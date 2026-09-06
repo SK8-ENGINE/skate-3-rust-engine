@@ -17,9 +17,12 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             | PhysicalStateId::SlideGround
             | PhysicalStateId::WipeoutGround
             | PhysicalStateId::Teleporting
+            | PhysicalStateId::BipedGround
     ) {
         return Err("PreState requires the selected state's actual PredictFutureOfDeck".into());
     }
+    //BipedGround's vslot24 at82327158 calls82D2D860 directly; the riding
+    //wrapper82D34DA8 calls that same producer with the same state argument.
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
     let velocity = physics.board.bodies()[BodyId::Deck.index()]
         .rates

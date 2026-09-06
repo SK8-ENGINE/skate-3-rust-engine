@@ -71,6 +71,7 @@ pub(super) fn publish(
             .normal_response(&skater.collision_feedback, [n.x, n.y, n.z, 0.0])
     };
     skater.collision_pose_error = response.impulse;
+    skater.collision_extra_displacements = response.extra;
     skater.collision_maximum_error = Some(response.maximum_error);
     skater
         .animated_skeleton

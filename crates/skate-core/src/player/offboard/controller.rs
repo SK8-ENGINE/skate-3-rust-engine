@@ -84,4 +84,8 @@ impl Controller {
         step::update(&mut self.state, &self.settings, job);
         output::export(&self.state)
     }
+    ///82D80F48 publishes current fields without advancing the controller.
+    pub fn output(&self) -> GroundResult {
+        output::export(&self.state)
+    }
 }

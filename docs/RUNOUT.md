@@ -88,3 +88,24 @@ Still required: production lifecycle owners and job integration; BipedAir,
 board possession and remount integration. These component tests do not enable
 BipedGround or establish end-to-end runout correctness. The production runout
 transition still fails and the playable binary has not been replaced.
+
+## Live owner and job input boundary
+
+SkaterRuntime now loads the stock Biped settings and shares animation metadata
+with MotionAnimation. Its persistent offboard owner holds the controller, ground
+state, contact history and retained contact packet. Player Update completes its
+pending contact observations before physical input/state update.
+
+The ground job adapter reads existing ProcessAnimAttributes owners directly,
+including the native reset cadence gate of-1 (zero activates animation velocity
+override). It preserves the third processed line1056/valid1092 fallback and the
+actual skeleton collision displacements16288/16304, now retained after collision
+feedback. Ground's vslot24 at82327158 points directly to82D2D860, the same deck
+prediction called through the riding wrapper.
+
+Validation:456 core tests and81 game tests passed together; the subsequent
+third-line/reset-attribute regression also passed (82 game tests total). The
+stock controller's real-floor test runs60 updates each for idle, half input and
+full input. This is controller/query coverage; production transitions still
+reject BipedGround until its complete physical adapter is available. No playable
+binary has been staged or launched from these changes.

@@ -37,6 +37,9 @@ pub struct MotionAnimation {
     property: AdvanceResult,
 }
 impl MotionAnimation {
+    pub(crate) fn metadata(&self) -> &AnimationMetadata {
+        &self.metadata
+    }
     pub fn reset_from_stock(&mut self) {
         self.current = None;
         self.current_name = None;

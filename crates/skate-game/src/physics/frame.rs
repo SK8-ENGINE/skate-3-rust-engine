@@ -48,6 +48,9 @@ pub(super) fn advance(
     .map_err(|e| format!("Animation tick{}: {e}", physics.ticks))?;
     drop(graph_timer);
     let input_timer = crate::performance::Scope::new("input_and_state");
+    //82DB4048 completes the prior Sync's Biped contact queries before input
+    //reset and state PreUpdate, including updates while another state is active.
+    skater.offboard.begin_player_update();
     //ForcePhysics Begin82BB2868 writes the live Skeleton16420 mode once.
     //Consume the graph request so a later physical reset can retain its own0.
     if let Some(mode) = skater.animation.motion.riding.force_mode.take() {

@@ -47,6 +47,7 @@ pub(crate) struct SkaterRuntime {
     pub wipeout: super::wipeout::Wipeout,
     pub wipeout_state: super::wipeout_states::WipeoutState,
     pub teleport_state: super::teleport_state::Runtime,
+    pub offboard: super::offboard::runtime::Runtime,
     pub skeleton: SkeletonBody,
     pub skeleton_joints: SkeletonJoints,
     pub skeleton_drives: SkeletonDrives,
@@ -54,6 +55,8 @@ pub(crate) struct SkaterRuntime {
     pub collision_feedback: skate_core::physics::skeleton_body::SkeletonCollisionFeedback,
     pub pose_errors: skate_core::physics::skeleton_body::SkeletonPoseErrors,
     pub collision_pose_error: [f32; 4],
+    ///Skeleton16288/16304, published by the completed collision response.
+    pub collision_extra_displacements: [[f32; 4]; 2],
     ///Skeleton16384 is published by the completed pose-error response. Wipeout
     ///runs after that publication; no fabricated pre-solve measurement exists.
     pub collision_maximum_error: Option<f32>,
@@ -92,6 +95,7 @@ impl SkaterRuntime {
         // or equipped physical hat. These are profile choices, not force values.
         let mut animation = SkaterAnimation::load(asset_root, &data, graphs, b"")?;
         let initial_hierarchy = animation.evaluate_initial_pose()?;
+        let offboard = super::offboard::runtime::Runtime::load(&data, animation.motion.animation.metadata())?;
         let mut animated_skeleton =
             AnimatedSkeleton::load(asset_root, &data, &animation.evaluator.frames, false)?;
         let initial_parts = map_animation_parts(
@@ -176,6 +180,7 @@ impl SkaterRuntime {
             &data, asset_root, &animation.evaluator.frames.source_sha256,
         )?;
         Ok(Self {
+            offboard,
             render_pose: initial_hierarchy,
             pose_generation: 0,
             centre_of_mass_filter: Default::default(),
@@ -218,6 +223,7 @@ impl SkaterRuntime {
                 ..Default::default()
             },
             collision_pose_error: [0.0; 4],
+            collision_extra_displacements: [[0.0; 4]; 2],
             collision_maximum_error: None,
             solved_drives: None,
             foot_ik,
