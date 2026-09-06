@@ -205,10 +205,12 @@ fn advance(
     mut camera: ResMut<crate::camera::CameraRuntime>,
     mut cadence: ResMut<Time<Fixed>>,
     mut exit: MessageWriter<AppExit>,
+    mut performance: Option<ResMut<crate::performance::Performance>>,
 ) {
     if physics.failed {
         return;
     }
+    let timer = performance.as_ref().map(|_| std::time::Instant::now());
     let mut actions = input.player_actions();
     let input_available = input
         .status
@@ -239,6 +241,9 @@ fn advance(
         exit.write(AppExit::error());
     }
     cadence.set_timestep(physics.clock.period());
+    if let (Some(performance), Some(timer)) = (performance.as_mut(), timer) {
+        performance.physics(timer.elapsed());
+    }
 }
 
 impl GamePhysics {

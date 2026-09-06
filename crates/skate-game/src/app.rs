@@ -95,6 +95,7 @@ pub(crate) fn build(
         world::WorldPlugin,
         camera::CameraPlugin,
         verification::VerificationPlugin,
+        crate::performance::PerformancePlugin,
     ));
     app
 }

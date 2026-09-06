@@ -10,6 +10,7 @@ mod input;
 mod physics;
 mod skater_animation;
 mod verification;
+mod performance;
 mod world;
 mod skate_world;
 

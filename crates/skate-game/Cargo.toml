@@ -9,3 +9,4 @@ bevy.workspace = true
 skate-core.workspace = true
 skate-data.workspace = true
 half = "=2.7.1"
+serde_json.workspace = true
