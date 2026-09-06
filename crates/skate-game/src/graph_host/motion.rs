@@ -44,6 +44,7 @@ pub struct MotionPhysical {
     pub foot_frame: Option<PushFootFrame>,
 }
 enum Instance {
+    Runout(Option<super::motion_runout::Parameters>),
     Trick(i32),
     Stateless,
     IntentFilter(skate_core::animation::intent_filter::State),
@@ -70,6 +71,7 @@ enum Instance {
 impl Instance {
     fn new(operation: &MotionOperation) -> Self {
         match operation {
+            MotionOperation::AddRunoutAttribs => Self::Runout(None),
             MotionOperation::Trick(_) => Self::Trick(0),
             MotionOperation::IntentFilter(_) => Self::IntentFilter(Default::default()),
             MotionOperation::Landing(_) => Self::Landing(Default::default()),
@@ -126,6 +128,7 @@ pub struct MotionHost {
     pub riding_conditions: Option<super::motion_riding_conditions::RidingConditionInputs>,
     pub condition_random: super::motion_riding_conditions::MotionRandom,
     pub native_physical: Option<super::motion_native::Physical>,
+    pub runout_physical: Option<super::motion_runout::Physical>,
     pub prelanding_physical: Option<super::motion_spin::PrelandingPhysical>,
     pub air_leg_physical: Option<skate_core::animation::air_leg_extension::Physical>,
     pub gesture_physical: Option<super::motion_native::GesturePhysical>,
@@ -218,6 +221,7 @@ impl MotionHost {
             riding_conditions: None,
             condition_random: super::motion_riding_conditions::MotionRandom::new(),
             native_physical: None,
+            runout_physical: None,
             prelanding_physical: None,
             air_leg_physical: None,
             gesture_physical: None,

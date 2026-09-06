@@ -175,6 +175,15 @@ pub(crate) fn advance(
         effective_z = effective_z.map(|v| -v);
     }
     let mut effective_x = skater.animated_skeleton.roots.animation_to_world[0];
+    skater.animation.motion.runout_physical = Some(crate::graph_host::motion_runout::Physical {
+        forward: effective_z,
+        velocity: physical.reckoning.vector_16.map(f32::from_bits),
+        up: physical.reckoning.vector_96.map(f32::from_bits),
+        // OffBoard331 remains reset in the currently implemented riding/air states,
+        // matching the camera publication. Biped trajectory owners must publish
+        // OffBoard128 here when they enable that alternate native output.
+        trajectory_velocity: None,
+    });
     if p.flags_2476 & 4 != 0 {
         effective_x = effective_x.map(|v| -v);
     }

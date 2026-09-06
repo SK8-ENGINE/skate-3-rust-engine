@@ -219,3 +219,37 @@ fn authored_checkpoint_reply_runs_teleport_state_and_restores_riding() {
     }
     assert!(saw_ready && restored_ticks > 60);
 }
+
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn runout_request_enters_stock_motion_graph_in_all_difficulties() {
+    let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
+    let root = std::path::Path::new(&root);
+    let assets = skate_data::GameAssets::load(root).unwrap();
+    let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
+    for difficulty in crate::difficulty::Difficulty::ALL {
+        let mut physics = GamePhysics::load_with_difficulty(root, None, difficulty).unwrap();
+        let mut skater = SkaterRuntime::load(root, &graphs, &physics, difficulty.key()).unwrap();
+        let mut controls = PlayerControls::default();
+        let mut input = crate::input::ControllerInput::default();
+        let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
+        for tick in 0..120 {
+            // Inject the completed runout request at the physical -> animation
+            // boundary; leave stock graph selection and all following ticks live.
+            input.sample_raw_for_test(XboxState { buttons: 0, triggers: [0;2], left: [0;2], right: [0;2] });
+            let mut actions = input.player_actions();
+            controls.update(&mut actions, physics.settings.step.simulation.time_step,
+                physics.settings.input_magnitude_threshold,
+                skater.player_input.physical.scoring.capabilities_204);
+            frame::advance(&mut physics, &mut skater, &mut controls, &graphs,
+                &mut actions, true, &mut camera)
+                .unwrap_or_else(|error| panic!("Runout {difficulty:?} tick{tick}: {error}"));
+            assert_finite(&physics, &skater, tick);
+        }
+        // Exercise the logged MotionGraph branch, separately from the still
+        // unsupported BipedGround physical owner selected by its output.
+        skater.player_state.state_flags[78 - 52] = true;
+        animation_phase::advance(&physics, &mut skater, &controls, &graphs,
+            &physics.animation_profile).unwrap();
+    }
+}

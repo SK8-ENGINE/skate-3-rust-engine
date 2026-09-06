@@ -26,6 +26,7 @@ pub(crate) mod motion_push_off;
 #[path = "motion_offboard/reset.rs"]
 pub(crate) mod motion_reset;
 mod motion_riding;
+pub(crate) mod motion_runout;
 pub(crate) mod motion_riding_conditions;
 pub(crate) mod motion_shove;
 mod motion_sliding;

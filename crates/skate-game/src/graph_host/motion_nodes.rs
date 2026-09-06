@@ -18,6 +18,7 @@ pub enum MotionOperation {
     Play(PlayAnimation),
     ///TU3 vtable82309664: Begin/Update/End all point to the empty82B61BB8.
     PrintText2D,
+    AddRunoutAttribs,
     AttachIntent {
         intent: String,
         attribute: AttributeName,
@@ -113,6 +114,7 @@ impl OperationFactory for MotionFactory {
                     )),
                     "PlayAnimation" => Some(MotionOperation::Play(play(a))),
                     "PrintText2D" => Some(MotionOperation::PrintText2D),
+                    "AddRunoutAttribs" => Some(MotionOperation::AddRunoutAttribs),
                     "ApplyingBodyTilt" => Some(MotionOperation::ApplyingBodyTilt),
                     "SettingBodyTilt" => {
                         Some(MotionOperation::SettingBodyTilt(key(a, "tilt_x", "tilt_x")))

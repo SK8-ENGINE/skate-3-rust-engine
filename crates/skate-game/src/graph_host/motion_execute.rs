@@ -94,6 +94,21 @@ impl MotionHost {
             .get_mut(behavior)
             .ok_or("Unallocated MotionGraph behavior")?;
         match (operation, instance) {
+            (MotionOperation::AddRunoutAttribs, Instance::Runout(state)) => {
+                if phase == 0 {
+                    *state = Some(super::super::motion_runout::capture(
+                        self.runout_physical.ok_or("AddRunoutAttribs requires completed physical output")?,
+                        self.animation.skater_animation_flags.ok_or("AddRunoutAttribs requires animation stance")? & 0x4000_0000 != 0,
+                    ));
+                } else if phase == 1 {
+                    let values = state.ok_or("AddRunoutAttribs updated before Begin")?;
+                    for (name, value) in [("BipedStartAngle", values.angle_degrees), ("BipedSpeed", values.speed)] {
+                        self.animation.set_attribute(SettableAttribute {
+                            name: encode(name.as_bytes()), value, normalized: false, sequence_id: -1,
+                        });
+                    }
+                }
+            }
             //Retail ctor82BA58E8 retains only diagnostic text/layout. All three
             //lifecycle slots in82309664 are82B61BB8 (blr), with no state writes.
             (MotionOperation::PrintText2D, _) => {}
