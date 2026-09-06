@@ -21,16 +21,14 @@ use skate_data::skate_map::SkateMap;
 use std::collections::HashMap;
 
 pub(crate) fn validate_runtime(map: &SkateMap) -> Result<(), String> {
-    if map.geometry.collision.is_empty() {
+    let archive = retail_archive(map)?;
+    if map.geometry.collision.is_empty() && archive.is_none() {
         return Err("SKATE map has no collision geometry".into());
     }
-    if map
-        .geometry
-        .collision
-        .iter()
-        .any(|t| t.native_edges.is_some())
-    {
-        return Err("SKATE native collision edge codes are preserved by the reader, but the compressed retail-edge decoder is not yet connected to this game's triangle adapter. Refusing to replace them with regenerated edges.".into());
+    for triangle in map.geometry.collision.iter().filter(|_| archive.is_none()) {
+        if let Some(edges) = triangle.native_edges {
+            decode_native_edges(edges)?;
+        }
     }
     if !map.doors.is_empty() {
         return Err(format!(
@@ -41,6 +39,15 @@ pub(crate) fn validate_runtime(map: &SkateMap) -> Result<(), String> {
     }
     for extension in &map.extensions {
         let tag = String::from_utf8_lossy(&extension.tag);
+        if extension.tag == *b"RWCM" {
+            continue;
+        }
+        if extension.tag == *b"SKYB" && extension.schema == 1 {
+            eprintln!(
+                "SKATE LIMITATION: SKYB retail sky retained; using the map horizon until its shader adapter is available."
+            );
+            continue;
+        }
         if extension.tag != *b"WMET" && extension.tag != *b"WCFG" && extension.tag != *b"BMAT" {
             return Err(format!(
                 "SKATE extension {tag} schema {} is decoded but its runtime adapter is not implemented. Refusing to silently omit potentially required world geometry.",
@@ -94,10 +101,122 @@ pub(crate) fn validate_runtime(map: &SkateMap) -> Result<(), String> {
     Ok(())
 }
 
+/// TU3 ClusteredMesh::GetUnitVolumes (82AC8A68): fdivs then fsubs,
+/// using the pi-squared word at 822F88D0. This is not acos/angle decoding.
+/// Bit 7 denotes an unmatched compiler edge and is not a triangle flag.
+fn decode_native_edges(edges: [u8; 3]) -> Result<(u32, [f32; 3]), String> {
+    let mut flags = 1 | TriangleFeature::ONE_SIDED | TriangleFeature::USE_EDGE_COSINES;
+    let mut cosines = [0.; 3];
+    for (i, code) in edges.into_iter().enumerate() {
+        let exponent = code & 0x1f;
+        // The native signed 32-bit shift becomes negative at 28 and zero
+        // above it. Reject those malformed codes instead of producing NaNs.
+        if exponent >= 28 {
+            return Err(format!(
+                "Invalid SKATE native edge angle code {exponent} at corner {i}"
+            ));
+        }
+        cosines[i] = 1.0 - f32::from_bits(0x411d_e9e7) / ((8_u32 << exponent) as f32);
+        flags |= u32::from(code & 0x20) << i;
+        flags |= u32::from(code & 0x40) << (i + 3);
+    }
+    Ok((flags, cosines))
+}
+
+fn retail_archive(map: &SkateMap) -> Result<Option<&[u8]>, String> {
+    let mut archives = map.extensions.iter().filter(|e| e.tag == *b"RWCM");
+    let Some(archive) = archives.next() else {
+        return Ok(None);
+    };
+    if archive.schema != 1 || archives.next().is_some() {
+        return Err("SKATE requires one RWCM extension with schema 1".into());
+    }
+    Ok(Some(&archive.payload))
+}
+
+fn retail_collision_world(
+    archive: &[u8],
+    material: RetailContactMaterial,
+) -> Result<BoardWorld, String> {
+    let mut triangles = Vec::new();
+    let mut packed_surfaces = Vec::new();
+    let mut meshes = Vec::new();
+    let count = skate_data::retail_collision::visit_clusters(archive, |_, cluster| {
+        // Preserve cluster order and partition further only for group filters.
+        let mut cursor = 0;
+        while cursor < cluster.len() {
+            let group = cluster[cursor].group;
+            let start = triangles.len();
+            while cursor < cluster.len() && cluster[cursor].group == group {
+                let source = cluster[cursor];
+                let (flags, cosines) = match source.edges {
+                    Some(edges) => {
+                        let (mut flags, cosines) = decode_native_edges(edges)?;
+                        flags &= !TriangleFeature::ONE_SIDED;
+                        if source.one_sided {
+                            flags |= TriangleFeature::ONE_SIDED;
+                        }
+                        (flags, cosines)
+                    }
+                    // TriangleVolume ctor82AC7770 retains these defaults when
+                    // the unit has no edge data; the mesh sidedness is not read.
+                    None => (0x1e1, [-1.; 3]),
+                };
+                triangles.push(
+                    WorldTriangle::from_vertices(
+                        source.points.map(|p| Vector3::new(p[0], p[1], p[2])),
+                        material,
+                        u32::from(source.surface),
+                        flags,
+                        cosines,
+                        0.,
+                    )
+                    .ok_or("Invalid RWCM collision triangle")?,
+                );
+                packed_surfaces.push(source.surface);
+                cursor += 1;
+            }
+            let range = start..triangles.len();
+            let bounds = Bounds::from_points(
+                triangles[range.clone()]
+                    .iter()
+                    .flat_map(|t| t.triangle.vertices),
+            )
+            .ok_or("Invalid RWCM cluster bounds")?;
+            meshes.push(QueryMesh {
+                triangle_range: range,
+                local_to_world: RetailAffineTransform::IDENTITY,
+                world_to_local: RetailAffineTransform::IDENTITY,
+                local_bounds: bounds,
+                matching_group: i32::from(group),
+                pool: QueryPool::Ground,
+            });
+        }
+        Ok(())
+    })?;
+    eprintln!(
+        "SKATE_RWCM_READY triangles={count} query_clusters={} source=embedded",
+        meshes.len()
+    );
+    BoardWorld::with_query_metadata(
+        triangles,
+        QueryMetadata {
+            packed_surfaces,
+            meshes,
+            static_edges: vec![],
+            island_flags: 0,
+        },
+    )
+    .map_err(str::to_owned)
+}
+
 pub(crate) fn collision_world(
     map: &SkateMap,
     material: RetailContactMaterial,
 ) -> Result<BoardWorld, String> {
+    if let Some(archive) = retail_archive(map)? {
+        return retail_collision_world(archive, material);
+    }
     // Match the reference RW mesh compiler's 1 mm vertex welding and reversed
     // edge pairing. Triangle diagonals are adjacency, never authored ledges.
     let mut welded = HashMap::<[i64; 3], usize>::new();
@@ -125,43 +244,52 @@ pub(crate) fn collision_world(
     let mut cosines = vec![[1.; 3]; vertices.len()];
     let mut flags =
         vec![TriangleFeature::ONE_SIDED | TriangleFeature::USE_EDGE_COSINES | 0xe0; vertices.len()];
-    let mut open = HashMap::<(usize, usize), (usize, usize)>::new();
-    for (i, ids) in vertices.iter().enumerate() {
-        for edge in 0..3 {
-            let (a, b) = (ids[edge], ids[(edge + 1) % 3]);
-            if let Some((other, oe)) = open.remove(&(b, a)) {
-                let cosine = normals[i].dot(normals[other]).clamp(-1., 1.);
-                let orientation =
-                    (positions[b] - positions[a]).dot(normals[i].cross(normals[other]));
-                // ExtendedEdgeCosine / MakeEdgeCode in rw_collision_mesh.cpp:
-                // orientation >= -1e-6 is convex; flat edges have no convex bit.
-                for (ti, e) in [(i, edge), (other, oe)] {
-                    cosines[ti][e] = cosine;
-                    if orientation <= -1.0e-6 || cosine >= 1. {
-                        flags[ti] &= !(0x20 << e);
+    // Fully native maps need no reconstructed adjacency. Mixed maps still
+    // include every face when finding neighbors for their authored geometry.
+    if map
+        .geometry
+        .collision
+        .iter()
+        .any(|t| t.native_edges.is_none())
+    {
+        let mut open = HashMap::<(usize, usize), (usize, usize)>::new();
+        for (i, ids) in vertices.iter().enumerate() {
+            for edge in 0..3 {
+                let (a, b) = (ids[edge], ids[(edge + 1) % 3]);
+                if let Some((other, oe)) = open.remove(&(b, a)) {
+                    let cosine = normals[i].dot(normals[other]).clamp(-1., 1.);
+                    let orientation =
+                        (positions[b] - positions[a]).dot(normals[i].cross(normals[other]));
+                    // ExtendedEdgeCosine / MakeEdgeCode in rw_collision_mesh.cpp:
+                    // orientation >= -1e-6 is convex; flat edges have no convex bit.
+                    for (ti, e) in [(i, edge), (other, oe)] {
+                        cosines[ti][e] = cosine;
+                        if orientation <= -1.0e-6 || cosine >= 1. {
+                            flags[ti] &= !(0x20 << e);
+                        }
                     }
+                } else {
+                    open.entry((a, b)).or_insert((i, edge));
                 }
-            } else {
-                open.entry((a, b)).or_insert((i, edge));
             }
         }
-    }
-    let mut adjacent = vec![Vec::new(); positions.len()];
-    for (i, ids) in vertices.iter().enumerate() {
-        for &v in ids {
-            adjacent[v].push(i);
+        let mut adjacent = vec![Vec::new(); positions.len()];
+        for (i, ids) in vertices.iter().enumerate() {
+            for &v in ids {
+                adjacent[v].push(i);
+            }
         }
-    }
-    for (v, faces) in adjacent.iter().enumerate() {
-        let reference = normals[faces[0]];
-        if faces
-            .iter()
-            .all(|&i| (reference.dot(normals[i]) - 1.).abs() <= 0.01)
-        {
-            for &i in faces {
-                for corner in 0..3 {
-                    if vertices[i][corner] == v {
-                        flags[i] |= 0x200 << corner;
+        for (v, faces) in adjacent.iter().enumerate() {
+            let reference = normals[faces[0]];
+            if faces
+                .iter()
+                .all(|&i| (reference.dot(normals[i]) - 1.).abs() <= 0.01)
+            {
+                for &i in faces {
+                    for corner in 0..3 {
+                        if vertices[i][corner] == v {
+                            flags[i] |= 0x200 << corner;
+                        }
                     }
                 }
             }
@@ -170,6 +298,9 @@ pub(crate) fn collision_world(
     let mut triangles = Vec::with_capacity(vertices.len());
     let mut packed_surfaces = Vec::with_capacity(vertices.len());
     for (i, source) in map.geometry.collision.iter().enumerate() {
+        if let Some(edges) = source.native_edges {
+            (flags[i], cosines[i]) = decode_native_edges(edges)?;
+        }
         let m = &map.materials[source.material as usize - 1];
         // Exact EncodeRwSurfaceId mapping from the reference native adapter.
         packed_surfaces.push((m.audio | (m.physics << 7) | (m.pattern << 12)) as u16);
@@ -438,6 +569,76 @@ mod tests {
             dynamic_friction: 0.,
             restitution: 1.,
         }
+    }
+    #[test]
+    fn native_edges_override_generated_adjacency() {
+        let mut map = demo();
+        map.geometry.collision[0].native_edges = Some([0x20, 0x42, 0x9a]);
+        validate_runtime(&map).unwrap();
+        let world = collision_world(&map, material()).unwrap();
+        let f = world.triangles()[0].triangle.feature;
+        assert!(f.edge_convex(0));
+        assert!(!f.edge_convex(1));
+        assert!(!f.edge_convex(2));
+        assert!(!f.vertex_disabled(0));
+        assert!(f.vertex_disabled(1));
+        assert!(!f.vertex_disabled(2));
+        assert_eq!(f.edge_cosines[0].to_bits(), 0xbe6f4f38);
+        assert_eq!(f.edge_cosines[1].to_bits(), 0x3f310b0c);
+        assert_eq!(f.edge_cosines[2], 1.);
+        assert!(decode_native_edges([31, 0, 0]).is_err());
+        assert_eq!(decode_native_edges([0, 2, 26]).unwrap().1, f.edge_cosines);
+    }
+    #[test]
+    fn embedded_archive_is_authoritative_and_preserves_cluster_metadata() {
+        let mut map = demo();
+        map.geometry.collision.clear();
+        map.extensions.push(skate_data::skate_map::Extension {
+            tag: *b"RWCM",
+            schema: 1,
+            payload: include_bytes!("../../skate-data/tests/fixtures/retail-collision.rwcmset")
+                .to_vec(),
+        });
+        validate_runtime(&map).unwrap();
+        let world = collision_world(&map, material()).unwrap();
+        assert_eq!(world.triangles().len(), 3);
+        let metadata = world.query_metadata().unwrap();
+        assert_eq!(metadata.meshes.len(), 3);
+        assert_eq!(metadata.meshes[1].matching_group, 0x1234);
+        assert_eq!(metadata.packed_surfaces, vec![0x4321; 3]);
+        assert_eq!(world.triangles()[1].triangle.vertices[0].x, 10.);
+    }
+    #[test]
+    fn native_unit_without_edge_data_keeps_constructor_defaults() {
+        let mut archive =
+            include_bytes!("../../skate-data/tests/fixtures/retail-collision.rwcmset").to_vec();
+        let name_len = u32::from_le_bytes(archive[12..16].try_into().unwrap()) as usize;
+        let cluster = 16 + name_len + 4 + 160;
+        archive[cluster + 2..cluster + 4].copy_from_slice(&8_u16.to_be_bytes());
+        archive[cluster + 80] = 0xc1;
+        archive[cluster + 84..cluster + 88].copy_from_slice(&[0x34, 0x12, 0x21, 0x43]);
+        let world = retail_collision_world(&archive, material()).unwrap();
+        let f = world.triangles()[0].triangle.feature;
+        assert_eq!(f.flags, 0x1e1);
+        assert_eq!(f.edge_cosines, [-1.; 3]);
+    }
+    #[test]
+    #[ignore = "requires SKATE_MAP_TEST_PATH pointing to a private map"]
+    fn private_map_builds_collision_world() {
+        let path = std::env::var("SKATE_MAP_TEST_PATH").unwrap();
+        let map = SkateMap::load(std::path::Path::new(&path)).unwrap();
+        validate_runtime(&map).unwrap();
+        let world = collision_world(&map, material()).unwrap();
+        let [x, y, z] = map.spawn;
+        let hit = world
+            .query_thin_line(Vector3::new(x, y + 1., z), Vector3::new(x, y - 10., z))
+            .unwrap();
+        assert!(hit.is_some(), "spawn has no supporting collision");
+        eprintln!(
+            "Private map world: {} triangles, spawn hit {:?}",
+            world.triangles().len(),
+            hit
+        );
     }
     #[test]
     fn map_collision_uses_separate_geometry_and_surface_metadata() {

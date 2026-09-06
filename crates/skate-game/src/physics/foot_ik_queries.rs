@@ -105,7 +105,7 @@ fn query_trajectory(
         let direction = Vector3::new(end[0] - start[0], end[1] - start[1], end[2] - start[2]);
         let mut nearest = f32::MAX;
         let mut position = None;
-        for triangle in world.triangles() {
+        for (_, triangle) in world.line_candidates(origin, vector(end), radius) {
             let mut geometry = TriangleLineHit {
                 position: Vector3::ZERO,
                 normal: Vector3::ZERO,

@@ -12,7 +12,7 @@ pub(super) fn line(world: &BoardWorld, start: [f32; 4], end: [f32; 4], radius: f
     let delta = Vector3::new(end[0] - start.x, end[1] - start.y, end[2] - start.z);
     let mut fraction = f32::MAX;
     let mut result = no_hit();
-    for entry in world.triangles() {
+    for (_, entry) in world.line_candidates(start, vector(end), radius) {
         let mut hit = TriangleLineHit { position: Vector3::ZERO, normal: Vector3::ZERO,
             fraction: 0.0, volume_parameter: [0.0; 3] };
         // Zero triangle fatness and zero material exclusion mask are native.

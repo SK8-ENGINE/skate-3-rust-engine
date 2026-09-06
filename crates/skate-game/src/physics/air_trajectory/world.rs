@@ -37,7 +37,7 @@ pub(super) fn line(
     let delta = Vector3::new(end[0] - start.x, end[1] - start.y, end[2] - start.z);
     let mut nearest = f32::MAX;
     let mut result = None;
-    for (index, entry) in world.triangles().iter().enumerate() {
+    for (index, entry) in world.line_candidates(start, vec3(end), radius) {
         let mut hit = TriangleLineHit {
             position: Vector3::ZERO,
             normal: Vector3::ZERO,
@@ -76,7 +76,7 @@ pub(super) fn nearby(
     let minimum = std::array::from_fn(|i| center[i] - radius);
     let maximum = std::array::from_fn(|i| center[i] + radius);
     let mut triangles = Vec::with_capacity(64);
-    for entry in world.triangles() {
+    for (_, entry) in world.line_candidates(vec3(center), vec3(center), radius) {
         let vertices = entry.triangle.vertices.map(lanes);
         if triangle_box(vertices, minimum, maximum) {
             triangles.push(vertices);

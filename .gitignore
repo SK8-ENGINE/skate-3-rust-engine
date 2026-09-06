@@ -3,3 +3,5 @@
 /logs/
 /assets/private/
 /maps/private/
+/maps/*.skate
+!/maps/format-demo.skate

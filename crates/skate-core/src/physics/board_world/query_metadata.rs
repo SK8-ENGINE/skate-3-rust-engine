@@ -16,6 +16,28 @@ pub struct Bounds {
     pub max: Vector3,
 }
 impl Bounds {
+    pub fn expanded(self, padding: f32) -> Self {
+        Self {
+            min: Vector3::new(
+                self.min.x - padding,
+                self.min.y - padding,
+                self.min.z - padding,
+            ),
+            max: Vector3::new(
+                self.max.x + padding,
+                self.max.y + padding,
+                self.max.z + padding,
+            ),
+        }
+    }
+    pub fn overlaps(self, other: Self) -> bool {
+        !(self.max.x < other.min.x
+            || self.min.x > other.max.x
+            || self.max.y < other.min.y
+            || self.min.y > other.max.y
+            || self.max.z < other.min.z
+            || self.min.z > other.max.z)
+    }
     pub fn from_points(points: impl IntoIterator<Item = Vector3>) -> Option<Self> {
         let mut points = points.into_iter();
         let first = points.next()?;

@@ -12,6 +12,12 @@ either launcher. `maps/private/` contains local copies of the transition park
 and parity grid. `maps/format-demo.skate` is a small original textured floor.
 No-map PLAY.bat still loads the supplied test environment.
 
+New San Vanelona now loads its embedded `RWCM` collision archive, including
+native edge flags and cluster query filtering. The staged build was checked
+with the actual map and rendered the skater on its streets. No separate
+collision sidecar is needed. See [map support notes](docs/SKATE-MAPS.md) for
+verification and remaining sky/grind limitations.
+
 This folder is a **local Git repository**, on `lol/skate-map-support`, with no
 GitHub remote. Private assets, private maps, binaries, logs and build outputs
 are excluded. See [the map support notes](docs/SKATE-MAPS.md) for supported
