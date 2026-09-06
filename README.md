@@ -1,7 +1,10 @@
 # Imported skater project
 
 Double-click **PLAY.bat** to launch. Use an XInput-compatible controller;
-**Esc** opens the pause/graphics menu. Startup selects the supplied **Easy** profile.
+**Esc** opens the pause/settings menu. Select **Easy**, **Normal**, or **Hardcore**
+there; the selection saves for the next launch. The initial default is Easy.
+Difficulty uses the extracted stock `physics_mode` tables and native selectors.
+See [difficulty implementation and remaining parity gaps](docs/DIFFICULTY.md).
 
 The menu supports window resolution (720p through 4K), internal render scale
 (25–100%), supported MSAA levels (Off/2×/4×/8×), an FPS cap (30–240 or

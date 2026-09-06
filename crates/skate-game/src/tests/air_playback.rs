@@ -21,7 +21,7 @@ fn roll_off(air_stick: Option<i16>) {
     let root = std::path::Path::new(&root);
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
-    let mut physics = GamePhysics::load(root).unwrap();
+    let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
     // Keep this air fixture's open edge now that the production level has a
     // downhill ramp. The dedicated ramp regression uses the unmodified world.
     physics.world = BoardWorld::new(physics.world.triangles().iter().copied()
@@ -144,7 +144,7 @@ fn stock_starting_ramp_reaches_floor_without_air() {
     let root = std::path::Path::new(&root);
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
-    let mut physics = GamePhysics::load(root).unwrap();
+    let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
     let mut input = crate::input::ControllerInput::default();

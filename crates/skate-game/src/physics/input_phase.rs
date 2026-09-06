@@ -177,6 +177,7 @@ impl PlayerInputCallbacks for Callbacks<'_, '_> {
         physical: &mut PhysicalPlayerInput,
         processed: &mut ProcessedPhysicsInput,
     ) -> Result<(), String> {
+        self.animation_input.select_physics_mode(processed.state_variant_index_2528)?;
         self.skeleton_input.process_data(
             board,
             toolkit,

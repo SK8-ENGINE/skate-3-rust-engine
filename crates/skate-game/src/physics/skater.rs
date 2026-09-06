@@ -65,7 +65,8 @@ pub(crate) struct SkaterRuntime {
     pub skeleton_input: SkeletonInputRuntime,
     pub ground: GroundState,
     pub ground_runtime: GroundRuntime,
-    pub ground_settings: GroundSettings,
+    pub ground_settings: std::sync::Arc<GroundSettings>,
+    pub ground_profiles: super::ground_runtime::GroundProfiles,
     pub ground_lifecycle: super::ground_phase::GroundLifecycle,
     pub animation_input: AnimationInput,
     pub animation_feedback: AnimationFeedback,
@@ -84,6 +85,9 @@ impl SkaterRuntime {
         mode: &str,
     ) -> Result<Self, String> {
         let data = Collections::load(asset_root)?;
+        let ground_profiles = super::ground_runtime::GroundProfiles::load(&data)?;
+        let mode_index = crate::difficulty::NATIVE_MODES.iter().position(|m| *m == mode)
+            .ok_or_else(|| format!("Invalid skater mode {mode}"))? as u32;
         // The host's current character is a custom skater with no pro selector
         // or equipped physical hat. These are profile choices, not force values.
         let mut animation = SkaterAnimation::load(asset_root, &data, graphs, b"")?;
@@ -231,7 +235,8 @@ impl SkaterRuntime {
             },
             ground: GroundState::load(&data, mode, true)?,
             ground_runtime: GroundRuntime::load(&data)?,
-            ground_settings: GroundSettings::load(&data, mode, "smooth")?,
+            ground_settings: ground_profiles.select(mode_index, 1)?,
+            ground_profiles,
             ground_lifecycle: super::ground_phase::GroundLifecycle::new(),
             animation_input,
             animation_feedback: AnimationFeedback::load(&data)?,

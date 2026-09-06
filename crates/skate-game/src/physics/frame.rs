@@ -60,6 +60,10 @@ pub(super) fn advance(
         actions,
         input_available,
     )?;
+    skater.ground_settings = skater.ground_profiles.select(
+        skater.player_input.processed.state_variant_index_2528,
+        skater.player_input.processed.surface_mode_2540,
+    )?;
     if teleported {
         skater.player_state.reset_for_teleport();
         skater.centre_of_mass_filter.reset();

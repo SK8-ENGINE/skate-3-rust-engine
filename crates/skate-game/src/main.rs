@@ -4,6 +4,7 @@ mod app;
 mod assets;
 mod camera;
 mod config;
+mod difficulty;
 mod graph_host;
 mod graph_runtime;
 mod input;
@@ -48,14 +49,15 @@ fn main() -> bevy::app::AppExit {
             return bevy::app::AppExit::error();
         }
     }
-    let physics = match physics::GamePhysics::load_with_map(&config.asset_root, config.map.as_ref()) {
+    eprintln!("SKATE_DIFFICULTY mode={} native_index={}", config.difficulty.key(), config.difficulty as u32);
+    let physics = match physics::GamePhysics::load_with_difficulty(&config.asset_root, config.map.as_ref(), config.difficulty) {
         Ok(physics) => physics,
         Err(error) => {
             eprintln!("{error}");
             return bevy::app::AppExit::error();
         }
     };
-    let skater = match physics::SkaterRuntime::load(&config.asset_root, &graphs, &physics, "easy") {
+    let skater = match physics::SkaterRuntime::load(&config.asset_root, &graphs, &physics, config.difficulty.key()) {
         Ok(skater) => skater,
         Err(error) => {
             eprintln!("{error}");

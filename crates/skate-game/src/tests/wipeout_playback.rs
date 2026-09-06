@@ -9,7 +9,7 @@ fn raw_controller_bail_runs_stock_wipeout_for_120_ticks() {
     let root = std::path::Path::new(&root);
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
-    let mut physics = GamePhysics::load(root).unwrap();
+    let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
     let mut input = crate::input::ControllerInput::default();
@@ -173,7 +173,7 @@ fn authored_checkpoint_reply_runs_teleport_state_and_restores_riding() {
     let root = std::path::Path::new(&root);
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
-    let mut physics = GamePhysics::load(root).unwrap();
+    let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
     let mut input = crate::input::ControllerInput::default();

@@ -30,12 +30,12 @@ pub(crate) struct GroundState {
     pub heading_previous: f32,
     pub pumping_settings: GroundPumping,
     output_settings: GroundOutputSettings,
-    auto_push_enabled: bool,
+    auto_push_enabled: [bool; 5],
     pub entered: bool,
     pub(super) entry_settings: super::entry::EntrySettings,
 }
 impl GroundState {
-    pub fn load(data: &Collections, mode: &str, human_player: bool) -> Result<Self, String> {
+    pub fn load(data: &Collections, _mode: &str, human_player: bool) -> Result<Self, String> {
         let push = |field| data.float("physics_push", "default", field);
         Ok(Self {
             world_grab: super::world_grab::GroundWorldGrabState::default(),
@@ -65,7 +65,9 @@ impl GroundState {
                 mode_speed_threshold_0: push("Hash_501D5581043D7D3C")?,
             },
             entry_settings: super::entry::EntrySettings::load(data)?,
-            auto_push_enabled: data.boolean("physics_mode", mode, "AutoPushEnabled")?,
+            auto_push_enabled: crate::difficulty::NATIVE_MODES.map(|mode|
+                data.boolean("physics_mode", mode, "AutoPushEnabled"))
+                .into_iter().collect::<Result<Vec<_>, _>>()?.try_into().unwrap(),
             entered: false,
         })
     }
@@ -86,7 +88,7 @@ impl GroundState {
                 scalar_2720: animation.fields.balance,
                 flags_2476: p.flags_2476,
                 flags_2484: p.flags_2484,
-                selected_mode_flag_109: self.auto_push_enabled,
+                selected_mode_flag_109: self.auto_push_enabled[p.state_variant_index_2528 as usize],
             },
             self.output_settings,
         )

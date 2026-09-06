@@ -22,6 +22,7 @@ mod settings;
 pub(crate) use launch::{GroundLaunchInfo, GroundLaunchPhysical};
 pub(crate) use services::{GroundControllers, GroundPhysicalFrame};
 pub(crate) use settings::GroundSettings;
+pub(crate) use settings::GroundProfiles;
 use skate_core::{
     math::Vector3,
     physics::{

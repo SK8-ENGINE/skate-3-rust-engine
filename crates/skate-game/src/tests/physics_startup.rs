@@ -7,7 +7,7 @@ fn stock_skater_startup_builds_the_graphs_and_physical_body_from_the_same_rig() 
     let root = std::path::Path::new(&root);
     let manifest = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &manifest).unwrap();
-    let mut physics = GamePhysics::load(root).unwrap();
+    let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
     // This regression isolates grounded controls on the original flat fixture.
     // The production box is only six metres wide: sustained kickturning leaves
     // it at x=-3.32, correctly selecting KnownAir and ForcePhysics2. Separate
@@ -363,7 +363,7 @@ fn stock_wheel_hardness_reaches_ground_force_and_torque() {
     let graphs = crate::graph_runtime::StockGraphs::load(root, &manifest).unwrap();
     let mut samples = Vec::new();
     for hardness in [0.0_f32, 0.7, 1.0] {
-        let mut physics = GamePhysics::load(root).unwrap();
+        let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
         let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
         let mut controls = PlayerControls::default();
         let mut camera = crate::camera::CameraRuntime::load(root).unwrap();

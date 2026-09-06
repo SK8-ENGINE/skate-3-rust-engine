@@ -20,6 +20,24 @@ use skate_core::{
     },
 };
 use skate_data::collections::Collections;
+use std::sync::Arc;
+
+/// Immutable stock tables selected by the processed packet, including its
+/// difficulty-dependent SurfacePhysics normalization. No per-tick parsing.
+pub(crate) struct GroundProfiles(Vec<Vec<Arc<GroundSettings>>>);
+impl GroundProfiles {
+    pub fn load(data: &Collections) -> Result<Self, String> {
+        crate::difficulty::NATIVE_MODES.into_iter().map(|mode| {
+            (1..=5).map(|surface| {
+                GroundSettings::load(data, mode, super::surface_key(surface)?).map(Arc::new)
+            }).collect::<Result<Vec<_>, String>>()
+        }).collect::<Result<Vec<_>, String>>().map(Self)
+    }
+    pub fn select(&self, mode: u32, surface: u32) -> Result<Arc<GroundSettings>, String> {
+        surface.checked_sub(1).and_then(|s| self.0.get(mode as usize)?.get(s as usize))
+            .cloned().ok_or_else(|| format!("Invalid processed physics mode/surface {mode}/{surface}"))
+    }
+}
 
 pub(crate) struct GroundSettings {
     steering: SteeringSettings,

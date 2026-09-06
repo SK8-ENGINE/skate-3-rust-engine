@@ -6,6 +6,7 @@ pub(crate) struct Config {
     pub asset_root: PathBuf,
     pub verification_capture: Option<PathBuf>,
     pub map: Option<skate_data::skate_map::SkateMap>,
+    pub difficulty: crate::difficulty::Difficulty,
 }
 
 impl Config {
@@ -14,7 +15,9 @@ impl Config {
             asset_root: PathBuf::from("assets"),
             verification_capture: None,
             map: None,
+            difficulty: crate::difficulty::Difficulty::default(),
         };
+        let mut difficulty_override = None;
         let mut args = std::env::args_os().skip(1);
         while let Some(arg) = args.next() {
             match arg.to_str() {
@@ -25,6 +28,10 @@ impl Config {
                     let path = PathBuf::from(args.next().ok_or("--map requires a .skate file")?);
                     config.map = Some(skate_data::skate_map::SkateMap::load(&path)?);
                 }
+                Some("--difficulty") => {
+                    let value = args.next().ok_or("--difficulty requires easy, normal or hardcore")?;
+                    difficulty_override = Some(crate::difficulty::Difficulty::parse(&value.to_string_lossy())?);
+                }
                 Some("--verify") => {
                     config.verification_capture = Some(
                         args.next()
@@ -34,7 +41,7 @@ impl Config {
                 }
                 _ => {
                     return Err(format!(
-                        "Unknown argument {arg:?}. Usage: skate-game [--assets DIRECTORY] [--map MAP.skate] [--verify CAPTURE.png]"
+                        "Unknown argument {arg:?}. Usage: skate-game [--assets DIRECTORY] [--map MAP.skate] [--difficulty easy|normal|hardcore] [--verify CAPTURE.png]"
                     ));
                 }
             }
@@ -43,6 +50,10 @@ impl Config {
             .asset_root
             .canonicalize()
             .map_err(|e| format!("Asset root {}: {e}", config.asset_root.display()))?;
+        config.difficulty = match difficulty_override {
+            Some(mode) => mode,
+            None => crate::difficulty::Difficulty::load(&config.asset_root)?,
+        };
         if let Some(path) = &mut config.verification_capture {
             if path.extension().and_then(|x| x.to_str()) != Some("png") {
                 return Err("--verify output must be a PNG file".into());

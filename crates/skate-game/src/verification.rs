@@ -55,7 +55,7 @@ fn verify(
     }
     if state.captured && state.elapsed > 6. {
         let input_report = format!(
-            "Game integration capture (not a Skate 3 parity verdict)\nExecutable: {}\nPolls: {}\nConsumed batches: {}\nStatus: {:?}\nPacket numbers: {:?}\nActions 64..81 by device: {:?}\nDerived ticks: {}\nIntents: {:?}\nPhysics ticks: {}\nContacts: {}\nBody positions: {:?}\nPhysical pose publications: {}\nGraph animation ticks: {}\nTruck targets: {:?}\nGround speed: {}\nGameplay camera shot: {}\nCamera frame: {:?}\n",
+            "Game integration capture (not a Skate 3 parity verdict)\nExecutable: {}\nPolls: {}\nConsumed batches: {}\nStatus: {:?}\nPacket numbers: {:?}\nActions 64..81 by device: {:?}\nDerived ticks: {}\nIntents: {:?}\nDifficulty index: {}\nPhysics ticks: {}\nContacts: {}\nBody positions: {:?}\nPhysical pose publications: {}\nGraph animation ticks: {}\nTruck targets: {:?}\nGround speed: {}\nGameplay camera shot: {}\nCamera frame: {:?}\n",
             std::env::current_exe()
                 .map_or_else(|_| "unavailable".into(), |p| p.display().to_string()),
             input.publications,
@@ -65,6 +65,7 @@ fn verify(
             input.mapped_actions,
             controls.ticks,
             controls.intents,
+            physics.difficulty_index(),
             physics.ticks,
             physics.contact_count,
             physics.board.bodies().map(|body| body.rates.position),

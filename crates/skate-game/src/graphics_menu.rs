@@ -12,6 +12,7 @@ use bevy::{
     window::{PresentMode, PrimaryWindow},
 };
 use serde::{Deserialize, Serialize};
+use crate::difficulty::Difficulty;
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -79,6 +80,7 @@ pub(crate) struct Menu {
     settings: GraphicsSettings,
     path: PathBuf,
     supported_msaa: Vec<u32>,
+    difficulty: Difficulty,
     status: String,
 }
 pub(crate) fn gameplay_active(menu: Option<Res<Menu>>) -> bool {
@@ -190,14 +192,14 @@ fn setup(
         display: Display::None, width:percent(100), height:percent(100), align_items:AlignItems::Center,
         justify_content:JustifyContent::Center, position_type:PositionType::Absolute, ..default()
     }, BackgroundColor(Color::srgba(0.015,0.025,0.04,0.88)))).with_children(|root| {
-        root.spawn((Node { width:px(560),max_width:percent(95),padding:UiRect::all(px(28)),flex_direction:FlexDirection::Column,row_gap:px(10),border_radius:BorderRadius::all(px(12)),..default() },
+        root.spawn((Node { width:px(560),max_width:percent(95),padding:UiRect::all(px(18)),flex_direction:FlexDirection::Column,row_gap:px(6),border_radius:BorderRadius::all(px(12)),..default() },
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("PAUSED"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
-            panel.spawn((Text::new("GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..7 {
-                panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(48),padding:UiRect::all(px(12)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
+            panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
+            for i in 0..8 {
+                panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(36),padding:UiRect::all(px(8)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
-                    row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:20.,..default()},TextColor(Color::WHITE)));
+                    row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
                 });
             }
             panel.spawn((StatusLabel,Text::new(""),TextFont {font_size:15.,..default()},TextColor(Color::srgb(0.65,0.75,0.8))));
@@ -211,6 +213,7 @@ fn setup(
         settings,
         path,
         supported_msaa,
+        difficulty: config.difficulty,
         status: String::new(),
     });
 }
@@ -227,6 +230,8 @@ fn cycle<T: PartialEq + Copy>(values: &[T], value: T, direction: i32) -> T {
     values[(index + direction).rem_euclid(values.len() as i32) as usize]
 }
 fn interact(
+    config: Res<crate::config::Config>,
+    mut physics: ResMut<crate::physics::GamePhysics>,
     keys: Res<ButtonInput<KeyCode>>,
     mut menu: ResMut<Menu>,
     mut time: ResMut<Time<Virtual>>,
@@ -239,10 +244,10 @@ fn interact(
     let mut action = None;
     if menu.open {
         if keys.just_pressed(KeyCode::ArrowUp) {
-            menu.selected = (menu.selected + 6) % 7;
+            menu.selected = (menu.selected + 7) % 8;
         }
         if keys.just_pressed(KeyCode::ArrowDown) {
-            menu.selected = (menu.selected + 1) % 7;
+            menu.selected = (menu.selected + 1) % 8;
         }
         if keys.just_pressed(KeyCode::ArrowLeft) {
             action = Some((menu.selected, -1));
@@ -274,8 +279,16 @@ fn interact(
             }
             3 => menu.settings.fps = cycle(LIMITS, menu.settings.fps, direction),
             4 => menu.settings.occlusion = !menu.settings.occlusion,
-            5 => menu.open = false,
-            6 => {
+            5 => {
+                menu.difficulty = cycle(&Difficulty::ALL, menu.difficulty, direction);
+                physics.set_difficulty(menu.difficulty);
+                menu.status = match menu.difficulty.save(&config.asset_root) {
+                    Ok(()) => "Difficulty saved".into(),
+                    Err(e) => format!("Applied, but could not save: {e}"),
+                };
+            }
+            6 => menu.open = false,
+            7 => {
                 exit.write(AppExit::Success);
             }
             _ => {}
@@ -390,7 +403,8 @@ fn labels(
                 }
             ),
             4 => format!("Occlusion culling     {}", if s.occlusion { "On" } else { "Off" }),
-            5 => "Resume".into(),
+            5 => format!("Difficulty            {}", menu.difficulty.label()),
+            6 => "Resume".into(),
             _ => "Quit game".into(),
         };
     }
@@ -428,7 +442,7 @@ mod tests {
             .insert_resource(images)
             .insert_resource(Menu {
                 open: false, selected: 0, settings: GraphicsSettings::default(),
-                path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
+                difficulty: Difficulty::Easy, path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
             })
             .add_systems(Update, apply);
         app.world_mut().spawn((Window::default(), PrimaryWindow));

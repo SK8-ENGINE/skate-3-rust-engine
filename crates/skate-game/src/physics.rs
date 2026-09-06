@@ -86,6 +86,14 @@ pub(crate) struct GamePhysics {
 }
 
 impl GamePhysics {
+    pub(crate) fn set_difficulty(&mut self, difficulty: crate::difficulty::Difficulty) {
+        // Actor publication carries this selector into the next physical packet.
+        // Keep the board, active trick, equipment preferences and controller history.
+        self.animation_profile.physics_mode = difficulty as u32;
+    }
+
+    pub(crate) fn difficulty_index(&self) -> u32 { self.animation_profile.physics_mode }
+
     pub(crate) fn world(&self) -> &BoardWorld {
         &self.world
     }
@@ -99,9 +107,13 @@ impl GamePhysics {
     }
 
     pub fn load_with_map(asset_root: &std::path::Path, map: Option<&skate_data::skate_map::SkateMap>) -> Result<Self, String> {
+        Self::load_with_difficulty(asset_root, map, crate::difficulty::Difficulty::Easy)
+    }
+
+    pub fn load_with_difficulty(asset_root: &std::path::Path, map: Option<&skate_data::skate_map::SkateMap>, difficulty: crate::difficulty::Difficulty) -> Result<Self, String> {
         let data = Collections::load(asset_root)?;
         let settings = PhysicsSettings::load(&data)?;
-        let animation_profile = animation_phase::AnimationProfile::load(&data, "easy")?;
+        let animation_profile = animation_phase::AnimationProfile::load(&data, difficulty.key())?;
         let mut spawn = RetailAffineTransform {
             translation: Vector3::new(
                 0.0,
@@ -313,6 +325,10 @@ mod air_tests;
 #[cfg(test)]
 #[path = "tests/wipeout_playback.rs"]
 mod wipeout_tests;
+
+#[cfg(test)]
+#[path = "tests/difficulty.rs"]
+mod difficulty_tests;
 
 fn present(
     physics: Res<GamePhysics>,
