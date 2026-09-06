@@ -97,9 +97,13 @@ impl BoardRuntime {
         }
     }
 
-    pub fn collision_group(&self) -> u32 { self.collision_group }
+    pub fn collision_group(&self) -> u32 {
+        self.collision_group
+    }
     ///All seven native board parts share the current assembly group.
-    pub fn set_collision_group(&mut self, group: u32) { self.collision_group = group }
+    pub fn set_collision_group(&mut self, group: u32) {
+        self.collision_group = group
+    }
 
     pub fn bodies(&self) -> &[BodySnapshot; BODY_COUNT] {
         &self.bodies
@@ -142,9 +146,8 @@ impl BoardRuntime {
             body.rates.angular_velocity = Vector3::ZERO;
             body.rates.force_acceleration = gravity;
             body.rates.torque_acceleration = Vector3::ZERO;
-            body.rates.world_inverse_inertia = world_inverse_inertia(
-                body.rates.basis, body.inertia.inverse_tensor,
-            );
+            body.rates.world_inverse_inertia =
+                world_inverse_inertia(body.rates.basis, body.inertia.inverse_tensor);
         }
         copy_pose(&hook, &mut self.hook.body.rates);
         self.forces.clear();
@@ -262,6 +265,30 @@ impl BoardRuntime {
         };
         set_part_transform(&mut part, pose_words(requested));
         copy_pose(&part, &mut self.hook.body.rates);
+    }
+    ///82C0B2C8, used by board retrieval and hiding. Changes live part poses
+    ///without Reset's rate, contact-history, or force-queue clearing.
+    pub fn set_transform(&mut self, requested: RetailAffineTransform) {
+        let poses = self.part_transforms();
+        let mut parts = core::array::from_fn(|i| PartPose {
+            transform: pose_words(poses[i]),
+            local_mass_frame: Some(mass_frame_words(self.mass_frames[i])),
+            body: Some(body_pose_words(self.bodies[i].rates)),
+            inertia: Some(inertia_words(self.bodies[i].inertia)),
+        });
+        let mut hook = PartPose {
+            transform: pose_words(self.hook_transform()),
+            local_mass_frame: None,
+            body: Some(body_pose_words(self.hook.body.rates)),
+            inertia: None,
+        };
+        set_board_transform(&mut parts, &mut hook, pose_words(requested));
+        for (body, part) in self.bodies.iter_mut().zip(&parts) {
+            copy_pose(part, &mut body.rates);
+            body.rates.world_inverse_inertia =
+                world_inverse_inertia(body.rates.basis, body.inertia.inverse_tensor);
+        }
+        copy_pose(&hook, &mut self.hook.body.rates);
     }
 }
 

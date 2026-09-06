@@ -52,6 +52,30 @@ pub(crate) struct RidingOutputs {
     pending_wheel_queries: Option<[Option<WheelLineHit>; 4]>,
 }
 impl RidingOutputs {
+    ///Skeleton82BDE060's final82D8E3E0 call, argument7=true.
+    pub(crate) fn update_biped_reckoning(
+        &mut self,
+        air: &mut skate_core::air::reckoning::AirState,
+        input: super::offboard::skeleton_ground::ReckoningUpdate,
+        flags_2468: u32,
+        body_spin: f32,
+    ) {
+        let previous_up = lanes(self.reckoning.up);
+        skate_core::player::offboard::ground_reckoning::update(
+            &mut self.reckoning, &mut self.reckoning_frames, &mut self.body_spin, air,
+            skate_core::player::offboard::ground_reckoning::Settings {
+                ground_normal_smoothing: self.orientation_settings.ground_normal_smoothing,
+                tilt_vs_rotation: &self.tilt_vs_rotation,
+                tilt_vs_slope: &self.tilt_vs_slope,
+            },
+            skate_core::player::offboard::ground_reckoning::Input {
+                previous_up,
+                requested_up: input.up, requested_forward: input.forward, blend: input.blend,
+                reverse_stance: flags_2468 & 0x0010_0000 != 0,
+                enable_body_spin_input: true, physical_body_spin_2812: body_spin,
+            },
+        );
+    }
     ///Board82C0D680 resets CollisionInfo and both probes, preserving7692.
     pub fn reset_for_teleport(&mut self) {
         let elapsed = self.ground.time_without_wheel_contact;

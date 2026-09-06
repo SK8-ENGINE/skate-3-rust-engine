@@ -276,6 +276,10 @@ impl GamePhysics {
             self.processed_flags_2468,
             self.settings.step.simulation.time_step,
         )?;
+        offboard::board_effects::classify_alignment(
+            &skater.offboard.board_policy,
+            &mut self.riding.ground,
+        );
         let partial = skateboard_controller::partial_request(
             &skater.skateboard_controller,
             &self.riding.ground,

@@ -33,7 +33,7 @@ impl SkateboardController {
         let previous = self.fields.state_448;
         self.fields.word_444 = 0;
         if previous != 0 {
-            actions.let_go_of_skateboard();
+            actions.let_go_of_skateboard(&mut self.fields);
             self.fields.state_448 = 0;
         }
         self.fields.system_on_452 = false;

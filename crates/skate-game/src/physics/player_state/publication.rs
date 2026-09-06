@@ -124,14 +124,6 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         //State Fill82D3B010 is a single byte from this retained Slide owner.
         physical.state.signed_ground_step_84 = u8::from(skater.slide_state.state.wall_riding);
     }
-    //ProcessOutput82DB71C4 calls SkateboardController::FillPhysOut82D76D20
-    //for every selected state. The constructor82D74DD8 seeds448=0; use the
-    //same controller owner as state transitions and post-physics ragdoll.
-    physical.off_board.dropping_board_322 = u8::from(p.flags_2476 & (1 << 9) != 0);
-    physical.off_board.retrieving_board_323 = u8::from(
-        p.flags_2476 & (1 << 10) != 0 || skater.skateboard_controller.fields.state_448 == 4,
-    );
-
     //ProcessOutput82DB7130..7180 copies the HandPlantManager animation
     //flags1876 into Air304+20 one bit at a time, preserving the low28 bits.
     //The same manager word is consumed by the actual input publication.
@@ -177,5 +169,6 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     if state == PhysicalStateId::Teleporting {
         skater.teleport_state.publish_output(&mut skater.player_input.physical);
     }
+    super::super::offboard::possession::publish(physics, skater)?;
     Ok(())
 }

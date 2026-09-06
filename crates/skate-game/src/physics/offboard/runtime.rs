@@ -10,6 +10,10 @@ use skate_core::point_graph::PointGraph;
 use skate_data::{animation_metadata::AnimationMetadata, collections::Collections};
 
 pub(crate) struct Runtime {
+    pub board_policy: super::board_effects::Policy,
+    pub standard_deck_drag: f32,
+    pub possession: skate_core::player::offboard::board_possession::State,
+    pub possession_settings: skate_core::player::offboard::board_possession::lifecycle::Settings,
     pub controller: Controller,
     pub ground: ground_entry::State,
     pub contacts: Toolkit,
@@ -136,6 +140,11 @@ impl Runtime {
     pub(crate) fn load(data: &Collections, metadata: &AnimationMetadata) -> Result<Self, String> {
         let settings = super::settings::Settings::load(data, metadata)?;
         Ok(Self {
+            board_policy: Default::default(),
+            standard_deck_drag: data.float("physicsdeck", "default", "DeckAngularDrag")?
+                * f32::from_bits(0x426f_ffff),
+            possession: Default::default(),
+            possession_settings: settings.possession,
             controller: Controller::new(settings.controller, settings.metrics),
             ground: Default::default(),
             contacts: Default::default(),

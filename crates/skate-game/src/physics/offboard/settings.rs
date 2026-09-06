@@ -2,6 +2,7 @@
 mod board;
 mod curves;
 mod metrics;
+mod possession;
 #[cfg(test)]
 mod tests;
 use skate_core::{
@@ -11,6 +12,7 @@ use skate_core::{
 use skate_data::{animation_metadata::AnimationMetadata, collections::Collections};
 
 pub(crate) struct Settings {
+    pub possession: skate_core::player::offboard::board_possession::lifecycle::Settings,
     pub controller: controller::Settings,
     pub board: skate_core::player::offboard::ground_sync::BoardSettings,
     pub metrics: [Option<controller::ClipMetric>; 3],
@@ -26,6 +28,7 @@ impl Settings {
         let biped = |name| curves::load::<8>(data, "physics_biped", name);
         let (sprint_blend, bounds) = biped("Hash_6B93C51256A30FB4")?;
         Ok(Self {
+            possession: possession::load(data)?,
             controller: controller::Settings {
                 movement_intent: movement_intent::Settings {
                     sprint_speed: curves::load::<4>(

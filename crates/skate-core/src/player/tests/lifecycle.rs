@@ -37,11 +37,11 @@ impl PhysicalStateCalls for SharedRecorder {
 }
 
 impl SkateboardControllerActions for SharedRecorder {
-    fn hold_skateboard(&mut self) {
+    fn hold_skateboard(&mut self, _fields: &mut SkateboardControllerFields) {
         self.events.borrow_mut().push(Event::Hold);
     }
 
-    fn let_go_of_skateboard(&mut self) {
+    fn let_go_of_skateboard(&mut self, _fields: &mut SkateboardControllerFields) {
         self.events.borrow_mut().push(Event::LetGo);
     }
 }
@@ -62,11 +62,11 @@ impl PhysicalStateCalls for Recorder {
 }
 
 impl SkateboardControllerActions for Recorder {
-    fn hold_skateboard(&mut self) {
+    fn hold_skateboard(&mut self, _fields: &mut SkateboardControllerFields) {
         self.events.push(Event::Hold);
     }
 
-    fn let_go_of_skateboard(&mut self) {
+    fn let_go_of_skateboard(&mut self, _fields: &mut SkateboardControllerFields) {
         self.events.push(Event::LetGo);
     }
 }
@@ -95,6 +95,41 @@ fn seeded_data() -> StateChangeData {
             system_on_452: false,
         },
     }
+}
+
+#[test]
+fn release_callback_retains_its_throw_countdown_through_state_publication() {
+    struct Throw;
+    impl SkateboardControllerActions for Throw {
+        fn hold_skateboard(&mut self, _: &mut SkateboardControllerFields) {
+            panic!("unexpected hold");
+        }
+        fn let_go_of_skateboard(&mut self, fields: &mut SkateboardControllerFields) {
+            assert_eq!(fields.word_444, 0);
+            fields.word_444 = 8;
+        }
+    }
+    let mut data = seeded_data();
+    data.skateboard_controller = SkateboardControllerFields {
+        word_444: 123,
+        state_448: 1,
+        system_on_452: true,
+    };
+    let mut states = Recorder {
+        reported_type: PhysicalStateId::BipedGround,
+        events: vec![],
+    };
+    PhysicalPlayerStateLifecycle::new(PhysicalStateId::BipedGround)
+        .set_physics_state(
+            PhysicalStateId::PhysicsGround as u32,
+            &mut data,
+            &mut states,
+            &mut Throw,
+        )
+        .unwrap();
+    assert_eq!(data.skateboard_controller.word_444, 8);
+    assert_eq!(data.skateboard_controller.state_448, 0);
+    assert!(!data.skateboard_controller.system_on_452);
 }
 
 fn recorder(reported_type: PhysicalStateId) -> Recorder {

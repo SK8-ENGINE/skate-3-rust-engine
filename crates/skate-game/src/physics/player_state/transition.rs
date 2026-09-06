@@ -35,15 +35,6 @@ impl PhysicalStateCalls for Calls {
         ));
     }
 }
-struct InactiveController;
-impl SkateboardControllerActions for InactiveController {
-    fn hold_skateboard(&mut self) {
-        unreachable!("active controller rejected before transition")
-    }
-    fn let_go_of_skateboard(&mut self) {
-        unreachable!("active controller rejected before transition")
-    }
-}
 pub(super) fn set(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
@@ -81,11 +72,29 @@ pub(super) fn set(
             "Physical state transition {current:?} -> {requested:?} requires its native Enter/Exit production adapter"
         ));
     }
-    if skater.skateboard_controller.fields.system_on_452 {
-        return Err(
-            "Ground transition requires active SkateboardController::LetGoOfSkateboard".into(),
-        );
+    if skater.player_input.toolkit.is_none() {
+        skater.player_input.toolkit = Some(BoardToolkit::from_board(
+            &physics.board,
+            skater.player_input.processed.flags_2468,
+            skater.player_input.processed.scalar_2612,
+            skater.player_input.processed.vectors_464_480_496_512_528[0].map(f32::from_bits),
+            [0.0, 1.0, 0.0, 0.0],
+        ));
     }
+    let observation = super::super::offboard::possession::observe(physics, skater)?;
+    let offboard = &mut skater.offboard;
+    let mut controller_actions = super::super::offboard::possession::Actions {
+        state: &mut offboard.possession,
+        settings: &offboard.possession_settings,
+        observation: &observation,
+        effects: super::super::offboard::board_effects::BoardEffects {
+            board: &mut physics.board,
+            animated: &mut skater.ground_lifecycle.board_animated_290,
+            policy: &mut offboard.board_policy,
+            standard_deck_drag: offboard.standard_deck_drag,
+            timestep: skater.player_input.processed.timestep_2604,
+        },
+    };
     let p = &mut skater.player_input.processed;
     let player = &mut skater.player_input.player;
     let mut data = StateChangeData {
@@ -114,7 +123,7 @@ pub(super) fn set(
             requested as u32,
             &mut data,
             &mut Calls,
-            &mut InactiveController,
+            &mut controller_actions,
         )
         .map_err(|e| format!("Unknown physical state {}", e.0))?;
     player.state_count_1312 = data.player.word_1312;
@@ -129,15 +138,6 @@ pub(super) fn set(
     p.state_count_2564 = data.processed.word_2564;
     p.state_timer_2664 = data.processed.scalar_2664;
     skater.skateboard_controller.fields = data.skateboard_controller;
-    if skater.player_input.toolkit.is_none() {
-        skater.player_input.toolkit = Some(BoardToolkit::from_board(
-            &physics.board,
-            p.flags_2468,
-            p.scalar_2612,
-            p.vectors_464_480_496_512_528[0].map(f32::from_bits),
-            [0.0, 1.0, 0.0, 0.0],
-        ));
-    }
     //Native82DB8540 publishes Processed state/history BEFORE old Exit. The
     //same retained objects then receive Exit followed by the new Enter.
     match current {
@@ -159,7 +159,10 @@ pub(super) fn set(
         PhysicalStateId::GroundAnimation => super::super::ground_animation::enter(physics, skater),
         PhysicalStateId::SlideGround => super::super::slide_state::enter(physics, skater),
         PhysicalStateId::WipeoutGround => super::super::wipeout_states::enter(physics, skater),
-        PhysicalStateId::Teleporting => { skater.teleport_state.enter(); Ok(()) },
+        PhysicalStateId::Teleporting => {
+            skater.teleport_state.enter();
+            Ok(())
+        }
         _ => unreachable!("state support checked before publication"),
     }
 }

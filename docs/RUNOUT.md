@@ -109,3 +109,40 @@ stock controller's real-floor test runs60 updates each for idle, half input and
 full input. This is controller/query coverage; production transitions still
 reject BipedGround until its complete physical adapter is available. No playable
 binary has been staged or launched from these changes.
+
+## Board possession and shared solver integration
+
+Native hand drives82D74FD8/82D751D8 now append to the existing board/skeleton
+island. Factory82AE64F8 stores its fifth argument as body A and fourth as B:
+hands3/7 therefore react against deck6. The skeleton's drive-spy results retain
+their original row count. Tests verify opposite hand/deck reactions and zero
+reaction after releasing the hand drive.
+
+The controller now has production hold/release, update and output adapters over
+the actual animated hand frames, physical hand contacts, board toolkit and
+retained collision normals. Its standard/released drag, hook drive and collision
+volume policies feed the existing physical owners. Native82C08818's surface vote
+is the producer of the controller's observed board840; it is not a sleeping flag.
+The lifecycle callback accepts the live controller fields so LetGo can preserve
+its eight-update throw countdown across a state change. Board positioning uses
+82C0B2C8 without clearing rates or pending forces, verified by regression test.
+
+Observed code comes from the generated TU3 functions and raw image
+default_82000000_011B0000.bin, SHA256
+f4aa113eb541bfba03dbc108cf5ab43f58c965b20fa3b82f9c40938a0ad841c4.
+Lookup8 proves893DA1B966231D76 is MaxDistance (hide trigger) and
+6CFF6F2C43F0AD41 is DistanceToHideSkateboard (hidden position offset), correcting
+the earlier reversed inference. The biped skeleton adapter also borrows the live roots,
+IK, collision and shared reckoning owners, including native body-spin input.
+
+The thrown-board update750F0 calls82C07328 three times. These outputs are angular
+displacements:07328 removes the current per-step motion along the requested axis
+and uses inverse-tensor/step/tensor conversion to add angular acceleration. It
+does not apply the outputs as raw torque. A regression covers braking overshoot
+and correcting opposite motion while preserving perpendicular angular velocity.
+
+Validation:459 core tests and83 game tests passed, including the final
+output/skeleton-owner wiring, private map and stock difficulty tests. These
+are still component and existing-state tests: BipedGround/BipedAir state
+integration and remount remain unfinished. The runout crash is not yet fixed
+in a staged playable build.

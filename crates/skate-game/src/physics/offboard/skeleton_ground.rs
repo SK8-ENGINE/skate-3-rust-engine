@@ -25,6 +25,51 @@ pub(crate) struct ReckoningUpdate {
     pub forward: [f32; 4],
     pub blend: f32,
 }
+
+///Borrow the same bodies, IK, roots, collision feedback and camera reckoning as
+///the riding phases. Sync supplies the completed Biped job frame and COM.
+pub(crate) fn update(
+    physics: &mut crate::physics::GamePhysics,
+    skater: &mut crate::physics::SkaterRuntime,
+    frame: Transform,
+    centre_of_mass: [f32; 4],
+) -> Result<(), String> {
+    let collision = crate::physics::input_phase::collision(skater);
+    let flags = skater.player_input.processed.flags_2468;
+    let spin = skater.animation_input.extra.physical_body_spin;
+    let mut owners = SkeletonOwners {
+        animated: &mut skater.animated_skeleton,
+        body: &mut skater.skeleton,
+        drives: &mut skater.skeleton_drives,
+        ik: &mut skater.foot_ik,
+        animation_input: &mut skater.animation_input,
+        correction: &mut skater.skeleton_output.correction,
+        pose_errors: &mut skater.pose_errors,
+    };
+    skater.skeleton_input.update_biped_ground(
+        &mut skater.skeleton_air,
+        &mut physics.board,
+        Input {
+            world_frame: &frame,
+            centre_of_mass_1056: centre_of_mass,
+        },
+        &mut skater.player_input.processed,
+        &mut owners,
+        &skater.animation.packet.hierarchy,
+        &collision,
+        physics.settings.step.simulation,
+        |update| {
+            physics.riding.update_biped_reckoning(
+                &mut skater.air_reckoning.state,
+                update,
+                flags,
+                spin,
+            );
+            Ok(())
+        },
+    )?;
+    Ok(())
+}
 impl SkeletonInputRuntime {
     pub(crate) fn update_biped_ground<F>(
         &mut self,

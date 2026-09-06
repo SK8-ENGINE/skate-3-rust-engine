@@ -14,7 +14,11 @@ pub(super) fn advance(
     skater: &mut SkaterRuntime,
     truck_targets: [f32; 2],
 ) -> Result<(), String> {
-    let board_volumes = colliders::world_volumes(&physics.board, &physics.settings);
+    let board_volumes = if skater.offboard.board_policy.volumes_enabled {
+        colliders::world_volumes(&physics.board, &physics.settings)
+    } else {
+        Vec::new()
+    };
     let skeleton_volumes =
         skeleton_colliders::world_volumes(&skater.skeleton, &skater.skeleton_collision)?;
     // Each native assembly has its own query record and retention buffer.
@@ -55,6 +59,16 @@ pub(super) fn advance(
         ATTACHED_REACTION_BASE + PART_COUNT,
         dt,
     );
+    let skeleton_drive_count = drives.rows.len();
+    if skater.skateboard_controller.fields.system_on_452 {
+        super::offboard::hand_drives::append(
+            &mut drives.rows,
+            &skater.offboard.possession,
+            physics.board.bodies(),
+            skater.skeleton.bodies(),
+            dt,
+        );
+    }
     let bodies = skater
         .skeleton
         .bodies_mut()
@@ -77,6 +91,9 @@ pub(super) fn advance(
         .publish_physical_record(deck_frame(&physics.board));
     // These solved rows are consumed by the actual collision/drive feedback
     // phase; keep their identity and impulses after the shared solve.
+    //Controller drive descriptors have flags28=0: they are not Skeleton's
+    //spy drives and must not be paired with SkeletonDriveIdentity feedback.
+    drives.rows.truncate(skeleton_drive_count);
     skater.solved_drives = Some(drives);
     Ok(())
 }

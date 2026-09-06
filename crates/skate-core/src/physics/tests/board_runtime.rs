@@ -60,6 +60,43 @@ fn close(actual: Vector3, expected: Vector3) {
 }
 
 #[test]
+fn moving_board_transform_preserves_rates_and_pending_forces() {
+    let mut board = runtime(Vector3::new(0., -9.8, 0.), BoardMotion::Active);
+    for (i, body) in board.bodies_mut().iter_mut().enumerate() {
+        body.rates.linear_velocity = Vector3::new(i as f32, 2., 3.);
+        body.rates.angular_velocity = Vector3::new(1., i as f32, 2.);
+        body.rates.force_acceleration = Vector3::new(5., 6., 7.);
+        body.rates.torque_acceleration = Vector3::new(8., 9., 10.);
+    }
+    let before = *board.bodies();
+    let parts = board.part_transforms();
+    let delta = Vector3::new(4., 5., 6.);
+    let mut target = parts[BodyId::Deck.index()];
+    target.translation = delta;
+    board.set_transform(target);
+    for (i, body) in board.bodies().iter().enumerate() {
+        close(body.rates.linear_velocity, before[i].rates.linear_velocity);
+        close(
+            body.rates.angular_velocity,
+            before[i].rates.angular_velocity,
+        );
+        close(
+            body.rates.force_acceleration,
+            before[i].rates.force_acceleration,
+        );
+        close(
+            body.rates.torque_acceleration,
+            before[i].rates.torque_acceleration,
+        );
+        let p = parts[i].translation;
+        close(
+            board.part_transforms()[i].translation,
+            Vector3::new(p.x + delta.x, p.y + delta.y, p.z + delta.z),
+        );
+    }
+}
+
+#[test]
 fn spawn_preserves_each_mass_frame_and_keeps_the_hook_separate() {
     let mut data = masses();
     data[BodyId::Deck.index()].local_mass_frame = RetailLocalMassFrame {

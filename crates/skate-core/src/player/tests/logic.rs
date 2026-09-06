@@ -43,8 +43,8 @@ impl PhysicalStateCalls for States {
 struct Controller;
 
 impl SkateboardControllerActions for Controller {
-    fn hold_skateboard(&mut self) {}
-    fn let_go_of_skateboard(&mut self) {}
+    fn hold_skateboard(&mut self, _fields: &mut SkateboardControllerFields) {}
+    fn let_go_of_skateboard(&mut self, _fields: &mut SkateboardControllerFields) {}
 }
 
 fn input() -> StateSelectionInput {

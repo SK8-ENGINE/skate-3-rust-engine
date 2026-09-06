@@ -118,8 +118,14 @@ pub struct GrindOutputFields {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OffBoardOutputFields {
     pub scalar_32: f32,
+    pub board_angle_36: f32,
+    pub board_angle_40: f32,
     pub flag_304: u8,
     pub flag_311: u8,
+    pub free_board_312: u8,
+    pub returning_board_313: u8,
+    pub hidden_board_321: u8,
+    pub board_request_324: u8,
     pub flag_314: u8,
     pub flag_315: u8,
     pub flag_316: u8,

@@ -10,6 +10,20 @@ use crate::math::{Basis3, Vector3};
 const STEP: f32 = f32::from_bits(0x3c88_8889);
 const NORMAL_MINIMUM: f32 = f32::from_bits(0x3586_37bd); //82F826F8 ->830BD350.
 
+///82C07328 subtracts the current angular displacement along the requested
+///axis, without07000's directional clamps, then performs the same tensor and
+///fixed-step conversion as075B8. The thrown-board controller calls this leaf.
+pub fn apply_axis_displacement(body: &mut RetailBodyRates, requested: Vector3) {
+    let squared = dot(requested, requested);
+    let inverse = inverse_length_squared(squared, 2);
+    let length = if squared == 0.0 { 0.0 } else { squared * inverse };
+    let direction = if length > NORMAL_MINIMUM {
+        scale(requested, inverse)
+    } else { Vector3::ZERO };
+    let existing = scale(direction, dot(direction, scale(body.angular_velocity, STEP)));
+    apply_angular_displacement(body, subtract(requested, existing));
+}
+
 /// 82C07000 first limits the requested angular displacement against the
 /// displacement already supplied by angular velocity along that same axis.
 pub fn apply_limited_displacement(body: &mut RetailBodyRates, requested: Vector3) {
@@ -128,6 +142,21 @@ mod tests {
             kinetic_energy: 0.0,
             cool_down: 3,
         }
+    }
+    #[test]
+    fn thrown_board_correction_brakes_axis_overshoot_without_touching_other_motion() {
+        let mut state = body();
+        state.angular_velocity = Vector3::new(4., 3., 5.);
+        apply_axis_displacement(&mut state, Vector3::new(0., 0.02, 0.));
+        assert!((state.torque_acceleration.y + 108.).abs() < 0.0001);
+        assert!(state.torque_acceleration.x.abs() < 0.0001);
+        assert!(state.torque_acceleration.z.abs() < 0.0001);
+        assert_eq!(state.angular_velocity, Vector3::new(4., 3., 5.));
+        assert_eq!(state.cool_down, 0);
+        let mut reverse = body();
+        reverse.angular_velocity = Vector3::new(0., -3., 0.);
+        apply_axis_displacement(&mut reverse, Vector3::new(0., 0.02, 0.));
+        assert!((reverse.torque_acceleration.y - 252.).abs() < 0.0001);
     }
     #[test]
     fn correction_enters_accumulator_and_respects_existing_angular_motion() {

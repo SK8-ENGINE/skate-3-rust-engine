@@ -79,8 +79,8 @@ pub struct StateChangeData {
 /// implementations are `HoldSkateboard` `0x82D75370` and
 /// `LetGoOfSkateboard` `0x82D75440`; this lifecycle never replaces them.
 pub trait SkateboardControllerActions {
-    fn hold_skateboard(&mut self);
-    fn let_go_of_skateboard(&mut self);
+    fn hold_skateboard(&mut self, _fields: &mut SkateboardControllerFields);
+    fn let_go_of_skateboard(&mut self, _fields: &mut SkateboardControllerFields);
 }
 
 /// Context supplied to an owned state's Enter or Exit implementation.
@@ -196,11 +196,11 @@ fn prepare_skateboard_controller<C: SkateboardControllerActions>(
     controller.word_444 = 0;
     if processed_flags_2480 & (0x80 | 0x100) != 0 {
         if controller.state_448 != 2 {
-            actions.let_go_of_skateboard();
+            actions.let_go_of_skateboard(controller);
             controller.state_448 = 2;
         }
     } else if controller.state_448 != 1 {
-        actions.hold_skateboard();
+        actions.hold_skateboard(controller);
         controller.state_448 = 1;
     }
     controller.system_on_452 = true;
@@ -218,7 +218,7 @@ fn stop_skateboard_controller<C: SkateboardControllerActions>(
     let previous_state = controller.state_448;
     controller.word_444 = 0;
     if previous_state != 0 {
-        actions.let_go_of_skateboard();
+        actions.let_go_of_skateboard(controller);
         controller.state_448 = 0;
     }
     controller.system_on_452 = false;

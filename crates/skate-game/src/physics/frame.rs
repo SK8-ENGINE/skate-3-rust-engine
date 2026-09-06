@@ -123,6 +123,7 @@ pub(super) fn advance(
         }
         state => return Err(format!("Selected {state:?} requires its physical update")),
     }
+    super::offboard::possession::update(physics, skater)?;
     // Source State82DB6120 submits the queue once, then advances state time.
     // BoardRuntime applies that same queue during its shared solve.
     skater.player_input.player.state_timer_1344 += skater.player_input.processed.timestep_2604;
