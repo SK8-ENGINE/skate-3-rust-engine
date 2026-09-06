@@ -1,0 +1,98 @@
+//! Shared Ground/Air wipeout requests from original TU3 82D8F9E0/82D90358.
+mod observations;
+mod settings;
+pub(crate) use observations::Observations;
+use skate_core::player::{
+    input_phase::ProcessedPhysicsInput,
+    wipeout::{self, Mode, Requests, Settings},
+};
+use skate_data::collections::Collections;
+pub(crate) struct Wipeout {
+    pub state: Requests,
+    settings: Settings,
+    modes: [Mode; 5],
+}
+impl Wipeout {
+    pub fn load(data: &Collections) -> Result<Self, String> {
+        let (settings, modes) = settings::load(data)?;
+        let mut state = Requests::new();
+        state.initialize_player(); //Player82DB3024, after the component ctor.
+        Ok(Self {
+            state,
+            settings,
+            modes,
+        })
+    }
+    pub fn check_ground(&mut self, input: &Observations<'_>) -> Result<(), String> {
+        let mode = self.mode(input.processed)?;
+        let frame = input.frame()?;
+        wipeout::check_ground(&mut self.state, &self.settings, &mode, &frame);
+        Ok(())
+    }
+    pub fn check_ground_animation(
+        &mut self,
+        input: &Observations<'_>,
+        scale: f32,
+    ) -> Result<(), String> {
+        let mode = self.mode(input.processed)?;
+        let frame = input.frame()?;
+        wipeout::check_ground_animation(&mut self.state, &self.settings, &mode, &frame, scale);
+        Ok(())
+    }
+    pub fn check_air(&mut self, input: &Observations<'_>, use_com: bool) -> Result<(), String> {
+        let mode = self.mode(input.processed)?;
+        let frame = input.frame()?;
+        wipeout::check_air(&mut self.state, &self.settings, &mode, &frame, use_com);
+        Ok(())
+    }
+    fn mode(&self, p: &ProcessedPhysicsInput) -> Result<Mode, String> {
+        self.modes
+            .get(p.state_variant_index_2528 as usize)
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "Undefined wipeout physics mode {}",
+                    p.state_variant_index_2528
+                )
+            })
+    }
+    ///Consumed by state selection and by the same tick's postphysics IK branch.
+    pub fn requests_runout(&self, p: &ProcessedPhysicsInput) -> bool {
+        self.state.requests_runout(&observations::request_input(p))
+    }
+    pub fn requests_wipeout(&self, p: &ProcessedPhysicsInput) -> bool {
+        self.state.requests_wipeout(&observations::request_input(p))
+    }
+}
+
+///Player postphysics82BD83E0 follows contact/error publication with the
+///selected state's check, before FootIK sees that tick's wipeout request.
+pub(super) fn check_after_physics(
+    physics: &super::GamePhysics,
+    skater: &mut super::SkaterRuntime,
+) -> Result<(), String> {
+    use skate_core::player::state::PhysicalStateId;
+    let observations = Observations {
+        processed: &skater.player_input.processed,
+        board: &physics.riding.ground,
+        collision: &skater.collision_feedback,
+        deck: super::solve::deck_frame(&physics.board),
+        //Ground82BDF694..6A4 stores this target into Processed0..48;
+        //Animated/KnownAir publish the same unblended target before board drive.
+        input_board: skater.animated_skeleton.board_frames.animation_target,
+        world_to_animation: skater.animated_skeleton.roots.world_to_animation,
+        pose_error: skater.collision_pose_error,
+        maximum_pose_error: skater.collision_maximum_error,
+        jump_fix_frames: skater.player_state.post.jump_fix_frames,
+        air: &skater.air_reckoning.state,
+        system_up_y: physics.riding.reckoning_frames.system[1][1],
+        grind_locked_to_middle: skater.trajectory.selector.grind_locked_to_middle(),
+        grind_normal: skater.trajectory.selector.grind_normal(),
+    };
+    match skater.player_state.current() {
+        PhysicalStateId::PhysicsGround | PhysicalStateId::SlideGround => skater.wipeout.check_ground(&observations),
+        PhysicalStateId::GroundAnimation => skater.wipeout.check_ground_animation(&observations, 1.0),
+        PhysicalStateId::PhysicsAir => skater.wipeout.check_air(&observations, false),
+        _ => Ok(()), //Other concrete states dispatch their own postphysics check.
+    }
+}

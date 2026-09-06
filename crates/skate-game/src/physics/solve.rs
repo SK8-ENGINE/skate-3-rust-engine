@@ -1,0 +1,95 @@
+//! One physical solve for the board, skater and original animation targets.
+//! The caller publishes forces and drive targets before entering this phase.
+mod assembly_contacts;
+use super::{GamePhysics, SkaterRuntime, colliders, skeleton_colliders};
+use skate_core::physics::{
+    board::BodyId,
+    board_step::{ATTACHED_REACTION_BASE, AttachedStep},
+    skeleton_animation_record::{AnimationPartTransform, IDENTITY},
+    skeleton_body::PART_COUNT,
+};
+
+pub(super) fn advance(
+    physics: &mut GamePhysics,
+    skater: &mut SkaterRuntime,
+    truck_targets: [f32; 2],
+) -> Result<(), String> {
+    let board_volumes = colliders::world_volumes(&physics.board, &physics.settings);
+    let skeleton_volumes =
+        skeleton_colliders::world_volumes(&skater.skeleton, &skater.skeleton_collision)?;
+    // Each native assembly has its own query record and retention buffer.
+    // Skeleton82BE5094 passes false to82768728: its edge threshold is -1,
+    // whereas the board requests .999. GroundPipeline supplies the remaining
+    // shared values. Do not let the second query overwrite the first's rows.
+    let mut contacts = physics
+        .world
+        .query_primitives(&board_volumes, physics.query, physics.retention)
+        .to_vec();
+    let mut skeleton_query = physics.query;
+    skeleton_query.edge_cos_bend_normal_threshold = -1.0;
+    contacts.extend_from_slice(physics.world.query_primitives(
+        &skeleton_volumes,
+        skeleton_query,
+        physics.retention,
+    ));
+    assembly_contacts::append(
+        &mut contacts,
+        &board_volumes,
+        &skeleton_volumes,
+        physics.board.collision_group(),
+        &skater.skeleton_collision,
+    )?;
+    physics.contact_count = contacts.len();
+    let dt = physics.settings.step.simulation.time_step;
+    let mut joints =
+        skater
+            .skeleton_joints
+            .build(skater.skeleton.bodies(), ATTACHED_REACTION_BASE, dt);
+    let mut drives = skater.skeleton_drives.build(
+        skater.skeleton.bodies(),
+        ATTACHED_REACTION_BASE,
+        ATTACHED_REACTION_BASE + PART_COUNT,
+        dt,
+    );
+    let bodies = skater
+        .skeleton
+        .bodies_mut()
+        .iter_mut()
+        .chain(skater.skeleton_drives.targets.bodies.iter_mut())
+        .collect();
+    physics.board.advance_attached(
+        &contacts,
+        truck_targets,
+        physics.settings.step,
+        AttachedStep {
+            bodies,
+            contacts: &mut [],
+            joints: &mut joints,
+            drives: &mut drives.rows,
+        },
+    );
+    skater
+        .skeleton
+        .publish_physical_record(deck_frame(&physics.board));
+    // These solved rows are consumed by the actual collision/drive feedback
+    // phase; keep their identity and impulses after the shared solve.
+    skater.solved_drives = Some(drives);
+    Ok(())
+}
+
+pub(super) fn deck_frame(
+    board: &skate_core::physics::board_runtime::BoardRuntime,
+) -> AnimationPartTransform {
+    let deck = board.part_transforms()[BodyId::Deck.index()];
+    let mut frame = IDENTITY;
+    for (axis, column) in deck.basis.columns.iter().enumerate() {
+        frame[axis][..3].copy_from_slice(column);
+    }
+    frame[3] = [
+        deck.translation.x,
+        deck.translation.y,
+        deck.translation.z,
+        0.0,
+    ];
+    frame
+}

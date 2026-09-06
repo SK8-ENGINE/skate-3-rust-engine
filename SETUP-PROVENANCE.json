@@ -1,0 +1,24 @@
+{
+  "archives": {
+    "crates (1).zip": "d039af756525a3071178c366bf6d44a8b426f320e28c414cb34449240be89bd9",
+    "assets.zip": "5127c4608742c4c2f574edb128829c6cc22f02cf957b9ade2fae6c56e5b95f7b"
+  },
+  "setup_changes": [
+    "Added missing Cargo workspace using installed Bevy 0.18.1 and Rust 2024 edition.",
+    "Selected supplied Easy profile at both game startup load sites.",
+    "Added build, staging and launch scripts."
+  ],
+  "animation_source": "Supplied assets.zip; no assets from the previous clone required.",
+  "validation": {
+    "build": "passed (56 supplied-source warnings)",
+    "startup": "GAME_CHARACTER_READY bones=35",
+    "skin_bones_matched": 35,
+    "decoded_animation_clips": 487,
+    "runtime_issue": "Unsupported MotionGraph Behavior AddRunoutAttribs (behavior 86); no bypass applied",
+    "gameplay_controls": "user-driven; no injected input or automated visual test"
+  },
+  "modified_imported_files": [
+    "crates/skate-game/src/main.rs",
+    "crates/skate-game/src/physics.rs"
+  ]
+}

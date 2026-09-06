@@ -1,0 +1,98 @@
+//! Persistent platform-input owner. Device collection runs on host frames;
+//! this does not choose the skater simulation clock or advance Derived input.
+use super::platform::{DeviceError, DevicePacket};
+use bevy::prelude::Resource;
+use skate_core::input::{
+    controller::ActionMap,
+    gameplay_map::GameplayActions,
+    history::{DEVICE_SLOTS, HistoryRecord, PadHistory},
+    pad::Pad,
+    xbox,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ControllerStatus {
+    Unpolled,
+    Ready,
+    Unavailable(DeviceError),
+}
+
+#[derive(Resource)]
+pub(crate) struct ControllerInput {
+    cache: [[HistoryRecord; DEVICE_SLOTS]; 2],
+    active: usize,
+    history: PadHistory,
+    pads: [Pad; DEVICE_SLOTS],
+    pub status: [ControllerStatus; DEVICE_SLOTS],
+    pub packet_numbers: [Option<u32>; DEVICE_SLOTS],
+    pub mapped_actions: [[f32; 18]; DEVICE_SLOTS],
+    pub publications: u64,
+    pub consumed_batches: u64,
+}
+
+impl Default for ControllerInput {
+    fn default() -> Self {
+        Self {
+            cache: [[HistoryRecord::new(&[]); DEVICE_SLOTS]; 2],
+            active: 0,
+            history: PadHistory::new(),
+            pads: std::array::from_fn(|_| Pad::new()),
+            status: [ControllerStatus::Unpolled; DEVICE_SLOTS],
+            packet_numbers: [None; DEVICE_SLOTS],
+            mapped_actions: [[0.0; 18]; DEVICE_SLOTS],
+            publications: 0,
+            consumed_batches: 0,
+        }
+    }
+}
+
+impl ControllerInput {
+    pub(crate) fn player_actions(&self) -> GameplayActions {
+        let device = self.status.iter().position(|status| *status == ControllerStatus::Ready).unwrap_or(0);
+        GameplayActions::from_pad(&self.pads[device])
+    }
+    /// TU3 8296D288/8296D0D0: write the inactive cache, publish one four-device
+    /// batch. Even an unchanged platform packet is sampled; packet-number
+    /// deduplication would alter native Pad edge/repeat behavior.
+    pub(super) fn collect(&mut self, samples: [Result<DevicePacket, DeviceError>; DEVICE_SLOTS]) {
+        let next = self.active ^ 1;
+        for (device, sample) in samples.into_iter().enumerate() {
+            match sample {
+                Ok(packet) => {
+                    // 8296D480 sets byte13 only when capability SubType == 7.
+                    let values = xbox::convert(&packet.state, u8::from(packet.subtype == 7));
+                    self.cache[next][device] = HistoryRecord::new(&values);
+                    self.packet_numbers[device] = Some(packet.number);
+                    self.status[device] = ControllerStatus::Ready;
+                }
+                Err(error) => {
+                    self.cache[next][device].clear_count();
+                    self.packet_numbers[device] = None;
+                    self.status[device] = ControllerStatus::Unavailable(error);
+                }
+            }
+        }
+        self.active = next;
+        self.history.publish(&self.cache[self.active]);
+        self.publications += 1;
+    }
+
+    /// TU3 82699230 drains first, then updates each Pad once. The game owns
+    /// this snapshot for subsequent consumers; Derived timers require the
+    /// actual actor timestep and state flags and are not driven by render dt.
+    pub(super) fn publish_actions(&mut self) -> bool {
+        if !self.history.drain_to_latest(&mut self.pads) {
+            return false;
+        }
+        for (device, pad) in self.pads.iter().enumerate() {
+            let mut actions = GameplayActions::from_pad(pad);
+            self.mapped_actions[device] = std::array::from_fn(|i| actions.value(64 + i as u32));
+        }
+        self.consumed_batches += 1;
+        true
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/controllers.rs"]
+mod tests;
