@@ -30,8 +30,16 @@ pub(super) fn line(
     end: Vector,
     radius: f32,
 ) -> Result<Option<SurfaceHit>, String> {
-    if !radius.is_finite() || radius < 0.0 || start.into_iter().chain(end).any(|v| !v.is_finite()) {
-        return Err("Non-finite trajectory collision request or invalid radius".into());
+    // Native vectors retain a fourth SIMD lane, but the segment predicate,
+    // broadphase and vec3 conversion below consume XYZ only. That carry lane
+    // is not a homogeneous coordinate and need not be a finite float.
+    if !radius.is_finite()
+        || radius < 0.0
+        || start[..3].iter().chain(&end[..3]).any(|v| !v.is_finite())
+    {
+        return Err(format!(
+            "Non-finite trajectory collision coordinates or invalid radius: start={start:?}, end={end:?}, radius={radius}"
+        ));
     }
     let start = vec3(start);
     let delta = Vector3::new(end[0] - start.x, end[1] - start.y, end[2] - start.z);
