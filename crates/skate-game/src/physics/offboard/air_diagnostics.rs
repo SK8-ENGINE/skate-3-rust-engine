@@ -15,6 +15,14 @@ struct Sample {
     lift: f32,
     extra: [[f32; 4]; 2],
     maximum_error: Option<f32>,
+    pose_errors: [[f32; 4]; 24],
+    physical_positions: [[f32; 4]; 24],
+    drive_positions: [[f32; 4]; 24],
+    contacts: [bool; 24],
+    contact_age: [f32; 24],
+    drive_weight: f32,
+    partial_ragdoll: bool,
+    limbs: [skate_core::animation::foot_ik::status::LimbStatus; 4],
     reasons: [bool; 34],
 }
 
@@ -48,6 +56,14 @@ pub(crate) fn record(skater: &mut SkaterRuntime) {
         lift: state.lift,
         extra: skater.collision_extra_displacements,
         maximum_error: skater.collision_maximum_error,
+        pose_errors: skater.pose_errors.parts,
+        physical_positions: std::array::from_fn(|i| skater.skeleton.record.pose[i][3]),
+        drive_positions: std::array::from_fn(|i| skater.skeleton_input.drive_frames[i][3]),
+        contacts: skater.collision_feedback.current,
+        contact_age: skater.collision_feedback.contact_age,
+        drive_weight: skater.collision_feedback.drive_weight,
+        partial_ragdoll: skater.skeleton_collision.partial_ragdoll,
+        limbs: skater.foot_ik.state.limbs,
         reasons: skater.wipeout.state.reasons,
     });
     if skater.wipeout.state.reasons.iter().any(|&requested| requested) {
