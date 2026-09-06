@@ -102,6 +102,7 @@ pub(crate) fn advance(
             skitch_transition_time: profile.skitch_transition_time,
             time_to_land: physical.animation.collision_time_144,
             offboard_time_to_land: physical.off_board.scalar_32,
+            tricks_blocked_on_stairs: physical.animation.tricks_blocked_on_stairs_166 != 0,
         },
     );
     skater.animation.action.gameplay_conditions = skater.animation.motion.gameplay_conditions;

@@ -24,6 +24,7 @@ pub struct GameplayConditions {
     pub time_to_land: f32,
     /// PhysOutOffBoard+32, shared by OBTimeToLand and OBTrajTime.
     pub offboard_time_to_land: f32,
+    pub tricks_blocked_on_stairs: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +43,7 @@ pub enum GameplayCondition {
     Dark,
     UnderflipRequested,
     DarkCatchRequested,
+    OkToDoTrickOnStairs,
     HandPlanting { state: u8, direction: u8 },
     EnteringSkitch,
     Skitching,
@@ -64,6 +66,7 @@ impl GameplayCondition {
                 | "IsDark"
                 | "IsUnderflipRequested"
                 | "IsDarkCatchRequested"
+                | "OkToDoTrickOnStairs"
                 | "IsHandPlanting"
                 | "IsEnteringSkitch"
                 | "IsSkitching"
@@ -87,6 +90,7 @@ impl GameplayCondition {
             "IsDark" => Self::Dark,
             "IsUnderflipRequested" => Self::UnderflipRequested,
             "IsDarkCatchRequested" => Self::DarkCatchRequested,
+            "OkToDoTrickOnStairs" => Self::OkToDoTrickOnStairs,
             "IsEnteringSkitch" => Self::EnteringSkitch,
             "IsSkitching" => Self::Skitching,
             "IsHandPlanting" => Self::HandPlanting {
@@ -109,6 +113,7 @@ impl GameplayCondition {
     /// conditions that also require the MotionGraph/channel owner.
     pub fn evaluate_physical(&self, p: &GameplayConditions) -> Option<bool> {
         Some(match self {
+            Self::OkToDoTrickOnStairs => !p.tricks_blocked_on_stairs, //82BA6930:Animation166
             Self::RetrievingBoard => p.retrieving_board, //82BA5EF0:Offboard323
             Self::InBipedAir => p.in_biped_air,          //82BA8030:Offboard328
             Self::HippyHurdling => p.hippy_hurdling,     //82BA5DA0:Offboard317

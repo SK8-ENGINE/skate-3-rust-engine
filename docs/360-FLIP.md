@@ -49,6 +49,7 @@ the recompiled PPC instruction listings. Relevant boundaries:
 | Trick construction identity | 82BB5C20, 82BB5CA0 |
 | Scoring metadata | 82BBFA88, 8258FA20 |
 | Underflip requests | 82BBE098, 82BBE0A8, 82BBE358 |
+| Trick stair gate and physical reset | 82BA6930, 82DE3F38 |
 | Nose-weight anticipation | 82BB2670, 82BB26D0, 82B97110 |
 
 Factory names were verified from registration strings. In particular,
@@ -63,7 +64,9 @@ Nonvisual checks pass for 36 core input tests, the PAT parser, the gesture
 mapping/ActionHost lifecycle, and two private-stock fixtures. Those fixtures
 recognize the authored scoop through all seven files and exercise the
 stock crouch, scoop, takeoff, and air-animation handlers in both stances,
-including finite decoded poses and required attributes. These are data/code
+including finite decoded poses and required attributes. The fixture also
+checks the ordinary route and ancestor entry/transition conditions for
+unsupported factories. These are data/code
 checks, not a claim of visually verified gameplay parity. No gameplay or
 visual test was automated. The existing game instance was closed to stage
 the new build; restarting it for the user is separate from these checks.
@@ -74,7 +77,13 @@ Please check:
 2. Perform a 360 flip; check preparation, pop, board flip/spin, and foot motion.
 3. Land and push away, then repeat in the opposite stance.
 
-This work validates the ordinary ground route, not every trick in the newly
+The first user-input run exposed the missing `OkToDoTrickOnStairs` gate.
+It now reads the retained PhysOutAnimation byte166. Native reset82DE3F38
+clears this byte; ordinary Ground Fill82D3A388 and common
+ProcessOutput82DB6EC0 do not override it. This is the original packet
+lifecycle, not a constant-success condition.
+
+These nonvisual checks cover the ordinary ground route, not every trick in the newly
 connected catalog. Advanced manual/grind-out branches still contain the
 known unsupported `JumpInto` behavior, and the existing separate
 `AddRunoutAttribs` gap remains. Those handlers were not bypassed. The current

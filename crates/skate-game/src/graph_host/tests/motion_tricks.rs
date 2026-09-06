@@ -23,6 +23,45 @@ fn stock_360_crouch_takeoff_and_air_animation_pipeline() {
         binding,
         runtime,
     };
+    // Include the parent entry conditions: invoking leaf animation handlers
+    // alone does not catch missing stock gates such as OkToDoTrickOnStairs.
+    let implementations = graph.binding.instantiate_operations(&graph.source, &mut MotionFactory).unwrap();
+    fn check_expression(binding: &skate_data::state_graph::binding::Binding, instances: &[MotionOperation], id: usize) {
+        use skate_data::state_graph::binding::Node;
+        for node in &binding.expressions[id].children {
+            match *node {
+                Node::Expression(child) => check_expression(binding, instances, child),
+                Node::Operation(op) => assert!(!matches!(instances[op], MotionOperation::Unsupported { .. }),
+                    "Unsupported stock entry/transition condition: {:?}", instances[op]),
+                _ => panic!("Unexpected expression child"),
+            }
+        }
+    }
+    for leaf in ["FromAntic", "LeftGround"] {
+        let state = graph.binding.states.iter().enumerate().find_map(|(id, state)| {
+            if state.name != leaf { return None; }
+            let mut cursor = Some(id);
+            let mut is_360 = false;
+            while let Some(i) = cursor {
+                is_360 |= graph.binding.states[i].name == "360Flip";
+                cursor = graph.binding.states[i].parent;
+            }
+            is_360.then_some(id)
+        }).expect("Authored 360-flip state");
+        let mut cursor = Some(state);
+        while let Some(i) = cursor {
+            let state = &graph.binding.states[i];
+            if let Some(expression) = state.expression {
+                check_expression(&graph.binding, &implementations.operations, expression);
+            }
+            for &transition in &state.transitions {
+                if let Some(expression) = graph.binding.transitions[transition].expression {
+                    check_expression(&graph.binding, &implementations.operations, expression);
+                }
+            }
+            cursor = state.parent;
+        }
+    }
     let collections = Collections::load(&root).unwrap();
     let mut host = MotionHost::from_graph(
         &graph,
