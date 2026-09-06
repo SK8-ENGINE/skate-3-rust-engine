@@ -570,8 +570,6 @@ dependencies = [
 [[package]]
 name = "bevy_core_pipeline"
 version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d0810e85c2436e50c67448d48a83bf0bb1b5849899619ae2c7ea817221e9172"
 dependencies = [
  "bevy_app",
  "bevy_asset",

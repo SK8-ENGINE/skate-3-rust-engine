@@ -1,5 +1,24 @@
 # Local Bevy patch
 
+## Conservative occlusion depth pyramid
+
+`bevy_core_pipeline` is vendored from crates.io 0.18.1 with its original licenses.
+Its `src/experimental/mip_generation/{mod.rs,downsample_depth.wgsl}` backports
+[Bevy #22603](https://github.com/bevyengine/bevy/pull/22603), commit
+`43f4552308a29f4130c3ad71ea65d48f77daea6e`. The upstream file paths changed
+between releases; the algorithm is the upstream fix. Power-of-two pyramid
+levels and conservative source sampling prevent false occlusion at arbitrary
+viewport sizes, including scaled targets and MSAA. The associated meshlet
+texture-dimension fix is included in `bevy_pbr/src/meshlet/meshlet_cull_shared.wgsl`.
+The game uses ordinary meshes, not meshlets.
+
+The late mesh preprocessing pass in 0.18.1 also binds its indirect dispatch
+buffer as writable storage, which fails wgpu validation when occlusion is on.
+`bevy_pbr/src/render/{gpu_preprocess.rs,mesh_preprocess.wgsl}` now declares that
+binding read-only in the late pass. Its counters are plain `u32` in that shader
+variant, preserving the same buffer layout; the early producer retains atomic
+counters and writable storage. No dispatch count or culling decision changes.
+
 `bevy_pbr` is the unmodified crates.io 0.18.1 source except for the changes
 described below. Its original MIT and Apache licenses are included. Cargo selects
 it through the workspace `[patch.crates-io]` entry; the Cargo registry is untouched.

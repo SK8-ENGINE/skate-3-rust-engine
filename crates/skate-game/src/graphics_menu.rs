@@ -1,9 +1,11 @@
 //! Native-resolution pause UI over a separately scaled 3D render target.
 use bevy::{
     camera::RenderTarget,
+    core_pipeline::prepass::DepthPrepass,
     image::ImageSampler,
     prelude::*,
     render::{
+        experimental::occlusion_culling::OcclusionCulling,
         render_resource::{Extent3d, TextureFormat},
         renderer::RenderAdapter,
     },
@@ -36,6 +38,7 @@ struct GraphicsSettings {
     scale: u32,
     samples: u32,
     fps: u32,
+    occlusion: bool,
 }
 impl Default for GraphicsSettings {
     fn default() -> Self {
@@ -45,6 +48,7 @@ impl Default for GraphicsSettings {
             scale: 100,
             samples: 4,
             fps: 0,
+            occlusion: true,
         }
     }
 }
@@ -141,6 +145,12 @@ fn setup(
         })
         .collect();
     let mut settings = settings;
+    // Reproducible A/B override; normal launches use the saved menu setting.
+    match std::env::var("SKATE_OCCLUSION").as_deref() {
+        Ok("0") => settings.occlusion = false,
+        Ok("1") => settings.occlusion = true,
+        _ => {}
+    }
     if !supported_msaa.contains(&settings.samples) {
         settings.samples = 1;
     }
@@ -184,7 +194,7 @@ fn setup(
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("PAUSED"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..6 {
+            for i in 0..7 {
                 panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(48),padding:UiRect::all(px(12)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:20.,..default()},TextColor(Color::WHITE)));
@@ -229,10 +239,10 @@ fn interact(
     let mut action = None;
     if menu.open {
         if keys.just_pressed(KeyCode::ArrowUp) {
-            menu.selected = (menu.selected + 5) % 6;
+            menu.selected = (menu.selected + 6) % 7;
         }
         if keys.just_pressed(KeyCode::ArrowDown) {
-            menu.selected = (menu.selected + 1) % 6;
+            menu.selected = (menu.selected + 1) % 7;
         }
         if keys.just_pressed(KeyCode::ArrowLeft) {
             action = Some((menu.selected, -1));
@@ -263,13 +273,14 @@ fn interact(
                     cycle(&menu.supported_msaa, menu.settings.samples, direction)
             }
             3 => menu.settings.fps = cycle(LIMITS, menu.settings.fps, direction),
-            4 => menu.open = false,
-            5 => {
+            4 => menu.settings.occlusion = !menu.settings.occlusion,
+            5 => menu.open = false,
+            6 => {
                 exit.write(AppExit::Success);
             }
             _ => {}
         }
-        if row < 4 {
+        if row < 5 {
             let save = (|| -> Result<(), String> {
                 std::fs::create_dir_all(menu.path.parent().unwrap()).map_err(|e| e.to_string())?;
                 std::fs::write(
@@ -291,11 +302,12 @@ fn interact(
     }
 }
 fn apply(
+    mut commands: Commands,
     menu: Res<Menu>,
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     target: Res<SceneTarget>,
     mut images: ResMut<Assets<Image>>,
-    mut cameras: Query<&mut Msaa, With<Camera3d>>,
+    mut cameras: Query<(Entity, &mut Msaa), With<Camera3d>>,
     mut previous: Local<Option<GraphicsSettings>>,
 ) {
     if previous
@@ -310,9 +322,19 @@ fn apply(
         .as_ref()
         .is_none_or(|p| p.samples != menu.settings.samples)
     {
-        for mut samples in &mut cameras {
+        for (_, mut samples) in &mut cameras {
             *samples = msaa(menu.settings.samples);
         }
+    }
+    if previous.as_ref().is_none_or(|p| p.occlusion != menu.settings.occlusion) {
+        for (entity, _) in &cameras {
+            if menu.settings.occlusion {
+                commands.entity(entity).insert((DepthPrepass, OcclusionCulling));
+            } else {
+                commands.entity(entity).remove::<(DepthPrepass, OcclusionCulling)>();
+            }
+        }
+        info!("GPU occlusion culling: {}", menu.settings.occlusion);
     }
     let size = menu.settings.internal_size(window.physical_size());
     if let Some(image) = images.get(&target.0) {
@@ -367,7 +389,8 @@ fn labels(
                     s.fps.to_string()
                 }
             ),
-            4 => "Resume".into(),
+            4 => format!("Occlusion culling     {}", if s.occlusion { "On" } else { "Off" }),
+            5 => "Resume".into(),
             _ => "Quit game".into(),
         };
     }
@@ -396,6 +419,44 @@ fn pace(menu: Option<Res<Menu>>, mut pacer: ResMut<FramePacer>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn culling_can_toggle_with_msaa_and_render_scale_changes() {
+        let mut app = App::new();
+        let mut images = Assets::<Image>::default();
+        let target = images.add(Image::new_target_texture(1280, 800, TextureFormat::Rgba8UnormSrgb, None));
+        app.insert_resource(SceneTarget(target.clone()))
+            .insert_resource(images)
+            .insert_resource(Menu {
+                open: false, selected: 0, settings: GraphicsSettings::default(),
+                path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
+            })
+            .add_systems(Update, apply);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        let camera = app.world_mut().spawn((Camera3d::default(), Msaa::Off)).id();
+        app.update();
+        assert!(app.world().entity(camera).contains::<OcclusionCulling>());
+        assert!(app.world().entity(camera).contains::<DepthPrepass>());
+        {
+            let mut menu = app.world_mut().resource_mut::<Menu>();
+            menu.settings.occlusion = false;
+            menu.settings.samples = 1;
+            menu.settings.scale = 67;
+        }
+        app.update();
+        assert!(!app.world().entity(camera).contains::<OcclusionCulling>());
+        assert!(!app.world().entity(camera).contains::<DepthPrepass>());
+        assert_eq!(*app.world().get::<Msaa>(camera).unwrap(), Msaa::Off);
+        assert_eq!(app.world().resource::<Assets<Image>>().get(&target).unwrap().size(), UVec2::new(857, 536));
+        {
+            let mut menu = app.world_mut().resource_mut::<Menu>();
+            menu.settings.occlusion = true;
+            menu.settings.samples = 8;
+        }
+        app.update();
+        assert!(app.world().entity(camera).contains::<OcclusionCulling>());
+        assert!(app.world().entity(camera).contains::<DepthPrepass>());
+        assert_eq!(*app.world().get::<Msaa>(camera).unwrap(), Msaa::Sample8);
+    }
     #[test]
     fn invalid_saved_values_fall_back() {
         let settings: GraphicsSettings =

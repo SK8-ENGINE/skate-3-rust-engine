@@ -4,10 +4,13 @@ Double-click **PLAY.bat** to launch. Use an XInput-compatible controller;
 **Esc** opens the pause/graphics menu. Startup selects the supplied **Easy** profile.
 
 The menu supports window resolution (720p through 4K), internal render scale
-(25–100%), supported MSAA levels (Off/2×/4×/8×), and an FPS cap (30–240 or
-Unlimited). Click a row to cycle it, or use arrow keys and Enter. Changes apply
+(25–100%), supported MSAA levels (Off/2×/4×/8×), an FPS cap (30–240 or
+Unlimited), and GPU occlusion culling (On/Off). Click a row to cycle it, or use arrow keys and Enter. Changes apply
 immediately and save to `settings/graphics.json`. Escape or Resume returns to
 gameplay; Quit game exits. The menu stays at the window's native resolution.
+Occlusion culling defaults to On and skips meshes hidden behind other geometry.
+It needs no changes to `.skate` files. Its benefit depends on the view; compare
+On/Off where you see dips. It does not reduce visible mesh detail or collision.
 
 The standing/rolling **360 flip** now uses the supplied gesture files and
 ActionGraph/MotionGraph route, including right-stick crouch preparation.

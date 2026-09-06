@@ -142,3 +142,39 @@ describe correctness fixes in 0.19. It was not enabled as an unverified workarou
 Validation: the explicit GPU regression test and game suite (46 passed,
 21 existing ignored) passed. The staged build completed the normal San Vanelona
 startup capture at the user's saved settings, with benchmark overrides disabled.
+
+## Runtime occlusion culling
+
+The Escape graphics menu now supports GPU occlusion culling, default On. Existing
+settings files without that field pick up the default. `SKATE_OCCLUSION=0` or `1`
+overrides the saved value at launch for A/B runs. The two-phase GPU algorithm
+uses a depth prepass and dynamically rejects hidden meshes; no map baking, LOD
+generation, distance cutoff, or collision changes are involved.
+
+This backports [Bevy #22603](https://github.com/bevyengine/bevy/pull/22603) to
+0.18.1's core pipeline: conservative depth-pyramid sampling at non-power-of-two
+resolutions. It also fixes a reproduced GPU validation failure in 0.18.1's late
+preprocessing pass by making its indirect argument buffer binding read-only.
+Details and provenance are in `vendor/README.md`.
+
+Same saved 1440p / 100% / 8x MSAA settings, rotating view, no concurrent builds:
+
+| Trial | Average FPS | Frame interval p95 |
+| --- | ---: | ---: |
+| Original material batches, culling Off | 124.1 | 22.1 ms |
+| Original material batches, culling On | 128.0 | 21.3 ms |
+| 128-unit spatial batches, culling On | 72.4 | 51.2 ms |
+
+Reports: `logs/cull-off.json`, `logs/cull-on2.json`, `logs/cull-cell128.json`.
+The small On/Off difference is within plausible run variation, not evidence of
+a major FPS win. CPU/render submission overhead remains significant even when
+the GPU skips hidden geometry. These sweeps are not a minimum-FPS guarantee.
+Spatial splitting increased batches from 30,097 to 55,850 and was removed from
+the final implementation. All 8,214,063 render triangles remain available.
+
+Validation: city sweep and normal startup capture completed without GPU errors
+at 8x MSAA. The game suite has 47 passing tests and 21 pre-existing ignored tests,
+including changing culling, MSAA and internal resolution together. The explicit
+GPU lightmap cache regression test also passed. The startup
+image was visually inspected. Manual menu testing was interrupted by the user
+stopping Computer Use, so live UI toggling has not been visually verified.

@@ -1305,12 +1305,12 @@ impl FromWorld for PreprocessPipelines {
         let direct_bind_group_layout_entries = preprocess_direct_bind_group_layout_entries();
         let gpu_frustum_culling_bind_group_layout_entries = gpu_culling_bind_group_layout_entries();
         let gpu_early_occlusion_culling_bind_group_layout_entries =
-            gpu_occlusion_culling_bind_group_layout_entries().extend_with_indices(((
+            gpu_occlusion_culling_bind_group_layout_entries(false).extend_with_indices(((
                 11,
                 storage_buffer::<PreprocessWorkItem>(/*has_dynamic_offset=*/ false),
             ),));
         let gpu_late_occlusion_culling_bind_group_layout_entries =
-            gpu_occlusion_culling_bind_group_layout_entries();
+            gpu_occlusion_culling_bind_group_layout_entries(true);
 
         let reset_indirect_batch_sets_bind_group_layout_entries =
             DynamicBindGroupLayoutEntries::sequential(
@@ -1488,7 +1488,7 @@ fn gpu_culling_bind_group_layout_entries() -> DynamicBindGroupLayoutEntries {
     ))
 }
 
-fn gpu_occlusion_culling_bind_group_layout_entries() -> DynamicBindGroupLayoutEntries {
+fn gpu_occlusion_culling_bind_group_layout_entries(read_only: bool) -> DynamicBindGroupLayoutEntries {
     gpu_culling_bind_group_layout_entries().extend_with_indices((
         (
             2,
@@ -1500,9 +1500,11 @@ fn gpu_occlusion_culling_bind_group_layout_entries() -> DynamicBindGroupLayoutEn
         ),
         (
             12,
-            storage_buffer::<LatePreprocessWorkItemIndirectParameters>(
-                /*has_dynamic_offset=*/ false,
-            ),
+            if read_only {
+                storage_buffer_read_only::<LatePreprocessWorkItemIndirectParameters>(false)
+            } else {
+                storage_buffer::<LatePreprocessWorkItemIndirectParameters>(false)
+            },
         ),
     ))
 }

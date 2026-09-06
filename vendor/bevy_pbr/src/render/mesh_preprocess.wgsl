@@ -57,13 +57,21 @@ struct LatePreprocessWorkItemIndirectParameters {
     // The number of workgroups we're going to dispatch.
     //
     // This value should always be equal to `ceil(work_item_count / 64)`.
+#ifdef EARLY_PHASE
     dispatch_x: atomic<u32>,
+#else
+    dispatch_x: u32,
+#endif
     // The number of workgroups in the Y direction; always 1.
     dispatch_y: u32,
     // The number of workgroups in the Z direction; always 1.
     dispatch_z: u32,
     // The precise number of work items.
+#ifdef EARLY_PHASE
     work_item_count: atomic<u32>,
+#else
+    work_item_count: u32,
+#endif
     // Padding.
     //
     // This isn't the usual structure padding; it's needed because some hardware
@@ -114,7 +122,12 @@ struct PushConstants {
     array<PreprocessWorkItem>;
 #endif  // EARLY_PHASE
 
+#ifdef EARLY_PHASE
 @group(0) @binding(12) var<storage, read_write> late_preprocess_work_item_indirect_parameters:
+#else
+// This buffer is also the indirect dispatch source; late phase must only read it.
+@group(0) @binding(12) var<storage, read> late_preprocess_work_item_indirect_parameters:
+#endif
     array<LatePreprocessWorkItemIndirectParameters>;
 
 var<push_constant> push_constants: PushConstants;
@@ -163,8 +176,8 @@ fn main(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     let instance_index = global_invocation_id.x;
 
 #ifdef LATE_PHASE
-    if (instance_index >= atomicLoad(&late_preprocess_work_item_indirect_parameters[
-            push_constants.late_preprocess_work_item_indirect_offset].work_item_count)) {
+    if (instance_index >= late_preprocess_work_item_indirect_parameters[
+            push_constants.late_preprocess_work_item_indirect_offset].work_item_count) {
         return;
     }
 #else   // LATE_PHASE
