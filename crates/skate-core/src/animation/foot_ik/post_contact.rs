@@ -67,7 +67,7 @@ pub(super) fn target(
 
 ///Scalar constructor path through original8252D980. Its argument is already
 ///clamped to [.01,1.5607964]; coefficients come from822FE3C0..E0.
-fn tangent(angle: f32) -> f32 {
+pub(crate) fn tangent(angle: f32) -> f32 {
     let quadrant = (angle * f32::from_bits(0x3F22_F983)).round_ties_even();
     let reduced = (-quadrant).mul_add(f32::from_bits(0x3FC9_0FDB), angle);
     let reduced = (-quadrant).mul_add(f32::from_bits(0x2E85_A309), reduced);

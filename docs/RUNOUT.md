@@ -72,10 +72,19 @@ normalization threshold at830BD350 is initialized by82F826F8 from82181A88
 fallback ordering, twenty-frame teleport suppression, geometry adjustment and
 retained publication flags. None of these components enables a physical state.
 
-Still required: scene segment gathering inside82D81610; native record sorting;
-classifiers82D82940,82D830A8,82D837C8 and82D84060 and their helpers; query-result
-136 identity mapping; production lifecycle owners and job integration;
-BipedAir and board/remount integration. These preparatory modules deliberately
-do not enable BipedGround while its native contact producer remains incomplete.
-The production runout transition still fails and the playable binary has not
-been replaced with an incomplete on-foot implementation.
+The full contact chain is now connected to real world queries: native record
+sorting, edge intersections, normal constraints, reduction, segment candidates,
+slope history and final packet publication. The reduced forward limit reaches
+packet172, which the subsequent ledge query consumes. Tests cover actual floor
+queries at speeds0,1,3 and6, along with step and slope boundaries.
+
+Player Update82DB4048 calls refresh82D81610 before state PreUpdate (call at
+82DB4094). Reset82D30BD0 and Exit82D30CC0 finish pending queries before clearing
+the completion latch and classifier history. This ordering is retained in the
+contact owner. A mesh's stable host identity replaces the original query body's
+guest pointer; current map providers contain static authored geometry.
+
+Still required: production lifecycle owners and job integration; BipedAir,
+board possession and remount integration. These component tests do not enable
+BipedGround or establish end-to-end runout correctness. The production runout
+transition still fails and the playable binary has not been replaced.
