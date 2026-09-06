@@ -51,6 +51,15 @@ fn stock_360_crouch_takeoff_and_air_animation_pipeline() {
         let mut cursor = Some(state);
         while let Some(i) = cursor {
             let state = &graph.binding.states[i];
+            // Selection evaluates sibling preconditions before reaching FromAntic.
+            if let Some(parent) = state.parent {
+                for &sibling in graph.binding.states[parent].children.iter().filter(|_|
+                    matches!(graph.binding.states[parent].name.as_str(), "Takeoff" | "360Flip")) {
+                    if let Some(expression) = graph.binding.states[sibling].expression {
+                        check_expression(&graph.binding, &implementations.operations, expression);
+                    }
+                }
+            }
             if let Some(expression) = state.expression {
                 check_expression(&graph.binding, &implementations.operations, expression);
             }
@@ -89,6 +98,26 @@ fn stock_360_crouch_takeoff_and_air_animation_pipeline() {
         last: None,
         state_times: Vec::new(),
     };
+    // The authored manual-exit behavior arms this timer on End, not Begin.
+    // Exercise its lifecycle with the existing update owner and condition.
+    use crate::graph_host::{motion_riding::RidingOperation, motion_conditions::MotionCondition};
+    let timer = graph.binding.operations.iter().position(|op| op.name == "SetManualOutTimer").unwrap();
+    let MotionOperation::Riding(set_timer) = host.operations[timer].clone() else { panic!("Timer factory"); };
+    let active = MotionCondition::ManualOutTimerIsActive;
+    for phase in [0, 1] {
+        host.riding.execute(set_timer.clone(), phase, &frame, &mut host.animation, None, None, false).unwrap();
+        assert!(!active.evaluate(&host, &frame).unwrap());
+    }
+    host.riding.execute(set_timer, 2, &frame, &mut host.animation, None, None, false).unwrap();
+    assert_eq!(host.riding.manual_out_timer, 0.1);
+    assert!(active.evaluate(&host, &frame).unwrap());
+    host.riding.execute(RidingOperation::ManualOutTimer, 1, &frame, &mut host.animation, None, None, true).unwrap();
+    assert_eq!(host.riding.manual_out_timer, 0.1);
+    for _ in 0..7 {
+        host.riding.execute(RidingOperation::ManualOutTimer, 1, &frame, &mut host.animation, None, None, false).unwrap();
+    }
+    assert_eq!(host.riding.manual_out_timer, 0.0);
+    assert!(!active.evaluate(&host, &frame).unwrap());
     let evaluation = Evaluation {
         cull_threshold: 0.01,
         update_history: true,

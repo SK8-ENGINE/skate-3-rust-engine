@@ -88,3 +88,10 @@ connected catalog. Advanced manual/grind-out branches still contain the
 known unsupported `JumpInto` behavior, and the existing separate
 `AddRunoutAttribs` gap remains. Those handlers were not bypassed. The current
 test does not certify dark catches or the rest of the trick catalog visually.
+
+The subsequent user run reached `ManualOutTimerIsActive` at tick3854.
+This condition now reads the existing retained timer (>0, native82BA78B0
+and8258F978). `SetManualOutTimer` arms it on End (82BB9158/8258F990),
+using the authored length; UpdateManualOutTimer already owns decay/reset.
+The regression fixture covers arming, hold during manuals, expiry, and
+sibling takeoff preconditions evaluated before FromAntic selection.

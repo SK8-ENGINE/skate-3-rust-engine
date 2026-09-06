@@ -9,6 +9,7 @@ use skate_data::state_graph::attributes::Attributes;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MotionCondition {
+    ManualOutTimerIsActive,
     Gesture(crate::input::gesture_catalog::Group),
     Landing(super::motion_landing::Condition),
     Wipeout(super::motion_wipeout::Condition),
@@ -77,6 +78,7 @@ impl MotionCondition {
         }
         let numeric = || super::condition_nodes::numeric(a);
         Ok(Some(match a.text("name").unwrap_or("") {
+            "ManualOutTimerIsActive" => Self::ManualOutTimerIsActive,
             "HasGestureIntent" => Self::Gesture(crate::input::gesture_catalog::Group::parse(
                 a.text("group").unwrap_or(""),
             )?),
@@ -156,6 +158,8 @@ impl MotionCondition {
                     &host.state_parents,
                 )
                 .map_err(str::to_owned)?,
+            //82BA78B0 -> specific getter: strictly positive retained timer.
+            Self::ManualOutTimerIsActive => host.riding.manual_out_timer > 0.0,
             Self::Gameplay(condition) => condition.evaluate(host)?,
             Self::Riding(condition) => condition.evaluate(host)?,
             Self::TimeToLand(n) => n.matches(
