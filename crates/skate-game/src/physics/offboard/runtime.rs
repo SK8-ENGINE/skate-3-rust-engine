@@ -10,6 +10,7 @@ use skate_core::point_graph::PointGraph;
 use skate_data::{animation_metadata::AnimationMetadata, collections::Collections};
 
 pub(crate) struct Runtime {
+    pub trace: super::trace::Trace,
     pub air_state: skate_core::player::offboard::air_state::State,
     pub air_prediction: Option<skate_core::player::offboard::air_prediction::Prediction>,
     pub air_blend_curve: PointGraph<8>,
@@ -148,6 +149,7 @@ impl Runtime {
     pub(crate) fn load(data: &Collections, metadata: &AnimationMetadata) -> Result<Self, String> {
         let settings = super::settings::Settings::load(data, metadata)?;
         Ok(Self {
+            trace: Default::default(),
             air_state: Default::default(),
             air_prediction: None,
             air_blend_curve: settings.air_blend_curve,

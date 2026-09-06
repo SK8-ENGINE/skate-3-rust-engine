@@ -22,6 +22,7 @@ pub enum ActionCondition {
     Tricking,
     InLocomotion,
     DisableDismount,
+    TimeToLand(NumericCondition),
 }
 impl ActionCondition {
     pub fn parse(a: &Attributes<'_>) -> Result<Option<Self>, String> {
@@ -42,11 +43,19 @@ impl ActionCondition {
             "IsTricking" => Self::Tricking,
             "IsInLocomotion" => Self::InLocomotion,
             "DisableDismount" => Self::DisableDismount,
+            "TimeToLand" => Self::TimeToLand(super::condition_nodes::numeric(a)),
             _ => return Ok(None),
         }))
     }
     pub fn evaluate(&self, host: &ActionHost, frame: &Frame) -> Result<bool, String> {
         Ok(match self {
+            // Same native physical leaf used by MotionGraph::TimeToLand.
+            Self::TimeToLand(numeric) => numeric.matches(
+                host.gameplay_conditions
+                    .as_ref()
+                    .ok_or("TimeToLand requires physical condition publication")?
+                    .time_to_land,
+            ),
             Self::Gesture(group) => group.has_intent(&host.action_intents),
             Self::AnimationAttribute {
                 name,
