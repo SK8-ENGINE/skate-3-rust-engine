@@ -148,7 +148,6 @@ pub(super) fn advance(
     //All consumers of the preceding output have completed this frame's input.
     super::player_input::reset_outputs(&mut skater.player_input.physical);
     physics.finish_skater(skater)?;
-    super::offboard::trace::record(physics, skater);
     let simulation = physics.settings.step.simulation;
     skater.player_input.update_dynamic_normal(
         &physics.board,

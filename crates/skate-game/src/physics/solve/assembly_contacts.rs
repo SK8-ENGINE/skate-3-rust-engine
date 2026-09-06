@@ -22,12 +22,19 @@ pub(super) fn append(
     if board_group > 7 || collision.assembly_group > 7 {
         return Err("Skater assembly collision requires its original group-table extension".into());
     }
-    if group_pair_allowed(board_group, collision.assembly_group) {
+    {
         for a in board {
             for b in rider {
                 let CollisionBody::Attached(part) = b.body else {
                     unreachable!()
                 };
+                // The per-part group is independently assigned in Biped mode:
+                // hands5, legs17, torso18 and the two controller capsules20.
+                // Using assembly6 here makes the carried board collide with
+                // its own hand drive and the capsules that feed root correction.
+                if !group_pair_allowed(board_group, collision.parts[part].part_group) {
+                    continue;
+                }
                 //Serialized volume+212 is source Volume+84 group.
                 //Stock board child constructors leave that field zero.
                 if !group_pair_allowed(0, collision.parts[part].volume_group) {
@@ -57,12 +64,15 @@ pub(super) fn append(
 }
 
 fn group_pair_allowed(a: u32, b: u32) -> bool {
-    match (a, b) {
-        (0, 0 | 2..=7) | (2..=7, 0) => true,
-        (4, 5) | (5, 4) => false,
-        (4..=7, 4..=7) => true,
-        _ => false,
-    }
+    // Single-player21x21 bitmap constructed by82765EF0 through the
+    // Island.flags==3 branch. One allowed bit per column, inverted from the
+    // native culling bits. Keep special Biped groups instead of truncating to8.
+    const ALLOWED: [u32; 21] = [
+        0x1876fd, 0, 0x120001, 1, 0x79d1, 0x1079e1, 0x1079f1,
+        0x279f1, 0x1676f0, 0x7101, 0x5101, 0x1008f0, 0x1d77f1,
+        0x233f1, 0xa57f1, 0, 0x1000, 0x6184, 0x1100, 0x5001, 0x1965,
+    ];
+    b < 21 && ALLOWED.get(a as usize).is_some_and(|row| row & (1 << b) != 0)
 }
 
 fn append_pair(contacts: &mut Vec<BoardCollision>, a: &BoardWorldVolume, b: &BoardWorldVolume) {
