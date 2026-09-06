@@ -90,6 +90,7 @@ pub(crate) fn build(
     .add_plugins((
         input::InputPlugin,
         PhysicsPlugin,
+        crate::presentation::PresentationPlugin,
         assets::GameAssetsPlugin,
         animation::AnimationPlugin,
         world::WorldPlugin,

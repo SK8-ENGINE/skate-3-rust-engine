@@ -48,19 +48,17 @@ fn spawn(mut commands: Commands, config: Res<Config>) {
 }
 
 fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
+    history: Res<crate::presentation::Presentation>, time: Res<Time<Fixed>>,
     mut cameras: Query<(&mut Camera, &mut Transform, &mut Projection), With<GameplayCamera>>) {
     if let Ok(window) = windows.single() {
         runtime.set_aspect_ratio(window.width() / window.height());
     }
-    let Some(frame) = runtime.frame else { return; };
+    let Some((previous, current)) = history.pair() else { return; };
+    let alpha = time.overstep_fraction().clamp(0.0, 1.0);
     for (mut camera, mut transform, mut projection) in &mut cameras {
-        let [right, up, at] = frame.basis.columns.map(Vec3::from_array);
-        // World rendering retains nativeXYZ. Native camera At points forward;
-        // Bevy camera looks along local-Z, hence the two-axis basis conversion.
-        transform.rotation = Quat::from_mat3(&Mat3::from_cols(-right, up, -at));
-        transform.translation = Vec3::new(frame.position[0], frame.position[1], frame.position[2]);
+        *transform = crate::presentation::blend(previous.camera, current.camera, alpha);
         if let Projection::Perspective(p) = &mut *projection {
-            p.fov = frame.field_of_view_degrees.to_radians();
+            p.fov = previous.fov + (current.fov - previous.fov) * alpha;
         }
         camera.is_active = true;
     }

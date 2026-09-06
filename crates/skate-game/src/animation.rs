@@ -105,7 +105,8 @@ fn bind(
     }
 }
 fn present(
-    skater: Res<SkaterRuntime>,
+    history: Res<crate::presentation::Presentation>,
+    time: Res<Time<Fixed>>,
     animation: Res<AnimationStatus>,
     mut nodes: Query<&mut Transform>,
 ) {
@@ -116,15 +117,19 @@ fn present(
     // rotated -90 degrees about X relative to the native frames. Both files'
     // world positions are Y-up. This is a skin basis change, not a physics turn.
     let basis = render_basis();
+    let Some((previous, current)) = history.pair() else { return; };
+    let alpha = time.overstep_fraction().clamp(0.0, 1.0);
     for binding in &animation.bindings {
-        let global = native_matrix(skater.render_pose[binding.bone]) * basis;
-        let local = if let Some(parent) = binding.parent_bone {
-            (native_matrix(skater.render_pose[parent]) * basis).inverse() * global
-        } else {
-            global
+        // Blend bone-local rotations, not matrix entries or independent world
+        // positions: joints retain their hierarchy while limbs turn.
+        let local = |snapshot: &crate::presentation::Snapshot| {
+            let global = snapshot.bones[binding.bone] * basis;
+            Transform::from_matrix(if let Some(parent) = binding.parent_bone {
+                (snapshot.bones[parent] * basis).inverse() * global
+            } else { global })
         };
         if let Ok(mut transform) = nodes.get_mut(binding.entity) {
-            *transform = Transform::from_matrix(local);
+            *transform = crate::presentation::blend(local(previous), local(current), alpha);
         }
     }
 }

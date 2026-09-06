@@ -336,15 +336,16 @@ mod difficulty_tests;
 
 fn present(
     physics: Res<GamePhysics>,
-    skater: Res<SkaterRuntime>,
+    history: Res<crate::presentation::Presentation>,
+    time: Res<Time<Fixed>>,
     mut roots: Query<&mut Transform, With<PlayerRoot>>,
 ) {
     if physics.failed {
         return;
     }
+    let Some((previous, current)) = history.pair() else { return; };
     for mut root in &mut roots {
-        *root = Transform::from_matrix(crate::animation::native_matrix(
-            skater.animated_skeleton.roots.animation_to_world,
-        ));
+        *root = crate::presentation::blend(previous.root, current.root,
+            time.overstep_fraction().clamp(0.0, 1.0));
     }
 }
