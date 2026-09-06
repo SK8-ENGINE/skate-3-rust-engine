@@ -286,6 +286,7 @@ fn has_transition(tree: &PlaybackTree) -> bool {
     match tree {
         PlaybackTree::Transition(_) => true,
         PlaybackTree::PhaseBlend(tree) => tree.children.iter().any(has_transition),
+        PlaybackTree::BlendSpace(tree) => tree.children.iter().any(has_transition),
         PlaybackTree::SelectionSpace(tree) => tree.current().is_some_and(has_transition),
         PlaybackTree::BindPose { motion, .. } => has_transition(motion),
         _ => false,
@@ -305,6 +306,10 @@ fn prune(tree: PlaybackTree) -> PlaybackTree {
         PlaybackTree::PhaseBlend(mut tree) => {
             tree.children = tree.children.into_iter().map(prune).collect();
             PlaybackTree::PhaseBlend(tree)
+        }
+        PlaybackTree::BlendSpace(mut tree) => {
+            tree.children = tree.children.into_iter().map(prune).collect();
+            PlaybackTree::BlendSpace(tree)
         }
         PlaybackTree::SelectionSpace(mut tree) => {
             tree.candidates = tree

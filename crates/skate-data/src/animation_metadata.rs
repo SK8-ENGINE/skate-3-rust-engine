@@ -4,6 +4,8 @@
 use serde::Deserialize;
 use std::{collections::BTreeMap, fs, path::Path};
 mod native;
+mod blend_space;
+pub use blend_space::{BlendSpaceMetadata, BlendSimplexMetadata};
 mod selection_space;
 pub use selection_space::{
     SelectionCandidateMetadata, SelectionParameterMetadata, SelectionSpaceMetadata,
@@ -52,6 +54,7 @@ pub struct PhaseBlendMetadata {
 }
 pub enum TreeMetadata<'a> {
     Clip(&'a ClipMetadata),
+    BlendSpace(&'a BlendSpaceMetadata),
     PhaseBlend(&'a PhaseBlendMetadata),
     Selector(&'a SelectorMetadata),
     SelectionSpace(&'a SelectionSpaceMetadata),
@@ -86,6 +89,8 @@ struct File {
     #[serde(default)]
     phase_blends: Vec<PhaseBlendMetadata>,
     #[serde(default)]
+    blend_spaces: Vec<BlendSpaceMetadata>,
+    #[serde(default)]
     selectors: Vec<SelectorMetadata>,
     #[serde(default)]
     selection_spaces: Vec<SelectionSpaceMetadata>,
@@ -98,6 +103,7 @@ pub struct AnimationMetadata {
     pub source_sha256: String,
     clips: BTreeMap<String, Vec<ClipMetadata>>,
     phase_blends: BTreeMap<String, Vec<PhaseBlendMetadata>>,
+    blend_spaces: BTreeMap<String, Vec<BlendSpaceMetadata>>,
     selectors: BTreeMap<String, Vec<SelectorMetadata>>,
     selection_spaces: BTreeMap<String, Vec<SelectionSpaceMetadata>>,
     unsupported: BTreeMap<String, Vec<(u64, u32)>>,
@@ -191,6 +197,11 @@ impl AnimationMetadata {
                 .or_default()
                 .push(tree);
         }
+        let mut blend_spaces: BTreeMap<String, Vec<BlendSpaceMetadata>> = BTreeMap::new();
+        for tree in file.blend_spaces {
+            tree.validate(file.source_bytes)?;
+            blend_spaces.entry(tree.name.clone()).or_default().push(tree);
+        }
         let mut selectors: BTreeMap<String, Vec<SelectorMetadata>> = BTreeMap::new();
         for tree in file.selectors {
             validate_name(&tree.name, 36)?;
@@ -231,7 +242,7 @@ impl AnimationMetadata {
         }
         let origins = clips
             .keys()
-            .chain(phase_blends.keys())
+            .chain(phase_blends.keys()).chain(blend_spaces.keys())
             .chain(selectors.keys())
             .chain(selection_spaces.keys())
             .chain(unsupported.keys())
@@ -247,6 +258,7 @@ impl AnimationMetadata {
             source_sha256: file.source_sha256,
             clips,
             phase_blends,
+            blend_spaces,
             selectors,
             selection_spaces,
             unsupported,
@@ -276,6 +288,7 @@ impl AnimationMetadata {
         self.sources.extend(other.sources);
         self.clips.extend(other.clips);
         self.phase_blends.extend(other.phase_blends);
+        self.blend_spaces.extend(other.blend_spaces);
         self.selectors.extend(other.selectors);
         self.selection_spaces.extend(other.selection_spaces);
         self.unsupported.extend(other.unsupported);
@@ -319,6 +332,7 @@ impl AnimationMetadata {
             .get(&name)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
+        let blend_spaces = self.blend_spaces.get(&name).map(Vec::as_slice).unwrap_or(&[]);
         let selectors = self.selectors.get(&name).map(Vec::as_slice).unwrap_or(&[]);
         let selection_spaces = self
             .selection_spaces
@@ -330,7 +344,7 @@ impl AnimationMetadata {
         let last = clips
             .iter()
             .map(|c| c.source_offset)
-            .chain(phase_blends.iter().map(|t| t.source_offset))
+            .chain(phase_blends.iter().map(|t| t.source_offset)).chain(blend_spaces.iter().map(|t| t.source_offset))
             .chain(selectors.iter().map(|t| t.source_offset))
             .chain(selection_spaces.iter().map(|t| t.source_offset))
             .chain(trees.iter().map(|t| t.0))
@@ -340,6 +354,9 @@ impl AnimationMetadata {
         }
         if let Some(tree) = phase_blends.iter().find(|t| Some(t.source_offset) == last) {
             return Ok(TreeMetadata::PhaseBlend(tree));
+        }
+        if let Some(tree) = blend_spaces.iter().find(|t| Some(t.source_offset) == last) {
+            return Ok(TreeMetadata::BlendSpace(tree));
         }
         if let Some(tree) = selectors.iter().find(|t| Some(t.source_offset) == last) {
             return Ok(TreeMetadata::Selector(tree));

@@ -89,6 +89,18 @@ impl MotionHost {
             //Retail ctor82BA58E8 retains only diagnostic text/layout. All three
             //lifecycle slots in82309664 are82B61BB8 (blr), with no state writes.
             (MotionOperation::PrintText2D, _) => {}
+            (MotionOperation::SetBumpCoefficients(names), _) => {
+                // Begin only: vtable823200C8+48; Update/End are82B61BB8.
+                if phase == 0 {
+                    use skate_core::animation::playback_parameters::{AttributeSink, SettableAttribute};
+                    let acceleration=self.bump_acceleration.ok_or("SetBumpCoefficients requires PhysOutAnimation112")?;
+                    let flags=self.animation.skater_animation_flags.ok_or("SetBumpCoefficients requires live ISkaterAnim stance")?;
+                    let values=skate_core::animation::bump::coefficients(acceleration,flags & 0x4000_0000 != 0,&self.bump_settings);
+                    for (name,value) in names.into_iter().zip(values) {
+                        AttributeSink::set_attribute(&mut self.animation,SettableAttribute {name,value,normalized:false,sequence_id:-1});
+                    }
+                }
+            }
             (MotionOperation::Shove(operation), Instance::Shove(state)) => match phase {
                 0 => state.begin(),
                 1 => state.update(

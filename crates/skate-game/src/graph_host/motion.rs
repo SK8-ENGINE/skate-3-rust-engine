@@ -151,6 +151,8 @@ pub struct MotionHost {
     wipeout_settings: super::motion_wipeout::Settings,
     ///Native PhysOutGround pumping acceleration268.
     pub pumping_acceleration: Option<f32>,
+    pub bump_acceleration: Option<[f32;4]>,
+    bump_settings: skate_core::animation::bump::Settings,
     pub allow_pumping: bool,
     pub riding: super::motion_riding::RidingState,
     pub errors: Vec<String>,
@@ -236,6 +238,13 @@ impl MotionHost {
             wipeout_controls: Default::default(),
             wipeout_settings: super::motion_wipeout::Settings::load(data)?,
             pumping_acceleration: None,
+            bump_acceleration: None,
+            bump_settings: skate_core::animation::bump::Settings {
+                scale_x_acc:data.float("anim_motion","bumps","scale_x_acc")?,
+                min_bump_mag:data.float("anim_motion","bumps","min_bump_mag")?,
+                min_bump_blend_value:data.float("anim_motion","bumps","min_bump_blend_value")?,
+                max_bump_mag:data.float("anim_motion","bumps","max_bump_mag")?,
+            },
             //8258F488 seeds bit24, and reset825953B0 preserves that bit.
             allow_pumping: true,
             riding: super::motion_riding::RidingState::new(),
@@ -359,3 +368,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/motion_slide.rs"]
 mod slide_tests;
+
+#[cfg(test)]
+#[path = "tests/motion_bump.rs"]
+mod bump_tests;

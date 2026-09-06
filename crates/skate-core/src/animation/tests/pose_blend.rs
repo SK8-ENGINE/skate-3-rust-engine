@@ -1,5 +1,18 @@
 use super::*;
 
+#[test]
+fn bump_multi_blend_accumulates_before_normalizing_without_hemisphere_flip() {
+    let a=pose([0.,0.,0.,1.]);
+    let mut b=pose([0.6,0.,0.,-0.8]);
+    b.translation=[4.,8.,12.,0.];
+    let c=pose([0.,0.6,0.,0.8]);
+    let output=weighted(&[vec![a],vec![b],vec![c]],&[0.5,0.25,0.25]).unwrap()[0];
+    assert_eq!(output.translation,[1.,2.,3.,0.]);
+    let raw=[0.15_f32,0.15,0.,0.5];
+    let norm=raw.iter().map(|v| v*v).sum::<f32>().sqrt();
+    for i in 0..4 {assert!((output.rotation[i]-raw[i]/norm).abs()<1e-6);}
+}
+
 fn pose(rotation: [f32; 4]) -> Sqt {
     Sqt {
         scale: [1.0; 4],

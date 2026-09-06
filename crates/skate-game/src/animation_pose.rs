@@ -95,6 +95,12 @@ impl PoseEvaluator {
                     }
                     stack.push(pose);
                 }
+                PoseCommand::WeightedBlend { weights } => {
+                    let start=stack.len().checked_sub(weights.len()).ok_or("Weighted blend pose stack underflow")?;
+                    let pose=skate_core::animation::pose_blend::weighted(&stack[start..],weights)
+                        .map_err(|e| format!("Weighted blend: {e:?}"))?;
+                    stack.truncate(start); stack.push(pose);
+                }
                 PoseCommand::Blend { weight } | PoseCommand::ChannelBlend { weight, .. } => {
                     let second = stack.pop().ok_or("Animation blend has no second subtree")?;
                     let first = stack

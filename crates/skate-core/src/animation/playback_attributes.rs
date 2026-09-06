@@ -47,6 +47,37 @@ pub fn blend(left: &mut AnimationAttribute, right: &AnimationAttribute, weight: 
     Ok(())
 }
 
+///82D16370. Keep reference names and event flags; scale only numeric payload.
+pub fn scale(attribute: &mut AnimationAttribute, weight: f32) -> Result<(), String> {
+    if attribute.status & 2 != 0 {
+        attribute.begin_time = -1.; attribute.end_time = -1.;
+    } else {
+        attribute.begin_time *= weight; attribute.end_time *= weight;
+    }
+    for &i in numeric_lanes(attribute.kind) {
+        let value = f32::from_bits(attribute.payload.0[i].ok_or("Uninitialized weighted attribute")?);
+        attribute.payload.0[i] = Some((value*weight).to_bits());
+    }
+    Ok(())
+}
+///82D16428. Time adds are separate instructions; numeric payload uses FMA.
+pub fn add_weighted(left: &mut AnimationAttribute, right: &AnimationAttribute, weight: f32) -> Result<(), String> {
+    if left.status & 2 == 0 {
+        left.begin_time += right.begin_time*weight;
+        left.end_time += right.end_time*weight;
+    }
+    for &i in numeric_lanes(left.kind) {
+        let a = f32::from_bits(left.payload.0[i].ok_or("Uninitialized weighted attribute")?);
+        let b = f32::from_bits(right.payload.0[i].ok_or("Uninitialized weighted attribute")?);
+        let value = b.mul_add(weight,a);
+        left.payload.0[i] = Some(value.to_bits());
+    }
+    Ok(())
+}
+fn numeric_lanes(kind:u8) -> &'static [usize] {
+    match kind {0|2 => &[0],1 => &[0,1,2,3],3 => &[5],_ => &[]}
+}
+
 /// Native uses a forward-only intersection, retaining left order/metadata.
 /// It does not append right-only attributes or replace the left reference name.
 pub fn intersection(left: Vec<AnimationAttribute>, right: &[AnimationAttribute], weight: f32) -> Result<Vec<AnimationAttribute>, String> {

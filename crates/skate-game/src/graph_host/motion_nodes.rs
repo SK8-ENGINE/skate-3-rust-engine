@@ -25,6 +25,7 @@ pub enum MotionOperation {
     Push(PushOperation),
     /// Angle, direction, quickness, speed, holding, in native emission order.
     SetTurning([AttributeName; 5]),
+    SetBumpCoefficients([AttributeName; 2]),
     ApplyingBodyTilt,
     SettingBodyTilt(AttributeName),
     Crouching(AttributeName),
@@ -93,6 +94,7 @@ impl OperationFactory for MotionFactory {
                 Some(MotionOperation::Shove(operation))
             } else {
                 match name {
+                    "SetBumpCoefficients" => Some(MotionOperation::SetBumpCoefficients([key(a,"X",""),key(a,"Y","")])),
                     "ResetSkaterAnimation" | "ResetToGivenStance" => Some(MotionOperation::ResetAnimation(
                         super::motion_reset::Operation::parse(a).ok_or("Invalid reset operation")?,
                     )),

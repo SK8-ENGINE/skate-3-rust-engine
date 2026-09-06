@@ -21,6 +21,7 @@ impl AnimationMetadata {
             source_bytes: bank.bytes().len() as u64,
             clips: Vec::new(),
             phase_blends: Vec::new(),
+            blend_spaces: Vec::new(),
             selectors: Vec::new(),
             selection_spaces: Vec::new(),
             unsupported_trees: Vec::new(),
@@ -35,6 +36,7 @@ impl AnimationMetadata {
                     .push(read_clip(r, h, clip).map_err(|e| e.to_string())?),
                 RecordData::Pose(_) | RecordData::Hierarchy(_) | RecordData::PhysicsPose(_) => {}
                 RecordData::Opaque => match h.type_id {
+                    6 => file.blend_spaces.push(super::blend_space::read(r, h).map_err(|e| e.to_string())?),
                     7 => file
                         .phase_blends
                         .push(read_phase_blend(r, h).map_err(|e| e.to_string())?),

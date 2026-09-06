@@ -1,5 +1,6 @@
 //! Owned animation tree evaluation; stock data constructs this topology.
 pub mod selection_space;
+pub mod blend_space;
 use super::{
     clip_clock::AdvanceResult,
     output::attributes::{AnimationAttribute, AttributeName},
@@ -15,6 +16,7 @@ pub enum PlaybackTree {
         clip: PlaybackClip,
     },
     PhaseBlend(PhaseBlend),
+    BlendSpace(blend_space::BlendSpace),
     SelectionSpace(selection_space::SelectionSpace),
     Transition(super::playback_transition::PlaybackTransition),
     ///SkaterAnim::AddBindPose82B98118, latched when a named tree is created.
@@ -39,6 +41,7 @@ pub enum PoseCommand {
     Blend {
         weight: f32,
     },
+    WeightedBlend { weights: Vec<f32> },
     ChannelBlend {
         weight: f32,
         use_channels_from_weights: bool,
@@ -63,6 +66,7 @@ impl PlaybackTree {
         match self {
             Self::Clip { clip, .. } => clip.clock.length,
             Self::PhaseBlend(tree) => tree.length,
+            Self::BlendSpace(tree) => tree.length(),
             Self::SelectionSpace(tree) => tree.current().map_or(0.0, Self::length),
             Self::Transition(tree) => tree.to.length(),
             Self::BindPose { motion, .. } => motion.length(),
@@ -72,6 +76,7 @@ impl PlaybackTree {
         match self {
             Self::Clip { clip, .. } => clip.clock.sample_time(),
             Self::PhaseBlend(tree) => tree.time,
+            Self::BlendSpace(tree) => tree.time,
             Self::SelectionSpace(tree) => tree.current().map_or(0.0, Self::time),
             Self::Transition(tree) => tree.to.time(),
             Self::BindPose { motion, .. } => motion.time(),
@@ -81,6 +86,7 @@ impl PlaybackTree {
         match self {
             Self::Clip { clip, .. } => clip.clock.set_time(time),
             Self::PhaseBlend(tree) => tree.set_time(time),
+            Self::BlendSpace(tree) => tree.set_time(time),
             Self::SelectionSpace(tree) => tree.set_time(time),
             Self::Transition(tree) => tree.to.set_time(time),
             Self::BindPose { motion, .. } => motion.set_time(time),
@@ -90,6 +96,7 @@ impl PlaybackTree {
         match self {
             Self::Clip { clip, .. } => clip.clock.set_speed(speed),
             Self::PhaseBlend(tree) => tree.set_speed(speed),
+            Self::BlendSpace(tree) => tree.set_speed(speed),
             Self::SelectionSpace(tree) => tree.set_speed(speed),
             Self::Transition(tree) => tree.to.set_speed(speed),
             Self::BindPose { motion, .. } => motion.set_speed(speed),
@@ -99,6 +106,7 @@ impl PlaybackTree {
         match self {
             Self::Clip { clip, .. } => clip.clock.advance(dt, phase, property),
             Self::PhaseBlend(tree) => tree.advance(dt, phase, property),
+            Self::BlendSpace(tree) => tree.advance(dt, phase, property),
             Self::SelectionSpace(tree) => {
                 if let Some(child) = tree.current_mut() {
                     child.advance(dt, phase, property);
@@ -112,6 +120,7 @@ impl PlaybackTree {
         match self {
             Self::Clip { .. } => Ok(false),
             Self::PhaseBlend(tree) => tree.set_attributes(attributes),
+            Self::BlendSpace(tree) => tree.set_attributes(attributes),
             Self::SelectionSpace(tree) => tree.set_attributes(attributes),
             Self::Transition(tree) => tree.set_attributes(attributes),
             Self::BindPose { motion, .. } => motion.set_attributes(attributes),
@@ -121,6 +130,7 @@ impl PlaybackTree {
         match self {
             Self::Clip { clip, .. } => clip.attributes(mask),
             Self::PhaseBlend(tree) => tree.attributes(mask),
+            Self::BlendSpace(tree) => tree.attributes(mask),
             Self::SelectionSpace(tree) => tree
                 .current()
                 .ok_or("SelectionSpace attributes requested before native selection")?
@@ -161,6 +171,7 @@ impl PlaybackTree {
     ) -> Result<bool, String> {
         match self {
             Self::PhaseBlend(tree) => tree.query_attribute(name, mask, output),
+            Self::BlendSpace(tree) => tree.query_attribute(name, mask, output),
             Self::SelectionSpace(tree) => tree
                 .current()
                 .ok_or("SelectionSpace attribute requested before native selection")?
@@ -198,6 +209,7 @@ impl PlaybackTree {
     ) -> Result<bool, String> {
         match self {
             Self::PhaseBlend(tree) => tree.evaluate(parameters, enabled, output),
+            Self::BlendSpace(tree) => tree.evaluate(parameters, enabled, output),
             Self::SelectionSpace(tree) => {
                 if !enabled {
                     Ok(false)

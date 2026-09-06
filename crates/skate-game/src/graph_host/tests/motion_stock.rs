@@ -45,6 +45,7 @@ fn stock_motion_host_loads_graph_settings_and_authored_riding_tree() {
                 .iter()
                 .map(count)
                 .fold((0, 1), |(ac, ap), (bc, bp)| (ac + bc, ap + bp)),
+            PlaybackTree::BlendSpace(tree) => tree.children.iter().map(count).fold((0,0), |(ac,ap),(bc,bp)| (ac+bc,ap+bp)),
             PlaybackTree::Transition(_) => {
                 panic!("Authored bank unexpectedly contains a runtime transition")
             }

@@ -33,6 +33,19 @@ pub(super) fn build(
                     .collect(),
             ),
         },
+        TreeMetadata::BlendSpace(source) => {
+            use skate_core::animation::playback_tree::blend_space::{BlendSpace, Simplex};
+            PlaybackTree::BlendSpace(BlendSpace::new(
+                source.parameters.iter().map(|p| encode(p.as_bytes())).collect(),
+                source.children.iter().map(|child| build(metadata, child, construction, parents)).collect::<Result<_,_>>()?,
+                source.simplexes.iter().map(|s| Simplex {
+                    children:s.children.clone(),
+                    vertices:s.vertex_bits.iter().map(|v| v.iter().map(|&v| f32::from_bits(v)).collect()).collect(),
+                    normals:s.normal_bits.iter().map(|v| v.iter().map(|&v| f32::from_bits(v)).collect()).collect(),
+                    scales:s.scale_bits.iter().map(|&v| f32::from_bits(v)).collect(),
+                }).collect(),
+            )?)
+        }
         TreeMetadata::PhaseBlend(source) => PlaybackTree::PhaseBlend(PhaseBlend::new(
             encode(source.parameter.as_bytes()),
             source

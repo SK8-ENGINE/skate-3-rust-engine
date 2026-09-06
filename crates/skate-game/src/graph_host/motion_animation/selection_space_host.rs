@@ -28,6 +28,10 @@ impl MotionAnimation {
                 }
                 self.prepare_selection_spaces(space.current_mut().unwrap(), attributes)?;
             }
+            PlaybackTree::BlendSpace(space) => {
+                // Type6 SetAttributes82D24078 consumes its own parameters only.
+                let _ = space;
+            }
             PlaybackTree::PhaseBlend(space) => {
                 for child in &mut space.children {
                     self.prepare_selection_spaces(child, attributes)?;

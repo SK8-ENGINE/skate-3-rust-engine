@@ -32,6 +32,7 @@ pub(crate) fn advance(
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
     let (fakie, mirrored) = skater.animation.stance();
     let feedback = skater.physical_feedback;
+    skater.animation.motion.bump_acceleration = Some(feedback.ground_acceleration);
     skater.animation.motion.wipeout_physical = Some(crate::graph_host::motion_wipeout::Physical {
         over_599: physical.skeleton.over_599 != 0,
         collision_time_144: physical.animation.collision_time_144,

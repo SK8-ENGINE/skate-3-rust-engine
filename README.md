@@ -25,6 +25,11 @@ project do not establish those claims.
 
 ## Observed runtime issue
 
+The later bump crash (tick 4159, behaviors 3623/3624) is repaired: the host now
+supports the stock `B_BUMP` blend space and `SetBumpCoefficients`. See
+[the fix and verification notes](docs/BUMP-CRASH-FIX.md). Visual confirmation
+remains with the user; the separate runout issue below is still open.
+
 The build launches and reports `GAME_CHARACTER_READY bones=35`. All 35 skin
 bones match the supplied stock rig; the decoded frame data contains 487 clips.
 However, the imported motion-graph host exits when it encounters
