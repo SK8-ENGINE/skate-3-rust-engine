@@ -4381,6 +4381,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "half",
+ "serde",
  "serde_json",
  "skate-core",
  "skate-data",

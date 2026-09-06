@@ -97,3 +97,48 @@ baseline. Exploration can still encounter heavier views and loading/shader spike
 Validation: GPU cache regression test passed, game suite passed (43 passed,
 21 existing ignored), and the staged executable completed a normal city startup
 capture with benchmark settings disabled.
+
+## City-facing dips at 1440p / 8x MSAA
+
+The next pass uses the user's saved 2560 x 1440, 100% internal resolution,
+8x MSAA, unlimited FPS settings and the same rotating-camera benchmark.
+Do not compare these results directly with the earlier stationary 1280 x 800 run.
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Average FPS | 84.9 | 119.1 |
+| Frame interval p95 | 28.9 ms | 23.5 ms |
+| Render preparation per frame | 5.42 ms | 1.49 ms |
+
+Reports: `logs/city-baseline.json` and `logs/city-double.json`. Temporary direct
+instrumentation measured roughly 3–4 ms in mesh binding preparation before the
+final fix and about 0.05 ms after warmup. GPU telemetry during the optimized run
+sampled roughly 24–39% usage. Heavy views and frame spikes remain.
+The final clean build, with temporary tracing and GPU telemetry polling removed,
+averaged 145.0 FPS with an 18.9 ms p95 frame interval (`logs/city-final.json`).
+The 119–145 FPS range illustrates run/instrumentation variation; it is not a
+guaranteed minimum while exploring the whole map.
+
+Bevy's `collect_buffers_for_phase` exchanges two buffer allocations every frame.
+A single-table cache therefore misses every frame even with static resource
+contents. The patch now retains both phase tables, checks resource identities
+and lightmap revisions, and shares unchanged tables without visiting every slab.
+The preceding one-table trial did not materially improve the sweep and is not
+the implementation shipped here.
+
+The game also reserves geometrically growing instance-buffer capacity before
+Bevy writes it, bounded by device limits. This reduces reallocations when visible
+counts increase; it does not change logical counts or dispatch extra instances.
+Mesh morph-target lookup is refreshed on GPU asset changes, and identical PBR
+materials can share handles while each mesh retains its own baked lightmap.
+
+No triangles, collision detail, lighting, or draw distance were removed. LODs
+remain a possible next step for distant geometry, particularly hierarchical LODs
+that also reduce the number of draws. They do not address the buffer-cache miss
+fixed here. GPU occlusion culling is also relevant to a dense city, but the current
+engine's version is experimental: [Bevy's migration notes](https://bevy.org/learn/migration-guides/0-18-to-0-19/#occlusion-culling-is-no-longer-experimental)
+describe correctness fixes in 0.19. It was not enabled as an unverified workaround.
+
+Validation: the explicit GPU regression test and game suite (46 passed,
+21 existing ignored) passed. The staged build completed the normal San Vanelona
+startup capture at the user's saved settings, with benchmark overrides disabled.

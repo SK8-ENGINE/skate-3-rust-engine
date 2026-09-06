@@ -11,6 +11,8 @@ mod physics;
 mod skater_animation;
 mod verification;
 mod performance;
+mod graphics_menu;
+mod render_capacity;
 mod world;
 mod skate_world;
 

@@ -145,6 +145,8 @@ pub(crate) struct RenderLightmap {
 /// system.
 #[derive(Resource)]
 pub struct RenderLightmaps {
+    /// Changes whenever slab bindings are added, removed, or replaced.
+    pub(crate) binding_revision: u64,
     /// The mapping from every lightmapped entity to its lightmap info.
     ///
     /// Entities without lightmaps, or for which the mesh or lightmap isn't
@@ -301,6 +303,7 @@ fn extract_lightmaps(
                 return true;
             };
             render_lightmaps.slabs[usize::from(slab_index)].insert(slot_index, gpu_image.clone());
+            render_lightmaps.binding_revision = render_lightmaps.binding_revision.wrapping_add(1);
             false
         });
 }
@@ -357,6 +360,7 @@ pub fn init_render_lightmaps(
     let bindless_supported = binding_arrays_are_usable(&render_device, &render_adapter);
 
     commands.insert_resource(RenderLightmaps {
+        binding_revision: 0,
         render_lightmaps: default(),
         slabs: vec![],
         free_slabs: FixedBitSet::new(),
@@ -369,6 +373,7 @@ impl RenderLightmaps {
     /// Creates a new slab, appends it to the end of the list, and returns its
     /// slab index.
     fn create_slab(&mut self, fallback_images: &FallbackImage) -> LightmapSlabIndex {
+        self.binding_revision = self.binding_revision.wrapping_add(1);
         let slab_index = LightmapSlabIndex::from(self.slabs.len());
         self.free_slabs.grow_and_insert(slab_index.into());
         self.slabs
@@ -401,6 +406,7 @@ impl RenderLightmaps {
         slab_index: LightmapSlabIndex,
         slot_index: LightmapSlotIndex,
     ) {
+        self.binding_revision = self.binding_revision.wrapping_add(1);
         let slab = &mut self.slabs[usize::from(slab_index)];
         slab.remove(fallback_images, slot_index);
 

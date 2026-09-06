@@ -2,16 +2,16 @@ use crate::{
     material_bind_groups::{MaterialBindGroupIndex, MaterialBindGroupSlot},
     resources::write_atmosphere_buffer,
 };
-use bevy_asset::{embedded_asset, load_embedded_asset, AssetId};
+use bevy_asset::{AssetId, embedded_asset, load_embedded_asset};
 use bevy_camera::{
+    Camera, Camera3d, Projection,
     primitives::Aabb,
     visibility::{NoFrustumCulling, RenderLayers, ViewVisibility, VisibilityRange},
-    Camera, Camera3d, Projection,
 };
 use bevy_core_pipeline::{
-    core_3d::{AlphaMask3d, Opaque3d, Transmissive3d, Transparent3d, CORE_3D_DEPTH_FORMAT},
+    core_3d::{AlphaMask3d, CORE_3D_DEPTH_FORMAT, Opaque3d, Transmissive3d, Transparent3d},
     deferred::{AlphaMask3dDeferred, Opaque3dDeferred},
-    oit::{prepare_oit_buffers, OrderIndependentTransparencySettingsOffset},
+    oit::{OrderIndependentTransparencySettingsOffset, prepare_oit_buffers},
     prepass::MotionVectorPrepass,
 };
 use bevy_derive::{Deref, DerefMut};
@@ -21,7 +21,7 @@ use bevy_ecs::{
     prelude::*,
     query::{QueryData, ROQueryItem},
     relationship::RelationshipSourceCollection,
-    system::{lifetimeless::*, SystemParamItem, SystemState},
+    system::{SystemParamItem, SystemState, lifetimeless::*},
 };
 use bevy_image::{BevyDefault, ImageSampler, TextureFormatPixelInfo};
 use bevy_light::{
@@ -30,20 +30,22 @@ use bevy_light::{
 };
 use bevy_math::{Affine3, Rect, UVec2, Vec3, Vec4};
 use bevy_mesh::{
-    skinning::SkinnedMesh, BaseMeshPipelineKey, Mesh, Mesh3d, MeshTag, MeshVertexBufferLayoutRef,
-    VertexAttributeDescriptor,
+    BaseMeshPipelineKey, Mesh, Mesh3d, MeshTag, MeshVertexBufferLayoutRef,
+    VertexAttributeDescriptor, skinning::SkinnedMesh,
 };
-use bevy_platform::collections::{hash_map::Entry, HashMap};
+use bevy_platform::collections::{HashMap, hash_map::Entry};
 use bevy_render::{
+    Extract,
     batching::{
+        GetBatchData, GetFullBatchData, NoAutomaticBatching,
         gpu_preprocessing::{
             self, GpuPreprocessingSupport, IndirectBatchSet, IndirectParametersBuffers,
             IndirectParametersCpuMetadata, IndirectParametersIndexed, IndirectParametersNonIndexed,
             InstanceInputUniformBuffer, UntypedPhaseIndirectParametersBuffers,
         },
-        no_gpu_preprocessing, GetBatchData, GetFullBatchData, NoAutomaticBatching,
+        no_gpu_preprocessing,
     },
-    mesh::{allocator::MeshAllocator, RenderMesh, RenderMeshBufferInfo},
+    mesh::{RenderMesh, RenderMeshBufferInfo, allocator::MeshAllocator},
     render_asset::RenderAssets,
     render_phase::{
         BinnedRenderPhasePlugin, InputUniformIndex, PhaseItem, PhaseItemExtraIndex, RenderCommand,
@@ -57,11 +59,10 @@ use bevy_render::{
         self, NoIndirectDrawing, RenderVisibilityRanges, RetainedViewEntity, ViewTarget,
         ViewUniformOffset,
     },
-    Extract,
 };
-use bevy_shader::{load_shader_library, Shader, ShaderDefVal, ShaderSettings};
+use bevy_shader::{Shader, ShaderDefVal, ShaderSettings, load_shader_library};
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::{default, Parallel, TypeIdMap};
+use bevy_utils::{Parallel, TypeIdMap, default};
 use core::any::TypeId;
 use core::mem::size_of;
 use material_bind_groups::MaterialBindingId;
@@ -71,8 +72,8 @@ use self::irradiance_volume::IRRADIANCE_VOLUMES_ARE_USABLE;
 use crate::{
     render::{
         morph::{
-            extract_morphs, no_automatic_morph_batching, prepare_morphs, MorphIndices,
-            MorphUniforms,
+            MorphIndices, MorphUniforms, extract_morphs, no_automatic_morph_batching,
+            prepare_morphs,
         },
         skin::no_automatic_skin_batching,
     },
@@ -83,15 +84,15 @@ use bevy_core_pipeline::prepass::{DeferredPrepass, DepthPrepass, NormalPrepass};
 use bevy_core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy_ecs::change_detection::Tick;
 use bevy_ecs::system::SystemChangeTick;
+use bevy_render::RenderSystems::PrepareAssets;
 use bevy_render::camera::TemporalJitter;
 use bevy_render::prelude::Msaa;
 use bevy_render::sync_world::{MainEntity, MainEntityHashMap};
 use bevy_render::view::ExtractedView;
-use bevy_render::RenderSystems::PrepareAssets;
 
 use bytemuck::{Pod, Zeroable};
 use nonmax::{NonMaxU16, NonMaxU32};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use static_assertions::const_assert_eq;
 
 /// Provides support for rendering 3D meshes.
@@ -2749,7 +2750,97 @@ pub struct MeshPhaseBindGroups {
     model_only: Option<BindGroup>,
     skinned: Option<MeshBindGroupPair>,
     morph_targets: HashMap<AssetId<Mesh>, MeshBindGroupPair>,
-    lightmaps: HashMap<LightmapSlabIndex, BindGroup>,
+    lightmaps: std::sync::Arc<HashMap<LightmapSlabIndex, BindGroup>>,
+}
+
+/// Cached lightmap lookup table for one rendering phase.
+#[derive(Default)]
+pub struct PhaseLightmapCache {
+    key: Option<LightmapTableKey>,
+    groups: std::sync::Arc<HashMap<LightmapSlabIndex, BindGroup>>,
+    previous: Option<Box<PhaseLightmapCache>>,
+}
+
+/// Meshes that actually need morph bindings, refreshed when GPU assets change.
+#[derive(Default)]
+pub struct MorphMeshCache(Vec<AssetId<Mesh>>);
+impl MorphMeshCache {
+    pub(crate) fn refresh(&mut self, meshes: &RenderAssets<RenderMesh>) -> &[AssetId<Mesh>] {
+        self.0 = meshes
+            .iter()
+            .filter_map(|(id, mesh)| mesh.morph_targets.as_ref().map(|_| id))
+            .collect();
+        &self.0
+    }
+}
+struct LightmapTableKey {
+    buffer: Buffer,
+    offset: u64,
+    size: Option<BufferSize>,
+    layout: BindGroupLayoutId,
+    revision: u64,
+}
+impl PhaseLightmapCache {
+    pub(crate) fn select(
+        &mut self,
+        model: &BindingResource,
+        layout: BindGroupLayoutId,
+        revision: u64,
+    ) -> bool {
+        if self.matches(model, layout, revision) {
+            return true;
+        }
+        if self
+            .previous
+            .as_ref()
+            .is_some_and(|previous| previous.matches(model, layout, revision))
+        {
+            let mut previous = self.previous.take().unwrap();
+            core::mem::swap(self, &mut previous);
+            self.previous = Some(previous);
+            return true;
+        }
+        false
+    }
+    pub(crate) fn matches(
+        &self,
+        model: &BindingResource,
+        layout: BindGroupLayoutId,
+        revision: u64,
+    ) -> bool {
+        let (Some(key), BindingResource::Buffer(model)) = (&self.key, model) else {
+            return false;
+        };
+        &*key.buffer == model.buffer
+            && key.offset == model.offset
+            && key.size == model.size
+            && key.layout == layout
+            && key.revision == revision
+    }
+    pub(crate) fn remember(
+        &mut self,
+        model: &BindingResource,
+        layout: BindGroupLayoutId,
+        revision: u64,
+    ) {
+        if self.key.is_some() {
+            self.previous = Some(Box::new(PhaseLightmapCache {
+                key: self.key.take(),
+                groups: core::mem::take(&mut self.groups),
+                previous: None,
+            }));
+        }
+        self.key = match model {
+            BindingResource::Buffer(model) => Some(LightmapTableKey {
+                buffer: Buffer::from(model.buffer.clone()),
+                offset: model.offset,
+                size: model.size,
+                layout,
+                revision,
+            }),
+            _ => None,
+        };
+    }
 }
 
 pub struct MeshBindGroupPair {
@@ -2773,7 +2864,7 @@ impl MeshPhaseBindGroups {
         self.model_only = None;
         self.skinned = None;
         self.morph_targets.clear();
-        self.lightmaps.clear();
+        self.lightmaps = default();
     }
     /// Get the `BindGroup` for `RenderMesh` with given `handle_id` and lightmap
     /// key `lightmap`.
@@ -2826,7 +2917,12 @@ pub fn prepare_mesh_bind_groups(
     skins_uniform: Res<SkinUniforms>,
     weights_uniform: Res<MorphUniforms>,
     mut render_lightmaps: ResMut<RenderLightmaps>,
+    mut lightmap_tables: Local<TypeIdMap<PhaseLightmapCache>>,
+    mut morph_meshes: Local<MorphMeshCache>,
 ) {
+    if meshes.is_changed() {
+        morph_meshes.refresh(&meshes);
+    }
     // CPU mesh preprocessing path.
     if let Some(cpu_batched_instance_buffer) = cpu_batched_instance_buffer
         && let Some(instance_data_binding) = cpu_batched_instance_buffer
@@ -2843,6 +2939,8 @@ pub fn prepare_mesh_bind_groups(
             &skins_uniform,
             &weights_uniform,
             &mut render_lightmaps,
+            lightmap_tables.entry(TypeId::of::<()>()).or_default(),
+            &morph_meshes.0,
         );
 
         commands.insert_resource(MeshBindGroups::CpuPreprocessing(
@@ -2874,11 +2972,18 @@ pub fn prepare_mesh_bind_groups(
                 &skins_uniform,
                 &weights_uniform,
                 &mut render_lightmaps,
+                lightmap_tables.entry(*phase_type_id).or_default(),
+                &morph_meshes.0,
             );
 
             gpu_preprocessing_mesh_bind_groups.insert(*phase_type_id, mesh_phase_bind_groups);
         }
 
+        lightmap_tables.retain(|phase, _| {
+            gpu_batched_instance_buffers
+                .phase_instance_buffers
+                .contains_key(phase)
+        });
         commands.insert_resource(MeshBindGroups::GpuPreprocessing(
             gpu_preprocessing_mesh_bind_groups,
         ));
@@ -2895,6 +3000,8 @@ fn prepare_mesh_bind_groups_for_phase(
     skins_uniform: &SkinUniforms,
     weights_uniform: &MorphUniforms,
     render_lightmaps: &mut RenderLightmaps,
+    lightmap_table: &mut PhaseLightmapCache,
+    morph_meshes: &[AssetId<Mesh>],
 ) -> MeshPhaseBindGroups {
     let layouts = &mesh_pipeline.mesh_layouts;
 
@@ -2922,7 +3029,10 @@ fn prepare_mesh_bind_groups_for_phase(
     // group.
     if let Some(weights) = weights_uniform.current_buffer.buffer() {
         let prev_weights = weights_uniform.prev_buffer.buffer().unwrap_or(weights);
-        for (id, gpu_mesh) in meshes.iter() {
+        for (id, gpu_mesh) in morph_meshes
+            .iter()
+            .filter_map(|&id| meshes.get(id).map(|mesh| (id, mesh)))
+        {
             if let Some(targets) = gpu_mesh.morph_targets.as_ref() {
                 let bind_group_pair = if is_skinned(&gpu_mesh.layout) {
                     let prev_skin = &skins_uniform.prev_buffer;
@@ -2972,18 +3082,27 @@ fn prepare_mesh_bind_groups_for_phase(
 
     // Create lightmap bindgroups. There will be one bindgroup for each slab.
     let bindless_supported = render_lightmaps.bindless_supported;
-    for (lightmap_slab_id, lightmap_slab) in render_lightmaps.slabs.iter_mut().enumerate() {
-        groups.lightmaps.insert(
-            LightmapSlabIndex(NonMaxU32::new(lightmap_slab_id as u32).unwrap()),
-            layouts.lightmapped(
-                render_device,
-                pipeline_cache,
-                &model,
-                lightmap_slab,
-                bindless_supported,
-            ),
-        );
+    let layout = pipeline_cache
+        .get_bind_group_layout(&layouts.lightmapped)
+        .id();
+    if !lightmap_table.select(&model, layout, render_lightmaps.binding_revision) {
+        let mut bindings = HashMap::default();
+        for (lightmap_slab_id, lightmap_slab) in render_lightmaps.slabs.iter_mut().enumerate() {
+            bindings.insert(
+                LightmapSlabIndex(NonMaxU32::new(lightmap_slab_id as u32).unwrap()),
+                layouts.lightmapped(
+                    render_device,
+                    pipeline_cache,
+                    &model,
+                    lightmap_slab,
+                    bindless_supported,
+                ),
+            );
+        }
+        lightmap_table.remember(&model, layout, render_lightmaps.binding_revision);
+        lightmap_table.groups = std::sync::Arc::new(bindings);
     }
+    groups.lightmaps = lightmap_table.groups.clone();
 
     groups
 }

@@ -6,7 +6,7 @@ try {
     if (-not (Test-Path -LiteralPath $executable)) { throw 'Game is not built. Run BUILD.bat first.' }
     New-Item -ItemType Directory -Path (Join-Path $PSScriptRoot 'logs') -Force | Out-Null
     $log = Join-Path $PSScriptRoot ('logs/game-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
-    Write-Host 'Starting imported skater project (Easy). Use your XInput controller; Esc exits.'
+    Write-Host 'Starting imported skater project (Easy). Use your XInput controller; Esc opens graphics/pause menu.'
     Write-Host "Log: $log"
     $errorLog = [System.IO.Path]::ChangeExtension($log, 'stderr.log')
     $assetArgument = '"' + (Join-Path $PSScriptRoot 'assets') + '"'

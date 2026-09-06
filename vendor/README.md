@@ -19,6 +19,15 @@ Local changes are restricted to:
 - `src/render/mesh_bindings.rs`: reuse or create the binding through that cache.
   The lightmap slab parameter is now mutable.
 - `src/lightmap/cache_tests.rs`: explicit GPU regression test.
+- `src/render/mesh.rs`: retain complete lookup tables for both alternating
+  instance buffers per phase. Keys include buffer identity, offset, size, layout,
+  and the lightmap binding revision. A slab creation, texture upload, or removal
+  changes that revision. Tables are shared by `Arc`, so a cache hit avoids
+  rebuilding and cloning thousands of individual entries. Keep only two tables
+  per phase, and discard caches for phases that disappear.
+- `src/render/mesh.rs`: cache the IDs of meshes with morph targets when
+  `RenderAssets<RenderMesh>` changes. Each phase still rebuilds its dynamic morph
+  bindings from the current GPU resources, but skips scanning static city meshes.
 
 Writing new instance data into an existing buffer does not require rebuilding a
 bind group. Changing the buffer, bound range, layout, or texture does. The patch
@@ -33,7 +42,8 @@ cargo test -p bevy_pbr --lib cache_tracks_binding_identity_and_texture_replaceme
 
 It covers cloned versus replaced buffers, changed binding ranges/layouts, writes
 to an existing buffer, texture insertion/removal, bounded eviction, and actual
-bind-group construction/reuse. Regular game tests and a city screenshot/benchmark
+bind-group construction/reuse, alternating-buffer table reuse, table revisions,
+and morph-target additions/replacements/removals. Regular game tests and a city screenshot/benchmark
 also exercise the patched renderer.
 
 Upstream references reviewed September 6, 2026:

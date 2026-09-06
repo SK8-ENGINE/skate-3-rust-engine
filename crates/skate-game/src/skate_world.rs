@@ -366,6 +366,14 @@ fn render_material_ids(
     materials: &[skate_data::skate_map::Material],
     texture_ids: &[u32],
 ) -> Vec<usize> {
+    material_ids(materials, texture_ids, true)
+}
+
+fn material_ids(
+    materials: &[skate_data::skate_map::Material],
+    texture_ids: &[u32],
+    include_lightmap: bool,
+) -> Vec<usize> {
     let mut unique = HashMap::new();
     materials
         .iter()
@@ -376,7 +384,7 @@ fn render_material_ids(
             let textures = m.textures.map(|id| texture_ids[id as usize]);
             let key = [
                 textures[0],
-                textures[1],
+                if include_lightmap { textures[1] } else { 0 },
                 textures[2],
                 textures[3],
                 textures[4],
@@ -477,6 +485,9 @@ pub(crate) fn spawn(
         )
     };
     let material_ids = render_material_ids(&map.materials, &texture_ids);
+    // Lightmaps belong to mesh entities, not StandardMaterial. Distinct baked
+    // lighting still needs separate geometry batches but can share a PBR material.
+    let pbr_ids = self::material_ids(&map.materials, &texture_ids, false);
     let groups = render_groups(&map.geometry, &material_ids);
     eprintln!(
         "SKATE_RENDER_BATCHES count={} triangles={}",
@@ -540,7 +551,7 @@ pub(crate) fn spawn(
                 warn!("SKATE material {} tangent generation: {error}", m.name);
             }
         }
-        let material = material_handles[material_index]
+        let material = material_handles[pbr_ids[material_index]]
             .get_or_insert_with(|| {
                 let orm = texture(m.textures[3], 2);
                 materials.add(StandardMaterial {
@@ -683,6 +694,9 @@ mod tests {
         map.materials[1].roughness = map.materials[0].roughness;
         map.materials[1].textures[1] = 0;
         assert_eq!(render_material_ids(&map.materials, &texture_ids), [0, 1]);
+        assert_eq!(material_ids(&map.materials, &texture_ids, false), [0, 0]);
+        map.materials[1].indirect_strength += 1.;
+        assert_eq!(material_ids(&map.materials, &texture_ids, false), [0, 1]);
     }
     #[test]
     fn texture_sharing_preserves_pixels_dimensions_and_color_space() {

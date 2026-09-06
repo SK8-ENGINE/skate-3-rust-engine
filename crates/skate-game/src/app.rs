@@ -94,6 +94,8 @@ pub(crate) fn build(
         animation::AnimationPlugin,
         world::WorldPlugin,
         camera::CameraPlugin,
+        crate::graphics_menu::GraphicsMenuPlugin,
+        crate::render_capacity::RenderCapacityPlugin,
         verification::VerificationPlugin,
         crate::performance::PerformancePlugin,
     ));

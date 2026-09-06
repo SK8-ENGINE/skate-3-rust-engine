@@ -58,6 +58,22 @@ fn cache_tracks_binding_identity_and_texture_replacement() {
     let layout = device.create_bind_group_layout(None, &[]);
     let different_layout = device.create_bind_group_layout(None, &[]);
     let group = device.create_bind_group(None, &layout, &[]);
+    let mut table = crate::render::mesh::PhaseLightmapCache::default();
+    table.remember(&binding(&a, 0, 256), layout.id(), 7);
+    assert!(table.matches(&binding(&a.clone(), 0, 256), layout.id(), 7));
+    assert!(!table.matches(&binding(&a, 0, 256), layout.id(), 8));
+    assert!(!table.matches(&binding(&b, 0, 256), layout.id(), 7));
+    assert!(!table.matches(&binding(&a, 256, 256), layout.id(), 7));
+    assert!(!table.matches(&binding(&a, 0, 512), layout.id(), 7));
+    assert!(!table.matches(&binding(&a, 0, 256), different_layout.id(), 7));
+    table.remember(&binding(&b, 0, 256), layout.id(), 7);
+    // Bevy exchanges its per-phase buffers every frame. Both allocations must
+    // remain reusable, rather than evicting one another on every camera turn.
+    for _ in 0..10 {
+        assert!(table.select(&binding(&a, 0, 256), layout.id(), 7));
+        assert!(table.select(&binding(&b, 0, 256), layout.id(), 7));
+    }
+    assert!(!table.select(&binding(&a, 0, 256), layout.id(), 8));
     let extent = Extent3d {
         width: 1,
         height: 1,
@@ -91,6 +107,37 @@ fn cache_tracks_binding_identity_and_texture_replacement() {
         cube_array: image.clone(),
         d3: image.clone(),
     };
+    // Adding/removing morph targets must refresh the compact mesh list.
+    let source = bevy_mesh::Mesh::new(
+        PrimitiveTopology::TriangleList,
+        bevy_asset::RenderAssetUsages::default(),
+    );
+    let mut layouts = bevy_mesh::MeshVertexBufferLayouts::default();
+    let mesh_layout = source.get_mesh_vertex_buffer_layout(&mut layouts);
+    let mesh = |morph| bevy_render::mesh::RenderMesh {
+        vertex_count: 0,
+        morph_targets: morph,
+        buffer_info: bevy_render::mesh::RenderMeshBufferInfo::NonIndexed,
+        key_bits: bevy_mesh::BaseMeshPipelineKey::empty(),
+        layout: mesh_layout.clone(),
+    };
+    let static_id = AssetId::Uuid {
+        uuid: bevy_asset::uuid::Uuid::from_u128(1),
+    };
+    let morph_id = AssetId::Uuid {
+        uuid: bevy_asset::uuid::Uuid::from_u128(2),
+    };
+    let mut render_meshes = RenderAssets::default();
+    render_meshes.insert(static_id, mesh(None));
+    render_meshes.insert(morph_id, mesh(Some(image.texture_view.clone())));
+    let mut morph_cache = crate::render::mesh::MorphMeshCache::default();
+    assert_eq!(morph_cache.refresh(&render_meshes), &[morph_id]);
+    render_meshes.insert(morph_id, mesh(None));
+    assert!(morph_cache.refresh(&render_meshes).is_empty());
+    render_meshes.insert(static_id, mesh(Some(image.texture_view.clone())));
+    assert_eq!(morph_cache.refresh(&render_meshes), &[static_id]);
+    render_meshes.remove(static_id);
+    assert!(morph_cache.refresh(&render_meshes).is_empty());
     // Exercise both single-texture and binding-array slab storage.
     for bindless in [false, true] {
         let mut slab = LightmapSlab::new(&fallback, bindless);

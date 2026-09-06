@@ -1,6 +1,7 @@
 /target/
 /bin/
 /logs/
+/settings/
 /assets/private/
 /maps/private/
 /maps/*.skate

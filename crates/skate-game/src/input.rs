@@ -14,7 +14,7 @@ pub(crate) struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ControllerInput>()
-            .add_systems(PreUpdate, (poll_controllers, exit_requested))
+            .add_systems(PreUpdate, poll_controllers.run_if(crate::graphics_menu::gameplay_active))
             .add_systems(FixedUpdate, publish_actions.in_set(SimulationSet::Input));
     }
 }
@@ -37,9 +37,4 @@ fn poll_controllers(mut input: ResMut<ControllerInput>) {
 
 fn publish_actions(mut input: ResMut<ControllerInput>) {
     input.publish_actions();
-}
-fn exit_requested(keys: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
-    if keys.just_pressed(KeyCode::Escape) {
-        exit.write(AppExit::Success);
-    }
 }
