@@ -63,9 +63,18 @@ world-Y normal replacement, deep-support flags, lateral-normal fallback and
 record capacity. These tests validate recovered host arithmetic, not bit-exact
 Xenon arithmetic or a hardware replay.
 
-Still required: scene segment gathering inside82D81610; classifiers82D82498,
-82D82940,82D830A8,82D83438,82D837C8 and82D84060 and their helpers; query-result
-136 identity mapping; the production ground-job producer and lifecycle owners;
+`contact_promotion` now implements82D82498's promotion stage before its final
+sort, retaining the original vertical-group scan and cursor advancement.
+`contact_segments` implements82D83438 and candidate insertion82D82380. The
+normalization threshold at830BD350 is initialized by82F826F8 from82181A88
+(word358637BD); its zero value in the raw dump is not the runtime constant.
+`ground_job` implements PreUpdate82D30D30's job fields, contact completion and
+fallback ordering, twenty-frame teleport suppression, geometry adjustment and
+retained publication flags. None of these components enables a physical state.
+
+Still required: scene segment gathering inside82D81610; native record sorting;
+classifiers82D82940,82D830A8,82D837C8 and82D84060 and their helpers; query-result
+136 identity mapping; production lifecycle owners and job integration;
 BipedAir and board/remount integration. These preparatory modules deliberately
 do not enable BipedGround while its native contact producer remains incomplete.
 The production runout transition still fails and the playable binary has not
