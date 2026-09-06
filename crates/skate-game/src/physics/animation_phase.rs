@@ -96,6 +96,7 @@ pub(crate) fn advance(
             retrieving_board: physical.off_board.retrieving_board_323 != 0,
             dropping_board: physical.off_board.dropping_board_322 != 0,
             in_biped_air: physical.off_board.flag_328 != 0,
+            can_land_on_board: physical.off_board.flag_316 != 0,
             hippy_hurdling: physical.off_board.hippy_hurdling_317 != 0,
             handplant_flags: physical.air.handplant_flags_324,
             time_to_skitch: physical.ground.scalar_276,

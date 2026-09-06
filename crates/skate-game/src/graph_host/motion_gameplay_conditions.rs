@@ -16,6 +16,7 @@ pub struct GameplayConditions {
     pub retrieving_board: bool,
     pub dropping_board: bool,
     pub in_biped_air: bool,
+    pub can_land_on_board: bool,
     pub hippy_hurdling: bool,
     pub handplant_flags: u32,
     pub time_to_skitch: f32,
@@ -33,6 +34,7 @@ pub enum GameplayCondition {
     RetrievingBoard,
     DroppingBoard,
     InBipedAir,
+    CanLandOnBoard,
     HippyHurdling,
     WantsRunout,
     PhysicsWiping,
@@ -57,6 +59,7 @@ impl GameplayCondition {
                 | "IsInDebugAnimationsMode"
                 | "IsDroppingSkateboard"
                 | "IsInBipedAir"
+                | "CanLandOnBoard"
                 | "IsHippyHurdling"
                 | "PhysicsWantsRunout"
                 | "IsPhysicsWiping"
@@ -80,6 +83,7 @@ impl GameplayCondition {
             "IsRetrievingSkateboard" => Self::RetrievingBoard,
             "IsDroppingSkateboard" => Self::DroppingBoard,
             "IsInBipedAir" => Self::InBipedAir,
+            "CanLandOnBoard" => Self::CanLandOnBoard,
             "IsHippyHurdling" => Self::HippyHurdling,
             "PhysicsWantsRunout" => Self::WantsRunout,
             "IsPhysicsWiping" => Self::PhysicsWiping,
@@ -121,6 +125,7 @@ impl GameplayCondition {
             Self::OkToDoTrickOnStairs => !p.tricks_blocked_on_stairs, //82BA6930:Animation166
             Self::RetrievingBoard => p.retrieving_board,              //82BA5EF0:Offboard323
             Self::InBipedAir => p.in_biped_air,                       //82BA8030:Offboard328
+            Self::CanLandOnBoard => p.can_land_on_board,             //82BA5D30:Offboard316
             Self::HippyHurdling => p.hippy_hurdling,                  //82BA5DA0:Offboard317
             Self::WantsRunout => p.wants_runout,                      //82BA44B8:State78
             Self::PhysicsWiping => p.physics_wiping,                  //82BA4390:State59
