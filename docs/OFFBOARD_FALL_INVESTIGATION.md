@@ -32,4 +32,22 @@ established defect. MatchAirTime (82BBA070) seeks the current sequence to the
 fraction of elapsed flight. Generated native instruction extracts are in
 `logs/biped-*.txt`; authoritative TU3 sources remain in Skate3Research.
 
-No gameplay fix is claimed by these diagnostic commits.
+## Located defect
+
+The next user capture, `logs/game-20260906-225525.stderr.log`, identifies
+`SS_BR_JUMP_RUN_INTO`. Before IK, part 19 moves from animation Y=0.541
+at tick 3 to Y=1.794 at tick 4 and Y=2.363 at tick 5. Original joint positions
+already contain the stretch, while the mapped rotation bases have unit length.
+
+The selection-space adapter incorrectly wrapped its selected raw child in a
+second BindPose node. The main playback tree already had that wrapper. This
+composed rest-pose translations and rotations twice as the jump blended in.
+
+Native evidence: SelectionSpace::SetAttributes82D26CC0, call at82D26F88,
+dispatches through IAnimatable+76. TU3 vtable8231E050+76 contains82E32328.
+That three-instruction thunk passes the construction map and calls82D19648
+directly; it does not call posture or AddBindPose. Main GetAnimTree82B980A0
+instead invokes vtable208 (posture) and164 (AddBindPose82B98118) after the
+raw builder. The adapter now preserves this distinction and leaves selected
+children raw, including nested selection spaces. Bail thresholds and physics
+are unchanged. Compilation is checked; gameplay validation belongs to the user.

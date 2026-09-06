@@ -1,4 +1,4 @@
-//! Deferred native GetAnimTree callback in SelectionSpace::SetAttributes.
+//! Deferred raw-tree callback in SelectionSpace::SetAttributes.
 use super::*;
 
 impl MotionAnimation {
@@ -10,22 +10,11 @@ impl MotionAnimation {
         match tree {
             PlaybackTree::SelectionSpace(space) => {
                 space.select(attributes)?;
-                if !space.child_constructed {
-                    let motion = space
-                        .current()
-                        .ok_or("SelectionSpace has no selected child")?
-                        .clone();
-                    let (motion, posture) = if self.posture_bank_valid {
-                        self.posture
-                            .apply::<_, String>((motion, None), |(motion, _), pose| {
-                                Ok((motion, Some(pose)))
-                            })?
-                    } else {
-                        (motion, None)
-                    };
-                    *space.current_mut().unwrap() = self.add_bind_pose(motion, posture)?;
-                    space.child_constructed = true;
-                }
+                //82D26F88 calls IAnimatable+76, not SkaterAnim::GetAnimTree.
+                //TU3 vtable8231E050+76 ->82E32328 ->82D19648 constructs a
+                //raw child. The enclosing main/channel tree already owns its
+                //bind pose and mirroring; applying those here doubles bone
+                //translations and rotations (visible on offboard jump clips).
                 self.prepare_selection_spaces(space.current_mut().unwrap(), attributes)?;
             }
             PlaybackTree::BlendSpace(space) => {

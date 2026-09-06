@@ -23,8 +23,6 @@ pub struct SelectionSpace {
     pub parameters: Vec<Parameter>,
     pub candidates: Vec<Candidate>,
     pub selected: Option<usize>,
-    /// Host GetAnimTree callback has supplied the selected child's wrappers.
-    pub child_constructed: bool,
     values: Vec<Option<f32>>,
     speed: f32,
     requested_time: f32,
@@ -44,7 +42,6 @@ impl SelectionSpace {
             parameters,
             candidates,
             selected: None,
-            child_constructed: false,
             values,
             speed: 1.0,
             requested_time: 0.0,
