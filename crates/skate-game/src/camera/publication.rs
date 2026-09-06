@@ -306,7 +306,6 @@ pub(crate) fn snapshot(
             grinding,
         },
         compass: CompassPoseInputs {
-            current_physical_transform: physical_transform,
             skeleton_direction: skeleton_root[2],
             look_target: input.collision_look_target_64,
             board_velocity: velocity,

@@ -19,7 +19,8 @@ pub struct CompassSettings {
 pub struct CompassInputs {
     pub ground_normal: [f32; 4], //0: subject452
     pub landing_normal: [f32; 4], //16: subject412 or448
-    /// Current physical entry0+64, publisher cache80; not the lagged subject376.
+    /// Publisher cache80, also published as subject376: skeleton root when
+    /// offboard/wiping out, otherwise the previous physical transform.
     pub transform: [[f32; 4]; 4], //32
     pub trajectory_direction: [f32; 4], //96: subject420 or normalized392
     pub launch_position: [f32; 4], //112
@@ -137,7 +138,6 @@ pub(super) fn heading(v: [f32; 4]) -> f32 {
 /// Physical fields not already present in ManagerSubject, used by82DF7B90.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CompassPoseInputs {
-    pub current_physical_transform: [[f32; 4]; 4],
     pub skeleton_direction: [f32; 4],
     pub look_target: [f32; 4],
     pub board_velocity: [f32; 4],
@@ -154,7 +154,10 @@ impl CompassPoseInputs {
         CompassInputs {
             ground_normal: subject.rig.last_valid_ground_up,
             landing_normal: if trajectory { subject.landing_normal } else { subject.ground_normal },
-            transform: self.current_physical_transform, trajectory_direction,
+            // 82DF80D8 chooses cache80 before 82DF69C0 publishes setter24.
+            // 82DF7B90 copies that same cache into compass32..80. Setter28
+            // updates the separate physical history, not this orbit centre.
+            transform: subject.rig.transform, trajectory_direction,
             launch_position: if trajectory { subject.launch_position } else { [0.0; 4] },
             landing_position: if trajectory { subject.landing_position } else { [0.0; 4] },
             grind_direction: subject.direction_424, skeleton_direction: self.skeleton_direction,
