@@ -21,10 +21,13 @@ pub(super) fn advance(
     // Skeleton82BE5094 passes false to82768728: its edge threshold is -1,
     // whereas the board requests .999. GroundPipeline supplies the remaining
     // shared values. Do not let the second query overwrite the first's rows.
+    let board_timer = crate::performance::Scope::new("board_world_contacts");
     let mut contacts = physics
         .world
         .query_primitives(&board_volumes, physics.query, physics.retention)
         .to_vec();
+    drop(board_timer);
+    let skeleton_timer = crate::performance::Scope::new("skeleton_world_contacts");
     let mut skeleton_query = physics.query;
     skeleton_query.edge_cos_bend_normal_threshold = -1.0;
     contacts.extend_from_slice(physics.world.query_primitives(
@@ -32,6 +35,7 @@ pub(super) fn advance(
         skeleton_query,
         physics.retention,
     ));
+    drop(skeleton_timer);
     assembly_contacts::append(
         &mut contacts,
         &board_volumes,

@@ -1,8 +1,36 @@
 //! Opt-in repeatable frame/physics timing: SKATE_PERF_REPORT=path.json.
 use bevy::prelude::*;
-use std::{path::PathBuf, time::Instant};
-use std::sync::{Arc, Mutex};
 use bevy::render::{Render, RenderApp, RenderSystems};
+use std::sync::{Arc, Mutex};
+use std::{collections::BTreeMap, sync::OnceLock};
+use std::{path::PathBuf, time::Instant};
+
+static SECTIONS: Mutex<BTreeMap<&'static str, (f64, u64)>> = Mutex::new(BTreeMap::new());
+pub(crate) struct Scope {
+    name: &'static str,
+    start: Option<Instant>,
+}
+impl Scope {
+    pub(crate) fn new(name: &'static str) -> Self {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        Self {
+            name,
+            start: ENABLED
+                .get_or_init(|| std::env::var_os("SKATE_PERF_REPORT").is_some())
+                .then(Instant::now),
+        }
+    }
+}
+impl Drop for Scope {
+    fn drop(&mut self) {
+        if let Some(start) = self.start {
+            let mut sections = SECTIONS.lock().unwrap();
+            let entry = sections.entry(self.name).or_default();
+            entry.0 += start.elapsed().as_secs_f64() * 1000.;
+            entry.1 += 1;
+        }
+    }
+}
 
 #[derive(Resource)]
 pub(crate) struct Performance {
@@ -13,7 +41,7 @@ pub(crate) struct Performance {
     physics_ms: f64,
     ticks: u32,
     samples: Vec<[f64; 4]>,
-    render: Arc<Mutex<Vec<[f64; 2]>>>,
+    render: Arc<Mutex<Vec<[f64; 5]>>>,
 }
 impl Performance {
     pub(crate) fn physics(&mut self, elapsed: std::time::Duration) {
@@ -25,21 +53,63 @@ impl Performance {
 pub(crate) struct PerformancePlugin;
 impl Plugin for PerformancePlugin {
     fn build(&self, app: &mut App) {
-        let Some(path) = std::env::var_os("SKATE_PERF_REPORT") else { return; };
+        let Some(path) = std::env::var_os("SKATE_PERF_REPORT") else {
+            return;
+        };
         let now = Instant::now();
         let render = Arc::new(Mutex::new(Vec::new()));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.insert_resource(RenderPerformance { start: None, frame: now, prepared: now, samples: render.clone() })
+            render_app
+                .insert_resource(RenderPerformance {
+                    start: None,
+                    frame: now,
+                    prepared: now,
+                    mark: now,
+                    phases: [0.; 3],
+                    samples: render.clone(),
+                })
                 .add_systems(Render, render_begin.before(RenderSystems::ExtractCommands))
-                .add_systems(Render, render_prepared.after(RenderSystems::Prepare).before(RenderSystems::Render))
+                .add_systems(
+                    Render,
+                    render_assets_done
+                        .after(RenderSystems::PrepareMeshes)
+                        .after(RenderSystems::PrepareAssets)
+                        .before(RenderSystems::ManageViews),
+                )
+                .add_systems(
+                    Render,
+                    render_views_done
+                        .after(RenderSystems::ManageViews)
+                        .before(RenderSystems::Queue),
+                )
+                .add_systems(
+                    Render,
+                    render_queue_done
+                        .after(RenderSystems::Queue)
+                        .before(RenderSystems::PhaseSort),
+                )
+                .add_systems(
+                    Render,
+                    render_prepared
+                        .after(RenderSystems::Prepare)
+                        .before(RenderSystems::Render),
+                )
                 .add_systems(Render, render_finish.after(RenderSystems::PostCleanup));
         }
         // Benchmark measurements must not depend on whether the window has focus.
         app.insert_resource(bevy::winit::WinitSettings::continuous());
         app.insert_resource(Performance {
-            path: path.into(), start: None, frame_start: now, previous: now,
-            physics_ms: 0., ticks: 0, samples: Vec::new(), render,
-        }).add_systems(First, begin).add_systems(Last, finish);
+            path: path.into(),
+            start: None,
+            frame_start: now,
+            previous: now,
+            physics_ms: 0.,
+            ticks: 0,
+            samples: Vec::new(),
+            render,
+        })
+        .add_systems(First, begin)
+        .add_systems(Last, finish);
     }
 }
 fn begin(mut p: ResMut<Performance>) {
@@ -49,21 +119,32 @@ fn begin(mut p: ResMut<Performance>) {
 }
 fn finish(mut p: ResMut<Performance>, mut exit: MessageWriter<AppExit>) {
     let now = Instant::now();
-    let elapsed = now.duration_since(*p.start.get_or_insert(now)).as_secs_f64();
+    let elapsed = now
+        .duration_since(*p.start.get_or_insert(now))
+        .as_secs_f64();
     let frame = now.duration_since(p.previous).as_secs_f64() * 1000.;
     p.previous = now;
     // Exclude initialization and shader warmup. Frame interval includes render
     // synchronization; CPU schedule time is First..Last of the main world.
     if elapsed > 10. {
-        let sample = [frame, now.duration_since(p.frame_start).as_secs_f64() * 1000., p.physics_ms, f64::from(p.ticks)];
+        let sample = [
+            frame,
+            now.duration_since(p.frame_start).as_secs_f64() * 1000.,
+            p.physics_ms,
+            f64::from(p.ticks),
+        ];
         p.samples.push(sample);
     }
     if elapsed > 25. && !p.samples.is_empty() {
-        let mean = |column: usize| p.samples.iter().map(|s| s[column]).sum::<f64>() / p.samples.len() as f64;
+        let mean = |column: usize| {
+            p.samples.iter().map(|s| s[column]).sum::<f64>() / p.samples.len() as f64
+        };
         let mut frames: Vec<_> = p.samples.iter().map(|s| s[0]).collect();
         frames.sort_by(f64::total_cmp);
         let render = p.render.lock().unwrap();
-        let render_mean = |column: usize| render.iter().map(|s| s[column]).sum::<f64>() / render.len().max(1) as f64;
+        let render_mean = |column: usize| {
+            render.iter().map(|s| s[column]).sum::<f64>() / render.len().max(1) as f64
+        };
         let report = serde_json::json!({
             "frames": frames.len(), "fps": 1000. / mean(0),
             "frame_ms_mean": mean(0), "frame_ms_median": frames[frames.len()/2],
@@ -72,32 +153,65 @@ fn finish(mut p: ResMut<Performance>, mut exit: MessageWriter<AppExit>) {
             "physics_ticks_per_frame": mean(3),
             "physics_ms_per_tick": mean(2) / mean(3).max(f64::EPSILON),
             "render_prepare_ms_mean": render_mean(0), "render_submit_ms_mean": render_mean(1),
+            "render_assets_ms_mean": render_mean(2), "render_views_ms_mean": render_mean(3), "render_queue_ms_mean": render_mean(4),
+            "sections_ms_per_call": SECTIONS.lock().unwrap().iter().map(|(&k, &(ms, n))| (k, ms / n as f64)).collect::<BTreeMap<_,_>>(),
             "samples": p.samples,
         });
         match std::fs::write(&p.path, serde_json::to_vec_pretty(&report).unwrap()) {
-            Ok(()) => { eprintln!("SKATE_PERF_REPORT {}", p.path.display()); exit.write(AppExit::Success); }
-            Err(e) => { eprintln!("Performance report: {e}"); exit.write(AppExit::error()); }
+            Ok(()) => {
+                eprintln!("SKATE_PERF_REPORT {}", p.path.display());
+                exit.write(AppExit::Success);
+            }
+            Err(e) => {
+                eprintln!("Performance report: {e}");
+                exit.write(AppExit::error());
+            }
         }
     }
 }
 
 #[derive(Resource)]
 struct RenderPerformance {
-    start: Option<Instant>, frame: Instant, prepared: Instant,
-    samples: Arc<Mutex<Vec<[f64; 2]>>>,
+    start: Option<Instant>,
+    frame: Instant,
+    prepared: Instant,
+    mark: Instant,
+    phases: [f64; 3],
+    samples: Arc<Mutex<Vec<[f64; 5]>>>,
 }
 fn render_begin(mut p: ResMut<RenderPerformance>) {
     p.frame = Instant::now();
+    p.mark = p.frame;
+}
+fn render_assets_done(mut p: ResMut<RenderPerformance>) {
+    let now = Instant::now();
+    p.phases[0] = now.duration_since(p.mark).as_secs_f64() * 1000.;
+    p.mark = now;
+}
+fn render_views_done(mut p: ResMut<RenderPerformance>) {
+    let now = Instant::now();
+    p.phases[1] = now.duration_since(p.mark).as_secs_f64() * 1000.;
+    p.mark = now;
+}
+fn render_queue_done(mut p: ResMut<RenderPerformance>) {
+    p.phases[2] = p.mark.elapsed().as_secs_f64() * 1000.;
 }
 fn render_prepared(mut p: ResMut<RenderPerformance>) {
     p.prepared = Instant::now();
 }
 fn render_finish(mut p: ResMut<RenderPerformance>) {
     let now = Instant::now();
-    if now.duration_since(*p.start.get_or_insert(now)).as_secs_f64() > 10. {
+    if now
+        .duration_since(*p.start.get_or_insert(now))
+        .as_secs_f64()
+        > 10.
+    {
         p.samples.lock().unwrap().push([
             p.prepared.duration_since(p.frame).as_secs_f64() * 1000.,
             now.duration_since(p.prepared).as_secs_f64() * 1000.,
+            p.phases[0],
+            p.phases[1],
+            p.phases[2],
         ]);
     }
 }

@@ -24,7 +24,7 @@ fn spawn(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    config: Res<crate::config::Config>,
+    mut config: ResMut<crate::config::Config>,
 ) {
     commands
         .spawn((PlayerRoot, Transform::default(), Visibility::default()))
@@ -33,8 +33,10 @@ fn spawn(
                 GltfAssetLabel::Scene(0).from_asset(manifest.0.character_scene.clone()),
             )));
         });
-    if let Some(map) = &config.map {
-        crate::skate_world::spawn(map, &mut commands, &mut meshes, &mut materials, &mut images);
+    if let Some(map) = config.map.take() {
+        // Physics has already consumed the package. Render assets own their
+        // uploaded data; keeping another full city package wastes gigabytes.
+        crate::skate_world::spawn(&map, &mut commands, &mut meshes, &mut materials, &mut images);
         return;
     }
     let colors = [

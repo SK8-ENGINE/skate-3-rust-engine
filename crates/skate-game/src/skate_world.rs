@@ -341,6 +341,77 @@ pub(crate) fn collision_world(
     BoardWorld::with_query_metadata(triangles, metadata).map_err(str::to_owned)
 }
 
+/// Reuse identical render resources without changing authored triangles.
+fn render_texture_ids(textures: &[skate_data::skate_map::Texture]) -> Vec<u32> {
+    use std::hash::{Hash, Hasher};
+    let mut buckets: HashMap<(u32, u32, u32, u64), Vec<usize>> = HashMap::new();
+    let mut ids = vec![0];
+    for (i, t) in textures.iter().enumerate() {
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        t.rgba.hash(&mut hash);
+        let bucket = buckets
+            .entry((t.width, t.height, t.color_space, hash.finish()))
+            .or_default();
+        let same = bucket.iter().copied().find(|&j| textures[j].rgba == t.rgba);
+        let canonical = same.unwrap_or_else(|| {
+            bucket.push(i);
+            i
+        });
+        ids.push(canonical as u32 + 1);
+    }
+    ids
+}
+
+fn render_material_ids(
+    materials: &[skate_data::skate_map::Material],
+    texture_ids: &[u32],
+) -> Vec<usize> {
+    let mut unique = HashMap::new();
+    materials
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            // Only fields consumed by this renderer belong in the identity. Source
+            // names and collision surface metadata do not change a PBR material.
+            let textures = m.textures.map(|id| texture_ids[id as usize]);
+            let key = [
+                textures[0],
+                textures[1],
+                textures[2],
+                textures[3],
+                textures[4],
+                m.color[0].to_bits(),
+                m.color[1].to_bits(),
+                m.color[2].to_bits(),
+                m.roughness.to_bits(),
+                m.emissive.to_bits(),
+                m.indirect_strength.to_bits(),
+                m.alpha_mode,
+                m.alpha_cutoff.to_bits(),
+            ];
+            *unique.entry(key).or_insert(i)
+        })
+        .collect()
+}
+
+fn render_groups(
+    geometry: &skate_data::skate_map::Geometry,
+    material_ids: &[usize],
+) -> Vec<(usize, Vec<u32>)> {
+    let mut lookup = HashMap::new();
+    let mut groups: Vec<(usize, Vec<u32>)> = Vec::new();
+    for tri in geometry.indices.chunks_exact(3) {
+        let material = material_ids[geometry.vertices[tri[0] as usize].material as usize - 1];
+        let group = *lookup.entry(material).or_insert_with(|| {
+            let index = groups.len();
+            groups.push((material, Vec::new()));
+            index
+        });
+        groups[group].1.extend_from_slice(tri);
+    }
+    groups
+}
+
 pub(crate) fn spawn(
     map: &SkateMap,
     commands: &mut Commands,
@@ -349,8 +420,10 @@ pub(crate) fn spawn(
     images: &mut Assets<Image>,
 ) {
     // Texture roles have different transfer functions even when sharing a record.
+    let texture_ids = render_texture_ids(&map.textures);
     let mut cache = HashMap::<(u32, u8), Handle<Image>>::new();
     let mut texture = |id: u32, role: u8| -> Option<Handle<Image>> {
+        let id = texture_ids[id as usize];
         if id == 0 {
             return None;
         }
@@ -390,7 +463,7 @@ pub(crate) fn spawn(
                         TextureDimension::D2,
                         bytes,
                         format,
-                        RenderAssetUsages::default(),
+                        RenderAssetUsages::RENDER_WORLD,
                     );
                     let mut sampler = bevy::image::ImageSamplerDescriptor::linear();
                     if role != 1 {
@@ -403,15 +476,18 @@ pub(crate) fn spawn(
                 .clone(),
         )
     };
-    let mut groups = vec![Vec::<u32>::new(); map.materials.len()];
-    for tri in map.geometry.indices.chunks_exact(3) {
-        groups[map.geometry.vertices[tri[0] as usize].material as usize - 1].extend_from_slice(tri);
-    }
-    for (m, indices) in map.materials.iter().zip(groups) {
-        if indices.is_empty() {
-            continue;
-        }
-        // Reindex each material once, preserving authored normals and both UV sets.
+    let material_ids = render_material_ids(&map.materials, &texture_ids);
+    let groups = render_groups(&map.geometry, &material_ids);
+    eprintln!(
+        "SKATE_RENDER_BATCHES count={} triangles={}",
+        groups.len(),
+        map.geometry.indices.len() / 3
+    );
+    let mut material_handles: Vec<Option<Handle<StandardMaterial>>> =
+        vec![None; map.materials.len()];
+    for (material_index, indices) in groups {
+        let m = &map.materials[material_index];
+        // Reindex each batch, preserving authored normals and both UV sets.
         let mut remap = HashMap::new();
         let mut vertices = Vec::new();
         let local: Vec<u32> = indices
@@ -426,7 +502,7 @@ pub(crate) fn spawn(
             .collect();
         let mut mesh = Mesh::new(
             bevy::mesh::PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
+            RenderAssetUsages::RENDER_WORLD,
         )
         .with_inserted_attribute(
             Mesh::ATTRIBUTE_POSITION,
@@ -464,29 +540,33 @@ pub(crate) fn spawn(
                 warn!("SKATE material {} tangent generation: {error}", m.name);
             }
         }
-        let orm = texture(m.textures[3], 2);
-        let material = materials.add(StandardMaterial {
-            base_color: Color::linear_rgb(m.color[0], m.color[1], m.color[2]),
-            base_color_texture: texture(m.textures[0], 0),
-            normal_map_texture: texture(m.textures[2], 2),
-            metallic_roughness_texture: orm.clone(),
-            occlusion_texture: orm,
-            metallic: if m.textures[3] != 0 { 1. } else { 0. },
-            perceptual_roughness: m.roughness,
-            emissive: LinearRgba::rgb(
-                m.color[0] * m.emissive,
-                m.color[1] * m.emissive,
-                m.color[2] * m.emissive,
-            ),
-            emissive_texture: texture(m.textures[4], 0),
-            alpha_mode: match m.alpha_mode {
-                1 => AlphaMode::Mask(m.alpha_cutoff),
-                2 => AlphaMode::Blend,
-                _ => AlphaMode::Opaque,
-            },
-            lightmap_exposure: m.indirect_strength,
-            ..default()
-        });
+        let material = material_handles[material_index]
+            .get_or_insert_with(|| {
+                let orm = texture(m.textures[3], 2);
+                materials.add(StandardMaterial {
+                    base_color: Color::linear_rgb(m.color[0], m.color[1], m.color[2]),
+                    base_color_texture: texture(m.textures[0], 0),
+                    normal_map_texture: texture(m.textures[2], 2),
+                    metallic_roughness_texture: orm.clone(),
+                    occlusion_texture: orm,
+                    metallic: if m.textures[3] != 0 { 1. } else { 0. },
+                    perceptual_roughness: m.roughness,
+                    emissive: LinearRgba::rgb(
+                        m.color[0] * m.emissive,
+                        m.color[1] * m.emissive,
+                        m.color[2] * m.emissive,
+                    ),
+                    emissive_texture: texture(m.textures[4], 0),
+                    alpha_mode: match m.alpha_mode {
+                        1 => AlphaMode::Mask(m.alpha_cutoff),
+                        2 => AlphaMode::Blend,
+                        _ => AlphaMode::Opaque,
+                    },
+                    lightmap_exposure: m.indirect_strength,
+                    ..default()
+                })
+            })
+            .clone();
         let mut entity = commands.spawn((
             Name::new(m.name.clone()),
             Mesh3d(meshes.add(mesh)),
@@ -562,6 +642,64 @@ mod tests {
     use super::*;
     fn demo() -> SkateMap {
         SkateMap::parse(include_bytes!("../../../maps/format-demo.skate")).unwrap()
+    }
+    #[test]
+    fn render_batches_preserve_complete_triangles_and_materials() {
+        let map = demo();
+        let material_ids = render_material_ids(&map.materials, &render_texture_ids(&map.textures));
+        let chunks = render_groups(&map.geometry, &material_ids);
+        assert_eq!(chunks.len(), 1);
+        let mut original: Vec<_> = map
+            .geometry
+            .indices
+            .chunks_exact(3)
+            .map(|t| t.to_vec())
+            .collect();
+        let mut partitioned = Vec::new();
+        for (material, indices) in chunks {
+            for tri in indices.chunks_exact(3) {
+                assert_eq!(
+                    material + 1,
+                    map.geometry.vertices[tri[0] as usize].material as usize
+                );
+                partitioned.push(tri.to_vec());
+            }
+        }
+        original.sort();
+        partitioned.sort();
+        assert_eq!(partitioned, original);
+    }
+    #[test]
+    fn render_material_sharing_requires_identical_rendered_fields() {
+        let mut map = demo();
+        let mut copy = demo().materials.remove(0);
+        copy.name = "another source object".into();
+        copy.audio = 42;
+        map.materials.push(copy);
+        let texture_ids = render_texture_ids(&map.textures);
+        assert_eq!(render_material_ids(&map.materials, &texture_ids), [0, 0]);
+        map.materials[1].roughness = 0.1234;
+        assert_eq!(render_material_ids(&map.materials, &texture_ids), [0, 1]);
+        map.materials[1].roughness = map.materials[0].roughness;
+        map.materials[1].textures[1] = 0;
+        assert_eq!(render_material_ids(&map.materials, &texture_ids), [0, 1]);
+    }
+    #[test]
+    fn texture_sharing_preserves_pixels_dimensions_and_color_space() {
+        let texture = |name: &str, color_space, pixel| skate_data::skate_map::Texture {
+            name: name.into(),
+            width: 1,
+            height: 1,
+            color_space,
+            rgba: vec![pixel, 0, 0, 255],
+        };
+        let textures = vec![
+            texture("first", 1, 30),
+            texture("duplicate", 1, 30),
+            texture("linear", 0, 30),
+            texture("different", 1, 31),
+        ];
+        assert_eq!(render_texture_ids(&textures), [0, 1, 1, 3, 4]);
     }
     fn material() -> RetailContactMaterial {
         RetailContactMaterial {

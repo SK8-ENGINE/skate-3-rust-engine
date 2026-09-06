@@ -29,12 +29,15 @@ pub(super) fn advance(
         //input reset82DB8998, which would immediately clear that mode again.
     }
     physics.board.clear_forces();
+    let query_timer = crate::performance::Scope::new("wheel_and_foot_queries");
     //World8275EA20 starts both batches before actor SetUpPhysics. Foot
     //results stay pending while PlayerInput consumes the preceding records.
     physics
         .riding
         .start_wheel_queries(&physics.board, &physics.world)?;
     let skeleton_queries = super::foot_ik_queries::query(&physics.world, &skater.skeleton)?;
+    drop(query_timer);
+    let graph_timer = crate::performance::Scope::new("animation_graph");
     let animation = animation_phase::advance(
         physics,
         skater,
@@ -43,6 +46,8 @@ pub(super) fn advance(
         &physics.animation_profile,
     )
     .map_err(|e| format!("Animation tick{}: {e}", physics.ticks))?;
+    drop(graph_timer);
+    let input_timer = crate::performance::Scope::new("input_and_state");
     //ForcePhysics Begin82BB2868 writes the live Skeleton16420 mode once.
     //Consume the graph request so a later physical reset can retain its own0.
     if let Some(mode) = skater.animation.motion.riding.force_mode.take() {
@@ -118,7 +123,11 @@ pub(super) fn advance(
     //World8275ECA4 ends skeleton tests after state/forces and before solving.
     //Teleport resets previous observations, but preserves this pending batch.
     skeleton_queries.publish(&mut skater.player_input.player);
+    drop(input_timer);
+    let solve_timer = crate::performance::Scope::new("solve_total");
     solve::advance(physics, skater, skater.ground.steering.targets)?;
+    drop(solve_timer);
+    let _output_timer = crate::performance::Scope::new("outputs_and_camera");
     //ProcessOutput82DB6EE8 resets the packet before its component publishers.
     //All consumers of the preceding output have completed this frame's input.
     super::player_input::reset_outputs(&mut skater.player_input.physical);
