@@ -20,7 +20,8 @@ impl StateSelector {
         if p.has_2476(0x8000) {
             return PhysicalStateId::BipedGround;
         }
-        if p.has_2476(0x80) && !p.has_2484(1) {
+        //Native lbz2484 selects the high byte of the big-endian flag word.
+        if p.has_2476(0x80) && !p.has_2484(0x100_0000) {
             return PhysicalStateId::BipedAir;
         }
         if facts.force_known_air {
@@ -72,7 +73,7 @@ impl StateSelector {
         {
             return PhysicalStateId::WipeoutGround;
         }
-        if p.has_2476(0x80) && !p.has_2484(1) {
+        if p.has_2476(0x80) && !p.has_2484(0x100_0000) {
             return PhysicalStateId::BipedAir;
         }
         if p.has_2476(0x8000) {

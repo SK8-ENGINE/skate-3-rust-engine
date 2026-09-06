@@ -1,10 +1,11 @@
-//! Bounded numeric history for user-reproduced airborne bails. No per-frame IO.
+//! Bounded numeric history for user-reproduced off-board bails. No per-frame IO.
 use crate::physics::SkaterRuntime;
 use std::collections::VecDeque;
 
 #[derive(Debug)]
 #[allow(dead_code)] // Fields are serialized together only when a bail is requested.
 struct Sample {
+    physical_state: u32,
     tick: i32,
     flags: [u32; 3],
     packet: skate_core::player::offboard::air_prediction::Packet,
@@ -37,6 +38,7 @@ pub(crate) fn record(skater: &mut SkaterRuntime) {
     let p = &skater.player_input.processed;
     if history.samples.len() == 32 { history.samples.pop_front(); }
     history.samples.push_back(Sample {
+        physical_state: p.state_2508,
         tick: state.tick,
         flags: [p.flags_2476, p.flags_2480, p.flags_2484],
         packet: state.packet,
@@ -51,7 +53,7 @@ pub(crate) fn record(skater: &mut SkaterRuntime) {
     if skater.wipeout.state.reasons.iter().any(|&requested| requested) {
         // Format in memory, then one write; never send Debug's individual
         // formatting fragments to the Windows redirected stderr handle.
-        let report = format!("SKATE_BIPED_AIR_BAIL history={:#?}", history.samples);
+        let report = format!("SKATE_BIPED_BAIL history={:#?}", history.samples);
         eprintln!("{report}");
         history.samples.clear();
         history.reports += 1;

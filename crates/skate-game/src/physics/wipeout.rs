@@ -151,6 +151,7 @@ pub(super) fn check_after_physics(
                     ground_kind_356: skater.offboard.retained_contact.kind_164,
                 },
             );
+            super::offboard::air_diagnostics::record(skater);
             Ok(())
         }
         PhysicalStateId::PhysicsAir => skater.wipeout.check_air(&observations, false),

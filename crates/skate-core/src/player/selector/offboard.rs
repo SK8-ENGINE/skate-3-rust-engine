@@ -35,7 +35,10 @@ impl StateSelector {
                     return PhysicalStateId::WipeoutGround;
                 }
                 if !p.has_2480(0x10) {
-                    if p.has_2484(1) {
+                    //82D8ADE8's BipedAir branch reads lhz2484, then tests its low bit. On
+                    //big-endian Xenon this is full-word bit16 (Offboard328),
+                    //not bit0 (the unrelated BipedBoardOnGround attribute).
+                    if p.has_2484(0x1_0000) {
                         if p.has_2476(0x8000) || p.has_2476(0x80) {
                             current
                         } else {
