@@ -10,6 +10,8 @@ use skate_data::collections::Collections;
 pub(crate) struct Wipeout {
     pub state: Requests,
     settings: Settings,
+    offboard: skate_core::player::offboard::ground_lifecycle::CollisionSettings,
+    offboard_air: skate_core::player::offboard::air_collision::Settings,
     modes: [Mode; 5],
 }
 impl Wipeout {
@@ -20,6 +22,8 @@ impl Wipeout {
         Ok(Self {
             state,
             settings,
+            offboard: settings::offboard(data)?,
+            offboard_air: settings::offboard_air(data)?,
             modes,
         })
     }
@@ -90,8 +94,64 @@ pub(super) fn check_after_physics(
         grind_normal: skater.trajectory.selector.grind_normal(),
     };
     match skater.player_state.current() {
-        PhysicalStateId::PhysicsGround | PhysicalStateId::SlideGround => skater.wipeout.check_ground(&observations),
-        PhysicalStateId::GroundAnimation => skater.wipeout.check_ground_animation(&observations, 1.0),
+        PhysicalStateId::BipedAir => {
+            let mode = skater.wipeout.mode(&skater.player_input.processed)?;
+            let frame = observations.frame()?;
+            let p = &skater.player_input.processed;
+            skate_core::player::offboard::air_collision::post(
+                &skater.offboard.air_state,
+                &mut skater.wipeout.state,
+                &skater.wipeout.offboard_air,
+                &skate_core::player::offboard::air_collision::PostInput {
+                    shared: &frame,
+                    root_velocity: skater.skeleton_input.root_velocity,
+                    check_squash: mode.check_squash,
+                    air_settings: &skater.wipeout.settings.air,
+                    elapsed: p.state_timer_2664,
+                    flags_2484: p.flags_2484,
+                    forward: p.effective_anim_transform_192[2].map(f32::from_bits),
+                    right: p.effective_anim_transform_192[0].map(f32::from_bits),
+                    right_stick: [
+                        skater.animation_input.extra.look_x,
+                        skater.animation_input.extra.look_y,
+                    ],
+                },
+            );
+            Ok(())
+        }
+        PhysicalStateId::PhysicsGround | PhysicalStateId::SlideGround => {
+            skater.wipeout.check_ground(&observations)
+        }
+        PhysicalStateId::GroundAnimation => {
+            skater.wipeout.check_ground_animation(&observations, 1.0)
+        }
+        PhysicalStateId::BipedGround => {
+            use skate_core::player::offboard::ground_lifecycle::{
+                CollisionInput, PostInput, post_physics,
+            };
+            let frame = observations.frame()?;
+            post_physics(
+                &mut skater.offboard.ground,
+                &mut skater.wipeout.state,
+                &skater.wipeout.offboard,
+                &PostInput {
+                    collision: CollisionInput {
+                        shared: &frame,
+                        skeleton_velocity_16336: skater.skeleton_input.root_velocity,
+                        contact_flag_4072: skater.collision_feedback.flags.group_8,
+                        contact_force_4056: skater.collision_feedback.maximum_group_8_force,
+                    },
+                    processed_flags_2484: skater.player_input.processed.flags_2484,
+                    processed_velocity_608: skater.player_input.processed.vectors_544_560_592_608
+                        [3]
+                    .map(f32::from_bits),
+                    skeleton_displacement_16288: skater.collision_extra_displacements[0],
+                    skeleton_displacement_16304: skater.collision_extra_displacements[1],
+                    ground_kind_356: skater.offboard.retained_contact.kind_164,
+                },
+            );
+            Ok(())
+        }
         PhysicalStateId::PhysicsAir => skater.wipeout.check_air(&observations, false),
         _ => Ok(()), //Other concrete states dispatch their own postphysics check.
     }

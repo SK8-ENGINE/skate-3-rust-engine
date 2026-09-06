@@ -9,6 +9,18 @@ use skate_data::state_graph::attributes::Attributes;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MotionCondition {
+    CanBipedLand,
+    BipedCommitted,
+    EnoughDistToObstacle {
+        animation: String,
+        database: String,
+    },
+    GroundSlope(super::motion_ground_slope::GroundSlopeType),
+    BipedGroundThin,
+    DisableDismount,
+    HoldingSkateboard,
+    StandingOnMovingObject,
+    LocoState(super::motion_cadence::LocoState),
     ManualOutTimerIsActive,
     Gesture(crate::input::gesture_catalog::Group),
     Landing(super::motion_landing::Condition),
@@ -67,6 +79,24 @@ pub enum MotionCondition {
 }
 impl MotionCondition {
     pub fn parse(a: &Attributes<'_>) -> Result<Option<Self>, String> {
+        if a.text("name") == Some("CanBipedLand") {
+            return Ok(Some(Self::CanBipedLand));
+        }
+        if a.text("name") == Some("IsBipedCommittedToMotion") {
+            return Ok(Some(Self::BipedCommitted));
+        }
+        if a.text("name") == Some("EnoughDistToObstacle") {
+            return Ok(Some(Self::EnoughDistToObstacle {
+                animation: a
+                    .text("anim")
+                    .ok_or("EnoughDistToObstacle requires anim")?
+                    .into(),
+                database: a
+                    .text("db")
+                    .ok_or("EnoughDistToObstacle requires db")?
+                    .into(),
+            }));
+        }
         if let Some(condition) = super::motion_landing::Condition::parse(a) {
             return Ok(Some(Self::Landing(condition)));
         }
@@ -78,6 +108,14 @@ impl MotionCondition {
         }
         let numeric = || super::condition_nodes::numeric(a);
         Ok(Some(match a.text("name").unwrap_or("") {
+            "GroundSlopeType" => {
+                Self::GroundSlope(super::motion_ground_slope::GroundSlopeType::parse(a)?)
+            }
+            "IsStandingOnMovingObject" => Self::StandingOnMovingObject,
+            "DisableDismount" => Self::DisableDismount,
+            "IsHoldingSkateboard" => Self::HoldingSkateboard, //82BA5E10
+            "IsBipedGroundThin" => Self::BipedGroundThin,     //82BA8110: OffBoard+330
+            "LocoState" => Self::LocoState(super::motion_cadence::LocoState::parse(a)?),
             "ManualOutTimerIsActive" => Self::ManualOutTimerIsActive,
             "HasGestureIntent" => Self::Gesture(crate::input::gesture_catalog::Group::parse(
                 a.text("group").unwrap_or(""),
@@ -148,6 +186,49 @@ impl MotionCondition {
     pub fn evaluate(&self, host: &MotionHost, frame: &Frame) -> Result<bool, String> {
         use skate_core::animation::playback_parameters::ParameterInputs;
         Ok(match self {
+            Self::CanBipedLand => host.offboard_output.landing_normal_192[1] > 0.85,
+            Self::BipedCommitted => host.offboard_output.flag_329 != 0,
+            Self::EnoughDistToObstacle {
+                animation,
+                database: _,
+            } => {
+                //82D16680 looks up the literal clip and initializes AnimTransZ at
+                //time zero; a missing bank/clip/attribute leaves the caller's zero.
+                let mut distance = 0.;
+                if let Ok(clip) = host.animation.metadata().clip(animation) {
+                    if let Some(attribute) = clip
+                        .attributes
+                        .iter()
+                        .find(|a| encode(a.name.as_bytes()) == encode(b"AnimTransZ"))
+                    {
+                        distance = match attribute.type_id {
+                            0 => f32::from_bits(
+                                *attribute
+                                    .payload_words
+                                    .first()
+                                    .ok_or("Truncated AnimTransZ")?,
+                            ),
+                            2 => skate_core::animation::playback_clip::sample_curve(
+                                &attribute.payload_words,
+                                0.,
+                            )?,
+                            _ => 0.,
+                        };
+                    }
+                }
+                host.offboard_output.scalar_112 >= distance + 0.3
+            }
+            Self::GroundSlope(condition) => condition.matches(host.offboard_slope),
+            //82BA5B80: abs(z)+abs(x)+speed, in source addition order.
+            Self::StandingOnMovingObject => {
+                (host.offboard_support[2].abs() + host.offboard_support[1].abs())
+                    + host.offboard_support[0]
+                    > f32::from_bits(0x3c23d70a)
+            }
+            Self::DisableDismount => host.disable_dismount,
+            Self::HoldingSkateboard => host.toggle_board_physical.held,
+            Self::BipedGroundThin => host.offboard_ground_thin,
+            Self::LocoState(condition) => condition.evaluate(host.offboard_locomotion),
             Self::ShouldLeaveSlide { right } => host.slide_latch.should_leave(*right),
             Self::Gesture(group) => group.has_intent(&host.action_intents),
             Self::Shared(condition) => condition

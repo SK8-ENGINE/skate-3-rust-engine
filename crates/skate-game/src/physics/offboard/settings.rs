@@ -12,6 +12,10 @@ use skate_core::{
 use skate_data::{animation_metadata::AnimationMetadata, collections::Collections};
 
 pub(crate) struct Settings {
+    pub air_blend_curve: PointGraph<8>,
+    pub air_query: skate_core::player::offboard::air_queries::Settings,
+    pub jump_height: f32,
+    pub jump_speed_scalar: f32,
     pub possession: skate_core::player::offboard::board_possession::lifecycle::Settings,
     pub controller: controller::Settings,
     pub board: skate_core::player::offboard::ground_sync::BoardSettings,
@@ -28,6 +32,31 @@ impl Settings {
         let biped = |name| curves::load::<8>(data, "physics_biped", name);
         let (sprint_blend, bounds) = biped("Hash_6B93C51256A30FB4")?;
         Ok(Self {
+            air_blend_curve: curves::load::<8>(
+                data,
+                "physics_state_offboard_air",
+                "TrajBlendAmountVsTime",
+            )?
+            .0,
+            air_query: skate_core::player::offboard::air_queries::Settings {
+                height: data.float(
+                    "physics_state_offboard_air",
+                    "default",
+                    "Hash_AB0D9EAEBFC584E9",
+                )?,
+                sphere_radius: data.float(
+                    "physics_state_offboard_air",
+                    "default",
+                    "TrajectorySphereRadius",
+                )?,
+                start_index: data.integer(
+                    "physics_state_offboard_air",
+                    "default",
+                    "TrajectoryStartIndex",
+                )?,
+            },
+            jump_height: data.float("physics_biped", "default", "JumpHeight")?,
+            jump_speed_scalar: data.float("physics_biped", "default", "JumpSpeedScalar")?,
             possession: possession::load(data)?,
             controller: controller::Settings {
                 movement_intent: movement_intent::Settings {

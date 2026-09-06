@@ -8,10 +8,13 @@ mod crouching_settings;
 pub mod motion;
 mod motion_air_leg;
 mod motion_animation;
+#[path = "motion_offboard/cadence.rs"]
+pub(crate) mod motion_cadence;
 mod motion_channels;
 pub(crate) mod motion_character_gesture;
 mod motion_conditions;
 pub(crate) mod motion_gameplay_conditions;
+mod motion_ground_slope;
 pub(crate) mod motion_hand_services;
 mod motion_hooks;
 pub(crate) mod motion_intent_filter;
@@ -20,17 +23,20 @@ pub(crate) mod motion_landing;
 mod motion_landing_execute;
 pub(crate) mod motion_native;
 mod motion_nodes;
-mod motion_tricks;
+#[path = "motion_offboard/air.rs"]
+pub(crate) mod motion_offboard_air;
 #[path = "motion_offboard/push_off.rs"]
 pub(crate) mod motion_push_off;
 #[path = "motion_offboard/reset.rs"]
 pub(crate) mod motion_reset;
 mod motion_riding;
-pub(crate) mod motion_runout;
 pub(crate) mod motion_riding_conditions;
+pub(crate) mod motion_runout;
 pub(crate) mod motion_shove;
 mod motion_sliding;
 pub(crate) mod motion_spin;
+pub(crate) mod motion_toggle_board;
+mod motion_tricks;
 #[path = "motion_offboard/twist_lean.rs"]
 pub(crate) mod motion_twist_lean;
 pub(crate) mod motion_wipeout;

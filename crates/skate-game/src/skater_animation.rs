@@ -196,6 +196,9 @@ impl SkaterAnimation {
             .ok_or("MotionGraph lost the SkaterAnim flag owner")?;
 
         self.motion.animation.apply_parameters()?;
+        if let Some(phase) = self.motion.phase_write.take() {
+            self.state.phase = phase;
+        }
         self.motion.animation.advance(dt, self.state.phase);
         //Collect before pose evaluation consumes clip history;82B98980 then
         //uses those exact records for board/mirror/switch event publication.

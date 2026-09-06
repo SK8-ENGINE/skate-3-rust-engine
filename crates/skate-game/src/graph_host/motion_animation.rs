@@ -37,6 +37,11 @@ pub struct MotionAnimation {
     property: AdvanceResult,
 }
 impl MotionAnimation {
+    pub fn seek_current_fraction(&mut self, fraction: f32) {
+        if let Some(tree) = &mut self.current {
+            tree.set_time(tree.length() * fraction);
+        }
+    }
     pub(crate) fn metadata(&self) -> &AnimationMetadata {
         &self.metadata
     }

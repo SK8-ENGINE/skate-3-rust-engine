@@ -5,6 +5,18 @@ use skate_core::{
     point_graph::PointGraph,
 };
 use skate_data::collections::Collections;
+pub(super) fn offboard_air(
+    data: &Collections,
+) -> Result<skate_core::player::offboard::air_collision::Settings, String> {
+    let f = |name| data.float("physics_wipeout", "default", name);
+    Ok(skate_core::player::offboard::air_collision::Settings {
+        minimum_speed: f("Wipeout_OB_Air_MinSpeed")?,
+        maximum_displacement: f("Wipeout_OB_Air_SkelMaxDisp")?,
+        maximum_contact: f("Wipeout_OB_Air_SkelMaxContact")?,
+        maximum_arm_contact: f("Wipeout_OB_SkeletonMaxContactArms")?,
+        maximum_squash: f("Wipeout_OB_MaxSquash")?,
+    })
+}
 pub(super) fn load(data: &Collections) -> Result<(Settings, [Mode; 5]), String> {
     let f = |name| data.float("physics_wipeout", "default", name);
     let graph = data
@@ -76,4 +88,22 @@ pub(super) fn load(data: &Collections) -> Result<(Settings, [Mode; 5]), String> 
             .try_into()
             .map_err(|_| "Expected five wipeout physics modes".to_owned())?,
     ))
+}
+
+pub(super) fn offboard(
+    data: &Collections,
+) -> Result<skate_core::player::offboard::ground_lifecycle::CollisionSettings, String> {
+    let f = |name| data.float("physics_wipeout", "default", name);
+    Ok(
+        skate_core::player::offboard::ground_lifecycle::CollisionSettings {
+            vehicle_scalar: f("Wipeout_OB_VehicleScalar")?,
+            vehicle_contact: f("Wipeout_OB_VehicleContact")?,
+            maximum_displacement: f("Wipeout_OB_SkeletonMaxDisp")?,
+            maximum_arm_contact: f("Wipeout_OB_SkeletonMaxContactArms")?,
+            maximum_body_contact: f("Wipeout_OB_SkeletonMaxContact")?,
+            minimum_speed: f("Wipeout_OB_MinSpeed")?,
+            maximum_squash: f("Wipeout_OB_MaxSquash")?,
+            special_scalar: f("Hash_472174920C68FBE3")?,
+        },
+    )
 }

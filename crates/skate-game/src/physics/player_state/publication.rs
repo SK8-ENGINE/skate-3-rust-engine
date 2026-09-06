@@ -18,6 +18,8 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             | PhysicalStateId::SlideGround
             | PhysicalStateId::WipeoutGround
             | PhysicalStateId::Teleporting
+            | PhysicalStateId::BipedAir
+            | PhysicalStateId::BipedGround
     ) {
         return Err(format!(
             "FillPhysOut requires the actual {state:?} output owner"
@@ -83,6 +85,16 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         set(84, skater.slide_state.state.wall_riding);
     }
     let physical = &mut skater.player_input.physical;
+    //Common Biped Fill82DB7218 precedes the selected physical state's Fill.
+    physical.off_board.vector_64 = skater
+        .offboard
+        .controller
+        .state
+        .frame_output
+        .velocity
+        .map(f32::to_bits);
+    physical.off_board.phase_80 = skater.offboard.controller.state.cadence.phase.phase;
+    physical.off_board.locomotion_84 = skater.offboard.controller.state.cadence.locomotion_index;
     //Common ProcessOutput82DB7044/7048 and70C0/70C4; these precede state Fill.
     physical.air.flag_444 = u8::from(
         skater
@@ -155,8 +167,9 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         //authored empty-edge world do not publish the active air/grind fields.
         targeting_grind: state == PhysicalStateId::KnownAir
             && skater.known_air.state.targeting_grind_213,
-        offboard_has_landed: false,
-        offboard_on_deck: false,
+        offboard_has_landed: state == PhysicalStateId::BipedAir
+            && skater.offboard.air_state.remaining <= f32::from_bits(0x3c888889),
+        offboard_on_deck: physical.off_board.flag_315 != 0,
         grind: GrindState::default(),
         last_grind_distance: 0.0,
     });
@@ -167,7 +180,15 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         super::wipeout_output::publish(skater);
     }
     if state == PhysicalStateId::Teleporting {
-        skater.teleport_state.publish_output(&mut skater.player_input.physical);
+        skater
+            .teleport_state
+            .publish_output(&mut skater.player_input.physical);
+    }
+    if state == PhysicalStateId::BipedGround {
+        super::super::offboard::ground_state::publish(skater);
+    }
+    if state == PhysicalStateId::BipedAir {
+        super::super::offboard::air_state::publish(skater);
     }
     super::super::offboard::possession::publish(physics, skater)?;
     Ok(())

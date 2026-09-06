@@ -17,6 +17,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             | PhysicalStateId::SlideGround
             | PhysicalStateId::WipeoutGround
             | PhysicalStateId::Teleporting
+            | PhysicalStateId::BipedAir
             | PhysicalStateId::BipedGround
     ) {
         return Err("PreState requires the selected state's actual PredictFutureOfDeck".into());

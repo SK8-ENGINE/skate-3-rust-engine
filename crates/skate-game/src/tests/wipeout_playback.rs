@@ -9,7 +9,9 @@ fn raw_controller_bail_runs_stock_wipeout_for_120_ticks() {
     let root = std::path::Path::new(&root);
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
-    let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
+    let mut physics =
+        GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal)
+            .unwrap();
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
     let mut input = crate::input::ControllerInput::default();
@@ -173,7 +175,9 @@ fn authored_checkpoint_reply_runs_teleport_state_and_restores_riding() {
     let root = std::path::Path::new(&root);
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
-    let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
+    let mut physics =
+        GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal)
+            .unwrap();
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
     let mut input = crate::input::ControllerInput::default();
@@ -188,25 +192,46 @@ fn authored_checkpoint_reply_runs_teleport_state_and_restores_riding() {
         }
         input.sample_raw_for_test(XboxState {
             buttons: if (12..60).contains(&tick) { 0x1000 } else { 0 },
-            triggers: [0; 2], left: [0; 2], right: [0; 2],
+            triggers: [0; 2],
+            left: [0; 2],
+            right: [0; 2],
         });
         let mut actions = input.player_actions();
-        controls.update(&mut actions, physics.settings.step.simulation.time_step,
+        controls.update(
+            &mut actions,
+            physics.settings.step.simulation.time_step,
             physics.settings.input_magnitude_threshold,
-            skater.player_input.physical.scoring.capabilities_204);
-        frame::advance(&mut physics, &mut skater, &mut controls, &graphs,
-            &mut actions, true, &mut camera)
-            .unwrap_or_else(|error| panic!("Checkpoint tick{tick}: {error}"));
+            skater.player_input.physical.scoring.capabilities_204,
+        );
+        frame::advance(
+            &mut physics,
+            &mut skater,
+            &mut controls,
+            &graphs,
+            &mut actions,
+            true,
+            &mut camera,
+        )
+        .unwrap_or_else(|error| panic!("Checkpoint tick{tick}: {error}"));
         if tick == 60 {
             assert_eq!(skater.player_state.current(), PhysicalStateId::Teleporting);
-            let output = skater.player_input.physical.teleport_output
+            let output = skater
+                .player_input
+                .physical
+                .teleport_output
                 .expect("702 must publish the captured reply");
-            assert_eq!((output.next_state, output.state_61, output.board_272), (100, 1, 1));
+            assert_eq!(
+                (output.next_state, output.state_61, output.board_272),
+                (100, 1, 1)
+            );
             assert_eq!(f32::from_bits(output.transform[3][2]), checkpoint.z);
             saw_ready = true;
         } else if tick == 61 {
             assert!(saw_ready);
-            assert_eq!(skater.player_state.current(), PhysicalStateId::PhysicsGround);
+            assert_eq!(
+                skater.player_state.current(),
+                PhysicalStateId::PhysicsGround
+            );
             let position = physics.board.bodies()[6].rates.position;
             assert!((position.x - checkpoint.x).abs() < 0.05);
             assert!((position.z - checkpoint.z).abs() < 0.05);
@@ -223,33 +248,82 @@ fn authored_checkpoint_reply_runs_teleport_state_and_restores_riding() {
 #[test]
 #[ignore = "requires private stock animation banks and collections"]
 fn runout_request_enters_stock_motion_graph_in_all_difficulties() {
+    offboard_stability(None);
+}
+
+#[test]
+#[ignore = "requires private stock assets and SKATE_MAP_TEST_PATH"]
+fn imported_map_offboard_stability() {
+    let path = std::env::var_os("SKATE_MAP_TEST_PATH").expect("set SKATE_MAP_TEST_PATH");
+    let map = skate_data::skate_map::SkateMap::load(std::path::Path::new(&path)).unwrap();
+    offboard_stability(Some(&map));
+}
+
+fn offboard_stability(map: Option<&skate_data::skate_map::SkateMap>) {
     let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
     let root = std::path::Path::new(&root);
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
     for difficulty in crate::difficulty::Difficulty::ALL {
-        let mut physics = GamePhysics::load_with_difficulty(root, None, difficulty).unwrap();
-        let mut skater = SkaterRuntime::load(root, &graphs, &physics, difficulty.key()).unwrap();
-        let mut controls = PlayerControls::default();
-        let mut input = crate::input::ControllerInput::default();
-        let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
-        for tick in 0..120 {
-            // Inject the completed runout request at the physical -> animation
-            // boundary; leave stock graph selection and all following ticks live.
-            input.sample_raw_for_test(XboxState { buttons: 0, triggers: [0;2], left: [0;2], right: [0;2] });
-            let mut actions = input.player_actions();
-            controls.update(&mut actions, physics.settings.step.simulation.time_step,
-                physics.settings.input_magnitude_threshold,
-                skater.player_input.physical.scoring.capabilities_204);
-            frame::advance(&mut physics, &mut skater, &mut controls, &graphs,
-                &mut actions, true, &mut camera)
-                .unwrap_or_else(|error| panic!("Runout {difficulty:?} tick{tick}: {error}"));
-            assert_finite(&physics, &skater, tick);
+        for walking in [false, true] {
+            let mut physics = GamePhysics::load_with_difficulty(root, map, difficulty).unwrap();
+            let mut skater =
+                SkaterRuntime::load(root, &graphs, &physics, difficulty.key()).unwrap();
+            let mut controls = PlayerControls::default();
+            let mut input = crate::input::ControllerInput::default();
+            let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
+            let mut visited = std::collections::BTreeSet::new();
+            for tick in 0..720 {
+                if tick == 120 && !walking {
+                    skater.player_state.state_flags[78 - 52] = true;
+                }
+                // Inject the completed runout request at the physical -> animation
+                // boundary; leave stock graph selection and all following ticks live.
+                input.sample_raw_for_test(XboxState {
+                    buttons: if walking && (tick == 120 || tick == 500) {
+                        0x8000
+                    } else if walking && tick == 240 {
+                        0x4000
+                    } else {
+                        0
+                    },
+                    triggers: [0; 2],
+                    left: if walking && tick > 200 {
+                        [0, 16000]
+                    } else {
+                        [0; 2]
+                    },
+                    right: [0; 2],
+                });
+                let mut actions = input.player_actions();
+                controls.update(
+                    &mut actions,
+                    physics.settings.step.simulation.time_step,
+                    physics.settings.input_magnitude_threshold,
+                    skater.player_input.physical.scoring.capabilities_204,
+                );
+                frame::advance(
+                    &mut physics,
+                    &mut skater,
+                    &mut controls,
+                    &graphs,
+                    &mut actions,
+                    true,
+                    &mut camera,
+                )
+                .unwrap_or_else(|error| {
+                    panic!("Runout {difficulty:?} walking={walking} tick{tick}: {error}")
+                });
+                assert_finite(&physics, &skater, tick);
+                visited.insert(skater.player_state.current() as u32);
+            }
+            eprintln!("Stability {difficulty:?} walking={walking}: {visited:?}");
+            if walking {
+                assert!(
+                    visited.contains(&500),
+                    "Dismount never reached the on-foot owner"
+                );
+            }
         }
-        // Exercise the logged MotionGraph branch, separately from the still
-        // unsupported BipedGround physical owner selected by its output.
-        skater.player_state.state_flags[78 - 52] = true;
-        animation_phase::advance(&physics, &mut skater, &controls, &graphs,
-            &physics.animation_profile).unwrap();
     }
 }

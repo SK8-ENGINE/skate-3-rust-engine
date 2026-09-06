@@ -74,8 +74,10 @@ pub(super) fn advance(
         player_state::enter_after_teleport(physics, skater)?;
         //82DB8E40 calls SetUpNormal after pose reset, state100 and board reset.
         skater.wipeout_state.ragdoll.restore_normal(
-            &mut skater.skeleton, &mut skater.skeleton_joints,
-            &mut skater.skeleton_collision, &mut skater.collision_feedback,
+            &mut skater.skeleton,
+            &mut skater.skeleton_joints,
+            &mut skater.skeleton_collision,
+            &mut skater.collision_feedback,
         );
     }
     //World8275EC0C ends board queries before PostInput/state selection.
@@ -83,6 +85,12 @@ pub(super) fn advance(
     player_state::post_input_and_select(physics, skater)?;
     player_state::pre_state(physics, skater)?;
     match skater.player_state.current() {
+        skate_core::player::state::PhysicalStateId::BipedAir => {
+            super::offboard::air_state::update(physics, skater)?;
+        }
+        skate_core::player::state::PhysicalStateId::BipedGround => {
+            super::offboard::ground_state::update(physics, skater)?;
+        }
         skate_core::player::state::PhysicalStateId::PhysicsGround => {
             let p = &skater.player_input.processed;
             let com = p.animation_com_to_deck_752.map(f32::from_bits);

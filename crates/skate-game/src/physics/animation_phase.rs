@@ -140,6 +140,39 @@ pub(crate) fn advance(
     } else {
         [0.0; 4]
     };
+    skater.animation.motion.toggle_board_physical =
+        crate::graph_host::motion_toggle_board::Physical {
+            blocked: physical.off_board.flag_304 != 0,
+            held: physical.off_board.flag_311 != 0,
+            returning: physical.off_board.returning_board_313 != 0,
+            forbid_retrieve: skater.player_state.state_flags[87 - 52],
+            angle: physical.off_board.board_angle_36,
+            pitch: physical.off_board.board_angle_40,
+            mirrored: skater
+                .animation
+                .motion
+                .animation
+                .skater_animation_flags
+                .unwrap_or(0)
+                & 0x40000000
+                != 0,
+        };
+    //82BA5368: Ground80.Y < .64 or Skeleton598 (IK3185,82BE2144).
+    skater.animation.motion.disable_dismount = physics.riding.reckoning_frames.ground[1][1]
+        < f32::from_bits(0x3f23d70a)
+        || skater.foot_ik.state.contacts.support_failed_this_update;
+    skater.animation.motion.offboard_phase = physical.off_board.phase_80;
+    skater.animation.motion.offboard_output = physical.off_board;
+    skater.animation.motion.offboard_locomotion = physical.off_board.locomotion_84;
+    //Player Fill82DB6EC0: Biped348/320/328 -> OffBoard256/260/264.
+    let support = &skater.offboard.controller.state.motion;
+    skater.animation.motion.offboard_support = [
+        support.support_speed_348,
+        support.filtered_local_acceleration_320[0],
+        support.filtered_local_acceleration_320[2],
+    ];
+    skater.animation.motion.offboard_slope = physical.off_board.kind_88;
+    skater.animation.motion.offboard_ground_thin = physical.off_board.flag_330 != 0;
     skater.animation.motion.shove_physical = Some(crate::graph_host::motion_shove::ShovePhysical {
         interaction_trigger,
         direction,
@@ -231,13 +264,33 @@ pub(crate) fn advance(
         board_present: physical.off_board.flag_311 != 0,
         physical_28_byte75: physical.state.category_12 == 500,
         time_since_teleport: skater.animation.motion.riding.time_since_teleport,
-
     };
+    //Native Listener::Fill825999F0, after derived controller sampling and before AG.
+    let mut action_intents = controls.action_intents.clone();
+    use skate_core::input::offboard_intentions::{
+        AnalogObservation, produce_analog, produce_discrete,
+    };
+    let biped = &skater.offboard.controller.state.contact;
+    for intent in produce_discrete(
+        &controls.controller,
+        controls.actor_flags,
+        physical.air.use_air_reckoning_452 != 0,
+    )
+    .into_iter()
+    .chain(produce_analog(
+        &controls.controller,
+        AnalogObservation {
+            effective_skeleton_z: p.effective_anim_transform_192[2].map(f32::from_bits),
+            biped_correction: biped.active.then_some(biped.direction),
+        },
+    )) {
+        action_intents.insert(intent.name, intent.value);
+    }
     let mut output = AnimationPhaseOutput::new(feedback);
     skater.animation.advance(
         graphs,
         physics.settings.step.simulation.time_step,
-        &controls.action_intents,
+        &action_intents,
         observations,
         &mut output.reset,
     )?;
@@ -262,7 +315,8 @@ pub(crate) fn publish_feedback(
             hall_of_meat_enabled: false,
             challenge_query_active: false,
             challenge_configuration_enabled: false,
-        }.capabilities();
+        }
+        .capabilities();
     let p = &skater.player_input.processed;
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
     // ProcessOutput82DE53F0 resets the animation packet; CalcLandingQuality

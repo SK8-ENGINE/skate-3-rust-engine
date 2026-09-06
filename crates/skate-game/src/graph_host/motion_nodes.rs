@@ -14,6 +14,9 @@ use skate_data::state_graph::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MotionOperation {
+    OffboardAir(super::motion_offboard_air::Operation),
+    ToggleBoard,
+    Cadence(super::motion_cadence::Operation),
     Trick(super::motion_tricks::Operation),
     Play(PlayAnimation),
     ///TU3 vtable82309664: Begin/Update/End all point to the empty82B61BB8.
@@ -78,7 +81,13 @@ impl OperationFactory for MotionFactory {
         let operation = if kind == OperationKind::Condition {
             MotionCondition::parse(a)?.map(MotionOperation::Condition)
         } else if kind == OperationKind::Behavior {
-            if let Some(operation) = super::motion_landing::Operation::parse(a) {
+            if let Some(operation) = super::motion_offboard_air::Operation::parse(a) {
+                Some(MotionOperation::OffboardAir(operation))
+            } else if name == "ToggleBoard" {
+                Some(MotionOperation::ToggleBoard)
+            } else if let Some(operation) = super::motion_cadence::Operation::parse(a) {
+                Some(MotionOperation::Cadence(operation))
+            } else if let Some(operation) = super::motion_landing::Operation::parse(a) {
                 Some(MotionOperation::Landing(operation))
             } else if let Some(operation) = super::motion_hand_services::Operation::parse(a) {
                 Some(MotionOperation::HandService(operation))
@@ -96,10 +105,16 @@ impl OperationFactory for MotionFactory {
                 Some(MotionOperation::Shove(operation))
             } else {
                 match name {
-                    "SetBumpCoefficients" => Some(MotionOperation::SetBumpCoefficients([key(a,"X",""),key(a,"Y","")])),
-                    "ResetSkaterAnimation" | "ResetToGivenStance" => Some(MotionOperation::ResetAnimation(
-                        super::motion_reset::Operation::parse(a).ok_or("Invalid reset operation")?,
-                    )),
+                    "SetBumpCoefficients" => Some(MotionOperation::SetBumpCoefficients([
+                        key(a, "X", ""),
+                        key(a, "Y", ""),
+                    ])),
+                    "ResetSkaterAnimation" | "ResetToGivenStance" => {
+                        Some(MotionOperation::ResetAnimation(
+                            super::motion_reset::Operation::parse(a)
+                                .ok_or("Invalid reset operation")?,
+                        ))
+                    }
                     "MatchTwistAndLean" => Some(MotionOperation::TwistLean(
                         super::motion_twist_lean::Operation::parse(a),
                     )),
@@ -126,7 +141,14 @@ impl OperationFactory for MotionFactory {
                         super::motion_air_leg::Operation::parse(a),
                     )),
                     "ClearTrickAttr" => Some(MotionOperation::ClearTrickAttr),
-                    "SetTrickHeight" | "SetTrickAttr" | "ScoringTrick" | "MonitorUnderflip" | "SetDark" | "UpdateIsWeightOnNose" => super::motion_tricks::Operation::parse(a).map(MotionOperation::Trick),
+                    "SetTrickHeight"
+                    | "SetTrickAttr"
+                    | "ScoringTrick"
+                    | "MonitorUnderflip"
+                    | "SetDark"
+                    | "UpdateIsWeightOnNose" => {
+                        super::motion_tricks::Operation::parse(a).map(MotionOperation::Trick)
+                    }
                     "CharacterGesture" => Some(MotionOperation::CharacterGesture),
                     "DisallowPumping" => Some(MotionOperation::DisallowPumping),
                     "FakieHeadChannel" => Some(MotionOperation::FakieHeadChannel),

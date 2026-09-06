@@ -44,6 +44,9 @@ pub struct MotionPhysical {
     pub foot_frame: Option<PushFootFrame>,
 }
 enum Instance {
+    OffboardAir(super::motion_offboard_air::State),
+    ToggleBoard(super::motion_toggle_board::ToggleBoard),
+    Cadence(super::motion_cadence::MatchCadence),
     Runout(Option<super::motion_runout::Parameters>),
     Trick(i32),
     Stateless,
@@ -71,6 +74,8 @@ enum Instance {
 impl Instance {
     fn new(operation: &MotionOperation) -> Self {
         match operation {
+            MotionOperation::OffboardAir(_) => Self::OffboardAir(Default::default()),
+            MotionOperation::Cadence(_) => Self::Cadence(Default::default()),
             MotionOperation::AddRunoutAttribs => Self::Runout(None),
             MotionOperation::Trick(_) => Self::Trick(0),
             MotionOperation::IntentFilter(_) => Self::IntentFilter(Default::default()),
@@ -115,12 +120,22 @@ impl Instance {
                 Self::CharacterGesture(super::motion_character_gesture::CharacterGesture::new())
             }
             MotionOperation::Shove(_) => Self::Shove(super::motion_shove::ShoveState::new()),
+            MotionOperation::ToggleBoard => Self::ToggleBoard(Default::default()),
             MotionOperation::ResetAnimation(_) => Self::Stateless,
             _ => Self::Stateless,
         }
     }
 }
 pub struct MotionHost {
+    pub offboard_output: skate_core::player::input_phase::OffBoardOutputFields,
+    pub toggle_board_physical: super::motion_toggle_board::Physical,
+    pub disable_dismount: bool,
+    pub offboard_phase: f32,
+    pub offboard_locomotion: u32,
+    pub offboard_slope: u32,
+    pub offboard_support: [f32; 3],
+    pub offboard_ground_thin: bool,
+    pub phase_write: Option<f32>,
     pub animation: MotionAnimation,
     pub playback_context: PlaybackContext,
     pub condition_inputs: ConditionInputs,
@@ -158,7 +173,7 @@ pub struct MotionHost {
     wipeout_settings: super::motion_wipeout::Settings,
     ///Native PhysOutGround pumping acceleration268.
     pub pumping_acceleration: Option<f32>,
-    pub bump_acceleration: Option<[f32;4]>,
+    pub bump_acceleration: Option<[f32; 4]>,
     bump_settings: skate_core::animation::bump::Settings,
     pub allow_pumping: bool,
     pub riding: super::motion_riding::RidingState,
@@ -214,6 +229,15 @@ impl MotionHost {
         });
         let pushing = PushingSettings::load(data, &mut metadata)?;
         Ok(Self {
+            toggle_board_physical: Default::default(),
+            disable_dismount: false,
+            offboard_output: Default::default(),
+            offboard_phase: 0.,
+            offboard_locomotion: 0,
+            offboard_slope: 0,
+            offboard_support: [0.; 3],
+            offboard_ground_thin: false,
+            phase_write: None,
             animation: MotionAnimation::from_metadata(metadata),
             playback_context,
             condition_inputs: ConditionInputs::default(),
@@ -232,7 +256,10 @@ impl MotionHost {
             is_power_sliding: false,
             score_packet: super::motion_native::ScorePacket::default(),
             trick_requests: Default::default(),
-            trick_height_settings: (data.boolean("anim_motion", "jumping", "use_gesture_speed")?, data.boolean("anim_motion", "jumping", "clamp_gesture_to_antic")?),
+            trick_height_settings: (
+                data.boolean("anim_motion", "jumping", "use_gesture_speed")?,
+                data.boolean("anim_motion", "jumping", "clamp_gesture_to_antic")?,
+            ),
             action_intents: IntentMap::new(),
             time_tags: None,
             physical: None,
@@ -250,10 +277,10 @@ impl MotionHost {
             pumping_acceleration: None,
             bump_acceleration: None,
             bump_settings: skate_core::animation::bump::Settings {
-                scale_x_acc:data.float("anim_motion","bumps","scale_x_acc")?,
-                min_bump_mag:data.float("anim_motion","bumps","min_bump_mag")?,
-                min_bump_blend_value:data.float("anim_motion","bumps","min_bump_blend_value")?,
-                max_bump_mag:data.float("anim_motion","bumps","max_bump_mag")?,
+                scale_x_acc: data.float("anim_motion", "bumps", "scale_x_acc")?,
+                min_bump_mag: data.float("anim_motion", "bumps", "min_bump_mag")?,
+                min_bump_blend_value: data.float("anim_motion", "bumps", "min_bump_blend_value")?,
+                max_bump_mag: data.float("anim_motion", "bumps", "max_bump_mag")?,
             },
             //8258F488 seeds bit24, and reset825953B0 preserves that bit.
             allow_pumping: true,

@@ -29,6 +29,7 @@ pub struct GameplayConditions {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GameplayCondition {
+    DebugAnimations,
     RetrievingBoard,
     DroppingBoard,
     InBipedAir,
@@ -53,6 +54,7 @@ impl GameplayCondition {
         matches!(
             name,
             "IsRetrievingSkateboard"
+                | "IsInDebugAnimationsMode"
                 | "IsDroppingSkateboard"
                 | "IsInBipedAir"
                 | "IsHippyHurdling"
@@ -74,6 +76,7 @@ impl GameplayCondition {
     }
     pub fn parse(a: &Attributes<'_>) -> Result<Self, String> {
         Ok(match a.text("name").unwrap_or("") {
+            "IsInDebugAnimationsMode" => Self::DebugAnimations,
             "IsRetrievingSkateboard" => Self::RetrievingBoard,
             "IsDroppingSkateboard" => Self::DroppingBoard,
             "IsInBipedAir" => Self::InBipedAir,
@@ -113,14 +116,16 @@ impl GameplayCondition {
     /// conditions that also require the MotionGraph/channel owner.
     pub fn evaluate_physical(&self, p: &GameplayConditions) -> Option<bool> {
         Some(match self {
+            //Factory82BC3F68, VT8231ED5C slot48=8274CA90 (li r3,0;blr).
+            Self::DebugAnimations => false,
             Self::OkToDoTrickOnStairs => !p.tricks_blocked_on_stairs, //82BA6930:Animation166
-            Self::RetrievingBoard => p.retrieving_board, //82BA5EF0:Offboard323
-            Self::InBipedAir => p.in_biped_air,          //82BA8030:Offboard328
-            Self::HippyHurdling => p.hippy_hurdling,     //82BA5DA0:Offboard317
-            Self::WantsRunout => p.wants_runout,         //82BA44B8:State78
-            Self::PhysicsWiping => p.physics_wiping,     //82BA4390:State59
-            Self::BodyFlipping => p.body_flipping,       //82BA71E0:Air441
-            Self::WantsWipeout => p.wants_wipeout,       //82BA4400:State63 || State65
+            Self::RetrievingBoard => p.retrieving_board,              //82BA5EF0:Offboard323
+            Self::InBipedAir => p.in_biped_air,                       //82BA8030:Offboard328
+            Self::HippyHurdling => p.hippy_hurdling,                  //82BA5DA0:Offboard317
+            Self::WantsRunout => p.wants_runout,                      //82BA44B8:State78
+            Self::PhysicsWiping => p.physics_wiping,                  //82BA4390:State59
+            Self::BodyFlipping => p.body_flipping,                    //82BA71E0:Air441
+            Self::WantsWipeout => p.wants_wipeout,                    //82BA4400:State63 || State65
             Self::Bumped => p.bumped, //82BA7310: published acceleration and anim_motion/bumps
             Self::GrabbingObject => p.grabbing_object, //82BA5700:Offboard304
             Self::Skitching => p.state == 104, //82BBBC88:State16
@@ -143,7 +148,11 @@ impl GameplayCondition {
                         _ => false,
                     }
             }
-            Self::DroppingBoard | Self::Dark | Self::UnderflipRequested | Self::DarkCatchRequested | Self::CanEnterSlide { .. } => return None,
+            Self::DroppingBoard
+            | Self::Dark
+            | Self::UnderflipRequested
+            | Self::DarkCatchRequested
+            | Self::CanEnterSlide { .. } => return None,
         })
     }
 

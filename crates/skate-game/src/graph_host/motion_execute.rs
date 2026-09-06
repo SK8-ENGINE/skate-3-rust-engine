@@ -15,6 +15,55 @@ impl MotionHost {
             .get(behavior)
             .ok_or("Unbound MotionGraph behavior")?;
         let operation = self.operations[id].clone();
+        if let MotionOperation::OffboardAir(operation) = operation {
+            let Instance::OffboardAir(state) = &mut self.instances[behavior] else {
+                return Err("OffboardAir instance mismatch".into());
+            };
+            state.execute(
+                &operation,
+                phase,
+                self.offboard_output,
+                &self.action_intents,
+                &mut self.animation,
+            )?;
+            if let Some(value) = state.seed_write {
+                self.wipeout_controls.seed_from_air_tweak = value;
+            }
+            return Ok(());
+        }
+        if let MotionOperation::ToggleBoard = operation {
+            let Instance::ToggleBoard(state) = &mut self.instances[behavior] else {
+                return Err("ToggleBoard instance mismatch".into());
+            };
+            return state.execute(
+                phase,
+                self.toggle_board_physical,
+                &self.action_intents,
+                &mut self.animation,
+            );
+        }
+        if let MotionOperation::Cadence(operation) = operation {
+            use crate::graph_host::motion_cadence::{Operation, biped_cadence};
+            match operation {
+                Operation::BipedCadence if phase == 1 => {
+                    let mut value = self.offboard_phase;
+                    biped_cadence(Some(self.offboard_phase), Some(&mut value), phase);
+                    self.phase_write = Some(value);
+                }
+                Operation::MatchCadence => {
+                    let Instance::Cadence(state) = &mut self.instances[behavior] else {
+                        return Err("Cadence operation/instance mismatch".into());
+                    };
+                    match phase {
+                        0 => state.begin(Some(self.offboard_phase), true),
+                        1 => state.update(Some(&mut self.animation)),
+                        _ => state.end(),
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         if let MotionOperation::Trick(operation) = operation {
             let Some(&Instance::Trick(mut updates)) = self.instances.get(behavior) else {
                 return Err("Trick operation/instance mismatch".into());
@@ -97,14 +146,25 @@ impl MotionHost {
             (MotionOperation::AddRunoutAttribs, Instance::Runout(state)) => {
                 if phase == 0 {
                     *state = Some(super::super::motion_runout::capture(
-                        self.runout_physical.ok_or("AddRunoutAttribs requires completed physical output")?,
-                        self.animation.skater_animation_flags.ok_or("AddRunoutAttribs requires animation stance")? & 0x4000_0000 != 0,
+                        self.runout_physical
+                            .ok_or("AddRunoutAttribs requires completed physical output")?,
+                        self.animation
+                            .skater_animation_flags
+                            .ok_or("AddRunoutAttribs requires animation stance")?
+                            & 0x4000_0000
+                            != 0,
                     ));
                 } else if phase == 1 {
                     let values = state.ok_or("AddRunoutAttribs updated before Begin")?;
-                    for (name, value) in [("BipedStartAngle", values.angle_degrees), ("BipedSpeed", values.speed)] {
+                    for (name, value) in [
+                        ("BipedStartAngle", values.angle_degrees),
+                        ("BipedSpeed", values.speed),
+                    ] {
                         self.animation.set_attribute(SettableAttribute {
-                            name: encode(name.as_bytes()), value, normalized: false, sequence_id: -1,
+                            name: encode(name.as_bytes()),
+                            value,
+                            normalized: false,
+                            sequence_id: -1,
                         });
                     }
                 }
@@ -115,12 +175,31 @@ impl MotionHost {
             (MotionOperation::SetBumpCoefficients(names), _) => {
                 // Begin only: vtable823200C8+48; Update/End are82B61BB8.
                 if phase == 0 {
-                    use skate_core::animation::playback_parameters::{AttributeSink, SettableAttribute};
-                    let acceleration=self.bump_acceleration.ok_or("SetBumpCoefficients requires PhysOutAnimation112")?;
-                    let flags=self.animation.skater_animation_flags.ok_or("SetBumpCoefficients requires live ISkaterAnim stance")?;
-                    let values=skate_core::animation::bump::coefficients(acceleration,flags & 0x4000_0000 != 0,&self.bump_settings);
-                    for (name,value) in names.into_iter().zip(values) {
-                        AttributeSink::set_attribute(&mut self.animation,SettableAttribute {name,value,normalized:false,sequence_id:-1});
+                    use skate_core::animation::playback_parameters::{
+                        AttributeSink, SettableAttribute,
+                    };
+                    let acceleration = self
+                        .bump_acceleration
+                        .ok_or("SetBumpCoefficients requires PhysOutAnimation112")?;
+                    let flags = self
+                        .animation
+                        .skater_animation_flags
+                        .ok_or("SetBumpCoefficients requires live ISkaterAnim stance")?;
+                    let values = skate_core::animation::bump::coefficients(
+                        acceleration,
+                        flags & 0x4000_0000 != 0,
+                        &self.bump_settings,
+                    );
+                    for (name, value) in names.into_iter().zip(values) {
+                        AttributeSink::set_attribute(
+                            &mut self.animation,
+                            SettableAttribute {
+                                name,
+                                value,
+                                normalized: false,
+                                sequence_id: -1,
+                            },
+                        );
                     }
                 }
             }

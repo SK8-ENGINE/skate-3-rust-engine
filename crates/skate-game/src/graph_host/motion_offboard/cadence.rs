@@ -7,6 +7,7 @@ use skate_core::animation::{
 };
 use skate_data::state_graph::attributes::Attributes;
 #[cfg(test)]
+#[path = "cadence/tests.rs"]
 mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

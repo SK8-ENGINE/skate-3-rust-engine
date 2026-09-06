@@ -147,7 +147,7 @@ pub(super) fn axis_rotation(axis: Vector, angle: f32) -> Transform {
 }
 
 ///82BD3150 returns the remaining rotation angle as well as the blended frame.
-pub(super) fn interpolate(a: &Transform, b: &Transform, weight: f32) -> (Transform, f32) {
+pub fn interpolate(a: &Transform, b: &Transform, weight: f32) -> (Transform, f32) {
     if weight >= 1.0 {
         return (*b, 0.0);
     }

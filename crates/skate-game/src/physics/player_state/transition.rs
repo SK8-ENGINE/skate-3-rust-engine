@@ -20,6 +20,8 @@ impl PhysicalStateCalls for Calls {
                 | PhysicalStateId::SlideGround
                 | PhysicalStateId::WipeoutGround
                 | PhysicalStateId::Teleporting
+                | PhysicalStateId::BipedAir
+                | PhysicalStateId::BipedGround
         ));
     }
     fn enter(&mut self, call: StateCall) {
@@ -32,6 +34,8 @@ impl PhysicalStateCalls for Calls {
                 | PhysicalStateId::SlideGround
                 | PhysicalStateId::WipeoutGround
                 | PhysicalStateId::Teleporting
+                | PhysicalStateId::BipedAir
+                | PhysicalStateId::BipedGround
         ));
     }
 }
@@ -55,7 +59,9 @@ pub(super) fn set(
         | PhysicalStateId::GroundAnimation
         | PhysicalStateId::SlideGround
         | PhysicalStateId::WipeoutGround
-        | PhysicalStateId::Teleporting => matches!(
+        | PhysicalStateId::Teleporting
+        | PhysicalStateId::BipedAir
+        | PhysicalStateId::BipedGround => matches!(
             requested,
             PhysicalStateId::PhysicsGround
                 | PhysicalStateId::PhysicsAir
@@ -64,6 +70,8 @@ pub(super) fn set(
                 | PhysicalStateId::SlideGround
                 | PhysicalStateId::WipeoutGround
                 | PhysicalStateId::Teleporting
+                | PhysicalStateId::BipedAir
+                | PhysicalStateId::BipedGround
         ),
         _ => false,
     };
@@ -141,6 +149,8 @@ pub(super) fn set(
     //Native82DB8540 publishes Processed state/history BEFORE old Exit. The
     //same retained objects then receive Exit followed by the new Enter.
     match current {
+        PhysicalStateId::BipedAir => super::super::offboard::air_state::exit(physics, skater),
+        PhysicalStateId::BipedGround => super::super::offboard::ground_state::exit(physics, skater),
         PhysicalStateId::PhysicsGround => super::super::ground_exit::exit(physics, skater),
         PhysicalStateId::PhysicsAir => super::super::air_phase::exit(skater),
         PhysicalStateId::KnownAir => {
@@ -153,6 +163,10 @@ pub(super) fn set(
         _ => unreachable!("state support checked before publication"),
     }
     match requested {
+        PhysicalStateId::BipedAir => super::super::offboard::air_state::enter(physics, skater),
+        PhysicalStateId::BipedGround => {
+            super::super::offboard::ground_state::enter(physics, skater)
+        }
         PhysicalStateId::PhysicsGround => super::super::ground_phase::enter(physics, skater),
         PhysicalStateId::PhysicsAir => super::super::air_phase::enter(physics, skater),
         PhysicalStateId::KnownAir => super::super::known_air::enter(physics, skater),
