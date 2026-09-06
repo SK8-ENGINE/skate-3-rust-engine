@@ -268,7 +268,7 @@ pub(crate) fn advance(
     //Native Listener::Fill825999F0, after derived controller sampling and before AG.
     let mut action_intents = controls.action_intents.clone();
     use skate_core::input::offboard_intentions::{
-        AnalogObservation, produce_analog, produce_discrete,
+        AnalogObservation, produce_analog_world, produce_discrete,
     };
     let biped = &skater.offboard.controller.state.contact;
     for intent in produce_discrete(
@@ -277,8 +277,11 @@ pub(crate) fn advance(
         physical.air.use_air_reckoning_452 != 0,
     )
     .into_iter()
-    .chain(produce_analog(
-        &controls.controller,
+    .chain(produce_analog_world(
+        controls.offboard_direction.unwrap_or_else(|| {
+            let words = controls.controller.words();
+            [f32::from_bits(words[7]), 0., f32::from_bits(words[8]), 0.]
+        }),
         AnalogObservation {
             effective_skeleton_z: p.effective_anim_transform_192[2].map(f32::from_bits),
             biped_correction: biped.active.then_some(biped.direction),

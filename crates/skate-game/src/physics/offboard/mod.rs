@@ -1,5 +1,6 @@
 //! Off-board game adapters over the shared physical and scene owners.
 pub(crate) mod air_state;
+pub(crate) mod air_diagnostics;
 pub(crate) mod air_trajectory;
 pub(crate) mod board_effects;
 pub(crate) mod contact_queries;

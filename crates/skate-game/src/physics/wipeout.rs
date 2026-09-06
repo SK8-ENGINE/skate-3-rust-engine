@@ -117,6 +117,7 @@ pub(super) fn check_after_physics(
                     ],
                 },
             );
+            super::offboard::air_diagnostics::record(skater);
             Ok(())
         }
         PhysicalStateId::PhysicsGround | PhysicalStateId::SlideGround => {

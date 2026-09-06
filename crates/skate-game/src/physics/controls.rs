@@ -12,6 +12,7 @@ use skate_core::input::{
 #[derive(Resource)]
 pub(crate) struct PlayerControls {
     pub controller: DerivedControllerInput,
+    pub offboard_direction: Option<[f32; 4]>,
     pub intents: Vec<RidingIntent>,
     pub action_intents: IntentMap,
     pub ticks: u64,
@@ -27,6 +28,7 @@ impl Default for PlayerControls {
         controller.initialize();
         Self {
             controller,
+            offboard_direction: None,
             intents: Vec::new(),
             action_intents: IntentMap::new(),
             ticks: 0,
@@ -43,6 +45,7 @@ pub(super) fn sample(
     input: Res<ControllerInput>,
     physics: Res<GamePhysics>,
     skater: Res<SkaterRuntime>,
+    camera: Res<crate::camera::CameraRuntime>,
     mut player: ResMut<PlayerControls>,
 ) {
     let mut map = input.player_actions();
@@ -52,6 +55,18 @@ pub(super) fn sample(
         physics.settings.input_magnitude_threshold,
         skater.player_input.physical.scoring.capabilities_204,
     );
+    if let Some(frame) = camera.frame {
+        let at = Vec3::from_array(frame.basis.columns[2]);
+        let forward = Vec3::new(at.x, 0., at.z).normalize_or_zero();
+        if forward != Vec3::ZERO {
+            // Match camera::present: native camera Right becomes Bevy -Right.
+            let right = forward.cross(Vec3::Y);
+            let words = player.controller.words();
+            let direction = right * f32::from_bits(words[7])
+                + forward * f32::from_bits(words[8]);
+            player.offboard_direction = Some([direction.x, 0., direction.z, 0.]);
+        }
+    }
     player.publish_gestures(physics.animation_profile.physics_mode, skater.player_input.physical.state.state_16);
 }
 
@@ -69,6 +84,7 @@ impl PlayerControls {
     }
 
     pub fn update(&mut self, map: &mut impl ActionMap, dt: f32, magnitude_threshold: f32, physical_capabilities: u32) {
+        self.offboard_direction = None;
         self.controller.update(
             map,
             dt,

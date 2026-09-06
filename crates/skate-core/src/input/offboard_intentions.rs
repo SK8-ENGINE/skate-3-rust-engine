@@ -87,6 +87,14 @@ pub fn produce_analog(
 ) -> [OffboardIntent; 4] {
     let words = controller.words();
     let stick = [f32::from_bits(words[7]), 0.0, f32::from_bits(words[8]), 0.0];
+    produce_analog_world(stick, observation)
+}
+
+/// Host camera conversion precedes the native world-space Biped attributes.
+pub fn produce_analog_world(
+    stick: [f32; 4],
+    observation: AnalogObservation,
+) -> [OffboardIntent; 4] {
     let mut horizontal = observation.effective_skeleton_z;
     horizontal[1] = 0.0;
     let forward = safe_unit(horizontal);

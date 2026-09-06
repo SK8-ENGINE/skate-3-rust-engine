@@ -16,6 +16,7 @@ fn effective(skater: &SkaterRuntime) -> Frame {
     frame
 }
 pub(crate) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
+    skater.offboard.air_diagnostics.clear();
     let frame = effective(skater);
     let p = &skater.player_input.processed;
     let body = skater.animated_skeleton.board_frames.com_frame[3];
