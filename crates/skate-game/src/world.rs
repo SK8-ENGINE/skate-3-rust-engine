@@ -23,6 +23,8 @@ fn spawn(
     manifest: Res<AssetManifest>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    config: Res<crate::config::Config>,
 ) {
     commands
         .spawn((PlayerRoot, Transform::default(), Visibility::default()))
@@ -31,6 +33,10 @@ fn spawn(
                 GltfAssetLabel::Scene(0).from_asset(manifest.0.character_scene.clone()),
             )));
         });
+    if let Some(map) = &config.map {
+        crate::skate_world::spawn(map, &mut commands, &mut meshes, &mut materials, &mut images);
+        return;
+    }
     let colors = [
         Color::srgb(0.16, 0.19, 0.21),
         Color::srgb(0.48, 0.35, 0.22),

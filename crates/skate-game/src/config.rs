@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub(crate) struct Config {
     pub asset_root: PathBuf,
     pub verification_capture: Option<PathBuf>,
+    pub map: Option<skate_data::skate_map::SkateMap>,
 }
 
 impl Config {
@@ -12,12 +13,17 @@ impl Config {
         let mut config = Self {
             asset_root: PathBuf::from("assets"),
             verification_capture: None,
+            map: None,
         };
         let mut args = std::env::args_os().skip(1);
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--assets") => {
                     config.asset_root = args.next().ok_or("--assets requires a directory")?.into()
+                }
+                Some("--map") => {
+                    let path = PathBuf::from(args.next().ok_or("--map requires a .skate file")?);
+                    config.map = Some(skate_data::skate_map::SkateMap::load(&path)?);
                 }
                 Some("--verify") => {
                     config.verification_capture = Some(
@@ -28,7 +34,7 @@ impl Config {
                 }
                 _ => {
                     return Err(format!(
-                        "Unknown argument {arg:?}. Usage: skate-game [--assets DIRECTORY] [--verify CAPTURE.png]"
+                        "Unknown argument {arg:?}. Usage: skate-game [--assets DIRECTORY] [--map MAP.skate] [--verify CAPTURE.png]"
                     ));
                 }
             }

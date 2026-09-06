@@ -11,6 +11,7 @@ mod physics;
 mod skater_animation;
 mod verification;
 mod world;
+mod skate_world;
 
 fn main() -> bevy::app::AppExit {
     let config = match config::Config::from_env() {
@@ -38,7 +39,13 @@ fn main() -> bevy::app::AppExit {
             return bevy::app::AppExit::error();
         }
     };
-    let physics = match physics::GamePhysics::load(&config.asset_root) {
+    if let Some(map) = &config.map {
+        if let Err(error) = skate_world::validate_runtime(map) {
+            eprintln!("{error}");
+            return bevy::app::AppExit::error();
+        }
+    }
+    let physics = match physics::GamePhysics::load_with_map(&config.asset_root, config.map.as_ref()) {
         Ok(physics) => physics,
         Err(error) => {
             eprintln!("{error}");

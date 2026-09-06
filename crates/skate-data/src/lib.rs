@@ -11,3 +11,4 @@ pub mod input_config;
 pub mod physics_skeleton;
 mod sha256;
 pub mod state_graph;
+pub mod skate_map;

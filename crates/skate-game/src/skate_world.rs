@@ -1,0 +1,503 @@
+//! Adapter for authored .skate world geometry. Does not replace controllers.
+use bevy::{
+    asset::RenderAssetUsages,
+    image::ImageSampler,
+    prelude::*,
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+};
+use skate_core::{
+    math::Vector3,
+    physics::{
+        board_world::{
+            BoardWorld, WorldTriangle,
+            query_metadata::{Bounds, QueryMesh, QueryMetadata, QueryPool},
+        },
+        collision::TriangleFeature,
+        contact::RetailContactMaterial,
+        drive_frames::RetailAffineTransform,
+    },
+};
+use skate_data::skate_map::SkateMap;
+use std::collections::HashMap;
+
+pub(crate) fn validate_runtime(map: &SkateMap) -> Result<(), String> {
+    if map.geometry.collision.is_empty() {
+        return Err("SKATE map has no collision geometry".into());
+    }
+    if map
+        .geometry
+        .collision
+        .iter()
+        .any(|t| t.native_edges.is_some())
+    {
+        return Err("SKATE native collision edge codes are preserved by the reader, but the compressed retail-edge decoder is not yet connected to this game's triangle adapter. Refusing to replace them with regenerated edges.".into());
+    }
+    if !map.doors.is_empty() {
+        return Err(format!(
+            "Map '{}' contains {} hinged doors. This imported game has no door body/controller adapter yet; refusing to drop their geometry or turn them into static walls.",
+            map.name,
+            map.doors.len()
+        ));
+    }
+    for extension in &map.extensions {
+        let tag = String::from_utf8_lossy(&extension.tag);
+        if extension.tag != *b"WMET" && extension.tag != *b"WCFG" && extension.tag != *b"BMAT" {
+            return Err(format!(
+                "SKATE extension {tag} schema {} is decoded but its runtime adapter is not implemented. Refusing to silently omit potentially required world geometry.",
+                extension.schema
+            ));
+        }
+        eprintln!(
+            "SKATE LIMITATION: {tag} extension retained; its runtime behavior is not connected."
+        );
+    }
+    if map.materials.iter().any(|m| m.retail_definition.is_some()) {
+        eprintln!(
+            "SKATE LIMITATION: retail shader definitions retained; rendering uses the package's portable PBR material fields."
+        );
+    }
+    if map.textures.iter().any(|t| t.width == 0) {
+        return Err(
+            "SKATE contains external texture placeholders; supply a package with embedded textures"
+                .into(),
+        );
+    }
+    if !map.rails.is_empty() {
+        eprintln!(
+            "SKATE LIMITATION: {} rail records parsed, but supplied game has no nonempty grind-edge controller. Rails will not engage grinds.",
+            map.rails.len()
+        );
+    }
+    if !map.routes.is_empty() {
+        eprintln!(
+            "SKATE LIMITATION: {} NPC routes parsed; supplied game has no NPC controller.",
+            map.routes.len()
+        );
+    }
+    if map.lights.iter().any(|l| l.kind == 2) {
+        eprintln!(
+            "SKATE LIMITATION: area-light records retained; Bevy adapter currently renders point and spot lights only."
+        );
+    }
+    eprintln!(
+        "SKATE LIMITATION: using existing game directional/ambient lighting with map horizon color; authored sky/day-night controller is not yet connected."
+    );
+    eprintln!(
+        "SKATE_MAP_LOADED name={:?} version={} render_triangles={} collision_triangles={} textures={} spawn={:?}",
+        map.name,
+        map.version,
+        map.geometry.indices.len() / 3,
+        map.geometry.collision.len(),
+        map.textures.len(),
+        map.spawn
+    );
+    Ok(())
+}
+
+pub(crate) fn collision_world(
+    map: &SkateMap,
+    material: RetailContactMaterial,
+) -> Result<BoardWorld, String> {
+    // Match the reference RW mesh compiler's 1 mm vertex welding and reversed
+    // edge pairing. Triangle diagonals are adjacency, never authored ledges.
+    let mut welded = HashMap::<[i64; 3], usize>::new();
+    let mut positions = Vec::<Vec3>::new();
+    let mut vertices = Vec::new();
+    let mut normals = Vec::new();
+    for tri in &map.geometry.collision {
+        let ids = tri.points.map(|p| {
+            let inverse = 1.0 / f64::from(0.001_f32);
+            let key = p.map(|v| (f64::from(v) * inverse).round() as i64);
+            *welded.entry(key).or_insert_with(|| {
+                let id = positions.len();
+                positions.push(Vec3::from_array(p));
+                id
+            })
+        });
+        let [a, b, c] = tri.points.map(Vec3::from_array);
+        let normal = (b - a)
+            .cross(c - a)
+            .try_normalize()
+            .ok_or("Invalid SKATE collision triangle normal")?;
+        vertices.push(ids);
+        normals.push(normal);
+    }
+    let mut cosines = vec![[1.; 3]; vertices.len()];
+    let mut flags =
+        vec![TriangleFeature::ONE_SIDED | TriangleFeature::USE_EDGE_COSINES | 0xe0; vertices.len()];
+    let mut open = HashMap::<(usize, usize), (usize, usize)>::new();
+    for (i, ids) in vertices.iter().enumerate() {
+        for edge in 0..3 {
+            let (a, b) = (ids[edge], ids[(edge + 1) % 3]);
+            if let Some((other, oe)) = open.remove(&(b, a)) {
+                let cosine = normals[i].dot(normals[other]).clamp(-1., 1.);
+                let orientation =
+                    (positions[b] - positions[a]).dot(normals[i].cross(normals[other]));
+                // ExtendedEdgeCosine / MakeEdgeCode in rw_collision_mesh.cpp:
+                // orientation >= -1e-6 is convex; flat edges have no convex bit.
+                for (ti, e) in [(i, edge), (other, oe)] {
+                    cosines[ti][e] = cosine;
+                    if orientation <= -1.0e-6 || cosine >= 1. {
+                        flags[ti] &= !(0x20 << e);
+                    }
+                }
+            } else {
+                open.entry((a, b)).or_insert((i, edge));
+            }
+        }
+    }
+    let mut adjacent = vec![Vec::new(); positions.len()];
+    for (i, ids) in vertices.iter().enumerate() {
+        for &v in ids {
+            adjacent[v].push(i);
+        }
+    }
+    for (v, faces) in adjacent.iter().enumerate() {
+        let reference = normals[faces[0]];
+        if faces
+            .iter()
+            .all(|&i| (reference.dot(normals[i]) - 1.).abs() <= 0.01)
+        {
+            for &i in faces {
+                for corner in 0..3 {
+                    if vertices[i][corner] == v {
+                        flags[i] |= 0x200 << corner;
+                    }
+                }
+            }
+        }
+    }
+    let mut triangles = Vec::with_capacity(vertices.len());
+    let mut packed_surfaces = Vec::with_capacity(vertices.len());
+    for (i, source) in map.geometry.collision.iter().enumerate() {
+        let m = &map.materials[source.material as usize - 1];
+        // Exact EncodeRwSurfaceId mapping from the reference native adapter.
+        packed_surfaces.push((m.audio | (m.physics << 7) | (m.pattern << 12)) as u16);
+        let points = vertices[i].map(|id| {
+            let p = positions[id];
+            Vector3::new(p.x, p.y, p.z)
+        });
+        // Keep the supplied game's original static-world contact combine values.
+        // The native map bridge supplies packed surfaces, not a guessed split of
+        // the package's single friction scalar into static/dynamic coefficients.
+        triangles.push(
+            WorldTriangle::from_vertices(
+                points,
+                material,
+                source.surface,
+                flags[i],
+                cosines[i],
+                0.,
+            )
+            .ok_or("Invalid SKATE collision volume")?,
+        );
+    }
+    let bounds = Bounds::from_points(triangles.iter().flat_map(|t| t.triangle.vertices))
+        .ok_or("SKATE collision bounds empty")?;
+    let metadata = QueryMetadata {
+        packed_surfaces,
+        meshes: vec![QueryMesh {
+            triangle_range: 0..triangles.len(),
+            local_to_world: RetailAffineTransform::IDENTITY,
+            world_to_local: RetailAffineTransform::IDENTITY,
+            local_bounds: bounds,
+            matching_group: -1,
+            pool: QueryPool::Ground,
+        }],
+        static_edges: vec![],
+        island_flags: 0,
+    };
+    BoardWorld::with_query_metadata(triangles, metadata).map_err(str::to_owned)
+}
+
+pub(crate) fn spawn(
+    map: &SkateMap,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+) {
+    // Texture roles have different transfer functions even when sharing a record.
+    let mut cache = HashMap::<(u32, u8), Handle<Image>>::new();
+    let mut texture = |id: u32, role: u8| -> Option<Handle<Image>> {
+        if id == 0 {
+            return None;
+        }
+        Some(
+            cache
+                .entry((id, role))
+                .or_insert_with(|| {
+                    let source = &map.textures[id as usize - 1];
+                    let (format, bytes) = if role == 1 {
+                        let mut bytes = Vec::with_capacity(source.rgba.len() * 2);
+                        for pixel in source.rgba.chunks_exact(4) {
+                            for (i, &byte) in pixel.iter().enumerate() {
+                                let v = f32::from(byte) / 255.;
+                                let linear = if i == 3 { 1. } else { v * v * 4. };
+                                bytes.extend_from_slice(&half::f16::from_f32(linear).to_le_bytes());
+                            }
+                        }
+                        (TextureFormat::Rgba16Float, bytes)
+                    } else {
+                        let srgb =
+                            role == 0 && source.color_space == 1 && !(2..=3).contains(&map.version);
+                        (
+                            if srgb {
+                                TextureFormat::Rgba8UnormSrgb
+                            } else {
+                                TextureFormat::Rgba8Unorm
+                            },
+                            source.rgba.clone(),
+                        )
+                    };
+                    let mut image = Image::new(
+                        Extent3d {
+                            width: source.width,
+                            height: source.height,
+                            depth_or_array_layers: 1,
+                        },
+                        TextureDimension::D2,
+                        bytes,
+                        format,
+                        RenderAssetUsages::default(),
+                    );
+                    let mut sampler = bevy::image::ImageSamplerDescriptor::linear();
+                    if role != 1 {
+                        sampler.address_mode_u = bevy::image::ImageAddressMode::Repeat;
+                        sampler.address_mode_v = bevy::image::ImageAddressMode::Repeat;
+                    }
+                    image.sampler = ImageSampler::Descriptor(sampler);
+                    images.add(image)
+                })
+                .clone(),
+        )
+    };
+    let mut groups = vec![Vec::<u32>::new(); map.materials.len()];
+    for tri in map.geometry.indices.chunks_exact(3) {
+        groups[map.geometry.vertices[tri[0] as usize].material as usize - 1].extend_from_slice(tri);
+    }
+    for (m, indices) in map.materials.iter().zip(groups) {
+        if indices.is_empty() {
+            continue;
+        }
+        // Reindex each material once, preserving authored normals and both UV sets.
+        let mut remap = HashMap::new();
+        let mut vertices = Vec::new();
+        let local: Vec<u32> = indices
+            .into_iter()
+            .map(|index| {
+                *remap.entry(index).or_insert_with(|| {
+                    let id = vertices.len() as u32;
+                    vertices.push(&map.geometry.vertices[index as usize]);
+                    id
+                })
+            })
+            .collect();
+        let mut mesh = Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vertices.iter().map(|v| v.position).collect::<Vec<_>>(),
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_NORMAL,
+            vertices.iter().map(|v| v.normal).collect::<Vec<_>>(),
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_UV_0,
+            vertices.iter().map(|v| v.uv).collect::<Vec<_>>(),
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_UV_1,
+            vertices.iter().map(|v| v.lightmap_uv).collect::<Vec<_>>(),
+        )
+        .with_inserted_indices(bevy::mesh::Indices::U32(local));
+        if vertices.iter().all(|v| v.tangent_frame.is_some()) {
+            let tangents: Vec<[f32; 4]> = vertices
+                .iter()
+                .map(|v| {
+                    let frame = v
+                        .tangent_frame
+                        .unwrap()
+                        .map(|b| (b as i8 as f32 / 127.).max(-1.));
+                    let binormal = Vec3::new(frame[0], frame[1], frame[2]);
+                    let tangent = binormal.cross(Vec3::from_array(v.normal)) * frame[3];
+                    [tangent.x, tangent.y, tangent.z, frame[3]]
+                })
+                .collect();
+            mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+        } else if m.textures[2] != 0 {
+            if let Err(error) = mesh.generate_tangents() {
+                warn!("SKATE material {} tangent generation: {error}", m.name);
+            }
+        }
+        let orm = texture(m.textures[3], 2);
+        let material = materials.add(StandardMaterial {
+            base_color: Color::linear_rgb(m.color[0], m.color[1], m.color[2]),
+            base_color_texture: texture(m.textures[0], 0),
+            normal_map_texture: texture(m.textures[2], 2),
+            metallic_roughness_texture: orm.clone(),
+            occlusion_texture: orm,
+            metallic: if m.textures[3] != 0 { 1. } else { 0. },
+            perceptual_roughness: m.roughness,
+            emissive: LinearRgba::rgb(
+                m.color[0] * m.emissive,
+                m.color[1] * m.emissive,
+                m.color[2] * m.emissive,
+            ),
+            emissive_texture: texture(m.textures[4], 0),
+            alpha_mode: match m.alpha_mode {
+                1 => AlphaMode::Mask(m.alpha_cutoff),
+                2 => AlphaMode::Blend,
+                _ => AlphaMode::Opaque,
+            },
+            lightmap_exposure: m.indirect_strength,
+            ..default()
+        });
+        let mut entity = commands.spawn((
+            Name::new(m.name.clone()),
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(material),
+            Transform::default(),
+        ));
+        if let Some(image) = texture(m.textures[1], 1) {
+            entity.insert(bevy::pbr::Lightmap {
+                image,
+                uv_rect: Rect::new(0., 0., 1., 1.),
+                bicubic_sampling: false,
+            });
+        }
+    }
+    for light in &map.lights {
+        let color = Color::linear_rgb(light.color[0], light.color[1], light.color[2]);
+        let transform = Transform::from_translation(Vec3::from_array(light.position));
+        match light.kind {
+            0 => {
+                commands.spawn((
+                    Name::new(light.name.clone()),
+                    PointLight {
+                        color,
+                        intensity: light.intensity,
+                        range: light.range,
+                        radius: light.radius,
+                        ..default()
+                    },
+                    transform,
+                ));
+            }
+            1 => {
+                commands.spawn((
+                    Name::new(light.name.clone()),
+                    SpotLight {
+                        color,
+                        intensity: light.intensity,
+                        range: light.range,
+                        radius: light.radius,
+                        inner_angle: light.inner_cos.acos(),
+                        outer_angle: light.outer_cos.acos(),
+                        ..default()
+                    },
+                    transform.looking_to(Vec3::from_array(light.direction), Vec3::Y),
+                ));
+            }
+            _ => {}
+        }
+    }
+    commands.insert_resource(ClearColor(Color::linear_rgb(
+        map.environment[3],
+        map.environment[4],
+        map.environment[5],
+    )));
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 11000.,
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(4., 7., 4.).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    info!(
+        "SKATE_WORLD_READY name={:?} render_triangles={} collision_triangles={}",
+        map.name,
+        map.geometry.indices.len() / 3,
+        map.geometry.collision.len()
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn demo() -> SkateMap {
+        SkateMap::parse(include_bytes!("../../../maps/format-demo.skate")).unwrap()
+    }
+    fn material() -> RetailContactMaterial {
+        RetailContactMaterial {
+            static_friction: 0.,
+            dynamic_friction: 0.,
+            restitution: 1.,
+        }
+    }
+    #[test]
+    fn map_collision_uses_separate_geometry_and_surface_metadata() {
+        let mut map = demo();
+        map.geometry.vertices[0].position = [1000.; 3];
+        map.materials[0].audio = 42;
+        map.materials[0].physics = 4;
+        map.materials[0].pattern = 7;
+        let world = collision_world(&map, material()).unwrap();
+        assert_eq!(world.triangles().len(), 2);
+        assert_eq!(
+            world.triangles()[0].triangle.vertices[0],
+            Vector3::new(-30., 0., -30.)
+        );
+        assert!(world.triangles()[0].triangle.feature.normal.y > 0.999);
+        assert_eq!(
+            world.query_metadata().unwrap().packed_surfaces,
+            vec![42 | (4 << 7) | (7 << 12); 2]
+        );
+        assert!(world.query_metadata().unwrap().static_edges.is_empty());
+    }
+    #[test]
+    fn shared_flat_diagonal_is_not_a_convex_contact_edge() {
+        let world = collision_world(&demo(), material()).unwrap();
+        let a = world.triangles()[0].triangle.feature;
+        let b = world.triangles()[1].triangle.feature;
+        assert!(!a.edge_convex(2));
+        assert!(!b.edge_convex(0));
+        assert!(a.edge_convex(0));
+        assert_eq!(a.edge_cosines[2], 1.);
+        assert!(a.vertex_disabled(0));
+    }
+    #[test]
+    fn render_adapter_creates_mesh_and_decoded_lightmap_without_a_window() {
+        let map = demo();
+        let mut world = World::new();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let mut images = Assets::<Image>::default();
+        spawn(
+            &map,
+            &mut Commands::new(&mut queue, &world),
+            &mut meshes,
+            &mut materials,
+            &mut images,
+        );
+        queue.apply(&mut world);
+        assert_eq!(meshes.len(), 1);
+        assert_eq!(materials.len(), 1);
+        assert_eq!(images.len(), 2);
+        assert_eq!(world.query::<&Mesh3d>().iter(&world).count(), 1);
+        let lightmap = world
+            .query::<&bevy::pbr::Lightmap>()
+            .single(&world)
+            .unwrap();
+        let image = images.get(&lightmap.image).unwrap();
+        assert_eq!(image.texture_descriptor.format, TextureFormat::Rgba16Float);
+        let data = image.data.as_ref().unwrap();
+        let value = half::f16::from_le_bytes([data[0], data[1]]).to_f32();
+        assert!((value - (64. / 255_f32).powi(2) * 4.).abs() < 0.0002);
+    }
+}

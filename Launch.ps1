@@ -1,3 +1,4 @@
+param([string]$Map)
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
@@ -9,8 +10,15 @@ try {
     Write-Host "Log: $log"
     $errorLog = [System.IO.Path]::ChangeExtension($log, 'stderr.log')
     $assetArgument = '"' + (Join-Path $PSScriptRoot 'assets') + '"'
+    $gameArguments = @('--assets', $assetArgument)
+    if ($Map) {
+        $mapPath = (Resolve-Path -LiteralPath $Map).Path
+        if ([System.IO.Path]::GetExtension($mapPath) -ine '.skate') { throw 'Select a .skate map file.' }
+        $gameArguments += @('--map', ('"' + $mapPath + '"'))
+        Write-Host "Map: $mapPath"
+    }
     $game = Start-Process -FilePath $executable -WorkingDirectory $PSScriptRoot `
-        -ArgumentList @('--assets', $assetArgument) -NoNewWindow -Wait -PassThru `
+        -ArgumentList $gameArguments -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput $log -RedirectStandardError $errorLog
     if ($game.ExitCode -ne 0) {
         Get-Content -LiteralPath $errorLog -Tail 30

@@ -95,10 +95,14 @@ impl GamePhysics {
     }
 
     pub fn load(asset_root: &std::path::Path) -> Result<Self, String> {
+        Self::load_with_map(asset_root, None)
+    }
+
+    pub fn load_with_map(asset_root: &std::path::Path, map: Option<&skate_data::skate_map::SkateMap>) -> Result<Self, String> {
         let data = Collections::load(asset_root)?;
         let settings = PhysicsSettings::load(&data)?;
         let animation_profile = animation_phase::AnimationProfile::load(&data, "easy")?;
-        let spawn = RetailAffineTransform {
+        let mut spawn = RetailAffineTransform {
             translation: Vector3::new(
                 0.0,
                 ground::HEIGHT + settings.wheel_radius - settings.authored[0].translation.y,
@@ -106,6 +110,12 @@ impl GamePhysics {
             ),
             ..RetailAffineTransform::IDENTITY
         };
+        if let Some(map) = map {
+            // Native collision placement aligns the package spawn with the
+            // wheel-ground point (skate3_native_collision.cpp), not skeleton COM.
+            spawn.translation = Vector3::new(map.spawn[0], map.spawn[1] + settings.wheel_radius - settings.authored[0].translation.y, map.spawn[2]);
+            spawn.basis = skate_core::math::Basis3 { columns: Mat3::from_rotation_y(map.heading).to_cols_array_2d() };
+        }
         let board = BoardRuntime::new(
             settings.masses,
             settings.authored,
@@ -113,7 +123,10 @@ impl GamePhysics {
             settings.step.simulation,
             BoardMotion::Active,
         );
-        let world = ground::world(settings.floor_material);
+        let world = match map {
+            Some(map) => crate::skate_world::collision_world(map, settings.floor_material)?,
+            None => ground::world(settings.floor_material),
+        };
         let processed_flags_2468 = 0x2000;
         let riding = RidingOutputs::load(&data, &board, processed_flags_2468)?;
         let (query, retention) = ground::query_settings();

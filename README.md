@@ -3,6 +3,16 @@
 Double-click **PLAY.bat** to launch. Use an XInput-compatible controller;
 **Esc** exits. Startup selects the supplied **Easy** profile.
 
+Double-click **PLAY-MAP.bat** to choose a `.skate` map, or drag a map onto
+either launcher. `maps/private/` contains local copies of the transition park
+and parity grid. `maps/format-demo.skate` is a small original textured floor.
+No-map PLAY.bat still loads the supplied test environment.
+
+This folder is a **local Git repository**, on `lol/skate-map-support`, with no
+GitHub remote. Private assets, private maps, binaries, logs and build outputs
+are excluded. See [the map support notes](docs/SKATE-MAPS.md) for supported
+versions and the explicit runtime limitations.
+
 This folder is separate from the earlier clone. It contains the contents of
 `crates (1).zip` and `assets.zip`, a reconstructed Cargo workspace, and launch
 scripts. The supplied stock animation banks, decoded frames, graphs, skater
