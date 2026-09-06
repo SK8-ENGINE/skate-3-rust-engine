@@ -20,6 +20,35 @@ fn parameter(mg_intent: &str, value: f32) -> Parameter {
 }
 
 #[test]
+fn gesture_behavior_publishes_and_releases_the_stock_tre_flip_intent() {
+    let mut config = parameter("", 0.0);
+    config.mg_intent = None;
+    let instance = ActionInstance {
+        operation: ActionOperation::CreateTrickIntentFromGesture {
+            group: crate::input::gesture_catalog::Group::Square,
+            override_name: None,
+        },
+        config,
+        parameters: Vec::new(),
+    };
+    let mut host = ActionHost::new(ActionInstances::new(vec![instance]), OperationRemap {
+        behaviors: vec![0], conditions: Vec::new(), hooks: Vec::new(),
+    });
+    let frame = Frame { dt: 1.0 / 60.0, current: None, last: None, state_times: Vec::new() };
+    for (mirrored, expected) in [(false, "360Flip"), (true, "Laserflip")] {
+        host.stance = Some((false, mirrored));
+        host.action_intents.insert("360Flip", 1.0);
+        Host::allocate(&mut host, 0, &frame);
+        Host::begin(&mut host, 0, [0; 6], &frame);
+        Host::update(&mut host, 0, [0; 6], &frame);
+        assert_eq!(host.motion_intents.get(expected), Some(&0.0));
+        Host::end(&mut host, 0, [0; 6], &frame);
+        assert!(host.motion_intents.is_empty());
+    }
+    assert!(host.errors.is_empty(), "{:?}", host.errors);
+}
+
+#[test]
 fn const_callbacks_publish_then_remove_motion_intent() {
     let instance = ActionInstance {
         operation: ActionOperation::CreateConstMgIntent,

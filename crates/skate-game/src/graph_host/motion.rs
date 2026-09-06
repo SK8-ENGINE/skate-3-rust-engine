@@ -44,6 +44,7 @@ pub struct MotionPhysical {
     pub foot_frame: Option<PushFootFrame>,
 }
 enum Instance {
+    Trick(i32),
     Stateless,
     IntentFilter(skate_core::animation::intent_filter::State),
     Landing(super::motion_landing::State),
@@ -69,6 +70,7 @@ enum Instance {
 impl Instance {
     fn new(operation: &MotionOperation) -> Self {
         match operation {
+            MotionOperation::Trick(_) => Self::Trick(0),
             MotionOperation::IntentFilter(_) => Self::IntentFilter(Default::default()),
             MotionOperation::Landing(_) => Self::Landing(Default::default()),
             MotionOperation::Wipeout(_) => Self::Wipeout(Default::default()),
@@ -134,6 +136,8 @@ pub struct MotionHost {
     ///SpecificCA4 bit26, getter8258F900/setter8258F910; reset clears it.
     pub is_power_sliding: bool,
     pub score_packet: super::motion_native::ScorePacket,
+    pub(super) trick_requests: super::motion_tricks::Requests,
+    pub(super) trick_height_settings: (bool, bool),
     pub action_intents: IntentMap,
     pub time_tags: Option<BTreeMap<String, f32>>,
     pub physical: Option<MotionPhysical>,
@@ -223,6 +227,8 @@ impl MotionHost {
             slide_latch: set_turning::SlideLatch::default(),
             is_power_sliding: false,
             score_packet: super::motion_native::ScorePacket::default(),
+            trick_requests: Default::default(),
+            trick_height_settings: (data.boolean("anim_motion", "jumping", "use_gesture_speed")?, data.boolean("anim_motion", "jumping", "clamp_gesture_to_antic")?),
             action_intents: IntentMap::new(),
             time_tags: None,
             physical: None,
@@ -372,3 +378,7 @@ mod slide_tests;
 #[cfg(test)]
 #[path = "tests/motion_bump.rs"]
 mod bump_tests;
+
+#[cfg(test)]
+#[path = "tests/motion_tricks.rs"]
+mod trick_tests;

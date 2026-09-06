@@ -8,6 +8,7 @@ pub mod animation_frames;
 pub mod animation_metadata;
 pub mod collections;
 pub mod input_config;
+pub mod gesture_patterns;
 pub mod physics_skeleton;
 mod sha256;
 pub mod state_graph;

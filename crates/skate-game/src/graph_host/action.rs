@@ -45,6 +45,7 @@ pub struct ActionHost {
     /// JuiceHook instance+8 starts with the native null intent name. Its
     /// update removes that pending key and resets it,82BA39A8.
     juice_pending: Vec<String>,
+    trick_handlers: Vec<crate::input::gesture_mapping::State>,
 }
 
 impl ActionHost {
@@ -109,6 +110,7 @@ impl ActionHost {
             body_flip: vec![body_flip_signal::State::default(); count],
             body_flip_settings: None,
             juice_pending: vec![String::new(); count],
+            trick_handlers: vec![crate::input::gesture_mapping::State::default(); count],
         }
     }
 
@@ -194,6 +196,7 @@ impl Host for ActionHost {
         self.time_handlers[behavior] = TimeMgIntent::default();
         self.body_flip[behavior] = body_flip_signal::State::default();
         self.juice_pending[behavior].clear();
+        self.trick_handlers[behavior] = crate::input::gesture_mapping::State::default();
         let result = self.next_instance;
         self.next_instance = self.next_instance.wrapping_add(1).max(1);
         result
@@ -202,6 +205,14 @@ impl Host for ActionHost {
         let Some(instance) = self.operation(behavior).cloned() else {
             return;
         };
+        if let ActionOperation::CreateTrickIntentFromGesture { group, override_name } = &instance.operation {
+            if let Some((_, mirrored)) = self.stance {
+                self.trick_handlers[behavior].begin(*group, override_name.as_deref(), &self.action_intents, &mut self.motion_intents, mirrored);
+            } else {
+                self.errors.push("CreateTrickIntentFromGesture requires published skater stance".into());
+            }
+            return;
+        }
         if instance.unsupported().is_some() {
             self.unsupported(behavior, &instance);
             return;
@@ -250,6 +261,10 @@ impl Host for ActionHost {
         let Some(instance) = self.operation(behavior).cloned() else {
             return;
         };
+        if matches!(instance.operation, ActionOperation::CreateTrickIntentFromGesture { .. }) {
+            self.trick_handlers[behavior].update(&mut self.motion_intents);
+            return;
+        }
         if instance.unsupported().is_some() {
             self.unsupported(behavior, &instance);
             return;
@@ -320,6 +335,10 @@ impl Host for ActionHost {
         let Some(instance) = self.operation(behavior).cloned() else {
             return;
         };
+        if matches!(instance.operation, ActionOperation::CreateTrickIntentFromGesture { .. }) {
+            self.trick_handlers[behavior].end(&mut self.motion_intents);
+            return;
+        }
         if let Some(name) = instance.config.mg_intent.as_deref() {
             let mutation = match instance.operation {
                 ActionOperation::CreateConstMgIntent => self.const_handlers[behavior].end(),

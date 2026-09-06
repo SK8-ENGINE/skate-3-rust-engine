@@ -73,7 +73,7 @@ pub enum ActionOperation {
     CreateMgTimeIntent,
     CreateConstMgIntent,
     BoardAdjust,
-    CreateTrickIntentFromGesture,
+    CreateTrickIntentFromGesture { group: crate::input::gesture_catalog::Group, override_name: Option<String> },
     JuiceHook,
     BodyFlippingSignal,
     /// Diagnostic presentation is owned by this host and has no intent effect.
@@ -120,9 +120,6 @@ impl ActionFactory {
                 ActionOperation::CreateConstMgIntent
             }
             (OperationKind::Behavior, "BoardAdjust") => ActionOperation::BoardAdjust,
-            (OperationKind::Behavior, "CreateTrickIntentFromGesture") => {
-                ActionOperation::CreateTrickIntentFromGesture
-            }
             (OperationKind::Behavior, "JuiceHook") => ActionOperation::JuiceHook,
             (OperationKind::Behavior, "BodyFlippingSignal") => ActionOperation::BodyFlippingSignal,
             _ => ActionOperation::Unsupported {
@@ -160,7 +157,12 @@ impl OperationFactory for ActionFactory {
                         .unwrap_or_else(|| Self::operation(kind, name))
                 }
             } else {
-                if kind == OperationKind::Behavior && name == "PrintText2D" {
+                if kind == OperationKind::Behavior && name == "CreateTrickIntentFromGesture" {
+                    ActionOperation::CreateTrickIntentFromGesture {
+                        group: crate::input::gesture_catalog::Group::parse(attributes.text("group").unwrap_or("Square")).map_err(ActionFactoryError)?,
+                        override_name: attributes.text("override").map(str::to_owned),
+                    }
+                } else if kind == OperationKind::Behavior && name == "PrintText2D" {
                     ActionOperation::PrintText(attributes.text("text").unwrap_or("").to_owned())
                 } else {
                     Self::operation(kind, name)
@@ -199,10 +201,6 @@ impl ActionInstance {
             ActionOperation::BoardAdjust => Some(UnsupportedOperation {
                 kind: OperationKind::Behavior,
                 name: "BoardAdjust".into(),
-            }),
-            ActionOperation::CreateTrickIntentFromGesture => Some(UnsupportedOperation {
-                kind: OperationKind::Behavior,
-                name: "CreateTrickIntentFromGesture".into(),
             }),
             _ => None,
         }

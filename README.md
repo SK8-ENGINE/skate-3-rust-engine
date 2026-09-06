@@ -3,6 +3,10 @@
 Double-click **PLAY.bat** to launch. Use an XInput-compatible controller;
 **Esc** exits. Startup selects the supplied **Easy** profile.
 
+The standing/rolling **360 flip** now uses the supplied gesture files and
+ActionGraph/MotionGraph route, including right-stick crouch preparation.
+See [360-flip integration and visual checks](docs/360-FLIP.md).
+
 Double-click **PLAY-MAP.bat** to choose a `.skate` map, or drag a map onto
 either launcher. `maps/private/` contains local copies of the transition park
 and parity grid. `maps/format-demo.skate` is a small original textured floor.

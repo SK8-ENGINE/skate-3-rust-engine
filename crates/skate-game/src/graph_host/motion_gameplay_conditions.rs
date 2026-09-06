@@ -40,6 +40,8 @@ pub enum GameplayCondition {
     CanEnterSlide { right: bool },
     GrabbingObject,
     Dark,
+    UnderflipRequested,
+    DarkCatchRequested,
     HandPlanting { state: u8, direction: u8 },
     EnteringSkitch,
     Skitching,
@@ -60,6 +62,8 @@ impl GameplayCondition {
                 | "CanEnterSlide"
                 | "IsGrabbingObject"
                 | "IsDark"
+                | "IsUnderflipRequested"
+                | "IsDarkCatchRequested"
                 | "IsHandPlanting"
                 | "IsEnteringSkitch"
                 | "IsSkitching"
@@ -81,6 +85,8 @@ impl GameplayCondition {
             },
             "IsGrabbingObject" => Self::GrabbingObject,
             "IsDark" => Self::Dark,
+            "IsUnderflipRequested" => Self::UnderflipRequested,
+            "IsDarkCatchRequested" => Self::DarkCatchRequested,
             "IsEnteringSkitch" => Self::EnteringSkitch,
             "IsSkitching" => Self::Skitching,
             "IsHandPlanting" => Self::HandPlanting {
@@ -132,7 +138,7 @@ impl GameplayCondition {
                         _ => false,
                     }
             }
-            Self::DroppingBoard | Self::Dark | Self::CanEnterSlide { .. } => return None,
+            Self::DroppingBoard | Self::Dark | Self::UnderflipRequested | Self::DarkCatchRequested | Self::CanEnterSlide { .. } => return None,
         })
     }
 
@@ -149,6 +155,8 @@ impl GameplayCondition {
             Self::DroppingBoard => p.dropping_board || host.animation.channels.has("RetrieveBoard"),
             //82BA79A0 calls the specific MotionGraph getter8258FB68.
             Self::Dark => host.riding.dark,
+            Self::UnderflipRequested => host.trick_requests.underflip,
+            Self::DarkCatchRequested => host.trick_requests.dark_catch,
             Self::CanEnterSlide { right } => {
                 //82BA6FE0 rejects RevertGround102, reverses the side for fakie,
                 //then reads its start bit in the retained C84 slide packet.

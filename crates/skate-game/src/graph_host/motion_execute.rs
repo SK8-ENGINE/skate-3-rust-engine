@@ -15,6 +15,14 @@ impl MotionHost {
             .get(behavior)
             .ok_or("Unbound MotionGraph behavior")?;
         let operation = self.operations[id].clone();
+        if let MotionOperation::Trick(operation) = operation {
+            let Some(&Instance::Trick(mut updates)) = self.instances.get(behavior) else {
+                return Err("Trick operation/instance mismatch".into());
+            };
+            let result = super::super::motion_tricks::execute(self, operation, &mut updates, phase);
+            self.instances[behavior] = Instance::Trick(updates);
+            return result;
+        }
         if let MotionOperation::Slide(operation) = operation {
             return self.execute_slide(behavior, operation, frame, phase);
         }

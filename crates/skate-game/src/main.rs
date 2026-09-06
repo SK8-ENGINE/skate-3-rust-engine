@@ -59,7 +59,13 @@ fn main() -> bevy::app::AppExit {
             return bevy::app::AppExit::error();
         }
     };
-    app::build(config, manifest, graphs, physics, skater).run()
+    let controls = match physics::PlayerControls::load(&config.asset_root) {
+        Ok(controls) => controls,
+        Err(error) => { eprintln!("{error}"); return bevy::app::AppExit::error(); }
+    };
+    let mut app = app::build(config, manifest, graphs, physics, skater);
+    app.insert_resource(controls);
+    app.run()
 }
 
 #[cfg(test)]

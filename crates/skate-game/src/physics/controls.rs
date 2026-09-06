@@ -19,6 +19,7 @@ pub(crate) struct PlayerControls {
     pub bumper_state_502: bool,
     pub bumper_state_104: bool,
     pub preferences: PushPreferences,
+    gestures: Option<crate::input::gesture_input::GestureInput>,
 }
 impl Default for PlayerControls {
     fn default() -> Self {
@@ -33,6 +34,7 @@ impl Default for PlayerControls {
             bumper_state_502: false,
             bumper_state_104: false,
             preferences: PushPreferences::default(),
+            gestures: None,
         }
     }
 }
@@ -50,9 +52,22 @@ pub(super) fn sample(
         physics.settings.input_magnitude_threshold,
         skater.player_input.physical.scoring.capabilities_204,
     );
+    player.publish_gestures(physics.animation_profile.physics_mode, skater.player_input.physical.state.state_16);
 }
 
 impl PlayerControls {
+    pub fn load(root: &std::path::Path) -> Result<Self, String> {
+        Ok(Self { gestures: Some(crate::input::gesture_input::GestureInput::load(root)?), ..Self::default() })
+    }
+
+    pub fn publish_gestures(&mut self, difficulty: u32, physical_state: u32) {
+        if let Some(gestures) = &mut self.gestures {
+            let words = self.controller.words();
+            let axes = [[words[7],words[8]], [words[9],words[10]]].map(|p|p.map(f32::from_bits));
+            gestures.publish(axes,difficulty,self.actor_flags,physical_state,&mut self.action_intents);
+        }
+    }
+
     pub fn update(&mut self, map: &mut impl ActionMap, dt: f32, magnitude_threshold: f32, physical_capabilities: u32) {
         self.controller.update(
             map,
@@ -70,6 +85,7 @@ impl PlayerControls {
         self.intents.extend(wipeout_intentions::produce(
             &self.controller, self.actor_flags, physical_capabilities,
         ));
+        self.intents.extend(skate_core::input::anticipation_intentions::produce(&self.controller));
         //GenerateActionGraphIntents82594310 clears the AG map through82BC1B68
         //before Listener::Fill. MG lifecycle intents use a different persistent map.
         self.action_intents.clear();

@@ -14,6 +14,7 @@ use skate_data::state_graph::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MotionOperation {
+    Trick(super::motion_tricks::Operation),
     Play(PlayAnimation),
     ///TU3 vtable82309664: Begin/Update/End all point to the empty82B61BB8.
     PrintText2D,
@@ -123,6 +124,7 @@ impl OperationFactory for MotionFactory {
                         super::motion_air_leg::Operation::parse(a),
                     )),
                     "ClearTrickAttr" => Some(MotionOperation::ClearTrickAttr),
+                    "SetTrickHeight" | "SetTrickAttr" | "ScoringTrick" | "MonitorUnderflip" | "SetDark" | "UpdateIsWeightOnNose" => super::motion_tricks::Operation::parse(a).map(MotionOperation::Trick),
                     "CharacterGesture" => Some(MotionOperation::CharacterGesture),
                     "DisallowPumping" => Some(MotionOperation::DisallowPumping),
                     "FakieHeadChannel" => Some(MotionOperation::FakieHeadChannel),

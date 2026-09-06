@@ -1,5 +1,7 @@
 //! Native input publication. Controller/graph producers remain separate stages.
 pub mod angle;
+pub mod gesture;
+pub mod anticipation_intentions;
 pub mod animation_packet;
 pub mod controller;
 pub mod gameplay_map;

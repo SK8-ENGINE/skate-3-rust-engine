@@ -20,6 +20,7 @@ pub(crate) mod motion_landing;
 mod motion_landing_execute;
 pub(crate) mod motion_native;
 mod motion_nodes;
+mod motion_tricks;
 #[path = "motion_offboard/push_off.rs"]
 pub(crate) mod motion_push_off;
 #[path = "motion_offboard/reset.rs"]
