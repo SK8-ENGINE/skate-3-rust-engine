@@ -95,9 +95,30 @@ impl Plugin for PerformancePlugin {
                         .before(RenderSystems::Render),
                 )
                 .add_systems(Render, render_finish.after(RenderSystems::PostCleanup));
+            render_app
+                .init_resource::<MeshBindingTimer>()
+                .add_systems(
+                    Render,
+                    mesh_binding_begin
+                        .in_set(RenderSystems::PrepareBindGroups)
+                        .before(bevy::pbr::prepare_mesh_bind_groups),
+                )
+                .add_systems(
+                    Render,
+                    mesh_binding_end
+                        .in_set(RenderSystems::PrepareBindGroups)
+                        .after(bevy::pbr::prepare_mesh_bind_groups),
+                );
         }
         // Benchmark measurements must not depend on whether the window has focus.
         app.insert_resource(bevy::winit::WinitSettings::continuous());
+        app.add_systems(Startup, report_adapter);
+        if std::env::var_os("SKATE_PERF_CAMERA_SWEEP").is_some() {
+            app.add_systems(
+                Update,
+                sweep_camera.after(crate::app::FrameSet::Verification),
+            );
+        }
         app.insert_resource(Performance {
             path: path.into(),
             start: None,
@@ -110,6 +131,34 @@ impl Plugin for PerformancePlugin {
         })
         .add_systems(First, begin)
         .add_systems(Last, finish);
+    }
+}
+
+#[derive(Resource, Default)]
+struct MeshBindingTimer(Option<Scope>);
+fn mesh_binding_begin(mut timer: ResMut<MeshBindingTimer>) {
+    timer.0 = Some(Scope::new("mesh_bind_groups"));
+}
+fn mesh_binding_end(mut timer: ResMut<MeshBindingTimer>) {
+    timer.0.take();
+}
+fn report_adapter(
+    device: Res<bevy::render::renderer::RenderDevice>,
+    adapter: Res<bevy::render::renderer::RenderAdapterInfo>,
+) {
+    eprintln!(
+        "SKATE_GPU adapter={:?} features={:?} limits={:?}",
+        &**adapter,
+        device.features(),
+        device.limits()
+    );
+}
+
+// Rendering-only benchmark: exercise changing visibility without steering the
+// skater or feeding synthetic inputs into the simulation camera.
+fn sweep_camera(time: Res<Time<Real>>, mut cameras: Query<&mut Transform, With<Camera3d>>) {
+    for mut transform in &mut cameras {
+        transform.rotate_y(time.elapsed_secs() * std::f32::consts::TAU / 12.);
     }
 }
 fn begin(mut p: ResMut<Performance>) {

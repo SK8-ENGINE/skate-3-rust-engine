@@ -59,3 +59,41 @@ Validation includes the full skate-core suite and game suite (43 passed, 21 exis
 ignored tests), differential collision queries against the unfiltered implementation
 across 420 varied poses, material/texture identity checks, and exact render triangle
 retention tests. Startup capture checks rendering/integration, not retail parity.
+
+## Follow-up: Bevy lightmap binding cache
+
+GPU diagnostics confirmed the RTX 5090 Vulkan adapter with binding arrays,
+non-uniform indexing, and indirect drawing enabled. Local source inspection and
+profiling found repeated lightmap bind-group creation in Bevy's
+`prepare_mesh_bind_groups`. The [tracked Bevy patch](../vendor/README.md) caches
+those bindings with resource-identity checks and bounded retention.
+
+Same stationary-spawn benchmark, before and after this patch:
+
+| Metric | Before cache | After cache |
+| --- | ---: | ---: |
+| Average FPS | 52.3 | 237.1 |
+| Frame interval p95 | 94.5 ms | 5.15 ms |
+| Render preparation per frame | 15.52 ms | 1.19 ms |
+| Mesh binding interval per call, including warmup | 10.39 ms | 0.66 ms |
+
+Reports: `logs/perf-bindings.json` and `logs/perf-cache-repeat.json`. The first
+cache trial averaged 158 FPS, but overlapped test compilation and is excluded
+from the clean comparison. The normal window presentation settings are unchanged.
+GPU telemetry during the clean repeat sampled roughly 23–33% usage, compared
+with the earlier single-digit readings. Full utilization is not the goal: this
+GPU can render this view at high FPS without approaching full utilization.
+
+An additional render-only camera sweep averaged 91.1 FPS, with a 24.9 ms p95
+frame interval (`logs/perf-cache-sweep.json`). This rotates through different
+views to exercise changing visibility and newly extracted lightmaps; it does not
+move the skater or alter collision behavior. Enable it alongside the usual
+benchmark variable with `$env:SKATE_PERF_CAMERA_SWEEP = '1'`, and remove it
+afterwards with `Remove-Item Env:SKATE_PERF_CAMERA_SWEEP`. It only runs when
+`SKATE_PERF_REPORT` also enables the benchmark plugin.
+
+The sweep is a different workload, not an FPS comparison against the stationary
+baseline. Exploration can still encounter heavier views and loading/shader spikes.
+Validation: GPU cache regression test passed, game suite passed (43 passed,
+21 existing ignored), and the staged executable completed a normal city startup
+capture with benchmark settings disabled.
