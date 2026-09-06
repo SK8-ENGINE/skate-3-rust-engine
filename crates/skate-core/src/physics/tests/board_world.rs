@@ -206,6 +206,36 @@ fn cluster_culling_preserves_predictive_contacts_for_every_shape() {
 }
 
 #[test]
+fn triangle_bounds_match_unfiltered_contacts_near_edges_and_rotated_boxes() {
+    let mut floor = triangle();
+    floor.triangle.fatness = 0.15;
+    let mut indexed = clustered(vec![floor]);
+    let mut full = BoardWorld::new(vec![floor]);
+    let mut settings = config();
+    settings.query.volume_padding = 0.1;
+    settings.query.maximum_separating_distance = 0.8;
+    for x in [-10.5, -10., -5., 0., 5., 10., 10.5] {
+        for z in [-10.5, -10., 0., 10., 10.5] {
+            for y in [-0.1, 0.2, 1., 2.] {
+                let center = Vector3::new(x, y, z);
+                for primitive in [
+                    ContactPrimitive::Sphere(Sphere { center, radius: 0.2 }),
+                    ContactPrimitive::Capsule { center, axis: Vector3::new(0.6, 0.8, 0.), half_length: 0.7, radius: 0.2 },
+                    ContactPrimitive::RoundedBox { center,
+                        basis: Basis3 { columns: [[0.6, 0., 0.8], [0., 1., 0.], [-0.8, 0., 0.6]] },
+                        half_extents: Vector3::new(0.6, 0.2, 0.1), radius: 0.05 },
+                ] {
+                    let volumes = [BoardWorldVolume { body: CollisionBody::Board(BodyId::ORDER[0]), primitive,
+                        linear_velocity: Vector3::new(20., -60., -30.), material: settings.material }];
+                    assert_eq!(format!("{:?}", indexed.query_primitives(&volumes, settings.query, settings.retention)),
+                        format!("{:?}", full.query_primitives(&volumes, settings.query, settings.retention)));
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn finite_world_geometry_produces_four_ordered_wheel_contacts_with_combined_materials() {
     let mut world = BoardWorld::new(vec![triangle()]);
     let board = board(0.0, Vector3::ZERO);

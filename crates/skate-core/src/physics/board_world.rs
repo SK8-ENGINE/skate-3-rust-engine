@@ -3,6 +3,7 @@
 //! triangle fixup82AD3130, material combine82763078 and contact retention
 //! determine the physical result, in world-triangle then moving-volume order.
 pub mod query_metadata;
+mod query_index;
 use crate::math::Vector3;
 use query_metadata::{Bounds, QueryMetadata};
 
@@ -102,7 +103,9 @@ pub struct BoardWorldVolume {
 /// the returned contacts are valid until the next mutable call.
 pub struct BoardWorld {
     triangles: Vec<WorldTriangle>,
+    triangle_bounds: Vec<Bounds>,
     query_metadata: Option<QueryMetadata>,
+    query_index: query_index::QueryIndex,
     contacts: Vec<BoardCollision>,
     buffer: ContactBuffer,
     maximum_fatness: f32,
@@ -110,6 +113,9 @@ pub struct BoardWorld {
 
 impl BoardWorld {
     pub fn new(triangles: Vec<WorldTriangle>) -> Self {
+        let triangle_bounds = triangles.iter().map(|t| Bounds::from_points(t.triangle.vertices)
+            .unwrap_or(Bounds { min: Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY),
+                max: Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY) })).collect();
         let maximum_fatness = triangles
             .iter()
             .map(|t| t.triangle.fatness)
@@ -117,7 +123,9 @@ impl BoardWorld {
         Self {
             maximum_fatness,
             triangles,
+            triangle_bounds,
             query_metadata: None,
+            query_index: query_index::QueryIndex::default(),
             contacts: Vec::new(),
             buffer: ContactBuffer {
                 count: 0,
@@ -139,6 +147,7 @@ impl BoardWorld {
     ) -> Result<Self, &'static str> {
         metadata.validate(&triangles)?;
         let mut world = Self::new(triangles);
+        world.query_index = query_index::QueryIndex::new(&metadata.meshes);
         world.query_metadata = Some(metadata);
         Ok(world)
     }
@@ -171,11 +180,9 @@ impl BoardWorld {
         .map(f32::abs)
         .fold(1., f32::max);
         let bounds = bounds.expanded(self.maximum_fatness + scale * (8. * f32::EPSILON));
-        metadata
-            .meshes
-            .iter()
-            .filter(|m| m.local_bounds.overlaps(bounds))
-            .map(|m| m.triangle_range.clone())
+        self.query_index.query(bounds, &metadata.meshes)
+            .into_iter()
+            .map(|i| metadata.meshes[i].triangle_range.clone())
             .collect()
     }
 
@@ -185,9 +192,11 @@ impl BoardWorld {
         end: Vector3,
         radius: f32,
     ) -> impl Iterator<Item = (usize, &WorldTriangle)> {
-        self.candidate_ranges(Bounds::from_points([start, end]).map(|b| b.expanded(radius)))
+        let bounds = Bounds::from_points([start, end]).map(|b| conservative_bounds(b, radius + self.maximum_fatness));
+        self.candidate_ranges(bounds)
             .into_iter()
             .flatten()
+            .filter(move |&i| self.query_metadata.is_none() || bounds.is_none_or(|b| self.triangle_bounds[i].overlaps(b)))
             .map(|i| (i, &self.triangles[i]))
     }
 
@@ -287,10 +296,11 @@ impl BoardWorld {
         self.buffer.distance_squared_threshold = retention.duplicate_distance_squared;
         self.buffer.deferred_reduction = u8::from(retention.deferred_reduction);
         let padding = query.volume_padding.max(0.) + query.maximum_separating_distance.max(0.);
-        let bounds: Option<Vec<_>> = volumes
+        let volume_bounds: Vec<_> = volumes
             .iter()
-            .map(|v| primitive_bounds(v.primitive))
+            .map(|v| primitive_bounds(v.primitive).map(|b| conservative_bounds(b, padding + self.maximum_fatness)))
             .collect();
+        let bounds: Option<Vec<_>> = volume_bounds.iter().copied().collect();
         let bounds = bounds
             .and_then(|b| Bounds::from_points(b.iter().flat_map(|b| [b.min, b.max])))
             .map(|b| b.expanded(padding));
@@ -301,7 +311,11 @@ impl BoardWorld {
         };
         for index in ranges.into_iter().flatten() {
             let entry = &self.triangles[index];
-            for volume in volumes {
+            for (volume, volume_bounds) in volumes.iter().zip(&volume_bounds) {
+                if self.query_metadata.is_some()
+                    && volume_bounds.is_some_and(|b| !self.triangle_bounds[index].overlaps(b)) {
+                    continue;
+                }
                 let Some(manifold) = primitive_triangle_world_contacts(
                     volume.primitive,
                     entry.triangle,
@@ -354,10 +368,13 @@ fn primitive_bounds(primitive: ContactPrimitive) -> Option<Bounds> {
             axis,
             half_length,
             radius,
-        } => (
-            center,
-            radius + half_length.abs() * (axis.x.abs() + axis.y.abs() + axis.z.abs()),
-        ),
+        } => {
+            let offset = Vector3::new(axis.x * half_length, axis.y * half_length, axis.z * half_length);
+            return Bounds::from_points([
+                Vector3::new(center.x - offset.x, center.y - offset.y, center.z - offset.z),
+                Vector3::new(center.x + offset.x, center.y + offset.y, center.z + offset.z),
+            ]).map(|b| b.expanded(radius.abs()));
+        },
         ContactPrimitive::RoundedBox {
             center,
             basis,
@@ -365,13 +382,12 @@ fn primitive_bounds(primitive: ContactPrimitive) -> Option<Bounds> {
             radius,
         } => {
             let half = [half_extents.x, half_extents.y, half_extents.z];
-            let extent: f32 = basis
-                .columns
-                .iter()
-                .zip(half)
-                .map(|(axis, h)| h.abs() * axis.iter().map(|v| v.abs()).sum::<f32>())
-                .sum();
-            (center, radius + extent)
+            let extent: [f32; 3] = std::array::from_fn(|axis| radius.abs() + basis.columns.iter().zip(half)
+                .map(|(column, h)| h.abs() * column[axis].abs()).sum::<f32>());
+            return Bounds::from_points([
+                Vector3::new(center.x - extent[0], center.y - extent[1], center.z - extent[2]),
+                Vector3::new(center.x + extent[0], center.y + extent[1], center.z + extent[2]),
+            ]);
         }
         ContactPrimitive::Triangle(t) => {
             return Bounds::from_points(t.vertices).map(|b| b.expanded(t.fatness));
@@ -381,6 +397,12 @@ fn primitive_bounds(primitive: ContactPrimitive) -> Option<Bounds> {
         return None;
     }
     Bounds::from_points([center]).map(|b| b.expanded(radius.abs()))
+}
+
+fn conservative_bounds(bounds: Bounds, padding: f32) -> Bounds {
+    let scale = [bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z]
+        .into_iter().map(f32::abs).fold(1., f32::max);
+    bounds.expanded(padding + scale * (8. * f32::EPSILON))
 }
 
 /// Retention reads only contact header geometry, body IDs and material/tag.
