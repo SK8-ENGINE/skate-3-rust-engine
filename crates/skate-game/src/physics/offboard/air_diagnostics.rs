@@ -18,6 +18,11 @@ struct Sample {
     pose_errors: [[f32; 4]; 24],
     physical_positions: [[f32; 4]; 24],
     drive_positions: [[f32; 4]; 24],
+    animation_positions: [[f32; 4]; 24],
+    animation_basis_squared: [[f32; 3]; 24],
+    original_positions: [[f32; 4]; 24],
+    foot_targets: [skate_core::animation::foot_ik::transforms::LimbFrames; 2],
+    animation_name: Option<String>,
     contacts: [bool; 24],
     contact_age: [f32; 24],
     drive_weight: f32,
@@ -59,6 +64,16 @@ pub(crate) fn record(skater: &mut SkaterRuntime) {
         pose_errors: skater.pose_errors.parts,
         physical_positions: std::array::from_fn(|i| skater.skeleton.record.pose[i][3]),
         drive_positions: std::array::from_fn(|i| skater.skeleton_input.drive_frames[i][3]),
+        animation_positions: std::array::from_fn(|i| skater.animated_skeleton.record.pose[i][3]),
+        animation_basis_squared: std::array::from_fn(|i| std::array::from_fn(|axis| {
+            let v = skater.animated_skeleton.record.pose[i][axis];
+            (v[0] * v[0] + v[1] * v[1]) + v[2] * v[2]
+        })),
+        original_positions: std::array::from_fn(|i| {
+            skater.animation.packet.hierarchy[skater.animated_skeleton.bone_indices[i]][3]
+        }),
+        foot_targets: [skater.foot_ik.state.frames[0], skater.foot_ik.state.frames[1]],
+        animation_name: skater.animation.motion.animation.current_name.clone(),
         contacts: skater.collision_feedback.current,
         contact_age: skater.collision_feedback.contact_age,
         drive_weight: skater.collision_feedback.drive_weight,
