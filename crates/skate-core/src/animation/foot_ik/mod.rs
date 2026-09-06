@@ -8,6 +8,7 @@ pub mod post_contact;
 pub mod post_physics;
 mod math;
 pub use math::inverse_affine;
+pub use math::interpolate_affine;
 pub mod settings;
 pub mod state;
 pub mod status;

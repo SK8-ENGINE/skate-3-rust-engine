@@ -186,7 +186,7 @@ pub(super) fn interpolate(a: &Transform, b: &Transform, weight: f32) -> (Transfo
 
 ///82E0A570 overrides the interpolation helper's translation, including at
 /// endpoint weights. Preserve its weighted-sum rounding instead of delta lerp.
-pub(super) fn interpolate_affine(a: &Transform, b: &Transform, weight: f32) -> Transform {
+pub fn interpolate_affine(a: &Transform, b: &Transform, weight: f32) -> Transform {
     let translation =
         core::array::from_fn(|lane| a[3][lane].mul_add(1.0 - weight, b[3][lane] * weight));
     let (mut output, _) = interpolate(a, b, weight);

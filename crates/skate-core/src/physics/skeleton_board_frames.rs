@@ -13,6 +13,8 @@ pub struct SkeletonBoardFrames {
     pub physical_board: Transform,
     pub skate_root: Transform,
     pub animation_target: Transform,
+    /// Skeleton16016: authored deck frame retained during off-board transitions.
+    pub retained_board_16016: Transform,
     pub com_frame: Transform,
     pub lifted_com_frame: Transform,
     pub centre_of_mass: [f32; 4],
@@ -29,6 +31,7 @@ impl Default for SkeletonBoardFrames {
             physical_board: IDENTITY,
             skate_root: IDENTITY,
             animation_target: IDENTITY,
+            retained_board_16016: IDENTITY,
             com_frame: IDENTITY,
             lifted_com_frame: IDENTITY,
             centre_of_mass: [0.; 4],

@@ -63,7 +63,7 @@ impl SkeletonAir {
 
     ///82C041C0: publish the effective matrix to the separate deck constraint
     ///anchor. It does not teleport the dynamic board assembly.
-    fn apply_board(
+    pub(crate) fn apply_board(
         &mut self,
         board: &mut BoardRuntime,
         target: &Transform,
