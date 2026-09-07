@@ -32,25 +32,15 @@ pub(crate) struct Runtime {
     pub launch_velocity: V,
     cooldown: u32,
     previous_position: V,
+    diagnostic_tick: u32,
 }
 impl Runtime {
-    pub fn load(data: &Collections, test_world: bool) -> Result<Self, String> {
+    pub fn load(data: &Collections, map: Option<&skate_data::skate_map::SkateMap>) -> Result<Self, String> {
         let graph = data
             .words::<8>("physics_grinds", "default", "PinVsSlope")?
             .map(f32::from_bits);
         Ok(Self {
-            primitives: if test_world {
-                crate::grind_world::rails()
-                    .iter()
-                    .map(|r| Primitive {
-                        start: lanes(r.start),
-                        end: lanes(r.end),
-                        owner: r.id,
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            },
+            primitives: crate::grind_world::primitives(map)?,
             candidate: None,
             name: String::new(),
             active: false,
@@ -77,6 +67,7 @@ impl Runtime {
             cooldown: 0,
             distance: 0.0,
             previous_position: [0.; 4],
+            diagnostic_tick: 0,
         })
     }
     pub fn output(&self) -> GrindState {
@@ -107,25 +98,36 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
     runtime.manager_age = (runtime.manager_age + 0.0035).min(1.0);
     let old = runtime.candidate;
     runtime.candidate = None;
-    if runtime.cooldown > 0 || skater.player_input.grind.disabled || p.flags_2476 & 0x01000000 != 0
-    {
-        return;
-    }
-    let hits = grind_contact::truck_contacts(
-        board,
-        p.flags_2484,
-        runtime.truck_to_wheel,
-        runtime.deck_to_truck,
+    runtime.diagnostic_tick = runtime.diagnostic_tick.wrapping_add(1);
+    let gated = runtime.cooldown > 0 || skater.player_input.grind.disabled
+        || p.flags_2476 & 0x01000000 != 0;
+    // Native GrindData query82D8A828: a 1.2m half-extent, at most40 chords.
+    let nearby: Vec<usize> = runtime.primitives.iter().enumerate().filter(|(_,edge)|
+        (0..3).all(|i| edge.start[i].min(edge.end[i]) <= board[3][i]+1.2
+            && edge.start[i].max(edge.end[i]) >= board[3][i]-1.2))
+        .map(|(i,_)|i).take(40).collect();
+    if nearby.is_empty() { return; }
+    let edges: Vec<Primitive> = nearby.iter().map(|i|runtime.primitives[*i]).collect();
+    let mut hits = grind_contact::truck_contacts(
+        board, p.flags_2484, runtime.truck_to_wheel, runtime.deck_to_truck, &edges,
+    );
+    for hit in hits.iter_mut().flatten() { hit.primitive = nearby[hit.primitive]; }
+    let extra = &skater.animation_input.extra;
+    let candidate = grind_contact::fifty_fifty_candidate_on_splines(
+        board, [extra.grind_translation, extra.grind_stability_nudge], hits,
         &runtime.primitives,
     );
-    let extra = &skater.animation_input.extra;
-    let Some(candidate) = grind_contact::fifty_fifty_candidate(
-        board,
-        [extra.grind_translation, extra.grind_stability_nudge],
-        hits,
-    ) else {
-        return;
-    };
+    // Passive diagnostics for the user's visual run; no input simulation.
+    if runtime.diagnostic_tick % 30 == 0 || (!gated && candidate.is_some()) != old.is_some() {
+        bevy::log::info!("GRIND_QUERY state={} gated={} nearby={} hits={:?} depth={:?} candidate={} board={:?} up={:?} forward={:?} probe={:?} flags={:08x}/{:08x}/{:08x}/{:08x}/{:08x}",
+            p.state_2508, gated, nearby.len(), hits.map(|h|h.map(|h|h.primitive)),
+            hits.map(|h|h.map(|h|dot3(sub(board[3],h.position),board[1]))),
+            candidate.is_some(),board[3],board[1],board[2],
+            [runtime.truck_to_wheel,runtime.deck_to_truck],
+            p.flags_2468,p.flags_2472,p.flags_2476,p.flags_2480,p.flags_2484);
+    }
+    if gated { return; }
+    let Some(candidate) = candidate else { return; };
     let velocity = p.vectors_400_416[0].map(f32::from_bits);
     //82D886B8: air accepts an actual intersection; same active grind uses90deg.
     //The ordinary level-ground admission uses17deg.
@@ -311,9 +313,7 @@ fn append(physics: &mut GamePhysics, force: V) -> Result<(), String> {
     }
     Ok(())
 }
-fn lanes(v: Vector3) -> V {
-    [v.x, v.y, v.z, 0.]
-}
+
 fn xyz(v: V) -> Vector3 {
     Vector3::new(v[0], v[1], v[2])
 }

@@ -34,11 +34,26 @@ pub fn fifty_fifty_candidate(
     balance: [f32; 2],
     contacts: [Option<TruckContact>; 2],
 ) -> Option<FiftyFiftyCandidate> {
+    fifty_fifty_candidate_on_splines(board, balance, contacts, &[])
+}
+
+///82D89150 also accepts two segment indices when their hits pass its signed
+/// cross-rail separation check. Splines with multiple segments need this path.
+pub fn fifty_fifty_candidate_on_splines(
+    board: [V; 4], balance: [f32; 2],
+    contacts: [Option<TruckContact>; 2], primitives: &[Primitive],
+) -> Option<FiftyFiftyCandidate> {
     let [Some(front), Some(rear)] = contacts else { return None };
-    if balance[0].abs().max(balance[1].abs()) >= 0.9
-        || front.primitive != rear.primitive
-    {
+    if balance[0].abs().max(balance[1].abs()) >= 0.9 {
         return None;
+    }
+    if front.primitive != rear.primitive {
+        let edge = primitives.get(front.primitive)?;
+        let delta = sub(edge.end, edge.start);
+        let direction = scale(delta, dot3(delta, delta).sqrt().recip());
+        let across = cross(upright_normal(direction), direction);
+        //820641A8. This comparison is signed in the original routine.
+        if dot3(sub(front.position, rear.position), across) > 0.1 { return None; }
     }
     let front_depth = dot3(sub(board[3], front.position), board[1]);
     let rear_depth = dot3(sub(board[3], rear.position), board[1]);

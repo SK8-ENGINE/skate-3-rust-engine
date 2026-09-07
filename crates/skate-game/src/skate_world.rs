@@ -69,12 +69,6 @@ pub(crate) fn validate_runtime(map: &SkateMap) -> Result<(), String> {
                 .into(),
         );
     }
-    if !map.rails.is_empty() {
-        eprintln!(
-            "SKATE LIMITATION: {} rail records parsed, but supplied game has no nonempty grind-edge controller. Rails will not engage grinds.",
-            map.rails.len()
-        );
-    }
     if !map.routes.is_empty() {
         eprintln!(
             "SKATE LIMITATION: {} NPC routes parsed; supplied game has no NPC controller.",

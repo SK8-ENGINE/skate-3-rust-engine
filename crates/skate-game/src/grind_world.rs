@@ -99,43 +99,10 @@ fn box_faces(out: &mut Vec<[Vector3; 4]>, min: Vector3, max: Vector3) {
         v(max.x, min.y, min.z), v(min.x, min.y, min.z)]);
 }
 
-/// Relocatable Pegasus tSplineData, matching the project's established native
-/// builder (owned/world/src/grind_spline.cpp). One straight segment per rail.
-/// Guest pointers stay blob-relative; the Rust owner retains stable rail IDs.
-pub(crate) fn spline_blob() -> Vec<u8> {
-    let rails = rails();
-    let segments = 16 + rails.len() * 32;
-    let mut bytes = vec![0; segments + rails.len() * 144];
-    word(&mut bytes, 0, rails.len() as u32);
-    word(&mut bytes, 4, rails.len() as u32);
-    word(&mut bytes, 8, 16);
-    word(&mut bytes, 12, segments as u32);
-    for (i, rail) in rails.iter().enumerate() {
-        let r = 16 + i * 32;
-        let s = segments + i * 144;
-        bytes[r..r + 8].copy_from_slice(&rail.id.to_be_bytes());
-        bytes[r + 8..r + 16].copy_from_slice(&0x2c7017070007004au64.to_be_bytes());
-        word(&mut bytes, r + 20, s as u32);
-        word(&mut bytes, r + 24, s as u32);
-        let delta = [rail.end.x - rail.start.x, rail.end.y - rail.start.y,
-            rail.end.z - rail.start.z];
-        let length = delta.iter().map(|v| v * v).sum::<f32>().sqrt();
-        vector(&mut bytes, s, [delta[0], delta[1], delta[2], 0.]);
-        vector(&mut bytes, s + 48, [rail.start.x, rail.start.y, rail.start.z, 1.]);
-        vector(&mut bytes, s + 64, [1. / length, 0., 0., 0.]);
-        vector(&mut bytes, s + 80, [rail.start.x.min(rail.end.x),
-            rail.start.y.min(rail.end.y), rail.start.z.min(rail.end.z), 0.]);
-        vector(&mut bytes, s + 96, [rail.start.x.max(rail.end.x),
-            rail.start.y.max(rail.end.y), rail.start.z.max(rail.end.z), 0.]);
-        word(&mut bytes, s + 112, length.to_bits());
-        word(&mut bytes, s + 120, r as u32);
-    }
-    bytes
-}
+mod spline;
+pub(crate) use spline::primitives;
 
-fn word(bytes: &mut [u8], at: usize, value: u32) {
-    bytes[at..at + 4].copy_from_slice(&value.to_be_bytes());
-}
-fn vector(bytes: &mut [u8], at: usize, value: [f32; 4]) {
-    for (i, v) in value.into_iter().enumerate() { word(bytes, at + i * 4, v.to_bits()); }
+/// Relocatable Pegasus tSplineData used by the live default-world query.
+pub(crate) fn spline_blob() -> Vec<u8> {
+    spline::build(None).expect("static test-course splines are valid")
 }

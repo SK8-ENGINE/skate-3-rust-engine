@@ -146,7 +146,7 @@ impl GamePhysics {
         let (query, retention) = ground::query_settings();
         Ok(Self {
             clock: clock::SimulationClock::default(),
-            grind: grind::Runtime::load(&data, map.is_none())?,
+            grind: grind::Runtime::load(&data, map)?,
             board,
             riding,
             world,
