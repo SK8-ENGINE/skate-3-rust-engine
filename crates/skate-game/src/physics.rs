@@ -334,6 +334,10 @@ mod wipeout_tests;
 #[path = "tests/difficulty.rs"]
 mod difficulty_tests;
 
+#[cfg(test)]
+#[path = "tests/trick_turn.rs"]
+mod trick_turn_tests;
+
 fn present(
     physics: Res<GamePhysics>,
     history: Res<crate::presentation::Presentation>,
