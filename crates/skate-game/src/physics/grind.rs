@@ -39,6 +39,9 @@ pub(crate) struct Runtime {
     exiting: bool,
     surface_kind: u32,
     surface_normal: V,
+    surface_side: V,
+    entry_velocity: Option<V>,
+    maximum_entry_delta: f32,
     truck_to_wheel: f32,
     deck_to_truck: f32,
     pin_vs_slope: PointGraph<4>,
@@ -79,6 +82,9 @@ impl Runtime {
             exiting: false,
             surface_kind: 0,
             surface_normal: [0.0, 1.0, 0.0, 0.0],
+            surface_side: [0.0; 4],
+            entry_velocity: None,
+            maximum_entry_delta: data.float("physics_wipeout", "default", "Wipeout_AirMaxSpeedIntoCollisionNearGrind")?,
             truck_to_wheel: data.float("physics_grinds", "default", "TruckToWheel")?,
             deck_to_truck: data.float("physics_grinds", "default", "DeckCenterToTruck")?,
             pin_vs_slope: PointGraph {
@@ -183,6 +189,7 @@ impl Runtime {
 pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
     let p = &mut skater.player_input.processed;
     let runtime = &mut physics.grind;
+    runtime.entry_velocity = None;
     let board = super::solve::deck_frame(&physics.board);
     let mut effective_board = board;
     if p.flags_2468 & 0x0010_0000 != 0 {
@@ -391,7 +398,7 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
     }
     runtime.candidate = Some(candidate);
     runtime.kind = kind;
-    if kind != 0 {
+    {
         let edge = runtime.primitives[candidate.primitive];
         match skate_core::air::trajectory::grind_surface::investigate(
             &physics.world,
@@ -407,6 +414,7 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
                 }
                 runtime.surface_kind = surface.evidence.kind;
                 runtime.surface_normal = surface.normal;
+                runtime.surface_side = surface.evidence.side;
                 if kind == 2
                     && families::is_backslash(
                         board[3],
@@ -448,6 +456,24 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
     } else {
         runtime.surface_normal
     };
+    //82D86F00 uses Processed608, the retained airborne trajectory velocity,
+    //not the board's post-contact400. Consume once after state selection.
+    if p.category_2512 == 200 {
+        let air_velocity = p.vectors_544_560_592_608[3].map(f32::from_bits);
+        let corrected = grind_contact::entry::airborne_velocity(kind, direction, normal, air_velocity);
+        let rejected = grind_contact::entry::airborne_rejections(
+            direction, p.vectors_544_560_592_608[0].map(f32::from_bits), velocity,
+            air_velocity, corrected, runtime.surface_kind, runtime.surface_side,
+            runtime.maximum_entry_delta,
+        );
+        if !rejected.is_empty() {
+            runtime.candidate = None;
+            p.flags_2468 |= 0x0004_0000;
+            for reason in rejected { skater.wipeout.state.request(reason, 0.0); }
+            return;
+        }
+        runtime.entry_velocity = Some(corrected);
+    }
     let (name, scoring_name) =
         runtime
             .chromosome
@@ -541,6 +567,28 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
             .drive
             .disable_animation(&mut skater.ground_lifecycle.board_animated_290);
         return super::input_phase::update_grind_jump(physics, skater);
+    }
+    if physics.grind.active {
+        if let Some(velocity) = physics.grind.entry_velocity.take() {
+            //82D40AF8 ->82C04168: all seven bodies, preserving angular rates.
+            bevy::log::info!("GRIND_ENTRY board_velocity={:?} airborne_velocity={:?} applied_velocity={:?}",
+                p.vectors_400_416[0].map(f32::from_bits),
+                p.vectors_544_560_592_608[3].map(f32::from_bits), velocity);
+            skater.ground_runtime.set_animated_velocity(&mut physics.board, velocity);
+            //82D40CF8 also supplies Skeleton16112/16416 for this same tick.
+            skater.animated_skeleton.roots.supplied_prediction = Some(
+                core::array::from_fn(|i| velocity[i].mul_add(p.timestep_2604, board[3][i])));
+            //The native entry-velocity branch bypasses the ordinary force
+            //update on this tick; its Ground skeleton continuation still runs.
+            let contact = physics.grind.candidate.ok_or("Grind entry lost its contact")?;
+            let normal = if physics.grind.kind == 0 {
+                grind_contact::upright_normal(contact.direction)
+            } else { physics.grind.surface_normal };
+            skater.ground.steering.targets = [0.0; 2];
+            physics.riding.update_grind_reckoning(
+                &mut skater.air_reckoning.state, normal, board[2], p.flags_2468, 0.9);
+            return super::input_phase::update_ground(physics, skater);
+        }
     }
     let velocity = p.vectors_400_416[0].map(f32::from_bits);
     //Both state vtables neutralize the trucks before the shared board solve.
