@@ -64,6 +64,7 @@ pub(crate) fn surfaces() -> [Vec<[Vector3; 4]>; 3] {
             v(-3.0, y1, z1),
         ]);
     }
+    platform.extend(crate::grind_world::surfaces());
     // Open ends at z +/-6 allow entry from the landing floor. Circular
     // transitions meet the four-metre flat bottom tangentially.
     let radius = 2.5;

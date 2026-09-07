@@ -17,6 +17,7 @@ mod render_capacity;
 mod presentation;
 mod replay;
 mod world;
+mod grind_world;
 mod skate_world;
 
 fn main() -> bevy::app::AppExit {

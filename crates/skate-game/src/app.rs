@@ -95,6 +95,7 @@ pub(crate) fn build(
         assets::GameAssetsPlugin,
         animation::AnimationPlugin,
         world::WorldPlugin,
+        crate::grind_world::GrindGeometryPlugin,
         camera::CameraPlugin,
         crate::graphics_menu::GraphicsMenuPlugin,
         crate::render_capacity::RenderCapacityPlugin,
