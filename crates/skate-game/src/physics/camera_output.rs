@@ -173,3 +173,7 @@ pub(crate) fn publish(
 fn bit(value: u32, shift: u32) -> u8 {
     ((value >> shift) & 1) as u8
 }
+
+#[cfg(test)]
+#[path = "camera_tricks.rs"]
+mod tests;

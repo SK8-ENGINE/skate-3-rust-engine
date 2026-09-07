@@ -225,7 +225,9 @@ pub(crate) fn snapshot(
             state_height_32: input.state.height_32,
             in_ground_physics: u8::from(category == 100),
             grinding,
-            trajectory_valid: if alternate { 1 } else { p.air.flag_441 },
+            // KnownAir Fill publishes validity at437. Byte441 is the body-flip
+            // flag; using it hides ordinary ollie trajectories from the camera.
+            trajectory_valid: if alternate { 1 } else { p.air.known_air_valid_437 },
             wiping_out: input.state.wiping_out_59,
             physically_pushing: input.state.physically_pushing_55,
             at_pushable_speed: u8::from(ground.skateboard_motion_4.is_at_pushable_speed),
