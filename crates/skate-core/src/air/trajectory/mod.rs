@@ -2,6 +2,7 @@
 //! Host world storage and batch ownership are independent of console layout.
 mod launch;
 pub mod grind;
+pub mod grind_surface;
 mod math;
 mod prediction;
 mod query;

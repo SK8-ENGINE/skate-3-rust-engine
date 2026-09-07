@@ -15,7 +15,7 @@ impl PhysicalStateCalls for Calls {
             PhysicalStateId::Sleeping
                 | PhysicalStateId::PhysicsGround
                 | PhysicalStateId::PhysicsAir
-                | PhysicalStateId::GrindFiftyFifty
+                | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty
                 | PhysicalStateId::Nonspecific
                 | PhysicalStateId::KnownAir
                 | PhysicalStateId::GroundAnimation
@@ -31,7 +31,7 @@ impl PhysicalStateCalls for Calls {
             call.state.state,
             PhysicalStateId::PhysicsGround
                 | PhysicalStateId::PhysicsAir
-                | PhysicalStateId::GrindFiftyFifty
+                | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty
                 | PhysicalStateId::Nonspecific
                 | PhysicalStateId::KnownAir
                 | PhysicalStateId::GroundAnimation
@@ -59,7 +59,7 @@ pub(super) fn set(
         PhysicalStateId::Sleeping => requested == PhysicalStateId::PhysicsGround,
         PhysicalStateId::PhysicsGround
         | PhysicalStateId::PhysicsAir
-        | PhysicalStateId::GrindFiftyFifty
+        | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty
                 | PhysicalStateId::Nonspecific
                 | PhysicalStateId::KnownAir
         | PhysicalStateId::GroundAnimation
@@ -71,7 +71,7 @@ pub(super) fn set(
             requested,
             PhysicalStateId::PhysicsGround
                 | PhysicalStateId::PhysicsAir
-                | PhysicalStateId::GrindFiftyFifty
+                | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty
                 | PhysicalStateId::Nonspecific
                 | PhysicalStateId::KnownAir
                 | PhysicalStateId::GroundAnimation
@@ -157,7 +157,7 @@ pub(super) fn set(
     //Native82DB8540 publishes Processed state/history BEFORE old Exit. The
     //same retained objects then receive Exit followed by the new Enter.
     match current {
-        PhysicalStateId::GrindFiftyFifty | PhysicalStateId::Nonspecific => super::super::grind::exit(physics, skater)?,
+        PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::Nonspecific => super::super::grind::exit(physics, skater)?,
         PhysicalStateId::BipedAir => super::super::offboard::air_state::exit(physics, skater),
         PhysicalStateId::BipedGround => super::super::offboard::ground_state::exit(physics, skater),
         PhysicalStateId::PhysicsGround => super::super::ground_exit::exit(physics, skater),
@@ -172,7 +172,7 @@ pub(super) fn set(
         _ => unreachable!("state support checked before publication"),
     }
     match requested {
-        PhysicalStateId::GrindFiftyFifty | PhysicalStateId::Nonspecific => super::super::grind::enter(physics, skater),
+        PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::Nonspecific => super::super::grind::enter(physics, skater),
         PhysicalStateId::BipedAir => super::super::offboard::air_state::enter(physics, skater),
         PhysicalStateId::BipedGround => {
             super::super::offboard::ground_state::enter(physics, skater)

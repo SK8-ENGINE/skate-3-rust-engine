@@ -77,6 +77,49 @@ fn scale(a: V, scale: f32) -> V {
     a.map(|v| v * scale)
 }
 
+///Boardslide82D419A0, static rail branch (investigation kind!=2).
+///Returns the native point forces in order. Translation comes from the stock
+///PhysGrindTranslation animation attribute, not controller magnitude.
+pub fn boardslide_control(
+    position: V,
+    point: V,
+    direction: V,
+    normal: V,
+    velocity: V,
+    translation: f32,
+    total_mass: f32,
+    exiting: bool,
+    ledge: bool,
+) -> Vec<V> {
+    let across = cross(direction, normal);
+    let offset = dot3(sub(position, point), across);
+    let inward = scale(across, if offset > 0.0 { -1.0 } else { 1.0 });
+    if exiting {
+        return if offset.abs() > 0.12 {
+            vec![scale(inward, 201.0)]
+        } else {
+            Vec::new()
+        };
+    }
+    let perpendicular = sub(velocity, scale(direction, dot3(velocity, direction)));
+    if ledge {
+        return vec![scale(across, translation * 25.0)];
+    }
+    if offset.abs() > 0.16 {
+        let mut forces = vec![scale(inward, 10.0)];
+        if dot3(inward, perpendicular) < 0.0 {
+            let mut stop = scale(perpendicular, -(total_mass * 60.0));
+            stop[1] = 0.0;
+            forces.push(stop);
+        }
+        forces
+    } else {
+        let mut damping = scale(perpendicular, -20.0);
+        damping[1] = 0.0;
+        vec![scale(across, translation * 25.0), damping]
+    }
+}
+
 ///82D73AB0 straight, static 50-50 branch: both support normals coincide,
 ///primitive motion336 is zero. The manager age controls the native exit nudge.
 pub fn fifty_fifty_pop(

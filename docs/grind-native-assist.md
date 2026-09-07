@@ -1,6 +1,7 @@
 # Native grind assist port status
 
-The live game still supports the paired-truck50-50 path only. The new
+The live game now supports paired-truck50-50 and centre-deck boardslide contacts
+(see boardslide-port.md). The new
 `skate-core/src/air/trajectory/grind.rs` leaves are not connected to gameplay.
 They must not be presented as working magnetic assistance or all-grind support.
 
@@ -45,9 +46,10 @@ The core crate builds. The user has reserved gameplay testing for themselves.
 
 ## Proposed read-only reference trace
 
-Awaiting user authorization because earlier instructions prohibit launching
-the recomp. No synthetic gameplay input is proposed; the user would approach
-and land on a rail in the reference game.
+A reference run was authorized and launched, but its controller backend did
+not expose the physical controller. The user requested continuation from code.
+No successful reference grind capture was obtained and no synthetic gameplay
+input was sent.
 
 Capture query inputs and indexed hit validity/fraction/position/normal/surface
 at82C20728 and82C20C08, the classification at82C21930, ranked candidates and

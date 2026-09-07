@@ -8,8 +8,8 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     let p = &skater.player_input.processed;
     let input = StateSelectionInput {
         processed: ProcessedStateInput {
-            //The live paired-truck scorer publishes native kind0 and candidate384.
-            grind_type_1248: 0,
+            //The retained contact owner publishes native kind and candidate384.
+            grind_type_1248: physics.grind.kind,
             grind_candidate_1488: physics.grind.candidate.is_some(),
             grind_investigation_flags_1516: 0,
             field_1776: p.external_physics_1616.flags as i32,
