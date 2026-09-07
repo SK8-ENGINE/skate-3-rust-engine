@@ -45,11 +45,13 @@ extracts are kept locally under logs/biped-*.txt.
 
 All six contact families and their named variations are connected for a manual
 playability pass. This is not verified retail parity. Existing host limitations
-remain: trajectory-driven magnetic acquisition, specialized tipslide drop-in
-exit handling, full native material/engagement feedback, and the air439 history
+remain: specialized tipslide drop-in exit handling, full native
+material/engagement feedback, and the air439 history
 snapshot are not completely connected. Common pop/exit behavior still supplies
 those families in this adapter. The ground history supplies approach naming;
 short approaches and rapid re-grinds particularly need visual comparison.
 
 Only compilation and source review were performed, as requested. Gameplay and
 animation behavior are for the user's visual test on the default map.
+
+Trajectory-driven magnetic acquisition is now connected; see [magnetism](grind-magnetism-difficulty.md).

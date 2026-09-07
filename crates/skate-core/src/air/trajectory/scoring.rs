@@ -1,8 +1,6 @@
-//! TU3 scoring82D68FE8/82D68AF0/82D69790 for a world with no grind edges.
-//! That topology is supplied by the authored BoardWorld, not inferred from a
-//! failed collision. Every wall probe still queries real world geometry.
+//! TU3 scoring82D68FE8/82D68AF0/82D69790 with world-supplied grind admission.
 use super::{
-    Prediction, SelectorInput, SelectorSettings, SurfaceHit, launch::adjust_trajectory, math::*,
+    launch::adjust_trajectory, math::*, Prediction, SelectorInput, SelectorSettings, SurfaceHit,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -15,6 +13,7 @@ pub(super) struct Candidate {
     pub score: f32,
     pub wall_score: f32,
     pub wall_ride: bool,
+    pub grind: Option<super::grind::GrindTarget>,
 }
 pub(super) fn score(
     candidates: &mut [Candidate],
@@ -22,6 +21,7 @@ pub(super) fn score(
     adjusted_on_vert: bool,
     input: SelectorInput,
     s: &SelectorSettings,
+    mut grind: impl FnMut(&mut Prediction, bool) -> Result<super::grind::GrindEvaluation, String>,
     mut line: impl FnMut(Vector, Vector, f32) -> Result<Option<SurfaceHit>, String>,
 ) -> Result<bool, String> {
     let mut all_miss = true; //selector9662, consumed by PhysicsAir COM latch
@@ -30,6 +30,7 @@ pub(super) fn score(
         c.score = 0.0;
         c.wall_score = 0.0;
         c.wall_ride = false;
+        c.grind = None;
         if !c.prediction.result.valid() {
             continue;
         }
@@ -53,13 +54,25 @@ pub(super) fn score(
         let force_score = (force_dot * s.score_landing_force) * scalar;
         let direction_score = (sideways * s.score_landing_direction) * scalar;
 
-        //82D69C00 returns0 immediately for the actual empty edge query. Its
-        //9552 flag remains clear.82D69D68 then evaluates the stock graph at
-        //its native invalid-query distance1000; do not substitute a score.
-        let grind_score = if input.flags_2476 & 0x0200_0000 == 0
-            && (input.grind_lock_distance > 0.5 || !middle)
-        {
-            s.grind_penalty_vs_distance.evaluate(1000.0)
+        //82D69C00 attempts acquisition only on the first-pass centre trajectory.
+        let mut evaluation = grind(
+            &mut c.prediction,
+            middle
+                && !(input.flags_2472 & 0x2000_0000 != 0
+                    && input.offboard_flags_1776 & 0x0400_0000 != 0
+                    && input.offboard_flags_1776 & 0x0800_0000 == 0),
+        )?;
+        if adjusted_on_vert && input.directional_input < 0.5 && evaluation.score > 0.0 {
+            evaluation.target = None;
+            evaluation.score = s.grind_penalty_vs_distance.evaluate(0.0);
+        }
+        c.grind = evaluation.target;
+        let grind_score = if input.flags_2476 & 0x0200_0000 != 0 {
+            0.0
+        } else if evaluation.score != 0.0 {
+            evaluation.score
+        } else if input.grind_lock_distance > 0.5 || !middle {
+            s.grind_penalty_vs_distance.evaluate(evaluation.distance)
         } else {
             0.0
         };

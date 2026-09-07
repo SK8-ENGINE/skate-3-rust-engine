@@ -231,6 +231,7 @@ impl SkaterRuntime {
             player_input: PlayerInputRuntime::load(&data, NoGrindEdges)?,
             player_state: super::player_state::PlayerState::load(&data, mode)?,
             skeleton_input: SkeletonInputRuntime {
+                grind_air_settings: Some(SkeletonInputRuntime::load_grind_settings(&data)?),
                 drive_frames: initial_parts,
                 extra_target_positions: [
                     initial_targets.com,

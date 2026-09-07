@@ -1,6 +1,6 @@
 //! TU3 rail-trajectory candidate leaves82D60C80/82D60B98,
 //! 82D6A398 and82D6A168. Admission and physical adjustment are separate owners.
-use super::{Prediction, Trajectory, math::*};
+use super::{math::*, Prediction, Trajectory};
 use crate::{physics::grind_contact::Primitive, point_graph::PointGraph};
 
 #[derive(Clone, Copy, Debug)]
@@ -325,4 +325,19 @@ pub fn take_best_grind(
         }
     }
     chosen.map(|i| candidates.remove(i))
+}
+
+/// A real world query and its accepted target, retained through selector scoring.
+#[derive(Clone, Copy, Debug)]
+pub struct GrindTarget {
+    pub air_limits: [Vector; 3],
+    pub edge: Primitive,
+    pub point: Vector,
+    pub normal: Vector,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct GrindEvaluation {
+    pub target: Option<GrindTarget>,
+    pub score: f32,
+    pub distance: f32,
 }

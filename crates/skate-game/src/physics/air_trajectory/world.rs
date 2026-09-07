@@ -2,11 +2,11 @@
 //!82772028, across the host's world-format boundary. BoardWorld stores static
 //!world-space triangles, so their source geometry transform is identity.
 use skate_core::{
-    air::trajectory::{SurfaceHit, WorldWithoutGrindEdges},
+    air::trajectory::SurfaceHit,
     math::Vector3,
     physics::{
         board_world::BoardWorld,
-        triangle_query::{TriangleLineHit, triangle_segment},
+        triangle_query::{triangle_segment, TriangleLineHit},
     },
 };
 type Vector = [f32; 4];
@@ -16,13 +16,6 @@ const IDENTITY: [[f32; 4]; 4] = [
     [0.0, 0.0, 1.0, 0.0],
     [0.0; 4],
 ];
-
-///BoardWorld's authored format contains triangles only; no grind primitive
-///collection is present. Update this adapter together with any world format
-///extension that introduces actual grind edges.
-pub(super) fn topology(_world: &BoardWorld) -> WorldWithoutGrindEdges {
-    WorldWithoutGrindEdges
-}
 
 pub(super) fn line(
     world: &BoardWorld,

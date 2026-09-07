@@ -23,7 +23,7 @@ mod camera;
 mod chromosome;
 pub(crate) struct Runtime {
     camera: camera::GrindCamera,
-    primitives: Vec<Primitive>,
+    pub(super) primitives: Vec<Primitive>,
     pub candidate: Option<FiftyFiftyCandidate>,
     pub name: String,
     pub active: bool,

@@ -9,9 +9,9 @@ Observed in assets/private/stock/skater-collections.json, physics_mode:
 | hardcore | 3E19999A | 0.15 |
 
 The field is native physics_mode+80. The live SelectorInput already receives
-this field when the active difficulty changes. It does not currently result in
-magnetic acquisition because AirTrajectoryRuntime passes WorldWithoutGrindEdges,
-and KnownAir's StartGrindAirAdjust callback reports an unsupported owner.
+this field when the active difficulty changes. AirTrajectoryRuntime now queries
+the authored spline primitives and the selected result retains the accepted
+primitive and angular reference directions through KnownAir entry.
 
 Observed TU3 path: ScoreTrajectories82D68FE8 attempts82D69C00 on the first-pass
 middle trajectory. Its actual spline query uses bounds around the natural landing
@@ -32,9 +32,30 @@ from the difficulty-dependent initial capture distance.
 
 Native source identity: TU3 default_82000000_011B0000.bin SHA256
 f4aa113eb541bfba03dbc108cf5ab43f58c965b20fa3b82f9c40938a0ad841c4.
-Instruction extracts are in local logs/biped-*.txt. No gameplay tests or reference
-process were run. Experimental selector plumbing is saved in
-logs/magnetism-in-progress, outside the production source: the incomplete pose
-owner must be connected before exposing9653 in the playable game.
+Instruction extracts are in local logs/biped-*.txt.
 
-Status: findings confirmed statically; magnetism is NOT fixed in the staged game.
+## Live integration
+
+The centre-trajectory query supplies ranking, admission, trajectory displacement
+and the landing normal. Alternative candidates reuse its actual edge collection
+for the distance penalty; they do not issue independent replacement queries.
+The selector retains the accepted middle target and skips its normal-delta
+second pass exactly at that handoff. The current processed COM and board position,
+predicted collision velocity and active difficulty feed the admission checks.
+
+KnownAir starts the retained GrindAir owner and activates it at the original
+apex/remaining-frame boundary. It predicts the physical deck's rotation and
+translation, intersects five deck/truck points with the rail plane, chooses from
+seven native contact choices, and integrates bounded translation and angular
+corrections. ProcessData publishes the unadjusted board orientation flag before
+this decision. The result refreshes the existing board/IK offset owner; ordinary
+exit deactivates the owner and preserves the native offset decay.
+
+`GRIND_ASSIST` log entries record accepted capture distance, miss distance,
+predicted contact time, primitive owner and correction. These are passive output
+from the user's play session; no scripted inputs are sent.
+
+Status: implemented and compiled, ready for the user's gameplay test. No tests
+or reference process were run, as requested. The equations and constants were
+translated from static TU3 source; matched retail replay/bitwise parity has not
+been established. The current world adapter supplies static spline primitives.

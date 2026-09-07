@@ -28,6 +28,7 @@ pub(super) fn advance(
         //Publishing Ground here runs its ForcePhysics Begin before the initial
         //input reset82DB8998, which would immediately clear that mode again.
     }
+    if skater.trajectory.edges.is_empty() { skater.trajectory.edges.clone_from(&physics.grind.primitives); }
     physics.board.clear_forces();
     let query_timer = crate::performance::Scope::new("wheel_and_foot_queries");
     //World8275EA20 starts both batches before actor SetUpPhysics. Foot
@@ -63,6 +64,8 @@ pub(super) fn advance(
         actions,
         input_available,
     )?;
+    skater.trajectory.grind_board_position = solve::deck_frame(&physics.board)[3];
+    skater.trajectory.grind_com_position = skater.player_input.processed.vectors_544_560_592_608[2].map(f32::from_bits);
     skater.ground_settings = skater.ground_profiles.select(
         skater.player_input.processed.state_variant_index_2528,
         skater.player_input.processed.surface_mode_2540,

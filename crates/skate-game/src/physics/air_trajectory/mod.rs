@@ -1,10 +1,11 @@
 //! Real stock-settings and BoardWorld adapter for the player trajectory selector.
+mod grind;
 mod settings;
 mod world;
 use skate_core::{
     air::trajectory::{
-        LaunchInfo, QueryRequest, QueryResult, SelectorInput, SelectorSettings, TrajectorySelector,
-        query_trajectory,
+        query_trajectory, LaunchInfo, QueryRequest, QueryResult, SelectorInput, SelectorSettings,
+        TrajectorySelector,
     },
     physics::board_world::BoardWorld,
 };
@@ -13,6 +14,11 @@ use skate_data::collections::Collections;
 pub struct AirTrajectoryRuntime {
     pub selector: TrajectorySelector,
     pub settings: SelectorSettings,
+    pub grind_board_position: [f32; 4],
+    pub grind_com_position: [f32; 4],
+    pub edges: Vec<skate_core::physics::grind_contact::Primitive>,
+    grind_candidates: Vec<skate_core::physics::grind_contact::Primitive>,
+    grind_settings: grind::Settings,
     pending_results: Option<Vec<QueryResult>>,
 }
 impl AirTrajectoryRuntime {
@@ -29,6 +35,11 @@ impl AirTrajectoryRuntime {
             selector: TrajectorySelector::new(),
             settings: settings::load(collections)?,
             pending_results: None,
+            edges: Vec::new(),
+            grind_board_position: [0.; 4],
+            grind_com_position: [0.; 4],
+            grind_settings: grind::Settings::load(collections)?,
+            grind_candidates: Vec::new(),
         })
     }
     pub fn launch(
@@ -47,11 +58,22 @@ impl AirTrajectoryRuntime {
         let Some(results) = self.pending_results.take() else {
             return Ok(self.selector.update_without_completion());
         };
-        let valid = self.selector.complete_batch(
+        let valid = self.selector.complete_batch_with_grinds(
             &results,
             input,
             &self.settings,
-            world::topology(world),
+            |prediction, acquire| {
+                self.grind_settings.evaluate(
+                    prediction,
+                    acquire,
+                    world,
+                    &self.edges,
+                    &mut self.grind_candidates,
+                    input.grind_lock_distance,
+                    self.grind_com_position,
+                    self.grind_board_position,
+                )
+            },
             |start, end, radius| world::line(world, start, end, radius),
         )?;
         if self.selector.pending() {

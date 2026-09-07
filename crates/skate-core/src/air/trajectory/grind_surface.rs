@@ -4,7 +4,7 @@ use super::{grind::GrindSurfaceEvidence, math::*};
 use crate::math::Vector3;
 use crate::physics::{
     board_world::BoardWorld,
-    ground_hang_geometry::{HangGeometryInput, hang_lines},
+    ground_hang_geometry::{hang_lines, HangGeometryInput},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -112,4 +112,57 @@ fn rotate(axis: Vector, value: Vector, angle: f32) -> Vector {
 }
 fn xyz(v: Vector) -> Vector3 {
     Vector3::new(v[0], v[1], v[2])
+}
+
+impl GrindSurface {
+    ///82C21930's three angular reference directions for GrindAirAdjust.
+    pub fn air_limits(
+        &self,
+        start: Vector,
+        end: Vector,
+        point: Vector,
+        board_position: Vector,
+    ) -> [Vector; 3] {
+        let rail = normalize(sub(end, start));
+        let up = normalize(cross(rail, cross(UP, rail)));
+        let side = cross(up, rail);
+        if self.evidence.kind == 0 {
+            let sign = if dot(side, sub(board_position, point)) > 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
+            let oriented = scale(side, sign);
+            let axis = cross(oriented, up);
+            [
+                side,
+                rotate(axis, oriented, f32::from_bits(0x3eb2b8c3)),
+                rotate(axis, oriented, f32::from_bits(0x401a25c2)),
+            ]
+        } else {
+            let sign = if dot(side, self.evidence.side) > 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
+            let axis = cross(side, up);
+            [
+                if self.evidence.kind == 1 {
+                    side
+                } else {
+                    cross(self.normal, rail)
+                },
+                rotate(
+                    scale(axis, -sign),
+                    scale(side, -sign),
+                    f32::from_bits(0x3eb2b8c3),
+                ),
+                rotate(
+                    scale(axis, sign),
+                    scale(side, sign),
+                    f32::from_bits(0x3f3ba866),
+                ),
+            ]
+        }
+    }
 }

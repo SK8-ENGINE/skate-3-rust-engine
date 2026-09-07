@@ -127,11 +127,14 @@ impl KnownAirRuntime for Runtime<'_> {
         self.skater.trajectory.selector.grind_locked_to_middle()
     }
     fn start_grind_air_adjust_from_selector(&mut self) {
-        //The host BoardWorld has an explicitly empty edge collection. Its selector
-        //cannot produce9653; do not manufacture the required2944/2960/edge9568 data.
-        self.record(Err(
-            "KnownAir received a grind selection from an edge-free world".into(),
-        ));
+        if let Some(target)=self.selection.grind {
+            self.skater.skeleton_input.grind_air.start(skate_core::physics::grind_air::Target {
+                edge:target.edge,limits:target.air_limits,
+            });
+            self.skater.skeleton_input.grind_air_started=true;
+        } else {
+            self.record(Err("KnownAir grind target lost its native spline record".into()));
+        }
     }
     fn selector_closest_trajectory_point(&mut self, com: V, zero: V) -> (i32, V) {
         let t = self.selection.com_trajectory;

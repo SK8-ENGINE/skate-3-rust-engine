@@ -80,7 +80,7 @@ pub(super) fn load(data: &Collections) -> Result<SelectorSettings, String> {
         vert_jump_align_max_angle: r("VertJumpAlignMaxAngle")?, //723FF102068622CF
     })
 }
-fn graph8(
+pub(super) fn graph8(
     data: &Collections,
     class: &str,
     name: &str,
