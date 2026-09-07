@@ -115,5 +115,10 @@ impl PlayerControls {
             self.action_intents.insert(intent.name, intent.value);
         }
         self.ticks += 1;
+        if self.ticks % 6 == 0 {
+            bevy::log::debug!(target: "skate_game::riding_trace",
+                tick = self.ticks, words = ?self.controller.words(),
+                intents = ?self.intents, "RIDING_INPUT");
+        }
     }
 }

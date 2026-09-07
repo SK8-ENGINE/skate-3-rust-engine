@@ -99,6 +99,14 @@ impl GroundState {
             input,
             physical,
         )?;
+        if p.frames_since_teleport_2584 % 6 == 0 {
+            bevy::log::debug!(target: "skate_game::riding_trace",
+                frame = p.frames_since_teleport_2584,
+                speed = p.scalar_2612, wheels = p.wheel_count_2556,
+                fields = ?frame.animation.fields,
+                steering = ?self.steering, speed_model = ?self.speed,
+                outcome = ?outcome, "RIDING_GROUND");
+        }
         let normal = p.vectors_464_480_496_512_528[0].map(f32::from_bits);
         if let Some(delta) = motion::future_deck_displacement(
             board.forces(),
