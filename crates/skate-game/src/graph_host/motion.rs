@@ -50,6 +50,7 @@ enum Instance {
     Cadence(super::motion_cadence::MatchCadence),
     Runout(Option<super::motion_runout::Parameters>),
     Trick(i32),
+    JumpInto(bool),
     Stateless,
     IntentFilter(skate_core::animation::intent_filter::State),
     Landing(super::motion_landing::State),
@@ -75,6 +76,7 @@ enum Instance {
 impl Instance {
     fn new(operation: &MotionOperation) -> Self {
         match operation {
+            MotionOperation::JumpInto(_) => Self::JumpInto(true),
             MotionOperation::Grind(_) => Self::Grind(Default::default()),
             MotionOperation::OffboardAir(_) => Self::OffboardAir(Default::default()),
             MotionOperation::Cadence(_) => Self::Cadence(Default::default()),

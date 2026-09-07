@@ -20,6 +20,7 @@ pub enum MotionOperation {
     Cadence(super::motion_cadence::Operation),
     Trick(super::motion_tricks::Operation),
     Play(PlayAnimation),
+    JumpInto(AttributeName),
     ///TU3 vtable82309664: Begin/Update/End all point to the empty82B61BB8.
     PrintText2D,
     AddRunoutAttribs,
@@ -130,6 +131,7 @@ impl OperationFactory for MotionFactory {
                     "FilterMotionGraphIntent" => Some(MotionOperation::IntentFilter(
                         super::motion_intent_filter::Operation::parse(a),
                     )),
+                    "JumpInto" => Some(MotionOperation::JumpInto(key(a, "attribute", ""))),
                     "PlayAnimation" => Some(MotionOperation::Play(play(a))),
                     "PrintText2D" => Some(MotionOperation::PrintText2D),
                     "AddRunoutAttribs" => Some(MotionOperation::AddRunoutAttribs),

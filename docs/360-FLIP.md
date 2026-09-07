@@ -85,7 +85,8 @@ lifecycle, not a constant-success condition.
 
 These nonvisual checks cover the ordinary ground route, not every trick in the newly
 connected catalog. Advanced manual/grind-out branches still contain the
-known unsupported `JumpInto` behavior, and the existing separate
+formerly unsupported `JumpInto` behavior (now implemented; see
+[grind-out fix](grind-out-jump-into.md)), and the existing separate
 `AddRunoutAttribs` gap remains. Those handlers were not bypassed. The current
 test does not certify dark catches or the rest of the trick catalog visually.
 

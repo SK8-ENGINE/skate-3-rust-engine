@@ -609,6 +609,14 @@ impl MotionHost {
                     _ => instance.end(&mut context),
                 }
             }
+            (MotionOperation::JumpInto(name), Instance::JumpInto(pending)) => {
+                // TU3 82BACDC0: Update consumes the allocation-time latch even
+                // if the authored marker is absent. Begin/End are empty.
+                if phase == 1 && *pending {
+                    self.animation.jump_into(name)?;
+                    *pending = false;
+                }
+            }
             (MotionOperation::Unsupported { kind, name }, _) => {
                 return Err(format!("Unsupported MotionGraph {kind:?} {name}"));
             }

@@ -37,6 +37,16 @@ pub struct MotionAnimation {
     property: AdvanceResult,
 }
 impl MotionAnimation {
+    /// TU3 JumpInto Update82BACDC0: query the live tree with mask31,
+    /// then seek to the attribute's begin time (not its scalar payload).
+    pub fn jump_into(&mut self, name: AttributeName) -> Result<(), String> {
+        if let Some(tree) = &mut self.current {
+            if let Some(marker) = tree.attribute(name, 31)? {
+                tree.set_time(marker.begin_time);
+            }
+        }
+        Ok(())
+    }
     pub fn seek_current_fraction(&mut self, fraction: f32) {
         if let Some(tree) = &mut self.current {
             tree.set_time(tree.length() * fraction);
