@@ -4,7 +4,7 @@ use skate_core::animation::{
     output::{self, NativeMatrix, Sqt},
     playback_tree::PoseCommand,
     pose_add, pose_blend, pose_mirror,
-    pose_sample::{sample_key_vbr, select_frames},
+    pose_sample::{sample_key, select_frames},
     pose_trajectory::{self, LoopTransform},
 };
 use skate_data::{
@@ -163,7 +163,10 @@ fn sample_clip(clip: &ClipFrames, time: f32) -> Result<Vec<Sqt>, String> {
         .zip(&clip.frames[selection.second])
         .enumerate()
         .map(|(bone, (&first, &second))| {
-            let mut sample = sample_key_vbr(sqt(first), sqt(second), selection);
+            // ClipFrames already contains independently decoded keys. The raw
+            // VBR block-boundary compatibility path substitutes the next key,
+            // which skips then holds a frame when applied to this flat cache.
+            let mut sample = sample_key(sqt(first), sqt(second), selection);
             sample.translation[3] = f32::from_bits(clip.channel_weights[bone]);
             sample
         })
@@ -178,7 +181,7 @@ fn sample_bone(clip: &ClipFrames, time: f32, bone: usize) -> Result<Sqt, String>
         true,
         0.0,
     )?;
-    let mut sample = sample_key_vbr(
+    let mut sample = sample_key(
         sqt(clip.frames[selection.first][bone]),
         sqt(clip.frames[selection.second][bone]),
         selection,

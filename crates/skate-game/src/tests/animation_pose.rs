@@ -1,6 +1,56 @@
 use super::*;
 
 #[test]
+fn decoded_clip_interpolates_across_compression_boundaries() {
+    // Uniform motion makes a skipped key or a held pose unambiguous. Exercise
+    // both full-pose sampling and the trajectory's previous-frame sampler.
+    for fps in [30.0_f32, 60.0] {
+        let clip = ClipFrames {
+            name: "BOUNDARY_RAMP".into(),
+            source_offset: 0,
+            fps_bits: fps.to_bits(),
+            loop_translation_bits: [0; 3],
+            loop_rotation_bits: [0, 0, 0, 1.0_f32.to_bits()],
+            channel_animation: true,
+            channel_weights: vec![0.25_f32.to_bits()],
+            frames: (0..=17)
+                .map(|frame| {
+                    let half_angle = frame as f32 * 0.02;
+                    vec![
+                        [
+                            1.0,
+                            1.0,
+                            1.0,
+                            0.0,
+                            0.0,
+                            half_angle.sin(),
+                            half_angle.cos(),
+                            frame as f32,
+                            0.0,
+                            0.0,
+                        ]
+                        .map(f32::to_bits),
+                    ]
+                })
+                .collect(),
+        };
+        for quarter in 0..=68 {
+            let frame = quarter as f32 * 0.25;
+            let time = frame / fps;
+            let pose = sample_clip(&clip, time).unwrap()[0];
+            assert_eq!(pose, sample_bone(&clip, time, 0).unwrap());
+            assert!(
+                (pose.translation[0] - frame).abs() < 0.0001,
+                "{fps} fps, frame {frame}: skipped/held decoded key: {pose:?}"
+            );
+            let angle = 2.0 * pose.rotation[2].atan2(pose.rotation[3]);
+            assert!((angle - frame * 0.04).abs() < 0.0001);
+            assert_eq!(pose.translation[3], 0.25);
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires the user's decoded stock animation assets"]
 fn stock_pose_commands_sample_complete_bones_and_preserve_tree_order() {
     let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("Set SKATE3_ASSET_ROOT");
