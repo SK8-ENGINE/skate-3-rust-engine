@@ -87,6 +87,10 @@ pub(super) fn advance(
     match skater.player_state.current() {
         skate_core::player::state::PhysicalStateId::GrindBoardslide
         | skate_core::player::state::PhysicalStateId::GrindFiftyFifty
+        | skate_core::player::state::PhysicalStateId::GrindTipslide
+        | skate_core::player::state::PhysicalStateId::GrindFiveO
+        | skate_core::player::state::PhysicalStateId::GrindBackslash
+        | skate_core::player::state::PhysicalStateId::GrindDarkslide
         | skate_core::player::state::PhysicalStateId::Nonspecific => super::grind::update(physics, skater)?,
         skate_core::player::state::PhysicalStateId::BipedAir => {
             super::offboard::air_state::update(physics, skater)?;

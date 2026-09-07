@@ -11,6 +11,8 @@ use crate::physics::{
 pub struct GrindSurface {
     pub evidence: GrindSurfaceEvidence,
     pub normal: Vector,
+    ///Investigation16/32: far-side query endpoints, consumed by82D883E0.
+    pub far_points: [Vector; 2],
 }
 
 ///The query consists of six consecutive48-byte descriptors; descriptor4 is
@@ -98,6 +100,7 @@ pub fn investigate(
     Ok(Some(GrindSurface {
         evidence: GrindSurfaceEvidence { kind, side },
         normal,
+        far_points: far,
     }))
 }
 

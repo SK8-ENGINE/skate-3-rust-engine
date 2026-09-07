@@ -2,6 +2,8 @@
 //! triangle query: exact parallel rejection and closed segment/barycentric bounds.
 use super::native_arithmetic::dot3;
 type V = [f32; 4];
+pub mod families;
+pub mod control;
 
 /// Native query entry: endpoints plus a spline owner, not three vectors.
 #[derive(Clone, Copy, Debug)]

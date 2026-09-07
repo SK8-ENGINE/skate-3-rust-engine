@@ -12,7 +12,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         skater.player_state.current(),
         PhysicalStateId::PhysicsGround
             | PhysicalStateId::PhysicsAir
-            | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty
+            | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
             | PhysicalStateId::Nonspecific
             | PhysicalStateId::KnownAir
             | PhysicalStateId::GroundAnimation

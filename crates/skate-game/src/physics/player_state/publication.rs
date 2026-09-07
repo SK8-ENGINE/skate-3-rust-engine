@@ -13,7 +13,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         state,
         PhysicalStateId::PhysicsGround
             | PhysicalStateId::PhysicsAir
-            | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty
+            | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
             | PhysicalStateId::Nonspecific
             | PhysicalStateId::KnownAir
             | PhysicalStateId::GroundAnimation
@@ -89,6 +89,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     let physical = &mut skater.player_input.physical;
     if physics.grind.active {
         physical.grinds.words_136_140 = [physics.grind.kind, 1];
+        physical.grinds.flag_318 = u8::from(physics.grind.front_contact);
         if physics.grind.launched {
             physical.air.launched_442=1;
             physical.air.launch_velocity_128=physics.grind.launch_velocity.map(f32::to_bits);

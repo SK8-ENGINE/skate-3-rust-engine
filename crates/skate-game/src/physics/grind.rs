@@ -19,6 +19,8 @@ use skate_data::collections::Collections;
 type V = [f32; 4];
 #[path = "grind_camera.rs"]
 mod camera;
+#[path = "grind_chromosome.rs"]
+mod chromosome;
 pub(crate) struct Runtime {
     camera: camera::GrindCamera,
     primitives: Vec<Primitive>,
@@ -26,6 +28,12 @@ pub(crate) struct Runtime {
     pub name: String,
     pub active: bool,
     pub kind: u32,
+    pub front_contact: bool,
+    chromosome: chromosome::Chromosome,
+    scoring_name: String,
+    ground_frames: u32,
+    crouch: f32,
+    control: grind_contact::control::Control,
     test_depth_epsilon: f32,
     test_depth: f32,
     exiting: bool,
@@ -37,6 +45,7 @@ pub(crate) struct Runtime {
     pub distance: f32,
     pop_heights: [[f32; 2]; 5],
     boardslide_pop_heights: [[f32; 2]; 5],
+    tipslide_pop_heights: [[f32; 2]; 5],
     manager_age: f32,
     pub launched: bool,
     pub launch_velocity: V,
@@ -59,6 +68,12 @@ impl Runtime {
             name: String::new(),
             active: false,
             kind: 0,
+            front_contact: false,
+            chromosome: chromosome::Chromosome::default(),
+            scoring_name: String::new(),
+            ground_frames: 0,
+            crouch: 0.0,
+            control: grind_contact::control::Control::default(),
             test_depth_epsilon: data.float("physics_grinds", "default", "TestDepthEpsilon")?,
             test_depth: data.float("physics_grinds", "default", "TestDepth")?,
             exiting: false,
@@ -93,6 +108,17 @@ impl Runtime {
                 .collect::<Result<Vec<_>, _>>()?
                 .try_into()
                 .unwrap(),
+            tipslide_pop_heights: ["easy", "normal", "hardcore", "motorized", "test"]
+                .map(|key| {
+                    Ok::<_, String>([
+                        data.float("physics_mode", key, "Hash_703829BD711E54DE")?,
+                        data.float("physics_mode", key, "Hash_F2473E9125079F0")?,
+                    ])
+                })
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?
+                .try_into()
+                .unwrap(),
             manager_age: 0.0,
             launched: false,
             launch_velocity: [0.; 4],
@@ -105,7 +131,12 @@ impl Runtime {
     pub fn advance_camera(&mut self, velocity: V) -> Result<(), String> {
         if self.active {
             let contact = self.candidate.ok_or("Grind camera needs active contact")?;
-            self.camera.update(contact, self.primitives[contact.primitive], self.kind, velocity);
+            self.camera.update(
+                contact,
+                self.primitives[contact.primitive],
+                self.kind,
+                velocity,
+            );
         } else {
             self.camera.exit();
         }
@@ -114,8 +145,16 @@ impl Runtime {
     pub fn camera_output(&self) -> crate::camera::CameraGrindOutput {
         crate::camera::CameraGrindOutput {
             //Reset82DE3518 defaults still apply outside the active state.
-            direction_0: if self.active { self.camera.direction } else { [1.0, 0.0, 0.0, 0.0] },
-            camera_target_96: if self.active { self.camera.target } else { [0.0; 4] },
+            direction_0: if self.active {
+                self.camera.direction
+            } else {
+                [1.0, 0.0, 0.0, 0.0]
+            },
+            camera_target_96: if self.active {
+                self.camera.target
+            } else {
+                [0.0; 4]
+            },
             grinding_316: u8::from(self.active),
         }
     }
@@ -130,7 +169,9 @@ impl Runtime {
         GrindState {
             kind: self.kind as i32,
             name: encode(self.name.as_bytes()),
-            scoring_name: encode(self.name.as_bytes()),
+            scoring_name: encode(self.scoring_name.as_bytes()),
+            on_front: self.front_contact,
+            crouch: self.crouch,
             pathed_guid: owner,
             local_guid: owner,
             ..GrindState::default()
@@ -143,12 +184,32 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
     let p = &mut skater.player_input.processed;
     let runtime = &mut physics.grind;
     let board = super::solve::deck_frame(&physics.board);
+    let mut effective_board = board;
+    if p.flags_2468 & 0x0010_0000 != 0 {
+        effective_board[0] = effective_board[0].map(|v| -v);
+        effective_board[2] = effective_board[2].map(|v| -v);
+    }
+    let pose = chromosome::Pose {
+        animated_board: skater.animated_skeleton.board_frames.animation_target,
+        board: effective_board,
+        foot_directions: [
+            skater.skeleton.record.pose[19][0],
+            skater.skeleton.record.pose[15][0],
+        ],
+        fakie: skater.animation.packet.riding_fakie,
+    };
+    runtime.chromosome.observe(pose, p.category_2512);
     runtime.cooldown = runtime.cooldown.saturating_sub(1);
     runtime.manager_age = (runtime.manager_age + 0.0035).min(1.0);
     let old = runtime.candidate;
-    let old_kind = runtime.kind;
+
     runtime.candidate = None;
     runtime.diagnostic_tick = runtime.diagnostic_tick.wrapping_add(1);
+    runtime.ground_frames = if p.category_2512 == 100 {
+        runtime.ground_frames.saturating_add(1)
+    } else {
+        0
+    };
     let gated = runtime.cooldown > 0
         || skater.player_input.grind.disabled
         || p.flags_2476 & 0x01000000 != 0;
@@ -210,15 +271,84 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
             runtime.truck_to_wheel,
         )
     });
-    //82D875A8 tries the current concrete state before the ordinary truck,
-    //tip and centre-deck fallback sequence.
-    let (candidate, kind) = if runtime.active && runtime.kind == 1 && slide.is_some() {
-        (slide, 1)
-    } else if fifty.is_some() {
-        (fifty, 0)
+    use grind_contact::families::{self, Contact};
+    let five = families::five_o(
+        board,
+        hits,
+        &runtime.primitives,
+        velocity,
+        p.flags_2476,
+        p.flags_2472,
+        runtime.ground_frames,
+        extra.grind_translation,
+    );
+    let mut tip_hits = families::tip_contacts(
+        board,
+        p.flags_2484,
+        p.state_2504,
+        p.flags_2468,
+        runtime.deck_to_truck,
+        &edges,
+    );
+    for hit in tip_hits.iter_mut().flatten() {
+        hit.primitive = nearby[hit.primitive];
+    }
+    let tip = families::tipslide(
+        board,
+        tip_hits,
+        &runtime.primitives,
+        velocity,
+        p.category_2512,
+        p.flags_2476,
+        p.flags_2472,
+        runtime.ground_frames,
+        skater.animation_input.fields.balance,
+        p.vectors_464_480_496_512_528[0].map(f32::from_bits),
+    );
+    let dark = families::inverted_contact(
+        board,
+        p.flags_2484,
+        runtime.test_depth_epsilon,
+        runtime.test_depth,
+        &edges,
+    )
+    .and_then(|mut hit| {
+        hit.primitive = nearby[hit.primitive];
+        families::darkslide(
+            board,
+            hit,
+            runtime.primitives[hit.primitive],
+            velocity,
+            p.category_2512,
+            skater.player_input.grind.low_wheel_frames,
+        )
+    });
+    let fifty = fifty.map(|geometry| Contact {
+        geometry,
+        front: false,
+        kind: 0,
+    });
+    let slide = slide.map(|geometry| Contact {
+        geometry,
+        front: false,
+        kind: 1,
+    });
+    //82D875A8 retains a valid current family, then truck/tip/deck/inverted.
+    let current = if runtime.active {
+        match runtime.kind {
+            0 | 3 => fifty.or(five),
+            1 => slide,
+            2 | 4 => tip,
+            5 => dark,
+            _ => None,
+        }
     } else {
-        (slide, 1)
+        None
     };
+    let selected = current.or(fifty).or(five).or(tip).or(slide).or(dark);
+    let candidate = selected.map(|c| c.geometry);
+    let mut kind = selected.map_or(0, |c| c.kind);
+    runtime.front_contact = selected.is_some_and(|c| c.front);
     // Passive diagnostics for the user's visual run; no input simulation.
     if runtime.diagnostic_tick % 30 == 0 || (!gated && candidate.is_some()) != old.is_some() {
         bevy::log::info!(
@@ -243,7 +373,7 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
     if gated {
         return;
     }
-    let Some(candidate) = candidate else {
+    let Some(mut candidate) = candidate else {
         return;
     };
     let velocity = p.vectors_400_416[0].map(f32::from_bits);
@@ -261,7 +391,7 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
     }
     runtime.candidate = Some(candidate);
     runtime.kind = kind;
-    if kind == 1 {
+    if kind != 0 {
         let edge = runtime.primitives[candidate.primitive];
         match skate_core::air::trajectory::grind_surface::investigate(
             &physics.world,
@@ -271,8 +401,25 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
             runtime.deck_to_truck,
         ) {
             Ok(Some(surface)) => {
+                if surface.evidence.kind == 3 {
+                    runtime.candidate = None;
+                    return;
+                }
                 runtime.surface_kind = surface.evidence.kind;
                 runtime.surface_normal = surface.normal;
+                if kind == 2
+                    && families::is_backslash(
+                        board[3],
+                        candidate.centre,
+                        surface.far_points,
+                        surface.normal,
+                        runtime.deck_to_truck,
+                        p.state_2508,
+                    )
+                {
+                    kind = 4;
+                    runtime.kind = kind;
+                }
             }
             Ok(None) | Err(_) => {
                 runtime.candidate = None;
@@ -280,23 +427,43 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
             }
         }
     }
-    p.grind_position_1120 = candidate.centre.map(f32::to_bits);
-    p.grind_direction_1136 = candidate.direction.map(f32::to_bits);
-    if !runtime.active || old.is_none() || old_kind != kind {
-        let backwards = dot3(board[2], velocity) < 0.0;
-        let side = dot3(sub(candidate.centre, board[3]), board[0]) >= 0.0;
-        runtime.name = format!(
-            "{}{}_{}",
-            if backwards && kind == 0 { "BF_" } else { "" },
-            if side { "FS" } else { "BS" },
-            if kind == 0 { "50_50" } else { "BOARD" }
-        );
+    //82D87460: primitive tangent follows travel, retaining its previous sign at rest.
+    let edge = runtime.primitives[candidate.primitive];
+    let delta = sub(edge.end, edge.start);
+    let length = dot3(delta, delta).sqrt();
+    let mut direction = delta.map(|v| v / length);
+    let along = dot3(direction, velocity);
+    if along < 0.0 {
+        direction = direction.map(|v| -v);
     }
+    if along.abs() < 0.1 && dot3(p.grind_direction_1136.map(f32::from_bits), direction) < -0.9 {
+        direction = direction.map(|v| -v);
+    }
+    candidate.direction = direction;
+    runtime.candidate = Some(candidate);
+    p.grind_position_1120 = candidate.centre.map(f32::to_bits);
+    p.grind_direction_1136 = direction.map(f32::to_bits);
+    let normal = if kind == 0 {
+        grind_contact::upright_normal(direction)
+    } else {
+        runtime.surface_normal
+    };
+    let (name, scoring_name) =
+        runtime
+            .chromosome
+            .update(pose, kind, candidate.centre, direction, normal);
+    runtime.name = name.into();
+    runtime.scoring_name = scoring_name.into();
 }
 pub(super) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
     physics.grind.active = matches!(
         skater.player_state.current(),
-        PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindBoardslide
+        PhysicalStateId::GrindFiftyFifty
+            | PhysicalStateId::GrindBoardslide
+            | PhysicalStateId::GrindTipslide
+            | PhysicalStateId::GrindFiveO
+            | PhysicalStateId::GrindBackslash
+            | PhysicalStateId::GrindDarkslide
     );
     physics.grind.exiting = false;
     physics.grind.distance = 0.0;
@@ -344,6 +511,8 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
             .ok_or("Grind pop has no primitive")?;
         let heights = if physics.grind.kind == 1 {
             &physics.grind.boardslide_pop_heights
+        } else if physics.grind.kind == 2 {
+            &physics.grind.tipslide_pop_heights
         } else {
             &physics.grind.pop_heights
         };
@@ -381,13 +550,26 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
             .grind
             .candidate
             .ok_or("Active grind lost its candidate before selection")?;
-        let normal = if physics.grind.kind == 1 {
+        let normal = if physics.grind.kind != 0 {
             physics.grind.surface_normal
         } else {
             grind_contact::upright_normal(c.direction)
         };
+        physics.grind.crouch = dot3(board[2], normal).abs() * 0.4;
         let across = cross(c.direction, normal);
-        if physics.grind.kind == 1 {
+        physics.grind.control.update(
+            physics.grind.kind,
+            board[2],
+            normal,
+            physics.grind.front_contact,
+            p.flags_2468 & 0x0010_0000 != 0,
+            false,
+            skater.animation_input.extra.grind_translation,
+            skater.animation_input.extra.grind_stability_nudge,
+            skater.animation_input.extra.grind_up_down,
+            skater.animation_input.extra.grind_grab_min_height,
+        );
+        if matches!(physics.grind.kind, 1 | 5) {
             physics.grind.exiting |= p.flags_2468 & 0x0020_0000 != 0;
             let mass = skater
                 .player_input
@@ -401,26 +583,63 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
                 c.direction,
                 normal,
                 velocity,
-                skater.animation_input.extra.grind_translation,
+                //Darkslide82D41438 scales translation40 by remaining .16m
+                //deck width; Boardslide82D419A0 uses constant25.
+                skater.animation_input.extra.grind_translation
+                    * if physics.grind.kind == 5 {
+                        (1.0 - dot3(sub(board[3], c.centre), across).abs() * 6.25) * 40.0 / 25.0
+                    } else {
+                        1.0
+                    },
                 mass,
                 physics.grind.exiting,
                 physics.grind.surface_kind == 2,
             ) {
                 append(physics, force)?;
             }
+        } else if physics.grind.kind == 2 {
+            //82D42390: lateral direction points toward the contact. The
+            //animation nudge changes sign with the contact side.
+            let offset = sub(board[3], c.centre);
+            let inward = across.map(|v| {
+                v * if dot3(across, offset) > 0.0 {
+                    -1.0
+                } else {
+                    1.0
+                }
+            });
+            let nudge = skater.animation_input.extra.grind_stability_nudge
+                * if dot3(normal, cross(c.direction, offset)) > 0.0 {
+                    1.0
+                } else {
+                    -1.0
+                };
+            append(physics, inward.map(|v| v * nudge * 37.0))?;
         } else {
+            let (strength, forward_offset, up_offset) = match physics.grind.kind {
+                3 => (3000.0, 0.234, 0.07),
+                4 => (3000.0, 0.39, 0.025),
+                _ => (800.0, 0.0, 0.07),
+            };
             let force = grind_forces::lateral_pin(
                 board,
                 c.centre,
                 across,
                 velocity,
-                800.,
-                0.,
-                0.07,
-                true,
+                strength,
+                forward_offset,
+                up_offset,
+                physics.grind.front_contact,
                 physics.grind.pin_vs_slope.evaluate(dot3(normal, normal)),
             );
             append(physics, force)?;
+            if matches!(physics.grind.kind, 0 | 3) {
+                //82D401F8: support load from the native pitch conditioner.
+                append(
+                    physics,
+                    normal.map(|v| v * physics.grind.control.pitch.abs() * -600.0),
+                )?;
+            }
         }
         //The primitive support frame is static and level for the authored rails.
         //82D86318 publishes this unit support normal in candidate304.
@@ -432,10 +651,11 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
             false,
             1.3,
             0,
-            if physics.grind.kind == 1 {
-                [55., 55., 60.]
-            } else {
-                [50., 40., 40.]
+            match physics.grind.kind {
+                1 | 5 => [55., 55., 60.],
+                2 => [60., 60., 60.],
+                4 => [70., 80., 80.],
+                _ => [50., 40., 40.],
             },
         );
         append(physics, friction)?;
@@ -444,7 +664,7 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
         } else {
             c.direction.map(|x| -x)
         };
-        let target = if physics.grind.kind == 1 {
+        let target = if matches!(physics.grind.kind, 1 | 5) {
             //82D418B8 aligns the board's RIGHT axis with the rail;50-50
             //82D41E38 aligns its FORWARD axis instead.
             let right = if dot3(board[0], c.direction) > 0.0 {
@@ -452,7 +672,29 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
             } else {
                 c.direction.map(|x| -x)
             };
-            [right, normal, cross(right, normal), board[3]]
+            let up = if physics.grind.kind == 5 {
+                normal.map(|v| -v)
+            } else {
+                normal
+            };
+            [right, up, cross(right, up), board[3]]
+        } else if matches!(physics.grind.kind, 2 | 4) {
+            grind_contact::control::tip_frame(
+                board,
+                c.direction,
+                normal,
+                c.centre,
+                physics.grind.kind == 4,
+            )
+        } else if physics.grind.kind == 3
+            || (physics.grind.kind == 0 && physics.grind.control.pitch.abs() > 0.12)
+        {
+            grind_contact::control::truck_frame(
+                board,
+                normal,
+                &physics.grind.control,
+                p.flags_2468 & 0x0010_0000 != 0,
+            )
         } else {
             [cross(normal, forward), normal, forward, board[3]]
         };
