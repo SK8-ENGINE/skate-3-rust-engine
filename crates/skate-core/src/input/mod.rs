@@ -6,6 +6,7 @@ pub mod animation_packet;
 pub mod controller;
 pub mod gameplay_map;
 pub mod graph_intents;
+pub mod grind_intentions;
 pub mod history;
 pub mod pad;
 pub mod power_sliding;

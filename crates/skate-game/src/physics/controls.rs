@@ -102,6 +102,7 @@ impl PlayerControls {
             &self.controller, self.actor_flags, physical_capabilities,
         ));
         self.intents.extend(skate_core::input::anticipation_intentions::produce(&self.controller));
+        self.intents.extend(skate_core::input::grind_intentions::produce(&self.controller));
         //GenerateActionGraphIntents82594310 clears the AG map through82BC1B68
         //before Listener::Fill. MG lifecycle intents use a different persistent map.
         self.action_intents.clear();
