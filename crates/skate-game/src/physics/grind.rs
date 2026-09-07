@@ -37,6 +37,7 @@ pub(crate) struct Runtime {
     test_depth_epsilon: f32,
     test_depth: f32,
     exiting: bool,
+    release: grind_forces::Release,
     surface_kind: u32,
     surface_normal: V,
     surface_side: V,
@@ -80,6 +81,7 @@ impl Runtime {
             test_depth_epsilon: data.float("physics_grinds", "default", "TestDepthEpsilon")?,
             test_depth: data.float("physics_grinds", "default", "TestDepth")?,
             exiting: false,
+            release: grind_forces::Release::default(),
             surface_kind: 0,
             surface_normal: [0.0, 1.0, 0.0, 0.0],
             surface_side: [0.0; 4],
@@ -492,6 +494,7 @@ pub(super) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
             | PhysicalStateId::GrindDarkslide
     );
     physics.grind.exiting = false;
+    physics.grind.release = grind_forces::Release::default();
     physics.grind.distance = 0.0;
     physics.grind.previous_position = super::solve::deck_frame(&physics.board)[3];
     skater.ground_lifecycle.skeleton_elapsed_16505 = true;
@@ -530,6 +533,20 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
     physics.grind.launched = false;
     let board = super::solve::deck_frame(&physics.board);
     let p = &skater.player_input.processed;
+    if physics.grind.active {
+        //82D40D90; Boardslide82D41788 only exposes this exit on kind2.
+        let explicit = p.flags_2476 & 0x2000_0000 != 0
+            && (!matches!(physics.grind.kind, 1 | 5) || physics.grind.surface_kind == 2);
+        let was_leaving = physics.grind.release.leaving;
+        physics.grind.release.begin_update(p.scalar_2652, explicit);
+        if !was_leaving && physics.grind.release.leaving {
+            bevy::log::info!("GRIND_RELEASE kind={} speed={} explicit={}", physics.grind.kind, p.scalar_2652, explicit);
+        }
+        if physics.grind.release.finish_update() {
+            //82D3F638: byte37/value124, using the retained request owner.
+            skater.wipeout.state.request(17, 0.0);
+        }
+    }
     if physics.grind.active && p.flags_2468 & 0x00400000 != 0 {
         let c = physics
             .grind
@@ -604,6 +621,31 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
             grind_contact::upright_normal(c.direction)
         };
         physics.grind.crouch = dot3(board[2], normal).abs() * 0.4;
+        if physics.grind.release.leaving {
+            let surface = physics.grind.surface_kind;
+            let (strength, limit, lift, force_across) = match physics.grind.kind {
+                //50-50 exit82D41DF0, 5-O exit82D428C0.
+                0 => if surface < 2 { (100.0, 1.0, 125.0, false) } else { (10.0, 1.0, 0.0, false) },
+                3 => if surface < 2 { (120.0, 0.9, 125.0, false) } else { (10.0, 0.9, 0.0, false) },
+                //Static rail Tipslide82D420A0 and Backslash82D42A80.
+                2 => (100.0, 1.5, 0.0, true),
+                4 => (100.0, 0.75, if surface == 1 { 125.0 } else { 0.0 }, surface == 1),
+                //Boardslide82D41250 enters the existing runout/wipeout path
+                //on rail/ledge engagement; kind2 uses a physical side force.
+                _ => (90.0, 0.75, 0.0, false),
+            };
+            if matches!(physics.grind.kind, 1 | 5) && surface != 2 {
+                skater.wipeout.state.request(10, 0.0);
+            } else {
+                append(physics, grind_forces::release_force(
+                    board[3], c.centre, c.direction, normal, velocity, surface,
+                    physics.grind.surface_side, force_across, strength, limit, lift,
+                ))?;
+            }
+            physics.riding.update_grind_reckoning(
+                &mut skater.air_reckoning.state, normal, board[2], p.flags_2468, 0.9);
+            return super::input_phase::update_ground(physics, skater);
+        }
         let across = cross(c.direction, normal);
         physics.grind.control.update(
             physics.grind.kind,

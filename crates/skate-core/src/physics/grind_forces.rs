@@ -164,3 +164,41 @@ fn cross(a: V, b: V) -> V {
         0.0,
     ]
 }
+
+/// Grind PreUpdate82D3F4E8 / exit decision82D40DA0. Counts are native
+/// simulation updates, not render frames. Once leaving, the phase is latched.
+#[derive(Default)]
+pub struct Release {
+    updates: u32,
+    leaving_updates: u32,
+    pub leaving: bool,
+}
+impl Release {
+    pub fn begin_update(&mut self, speed: f32, explicit_exit: bool) {
+        self.leaving |= explicit_exit || (self.updates > 60 && speed < 0.15);
+    }
+    pub fn finish_update(&mut self) -> bool {
+        self.leaving_updates = if self.leaving { self.leaving_updates.wrapping_add(1) } else { 0 };
+        self.updates = self.updates.wrapping_add(1);
+        self.leaving_updates > 35
+    }
+}
+
+///82D3F850: push away from the contacted edge until the native lateral
+///speed limit is reached. Ledge engagement may supply its outward direction.
+pub fn release_force(
+    position: V, point: V, direction: V, normal: V, velocity: V,
+    surface_kind: u32, surface_side: V, force_across: bool,
+    strength: f32, speed_limit: f32, lift: f32,
+) -> V {
+    let outward = if !force_across && surface_kind != 0 {
+        scale(surface_side, -1.0)
+    } else {
+        let across = cross(direction, normal);
+        scale(across, if dot3(across, sub(position, point)) > 0.0 { 1.0 } else { -1.0 })
+    };
+    if dot3(velocity, outward) >= speed_limit { return [0.0; 4]; }
+    let lateral = scale(outward, strength);
+    let upward = normal[1].max(0.0) * lift;
+    core::array::from_fn(|i| normal[i].mul_add(upward, lateral[i]))
+}
