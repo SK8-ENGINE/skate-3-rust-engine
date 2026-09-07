@@ -109,15 +109,25 @@ pub(crate) fn surfaces() -> [Vec<[Vector3; 4]>; 3] {
 
 pub(super) fn world(material: RetailContactMaterial) -> BoardWorld {
     let mut triangles = Vec::new();
+    let rail_faces = crate::grind_world::surfaces();
     for (tag, quads) in surfaces().into_iter().enumerate() {
         for vertices in quads {
-            for indices in [[0, 2, 1], [0, 3, 2]] {
+            let rail_face = rail_faces.contains(&vertices);
+            for (half, indices) in [[0, 2, 1], [0, 3, 2]].into_iter().enumerate() {
+                // Closed rectangular rails have convex perimeter edges. Keep
+                // the coplanar triangulation diagonal non-convex. Without
+                // these flags,82AD3130 rejects narrow-rail edge contacts.
+                let convex = if rail_face {
+                    if half == 0 { 0x60 } else { 0xc0 }
+                } else {
+                    0
+                };
                 triangles.push(WorldTriangle {
                     triangle: triangle_from_volume(
                         indices.map(|i| vertices[i]),
                         0.0,
                         [1.0; 3],
-                        TriangleFeature::ONE_SIDED,
+                        TriangleFeature::ONE_SIDED | convex,
                     ),
                     material,
                     tag: tag as u32,

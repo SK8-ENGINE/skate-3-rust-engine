@@ -60,3 +60,27 @@ record/scorer, then lifecycle/constraint/output integration as one coherent
 vertical slice. Do not enable selector candidates before those owners exist.
 
 Validation: build only; no gameplay or automated tests, per user instruction.
+
+## 2026-09-07 collision and contact follow-up
+
+The rail boxes were emitted with only ONE_SIDED. Native contact fixup82AD3130
+rejects an edge-region contact when its convex bit is absent. Authored rail
+faces now set the two perimeter-edge bits on each triangle and leave the
+coplanar diagonal non-convex (0x60 /0xC0 for the existing triangle winding).
+This change applies to rail/coping/support boxes only. Gameplay confirmation
+is outstanding; a build does not establish that this explains every missed hit.
+
+Core truck_contacts ports82C1FDC0's two local-board probe rectangles, using
+TruckToWheel and DeckCenterToTruck, the -.02 start offset and -.20 depth,
+first-triangle priority, strict squared-distance comparison and first-entry
+tie retention. It remains a contact query, not an engagement decision.
+
+Checked the task Research readable game recreation and its referenced
+Skate3CustomEngineLayer/src/skate3_native_grind.cpp. That integration registers
+splines in the original guest GrindData owner; it does not contain replacement
+grind forces. Expand Skate 3 replay toolkit likewise supplies research and
+capture infrastructure rather than a standalone grind controller.
+
+The remaining native state/force and graph-attribute contracts are unresolved.
+Do not advertise this build as grind-ready. Build log:
+logs/grind-collision-build.log (successful,35 warnings); no tests executed.
