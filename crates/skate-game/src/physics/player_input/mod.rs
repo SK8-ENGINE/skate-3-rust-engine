@@ -70,6 +70,9 @@ impl PlayerInputRuntime {
     pub fn pending_teleport(&self) -> Option<AnimationPartTransform> {
         self.pending_teleport
     }
+    pub fn processed_snapshot(&self, tick: u64) -> skate_core::player::input_phase::ProcessedPhysicsSnapshot {
+        skate_core::player::input_phase::ProcessedPhysicsSnapshot::new(tick, self.processed)
+    }
     ///Run after the current board/contact solve, before ProcessOutput publishes.
     pub fn update_dynamic_normal(
         &mut self,

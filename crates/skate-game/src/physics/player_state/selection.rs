@@ -4,8 +4,13 @@ use skate_core::player::selector::{
     ProcessedStateInput, StateSelectionInput,
     conditions::{BoardBodyState, SkeletonAnimationState},
 };
-pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
-    let p = &skater.player_input.processed;
+pub(super) fn advance(
+    physics: &mut GamePhysics,
+    skater: &mut SkaterRuntime,
+    snapshot: skate_core::player::input_phase::ProcessedPhysicsSnapshot,
+) -> Result<(), String> {
+    debug_assert_eq!(snapshot.tick, physics.ticks);
+    let p = &snapshot.input;
     let input = StateSelectionInput {
         processed: ProcessedStateInput {
             //The retained contact owner publishes native kind and candidate384.

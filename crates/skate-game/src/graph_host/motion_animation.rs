@@ -17,7 +17,10 @@ use skate_core::graph::intents::IntentMap;
 use skate_data::animation_metadata::{AnimationMetadata, TreeMetadata};
 use tree_builder::build;
 
+use super::outputs::ActionGraphOutput;
+
 pub struct MotionAnimation {
+    pub grab_type: Option<super::motion_stock_gameplay::GrabType>,
     metadata: AnimationMetadata,
     current: Option<PlaybackTree>,
     pub channels: super::motion_channels::MotionChannels,
@@ -37,6 +40,10 @@ pub struct MotionAnimation {
     property: AdvanceResult,
 }
 impl MotionAnimation {
+    pub fn accept_action_graph(&mut self, output: ActionGraphOutput) {
+        output.motion_effects.apply_to(&mut self.motion_intents);
+    }
+
     /// TU3 JumpInto Update82BACDC0: query the live tree with mask31,
     /// then seek to the attribute's begin time (not its scalar payload).
     pub fn jump_into(&mut self, name: AttributeName) -> Result<(), String> {
@@ -58,6 +65,7 @@ impl MotionAnimation {
     pub fn reset_from_stock(&mut self) {
         self.current = None;
         self.current_name = None;
+        self.grab_type = None;
         self.channels.reset_from_stock();
         self.motion_intents.clear();
         self.filtered_intents.clear();
@@ -72,6 +80,7 @@ impl MotionAnimation {
             current: None,
             channels: super::motion_channels::MotionChannels::default(),
             current_name: None,
+            grab_type: None,
             motion_intents: IntentMap::new(),
             filtered_intents: IntentMap::new(),
             motion_attributes: Vec::new(),
@@ -229,6 +238,13 @@ impl MotionAnimation {
     pub fn emit_packet(&mut self, name: AttributeName, value: f32) {
         self.motion_attributes
             .push(MotionGraphAttribute { name, value });
+    }
+    pub fn set_grab_type(&mut self, grab_type: super::motion_stock_gameplay::GrabType) {
+        self.grab_type = Some(grab_type);
+        //82B971F8 stores ISkaterAnim360; this is not a physics attribute.
+    }
+    pub fn clear_grab_type(&mut self) {
+        self.grab_type = None;
     }
     pub fn build_tree(&self, name: &str) -> Result<PlaybackTree, String> {
         build(

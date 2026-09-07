@@ -18,8 +18,7 @@ pub(crate) use publication::{
     CameraAnimationOutput, CameraAirOutput, CameraOffboardOutput, CameraGrindOutput,
     CameraEventsOutput, CameraPreferences,
 };
-pub(crate) use subject::{CameraSubjectFrame, CameraSubjectSnapshot};
-pub(crate) use graph_subject::{CameraGraphEnvironment, CameraGraphSubject};
+pub(crate) use graph_subject::CameraGraphEnvironment;
 pub(crate) use runtime::CameraRuntime;
 use bevy::prelude::*;
 use crate::{app::FrameSet, config::Config};
@@ -30,8 +29,7 @@ struct GameplayCamera;
 pub(crate) struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CameraSubjectFrame>()
-            .add_systems(Startup, spawn)
+        app.add_systems(Startup, spawn)
             .add_systems(Update, present.after(FrameSet::Animation).before(FrameSet::Verification));
     }
 }

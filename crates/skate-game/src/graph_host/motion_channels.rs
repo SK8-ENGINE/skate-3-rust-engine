@@ -53,6 +53,17 @@ impl MotionChannels {
                 if value >= 0.0 { value } else { 0.0 }
             })
     }
+    ///82D1D4B8: clamp the actual child time to [0, child length].
+    pub fn elapsed(&self, name: &str) -> f32 {
+        self.channels.iter()
+            .find(|c| intent_key(&c.name) == intent_key(name))
+            .map_or(0.0, |c| {
+                let time = c.tree.time();
+                let lower = if -time >= 0.0 { 0.0 } else { time };
+                let length = c.tree.length();
+                if length - lower >= 0.0 { lower } else { length }
+            })
+    }
     ///82B96FF0 reads Channel136, set/cleared by Start/CompleteTransition.
     pub fn in_transition(&self, name: &str) -> bool {
         self.channels

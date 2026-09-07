@@ -1,7 +1,6 @@
 //! Original TU3 gesture membership,82BA10C0 ->82BA07F0.
 //! The catalog is constructed by82B98DB8 ->82B98F70, independently checked
 //! against all270 raw map-insertion calls. PAT paths do not define these groups.
-use skate_core::graph::intents::IntentMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Group {
@@ -31,7 +30,7 @@ impl Group {
 
     ///82BA07F0 tests map-key presence, never the intent value. All seven maps
     ///contain the same30 unrotated keys; each rotated map adds its15 own keys.
-    pub(crate) fn has_intent(self, action_intents: &IntentMap) -> bool {
+    pub(crate) fn has_intent(self, has: impl Fn(&str) -> bool) -> bool {
         let additional: &[&str] = match self {
             Self::Square | Self::Nose | Self::Tail => &[],
             Self::Nose90 => &NOSE_90,
@@ -42,7 +41,7 @@ impl Group {
         COMMON
             .iter()
             .chain(additional)
-            .any(|name| action_intents.contains_key(name))
+            .any(|name| has(name))
     }
 }
 

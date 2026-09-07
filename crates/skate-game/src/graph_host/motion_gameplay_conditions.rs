@@ -21,8 +21,10 @@ pub struct GameplayConditions {
     pub handplant_flags: u32,
     pub time_to_skitch: f32,
     pub skitch_transition_time: f32,
-    /// PhysOutAnimation+144 collision time used by TimeToLand.
+    /// TimeToLand82BA7250 reads Air184 when Air437 is valid.
     pub time_to_land: f32,
+    pub time_to_land_valid: bool,
+    pub trucks_or_deck_contact: bool,
     /// PhysOutOffBoard+32, shared by OBTimeToLand and OBTrajTime.
     pub offboard_time_to_land: f32,
     pub tricks_blocked_on_stairs: bool,

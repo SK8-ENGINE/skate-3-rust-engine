@@ -110,7 +110,7 @@ pub(crate) fn post_input_and_select(
 ) -> Result<(), String> {
     super::grind::query(physics, skater);
     post_input::advance(physics, skater)?;
-    selection::advance(physics, skater)
+    selection::advance(physics, skater, skater.player_input.processed_snapshot(physics.ticks))
 }
 ///The reset/board/skeleton publications precede this selected-state FillPhysOut.
 pub(crate) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {

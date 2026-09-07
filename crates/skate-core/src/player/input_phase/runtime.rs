@@ -5,9 +5,9 @@ use super::publication::{
     transfer_bit,
 };
 use super::types::{
-    AnimationInputPacket, GroundHistoryRequest, PhysicalPlayerInput, PlayerInputState,
-    PrepareJumpRequest, ProcessedPhysicsInput, RawVector,
+    AnimationInputPacket, PhysicalPlayerInput, PlayerInputState, ProcessedPhysicsInput, RawVector,
 };
+use super::requests::{GroundHistoryRequest, PrepareJumpRequest};
 
 const FIXED_FRAME_STEP: f32 = f32::from_bits(0x3c88_8889);
 

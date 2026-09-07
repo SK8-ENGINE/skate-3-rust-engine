@@ -22,6 +22,10 @@ pub(crate) struct CameraRuntime {
     shakes: [ShakeSamples; 2],
     trajectories: [TrajectoryResult; 3],
     pub frame: Option<CameraFrame>,
+    /// Immutable physical subject publication consumed by the camera graph.
+    /// Rendering may inspect this snapshot for diagnostics without rebuilding
+    /// subject fields from mutable skater state.
+    pub latest_subject: Option<CameraSubjectSnapshot>,
     /// Native message order, including End followed by Begin in one graph tick.
     /// The simulation schedule drains these after advance.
     pub simulation_rate_requests: Vec<SimulationRateRequest>,
@@ -53,6 +57,7 @@ impl CameraRuntime {
             shots: StockShots::from_collections(&data)?, settings: settings::manager_settings(&data)?,
             compass_settings: settings::compass_settings(&data)?, shakes: [samples("1.shk")?, samples("2.shk")?],
             trajectories: core::array::from_fn(|_| TrajectoryResult::new()), frame: None,
+            latest_subject: None,
             simulation_rate_requests: Vec::new() })
     }
 
@@ -64,7 +69,16 @@ impl CameraRuntime {
     pub fn advance(&mut self, dt: f32, snapshot: CameraSubjectSnapshot,
         world: &BoardWorld, query_gravity: [f32; 4], environment: &CameraGraphEnvironment,
         moving: &mut impl MovingObstacleProvider) -> Result<CameraFrame, String> {
-        let mut subject = self.subject.publish(snapshot, &self.manager, self.compass_settings);
+        if let Some(previous) = self.latest_subject.as_ref()
+            && snapshot.tick <= previous.tick
+        {
+            return Err(format!(
+                "Camera received non-monotonic subject tick: previous={}, current={}",
+                previous.tick, snapshot.tick,
+            ));
+        }
+        self.latest_subject = Some(snapshot);
+        let mut subject = self.subject.publish(snapshot, &self.manager, self.compass_settings)?;
         self.manager.prepare(&subject, self.settings);
         let requests = self.graph.update(dt, &mut self.manager, &subject,
             snapshot.graph, environment, &self.shots)?;
@@ -83,7 +97,16 @@ impl CameraRuntime {
         if !frame.position.iter().all(|v| v.is_finite())
             || !frame.basis.columns.iter().flatten().all(|v| v.is_finite())
             || !frame.field_of_view_degrees.is_finite() {
-            return Err("Normal gameplay camera produced a non-finite frame".into());
+            return Err(format!(
+                "Normal gameplay camera produced a non-finite frame: frame={frame:?}; lens_length={:?}; aspect_ratio={:?}; subject_transform={:?}; skeleton_root={:?}; ground_normal={:?}; launch_position={:?}; landing_position={:?}",
+                self.manager.shots.interpolated.lens_length,
+                self.manager.state.aspect_ratio,
+                subject.rig.transform,
+                subject.rig.skeleton_root,
+                subject.ground_normal,
+                subject.launch_position,
+                subject.landing_position,
+            ));
         }
         self.frame = Some(frame);
         Ok(frame)

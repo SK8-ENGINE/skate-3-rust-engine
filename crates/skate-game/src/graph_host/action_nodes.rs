@@ -8,6 +8,8 @@ use skate_data::state_graph::{
 pub struct Parameter {
     pub name: Option<String>,
     pub mg_intent: Option<String>,
+    pub mg_intent_mag: Option<String>,
+    pub mg_intent_angle: Option<String>,
     pub ag_intent: Option<String>,
     pub text: Option<String>,
     pub float_bits: Option<u32>,
@@ -16,6 +18,8 @@ pub struct Parameter {
     pub scale: Option<f32>,
     pub on_update: bool,
     pub filters: [u32; 4],
+    pub angle_filter: u32,
+    pub negate_on_mirror: bool,
 }
 
 impl Parameter {
@@ -23,6 +27,8 @@ impl Parameter {
         Self {
             name: attributes.text("name").map(str::to_owned),
             mg_intent: attributes.text("MGIntent").map(str::to_owned),
+            mg_intent_mag: attributes.text("MGIntentMag").map(str::to_owned),
+            mg_intent_angle: attributes.text("MGIntentAngle").map(str::to_owned),
             ag_intent: attributes.text("AGIntent").map(str::to_owned),
             text: attributes.text("value").map(str::to_owned),
             float_bits: attributes.get("value").map(|value| value.float_bits),
@@ -45,6 +51,8 @@ impl Parameter {
                 filter(attributes.text("fakieFilter")),
                 filter(attributes.text("mirrorFilter")),
             ],
+            angle_filter: filter(attributes.text("angleFilter")),
+            negate_on_mirror: attributes.boolean_byte("negateOnMirror", 0) != 0,
         }
     }
 }
@@ -197,10 +205,6 @@ impl ActionInstance {
             ActionOperation::Unsupported { kind, name } => Some(UnsupportedOperation {
                 kind: *kind,
                 name: name.clone(),
-            }),
-            ActionOperation::BoardAdjust => Some(UnsupportedOperation {
-                kind: OperationKind::Behavior,
-                name: "BoardAdjust".into(),
             }),
             _ => None,
         }

@@ -20,6 +20,13 @@ pub(crate) fn advance(
     feedback: &PhysicalFeedback,
     camera: &mut crate::camera::CameraRuntime,
 ) -> Result<(), String> {
+    let output = physics.exchange.output()
+        .ok_or("Camera requires the completed physical output snapshot")?;
+    let completed_tick = physics.ticks.checked_sub(1)
+        .ok_or("Camera received output before the first completed tick")?;
+    if output.tick != completed_tick || output.state != skater.player_state.current() {
+        return Err(format!("Camera received stale physical output: tick={}, completed={completed_tick}", output.tick));
+    }
     //Once per physical publication, preserving conditioner history across
     //direct grind-type changes and invalidating it on the first non-grind tick.
     physics.grind.advance_camera(
@@ -89,8 +96,11 @@ pub(crate) fn publish(
     let fields = &skater.animation_input.fields;
     let intents = skater.animation_input.output.flags;
     let packet = &skater.animation.packet;
-    let normal = physics.riding.ground.wheel_normal;
+    let output = physics.exchange.output()
+        .ok_or("Camera requires the completed physical output snapshot")?;
+    let normal = output.ground_normal;
     Ok(CameraPublicationInputs {
+        tick: output.tick,
         state: CameraStateOutput {
             height_32: physical.state.surface_height_32,
             physically_pushing_55: bit(p.flags_2468, 25),
@@ -166,7 +176,7 @@ pub(crate) fn publish(
             skater.animation_input.extra.look_x,
             skater.animation_input.extra.look_y,
         ],
-        collision_look_target_64: physical.collision.predicted_position_64.map(f32::from_bits),
+        collision_look_target_64: [output.predicted_position.x, output.predicted_position.y, output.predicted_position.z, 0.0],
         preferences,
         context,
     })

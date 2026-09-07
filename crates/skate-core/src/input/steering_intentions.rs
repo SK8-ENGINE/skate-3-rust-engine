@@ -47,3 +47,29 @@ pub fn produce(left: [f32; 2], actor_flags_1908: u32) -> SteeringIntentions {
         hard_turn_crouch: (active && allowed).then_some((hard * f32::from_bits(0x3f59999a)).abs()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn left_steering_preserves_signed_turn_and_hard_turn_symmetry() {
+        let left = produce([-0.75, 0.0], 0);
+        let right = produce([0.75, 0.0], 0);
+
+        assert_eq!(left.turn, Some(-0.75));
+        assert_eq!(right.turn, Some(0.75));
+        assert_eq!(left.hard_turn, right.hard_turn.map(|value| -value));
+        assert_eq!(left.hard_turn_crouch, right.hard_turn_crouch);
+    }
+
+    #[test]
+    fn steering_gate_suppresses_all_three_emissions_without_changing_input() {
+        let gated = produce([-0.75, 0.0], 1);
+        assert_eq!(gated, SteeringIntentions {
+            turn: None,
+            hard_turn: None,
+            hard_turn_crouch: None,
+        });
+    }
+}

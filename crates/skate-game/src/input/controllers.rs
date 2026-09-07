@@ -8,6 +8,7 @@ use skate_core::input::{
     history::{DEVICE_SLOTS, HistoryRecord, PadHistory},
     pad::Pad,
     xbox,
+    tick::TickInput,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +30,7 @@ pub(crate) struct ControllerInput {
     pub mapped_actions: [[f32; 18]; DEVICE_SLOTS],
     pub publications: u64,
     pub consumed_batches: u64,
+    tick: u64,
 }
 
 impl Default for ControllerInput {
@@ -44,6 +46,7 @@ impl Default for ControllerInput {
             mapped_actions: [[0.0; 18]; DEVICE_SLOTS],
             publications: 0,
             consumed_batches: 0,
+            tick: 0,
         }
     }
 }
@@ -63,6 +66,22 @@ impl ControllerInput {
     pub(crate) fn player_actions(&self) -> GameplayActions {
         let device = self.status.iter().position(|status| *status == ControllerStatus::Ready).unwrap_or(0);
         GameplayActions::from_pad(&self.pads[device])
+    }
+
+    pub(super) fn tick_input(&self) -> TickInput {
+        let device = self
+            .status
+            .iter()
+            .position(|status| *status == ControllerStatus::Ready);
+        let controller_available = device.is_some();
+        let actions = device
+            .map(|device| GameplayActions::from_pad(&self.pads[device]))
+            .unwrap_or_else(|| GameplayActions::from_values([0.0; 18]));
+        TickInput::new(
+            self.tick,
+            actions,
+            controller_available,
+        )
     }
     /// TU3 8296D288/8296D0D0: write the inactive cache, publish one four-device
     /// batch. Even an unchanged platform packet is sampled; packet-number
@@ -101,6 +120,7 @@ impl ControllerInput {
     /// this snapshot for subsequent consumers; Derived timers require the
     /// actual actor timestep and state flags and are not driven by render dt.
     pub(super) fn publish_actions(&mut self) -> bool {
+        self.tick = self.tick.wrapping_add(1);
         if !self.history.drain_to_latest(&mut self.pads) {
             return false;
         }

@@ -15,6 +15,13 @@ impl MotionHost {
             .get(behavior)
             .ok_or("Unbound MotionGraph behavior")?;
         let operation = self.operations[id].clone();
+        if let MotionOperation::StockGameplay(operation) = operation {
+            return super::stock_execution::execute(self, operation, phase);
+        }
+        if let MotionOperation::EndGesture = operation {
+            if phase == 0 { self.end_gesture_channels(); }
+            return Ok(());
+        }
         if let MotionOperation::Grind(operation) = operation {
             let Instance::Grind(state)=&mut self.instances[behavior] else {return Err("Grind instance mismatch".into())};
             let height=self.crouching_physical.map(|p|p.animation_height_72).ok_or("Grind requires physical height")?;

@@ -56,7 +56,7 @@ impl ActionCondition {
                     .ok_or("TimeToLand requires physical condition publication")?
                     .time_to_land,
             ),
-            Self::Gesture(group) => group.has_intent(&host.action_intents),
+            Self::Gesture(group) => group.has_intent(|name| host.action_intents.contains_key(name)),
             Self::AnimationAttribute {
                 name,
                 sequence_id,

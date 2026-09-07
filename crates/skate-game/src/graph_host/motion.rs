@@ -1,3 +1,5 @@
+#[path = "motion_stock_execute.rs"]
+mod stock_execution;
 #[path = "motion_air_execute.rs"]
 mod air_execution;
 #[path = "motion_execute.rs"]
@@ -130,7 +132,13 @@ impl Instance {
         }
     }
 }
+use super::outputs::{ActionControls, GraphDiagnostics, GraphEffects, MotionGraphInput, TurningOutput};
+
 pub struct MotionHost {
+    pub action_controls: ActionControls,
+    pub turning_output: TurningOutput,
+    pub graph_effects: GraphEffects,
+    pub moving_objects: super::motion_stock_gameplay::MovingObjectRegistry,
     pub grind_physical: super::motion_grind::Physical,
     grind_settings: super::motion_grind::Settings,
     pub offboard_output: skate_core::player::input_phase::OffBoardOutputFields,
@@ -183,7 +191,7 @@ pub struct MotionHost {
     bump_settings: skate_core::animation::bump::Settings,
     pub allow_pumping: bool,
     pub riding: super::motion_riding::RidingState,
-    pub errors: Vec<String>,
+    pub errors: GraphDiagnostics,
     pub(super) state_parents: Vec<Option<usize>>,
     operations: Vec<MotionOperation>,
     instances: Vec<Instance>,
@@ -200,6 +208,17 @@ pub struct MotionHost {
     next_instance: u32,
 }
 impl MotionHost {
+    pub(super) fn end_gesture_channels(&mut self) {
+        // EndGesture nodes share the graph-wide gesture channel owner. The
+        // active CharacterGesture instance is found by its operation binding.
+        for instance in &mut self.instances {
+            if let Instance::CharacterGesture(state) = instance {
+                state.end(&mut self.animation);
+            }
+        }
+        self.gesture_publication = None;
+    }
+
     pub fn from_graph(
         graph: &LoadedGraph,
         data: &Collections,
@@ -269,6 +288,10 @@ impl MotionHost {
                 data.boolean("anim_motion", "jumping", "clamp_gesture_to_antic")?,
             ),
             action_intents: IntentMap::new(),
+            action_controls: ActionControls::default(),
+            turning_output: TurningOutput::default(),
+            graph_effects: GraphEffects::default(),
+            moving_objects: Default::default(),
             time_tags: None,
             physical: None,
             push_state,
@@ -293,7 +316,7 @@ impl MotionHost {
             //8258F488 seeds bit24, and reset825953B0 preserves that bit.
             allow_pumping: true,
             riding: super::motion_riding::RidingState::new(),
-            errors: Vec::new(),
+            errors: GraphDiagnostics::default(),
             state_parents: graph.binding.states.iter().map(|s| s.parent).collect(),
             operations,
             instances,
@@ -309,6 +332,18 @@ impl MotionHost {
             kickturn: super::motion_kickturn::load_settings(data)?,
             next_instance: 1,
         })
+    }
+    pub fn accept_action_graph(&mut self, input: MotionGraphInput) {
+        let MotionGraphInput { tick, action } = input;
+        debug_assert_eq!(tick, action.tick);
+        self.errors.clear();
+        self.turning_output = action.turning;
+        self.graph_effects = action.effects.clone();
+        self.action_controls = action.controls.clone();
+        // Clone before handing the full output to MotionAnimation so the two
+        // consumers observe one immutable packet.
+        self.action_intents = action.controls.authored_values();
+        self.animation.accept_action_graph(action);
     }
     fn run(&mut self, id: BehaviorId, frame: &Frame, phase: u8) {
         if let Err(error) = self.execute(id, frame, phase) {

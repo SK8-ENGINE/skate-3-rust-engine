@@ -9,6 +9,7 @@ use skate_core::{
     },
     physics::{board::BodyId, skeleton_animation_record::AnimationPartTransform as Transform},
 };
+use bevy::log::debug;
 
 /// State record fields absent from the input phase's smaller CurrentStateFields.
 /// The same output/reset owner must publish these; there is no camera default.
@@ -95,6 +96,8 @@ pub(crate) struct CameraPreferences {
 /// This structure deliberately has no Default: its callers must publish the
 /// actual native reset/state values even when air/offboard/grinds are inactive.
 pub(crate) struct CameraPublicationInputs {
+    /// Completed physics tick represented by these publication inputs.
+    pub tick: u64,
     pub state: CameraStateOutput,
     pub animation: CameraAnimationOutput,
     pub air: CameraAirOutput,
@@ -156,6 +159,8 @@ pub(crate) fn snapshot(
         skater.animated_skeleton.roots.animation_to_world,
         processed.flags_2476,
     );
+    //82DF80D8 selects the subject pose separately.82DF70CC/70E8 still
+    //publish the board transform/position, including while off-board.
     let record = &skater.skeleton.record;
     let com = p.reckoning.vector_64.map(f32::from_bits);
     let up = p.reckoning.vector_96.map(f32::from_bits);
@@ -163,6 +168,36 @@ pub(crate) fn snapshot(
     //The source getter396 is bound to Motion64, despite its camera name
     //"acceleration". Motion64 is the published deck angular velocity.
     let acceleration = p.skateboard.vector_64.map(f32::from_bits);
+    let finite = |name: &str, values: &[f32]| -> Result<(), String> {
+        if values.iter().all(|value| value.is_finite()) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Camera subject owner published non-finite {name}: {values:?}; state={:?}; category={:?}",
+                processed.state_2508,
+                processed.category_2512,
+            ))
+        }
+    };
+    finite("centre_of_mass", &com)?;
+    finite("reckoning_up", &up)?;
+    finite("damped_centre_of_mass", &input.damped_com_80)?;
+    finite("ground_up", &input.ground_up_80)?;
+    finite("skeleton_root", skeleton_root.iter().flatten().copied().collect::<Vec<_>>().as_slice())?;
+    for (index, pose) in [1usize, 15, 19, 23].into_iter().map(|index| (index, record.pose[index][3])) {
+        finite(match index { 1 => "head", 15 => "left_foot", 19 => "right_foot", _ => "hips" }, &pose)?;
+    }
+    if velocity.iter().chain(acceleration.iter()).any(|v| !v.is_finite()) {
+        return Err(format!(
+            "Camera received non-finite board motion publication: velocity={velocity:?}; acceleration={acceleration:?}; raw_velocity={:?}; raw_acceleration={:?}",
+            p.skateboard.vector_80,
+            p.skateboard.vector_64,
+        ));
+    }
+    debug!(state = p.state.state_16, category = p.state.category_12,
+        board_position = ?physical_transform[3], board_velocity = ?velocity,
+        board_angular_velocity = ?acceleration, skeleton_root = ?skeleton_root[3],
+        "camera subject publication");
     let last_ground_up = p.ground.vector_96.map(f32::from_bits);
     let category = p.state.category_12;
     let state = p.state.state_16;
@@ -272,6 +307,7 @@ pub(crate) fn snapshot(
         flag_684: off.object_held_304,
     };
     Ok(CameraSubjectSnapshot {
+        tick: input.tick,
         subject,
         pose: SubjectPoseInputs {
             physical_transform,

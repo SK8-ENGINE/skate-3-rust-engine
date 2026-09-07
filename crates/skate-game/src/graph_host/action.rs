@@ -12,7 +12,9 @@ use skate_core::graph::{
 };
 use skate_core::input::body_flip_signal;
 use skate_core::input::graph_intents::{CreateMgIntent, IntentMutation};
+use skate_core::input::graph_intents::apply_filter;
 use skate_data::collections::Collections;
+use super::outputs::{ActionGraphInput, ActionGraphOutput, GraphCapabilityReport, GraphDiagnostics};
 
 /// Original State output consumed by82BA1680/82BA16F0.
 #[derive(Clone, Copy, Debug)]
@@ -33,7 +35,8 @@ pub struct ActionHost {
     pub animation_attributes: Vec<skate_core::animation::output::attributes::AnimationAttribute>,
     pub is_tricking: Option<bool>,
     pub stance: Option<(bool, bool)>,
-    pub errors: Vec<String>,
+    tick: u64,
+    pub errors: GraphDiagnostics,
     remap: OperationRemap,
     state_parents: Vec<Option<usize>>,
     next_instance: u32,
@@ -55,6 +58,42 @@ impl ActionHost {
             .instantiate_operations(&graph.source, &mut ActionFactory)
             .map_err(|error| error.to_string())?;
         let mut instances = ActionInstances::new(operations.operations);
+        let mut capabilities = GraphCapabilityReport {
+            supported_operations: instances
+                .operations
+                .iter()
+                .filter(|instance| instance.unsupported().is_none())
+                .count(),
+            unsupported_operations: instances
+                .operations
+                .iter()
+                .filter_map(|instance| instance.unsupported())
+                .map(|operation| format!("{:?} `{}`", operation.kind, operation.name))
+                .collect(),
+            ..GraphCapabilityReport::default()
+        };
+        for &operation in &graph.runtime.operations.conditions {
+            if let Some(instance) = instances.get(operation) {
+                if let Some(unsupported) = instance.unsupported() {
+                    capabilities.unsupported_conditions.push(format!(
+                        "{:?} `{}`",
+                        unsupported.kind, unsupported.name
+                    ));
+                }
+            }
+        }
+        for &operation in &graph.runtime.operations.hooks {
+            if let Some(instance) = instances.get(operation) {
+                if let Some(unsupported) = instance.unsupported() {
+                    capabilities.unsupported_hooks.push(format!(
+                        "{:?} `{}`",
+                        unsupported.kind, unsupported.name
+                    ));
+                }
+            }
+        }
+        // Keep lazy unsupported-operation errors: optional graph branches
+        // are not a reason to prevent loading the working game.
         super::condition_nodes::bind_current_states(graph, &mut instances);
         let mut host = Self::new(instances, graph.runtime.operations.clone());
         host.body_flip_settings = Some(body_flip_signal::Settings {
@@ -102,7 +141,8 @@ impl ActionHost {
             state_parents: Vec::new(),
             remap,
             stance: None,
-            errors: Vec::new(),
+            tick: 0,
+            errors: GraphDiagnostics::default(),
             next_instance: 1,
             created: vec![false; count],
             const_handlers,
@@ -127,6 +167,23 @@ impl ActionHost {
         }
     }
 
+    pub fn prepare_input(&mut self, input: ActionGraphInput) {
+        self.errors.clear();
+        self.tick = input.tick;
+        self.action_intents = input.controls.into_values();
+        self.motion_intents = input.prior_motion.into_values();
+        self.animation_attributes = input.animation_attributes;
+    }
+
+    pub fn output(&self) -> ActionGraphOutput {
+        ActionGraphOutput::from_host(
+            self.tick,
+            &self.action_intents,
+            &self.motion_intents,
+            &self.animation_attributes,
+        )
+    }
+
     fn operation(&self, id: BehaviorId) -> Option<&ActionInstance> {
         self.remap
             .behaviors
@@ -142,6 +199,34 @@ impl ActionHost {
             ));
         }
     }
+
+    fn publish_board_adjust(&mut self, instance: &ActionInstance) {
+        let Some(magnitude_name) = instance.config.mg_intent_mag.as_deref() else {
+            return;
+        };
+        let Some(angle_name) = instance.config.mg_intent_angle.as_deref() else {
+            return;
+        };
+
+        if let Some(value) = self.action_intents.get("BoardAdjustMag").copied() {
+            self.motion_intents.insert(magnitude_name, value);
+        } else {
+            self.motion_intents.remove(magnitude_name);
+        }
+
+        if let Some(mut value) = self.action_intents.get("BoardAdjustAngle").copied() {
+            if instance.config.angle_filter != 0 {
+                value = apply_filter(value, instance.config.angle_filter);
+            }
+            if instance.config.negate_on_mirror && self.stance.is_some_and(|(_, mirrored)| mirrored) {
+                value = -value;
+            }
+            self.motion_intents.insert(angle_name, value);
+        } else {
+            self.motion_intents.remove(angle_name);
+        }
+    }
+
 }
 
 impl ConditionHost for ActionHost {
@@ -209,7 +294,7 @@ impl Host for ActionHost {
             if let Some((_, mirrored)) = self.stance {
                 self.trick_handlers[behavior].begin(*group, override_name.as_deref(), &self.action_intents, &mut self.motion_intents, mirrored);
             } else {
-                self.errors.push("CreateTrickIntentFromGesture requires published skater stance".into());
+                self.errors.push("CreateTrickIntentFromGesture requires published skater stance");
             }
             return;
         }
@@ -226,8 +311,12 @@ impl Host for ActionHost {
                 Some(settings) => self.body_flip[behavior].begin(settings),
                 None => self
                     .errors
-                    .push("BodyFlippingSignal requires stock anim_motion settings".into()),
+                    .push("BodyFlippingSignal requires stock anim_motion settings"),
             }
+            return;
+        }
+        if let ActionOperation::BoardAdjust = instance.operation {
+            self.publish_board_adjust(&instance);
             return;
         }
         if let ActionOperation::CreateConstMgIntent = instance.operation {
@@ -277,12 +366,12 @@ impl Host for ActionHost {
         if let ActionOperation::BodyFlippingSignal = instance.operation {
             let Some(settings) = self.body_flip_settings else {
                 self.errors
-                    .push("BodyFlippingSignal requires stock anim_motion settings".into());
+                    .push("BodyFlippingSignal requires stock anim_motion settings");
                 return;
             };
             let Some(physical) = &self.condition_inputs.physical_state else {
                 self.errors
-                    .push("BodyFlippingSignal requires published filtered state".into());
+                    .push("BodyFlippingSignal requires published filtered state");
                 return;
             };
             // TU3 initializers82F84DA8/82F84DC0 bind these exact keys.
@@ -298,6 +387,10 @@ impl Host for ActionHost {
                     }
                 }
             }
+            return;
+        }
+        if let ActionOperation::BoardAdjust = instance.operation {
+            self.publish_board_adjust(&instance);
             return;
         }
         if let ActionOperation::CreateConstMgIntent = instance.operation {

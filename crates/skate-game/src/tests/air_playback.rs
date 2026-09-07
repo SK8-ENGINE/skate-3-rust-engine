@@ -17,6 +17,30 @@ fn airborne_stick_reaches_physical_spin() {
 }
 
 fn roll_off(air_stick: Option<i16>) {
+    roll_off_input(air_stick, None, [0; 2]);
+}
+
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn airborne_grabs_release_through_stock_graphs() {
+    for hand in 0..2 {
+        for stick in [[0, 0], [32767, 0], [-32767, 0], [0, 32767], [0, -32767]] {
+            roll_off_input(None, Some(hand), stick);
+        }
+    }
+}
+
+fn roll_off_input(air_stick: Option<i16>, grab_hand: Option<usize>, grab_stick: [i16; 2]) {
+    roll_off_sequence(air_stick, grab_hand, grab_stick, false);
+}
+
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn airborne_tailwalk_from_raw_controller_reaches_stock_cycle() {
+    roll_off_sequence(None, Some(0), [0, 32767], true);
+}
+
+fn roll_off_sequence(air_stick: Option<i16>, grab_hand: Option<usize>, grab_stick: [i16; 2], tailwalk: bool) {
     let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
     let root = std::path::Path::new(&root);
     let assets = skate_data::GameAssets::load(root).unwrap();
@@ -28,6 +52,21 @@ fn roll_off(air_stick: Option<i16>) {
         .filter(|face| !(face.tag == 1
             && face.triangle.vertices.iter().any(|vertex| vertex.z > 4.0)))
         .collect());
+    if grab_hand.is_some() {
+        // A deeper test landing gives the held cycle and OUT animation time
+        // to run before contact can hide a failed airborne release.
+        physics.world = BoardWorld::new(physics.world.triangles().iter().map(|face| {
+            let vertices = face.triangle.vertices.map(|mut vertex| {
+                if vertex.y < -1.0 { vertex.y -= 18.0; }
+                vertex
+            });
+            skate_core::physics::board_world::WorldTriangle::from_vertices(
+                vertices, face.material, face.tag,
+                skate_core::physics::collision::TriangleFeature::ONE_SIDED,
+                [1.0; 3], 0.0,
+            ).unwrap()
+        }).collect());
+    }
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
     let mut input = crate::input::ControllerInput::default();
@@ -36,12 +75,23 @@ fn roll_off(air_stick: Option<i16>) {
     let mut saw_air = false;
     let mut landed_frames = 0;
     let mut airborne_frames = 0;
+    let mut grab_frames = 0;
+    let mut saw_grab = false;
+    let mut saw_release = false;
     for tick in 0..1000 {
+        let mut triggers = [0; 2];
+        if let Some(hand) = grab_hand {
+            if saw_air && grab_frames < if tailwalk { 100 } else { 35 } {
+                triggers[hand] = 255;
+            }
+        }
         input.sample_raw_for_test(skate_core::input::xbox::XboxState {
-            buttons: if tick >= 12 && !saw_air { 0x1000 } else { 0 },
-            triggers: [0; 2],
+            buttons: if tick >= 12 && !saw_air { 0x1000 }
+                else if tailwalk && saw_air && grab_frames >= 20 { 0x2000 }
+                else { 0 },
+            triggers,
             left: [if saw_air { air_stick.unwrap_or(0) } else { 0 }, 0],
-            right: [0; 2],
+            right: if triggers != [0; 2] { grab_stick } else { [0; 2] },
         });
         let mut actions = input.player_actions();
         controls.update(
@@ -80,6 +130,37 @@ fn roll_off(air_stick: Option<i16>) {
             )
         });
         saw_air |= state.category() == 200;
+        if tailwalk && state.category() == 200 {
+            let motion = &skater.animation.motion;
+            if grab_frames >= 20 {
+                eprintln!("Tailwalk frame={grab_frames} LeftPush={:?} RightPush={:?} angle={:?} TailGrab={:?} NoFootAirWalk={:?} animation={:?}",
+                    controls.action_intents.get("LeftPush"), controls.action_intents.get("RightPush"),
+                    controls.action_intents.get("BoardAdjustAngle"),
+                    motion.animation.motion_intents.get("TailGrab"), motion.animation.motion_intents.get("NoFootAirWalk"),
+                    motion.animation.current_name);
+            }
+            if motion.animation.current_name.as_deref() == Some("2FT_AIR_GRAB_N_TAIL_0_CYC") {
+                assert!(motion.animation.motion_intents.contains_key("TailGrab"));
+                assert!(motion.animation.motion_intents.contains_key("NoFootAirWalk"));
+                assert_eq!(motion.score_packet.grab.map(|(name, _)| name),
+                    Some(skate_core::animation::skeleton_input::name::encode(b"tailgrab_airwalk")));
+                assert_eq!(skater.pose_generation, physics.ticks);
+                return;
+            }
+        }
+        if grab_hand.is_some() && state.category() == 200 {
+            grab_frames += 1;
+            let anim = &skater.animation.motion.animation;
+            let grabbing = skater.player_input.processed.flags_2468 & 0x20 != 0;
+            saw_grab |= grabbing;
+            saw_release |= saw_grab && grab_frames > 35 && !grabbing;
+            if matches!(grab_frames, 3 | 34 | 36 | 50 | 65) {
+            eprintln!("Grab hand={grab_hand:?} stick={grab_stick:?} frame={grab_frames} trigger={triggers:?} AG={:?}/{:?} MG={:?}/{:?} animation={:?} flags={:08x}",
+                controls.action_intents.get("LeftAirGrab"), controls.action_intents.get("RightAirGrab"),
+                anim.motion_intents.get("WantsLeftAirGrab"), anim.motion_intents.get("WantsRightAirGrab"),
+                anim.current_name, skater.player_input.processed.flags_2468);
+            }
+        }
         if saw_air && air_stick.is_some() {
             airborne_frames += 1;
             eprintln!(
@@ -127,6 +208,11 @@ fn roll_off(air_stick: Option<i16>) {
         }
     }
     assert!(saw_air, "Raw pushing never entered the actual Air family");
+    assert!(!tailwalk, "Raw airborne LT + right stick up + B did not produce the Tailwalk cycle");
+    if grab_hand.is_some() {
+        assert!(saw_grab, "Grab never became active");
+        assert!(saw_release, "Grab never released while airborne");
+    }
     assert!(
         landed_frames >= 120,
         "Air never returned to stable grounded riding"

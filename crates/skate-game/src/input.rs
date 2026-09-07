@@ -9,11 +9,26 @@ pub(crate) mod gesture_mapping;
 pub(crate) mod gesture_input;
 mod platform;
 pub(crate) use controllers::{ControllerInput, ControllerStatus};
+use skate_core::input::tick::TickInput;
+
+#[derive(Resource, Clone, Copy, Debug)]
+pub(crate) struct PublishedTickInput(pub TickInput);
+
+impl Default for PublishedTickInput {
+    fn default() -> Self {
+        Self(TickInput::new(
+            0,
+            skate_core::input::gameplay_map::GameplayActions::from_values([0.0; 18]),
+            false,
+        ))
+    }
+}
 
 pub(crate) struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ControllerInput>()
+            .init_resource::<PublishedTickInput>()
             .add_systems(PreUpdate, poll_controllers.run_if(crate::graphics_menu::gameplay_active))
             .add_systems(FixedUpdate, publish_actions.in_set(SimulationSet::Input));
     }
@@ -35,6 +50,10 @@ pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>) {
     }
 }
 
-fn publish_actions(mut input: ResMut<ControllerInput>) {
+fn publish_actions(
+    mut input: ResMut<ControllerInput>,
+    mut published: ResMut<PublishedTickInput>,
+) {
     input.publish_actions();
+    published.0 = input.tick_input();
 }

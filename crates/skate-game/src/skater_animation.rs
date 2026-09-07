@@ -6,6 +6,7 @@ use crate::{
     graph_host::{
         action::ActionHost,
         motion::{MotionHost, MotionPhysical},
+        outputs::{ActionGraphInput, ActionInput, MotionGraphInput, PriorMotionState},
     },
     graph_runtime::StockGraphs,
 };
@@ -158,33 +159,28 @@ impl SkaterAnimation {
         physical: AnimationPhysical,
         reset_fields: &mut AdditionalResetFields,
     ) -> Result<(), String> {
+        let tick = self.ticks;
         self.publish_physical(physical)?;
-        self.action.action_intents.clone_from(action_intents);
-        self.motion.action_intents.clone_from(action_intents);
-        //HasAnimAttribute82BA3A78 reads the preceding cached animation
-        //attributes. Specific flag27 is observed before this frame's MG update.
-        self.action.animation_attributes.clear();
-        self.action
-            .animation_attributes
-            .extend_from_slice(self.motion.animation.tree_attributes());
+        self.action.prepare_input(ActionGraphInput {
+            tick,
+            controls: ActionInput::from_values(action_intents),
+            prior_motion: PriorMotionState::from_values(&self.motion.animation.motion_intents),
+            //HasAnimAttribute82BA3A78 reads the preceding cached animation
+            //attributes. Specific flag27 is observed before this frame's MG update.
+            animation_attributes: self.motion.animation.tree_attributes().to_vec(),
+        });
         self.action.is_tricking = Some(self.motion.flags.doing_trick);
-        // Specific MotionGraph+8 is its own persistent filtered-intent map
-        // (82D0B660), initially cleared by825953B0. Only authored filtering
-        // behaviors write it; raw actor/controller intents do not replace it.
-        std::mem::swap(
-            &mut self.action.motion_intents,
-            &mut self.motion.animation.motion_intents,
-        );
         self.action_controller
             .update(&graphs.action.runtime.program, dt, &mut self.action);
-        std::mem::swap(
-            &mut self.action.motion_intents,
-            &mut self.motion.animation.motion_intents,
-        );
         if !self.action.errors.is_empty() {
             return Err(self.action.errors.join("\n"));
         }
+        let action_output = self.action.output();
         self.motion.animation.begin_graph_update();
+        self.motion.accept_action_graph(MotionGraphInput {
+            tick: action_output.tick,
+            action: action_output,
+        });
         self.motion_controller
             .update(&graphs.motion.runtime.program, dt, &mut self.motion);
         if !self.motion.errors.is_empty() {

@@ -1,6 +1,6 @@
 //! Controller-derived state is evaluated on the same fixed gameplay tick.
 use super::{GamePhysics, skater::SkaterRuntime};
-use crate::input::ControllerInput;
+use crate::input::PublishedTickInput;
 use bevy::prelude::*;
 use skate_core::graph::intents::IntentMap;
 use skate_core::input::{
@@ -42,13 +42,13 @@ impl Default for PlayerControls {
 }
 
 pub(super) fn sample(
-    input: Res<ControllerInput>,
+    input: Res<PublishedTickInput>,
     physics: Res<GamePhysics>,
     skater: Res<SkaterRuntime>,
     camera: Res<crate::camera::CameraRuntime>,
     mut player: ResMut<PlayerControls>,
 ) {
-    let mut map = input.player_actions();
+    let mut map = input.0.actions();
     player.update(
         &mut map,
         physics.settings.step.simulation.time_step,
@@ -103,6 +103,11 @@ impl PlayerControls {
         ));
         self.intents.extend(skate_core::input::anticipation_intentions::produce(&self.controller));
         self.intents.extend(skate_core::input::grind_intentions::produce(&self.controller));
+        self.intents.extend(
+            skate_core::input::trick_intentions::produce(&self.controller)
+                .into_iter()
+                .map(|intent| RidingIntent { name: intent.name, value: intent.value }),
+        );
         //GenerateActionGraphIntents82594310 clears the AG map through82BC1B68
         //before Listener::Fill. MG lifecycle intents use a different persistent map.
         self.action_intents.clear();

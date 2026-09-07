@@ -1,5 +1,5 @@
-//! Push, brake, body-spin, steering, kick-turn and crouch from TU3 Fill825999F0.
-//! Trick/gesture, slide, manual and offboard branches remain separate work.
+//! Push, brake, body-spin, steering, kick-turn, crouch and powerslide intents
+//! from the TU3 ActionGraph input listener (`825999F0`).
 use super::{
     angle::left_stick_angle,
     controller::{DerivedControllerInput, magnitude},
@@ -64,7 +64,7 @@ pub fn produce(
         new_right = false;
         new_left = false;
     }
-    let mut output = Vec::with_capacity(13);
+    let mut output = Vec::with_capacity(17);
     let mut emit = |name, value| output.push(RidingIntent { name, value });
     if current & (1 << 20) != 0 && actor_flags & (1 << 7) == 0 {
         emit("Brake", 1.0);
@@ -130,6 +130,26 @@ pub fn produce(
     }
     if let Some(value) = steering.turn {
         emit("Turn", value);
+    }
+
+    //8259A430..A50C: start queries and continuous values have distinct open
+    //heading windows. Both continuous descriptors can be present together.
+    //8259AECC..AF5C gates only actor bit8, independently of push inhibition.
+    if actor_flags & (1 << 8) == 0 && length > 0.89999998 {
+        const SLIDE_SCALE: f32 = 0.28004956;
+        const HALF_PI: f32 = f32::from_bits(0x3fc90fdb);
+        if angle > 0.0 && angle < 0.91000003 {
+            emit("RightSlideStart", 1.0);
+        }
+        if angle > -0.91000003 && angle < 0.0 {
+            emit("LeftSlideStart", 1.0);
+        }
+        if angle > -2.0 && angle < HALF_PI {
+            emit("LeftSlide", -((angle + 2.0) * SLIDE_SCALE));
+        }
+        if angle > -HALF_PI && angle < 2.0 {
+            emit("RightSlide", (2.0 - angle) * SLIDE_SCALE);
+        }
     }
     output
 }

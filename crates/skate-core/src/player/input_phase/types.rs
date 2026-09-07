@@ -397,6 +397,22 @@ pub struct ProcessedPhysicsInput {
     pub actor_query_2952: u32,
 }
 
+/// Immutable publication of the completed physical-input phase for one tick.
+/// The mutable record remains private to the input producer; selectors and
+/// later phases consume this value object so they cannot observe a half-written
+/// packet.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProcessedPhysicsSnapshot {
+    pub tick: u64,
+    pub input: ProcessedPhysicsInput,
+}
+
+impl ProcessedPhysicsSnapshot {
+    pub const fn new(tick: u64, input: ProcessedPhysicsInput) -> Self {
+        Self { tick, input }
+    }
+}
+
 impl Default for ProcessedPhysicsInput {
     fn default() -> Self {
         Self {
@@ -479,26 +495,21 @@ impl Default for ProcessedPhysicsInput {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GroundHistoryRequest {
-    pub previous_position: RawVector,
-    pub current_position: RawVector,
-    pub previous_filtered_delta: RawVector,
-    /// Processed +2604. The native block also consumes constants at
-    /// `0x82072818` and `0x8231A844`; the service owns those exact values.
-    pub timestep_bits: u32,
-}
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GroundHistoryResult {
-    pub delta: RawVector,
-    pub filtered_delta: RawVector,
-}
+    #[test]
+    fn processed_snapshot_is_immutable_and_tick_owned() {
+        let mut input = ProcessedPhysicsInput::default();
+        input.flags_2468 = 0x10;
+        let snapshot = ProcessedPhysicsSnapshot::new(23, input);
+        input.flags_2468 = 0x20;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PrepareJumpRequest {
-    pub skateboard_vector: RawVector,
-    pub previous_velocity: RawVector,
+        assert_eq!(snapshot.tick, 23);
+        assert_eq!(snapshot.input.flags_2468, 0x10);
+        assert_eq!(input.flags_2468, 0x20);
+    }
 }
 
 pub(crate) fn empty_external_physics() -> ExternalPhysicsInput {

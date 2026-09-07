@@ -61,16 +61,19 @@ impl State {
         let Some(name) = select(group, ag, mirrored) else {
             return;
         };
-        let name = override_name.unwrap_or(name);
-        self.selected = Some(name.to_owned());
-        self.successor = match name {
+        let mut name = override_name.unwrap_or(name).to_owned();
+        if ag.contains_key("Underflip") {
+            name = format!("U_{name}");
+        }
+        self.successor = match name.as_str() {
             "Kickflip" => Some("KickflipHold"),
             "Heelflip" => Some("HeelflipHold"),
             "N_Kickflip" => Some("N_KickflipHold"),
             "N_Heelflip" => Some("N_HeelflipHold"),
             _ => None,
         };
-        mg.insert(name, 0.0);
+        self.selected = Some(name.clone());
+        mg.insert(&name, 0.0);
     }
     pub fn update(&mut self, mg: &mut IntentMap) {
         if !self.first_update {
@@ -82,6 +85,7 @@ impl State {
         self.first_update = false;
     }
     pub fn end(&mut self, mg: &mut IntentMap) {
+        mg.remove("DarkCatch");
         if let Some(name) = &self.selected {
             if let Some(successor) = self.successor {
                 mg.remove(successor);

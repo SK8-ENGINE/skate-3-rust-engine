@@ -8,6 +8,8 @@ fn parameter(mg_intent: &str, value: f32) -> Parameter {
     Parameter {
         name: None,
         mg_intent: Some(mg_intent.into()),
+        mg_intent_mag: None,
+        mg_intent_angle: None,
         ag_intent: None,
         text: None,
         float_bits: Some(value.to_bits()),
@@ -16,6 +18,8 @@ fn parameter(mg_intent: &str, value: f32) -> Parameter {
         scale: None,
         on_update: false,
         filters: [0; 4],
+        angle_filter: 0,
+        negate_on_mirror: false,
     }
 }
 
@@ -92,6 +96,34 @@ fn const_callbacks_publish_then_remove_motion_intent() {
         },
     );
     assert!(!host.motion_intents.contains_key("Crouch"));
+}
+
+#[test]
+fn released_grab_source_cannot_retain_its_motion_intent() {
+    let mut config = parameter("WantsLeftAirGrab", 0.0);
+    config.ag_intent = Some("LeftAirGrab".into());
+    config.on_update = true;
+    let instance = ActionInstance {
+        operation: ActionOperation::CreateMgIntent,
+        config,
+        parameters: Vec::new(),
+    };
+    let mut host = ActionHost::new(
+        ActionInstances::new(vec![instance]),
+        OperationRemap {
+            behaviors: vec![0],
+            conditions: vec![],
+            hooks: vec![],
+        },
+    );
+    host.motion_intents.insert("WantsLeftAirGrab", 1.0);
+    Host::update(&mut host, 0, [0; 6], &Frame {
+        dt: 1.0 / 60.0,
+        current: None,
+        last: None,
+        state_times: Vec::new(),
+    });
+    assert!(!host.motion_intents.contains_key("WantsLeftAirGrab"));
 }
 
 #[test]
@@ -195,13 +227,13 @@ fn native_intent_aliases_share_action_motion_and_end_lifecycle() {
             host.begin(1, [0; 6], &frame);
             assert_eq!(host.motion_intents.len(), 1);
 
-            // Preserve the production coordinator's single-map handoff.
-            std::mem::swap(&mut host.motion_intents, &mut motion.motion_intents);
+            // Preserve the production coordinator's explicit graph handoff.
+            let output = host.output();
+            motion.accept_action_graph(output);
             assert_eq!(motion.motion_intent(first), Some(1.25));
             assert_eq!(motion.motion_intent(second), Some(1.25));
-            std::mem::swap(&mut host.motion_intents, &mut motion.motion_intents);
             host.end(0, [0; 6], &frame);
-            std::mem::swap(&mut host.motion_intents, &mut motion.motion_intents);
+            motion.accept_action_graph(host.output());
             assert_eq!(motion.motion_intent(first), None);
             assert_eq!(motion.motion_intent(second), None);
             assert!(motion.motion_intents.is_empty());

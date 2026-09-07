@@ -62,6 +62,15 @@ impl CharacterGesture {
         }
     }
 
+    /// EndGesture82BAA320's explicit teardown path. The native operation ends
+    /// all gesture-owned channels in reverse owner order and clears the
+    /// persistent selection state.
+    pub fn end(&mut self, animation: &mut MotionAnimation) {
+        end_all(animation);
+        self.clear_active();
+        self.stage = -1;
+    }
+
     pub fn update(
         &mut self,
         animation: &mut MotionAnimation,

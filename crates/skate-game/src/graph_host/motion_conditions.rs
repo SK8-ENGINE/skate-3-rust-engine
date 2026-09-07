@@ -74,6 +74,10 @@ pub enum MotionCondition {
     Riding(super::motion_riding_conditions::MotionRidingCondition),
     /// Native Air condition: PhysOutAnimation collision/trajectory time.
     TimeToLand(NumericCondition),
+    CurrentGrabType(super::motion_stock_gameplay::GrabType),
+    CrouchedForGrabCycle,
+    TrucksOrDeckInContact,
+    HasTweak(NumericCondition),
     ///DistToEdge82BA8238: completed OffBoard116, not a fresh nearest-rail query.
     DistToEdge(NumericCondition),
     /// Native off-board trajectory time (PhysOutOffBoard+32).
@@ -183,6 +187,10 @@ impl MotionCondition {
             }
             "DistToEdge" => Self::DistToEdge(numeric()),
             "IsDroppingIn" => Self::DroppingIn,
+            "TrucksOrDeckInContact" => Self::TrucksOrDeckInContact,
+            "HasTweak" => Self::HasTweak(numeric()),
+            "CurrentGrabType" => Self::CurrentGrabType(super::motion_stock_gameplay::GrabType::parse(a.text("grab").unwrap_or(""))?),
+            "IsCrouchedEnoughForBlendToGrabCycle" => Self::CrouchedForGrabCycle,
             "TimeToLand" => Self::TimeToLand(numeric()),
             "OBTimeToLand" => Self::ObTimeToLand(numeric()),
             "OBTrajTime" => Self::ObTrajTime(numeric()),
@@ -192,6 +200,25 @@ impl MotionCondition {
     pub fn evaluate(&self, host: &MotionHost, frame: &Frame) -> Result<bool, String> {
         use skate_core::animation::playback_parameters::ParameterInputs;
         Ok(match self {
+            //82BA42E0 reads Collision3472 (trucks) OR3475 (deck), not wheels.
+            Self::TrucksOrDeckInContact => host.gameplay_conditions
+                .ok_or("Contact condition requires physical publication")?.trucks_or_deck_contact,
+            //82BA6B90 shares the filtered-map accessor with82BA6AC0. At least
+            //one component must exist even when no numeric comparison is authored.
+            Self::HasTweak(n) => {
+                let x = host.animation.filtered_intent("TweakX");
+                let y = host.animation.filtered_intent("TweakY");
+                (x.is_some() || y.is_some()) && {
+                    let (x, y) = (x.unwrap_or(0.0), y.unwrap_or(0.0));
+                    n.matches(skate_core::input::controller::magnitude(y.mul_add(y, x * x)))
+                }
+            },
+            //82BA7848 -> ISkaterAnim+100 ->82B97200 compares the enum at360.
+            Self::CurrentGrabType(grab) => host.animation.grab_type == Some(*grab),
+            //82BBDE40: PhysOutSkeleton72 < literal821EE79C (strictly 0.6).
+            Self::CrouchedForGrabCycle => host.crouching_physical
+                .ok_or("Grind grab requires the published skeleton height")?
+                .animation_height_72 < f32::from_bits(0x3f19_999a),
             Self::CanBipedLand => host.offboard_output.landing_normal_192[1] > 0.85,
             Self::BipedCommitted => host.offboard_output.flag_329 != 0,
             Self::EnoughDistToObstacle {
@@ -236,7 +263,7 @@ impl MotionCondition {
             Self::BipedGroundThin => host.offboard_ground_thin,
             Self::LocoState(condition) => condition.evaluate(host.offboard_locomotion),
             Self::ShouldLeaveSlide { right } => host.slide_latch.should_leave(*right),
-            Self::Gesture(group) => group.has_intent(&host.action_intents),
+            Self::Gesture(group) => group.has_intent(|name| host.action_intents.contains_key(name)),
             Self::Shared(condition) => condition
                 .evaluate(
                     &host.condition_inputs,
@@ -251,12 +278,11 @@ impl MotionCondition {
             Self::Riding(condition) => condition.evaluate(host)?,
             Self::DistToEdge(n) => n.matches(host.offboard_output.distance_116),
             Self::DroppingIn => host.grind_physical.dropping_in,
-            Self::TimeToLand(n) => n.matches(
-                host.gameplay_conditions
-                    .as_ref()
-                    .ok_or("TimeToLand requires physical condition publication")?
-                    .time_to_land,
-            ),
+            Self::TimeToLand(n) => {
+                let p = host.gameplay_conditions
+                    .ok_or("TimeToLand requires physical condition publication")?;
+                p.time_to_land_valid && n.matches(p.time_to_land)
+            },
             Self::ObTimeToLand(n) | Self::ObTrajTime(n) => n.matches(
                 host.gameplay_conditions
                     .as_ref()

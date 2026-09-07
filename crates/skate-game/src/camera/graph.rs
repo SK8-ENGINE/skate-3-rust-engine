@@ -36,9 +36,17 @@ impl CameraGraph {
             let node = &source.elements[operation.element];
             let a = Attributes::new(&node.attributes);
             Ok(match operation.name.as_str() {
-                "CameraChooseShot" => Behavior::Choose { names: shot_names(&a),
-                    incoming: f32::from_bits(a.float_bits("transitionIn", (-1.0_f32).to_bits())),
-                    outgoing: f32::from_bits(a.float_bits("transitionOut", (-1.0_f32).to_bits())) },
+                "CameraChooseShot" => {
+                    let names = shot_names(&a);
+                    if names.is_empty() {
+                        return Err("CameraChooseShot has no named shot".into());
+                    }
+                    Behavior::Choose {
+                        names,
+                        incoming: f32::from_bits(a.float_bits("transitionIn", (-1.0_f32).to_bits())),
+                        outgoing: f32::from_bits(a.float_bits("transitionOut", (-1.0_f32).to_bits())),
+                    }
+                }
                 "PrintText2D" => Behavior::Print(a.text("text").unwrap_or("").into()),
                 "SlowMotionController" => Behavior::SlowMotion,
                 name => return Err(format!("Unimplemented camera behavior {name}")),
@@ -87,12 +95,14 @@ impl Host for CameraHost<'_> {
     fn begin(&mut self, id: usize, _: [u32; 6], _: &Frame) {
         match &self.behaviors[id] {
             Behavior::Choose { names, incoming, outgoing } => {
-                if let Some(name) = names.first() {
-                    if let Err(error) = self.manager.set_shot(name, false, self.subject, self.database) {
-                        self.error = Some(error); return;
-                    }
-                    self.manager.shots.apply_graph_transition(*incoming, *outgoing);
+                let Some(name) = names.first() else {
+                    self.error = Some("CameraChooseShot has no named shot".into());
+                    return;
+                };
+                if let Err(error) = self.manager.set_shot(name, false, self.subject, self.database) {
+                    self.error = Some(error); return;
                 }
+                self.manager.shots.apply_graph_transition(*incoming, *outgoing);
             }
             Behavior::Print(text) => bevy::log::warn!("Stock camera graph: {text}"),
             Behavior::SlowMotion => {

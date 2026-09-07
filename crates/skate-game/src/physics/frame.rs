@@ -5,7 +5,7 @@ use super::{
     input_phase, player_state, solve,
 };
 use crate::{camera::CameraRuntime, graph_runtime::StockGraphs};
-use skate_core::{input::controller::ActionMap, math::Vector3};
+use skate_core::{input::controller::ActionMap, math::Vector3, physics::{board::BodyId, phase::{PhysicsEvent, PhysicalOutputSnapshot}}};
 
 pub(super) fn advance(
     physics: &mut GamePhysics,
@@ -16,6 +16,8 @@ pub(super) fn advance(
     input_available: bool,
     camera: &mut CameraRuntime,
 ) -> Result<(), String> {
+    let tick = physics.ticks;
+    physics.exchange = super::SimulationExchange::new(tick);
     //SimController8285C968 dispatches the preceding tick's camera messages
     //before simulation. Keep End/Begin ordering when both occur in one update.
     for request in camera.simulation_rate_requests.drain(..) {
@@ -85,7 +87,18 @@ pub(super) fn advance(
     }
     //World8275EC0C ends board queries before PostInput/state selection.
     physics.riding.finish_wheel_queries()?;
+    let state_before_selection = skater.player_state.current();
     player_state::post_input_and_select(physics, skater)?;
+    let state_after_selection = skater.player_state.current();
+    if state_before_selection != state_after_selection {
+        physics.exchange.emit_event(
+            tick,
+            PhysicsEvent::StateChanged {
+                from: state_before_selection,
+                to: state_after_selection,
+            },
+        )?;
+    }
     player_state::pre_state(physics, skater)?;
     match skater.player_state.current() {
         skate_core::player::state::PhysicalStateId::GrindBoardslide
@@ -173,6 +186,38 @@ pub(super) fn advance(
         physical.reckoning.vector_16.map(f32::from_bits),
     );
     let feedback = animation_phase::publish_feedback(physics, skater);
+    let deck = physics.board.bodies()[BodyId::Deck.index()];
+    let rider = skater
+        .skeleton
+        .bodies()
+        .first()
+        .ok_or("Physical output requires the constructed rider body")?;
+    let ground_normal = physics.riding.ground.wheel_normal;
+    let predicted = skater.player_input.physical.collision.predicted_position_64;
+    let predicted_position = Vector3::new(
+        f32::from_bits(predicted[0]),
+        f32::from_bits(predicted[1]),
+        f32::from_bits(predicted[2]),
+    );
+    let events = physics.exchange.events().to_vec();
+    physics.exchange.publish_output(PhysicalOutputSnapshot {
+        tick,
+        state: skater.player_state.current(),
+        board_position: deck.rates.position,
+        board_linear_velocity: deck.rates.linear_velocity,
+        rider_root_position: rider.rates.position,
+        rider_linear_velocity: rider.rates.linear_velocity,
+        ground_normal,
+        contact_count: physics.riding.ground.part_contact_count as u32,
+        predicted_position,
+        grounded: matches!(
+            skater.player_state.current(),
+            skate_core::player::state::PhysicalStateId::PhysicsGround
+        ),
+        wiping_out: skater.skeleton_collision.is_ragdoll,
+        landed: events.iter().any(|event| matches!(event, PhysicsEvent::Landing)),
+        events,
+    });
     camera_output::advance(physics, skater, &feedback, camera)?;
     skater.animation_input.finish_output_publication();
     skater.player_input.player.update_count_1316 =

@@ -2,8 +2,19 @@
 //! Config identity and VM operand semantics are recorded in STEERING_INPUT.md.
 use super::{controller::ActionMap, pad::Pad};
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GameplayActions {
     values: [f32; 18],
+}
+
+impl GameplayActions {
+    pub fn from_values(values: [f32; 18]) -> Self {
+        Self { values }
+    }
+
+    pub fn values(&self) -> &[f32; 18] {
+        &self.values
+    }
 }
 impl GameplayActions {
     /// The native pad retains storage even while count is zero. With a nonzero

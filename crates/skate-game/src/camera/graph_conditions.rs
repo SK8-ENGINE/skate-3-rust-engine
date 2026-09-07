@@ -26,7 +26,7 @@ impl Condition {
     pub fn parse(a: &Attributes<'_>) -> Result<Self, String> {
         use Boolean as B;
         use Value as V;
-        let name = a.text("name").unwrap_or("");
+        let name = a.text("name").ok_or("Camera condition requires name")?;
         let boolean = match name {
             "IsInObserverMode" => Some(B::Observer), "IsWipingOut" => Some(B::WipingOut),
             "IsBrokenBoneSlowMo" => Some(B::BrokenBone), "IsOffboard" => Some(B::Offboard),
@@ -62,10 +62,14 @@ impl Condition {
             return Ok(Self::Numeric(value, crate::graph_host::parse_numeric_condition(a)));
         }
         Ok(match name {
-            "IsCameraTypeActive" => Self::Type(a.text("type").unwrap_or("0").parse()
+            "IsCameraTypeActive" => Self::Type(a.text("type")
+                .ok_or("IsCameraTypeActive requires type")?
+                .parse()
                 .map_err(|_| "Invalid normal camera type")?),
             "IsPreviousShot" => Self::Previous(shot_names(a).iter().map(|v| key_hash(v)).collect()),
-            "IsInVolume" => Self::Volume(a.text("volume").unwrap_or("").to_owned()),
+            "IsInVolume" => Self::Volume(a.text("volume")
+                .ok_or("IsInVolume requires volume")?
+                .to_owned()),
             // Constructor82DF5588 uses case-sensitive comparison and keeps0
             // for both Freefall and an unrecognized tweak name.
             "IsWipeoutBodyTweak" => Self::Tweak(match a.text("tweak").unwrap_or("") {

@@ -10,11 +10,13 @@ mod runtime;
 mod types;
 mod air_output;
 mod pose_output;
+mod requests;
 
 pub use runtime::{InputContinuation, InputPhaseError, InputPhaseServices, process_input, start_input, finish_input};
 pub use types::*;
 pub use air_output::AirOutputFields;
 pub use pose_output::{AnimationOutputFields, ScoringOutputFields, SkeletonOutputFields};
+pub use requests::*;
 
 #[cfg(test)]
 mod tests;

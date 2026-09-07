@@ -51,6 +51,8 @@ pub enum MotionOperation {
     HandService(super::motion_hand_services::Operation),
     IntentFilter(super::motion_intent_filter::Operation),
     CharacterGesture,
+    EndGesture,
+    StockGameplay(super::motion_stock_gameplay::Operation),
     Shove(super::motion_shove::ShoveOperation),
     ResetAnimation(super::motion_reset::Operation),
     UpdateRidingFakie(skate_core::animation::riding_fakie::Settings),
@@ -155,6 +157,7 @@ impl OperationFactory for MotionFactory {
                         super::motion_tricks::Operation::parse(a).map(MotionOperation::Trick)
                     }
                     "CharacterGesture" => Some(MotionOperation::CharacterGesture),
+                    "EndGesture" => Some(MotionOperation::EndGesture),
                     "DisallowPumping" => Some(MotionOperation::DisallowPumping),
                     "FakieHeadChannel" => Some(MotionOperation::FakieHeadChannel),
                     "SetSpeed" => Some(MotionOperation::SetSpeed {
@@ -178,6 +181,9 @@ impl OperationFactory for MotionFactory {
                         },
                     )),
                     // Factory82BC6D40 defaults both identifiers to the string0.
+                    name if super::motion_stock_gameplay::Operation::recognizes(name) => Some(
+                        MotionOperation::StockGameplay(super::motion_stock_gameplay::Operation::parse(a)),
+                    ),
                     "AttachIntent" => Some(MotionOperation::AttachIntent {
                         intent: a.text("intent").unwrap_or("0").into(),
                         attribute: encode(a.text("attr").unwrap_or("0").as_bytes()),

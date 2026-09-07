@@ -33,6 +33,7 @@ pub mod joint_solver;
 pub mod manual;
 pub mod mass;
 pub(crate) mod native_arithmetic;
+pub mod phase;
 pub mod point_force;
 pub(crate) mod reciprocal_sqrt;
 pub mod rigid_body;

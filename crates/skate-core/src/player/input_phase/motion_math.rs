@@ -1,6 +1,7 @@
 //! Inlined physical input calculations from TU3 82DB4048.
 //! Xenon estimates use the shared, explicitly approximation-derived model.
-use super::types::{GroundHistoryRequest, GroundHistoryResult, PrepareJumpRequest, RawVector};
+use super::requests::{GroundHistoryRequest, GroundHistoryResult, PrepareJumpRequest};
+use super::types::RawVector;
 use crate::physics::{
     board_motion_output::inverse_length_squared,
     native_arithmetic::{dot3, reciprocal_estimate},

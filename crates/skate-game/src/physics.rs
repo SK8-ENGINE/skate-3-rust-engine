@@ -80,11 +80,91 @@ pub(crate) struct GamePhysics {
     pub ticks: u64,
     pub contact_count: usize,
     pub failed: bool,
+    exchange: SimulationExchange,
     /// ProcessedPhysIn reset82BF9EF0 sets0x2000; initial stancebit20 is clear.
     /// Animation packet publication owns subsequent stance-bit updates.
     pub processed_flags_2468: u32,
     /// Toolkit ctor82C0680C clears8384bit7; wipeout entry/exit owns changes.
     pub board_wiping_out: bool,
+}
+
+/// Cross-phase records for the current fixed tick. Subsystems retain their
+/// private native-shaped storage; only these buffers cross the coordinator.
+pub(crate) struct SimulationExchange {
+    commands: skate_core::physics::phase::PhysicsCommandBuffer,
+    events: skate_core::physics::phase::PhysicsEventBuffer,
+    physical_output: Option<skate_core::physics::phase::PhysicalOutputSnapshot>,
+}
+
+impl SimulationExchange {
+    fn new(tick: u64) -> Self {
+        Self {
+            commands: skate_core::physics::phase::PhysicsCommandBuffer::new(tick),
+            events: skate_core::physics::phase::PhysicsEventBuffer::new(tick),
+            physical_output: None,
+        }
+    }
+
+    fn emit_event(
+        &mut self,
+        tick: u64,
+        event: skate_core::physics::phase::PhysicsEvent,
+    ) -> Result<(), String> {
+        self.events.emit(tick, event)
+    }
+
+    fn publish_output(&mut self, output: skate_core::physics::phase::PhysicalOutputSnapshot) {
+        self.physical_output = Some(output);
+    }
+
+    fn output(&self) -> Option<&skate_core::physics::phase::PhysicalOutputSnapshot> {
+        self.physical_output.as_ref()
+    }
+
+    fn events(&self) -> &[skate_core::physics::phase::PhysicsEvent] {
+        self.events.events()
+    }
+
+    pub(super) fn request_state(
+        &mut self,
+        state: skate_core::player::state::PhysicalStateId,
+    ) -> Result<(), String> {
+        let tick = self.commands.tick();
+        self.commands.push(
+            tick,
+            skate_core::physics::phase::PhysicsCommand::RequestState(state),
+        )
+    }
+}
+
+#[cfg(test)]
+mod exchange_tests {
+    use super::*;
+
+    #[test]
+    fn exchange_keeps_events_on_the_authoritative_tick() {
+        let mut exchange = SimulationExchange::new(8);
+        assert!(exchange.emit_event(
+            7,
+            skate_core::physics::phase::PhysicsEvent::StateChanged {
+                from: skate_core::player::state::PhysicalStateId::PhysicsGround,
+                to: skate_core::player::state::PhysicalStateId::PhysicsAir,
+            },
+        ).is_err());
+        assert!(exchange.emit_event(
+            8,
+            skate_core::physics::phase::PhysicsEvent::StateChanged {
+                from: skate_core::player::state::PhysicalStateId::PhysicsGround,
+                to: skate_core::player::state::PhysicalStateId::PhysicsAir,
+            },
+        ).is_ok());
+        assert!(exchange
+            .request_state(skate_core::player::state::PhysicalStateId::PhysicsAir)
+            .is_ok());
+        assert_eq!(exchange.commands.tick(), 8);
+        assert_eq!(exchange.commands.commands().len(), 1);
+        assert_eq!(exchange.events().len(), 1);
+    }
 }
 
 impl GamePhysics {
@@ -157,6 +237,7 @@ impl GamePhysics {
             ticks: 0,
             contact_count: 0,
             failed: false,
+            exchange: SimulationExchange::new(0),
             processed_flags_2468,
             board_wiping_out: false,
         })
@@ -216,7 +297,7 @@ fn advance(
     mut skater: ResMut<SkaterRuntime>,
     mut controls: ResMut<PlayerControls>,
     graphs: Res<crate::graph_runtime::StockGraphs>,
-    input: Res<crate::input::ControllerInput>,
+    input: Res<crate::input::PublishedTickInput>,
     mut camera: ResMut<crate::camera::CameraRuntime>,
     mut cadence: ResMut<Time<Fixed>>,
     mut exit: MessageWriter<AppExit>,
@@ -226,11 +307,8 @@ fn advance(
         return;
     }
     let timer = performance.as_ref().map(|_| std::time::Instant::now());
-    let mut actions = input.player_actions();
-    let input_available = input
-        .status
-        .iter()
-        .any(|s| *s == crate::input::ControllerStatus::Ready);
+    let mut actions = input.0.actions();
+    let input_available = input.0.controller_available();
     if let Err(message) = frame::advance(
         &mut physics,
         &mut skater,
@@ -244,7 +322,7 @@ fn advance(
         error!(
             "{message}; tick={}; mapped_input={:?}; force_mode={}; board_axis_y={}; flags={:08x}/{:08x}/{:08x}/{:08x}/{:08x}",
             physics.ticks,
-            input.mapped_actions,
+            input.0.actions(),
             skater.skeleton_input.force_mode,
             skater.skeleton_input.drive_frames[0][2][1],
             skater.player_input.processed.flags_2468,
@@ -357,3 +435,7 @@ fn present(
             alpha);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/powerslide_playback.rs"]
+mod powerslide_tests;

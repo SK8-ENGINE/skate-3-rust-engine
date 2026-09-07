@@ -79,6 +79,7 @@ impl Operation {
 /// this game.82595D08 sets a name and ORs a bit in the graph's score packet.
 #[derive(Default)]
 pub struct ScorePacket {
+    pub grab: Option<(skate_core::animation::output::attributes::AttributeName, [f32; 2])>,
     pub trick: Option<skate_core::animation::output::attributes::AttributeName>,
     pub name: Option<u32>,
     pub flags: u32,

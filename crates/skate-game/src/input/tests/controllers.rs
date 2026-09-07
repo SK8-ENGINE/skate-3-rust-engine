@@ -110,3 +110,37 @@ fn alternate_guitar_subtype_uses_verified_conversion_mask_and_errors_stay_visibl
     );
     assert_eq!(input.mapped_actions[1], [0.0; 18]);
 }
+
+#[test]
+fn tick_input_is_the_single_fixed_tick_snapshot() {
+    let mut input = ControllerInput::default();
+    input.collect(std::array::from_fn(|_| packet(1, 0, [19661, 0])));
+    assert!(input.publish_actions());
+
+    let first = input.tick_input();
+    assert_eq!(first.tick(), 1);
+    assert!(first.controller_available());
+    let mut first_actions = first.actions();
+    let first_turn = first_actions.value(64);
+
+    // A second consumer reads the same published tick without touching the
+    // platform cache or remapping the controller.
+    let second = input.tick_input();
+    let mut second_actions = second.actions();
+    assert_eq!(second.tick(), first.tick());
+    assert_eq!(second_actions.value(64), first_turn);
+}
+
+#[test]
+fn unavailable_controllers_publish_zero_gameplay_actions() {
+    let mut input = ControllerInput::default();
+    input.collect(std::array::from_fn(|_| packet(1, 0x1000, [32767, 0])));
+    assert!(input.publish_actions());
+    assert!(input.tick_input().controller_available());
+
+    input.collect(std::array::from_fn(|_| Err(DeviceError::Disconnected)));
+    assert!(input.publish_actions());
+    let snapshot = input.tick_input();
+    assert!(!snapshot.controller_available());
+    assert_eq!(*snapshot.actions().values(), [0.0; 18]);
+}
