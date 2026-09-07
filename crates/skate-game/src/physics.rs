@@ -31,6 +31,7 @@ mod animation_input;
 mod animation_phase;
 mod landing_quality;
 mod frame;
+mod grind;
 mod ground_phase;
 mod ground_animation;
 mod slide_state;
@@ -70,6 +71,7 @@ pub(crate) struct GamePhysics {
     clock: clock::SimulationClock,
     pub board: BoardRuntime,
     pub riding: RidingOutputs,
+    grind: grind::Runtime,
     world: BoardWorld,
     settings: PhysicsSettings,
     animation_profile: animation_phase::AnimationProfile,
@@ -144,6 +146,7 @@ impl GamePhysics {
         let (query, retention) = ground::query_settings();
         Ok(Self {
             clock: clock::SimulationClock::default(),
+            grind: grind::Runtime::load(&data, map.is_none())?,
             board,
             riding,
             world,

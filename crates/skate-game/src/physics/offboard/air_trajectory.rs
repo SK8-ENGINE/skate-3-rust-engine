@@ -6,14 +6,6 @@ use skate_core::player::offboard::{
 };
 pub(crate) fn prepare(skater: &SkaterRuntime, current: bool) -> Result<air_launch::Launch, String> {
     let p = &skater.player_input.processed;
-    if (if current {
-        p.category_2512
-    } else {
-        p.category_2516
-    }) == 400
-    {
-        return Err("Biped launch from a grind requires the grind primitive owner".into());
-    }
     let toolkit = skater
         .player_input
         .toolkit
@@ -34,9 +26,9 @@ pub(crate) fn prepare(skater: &SkaterRuntime, current: bool) -> Result<air_launc
         position_592: p.vectors_544_560_592_608[2].map(f32::from_bits),
         target_112: toolkit.effective[3],
         velocity_912: p.vectors_880_896_912_928_944[2].map(f32::from_bits),
-        //The current authored world has no grind primitives; category400 is rejected above.
-        grind_position_1120: [0.; 4],
-        grind_axis_1136: [0.; 4],
+        //Retained live grind primitive, published before native state entry.
+        grind_position_1120: p.grind_position_1120.map(f32::from_bits),
+        grind_axis_1136: p.grind_direction_1136.map(f32::from_bits),
         stick: [
             skater.animation_input.extra.biped_world_x,
             skater.animation_input.extra.biped_world_z,

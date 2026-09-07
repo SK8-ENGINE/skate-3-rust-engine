@@ -310,6 +310,8 @@ impl Default for PlayerInputState {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ProcessedPhysicsInput {
+    pub grind_position_1120: RawVector,
+    pub grind_direction_1136: RawVector,
     pub effective_anim_transform_192: RawMatrix,
     pub vectors_400_416: [RawVector; 2],
     pub vectors_464_480_496_512_528: [RawVector; 5],
@@ -395,6 +397,8 @@ pub struct ProcessedPhysicsInput {
 impl Default for ProcessedPhysicsInput {
     fn default() -> Self {
         Self {
+            grind_position_1120: [0;4],
+            grind_direction_1136: [0;4],
             effective_anim_transform_192: [[0; 4]; 4],
             vectors_400_416: [[0; 4]; 2],
             vectors_464_480_496_512_528: [[0; 4]; 5],

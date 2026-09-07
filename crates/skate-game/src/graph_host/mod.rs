@@ -6,6 +6,7 @@ mod condition_nodes;
 pub(crate) use condition_nodes::numeric as parse_numeric_condition;
 mod crouching_settings;
 pub mod motion;
+pub(crate) mod motion_grind;
 mod motion_air_leg;
 mod motion_animation;
 #[path = "motion_offboard/cadence.rs"]

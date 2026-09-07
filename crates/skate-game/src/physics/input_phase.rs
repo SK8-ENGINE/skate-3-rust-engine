@@ -213,3 +213,15 @@ impl PlayerInputCallbacks for Callbacks<'_, '_> {
         self.reset_player(board, runtime, target, player, physical, processed)
     }
 }
+
+///Grind pop82D40D30 calls the animated skeleton update with fast blend=false.
+pub(super) fn update_grind_jump(physics:&mut GamePhysics,skater:&mut SkaterRuntime)->Result<(),String> {
+    let collision=collision(skater);
+    let mut owners=SkeletonOwners {animated:&mut skater.animated_skeleton,body:&mut skater.skeleton,
+        drives:&mut skater.skeleton_drives,ik:&mut skater.foot_ik,animation_input:&mut skater.animation_input,
+        correction:&mut skater.skeleton_output.correction,pose_errors:&mut skater.pose_errors};
+    skater.skeleton_input.update_animated(&mut skater.skeleton_air,&mut physics.board,
+        &physics.riding.reckoning_frames.system,&mut skater.player_input.processed,&mut owners,
+        &skater.animation.packet.hierarchy,&collision,physics.settings.step.simulation,false)?;
+    Ok(())
+}

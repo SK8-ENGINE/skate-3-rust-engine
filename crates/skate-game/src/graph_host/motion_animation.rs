@@ -104,6 +104,23 @@ impl MotionAnimation {
         );
         Ok(())
     }
+    ///82BB0A30 samples the actual selected blend tree at normalized endpoints.
+    ///Work on a clone so endpoint probing cannot leak into the current pose.
+    pub fn attribute_endpoints(&self, name: AttributeName) -> Result<[f32;2],String> {
+        let source=self.current.as_ref().ok_or("Grind has no selected animation")?;
+        let mut values=[0.;2];
+        for i in 0..2 {
+            let mut tree=source.clone();
+            let mut attributes=self.settable.entries().to_vec();
+            attributes.push(SettableAttribute {name,value:i as f32,normalized:true,sequence_id:-1});
+            tree.set_attributes(&attributes)?;
+            // During entry the destination tree owns bounds, not the fading-out pose.
+            let attribute=tree.attributes(15)?.into_iter().find(|a|a.name==name)
+                .ok_or("Grind animation is missing its twist attribute")?;
+            values[i]=f32::from_bits(attribute.payload.0[0].ok_or("Grind twist is uninitialized")?);
+        }
+        Ok(values)
+    }
     pub fn tree_attributes(&self) -> &[AnimationAttribute] {
         &self.tree_attributes
     }

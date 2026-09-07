@@ -12,6 +12,8 @@ pub(crate) fn reset_processed(input: &mut ProcessedPhysicsInput) {
             [0, 0, 1.0f32.to_bits(), 0],
             [0; 4],
         ],
+        grind_position_1120: input.grind_position_1120,
+        grind_direction_1136: input.grind_direction_1136,
         vector_1520: input.vector_1520,
         matrix_1536: input.matrix_1536,
         byte_1600: input.byte_1600,

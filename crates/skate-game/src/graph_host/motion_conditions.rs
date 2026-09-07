@@ -72,6 +72,8 @@ pub enum MotionCondition {
     Riding(super::motion_riding_conditions::MotionRidingCondition),
     /// Native Air condition: PhysOutAnimation collision/trajectory time.
     TimeToLand(NumericCondition),
+    ///DistToEdge82BA8238: completed OffBoard116, not a fresh nearest-rail query.
+    DistToEdge(NumericCondition),
     /// Native off-board trajectory time (PhysOutOffBoard+32).
     ObTimeToLand(NumericCondition),
     /// Native off-board trajectory time used by dismount/runout branches.
@@ -177,6 +179,7 @@ impl MotionCondition {
             name if super::motion_riding_conditions::MotionRidingCondition::recognizes(name) => {
                 Self::Riding(super::motion_riding_conditions::MotionRidingCondition::parse(a)?)
             }
+            "DistToEdge" => Self::DistToEdge(numeric()),
             "TimeToLand" => Self::TimeToLand(numeric()),
             "OBTimeToLand" => Self::ObTimeToLand(numeric()),
             "OBTrajTime" => Self::ObTrajTime(numeric()),
@@ -243,6 +246,7 @@ impl MotionCondition {
             Self::ManualOutTimerIsActive => host.riding.manual_out_timer > 0.0,
             Self::Gameplay(condition) => condition.evaluate(host)?,
             Self::Riding(condition) => condition.evaluate(host)?,
+            Self::DistToEdge(n) => n.matches(host.offboard_output.distance_116),
             Self::TimeToLand(n) => n.matches(
                 host.gameplay_conditions
                     .as_ref()

@@ -3,8 +3,8 @@
 use skate_core::math::Vector3;
 use bevy::prelude::*;
 
-/// Retained geometry for the forthcoming native contact/scorer adapter. This
-/// deliberately does not publish selector candidate1488 or enter state400.
+/// Shared authored geometry. The physical grind owner runs native truck queries
+/// against these same spline endpoints before state selection.
 #[derive(Resource)]
 pub(crate) struct GrindGeometry {
     pub rails: Vec<Rail>,
@@ -21,7 +21,7 @@ impl Plugin for GrindGeometryPlugin {
             GrindGeometry { rails: Vec::new(), native_blob: Vec::new() }
         };
         if test_world {
-            info!("GRIND_GEOMETRY rails={} bytes={} native_acquisition=not_connected",
+            info!("GRIND_GEOMETRY rails={} bytes={} native_acquisition=paired_trucks_50_50",
                 geometry.rails.len(), geometry.native_blob.len());
             for rail in &geometry.rails {
                 info!("GRIND_RAIL id={} name={} start={:?} end={:?}",

@@ -112,7 +112,7 @@ struct Services<'a> {
 }
 impl PostInputServices for Services<'_> {
     fn update_grind_manager_82d8ab08(&mut self) {
-        self.grind.advance(self.processed);
+        if self.processed.category_2512 != 400 { self.grind.advance(self.processed); }
     }
     fn update_trajectory_selector_82d68800(&mut self) -> u8 {
         //82DB56B0 runs the real selector after GrindManager. That manager
@@ -142,7 +142,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     let trajectory_input = super::super::air_phase::selector_input(physics, skater)?;
     let post = &mut skater.player_state.post;
     let p = &mut skater.player_input.processed;
-    if skater.ground_lifecycle.edge.is_some() || p.category_2512 == 400 || p.state_2508 == 701 {
+    if skater.ground_lifecycle.edge.is_some() {
         return Err("PostInput active grind requires its actual candidate/scorer output".into());
     }
     let requests = &skater.ground_lifecycle.trajectory;

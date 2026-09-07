@@ -15,6 +15,12 @@ impl MotionHost {
             .get(behavior)
             .ok_or("Unbound MotionGraph behavior")?;
         let operation = self.operations[id].clone();
+        if let MotionOperation::Grind(operation) = operation {
+            let Instance::Grind(state)=&mut self.instances[behavior] else {return Err("Grind instance mismatch".into())};
+            let height=self.crouching_physical.map(|p|p.animation_height_72).ok_or("Grind requires physical height")?;
+            return super::super::motion_grind::execute(state,&operation,phase,frame.dt,
+                &self.grind_settings,&self.grind_physical,height,&mut self.animation);
+        }
         if let MotionOperation::OffboardAir(operation) = operation {
             let Instance::OffboardAir(state) = &mut self.instances[behavior] else {
                 return Err("OffboardAir instance mismatch".into());

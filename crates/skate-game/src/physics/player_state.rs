@@ -108,6 +108,7 @@ pub(crate) fn post_input_and_select(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
 ) -> Result<(), String> {
+    super::grind::query(physics, skater);
     post_input::advance(physics, skater)?;
     selection::advance(physics, skater)
 }

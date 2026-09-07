@@ -1,6 +1,5 @@
-//! Original82D8A828/82D8ABD8/82D875A8 ordinary empty-edge path.
-//! The authored host floor explicitly contains no grind edges. This is an
-//! asset declaration, not a missing-loader fallback or an inferred no-hit.
+//! Input timing/gates from82D8A828/82D8ABD8. The geometry query/scorer runs
+//! in physics::grind after input completion, before the state selector.
 use skate_core::{player::input_phase::ProcessedPhysicsInput, point_graph::PointGraph};
 use skate_data::collections::Collections;
 #[derive(Clone, Copy, Debug)]
@@ -88,11 +87,6 @@ impl GrindInputState {
         } else {
             0.
         };
-        //Empty real edge query selects standard board collision in82D89DC0
-        //for ordinary ground. An active grind state needs its geometry owner.
-        if p.category_2512 == 400 || state == 701 {
-            return Err("Active grind state requires authored grind geometry".into());
-        }
         self.low_wheel_frames = if self.previous_candidate
             && state == 100
             && p.wheel_count_2556 < 2

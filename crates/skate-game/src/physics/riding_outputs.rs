@@ -76,6 +76,20 @@ impl RidingOutputs {
             },
         );
     }
+    ///Shared Reckoning82D8E3E0, argument7=false for grind/nonspecific.
+    pub fn update_grind_reckoning(&mut self, air: &mut skate_core::air::reckoning::AirState,
+        normal: [f32;4], forward: [f32;4], flags: u32, blend: f32) {
+        let previous_up=lanes(self.reckoning.up);
+        skate_core::player::offboard::ground_reckoning::update(
+            &mut self.reckoning,&mut self.reckoning_frames,&mut self.body_spin,air,
+            skate_core::player::offboard::ground_reckoning::Settings {
+                ground_normal_smoothing:self.orientation_settings.ground_normal_smoothing,
+                tilt_vs_rotation:&self.tilt_vs_rotation,tilt_vs_slope:&self.tilt_vs_slope,
+            },skate_core::player::offboard::ground_reckoning::Input {
+                previous_up,requested_up:normal,requested_forward:forward,blend,
+                reverse_stance:flags&0x100000!=0,enable_body_spin_input:false,physical_body_spin_2812:0.,
+            });
+    }
     ///Board82C0D680 resets CollisionInfo and both probes, preserving7692.
     pub fn reset_for_teleport(&mut self) {
         let elapsed = self.ground.time_without_wheel_contact;

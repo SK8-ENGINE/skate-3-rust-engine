@@ -181,17 +181,31 @@ pub(crate) fn advance(
         board_on_ground: physical.off_board.flag_311 != 0,
         animation_height: feedback.crouching.animation_height_72,
     });
-    // FilteredState82DE5BA0 clears grind metadata on every nongrind output.
-    // A future grind phase must supply its actual cached name, not an AG intent.
-    if physical.filtered_state_0 == 3 {
-        return Err("Animation phase requires the selected grind's filtered output name".into());
-    }
+    let grinding=skater.player_state.filtered_output.as_ref().is_some_and(|f|f.grinding);
+    let grind_name=if grinding {physics.grind.name.clone()} else {String::new()};
+    //FillSkeleton82BE1AE8 uses the vector between physical parts10/6,
+    //Processed352 and Reckoning1152, then wraps the signed angle to +/-pi.
+    let a=skater.skeleton.record.pose[10][3];
+    let b=skater.skeleton.record.pose[6][3];
+    let lateral=Vector3::new(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
+    let forward=skater.player_input.toolkit.as_ref().map(|t| t.forward)
+        .unwrap_or([0.,0.,1.,0.]);
+    let mut twist=skate_core::riding::collision_response::signed_angle(
+        Vector3::new(forward[0],forward[1],forward[2]),lateral,physics.riding.reckoning.up);
+    let turns=twist* f32::from_bits(0x3e22f983);
+    let fraction=turns-turns.floor();
+    twist=(fraction-if fraction>0.5 {1.0} else {0.0})*f32::from_bits(0x40c90fdb);
+    if mirrored {twist=if twist>=0.0 {std::f32::consts::PI-twist} else {-std::f32::consts::PI-twist};}
+    skater.animation.motion.grind_physical=crate::graph_host::motion_grind::Physical {
+        name:grind_name.clone(),grinding,crouch:physics.grind.output().crouch,twist,
+        facing_backwards: physics.grind.name.starts_with("BF_"),
+    };
     let conditions = ConditionInputs {
         speeds: Some(physics.riding.graph_speeds()),
         physical_state: Some(PhysicalStateInputs {
             category: physical.filtered_state_0,
-            grinding: false,
-            grind_name: String::new(),
+            grinding,
+            grind_name,
         }),
         time_since_last_input: Some(p.time_since_last_input_2748),
         mirrored: Some(mirrored),

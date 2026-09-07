@@ -14,6 +14,7 @@ use skate_data::state_graph::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MotionOperation {
+    Grind(super::motion_grind::Operation),
     OffboardAir(super::motion_offboard_air::Operation),
     ToggleBoard,
     Cadence(super::motion_cadence::Operation),
@@ -81,7 +82,9 @@ impl OperationFactory for MotionFactory {
         let operation = if kind == OperationKind::Condition {
             MotionCondition::parse(a)?.map(MotionOperation::Condition)
         } else if kind == OperationKind::Behavior {
-            if let Some(operation) = super::motion_offboard_air::Operation::parse(a) {
+            if let Some(operation) = super::motion_grind::Operation::parse(a) {
+                Some(MotionOperation::Grind(operation))
+            } else if let Some(operation) = super::motion_offboard_air::Operation::parse(a) {
                 Some(MotionOperation::OffboardAir(operation))
             } else if name == "ToggleBoard" {
                 Some(MotionOperation::ToggleBoard)

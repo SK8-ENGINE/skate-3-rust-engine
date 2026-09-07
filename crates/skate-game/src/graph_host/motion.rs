@@ -44,6 +44,7 @@ pub struct MotionPhysical {
     pub foot_frame: Option<PushFootFrame>,
 }
 enum Instance {
+    Grind(super::motion_grind::State),
     OffboardAir(super::motion_offboard_air::State),
     ToggleBoard(super::motion_toggle_board::ToggleBoard),
     Cadence(super::motion_cadence::MatchCadence),
@@ -74,6 +75,7 @@ enum Instance {
 impl Instance {
     fn new(operation: &MotionOperation) -> Self {
         match operation {
+            MotionOperation::Grind(_) => Self::Grind(Default::default()),
             MotionOperation::OffboardAir(_) => Self::OffboardAir(Default::default()),
             MotionOperation::Cadence(_) => Self::Cadence(Default::default()),
             MotionOperation::AddRunoutAttribs => Self::Runout(None),
@@ -127,6 +129,8 @@ impl Instance {
     }
 }
 pub struct MotionHost {
+    pub grind_physical: super::motion_grind::Physical,
+    grind_settings: super::motion_grind::Settings,
     pub offboard_output: skate_core::player::input_phase::OffBoardOutputFields,
     pub toggle_board_physical: super::motion_toggle_board::Physical,
     pub disable_dismount: bool,
@@ -229,6 +233,8 @@ impl MotionHost {
         });
         let pushing = PushingSettings::load(data, &mut metadata)?;
         Ok(Self {
+            grind_physical: Default::default(),
+            grind_settings: super::motion_grind::Settings::load(data)?,
             toggle_board_physical: Default::default(),
             disable_dismount: false,
             offboard_output: Default::default(),

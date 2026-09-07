@@ -3,7 +3,7 @@ use super::*;
 use skate_core::{
     physics::{
         contact_feedback::choose_surface,
-        filtered_state::{FilteredStateInput, GrindState},
+        filtered_state::{FilteredStateInput},
     },
     player::input_phase::CurrentStateFields,
 };
@@ -13,6 +13,8 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         state,
         PhysicalStateId::PhysicsGround
             | PhysicalStateId::PhysicsAir
+            | PhysicalStateId::GrindFiftyFifty
+            | PhysicalStateId::Nonspecific
             | PhysicalStateId::KnownAir
             | PhysicalStateId::GroundAnimation
             | PhysicalStateId::SlideGround
@@ -85,6 +87,13 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         set(84, skater.slide_state.state.wall_riding);
     }
     let physical = &mut skater.player_input.physical;
+    if physics.grind.active {
+        physical.grinds.words_136_140 = [0, 1];
+        if physics.grind.launched {
+            physical.air.launched_442=1;
+            physical.air.launch_velocity_128=physics.grind.launch_velocity.map(f32::to_bits);
+        }
+    }
     //Common Biped Fill82DB7218 precedes the selected physical state's Fill.
     physical.off_board.vector_64 = skater
         .offboard
@@ -170,8 +179,8 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         offboard_has_landed: state == PhysicalStateId::BipedAir
             && skater.offboard.air_state.remaining <= f32::from_bits(0x3c888889),
         offboard_on_deck: physical.off_board.flag_315 != 0,
-        grind: GrindState::default(),
-        last_grind_distance: 0.0,
+        grind: physics.grind.output(),
+        last_grind_distance: physics.grind.distance,
     });
     physical.filtered_state_0 = filtered.category as u32;
     skater.player_state.filtered_output = Some(filtered);

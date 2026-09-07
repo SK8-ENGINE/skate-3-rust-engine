@@ -16,7 +16,11 @@ pub fn lateral_pin(
     forward_selected: bool,
     slope_multiplier: f32,
 ) -> V {
-    let direction = if forward_selected { board[2] } else { scale(board[2], -1.0) };
+    let direction = if forward_selected {
+        board[2]
+    } else {
+        scale(board[2], -1.0)
+    };
     let reference = core::array::from_fn(|i| {
         direction[i].mul_add(forward_offset, board[3][i]) - board[1][i] * up_offset
     });
@@ -26,7 +30,10 @@ pub fn lateral_pin(
         return [0.0; 4];
     }
     let axis = scale(force, length.recip());
-    let damping = scale(axis, strength * f32::from_bits(0x3e08_3127) * dot3(velocity, axis));
+    let damping = scale(
+        axis,
+        strength * f32::from_bits(0x3e08_3127) * dot3(velocity, axis),
+    );
     scale(sub(force, damping), slope_multiplier)
 }
 
@@ -47,13 +54,70 @@ pub fn friction(
     if speed <= 0.001 {
         return [0.0; 4];
     }
-    let strength = strengths[match engagement { 0 => 0, 1 => 1, _ => 2 }];
+    let strength = strengths[match engagement {
+        0 => 0,
+        1 => 1,
+        _ => 2,
+    }];
     let load = support[1].max(0.0);
     let surface_flag_multiplier = if flagged_surface { 1.9 } else { 1.0 };
-    let multiplier = load / speed * time_multiplier * surface_flag_multiplier
-        * surface_multiplier * strength * f32::from_bits(0xbef5_c28f);
+    let multiplier = load / speed
+        * time_multiplier
+        * surface_flag_multiplier
+        * surface_multiplier
+        * strength
+        * f32::from_bits(0xbef5_c28f);
     scale(tangent_velocity, multiplier)
 }
 
-fn sub(a: V, b: V) -> V { core::array::from_fn(|i| a[i] - b[i]) }
-fn scale(a: V, scale: f32) -> V { a.map(|v| v * scale) }
+fn sub(a: V, b: V) -> V {
+    core::array::from_fn(|i| a[i] - b[i])
+}
+fn scale(a: V, scale: f32) -> V {
+    a.map(|v| v * scale)
+}
+
+///82D73AB0 straight, static 50-50 branch: both support normals coincide,
+///primitive motion336 is zero. The manager age controls the native exit nudge.
+pub fn fifty_fifty_pop(
+    velocity: V,
+    normal: V,
+    direction: V,
+    board_position: V,
+    point: V,
+    height: f32,
+    nudge: f32,
+    manager_age: f32,
+) -> V {
+    let across = cross(direction, normal);
+    let balance = if manager_age < 0.31 {
+        if nudge < 0.0 {
+            nudge.min(-0.42)
+        } else if nudge > 0.0 {
+            nudge.max(0.42)
+        } else if dot3(sub(board_position, point), across) > 0.0 {
+            0.42
+        } else {
+            -0.42
+        }
+    } else {
+        nudge
+    };
+    let lateral = scale(across, balance * 1.8);
+    let length = dot3(lateral, lateral).sqrt();
+    let lateral = if length > 1.8 {
+        scale(lateral, 1.8 / length)
+    } else {
+        lateral
+    };
+    let planar = sub(velocity, scale(normal, dot3(velocity, normal)));
+    core::array::from_fn(|i| normal[i].mul_add(height * 1.03, planar[i]) + lateral[i])
+}
+fn cross(a: V, b: V) -> V {
+    [
+        (-a[2]).mul_add(b[1], a[1] * b[2]),
+        (-a[0]).mul_add(b[2], a[2] * b[0]),
+        (-a[1]).mul_add(b[0], a[0] * b[1]),
+        0.0,
+    ]
+}
