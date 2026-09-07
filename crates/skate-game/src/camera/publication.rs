@@ -168,8 +168,11 @@ pub(crate) fn snapshot(
     //The source getter396 is bound to Motion64, despite its camera name
     //"acceleration". Motion64 is the published deck angular velocity.
     let acceleration = p.skateboard.vector_64.map(f32::from_bits);
-    let finite = |name: &str, values: &[f32]| -> Result<(), String> {
-        if values.iter().all(|value| value.is_finite()) {
+    // Native vector storage retains four lanes, but camera positions,
+    // directions and magnitudes use only XYZ. W is not a homogeneous
+    // coordinate here and can be non-finite without corrupting the pose.
+    let finite = |name: &str, values: &[f32; 4]| -> Result<(), String> {
+        if values[..3].iter().all(|value| value.is_finite()) {
             Ok(())
         } else {
             Err(format!(
@@ -183,11 +186,13 @@ pub(crate) fn snapshot(
     finite("reckoning_up", &up)?;
     finite("damped_centre_of_mass", &input.damped_com_80)?;
     finite("ground_up", &input.ground_up_80)?;
-    finite("skeleton_root", skeleton_root.iter().flatten().copied().collect::<Vec<_>>().as_slice())?;
+    for column in &skeleton_root {
+        finite("skeleton_root", column)?;
+    }
     for (index, pose) in [1usize, 15, 19, 23].into_iter().map(|index| (index, record.pose[index][3])) {
         finite(match index { 1 => "head", 15 => "left_foot", 19 => "right_foot", _ => "hips" }, &pose)?;
     }
-    if velocity.iter().chain(acceleration.iter()).any(|v| !v.is_finite()) {
+    if velocity[..3].iter().chain(acceleration[..3].iter()).any(|v| !v.is_finite()) {
         return Err(format!(
             "Camera received non-finite board motion publication: velocity={velocity:?}; acceleration={acceleration:?}; raw_velocity={:?}; raw_acceleration={:?}",
             p.skateboard.vector_80,
