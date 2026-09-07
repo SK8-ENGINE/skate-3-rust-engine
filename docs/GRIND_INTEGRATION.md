@@ -37,6 +37,10 @@ its truncated pseudocode is not sufficient to port the nonempty branches.
   queries (`82C1FDC0`, `82C20130`, `82C1FB98`, `82C1F968`) before scoring. For
   example `82D89150` handles a two-truck candidate; it is not a nearest-rail
   angle classifier. Selection output has candidate byte384 in a416-byte record.
+- `82C1E2C8` is now ported in core `physics/grind_contact.rs`: the exact
+  segment/triangle leaf used by those truck/deck queries. It retains the
+  zero-denominator rejection and closed0..1 bounds, unlike wheel probes with
+  their endpoint tolerance. It does not itself accept a grind.
 - `82D8AB08`: post-input manager publication precedes state selection.
 - Native selector maps actual candidate grind type0..5 to states401,400,402,
   403,404,405. `player_state/selection.rs` currently publishes no candidate.

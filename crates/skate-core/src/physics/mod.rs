@@ -40,6 +40,7 @@ pub mod solver;
 pub mod startup;
 mod triangle_closest;
 pub mod triangle_query;
+pub mod grind_contact;
 mod triangle_sweep;
 mod triangle_sweep_roots;
 mod triangle_sweep_walk;
