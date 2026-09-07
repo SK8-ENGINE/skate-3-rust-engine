@@ -41,6 +41,7 @@ pub mod startup;
 mod triangle_closest;
 pub mod triangle_query;
 pub mod grind_contact;
+pub mod grind_forces;
 mod triangle_sweep;
 mod triangle_sweep_roots;
 mod triangle_sweep_walk;

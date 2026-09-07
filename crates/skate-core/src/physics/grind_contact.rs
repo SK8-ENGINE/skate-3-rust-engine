@@ -17,6 +17,68 @@ pub struct TruckContact {
     pub primitive: usize,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct FiftyFiftyCandidate {
+    pub direction: V,
+    pub centre: V,
+    pub front: V,
+    pub rear: V,
+    pub primitive: usize,
+}
+
+///82D89150's same-primitive contact branch, before shared admission82D886B8.
+/// Linked/adjacent primitive arbitration belongs to the caller; this boundary
+/// explicitly returns none for that case instead of guessing an owner.
+pub fn fifty_fifty_candidate(
+    board: [V; 4],
+    balance: [f32; 2],
+    contacts: [Option<TruckContact>; 2],
+) -> Option<FiftyFiftyCandidate> {
+    let [Some(front), Some(rear)] = contacts else { return None };
+    if balance[0].abs().max(balance[1].abs()) >= 0.9
+        || front.primitive != rear.primitive
+    {
+        return None;
+    }
+    let front_depth = dot3(sub(board[3], front.position), board[1]);
+    let rear_depth = dot3(sub(board[3], rear.position), board[1]);
+    if front_depth.max(rear_depth) >= 0.13 {
+        return None;
+    }
+    let difference = sub(front.position, rear.position);
+    let length = dot3(difference, difference).sqrt();
+    // A degenerate pair cannot define a finite native grind frame.
+    if !length.is_finite() || length == 0.0 { return None; }
+    Some(FiftyFiftyCandidate {
+        direction: scale(difference, length.recip()),
+        centre: scale(add(front.position, rear.position), 0.5),
+        front: front.position,
+        rear: rear.position,
+        primitive: front.primitive,
+    })
+}
+
+///82D370F8: upward-facing normal perpendicular to the spline direction.
+pub fn upright_normal(direction: V) -> V {
+    let cross_up = cross([0.0, 1.0, 0.0, 0.0], direction);
+    let mut normal = cross(cross_up, direction);
+    let length = dot3(normal, normal).sqrt();
+    if length <= 0.0 { return [1.0, 0.0, 0.0, 0.0]; }
+    if normal[1] < 0.0 { normal = scale(normal, -1.0); }
+    scale(normal, length.recip())
+}
+
+///82D88518, common active-grind angular admission. Plane projection occurs
+/// before the direction comparison; vertical speed is not an approach angle.
+pub fn within_approach_angle(direction: V, velocity: V, degrees: f32) -> bool {
+    let normal = upright_normal(direction);
+    let projected = sub(velocity, scale(normal, dot3(velocity, normal)));
+    let length = dot3(projected, projected).sqrt();
+    if length <= 0.001 { return true; }
+    let alignment = dot3(scale(projected, length.recip()), direction).abs();
+    alignment > (degrees * f32::from_bits(0x3c8e_fa35)).cos()
+}
+
 /// Truck rectangles from82C1FDC0. The geometry dimensions come from the
 /// physics_grinds collection (TruckToWheel584, DeckCenterToTruck636).
 /// Output order is positive board-forward truck, negative board-forward truck.

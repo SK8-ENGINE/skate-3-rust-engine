@@ -13,6 +13,7 @@ pub mod phase_blend;
 pub mod pose_blend;
 pub mod playback_transition;
 pub mod crouching;
+pub mod grind_control;
 pub mod pose_sample;
 pub mod pose_trajectory;
 pub mod pose_add;

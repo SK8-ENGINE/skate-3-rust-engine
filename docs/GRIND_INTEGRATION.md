@@ -84,3 +84,45 @@ capture infrastructure rather than a standalone grind controller.
 The remaining native state/force and graph-attribute contracts are unresolved.
 Do not advertise this build as grind-ready. Build log:
 logs/grind-collision-build.log (successful,35 warnings); no tests executed.
+
+## Additional static recovery
+
+The reference process was closed at the user's request. Continue using static
+analysis; do not relaunch it. IDA database
+`research/reverse-engineering/XexDump/Skate3TU3_dump.i64` was copied into local
+ignored `logs/grind-research-copy.i64`. The original was not modified. The
+database has sparse function boundaries; bounded definitions are needed even
+where the community symbol map supplies a name. VMX128 decompilation remains
+unreliable; cross-check vector operations against generated instruction text.
+
+New core routines (not yet called by the game's active state):
+
+- `fifty_fifty_candidate`:82D89150 same-primitive two-truck branch. Rejects
+  balance magnitude >=.9 and local-up contact depth >=.13. Adjacent-segment
+  arbitration is deliberately outside this routine.
+- `upright_normal`:82D370F8; the vertical-line fallback is the actual constant
+  X axis at82139A10. `within_approach_angle`:82D88518's plane projection and
+  strict cosine comparison.
+- `grind_forces::lateral_pin`:82D3FA18. Native50-50 caller82D41D70 supplies
+  strength800, forward offset0, up offset.07, damping scalar.133.
+- `grind_forces::friction`:82D3FD88 after material selection. Receives actual
+  support, material and engagement inputs; does not invent them. Native50-50
+  caller supplies strength50 for engagement0,40 otherwise.
+- `animation::grind_control::Fade`:82BB0D40; Begin82BB0A30 evaluates attribute
+  bounds. First Update only clears the Begin latch. Later updates apply the
+  native target, response, acceleration and step bounds.
+- `grind_control::crouch`:82BB10F8. Begin82BB1078 seeds from physical crouching
+  output. Runtime collection names for owner312 offsets1640..1652 and owner340
+  offsets1760/1792/1816 still need resolving before host integration.
+
+Vtable823283D0 identifies50-50: Enter82D3F318, Exit82D3F430,
+PreUpdate82D3F4E8, Update82D41D70, Fill82D41FF8. Its angular target path
+82D41E38 ->82D40890 uses existing matrix interpolation82BD3150 with weight.1,
+then hook target82BD4318 and angular-only hook drive82C05658. It does not
+teleport the deck to a spline. This should use the existing core interpolation
+and hook implementation when connected.
+
+The playable-state integration is still incomplete. In particular no selector
+candidate is published, the active state adapter is absent, and MotionHost
+still rejects the unbound stock grind behaviors. These ports alone are not a
+grind-ready game build.
