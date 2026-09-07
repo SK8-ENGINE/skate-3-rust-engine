@@ -12,19 +12,29 @@ use skate_data::{
     animation_frames::{AnimationFrames, ClipFrames, SampleWords},
 };
 use std::path::Path;
+mod authored_clips;
 
 pub(crate) struct PoseEvaluator {
     pub frames: AnimationFrames,
+    authored: authored_clips::Replacements,
 }
 
 impl PoseEvaluator {
     pub fn load(asset_root: &Path) -> Result<Self, String> {
-        Self::from_banks(&AnimationBanks::load(asset_root)?)
+        let mut evaluator = Self::from_banks(&AnimationBanks::load(asset_root)?)?;
+        evaluator.load_authored_clips(asset_root)?;
+        Ok(evaluator)
     }
     pub fn from_banks(banks: &AnimationBanks) -> Result<Self, String> {
         Ok(Self {
             frames: AnimationFrames::from_banks(banks)?,
+            authored: Default::default(),
         })
+    }
+
+    pub fn load_authored_clips(&mut self, root: &Path) -> Result<(), String> {
+        self.authored = authored_clips::Replacements::load(root, &self.frames)?;
+        Ok(())
     }
 
     /// Executes the ordered stock tree. This uses the native immediate ACS
@@ -80,7 +90,8 @@ impl PoseEvaluator {
                     previous_time,
                     loops,
                 } => {
-                    let clip = self.frames.clip(name)?;
+                    let stock = self.frames.clip(name)?;
+                    let clip = self.authored.clip(&stock.name).unwrap_or(stock);
                     let mut pose = sample_clip(clip, *time)?;
                     if self.frames.has_trajectory {
                         let previous = sample_bone(clip, *previous_time, 0)?;

@@ -82,7 +82,8 @@ impl SkaterAnimation {
         pro_skater: &[u8],
     ) -> Result<Self, String> {
         let banks = skate_data::animation_banks::AnimationBanks::load(root)?;
-        let evaluator = PoseEvaluator::from_banks(&banks)?;
+        let mut evaluator = PoseEvaluator::from_banks(&banks)?;
+        evaluator.load_authored_clips(root)?;
         let state = state::AnimationState::new(true);
         let count = evaluator.frames.bone_names.len();
         let mut motion = MotionHost::from_graph(
