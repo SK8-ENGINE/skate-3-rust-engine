@@ -337,15 +337,16 @@ mod difficulty_tests;
 fn present(
     physics: Res<GamePhysics>,
     history: Res<crate::presentation::Presentation>,
+    replay: Res<crate::replay::Replay>,
     time: Res<Time<Fixed>>,
     mut roots: Query<&mut Transform, With<PlayerRoot>>,
 ) {
     if physics.failed {
         return;
     }
-    let Some((previous, current)) = history.pair() else { return; };
+    let Some((previous, current, alpha)) = history.view(&replay, time.overstep_fraction()) else { return; };
     for mut root in &mut roots {
         *root = crate::presentation::blend(previous.root, current.root,
-            time.overstep_fraction().clamp(0.0, 1.0));
+            alpha);
     }
 }

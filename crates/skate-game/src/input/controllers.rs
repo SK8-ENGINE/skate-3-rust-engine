@@ -19,6 +19,7 @@ pub(crate) enum ControllerStatus {
 
 #[derive(Resource)]
 pub(crate) struct ControllerInput {
+    raw: [RawInput; DEVICE_SLOTS],
     cache: [[HistoryRecord; DEVICE_SLOTS]; 2],
     active: usize,
     history: PadHistory,
@@ -33,6 +34,7 @@ pub(crate) struct ControllerInput {
 impl Default for ControllerInput {
     fn default() -> Self {
         Self {
+            raw: [RawInput::default(); DEVICE_SLOTS],
             cache: [[HistoryRecord::new(&[]); DEVICE_SLOTS]; 2],
             active: 0,
             history: PadHistory::new(),
@@ -47,6 +49,17 @@ impl Default for ControllerInput {
 }
 
 impl ControllerInput {
+    pub(crate) fn raw_input(&self) -> RawInput {
+        self.status.iter().position(|s| *s == ControllerStatus::Ready)
+            .map_or(RawInput::default(), |i| self.raw[i])
+    }
+
+    // Replay controls must never queue a flick or a button press for gameplay.
+    pub(crate) fn discard_gameplay(&mut self) {
+        self.history = PadHistory::new();
+        self.pads = std::array::from_fn(|_| Pad::new());
+        self.mapped_actions = [[0.0; 18]; DEVICE_SLOTS];
+    }
     pub(crate) fn player_actions(&self) -> GameplayActions {
         let device = self.status.iter().position(|status| *status == ControllerStatus::Ready).unwrap_or(0);
         GameplayActions::from_pad(&self.pads[device])
@@ -59,6 +72,12 @@ impl ControllerInput {
         for (device, sample) in samples.into_iter().enumerate() {
             match sample {
                 Ok(packet) => {
+                    self.raw[device] = RawInput {
+                        buttons: packet.state.buttons,
+                        triggers: packet.state.triggers.map(|v| f32::from(v) / 255.0),
+                        left: packet.state.left.map(|v| f32::from(v) / 32768.0),
+                        right: packet.state.right.map(|v| f32::from(v) / 32768.0),
+                    };
                     // 8296D480 sets byte13 only when capability SubType == 7.
                     let values = xbox::convert(&packet.state, u8::from(packet.subtype == 7));
                     self.cache[next][device] = HistoryRecord::new(&values);
@@ -66,6 +85,7 @@ impl ControllerInput {
                     self.status[device] = ControllerStatus::Ready;
                 }
                 Err(error) => {
+                    self.raw[device] = RawInput::default();
                     self.cache[next][device].clear_count();
                     self.packet_numbers[device] = None;
                     self.status[device] = ControllerStatus::Unavailable(error);
@@ -91,6 +111,14 @@ impl ControllerInput {
         self.consumed_batches += 1;
         true
     }
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct RawInput {
+    pub buttons: u16,
+    pub triggers: [f32; 2],
+    pub left: [f32; 2],
+    pub right: [f32; 2],
 }
 
 #[cfg(test)]

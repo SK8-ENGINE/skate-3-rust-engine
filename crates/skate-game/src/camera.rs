@@ -49,14 +49,17 @@ fn spawn(mut commands: Commands, config: Res<Config>) {
 
 fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
     history: Res<crate::presentation::Presentation>, time: Res<Time<Fixed>>,
+    replay: Res<crate::replay::Replay>,
     mut cameras: Query<(&mut Camera, &mut Transform, &mut Projection), With<GameplayCamera>>) {
     if let Ok(window) = windows.single() {
         runtime.set_aspect_ratio(window.width() / window.height());
     }
-    let Some((previous, current)) = history.pair() else { return; };
-    let alpha = time.overstep_fraction().clamp(0.0, 1.0);
+    let Some((previous, current, alpha)) = history.view(&replay, time.overstep_fraction()) else { return; };
     for (mut camera, mut transform, mut projection) in &mut cameras {
         *transform = crate::presentation::blend(previous.camera, current.camera, alpha);
+        if replay.active {
+            if let Some(free) = replay.free_camera { *transform = free; }
+        }
         if let Projection::Perspective(p) = &mut *projection {
             p.fov = previous.fov + (current.fov - previous.fov) * alpha;
         }

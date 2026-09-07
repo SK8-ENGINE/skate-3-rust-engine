@@ -106,6 +106,7 @@ fn bind(
 }
 fn present(
     history: Res<crate::presentation::Presentation>,
+    replay: Res<crate::replay::Replay>,
     time: Res<Time<Fixed>>,
     animation: Res<AnimationStatus>,
     mut nodes: Query<&mut Transform>,
@@ -117,8 +118,7 @@ fn present(
     // rotated -90 degrees about X relative to the native frames. Both files'
     // world positions are Y-up. This is a skin basis change, not a physics turn.
     let basis = render_basis();
-    let Some((previous, current)) = history.pair() else { return; };
-    let alpha = time.overstep_fraction().clamp(0.0, 1.0);
+    let Some((previous, current, alpha)) = history.view(&replay, time.overstep_fraction()) else { return; };
     for binding in &animation.bindings {
         // Blend bone-local rotations, not matrix entries or independent world
         // positions: joints retain their hierarchy while limbs turn.

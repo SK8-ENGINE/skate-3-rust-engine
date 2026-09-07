@@ -27,13 +27,22 @@ pub(crate) struct Presentation {
     period: std::time::Duration,
 }
 impl Presentation {
+    pub fn view<'a>(&'a self, replay: &'a crate::replay::Replay, alpha: f32)
+        -> Option<(&'a Snapshot, &'a Snapshot, f32)> {
+        if replay.active {
+            replay.sample()
+        } else {
+            self.pair().map(|(a, b)| (a, b, alpha.clamp(0.0, 1.0)))
+        }
+    }
     pub fn pair(&self) -> Option<(&Snapshot, &Snapshot)> {
         self.pair.as_ref().map(|(a, b)| (a, b))
     }
 }
 
 fn capture(skater: Res<SkaterRuntime>, camera: Res<CameraRuntime>,
-    time: Res<Time<Fixed>>, mut history: ResMut<Presentation>) {
+    time: Res<Time<Fixed>>, mut history: ResMut<Presentation>,
+    mut replay: ResMut<crate::replay::Replay>) {
     if skater.pose_generation == history.generation { return; }
     let Some(frame) = camera.frame else { return; };
     let next = Snapshot {
@@ -49,6 +58,7 @@ fn capture(skater: Res<SkaterRuntime>, camera: Res<CameraRuntime>,
     let reset = frame.discontinuity
         || skater.player_input.processed.flags_2472 & (1 << 10) != 0
         || history.period != time.timestep();
+    replay.record(next.clone(), time.delta_secs_f64(), reset);
     if let Some((previous, current)) = history.pair.as_mut() {
         if reset || current.bones.len() != next.bones.len() {
             *previous = next.clone();

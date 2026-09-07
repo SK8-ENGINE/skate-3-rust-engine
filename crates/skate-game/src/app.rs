@@ -91,6 +91,7 @@ pub(crate) fn build(
         input::InputPlugin,
         PhysicsPlugin,
         crate::presentation::PresentationPlugin,
+        crate::replay::ReplayPlugin,
         assets::GameAssetsPlugin,
         animation::AnimationPlugin,
         world::WorldPlugin,

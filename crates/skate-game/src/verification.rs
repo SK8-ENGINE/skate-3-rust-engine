@@ -35,6 +35,7 @@ fn verify(
     controls: Res<PlayerControls>,
     skater: Res<SkaterRuntime>,
     camera: Res<crate::camera::CameraRuntime>,
+    mut replay: ResMut<crate::replay::Replay>,
     mut state: ResMut<Verification>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -42,6 +43,11 @@ fn verify(
         return;
     };
     state.elapsed += time.delta_secs();
+    // Opt-in visual smoke check of the replay HUD and presentation endpoints.
+    if animation.ready && state.elapsed > 2.0 && !replay.active
+        && std::env::var("SKATE_VERIFY_REPLAY").as_deref() == Ok("1") {
+        replay.enter();
+    }
     if animation.ready && state.elapsed > 4. && !state.requested {
         commands
             .spawn(Screenshot::primary_window())

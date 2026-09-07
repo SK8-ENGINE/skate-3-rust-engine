@@ -15,6 +15,7 @@ mod performance;
 mod graphics_menu;
 mod render_capacity;
 mod presentation;
+mod replay;
 mod world;
 mod skate_world;
 

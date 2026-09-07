@@ -19,7 +19,7 @@ impl Plugin for InputPlugin {
     }
 }
 
-fn poll_controllers(mut input: ResMut<ControllerInput>) {
+pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>) {
     let previous = input.status;
     input.collect(std::array::from_fn(platform::poll));
     for (index, (&before, &after)) in previous.iter().zip(&input.status).enumerate() {
