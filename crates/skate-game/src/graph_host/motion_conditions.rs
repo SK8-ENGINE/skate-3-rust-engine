@@ -9,6 +9,8 @@ use skate_data::state_graph::attributes::Attributes;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MotionCondition {
+    ///82BA41F0: nonzero PhysOut.Grinds324, independent of grind category.
+    DroppingIn,
     CanBipedLand,
     BipedCommitted,
     EnoughDistToObstacle {
@@ -180,6 +182,7 @@ impl MotionCondition {
                 Self::Riding(super::motion_riding_conditions::MotionRidingCondition::parse(a)?)
             }
             "DistToEdge" => Self::DistToEdge(numeric()),
+            "IsDroppingIn" => Self::DroppingIn,
             "TimeToLand" => Self::TimeToLand(numeric()),
             "OBTimeToLand" => Self::ObTimeToLand(numeric()),
             "OBTrajTime" => Self::ObTrajTime(numeric()),
@@ -247,6 +250,7 @@ impl MotionCondition {
             Self::Gameplay(condition) => condition.evaluate(host)?,
             Self::Riding(condition) => condition.evaluate(host)?,
             Self::DistToEdge(n) => n.matches(host.offboard_output.distance_116),
+            Self::DroppingIn => host.grind_physical.dropping_in,
             Self::TimeToLand(n) => n.matches(
                 host.gameplay_conditions
                     .as_ref()

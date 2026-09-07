@@ -17,6 +17,15 @@ TU3 image: default_82000000_011B0000.bin, SHA256 f4aa113eb541bfba03dbc108cf5ab43
 
 ## Visual check
 
+The user's 2026-09-07 18:59:36 run confirmed acquisition: both truck contacts
+passed at depths0.0753/0.0664m and entered BS_50_50 at18:00:19.516 UTC.
+The next animation tick2437 stopped on unsupported IsDroppingIn. Factory82BC2D58
+uses vtable8231E898 whose evaluator82BA41F0 reads PhysOut bundle16 (Grinds),
+byte324 for nonzero. Reset82DE3518 clears this byte; tipslide Fill82D42788
+copies state97 into it. This condition now consumes that physical publication;
+the ordinary50-50 retains the reset value. This is not Ground324 (pumping) or
+OffBoard334 (camera drop-in). No gameplay test was run for this fix.
+
 Build with Build.ps1; launch bin/skate-game.exe --assets assets (no map argument). The low straight rail is at x=-7, z=7..15, 0.45m above the lower floor; the higher rail is at x=4.5, z=8..16, 0.70m above it. Approach along the rail and land both trucks on its top. The halfpipe coping and three starting-platform edges also have authored paths.
 
 Build completed. No automated tests or controller-driven gameplay tests were run. Visual behavior, catch consistency, pop timing, naming and solver stability while grinding require the user's playtest; this is not a claim of complete Skate 3 grind parity.
@@ -25,4 +34,4 @@ Build completed. No automated tests or controller-driven gameplay tests were run
 
 The newer `SK8R15/Source/owned/world/src/grind_spline.cpp` revealed that the previous default-world blob incorrectly put delta in coefficient A and populated auxiliary words as length fields. Authored segments now use A=-2*delta, B=3*delta, C=0, D=start. The old independent endpoint list bypassed that blob, so this malformed blob alone does not explain the failed default-world catches.
 
-Both map paths now build Pegasus data and feed the live query from it. TU3 AssetRecord82C1E568 constructs exactly one contact chord per cubic, D to (A+B)+(C+D); curved payloads are retained without an invented tessellation scheme. Imported native IDs, flags and all30 payload words are preserved. The query uses the native local1.2m bounds and40-entry limit. The latest user run recorded no entered grind; the default-world acquisition failure still needs a near-rail observation to identify the rejecting gate/contact. Passive GRIND_QUERY logging now records those observations during the user's visual run. No gameplay success is claimed from a build.
+Both map paths now build Pegasus data and feed the live query from it. TU3 AssetRecord82C1E568 constructs exactly one contact chord per cubic, D to (A+B)+(C+D); curved payloads are retained without an invented tessellation scheme. Imported native IDs, flags and all30 payload words are preserved. The query uses the native local1.2m bounds and40-entry limit. The run preceding this correction recorded no entered grind; the subsequent user run confirmed acquisition and exposed the IsDroppingIn binding described above. Passive GRIND_QUERY logging now records those observations during the user's visual run. No gameplay success is claimed from a build.

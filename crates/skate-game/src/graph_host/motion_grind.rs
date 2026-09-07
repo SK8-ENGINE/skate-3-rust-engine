@@ -63,6 +63,7 @@ pub struct State {
 pub struct Physical {
     pub name: String,
     pub grinding: bool,
+    pub dropping_in: bool,
     pub crouch: f32,
     pub twist: f32,
     pub facing_backwards: bool,

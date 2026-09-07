@@ -113,6 +113,9 @@ pub struct GrindOutputFields {
     pub words_136_140: [u32; 2],
     pub flag_318: u8,
     pub flag_322: u8,
+    /// PhysOut.Grinds324: reset82DE3518 clears it; tipslide Fill82D42788
+    /// publishes its retained drop-in byte97. Read by IsDroppingIn82BA41F0.
+    pub dropping_in_324: u8,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
