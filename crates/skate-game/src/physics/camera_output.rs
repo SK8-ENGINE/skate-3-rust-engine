@@ -2,7 +2,7 @@
 //! Reset82DE53F0 runs before the actual producers82DB6EC0/82D3A388.
 use super::{GamePhysics, SkaterRuntime};
 use crate::camera::{
-    CameraAirOutput, CameraAnimationOutput, CameraEventsOutput, CameraGrindOutput,
+    CameraAirOutput, CameraAnimationOutput, CameraEventsOutput,
     CameraOffboardOutput, CameraPreferences, CameraPublicationInputs, CameraStateOutput,
 };
 use skate_core::{
@@ -15,11 +15,16 @@ use skate_core::{
 /// The user's selected normal High camera is graph type1. This custom world
 /// has no road/ledge/camera-volume annotations or other moving actors.
 pub(crate) fn advance(
-    physics: &GamePhysics,
+    physics: &mut GamePhysics,
     skater: &SkaterRuntime,
     feedback: &PhysicalFeedback,
     camera: &mut crate::camera::CameraRuntime,
 ) -> Result<(), String> {
+    //Once per physical publication, preserving conditioner history across
+    //direct grind-type changes and invalidating it on the first non-grind tick.
+    physics.grind.advance_camera(
+        skater.player_input.processed.vectors_400_416[0].map(f32::from_bits),
+    )?;
     let inputs = publish(
         physics,
         skater,
@@ -137,12 +142,9 @@ pub(crate) fn publish(
             use_trajectory_331: 0,
             dropping_in_334: 0,
         },
-        grinds: CameraGrindOutput {
-            //Reset82DE3518 loads original world-X literal82139A10.
-            direction_0: [1.0, 0.0, 0.0, 0.0],
-            camera_target_96: [0.0; 4],
-            grinding_316: u8::from(matches!(physical.grinds.words_136_140[1], 1 | 2)),
-        },
+        //Shared grind Fill82D40EA0 publishes the directed rail tangent;
+        //conditioner82DF0640 supplies the continuous contact anchor.
+        grinds: physics.grind.camera_output(),
         events: CameraEventsOutput {
             intent_51: bit(intents, 28),
             preparing_52: bit(intents, 27),

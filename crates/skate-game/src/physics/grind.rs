@@ -17,7 +17,10 @@ use skate_core::{
 };
 use skate_data::collections::Collections;
 type V = [f32; 4];
+#[path = "grind_camera.rs"]
+mod camera;
 pub(crate) struct Runtime {
+    camera: camera::GrindCamera,
     primitives: Vec<Primitive>,
     pub candidate: Option<FiftyFiftyCandidate>,
     pub name: String,
@@ -50,6 +53,7 @@ impl Runtime {
             .words::<8>("physics_grinds", "default", "PinVsSlope")?
             .map(f32::from_bits);
         Ok(Self {
+            camera: camera::GrindCamera::default(),
             primitives: crate::grind_world::primitives(map)?,
             candidate: None,
             name: String::new(),
@@ -97,6 +101,23 @@ impl Runtime {
             previous_position: [0.; 4],
             diagnostic_tick: 0,
         })
+    }
+    pub fn advance_camera(&mut self, velocity: V) -> Result<(), String> {
+        if self.active {
+            let contact = self.candidate.ok_or("Grind camera needs active contact")?;
+            self.camera.update(contact, self.primitives[contact.primitive], self.kind, velocity);
+        } else {
+            self.camera.exit();
+        }
+        Ok(())
+    }
+    pub fn camera_output(&self) -> crate::camera::CameraGrindOutput {
+        crate::camera::CameraGrindOutput {
+            //Reset82DE3518 defaults still apply outside the active state.
+            direction_0: if self.active { self.camera.direction } else { [1.0, 0.0, 0.0, 0.0] },
+            camera_target_96: if self.active { self.camera.target } else { [0.0; 4] },
+            grinding_316: u8::from(self.active),
+        }
     }
     pub fn output(&self) -> GrindState {
         if !self.active {
