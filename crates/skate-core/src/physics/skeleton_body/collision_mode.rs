@@ -39,6 +39,17 @@ pub struct SkeletonCollisionMode {
 }
 
 impl SkeletonCollisionMode {
+    ///82D91298: Body volume pointers start at3092, counters at8128.
+    /// The stores at3120/3104/3124/3108/3096 therefore select parts7/3/8/4/1:
+    /// both hands, both forearms and the head, not the next bone in each chain.
+    pub fn disable_handplant_contacts(&mut self, frames: u32) {
+        self.pending_reenable = true;
+        for part in [7, 3, 8, 4, 1] {
+            self.disable_count[part] = frames;
+            self.parts[part].enabled = false;
+        }
+    }
+
     ///82BE7078, used by the real teleport path82BE3508. Collision volume
     ///enabled flags and materials survive this reset.
     pub fn reset_body_state(&mut self, feedback: &mut SkeletonCollisionFeedback) {

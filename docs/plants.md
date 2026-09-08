@@ -230,3 +230,30 @@ the selected arm, two0.65m clamps and feet-only external post pass match the
 existing port. Need another normal/A/B reproduction to locate the divergence.
 The same run later terminates in unsupported IsGrindBluntingBackslash at8059;
 that separate grind condition remains unresolved by this diagnostic change.
+
+## Handplant collision-mask correction (8 September, 18:06 run)
+
+The requested normal/A/B reproduction is plants-20260908-180656-119-4993.log.
+Normal plant316..395 returns to Ground; variations767..788 and1139..1166
+request pose-displacement bail1. Solved traces show the free hand tracking
+within0.006m at324, then falling0.57m behind at340. Its IK adjustment is
+only0.002m at340. Collision weight drops to0 and the arm switches to soft
+drives with local/root strengths0.5/0.0. Both variation attempts repeat this
+sequence. No crash was recorded in this run.
+
+Confirmed source error:82D91298's five volume-pointer writes use offsets
+3120,3104,3124,3108,3096; matching counter writes are8156,8140,8160,8144,8132.
+The generic EnableBone82BE7190 independently establishes the volume base as
+4*773=3092 and counter base as4*2032=8128. Both address sets therefore resolve
+to parts7,3,8,4,1 (hands, forearms, head). The port incorrectly disabled
+8,4,9,5,2, leaving the hands and head collidable. TU3 dump identity remains
+SHA256 f4aa113eb541bfba03dbc108cf5ab43f58c965b20fa3b82f9c40938a0ad841c4.
+Evidence: logs/recomp-82d91298.asm and logs/recomp-82be7190.asm.
+
+Handplant now calls a shared collision-owner method with the corrected
+five-part mask and native two-frame countdown. A regression test checks
+refresh during the plant, survival across normal driven-state setup, other
+bones retaining contact, and automatic re-enabling after exit. Bail
+thresholds and authored animation/IK targets are unchanged. The native mask
+error is fixed; visual recovery and successful variations need gameplay
+confirmation from the user. The game has not been launched by the agent.

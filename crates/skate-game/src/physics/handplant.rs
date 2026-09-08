@@ -269,12 +269,8 @@ pub(super) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
     Ok(())
 }
 pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
-    //82D4C3D8 ->82D91298 disables five upper-body volumes for two frames.
-    for part in [8, 4, 9, 5, 2] {
-        skater.skeleton_collision.pending_reenable = true;
-        skater.skeleton_collision.disable_count[part] = 2;
-        skater.skeleton_collision.parts[part].enabled = false;
-    }
+    //82D4C3D8 ->82D91298: keep planted hands out of collision response.
+    skater.skeleton_collision.disable_handplant_contacts(2);
     let h = &mut skater.handplant;
     h.warped += (1.0 + h.settings.time_warp.evaluate(h.warped - h.apex)) * STEP;
     h.estimate_apex();
