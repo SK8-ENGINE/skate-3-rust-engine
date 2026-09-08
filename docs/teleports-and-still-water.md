@@ -2,21 +2,25 @@
 
 ## Travel
 
-Esc → Teleport lists the original English frontend location names. The installer
+Esc → Teleport lists the original English frontend location names for usable
+destinations on the currently loaded map. A continuous list supports mouse-wheel
+scrolling, a draggable scrollbar and keyboard selection that scrolls into view.
+There are no pages or cross-map destinations in this menu. The installer
 now extracts `private/teleports.json` by joining `fe_locations`, the shipped label
 and English language tables, and global RX2 locator records. Names are joined by
 their label hashes, not string-table order. The special skate wordmark byte is
 represented as `skate.` in plain text.
 
 The current owned installation yields 42 frontend destinations, 41 with unique
-authored transforms. `Stadium - Monster Park` remains visible but unavailable:
+authored transforms. `Stadium - Monster Park` remains in the catalog but is hidden
+from the menu because it is unavailable:
 its reference `vert_skp5_01_challengelocator_01` was not found in the global
 locators or the inspected mission payload. No substitute position is invented.
 Frontend templates and unnamed park-layout aliases are excluded.
 
 Same-map travel queues the existing player-input teleport/reset service and
-updates the checkpoint. Cross-map travel uses the existing map-switch process
-with `--teleport ID`; startup checks that the destination belongs to that map.
+updates the checkpoint. The `--teleport ID` startup adapter also checks that the
+destination belongs to the loaded map; menu travel does not restart the session.
 Authored height and orientation are preserved. Runtime arrivals and menu layout
 have not been checked in a running game.
 

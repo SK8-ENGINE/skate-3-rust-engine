@@ -85,7 +85,7 @@ pub(crate) struct Menu {
     maps: Vec<crate::map_library::Entry>,
     selected_map: usize,
     destinations: Vec<crate::teleport_menu::Destination>,
-    travel_page: Option<usize>,
+    travel_open: bool,
 }
 pub(crate) fn gameplay_active(menu: Option<Res<Menu>>) -> bool {
     menu.is_none_or(|m| !m.open)
@@ -102,13 +102,25 @@ struct MenuRow(usize);
 struct MenuLabel(usize);
 #[derive(Component)]
 struct StatusLabel;
+#[derive(Component)]
+struct TravelPanel;
+#[derive(Component)]
+struct TravelRow(usize);
+#[derive(Component)]
+struct TravelViewport;
+#[derive(Component)]
+struct TravelTrack;
+#[derive(Component)]
+struct TravelThumb;
+const TRAVEL_HEIGHT: f32 = 294.;
+const TRAVEL_ROW: f32 = 42.;
 
 pub(crate) struct GraphicsMenuPlugin;
 impl Plugin for GraphicsMenuPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FramePacer(Instant::now()))
             .add_systems(PostStartup, setup)
-            .add_systems(Update, (interact, apply, labels).chain())
+            .add_systems(Update, (interact, apply, labels, travel_scroll).chain())
             .add_systems(Last, pace);
     }
 }
@@ -193,6 +205,19 @@ fn setup(
         ImageNode::new(target.clone()),
         UiTargetCamera(output),
     ));
+    let maps = crate::map_library::discover(&config.asset_root);
+    let selected_map = maps.iter().position(|m| m.path.as_ref() == config.map_path.as_ref()).unwrap_or(0);
+    let (mut destinations, mut status) = match crate::teleport_menu::load(&config.asset_root) {
+        Ok(locations) => (locations, String::new()),
+        Err(e) => (Vec::new(), e),
+    };
+    if let Some(id) = &config.teleport {
+        if let Some(target) = destinations.iter().find(|d| &d.id == id).and_then(|d| d.matrix) {
+            if let Err(e) = skater.travel_to(target) { status = e; }
+        }
+    }
+    destinations.retain(|d| d.matrix.is_some() && config.map_path.as_ref()
+        .is_some_and(|p| crate::teleport_menu::same_map(p, &d.map)));
     commands.spawn((MenuRoot, UiTargetCamera(output), GlobalZIndex(10), Node {
         display: Display::None, width:percent(100), height:percent(100), align_items:AlignItems::Center,
         justify_content:JustifyContent::Center, position_type:PositionType::Absolute, ..default()
@@ -207,22 +232,31 @@ fn setup(
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
                 });
             }
+            panel.spawn((TravelPanel, Node { display: Display::None, flex_direction: FlexDirection::Column, row_gap:px(6), ..default() })).with_children(|travel| {
+                travel.spawn(Node { height:px(TRAVEL_HEIGHT), column_gap:px(8), ..default() }).with_children(|list| {
+                    list.spawn((TravelViewport, ScrollPosition::default(), Node {
+                        flex_grow:1., flex_basis:px(0), height:px(TRAVEL_HEIGHT), overflow:Overflow::scroll_y(),
+                        flex_direction:FlexDirection::Column, ..default()
+                    })).with_children(|rows| {
+                        for (i, destination) in destinations.iter().enumerate() {
+                            rows.spawn((Button, TravelRow(i), Node { width:percent(100), height:px(TRAVEL_ROW), flex_shrink:0., padding:UiRect::horizontal(px(8)), align_items:AlignItems::Center, ..default() }, BackgroundColor(Color::srgb(0.08,0.11,0.15))))
+                                .with_child((Text::new(&destination.name), TextFont {font_size:18.,..default()}, TextColor(Color::WHITE)));
+                        }
+                        if destinations.is_empty() {
+                            rows.spawn((Text::new("No teleport destinations available on this map."), TextFont {font_size:18.,..default()}, TextColor(Color::WHITE)));
+                        }
+                    });
+                    list.spawn((TravelTrack, Button, bevy::ui::RelativeCursorPosition::default(), Node { width:px(16), height:percent(100), ..default() }, BackgroundColor(Color::srgb(0.02,0.035,0.05))))
+                        .with_child((TravelThumb, bevy::ui::FocusPolicy::Pass, Node { position_type:PositionType::Absolute, width:percent(100), height:percent(100), border_radius:BorderRadius::all(px(6)), ..default() }, BackgroundColor(Color::srgb(0.3,0.65,0.68))));
+                });
+                travel.spawn((Button, TravelRow(destinations.len()), Node {height:px(TRAVEL_ROW),padding:UiRect::horizontal(px(8)),align_items:AlignItems::Center,..default()},BackgroundColor(Color::srgb(0.08,0.11,0.15))))
+                    .with_child((Text::new("Back to pause menu"),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
+            });
             panel.spawn((StatusLabel,Text::new(""),TextFont {font_size:15.,..default()},TextColor(Color::srgb(0.65,0.75,0.8))));
             panel.spawn((MenuLabel(usize::MAX-2),Text::new(""),TextFont {font_size:14.,..default()},TextColor(Color::srgb(0.65,0.75,0.8))));
         });
     });
     commands.insert_resource(SceneTarget(target));
-    let maps = crate::map_library::discover(&config.asset_root);
-    let selected_map = maps.iter().position(|m| m.path.as_ref() == config.map_path.as_ref()).unwrap_or(0);
-    let (destinations, mut status) = match crate::teleport_menu::load(&config.asset_root) {
-        Ok(locations) => (locations, String::new()),
-        Err(e) => (Vec::new(), e),
-    };
-    if let Some(id) = &config.teleport {
-        if let Some(target) = destinations.iter().find(|d| &d.id == id).and_then(|d| d.matrix) {
-            if let Err(e) = skater.travel_to(target) { status = e; }
-        }
-    }
     commands.insert_resource(Menu {
         open: false,
         selected: 0,
@@ -234,7 +268,7 @@ fn setup(
         maps,
         selected_map,
         destinations,
-        travel_page: None,
+        travel_open: false,
     });
 }
 fn msaa(samples: u32) -> Msaa {
@@ -257,31 +291,40 @@ fn interact(
     mut menu: ResMut<Menu>,
     mut time: ResMut<Time<Virtual>>,
     buttons: Query<(&Interaction, &MenuRow), Changed<Interaction>>,
+    travel_buttons: Query<(&Interaction, &TravelRow), Changed<Interaction>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        if menu.open && menu.travel_page.is_some() {
-            menu.travel_page = None;
+        if menu.open && menu.travel_open {
+            menu.travel_open = false;
             menu.selected = 8;
         } else { menu.open = !menu.open; }
     }
     let mut action = None;
     if menu.open {
         if keys.just_pressed(KeyCode::ArrowUp) {
-            menu.selected = (menu.selected + 10) % 11;
+            let count = if menu.travel_open { menu.destinations.len() + 1 } else { 11 };
+            menu.selected = (menu.selected + count - 1) % count;
         }
         if keys.just_pressed(KeyCode::ArrowDown) {
-            menu.selected = (menu.selected + 1) % 11;
+            let count = if menu.travel_open { menu.destinations.len() + 1 } else { 11 };
+            menu.selected = (menu.selected + 1) % count;
         }
-        if menu.travel_page.is_some() && (keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::ArrowRight)) {
-            action = Some((if keys.just_pressed(KeyCode::ArrowLeft) { 8 } else { 9 }, 1));
-        } else if keys.just_pressed(KeyCode::ArrowLeft) {
+        if !menu.travel_open && keys.just_pressed(KeyCode::ArrowLeft) {
             action = Some((menu.selected, -1));
         }
-        if (menu.travel_page.is_none() && keys.just_pressed(KeyCode::ArrowRight)) || keys.just_pressed(KeyCode::Enter) {
+        if (!menu.travel_open && keys.just_pressed(KeyCode::ArrowRight)) || keys.just_pressed(KeyCode::Enter) {
             action = Some((menu.selected, 1));
         }
         for (interaction, row) in &buttons {
+            if !menu.travel_open && *interaction == Interaction::Pressed {
+                menu.selected = row.0;
+                action = Some((row.0, 1));
+            }
+        }
+    }
+    if menu.open && menu.travel_open {
+        for (interaction, row) in &travel_buttons {
             if *interaction == Interaction::Pressed {
                 menu.selected = row.0;
                 action = Some((row.0, 1));
@@ -289,29 +332,15 @@ fn interact(
         }
     }
     if let Some((row, direction)) = action {
-        if let Some(page) = menu.travel_page {
-            match row {
-                0..=7 => {
-                    if let Some(destination) = menu.destinations.get(page * 8 + row).cloned() {
-                        if let Some(transform) = destination.matrix {
-                            if config.map_path.as_ref().is_some_and(|p| crate::teleport_menu::same_map(p, &destination.map)) {
-                                match skater.travel_to(transform) {
-                                    Ok(()) => { menu.open = false; menu.travel_page = None; menu.status = format!("Arrived at {}", destination.name); }
-                                    Err(e) => menu.status = e,
-                                }
-                            } else if let Some(entry) = menu.maps.iter().find(|m| m.path.as_ref().is_some_and(|p| crate::teleport_menu::same_map(p, &destination.map))) {
-                                match crate::map_library::switch_to(&config.asset_root, entry, Some(&destination.id)) {
-                                    Ok(()) => { exit.write(AppExit::Success); }
-                                    Err(e) => menu.status = e,
-                                }
-                            } else { menu.status = format!("{} is not installed", destination.map); }
-                        } else { menu.status = destination.unavailable_reason.unwrap_or_else(|| "Destination unavailable".into()); }
+        if menu.travel_open {
+            if let Some(destination) = menu.destinations.get(row) {
+                if let Some(transform) = destination.matrix {
+                    match skater.travel_to(transform) {
+                        Ok(()) => { menu.open = false; menu.travel_open = false; menu.status.clear(); }
+                        Err(e) => menu.status = e,
                     }
                 }
-                8 => menu.travel_page = Some(page.saturating_sub(1)),
-                9 => menu.travel_page = Some((page + 1).min(menu.destinations.len().saturating_sub(1) / 8)),
-                _ => { menu.travel_page = None; menu.selected = 8; }
-            }
+            } else { menu.travel_open = false; menu.selected = 8; }
         } else {
         match row {
             0 => {
@@ -348,7 +377,7 @@ fn interact(
                     Err(e) => menu.status = e,
                 }
             }
-            8 => { menu.travel_page = Some(0); menu.selected = 0; menu.status = "Select a destination | Left/Right: pages | Esc: back".into(); },
+            8 => { menu.travel_open = true; menu.selected = 0; menu.status.clear(); },
             9 => menu.open = false,
             10 => {
                 exit.write(AppExit::Success);
@@ -444,23 +473,14 @@ fn labels(
     let size = s.internal_size(window.physical_size());
     for (label, mut text) in &mut labels {
         if label.0 >= usize::MAX-2 {
-            let travel = menu.travel_page.is_some();
+            let travel = menu.travel_open;
             **text = if label.0 == usize::MAX {
                 if travel { "TELEPORT" } else { "PAUSED" }
             } else if label.0 == usize::MAX-1 {
-                if travel { "ORIGINAL GAME LOCATIONS" } else { "GAMEPLAY & GRAPHICS" }
+                if travel { "CURRENT MAP LOCATIONS" } else { "GAMEPLAY & GRAPHICS" }
             } else if travel {
-                "Click or Enter to travel | Up/Down select | Left/Right pages\nEsc back | Travelling to another map restarts the session"
+                "Click or Enter to travel | Up/Down select\nMouse wheel or drag scrollbar to scroll | Esc back"
             } else { "Click to cycle | Up/Down select | Left/Right change\nEsc resume | Changes save automatically" }.into();
-            continue;
-        }
-        if let Some(page) = menu.travel_page {
-            **text = match label.0 {
-                0..=7 => menu.destinations.get(page * 8 + label.0).map(|d| format!("{}  —  {}{}", d.name, d.map, if d.matrix.is_none() { " (unavailable)" } else { "" })).unwrap_or_default(),
-                8 => "Previous page".into(),
-                9 => format!("Next page  ({}/{})", page + 1, menu.destinations.len().div_ceil(8).max(1)),
-                _ => "Back to pause menu".into(),
-            };
             continue;
         }
         **text = match label.0 {
@@ -503,6 +523,62 @@ fn labels(
         };
     }
 }
+fn travel_scroll(
+    menu: Res<Menu>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut nodes: Query<(&mut Node, Option<&MenuRow>, Option<&TravelPanel>, Option<&TravelThumb>), Without<MenuRoot>>,
+    mut viewport: Single<&mut ScrollPosition, With<TravelViewport>>,
+    track: Single<&bevy::ui::RelativeCursorPosition, With<TravelTrack>>,
+    mut rows: Query<(&TravelRow, &Interaction, &mut BackgroundColor)>,
+    mut drag_offset: Local<Option<f32>>,
+    mut was_open: Local<bool>,
+) {
+    let visible = menu.open && menu.travel_open;
+    let content = menu.destinations.len() as f32 * TRAVEL_ROW;
+    let max_scroll = (content - TRAVEL_HEIGHT).max(0.);
+    let thumb_height = (TRAVEL_HEIGHT / content.max(TRAVEL_HEIGHT)) * TRAVEL_HEIGHT;
+    if visible && !*was_open { viewport.0.y = 0.; }
+    for event in wheel.read() {
+        if visible {
+            let scale = match event.unit { bevy::input::mouse::MouseScrollUnit::Line => TRAVEL_ROW, _ => 1. };
+            viewport.0.y -= event.y * scale;
+        }
+    }
+    if visible && (keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::ArrowDown)) && menu.selected < menu.destinations.len() {
+        let top = menu.selected as f32 * TRAVEL_ROW;
+        viewport.0.y = viewport.0.y.min(top).max(top + TRAVEL_ROW - TRAVEL_HEIGHT);
+    }
+    if visible && mouse.just_pressed(MouseButton::Left) && track.cursor_over {
+        if let Some(cursor) = track.normalized {
+            // Bevy uses -0.5..0.5, rather than 0..1, for relative node coordinates.
+            let y = (cursor.y + 0.5) * TRAVEL_HEIGHT;
+            let top = if max_scroll > 0. { viewport.0.y / max_scroll * (TRAVEL_HEIGHT - thumb_height) } else { 0. };
+            *drag_offset = Some(if y >= top && y <= top + thumb_height { y - top } else { thumb_height * 0.5 });
+        }
+    }
+    if !visible || !mouse.pressed(MouseButton::Left) { *drag_offset = None; }
+    if let (Some(offset), Some(cursor)) = (*drag_offset, track.normalized) {
+        if max_scroll > 0. {
+            viewport.0.y = (((cursor.y + 0.5) * TRAVEL_HEIGHT - offset) / (TRAVEL_HEIGHT - thumb_height)) * max_scroll;
+        }
+    }
+    viewport.0.y = viewport.0.y.clamp(0., max_scroll);
+    for (mut node, main, panel, thumb) in &mut nodes {
+        if main.is_some() { node.display = if menu.travel_open { Display::None } else { Display::Flex }; }
+        if panel.is_some() { node.display = if menu.travel_open { Display::Flex } else { Display::None }; }
+        if thumb.is_some() {
+            node.height = px(thumb_height);
+            node.top = px(if max_scroll > 0. { viewport.0.y / max_scroll * (TRAVEL_HEIGHT - thumb_height) } else { 0. });
+        }
+    }
+    for (row, interaction, mut color) in &mut rows {
+        color.0 = if row.0 == menu.selected || *interaction == Interaction::Hovered { Color::srgb(0.10,0.30,0.34) } else { Color::srgb(0.08,0.11,0.15) };
+    }
+    *was_open = visible;
+}
+
 fn pace(menu: Option<Res<Menu>>, mut pacer: ResMut<FramePacer>) {
     let Some(menu) = menu else {
         return;
@@ -529,7 +605,7 @@ mod tests {
             .insert_resource(Menu {
                 open: false, selected: 0, settings: GraphicsSettings::default(),
                 difficulty: Difficulty::Easy, path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
-                maps: Vec::new(), selected_map: 0, destinations: Vec::new(), travel_page: None,
+                maps: Vec::new(), selected_map: 0, destinations: Vec::new(), travel_open: false,
             })
             .add_systems(Update, apply);
         app.world_mut().spawn((Window::default(), PrimaryWindow));
@@ -557,6 +633,37 @@ mod tests {
         assert!(app.world().entity(camera).contains::<OcclusionCulling>());
         assert!(app.world().entity(camera).contains::<DepthPrepass>());
         assert_eq!(*app.world().get::<Msaa>(camera).unwrap(), Msaa::Sample8);
+    }
+    #[test]
+    fn travel_scroll_handles_keyboard_drag_and_empty_lists() {
+        let mut app = App::new();
+        app.insert_resource(Menu {
+            open:true, travel_open:true, selected:0, settings:GraphicsSettings::default(),
+            path:PathBuf::new(),supported_msaa:vec![1],difficulty:Difficulty::Easy,status:String::new(),maps:vec![],selected_map:0,
+            destinations:(0..14).map(|i| crate::teleport_menu::Destination {
+                id:i.to_string(),name:i.to_string(),map:"University".into(),
+                matrix:Some(skate_core::physics::skeleton_animation_record::IDENTITY),unavailable_reason:None,
+            }).collect(),
+        }).init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .add_message::<bevy::input::mouse::MouseWheel>()
+            .add_systems(Update, travel_scroll);
+        let view = app.world_mut().spawn((TravelViewport, ScrollPosition::default())).id();
+        app.world_mut().spawn((TravelTrack, bevy::ui::RelativeCursorPosition { cursor_over:true, normalized:Some(Vec2::new(0.,0.5)) }));
+        app.world_mut().spawn((TravelThumb, Node::default()));
+        app.update();
+        app.world_mut().resource_mut::<Menu>().selected = 13;
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowDown);
+        app.update();
+        assert_eq!(app.world().get::<ScrollPosition>(view).unwrap().0.y, 294.);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset_all();
+        app.world_mut().get_mut::<ScrollPosition>(view).unwrap().0.y = 0.;
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
+        app.update();
+        assert_eq!(app.world().get::<ScrollPosition>(view).unwrap().0.y, 294.);
+        app.world_mut().resource_mut::<Menu>().destinations.clear();
+        app.update();
+        assert_eq!(app.world().get::<ScrollPosition>(view).unwrap().0.y, 0.);
     }
     #[test]
     fn invalid_saved_values_fall_back() {
