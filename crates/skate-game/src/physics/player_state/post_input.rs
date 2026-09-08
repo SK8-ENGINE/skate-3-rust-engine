@@ -14,8 +14,6 @@ pub(crate) struct PostInputState {
     pub trajectory_valid: bool,
     pub trajectory_available: bool,
     pub trajectory_new_candidate: bool,
-    pub candidates: CandidatePublicationFields,
-    pub grind: EmptyEdgePost,
 }
 impl PostInputState {
     pub fn new() -> Self {
@@ -31,17 +29,6 @@ impl PostInputState {
             trajectory_valid: false,
             trajectory_available: false,
             trajectory_new_candidate: false,
-            candidates: CandidatePublicationFields {
-                first_object_present_196: false,
-                first_pending_288: false,
-                second_object_present_500: false,
-                second_pending_592: false,
-                staged_word_12768: 0,
-                staged_valid_12772: 0,
-                staged_latched_12776: 0,
-                staged_pending_12780: false,
-            },
-            grind: EmptyEdgePost::new(),
         }
     }
 }
@@ -103,23 +90,46 @@ fn decrement(v: u32) -> u32 {
 }
 struct Services<'a> {
     heading: f32,
-    grind: &'a mut EmptyEdgePost,
+    grind: &'a mut super::super::player_input::grind::GrindInputState,
+    pending: Option<super::super::player_input::grind::Pending>,
+    grind_context: super::super::player_input::grind::PostContext,
+    host: super::super::grind_host::LiveHost<'a>,
+    result: Option<super::super::player_input::grind::PostResult>,
     processed: &'a mut skate_core::player::input_phase::ProcessedPhysicsInput,
     trajectory: &'a mut super::super::air_trajectory::AirTrajectoryRuntime,
     trajectory_input: skate_core::air::trajectory::SelectorInput,
+    trajectory_board_position: [f32; 4],
     world: &'a skate_core::physics::board_world::BoardWorld,
+    grab_records: [Option<skate_core::player::offboard::grab_scene::Record>; 2],
     error: Option<String>,
 }
 impl PostInputServices for Services<'_> {
     fn update_grind_manager_82d8ab08(&mut self) {
-        if self.processed.category_2512 != 400 { self.grind.advance(self.processed); }
+        let Some(pending) = self.pending.take() else {
+            self.error = Some("Grind post-input requires this tick's pre-input queries".into());
+            return;
+        };
+        match self.grind.post_update(
+            self.processed,
+            self.world,
+            pending,
+            self.grind_context,
+            &mut self.host,
+        ) {
+            Ok(result) => self.result = Some(result),
+            Err(error) => self.error = Some(error),
+        }
     }
     fn update_trajectory_selector_82d68800(&mut self) -> u8 {
         //82DB56B0 runs the real selector after GrindManager. That manager
         //can change2476, so use its current output rather than a prior snapshot.
         let mut input = self.trajectory_input;
         input.flags_2476 = self.processed.flags_2476;
-        match self.trajectory.update(input, self.world) {
+        let grind_context = super::super::air_trajectory::GrindContext::from_processed(
+            self.processed,
+            self.trajectory_board_position,
+        );
+        match self.trajectory.update(input, self.world, grind_context) {
             Ok(valid) => u8::from(valid),
             Err(error) => {
                 self.error = Some(error);
@@ -130,30 +140,44 @@ impl PostInputServices for Services<'_> {
     fn calculate_scalar_2740_82db5e10(&mut self) -> f32 {
         self.heading
     }
-    fn register_candidate_82762ab0(&mut self, _: CandidateRegistration) {
-        //82762AB0 copies a grab-spline record; the inherited trait name does
-        //not imply engine registration or ballistic trajectory publication.
-        unreachable!(
-            "grab-spline publication requires an authored descriptor checked before this phase"
-        )
+    fn register_candidate_82762ab0(&mut self, registration: CandidateRegistration) {
+        let index = match registration {
+            CandidateRegistration::First1888 => 0,
+            CandidateRegistration::Second2176 => 1,
+        };
+        match &self.grab_records[index] {
+            Some(record) => copy_grab_record_82762ab0(
+                &mut self.processed.grab_records_1888_2176[index],
+                &record.0,
+            ),
+            None => {
+                self.error = Some("Grab publication requested without a completed record".into())
+            }
+        }
     }
 }
 pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
     let trajectory_input = super::super::air_phase::selector_input(physics, skater)?;
+    let trajectory_board_position = skater
+        .player_input
+        .toolkit
+        .as_ref()
+        .ok_or("Post-input trajectory requires this tick's board toolkit")?
+        .deck[3];
     let post = &mut skater.player_state.post;
     let p = &mut skater.player_input.processed;
-    if skater.ground_lifecycle.edge.is_some() {
-        return Err("PostInput active grind requires its actual candidate/scorer output".into());
-    }
-    let requests = &skater.ground_lifecycle.trajectory;
-    if requests.primary_valid_288
-        || requests.secondary_valid_592
-        || post.candidates.staged_pending_12780
-    {
-        return Err(
-            "PostInput grab-spline publication requires its retained authored descriptor".into(),
-        );
-    }
+    //82DB573C ->82D740F8 consumes the one live owner's completed results.
+    let publication = skater.offboard_grab.publish();
+    let mut candidates = CandidatePublicationFields {
+        first_object_present_196: publication.records[0].is_some(),
+        first_pending_288: publication.records[0].is_some(),
+        second_object_present_500: publication.records[1].is_some(),
+        second_pending_592: publication.records[1].is_some(),
+        staged_word_12768: publication.object.flatten().unwrap_or(p.object_2464),
+        staged_valid_12772: u32::from(publication.object.flatten().is_some()),
+        staged_latched_12776: u32::from(skater.offboard_grab.interactable_latched),
+        staged_pending_12780: publication.object.is_some(),
+    };
     let mut player = PostInputPlayerFields {
         jump_reference_1264: post.jump_reference,
         flags_1296: skater.player_input.player.flags_1296,
@@ -163,7 +187,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     };
     let mut processed = PostInputProcessedFields {
         jump_reference_848: post.jump_reference,
-        word_2464: 0,
+        word_2464: p.object_2464,
         flags_2468: p.flags_2468,
         flags_2472: p.flags_2472,
         flags_2480: p.flags_2480,
@@ -190,11 +214,28 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     );
     let mut services = Services {
         heading,
-        grind: &mut post.grind,
+        grind: &mut skater.player_input.grind,
+        pending: skater.player_input.pending_grind.take(),
+        grind_context: super::super::player_input::grind::PostContext {
+            board: super::super::solve::deck_frame(&physics.board),
+            balance_2720: skater.animation_input.fields.balance,
+            translation_2796: skater.animation_input.extra.grind_translation,
+            stability_nudge_2800: skater.animation_input.extra.grind_stability_nudge,
+            up_down_2804: skater.animation_input.extra.grind_up_down,
+            grab_min_height_2808: skater.animation_input.extra.grind_grab_min_height,
+        },
+        host: super::super::grind_host::LiveHost {
+            board: &mut physics.board,
+            settings: &mut physics.settings,
+            materials: &physics.grind_materials,
+        },
+        result: None,
         processed: p,
         trajectory: &mut skater.trajectory,
         trajectory_input,
+        trajectory_board_position,
         world: &physics.world,
+        grab_records: publication.records,
         error: None,
     };
     run_post_input(
@@ -202,14 +243,40 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             player: &mut player,
             processed: &mut processed,
             phys_out: &mut output,
-            candidates: &mut post.candidates,
+            candidates: &mut candidates,
         },
         &mut services,
     );
     if let Some(error) = services.error.take() {
         return Err(error);
     }
+    let grind_result = services
+        .result
+        .take()
+        .ok_or("Grind post-input did not publish its result")?;
+    processed.flags_2468 |= services.processed.flags_2468 & 0x0004_0000;
     drop(services);
+    for reason in grind_result.wipeout_reasons {
+        skater.wipeout.state.request(reason, 0.0);
+    }
+    skater.grind.observe(grind_result.observation);
+    skater.player_input.grind_observation = Some(grind_result.observation);
+    let g = p.grind;
+    skater.ground_lifecycle.edge = (g.flags_1516 & 0x0800_0000 != 0).then(|| {
+        let xyz = |v: [u32; 4]| {
+            skate_core::math::Vector3::new(
+                f32::from_bits(v[0]),
+                f32::from_bits(v[1]),
+                f32::from_bits(v[2]),
+            )
+        };
+        super::super::ground_phase::GroundEdge {
+            flags: g.flags_1516,
+            point: g.vector_1232.map(f32::from_bits),
+            start: xyz(g.second_start_1312),
+            end: xyz(g.second_end_1328),
+        }
+    });
     //These are observations of the actual owner, never inputs to selection.
     post.trajectory_pending = skater.trajectory.selector.pending();
     post.trajectory_valid = skater.trajectory.selector.valid();
@@ -221,6 +288,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     p.flags_2472 = processed.flags_2472;
     p.flags_2480 = processed.flags_2480;
     p.flags_2484 = processed.flags_2484;
+    p.object_2464 = processed.word_2464;
     post.jump_reference = player.jump_reference_1264;
     post.jump_fix_frames = player.jump_fix_frames_1308;
     post.latch_frames = player.latch_frames_1320;

@@ -81,11 +81,14 @@ impl Controller {
         self.state.place(input);
     }
     pub fn step_ground(&mut self, job: &GroundJob) -> GroundResult {
-        step::update(&mut self.state, &self.settings, job);
-        output::export(&self.state)
+        step_ground(&mut self.state, &self.settings, job)
     }
-    ///82D80F48 publishes current fields without advancing the controller.
-    pub fn output(&self) -> GroundResult {
-        output::export(&self.state)
-    }
+}
+
+/// Run the recovered ground producer against an externally owned state.  The
+/// game coordinator owns the state lifetime; this keeps the numerical producer
+/// reusable without constructing a second controller every tick.
+pub fn step_ground(state: &mut State, settings: &Settings, job: &GroundJob) -> GroundResult {
+    step::update(state, settings, job);
+    output::export(state)
 }

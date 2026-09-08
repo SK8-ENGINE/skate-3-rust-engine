@@ -12,22 +12,34 @@ use skate_core::{
 };
 use skate_data::{collections::Collections, physics_skeleton::PhysicsSkeleton};
 use std::path::Path;
-#[path = "skeleton_body_drive_settings.rs"]
-mod drive_settings;
 #[path = "skeleton_body_collision_settings.rs"]
 mod collision_settings;
+#[path = "skeleton_body_drive_settings.rs"]
+mod drive_settings;
 
-pub(crate) fn load_collision(asset_root: &Path, data: &Collections, bank_sha: &str,
-    cull_all_self_pairs: bool) -> Result<skate_core::physics::skeleton_body::SkeletonCollisionMode, String> {
-    Ok(skate_core::physics::skeleton_body::SkeletonCollisionMode::new_normal(
-        collision_settings::load(asset_root, data, bank_sha)?, cull_all_self_pairs))
+pub(crate) fn load_collision(
+    asset_root: &Path,
+    data: &Collections,
+    bank_sha: &str,
+    cull_all_self_pairs: bool,
+) -> Result<skate_core::physics::skeleton_body::SkeletonCollisionMode, String> {
+    Ok(
+        skate_core::physics::skeleton_body::SkeletonCollisionMode::new_normal(
+            collision_settings::load(asset_root, data, bank_sha)?,
+            cull_all_self_pairs,
+        ),
+    )
 }
 
-pub(crate) fn load_feedback(data: &Collections,
-    settings: skate_core::physics::skeleton_body::SkeletonCollisionSettings)
-    -> Result<skate_core::physics::skeleton_body::SkeletonCollisionFeedback,String> {
-    Ok(skate_core::physics::skeleton_body::SkeletonCollisionFeedback::new(
-        collision_settings::feedback(data,settings)?))
+pub(crate) fn load_feedback(
+    data: &Collections,
+    settings: skate_core::physics::skeleton_body::SkeletonCollisionSettings,
+) -> Result<skate_core::physics::skeleton_body::SkeletonCollisionFeedback, String> {
+    Ok(
+        skate_core::physics::skeleton_body::SkeletonCollisionFeedback::new(
+            collision_settings::feedback(data, settings)?,
+        ),
+    )
 }
 
 /// Build the complete original26-part drive owner using the already-resolved

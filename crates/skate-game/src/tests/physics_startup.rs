@@ -7,7 +7,7 @@ fn stock_skater_startup_builds_the_graphs_and_physical_body_from_the_same_rig() 
     let root = std::path::Path::new(&root);
     let manifest = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &manifest).unwrap();
-    let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
+    let mut physics = GamePhysics::load(root).unwrap();
     // This regression isolates grounded controls on the original flat fixture.
     // The production box is only six metres wide: sustained kickturning leaves
     // it at x=-3.32, correctly selecting KnownAir and ForcePhysics2. Separate
@@ -18,12 +18,21 @@ fn stock_skater_startup_builds_the_graphs_and_physical_body_from_the_same_rig() 
         Vector3::new(20.0, ground::HEIGHT, 20.0),
         Vector3::new(-20.0, ground::HEIGHT, 20.0),
     ];
-    physics.world = BoardWorld::new([[0, 2, 1], [0, 3, 2]].map(|indices| {
-        skate_core::physics::board_world::WorldTriangle::from_vertices(
-            indices.map(|i| corners[i]), physics.settings.floor_material, 0,
-            skate_core::physics::collision::TriangleFeature::ONE_SIDED, [1.0; 3], 0.0,
-        ).unwrap()
-    }).to_vec());
+    physics.world = BoardWorld::new(
+        [[0, 2, 1], [0, 3, 2]]
+            .map(|indices| {
+                skate_core::physics::board_world::WorldTriangle::from_vertices(
+                    indices.map(|i| corners[i]),
+                    physics.settings.floor_material,
+                    0,
+                    skate_core::physics::collision::TriangleFeature::ONE_SIDED,
+                    [1.0; 3],
+                    0.0,
+                )
+                .unwrap()
+            })
+            .to_vec(),
+    );
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     assert_eq!(
         skater.animation.pose.len(),
@@ -202,9 +211,11 @@ fn stock_skater_startup_builds_the_graphs_and_physical_body_from_the_same_rig() 
             )
         });
         assert_eq!(
-            skater.skeleton_input.force_mode, 1,
+            skater.skeleton_input.force_mode,
+            1,
             "Stock Ground ForcePhysics Begin was lost at standing tick{tick}; state={:?}; deck={:?}; contacts={}",
-            skater.player_state.current(), physics.board.bodies()[6].rates.position,
+            skater.player_state.current(),
+            physics.board.bodies()[6].rates.position,
             physics.riding.ground.wheel_contact_count
         );
         saw_kickturn_balance |= skater.animation_input.fields.balance != 0.0;
@@ -363,7 +374,7 @@ fn customiser_equipment_reaches_ground_force_and_torque() {
     let graphs = crate::graph_runtime::StockGraphs::load(root, &manifest).unwrap();
     let mut samples = Vec::new();
     for hardness in [0.0_f32, 0.7, 1.0] {
-        let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
+        let mut physics = GamePhysics::load(root).unwrap();
         let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
         crate::customiser::apply_preferences(
             &serde_json::json!({"truck": hardness, "wheel": hardness}),
@@ -503,4 +514,265 @@ fn customiser_styles_and_postures_change_stock_pose() {
     assert_ne!(skater.animation.stance(), stance);
     skater.animation.set_customisation(1,0);
     assert_eq!(skater.animation.stance(), stance);
+}
+
+#[test]
+#[ignore = "requires private stock assets"]
+fn raw_y_reaches_stock_dismount() {
+    let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
+    let root = std::path::Path::new(&root);
+    let assets = skate_data::GameAssets::load(root).unwrap();
+    let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
+    let mut physics = GamePhysics::load(root).unwrap();
+    let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
+    let mut controls = PlayerControls::default();
+    let mut input = crate::input::ControllerInput::default();
+    let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
+    let mut saw_toggle = false;
+    let mut first_offboard_tick = None;
+    let mut previous_state = skater.player_state.current();
+    let mut walk_start = None;
+    let mut walk_end = None;
+    let mut camera_start = None;
+    let mut camera_end = None;
+    let mut held_board_seen = false;
+    let mut released_board_seen = false;
+    for tick in 0..2400 {
+        input.sample_raw_for_test(skate_core::input::xbox::XboxState {
+            buttons: if tick == 20 { 0x8000 } else { 0 },
+            triggers: if (400..460).contains(&tick) {
+                [0, 255]
+            } else {
+                [0; 2]
+            },
+            left: match tick {
+                120..300 => [0, 24000],
+                800..920 => [24000, 0],
+                920..1040 => [-24000, 0],
+                _ => [0; 2],
+            },
+            right: [0; 2],
+        });
+        let mut actions = input.player_actions();
+        controls
+            .update_for_physics(&mut actions, &physics, &skater, &camera)
+            .unwrap();
+        let published_slope = skater.player_input.physical.off_board.kind_88;
+        let published_thin = skater.player_input.physical.off_board.flag_330 != 0;
+        let result = frame::advance(
+            &mut physics,
+            &mut skater,
+            &mut controls,
+            &graphs,
+            &mut actions,
+            true,
+            &mut camera,
+        );
+        saw_toggle |= skater
+            .animation
+            .motion
+            .action_intents
+            .get("NewToggleOffBoardState")
+            .is_some();
+        result.unwrap_or_else(|error| {
+            panic!(
+                "Y tick{tick}, input_received={saw_toggle}, state={:?}: {error}",
+                skater.player_state.current()
+            )
+        });
+        assert_eq!(
+            skater.animation.motion.ground_slope_type,
+            Some(published_slope),
+            "GroundSlopeType did not read completed OffBoard88 at tick{tick}"
+        );
+        assert_eq!(
+            skater.animation.motion.biped_ground_thin,
+            Some(published_thin),
+            "IsBipedGroundThin did not read completed OffBoard330 at tick{tick}"
+        );
+        let root_position = skater.animated_skeleton.roots.animation_to_world[3];
+        held_board_seen |= skater.skateboard_controller.fields.state_448 == 1;
+        if held_board_seen && skater.skateboard_controller.fields.state_448 == 2 {
+            released_board_seen = true;
+            //LetGo82D75440 clears both deck-drive channels and the selected
+            //hand drive before entering released state2. Test the live owners.
+            assert_eq!(
+                physics.board.hook().drive.dynamics,
+                [0, 0, 0, 2, 0, 0, 0, 2],
+                "Deck remains driven after release tick{tick}"
+            );
+            assert_eq!(
+                skater.board_possession.state.selected_hand_424, 2,
+                "Released board retains a hand owner at tick{tick}"
+            );
+            for hand in &skater.board_possession.state.hands {
+                assert_eq!(
+                    hand.dynamics,
+                    [[0, 0, 0, 2]; 2],
+                    "Hand drive remains armed after release tick{tick}"
+                );
+            }
+        }
+        let camera_position = camera
+            .frame
+            .as_ref()
+            .expect("Missing gameplay camera")
+            .position;
+        assert!(
+            camera_position.iter().all(|v| v.is_finite()),
+            "Camera tick{tick}"
+        );
+        assert!(
+            skater
+                .render_pose
+                .iter()
+                .flatten()
+                .flatten()
+                .all(|v| v.is_finite()),
+            "Non-finite rendered skeleton at tick{tick}"
+        );
+        assert_eq!(
+            skater
+                .player_input
+                .physical
+                .reckoning
+                .vector_64
+                .map(f32::from_bits),
+            skater.animated_skeleton.board_frames.centre_of_mass,
+            "COM output was overwritten after skeleton publication at tick{tick}"
+        );
+        if tick == 120 {
+            walk_start = Some(root_position);
+            camera_start = Some(camera_position);
+        }
+        if tick == 299 {
+            walk_end = Some(root_position);
+            camera_end = Some(camera_position);
+        }
+        if tick == 240 {
+            let attrs = skater.animation_input.extra;
+            assert!(
+                attrs.offboard_magnitude > 0.1,
+                "Stock AG/MG did not produce offboard magnitude: {attrs:?}"
+            );
+            assert!(
+                attrs.biped_world_x.abs() + attrs.biped_world_z.abs() > 0.1,
+                "Stock AG/MG did not publish Biped world direction: {attrs:?}"
+            );
+        }
+        if (120..2400).contains(&tick) {
+            assert_eq!(
+                skater.player_state.current(),
+                skate_core::player::state::PhysicalStateId::BipedGround,
+                "Ordinary walking/trigger input left BipedGround at tick{tick}"
+            );
+            // Measure the actual shared-solver joint anchors, not a synthetic
+            // stand pose. A 35cm separation is visible limb failure, not
+            // normal constraint compliance. This is an acceptance threshold.
+            let bodies = skater.skeleton.bodies();
+            let anchor = |part: usize, words: &[u32]| -> [f32; 3] {
+                let body = &bodies[part];
+                let local: [f32; 3] = std::array::from_fn(|i| f32::from_bits(words[i]));
+                let basis = body.rates.basis.columns;
+                let position = body.rates.position;
+                let position = [position.x, position.y, position.z];
+                std::array::from_fn(|i| {
+                    position[i]
+                        + basis[0][i] * local[0]
+                        + basis[1][i] * local[1]
+                        + basis[2][i] * local[2]
+                })
+            };
+            for joint in &skater.skeleton_joints.records {
+                let child = anchor(joint.child, &joint.frames.words[4..7]);
+                let parent = anchor(joint.parent, &joint.frames.words[12..15]);
+                let gap = (0..3)
+                    .map(|i| (child[i] - parent[i]).powi(2))
+                    .sum::<f32>()
+                    .sqrt();
+                if gap >= 0.35 {
+                    let collision = crate::physics::input_phase::collision(&skater);
+                    eprintln!(
+                        "Joint failure drive input: partial={}, weight={}",
+                        collision.partial_ragdoll, collision.drive_weight_4028
+                    );
+                    for part in [15usize, 16] {
+                        if let Some(bone) = &skater.skeleton_drives.bones[part] {
+                            eprintln!(
+                                "Joint failure bone{part}: parent={:?} active={:?} dynamics={:?} frames={:?}",
+                                bone.parent, bone.active, bone.dynamics, bone.frames
+                            );
+                        }
+                    }
+                    eprintln!(
+                        "Pose boundary errors: {:?}",
+                        crate::physics::offboard::skeleton_ground::audit_render_parts(&skater)
+                    );
+                }
+                assert!(
+                    gap < 0.35,
+                    "Broken joint at tick{tick}: {} -> {}, gap={gap}; board_state={:?}; hands={:?}; ground_result={:?}; errors={:?}; com_target={:?}; flags={:08x}/{:08x}/{:08x}",
+                    joint.parent,
+                    joint.child,
+                    skater.skateboard_controller.fields,
+                    skater.board_possession.state.hands,
+                    skater.biped_ground.result,
+                    skater.collision_extra_errors,
+                    skater.animated_skeleton.board_frames.com_frame,
+                    skater.player_input.processed.flags_2476,
+                    skater.player_input.processed.flags_2480,
+                    skater.player_input.processed.flags_2484
+                );
+            }
+        }
+        if skater.player_state.current() != previous_state || tick % 120 == 0 {
+            for bone in skater.skeleton_output.pose.board_bones.all() {
+                eprintln!(
+                    "board bone tick{tick} {} parent={} animation_local={:?} rendered={:?}",
+                    skater.animation.evaluator.frames.bone_names[bone],
+                    skater.animation.evaluator.frames.parents[bone],
+                    skate_core::animation::output::sqt_to_matrix(skater.animation.pose[bone])[3],
+                    skater.render_pose[bone][3]
+                );
+            }
+            eprintln!(
+                "dismount tick={tick} state={:?} root={:?} com={:?} camera={:?}",
+                skater.player_state.current(),
+                skater.animated_skeleton.roots.animation_to_world[3],
+                skater
+                    .player_input
+                    .physical
+                    .reckoning
+                    .vector_64
+                    .map(f32::from_bits),
+                camera.frame.as_ref().map(|f| f.position)
+            );
+            previous_state = skater.player_state.current();
+        }
+        if skater.player_state.current().category() == 500 {
+            assert!(saw_toggle);
+            first_offboard_tick.get_or_insert(tick);
+        }
+    }
+    assert!(
+        first_offboard_tick.is_some(),
+        "Y did not reach off-board physics; input_received={saw_toggle}"
+    );
+    assert!(
+        held_board_seen && released_board_seen,
+        "Replay did not exercise held-to-released board possession"
+    );
+    let distance =
+        |a: [f32; 4], b: [f32; 4]| ((a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+    // Acceptance bounds for this recorded three-second input, not gameplay clamps.
+    let walked = distance(walk_start.unwrap(), walk_end.unwrap());
+    assert!(
+        walked > 1.0 && walked < 20.0,
+        "Implausible walking displacement: {walked}"
+    );
+    let followed = distance(camera_start.unwrap(), camera_end.unwrap());
+    assert!(
+        followed > 1.0 && followed < 20.0,
+        "Camera did not follow walking: {followed}"
+    );
 }

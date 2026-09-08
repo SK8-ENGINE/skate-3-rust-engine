@@ -103,9 +103,28 @@ fn box_faces(out: &mut Vec<[Vector3; 4]>, min: Vector3, max: Vector3) {
 }
 
 mod spline;
-pub(crate) use spline::primitives;
+mod provider;
+mod octree;
+pub(crate) use spline::{primitives, PrimitiveMetadata};
+pub(crate) use provider::{SourceIdentity, StaticProvider};
 
-/// Relocatable Pegasus tSplineData used by the live default-world query.
+/// Retain the archive's relocatable Pegasus representation, including all 120
+/// authored bytes per segment. Omitted runtime pointers are rebuilt as offsets.
+pub(crate) fn native_blob(
+    map: Option<&skate_data::skate_map::SkateMap>,
+) -> Result<Vec<u8>, String> {
+    spline::build(map)
+}
+
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn spline_blob() -> Vec<u8> {
-    spline::build(None).expect("static test-course splines are valid")
+    spline::build_rails(&test_rails()).expect("authored course splines")
+}
+pub(super) fn test_rails() -> Vec<skate_data::skate_map::Rail> {
+    rails().iter().map(|r| skate_data::skate_map::Rail {
+        name: r.name.into(), points: vec![[r.start.x,r.start.y,r.start.z], [r.end.x,r.end.y,r.end.z]],
+        closed: false, native: None,
+    }).collect()
 }

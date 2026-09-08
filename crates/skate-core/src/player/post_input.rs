@@ -214,6 +214,16 @@ fn replace_bit(word: &mut u32, bit: u32, value: u32) {
     *word = (*word & !(1 << bit)) | ((value & 1) << bit);
 }
 
+///82762AB0 copies the defined fields, preserving destination padding and the
+///low five bits of byte200. Words use native big-endian bit positions.
+pub fn copy_grab_record_82762ab0(destination: &mut [u32; 72], source: &[u32; 72]) {
+    destination[..50].copy_from_slice(&source[..50]);
+    destination[50] = (destination[50] & 0x1fff_ffff) | (source[50] & 0xe000_0000);
+    destination[51..55].copy_from_slice(&source[51..55]);
+    destination[56..66].copy_from_slice(&source[56..66]);
+    destination[68] = source[68];
+}
+
 #[cfg(test)]
 #[path = "tests/post_input.rs"]
 mod tests;

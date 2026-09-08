@@ -16,7 +16,9 @@ fn run_side(side: i16) {
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
     let data = skate_data::collections::Collections::load(root).unwrap();
-    let entry_speed = data.float("anim_motion", "power_slide", "slide_speed_threshold").unwrap();
+    let entry_speed = data
+        .float("anim_motion", "power_slide", "slide_speed_threshold")
+        .unwrap();
     let mut physics = GamePhysics::load(root).unwrap();
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
@@ -31,7 +33,8 @@ fn run_side(side: i16) {
     let mut saw_packet = false;
     let mut release_clear = false;
     for tick in 0..900 {
-        if sequence_start.is_none() && tick >= 60
+        if sequence_start.is_none()
+            && tick >= 60
             && physics.riding.motion.ground_speed > entry_speed * 1.5
             && skater.player_state.current() == PhysicalStateId::PhysicsGround
         {
@@ -44,13 +47,22 @@ fn run_side(side: i16) {
             _ => [0; 2],
         };
         input.sample_raw_for_test(skate_core::input::xbox::XboxState {
-            buttons: if tick >= 12 && sequence_start.is_none() { 0x1000 } else { 0 },
-            triggers: [0; 2], left, right: [0; 2],
+            buttons: if tick >= 12 && sequence_start.is_none() {
+                0x1000
+            } else {
+                0
+            },
+            triggers: [0; 2],
+            left,
+            right: [0; 2],
         });
         let mut actions = input.player_actions();
-        controls.update(&mut actions, physics.settings.step.simulation.time_step,
+        controls.update(
+            &mut actions,
+            physics.settings.step.simulation.time_step,
             physics.settings.input_magnitude_threshold,
-            skater.player_input.physical.scoring.capabilities_204);
+            skater.player_input.physical.scoring.capabilities_204,
+        );
         frame::advance(&mut physics, &mut skater, &mut controls, &graphs,
             &mut actions, true, &mut camera).unwrap_or_else(|error| panic!(
                 "Powerslide side={side} tick={tick} phase={phase:?}: {error}; state={:?}; speed={}; deck={:?}",
@@ -60,44 +72,95 @@ fn run_side(side: i16) {
         let motion = &skater.animation.motion;
         let starts = motion.slide_latch.start(true) || motion.slide_latch.start(false);
         if matches!(phase, Some(12..=23)) {
-            assert!(controls.action_intents.get("RightSlideStart").is_none()
-                && controls.action_intents.get("LeftSlideStart").is_none(),
-                "Pure lateral stick generated a slide start: side={side} tick={tick}");
+            assert!(
+                controls.action_intents.get("RightSlideStart").is_none()
+                    && controls.action_intents.get("LeftSlideStart").is_none(),
+                "Pure lateral stick generated a slide start: side={side} tick={tick}"
+            );
             assert!(!starts, "Pure lateral stick started the slide latch");
-            assert_ne!(skater.player_state.current(), PhysicalStateId::SlideGround,
-                "Pure lateral stick entered SlideGround");
+            assert_ne!(
+                skater.player_state.current(),
+                PhysicalStateId::SlideGround,
+                "Pure lateral stick entered SlideGround"
+            );
         }
         if matches!(phase, Some(36..=95)) {
             saw_start |= starts;
             saw_slide |= skater.player_state.current() == PhysicalStateId::SlideGround;
-            let emitted = motion.animation.motion_attributes.iter()
+            let emitted = motion
+                .animation
+                .motion_attributes
+                .iter()
                 .any(|attribute| attribute.name == encode(b"slide") && attribute.value != 0.0);
-            let published = skater.animation.attributes.entries().iter().rev()
-                .find(|attribute| attribute.name == encode(b"slide") && matches!(attribute.kind, 0 | 2))
-                .and_then(|attribute| attribute.payload.0[0]).map(f32::from_bits);
+            let published = skater
+                .animation
+                .attributes
+                .entries()
+                .iter()
+                .rev()
+                .find(|attribute| {
+                    attribute.name == encode(b"slide") && matches!(attribute.kind, 0 | 2)
+                })
+                .and_then(|attribute| attribute.payload.0[0])
+                .map(f32::from_bits);
             if emitted && let Some(value) = published {
-                assert_eq!(skater.animation_input.fields.slide.to_bits(), value.to_bits(),
-                    "Slide changed between canonical animation packet and Skeleton input");
+                assert_eq!(
+                    skater.animation_input.fields.slide.to_bits(),
+                    value.to_bits(),
+                    "Slide changed between canonical animation packet and Skeleton input"
+                );
                 saw_packet |= value != 0.0;
             }
         }
         if matches!(phase, Some(97..)) {
-            for name in ["LeftSlideStart", "RightSlideStart", "LeftSlide", "RightSlide"] {
-                assert!(controls.action_intents.get(name).is_none(), "Released AG intent retained: {name}");
-                assert!(motion.animation.motion_intents.get(name).is_none(), "Released MG intent retained: {name}");
+            for name in [
+                "LeftSlideStart",
+                "RightSlideStart",
+                "LeftSlide",
+                "RightSlide",
+            ] {
+                assert!(
+                    controls.action_intents.get(name).is_none(),
+                    "Released AG intent retained: {name}"
+                );
+                assert!(
+                    motion.animation.motion_intents.get(name).is_none(),
+                    "Released MG intent retained: {name}"
+                );
             }
             release_clear |= !motion.is_power_sliding
                 && skater.player_state.current() != PhysicalStateId::SlideGround;
         }
         assert!(camera.frame.is_some());
         assert_eq!(skater.pose_generation, physics.ticks);
-        if phase.is_some_and(|phase| phase >= 215) { break; }
+        if phase.is_some_and(|phase| phase >= 215) {
+            break;
+        }
     }
-    assert!(sequence_start.is_some(), "Real pushing never attained stock slide speed: side={side}, speed={}, threshold={entry_speed}", physics.riding.motion.ground_speed);
+    assert!(
+        sequence_start.is_some(),
+        "Real pushing never attained stock slide speed: side={side}, speed={}, threshold={entry_speed}",
+        physics.riding.motion.ground_speed
+    );
     assert!(saw_push, "No physical push was published");
-    assert!(saw_start, "Diagonal input never started the stock slide latch: side={side}");
-    assert!(saw_packet, "No canonical nonzero slide packet reached Skeleton: side={side}");
-    assert!(saw_slide, "Stock graph never entered SlideGround: side={side}");
-    assert!(release_clear, "Slide failed to exit after controller release: side={side}");
-    eprintln!("Powerslide side={side}: stock entry, packet, physical SlideGround and release passed in {} ticks", physics.ticks);
+    assert!(
+        saw_start,
+        "Diagonal input never started the stock slide latch: side={side}"
+    );
+    assert!(
+        saw_packet,
+        "No canonical nonzero slide packet reached Skeleton: side={side}"
+    );
+    assert!(
+        saw_slide,
+        "Stock graph never entered SlideGround: side={side}"
+    );
+    assert!(
+        release_clear,
+        "Slide failed to exit after controller release: side={side}"
+    );
+    eprintln!(
+        "Powerslide side={side}: stock entry, packet, physical SlideGround and release passed in {} ticks",
+        physics.ticks
+    );
 }

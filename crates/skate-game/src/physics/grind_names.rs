@@ -1,68 +1,49 @@
-//! TU3 canonical grind strings8206FCE4..8207268C. Mixed radix2/2/2/2/4/6.
-//! Recovered table matches SHA2568FA7CCBC..D317 of the NUL-separated names.
-pub(super) const NAMES: [&str; 384] = [
-    "FS_50_50", "FS_LIP", "FS_NOSEBLUNT", "FS_OVERCROOK", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "FS_50_50", "FS_BOARD", "FS_NOSESLIDE", "FS_CROOK", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BF_FS_50_50", "FS_LIP", "FS_NOSEBLUNT", "BF_FS_OVERCROOK", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BF_FS_50_50", "FS_BOARD", "FS_NOSESLIDE", "BF_FS_CROOK", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "FS_50_50", "FS_LIP", "FS_NOSEBLUNT", "FS_OVERWILLY", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "FS_50_50", "FS_BOARD", "FS_NOSESLIDE", "FS_WILLY", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BF_FS_50_50", "FS_LIP", "FS_NOSEBLUNT", "BF_FS_OVERWILLY", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BF_FS_50_50", "FS_BOARD", "FS_NOSESLIDE", "BF_FS_WILLY", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "FS_50_50", "FS_LIP", "FS_NOSEBLUNT", "FS_NOSEGRIND", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "FS_50_50", "FS_BOARD", "FS_NOSESLIDE", "FS_NOSEGRIND", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BF_FS_50_50", "FS_LIP", "FS_NOSEBLUNT", "BF_FS_NOSEGRIND", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BF_FS_50_50", "FS_BOARD", "FS_NOSESLIDE", "BF_FS_NOSEGRIND", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "FS_50_50", "FS_LIP", "FS_NOSEBLUNT", "FS_OVERWILLY", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "FS_50_50", "FS_BOARD", "FS_NOSESLIDE", "FS_WILLY", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BF_FS_50_50", "FS_LIP", "FS_NOSEBLUNT", "BF_FS_OVERWILLY", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BF_FS_50_50", "FS_BOARD", "FS_NOSESLIDE", "BF_FS_WILLY", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "FS_50_50", "FS_LIP", "FS_TAILSLIDE", "FS_5_O", "BS_BLUNT", "BS_DARKSLIDE",
-    "FS_50_50", "FS_BOARD", "FS_BLUNT", "FS_SALAD", "FS_BLUNT", "FS_DARKSLIDE",
-    "BF_FS_50_50", "FS_LIP", "FS_TAILSLIDE", "BF_FS_5_O", "BS_BLUNT", "BS_DARKSLIDE",
-    "BF_FS_50_50", "FS_BOARD", "FS_BLUNT", "BF_FS_SALAD", "FS_BLUNT", "FS_DARKSLIDE",
-    "FS_50_50", "FS_LIP", "FS_TAILSLIDE", "FS_SMITH", "BS_BLUNT", "BS_DARKSLIDE",
-    "FS_50_50", "FS_BOARD", "FS_BLUNT", "FS_FEEBLE", "FS_BLUNT", "FS_DARKSLIDE",
-    "BF_FS_50_50", "FS_LIP", "FS_TAILSLIDE", "BF_FS_SMITH", "BS_BLUNT", "BS_DARKSLIDE",
-    "BF_FS_50_50", "FS_BOARD", "FS_BLUNT", "BF_FS_FEEBLE", "FS_BLUNT", "FS_DARKSLIDE",
-    "FS_50_50", "FS_LIP", "FS_TAILSLIDE", "FS_5_O", "BS_BLUNT", "BS_DARKSLIDE",
-    "FS_50_50", "FS_BOARD", "FS_BLUNT", "FS_5_O", "FS_BLUNT", "FS_DARKSLIDE",
-    "BF_FS_50_50", "FS_LIP", "FS_TAILSLIDE", "BF_FS_5_O", "BS_BLUNT", "BS_DARKSLIDE",
-    "BF_FS_50_50", "FS_BOARD", "FS_BLUNT", "BF_FS_5_O", "FS_BLUNT", "FS_DARKSLIDE",
-    "FS_50_50", "FS_LIP", "FS_TAILSLIDE", "FS_SMITH", "BS_BLUNT", "BS_DARKSLIDE",
-    "FS_50_50", "FS_BOARD", "FS_BLUNT", "FS_FEEBLE", "FS_BLUNT", "FS_DARKSLIDE",
-    "BF_FS_50_50", "FS_LIP", "FS_TAILSLIDE", "BF_FS_SMITH", "BS_BLUNT", "BS_DARKSLIDE",
-    "BF_FS_50_50", "FS_BOARD", "FS_BLUNT", "BF_FS_FEEBLE", "FS_BLUNT", "FS_DARKSLIDE",
-    "BS_50_50", "BS_BOARD", "BS_NOSESLIDE", "BS_CROOK", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BS_50_50", "BS_LIP", "BS_NOSEBLUNT", "BS_OVERCROOK", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BF_BS_50_50", "BS_BOARD", "BS_NOSESLIDE", "BF_BS_CROOK", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BF_BS_50_50", "BS_LIP", "BS_NOSEBLUNT", "BF_BS_OVERCROOK", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BS_50_50", "BS_BOARD", "BS_NOSESLIDE", "BS_WILLY", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BS_50_50", "BS_LIP", "BS_NOSEBLUNT", "BS_OVERWILLY", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BF_BS_50_50", "BS_BOARD", "BS_NOSESLIDE", "BF_BS_WILLY", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BF_BS_50_50", "BS_LIP", "BS_NOSEBLUNT", "BF_BS_OVERWILLY", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BS_50_50", "BS_BOARD", "BS_NOSESLIDE", "BS_NOSEGRIND", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BS_50_50", "BS_LIP", "BS_NOSEBLUNT", "BS_NOSEGRIND", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BF_BS_50_50", "BS_BOARD", "BS_NOSESLIDE", "BF_BS_NOSEGRIND", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BF_BS_50_50", "BS_LIP", "BS_NOSEBLUNT", "BF_BS_NOSEGRIND", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BS_50_50", "BS_BOARD", "BS_NOSESLIDE", "BS_WILLY", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BS_50_50", "BS_LIP", "BS_NOSEBLUNT", "BS_OVERWILLY", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BF_BS_50_50", "BS_BOARD", "BS_NOSESLIDE", "BF_BS_WILLY", "FS_NOSEBLUNT", "FS_DARKSLIDE",
-    "BF_BS_50_50", "BS_LIP", "BS_NOSEBLUNT", "BF_BS_OVERWILLY", "BS_NOSEBLUNT", "BS_DARKSLIDE",
-    "BS_50_50", "BS_BOARD", "BS_BLUNT", "BS_SALAD", "BS_BLUNT", "BS_DARKSLIDE",
-    "BS_50_50", "BS_LIP", "BS_TAILSLIDE", "BS_5_O", "FS_BLUNT", "FS_DARKSLIDE",
-    "BF_BS_50_50", "BS_BOARD", "BS_BLUNT", "BF_BS_SALAD", "BS_BLUNT", "BS_DARKSLIDE",
-    "BF_BS_50_50", "BS_LIP", "BS_TAILSLIDE", "BF_BS_5_O", "FS_BLUNT", "FS_DARKSLIDE",
-    "BS_50_50", "BS_BOARD", "BS_BLUNT", "BS_FEEBLE", "BS_BLUNT", "BS_DARKSLIDE",
-    "BS_50_50", "BS_LIP", "BS_TAILSLIDE", "BS_SMITH", "FS_BLUNT", "FS_DARKSLIDE",
-    "BF_BS_50_50", "BS_BOARD", "BS_BLUNT", "BF_BS_FEEBLE", "BS_BLUNT", "BS_DARKSLIDE",
-    "BF_BS_50_50", "BS_LIP", "BS_TAILSLIDE", "BF_BS_SMITH", "FS_BLUNT", "FS_DARKSLIDE",
-    "BS_50_50", "BS_BOARD", "BS_BLUNT", "BS_5_O", "BS_BLUNT", "BS_DARKSLIDE",
-    "BS_50_50", "BS_LIP", "BS_TAILSLIDE", "BS_5_O", "FS_BLUNT", "FS_DARKSLIDE",
-    "BF_BS_50_50", "BS_BOARD", "BS_BLUNT", "BF_BS_5_O", "BS_BLUNT", "BS_DARKSLIDE",
-    "BF_BS_50_50", "BS_LIP", "BS_TAILSLIDE", "BF_BS_5_O", "FS_BLUNT", "FS_DARKSLIDE",
-    "BS_50_50", "BS_BOARD", "BS_BLUNT", "BS_FEEBLE", "BS_BLUNT", "BS_DARKSLIDE",
-    "BS_50_50", "BS_LIP", "BS_TAILSLIDE", "BS_SMITH", "FS_BLUNT", "FS_DARKSLIDE",
-    "BF_BS_50_50", "BS_BOARD", "BS_BLUNT", "BF_BS_FEEBLE", "BS_BLUNT", "BS_DARKSLIDE",
-    "BF_BS_50_50", "BS_LIP", "BS_TAILSLIDE", "BF_BS_SMITH", "FS_BLUNT", "FS_DARKSLIDE",
-];
+//! ZIP short names verified entry-for-entry from original S3 initializer82DE6678.
+//!82F92AC0 splits384 records;82DEE508 publishes skating IDs and scoring IDs
+//! separately. S2 82E2F9D0 uses160 records (two orientations, five families).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Name {
+    pub skating_id: i32,
+    pub attribute: &'static str,
+    pub display: &'static str,
+    pub scorable_id: i32,
+}
+#[path = "grind_names/table0.rs"]
+mod table0;
+#[path = "grind_names/table1.rs"]
+mod table1;
+#[path = "grind_names/table2.rs"]
+mod table2;
+#[path = "grind_names/table3.rs"]
+mod table3;
+#[path = "grind_names/table4.rs"]
+mod table4;
+#[path = "grind_names/table5.rs"]
+mod table5;
+#[path = "grind_names/table6.rs"]
+mod table6;
+#[path = "grind_names/table7.rs"]
+mod table7;
+
+/// Dimensions: approach2, location2, twist2, tilt2, orientation4, family6.
+/// Invalid/sentinel chromosomes are not silently mapped to a fifty-fifty.
+pub(crate) fn lookup(c: [u32; 6]) -> Option<Name> {
+    if c.into_iter()
+        .zip([2, 2, 2, 2, 4, 6])
+        .any(|(v, bound)| v >= bound)
+    {
+        return None;
+    }
+    let i = (((((c[0] * 2 + c[1]) * 2 + c[2]) * 2 + c[3]) * 4 + c[4]) * 6 + c[5]) as usize;
+    let table = match i / 48 {
+        0 => &table0::TABLE,
+        1 => &table1::TABLE,
+        2 => &table2::TABLE,
+        3 => &table3::TABLE,
+        4 => &table4::TABLE,
+        5 => &table5::TABLE,
+        6 => &table6::TABLE,
+        _ => &table7::TABLE,
+    };
+    Some(table[i % 48])
+}

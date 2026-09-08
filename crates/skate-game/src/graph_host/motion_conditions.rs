@@ -9,23 +9,12 @@ use skate_data::state_graph::attributes::Attributes;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MotionCondition {
-    ///82BA41F0: nonzero PhysOut.Grinds324, independent of grind category.
-    DroppingIn,
-    CanBipedLand,
-    BipedCommitted,
-    EnoughDistToObstacle {
-        animation: String,
-        database: String,
-    },
-    GroundSlope(super::motion_ground_slope::GroundSlopeType),
-    BipedGroundThin,
-    DisableDismount,
-    HoldingSkateboard,
-    StandingOnMovingObject,
-    LocoState(super::motion_cadence::LocoState),
+    Grind(super::motion_grind::conditions::Condition),
+    HasTweak(NumericCondition),
+    CurrentGrabType(super::motion_stock_gameplay::GrabType),
     ManualOutTimerIsActive,
-    PhysicsWantsManualExit,
     Gesture(crate::input::gesture_catalog::Group),
+    DisableDismount(super::motion_dismount::Condition),
     Landing(super::motion_landing::Condition),
     Wipeout(super::motion_wipeout::Condition),
     PushOff(super::motion_push_off::IsPushOffEnabled),
@@ -73,38 +62,35 @@ pub enum MotionCondition {
     },
     Gameplay(super::motion_gameplay_conditions::GameplayCondition),
     Riding(super::motion_riding_conditions::MotionRidingCondition),
-    /// Native Air condition: PhysOutAnimation collision/trajectory time.
+    /// TimeToLand82BA7250: valid Air trajectory remaining time.
     TimeToLand(NumericCondition),
-    CurrentGrabType(super::motion_stock_gameplay::GrabType),
-    CrouchedForGrabCycle,
-    TrucksOrDeckInContact,
-    HasTweak(NumericCondition),
-    ///DistToEdge82BA8238: completed OffBoard116, not a fresh nearest-rail query.
-    DistToEdge(NumericCondition),
     /// Native off-board trajectory time (PhysOutOffBoard+32).
     ObTimeToLand(NumericCondition),
     /// Native off-board trajectory time used by dismount/runout branches.
     ObTrajTime(NumericCondition),
+    /// Biped locomotion bucket published by the physical off-board owner.
+    LocoState(super::motion_offboard_cadence::LocoState),
+    GroundSlopeType(super::motion_ground_slope::GroundSlopeType),
+    /// Thin-ground branch of the stock BipedGround state.
+    IsBipedGroundThin,
+    IsHoldingSkateboard,
+    /// Static gameplay has no moving actors yet; the stock condition is a
+    /// resolved physical flag and must remain false until a moving support is
+    /// published by the collision owner.
+    IsStandingOnMovingObject,
+    /// IsInDebugAnimationsMode is a retail debug gate. TU3 has no gameplay
+    /// producer for this flag; the shipped runtime never enables debug
+    /// animation mode, so the condition is a resolved false leaf rather than
+    /// an unsupported graph node.
+    DebugAnimationsMode,
+    /// Stock gameplay predicates whose concrete values are published by the
+    /// grind/handplant/skitch physical owners.
+    StockGameplay(super::motion_stock_conditions::Condition),
 }
 impl MotionCondition {
     pub fn parse(a: &Attributes<'_>) -> Result<Option<Self>, String> {
-        if a.text("name") == Some("CanBipedLand") {
-            return Ok(Some(Self::CanBipedLand));
-        }
-        if a.text("name") == Some("IsBipedCommittedToMotion") {
-            return Ok(Some(Self::BipedCommitted));
-        }
-        if a.text("name") == Some("EnoughDistToObstacle") {
-            return Ok(Some(Self::EnoughDistToObstacle {
-                animation: a
-                    .text("anim")
-                    .ok_or("EnoughDistToObstacle requires anim")?
-                    .into(),
-                database: a
-                    .text("db")
-                    .ok_or("EnoughDistToObstacle requires db")?
-                    .into(),
-            }));
+        if let Some(condition) = super::motion_grind::conditions::Condition::parse(a)? {
+            return Ok(Some(Self::Grind(condition)));
         }
         if let Some(condition) = super::motion_landing::Condition::parse(a) {
             return Ok(Some(Self::Landing(condition)));
@@ -115,17 +101,21 @@ impl MotionCondition {
         if let Some(condition) = super::motion_push_off::IsPushOffEnabled::parse(a) {
             return Ok(Some(Self::PushOff(condition)));
         }
+        if let Some(condition) = super::motion_dismount::Condition::parse(a) {
+            return Ok(Some(Self::DisableDismount(condition)));
+        }
         let numeric = || super::condition_nodes::numeric(a);
-        Ok(Some(match a.text("name").unwrap_or("") {
-            "GroundSlopeType" => {
-                Self::GroundSlope(super::motion_ground_slope::GroundSlopeType::parse(a)?)
-            }
-            "IsStandingOnMovingObject" => Self::StandingOnMovingObject,
-            "DisableDismount" => Self::DisableDismount,
-            "IsHoldingSkateboard" => Self::HoldingSkateboard, //82BA5E10
-            "IsBipedGroundThin" => Self::BipedGroundThin,     //82BA8110: OffBoard+330
-            "LocoState" => Self::LocoState(super::motion_cadence::LocoState::parse(a)?),
-            "PhysicsWantsManualExit" => Self::PhysicsWantsManualExit,
+        let name = a
+            .text("name")
+            .unwrap_or("")
+            .trim_matches(|c: char| c.is_whitespace() || c == '\0');
+        Ok(Some(match name {
+            "HasTweak" => Self::HasTweak(numeric()),
+            "CurrentGrabType" => Self::CurrentGrabType(
+                super::motion_stock_gameplay::GrabType::parse(
+                    a.text("grab").ok_or("CurrentGrabType requires grab")?,
+                )?,
+            ),
             "ManualOutTimerIsActive" => Self::ManualOutTimerIsActive,
             "HasGestureIntent" => Self::Gesture(crate::input::gesture_catalog::Group::parse(
                 a.text("group").unwrap_or(""),
@@ -187,85 +177,46 @@ impl MotionCondition {
             name if super::motion_riding_conditions::MotionRidingCondition::recognizes(name) => {
                 Self::Riding(super::motion_riding_conditions::MotionRidingCondition::parse(a)?)
             }
-            "DistToEdge" => Self::DistToEdge(numeric()),
-            "IsDroppingIn" => Self::DroppingIn,
-            "TrucksOrDeckInContact" => Self::TrucksOrDeckInContact,
-            "HasTweak" => Self::HasTweak(numeric()),
-            "CurrentGrabType" => Self::CurrentGrabType(super::motion_stock_gameplay::GrabType::parse(a.text("grab").unwrap_or(""))?),
-            "IsCrouchedEnoughForBlendToGrabCycle" => Self::CrouchedForGrabCycle,
             "TimeToLand" => Self::TimeToLand(numeric()),
             "OBTimeToLand" => Self::ObTimeToLand(numeric()),
             "OBTrajTime" => Self::ObTrajTime(numeric()),
+            "LocoState" => Self::LocoState(super::motion_offboard_cadence::LocoState::parse(a)?),
+            "GroundSlopeType" => Self::GroundSlopeType(super::motion_ground_slope::GroundSlopeType::parse(a)?),
+            "IsBipedGroundThin" => Self::IsBipedGroundThin,
+            "IsHoldingSkateboard" => Self::IsHoldingSkateboard,
+            "IsStandingOnMovingObject" => Self::IsStandingOnMovingObject,
+            "IsInDebugAnimationsMode" => Self::DebugAnimationsMode,
+            name if super::motion_stock_conditions::Condition::recognizes(name) => {
+                Self::StockGameplay(super::motion_stock_conditions::Condition::parse(a))
+            }
             _ => return Ok(super::condition_nodes::parse(a)?.map(Self::Shared)),
         }))
     }
     pub fn evaluate(&self, host: &MotionHost, frame: &Frame) -> Result<bool, String> {
         use skate_core::animation::playback_parameters::ParameterInputs;
         Ok(match self {
-            //82BA42E0 reads Collision3472 (trucks) OR3475 (deck), not wheels.
-            Self::TrucksOrDeckInContact => host.gameplay_conditions
-                .ok_or("Contact condition requires physical publication")?.trucks_or_deck_contact,
-            //82BA6B90 shares the filtered-map accessor with82BA6AC0. At least
-            //one component must exist even when no numeric comparison is authored.
-            Self::HasTweak(n) => {
+            Self::Grind(condition) => condition.evaluate(
+                host.grind_conditions.as_ref()
+                    .ok_or("Grind condition requires completed physical output")?
+            ),
+            // 82BA7760/82BA7848 compares the authored type through
+            // ISkaterAnim; SetGrabType Begin/End writes that same owner.
+            Self::CurrentGrabType(grab) => host.animation.grab_type == Some(*grab),
+            // TU3 82BA6B90 uses the filtered MG map (virtual +12),
+            // requires at least one axis, then compares vector magnitude.
+            Self::HasTweak(numeric) => {
                 let x = host.animation.filtered_intent("TweakX");
                 let y = host.animation.filtered_intent("TweakY");
-                (x.is_some() || y.is_some()) && {
-                    let (x, y) = (x.unwrap_or(0.0), y.unwrap_or(0.0));
-                    n.matches(skate_core::input::controller::magnitude(y.mul_add(y, x * x)))
-                }
-            },
-            //82BA7848 -> ISkaterAnim+100 ->82B97200 compares the enum at360.
-            Self::CurrentGrabType(grab) => host.animation.grab_type == Some(*grab),
-            //82BBDE40: PhysOutSkeleton72 < literal821EE79C (strictly 0.6).
-            Self::CrouchedForGrabCycle => host.crouching_physical
-                .ok_or("Grind grab requires the published skeleton height")?
-                .animation_height_72 < f32::from_bits(0x3f19_999a),
-            Self::CanBipedLand => host.offboard_output.landing_normal_192[1] > 0.85,
-            Self::BipedCommitted => host.offboard_output.flag_329 != 0,
-            Self::EnoughDistToObstacle {
-                animation,
-                database: _,
-            } => {
-                //82D16680 looks up the literal clip and initializes AnimTransZ at
-                //time zero; a missing bank/clip/attribute leaves the caller's zero.
-                let mut distance = 0.;
-                if let Ok(clip) = host.animation.metadata().clip(animation) {
-                    if let Some(attribute) = clip
-                        .attributes
-                        .iter()
-                        .find(|a| encode(a.name.as_bytes()) == encode(b"AnimTransZ"))
-                    {
-                        distance = match attribute.type_id {
-                            0 => f32::from_bits(
-                                *attribute
-                                    .payload_words
-                                    .first()
-                                    .ok_or("Truncated AnimTransZ")?,
-                            ),
-                            2 => skate_core::animation::playback_clip::sample_curve(
-                                &attribute.payload_words,
-                                0.,
-                            )?,
-                            _ => 0.,
-                        };
-                    }
-                }
-                host.offboard_output.scalar_112 >= distance + 0.3
+                (x.is_some() || y.is_some())
+                    && (numeric.comparison == Comparison::None
+                        || numeric.matches((x.unwrap_or(0.0).powi(2)
+                            + y.unwrap_or(0.0).powi(2)).sqrt()))
             }
-            Self::GroundSlope(condition) => condition.matches(host.offboard_slope),
-            //82BA5B80: abs(z)+abs(x)+speed, in source addition order.
-            Self::StandingOnMovingObject => {
-                (host.offboard_support[2].abs() + host.offboard_support[1].abs())
-                    + host.offboard_support[0]
-                    > f32::from_bits(0x3c23d70a)
-            }
-            Self::DisableDismount => host.disable_dismount,
-            Self::HoldingSkateboard => host.toggle_board_physical.held,
-            Self::BipedGroundThin => host.offboard_ground_thin,
-            Self::LocoState(condition) => condition.evaluate(host.offboard_locomotion),
+            // Native 82BA78B0: strictly positive retained manual-out timer.
+            Self::ManualOutTimerIsActive => host.riding.manual_out_timer > 0.0,
             Self::ShouldLeaveSlide { right } => host.slide_latch.should_leave(*right),
-            Self::Gesture(group) => group.has_intent(|name| host.action_intents.contains_key(name)),
+            Self::Gesture(group) => group.has_intent(|name| host.action_controls.has(name)),
+            Self::DisableDismount(condition) => condition.evaluate(host.condition_inputs.push_brake.as_ref())?,
             Self::Shared(condition) => condition
                 .evaluate(
                     &host.condition_inputs,
@@ -274,24 +225,42 @@ impl MotionCondition {
                     &host.state_parents,
                 )
                 .map_err(str::to_owned)?,
-            //82BA78B0 -> specific getter: strictly positive retained timer.
-            Self::PhysicsWantsManualExit => host.manual_exit.ok_or("PhysicsWantsManualExit requires completed Animation168")?,
-            Self::ManualOutTimerIsActive => host.riding.manual_out_timer > 0.0,
             Self::Gameplay(condition) => condition.evaluate(host)?,
             Self::Riding(condition) => condition.evaluate(host)?,
-            Self::DistToEdge(n) => n.matches(host.offboard_output.distance_116),
-            Self::DroppingIn => host.grind_physical.dropping_in,
             Self::TimeToLand(n) => {
-                let p = host.gameplay_conditions
+                let p = host.gameplay_conditions.as_ref()
                     .ok_or("TimeToLand requires physical condition publication")?;
                 p.time_to_land_valid && n.matches(p.time_to_land)
-            },
-            Self::ObTimeToLand(n) | Self::ObTrajTime(n) => n.matches(
-                host.gameplay_conditions
-                    .as_ref()
-                    .ok_or("OB trajectory condition requires physical condition publication")?
+            }
+            Self::ObTimeToLand(n) => n.matches(
+                host.gameplay_conditions.as_ref()
+                    .ok_or("OBTimeToLand requires physical condition publication")?
                     .offboard_time_to_land,
             ),
+            Self::ObTrajTime(n) => {
+                let p = host.gameplay_conditions.as_ref()
+                    .ok_or("OBTrajTime requires physical condition publication")?;
+                p.offboard_trajectory_valid && n.matches(p.offboard_trajectory_time)
+            }
+            Self::DebugAnimationsMode => false,
+            Self::LocoState(condition) => condition.evaluate(
+                host.offboard_locomotion_state
+                    .ok_or("LocoState requires retained Biped locomotion through OffBoard84")?,
+            ),
+            Self::GroundSlopeType(condition) => condition.matches(
+                host.ground_slope_type
+                    .ok_or("GroundSlopeType requires the completed ground slope publication")?,
+            ),
+            Self::IsBipedGroundThin => host
+                .biped_ground_thin
+                .ok_or("IsBipedGroundThin requires the native ground geometry publication")?,
+            Self::IsHoldingSkateboard => host.toggle_board_physical
+                .is_some_and(|p| p.holding_board),
+            Self::IsStandingOnMovingObject => host
+                .gameplay_conditions
+                .ok_or("IsStandingOnMovingObject requires the physical state publication")?
+                .moving_object,
+            Self::StockGameplay(condition) => condition.evaluate(host)?,
             Self::PushOff(condition) => condition.evaluate(),
             Self::Wipeout(condition) => condition.evaluate(host.wipeout_physical)?,
             Self::Landing(condition) => condition.evaluate(

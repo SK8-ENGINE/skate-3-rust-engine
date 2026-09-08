@@ -15,15 +15,13 @@ use skate_data::state_graph::{
 #[derive(Clone, Debug, PartialEq)]
 pub enum MotionOperation {
     Grind(super::motion_grind::Operation),
-    OffboardAir(super::motion_offboard_air::Operation),
-    ToggleBoard,
-    Cadence(super::motion_cadence::Operation),
     Trick(super::motion_tricks::Operation),
+    SetDeckPitchAndYaw,
     Play(PlayAnimation),
-    JumpInto(AttributeName),
     ///TU3 vtable82309664: Begin/Update/End all point to the empty82B61BB8.
     PrintText2D,
-    AddRunoutAttribs,
+    ToggleBoard,
+    Runout(super::motion_runout::Operation),
     AttachIntent {
         intent: String,
         attribute: AttributeName,
@@ -32,12 +30,13 @@ pub enum MotionOperation {
     Push(PushOperation),
     /// Angle, direction, quickness, speed, holding, in native emission order.
     SetTurning([AttributeName; 5]),
-    SetBumpCoefficients([AttributeName; 2]),
     ApplyingBodyTilt,
     SettingBodyTilt(AttributeName),
     Crouching(AttributeName),
-    SetManualAngle,
     Pumping,
+    BipedCadence,
+    MatchCadence,
+    OffboardBodyTweakBlend(super::motion::body_tweak::Settings),
     DisallowPumping,
     FakieHeadChannel,
     Native(super::motion_native::Operation),
@@ -46,6 +45,8 @@ pub enum MotionOperation {
     BodySpin,
     AirLeg(super::motion_air_leg::Operation),
     ClearTrickAttr,
+    ScoringTrick(super::motion_scoring_trick::Operation),
+    SetBumpCoefficients { x: AttributeName, y: AttributeName },
     Landing(super::motion_landing::Operation),
     Wipeout(super::motion_wipeout::Operation),
     TwistLean(super::motion_twist_lean::Operation),
@@ -53,10 +54,15 @@ pub enum MotionOperation {
     IntentFilter(super::motion_intent_filter::Operation),
     CharacterGesture,
     EndGesture,
-    StockGameplay(super::motion_stock_gameplay::Operation),
     Shove(super::motion_shove::ShoveOperation),
     ResetAnimation(super::motion_reset::Operation),
     UpdateRidingFakie(skate_core::animation::riding_fakie::Settings),
+    /// Authored stock operations whose state is owned by the physical/gameplay
+    /// producers rather than by the animation controller. Keeping these as a
+    /// typed family lets the authored graph retain its native operation set;
+    /// execution reports a missing producer instead of silently dropping the
+    /// node.
+    StockGameplay(super::motion_stock_gameplay::Operation),
     SetSpeed {
         name: AttributeName,
         value: Option<f32>,
@@ -82,18 +88,15 @@ impl OperationFactory for MotionFactory {
         _parent: Node,
         a: &Attributes<'_>,
     ) -> Result<Option<Self::Instance>, String> {
-        let name = a.text("name").ok_or("MotionGraph operation has no name")?;
+        let name = a
+            .text("name")
+            .ok_or("MotionGraph operation has no name")?
+            .trim_matches(|c: char| c.is_whitespace() || c == '\0');
         let operation = if kind == OperationKind::Condition {
             MotionCondition::parse(a)?.map(MotionOperation::Condition)
         } else if kind == OperationKind::Behavior {
-            if let Some(operation) = super::motion_grind::Operation::parse(a) {
+            if let Some(operation) = super::motion_grind::Operation::parse(a)? {
                 Some(MotionOperation::Grind(operation))
-            } else if let Some(operation) = super::motion_offboard_air::Operation::parse(a) {
-                Some(MotionOperation::OffboardAir(operation))
-            } else if name == "ToggleBoard" {
-                Some(MotionOperation::ToggleBoard)
-            } else if let Some(operation) = super::motion_cadence::Operation::parse(a) {
-                Some(MotionOperation::Cadence(operation))
             } else if let Some(operation) = super::motion_landing::Operation::parse(a) {
                 Some(MotionOperation::Landing(operation))
             } else if let Some(operation) = super::motion_hand_services::Operation::parse(a) {
@@ -112,16 +115,10 @@ impl OperationFactory for MotionFactory {
                 Some(MotionOperation::Shove(operation))
             } else {
                 match name {
-                    "SetBumpCoefficients" => Some(MotionOperation::SetBumpCoefficients([
-                        key(a, "X", ""),
-                        key(a, "Y", ""),
-                    ])),
-                    "ResetSkaterAnimation" | "ResetToGivenStance" => {
-                        Some(MotionOperation::ResetAnimation(
-                            super::motion_reset::Operation::parse(a)
-                                .ok_or("Invalid reset operation")?,
-                        ))
-                    }
+                    "SetDeckPitchAndYaw" => Some(MotionOperation::SetDeckPitchAndYaw),
+                    "ResetSkaterAnimation" | "ResetToGivenStance" => Some(MotionOperation::ResetAnimation(
+                        super::motion_reset::Operation::parse(a).ok_or("Invalid reset operation")?,
+                    )),
                     "MatchTwistAndLean" => Some(MotionOperation::TwistLean(
                         super::motion_twist_lean::Operation::parse(a),
                     )),
@@ -134,17 +131,22 @@ impl OperationFactory for MotionFactory {
                     "FilterMotionGraphIntent" => Some(MotionOperation::IntentFilter(
                         super::motion_intent_filter::Operation::parse(a),
                     )),
-                    "JumpInto" => Some(MotionOperation::JumpInto(key(a, "attribute", ""))),
-                    "SetManualAngle" => Some(MotionOperation::SetManualAngle),
+                    "ToggleBoard" => Some(MotionOperation::ToggleBoard),
+                    "AddRunoutAttribs" => super::motion_runout::Operation::parse(a)
+                        .map(MotionOperation::Runout),
                     "PlayAnimation" => Some(MotionOperation::Play(play(a))),
                     "PrintText2D" => Some(MotionOperation::PrintText2D),
-                    "AddRunoutAttribs" => Some(MotionOperation::AddRunoutAttribs),
                     "ApplyingBodyTilt" => Some(MotionOperation::ApplyingBodyTilt),
                     "SettingBodyTilt" => {
                         Some(MotionOperation::SettingBodyTilt(key(a, "tilt_x", "tilt_x")))
                     }
                     "Crouching" => Some(MotionOperation::Crouching(key(a, "crouchName", ""))),
                     "Pumping" => Some(MotionOperation::Pumping),
+                    "BipedCadence" => Some(MotionOperation::BipedCadence),
+                    "MatchCadence" => Some(MotionOperation::MatchCadence),
+                    "OffboardBodyTweakBlend" => Some(MotionOperation::OffboardBodyTweakBlend(
+                        super::motion::body_tweak::Settings::parse(a),
+                    )),
                     "BodySpin" => Some(MotionOperation::BodySpin),
                     "ControlAirLegExtension" => Some(MotionOperation::AirLeg(
                         super::motion_air_leg::Operation::parse(a),
@@ -155,12 +157,18 @@ impl OperationFactory for MotionFactory {
                     | "SetHandPlantAnticLength"
                     | "ScoringHandPlants"
                     | "SetTrickAttr"
-                    | "ScoringTrick"
                     | "MonitorUnderflip"
                     | "SetDark"
                     | "UpdateIsWeightOnNose" => {
                         super::motion_tricks::Operation::parse(a).map(MotionOperation::Trick)
                     }
+                    "ScoringTrick" => Some(MotionOperation::ScoringTrick(
+                        super::motion_scoring_trick::Operation::parse(a)?,
+                    )),
+                    "SetBumpCoefficients" => Some(MotionOperation::SetBumpCoefficients {
+                        x: key(a, "X", "BumpX"),
+                        y: key(a, "Y", "BumpY"),
+                    }),
                     "CharacterGesture" => Some(MotionOperation::CharacterGesture),
                     "EndGesture" => Some(MotionOperation::EndGesture),
                     "DisallowPumping" => Some(MotionOperation::DisallowPumping),
@@ -185,10 +193,12 @@ impl OperationFactory for MotionFactory {
                             ),
                         },
                     )),
-                    // Factory82BC6D40 defaults both identifiers to the string0.
                     name if super::motion_stock_gameplay::Operation::recognizes(name) => Some(
-                        MotionOperation::StockGameplay(super::motion_stock_gameplay::Operation::parse(a)),
+                        MotionOperation::StockGameplay(
+                            super::motion_stock_gameplay::Operation::parse(a),
+                        ),
                     ),
+                    // Factory82BC6D40 defaults both identifiers to the string0.
                     "AttachIntent" => Some(MotionOperation::AttachIntent {
                         intent: a.text("intent").unwrap_or("0").into(),
                         attribute: encode(a.text("attr").unwrap_or("0").as_bytes()),

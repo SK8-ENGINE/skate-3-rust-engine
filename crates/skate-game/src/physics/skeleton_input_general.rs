@@ -116,6 +116,8 @@ impl SkeletonInputRuntime {
         owners: &mut SkeletonOwners<'_>,
         simulation: RetailSimulationStep,
     ) {
+        //82BE27B0 clears the same16388 that states arm and PostWipeoutCheck
+        //consumes. A discontinuity must not retain a detached lifecycle copy.
         owners.correction.pending = false;
         let s = &mut owners.animated;
         let observation = skeleton_general::reset_to_animation(

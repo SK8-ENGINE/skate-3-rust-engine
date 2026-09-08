@@ -152,7 +152,7 @@ mod startup_tests;
 
 /// Independent reciprocal-square-root estimate followed by the original two
 /// refinement steps. Host arithmetic is not claimed to be bit-exact Xenon math.
-pub fn magnitude(squared: f32) -> f32 {
+pub(super) fn magnitude(squared: f32) -> f32 {
     let mut inverse = estimate(squared);
     for _ in 0..2 {
         let correction = (-squared).mul_add(inverse * inverse, 1.0);

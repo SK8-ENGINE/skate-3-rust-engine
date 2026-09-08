@@ -98,6 +98,6 @@ fn launch(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), S
     info.player_jumped = true;
     let input = air_phase::selector_input(physics, skater)?;
     skater.trajectory.launch(info, input, &physics.world)?;
-    skater.trajectory.update(input, &physics.world)?;
+    skater.trajectory.update(input, &physics.world, crate::physics::air_trajectory::GrindContext::from_processed(&skater.player_input.processed, crate::physics::solve::deck_frame(&physics.board)[3]))?;
     Ok(())
 }

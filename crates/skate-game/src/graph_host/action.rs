@@ -93,8 +93,7 @@ impl ActionHost {
                 }
             }
         }
-        // Keep lazy unsupported-operation errors: optional graph branches
-        // are not a reason to prevent loading the working game.
+        // Preserve lazy diagnostics for optional unsupported graph branches.
         super::condition_nodes::bind_current_states(graph, &mut instances);
         let mut host = Self::new(instances, graph.runtime.operations.clone());
         host.body_flip_settings = Some(body_flip_signal::Settings {

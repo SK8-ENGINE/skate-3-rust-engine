@@ -50,8 +50,7 @@ pub(crate) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     skater.ground_animation.launched = false;
     let p = &skater.player_input.processed;
     let com = p.animation_com_to_deck_752.map(f32::from_bits);
-    let heading = physics.riding.reckoning_frames.heading;
-    physics.riding.update_ground_reckoning_with_heading(
+    physics.riding.update_ground_reckoning(
         &physics.board,
         super::riding_outputs::RidingPoseInputs {
             com_to_deck: Vector3::new(com[0], com[1], com[2]),
@@ -60,10 +59,10 @@ pub(crate) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         p.flags_2468,
         skater.animation_input.fields.balance,
         p.flags_2476 & 0x4000_0000 != 0,
-        heading,
+        p,
     );
     skeleton::advance(physics, skater)?;
-    skater.ground_lifecycle.skeleton_ground_16388 = true;
+    skater.skeleton_output.correction.pending = true;
     board::advance(physics, skater)
 }
 pub(crate) fn exit(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {

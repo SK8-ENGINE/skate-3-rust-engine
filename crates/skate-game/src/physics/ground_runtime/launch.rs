@@ -15,11 +15,14 @@ pub(crate) struct GroundLaunchInfo {
     pub skeleton_vector_16240: [f32; 4],
     pub board_position: [f32; 4],
     pub physical_center_of_mass: [f32; 4],
+    #[allow(dead_code)]
     pub vector_224: [f32; 4],
+    #[allow(dead_code)]
     pub vector_240: [f32; 4],
     pub cone_angle_x: f32,
     pub cone_angle_z: f32,
     pub time_step: f32,
+    #[allow(dead_code)]
     pub flag_269: bool,
     pub wall_jump: bool,
     pub flags_270: u16,

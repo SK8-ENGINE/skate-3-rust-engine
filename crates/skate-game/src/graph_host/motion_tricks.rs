@@ -169,7 +169,8 @@ pub fn execute(
         }
         Operation::Scoring(name) if phase == 1 => {
             // ISkaterMotionGraph236 ->8258FA20 stores both equal names and bit24.
-            host.score_packet.trick = Some(name);
+            host.score_packet.trick_names.first = Some(name);
+            host.score_packet.trick_names.second = Some(name);
             host.score_packet.flags |= 0x0100_0000;
         }
         Operation::MonitorUnderflip => {

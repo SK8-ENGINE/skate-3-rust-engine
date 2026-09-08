@@ -88,7 +88,8 @@ pub(super) fn inverse_rigid(f: Frame) -> Frame {
     crate::physics::skeleton_root::inverse_rigid(&f)
 }
 
-///82D7FEE0..FFCC Rodrigues columns, including original repeated X in W.
+///82D7FEE0..FFCC XYZ Rodrigues rotation, using the host's geometric W=0
+///representation rather than native permutation scratch lanes.
 pub(super) fn rotate(v: Vector, axis: Vector, angle: f32) -> Vector {
     let [x, y, z, _] = axis;
     let (s, c) = trigonometry::sin_cos(angle);
@@ -99,9 +100,9 @@ pub(super) fn rotate(v: Vector, axis: Vector, angle: f32) -> Vector {
     let yx = ty * x - sz;
     let zx = tz.mul_add(x, sy);
     let columns = [
-        [xx, tx.mul_add(y, sz), tx * z - sy, xx],
-        [yx, ty.mul_add(y, c), ty.mul_add(z, sx), yx],
-        [zx, tz * y - sx, tz.mul_add(z, c), zx],
+        [xx, tx.mul_add(y, sz), tx * z - sy, 0.],
+        [yx, ty.mul_add(y, c), ty.mul_add(z, sx), 0.],
+        [zx, tz * y - sx, tz.mul_add(z, c), 0.],
     ];
     transform_vector(v, [columns[0], columns[1], columns[2], ZERO])
 }

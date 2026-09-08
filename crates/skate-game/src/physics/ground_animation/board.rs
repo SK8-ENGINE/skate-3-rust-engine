@@ -46,6 +46,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     skater.ground_animation.jump = ground_jump::calculate(
         GroundJumpInput {
             flags_2468: p.flags_2468,
+            flags_2480: p.flags_2480,
             flags_2484: p.flags_2484,
             flags_2488: p.flags_2488,
             effective_forward: t.effective[2],
@@ -77,7 +78,18 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         //The native caller does not replace Fill's COM velocity144.
         let input = super::super::air_phase::selector_input(physics, skater)?;
         skater.trajectory.launch(info, input, &physics.world)?;
-        skater.trajectory.update(input, &physics.world)?;
+        let grind_context = super::super::air_trajectory::GrindContext::from_processed(
+            &skater.player_input.processed,
+            skater
+                .player_input
+                .toolkit
+                .as_ref()
+                .ok_or("Jump trajectory requires current board toolkit")?
+                .deck[3],
+        );
+        skater
+            .trajectory
+            .update(input, &physics.world, grind_context)?;
         //Launch82D678DC stores packet at1920;128 is selector2048. Update's
         //second pass may replace that retained launch velocity before this read.
         skater.ground_animation.launch_velocity = skater

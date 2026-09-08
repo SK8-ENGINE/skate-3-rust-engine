@@ -1,18 +1,30 @@
-//! SK8R15 owned/world/src/grind_spline.cpp and TU3 AssetRecord82C1E568.
+//! User-authorized ZIP spline adapter, checked against original TU3 82C1E568,
+//! 82C1E6C0, 82C1EEF0 and 82C1F098 in default.patched.xex (431b8eba...).
 //! Keep the native cubic payload; the game's contact primitive is its chord
 //! D -> (A+B)+(C+D), including for retail cubic segments.
 use skate_core::physics::grind_contact::Primitive;
 use skate_data::skate_map::{Rail, SkateMap};
 
+/// Native primitive side metadata; contact's endpoint/owner API stays unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PrimitiveMetadata {
+    /// Both authored header u64s, +0 and +8. The extractor names the latter
+    /// `type_signature`; preserve it verbatim, not the containing asset ID.
+    pub spline_guids: [u64; 2],
+    pub segment_index: u32,
+    /// 82C1E568 computed near-vertical high bit; newly allocated lower bits zero.
+    pub flags: u32,
+}
+
 pub(super) fn build(map: Option<&SkateMap>) -> Result<Vec<u8>, String> {
-    let defaults;
-    let rails = if let Some(map) = map { &map.rails } else {
-        defaults = super::rails().iter().map(|r| Rail {
-            name: r.name.into(), closed: false, native: None,
-            points: vec![[r.start.x,r.start.y,r.start.z], [r.end.x,r.end.y,r.end.z]],
-        }).collect();
-        &defaults
-    };
+    build_rails(map.map(|map| map.rails.as_slice()).unwrap_or(&[]))
+}
+
+pub(super) fn build_rails(rails: &[Rail]) -> Result<Vec<u8>, String> {
+    // TU3 82C1EEF0 reads the rail count with lhz +2, not a full 32-bit load.
+    if rails.len() > usize::from(u16::MAX) {
+        return Err("Pegasus spline table exceeds its uint16 rail count".into());
+    }
     let mut records = Vec::new();
     for rail in rails {
         let mut header = [0u32; 6];
@@ -41,8 +53,8 @@ pub(super) fn build(map: Option<&SkateMap>) -> Result<Vec<u8>, String> {
             header = [(id>>32) as u32,id as u32,0x2c701707,0x0007004a,0,0];
             let mut points = rail.points.clone();
             let first = points[0]; let last = *points.last().unwrap();
-            let distance: f32 = (0..3).map(|i| (first[i]-last[i]).powi(2)).sum();
-            if rail.closed && distance > 0.001*0.001 { points.push(first); }
+            // Closed authored polylines retain their final edge, even when short.
+            if rail.closed && first != last { points.push(first); }
             for pair in points.windows(2) {
                 let [start,end] = [pair[0],pair[1]];
                 let mut segment = [0u32;30];
@@ -63,12 +75,18 @@ pub(super) fn build(map: Option<&SkateMap>) -> Result<Vec<u8>, String> {
             if s[..28].iter().any(|w| !f32::from_bits(*w).is_finite()) {
                 return Err(format!("Non-finite spline data in {}",rail.name));
             }
+            if (0..3).any(|i| f32::from_bits(s[20+i]) > f32::from_bits(s[24+i])) {
+                return Err(format!("Inverted spline bounds in {}", rail.name));
+            }
         }
         records.push((header,segments));
     }
-    let count: usize = records.iter().map(|r| r.1.len()).sum();
+    let count = records.iter().try_fold(0usize, |count, r| count.checked_add(r.1.len()))
+        .ok_or("Spline segment count overflow")?;
     let base = 16+records.len()*32;
-    let mut bytes = vec![0; base+count*144];
+    let size = count.checked_mul(144).and_then(|size| size.checked_add(base))
+        .filter(|&size| u32::try_from(size).is_ok()).ok_or("Spline blob exceeds uint32 offsets")?;
+    let mut bytes = vec![0; size];
     put(&mut bytes,0,records.len() as u32); put(&mut bytes,4,count as u32);
     put(&mut bytes,8,16); put(&mut bytes,12,base as u32);
     let mut at = base;
@@ -91,8 +109,19 @@ pub(super) fn build(map: Option<&SkateMap>) -> Result<Vec<u8>, String> {
 
 pub(crate) fn primitives(map: Option<&SkateMap>) -> Result<Vec<Primitive>,String> {
     let bytes = build(map)?;
+    primitives_from_blob(&bytes)
+}
+
+// Only accepts a blob returned by build/build_rails; public package input is
+// validated there. Owner is a map-local header handle, not the repeating ID.
+pub(super) fn primitives_from_blob(bytes: &[u8]) -> Result<Vec<Primitive>,String> {
+    decoded_from_blob(bytes).map(|(primitives, _)| primitives)
+}
+
+pub(super) fn decoded_from_blob(bytes: &[u8]) -> Result<(Vec<Primitive>, Vec<PrimitiveMetadata>),String> {
     let word = |at| u32::from_be_bytes(bytes[at..at+4].try_into().unwrap());
     let mut result = Vec::new();
+    let mut metadata = Vec::new();
     let base = word(12) as usize;
     for i in 0..word(4) as usize {
         let s = base+i*144;
@@ -105,17 +134,22 @@ pub(crate) fn primitives(map: Option<&SkateMap>) -> Result<Vec<Primitive>,String
         if !length.is_finite() {
             return Err(format!("Spline segment {i} has a non-finite contact chord"));
         }
-        if length <= 0.000001 {
-            // Retail Downtown contains duplicate knots and sub-millimetre
-            // chords. They cannot provide a usable contact direction. Keep
-            // their cubic records and links in build(), but omit them from
-            // this adapter's independent contact-primitive array.
-            continue;
-        }
-        result.push(Primitive { start:d,end,owner:((word(r) as u64)<<32)|word(r+4) as u64 });
+        // Original 82C1E568 / 82C1F098 emit every segment. Do not drop tiny or
+        // duplicate knots here: downstream contact/selection owns admission.
+        let horizontal_tolerance = f32::from_bits(0x3780_0000);
+        let vertical = (end[0]-d[0]).abs() <= horizontal_tolerance
+            && (end[2]-d[2]).abs() <= horizontal_tolerance;
+        result.push(Primitive {
+            start: d, end,
+            owner: ((r-16)/32 + 1) as u64,
+        });
+        metadata.push(PrimitiveMetadata {
+            spline_guids: [((word(r) as u64)<<32)|word(r+4) as u64,
+                ((word(r+8) as u64)<<32)|word(r+12) as u64],
+            segment_index: ((s-word(r+20) as usize)/144) as u32,
+            flags: if vertical { 0x8000_0000 } else { 0 },
+        });
     }
-    bevy::log::info!("GRIND_RUNTIME splines={} primitives={} source={}",word(0),result.len(),
-        map.map(|m|m.name.as_str()).unwrap_or("default test world"));
-    Ok(result)
+    Ok((result, metadata))
 }
 fn put(bytes:&mut [u8],at:usize,w:u32) { bytes[at..at+4].copy_from_slice(&w.to_be_bytes()); }

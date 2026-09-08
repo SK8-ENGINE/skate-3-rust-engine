@@ -15,6 +15,25 @@ use skate_core::{
 
 pub(crate) const HEIGHT: f32 = -0.035;
 
+/// One authored terrain selection drives both presentation and live queries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Terrain {
+    Flat,
+    Course,
+}
+
+impl Terrain {
+    pub(crate) fn surfaces(self) -> [Vec<[Vector3; 4]>; 4] {
+        match self { Self::Flat => flat_surfaces(), Self::Course => surfaces() }
+    }
+    pub(crate) fn world(self, material: RetailContactMaterial) -> BoardWorld {
+        match self {
+            Self::Flat => flat_world(material),
+            Self::Course => world(material),
+        }
+    }
+}
+
 /// Authored level dimensions in metres; HEIGHT remains the starting surface.
 pub(crate) const FLOOR_HEIGHT: f32 = HEIGHT - 1.5;
 
@@ -122,20 +141,41 @@ pub(crate) fn surfaces() -> [Vec<[Vector3; 4]>; 4] {
 }
 
 pub(super) fn world(material: RetailContactMaterial) -> BoardWorld {
+    build_world(material, surfaces(), query_edges())
+}
+
+/// Deliberately authored flat-ground comparison surface. Both the solver and
+/// all gameplay probes query these real collision triangles.
+pub(crate) fn flat_surfaces() -> [Vec<[Vector3; 4]>; 4] {
+    let v = Vector3::new;
+    [
+        vec![[
+            v(-50.0, HEIGHT, -50.0),
+            v(50.0, HEIGHT, -50.0),
+            v(50.0, HEIGHT, 50.0),
+            v(-50.0, HEIGHT, 50.0),
+        ]],
+        vec![],
+        vec![],
+        vec![],
+    ]
+}
+pub(crate) fn flat_world(material: RetailContactMaterial) -> BoardWorld {
+    build_world(material, flat_surfaces(), Vec::new())
+}
+
+fn build_world(
+    material: RetailContactMaterial,
+    surfaces: [Vec<[Vector3; 4]>; 4],
+    edges: Vec<EdgeSegment>,
+) -> BoardWorld {
     let mut triangles = Vec::new();
     let rail_faces = crate::grind_world::surfaces();
-    for (tag, quads) in surfaces().into_iter().enumerate() {
+    for (tag, quads) in surfaces.into_iter().enumerate() {
         for vertices in quads {
             let rail_face = rail_faces.contains(&vertices);
             for (half, indices) in [[0, 2, 1], [0, 3, 2]].into_iter().enumerate() {
-                // Closed rectangular rails have convex perimeter edges. Keep
-                // the coplanar triangulation diagonal non-convex. Without
-                // these flags,82AD3130 rejects narrow-rail edge contacts.
-                let convex = if rail_face {
-                    if half == 0 { 0x60 } else { 0xc0 }
-                } else {
-                    0
-                };
+                let convex = if rail_face { if half == 0 { 0x60 } else { 0xc0 } } else { 0 };
                 triangles.push(WorldTriangle {
                     triangle: triangle_from_volume(
                         indices.map(|i| vertices[i]),
@@ -163,9 +203,12 @@ pub(super) fn world(material: RetailContactMaterial) -> BoardWorld {
             )
             .expect("Authored level contains collision triangles"),
             matching_group: -1,
+            // This authored static collision mesh accepts trajectory queries.
+            rejection_flags: 0,
+            geometry: 1,
             pool: QueryPool::Ground,
         }],
-        static_edges: query_edges(),
+        static_edges: edges,
         //No island or conditional meshes exist in the current static level.
         island_flags: 0,
     };
@@ -219,3 +262,7 @@ pub(super) fn query_settings() -> (WorldContactSettings, ContactRetentionSetting
         },
     )
 }
+
+#[cfg(test)]
+#[path = "tests/flat_ground.rs"]
+mod flat_tests;

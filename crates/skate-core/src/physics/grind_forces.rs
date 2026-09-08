@@ -1,10 +1,29 @@
 //! TU3 grind force leaves. Their inputs belong to the retained grind manager;
 //! contact admission and lifecycle are separate from these force calculations.
 use super::native_arithmetic::dot3;
-type V = [f32; 4];
+pub type V = [f32; 4];
+#[path = "grind_forces/slide.rs"]
+pub mod slide;
+#[path = "grind_forces/release.rs"]
+pub mod release;
+#[path = "grind_forces/noise.rs"]
+pub mod noise;
+#[path = "grind_forces/post.rs"]
+pub mod post;
+#[path = "grind_forces/launch.rs"]
+pub mod launch;
+#[path = "grind_forces/orientation.rs"]
+pub mod orientation;
+#[path = "grind_forces/support.rs"]
+pub mod support;
+#[path = "grind_forces/reckoning.rs"]
+pub mod reckoning;
+#[cfg(test)]
+#[path = "grind_forces/tests.rs"]
+mod tests;
 
 ///82D3FA18, called by the 50-50 update82D41D70 with800,0,.07.
-/// Returns a force at the deck origin; never moves the body to a spline.
+/// Returns a force at the deck origin; None means no accumulator call.
 pub fn lateral_pin(
     board: [V; 4],
     point: V,
@@ -15,7 +34,7 @@ pub fn lateral_pin(
     up_offset: f32,
     forward_selected: bool,
     slope_multiplier: f32,
-) -> V {
+) -> Option<V> {
     let direction = if forward_selected {
         board[2]
     } else {
@@ -25,16 +44,16 @@ pub fn lateral_pin(
         direction[i].mul_add(forward_offset, board[3][i]) - board[1][i] * up_offset
     });
     let force = scale(across, dot3(sub(point, reference), across) * strength);
-    let length = dot3(force, force).sqrt();
-    if length <= 0.0 {
-        return [0.0; 4];
+    let length = length(force);
+    if !(length > 0.0) {
+        return None;
     }
-    let axis = scale(force, length.recip());
+    let axis = scale(force, reciprocal(length));
     let damping = scale(
         axis,
         strength * f32::from_bits(0x3e08_3127) * dot3(velocity, axis),
     );
-    scale(sub(force, damping), slope_multiplier)
+    Some(scale(sub(force, damping), slope_multiplier))
 }
 
 ///82D3FD88 after its native surface/material selection. It damps velocity in
@@ -46,15 +65,15 @@ pub fn friction(
     time_multiplier: f32,
     flagged_surface: bool,
     surface_multiplier: f32,
-    engagement: u32,
+    geometry_kind: u32,
     strengths: [f32; 3],
 ) -> V {
     let tangent_velocity = sub(velocity, scale(grind_normal, dot3(velocity, grind_normal)));
-    let speed = dot3(tangent_velocity, tangent_velocity).sqrt();
+    let speed = length(tangent_velocity);
     if speed <= 0.001 {
         return [0.0; 4];
     }
-    let strength = strengths[match engagement {
+    let strength = strengths[match geometry_kind {
         0 => 0,
         1 => 1,
         _ => 2,
@@ -77,128 +96,44 @@ fn scale(a: V, scale: f32) -> V {
     a.map(|v| v * scale)
 }
 
-///Boardslide82D419A0, static rail branch (investigation kind!=2).
-///Returns the native point forces in order. Translation comes from the stock
-///PhysGrindTranslation animation attribute, not controller magnitude.
-pub fn boardslide_control(
-    position: V,
-    point: V,
-    direction: V,
-    normal: V,
-    velocity: V,
-    translation: f32,
-    total_mass: f32,
-    exiting: bool,
-    ledge: bool,
-) -> Vec<V> {
-    let across = cross(direction, normal);
-    let offset = dot3(sub(position, point), across);
-    let inward = scale(across, if offset > 0.0 { -1.0 } else { 1.0 });
-    if exiting {
-        return if offset.abs() > 0.12 {
-            vec![scale(inward, 201.0)]
-        } else {
-            Vec::new()
-        };
-    }
-    let perpendicular = sub(velocity, scale(direction, dot3(velocity, direction)));
-    if ledge {
-        return vec![scale(across, translation * 25.0)];
-    }
-    if offset.abs() > 0.16 {
-        let mut forces = vec![scale(inward, 10.0)];
-        if dot3(inward, perpendicular) < 0.0 {
-            let mut stop = scale(perpendicular, -(total_mass * 60.0));
-            stop[1] = 0.0;
-            forces.push(stop);
-        }
-        forces
-    } else {
-        let mut damping = scale(perpendicular, -20.0);
-        damping[1] = 0.0;
-        vec![scale(across, translation * 25.0), damping]
-    }
-}
-
-///82D73AB0 straight, static 50-50 branch: both support normals coincide,
-///primitive motion336 is zero. The manager age controls the native exit nudge.
-pub fn fifty_fifty_pop(
-    velocity: V,
-    normal: V,
-    direction: V,
-    board_position: V,
-    point: V,
-    height: f32,
-    nudge: f32,
-    manager_age: f32,
-) -> V {
-    let across = cross(direction, normal);
-    let balance = if manager_age < 0.31 {
-        if nudge < 0.0 {
-            nudge.min(-0.42)
-        } else if nudge > 0.0 {
-            nudge.max(0.42)
-        } else if dot3(sub(board_position, point), across) > 0.0 {
-            0.42
-        } else {
-            -0.42
-        }
-    } else {
-        nudge
-    };
-    let lateral = scale(across, balance * 1.8);
-    let length = dot3(lateral, lateral).sqrt();
-    let lateral = if length > 1.8 {
-        scale(lateral, 1.8 / length)
-    } else {
-        lateral
-    };
+///82D3FD88 skips the accumulator call at or below its planar-speed threshold.
+pub fn friction_applies(velocity: V, normal: V) -> bool {
     let planar = sub(velocity, scale(normal, dot3(velocity, normal)));
-    core::array::from_fn(|i| normal[i].mul_add(height * 1.03, planar[i]) + lateral[i])
-}
-fn cross(a: V, b: V) -> V {
-    [
-        (-a[2]).mul_add(b[1], a[1] * b[2]),
-        (-a[0]).mul_add(b[2], a[2] * b[0]),
-        (-a[1]).mul_add(b[0], a[0] * b[1]),
-        0.0,
-    ]
+    length(planar) > 0.001
 }
 
-/// Grind PreUpdate82D3F4E8 / exit decision82D40DA0. Counts are native
-/// simulation updates, not render frames. Once leaving, the phase is latched.
-#[derive(Default)]
-pub struct Release {
-    updates: u32,
-    leaving_updates: u32,
-    pub leaving: bool,
+fn length(v: V) -> f32 {
+    let square = dot3(v, v);
+    if square == 0.0 { return 0.0; }
+    square * super::board_motion_output::inverse_length_squared(square, 2)
 }
-impl Release {
-    pub fn begin_update(&mut self, speed: f32, explicit_exit: bool) {
-        self.leaving |= explicit_exit || (self.updates > 60 && speed < 0.15);
+
+fn reciprocal(value: f32) -> f32 {
+    let mut inverse = value.recip();
+    for _ in 0..2 {
+        let correction = (-inverse).mul_add(value, 1.0);
+        inverse = inverse.mul_add(correction, inverse);
     }
-    pub fn finish_update(&mut self) -> bool {
-        self.leaving_updates = if self.leaving { self.leaving_updates.wrapping_add(1) } else { 0 };
-        self.updates = self.updates.wrapping_add(1);
-        self.leaving_updates > 35
+    inverse
+}
+
+
+///82D3FD88's material switch. S3 adds material13 to S2's material2 case.
+pub fn material_multiplier(material: u32) -> f32 {
+    match material {
+        2 | 13 => 1.7,
+        3 => 2.6,
+        4 => 0.6,
+        5 => 4.0,
+        6 => 5.0,
+        _ => 1.3,
     }
 }
 
-///82D3F850: push away from the contacted edge until the native lateral
-///speed limit is reached. Ledge engagement may supply its outward direction.
-pub fn release_force(
-    position: V, point: V, direction: V, normal: V, velocity: V,
-    surface_kind: u32, surface_side: V, force_across: bool,
-    strength: f32, speed_limit: f32, lift: f32,
-) -> V {
-    let outward = if !force_across && surface_kind != 0 {
-        scale(surface_side, -1.0)
-    } else {
-        let across = cross(direction, normal);
-        scale(across, if dot3(across, sub(position, point)) > 0.0 { 1.0 } else { -1.0 })
-    };
-    if dot3(velocity, outward) >= speed_limit { return [0.0; 4]; }
-    let lateral = scale(outward, strength);
-    let upward = normal[1].max(0.0) * lift;
-    core::array::from_fn(|i| normal[i].mul_add(upward, lateral[i]))
+///82D3FA18: gravity relief bypasses the authored PinVsSlope four-point graph.
+pub fn pin_slope(
+    normal: V, upmost_normal: V, gravity_relief: f32,
+    pin_vs_slope: &crate::point_graph::PointGraph<4>,
+) -> f32 {
+    if gravity_relief > 0.0 { 1.0 } else { pin_vs_slope.evaluate(dot3(normal, upmost_normal)) }
 }

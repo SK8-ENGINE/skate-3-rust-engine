@@ -1,6 +1,4 @@
 //! Animation timing and event semantics recovered from Skate 3 TU3.
-pub mod bump;
-pub mod manual;
 pub mod clip_clock;
 pub mod commands;
 pub mod output;
@@ -30,7 +28,10 @@ pub mod ground_acceleration;
 pub mod foot_ik;
 pub mod vbr;
 pub mod kickturn;
+pub mod manual;
 
 pub mod intent_filter;
 
 pub mod posture;
+
+pub mod bump;

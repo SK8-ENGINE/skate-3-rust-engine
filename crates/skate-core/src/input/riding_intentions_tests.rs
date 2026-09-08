@@ -1,5 +1,23 @@
 use super::*;
 #[test]
+fn right_bumper_publishes_held_grab_world_without_actor_gate() {
+    for (previous, current, expected) in [
+        (0, 1 << 28, true),
+        (1 << 28, 1 << 28, true),
+        (1 << 28, 0, false),
+        (0, 1 << 29, false),
+    ] {
+        for actor_flags in [0, u32::MAX] {
+            let output = produce(&snapshot(previous, current, 0.5), actor_flags,
+                PushPreferences::default());
+            let values: Vec<_> = output.iter().filter(|i| i.name == "GrabWorld").collect();
+            assert_eq!(values.len(), usize::from(expected));
+            if expected { assert_eq!(values[0].value, 1.0); }
+        }
+    }
+}
+
+#[test]
 fn crouch_preserves_zero_presence_and_uses_maximum_trigger() {
     let mut words = [0u32; 26];
     words[8] = 1.0f32.to_bits();

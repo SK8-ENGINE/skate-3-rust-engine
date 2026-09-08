@@ -10,7 +10,9 @@ pub(crate) fn load(
 ) -> Result<Settings, String> {
     let skeleton = PhysicsSkeleton::load(
         &asset_root.join("private/stock/physics-skeletons.json"),
-        primary_bank_sha, "PHYS_TPOSE")?;
+        primary_bank_sha,
+        "PHYS_TPOSE",
+    )?;
     if skeleton.bones.len() != 24 {
         return Err("Wipeout requires the actual24 physical skeleton parts".into());
     }
@@ -20,14 +22,19 @@ pub(crate) fn load(
         let words = data.words::<9>("physics_skeleton_drives", "default", &name)?;
         bone[part] = std::array::from_fn(|i| f32::from_bits(words[i]));
     }
-    let roots = ["root_drive_start_scalar", "root_drive_scalar",
-        "root_drive_controlled_scalar", "root_drive_end_scalar"];
+    let roots = [
+        "root_drive_start_scalar",
+        "root_drive_scalar",
+        "root_drive_controlled_scalar",
+        "root_drive_end_scalar",
+    ];
     let mut root = [0.0; 4];
     for (i, name) in roots.into_iter().enumerate() {
         root[i] = data.float("physics_skeleton_drives", "default", name)?;
     }
     Ok(Settings {
-        bone, root,
+        bone,
+        root,
         strength: [
             data.float("animation", "default", "DriveStrengthLocal")?,
             data.float("animation", "default", "DriveStrengthRootLocal")?,

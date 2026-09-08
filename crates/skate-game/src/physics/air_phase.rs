@@ -1,16 +1,15 @@
 //! PhysicsAir200 production lifecycle82D34388/82D346C0/82D346A0.
 //! Uses the live player, board, skeleton and selector; no alternate air solver.
-mod input;
 mod board;
+mod input;
 mod skeleton;
-pub(crate) use input::AirSettings;
-pub(crate) use input::selector_input;
-pub(crate) use input::launch_info;
 use super::{GamePhysics, SkaterRuntime};
+pub(crate) use input::AirSettings;
+pub(crate) use input::launch_info;
+pub(crate) use input::selector_input;
 use skate_core::air::state::{
-    AirMath, AirTrajectory, PhysicsAirState, PhysicsAirMath,
-    angle_between_vectors, calculate_velocity_from_jump, integrate_trajectory_fixed_step,
-    wrap_signed_angle,
+    AirMath, AirTrajectory, PhysicsAirMath, PhysicsAirState, angle_between_vectors,
+    calculate_velocity_from_jump, integrate_trajectory_fixed_step, wrap_signed_angle,
 };
 
 ///Original initializer82F826B0/822F8B40. This COM trajectory acceleration is
@@ -21,10 +20,16 @@ pub(super) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
     let frame = input::frame(skater);
     let life = &mut skater.ground_lifecycle;
     life.skeleton_controller.flag_18 = true;
-    life.skeleton_controller.request(7, &mut skater.skeleton_collision)?;
+    life.skeleton_controller
+        .request(7, &mut skater.skeleton_collision)?;
     skater.foot_ik.enable_feet(true);
-    life.skeleton_controller.request(6, &mut skater.skeleton_collision)?;
-    physics.board.hook_mut().drive.enable_angular_only(&mut life.board_animated_290);
+    life.skeleton_controller
+        .request(6, &mut skater.skeleton_collision)?;
+    physics
+        .board
+        .hook_mut()
+        .drive
+        .enable_angular_only(&mut life.board_animated_290);
     skater.footplant.enabled = false;
     skater.footplant.reset();
     let state = &mut skater.air_state;
@@ -36,7 +41,8 @@ pub(super) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
     state.max_y = physics.board.part_transforms()[6].translation.y;
     state.start_y = frame.ground_position_y_500;
     let (use_com, heading) = if frame.previous_physics_category_2516 == 400
-        || frame.previous_physics_state_2504 == 701 {
+        || frame.previous_physics_state_2504 == 701
+    {
         (frame.flags_2468 & 0x4000 == 0, false)
     } else {
         let selected = !matches!(frame.previous_physics_state_2504, 100 | 103 | 201);
@@ -49,14 +55,22 @@ pub(super) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
             velocity[1] = AirMath.minimum_vminfp(velocity[1] * f32::from_bits(0x3f26_6666), 3.0);
         }
         if frame.frames_since_jump_correction_2576 < 12 {
-            velocity = calculate_velocity_from_jump(&frame, frame.frames_since_jump_correction_2576, &mut AirMath);
+            velocity = calculate_velocity_from_jump(
+                &frame,
+                frame.frames_since_jump_correction_2576,
+                &mut AirMath,
+            );
         }
         state.centre_of_mass_trajectory = AirTrajectory {
-            position: frame.trajectory_position_592, velocity,
-            acceleration: COM_ACCELERATION, scalar_48: -1.0,
+            position: frame.trajectory_position_592,
+            velocity,
+            acceleration: COM_ACCELERATION,
+            scalar_48: -1.0,
         };
     }
-    if heading { skater.animated_skeleton.roots.initialize_heading = true; }
+    if heading {
+        skater.animated_skeleton.roots.initialize_heading = true;
+    }
     Ok(())
 }
 
@@ -69,20 +83,30 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     let frame = input::frame(skater);
     skater.ground_lifecycle.skeleton_controller.update_air(
         skater.player_input.processed.flags_2472,
-        frame.current_velocity_400[1], &mut skater.skeleton_collision,
+        frame.current_velocity_400[1],
+        &mut skater.skeleton_collision,
     )?;
     let state = &mut skater.air_state;
     state.trajectory_query_countdown = state.trajectory_query_countdown.wrapping_sub(1);
-    if state.trajectory_query_countdown <= 0 && frame.flags_2468 & 0x8000 == 0
-        && frame.previous_physics_state_2504 != 0 && !skater.trajectory.selector.pending() {
+    if state.trajectory_query_countdown <= 0
+        && frame.flags_2468 & 0x8000 == 0
+        && frame.previous_physics_state_2504 != 0
+        && !skater.trajectory.selector.pending()
+    {
         let mut info = input::launch_info(physics, skater)?;
         if frame.frames_since_jump_correction_2576 < 12 {
-            info.start_velocity = calculate_velocity_from_jump(&frame, frame.frames_since_jump_correction_2576, &mut AirMath);
+            info.start_velocity = calculate_velocity_from_jump(
+                &frame,
+                frame.frames_since_jump_correction_2576,
+                &mut AirMath,
+            );
         } else if skater.air_state.use_centre_of_mass_velocity {
             //COM helper82D34570 repeats Fill, then offsets start/board and
             //narrows the cone. Caller clears player_jumped again before Launch.
             let velocity = skater.air_state.centre_of_mass_trajectory.velocity;
-            info.start_velocity = std::array::from_fn(|i| COM_ACCELERATION[i].mul_add(f32::from_bits(0x3c88_8889), velocity[i]));
+            info.start_velocity = std::array::from_fn(|i| {
+                COM_ACCELERATION[i].mul_add(f32::from_bits(0x3c88_8889), velocity[i])
+            });
             info.start_position_override = info.animation_com_position;
             info.start_position_override[1] += f32::from_bits(0xbf26_6666);
             info.board_position_override = info.animation_com_position;
@@ -98,15 +122,37 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         skater.air_state.trajectory_query_countdown = 7;
     }
     let input = input::selector_input(physics, skater)?;
-    skater.trajectory.update(input, &physics.world)?;
-    let current = skater.air_reckoning.fields(&physics.riding).current_landing_normal_1152;
-    let normal = skater.trajectory.selector.suggested_normal().unwrap_or(current);
+    let grind_context = super::air_trajectory::GrindContext::from_processed(
+        &skater.player_input.processed,
+        skater
+            .player_input
+            .toolkit
+            .as_ref()
+            .ok_or("Air trajectory requires current board toolkit")?
+            .deck[3],
+    );
+    skater
+        .trajectory
+        .update(input, &physics.world, grind_context)?;
+    let current = skater
+        .air_reckoning
+        .fields(&physics.riding)
+        .current_landing_normal_1152;
+    let normal = skater
+        .trajectory
+        .selector
+        .suggested_normal()
+        .unwrap_or(current);
     let state = &mut skater.air_state;
     state.landing_normal = normal;
     let settings = &skater.air_settings.state;
-    let mut blend = if wrap_signed_angle(angle_between_vectors(normal, current)) <= settings.landing_normal_angle_limit_444 {
+    let mut blend = if wrap_signed_angle(angle_between_vectors(normal, current))
+        <= settings.landing_normal_angle_limit_444
+    {
         settings.landing_normal_blend_388
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     if !state.use_centre_of_mass_velocity {
         if !state.selector_latch_174 {
             state.selector_latch_174 = skater.trajectory.selector.all_predictions_missed();
@@ -114,28 +160,50 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         if state.selector_latch_174 {
             state.use_centre_of_mass_velocity = true;
             state.centre_of_mass_trajectory = AirTrajectory {
-                position: frame.trajectory_position_592, velocity: frame.trajectory_velocity_608,
-                acceleration: COM_ACCELERATION, scalar_48: -1.0,
+                position: frame.trajectory_position_592,
+                velocity: frame.trajectory_velocity_608,
+                acceleration: COM_ACCELERATION,
+                scalar_48: -1.0,
             };
         }
     }
-    if frame.state_timer_2664 <= 0.0 { blend = 0.0; }
-    else if frame.flags_2468 & 0x4000 != 0 { state.use_centre_of_mass_velocity = false; }
-    let spin = (frame.body_spin_input_2640 * settings.body_spin_scale_428) * f32::from_bits(0x3c8e_fa35);
-    let target_spin = settings.body_spin_over_time_320.evaluate(state.time_in_state * 2.0) * spin;
+    if frame.state_timer_2664 <= 0.0 {
+        blend = 0.0;
+    } else if frame.flags_2468 & 0x4000 != 0 {
+        state.use_centre_of_mass_velocity = false;
+    }
+    let spin =
+        (frame.body_spin_input_2640 * settings.body_spin_scale_428) * f32::from_bits(0x3c8e_fa35);
+    let target_spin = settings
+        .body_spin_over_time_320
+        .evaluate(state.time_in_state * 2.0)
+        * spin;
     skater.air_reckoning.update(
-        &mut physics.riding, &skater.player_input.processed,
-        skater.animation_input.extra.physical_body_spin, normal, blend, target_spin, 0.0,
+        &mut physics.riding,
+        &skater.player_input.processed,
+        skater.animation_input.extra.physical_body_spin,
+        normal,
+        blend,
+        target_spin,
+        0.0,
     )?;
     if skater.air_state.use_centre_of_mass_velocity {
         integrate_trajectory_fixed_step(&mut skater.air_state.centre_of_mass_trajectory);
-        skeleton::advance(physics, skater, Some(skater.air_state.centre_of_mass_trajectory.position))?;
-    } else { skeleton::advance(physics, skater, None)?; }
+        skeleton::advance(
+            physics,
+            skater,
+            Some(skater.air_state.centre_of_mass_trajectory.position),
+        )?;
+    } else {
+        skeleton::advance(physics, skater, None)?;
+    }
     board::advance(physics, skater, frame)?;
-    skater.ground_lifecycle.skeleton_ground_16388 = true;
+    skater.skeleton_output.correction.pending = true;
     let height = physics.board.part_transforms()[6].translation.y;
     let state = &mut skater.air_state;
-    if !(state.max_y > height) { state.max_y = height; }
+    if !(state.max_y > height) {
+        state.max_y = height;
+    }
     state.time_in_state += frame.delta_time_2604;
     Ok(())
 }

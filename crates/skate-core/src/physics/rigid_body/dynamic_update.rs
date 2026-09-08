@@ -60,6 +60,8 @@ pub fn dynamic_update_packed(
     // rather than recalculating squared speed from the rounded scaled vector.
     let factor = f32::from_bits(inertia[5]) * f32::from_bits(body[31]);
     let energy = factor.mul_add(angular_squared, linear_squared);
+    // S3 82AE6974 / S2 82AE487C: bge tests LT clear, including unordered.
+    // Do not replace this with >=; the host predicate below is intentional.
     body[43] = if !(energy < simulation.minimum_energy) {
         0
     } else {
@@ -85,7 +87,7 @@ pub fn dynamic_update_packed(
 }
 
 pub(super) fn orientation(q: V, rotation: V) -> V {
-    // 82AE6680..67B8: preserve the native cross-product and normalization order.
+    // S3 82AE6668..66C8 / S2 82AE455C..45C8: cross product then normalization.
     let cross = perm(
         nmsub(
             perm(rotation, [1, 2, 0, 3]),
@@ -135,6 +137,8 @@ pub(super) fn inverse_inertia(basis: [V; 3], tensor: [u32; 3]) -> (V, V) {
 fn cap(value: V, maximum: f32) -> (V, f32) {
     let squared = dot(value, value, false);
     let maximum_squared = maximum * maximum;
+    // S3 82AE6888/68FC and S2 82AE478C/4804 skip on GT clear (ble),
+    // including unordered. Thus ordered >, not !(<=), enters the cap path.
     if squared > maximum_squared {
         let ratio = maximum_squared / squared;
         let root = ratio * refined_rsqrt(ratio);

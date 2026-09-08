@@ -38,10 +38,7 @@ impl Group {
             Self::NoseN90 => &NOSE_N90,
             Self::TailN90 => &TAIL_N90,
         };
-        COMMON
-            .iter()
-            .chain(additional)
-            .any(|name| has(name))
+        COMMON.iter().chain(additional).any(|name| has(name))
     }
 }
 

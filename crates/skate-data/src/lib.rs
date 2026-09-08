@@ -11,6 +11,7 @@ pub mod scoring;
 mod scoring_fields;
 pub mod attrib_hash;
 pub mod input_config;
+pub mod input_recording;
 pub mod gesture_patterns;
 pub mod physics_skeleton;
 mod sha256;

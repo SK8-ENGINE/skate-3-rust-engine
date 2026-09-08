@@ -65,6 +65,7 @@ fn world(height: f32, width: f32, depth: f32, ceiling: bool, top: bool) -> Board
             static_edges: vec![],
             island_flags: 0,
             meshes: vec![QueryMesh {
+                geometry: 1, rejection_flags: 0,
                 triangle_range: 0..count,
                 pool: QueryPool::Ground,
                 matching_group: 0,

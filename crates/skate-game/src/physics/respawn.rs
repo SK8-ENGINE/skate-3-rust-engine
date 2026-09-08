@@ -7,11 +7,11 @@ use skate_core::{
         skeleton_animation_record::AnimationPartTransform as Matrix,
     },
     player::{
-        offboard::contact_queries::Probe,
         respawn::{Candidate, Ground, History, Observation, Validation, surface_allowed},
     },
 };
 use skate_data::collections::Collections;
+use super::offboard::contact_queries::Probe;
 
 pub(super) struct Runtime {
     history: History,
@@ -103,8 +103,8 @@ pub(super) fn observe(physics: &GamePhysics, skater: &mut SkaterRuntime) -> Resu
         teleport_requested: physical.state.flag_69 != 0,
         physical_state: physical.state.state_16,
         state_frames: skater.player_state.state_count,
-        ground_suppressed: physics.grind.checkpoint_suppressed,
-        offboard_correction: skater.offboard.controller.state.contact.active,
+        ground_suppressed: processed.grind.flags_1516 & 0x0800_0000 != 0,
+        offboard_correction: skater.biped_ground.controller.state.contact.active,
         ground_category: super::ground_runtime::active_surface(&physics.riding, &physics.board)
             & 0xffff,
         //82DB6EC0 publishes the same processed foot record to both fields.
@@ -161,8 +161,6 @@ impl Validation for Scene<'_> {
             start,
             end,
             radius,
-            id: 0,
-            reverse_id: None,
         };
         //The only actor has matching identity0; canonical map groups remain active.
         let Some(hit) = contact_queries::query(self.world, probe(start, end, 0.), 0)? else {

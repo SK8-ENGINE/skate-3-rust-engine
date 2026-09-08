@@ -1,5 +1,9 @@
-//! Imported grab, tweak scoring and moving-object registration operations.
-//! Existing native grind, manual, landing and offboard owners take precedence.
+//! Typed bindings for the remaining stock MotionGraph gameplay operations.
+//!
+//! These operations are deliberately represented as authored gameplay nodes,
+//! not compatibility no-ops. Their producers are completed incrementally and
+//! execution fails with the exact authored operation until that producer is
+//! published by the corresponding physics owner.
 use skate_data::state_graph::attributes::Attributes;
 use skate_core::animation::output::attributes::AttributeName;
 use skate_core::animation::skeleton_input::name::encode;
@@ -112,29 +116,89 @@ fn djb2(value: &str) -> u32 {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
+    MatchAirTime,
+    UpdateStandingOnCar,
     InitMovingObjects { path: String },
     MovingObject { path: String },
+    CreateGrindAttributes,
+    ControlGrindCrouch,
+    GrindControlFade,
     SetGrabType { grab: String },
+    JumpInto { attribute: AttributeName },
+    ScoringHandPlants,
+    SetHandPlantAnticLength,
     ScoringGrabs {
         grab_name: String,
-        up: Option<String>, left: Option<String>, down: Option<String>, right: Option<String>,
-        intent_x: String, intent_y: String,
-        invert_y: bool, polar: bool,
+        up: Option<String>,
+        left: Option<String>,
+        down: Option<String>,
+        right: Option<String>,
+        intent_x: String,
+        intent_y: String,
+        invert_y: bool,
+        polar: bool,
     },
+    AirDismounting,
     TweakProject {
-        intent_x: String, intent_y: String,
-        attribute_x: AttributeName, attribute_y: AttributeName,
+        intent_x: String,
+        intent_y: String,
+        attribute_x: AttributeName,
+        attribute_y: AttributeName,
     },
+    FootPlantAbsorb,
+    FingerFlipOut,
+    EnterSkitchingBehaviour,
+    SkitchingBehaviour,
+    SkitchShimmyingBehaviour,
+    SetManualAngle { attribute: AttributeName },
+    HippyJumpAntic,
+    LandOnBoard,
 }
+
 impl Operation {
     pub fn recognizes(name: &str) -> bool {
-        matches!(name, "InitMovingObjects" | "MovingObject" | "SetGrabType" | "ScoringGrabs" | "TweakProject")
+        matches!(
+            name,
+            "MatchAirTime"
+                | "UpdateStandingOnCar"
+                | "InitMovingObjects"
+                | "MovingObject"
+                | "CreateGrindAttributes"
+                | "ControlGrindCrouch"
+                | "GrindControlFade"
+                | "SetGrabType"
+                | "JumpInto" | "ScoringHandPlants" | "SetHandPlantAnticLength"
+                | "ScoringGrabs" | "AirDismounting" | "TweakProject"
+                | "FootPlantAbsorb" | "FingerFlipOut" | "EnterSkitchingBehaviour"
+                | "SkitchingBehaviour" | "SkitchShimmyingBehaviour"
+                | "SetManualAngle" | "HippyJumpAntic"
+                | "LandOnBoard"
+        )
     }
+
     pub fn parse(a: &Attributes<'_>) -> Self {
         match a.text("name").unwrap_or("") {
-            "InitMovingObjects" => Self::InitMovingObjects { path: authored_path(a) },
-            "MovingObject" => Self::MovingObject { path: authored_path(a) },
+            "MatchAirTime" => Self::MatchAirTime,
+            "UpdateStandingOnCar" => Self::UpdateStandingOnCar,
+            "InitMovingObjects" => Self::InitMovingObjects {
+                path: authored_path(a),
+            },
+            "MovingObject" => Self::MovingObject {
+                path: authored_path(a),
+            },
+            "CreateGrindAttributes" => Self::CreateGrindAttributes,
+            "ControlGrindCrouch" => Self::ControlGrindCrouch,
+            "GrindControlFade" => Self::GrindControlFade,
             "SetGrabType" => Self::SetGrabType { grab: a.text("grab").unwrap_or("").to_owned() },
+            "JumpInto" => Self::JumpInto {
+                attribute: encode(
+                    a.text("attribute")
+                        .or_else(|| a.text("attr"))
+                        .unwrap_or("JumpInto")
+                        .as_bytes(),
+                ),
+            }, "ScoringHandPlants" => Self::ScoringHandPlants,
+            "SetHandPlantAnticLength" => Self::SetHandPlantAnticLength,
             "ScoringGrabs" => Self::ScoringGrabs {
                 grab_name: required_text(a, "grabName"),
                 up: a.text("up").map(str::to_owned),
@@ -145,11 +209,23 @@ impl Operation {
                 intent_y: a.text("intentY").or_else(|| a.text("magnitude")).unwrap_or("").to_owned(),
                 invert_y: a.boolean_byte("invertY", 0) != 0,
                 polar: a.text("intentX").is_none(),
-            },
+            }, "AirDismounting" => Self::AirDismounting,
             "TweakProject" => Self::TweakProject {
-                intent_x: "TweakX".to_owned(), intent_y: "TweakY".to_owned(),
-                attribute_x: encode(b"tweak_x"), attribute_y: encode(b"tweak_y"),
+                // TU3 factory 82BC9510 binds these names directly.
+                intent_x: "TweakX".to_owned(),
+                intent_y: "TweakY".to_owned(),
+                attribute_x: encode(b"tweak_x"),
+                attribute_y: encode(b"tweak_y"),
+            }, "FootPlantAbsorb" => Self::FootPlantAbsorb,
+            "FingerFlipOut" => Self::FingerFlipOut,
+            "EnterSkitchingBehaviour" => Self::EnterSkitchingBehaviour,
+            "SkitchingBehaviour" => Self::SkitchingBehaviour,
+            "SkitchShimmyingBehaviour" => Self::SkitchShimmyingBehaviour,
+            "SetManualAngle" => Self::SetManualAngle {
+                // Factory82BC9678/84 uses literal8231D5C8, no authored override.
+                attribute: encode(b"manual_angle"),
             },
+            "HippyJumpAntic" => Self::HippyJumpAntic, "LandOnBoard" => Self::LandOnBoard,
             _ => unreachable!("unrecognized stock gameplay operation"),
         }
     }

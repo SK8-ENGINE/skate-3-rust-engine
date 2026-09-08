@@ -23,10 +23,15 @@ pub struct GroundJumpSettings {
     pub adjust_z_factor: f32,                   //432
     pub adjust_x_factor: f32,                   //436
     pub absolute_minimum_height: f32,           //456, metres
+    /// physics_jump.HippyJumpMinHeight/MaxHeight. These are separate from
+    /// the ordinary jump-mode bounds in the stock data.
+    pub hippy_minimum_height: f32,
+    pub hippy_maximum_height: f32,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct GroundJumpInput {
     pub flags_2468: u32,
+    pub flags_2480: u32,
     pub flags_2484: u32,
     pub flags_2488: u32,
     pub effective_forward: [f32; 4],         //Processed160

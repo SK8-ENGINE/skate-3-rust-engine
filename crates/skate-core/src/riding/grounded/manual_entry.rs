@@ -1,5 +1,6 @@
 //! Ground's manual entry slice82D376F4..7750 and velocity helper82D37960.
-//! The complete Ground Enter function and native projection are not supplied.
+//! Original-image bytes confirm the complete entry-helper branch/write order.
+//! The game adapter supplies live board bodies and the shared dot calculation.
 use crate::physics::manual::state::{ManualEntryContinuation, ManualState};
 
 #[derive(Clone, Copy, Debug)]
@@ -24,12 +25,12 @@ pub trait ManualGroundBodies {
     fn set_linear_velocity(&mut self, part: usize, velocity: [f32; 4]);
 }
 
-/// Required numerical dependency with no production or fallback implementation.
+/// Three-component projection supplied by the host's shared numerical adapter.
 pub trait ManualGroundProjection {
     type Error;
     /// Native three-component projection at82D3799C (and six repeated sites).
-    /// W does not contribute. Preserve native accumulation/rounding when this
-    /// operation is recovered; generic host dot arithmetic is not a substitute.
+    /// W does not contribute. Independent hardware numerical parity of the
+    /// shared dot implementation is separate from this helper's control flow.
     fn normal_speed(
         &mut self,
         ground_normal: [f32; 4],

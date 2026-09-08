@@ -21,27 +21,21 @@ pub(super) fn advance(
         skater.animated_skeleton.board_frames.com_frame,
         skater.animated_skeleton.board_frames.lifted_com_frame,
         skater.animated_skeleton.roots.animation_to_world,
-        skater.offboard.controller.output().position,
-        skater.offboard.controller.state.surface,
+        skater.biped_ground.controller.state.position_368,
+        skater.biped_ground.controller.state.surface,
     ))?;
-    let board_volumes = if skater.offboard.board_policy.volumes_enabled {
-        colliders::world_volumes(&physics.board, &physics.settings)
-    } else {
-        Vec::new()
-    };
+    let mut board_volumes = colliders::world_volumes(&physics.board, &physics.settings);
+    board_volumes.retain(|volume| skater.board_possession_live.volume_enabled(volume.body));
     let skeleton_volumes =
         skeleton_colliders::enabled_volumes(&skater.skeleton, &skater.skeleton_collision)?;
     // Each native assembly has its own query record and retention buffer.
     // Skeleton82BE5094 passes false to82768728: its edge threshold is -1,
     // whereas the board requests .999. GroundPipeline supplies the remaining
     // shared values. Do not let the second query overwrite the first's rows.
-    let board_timer = crate::performance::Scope::new("board_world_contacts");
     let mut contacts = physics
         .world
         .query_primitives(&board_volumes, physics.query, physics.retention)
         .to_vec();
-    drop(board_timer);
-    let skeleton_timer = crate::performance::Scope::new("skeleton_world_contacts");
     let mut skeleton_query = physics.query;
     skeleton_query.edge_cos_bend_normal_threshold = -1.0;
     let mut skeleton_world_volumes = skeleton_volumes.clone();
@@ -51,7 +45,6 @@ pub(super) fn advance(
         skeleton_query,
         physics.retention,
     ));
-    drop(skeleton_timer);
     assembly_contacts::append(
         &mut contacts,
         &board_volumes,
@@ -85,15 +78,15 @@ pub(super) fn advance(
         dt,
     );
     let skeleton_drive_count = drives.rows.len();
-    if skater.skateboard_controller.fields.system_on_452 {
-        super::offboard::hand_drives::append(
-            &mut drives.rows,
-            &skater.offboard.possession,
-            physics.board.bodies(),
-            skater.skeleton.bodies(),
-            dt,
-        );
-    }
+    //82D74FD8: persistent hand drives share the deck and skeleton reactions.
+    skater.board_possession.append_drives(
+        physics.board.bodies()[BodyId::Deck.index()],
+        [skater.skeleton.bodies()[3], skater.skeleton.bodies()[7]],
+        BodyId::Deck.index(),
+        [ATTACHED_REACTION_BASE + 3, ATTACHED_REACTION_BASE + 7],
+        dt,
+        &mut drives.rows,
+    );
     let bodies = skater
         .skeleton
         .bodies_mut()
@@ -122,8 +115,8 @@ pub(super) fn advance(
         .publish_physical_record(deck_frame(&physics.board));
     // These solved rows are consumed by the actual collision/drive feedback
     // phase; keep their identity and impulses after the shared solve.
-    //Controller drive descriptors have flags28=0: they are not Skeleton's
-    //spy drives and must not be paired with SkeletonDriveIdentity feedback.
+    // Possession drives have no skeleton spy identity. They participate in the
+    // same solve above, but must not enter the skeleton-only feedback batch.
     drives.rows.truncate(skeleton_drive_count);
     skater.solved_drives = Some(drives);
     Ok(())

@@ -61,7 +61,11 @@ impl GroundState {
         toolkit: &BoardToolkit,
         targets: GroundEntryTargets<'_>,
     ) -> Result<(), String> {
-        restore_standard_board_fields(board, targets.board_flags_8384, self.entry_settings.deck_angular_drag);
+        restore_standard_board_fields(
+            board,
+            targets.board_flags_8384,
+            self.entry_settings.deck_angular_drag,
+        );
         targets.foot_ik.enable_feet(true);
         *targets.skeleton_elapsed_16505 = false;
         (targets.set_skeleton_collision_state)(6)?;
@@ -128,6 +132,19 @@ impl GroundState {
         Ok(())
     }
 }
+/// Board-owned portion of SetStandard82C03AF8. 82C090D4/90EC write
+/// assembly/part COLLISION groups, not rigid-body activation flags. Material
+/// bindings and volume enables still require the live settings/volume owner.
+fn restore_standard_board_fields(board: &mut BoardRuntime, flags: &mut u8, drag: f32) {
+    *flags &= 0x7f;
+    board.bodies_mut()[6].inertia.angular_drag = drag;
+    board.set_collision_group(4);
+}
+
+#[cfg(test)]
+#[path = "entry_restoration_tests.rs"]
+mod restoration_tests;
+
 struct ManualBodies<'a>(&'a mut BoardRuntime);
 impl ManualGroundBodies for ManualBodies<'_> {
     fn linear_velocity(&mut self, part: usize) -> [f32; 4] {
@@ -145,13 +162,3 @@ impl ManualGroundProjection for Projection {
         Ok(dot_product(n, v))
     }
 }
-
-// SetStandard restores collision groups; activation flags belong to body state.
-fn restore_standard_board_fields(board: &mut BoardRuntime, flags: &mut u8, drag: f32) {
-    *flags &= 0x7f;
-    board.bodies_mut()[6].inertia.angular_drag = drag;
-    board.set_collision_group(4);
-}
-#[cfg(test)]
-#[path = "entry_restoration_tests.rs"]
-mod restoration_tests;

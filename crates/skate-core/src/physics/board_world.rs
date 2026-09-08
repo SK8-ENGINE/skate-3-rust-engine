@@ -2,9 +2,11 @@
 //! Rust owns geometry storage and traversal. Recovered query8277B720,
 //! triangle fixup82AD3130, material combine82763078 and contact retention
 //! determine the physical result, in world-triangle then moving-volume order.
-pub mod query_metadata;
+mod broadphase;
 mod query_index;
+pub mod query_metadata;
 use crate::math::Vector3;
+use broadphase::{conservative_bounds, primitive_bounds};
 use query_metadata::{Bounds, QueryMetadata};
 
 use super::{
@@ -106,26 +108,51 @@ pub struct BoardWorld {
     triangle_bounds: Vec<Bounds>,
     query_metadata: Option<QueryMetadata>,
     query_index: query_index::QueryIndex,
+    maximum_fatness: f32,
+    maximum_triangle_margin: f32,
     contacts: Vec<BoardCollision>,
     buffer: ContactBuffer,
-    maximum_fatness: f32,
 }
 
 impl BoardWorld {
     pub fn new(triangles: Vec<WorldTriangle>) -> Self {
-        let triangle_bounds = triangles.iter().map(|t| Bounds::from_points(t.triangle.vertices)
-            .unwrap_or(Bounds { min: Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY),
-                max: Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY) })).collect();
+        let triangle_bounds: Vec<_> = triangles
+            .iter()
+            .map(|t| {
+                Bounds::from_points(t.triangle.vertices).unwrap_or(Bounds {
+                    min: Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY),
+                    max: Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY),
+                })
+            })
+            .collect();
         let maximum_fatness = triangles
             .iter()
-            .map(|t| t.triangle.fatness)
+            .map(|t| {
+                if t.triangle.fatness.is_finite() && t.triangle.fatness >= 0. {
+                    t.triangle.fatness
+                } else {
+                    f32::INFINITY
+                }
+            })
+            .fold(0., f32::max);
+        // The current thin-triangle leaf accepts barycentric weights down to
+        // -epsilon. Two negative weights can extend an axis by 2*epsilon*span.
+        let maximum_triangle_margin = triangle_bounds
+            .iter()
+            .map(|b| {
+                let span = (b.max.x - b.min.x)
+                    .max(b.max.y - b.min.y)
+                    .max(b.max.z - b.min.z);
+                span * (2. * broadphase::THIN_MARGIN)
+            })
             .fold(0., f32::max);
         Self {
-            maximum_fatness,
             triangles,
             triangle_bounds,
             query_metadata: None,
             query_index: query_index::QueryIndex::default(),
+            maximum_fatness,
+            maximum_triangle_margin,
             contacts: Vec::new(),
             buffer: ContactBuffer {
                 count: 0,
@@ -160,44 +187,6 @@ impl BoardWorld {
 
     pub fn triangles(&self) -> &[WorldTriangle] {
         &self.triangles
-    }
-
-    /// Conservative cluster culling, retaining canonical traversal order and
-    /// every triangle in intersecting clusters. Narrow-phase remains unchanged.
-    pub fn candidate_ranges(&self, bounds: Option<Bounds>) -> Vec<std::ops::Range<usize>> {
-        let (Some(metadata), Some(bounds)) = (&self.query_metadata, bounds) else {
-            return vec![0..self.triangles.len()];
-        };
-        let scale = [
-            bounds.min.x,
-            bounds.min.y,
-            bounds.min.z,
-            bounds.max.x,
-            bounds.max.y,
-            bounds.max.z,
-        ]
-        .into_iter()
-        .map(f32::abs)
-        .fold(1., f32::max);
-        let bounds = bounds.expanded(self.maximum_fatness + scale * (8. * f32::EPSILON));
-        self.query_index.query(bounds, &metadata.meshes)
-            .into_iter()
-            .map(|i| metadata.meshes[i].triangle_range.clone())
-            .collect()
-    }
-
-    pub fn line_candidates(
-        &self,
-        start: Vector3,
-        end: Vector3,
-        radius: f32,
-    ) -> impl Iterator<Item = (usize, &WorldTriangle)> {
-        let bounds = Bounds::from_points([start, end]).map(|b| conservative_bounds(b, radius + self.maximum_fatness));
-        self.candidate_ranges(bounds)
-            .into_iter()
-            .flatten()
-            .filter(move |&i| self.query_metadata.is_none() || bounds.is_none_or(|b| self.triangle_bounds[i].overlaps(b)))
-            .map(|i| (i, &self.triangles[i]))
     }
 
     /// Board wheel segments use zero query radius; rounded world triangles
@@ -280,7 +269,7 @@ impl BoardWorld {
 
     /// World-space shapes come from the live part poses and authored children.
     /// Cluster bounds include shape radii and the maximum predictive padding.
-    /// Candidate pairs retain source query order.
+    /// Candidate pairs retain world-triangle then moving-volume order.
     pub fn query_primitives(
         &mut self,
         volumes: &[BoardWorldVolume],
@@ -295,10 +284,18 @@ impl BoardWorld {
         self.buffer.capacity = retention.capacity;
         self.buffer.distance_squared_threshold = retention.duplicate_distance_squared;
         self.buffer.deferred_reduction = u8::from(retention.deferred_reduction);
-        let padding = query.volume_padding.max(0.) + query.maximum_separating_distance.max(0.);
+        let padding =
+            if query.volume_padding.is_finite() && query.maximum_separating_distance.is_finite() {
+                query.volume_padding.max(0.) + query.maximum_separating_distance.max(0.)
+            } else {
+                f32::INFINITY
+            };
         let volume_bounds: Vec<_> = volumes
             .iter()
-            .map(|v| primitive_bounds(v.primitive).map(|b| conservative_bounds(b, padding + self.maximum_fatness)))
+            .map(|v| {
+                primitive_bounds(v.primitive)
+                    .map(|b| conservative_bounds(b, padding + self.maximum_fatness))
+            })
             .collect();
         let bounds: Option<Vec<_>> = volume_bounds.iter().copied().collect();
         let bounds = bounds
@@ -313,7 +310,8 @@ impl BoardWorld {
             let entry = &self.triangles[index];
             for (volume, volume_bounds) in volumes.iter().zip(&volume_bounds) {
                 if self.query_metadata.is_some()
-                    && volume_bounds.is_some_and(|b| !self.triangle_bounds[index].overlaps(b)) {
+                    && volume_bounds.is_some_and(|b| !self.triangle_bounds[index].overlaps(b))
+                {
                     continue;
                 }
                 let Some(manifold) = primitive_triangle_world_contacts(
@@ -360,51 +358,6 @@ impl BoardWorld {
     }
 }
 
-fn primitive_bounds(primitive: ContactPrimitive) -> Option<Bounds> {
-    let (center, radius) = match primitive {
-        ContactPrimitive::Sphere(s) => (s.center, s.radius),
-        ContactPrimitive::Capsule {
-            center,
-            axis,
-            half_length,
-            radius,
-        } => {
-            let offset = Vector3::new(axis.x * half_length, axis.y * half_length, axis.z * half_length);
-            return Bounds::from_points([
-                Vector3::new(center.x - offset.x, center.y - offset.y, center.z - offset.z),
-                Vector3::new(center.x + offset.x, center.y + offset.y, center.z + offset.z),
-            ]).map(|b| b.expanded(radius.abs()));
-        },
-        ContactPrimitive::RoundedBox {
-            center,
-            basis,
-            half_extents,
-            radius,
-        } => {
-            let half = [half_extents.x, half_extents.y, half_extents.z];
-            let extent: [f32; 3] = std::array::from_fn(|axis| radius.abs() + basis.columns.iter().zip(half)
-                .map(|(column, h)| h.abs() * column[axis].abs()).sum::<f32>());
-            return Bounds::from_points([
-                Vector3::new(center.x - extent[0], center.y - extent[1], center.z - extent[2]),
-                Vector3::new(center.x + extent[0], center.y + extent[1], center.z + extent[2]),
-            ]);
-        }
-        ContactPrimitive::Triangle(t) => {
-            return Bounds::from_points(t.vertices).map(|b| b.expanded(t.fatness));
-        }
-    };
-    if !radius.is_finite() {
-        return None;
-    }
-    Bounds::from_points([center]).map(|b| b.expanded(radius.abs()))
-}
-
-fn conservative_bounds(bounds: Bounds, padding: f32) -> Bounds {
-    let scale = [bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z]
-        .into_iter().map(f32::abs).fold(1., f32::max);
-    bounds.expanded(padding + scale * (8. * f32::EPSILON))
-}
-
 /// Retention reads only contact header geometry, body IDs and material/tag.
 /// BoardStep builds the actual body workspaces after this frame's force queue
 /// has been applied, preventing stale acceleration copies in solver contacts.
@@ -447,3 +400,7 @@ fn collision_from_record(record: &ContactRecord) -> BoardCollision {
 #[cfg(test)]
 #[path = "tests/board_world.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "board_world/tests.rs"]
+mod broadphase_tests;

@@ -120,7 +120,8 @@ pub struct BoardGroundState {
     pub wheel_contact_count: u8,
     ///Body7692, accumulated only while all four physical wheels lack contact.
     pub time_without_wheel_contact: f32,
-    /// Native wheel inertia+36 writes made after normal selection.
+    /// Angular drag: S3 postphysics82C08634 writes wheel inertia+36;
+    /// paired S2 postphysics82B372E0 names this mAngularDrag.
     pub wheel_angular_drag: [f32; 4],
 }
 impl Default for BoardGroundState {

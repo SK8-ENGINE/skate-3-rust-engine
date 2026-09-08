@@ -20,6 +20,7 @@ use skate_core::{
     },
 };
 use skate_data::collections::Collections;
+
 use std::sync::Arc;
 
 /// Immutable stock tables selected by the processed packet, including its

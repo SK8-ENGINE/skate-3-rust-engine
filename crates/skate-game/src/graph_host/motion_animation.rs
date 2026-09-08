@@ -1,6 +1,7 @@
 //! Stock tree ownership and persistent playback used directly by MotionHost.
 mod selection_space_host;
 mod tree_builder;
+mod stock_clip_query;
 use skate_core::animation::posture::{PendingPosture, PosturePose};
 use skate_core::animation::{
     clip_clock::AdvanceResult,
@@ -16,11 +17,9 @@ use skate_core::animation::{
 use skate_core::graph::intents::IntentMap;
 use skate_data::animation_metadata::{AnimationMetadata, TreeMetadata};
 use tree_builder::build;
-
 use super::outputs::ActionGraphOutput;
 
 pub struct MotionAnimation {
-    pub grab_type: Option<super::motion_stock_gameplay::GrabType>,
     metadata: AnimationMetadata,
     current: Option<PlaybackTree>,
     pub channels: super::motion_channels::MotionChannels,
@@ -28,6 +27,7 @@ pub struct MotionAnimation {
     pub motion_intents: IntentMap,
     pub filtered_intents: IntentMap,
     pub motion_attributes: Vec<MotionGraphAttribute>,
+    pub grab_type: Option<super::motion_stock_gameplay::GrabType>,
     pub construction_values: Vec<(AttributeName, AttributeName)>,
     pub posture: PendingPosture,
     pub posture_bank_valid: bool,
@@ -45,33 +45,28 @@ pub struct MotionAnimation {
     property: AdvanceResult,
 }
 impl MotionAnimation {
+    #[cfg(test)]
+    pub fn seek_current_fraction(&mut self, fraction: f32) {
+        if let Some(tree) = &mut self.current { tree.set_time(tree.length() * fraction); }
+    }
+
+    pub(crate) fn metadata(&self) -> &AnimationMetadata {
+        &self.metadata
+    }
+
+    #[cfg(test)]
+    pub(super) fn pending_parameter(&self, name: AttributeName) -> Option<f32> {
+        self.settable.entries().iter().find(|a| a.name == name).map(|a| a.value)
+    }
     pub fn accept_action_graph(&mut self, output: ActionGraphOutput) {
         output.motion_effects.apply_to(&mut self.motion_intents);
     }
 
-    /// TU3 JumpInto Update82BACDC0: query the live tree with mask31,
-    /// then seek to the attribute's begin time (not its scalar payload).
-    pub fn jump_into(&mut self, name: AttributeName) -> Result<(), String> {
-        if let Some(tree) = &mut self.current {
-            if let Some(marker) = tree.attribute(name, 31)? {
-                tree.set_time(marker.begin_time);
-            }
-        }
-        Ok(())
-    }
-    pub fn seek_current_fraction(&mut self, fraction: f32) {
-        if let Some(tree) = &mut self.current {
-            tree.set_time(tree.length() * fraction);
-        }
-    }
-    pub(crate) fn metadata(&self) -> &AnimationMetadata {
-        &self.metadata
-    }
     pub fn reset_from_stock(&mut self) {
         self.current = None;
         self.current_name = None;
-        self.grab_type = None;
         self.channels.reset_from_stock();
+        self.grab_type = None;
         self.motion_intents.clear();
         self.filtered_intents.clear();
         self.motion_attributes.clear();
@@ -98,10 +93,10 @@ impl MotionAnimation {
             current: None,
             channels: super::motion_channels::MotionChannels::default(),
             current_name: None,
-            grab_type: None,
             motion_intents: IntentMap::new(),
             filtered_intents: IntentMap::new(),
             motion_attributes: Vec::new(),
+            grab_type: None,
             construction_values: Vec::new(),
             posture: PendingPosture::default(),
             posture_bank_valid: false,
@@ -145,23 +140,6 @@ impl MotionAnimation {
         );
         Ok(())
     }
-    ///82BB0A30 samples the actual selected blend tree at normalized endpoints.
-    ///Work on a clone so endpoint probing cannot leak into the current pose.
-    pub fn attribute_endpoints(&self, name: AttributeName) -> Result<[f32;2],String> {
-        let source=self.current.as_ref().ok_or("Grind has no selected animation")?;
-        let mut values=[0.;2];
-        for i in 0..2 {
-            let mut tree=source.clone();
-            let mut attributes=self.settable.entries().to_vec();
-            attributes.push(SettableAttribute {name,value:i as f32,normalized:true,sequence_id:-1});
-            tree.set_attributes(&attributes)?;
-            // During entry the destination tree owns bounds, not the fading-out pose.
-            let attribute=tree.attributes(15)?.into_iter().find(|a|a.name==name)
-                .ok_or("Grind animation is missing its twist attribute")?;
-            values[i]=f32::from_bits(attribute.payload.0[0].ok_or("Grind twist is uninitialized")?);
-        }
-        Ok(values)
-    }
     pub fn tree_attributes(&self) -> &[AnimationAttribute] {
         &self.tree_attributes
     }
@@ -180,8 +158,27 @@ impl MotionAnimation {
             .map(PlaybackTree::length)
             .ok_or_else(|| "No current animation tree".into())
     }
+    /// MatchAirTime82BBA198..1CC: current tree v20 length, v28 SetTime.
+    /// Missing current tree skips the seek, but not the caller's parameters.
+    pub(super) fn synchronize_air_time(&mut self, fraction: f32) {
+        if let Some(tree) = &mut self.current {
+            tree.set_time(tree.length() * fraction);
+        }
+    }
     pub fn in_transition(&self) -> bool {
         self.current.as_ref().is_some_and(has_transition)
+    }
+    ///JumpInto Update82BACDC0: apply pending parameters, then query the
+    ///current tree with mask31 and seek to the authored attribute's begin.
+    ///The caller owns the one-shot instance latch; a missing marker is a miss.
+    pub(super) fn jump_into(&mut self, name: AttributeName) -> Result<(), String> {
+        self.apply_parameters()?;
+        let tree = self.current.as_mut().ok_or("JumpInto requires a current animation tree")?;
+        let mut attribute = MotionGraphAttribute { name, value: 0.0 }.to_animation();
+        if tree.query_attribute(name, 31, &mut attribute)? {
+            tree.set_time(attribute.begin_time);
+        }
+        Ok(())
     }
     ///825310F0: retire completed transitions before advancing; reset property
     /// once at the root. Graph evaluation, parametrization and pose evaluation
@@ -263,7 +260,7 @@ impl MotionAnimation {
     }
     pub fn set_grab_type(&mut self, grab_type: super::motion_stock_gameplay::GrabType) {
         self.grab_type = Some(grab_type);
-        //82B971F8 stores ISkaterAnim360; this is not a physics attribute.
+        self.emit_packet(encode(b"GrabType"), grab_type.as_value());
     }
     pub fn clear_grab_type(&mut self) {
         self.grab_type = None;
@@ -376,13 +373,10 @@ fn prune(tree: PlaybackTree) -> PlaybackTree {
                 PlaybackTree::Transition(transition)
             }
         }
+        PlaybackTree::BlendSpace(mut tree) => {tree.children=tree.children.into_iter().map(prune).collect();PlaybackTree::BlendSpace(tree)}
         PlaybackTree::PhaseBlend(mut tree) => {
             tree.children = tree.children.into_iter().map(prune).collect();
             PlaybackTree::PhaseBlend(tree)
-        }
-        PlaybackTree::BlendSpace(mut tree) => {
-            tree.children = tree.children.into_iter().map(prune).collect();
-            PlaybackTree::BlendSpace(tree)
         }
         PlaybackTree::SelectionSpace(mut tree) => {
             tree.candidates = tree
@@ -515,3 +509,9 @@ impl PlaybackService for MotionAnimation {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+#[path = "tests/animation_jump_into.rs"]
+mod jump_into_tests;
+#[path = "motion_grind/animation_owner.rs"]
+mod grind_owner;

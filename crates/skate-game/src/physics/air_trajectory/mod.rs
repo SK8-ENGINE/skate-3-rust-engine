@@ -1,11 +1,14 @@
 //! Real stock-settings and BoardWorld adapter for the player trajectory selector.
 mod grind;
 mod settings;
+use crate::grind_world::StaticProvider;
+pub(crate) use grind::GrindContext;
+use std::sync::Arc;
 mod world;
 use skate_core::{
     air::trajectory::{
-        query_trajectory, LaunchInfo, QueryRequest, QueryResult, SelectorInput, SelectorSettings,
-        TrajectorySelector,
+        LaunchInfo, QueryRequest, QueryResult, SelectorInput, SelectorSettings, TrajectorySelector,
+        query_trajectory,
     },
     physics::board_world::BoardWorld,
 };
@@ -14,12 +17,10 @@ use skate_data::collections::Collections;
 pub struct AirTrajectoryRuntime {
     pub selector: TrajectorySelector,
     pub settings: SelectorSettings,
-    pub grind_board_position: [f32; 4],
-    pub grind_com_position: [f32; 4],
-    pub edges: Vec<skate_core::physics::grind_contact::Primitive>,
-    grind_candidates: Vec<skate_core::physics::grind_contact::Primitive>,
-    grind_settings: grind::Settings,
     pending_results: Option<Vec<QueryResult>>,
+    grind_settings: grind::Settings,
+    grind_world: Option<Arc<StaticProvider>>,
+    nearby_grinds: Vec<usize>,
 }
 impl AirTrajectoryRuntime {
     ///Full82E099A0 query shared by trajectory and Footplant callers.
@@ -35,11 +36,9 @@ impl AirTrajectoryRuntime {
             selector: TrajectorySelector::new(),
             settings: settings::load(collections)?,
             pending_results: None,
-            edges: Vec::new(),
-            grind_board_position: [0.; 4],
-            grind_com_position: [0.; 4],
             grind_settings: grind::Settings::load(collections)?,
-            grind_candidates: Vec::new(),
+            grind_world: None,
+            nearby_grinds: Vec::new(),
         })
     }
     pub fn launch(
@@ -54,11 +53,24 @@ impl AirTrajectoryRuntime {
         }
         Ok(launched)
     }
-    pub fn update(&mut self, input: SelectorInput, world: &BoardWorld) -> Result<bool, String> {
+    pub fn bind_grind_world(&mut self, provider: Arc<StaticProvider>) {
+        self.grind_world = Some(provider);
+        self.nearby_grinds.clear();
+    }
+    pub fn update(
+        &mut self,
+        input: SelectorInput,
+        world: &BoardWorld,
+        context: GrindContext,
+    ) -> Result<bool, String> {
         let Some(results) = self.pending_results.take() else {
             return Ok(self.selector.update_without_completion());
         };
-        let valid = self.selector.complete_batch_with_grinds(
+        let provider = self
+            .grind_world
+            .as_deref()
+            .ok_or("Trajectory static grind provider was not registered")?;
+        let valid = self.selector.complete_batch(
             &results,
             input,
             &self.settings,
@@ -67,11 +79,10 @@ impl AirTrajectoryRuntime {
                     prediction,
                     acquire,
                     world,
-                    &self.edges,
-                    &mut self.grind_candidates,
+                    provider,
+                    &mut self.nearby_grinds,
                     input.grind_lock_distance,
-                    self.grind_com_position,
-                    self.grind_board_position,
+                    context,
                 )
             },
             |start, end, radius| world::line(world, start, end, radius),
@@ -80,10 +91,6 @@ impl AirTrajectoryRuntime {
             self.submit(world)?;
         }
         Ok(valid)
-    }
-    pub fn cancel_pending(&mut self) {
-        self.pending_results = None;
-        self.selector.cancel_pending();
     }
     fn submit(&mut self, world: &BoardWorld) -> Result<(), String> {
         let results = self

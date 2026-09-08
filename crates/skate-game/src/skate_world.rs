@@ -182,6 +182,7 @@ fn retail_collision_world(
             )
             .ok_or("Invalid RWCM cluster bounds")?;
             meshes.push(QueryMesh {
+                geometry: 0, rejection_flags: 0,
                 triangle_range: range,
                 local_to_world: RetailAffineTransform::IDENTITY,
                 world_to_local: RetailAffineTransform::IDENTITY,
@@ -326,6 +327,7 @@ pub(crate) fn collision_world(
     let metadata = QueryMetadata {
         packed_surfaces,
         meshes: vec![QueryMesh {
+            geometry: 0, rejection_flags: 0,
             triangle_range: 0..triangles.len(),
             local_to_world: RetailAffineTransform::IDENTITY,
             world_to_local: RetailAffineTransform::IDENTITY,

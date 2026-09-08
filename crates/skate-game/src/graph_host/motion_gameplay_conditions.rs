@@ -16,7 +16,6 @@ pub struct GameplayConditions {
     pub retrieving_board: bool,
     pub dropping_board: bool,
     pub in_biped_air: bool,
-    pub can_land_on_board: bool,
     pub hippy_hurdling: bool,
     pub handplant_flags: u32,
     pub handplant_time: f32,
@@ -27,22 +26,48 @@ pub struct GameplayConditions {
     pub footplant_contact_time: f32,
     pub time_to_skitch: f32,
     pub skitch_transition_time: f32,
-    /// TimeToLand82BA7250 reads Air184 when Air437 is valid.
+    /// TimeToLand82BA7250: PhysOutAir+184, gated by byte437.
     pub time_to_land: f32,
     pub time_to_land_valid: bool,
-    pub trucks_or_deck_contact: bool,
-    /// PhysOutOffBoard+32, shared by OBTimeToLand and OBTrajTime.
+    /// OBTimeToLand82BA5770: PhysOutOffBoard+32.
     pub offboard_time_to_land: f32,
+    /// OffboardBodyTweakBlend82BBAFC8 reads completed OffBoard+92.
+    pub offboard_air_scalar_92: f32,
+    /// MatchAirTime82BBA200 consumes the completed OffBoard+96 vector.
+    pub offboard_air_translation: [f32; 4],
+    /// CanBipedLand82BA8214 tests OffBoard+192.Y strictly above0.85.
+    pub offboard_landing_normal: [f32; 4],
+    ///IsBipedCommittedToMotion82BA80A0: completed OffBoard byte329.
+    pub offboard_committed_to_motion: bool,
+    ///EnoughDistToObstacle82BA7FD0: completed OffBoard+112, not distance116.
+    pub offboard_obstacle_distance: f32,
+    ///DistToEdge82BA82A8: completed OffBoard+116, not obstacle scalar112.
+    pub offboard_edge_distance: f32,
+    /// OBTrajTime82BA4528: PhysOutOffBoard+120, gated by byte331.
+    pub offboard_trajectory_time: f32,
+    pub offboard_trajectory_valid: bool,
+    /// AirOutputFields::reached_apex_436, published by the known-air owner.
+    pub reached_apex: bool,
+    ///TU3 CanLandOnBoard82BA5D30 and LandOnBoard82BB95D8.
+    pub can_land_on_board: bool,
+    pub landing_turning: bool,
+    /// GrindOutputFields::flag_318/322, published by the contact solver.
+    pub grind_contact: bool,
+    /// CollisionOutputFields::wheel_contact_3296_3299.
+    pub wheel_contact: bool,
+    /// Collision3472 (trucks) OR3475 (deck), excluding wheels.
+    pub trucks_or_deck_contact: bool,
+    /// StateGraph's moving-object state publication. TU3 camera and motion
+    /// consumers use state 502 for the moving-object riding branch.
+    pub moving_object: bool,
     pub tricks_blocked_on_stairs: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GameplayCondition {
-    DebugAnimations,
     RetrievingBoard,
     DroppingBoard,
     InBipedAir,
-    CanLandOnBoard,
     HippyHurdling,
     WantsRunout,
     PhysicsWiping,
@@ -62,16 +87,15 @@ pub enum GameplayCondition {
     PlayHandplant { phase: usize },
     EnteringSkitch,
     Skitching,
+    IsMovingObject,
 }
 impl GameplayCondition {
     pub fn recognizes(name: &str) -> bool {
         matches!(
             name,
             "IsRetrievingSkateboard"
-                | "IsInDebugAnimationsMode"
                 | "IsDroppingSkateboard"
                 | "IsInBipedAir"
-                | "CanLandOnBoard"
                 | "IsHippyHurdling"
                 | "PhysicsWantsRunout"
                 | "IsPhysicsWiping"
@@ -91,15 +115,14 @@ impl GameplayCondition {
                 | "ShouldPlayHandPlantAnim"
                 | "IsEnteringSkitch"
                 | "IsSkitching"
+                | "IsMovingObject"
         )
     }
     pub fn parse(a: &Attributes<'_>) -> Result<Self, String> {
         Ok(match a.text("name").unwrap_or("") {
-            "IsInDebugAnimationsMode" => Self::DebugAnimations,
             "IsRetrievingSkateboard" => Self::RetrievingBoard,
             "IsDroppingSkateboard" => Self::DroppingBoard,
             "IsInBipedAir" => Self::InBipedAir,
-            "CanLandOnBoard" => Self::CanLandOnBoard,
             "IsHippyHurdling" => Self::HippyHurdling,
             "PhysicsWantsRunout" => Self::WantsRunout,
             "IsPhysicsWiping" => Self::PhysicsWiping,
@@ -123,6 +146,7 @@ impl GameplayCondition {
                 Some("antic") => 2, Some("into") => 1, Some("out") => 0,
                 value => return Err(format!("Unauthored handplant animation phase {value:?}")),
             } },
+            "IsMovingObject" => Self::IsMovingObject,
             "IsHandPlanting" => Self::HandPlanting {
                 //82BA54A0 compares these authored strings in this order.
                 state: match a.text("state").unwrap_or("") {
@@ -143,20 +167,18 @@ impl GameplayCondition {
     /// conditions that also require the MotionGraph/channel owner.
     pub fn evaluate_physical(&self, p: &GameplayConditions) -> Option<bool> {
         Some(match self {
-            //Factory82BC3F68, VT8231ED5C slot48=8274CA90 (li r3,0;blr).
-            Self::DebugAnimations => false,
-            Self::OkToDoTrickOnStairs => !p.tricks_blocked_on_stairs, //82BA6930:Animation166
-            Self::RetrievingBoard => p.retrieving_board,              //82BA5EF0:Offboard323
-            Self::InBipedAir => p.in_biped_air,                       //82BA8030:Offboard328
-            Self::CanLandOnBoard => p.can_land_on_board,             //82BA5D30:Offboard316
-            Self::HippyHurdling => p.hippy_hurdling,                  //82BA5DA0:Offboard317
-            Self::WantsRunout => p.wants_runout,                      //82BA44B8:State78
-            Self::PhysicsWiping => p.physics_wiping,                  //82BA4390:State59
-            Self::BodyFlipping => p.body_flipping,                    //82BA71E0:Air441
-            Self::WantsWipeout => p.wants_wipeout,                    //82BA4400:State63 || State65
+            Self::OkToDoTrickOnStairs => !p.tricks_blocked_on_stairs,
+            Self::RetrievingBoard => p.retrieving_board, //82BA5EF0:Offboard323
+            Self::InBipedAir => p.in_biped_air,          //82BA8030:Offboard328
+            Self::HippyHurdling => p.hippy_hurdling,     //82BA5DA0:Offboard317
+            Self::WantsRunout => p.wants_runout,         //82BA44B8:State78
+            Self::PhysicsWiping => p.physics_wiping,     //82BA4390:State59
+            Self::BodyFlipping => p.body_flipping,       //82BA71E0:Air441
+            Self::WantsWipeout => p.wants_wipeout,       //82BA4400:State63 || State65
             Self::Bumped => p.bumped, //82BA7310: published acceleration and anim_motion/bumps
             Self::GrabbingObject => p.grabbing_object, //82BA5700:Offboard304
             Self::Skitching => p.state == 104, //82BBBC88:State16
+            Self::IsMovingObject => p.moving_object,
             Self::EnteringSkitch => {
                 //82BBBDE0:Ground276,Globals400/layout96
                 !(p.time_to_skitch < 0.0) && p.time_to_skitch <= p.skitch_transition_time

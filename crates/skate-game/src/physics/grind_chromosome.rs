@@ -1,100 +1,232 @@
-//! TU3 chromosome producers82DEE7E0/82DEE918/82DEED98/82DEEEE0/82DEEFB0.
-use skate_core::riding::ground_correction_math::dot_product as dot;
-type V = [f32; 4];
+//! ZIP chromosome port corrected from S3 82DEE918/82DEF518/82DEE508.
+//! S2 82E2E9E0/82E2EBE8/82E2F9D0 confirms history/publication structure;
+//! only S3 has four-way orientation for5050/5O and the sixth darkslide family.
+use super::grind::Family;
 #[path = "grind_names.rs"]
-mod names;
+pub(crate) mod names;
+#[path = "grind_chromosome/pose.rs"]
+mod pose;
+pub(crate) use pose::{ApproachPose, Input};
+use pose::{add, dot, signed, sub};
 
-#[derive(Clone, Copy, Default)]
-pub(super) struct Pose {
-    pub animated_board: [V; 4],
-    pub board: [V; 4],
-    pub foot_directions: [V; 2],
-    pub fakie: bool,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Components(pub [u32; 6]);
+impl Components {
+    pub fn name(self) -> names::Name {
+        // Constructed only from booleans, orientation0..3 and the Family enum.
+        names::lookup(self.0).expect("validated grind chromosome dimensions")
+    }
 }
-#[derive(Default)]
-pub(super) struct Chromosome {
-    history: std::collections::VecDeque<Pose>,
-    approach_pose: Pose,
-    approach: usize,
-    previous_kind: Option<u32>,
-    away_frames: u32,
+
+///82DEE508's actual PhysOut publication, after update and only while grinding.
+/// FastString encoding uses CURRENT's existing original-name encoder.
+pub(crate) fn publish(
+    p: Publication,
+    out: &mut skate_core::player::input_phase::GrindOutputFields,
+) {
+    use skate_core::animation::skeleton_input::name::encode;
+    out.volatile_chromosome_244 = p.volatile.0;
+    if let Some(animation) = p.animation {
+        let name = animation.name();
+        out.animation_chromosome_268 = animation.0;
+        out.animation_id_144 = name.skating_id as u32;
+        out.animation_name_156 = Some(encode(name.attribute.as_bytes()));
+    }
+    if let Some(scoring) = p.scoring {
+        let name = scoring.name();
+        out.scoring_chromosome_292 = scoring.0;
+        out.scoring_id_148 = name.skating_id as u32;
+        out.scorable_id_152 = name.scorable_id as u32;
+        out.scoring_name_176 = Some(encode(name.attribute.as_bytes()));
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Publication {
+    pub volatile: Components,
+    pub animation: Option<Components>,
+    pub scoring: Option<Components>,
+}
+
+pub(crate) struct Chromosome {
+    history: std::collections::VecDeque<ApproachPose>,
+    saved: ApproachPose,
+    saved_fakie_initialized: bool,
+    approach: u32,
+    previous_category: u32,
+    previous_kind: Option<Family>,
+    away_frames: i32,
     reversed: bool,
-    travel: Option<usize>,
-    pending: [usize; 6],
-    pending_frames: u32,
-    animation: [usize; 6],
-    scoring: [usize; 6],
+    orientation: Option<u32>,
+    pending: Option<Components>,
+    pending_frames: i32,
+    animation: Option<Components>,
+    scoring: Option<Components>,
 }
+
 impl Chromosome {
-    pub fn observe(&mut self, pose: Pose, category: u32) {
-        if category == 100 {
-            self.history.push_back(pose);
-            if self.history.len() > 30 {
-                self.history.pop_front();
-            }
-            self.approach_pose = pose;
-        }
-        if category != 400 {
-            self.away_frames = self.away_frames.saturating_add(1);
-            self.previous_kind = None;
-            self.travel = None;
+    ///82DEE358 leaves byte144 unwritten. The false storage below is opaque
+    ///until the host observes the first completed animation packet.
+    pub fn uninitialized() -> Self {
+        let mut state = Self::new(false);
+        state.saved_fakie_initialized = false;
+        state
+    }
+
+    ///Explicit host initialization of a native unwritten byte, not a claim
+    ///about retail allocator contents. Seed once from completed Anim10372;
+    ///do not replace constructor axes/position or any established history.
+    pub fn initialize_host_fakie(&mut self, observed_fakie: bool) {
+        if !self.saved_fakie_initialized {
+            self.saved.fakie = observed_fakie;
+            self.saved_fakie_initialized = true;
         }
     }
-    pub fn update(
-        &mut self,
-        pose: Pose,
-        kind: u32,
-        point: V,
-        direction: V,
-        normal: V,
-    ) -> (&'static str, &'static str) {
-        let new_grind = self.previous_kind.is_none();
-        let reference = if self.history.len() >= 30 {
+
+    /// S3 ctor82DEE358 explicitly initializes the saved axes/position but does
+    /// not write saved fakie byte144. The supplied value is an explicit host
+    /// initialization observation, not a recovered native constructor default.
+    /// A real Air439 snapshot or30 Ground samples replaces this reference.
+    pub fn new(constructor_fakie_144: bool) -> Self {
+        Self {
+            history: std::collections::VecDeque::with_capacity(30),
+            saved: ApproachPose {
+                right: [1.0, 0.0, 0.0, 0.0],
+                position: [0.0; 4],
+                feet: [[1.0, 0.0, 0.0, 0.0]; 2],
+                fakie: constructor_fakie_144,
+            },
+            saved_fakie_initialized: true,
+            approach: 0,
+            previous_category: 0,
+            previous_kind: None,
+            away_frames: 31,
+            reversed: false,
+            orientation: None, // Native sentinel4, distinct from forward0.
+            pending: None,
+            pending_frames: 0,
+            animation: None,
+            scoring: None,
+        }
+    }
+
+    fn reference(&self) -> ApproachPose {
+        //82DEED28: fewer than30 samples uses saved, NOT newest ground pose.
+        if self.history.len() == 30 {
             self.history[0]
         } else {
-            self.approach_pose
+            self.saved
+        }
+    }
+
+    /// Invoke after physical selection/FillOut with current PhysOut inputs.
+    /// Category400 and grinding316 are distinct source observations.
+    pub fn update(&mut self, input: Input) -> Option<Publication> {
+        let snapshot = ApproachPose {
+            right: input.basic_right_0,
+            position: input.basic_position_48,
+            feet: input.feet_256_272,
+            fakie: input.fakie_155,
         };
-        if new_grind && self.away_frames > 30 {
-            let across = cross(direction, normal);
-            let from = sub(reference.animated_board[3], point);
-            let across = signed(across, dot(across, from) > 0.0);
+        //82DEEB90/82DEEAF8, in this order even if both conditions hold.
+        if input.air_event_439 {
+            self.saved = snapshot;
+            self.saved_fakie_initialized = true;
+            self.history.clear();
+        }
+        if input.category == 100 {
+            if self.history.len() == 30 {
+                self.history.pop_front();
+            }
+            self.history.push_back(snapshot);
+        }
+        let new_approach =
+            input.category == 400 && self.previous_category != 400 && self.away_frames > 30;
+        if new_approach || (input.category == 400 && self.previous_kind != input.family) {
+            self.saved = self.reference();
+            self.saved_fakie_initialized |= self.history.len() == 30;
+        }
+        if new_approach {
+            let across = signed(
+                input.across,
+                dot(input.across, sub(self.saved.position, input.point)) > 0.0,
+            );
             let right = signed(
-                reference.animated_board[0],
+                self.saved.right,
                 dot(
-                    add(reference.foot_directions[0], reference.foot_directions[1]),
-                    reference.animated_board[0],
+                    add(self.saved.feet[0], self.saved.feet[1]),
+                    self.saved.right,
                 ) > 0.0,
             );
-            self.approach = usize::from(dot(right, across) > 0.0);
+            self.approach = u32::from(dot(right, across) > 0.0);
         }
-        let board_end = if matches!(kind, 2 | 3 | 4) {
-            usize::from(dot(sub(point, pose.board[3]), pose.board[2]) <= 0.0)
-        } else {
+        self.previous_kind = input.family;
+        self.away_frames = if input.category == 400 {
             0
+        } else {
+            self.away_frames.wrapping_add(1)
         };
-        let projected = sub(
-            pose.board[2],
-            normal.map(|v| v * dot(pose.board[2], normal)),
-        );
-        let length = dot(projected, projected).sqrt();
-        let straight = length <= 0.01 || (dot(projected, direction) / length).abs() > 0.9397;
-        let tip_axis = signed(
-            pose.animated_board[2],
-            dot(sub(pose.animated_board[3], point), pose.animated_board[2]) > 0.0,
-        );
-        let low = dot(normal, tip_axis) <= -0.1;
-        let feet = add(pose.foot_directions[0], pose.foot_directions[1]);
-        let right = signed(
-            pose.animated_board[0],
-            dot(feet, pose.animated_board[0]) > 0.0,
-        );
-        let forward = dot(right, direction) > 0.0;
-        let travel = if matches!(kind, 0 | 3) {
-            if self.travel.is_none() {
-                self.reversed = dot(
-                    feet,
-                    add(reference.foot_directions[0], reference.foot_directions[1]),
-                ) < 0.0;
+        let output = if let Some(family) = input.family.filter(|_| input.grinding_316) {
+            //82DEF518: orientation, tilt, then twist, using actual Basic output
+            //lanes rather than substituting the live board's current transform.
+            let orientation = self.travel(input, family);
+            let low = pose::low(input);
+            let straight = pose::straight(input);
+            let location = matches!(family, Family::Tipslide | Family::FiveO | Family::Backslash)
+                && dot(
+                    sub(input.point, input.basic_location_position_144),
+                    input.basic_location_axis_96,
+                ) <= 0.0;
+            let components = Components([
+                self.approach,
+                u32::from(location),
+                u32::from(straight),
+                u32::from(low),
+                orientation,
+                family as u32,
+            ]);
+            if self.previous_category != 400 {
+                self.pending = Some(components);
+                self.pending_frames = 13;
+            } else if self.pending == Some(components) {
+                self.pending_frames = self.pending_frames.wrapping_add(1);
+            } else {
+                self.pending = Some(components);
+                self.pending_frames = 0;
+            }
+            if self.pending_frames > 0 {
+                self.animation = self.pending;
+            }
+            if self.pending_frames > 12 {
+                self.scoring = self.pending;
+            }
+            Some(Publication {
+                volatile: components,
+                animation: self.animation,
+                scoring: self.scoring,
+            })
+        } else {
+            //82DEE508 tail, independent of the category.
+            self.orientation = None;
+            self.reversed = false;
+            None
+        };
+        self.previous_category = input.category;
+        output
+    }
+
+    fn travel(&mut self, input: Input, family: Family) -> u32 {
+        let feet = add(input.feet_256_272[0], input.feet_256_272[1]);
+        let right = signed(input.basic_right_0, dot(feet, input.basic_right_0) > 0.0);
+        let forward = dot(right, input.direction) > 0.0;
+        let orientation = if matches!(family, Family::FiftyFifty | Family::FiveO) {
+            if self.orientation.is_none() {
+                assert!(
+                    self.history.len() == 30 || self.saved_fakie_initialized,
+                    "saved fakie144 consumed before an actual history write"
+                );
+                let reference = self.reference();
+                self.reversed = dot(feet, add(reference.feet[0], reference.feet[1])) < 0.0;
                 if reference.fakie {
                     self.reversed = !self.reversed;
                 }
@@ -106,58 +238,13 @@ impl Chromosome {
                 (false, true) => 3,
             }
         } else {
-            usize::from(!forward)
+            u32::from(!forward)
         };
-        self.travel = Some(travel);
-        let chromosome = [
-            self.approach,
-            board_end,
-            usize::from(straight),
-            usize::from(low),
-            travel,
-            kind as usize,
-        ];
-        //82DEF518 publishes animation after one stable repeat and scoring after
-        //13; entering a grind publishes both immediately.
-        if new_grind {
-            self.pending = chromosome;
-            self.pending_frames = 13;
-        } else if self.pending == chromosome {
-            self.pending_frames = self.pending_frames.saturating_add(1);
-        } else {
-            self.pending = chromosome;
-            self.pending_frames = 0;
-        }
-        if self.pending_frames > 0 {
-            self.animation = self.pending;
-        }
-        if self.pending_frames > 12 {
-            self.scoring = self.pending;
-        }
-        self.previous_kind = Some(kind);
-        self.away_frames = 0;
-        let animation = index(self.animation);
-        let scoring = index(self.scoring);
-        (names::NAMES[animation], names::NAMES[scoring])
+        self.orientation = Some(orientation);
+        orientation
     }
 }
-fn index(v: [usize; 6]) -> usize {
-    (((((v[0] * 2 + v[1]) * 2 + v[2]) * 2 + v[3]) * 4 + v[4]) * 6) + v[5]
-}
-fn sub(a: V, b: V) -> V {
-    core::array::from_fn(|i| a[i] - b[i])
-}
-fn add(a: V, b: V) -> V {
-    core::array::from_fn(|i| a[i] + b[i])
-}
-fn signed(v: V, positive: bool) -> V {
-    v.map(|x| if positive { x } else { -x })
-}
-fn cross(a: V, b: V) -> V {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-        0.0,
-    ]
-}
+
+#[cfg(test)]
+#[path = "grind_chromosome/tests.rs"]
+mod tests;

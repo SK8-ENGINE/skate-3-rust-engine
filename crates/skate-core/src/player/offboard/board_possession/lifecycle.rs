@@ -35,6 +35,14 @@ pub trait Effects {
     fn torque(&mut self,value:Vector);
 }
 impl State {
+    ///75EA0 retains the optional throw's word444 write made inside LetGo.
+    pub fn stop(&mut self,f:&mut SkateboardControllerFields,o:&Observation,s:&Settings,e:&mut impl Effects){
+        if f.system_on_452 {
+            f.word_444=0;
+            if f.state_448!=0 {self.let_go(f,o,s,e);f.state_448=0;}
+            f.system_on_452=false;
+        }
+    }
     ///75370 writes held state BEFORE selecting/arming the hand and drive frames.
     pub fn hold(&mut self,fields:&mut SkateboardControllerFields,o:&Observation,e:&mut impl Effects){
         e.enable_animation_soft();e.standard_board();e.collision_volumes(true);

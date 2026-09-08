@@ -2,7 +2,7 @@
 //! The GLB supplies the mesh, skin weights and hierarchy; it does not play a
 //! separate idle clip or own the skater's pose.
 use crate::{app::FrameSet, assets::AssetStatus, physics::SkaterRuntime, world::PlayerRoot};
-use bevy::{mesh::skinning::SkinnedMesh, prelude::*};
+use bevy::{camera::visibility::NoFrustumCulling, mesh::skinning::SkinnedMesh, prelude::*};
 use skate_core::animation::output::NativeMatrix;
 
 #[derive(Resource, Default)]
@@ -88,9 +88,25 @@ pub(crate) struct AnimationPlugin;
 impl Plugin for AnimationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AnimationStatus>()
-            .add_systems(Update, (bind, present).chain().in_set(FrameSet::Animation));
+            .add_systems(Update, (disable_skater_culling, bind, present).chain().in_set(FrameSet::Animation));
     }
 }
+fn disable_skater_culling(
+    mut commands: Commands,
+    skins: Query<Entity, (With<SkinnedMesh>, Without<NoFrustumCulling>)>,
+    parents: Query<&ChildOf>,
+    roots: Query<Entity, With<PlayerRoot>>,
+) {
+    // GLB primitive bounds describe the bind pose, not the animated skin.
+    // Apply to every skater mesh (not just the first skin used to bind bones).
+    // World meshes retain their normal culling behavior.
+    for entity in &skins {
+        if parents.iter_ancestors(entity).any(|e| roots.contains(e)) {
+            commands.entity(entity).insert(NoFrustumCulling);
+        }
+    }
+}
+
 fn bind(
     status: Res<AssetStatus>,
     skater: Res<SkaterRuntime>,

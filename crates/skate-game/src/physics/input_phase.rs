@@ -38,6 +38,12 @@ pub(super) fn advance(
     actions: &mut dyn ActionMap,
     input_available: bool,
 ) -> Result<bool, String> {
+    //82DB4094 completes the preceding off-board batch BEFORE input reset.
+    skater.offboard_contact.begin_input();
+    //82DB409C clears the actual shared manager latch;82DB4348 publishes its IK offset.
+    skater.landing_deck.manager.can_land_256 = false;
+    skater.player_input.player.manager_1852_vector_176 =
+        skater.landing_deck.manager.ik_offset_176.map(f32::to_bits);
     let host = InputHostFrame {
         // Native actor queries are host identity, not a physical parameter.
         actor_query_56: 0,
@@ -45,14 +51,28 @@ pub(super) fn advance(
         input_available,
         transition_action: actions.value(71),
         published_board_transform: if skater.player_input.physical.state.flag_61 != 0 {
-            skater.player_input.physical.teleport_output
+            skater
+                .player_input
+                .physical
+                .teleport_output
                 .ok_or("Teleport State61 requires its published reset transform")?
-                .transform.map(|row| row.map(f32::from_bits))
-        } else { super::solve::deck_frame(&physics.board) },
+                .transform
+                .map(|row| row.map(f32::from_bits))
+        } else {
+            super::solve::deck_frame(&physics.board)
+        },
         //82D8ABD8 reads the state selector's retained signed counter+40,
         //before this tick's CalcSuggestedState advances it at82D8AF78..94.
         air_counter_40: skater.player_state.selector.post_grind_jump_counter,
     };
+    // TU3 82DB8CE4..8D1C stops possession before moving either assembly.
+    let resetting = skater.player_input.physical.state.flag_61 != 0
+        || skater.player_input.player.flags_1296 & (1 << 19) != 0
+        || skater.player_input.pending_teleport().is_some();
+    if resetting {
+        skater.offboard_air_selector.reset();
+        super::offboard::board_manager::runtime::reset_for_teleport(physics, skater);
+    }
     let collision = collision(skater);
     let mut callbacks = Callbacks {
         skeleton_input: &mut skater.skeleton_input,
@@ -71,10 +91,13 @@ pub(super) fn advance(
         collision,
         ground: &mut skater.ground,
         life: &mut skater.ground_lifecycle,
+        offboard_grab: &mut skater.offboard_grab,
         wipeout: &mut skater.wipeout,
         riding: &mut physics.riding,
         wiping_out: &mut physics.board_wiping_out,
-        settings: &physics.settings,
+        settings: &mut physics.settings,
+        grind_materials: &physics.grind_materials,
+        air_targeting_grind: skater.trajectory.selector.grind_locked_to_middle(),
         globals: &skater.animation.packet.hierarchy,
         attributes: skater.animation.attributes.entries(),
         actions,
@@ -90,6 +113,8 @@ pub(super) fn advance(
         host,
         &mut callbacks,
         super::player_input::InputStage::ThroughTeleport,
+        &physics.world,
+        &physics.grind_world,
     )?;
     if let Some(continuation) = continuation {
         skater.player_input.process_stage(
@@ -100,10 +125,17 @@ pub(super) fn advance(
             host,
             &mut callbacks,
             super::player_input::InputStage::AfterTeleport(continuation),
+            &physics.world,
+            &physics.grind_world,
         )?;
     }
+    let teleported = callbacks.teleported;
+    if teleported {
+        // TU3 82DB8D6C..8DA4 repeats the controller reset after Skeleton.
+        super::offboard::board_manager::runtime::reset_for_teleport(physics, skater);
+    }
     physics.processed_flags_2468 = skater.player_input.processed.flags_2468;
-    Ok(callbacks.teleported)
+    Ok(teleported)
 }
 
 pub(super) fn update_ground(
@@ -131,7 +163,9 @@ pub(super) fn update_ground(
     )?;
     //Ground82D38000 completes GeneralUpdate;82D38008 then retains the actual
     //board/animation error used when Air subsequently blends its board target.
-    skater.skeleton_air.capture_physics_error(&physics.board, &target);
+    skater
+        .skeleton_air
+        .capture_physics_error(&physics.board, &target);
     Ok(())
 }
 
@@ -162,10 +196,13 @@ struct Callbacks<'a, 'p> {
     collision: CollisionInput,
     ground: &'a mut GroundState,
     life: &'a mut GroundLifecycle,
+    offboard_grab: &'a mut super::biped_ground::grab_runtime::Owner,
     wipeout: &'a mut super::wipeout::Wipeout,
     riding: &'a mut RidingOutputs,
     wiping_out: &'a mut bool,
-    settings: &'a PhysicsSettings,
+    settings: &'a mut PhysicsSettings,
+    grind_materials: &'a super::grind_materials::GrindMaterials,
+    air_targeting_grind: bool,
     globals: &'a [NativeMatrix],
     attributes: &'a [AnimationAttribute],
     actions: &'a mut dyn ActionMap,
@@ -173,6 +210,34 @@ struct Callbacks<'a, 'p> {
     teleported: bool,
 }
 impl PlayerInputCallbacks for Callbacks<'_, '_> {
+    fn prepare_grind(
+        &mut self,
+        board: &mut BoardRuntime,
+        grind: &mut super::player_input::grind::GrindInputState,
+        processed: &ProcessedPhysicsInput,
+        world: &skate_core::physics::board_world::BoardWorld,
+        provider: &crate::grind_world::StaticProvider,
+        air_counter: i32,
+    ) -> Result<super::player_input::grind::Pending, String> {
+        let extra = &self.animation_input.extra;
+        let context = super::player_input::grind::PreContext {
+            board: super::solve::deck_frame(board),
+            air_counter,
+            tip_state: processed.state_2504,
+            air_targeting_grind_9653: self.air_targeting_grind,
+            balance_2720: self.animation_input.fields.balance,
+            translation_2796: extra.grind_translation,
+            stability_nudge_2800: extra.grind_stability_nudge,
+            up_down_2804: extra.grind_up_down,
+            grab_min_height_2808: extra.grind_grab_min_height,
+        };
+        let mut host = super::grind_host::LiveHost {
+            board,
+            settings: self.settings,
+            materials: self.grind_materials,
+        };
+        grind.pre_update(processed, provider, world, context, &mut host)
+    }
     fn process_skeleton(
         &mut self,
         board: &mut BoardRuntime,
@@ -216,16 +281,4 @@ impl PlayerInputCallbacks for Callbacks<'_, '_> {
     ) -> Result<(), String> {
         self.reset_player(board, runtime, target, player, physical, processed)
     }
-}
-
-///Grind pop82D40D30 calls the animated skeleton update with fast blend=false.
-pub(super) fn update_grind_jump(physics:&mut GamePhysics,skater:&mut SkaterRuntime)->Result<(),String> {
-    let collision=collision(skater);
-    let mut owners=SkeletonOwners {animated:&mut skater.animated_skeleton,body:&mut skater.skeleton,
-        drives:&mut skater.skeleton_drives,ik:&mut skater.foot_ik,animation_input:&mut skater.animation_input,
-        correction:&mut skater.skeleton_output.correction,pose_errors:&mut skater.pose_errors};
-    skater.skeleton_input.update_animated(&mut skater.skeleton_air,&mut physics.board,
-        &physics.riding.reckoning_frames.system,&mut skater.player_input.processed,&mut owners,
-        &skater.animation.packet.hierarchy,&collision,physics.settings.step.simulation,false)?;
-    Ok(())
 }

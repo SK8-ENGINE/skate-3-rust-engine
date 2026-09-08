@@ -127,13 +127,16 @@ impl KnownAirRuntime for Runtime<'_> {
         self.skater.trajectory.selector.grind_locked_to_middle()
     }
     fn start_grind_air_adjust_from_selector(&mut self) {
-        if let Some(target)=self.selection.grind {
-            self.skater.skeleton_input.grind_air.start(skate_core::physics::grind_air::Target {
-                edge:target.edge,limits:target.air_limits,
-            });
-            self.skater.skeleton_input.grind_air_started=true;
+        if let Some(target) = self.selection.grind {
+            self.skater
+                .skeleton_input
+                .grind_air
+                .start(target.air_target());
+            self.skater.skeleton_input.grind_air_started = true;
         } else {
-            self.record(Err("KnownAir grind target lost its native spline record".into()));
+            self.record(Err(
+                "KnownAir grind lock has no accepted trajectory target".into()
+            ));
         }
     }
     fn selector_closest_trajectory_point(&mut self, com: V, zero: V) -> (i32, V) {
@@ -264,7 +267,7 @@ impl KnownAirRuntime for Runtime<'_> {
         self.record(result);
     }
     fn set_skeleton_add_skateboard_error(&mut self, v: bool) {
-        self.skater.ground_lifecycle.skeleton_ground_16388 = v;
+        self.skater.skeleton_output.correction.pending = v;
     }
     fn set_head_tracking_target(&mut self, target: V, valid: bool) {
         self.skater.skeleton_input.head_tracking_history[5] = target;
@@ -294,7 +297,7 @@ impl KnownAirRuntime for Runtime<'_> {
             body: &self.skater.skeleton,
             gravity: [g.x, g.y, g.z, 0.0],
             world: &self.physics.world,
-            edges: &self.physics.grind.primitives,
+            edges: self.physics.grind_world.primitives(),
         };
         self.skater.footplant.update_candidate(input, &f);
     }
@@ -310,7 +313,7 @@ impl KnownAirRuntime for Runtime<'_> {
             body: &self.skater.skeleton,
             gravity: [g.x, g.y, g.z, 0.0],
             world: &self.physics.world,
-            edges: &self.physics.grind.primitives,
+            edges: self.physics.grind_world.primitives(),
         };
         let result = self.skater.footplant.consume_and_submit(
             input,

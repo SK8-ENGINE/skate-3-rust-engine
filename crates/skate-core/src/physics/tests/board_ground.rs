@@ -1,5 +1,30 @@
 use super::*;
 
+/// Regression for the paired postphysics branch contract, not fidelity proof.
+/// S2 82B372E0 names mAngularDrag; S3 82C08634 stores inertia+36.
+#[test]
+fn wheel_angular_drag_tracks_physical_contact_and_wipeout() {
+    let mut ground = BoardGroundState::default();
+    let mut lines = WheelLineState::default();
+    // A successful line query is not physical wheel contact for drag selection.
+    lines.publish([Some(WheelLineHit { fraction: 0.1, normal: UP, surface_tag: 0 }); 4]);
+    let frequency = f32::from_bits(0x426F_FFFF);
+    let free = f32::from_bits(0x3BC4_9BA6) * frequency;
+    let wiping_out = f32::from_bits(0x3D23_D70A) * frequency;
+    let contacts = [
+        report(BodyId::RightFrontWheel, UP),
+        report(BodyId::LeftBackWheel, UP),
+    ];
+    ground.update(&contacts, &lines, UP, 80.0, false);
+    assert_eq!(ground.wheel_angular_drag, [0.0, free, free, 0.0]);
+    ground.update(&contacts, &lines, UP, 80.0, true);
+    assert_eq!(ground.wheel_angular_drag, [wiping_out, free, free, wiping_out]);
+    ground.update(&[], &lines, UP, 80.0, true);
+    assert_eq!(ground.wheel_angular_drag, [free; 4]);
+    ground.update(&contacts, &lines, UP, 80.0, false);
+    assert_eq!(ground.wheel_angular_drag, [0.0, free, free, 0.0]);
+}
+
 fn report(part: BodyId, normal: Vector3) -> BoardContactReport {
     BoardContactReport {
         part, other: CollisionBody::StaticWorld, is_body_a: true,

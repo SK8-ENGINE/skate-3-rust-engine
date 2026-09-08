@@ -8,26 +8,27 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     player.state_count_1312 = player.state_count_1312.wrapping_add(1);
     //KnownAir ctor82D35130 installs82327210; vslot24 at82327228 is
     //the same82D34DA8. Its target-following trajectory is not this deck sample.
-    if !matches!(
-        skater.player_state.current(),
-        PhysicalStateId::PhysicsGround
-            | PhysicalStateId::PhysicsAir
-            | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
-            | PhysicalStateId::Nonspecific
-            | PhysicalStateId::KnownAir
-            | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
+    //Six grind vtables call82D2D860 directly;701 calls the82D34DA8 wrapper.
+    if !skater.player_state.current().is_grind()
+        && !matches!(
+            skater.player_state.current(),
+            PhysicalStateId::PhysicsGround
+                | PhysicalStateId::PhysicsAir
+                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                | PhysicalStateId::KnownAir
+                | PhysicalStateId::BipedAir
+                | PhysicalStateId::BipedGround
+                | PhysicalStateId::OffBoardPushing
                 | PhysicalStateId::GroundAnimation
-            | PhysicalStateId::SlideGround
-            | PhysicalStateId::RevertGround
-            | PhysicalStateId::WipeoutGround
-            | PhysicalStateId::Teleporting
-            | PhysicalStateId::BipedAir
-            | PhysicalStateId::BipedGround
-    ) {
+                | PhysicalStateId::SlideGround
+                | PhysicalStateId::WipeoutGround
+                | PhysicalStateId::Teleporting
+                | PhysicalStateId::LandingOnDeck
+                | PhysicalStateId::Nonspecific
+        )
+    {
         return Err("PreState requires the selected state's actual PredictFutureOfDeck".into());
     }
-    //BipedGround's vslot24 at82327158 calls82D2D860 directly; the riding
-    //wrapper82D34DA8 calls that same producer with the same state argument.
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
     let velocity = physics.board.bodies()[BodyId::Deck.index()]
         .rates
@@ -44,17 +45,17 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     roots.supplied_prediction = Some(prediction);
     //82DB60DC clears sticky3184, not this-update3185.
     skater.foot_ik.state.contacts.support_failed = false;
-    let requests = &mut skater.ground_lifecycle.trajectory;
-    //82D74270 is PlayerGrabSpline::Sync. Its288-byte grab-spline records are
-    //separate from the240-byte ballistic predictions. It clears flag6 first.
-    //This world's triangles have no authored grab-spline descriptors, so no
-    //pending line batch and no query result9840 take the actual empty branch.
-    requests.flags_12836 &= !0x40;
-    if requests.pending_request.is_some() || requests.result_valid_9840 {
-        return Err(
-            "PreState has a retained grab-spline request/result requiring82D74270 synchronization"
-                .into(),
-        );
-    }
+    //82DB60EC calls82D74270 AFTER sticky reset and before state PreUpdate.
+    //Consume the canonical owner's preceding validation/query results.
+    let p = &skater.player_input.processed;
+    let context = skate_core::player::offboard::ground_query::QueryContext {
+        selection_flags_2948: p.actor_query_2948,
+        matching_id_2952: p.actor_query_2952 as i32,
+    };
+    let scene = super::super::offboard::grab_scene::Scene::new(
+        &physics.world,
+        &physics.offboard_grab_scene,
+    );
+    skater.offboard_grab.sync(&scene, context)?;
     Ok(())
 }

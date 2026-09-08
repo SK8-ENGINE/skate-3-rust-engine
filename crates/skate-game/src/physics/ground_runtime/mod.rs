@@ -4,13 +4,9 @@ mod corrections;
 mod entry;
 mod state;
 mod update;
-pub(crate) use update::{GroundUpdateFrame, GroundUpdateTargets};
-mod trajectory;
 pub(crate) use entry::GroundEntryTargets;
-pub(crate) use trajectory::GroundTrajectoryState;
-mod surface;
 pub(crate) use state::GroundState;
-pub(crate) use surface::{active_surface, surface_key};
+pub(crate) use update::{GroundUpdateFrame, GroundUpdateTargets};
 mod input;
 mod pumping;
 pub(crate) use input::GroundInputObservations;
@@ -20,8 +16,7 @@ mod services;
 mod settings;
 pub(crate) use launch::{GroundLaunchInfo, GroundLaunchPhysical};
 pub(crate) use services::{GroundControllers, GroundPhysicalFrame};
-pub(crate) use settings::GroundSettings;
-pub(crate) use settings::GroundProfiles;
+pub(crate) use settings::{GroundSettings, GroundProfiles};
 use skate_core::{
     math::Vector3,
     physics::{
@@ -97,19 +92,13 @@ impl GroundRuntime {
             collision_force: None,
         })
     }
-    pub fn contact_response(
-        &mut self,
-        frame: GroundContactFrame,
-        physical: WallRidePhysical,
-    ) -> GroundContactResponse {
-        self.contact =
-            wall_ride_response(&self.wall_ride, physical, frame, self.contact.vector_2688);
-        self.contact
-    }
     /// Slide82D3AA74..AA9C passes a fresh zero previous vector each update.
     /// This call does not overwrite Ground's separately retained contact state.
     pub fn contact_response_with_previous(
-        &self, frame: GroundContactFrame, physical: WallRidePhysical, previous: [f32;4],
+        &self,
+        frame: GroundContactFrame,
+        physical: WallRidePhysical,
+        previous: [f32; 4],
     ) -> GroundContactResponse {
         wall_ride_response(&self.wall_ride, physical, frame, previous)
     }
@@ -168,3 +157,6 @@ fn curve(data: &Collections, class: &str, field: &str) -> Result<PointGraph<8>, 
 fn xyz(v: [f32; 4]) -> Vector3 {
     Vector3::new(v[0], v[1], v[2])
 }
+
+mod surface;
+pub(crate) use surface::{active_surface, surface_key};

@@ -69,9 +69,9 @@ pub(crate) fn anchors(skater: &SkaterRuntime) -> Vec<usize> {
 }
 pub(crate) fn capture_body(physics: &GamePhysics, skater: &SkaterRuntime) -> BodyState {
     let mut enabled = 0u64;
-    if skater.offboard.board_policy.volumes_enabled {
+    {
         for (i, b) in physics.board.bodies().iter().enumerate() {
-            if b.state_flags != 1 {
+            if b.state_flags != 1 && skater.board_possession_live.volume_enabled(CollisionBody::Board(skate_core::physics::board::BodyId::ORDER[i])) {
                 enabled |= 1 << i;
             }
         }

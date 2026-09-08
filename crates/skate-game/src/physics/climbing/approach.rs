@@ -183,8 +183,8 @@ fn update(
             carry_board: skater.skateboard_controller.fields.state_448 == 1,
         });
         r.approach = None;
-        skater.offboard.air_prediction = None;
-        skater.offboard.feet.reset();
+        skater.offboard_air_selector.reset();
+        skater.offboard_feet.reset();
         skater.foot_ik.state.enable_feet(false);
         bevy::log::info!("Climbing: caught ledge from stock jump");
     }

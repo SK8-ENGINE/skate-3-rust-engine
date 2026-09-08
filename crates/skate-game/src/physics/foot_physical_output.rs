@@ -25,10 +25,6 @@ impl FootPhysicalOutputs {
             },
         })
     }
-    pub fn reset(&mut self) {
-        self.state.reset();
-        self.output = FootPhysicalOutput::default();
-    }
     pub fn publish(&mut self, record: &SkeletonPhysicalRecord, dt: f32) -> FootPhysicalOutput {
         self.output = self.state.update(record, dt, self.settings);
         self.output

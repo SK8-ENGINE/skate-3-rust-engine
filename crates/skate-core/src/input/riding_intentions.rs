@@ -1,4 +1,4 @@
-//! Push, brake, body-spin, steering, kick-turn, crouch and powerslide intents
+//! Push, brake, body-spin, steering, kick-turn, crouch, powerslide and world-grab intents
 //! from the TU3 ActionGraph input listener (`825999F0`).
 use super::{
     angle::left_stick_angle,
@@ -150,6 +150,12 @@ pub fn produce(
         if angle > -HALF_PI && angle < 2.0 {
             emit("RightSlide", (2.0 - angle) * SLIDE_SCALE);
         }
+    }
+    //8259A54C/554 reads current raw flags bit28;8259AF68..7C emits
+    //GrabWorld (830BE780, named by initializer82F84EB0) while held.
+    //No actor inhibition or rising-edge gate applies to this intention.
+    if current & (1 << 28) != 0 {
+        emit("GrabWorld", 1.0);
     }
     output
 }

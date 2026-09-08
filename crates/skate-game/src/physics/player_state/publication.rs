@@ -3,28 +3,38 @@ use super::*;
 use skate_core::{
     physics::{
         contact_feedback::choose_surface,
-        filtered_state::{FilteredStateInput},
+        filtered_state::{FilteredStateInput, GrindState},
     },
     player::input_phase::CurrentStateFields,
 };
 pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
     let state = skater.player_state.current();
-    if !matches!(
-        state,
-        PhysicalStateId::PhysicsGround
-            | PhysicalStateId::PhysicsAir
-            | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
-            | PhysicalStateId::Nonspecific
-            | PhysicalStateId::KnownAir
-            | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
+    super::super::offboard::board_manager::runtime::publish(physics, skater);
+    //82DB7218..7258 runs for every state, before the selected state's Fill.
+    //BipedAir may subsequently overwrite64 with its sampled trajectory velocity.
+    let biped = &skater.biped_ground.controller.state;
+    skater.player_input.physical.off_board.vector_64 =
+        biped.frame_output.velocity.map(f32::to_bits);
+    skater.player_input.physical.off_board.cadence_phase_80 = biped.cadence.phase.phase;
+    skater.player_input.physical.off_board.locomotion_state_84 = biped.cadence.locomotion_index;
+    if !state.is_grind()
+        && state != PhysicalStateId::Nonspecific
+        && !matches!(
+            state,
+            PhysicalStateId::PhysicsGround
+                | PhysicalStateId::PhysicsAir
+                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                | PhysicalStateId::KnownAir
+                | PhysicalStateId::BipedAir
+                | PhysicalStateId::BipedGround
+                | PhysicalStateId::OffBoardPushing
                 | PhysicalStateId::GroundAnimation
-            | PhysicalStateId::SlideGround
-            | PhysicalStateId::RevertGround
-            | PhysicalStateId::WipeoutGround
-            | PhysicalStateId::Teleporting
-            | PhysicalStateId::BipedAir
-            | PhysicalStateId::BipedGround
-    ) {
+                | PhysicalStateId::SlideGround
+                | PhysicalStateId::WipeoutGround
+                | PhysicalStateId::Teleporting
+                | PhysicalStateId::LandingOnDeck
+        )
+    {
         return Err(format!(
             "FillPhysOut requires the actual {state:?} output owner"
         ));
@@ -32,6 +42,27 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     if state == PhysicalStateId::KnownAir {
         super::super::known_air::fill(physics, skater)?;
     }
+    if state == PhysicalStateId::BipedAir {
+        super::super::biped_air::fill(skater)?;
+    }
+    if state == PhysicalStateId::LandingOnDeck {
+        super::super::landing_on_deck::fill(skater)?;
+    }
+    if state.is_grind() || state == PhysicalStateId::Nonspecific {
+        super::super::grind::fill(physics, skater)?;
+    }
+    let offboard_ground = if matches!(
+        state,
+        PhysicalStateId::BipedGround | PhysicalStateId::OffBoardPushing
+    ) {
+        let output = super::super::biped_ground::fill(skater, &skater.offboard_feet)?;
+        Some(super::super::biped_ground::publish_fields(
+            output,
+            &mut skater.player_input.physical,
+        ))
+    } else {
+        None
+    };
     let p = &skater.player_input.processed;
     let toolkit = skater
         .player_input
@@ -56,6 +87,11 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     set(59, p.flags_2468 & (1 << 18) != 0);
     set(60, skater.animation_input.fields.balance != 0.0);
     set(62, p.flags_2472 & (1 << 10) != 0);
+    set(
+        63,
+        state == PhysicalStateId::LandingOnDeck
+            && skater.landing_on_deck.state.requests_board_flip(),
+    );
     // State63 is set only by LandingOnDeckManager::Fill82D4E0E8..E0F4
     // when byte246 && time240<.02. Ordinary Ground never invokes that Fill,
     // so it retains the template zero here; State65 carries Ground requests.
@@ -88,6 +124,9 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         }
     }
     set(87, p.flags_2484 & (1 << 10) != 0);
+    if let Some(output) = &offboard_ground {
+        set(86, output.flag_86);
+    }
     if state == PhysicalStateId::SlideGround {
         set(84, skater.slide_state.state.wall_riding);
     }
@@ -97,24 +136,8 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     physical.air.handplant_time_320=skater.handplant.phase;
     physical.air.flag_446=u8::from(skater.handplant.flags&0x8000_0000!=0);
     skater.footplant.publish(&mut physical.air);
-    if physics.grind.active {
-        physical.grinds.words_136_140 = [physics.grind.kind, 1];
-        physical.grinds.flag_318 = u8::from(physics.grind.front_contact);
-        if physics.grind.launched {
-            physical.air.launched_442=1;
-            physical.air.launch_velocity_128=physics.grind.launch_velocity.map(f32::to_bits);
-        }
-    }
-    //Common Biped Fill82DB7218 precedes the selected physical state's Fill.
-    physical.off_board.vector_64 = skater
-        .offboard
-        .controller
-        .state
-        .frame_output
-        .velocity
-        .map(f32::to_bits);
-    physical.off_board.phase_80 = skater.offboard.controller.state.cadence.phase.phase;
-    physical.off_board.locomotion_84 = skater.offboard.controller.state.cadence.locomotion_index;
+    //82DB76E0..76F4 publishes this independently of selected-state304/311.
+    physical.off_board.flag_308 = u8::from(p.flags_2480 & (1 << 19) != 0);
     //Common ProcessOutput82DB7044/7048 and70C0/70C4; these precede state Fill.
     physical.air.flag_444 = u8::from(
         skater
@@ -138,6 +161,10 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         ..CurrentStateFields::default()
     };
     skater.player_state.state_flags[69 - 52] = physical.state.flag_69 != 0;
+    if let Some(output) = &offboard_ground {
+        physical.state.counter_36 = output.word_36;
+        physical.state.skitch_value_40 = output.word_40;
+    }
     if let Some(output) = &output {
         physical.state.skitch_value_40 = output.state_28.grab_spline_object_id;
         physical.state.signed_ground_step_84 = u8::from(output.state_28.flag_84);
@@ -159,6 +186,11 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         //State Fill82D3B010 is a single byte from this retained Slide owner.
         physical.state.signed_ground_step_84 = u8::from(skater.slide_state.state.wall_riding);
     }
+    //ProcessOutput82DB71C4 calls SkateboardController::FillPhysOut82D76D20
+    //for every selected state. The constructor82D74DD8 seeds448=0; use the
+    //same controller owner as state transitions and post-physics ragdoll.
+    //Published by board_manager::runtime::publish above from retained controller state.
+
     //ProcessOutput82DB7130..7180 copies the HandPlantManager animation
     //flags1876 into Air304+20 one bit at a time, preserving the low28 bits.
     //The same manager word is consumed by the actual input publication.
@@ -178,6 +210,8 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         core::array::from_fn(|i| physics.riding.ground.parts[i].in_contact),
         physics.riding.ground.collision_flags & (1 << 25) != 0,
     );
+    super::super::grind::condition(physics, skater)?;
+    let physical = &mut skater.player_input.physical;
     let filtered = skater.player_state.filtered.update(FilteredStateInput {
         physics_category: state.category() as i32,
         physics_state: state as i32,
@@ -190,11 +224,15 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         //authored empty-edge world do not publish the active air/grind fields.
         targeting_grind: state == PhysicalStateId::KnownAir
             && skater.known_air.state.targeting_grind_213,
-        offboard_has_landed: state == PhysicalStateId::BipedAir
-            && skater.offboard.air_state.remaining <= f32::from_bits(0x3c888889),
+        //82DE6078..60C0: state501 is Offboard or OffboardAir from output320.
+        offboard_has_landed: physical.off_board.flag_320 != 0,
         offboard_on_deck: physical.off_board.flag_315 != 0,
-        grind: physics.grind.output(),
-        last_grind_distance: physics.grind.distance,
+        grind: if state.is_grind() {
+            super::super::grind::Runtime::filtered_output(&physical.grinds)?
+        } else {
+            GrindState::default()
+        },
+        last_grind_distance: skater.grind.last_grind_distance(),
     });
     physical.filtered_state_0 = filtered.category as u32;
     skater.player_state.filtered_output = Some(filtered);
@@ -207,12 +245,5 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             .teleport_state
             .publish_output(&mut skater.player_input.physical);
     }
-    if state == PhysicalStateId::BipedGround {
-        super::super::offboard::ground_state::publish(skater);
-    }
-    if state == PhysicalStateId::BipedAir {
-        super::super::offboard::air_state::publish(skater);
-    }
-    super::super::offboard::possession::publish(physics, skater)?;
     Ok(())
 }

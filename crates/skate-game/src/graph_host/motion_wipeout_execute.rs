@@ -61,15 +61,15 @@ impl MotionHost {
             state.gesture = if state.released {
                 self.wipeout_controls.seed_from_air_tweak = false;
                 [
-                    *self.action_intents.get("OB_AirBodyTweakX").unwrap_or(&0.0),
-                    *self.action_intents.get("OB_AirBodyTweakY").unwrap_or(&0.0),
+                    self.action_controls.wipeout.air_body_tweak[0],
+                    self.action_controls.wipeout.air_body_tweak[1],
                 ]
             } else {
                 [0.0; 2]
             };
             return Ok(());
         }
-        if self.action_intents.contains_key("WipeOutRequest") || (state.ticks as i32) > 80 {
+        if self.action_controls.wipeout.request || (state.ticks as i32) > 80 {
             state.released = true;
         }
         if self.wipeout_controls.gestures_enabled {
@@ -121,8 +121,9 @@ impl MotionHost {
             state.twist_velocity = velocity;
             state.twist = positive_turn(twist);
             set(&mut self.animation, b"Twist", state.twist);
-            let x = self.action_intents.get("WipeoutGestureX").copied();
-            let y = self.action_intents.get("WipeoutGestureY").copied();
+            let gesture = self.action_controls.wipeout.gesture;
+            let x = gesture.map(|values| values[0]);
+            let y = gesture.map(|values| values[1]);
             let xv = x.unwrap_or(0.0);
             let yv = y.unwrap_or(0.0);
             if !state.released && x.is_some() && y.is_some() && xv.abs() < 0.1 && yv.abs() < 0.1 {

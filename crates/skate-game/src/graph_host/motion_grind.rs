@@ -1,73 +1,83 @@
-//! Stock grind graph behaviors82BAF208/82BB0A30/82BB0D40/82BB10F8.
+//! Original S3 grind graph lifecycle, using the current animation owner.
+//! No animation choice, physical-state transition or synthetic observation.
+pub mod animation;
+pub mod conditions;
+mod settings;
+pub use settings::Settings;
+#[cfg(test)]
+mod tests;
+
+use animation::{Animation, endpoints, set};
 use skate_core::animation::{
-    grind_control::{Fade, FadeSettings, crouch},
-    playback_parameters::{AttributeSink, SettableAttribute},
+    grind_control::{Fade, crouch, facing, mirrored_twist},
+    output::attributes::AttributeName,
     skeleton_input::name::encode,
 };
-use skate_data::{collections::Collections, state_graph::attributes::Attributes};
+use skate_data::state_graph::attributes::Attributes;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
     Attributes,
-    Crouch,
+    Crouch {
+        height: AttributeName,
+    },
     Fade {
-        height: String,
-        twist: String,
+        height: AttributeName,
+        twist: AttributeName,
         intent: String,
     },
 }
 impl Operation {
-    pub fn parse(a: &Attributes<'_>) -> Option<Self> {
-        Some(match a.text("name")? {
-            "CreateGrindAttributes" => Self::Attributes,
-            "ControlGrindCrouch" => Self::Crouch,
-            "GrindControlFade" => Self::Fade {
-                height: a
-                    .text("distBoardToCogAnimAttribute")
-                    .unwrap_or("DistToCog")
-                    .into(),
-                twist: a.text("twistAnimAttribute").unwrap_or("twist").into(),
-                intent: a.text("twistMGIntent").unwrap_or("GrindBalanceX").into(),
+    pub fn parse(a: &Attributes<'_>) -> Result<Option<Self>, String> {
+        let required = |name| {
+            a.text(name)
+                .ok_or_else(|| format!("GrindControlFade requires {name}"))
+        };
+        Ok(Some(match a.text("name") {
+            Some("CreateGrindAttributes") => Self::Attributes,
+            Some("ControlGrindCrouch") => Self::Crouch {
+                height: encode(a.text("driveDistToCom").unwrap_or("disttocog").as_bytes()),
             },
-            _ => return None,
-        })
+            Some("GrindControlFade") => Self::Fade {
+                height: encode(required("distBoardToCogAnimAttribute")?.as_bytes()),
+                twist: encode(required("twistAnimAttribute")?.as_bytes()),
+                intent: required("twistMGIntent")?.into(),
+            },
+            _ => return Ok(None),
+        }))
     }
 }
-pub struct Settings {
-    pub fade: FadeSettings,
-    pub height: [f32; 3],
-}
-impl Settings {
-    pub fn load(d: &Collections) -> Result<Self, String> {
-        let f = |n| d.float("anim_motion", "grind_twist", n);
-        Ok(Self {
-            fade: FadeSettings {
-                response: f("twist_smoothing")?,
-                input_scale: f("twist_sensitivity")?,
-                acceleration: f("twist_max_delta_delta")?,
-                maximum_step: f("twist_max_delta")?,
-            },
-            height: [
-                d.float("anim_motion", "grind_height", "min_grind_disttocog")?,
-                d.float("anim_motion", "grind_height", "max_grind_disttocog")?,
-                d.float("anim_motion", "grind_height", "grind_disttocog_speed")?,
-            ],
-        })
-    }
-}
+
+/// Per behavior instance, never shared between different graph nodes.
 #[derive(Default)]
 pub struct State {
-    pub fade: Fade,
-    pub height: f32,
+    fade: Option<Fade>,
+    height: Option<f32>,
 }
-#[derive(Clone, Debug, Default)]
+
+/// Required genuine physical fields. No Default: an unavailable producer must
+/// not silently become a fabricated all-zero observation.
+#[derive(Clone, Copy, Debug)]
 pub struct Physical {
-    pub name: String,
+    /// Filtered bundle64 byte80 and five-word encoded name at+8.
     pub grinding: bool,
-    pub dropping_in: bool,
+    pub grind_name: AttributeName,
+    /// Motion bundle4 vector80 (deck velocity), Basic bundle0 vector128
+    /// (completed effective board forward). Historical field name retained.
+    pub ground_axis: [f32; 3],
+    pub board_axis: [f32; 3],
+    /// Motion273: Processed2468 bit20, not a ground-contact flag.
+    pub ground_flag_273: bool,
+    /// Live animation mirror, not a cached physical stance.
+    pub animation_mirrored: bool,
+    /// Animation bundle56 float72, Filtered bundle64 float56.
+    pub height: f32,
     pub crouch: f32,
+    /// RAW Skeleton bundle20 float504; this handler mirrors it on Begin.
     pub twist: f32,
-    pub facing_backwards: bool,
 }
+
+/// phase0=Begin,1=Update,2=End. Graph execution owns lifecycle/order.
 pub fn execute(
     state: &mut State,
     op: &Operation,
@@ -75,54 +85,70 @@ pub fn execute(
     dt: f32,
     settings: &Settings,
     physical: &Physical,
-    height: f32,
-    animation: &mut super::motion_animation::MotionAnimation,
+    animation: &mut impl Animation,
 ) -> Result<(), String> {
-    let set = |animation: &mut super::motion_animation::MotionAnimation, name: &str, value: f32| {
-        animation.set_attribute(SettableAttribute {
-            name: encode(name.as_bytes()),
-            value,
-            normalized: false,
-            sequence_id: -1,
-        });
-    };
     match op {
         Operation::Attributes if phase == 1 && physical.grinding => {
-            animation.motion_intents.insert(&physical.name, 1.0);
-            animation.motion_intents.insert(
-                if physical.facing_backwards {
-                    "GrindFacingBackwards"
+            // Actor1800 slot16 ->8258F6E0 AddMgAttribute, NOT InsertIntent.
+            animation.emit_packet(physical.grind_name, 1.0);
+            let backwards = facing::backwards(
+                physical.ground_axis,
+                physical.board_axis,
+                physical.ground_flag_273,
+                physical.animation_mirrored,
+            );
+            animation.emit_packet(
+                encode(if backwards {
+                    b"GrindFacingBackwards"
                 } else {
-                    "GrindFacingForwards"
-                },
+                    b"GrindFacingForwards"
+                }),
                 1.0,
             );
         }
-        Operation::Crouch if phase == 0 => state.height = height,
-        Operation::Crouch if phase == 1 => {
-            let intent = animation
-                .motion_intents
-                .get("Crouch")
-                .copied()
-                .unwrap_or(0.0);
+        Operation::Crouch { .. } if phase == 0 => state.height = Some(physical.height),
+        Operation::Crouch { height } if phase == 1 => {
+            let previous = state
+                .height
+                .ok_or("ControlGrindCrouch Update before Begin")?;
             let [min, max, rate] = settings.height;
-            state.height = crouch(state.height, intent, physical.crouch, min, max, rate, dt);
-            set(animation, "DistToCog", state.height);
+            let next = crouch(
+                previous,
+                animation.intent("Crouch").unwrap_or(0.0),
+                physical.crouch,
+                min,
+                max,
+                rate,
+                dt,
+            );
+            state.height = Some(next);
+            set(animation, *height, next, false);
         }
         Operation::Fade {
-            height: name,
+            height,
             twist,
             intent,
         } => {
             if phase == 0 {
-                set(animation, name, height);
-                let bounds = animation.attribute_endpoints(encode(twist.as_bytes()))?;
-                let value = state.fade.begin(bounds[0], bounds[1], physical.twist);
-                set(animation, twist, value);
+                set(animation, *height, physical.height, false);
+                let bounds = endpoints(animation, *twist)?;
+                let mut fade = Fade::default();
+                let value = fade.begin(
+                    bounds[0],
+                    bounds[1],
+                    mirrored_twist(physical.twist, physical.animation_mirrored),
+                );
+                set(animation, *twist, value, false);
+                state.fade = Some(fade);
             } else if phase == 1 {
-                let input = animation.motion_intents.get(intent).copied().unwrap_or(0.0);
-                if let Some(value) = state.fade.update(dt, input, settings.fade) {
-                    set(animation, twist, value);
+                let fade = state
+                    .fade
+                    .as_mut()
+                    .ok_or("GrindControlFade Update before Begin")?;
+                if let Some(value) =
+                    fade.update(dt, animation.intent(intent).unwrap_or(0.0), settings.fade)
+                {
+                    set(animation, *twist, value, false);
                 }
             }
         }

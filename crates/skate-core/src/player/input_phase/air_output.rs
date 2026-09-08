@@ -21,6 +21,8 @@ pub struct AirOutputFields {
     pub trajectory_plane_samples_336: [f32; 25],
     pub known_air_valid_437: u8,
     pub launched_442: u8,
+    /// Common ProcessOutput82DB703C: TrajectorySelector9653.
+    pub flag_443: u8,
     pub flag_444: u8,
     /// Air324 high bits used by IsHandPlanting82BA55A8.
     pub handplant_flags_324: u32,

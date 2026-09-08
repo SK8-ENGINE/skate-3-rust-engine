@@ -3,8 +3,6 @@
 //! GeneralUpdate belongs to the later movement-state phase, not PlayerInput.
 #[path = "skeleton_input_general.rs"]
 mod general;
-#[path = "grind_air_settings.rs"]
-mod grind_settings;
 #[path = "skeleton_input_teleport.rs"]
 mod teleport;
 
@@ -12,7 +10,7 @@ use super::{
     animated_skeleton::AnimatedSkeleton, animation_input::AnimationInput, foot_ik::FootIk,
 };
 use skate_core::{
-    animation::output::{attributes::AnimationAttribute, NativeMatrix},
+    animation::output::{NativeMatrix, attributes::AnimationAttribute},
     input::controller::ActionMap,
     physics::{
         board::BodyId,
@@ -79,11 +77,11 @@ pub(crate) struct SkeletonInputRuntime {
     ///GrindAirAdjust ctor82D7116C initializes activated289=false.
     ///Only KnownAir Update82D35D30/Exit82D3597C subsequently write this flag.
     ///288, ctor82D71160; activated289 is a separate retained flag.
-    pub grind_air: skate_core::physics::grind_air::GrindAir,
-    pub grind_air_settings: Option<skate_core::physics::grind_air::Settings>,
     pub grind_air_started: bool,
     pub grind_air_active: bool,
     pub grind_air_adjusting: bool,
+    pub grind_air: skate_core::physics::grind_air::GrindAir,
+    grind_air_settings: Option<skate_core::physics::grind_air::Settings>,
 }
 
 impl Default for SkeletonInputRuntime {
@@ -104,20 +102,21 @@ impl Default for SkeletonInputRuntime {
             force_mode: 0,
             head_tracking_history: [[0.0; 4]; 8],
             head_tracking_active: false,
-            grind_air: Default::default(),
-            grind_air_settings: None,
             grind_air_started: false,
             grind_air_active: false,
             grind_air_adjusting: false,
+            grind_air: Default::default(),
+            grind_air_settings: None,
         }
     }
 }
 
 impl SkeletonInputRuntime {
-    pub fn load_grind_settings(
-        data: &skate_data::collections::Collections,
-    ) -> Result<skate_core::physics::grind_air::Settings, String> {
-        grind_settings::load(data)
+    pub fn load(data: &skate_data::collections::Collections) -> Result<Self, String> {
+        Ok(Self {
+            grind_air_settings: Some(super::grind_air_settings::load(data)?),
+            ..Self::default()
+        })
     }
     ///Called by PlayerInputCallbacks::process_skeleton, after the actual
     ///BoardToolkit and line tests have been published. It does not advance
@@ -125,7 +124,7 @@ impl SkeletonInputRuntime {
     pub fn process_data(
         &mut self,
         board: &mut BoardRuntime,
-        _toolkit: &BoardToolkit,
+        toolkit: &BoardToolkit,
         packet: &AnimationInputPacket<'_>,
         _physical: &mut PhysicalPlayerInput,
         p: &mut ProcessedPhysicsInput,
@@ -166,13 +165,7 @@ impl SkeletonInputRuntime {
         //Do not silently reuse a riding pose if a future state enables them.
         let reparented_hands = owners.animated.reparented_hand_indices();
         super::offboard::pose_adjust::update(owners.animated, pose.globals, reparented_hands, p)?;
-        if p.flags_2476 & 0x100 != 0 {
-            if p.flags_2476 & 0x10000 == 0 {
-                return Err(
-                    "Landing-on-board pose requires UpdateLandingOnSkateboardAdjust82BDCC28".into(),
-                );
-            }
-        } else {
+        if p.flags_2476 & 0x100 == 0 {
             //82D712E0 clears result48/49 first and always writes adjusting290.
             //Inactive Ground leaves retained total offset/angle untouched.
             self.grind_air_adjusting = false;
@@ -180,43 +173,15 @@ impl SkeletonInputRuntime {
                 let settings = self
                     .grind_air_settings
                     .as_ref()
-                    .ok_or("Missing stock GrindAir settings")?;
-                let mut frame = super::solve::deck_frame(board);
-                if p.flags_2468 & 0x0010_0000 != 0 {
-                    frame[0] = frame[0].map(|v| -v);
-                    frame[2] = frame[2].map(|v| -v);
-                }
-                let mapped = skate_core::physics::skeleton_animation_record::map_animation_parts(
-                    pose.globals,
-                    &owners.animated.bone_indices,
-                    &owners.animated.physics_frames,
-                )?;
-                skate_core::physics::skeleton_motion::SkeletonMotion::publish_unadjusted_board(
-                    &mapped[0],
-                    &mut p.flags_2472,
-                );
-                if let Some(adjustment) = self.grind_air.update(
-                    frame,
-                    p.vectors_400_416[0].map(f32::from_bits),
-                    p.vectors_720_784_800_816_832_864[0].map(f32::from_bits),
-                    p.vectors_544_560_592_608[0].map(f32::from_bits),
-                    p.timestep_2604,
-                    [p.flags_2480, p.flags_2472, p.flags_2468],
-                    p.flags_2484 & 0x0020_0000 != 0,
+                    .ok_or("GrindAirAdjust stock settings were not loaded")?;
+                self.grind_air_adjusting = super::skeleton_grind_air::update(
+                    &mut self.grind_air,
                     settings,
-                ) {
-                    let pivot = skate_core::physics::skeleton_animation_record::transform_point(
-                        &owners.animated.roots.animation_to_world,
-                        mapped[0][3],
-                    );
-                    let offset = adjustment.local_transform(
-                        owners.animated.roots.animation_to_world,
-                        pivot,
-                        owners.animated.board_frames.physical_board[2],
-                    );
-                    owners.animated.board_offset.refresh_transform(offset);
-                    self.grind_air_adjusting = true;
-                }
+                    toolkit.deck,
+                    p,
+                    owners.animated,
+                    pose.globals,
+                )?;
             }
         }
         let up = p.vectors_544_560_592_608[0].map(f32::from_bits);
@@ -241,6 +206,12 @@ impl SkeletonInputRuntime {
             packet.publication.timestep,
             &mut p.flags_2468,
             &mut p.flags_2472,
+            (p.flags_2476 & 0x10100 == 0x100).then_some((
+                toolkit.deck,
+                p.vectors_720_784_800_816_832_864[5].map(f32::from_bits),
+                p.flags_2480,
+                p.off_board_scalar_2832,
+            )),
         )?;
         self.drive_frames = owners.animated.record.pose;
         p.board_at_y_delta_2768 = owners.animated.board_at_y_delta;
@@ -270,10 +241,24 @@ impl SkeletonInputRuntime {
 }
 
 fn publish_attribute_flags(input: &AnimationInput, p: &mut ProcessedPhysicsInput) {
-    p.flags_2468 = input.fields.flags2468;
-    p.flags_2472 = input.fields.flags2472;
-    p.flags_2476 = input.fields.flags2476;
+    // The scalar and extended attribute consumers write into the same
+    // ProcessedPhysicsInput flag lanes that the later physics stages read.
+    // Publish each lane explicitly at the native boundary:
+    //
+    //   AnimationInput.fields.flags2468 -> ProcessedPhysicsInput.flags_2468
+    //   AnimationInput.fields.flags2472 -> ProcessedPhysicsInput.flags_2472
+    //   AnimationInput.fields.flags2476 -> ProcessedPhysicsInput.flags_2476
+    //   AnimationInput.extra.flags2480  -> ProcessedPhysicsInput.flags_2480
+    //   AnimationInput.fields.flags2484 -> ProcessedPhysicsInput.flags_2484
+    //   AnimationInput.fields.flags2488 -> ProcessedPhysicsInput.flags_2488
+    //
+    // This is publication only. No flags are synthesized, retained, or
+    // filtered here; reset and attribute dispatch own those decisions.
+    let scalar = &input.fields;
+    p.flags_2468 = scalar.flags2468;
+    p.flags_2472 = scalar.flags2472;
+    p.flags_2476 = scalar.flags2476;
+    p.flags_2484 = scalar.flags2484;
+    p.flags_2488 = scalar.flags2488;
     p.flags_2480 = input.extra.flags2480;
-    p.flags_2484 = input.fields.flags2484;
-    p.flags_2488 = input.fields.flags2488;
 }

@@ -133,8 +133,9 @@ pub struct RetailBodyRateStep {
 /// - `mIfull = (Ixx, Ixy, Ixz)`;
 /// - `mIsplt = (Izz, Iyy, Iyz)`.
 ///
-/// This retained lane mapping requires independent TU3 instruction review.
-/// Earlier generated-code validation has been withdrawn.
+/// Independently traced through original S3 DynamicUpdate82AE6778..6804 and
+/// S2 DynamicUpdate82AE467C..46FC. This verifies the six-component layout,
+/// not bit-exact Xenon arithmetic; generated-code validation is withdrawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RetailPackedWorldInverseInertia {
     pub full: Vector3,
@@ -278,7 +279,8 @@ pub fn integrate_body_rates(
     }
 }
 
-/// Quaternion branch from TU3 `0x82AE66A8..0x82AE67B8`.
+/// Quaternion branch from TU3 `0x82AE6668..0x82AE66C8`, paired with
+/// Skate 2 `0x82AE455C..0x82AE45C8`.
 ///
 /// Mapping the VMX128 word permutations back to RenderWare's public
 /// `(x,y,z,w)` lane order gives:

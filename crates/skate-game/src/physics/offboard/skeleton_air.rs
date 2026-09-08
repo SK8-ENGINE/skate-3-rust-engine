@@ -1,72 +1,81 @@
-//! Live Skeleton BipedAir82BDDD70 over the shared solve owners.
-use crate::physics::{GamePhysics, SkaterRuntime, skeleton_input_runtime::SkeletonOwners};
-use skate_core::physics::skeleton_animation_record::{
-    AnimationPartTransform as Frame, compose_affine,
+//! BipedAir Skeleton82BDDD70 with the existing skeleton, drives and solver.
+//! The caller supplies the shared reckoning service; no second physics owner.
+use super::skeleton_ground::ReckoningUpdate;
+use crate::physics::{
+    skeleton_air::SkeletonAir,
+    skeleton_input_runtime::{CollisionInput, SkeletonInputRuntime, SkeletonOwners},
 };
-pub(crate) fn update(
-    physics: &mut GamePhysics,
-    skater: &mut SkaterRuntime,
-    frame: Frame,
-    trajectory_position: [f32; 4],
-    body_position: [f32; 4],
-    height: f32,
-) -> Result<(), String> {
-    let collision = crate::physics::input_phase::collision(skater);
-    let p = &mut skater.player_input.processed;
-    let s = &mut skater.animated_skeleton;
-    s.board_frames.skate_root = compose_affine(&s.roots.animation_to_world, &s.record.pose[0]);
-    s.board_frames
-        .update_com_lift(&s.roots.animation_to_world, body_position, height);
-    let target = skate_core::physics::skeleton_biped_air::prepare(
-        &mut s.roots,
-        frame,
-        trajectory_position,
-        s.record.centre_of_mass,
-        &skater.skeleton_input.drive_frames[0],
-        p.flags_2476,
-        &mut p.flags_2468,
-    );
-    s.board_frames.animation_target = target;
-    if p.flags_2480 & 0x8000 != 0 {
-        s.board_frames.physical_board =
-            skater
-                .skeleton_air
-                .apply_board(&mut physics.board, &target, true);
+use skate_core::{
+    animation::output::NativeMatrix,
+    physics::{
+        board_runtime::BoardRuntime,
+        rigid_body::RetailSimulationStep,
+        skeleton_animation_record::{AnimationPartTransform as Frame, compose_affine},
+    },
+    player::input_phase::ProcessedPhysicsInput,
+};
+
+pub(crate) struct Input {
+    pub frame_208: Frame,
+    pub trajectory_position_272: [f32; 4],
+    pub body_target_416: [f32; 4],
+    pub lift_436: f32,
+    ///Actual processed board-forward96, NOT effective animation-forward224.
+    pub board_forward_96: [f32; 4],
+}
+
+impl SkeletonInputRuntime {
+    ///Old-root skate/COM -> new animation root -> held-board target ->
+    ///GeneralUpdate -> shared Reckoning -> clear next trajectory12176.
+    ///Return the actual processed0..48 target for the parent's input owner.
+    pub(crate) fn update_biped_air<F>(
+        &mut self,
+        air: &mut SkeletonAir,
+        board: &mut BoardRuntime,
+        input: Input,
+        p: &mut ProcessedPhysicsInput,
+        owners: &mut SkeletonOwners<'_>,
+        globals: &[NativeMatrix],
+        collision: &CollisionInput,
+        simulation: RetailSimulationStep,
+        finish_reckoning: F,
+    ) -> Result<Frame, String>
+    where
+        F: FnOnce(ReckoningUpdate, &ProcessedPhysicsInput, f32) -> Result<(), String>,
+    {
+        let s = &mut owners.animated;
+        //82BDEE08 and82BDE310 use the OLD root, before82BDDDC8 changes it.
+        s.board_frames.skate_root = compose_affine(&s.roots.animation_to_world, &s.record.pose[0]);
+        s.board_frames.update_com_lift(
+            &s.roots.animation_to_world,
+            input.body_target_416,
+            input.lift_436,
+        );
+        let target = skate_core::physics::skeleton_biped_air::prepare(
+            &mut s.roots,
+            input.frame_208,
+            input.trajectory_position_272,
+            s.record.centre_of_mass,
+            &self.drive_frames[0],
+            p.flags_2476,
+            &mut p.flags_2468,
+        );
+        s.board_frames.animation_target = target;
+        if p.flags_2480 & 0x8000 != 0 {
+            s.board_frames.physical_board = air.apply_board(board, &target, true);
+        }
+        self.general_update(p, owners, globals, collision, simulation)?;
+        finish_reckoning(
+            ReckoningUpdate {
+                up: owners.animated.roots.animation_to_world[1],
+                forward: input.board_forward_96,
+                blend: 0.5,
+            },
+            p,
+            owners.animation_input.extra.physical_body_spin,
+        )?;
+        owners.animated.finish_ground();
+        owners.animation_input.fields.flags2468 = p.flags_2468;
+        Ok(target)
     }
-    let mut owners = SkeletonOwners {
-        animated: s,
-        body: &mut skater.skeleton,
-        drives: &mut skater.skeleton_drives,
-        ik: &mut skater.foot_ik,
-        animation_input: &mut skater.animation_input,
-        correction: &mut skater.skeleton_output.correction,
-        pose_errors: &mut skater.pose_errors,
-    };
-    skater.skeleton_input.general_update(
-        p,
-        &mut owners,
-        &skater.animation.packet.hierarchy,
-        &collision,
-        physics.settings.step.simulation,
-    )?;
-    let root = owners.animated.roots.animation_to_world;
-    //82D8E3E0's forward is the processed board forward96 in this Air caller.
-    physics.riding.update_biped_reckoning(
-        &mut skater.air_reckoning.state,
-        super::skeleton_ground::ReckoningUpdate {
-            up: root[1],
-            forward: skater
-                .player_input
-                .toolkit
-                .as_ref()
-                .ok_or("BipedAir Skeleton has no board toolkit")?
-                .deck[2],
-            blend: 0.5,
-        },
-        p.flags_2468,
-        owners.animation_input.extra.physical_body_spin,
-    );
-    owners.animated.finish_ground();
-    owners.animation_input.fields.flags2468 = p.flags_2468;
-    Ok(())
 }

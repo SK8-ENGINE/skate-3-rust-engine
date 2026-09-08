@@ -1,8 +1,8 @@
 //! TU3 trajectory selection82D67848/82D682E8/82D68800.
 //! Host world storage and batch ownership are independent of console layout.
 mod launch;
-pub mod grind;
 pub mod grind_surface;
+pub mod grind;
 mod math;
 mod prediction;
 mod query;

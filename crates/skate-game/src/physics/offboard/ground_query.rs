@@ -4,7 +4,6 @@ mod edges;
 mod lines;
 mod transform;
 mod world;
-pub use world::with_world_scene;
 use skate_core::{
     math::Vector3,
     physics::board_world::WorldTriangle,
@@ -12,6 +11,7 @@ use skate_core::{
         Edge, EdgeSearch, Frame, GroundQueryPacket, GroundQueryScene, LineHit,
     },
 };
+pub use world::with_world_scene;
 #[derive(Clone, Copy, Debug)]
 pub struct Bounds {
     pub min: Vector3,
@@ -80,4 +80,3 @@ impl GroundQueryScene for Scene<'_> {
 
 #[cfg(test)]
 mod tests;
-
