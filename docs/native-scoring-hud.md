@@ -29,8 +29,13 @@ Implemented source components:
   geometry, font metadata, textures and compact action stream into a private
   cache. Source asset hashes are retained in the compiled manifest.
 * `apt_vm`: partial bounded interpreter for the original compact instructions.
-  The data-only audit initializes the original class and runs its constructor
-  against a dummy host. This does not validate a functioning display.
+  The data-only audit initializes the original class, builds the authored
+  initial child hierarchy and checks the constructor's four trick-name
+  visibility writes. Native method calls still use a dummy host, so this does
+  not validate a functioning display.
+* `apt_display`: retained depth-list placement flags and transforms. The
+  data-only audit validates all controls across 38 original movie timelines.
+  Unsupported clip actions and filters fail explicitly.
 
 ## Extractor provenance
 
@@ -61,7 +66,7 @@ announcement delays to ticks. A physics-frame count is not a safe substitute.
 
 The HUD still needs a complete movie object hierarchy, native bindings,
 timeline execution and rendering with multiplicative and additive colors.
-Function scope/preloads and supported action coverage also remain incomplete.
+Superclass preloads and supported action coverage also remain incomplete.
 The audit's dummy host intentionally does not establish native binding parity.
 
 The movie references `FuturaOuterGlow`, absent under that exact name from the
@@ -74,3 +79,8 @@ Pause, map-change generation reset, resource reuse and the final task-specific
 release build/launcher remain to be integrated and checked. No game/recomp,
 controller harness, gameplay automation, `--check-assets`, or screenshot
 capture has been run for this work.
+
+Validation so far: eight scoring unit tests pass (including unsigned clock
+rollover, early completion, conversion, timer thresholds, one-time banking and
+cancelled rewards); the owned-data loader audit resolves 300 definitions; the
+APT data-only audit passes placement validation and constructor checks.

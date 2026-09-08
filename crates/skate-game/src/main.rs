@@ -1,4 +1,6 @@
 mod animation;
+mod apt_vm;
+mod apt_display;
 mod animation_pose;
 mod app;
 mod assets;
