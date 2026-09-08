@@ -1,14 +1,16 @@
 //! Independent, draggable enabled-mod windows. Positions survive closing Escape.
 use super::{ModMenu, Mods};
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use std::collections::BTreeMap;
-const PAGE: usize = 7;
+
 #[derive(Default)]
 struct Layout {
     position: Vec2,
     collapsed: bool,
     selected: usize,
     status: String,
+    reveal_selected: bool,
 }
 #[derive(Resource, Default)]
 pub(crate) struct EnabledPanel {
@@ -28,6 +30,8 @@ struct Root(String);
 #[derive(Component)]
 struct Body(String);
 #[derive(Component)]
+struct Viewport(String);
+#[derive(Component)]
 struct Header(String);
 #[derive(Component)]
 struct Row(String, usize);
@@ -46,7 +50,6 @@ enum Operation {
     Adjust(usize, i32),
     Collapse,
     Configure,
-    Page(i32),
 }
 pub(super) fn install(app: &mut App) {
     app.init_resource::<EnabledPanel>()
@@ -56,7 +59,7 @@ pub(super) fn install(app: &mut App) {
                 .after(crate::graphics_menu::MenuInput)
                 .before(crate::map_transition::MapTransitionSet),
         )
-        .add_systems(Update, (sync, draw).chain());
+        .add_systems(Update, (sync, draw, scroll).chain());
 }
 fn button(parent: &mut ChildSpawnerCommands, text: &str, action: Action) {
     parent
@@ -117,7 +120,7 @@ fn sync(
         panel.active = signature.first().map(|(id, _)| id.clone());
         panel.focused = false;
     }
-    for (index, (id, _)) in signature.iter().enumerate() {
+    for (index, (id, settings)) in signature.iter().enumerate() {
         panel.layouts.entry(id.clone()).or_insert_with(|| Layout {
             position: Vec2::new(16. + index as f32 * 22., 64. + index as f32 * 34.),
             ..default()
@@ -202,56 +205,69 @@ fn sync(
                         },
                     ))
                     .with_children(|body| {
-                        for i in 0..PAGE {
-                            body.spawn((
-                                Row(id.clone(), i),
-                                Node {
-                                    align_items: AlignItems::Center,
-                                    column_gap: px(4.),
-                                    min_height: px(34.),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgb(0.08, 0.11, 0.15)),
-                            ))
-                            .with_children(|row| {
-                                row.spawn((
-                                    Label(id.clone(), i),
-                                    Text::new(""),
-                                    TextFont {
-                                        font_size: 14.,
-                                        ..default()
-                                    },
-                                    TextColor(Color::WHITE),
+                        body.spawn((
+                            Viewport(id.clone()),
+                            ScrollPosition::default(),
+                            Node {
+                                height: px(280.),
+                                max_height: Val::Vh(45.),
+                                overflow: Overflow::scroll_y(),
+                                flex_direction: FlexDirection::Column,
+                                row_gap: px(6.),
+                                ..default()
+                            },
+                        ))
+                        .with_children(|list| {
+                            for i in 0..settings.len() {
+                                list.spawn((
+                                    Row(id.clone(), i),
                                     Node {
-                                        flex_grow: 1.,
-                                        width: px(132.),
+                                        align_items: AlignItems::Center,
+                                        column_gap: px(4.),
+                                        min_height: px(34.),
+                                        flex_shrink: 0.,
                                         ..default()
                                     },
-                                ));
-                                button(row, "-", Action(id.clone(), Operation::Adjust(i, -1)));
-                                row.spawn((
-                                    ValueLabel(id.clone(), i),
-                                    Text::new(""),
-                                    TextFont {
-                                        font_size: 14.,
-                                        ..default()
-                                    },
-                                    TextColor(Color::WHITE),
-                                    Node {
-                                        width: px(51.),
-                                        ..default()
-                                    },
-                                ));
-                                button(row, "+", Action(id.clone(), Operation::Adjust(i, 1)));
-                            });
-                        }
+                                    BackgroundColor(Color::srgb(0.08, 0.11, 0.15)),
+                                ))
+                                .with_children(|row| {
+                                    row.spawn((
+                                        Label(id.clone(), i),
+                                        Text::new(""),
+                                        TextFont {
+                                            font_size: 14.,
+                                            ..default()
+                                        },
+                                        TextColor(Color::WHITE),
+                                        Node {
+                                            flex_grow: 1.,
+                                            width: px(132.),
+                                            ..default()
+                                        },
+                                    ));
+                                    button(row, "-", Action(id.clone(), Operation::Adjust(i, -1)));
+                                    row.spawn((
+                                        ValueLabel(id.clone(), i),
+                                        Text::new(""),
+                                        TextFont {
+                                            font_size: 14.,
+                                            ..default()
+                                        },
+                                        TextColor(Color::WHITE),
+                                        Node {
+                                            width: px(51.),
+                                            ..default()
+                                        },
+                                    ));
+                                    button(row, "+", Action(id.clone(), Operation::Adjust(i, 1)));
+                                });
+                            }
+                        });
                         body.spawn(Node {
                             column_gap: px(6.),
                             ..default()
                         })
                         .with_children(|p| {
-                            button(p, "<", Action(id.clone(), Operation::Page(-1)));
-                            button(p, ">", Action(id.clone(), Operation::Page(1)));
                             button(p, "Manage mod", Action(id.clone(), Operation::Configure));
                         });
                         body.spawn((
@@ -349,24 +365,20 @@ fn input(
                     layout.selected = layout.selected.min(count - 1);
                     if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
                         layout.selected = (layout.selected + count - 1) % count;
+                        layout.reveal_selected = true;
                     }
                     if keys.just_pressed(KeyCode::ArrowDown) || nav.pressed & 2 != 0 {
                         layout.selected = (layout.selected + 1) % count;
+                        layout.reveal_selected = true;
                     }
                     if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
-                        action = Some(Action(
-                            id.clone(),
-                            Operation::Adjust(layout.selected % PAGE, -1),
-                        ));
+                        action = Some(Action(id.clone(), Operation::Adjust(layout.selected, -1)));
                     }
                     if keys.just_pressed(KeyCode::ArrowRight)
                         || keys.just_pressed(KeyCode::Enter)
                         || nav.pressed & (8 | 0x1000) != 0
                     {
-                        action = Some(Action(
-                            id.clone(),
-                            Operation::Adjust(layout.selected % PAGE, 1),
-                        ));
+                        action = Some(Action(id.clone(), Operation::Adjust(layout.selected, 1)));
                     }
                 }
             }
@@ -396,17 +408,11 @@ fn input(
             layout.collapsed = !layout.collapsed;
         }
         Operation::Configure => menu.configure(id),
-        Operation::Page(direction) => {
-            let pages = p.manifest.settings.len().max(1).div_ceil(PAGE);
-            layout.selected = ((layout.selected / PAGE) as i32 + direction).rem_euclid(pages as i32)
-                as usize
-                * PAGE;
-        }
         Operation::Adjust(row, direction) => {
             if layout.collapsed {
                 return;
             }
-            let selected = layout.selected / PAGE * PAGE + row;
+            let selected = row;
             let Some((key, s)) = p.manifest.settings.iter().nth(selected) else {
                 return;
             };
@@ -491,7 +497,7 @@ fn draw(
     }
     for (row, mut node, mut color) in &mut rows {
         let selected = panel.layouts.get(&row.0).map_or(0, |l| l.selected);
-        let index = selected / PAGE * PAGE + row.1;
+        let index = row.1;
         node.display = if mods
             .manager
             .packages
@@ -520,7 +526,7 @@ fn draw(
         if let Some(h) = hint {
             if let Some(l) = panel.layouts.get(&h.0) {
                 **t = format!(
-                    "Drag title to move | +/- change values\nTab / X cycles windows; arrows adjust\n{}",
+                    "Drag title to move | +/- change values\nScroll wheel: more settings | Tab / X: focus\n{}",
                     l.status
                 );
             }
@@ -533,14 +539,7 @@ fn draw(
                 .manager
                 .packages
                 .get(id)
-                .zip(panel.layouts.get(id))
-                .and_then(|(p, l)| {
-                    p.manifest
-                        .settings
-                        .iter()
-                        .nth(l.selected / PAGE * PAGE + row)
-                        .map(|(k, s)| (p, k, s))
-                });
+                .and_then(|p| p.manifest.settings.iter().nth(row).map(|(k, s)| (p, k, s)));
             **t = setting
                 .map(|(p, key, s)| {
                     if !is_value {
@@ -556,5 +555,77 @@ fn draw(
                 })
                 .unwrap_or_default();
         }
+    }
+}
+
+// Scroll only the uppermost mod window under the pointer. Use computed UI
+// geometry so DPI scaling, dragging and wrapped setting labels remain correct.
+fn scroll(
+    mut wheel: MessageReader<MouseWheel>,
+    mut panel: ResMut<EnabledPanel>,
+    pause: Res<crate::graphics_menu::Menu>,
+    menu: Res<ModMenu>,
+    custom: Res<crate::customiser::Customiser>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    roots: Query<(&Root, &ComputedNode, &UiGlobalTransform)>,
+    mut lists: Query<(
+        &Viewport,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &mut ScrollPosition,
+    )>,
+    rows: Query<(&Row, &ComputedNode, &UiGlobalTransform)>,
+) {
+    let delta: f32 = wheel
+        .read()
+        .map(|event| match event.unit {
+            MouseScrollUnit::Line => event.y * 40.,
+            MouseScrollUnit::Pixel => event.y,
+        })
+        .sum();
+    if !pause.open || menu.open || custom.open || panel.drag.is_some() {
+        return;
+    }
+    let hovered = window.physical_cursor_position().and_then(|cursor| {
+        roots
+            .iter()
+            .filter(|(_, node, transform)| node.contains_point(**transform, cursor))
+            .max_by_key(|(root, node, _)| {
+                (panel.active.as_ref() == Some(&root.0), node.stack_index)
+            })
+            .map(|(root, _, _)| root.0.clone())
+    });
+    for (viewport, node, transform, mut position) in &mut lists {
+        let Some(layout) = panel.layouts.get_mut(&viewport.0) else {
+            continue;
+        };
+        if layout.collapsed {
+            continue;
+        }
+        if hovered.as_ref() == Some(&viewport.0) && delta != 0. {
+            position.0.y -= delta;
+            layout.reveal_selected = false;
+        }
+        if layout.reveal_selected && node.size().y > 0. {
+            if let Some((_, row_node, row_transform)) = rows
+                .iter()
+                .find(|(row, _, _)| row.0 == viewport.0 && row.1 == layout.selected)
+            {
+                let center = transform
+                    .inverse()
+                    .transform_point2(row_transform.translation);
+                let top = center.y - row_node.size().y / 2. + node.size().y / 2.;
+                let bottom = top + row_node.size().y;
+                let shift = if top < 0. {
+                    top
+                } else {
+                    (bottom - node.size().y).max(0.)
+                };
+                position.0.y += shift * node.inverse_scale_factor;
+                layout.reveal_selected = false;
+            }
+        }
+        let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor).max(0.);
+        position.0.y = position.0.y.clamp(0., max);
     }
 }
