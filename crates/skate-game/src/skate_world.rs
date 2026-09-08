@@ -422,11 +422,11 @@ fn render_groups(
 
 pub(crate) fn spawn(
     map: &SkateMap,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    retail_materials: &mut Assets<crate::retail_render::RetailWorldMaterial>,
-    images: &mut Assets<Image>,
+    commands: &mut crate::map_render::SceneCommands,
+    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
+    materials: &mut impl crate::map_render::AssetSink<StandardMaterial>,
+    retail_materials: &mut impl crate::map_render::AssetSink<crate::retail_render::RetailWorldMaterial>,
+    images: &mut impl crate::map_render::AssetSink<Image>,
 ) {
     // Texture roles have different transfer functions even when sharing a record.
     let texture_ids = render_texture_ids(&map.textures);
@@ -850,27 +850,23 @@ mod tests {
     fn render_adapter_creates_mesh_and_decoded_lightmap_without_a_window() {
         let map = demo();
         let mut world = World::new();
-        let mut queue = bevy::ecs::world::CommandQueue::default();
-        let mut meshes = Assets::<Mesh>::default();
-        let mut materials = Assets::<StandardMaterial>::default();
-        let mut images = Assets::<Image>::default();
-        spawn(
-            &map,
-            &mut Commands::new(&mut queue, &world),
-            &mut meshes,
-            &mut materials,
-            &mut images,
-        );
-        queue.apply(&mut world);
-        assert_eq!(meshes.len(), 1);
-        assert_eq!(materials.len(), 1);
-        assert_eq!(images.len(), 2);
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<Assets<crate::retail_render::RetailWorldMaterial>>();
+        world.init_resource::<Assets<crate::retail_render::RetailSkyMaterial>>();
+        world.init_resource::<Assets<Image>>();
+        let mut scene = crate::map_render::PreparedScene::new(&world);
+        scene.prepare(Some(&map), std::path::Path::new("unused"));
+        scene.publish(&mut world);
+        assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
+        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);
+        assert_eq!(world.resource::<Assets<Image>>().len(), 2);
         assert_eq!(world.query::<&Mesh3d>().iter(&world).count(), 1);
         let lightmap = world
             .query::<&bevy::pbr::Lightmap>()
             .single(&world)
             .unwrap();
-        let image = images.get(&lightmap.image).unwrap();
+        let image = world.resource::<Assets<Image>>().get(&lightmap.image).unwrap();
         assert_eq!(image.texture_descriptor.format, TextureFormat::Rgba16Float);
         let data = image.data.as_ref().unwrap();
         let value = half::f16::from_le_bytes([data[0], data[1]]).to_f32();

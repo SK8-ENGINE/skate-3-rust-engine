@@ -15,11 +15,7 @@ pub(crate) struct GrindGeometryPlugin;
 impl Plugin for GrindGeometryPlugin {
     fn build(&self, app: &mut App) {
         let test_world = app.world().resource::<crate::config::Config>().map.is_none();
-        let geometry = if test_world {
-            GrindGeometry { rails: rails().to_vec(), native_blob: spline_blob() }
-        } else {
-            GrindGeometry { rails: Vec::new(), native_blob: Vec::new() }
-        };
+        let geometry = GrindGeometry::for_world(test_world);
         if test_world {
             info!("GRIND_GEOMETRY rails={} bytes={} native_acquisition=paired_trucks_50_50",
                 geometry.rails.len(), geometry.native_blob.len());
@@ -29,6 +25,13 @@ impl Plugin for GrindGeometryPlugin {
             }
         }
         app.insert_resource(geometry);
+    }
+}
+
+impl GrindGeometry {
+    pub(crate) fn for_world(test_world: bool) -> Self {
+        if test_world { Self { rails: rails().to_vec(), native_blob: spline_blob() } }
+        else { Self { rails: Vec::new(), native_blob: Vec::new() } }
     }
 }
 
