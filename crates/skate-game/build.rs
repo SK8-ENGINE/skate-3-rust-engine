@@ -12,6 +12,9 @@ fn main() {
     println!("cargo:rerun-if-changed=../skate-data/src");
     println!("cargo:rerun-if-changed=../skate-net/src");
     println!("cargo:rerun-if-changed=../../Cargo.lock");
+    for path in ["../../Cargo.toml", "Cargo.toml", "../skate-core/Cargo.toml", "../skate-data/Cargo.toml", "../skate-net/Cargo.toml", "../../vendor/bevy_pbr", "../../vendor/bevy_core_pipeline"] {
+        println!("cargo:rerun-if-changed={path}");
+    }
     let git = |args: &[&str]| Command::new("git").args(args).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
     let revision = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "revision-unavailable".into());
     let dirty = git(&["status", "--porcelain", "--untracked-files=normal"]).map(|s| !s.is_empty());

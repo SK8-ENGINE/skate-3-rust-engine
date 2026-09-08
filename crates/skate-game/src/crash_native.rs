@@ -77,6 +77,8 @@ unsafe extern "system" {
     ) -> *const c_void;
     fn GetModuleHandleW(name: *const u16) -> *const c_void;
     fn GetStdHandle(kind: u32) -> *mut c_void;
+    fn GetErrorMode() -> u32;
+    fn SetErrorMode(mode: u32) -> u32;
     fn WriteFile(
         file: *mut c_void,
         buffer: *const u8,
@@ -89,6 +91,9 @@ pub(super) fn install() {
     // SAFETY: null requests this executable; -12 requests stderr. Handles are
     // borrowed for the process lifetime, and our filter has the Windows ABI.
     unsafe {
+        // Let the supervisor present the error instead of waiting on a competing
+        // Windows fault dialog. Preserve the process's other error-mode flags.
+        SetErrorMode(GetErrorMode() | 0x0002); // SEM_NOGPFAULTERRORBOX
         IMAGE_BASE.store(
             GetModuleHandleW(std::ptr::null()) as usize,
             Ordering::Relaxed,
