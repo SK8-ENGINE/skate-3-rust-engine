@@ -25,7 +25,7 @@ SHA-256 provenance:
 ```text
 Owned default.xex: 1db39496585c521d17a2137804f42cf73ebed2b32cac166ec42dbf772f4dcf7f
 TU3 disassembly image: f4aa113eb541bfba03dbc108cf5ab43f58c965b20fa3b82f9c40938a0ad841c4
-Private manual executable: 38be66b784b64d87d2134120b9bf582c74b295d4a01b1d1e9246cf62b4f0775f
+Corrected private manual executable: cf5e5e0cc4ed88547f03a8a1ebe628133d4b58ecc451ecad4d59276d1ba22cbf
 ```
 
 | Native owner | Behavior represented |
@@ -95,6 +95,15 @@ Release compilation passed with the existing static-CRT Windows target flags:
 ```text
 cargo build --release --locked --target x86_64-pc-windows-msvc -p skate-game --no-default-features
 ```
+
+The first staged executable was subsequently found to be an older build from
+the shared target directory: it contained neither `--start-paused` nor the
+marker shader. The compile result did not verify the staged artifact. That
+executable has been superseded by `.local/session-marker/skate3-session-marker.exe`.
+`Build-SessionMarker.ps1` now links directly into the task's private build
+directory with a distinct artifact name, checks the CLI/marker strings without
+executing it, and verifies the staged SHA-256. Use that script for future builds;
+`-DependencyTargetDirectory` can select an existing dependency cache.
 
 Three standalone hold-state tests passed (cancellation/latching, unset/nearby/
 blocked returns and tail, distance ramp). The WGSL passed offline Naga27 parsing
