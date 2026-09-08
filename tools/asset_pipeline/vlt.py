@@ -43,6 +43,42 @@ def take(data, at, size):
 def unpack(fmt,data,at):
     return struct.unpack('>'+fmt,take(data,at,struct.calcsize('>'+fmt)))
 
+def array_items(data, pos, size, alignment):
+    """ModernBase array: four u16 header lanes, then aligned elements.
+
+    Alignment in the schema is log2(bytes), not the array header's mask.
+    Retain each element separately: padding is not part of its value.
+    """
+    capacity, count, stride, _ = unpack('4H', data, pos)
+    if count > capacity or stride != size or not stride or alignment > 16:
+        raise ValueError(f'Invalid VLT array at {pos:#x}')
+    boundary = 1 << alignment
+    cursor = pos + 8
+    items = []
+    for index in range(capacity):
+        cursor = (cursor + boundary - 1) & -boundary
+        raw = take(data, cursor, stride)
+        if index < count:
+            items.append(raw.hex().upper())
+        cursor += stride
+    return {'capacity': capacity, 'element_size': stride,
+            'alignment': boundary, 'items': items}
+
+
+def array_text_items(binary, items):
+    values = []
+    for raw in items:
+        ptr, = unpack('I', bytes.fromhex(raw), 0)
+        if not ptr:
+            values.append('')
+            continue
+        end = binary.find(b'\0', ptr)
+        if end < 0:
+            raise ValueError(f'Unterminated VLT array text at {ptr:#x}')
+        values.append(take(binary, ptr, end-ptr).decode('utf-8'))
+    return values
+
+
 def chunks(data):
     at=0
     while at<len(data):
@@ -114,6 +150,13 @@ def convert(schema_stem, collections_stem, names):
             else:
                 raw=take(data,pos,length)
                 out[name(fkey)]={'type':t,'data':raw.hex().upper()}
+                if flags&1:
+                    # Keep the legacy data field unchanged for existing
+                    # gameplay consumers. New readers use the full array.
+                    out[name(fkey)]['array']=array_items(data,pos,n,alignment)
+                    if t=='EA::Reflection::Text':
+                        array=out[name(fkey)]['array']
+                        array['text_items']=array_text_items(cb,array['items'])
         for fk,f in fields.items():
             if f[4]&2 and layout: value(fk,cb,layout+f[1])
         entries=at+48+typeslen*8

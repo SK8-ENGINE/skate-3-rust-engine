@@ -333,7 +333,7 @@ def morph_weight(name: str, manifest: dict) -> float:
     if name == "thin" or name.startswith("thin_"):
         return float(body["skinniness"])
     if name in manifest["morph_assembly"]["face_targets"]:
-        return float(body["face_fields"])
+        return float(body.get("targets", {}).get(name, body["face_fields"]))
     raise RuntimeError(f"Retail morph target has no recipe mapping: {name}")
 
 def decode_dense_morphs(
@@ -424,6 +424,7 @@ def decode_dense_morphs(
             )
 
         deltas = []
+        normal_deltas = []
         nonzero_vertices = 0
         nonzero_normal_deltas = 0
         max_delta = 0.0
@@ -434,7 +435,9 @@ def decode_dense_morphs(
             x, y, z, _remap = struct.unpack_from(
                 ">4h", data, vertex_offset
             )
-            if be_u32(data, vertex_offset + 8) != 0:
+            packed_normal = be_u32(data, vertex_offset + 8)
+            normal_deltas.append(rx2_skeleton._dec_11_11_10(packed_normal))
+            if packed_normal != 0:
                 nonzero_normal_deltas += 1
             if be_u32(data, vertex_offset + 12) != 0x3F800000:
                 raise RuntimeError(
@@ -456,6 +459,7 @@ def decode_dense_morphs(
                 "hash": f"{target_hash:016x}",
                 "descriptor_index": descriptor_index,
                 "deltas": deltas,
+                "normal_deltas": normal_deltas,
                 "nonzero_vertices": nonzero_vertices,
                 "nonzero_normal_deltas": nonzero_normal_deltas,
                 "max_source_delta": max_delta,

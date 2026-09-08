@@ -32,9 +32,12 @@ class Glb:
         path.write_bytes(struct.pack('<III',0x46546c67,2,28+len(text)+len(self.data))+
                         struct.pack('<I4s',len(text),b'JSON')+text+struct.pack('<I4s',len(self.data),b'BIN\0')+self.data)
 
-def convert(models,private,recipe):
-    source=AnimSource(private/'stock/data/anim/OnBoard.abin')
+def convert(models,private,recipe,*,stock=None,output=None,materials=None,live_morphs=False,geometry_only=False,reference_models=None):
+    source=AnimSource((stock or private/'stock')/'data/anim/OnBoard.abin')
     skeleton=SkeletonSet(str(models))
+    if reference_models:
+        reference_skeleton=SkeletonSet(str(reference_models))
+        skeleton.bind={**reference_skeleton.bind,**skeleton.bind}
     if skeleton.errors:raise ValueError(str(skeleton.errors))
     mapping=skeleton.index_map(ABIN.BONE_NAMES,source.parents)
     worlds={mapping[n]:m for n,m in skeleton.bind.items() if n in mapping}
@@ -76,11 +79,20 @@ def convert(models,private,recipe):
         raw=raw[0];positions=np.asarray(mesh['pos'],dtype=np.float64)
         morphs=decode_dense_morphs(path,parsed,len(positions),RX2)
         if [m['name'] for m in morphs]!=recipe['morph_assembly']['expected_targets'][slot]:raise ValueError('Unexpected morph set '+slot)
-        for morph in morphs:
+        if 'normals' in raw:
+            normals=np.asarray(raw['normals'],dtype=np.float64)
+        else:
+            normals=np.zeros_like(positions)
+            for triangle in mesh['tris']:
+                a,b,c=triangle;normal=np.cross(positions[b]-positions[a],positions[c]-positions[a])
+                for index in triangle:normals[index]+=normal
+            normals/=np.maximum(np.linalg.norm(normals,axis=1,keepdims=True),1e-20)
+        for morph in ([] if live_morphs else morphs):
             weight=morph_weight(morph['name'],recipe)
-            if weight and morph['nonzero_normal_deltas']:raise ValueError('Unsupported morph normals '+slot)
             positions+=np.asarray(morph['deltas'])*weight
-        normals=np.asarray(raw['normals'],dtype=np.float64);normals/=np.maximum(np.linalg.norm(normals,axis=1,keepdims=True),1e-20)
+            if weight:
+                normals+=np.asarray(morph['normal_deltas'])*weight
+        normals/=np.maximum(np.linalg.norm(normals,axis=1,keepdims=True),1e-20)
         joints=np.zeros((len(positions),4),dtype=np.uint16);weights=np.zeros((len(positions),4),dtype=np.float32)
         if not mesh['skin']:raise ValueError('Missing skin '+slot)
         for i,influences in enumerate(mesh['skin']):
@@ -89,31 +101,47 @@ def convert(models,private,recipe):
             if len(combined)>4 or not combined:raise ValueError('Invalid skin influences '+slot)
             for j,(bone,w) in enumerate(combined.items()):joints[i,j]=joint_index[bone];weights[i,j]=w
         weights/=weights.sum(axis=1,keepdims=True)
-        folder=private/'default_skater/textures/materials'
+        folder=materials or private/'default_skater/textures/materials'
         pbr={'baseColorFactor':[*component['tint'],1.0],
-             'baseColorTexture':glb.texture(folder/(slot+'_base_color.png')),
              'metallicFactor':0.65 if slot=='SkateTruck' else 0.0,
              'roughnessFactor':0.48 if slot in {'SkateTruck','SkateWheel'} else 0.72}
+        if not geometry_only:pbr['baseColorTexture']=glb.texture(folder/(slot+'_base_color.png'))
         rough=folder/(slot+'_roughness.png')
-        if rough.is_file():
+        if not geometry_only and rough.is_file():
             channel=Image.open(rough).convert('RGB').getchannel('R')
             white=Image.new('L',channel.size,255);packed=Image.merge('RGB',(white,channel,white));buffer=io.BytesIO();packed.save(buffer,format='PNG')
             pbr['metallicRoughnessTexture']=glb.texture(buffer.getvalue());pbr['roughnessFactor']=1.0
         material={'name':'Retail_'+slot,'pbrMetallicRoughness':pbr,'doubleSided':False,
                   'alphaMode':component.get('alpha_mode','OPAQUE')}
         if material['alphaMode']=='MASK':material['alphaCutoff']=component.get('alpha_cutoff',0.5)
-        if component['textures'].get('normal'):material['normalTexture']=glb.texture(folder/(slot+'_normal.png'))
+        if not geometry_only and component['textures'].get('normal'):material['normalTexture']=glb.texture(folder/(slot+'_normal.png'))
         glb.doc['materials'].append(material)
         attributes={'POSITION':glb.accessor(positions,'VEC3',bounds=True),'NORMAL':glb.accessor(normals,'VEC3'),
                     'TEXCOORD_0':glb.accessor(raw['uvs'],'VEC2'),'JOINTS_0':glb.accessor(joints,'VEC4',5123),
                     'WEIGHTS_0':glb.accessor(weights,'VEC4')}
+        if live_morphs and 'uvs2' in raw:
+            attributes['TEXCOORD_1']=glb.accessor(raw['uvs2'],'VEC2')
         primitives.append({'attributes':attributes,'indices':glb.accessor(np.asarray(mesh['tris']).ravel(),'SCALAR',5125),
                            'material':len(glb.doc['materials'])-1})
+        if live_morphs:
+            names_morph=recipe['morph_assembly'].get('live_targets',['fat','thin']+recipe['morph_assembly']['face_targets'])
+            zero=glb.accessor(np.zeros_like(positions),'VEC3',bounds=True)
+            targets={}
+            for morph in morphs:
+                name=morph['name']
+                key='fat' if name.startswith('fat') else 'thin' if name.startswith('thin') else name
+                if key not in names_morph:raise ValueError('Unmapped live morph '+name)
+                targets[key]={'POSITION':glb.accessor(morph['deltas'],'VEC3',bounds=True),
+                              'NORMAL':glb.accessor(morph['normal_deltas'],'VEC3')}
+            primitives[-1]['targets']=[targets.get(n,{'POSITION':zero,'NORMAL':zero}) for n in names_morph]
     mesh_node=len(nodes);nodes.append({'name':'Skate3_SkaterAndBoard','mesh':0,'skin':0})
     root=len(nodes);nodes.append({'name':'Skate3_RX2_Rig','children':root_children+[mesh_node]})
     glb.doc.update(nodes=nodes,meshes=[{'primitives':primitives}],skins=[{'joints':list(range(len(indices))),
                     'inverseBindMatrices':inverse}],scenes=[{'nodes':[root]}],scene=0)
-    glb.save(private/'skater.glb')
+    if live_morphs:
+        glb.doc['meshes'][0].update(weights=[.25 if n in recipe['morph_assembly']['face_targets'] else 0. for n in names_morph],
+                                  extras={'targetNames':names_morph})
+    glb.save(output or private/'skater.glb')
 
 if __name__=='__main__':
     import argparse

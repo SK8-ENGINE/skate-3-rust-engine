@@ -52,6 +52,7 @@ fn spawn(mut commands: Commands, config: Res<Config>, retail: Res<crate::retail_
 fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
     history: Res<crate::presentation::Presentation>, time: Res<Time<Fixed>>,
     replay: Res<crate::replay::Replay>,
+    customiser: Option<Res<crate::customiser::Customiser>>,
     mut cameras: Query<(&mut Camera, &mut Transform, &mut Projection), With<GameplayCamera>>) {
     if let Ok(window) = windows.single() {
         runtime.set_aspect_ratio(window.width() / window.height());
@@ -64,6 +65,15 @@ fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
         }
         if let Projection::Perspective(p) = &mut *projection {
             p.fov = previous.fov + (current.fov - previous.fov) * alpha;
+        }
+        if let Some(customiser) = customiser.as_ref().filter(|c| c.open) {
+            let (height,distance,yaw)=customiser.preview_camera();
+            let center = current.root.translation + Vec3::Y * height;
+            let offset = current.root.rotation * Quat::from_rotation_y(yaw) * Vec3::new(0.0, 0.25, distance);
+            let eye = center + offset;
+            let right = offset.normalize().cross(Vec3::Y).normalize();
+            *transform = Transform::from_translation(eye).looking_at(center + right * (distance * 0.265625), Vec3::Y);
+            if let Projection::Perspective(p) = &mut *projection { p.fov = 50_f32.to_radians(); }
         }
         camera.is_active = true;
     }

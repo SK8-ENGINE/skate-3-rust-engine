@@ -356,7 +356,7 @@ fn stock_skater_startup_builds_the_graphs_and_physical_body_from_the_same_rig() 
 
 #[test]
 #[ignore = "requires private stock skater, animation banks and collections"]
-fn stock_wheel_hardness_reaches_ground_force_and_torque() {
+fn customiser_equipment_reaches_ground_force_and_torque() {
     let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
     let root = std::path::Path::new(&root);
     let manifest = skate_data::GameAssets::load(root).unwrap();
@@ -365,6 +365,10 @@ fn stock_wheel_hardness_reaches_ground_force_and_torque() {
     for hardness in [0.0_f32, 0.7, 1.0] {
         let mut physics = GamePhysics::load_with_difficulty(root, None, crate::difficulty::Difficulty::Normal).unwrap();
         let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
+        crate::customiser::apply_preferences(
+            &serde_json::json!({"truck": hardness, "wheel": hardness}),
+            &mut physics, &mut skater.animation,
+        );
         let mut controls = PlayerControls::default();
         let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
         let input = crate::input::ControllerInput::default();
@@ -382,7 +386,8 @@ fn stock_wheel_hardness_reaches_ground_force_and_torque() {
         // Replay identical observed sideways travel at the Ground input boundary.
         // Only the published profile input changes; run the actual Ground adapter.
         let p = &mut skater.player_input.processed;
-        p.scalar_2764 = hardness;
+        assert_eq!(p.scalar_2764, hardness);
+        assert_eq!(p.truck_tightness_2760, hardness);
         p.vectors_400_416 = [[1.0_f32, 0.0, 3.0, 0.0].map(f32::to_bits); 2];
         p.scalar_2656 = 10.0_f32.sqrt();
         skater.ground.state.elapsed_2648 = 0.25;
@@ -453,4 +458,49 @@ fn stock_geometry_loads_and_reaches_the_live_board_solver() {
     assert_eq!(physics.ticks, 120);
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
     assert!(deck.translation.y > ground::HEIGHT);
+}
+
+#[test]
+#[ignore = "requires private stock animation banks and collections; no window or renderer"]
+fn customiser_styles_and_postures_change_stock_pose() {
+    use skate_core::animation::playback::{PlayAnimation, PlayAnimationInstance, TransitionSettings};
+    use skate_core::animation::playback_tree::{Evaluation, PoseCommand};
+    let root = std::path::PathBuf::from(std::env::var_os("SKATE3_ASSET_ROOT").unwrap());
+    let manifest = skate_data::GameAssets::load(&root).unwrap();
+    let graphs = crate::graph_runtime::StockGraphs::load(&root, &manifest).unwrap();
+    let mut physics = GamePhysics::load(&root).unwrap();
+    let mut skater = SkaterRuntime::load(&root, &graphs, &physics, "normal").unwrap();
+    let operation = PlayAnimation {
+        animation: "S_R_PUSHLSP_HSTR_N_0_CYC1".into(), switch_animation: None, mirror_animation: None,
+        no_board_animation: None, playback_speed: 1.0, apply_posture: true,
+        transition: TransitionSettings { kind: 1, seconds: 0.0, under: 0, matching: 0, use_channels_from_weights: false },
+        parameters: vec![],
+    };
+    let mut samples = Vec::new();
+    for (style, posture) in [(0,0), (1,0), (2,0), (3,0), (0,1), (0,2), (0,3)] {
+        crate::customiser::apply_preferences(
+            &serde_json::json!({"style":style, "posture":posture}),
+            &mut physics, &mut skater.animation,
+        );
+        let motion = &mut skater.animation.motion;
+        PlayAnimationInstance::default().begin(&operation, &mut motion.playback_context, &mut motion.animation).unwrap();
+        motion.animation.apply_parameters().unwrap();
+        motion.animation.seek_current_fraction(0.35);
+        let commands = motion.animation.evaluate_pose(Evaluation { cull_threshold: 0.0001, update_history: false }).unwrap();
+        let pose = skater.animation.evaluator.evaluate(&commands).unwrap();
+        let names: Vec<_> = commands.iter().filter_map(|c| match c {
+            PoseCommand::Clip { name, .. } | PoseCommand::Pose { name } => Some(name.clone()), _ => None,
+        }).collect();
+        eprintln!("Style {style}, posture {posture}: {names:?}");
+        if let Some(baseline) = samples.first() {
+            assert!(&pose != baseline, "Style {style}, posture {posture} did not change the evaluated stock pose");
+        }
+        samples.push(pose);
+    }
+    skater.animation.set_customisation(1,0);
+    let stance = skater.animation.stance();
+    skater.animation.set_customisation(0,0);
+    assert_ne!(skater.animation.stance(), stance);
+    skater.animation.set_customisation(1,0);
+    assert_eq!(skater.animation.stance(), stance);
 }

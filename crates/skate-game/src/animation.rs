@@ -29,6 +29,7 @@ fn bind(
     skins: Query<(Entity, &SkinnedMesh)>,
     nodes: Query<(&Name, &Transform)>,
     parents: Query<&ChildOf>,
+    visibility: Query<&Visibility>,
     roots: Query<Entity, With<PlayerRoot>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -37,12 +38,16 @@ fn bind(
     }
     let names = &skater.animation.evaluator.frames.bone_names;
     let result = (|| -> Result<Option<Vec<BoneBinding>>, String> {
+        let mut bindings = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         for (entity, skin) in &skins {
             if !parents.iter_ancestors(entity).any(|e| roots.contains(e)) {
                 continue;
             }
+            if parents.iter_ancestors(entity).any(|e| visibility.get(e).is_ok_and(|v| *v == Visibility::Hidden)) { continue; }
             let mut binding = Vec::with_capacity(skin.joints.len());
             for &joint in &skin.joints {
+                if !seen.insert(joint) { continue; }
                 let (name, _) = nodes
                     .get(joint)
                     .map_err(|_| "Skater skin joint is missing its name or transform")?;
@@ -80,13 +85,10 @@ fn bind(
                     parent_bone,
                 });
             }
-            // All ten imported mesh primitives share these joint entities and
-            // their authored inverse-bind matrices. Bind the joints once and
-            // retain that mesh reference: the stock initialization pose is an
-            // animation pose, not a replacement skin bind pose.
-            return Ok(Some(binding));
+            // Bind each visible modular rig, retaining its authored inverse binds.
+            bindings.extend(binding);
         }
-        Ok(None)
+        Ok(if bindings.is_empty() { None } else { Some(bindings) })
     })();
     match result {
         Ok(Some(binding)) => {

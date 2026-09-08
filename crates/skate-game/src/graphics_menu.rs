@@ -75,7 +75,7 @@ impl GraphicsSettings {
 }
 #[derive(Resource)]
 pub(crate) struct Menu {
-    open: bool,
+    pub(crate) open: bool,
     selected: usize,
     settings: GraphicsSettings,
     path: PathBuf,
@@ -101,7 +101,7 @@ struct FramePacer(Instant);
 #[derive(Component)]
 struct MenuRoot;
 #[derive(Component)]
-struct MenuRow(usize);
+pub(crate) struct MenuRow(usize);
 #[derive(Component)]
 struct MenuLabel(usize);
 #[derive(Component)]
@@ -209,7 +209,7 @@ fn setup(
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("PAUSED"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..10 {
+            for i in 0..11 {
                 panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(36),padding:UiRect::all(px(8)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
@@ -247,9 +247,11 @@ fn cycle<T: PartialEq + Copy>(values: &[T], value: T, direction: i32) -> T {
     let index = values.iter().position(|x| *x == value).unwrap_or(0) as i32;
     values[(index + direction).rem_euclid(values.len() as i32) as usize]
 }
-fn interact(
+pub(crate) fn interact(
     mut config: ResMut<crate::config::Config>,
     mut transition: ResMut<crate::map_transition::MapTransition>,
+    mut customiser: ResMut<crate::customiser::Customiser>,
+    nav: Res<crate::customiser::Navigation>,
     mut physics: ResMut<crate::physics::GamePhysics>,
     keys: Res<ButtonInput<KeyCode>>,
     mut menu: ResMut<Menu>,
@@ -262,21 +264,22 @@ fn interact(
         time.pause();
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) {
+    if customiser.open { return; }
+    if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 {
         menu.open = !menu.open;
     }
     let mut action = None;
     if menu.open {
-        if keys.just_pressed(KeyCode::ArrowUp) {
-            menu.selected = (menu.selected + 9) % 10;
+        if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
+            menu.selected = (menu.selected + 10) % 11;
         }
-        if keys.just_pressed(KeyCode::ArrowDown) {
-            menu.selected = (menu.selected + 1) % 10;
+        if keys.just_pressed(KeyCode::ArrowDown) || nav.pressed & 2 != 0 {
+            menu.selected = (menu.selected + 1) % 11;
         }
-        if keys.just_pressed(KeyCode::ArrowLeft) {
+        if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
             action = Some((menu.selected, -1));
         }
-        if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::Enter) {
+        if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::Enter) || nav.pressed & (8 | 0x1000) != 0 {
             action = Some((menu.selected, 1));
         }
         for (interaction, row) in &buttons {
@@ -325,6 +328,7 @@ fn interact(
             9 => {
                 exit.write(AppExit::Success);
             }
+            10 => customiser.begin(),
             _ => {}
         }
         if row < 5 {
@@ -399,13 +403,14 @@ fn labels(
     menu: Res<Menu>,
     transition: Res<crate::map_transition::MapTransition>,
     time: Res<Time<Real>>,
+    customiser: Res<crate::customiser::Customiser>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut root: Single<&mut Node, With<MenuRoot>>,
     mut labels: Query<(&MenuLabel, &mut Text), Without<StatusLabel>>,
     mut status: Single<&mut Text, With<StatusLabel>>,
     mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor)>,
 ) {
-    root.display = if menu.open {
+    root.display = if menu.open && !customiser.open {
         Display::Flex
     } else {
         Display::None
@@ -443,7 +448,8 @@ fn labels(
             6 => format!("Map                   {}", menu.maps[menu.selected_map].label),
             7 => if transition.busy() { "Loading map...".into() } else { "Load map".into() },
             8 => "Resume".into(),
-            _ => "Quit game".into(),
+            9 => "Quit game".into(),
+            _ => "Character customiser".into(),
         };
     }
     ***status = if transition.busy() {
