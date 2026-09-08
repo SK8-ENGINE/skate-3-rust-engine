@@ -43,6 +43,7 @@ pub(crate) struct Vehicles {
     visual_phase: String,
     blend_time: f32,
     steering_visual: f32,
+    crash_handoff: bool,
     previous_motion: BTreeMap<u64, interpolation::Motion>,
     rendered_motion: BTreeMap<u64, interpolation::Motion>,
 }
@@ -133,6 +134,7 @@ fn exit_now(world: &mut World, v: &mut Vehicles, forced: bool) -> Result<(), Str
             }
         }
     }
+    if let Some(i)=v.owned.get(&(driver.owner.clone(),driver.key.clone())) {v.simulation.set_occupied(i.id,false);}
     v.pose = None;
     for (entity, visibility) in v.hidden.drain(..) {
         if let Some(mut current) = world.get_mut::<Visibility>(entity) {
@@ -155,6 +157,34 @@ fn exit_now(world: &mut World, v: &mut Vehicles, forced: bool) -> Result<(), Str
         skater.teleport_state.request_manual(matrix, false);
     }
     event(v, &driver.owner, &driver.key, "vehicle_exited");
+    Ok(())
+}
+fn eject_now(world: &mut World, v: &mut Vehicles, ejection: skate_vehicles::Ejection) -> Result<(), String> {
+    let Some(driver) = v.driver.as_ref() else {return Ok(());};
+    let owner=driver.owner.clone(); let key=driver.key.clone();
+    let id=v.owned[&(owner.clone(),key.clone())].id;
+    let (_,rotation)=v.simulation.pose(id).ok_or("Missing crash vehicle")?;
+    let forward=Quat::from_array(rotation)*Vec3::Z;
+    let heading=forward.x.atan2(forward.z);
+    let (sin,cos)=heading.sin_cos();
+    // The native reset initializes a full upright body. Start clear of the seat,
+    // then its ordinary ragdoll/contact solver takes over immediately.
+    let p=Vec3::from_array(ejection.position)+Vec3::Y*0.25;
+    let matrix=[[cos,0.,-sin,0.],[0.,1.,0.,0.],[sin,0.,cos,0.],[p.x,p.y,p.z,0.]];
+    {
+        let mut skater=world.resource_mut::<crate::physics::SkaterRuntime>();
+        skater.player_input.request_teleport(matrix).map_err(|e|e.to_string())?;
+        skater.teleport_state.request_vehicle_ejection(matrix,ejection.velocity,ejection.angular_velocity);
+    }
+    v.simulation.set_occupied(id,false);
+    v.simulation.vehicles.get_mut(&id).unwrap().controls=Controls{brake:0.2,..Default::default()};
+    v.driver=None;v.pose=None;v.crash_handoff=true;
+    for (entity,visibility) in v.hidden.drain(..) {
+        if let Some(mut current)=world.get_mut::<Visibility>(entity) {*current=visibility;}
+    }
+    v.events.push(json!({"name":"vehicle_bailed","owner":owner,"key":key,
+        "reason":ejection.reason,"position":ejection.position,"velocity":ejection.velocity,
+        "angular_velocity":ejection.angular_velocity}));
     Ok(())
 }
 pub(super) fn retire(world: &mut World, owner: &str) {
@@ -192,6 +222,7 @@ pub(super) fn clear(world: &mut World) {
         v.driver = None;
         v.pose = None;
         v.last_visual.clear();v.blend_from.clear();v.visual_phase.clear();v.steering_visual=0.;
+        v.crash_handoff=false;
         v.previous_motion.clear();
         v.rendered_motion.clear();
         v.simulation = Simulation::default();
@@ -473,10 +504,19 @@ fn tick(world: &mut World) {
                 }
             }
         }
+        let occupied_id=v.driver.as_ref().and_then(|d|v.owned.get(&(d.owner.clone(),d.key.clone()))).map(|i|i.id);
+        let ids:Vec<_>=v.simulation.vehicles.keys().copied().collect();
+        for id in ids {v.simulation.set_occupied(id,Some(id)==occupied_id);}
         if !v.owned.is_empty() {
             v.previous_motion = v.simulation.vehicles.keys().filter_map(|&id|
                 interpolation::Motion::capture(&v.simulation, id).map(|m| (id, m))).collect();
             v.simulation.step(dt);
+        }
+        if let Some(id)=occupied_id {
+            if let Some(ejection)=v.simulation.take_ejection(id) {
+                if let Err(error)=eject_now(world,&mut v,ejection) {warn!("Vehicle ejection: {error}");}
+                return;
+            }
         }
         if let Some((owner, key, phase)) = driver_info {
             if let Some(i) = v.owned.get(&(owner.clone(), key.clone())) {
@@ -673,11 +713,11 @@ pub(crate) fn present(world: &mut World) {
         v.pose = pose;
     });
     world.resource_scope(|world,mut v:Mut<Vehicles>| {
-        let duration=if v.visual_phase=="vanilla" {0.5} else {0.4};
+        let duration=if v.visual_phase=="vanilla" {if v.crash_handoff {0.12} else {0.5}} else {0.4};
         if v.blend_time<duration {
             let t=(v.blend_time/duration).clamp(0.,1.);
             crate::animation::blend_vehicle_visual(world,&v.blend_from,t*t*(3.-2.*t));
-        } else {v.blend_from.clear();}
+        } else {v.blend_from.clear();v.crash_handoff=false;}
         v.last_visual=crate::animation::capture_vehicle_visual(world);
     });
 }

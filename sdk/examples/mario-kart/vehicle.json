@@ -106,5 +106,20 @@
     0.7,
     0.2,
     1.05
-  ]
+  ],
+  "rider_safety": {
+    "enabled": true,
+    "offset": [
+      0,
+      0.5,
+      0
+    ],
+    "radius": 0.25,
+    "half_height": 0.25,
+    "crash_delta_v": 6,
+    "hit_impulse": 180,
+    "inverted_up_y": -0.2,
+    "inverted_seconds": 0.2,
+    "eject_up_speed": 2
+  }
 }

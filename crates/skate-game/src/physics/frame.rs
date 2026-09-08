@@ -78,6 +78,7 @@ pub(super) fn advance(
     if physics.trainer != skate_mods::TrainerTuning::default() {
         skater.ground_settings = std::sync::Arc::new(skater.ground_settings.tuned(physics.trainer));
     }
+    let mut vehicle_ejected = false;
     if teleported {
         skater.respawn.reset_measurements();
         skater.player_state.reset_for_teleport();
@@ -91,11 +92,12 @@ pub(super) fn advance(
             &mut skater.skeleton_collision,
             &mut skater.collision_feedback,
         );
+        vehicle_ejected = player_state::apply_vehicle_ejection(physics, skater)?;
     }
     //World8275EC0C ends board queries before PostInput/state selection.
     physics.riding.finish_wheel_queries()?;
     let state_before_selection = skater.player_state.current();
-    player_state::post_input_and_select(physics, skater)?;
+    if !vehicle_ejected { player_state::post_input_and_select(physics, skater)?; }
     let state_after_selection = skater.player_state.current();
     if state_before_selection != state_after_selection {
         physics.exchange.emit_event(

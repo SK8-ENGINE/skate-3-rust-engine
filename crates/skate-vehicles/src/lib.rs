@@ -1,5 +1,7 @@
 //! Bevy-independent, fixed-step Rapier vehicle simulation and validated mod definitions.
 mod definition;
+mod safety;
+pub use safety::Ejection;
 pub use definition::*;
 pub use rapier3d;
 use rapier3d::{
@@ -30,6 +32,10 @@ pub struct Vehicle {
     pub body: RigidBodyHandle,
     pub controller: DynamicRayCastVehicleController,
     pub controls: Controls,
+    rider: ColliderHandle,
+    occupied: bool,
+    inverted_time: f32,
+    pub ejection: Option<Ejection>,
 }
 pub struct Simulation {
     pub world: PhysicsWorld,
@@ -116,6 +122,11 @@ impl Simulation {
                 &tuning,
             );
         }
+        let safety = &d.rider_safety;
+        let rider = self.world.colliders.insert_with_parent(
+            ColliderBuilder::capsule_y(safety.half_height, safety.radius)
+                .translation(Vector::from_array(d.seat) + Vector::from_array(safety.offset))
+                .density(0.).friction(0.2).enabled(false).build(), body, &mut self.world.bodies);
         let id = self.next;
         self.next += 1;
         self.vehicles.insert(
@@ -125,6 +136,7 @@ impl Simulation {
                 body,
                 controller,
                 controls: Controls::default(),
+                rider, occupied: false, inverted_time: 0., ejection: None,
             },
         );
         Ok(id)
@@ -142,6 +154,7 @@ impl Simulation {
         let steps = (dt / 0.008334).ceil().clamp(1., 16.) as u32;
         let h = dt.min(0.1) / steps as f32;
         for _ in 0..steps {
+            let before = self.capture_riders();
             self.world.integration_parameters.dt = h;
             for v in self.vehicles.values_mut() {
                 let c = v.controls;
@@ -176,6 +189,7 @@ impl Simulation {
                 v.controller.update_vehicle(h, queries);
             }
             self.world.step();
+            self.check_riders(&before, h);
         }
     }
     pub fn pose(&self, id: u64) -> Option<([f32; 3], [f32; 4])> {
@@ -193,6 +207,7 @@ impl Simulation {
         b.set_linvel(Vector::ZERO, true);
         b.set_angvel(Vector::ZERO, true);
         v.controls = Controls::default();
+        v.ejection = None; v.inverted_time = 0.;
         Ok(())
     }
     pub fn floor(&self, position: [f32; 3]) -> Option<[f32; 3]> {

@@ -70,7 +70,8 @@ engine_volume (0..1), brake_impulse (0..10000), steering_angle (0.01..1.2 radian
 Maximum speed limits engine application; it is not an absolute downhill speed cap.
 
 Events passed to `on_event`: `vehicle_spawned`, `vehicle_entering`, `vehicle_entered`,
-`vehicle_exited`, `vehicle_exit_blocked`, `vehicle_reset`, `vehicle_removed`.
+`vehicle_exited`, `vehicle_exit_blocked`, `vehicle_reset`, `vehicle_removed`,
+`vehicle_bailed`.
 Each includes owner and key. Map changes use the existing `world_changed` event;
 spawn new vehicles in the new world as needed. Invalid assets/commands appear as
 mod errors; they retire the mod's vehicles instead of crashing the game.
@@ -221,3 +222,80 @@ calibration, Blender fitting, native export and packaging commands. The host's a
 slots, steering blend, stance hand-offs, board hiding and shared motion interpolation
 apply automatically to every vehicle definition. The example fitting scripts contain
 kart geometry targets; adjust those targets for another vehicle without changing the host.
+
+## Rider hitbox and crash ejection
+
+Every vehicle can use the shared `rider_safety` definition. It is enabled by default;
+explicit example values are shown below. Changes require respawning the vehicle.
+
+```json
+"rider_safety": {
+  "enabled": true,
+  "offset": [0, 0.5, 0],
+  "radius": 0.25,
+  "half_height": 0.25,
+  "crash_delta_v": 6,
+  "hit_impulse": 180,
+  "inverted_up_y": -0.2,
+  "inverted_seconds": 0.2,
+  "eject_up_speed": 2
+}
+```
+
+A solid capsule is attached to the occupied chassis, centred at `seat + offset`.
+It covers the seated torso/head, including roof/ground/overhang contact when rolled.
+It is not a sensor: contacts affect the vehicle. It adds no mass, so existing mass and
+inertia tuning remains authoritative. Empty vehicles have no active rider collider.
+The capsule is an approximation, not separate animated hand/foot hitboxes; adjust it
+for your cockpit and expected character proportions. It is active through entry/exit
+as well as driving, and is removed from collision when ownership ends. Disabling
+rider_safety disables both this collider and automatic ejection.
+
+Ejection triggers on any of:
+
+- A chassis collision changing linear velocity by at least crash_delta_v in a physics
+  substep. This is delta speed in m/s, not total driving speed; braking/ordinary ramps
+  should not meet the default threshold.
+- A rider-capsule contact impulse at least hit_impulse, in N·s. This is an impulse
+  threshold, not force in newtons, and is evaluated on actual Rapier contacts.
+- Chassis-local up having world Y below inverted_up_y continuously for inverted_seconds.
+  The timer clears when upright again. Reset clears pending impacts/inversion history.
+
+The host stops driver controls, releases occupancy and fades engine audio. It queues
+an actor reset just above the seat, enters the native Wipeout ragdoll after normal reset
+initialization, and seeds the native body and board velocities. Seat point velocity
+includes the vehicle's angular motion. Pre-impact velocity is retained when the car
+stops abruptly; if a hit accelerates the car from rest, the stronger post-impact point
+velocity is used instead. A small world-up launch speed helps clear the seat. Output
+linear/angular speeds are bounded to 60 m/s and 15 rad/s. This is a momentum hand-off,
+not a fully coupled passenger rigid-body simulation or an exact seated ragdoll pose.
+The crash visual hand-off lasts 0.12 seconds; normal entry/exit blends remain unchanged.
+Native map collision and ordinary bail recovery take over. After release, native rider
+collision against the Rapier car itself is still not bridged, as described above.
+
+Lua receives **vehicle_bailed** instead of the normal vehicle_exited event:
+
+```lua
+on_event = function(event)
+    if event.name == 'vehicle_bailed' then
+        -- event.key is this mod's vehicle key; reason is crash/rider_impact/inverted.
+        sdk.log('Ejected: ' .. event.reason)
+        -- event.position: world seat position at detection, metres
+        -- event.velocity: carried world velocity including launch lift, m/s
+        -- event.angular_velocity: world angular velocity, rad/s
+    end
+end
+```
+
+The vehicle remains spawned and can be reset or entered again after bail recovery.
+Use vehicle.read().occupied/phase for ownership; do not keep sending driving input
+while unoccupied. Physics events are delivered through the existing mod callback queue.
+The shared Rust simulation also exposes set_occupied and take_ejection for host tests;
+Lua cannot directly write native ragdoll bodies or bypass the hand-off lifecycle.
+
+Bounds: offset components ±5 m, radius 0.1..1 m, half_height 0.05..1 m (capsule cylinder
+half-length; total height is 2*(half_height+radius)), crash_delta_v 1..50 m/s,
+hit_impulse 10..10000 N·s, inverted_up_y -1..0.5, inverted_seconds 0.05..3 s,
+eject_up_speed 0..10 m/s. Nonfinite values are rejected. Headless tests cover wall
+momentum retention, overhang rider hits and sustained inversion versus empty vehicles.
+Native rendering/recovery and unusual map geometry still need manual playtesting.

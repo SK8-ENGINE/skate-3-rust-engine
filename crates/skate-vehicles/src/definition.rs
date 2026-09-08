@@ -14,6 +14,7 @@ pub struct VehicleDefinition {
     pub collider_rounding: f32,
     pub chassis_friction: f32,
     pub engine_audio: EngineAudio,
+    pub rider_safety: RiderSafety,
     pub mass: f32,
     pub engine_force: f32,
     pub brake_impulse: f32,
@@ -29,6 +30,25 @@ pub struct VehicleDefinition {
     pub camera_distance: f32,
     pub camera_height: f32,
     pub animations: Animations,
+}
+/// Occupied-seat collision and automatic ejection. Coordinates are chassis-local.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RiderSafety {
+    pub enabled: bool,
+    pub offset: [f32; 3],
+    pub radius: f32,
+    pub half_height: f32,
+    pub crash_delta_v: f32,
+    pub hit_impulse: f32,
+    pub inverted_up_y: f32,
+    pub inverted_seconds: f32,
+    pub eject_up_speed: f32,
+}
+impl Default for RiderSafety {
+    fn default() -> Self { Self { enabled: true, offset: [0.,0.5,0.], radius: 0.25,
+        half_height: 0.25, crash_delta_v: 6., hit_impulse: 180., inverted_up_y: -0.2,
+        inverted_seconds: 0.2, eject_up_speed: 2. } }
 }
 /// Built-in synthesized engine; no external recording is required.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -80,6 +100,7 @@ impl Default for VehicleDefinition {
             collider_rounding: 0.,
             chassis_friction: 0.3,
             engine_audio: EngineAudio::default(),
+            rider_safety: RiderSafety::default(),
             mass: 220.,
             engine_force: 1800.,
             brake_impulse: 100.,
@@ -128,6 +149,14 @@ impl VehicleDefinition {
             || !range(self.engine_audio.volume, 0., 1.)
             || !range(self.engine_audio.idle_pitch, 0.25, 2.)
             || !range(self.engine_audio.max_pitch, self.engine_audio.idle_pitch, 5.)
+            || !point(&self.rider_safety.offset, 5.)
+            || !range(self.rider_safety.radius, 0.1, 1.)
+            || !range(self.rider_safety.half_height, 0.05, 1.)
+            || !range(self.rider_safety.crash_delta_v, 1., 50.)
+            || !range(self.rider_safety.hit_impulse, 10., 10000.)
+            || !range(self.rider_safety.inverted_up_y, -1., 0.5)
+            || !range(self.rider_safety.inverted_seconds, 0.05, 3.)
+            || !range(self.rider_safety.eject_up_speed, 0., 10.)
             || !range(self.mass, 10., 10000.)
             || !range(self.engine_force, 0., 100000.)
             || !range(self.brake_impulse, 0., 10000.)

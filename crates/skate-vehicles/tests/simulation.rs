@@ -182,3 +182,67 @@ fn collision_mass_and_audio_tuning_are_validated() {
     let invalid=VehicleTuning { engine_volume:Some(f32::NAN), ..Default::default() };
     assert!(!invalid.valid()); assert!(invalid.apply(&base).is_err());
 }
+#[test]
+fn occupied_crash_ejects_with_preimpact_momentum() {
+    use rapier3d::prelude::*;
+    let mut s=simulation();
+    s.world.insert(RigidBodyBuilder::fixed().translation(Vector::new(0.,1.,3.)),ColliderBuilder::cuboid(5.,2.,0.2));
+    let id=s.spawn(definition(),[0.,0.6,0.],0.).unwrap();
+    s.set_occupied(id,true);
+    let handle=s.vehicles[&id].body;
+    s.world.bodies[handle].set_linvel(Vector::new(0.,0.,20.),true);
+    let mut crash=None;
+    for _ in 0..120 {s.step(1./120.);if let Some(e)=s.take_ejection(id){crash=Some(e);break;}}
+    let crash=crash.expect("wall impact should eject");
+    assert!(matches!(crash.reason,"crash"|"rider_impact"));
+    assert!(crash.velocity[2]>15.,"momentum was lost: {:?}",crash.velocity);
+    s.set_occupied(id,false);
+    for _ in 0..60 {s.step(1./120.);}
+    assert!(s.take_ejection(id).is_none());
+}
+
+#[test]
+fn inverted_rider_bails_but_parked_vehicle_does_not() {
+    use rapier3d::prelude::*;
+    for occupied in [false,true] {
+        let mut s=simulation();let id=s.spawn(definition(),[0.,4.,0.],0.).unwrap();
+        s.set_occupied(id,occupied);
+        let h=s.vehicles[&id].body;
+        s.world.bodies[h].set_rotation(Rotation::from_rotation_z(std::f32::consts::PI),true);
+        s.world.bodies[h].set_linvel(Vector::new(5.,0.,0.),true);
+        for _ in 0..30 {s.step(1./120.);}
+        let e=s.take_ejection(id);
+        if occupied {let e=e.unwrap();assert_eq!(e.reason,"inverted");assert!(e.velocity[0]>4.);}
+        else {assert!(e.is_none());}
+    }
+}
+
+#[test]
+fn rider_hitbox_catches_an_overhang_above_the_chassis() {
+    use rapier3d::prelude::*;
+    let mut s=simulation();
+    s.world.insert(RigidBodyBuilder::fixed().translation(Vector::new(0.,1.55,3.)),ColliderBuilder::cuboid(5.,0.15,0.2));
+    let id=s.spawn(definition(),[0.,0.6,0.],0.).unwrap();s.set_occupied(id,true);
+    let h=s.vehicles[&id].body;s.world.bodies[h].set_linvel(Vector::new(0.,0.,18.),true);
+    let mut crash=None;
+    for _ in 0..120 {s.step(1./120.);if let Some(e)=s.take_ejection(id){crash=Some(e);break;}}
+    assert_eq!(crash.expect("head/torso collision must eject").reason,"rider_impact");
+}
+#[test]
+fn occupied_ramp_driving_does_not_false_bail() {
+    let mut s=Simulation::default();let slope=30_f32.to_radians().tan();
+    s.ground([
+        [[-20.,0.,-20.],[20.,0.,3.],[20.,0.,-20.]],
+        [[-20.,0.,-20.],[-20.,0.,3.],[20.,0.,3.]],
+        [[-20.,0.,3.],[20.,20.*slope,23.],[20.,0.,3.]],
+        [[-20.,0.,3.],[-20.,20.*slope,23.],[20.,20.*slope,23.]],
+    ].into_iter()).unwrap();
+    let id=s.spawn(definition(),[0.,0.6,-2.],0.).unwrap();s.set_occupied(id,true);
+    s.vehicles.get_mut(&id).unwrap().controls=Controls{throttle:1.,..Default::default()};
+    let mut climbed=false;
+    for _ in 0..960 {
+        s.step(1./120.);assert!(s.take_ejection(id).is_none(),"normal ramp triggered ejection");
+        if s.pose(id).unwrap().0[2]>10. {climbed=true;break;}
+    }
+    assert!(climbed);
+}

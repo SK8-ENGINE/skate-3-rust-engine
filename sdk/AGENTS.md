@@ -57,6 +57,8 @@ python tools/package_mod.py sdk/examples/your-mod mods/your-mod.zip
 - Vehicles: spawn/read/control/tune/enter/exit/reset/remove, Rapier map and vehicle
   collision, raycast wheels/suspension, collider offsets/rounding, independent inertia
   and centre of mass, throttle-responsive engine synthesis and live engine volume.
+  Rider safety adds an occupied capsule, crash/inversion ejection, carried momentum
+  into the native bail state and vehicle_bailed events; configure rider_safety.
 - Native-rig rider enter/exit/drive/idle/reverse/brake/steering slots. The host handles
   steering blending, vanilla hand-offs, board hiding and shared motion interpolation.
 - Automatic per-mod draggable/resizable/collapsible settings windows and enable badges.

@@ -157,3 +157,13 @@ function sdk.vehicle.reset(key,position,heading) end
 function sdk.vehicle.remove(key) end
 ---@return table Normalized keyboard/controller axes plus interact and pad_buttons
 function sdk.vehicle.input() end
+
+---@class VehicleBailEvent
+---@field name 'vehicle_bailed'
+---@field owner string
+---@field key string
+---@field reason 'crash'|'rider_impact'|'inverted'
+---@field position number[] World seat position at detection, metres
+---@field velocity number[] Carried world velocity plus launch lift, m/s
+---@field angular_velocity number[] World angular velocity, rad/s
+-- Configure rider_safety in the vehicle definition; see docs/vehicle-sdk.md.

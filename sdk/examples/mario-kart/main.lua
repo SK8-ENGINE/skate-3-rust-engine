@@ -9,7 +9,7 @@ local function hud(car)
   'KEYBOARD | Space brake | Left Shift handbrake | R reset',
   'CONTROLLER | Y enter / exit | RT / LT accelerate / reverse | Left stick steer',
   'CONTROLLER | A brake | B handbrake | '..(sdk.settings.reset_button=='Left stick' and 'L3' or 'R3')..' (stick click) reset',
-  'Slow below 3 m/s to exit | Escape: mod settings'
+  'Slow below 3 m/s to exit | Hard crashes / rollovers eject the rider | Escape: settings'
  }
  for i,line in ipairs(lines) do
   local key=i==1 and 'kart-hud' or 'kart-hud-'..i

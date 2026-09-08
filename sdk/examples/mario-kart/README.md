@@ -29,3 +29,8 @@ controls it live (zero mutes). Full authoring guide: docs/mixamo-vehicle-workflo
 
 Author here, then run `python tools/package_mod.py sdk/examples/mario-kart mods/mario-kart.zip`.
 The live ZIP loads automatically; do not edit mods/.cache. See sdk/AGENTS.md.
+
+Hard crashes, strong head/torso hits and sustained inversion now eject the rider into
+native bail physics with carried momentum. An occupied-seat capsule protects the torso
+against map geometry. Tune rider_safety in vehicle.json; see docs/vehicle-sdk.md for
+threshold units, vehicle_bailed events and the native/Rapier collision boundary.
