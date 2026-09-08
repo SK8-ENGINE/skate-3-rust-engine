@@ -98,8 +98,8 @@ The copied build and launcher are in ignored `logs/scoring/build`. The launcher
 uses this worktree's HUD cache and the existing owned asset installation and
 starts paused. It checks required paths before running and retains failures on
 screen. The executable SHA256 is
-`6853a0035cb3a8693681e574f1fae5829f2caec694657536b92217c6d8f7c63b`.
-The launcher now selects `skate3rust-hud-score-fix.exe`.
+`59c7c876d289c58e9661f669274fa4faa4e50a7bf51085461bcf33f2fc1bd809`.
+The launcher now selects `skate3rust-hud-animation.exe`.
 
 The missing-HUD startup defect is fixed: HUD setup now depends on presentation
 setup, so Bevy applies the deferred camera spawn before the HUD queries it.
@@ -188,7 +188,31 @@ preparation order. An asset-only regression test checks that an unchanged
 target emits no Modified event and a resize invalidates both image and material.
 The test uses no window, renderer or gameplay systems.
 
-## Native parity gaps
+## Multiplier timeline playback
+
+The host previously called `UpdateLineDisplay` every fixed tick. The shipped
+action at 019C39 computes `floor(GetLineTimeRemaining() * 60) - 30`, clamps
+it, and seeks `multiTimer_mc` with `gotoAndPlay` at 019CF4. Since the native
+binding returns whole seconds, repeated calls pin the 501-frame timer to the
+same frame for a second, then jump it forward. The ActionScript dispatches
+this method for event11 (0196CC) and ScreenShow, rather than onEnterFrame.
+The adapter now dispatches when the exposed timer sample or line score changes,
+allowing the authored timeline to advance between samples. This is an adapter
+event policy; the entire native HUD event producer is not yet ported.
+
+Original x3 effect clips are retained: character59 changes mBlueGlow alpha
+with `80 + Math.random() * 20` every four frames; character70 changes mFlicker
+with `90 + Math.random() * 10`. Original multiplier labels select the glow
+and background timelines (characters66 and77); no replacement particles,
+colors or universal x3 effect were added to lower multiplier levels.
+
+The supplied-data movie audit now visits x1.5, x2 and x3 over 1,800 frames,
+asserts consecutive timer frames between events, checks both flicker ranges
+and changing alpha values, and reaches 40 authored draw batches. The scoring
+flow audit still passes landing persistence, line expiry and cancellation.
+No game or GPU capture was launched.
+
+## Remaining native parity gaps
 
 These are implementation gaps, not merely missing gameplay validation:
 

@@ -236,13 +236,20 @@ impl Runtime {
                 .call_method(self.controller, method, vec![], &mut self.bindings)?;
             self.drain()?;
         }
-        self.vm.call_method(
-            self.controller,
-            "UpdateLineDisplay",
-            vec![],
-            &mut self.bindings,
-        )?;
-        self.drain()?;
+        // The movie handles this as event 11 (0196CC), not onEnterFrame.
+        // Re-seeking the 501-frame multiTimer_mc on every tick pins it to
+        // the same whole-second sample instead of letting gotoAndPlay run.
+        if previous.line_time.trunc() != self.bindings.input.line_time.trunc()
+            || previous.line_score != self.bindings.input.line_score
+        {
+            self.vm.call_method(
+                self.controller,
+                "UpdateLineDisplay",
+                vec![],
+                &mut self.bindings,
+            )?;
+            self.drain()?;
+        }
         self.bindings.movie.advance(&mut self.vm)?;
         self.drain()?;
         self.vm
