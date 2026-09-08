@@ -69,7 +69,7 @@ It is a usable integration for testing, **not a finished native-parity port**.
 
 The HUD executes the owned trickdisplay ActionScript and timelines, including
 score, multiplier, line meter, stance and trick-name updates. It renders original
-shape atlases and font glyphs through a separate 1280x720 camera with inherited
+shape atlases and font glyphs through a separate camera with inherited
 multiplicative/additive colors. Movie objects are collected and mesh/material
 slots reused. Fixed updates pause with gameplay; map-generation changes recreate
 the movie even while paused. Missing assets or unsupported actions are logged.
@@ -98,7 +98,8 @@ The copied build and launcher are in ignored `logs/scoring/build`. The launcher
 uses this worktree's HUD cache and the existing owned asset installation and
 starts paused. It checks required paths before running and retains failures on
 screen. The executable SHA256 is
-`9b3458045e7078dcd6daca3e5bea89d16298315b751b4cac4f82f8a6531cd7c0`.
+`cecfff20b647a56253f0aad3e9a37655143121a1ae8c883e7fc3dfc88e6e3de7`.
+The launcher now selects `skate3rust-hud-quality.exe`.
 
 The missing-HUD startup defect is fixed: HUD setup now depends on presentation
 setup, so Bevy applies the deferred camera spawn before the HUD queries it.
@@ -144,6 +145,38 @@ seconds conversion, natural line expiry and teleport cancellation. The
 finite geometry (33 maximum batches). Release compilation passes. User
 screenshots guided the investigation but did not supply rendering constants;
 no game, reference executable or GPU capture was launched for validation.
+
+## Output resolution and authored blue glow
+
+The HUD target now uses the window's physical pixel dimensions and resizes with
+the window. Its orthographic projection retains the authored 1280x720 coordinate
+space. Previously the adapter rasterized at 720p and enlarged the finished image,
+adding blur on larger windows. This change improves rasterization without
+inventing higher-resolution source artwork.
+
+A data-only inventory of `fedata.big`, `fedynamic.big`, `fetexture.big` and
+`miscboot.big` found byte-identical duplicate trickdisplay APT/CONST/GEO/RX2
+assets and 512x512 Futura font atlases. No higher-resolution variant was found
+in those banks. The inventory and hashes are retained in ignored
+`logs/scoring/hud-resolution-inventory.json`.
+
+`GetGeneralInfo` had clean and sketchy reversed. The original
+`UpdateTrickScoring` action stream reads slot2 as sketchy (0199D2) and slot3
+as clean (019A30), matching backend bytes152/153 returned by `825C2D90`.
+Correcting those slots selects the authored clean color animation. The native
+FontPS/Font8PS programs contain texture/color modulation; the glow is supplied
+by the authored layers, not a replacement procedural effect.
+
+Additional collector fixes follow `82DA8A70`/`82DA93D8`: published Air452
+suspends continuous air metrics and grab accrual while preserving the carrier.
+Distance collectors also start their first active frame at zero elapsed
+time/distance, following `82DB0588`.
+
+Validation: the 1,800-frame supplied-data HUD audit asserts that clean input
+selects mLastClean rather than mLastSketchy; the scoring-flow audit verifies
+Air452 suspension in addition to landing lifetime, expiry and cancellation.
+Both pass, and the static-CRT release build succeeds. The game was not launched;
+pixel appearance and GPU resize behavior still require interactive verification.
 
 ## Native parity gaps
 

@@ -36,6 +36,7 @@ pub(crate) struct Frame {
     pub fakie: bool,
     pub nollie: bool,
     pub body_flip: bool,
+    pub suspend_air: bool,
     pub landing: skate_core::animation::landing_quality::Output,
     pub teleported: bool,
     pub reverting: bool,
@@ -48,6 +49,7 @@ pub(crate) struct Runtime {
     held: [f32; 4],
     distance: [f32; 4],
     metric_rewards: [f32; 4],
+    metric_started: [bool; 4],
     start: [f32; 3],
     previous: [f32; 3],
     previous_heading: f32,
@@ -83,6 +85,7 @@ impl Runtime {
             held: [0.; 4],
             distance: [0.; 4],
             metric_rewards: [0.; 4],
+            metric_started: [false; 4],
             start: [0.; 3],
             previous: [0.; 3],
             previous_heading: 0.,
@@ -175,6 +178,7 @@ impl Runtime {
             }
         }
         if !keep_metric {
+            self.metric_started[slot] = false;
             self.held[slot] = 0.;
             self.distance[slot] = 0.;
             self.metric_rewards[slot] = 0.;
@@ -269,8 +273,16 @@ impl Runtime {
                     self.air_repetition_set = true;
                 }
             }
-            if c.announced {
-                self.held[slot] += f.dt;
+            let distance_metric = self.collector == Collector::Grind
+                || self.collector == Collector::Ground && slot < 3;
+            let was_active = self.metric_started[slot];
+            self.metric_started[slot] = true;
+            if c.announced && !(self.collector == Collector::Air && f.suspend_air) {
+                // 82DB0588 starts a distance collector at time/distance zero.
+                // Every active frame still updates its reference position.
+                if !distance_metric || was_active {
+                    self.held[slot] += f.dt;
+                }
                 let previous_distance = self.distance[slot];
                 let displacement =
                     std::array::from_fn::<_, 3, _>(|i| f.position[i] - self.previous[i]);
@@ -283,7 +295,7 @@ impl Runtime {
                 } else {
                     (displacement.iter().map(|x| x * x).sum::<f32>()).sqrt()
                 };
-                if delta > f32::from_bits(0x3ba3d70a) {
+                if was_active && delta > f32::from_bits(0x3ba3d70a) {
                     self.distance[slot] += delta;
                 }
                 let curve = match self.collector {
@@ -409,7 +421,9 @@ impl Runtime {
             }
         }
         let mut ids = [None; 4];
-        self.collector_ticks = self.collector_ticks.saturating_add(1);
+        if !(self.collector == Collector::Air && f.suspend_air) {
+            self.collector_ticks = self.collector_ticks.saturating_add(1);
+        }
         match self.collector {
             Collector::Ground => {
                 ids[0] = if f.flags & 0x80000000 != 0 {
@@ -459,7 +473,7 @@ impl Runtime {
         for (slot, id) in ids.into_iter().enumerate() {
             self.carrier(slot, id, &f)?;
         }
-        if self.collector == Collector::Air {
+        if self.collector == Collector::Air && !f.suspend_air {
             if self.collector_ticks > 5 || f.flags & 0x01000000 != 0 {
                 self.sequence_active = true;
             }

@@ -2,7 +2,7 @@
 use crate::{apt_scene, config::Config, hud_runtime, physics::SkaterRuntime};
 use bevy::{
     asset::{RenderAssetUsages, embedded_asset},
-    camera::{RenderTarget, visibility::RenderLayers},
+    camera::{RenderTarget, ScalingMode, visibility::RenderLayers},
     prelude::*,
     render::render_resource::{
         AsBindGroup, BlendState, Extent3d, PrimitiveTopology, RenderPipelineDescriptor, ShaderType,
@@ -11,6 +11,7 @@ use bevy::{
     shader::ShaderRef,
     sprite_render::{AlphaMode2d, Material2d, Material2dPlugin, MeshMaterial2d},
     ui_render::UiMaterialPlugin,
+    window::PrimaryWindow,
 };
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -62,6 +63,7 @@ struct Slot {
 }
 #[derive(Resource)]
 struct Hud {
+    target: Handle<Image>,
     runtime: hud_runtime::Runtime,
     source: serde_json::Value,
     shapes: apt_scene::Shapes,
@@ -91,7 +93,9 @@ impl Plugin for ScoringHudPlugin {
         )
         .add_systems(
             Update,
-            (reset, render).chain().after(crate::app::FrameSet::Physics),
+            (resize_target, reset, render)
+                .chain()
+                .after(crate::app::FrameSet::Physics),
         );
     }
 }
@@ -100,6 +104,7 @@ fn setup(
     config: Res<Config>,
     skater: Res<SkaterRuntime>,
     cameras: Query<Entity, With<IsDefaultUiCamera>>,
+    window: Single<&Window, With<PrimaryWindow>>,
     mut images: ResMut<Assets<Image>>,
     mut composites: ResMut<Assets<HudComposite>>,
 ) {
@@ -151,6 +156,7 @@ fn setup(
             textures.insert(path, images.add(image));
         }
         Ok(Hud {
+            target: Handle::default(),
             runtime,
             source,
             shapes,
@@ -161,15 +167,23 @@ fn setup(
         })
     })();
     match result {
-        Ok(hud) => {
+        Ok(mut hud) => {
             let target = images.add(Image::new_target_texture(
-                1280,
-                720,
+                window.physical_width().max(1),
+                window.physical_height().max(1),
                 TextureFormat::Rgba8UnormSrgb,
                 None,
             ));
+            hud.target = target.clone();
             commands.spawn((
                 Camera2d,
+                Projection::Orthographic(OrthographicProjection {
+                    scaling_mode: ScalingMode::Fixed {
+                        width: 1280.,
+                        height: 720.,
+                    },
+                    ..OrthographicProjection::default_2d()
+                }),
                 Camera {
                     order: -1,
                     clear_color: ClearColorConfig::Custom(Color::NONE),
@@ -195,6 +209,28 @@ fn setup(
             info!("Original scoring HUD loaded");
         }
         Err(error) => error!("Original scoring HUD could not load: {error}"),
+    }
+}
+// Rasterize at output pixel resolution; retain the original 1280x720 APT
+// coordinate space. This avoids a second enlargement of every glyph/glow.
+fn resize_target(
+    hud: Option<Res<Hud>>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let Some(hud) = hud else {
+        return;
+    };
+    let Some(image) = images.get_mut(&hud.target) else {
+        return;
+    };
+    let size = Extent3d {
+        width: window.physical_width().max(1),
+        height: window.physical_height().max(1),
+        depth_or_array_layers: 1,
+    };
+    if image.texture_descriptor.size != size {
+        image.resize(size);
     }
 }
 fn reset(

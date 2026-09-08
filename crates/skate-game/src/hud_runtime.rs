@@ -106,8 +106,10 @@ impl Host for Bindings {
                 [
                     Value::Number(self.input.sequence_score as f64),
                     Value::Text(score(self.input.sequence_score)),
-                    Value::Bool(self.input.clean),
+                    // 825C2D90 exposes backend152/153; the shipped
+                    // UpdateTrickScoring reads [2] as sketchy, [3] as clean.
                     Value::Bool(self.input.sketchy),
+                    Value::Bool(self.input.clean),
                     Value::Number(self.input.sequence_timer as f64),
                     Value::Number(self.input.line_score as f64),
                     Value::Text(score(self.input.line_score)),

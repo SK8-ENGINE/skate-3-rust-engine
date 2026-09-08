@@ -61,6 +61,13 @@ fn main() -> Result<(), String> {
         runtime
             .update(input.clone(), new_trick, false, tick % 180 == 120)
             .map_err(|e| format!("Data frame {tick}: {e}"))?;
+        if tick == 10 {
+            if !runtime.vm.get(runtime.controller, "mLastClean").truth()
+                || runtime.vm.get(runtime.controller, "mLastSketchy").truth()
+            {
+                return Err("Clean landing selected the sketchy color timeline".into());
+            }
+        }
         let draws = apt_scene::draw(&runtime.bindings.movie, &runtime.vm, &shapes)?;
         max_draws = max_draws.max(draws.len());
         saw_native_shadow_pair |= draws.windows(2).any(|pair| {

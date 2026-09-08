@@ -36,6 +36,7 @@ fn frame(
         fakie: false,
         nollie: false,
         body_flip: false,
+        suspend_air: false,
         landing: Default::default(),
         teleported: false,
         reverting: false,
@@ -131,8 +132,23 @@ fn main() -> Result<(), String> {
     if expired.hud_input().sequence_score != 0 || expired.hud_input().line_time != 0. {
         return Err("Expired line retained its HUD score".into());
     }
+    // Native Air452 suspends continuous air metrics without removing the carrier.
+    let mut suspended = scoring_runtime::Runtime::load(&data)?;
+    suspended.advance(frame(0, FilteredCategory::Ground, None))?;
+    for tick in 1..61 {
+        suspended.advance(frame(tick, FilteredCategory::Air, Some(kickflip)))?;
+    }
+    let held_score = suspended.hud_input().sequence_score;
+    let mut freeze = frame(61, FilteredCategory::Air, Some(kickflip));
+    freeze.suspend_air = true;
+    freeze.position = [100., 100., 100.];
+    freeze.body_flip = true;
+    suspended.advance(freeze)?;
+    if suspended.hud_input().sequence_score != held_score {
+        return Err("Air452 suspension accrued distance/height reward".into());
+    }
     println!(
-        "Scoring data audit: authored kickflip credited once; landing display persists; timer uses seconds; line expiry clears score; teleport cancels pending rewards and multiplier"
+        "Scoring data audit: authored kickflip credited once; landing display persists; timer uses seconds; line expiry clears score; teleport cancels pending rewards and multiplier; Air452 freezes continuous metrics"
     );
     Ok(())
 }

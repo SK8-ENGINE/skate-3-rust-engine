@@ -237,6 +237,7 @@ pub(super) fn advance(
         forward:deck_frame.basis.columns[2],
         switch:skater.animation.packet.riding_switch,fakie:skater.animation.packet.riding_fakie,
         nollie:skater.animation.packet.weight_forwards,body_flip:skater.player_input.physical.air.flag_441!=0,
+        suspend_air:skater.player_input.physical.air.use_air_reckoning_452!=0,
         landing:skater.landing_quality,teleported,reverting:skater.player_state.state_flags[70-52],
     })?;
     super::climbing::approach::advance(physics, skater, controls);
