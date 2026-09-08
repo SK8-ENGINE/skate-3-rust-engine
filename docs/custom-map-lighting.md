@@ -64,3 +64,12 @@ custom scene lights without a separate character light rig.
   lighting. A retail-derived package retaining provenance must stay retail.
 
 No game, recomp, Steam or gameplay automation was launched for this change.
+
+## Automated validation
+
+`cargo check -p skate-game --tests --no-default-features --release --offline`
+passed with existing warnings. A static-CRT release test harness was linked
+directly into the worktree's ignored private output using the shared Cargo
+cache. All six focused CPU tests passed: `map_render::tests` (3),
+`retail_character::tests` (2), and `camera::environment_tests` (1). These checks
+do not validate GPU appearance; use the visual checklist above.
