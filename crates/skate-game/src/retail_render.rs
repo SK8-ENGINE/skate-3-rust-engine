@@ -1,6 +1,6 @@
 //! Retail world shading. See docs/retail-renderer.md for provenance and gaps.
 use bevy::{
-    asset::embedded_asset,
+    asset::{AssetPath, embedded_asset, embedded_path},
     core_pipeline::{
         core_3d::graph::Node3d,
         fullscreen_material::{FullscreenMaterial, FullscreenMaterialPlugin},
@@ -16,6 +16,11 @@ use bevy::{
 use std::collections::BTreeMap;
 
 pub(crate) struct RetailRenderPlugin;
+// Use the same path derivation as embedded_asset!: alternate binary targets
+// have a different crate namespace even though they share these source files.
+fn retail_shader(path: &str) -> ShaderRef {
+    AssetPath::from(embedded_path!(path)).with_source("embedded").into()
+}
 impl Plugin for RetailRenderPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "retail_world.wgsl");
@@ -49,7 +54,7 @@ impl Material for RetailSkyMaterial {
         false
     }
     fn vertex_shader() -> ShaderRef {
-        "embedded://skate3rust/retail_sky.wgsl".into()
+        retail_shader("retail_sky.wgsl")
     }
     fn fragment_shader() -> ShaderRef {
         Self::vertex_shader()
@@ -157,7 +162,7 @@ pub(crate) struct RetailTone {
 }
 impl FullscreenMaterial for RetailTone {
     fn fragment_shader() -> ShaderRef {
-        "embedded://skate3rust/retail_tone.wgsl".into()
+        retail_shader("retail_tone.wgsl")
     }
     fn node_edges() -> Vec<InternedRenderLabel> {
         vec![
@@ -225,10 +230,10 @@ impl From<&RetailWorldMaterial> for RetailKey {
 }
 impl Material for RetailWorldMaterial {
     fn fragment_shader() -> ShaderRef {
-        "embedded://skate3rust/retail_world.wgsl".into()
+        retail_shader("retail_world.wgsl")
     }
     fn prepass_fragment_shader() -> ShaderRef {
-        "embedded://skate3rust/retail_depth.wgsl".into()
+        retail_shader("retail_depth.wgsl")
     }
     fn alpha_mode(&self) -> AlphaMode {
         self.alpha

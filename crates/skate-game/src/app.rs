@@ -50,7 +50,7 @@ pub(crate) fn build(
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Skate 3 Rust Engine".into(),
+                    title: config.multiplayer.title.clone().unwrap_or_else(||"Skate 3 Rust Engine".into()),
                     resolution: (1280, 800).into(),
                     ..default()
                 }),
@@ -67,6 +67,7 @@ pub(crate) fn build(
                 ..default()
             }),
     )
+    .insert_resource(bevy::winit::WinitSettings {focused_mode:bevy::winit::UpdateMode::Continuous,unfocused_mode:bevy::winit::UpdateMode::Continuous})
     .insert_resource(config)
     .insert_resource(crate::retail_render::RetailScene(retail_scene))
     .insert_resource(assets::AssetManifest(manifest))
@@ -111,5 +112,6 @@ pub(crate) fn build(
     ));
     app.add_plugins((crate::session_marker::SessionMarkerPlugin, crate::customiser::CustomiserPlugin, crate::modding::ModdingPlugin));
     app.add_plugins(crate::custom_models::CustomModelsPlugin);
+    app.add_plugins(crate::multiplayer::MultiplayerPlugin);
     app
 }

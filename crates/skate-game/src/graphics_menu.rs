@@ -1,4 +1,5 @@
 //! Native-resolution pause UI over a separately scaled 3D render target.
+use crate::difficulty::Difficulty;
 use bevy::{
     camera::RenderTarget,
     core_pipeline::prepass::DepthPrepass,
@@ -12,7 +13,6 @@ use bevy::{
     window::{PresentMode, PrimaryWindow},
 };
 use serde::{Deserialize, Serialize};
-use crate::difficulty::Difficulty;
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -84,6 +84,8 @@ pub(crate) struct Menu {
     status: String,
     maps: Vec<crate::map_library::Entry>,
     selected_map: usize,
+    multiplayer: bool,
+    browser: bool,
 }
 impl Menu {
     pub(crate) fn transition_finished(&mut self, status: String, resume: bool) {
@@ -207,9 +209,9 @@ fn setup(
     }, BackgroundColor(Color::srgba(0.015,0.025,0.04,0.88)))).with_children(|root| {
         root.spawn((Node { width:px(560),max_width:percent(95),padding:UiRect::all(px(18)),flex_direction:FlexDirection::Column,row_gap:px(4),border_radius:BorderRadius::all(px(12)),..default() },
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
-            panel.spawn((Text::new("PAUSED"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
+            panel.spawn((Text::new("GAME MENU"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..13 {
+            for i in 0..14 {
                 panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(32),padding:UiRect::all(px(6)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
@@ -233,6 +235,8 @@ fn setup(
         status: String::new(),
         maps,
         selected_map,
+        multiplayer: false,
+        browser: false,
     });
 }
 fn msaa(samples: u32) -> Msaa {
@@ -261,6 +265,8 @@ pub(crate) fn interact(
     mut time: ResMut<Time<Virtual>>,
     buttons: Query<(&Interaction, &MenuRow), Changed<Interaction>>,
     mut exit: MessageWriter<AppExit>,
+    mut net: ResMut<crate::multiplayer::Multiplayer>,
+    mut typing: MessageReader<bevy::input::keyboard::KeyboardInput>,
 ) {
     if transition.busy() {
         menu.open = true;
@@ -272,13 +278,34 @@ pub(crate) fn interact(
         menu.open = !menu.open;
     }
     let mut action = None;
+    for event in typing.read() {
+        if !menu.open
+            || !menu.multiplayer
+            || menu.browser
+            || menu.selected != 3
+            || !event.state.is_pressed()
+        {
+            continue;
+        }
+        if event.key_code == KeyCode::Backspace {
+            net.join_code.pop();
+        }
+        if let Some(text) = &event.text {
+            for ch in text.chars().filter(|c| c.is_ascii_hexdigit() || *c == '-') {
+                if net.join_code.len() < 40 {
+                    net.join_code.push(ch);
+                }
+            }
+        }
+    }
     if menu.open {
+        let rows=if menu.multiplayer || menu.browser {11} else {14};
         if !panel.focused {
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
-            menu.selected = (menu.selected + 12) % 13;
+            menu.selected = (menu.selected + rows - 1) % rows;
         }
         if keys.just_pressed(KeyCode::ArrowDown) || nav.pressed & 2 != 0 {
-            menu.selected = (menu.selected + 1) % 13;
+            menu.selected = (menu.selected + 1) % rows;
         }
         if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
             action = Some((menu.selected, -1));
@@ -296,50 +323,108 @@ pub(crate) fn interact(
         }
     }
     if let Some((row, direction)) = action {
-        match row {
-            0 => {
-                let size = cycle(
-                    RESOLUTIONS,
-                    (menu.settings.width, menu.settings.height),
-                    direction,
-                );
-                (menu.settings.width, menu.settings.height) = size;
+        if menu.browser {
+            match row {
+                0 => net.browse(0),
+                1..=5 => net.join_row(row - 1),
+                6 => {
+                    let page = net.browser_page.saturating_sub(1);
+                    net.browse(page);
+                }
+                7 => {
+                    let page = net.browser_page + 1;
+                    if page * 5 < net.browser_total {
+                        net.browse(page);
+                    }
+                }
+                8 => menu.open = false,
+                9 => {
+                    exit.write(AppExit::Success);
+                }
+                10 => {
+                    menu.browser = false;
+                    menu.selected = 6;
+                }
+                _ => {}
             }
-            1 => menu.settings.scale = cycle(SCALES, menu.settings.scale, direction),
-            2 => {
-                menu.settings.samples =
-                    cycle(&menu.supported_msaa, menu.settings.samples, direction)
+        } else if menu.multiplayer {
+            match row {
+                0 => net.local(true),
+                1 => net.local(false),
+                2 => net.steam(true),
+                3 => {}
+                4 => net.steam(false),
+                5 => net.leave(),
+                6 => {
+                    net.browse(0);
+                    menu.browser = true;
+                    menu.selected = 0;
+                }
+                8 => menu.open = false,
+                9 => {
+                    exit.write(AppExit::Success);
+                }
+                10 => {
+                    menu.multiplayer = false;
+                    menu.selected = 13;
+                }
+                _ => {}
             }
-            3 => menu.settings.fps = cycle(LIMITS, menu.settings.fps, direction),
-            4 => menu.settings.occlusion = !menu.settings.occlusion,
-            5 => {
-                menu.difficulty = cycle(&Difficulty::ALL, menu.difficulty, direction);
-                physics.set_difficulty(menu.difficulty);
-                config.difficulty = menu.difficulty;
-                menu.status = match menu.difficulty.save(&config.asset_root) {
-                    Ok(()) => "Difficulty saved".into(),
-                    Err(e) => format!("Applied, but could not save: {e}"),
-                };
+        } else {
+            match row {
+                0 => {
+                    let size = cycle(
+                        RESOLUTIONS,
+                        (menu.settings.width, menu.settings.height),
+                        direction,
+                    );
+                    (menu.settings.width, menu.settings.height) = size;
+                }
+                1 => menu.settings.scale = cycle(SCALES, menu.settings.scale, direction),
+                2 => {
+                    menu.settings.samples =
+                        cycle(&menu.supported_msaa, menu.settings.samples, direction)
+                }
+                3 => menu.settings.fps = cycle(LIMITS, menu.settings.fps, direction),
+                4 => menu.settings.occlusion = !menu.settings.occlusion,
+                5 => {
+                    menu.difficulty = cycle(&Difficulty::ALL, menu.difficulty, direction);
+                    config.difficulty = menu.difficulty;
+                    physics.set_difficulty(menu.difficulty);
+                    menu.status = match menu.difficulty.save(&config.asset_root) {
+                        Ok(()) => "Difficulty saved".into(),
+                        Err(e) => format!("Applied, but could not save: {e}"),
+                    };
+                }
+                6 => {
+                    menu.selected_map = (menu.selected_map as i32 + direction)
+                        .rem_euclid(menu.maps.len() as i32)
+                        as usize;
+                    menu.status = "Choose Load map to switch".into();
+                }
+                7 => {
+                    if net.active() {
+                        menu.status = "Leave multiplayer before switching maps".into();
+                    } else {
+                        transition.request(menu.maps[menu.selected_map].clone());
+                        menu.status = "Loading map...".into();
+                    }
+                }
+                8 => menu.open = false,
+                9 => {
+                    exit.write(AppExit::Success);
+                }
+                10 => { custom_models.request_stock(); customiser.begin(); },
+                11 => mods.begin(),
+                12 => custom_models.begin(),
+                13 => {
+                    menu.multiplayer = true;
+                    menu.selected = 0;
+                }
+                _ => {}
             }
-            6 => {
-                menu.selected_map = (menu.selected_map as i32 + direction)
-                    .rem_euclid(menu.maps.len() as i32) as usize;
-                menu.status = "Choose Load map to switch".into();
-            }
-            7 => {
-                transition.request(menu.maps[menu.selected_map].clone());
-                menu.status = "Loading map...".into();
-            }
-            8 => menu.open = false,
-            9 => {
-                exit.write(AppExit::Success);
-            }
-            10 => { custom_models.request_stock(); customiser.begin(); },
-            11 => mods.begin(),
-            12 => custom_models.begin(),
-            _ => {}
         }
-        if row < 5 {
+        if row < 5 && !menu.multiplayer {
             let save = (|| -> Result<(), String> {
                 std::fs::create_dir_all(menu.path.parent().unwrap()).map_err(|e| e.to_string())?;
                 std::fs::write(
@@ -354,7 +439,7 @@ pub(crate) fn interact(
             };
         }
     }
-    if menu.open {
+    if menu.open && !net.active() {
         time.pause();
     } else {
         time.unpause();
@@ -385,12 +470,19 @@ fn apply(
             *samples = msaa(menu.settings.samples);
         }
     }
-    if previous.as_ref().is_none_or(|p| p.occlusion != menu.settings.occlusion) {
+    if previous
+        .as_ref()
+        .is_none_or(|p| p.occlusion != menu.settings.occlusion)
+    {
         for (entity, _) in &cameras {
             if menu.settings.occlusion {
-                commands.entity(entity).insert((DepthPrepass, OcclusionCulling));
+                commands
+                    .entity(entity)
+                    .insert((DepthPrepass, OcclusionCulling));
             } else {
-                commands.entity(entity).remove::<(DepthPrepass, OcclusionCulling)>();
+                commands
+                    .entity(entity)
+                    .remove::<(DepthPrepass, OcclusionCulling)>();
             }
         }
         info!("GPU occlusion culling: {}", menu.settings.occlusion);
@@ -414,11 +506,12 @@ fn labels(
     customiser: Res<crate::customiser::Customiser>,
     custom_models: Res<crate::custom_models::CustomModels>,
     mods: Res<crate::modding::ModMenu>,
+    net: Res<crate::multiplayer::Multiplayer>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut root: Single<&mut Node, With<MenuRoot>>,
     mut labels: Query<(&MenuLabel, &mut Text), Without<StatusLabel>>,
     mut status: Single<&mut Text, With<StatusLabel>>,
-    mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor)>,
+    mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor, &mut Node), Without<MenuRoot>>,
 ) {
     root.display = if menu.open && !customiser.open && !custom_models.open && !mods.open {
         Display::Flex
@@ -431,43 +524,110 @@ fn labels(
     let s = &menu.settings;
     let size = s.internal_size(window.physical_size());
     for (label, mut text) in &mut labels {
-        **text = match label.0 {
-            0 => format!("Resolution          {} x {}", s.width, s.height),
-            1 => format!(
-                "Internal resolution   {}%  ({} x {})",
-                s.scale, size.x, size.y
-            ),
-            2 => format!(
-                "MSAA                {}",
-                if s.samples == 1 {
-                    "Off".into()
-                } else {
-                    format!("{}x", s.samples)
-                }
-            ),
-            3 => format!(
-                "FPS limit             {}",
-                if s.fps == 0 {
-                    "Unlimited".into()
-                } else {
-                    s.fps.to_string()
-                }
-            ),
-            4 => format!("Occlusion culling     {}", if s.occlusion { "On" } else { "Off" }),
-            5 => format!("Difficulty            {}", menu.difficulty.label()),
-            6 => format!("Map                   {}", menu.maps[menu.selected_map].label),
-            7 => if transition.busy() { "Loading map...".into() } else { "Load map".into() },
-            8 => "Resume".into(),
-            9 => "Quit game".into(),
-            10 => "Character customiser".into(),
-            11 => "Mods".into(),
-            _ => "Custom models".into(),
+        **text = if menu.browser {
+            match label.0 {
+                0 => "Refresh public Steam lobbies".into(),
+                1..=5 => net
+                    .browser_rows
+                    .get(label.0 - 1)
+                    .map(|r| {
+                        format!(
+                            "{} | {}/{} | #{}{}",
+                            r.map,
+                            r.players,
+                            r.capacity,
+                            r.id % 100000,
+                            if r.compatible {
+                                ""
+                            } else {
+                                " | different map/build"
+                            }
+                        )
+                    })
+                    .unwrap_or_else(|| "--".into()),
+                6 => "Previous page".into(),
+                7 => "Next page".into(),
+                8 => "Resume".into(),
+                9 => "Quit game".into(),
+                _ => "Back to multiplayer".into(),
+            }
+        } else if menu.multiplayer {
+            match label.0 {
+                0 => "Host local test (no Steam)".into(),
+                1 => "Join local test (no Steam)".into(),
+                2 => "Host via Steam / Spacewar".into(),
+                3 => format!(
+                    "Join code: {}{}",
+                    net.join_code,
+                    if menu.selected == 3 { "_" } else { "" }
+                ),
+                4 => "Join via Steam / Spacewar".into(),
+                5 => "Leave multiplayer".into(),
+                6 => "Browse public Steam lobbies".into(),
+                7 => "Solo / local play does not require Steam".into(),
+                8 => "Resume".into(),
+                9 => "Quit game".into(),
+                _ => "Back to gameplay & graphics".into(),
+            }
+        } else {
+            match label.0 {
+                0 => format!("Resolution          {} x {}", s.width, s.height),
+                1 => format!(
+                    "Internal resolution   {}%  ({} x {})",
+                    s.scale, size.x, size.y
+                ),
+                2 => format!(
+                    "MSAA                {}",
+                    if s.samples == 1 {
+                        "Off".into()
+                    } else {
+                        format!("{}x", s.samples)
+                    }
+                ),
+                3 => format!(
+                    "FPS limit             {}",
+                    if s.fps == 0 {
+                        "Unlimited".into()
+                    } else {
+                        s.fps.to_string()
+                    }
+                ),
+                4 => format!(
+                    "Occlusion culling     {}",
+                    if s.occlusion { "On" } else { "Off" }
+                ),
+                5 => format!("Difficulty            {}", menu.difficulty.label()),
+                6 => format!(
+                    "Map                   {}",
+                    menu.maps[menu.selected_map].label
+                ),
+                7 => "Load map (restarts session)".into(),
+                8 => "Resume".into(),
+                9 => "Quit game".into(),
+                10 => "Character customiser".into(),
+                11 => "Mods".into(),
+                12 => "Custom models".into(),
+                _ => "Multiplayer".into(),
+            }
         };
     }
-    ***status = if transition.busy() {
-        format!("{} {}\nGameplay is paused. Please wait.", ["|", "/", "-", "\\"][(time.elapsed_secs() * 4.) as usize % 4], transition.label())
-    } else { menu.status.clone() };
-    for (row, interaction, mut color) in &mut buttons {
+    ***status = if menu.browser {
+        net.browser_status.clone()
+    } else if menu.multiplayer {
+        format!(
+            "{}{}",
+            net.status,
+            if net.host_code.is_empty() {
+                String::new()
+            } else {
+                format!("\nYour connection code: {}", net.host_code)
+            }
+        )
+    } else {
+        menu.status.clone()
+    };
+    for (row, interaction, mut color, mut node) in &mut buttons {
+        node.display = if (menu.multiplayer || menu.browser) && row.0 >= 11 { Display::None } else { Display::Flex };
         color.0 = if row.0 == menu.selected || *interaction == Interaction::Hovered {
             Color::srgb(0.10, 0.30, 0.34)
         } else {
@@ -495,7 +655,12 @@ mod tests {
     fn culling_can_toggle_with_msaa_and_render_scale_changes() {
         let mut app = App::new();
         let mut images = Assets::<Image>::default();
-        let target = images.add(Image::new_target_texture(1280, 800, TextureFormat::Rgba8UnormSrgb, None));
+        let target = images.add(Image::new_target_texture(
+            1280,
+            800,
+            TextureFormat::Rgba8UnormSrgb,
+            None,
+        ));
         app.insert_resource(SceneTarget(target.clone()))
             .insert_resource(images)
             .insert_resource(Menu {
@@ -519,7 +684,14 @@ mod tests {
         assert!(!app.world().entity(camera).contains::<OcclusionCulling>());
         assert!(!app.world().entity(camera).contains::<DepthPrepass>());
         assert_eq!(*app.world().get::<Msaa>(camera).unwrap(), Msaa::Off);
-        assert_eq!(app.world().resource::<Assets<Image>>().get(&target).unwrap().size(), UVec2::new(857, 536));
+        assert_eq!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&target)
+                .unwrap()
+                .size(),
+            UVec2::new(857, 536)
+        );
         {
             let mut menu = app.world_mut().resource_mut::<Menu>();
             menu.settings.occlusion = true;

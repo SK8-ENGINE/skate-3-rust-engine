@@ -21,8 +21,9 @@ pub(super) fn advance(
     //SimController8285C968 dispatches the preceding tick's camera messages
     //before simulation. Keep End/Begin ordering when both occur in one update.
     for request in camera.simulation_rate_requests.drain(..) {
-        physics.clock.apply(request)?;
+        if !physics.network_active { physics.clock.apply(request)?; }
     }
+    if physics.network_active { physics.clock = super::clock::SimulationClock::default(); }
     if physics.ticks == 0 {
         player_state::initialize(physics, skater)?;
         //Ctor82DB3008 enters Ground without ProcessOutput. Keep the constructed

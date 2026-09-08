@@ -13,6 +13,11 @@ name = "skate3-custom-models"
 path = "src/custom_models_main.rs"
 test = false
 
+[[bin]]
+name = "skate3-multiplayer"
+path = "src/multiplayer_main.rs"
+test = false
+
 [features]
 default = ["dev-dynamic"]
 dev-dynamic = ["bevy/dynamic_linking"]
@@ -27,3 +32,4 @@ serde.workspace = true
 skate-mods = { path = "../skate-mods" }
 
 skate-vehicles = { path = "../skate-vehicles" }
+skate-net = { path = "../skate-net" }
