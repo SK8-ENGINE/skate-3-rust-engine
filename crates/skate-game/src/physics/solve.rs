@@ -23,7 +23,7 @@ pub(super) fn advance(
         Vec::new()
     };
     let skeleton_volumes =
-        skeleton_colliders::world_volumes(&skater.skeleton, &skater.skeleton_collision)?;
+        skeleton_colliders::enabled_volumes(&skater.skeleton, &skater.skeleton_collision)?;
     // Each native assembly has its own query record and retention buffer.
     // Skeleton82BE5094 passes false to82768728: its edge threshold is -1,
     // whereas the board requests .999. GroundPipeline supplies the remaining
@@ -37,8 +37,10 @@ pub(super) fn advance(
     let skeleton_timer = crate::performance::Scope::new("skeleton_world_contacts");
     let mut skeleton_query = physics.query;
     skeleton_query.edge_cos_bend_normal_threshold = -1.0;
+    let mut skeleton_world_volumes = skeleton_volumes.clone();
+    skeleton_colliders::retain_world_volumes(&mut skeleton_world_volumes, &skater.skeleton_collision);
     contacts.extend_from_slice(physics.world.query_primitives(
-        &skeleton_volumes,
+        &skeleton_world_volumes,
         skeleton_query,
         physics.retention,
     ));

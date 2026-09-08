@@ -47,6 +47,14 @@ input is released. Those paths already run through `handplant::ground_query`
 and `ground_update`. The obsolete error and its unused duplicate manager have
 been removed; input still reaches the stock graphs and handplant selector.
 
+The subsequent normal-map run failed at tick4225 in KnownAir because enabled
+foot part15 carried volume group4. This is the existing native
+DisableCollisionWithWorld classification, not an unsupported shape. Enabled
+group4 shapes now stay in the assembly collision pass but are excluded from
+the world query. Re-enabling world collision by restoring group0 takes effect
+on the next query. This fixes that explicit exit; the separately logged
+off-board world-object query and non-finite-pose failures remain under investigation.
+
 The task executable is a separate copy, built with:
 
 ```powershell
