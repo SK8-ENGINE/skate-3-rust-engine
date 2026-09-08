@@ -49,7 +49,7 @@ the ignored private output directory.
 Example preparation (data extraction only):
 
 ```powershell
-python tools/prepare_hud.py --game <owned-game-directory> --output assets/private/hud
+python tools/prepare_hud.py --game <owned-game-directory> --output assets/private/hud --collections <owned-assets>/private/stock/skater-collections.json
 ```
 
 The original movie is authored at 1280 by 720. Its score, line, stance,
@@ -69,11 +69,15 @@ timeline execution and rendering with multiplicative and additive colors.
 Superclass preloads and supported action coverage also remain incomplete.
 The audit's dummy host intentionally does not establish native binding parity.
 
-The movie references `FuturaOuterGlow`, absent under that exact name from the
-five extracted bitmap-font banks. The old extractor infers an alias to
-`Futura Glow` from matching menu metrics; that is not yet evidence of native
-font-server resolution. The manifest reports it as unresolved rather than
-silently selecting a substitute.
+Font resolution is recovered from FontManager initialization `82808AE8`,
+APT-name lookup `82809208` and loading `82809308`. VLT class
+`FECFBCAF356518C4` maps the APT name (field `340832CCFD9FDEB4`, layout +8) to
+`FileName` (layout +4). In particular, `FuturaOuterGlow` maps to `futurashadow`,
+not the prior extractor's inferred `Futura Glow`. The prepared movie has no
+unresolved font references. The manifest retains VLT record provenance and
+native scale/offset fields. The community symbol calling `82809168`
+GetFontByAptName is misleading: that function searches the filename column;
+`82809208` searches the APT-name column.
 
 Pause, map-change generation reset, resource reuse and the final task-specific
 release build/launcher remain to be integrated and checked. No game/recomp,
