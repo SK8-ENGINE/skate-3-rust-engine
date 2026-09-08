@@ -96,6 +96,14 @@ pub(super) fn advance(
     player_state::post_input_and_select(physics, skater)?;
     let state_after_selection = skater.player_state.current();
     if state_before_selection != state_after_selection {
+        if skater.player_input.processed.flags_2476 & (1 << 22) != 0
+            || state_before_selection == skate_core::player::state::PhysicalStateId::HandPlant
+            || state_after_selection == skate_core::player::state::PhysicalStateId::HandPlant {
+            bevy::log::info!("HANDPLANT_STATE tick={tick} from={state_before_selection:?} to={state_after_selection:?} flags={:08x} phase={} processed={:08x}/{:08x}/{:08x}",
+                skater.handplant.flags, skater.handplant.phase,
+                skater.player_input.processed.flags_2468, skater.player_input.processed.flags_2476,
+                skater.player_input.processed.flags_2480);
+        }
         physics.exchange.emit_event(
             tick,
             PhysicsEvent::StateChanged {
@@ -106,6 +114,10 @@ pub(super) fn advance(
     }
     player_state::pre_state(physics, skater)?;
     match skater.player_state.current() {
+        skate_core::player::state::PhysicalStateId::RevertGround => super::revert_state::update(physics,skater)?,
+        skate_core::player::state::PhysicalStateId::HandPlant => super::handplant::update(physics,skater)?,
+        skate_core::player::state::PhysicalStateId::FootPlant => super::footplant::ground::update(physics, skater)?,
+        skate_core::player::state::PhysicalStateId::Boneless => super::boneless::update(physics, skater)?,
         skate_core::player::state::PhysicalStateId::GrindBoardslide
         | skate_core::player::state::PhysicalStateId::GrindFiftyFifty
         | skate_core::player::state::PhysicalStateId::GrindTipslide
@@ -136,6 +148,7 @@ pub(super) fn advance(
             //after Reckoning; this frame's propulsion may then set it again.
             skater.ground.state.push_suppressed_2730 = false;
             ground_phase::advance(physics, skater)?;
+            super::handplant::ground_update(physics,skater)?;
             input_phase::update_ground(physics, skater)?;
         }
         skate_core::player::state::PhysicalStateId::PhysicsAir => {

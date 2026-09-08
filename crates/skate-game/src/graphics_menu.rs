@@ -656,6 +656,7 @@ mod tests {
             .insert_resource(images)
             .insert_resource(Menu {
                 open: false, selected: 0, settings: GraphicsSettings::default(),
+                maps: Vec::new(), selected_map: 0,
                 difficulty: Difficulty::Easy, path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
                 multiplayer: false, browser: false,
                 maps: vec![crate::map_library::Entry { label: "Test world".into(), path: None }], selected_map: 0,

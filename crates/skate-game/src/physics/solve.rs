@@ -1,6 +1,7 @@
 //! One physical solve for the board, skater and original animation targets.
 //! The caller publishes forces and drive targets before entering this phase.
 mod assembly_contacts;
+mod diagnostics;
 use super::{GamePhysics, SkaterRuntime, colliders, skeleton_colliders};
 use skate_core::physics::{
     board::BodyId,
@@ -14,13 +15,22 @@ pub(super) fn advance(
     skater: &mut SkaterRuntime,
     truck_targets: [f32; 2],
 ) -> Result<(), String> {
+    let before = diagnostics::snapshot(physics, skater);
+    diagnostics::validate(&before, "before shared solve").map_err(|error| format!(
+        "{error}; com_frame={:?}; lifted_com_frame={:?}; animation_root={:?}; biped_position={:?}; biped_surface={:?}",
+        skater.animated_skeleton.board_frames.com_frame,
+        skater.animated_skeleton.board_frames.lifted_com_frame,
+        skater.animated_skeleton.roots.animation_to_world,
+        skater.offboard.controller.output().position,
+        skater.offboard.controller.state.surface,
+    ))?;
     let board_volumes = if skater.offboard.board_policy.volumes_enabled {
         colliders::world_volumes(&physics.board, &physics.settings)
     } else {
         Vec::new()
     };
     let skeleton_volumes =
-        skeleton_colliders::world_volumes(&skater.skeleton, &skater.skeleton_collision)?;
+        skeleton_colliders::enabled_volumes(&skater.skeleton, &skater.skeleton_collision)?;
     // Each native assembly has its own query record and retention buffer.
     // Skeleton82BE5094 passes false to82768728: its edge threshold is -1,
     // whereas the board requests .999. GroundPipeline supplies the remaining
@@ -34,8 +44,10 @@ pub(super) fn advance(
     let skeleton_timer = crate::performance::Scope::new("skeleton_world_contacts");
     let mut skeleton_query = physics.query;
     skeleton_query.edge_cos_bend_normal_threshold = -1.0;
+    let mut skeleton_world_volumes = skeleton_volumes.clone();
+    skeleton_colliders::retain_world_volumes(&mut skeleton_world_volumes, &skater.skeleton_collision);
     contacts.extend_from_slice(physics.world.query_primitives(
-        &skeleton_volumes,
+        &skeleton_world_volumes,
         skeleton_query,
         physics.retention,
     ));
@@ -100,6 +112,11 @@ pub(super) fn advance(
             drives: &mut drives.rows,
         },
     );
+    if let Err(error) = diagnostics::validate(
+        &diagnostics::snapshot(physics, skater), "after shared solve",
+    ) {
+        return Err(format!("{error}; input_bodies={before:?}; contacts={contacts:?}; joints={joints:?}; drives={:?}", drives.rows));
+    }
     skater
         .skeleton
         .publish_physical_record(deck_frame(&physics.board));

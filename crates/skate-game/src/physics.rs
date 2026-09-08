@@ -10,6 +10,9 @@ mod colliders;
 mod controls;
 mod foot_ik;
 mod footplant;
+mod plant_skeleton;
+mod boneless;
+mod handplant;
 mod foot_ik_queries;
 mod foot_physical_output;
 pub(crate) mod ground;
@@ -37,6 +40,7 @@ mod grind;
 mod ground_phase;
 mod ground_animation;
 mod slide_state;
+mod revert_state;
 mod ground_exit;
 mod ground_runtime;
 mod input_phase;
@@ -340,7 +344,8 @@ fn advance(
     ) {
         physics.failed = true;
         error!(
-            "{message}; tick={}; mapped_input={:?}; force_mode={}; board_axis_y={}; flags={:08x}/{:08x}/{:08x}/{:08x}/{:08x}",
+            "{message}; state={:?}; tick={}; mapped_input={:?}; force_mode={}; board_axis_y={}; flags={:08x}/{:08x}/{:08x}/{:08x}/{:08x}",
+            skater.player_state.current(),
             physics.ticks,
             input.0.actions(),
             skater.skeleton_input.force_mode,

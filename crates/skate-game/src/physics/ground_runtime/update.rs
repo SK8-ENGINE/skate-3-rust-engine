@@ -1,6 +1,6 @@
 //! Ordinary Ground82D37C88 executes persistent controller updates and actual
-//!body forces before prediction and IK publication. Skitch's active query and
-//!force path is a distinct behavior; absent world data cannot simulate it.
+//!body forces before prediction and IK publication. Ground's handplant query
+//!82D38430 is dispatched by ground_phase through the retained Handplant owner.
 use super::{
     super::{
         animated_skeleton::AnimatedSkeleton, animation_input::AnimationInput, foot_ik::FootIk,
@@ -32,7 +32,6 @@ pub(crate) struct GroundUpdateTargets<'a, T> {
     pub foot_ik: &'a mut FootIk,
     pub skeleton_elapsed_16505: &'a mut bool,
     pub skeleton_ground_16388: &'a mut bool,
-    pub world_grab_reset_direction: [f32; 4],
     ///Applies to SkeletonDrives hook432 body and Skeleton16112 together.
     pub move_future_deck: &'a mut dyn FnMut(Vector3) -> Result<(), String>,
     pub trajectory: &'a mut GroundTrajectoryState<T>,
@@ -58,11 +57,10 @@ impl GroundState {
         if signals.set_skeleton_flag_16505 {
             *targets.skeleton_elapsed_16505 = true;
         }
-        if p.flags_2476 & 0x0040_0000 != 0 {
-            return Err("Active world-grab requires recovered Skitch query/force behavior; ordinary Ground cannot invent an object".into());
-        }
-        self.world_grab
-            .clear_inactive(targets.world_grab_reset_direction);
+        //GrabWorld (2476 bit22) requests Handplant::ground_query82D38430,
+        //already submitted by ground_phase. It is not proof of a Skitch object.
+        //The same Handplant owner handles the inactive reset and a query miss;
+        //ordinary ground forces continue for both held and released input.
         let pumping_mode = self.pumping_settings.mode(p.state_variant_index_2528)?;
         self.pumping_settings.update(
             &mut self.pumping,

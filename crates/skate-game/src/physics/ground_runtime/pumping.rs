@@ -27,6 +27,46 @@ pub(crate) struct GroundPumpingMode {
     pub unintentional_scalar: f32,
 }
 impl GroundPumping {
+    ///Revert82D435FC..36A0 uses the processed timestep and flag2472 bit16.
+    pub fn update_revert(
+        &self,
+        state: &mut PumpingState,
+        toolkit: &BoardToolkit,
+        riding: &RidingOutputs,
+        skeleton: &AnimatedSkeleton,
+        p: &skate_core::player::input_phase::ProcessedPhysicsInput,
+        balance: f32,
+    ) -> Result<(), String> {
+        let angle = if balance != 0.0 {
+            0.0
+        } else {
+            (skate_core::physics::board_ground::angle_between(
+                xyz(toolkit.deck[2]),
+                riding.reckoning.up,
+            )
+            .abs()
+                - std::f32::consts::FRAC_PI_2)
+                .abs()
+        };
+        let sample = PumpingSample {
+            position: toolkit.deck[3],
+            normal: v(riding.reckoning.ground_normal),
+            com_to_deck_world: skeleton.record.com_to_deck_world,
+            deck_angle: angle,
+            intentional_pumping: ((p.flags_2472 >> 16) & 1) as u8,
+        };
+        match controller::update(
+            state,
+            &self.settings,
+            self.mode(p.state_variant_index_2528)?.controller,
+            sample,
+            p.timestep_2604,
+            &mut NativePumpingGeometry,
+        ) {
+            Ok(()) => Ok(()),
+            Err(never) => match never {},
+        }
+    }
     pub fn load(data: &Collections) -> Result<Self, String> {
         let f = |field| data.float("physics_pumping", "default", field);
         let c = |field| super::settings::curve8(data, "physics_pumping", "default", field);

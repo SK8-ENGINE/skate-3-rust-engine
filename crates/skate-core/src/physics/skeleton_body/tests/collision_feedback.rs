@@ -1,6 +1,33 @@
 use super::*;
 use crate::physics::{contact::RetailContactMaterial, skeleton_animation_record::IDENTITY};
 
+#[test]
+fn handplant_contact_mask_survives_updates_and_restores_on_exit() {
+    let mut collision = SkeletonCollisionMode::new_normal(settings().body, false);
+    for _ in 0..3 {
+        collision.disable_handplant_contacts(2);
+        // A driven-state refresh must not restore these volumes mid-plant.
+        collision.select_driven(5).unwrap();
+        for part in [1, 3, 4, 7, 8] {
+            assert!(!collision.parts[part].enabled, "plant contact part {part}");
+        }
+        for part in [2, 5, 6, 9, 10, 15, 19] {
+            assert!(collision.parts[part].enabled, "unaffected part {part}");
+        }
+        collision.finish_contact_frame();
+        assert!(collision.pending_reenable);
+        assert_eq!(collision.disable_count[3], 1);
+        assert!(!collision.parts[3].enabled);
+    }
+    // No refresh from the plant on the next tick: restore normal contact.
+    collision.finish_contact_frame();
+    assert!(!collision.pending_reenable);
+    for part in [1, 3, 4, 7, 8] {
+        assert!(collision.parts[part].enabled);
+        assert_eq!(collision.disable_count[part], 0);
+    }
+}
+
 fn settings() -> SkeletonFeedbackSettings {
     SkeletonFeedbackSettings {
         body: SkeletonCollisionSettings {

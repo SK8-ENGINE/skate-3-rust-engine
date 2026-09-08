@@ -20,7 +20,6 @@ use skate_core::{
 use skate_data::collections::Collections;
 
 pub(crate) struct GroundState {
-    pub world_grab: super::world_grab::GroundWorldGrabState,
     pub state: PhysicsGroundState,
     pub pumping: PumpingState,
     pub wobble: SpeedWobbleState,
@@ -38,7 +37,6 @@ impl GroundState {
     pub fn load(data: &Collections, _mode: &str, human_player: bool) -> Result<Self, String> {
         let push = |field| data.float("physics_push", "default", field);
         Ok(Self {
-            world_grab: super::world_grab::GroundWorldGrabState::default(),
             state: PhysicsGroundState::before_first_enter(human_player),
             pumping: PumpingState::reset_state(),
             wobble: SpeedWobbleState([0; 8]),

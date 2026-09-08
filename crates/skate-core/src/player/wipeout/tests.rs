@@ -1,6 +1,26 @@
 use super::*;
 use crate::physics::skeleton_animation_record::IDENTITY;
 use crate::point_graph::PointGraph;
+#[test]
+fn handplant_air_check_preserves_contact_threshold_and_real_impact_bails() {
+    let mut f=input();
+    f.category=600;
+    f.closing_velocity=[0.2,0.0,0.0,0.0];
+    let mut s=settings();
+    s.air.xz_trick=0.1;
+    s.air.y_trick=0.6;
+    let mut foot=Requests::new();
+    check_plant(&mut foot,&s,&f);
+    assert!(foot.reasons[2]);
+    //HandPlant82D4C530 calls Air(false); a coping contact is not by itself
+    //the sideways-board danger branch that enables the tiny trick limits.
+    let mut hand=Requests::new();
+    check_air(&mut hand,&s,&mode(),&f,false);
+    assert_eq!(hand.count,0);
+    f.closing_velocity=[11.0,0.0,0.0,0.0];
+    check_air(&mut hand,&s,&mode(),&f,false);
+    assert!(hand.reasons[2]);
+}
 fn input() -> Frame {
     Frame {
         flags_2468: 0,

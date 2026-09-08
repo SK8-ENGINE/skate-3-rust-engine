@@ -125,5 +125,25 @@ fn vector(v: [f32; 4]) -> Vector3 {
     Vector3::new(v[0], v[1], v[2])
 }
 
+///Handplant Reckoning82D8E1C0. Uses the ordinary persistent normal filters.
+pub fn update_plant(orientation:&mut GroundOrientation,frames:&mut ReckoningFrames,
+    body_spin:&mut BodySpinState,state:&mut AirState,settings:&Settings,
+    up:[f32;4],heading:[f32;4],reverse:bool) {
+    frames.heading=heading;
+    body_spin::update(body_spin,&settings.body_spin,0.0,0.0,true,0);
+    let previous=lanes(orientation.up);
+    orientation.dynamic_up=orientation.up;
+    frames.target_lean_angle=0.0;state.secondary_lean_angle=0.0;
+    let normal=normalize(orientation.ground_filter.update(settings.ground_normal_smoothing,up));
+    orientation.ground_normal=vector(normal);
+    let up=normalize_safe(limit_angle(normal,previous,1.0),previous);
+    orientation.up_velocity=vector(std::array::from_fn(|i|up[i]-previous[i]));
+    orientation.up=vector(up);orientation.target=orientation.up;
+    orientation.slow_filter.filter(up);orientation.fast_filter.filter(up);
+    orientation.slow_filter.publish_current(up);orientation.fast_filter.publish_current(up);
+    frames.calculate_transform(up,normal);
+    frames.calculate_tilt(reverse,&settings.tilt_vs_rotation,&settings.tilt_vs_slope);
+}
+
 #[cfg(test)]
 mod tests;

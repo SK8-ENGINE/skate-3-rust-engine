@@ -99,6 +99,11 @@ pub(crate) fn advance(
             can_land_on_board: physical.off_board.flag_316 != 0,
             hippy_hurdling: physical.off_board.hippy_hurdling_317 != 0,
             handplant_flags: physical.air.handplant_flags_324,
+            handplant_time: physical.air.handplant_time_320,
+            handplant_thresholds: skater.handplant.animation_thresholds(),
+            footplant_active: physical.air.flag_448 != 0,
+            footplant_duration: physical.air.footplant_duration_212,
+            footplant_contact_time: physical.air.footplant_contact_time_208,
             time_to_skitch: physical.ground.scalar_276,
             skitch_transition_time: profile.skitch_transition_time,
             time_to_land: physical.air.scalar_184,
@@ -203,6 +208,7 @@ pub(crate) fn advance(
         facing_backwards: physics.grind.name.starts_with("BF_"),
         dropping_in: physical.grinds.dropping_in_324 != 0,
     };
+    skater.animation.action.dropping_in = Some(physical.grinds.dropping_in_324 != 0);
     let conditions = ConditionInputs {
         speeds: Some(physics.riding.graph_speeds()),
         physical_state: Some(PhysicalStateInputs {

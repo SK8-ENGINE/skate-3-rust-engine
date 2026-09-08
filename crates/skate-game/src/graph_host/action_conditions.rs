@@ -20,6 +20,7 @@ pub enum ActionCondition {
     },
     Physical(GameplayCondition),
     Tricking,
+    DroppingIn,
     InLocomotion,
     DisableDismount,
     TimeToLand(NumericCondition),
@@ -39,8 +40,9 @@ impl ActionCondition {
                 target: None,
                 numeric: super::condition_nodes::numeric(a),
             },
-            "IsGrabbingObject" | "IsHandPlanting" => Self::Physical(GameplayCondition::parse(a)?),
+            "IsGrabbingObject" | "IsHandPlanting" | "IsFootPlanting" => Self::Physical(GameplayCondition::parse(a)?),
             "IsTricking" => Self::Tricking,
+            "IsDroppingIn" => Self::DroppingIn,
             "IsInLocomotion" => Self::InLocomotion,
             "DisableDismount" => Self::DisableDismount,
             "TimeToLand" => Self::TimeToLand(super::condition_nodes::numeric(a)),
@@ -49,6 +51,8 @@ impl ActionCondition {
     }
     pub fn evaluate(&self, host: &ActionHost, frame: &Frame) -> Result<bool, String> {
         Ok(match self {
+            Self::DroppingIn => host.dropping_in
+                .ok_or("IsDroppingIn requires physical grind publication")?,
             // Same native physical leaf used by MotionGraph::TimeToLand.
             Self::TimeToLand(numeric) => numeric.matches(
                 host.gameplay_conditions

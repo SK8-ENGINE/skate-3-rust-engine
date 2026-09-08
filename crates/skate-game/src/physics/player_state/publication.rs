@@ -16,8 +16,10 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
             | PhysicalStateId::Nonspecific
             | PhysicalStateId::KnownAir
-            | PhysicalStateId::GroundAnimation
+            | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
+                | PhysicalStateId::GroundAnimation
             | PhysicalStateId::SlideGround
+            | PhysicalStateId::RevertGround
             | PhysicalStateId::WipeoutGround
             | PhysicalStateId::Teleporting
             | PhysicalStateId::BipedAir
@@ -57,10 +59,12 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     // State63 is set only by LandingOnDeckManager::Fill82D4E0E8..E0F4
     // when byte246 && time240<.02. Ordinary Ground never invokes that Fill,
     // so it retains the template zero here; State65 carries Ground requests.
+    set(66, state == PhysicalStateId::RevertGround && skater.revert_state.active);
     set(65, skater.wipeout.requests_wipeout(p));
     set(78, skater.wipeout.requests_runout(p));
     set(71, player.flags_1296 & (1 << 24) != 0);
     set(73, p.flags_2476 & (1 << 24) != 0);
+    set(74, state == PhysicalStateId::HandPlant && skater.handplant.continuation);
     set(75, state.category() == 500);
     set(76, state as u32 == 500);
     //82DB78A8..78DC: the processed off-board request refreshes three
@@ -75,6 +79,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     set(77, dismount_requested);
     set(79, p.state_variant_index_2528 == 3);
     set(80, p.flags_2484 & (1 << 21) != 0);
+    set(83, skater.footplant.perform || skater.footplant.flag_627);
     if let Some(output) = &output {
         set(84, output.state_28.flag_84);
         set(86, output.state_28.has_world_grab_intent_without_object);
@@ -87,6 +92,11 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         set(84, skater.slide_state.state.wall_riding);
     }
     let physical = &mut skater.player_input.physical;
+    physical.component_1832_word_1876=skater.handplant.flags;
+    physical.air.handplant_position_304=skater.handplant.anchor.map(f32::to_bits);
+    physical.air.handplant_time_320=skater.handplant.phase;
+    physical.air.flag_446=u8::from(skater.handplant.flags&0x8000_0000!=0);
+    skater.footplant.publish(&mut physical.air);
     if physics.grind.active {
         physical.grinds.words_136_140 = [physics.grind.kind, 1];
         physical.grinds.flag_318 = u8::from(physics.grind.front_contact);
@@ -120,6 +130,8 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     physical.state = CurrentStateFields {
         category_12: state.category(),
         state_16: state as u32,
+        flag_66: u8::from(state == PhysicalStateId::RevertGround && skater.revert_state.active),
+        flag_74: u8::from(state==PhysicalStateId::HandPlant && skater.handplant.continuation),
         //ProcessOutput82DB7104..7128: selector57 requests State69 here.
         //The next input/selection enters702; never reset inside selection.
         flag_69: u8::from(skater.player_state.selector.request_teleport),

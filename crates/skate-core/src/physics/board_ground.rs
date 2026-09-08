@@ -293,7 +293,7 @@ impl BoardGroundState {
 
 /// Complete8296EBB0, including its small-vector gate and ONE reciprocal-square-
 /// root refinement per vector. Native82C07D20 compares this angle with pi/4.
-pub(crate) fn angle_between(a: Vector3, b: Vector3) -> f32 {
+pub fn angle_between(a: Vector3, b: Vector3) -> f32 {
     let a_squared = dot(a, a);
     let b_squared = dot(b, b);
     let epsilon = f32::from_bits(0x38D1_B717);

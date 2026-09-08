@@ -18,8 +18,10 @@ impl PhysicalStateCalls for Calls {
                 | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
                 | PhysicalStateId::Nonspecific
                 | PhysicalStateId::KnownAir
+                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
                 | PhysicalStateId::GroundAnimation
                 | PhysicalStateId::SlideGround
+                | PhysicalStateId::RevertGround
                 | PhysicalStateId::WipeoutGround
                 | PhysicalStateId::Teleporting
                 | PhysicalStateId::BipedAir
@@ -34,8 +36,10 @@ impl PhysicalStateCalls for Calls {
                 | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
                 | PhysicalStateId::Nonspecific
                 | PhysicalStateId::KnownAir
+                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
                 | PhysicalStateId::GroundAnimation
                 | PhysicalStateId::SlideGround
+                | PhysicalStateId::RevertGround
                 | PhysicalStateId::WipeoutGround
                 | PhysicalStateId::Teleporting
                 | PhysicalStateId::BipedAir
@@ -62,8 +66,10 @@ pub(super) fn set(
         | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
                 | PhysicalStateId::Nonspecific
                 | PhysicalStateId::KnownAir
-        | PhysicalStateId::GroundAnimation
+        | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
+                | PhysicalStateId::GroundAnimation
         | PhysicalStateId::SlideGround
+        | PhysicalStateId::RevertGround
         | PhysicalStateId::WipeoutGround
         | PhysicalStateId::Teleporting
         | PhysicalStateId::BipedAir
@@ -74,8 +80,10 @@ pub(super) fn set(
                 | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
                 | PhysicalStateId::Nonspecific
                 | PhysicalStateId::KnownAir
+                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
                 | PhysicalStateId::GroundAnimation
                 | PhysicalStateId::SlideGround
+                | PhysicalStateId::RevertGround
                 | PhysicalStateId::WipeoutGround
                 | PhysicalStateId::Teleporting
                 | PhysicalStateId::BipedAir
@@ -157,6 +165,10 @@ pub(super) fn set(
     //Native82DB8540 publishes Processed state/history BEFORE old Exit. The
     //same retained objects then receive Exit followed by the new Enter.
     match current {
+        PhysicalStateId::RevertGround => {}, //Exit82B61BB8
+        PhysicalStateId::HandPlant => skater.handplant.reset(),
+        PhysicalStateId::FootPlant => skater.footplant.reset(), //Exit82D4C5A8
+        PhysicalStateId::Boneless => {}, //empty82D4C9B4
         PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide | PhysicalStateId::Nonspecific => super::super::grind::exit(physics, skater)?,
         PhysicalStateId::BipedAir => super::super::offboard::air_state::exit(physics, skater),
         PhysicalStateId::BipedGround => super::super::offboard::ground_state::exit(physics, skater),
@@ -172,6 +184,10 @@ pub(super) fn set(
         _ => unreachable!("state support checked before publication"),
     }
     match requested {
+        PhysicalStateId::RevertGround => super::super::revert_state::enter(physics, skater),
+        PhysicalStateId::HandPlant => super::super::handplant::enter(physics, skater),
+        PhysicalStateId::FootPlant => super::super::footplant::ground::enter(physics, skater),
+        PhysicalStateId::Boneless => super::super::boneless::enter(physics, skater),
         PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide | PhysicalStateId::Nonspecific => super::super::grind::enter(physics, skater),
         PhysicalStateId::BipedAir => super::super::offboard::air_state::enter(physics, skater),
         PhysicalStateId::BipedGround => {
