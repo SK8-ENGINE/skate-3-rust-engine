@@ -499,12 +499,13 @@ pub(crate) fn update(
     mut materials: ResMut<Assets<SkaterMaterial>>,
     root: Query<Entity, With<crate::world::PlayerRoot>>,
     parents: Query<&ChildOf>,
-    mut scenes: Query<(Entity, Option<&PartRoot>, &mut Visibility), With<SceneRoot>>,
+    mut scenes: Query<(Entity, Option<&PartRoot>, &mut Visibility), (With<SceneRoot>, Without<crate::custom_models::CustomModelRoot>)>,
     mut mesh_materials: Query<(Entity, Option<&mut MeshMaterial3d<SkaterMaterial>>), With<Mesh3d>>,
     mut morphs: Query<(Entity, &mut MorphWeights)>,
     mut animation: ResMut<crate::animation::AnimationStatus>,
+    custom_models: Res<crate::custom_models::CustomModels>,
 ) {
-    if !state.enabled {
+    if !state.enabled || custom_models.active.is_some() {
         return;
     }
     let Ok(root) = root.single() else {

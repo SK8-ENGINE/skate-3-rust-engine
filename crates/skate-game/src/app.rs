@@ -39,6 +39,7 @@ pub(crate) fn build(
 ) -> App {
     let retail_scene = config.map.as_ref().is_some_and(|map| map.materials.iter().any(|m| m.retail_definition.is_some()));
     let mut app = App::new();
+    crate::custom_models::register_source(&mut app);
     app.add_plugins(
         DefaultPlugins
             .set(AssetPlugin {
@@ -108,6 +109,7 @@ pub(crate) fn build(
         crate::performance::PerformancePlugin,
     ));
     app.add_plugins((crate::session_marker::SessionMarkerPlugin, crate::customiser::CustomiserPlugin));
+    app.add_plugins(crate::custom_models::CustomModelsPlugin);
     app.add_plugins(crate::multiplayer::MultiplayerPlugin);
     app.add_plugins(crate::scoring_hud::ScoringHudPlugin);
     app.add_systems(Last, crate::crash_context::sample);

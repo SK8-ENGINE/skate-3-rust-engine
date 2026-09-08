@@ -13,12 +13,17 @@ name = "skate3-multiplayer"
 path = "src/multiplayer_main.rs"
 test = false
 
+[[bin]]
+name = "skate3-custom-models"
+path = "src/custom_models_main.rs"
+test = false
+
 [features]
 default = ["dev-dynamic"]
 dev-dynamic = ["bevy/dynamic_linking"]
 
 [dependencies]
-bevy.workspace = true
+bevy = { workspace = true, features = ["jpeg"] }
 skate-core.workspace = true
 skate-data.workspace = true
 half = "=2.7.1"

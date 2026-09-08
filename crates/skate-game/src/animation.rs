@@ -15,6 +15,75 @@ struct BoneBinding {
     bone: usize,
     parent_bone: Option<usize>,
 }
+impl AnimationStatus {
+    /// Prepare a hidden imported scene without disturbing the live bindings.
+    pub(crate) fn for_scene(
+        root: Entity,
+        names: &[String],
+        skins: &Query<(Entity, &SkinnedMesh)>,
+        nodes: &Query<(&Name, &Transform)>,
+        parents: &Query<&ChildOf>,
+    ) -> Result<Self, String> {
+        let mut bindings = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (entity, skin) in skins.iter() {
+            if !parents.iter_ancestors(entity).any(|p| p == root) { continue; }
+            for &joint in &skin.joints {
+                if !seen.insert(joint) { continue; }
+                if !parents.iter_ancestors(joint).any(|p| p == root) {
+                    return Err("Imported skin refers to a joint outside its scene".into());
+                }
+                let (name, _) = nodes.get(joint).map_err(|_| "Imported joint has no name/transform")?;
+                let bone = names.iter().position(|n| n.eq_ignore_ascii_case(name.as_str()))
+                    .ok_or_else(|| format!("Unsupported imported bone: {name}"))?;
+                let mut parent_bone = None;
+                for p in parents.iter_ancestors(joint) {
+                    if p == root { break; }
+                    if let Ok((name, transform)) = nodes.get(p) {
+                        if let Some(i) = names.iter().position(|n| n.eq_ignore_ascii_case(name.as_str())) {
+                            parent_bone = Some(i);
+                            break;
+                        }
+                        if !transform.to_matrix().abs_diff_eq(Mat4::IDENTITY, 0.00001) {
+                            return Err("Imported armature has an unsupported ancestor transform".into());
+                        }
+                    }
+                }
+                bindings.push(BoneBinding { entity: joint, bone, parent_bone });
+            }
+        }
+        if bindings.is_empty() { return Err("Imported scene has no skinned character".into()); }
+        Ok(Self { ready: true, bindings })
+    }
+}
+#[cfg(test)]
+mod custom_model_binding_tests {
+    use super::*;
+    use bevy::ecs::system::SystemState;
+    #[test]
+    fn custom_models_bind_only_the_candidate_and_reject_foreign_joints() {
+        let mut world = World::new();
+        let root = world.spawn_empty().id();
+        let hips = world.spawn((Name::new("HIPS"), Transform::default(), ChildOf(root))).id();
+        let head = world.spawn((Name::new("HEAD"), Transform::default(), ChildOf(hips))).id();
+        for _ in 0..2 {
+            world.spawn((ChildOf(root), SkinnedMesh { inverse_bindposes: default(), joints: vec![hips, head] }));
+        }
+        let foreign = world.spawn((Name::new("unrelated"), Transform::default())).id();
+        world.spawn(SkinnedMesh { inverse_bindposes: default(), joints: vec![foreign] });
+        let names = vec!["HIPS".into(), "HEAD".into()];
+        let mut queries: SystemState<(Query<(Entity, &SkinnedMesh)>, Query<(&Name, &Transform)>, Query<&ChildOf>)> = SystemState::new(&mut world);
+        let (skins,nodes,parents) = queries.get(&world);
+        let prepared = AnimationStatus::for_scene(root,&names,&skins,&nodes,&parents).unwrap();
+        assert!(prepared.ready);
+        assert_eq!(prepared.bindings.len(),2);
+        assert_eq!(prepared.bindings.iter().find(|b| b.entity == head).unwrap().parent_bone,Some(0));
+        world.spawn((ChildOf(root), SkinnedMesh { inverse_bindposes: default(), joints: vec![foreign] }));
+        let (skins,nodes,parents) = queries.get(&world);
+        assert!(AnimationStatus::for_scene(root,&names,&skins,&nodes,&parents).is_err());
+        assert_eq!(prepared.bindings.len(),2);
+    }
+}
 pub(crate) struct AnimationPlugin;
 impl Plugin for AnimationPlugin {
     fn build(&self, app: &mut App) {

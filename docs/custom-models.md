@@ -1,0 +1,15 @@
+# Custom model library
+
+Open the pause menu, choose **Custom models**, then **Import model...**. The native file picker accepts Mixamo FBX and self-contained GLB characters. Successful imports generate textured thumbnail cards and equip automatically. Click any saved card to swap, or **Use stock skater** to restore the regular customiser. Selection persists between sessions. The three-column grid scrolls vertically with the mouse wheel. Keyboard: arrow keys and Enter; controller: D-pad and A; Escape/B returns to the pause menu. Keyboard/controller selection scrolls into view. The Show filter switches between all models, native pros, native specials, and imports.
+
+The game runs `support/custom-models/Mixamo to Skate.exe` as a hidden child process; its file picker remains visible. Bundle the complete PyInstaller onedir output, FBX2glTF under `tools`, licenses, and optionally a locally generated `calibration.json`. Python and Blender are not required on the player's machine. Conversion instructions and restrictions are in `mixamo-to-skate.md`.
+
+The library lives in `%LOCALAPPDATA%/Skate3RustEngine/custom-characters`. Each content-addressed entry contains `manifest.json`, `character.glb`, `source.glb`, `preview.png`, and a conversion report when converted. Imports publish through an atomic directory rename, so failed imports never appear as completed entries. Saved assets do not depend on the original FBX location. Import failures/cancellation preserve the existing character.
+
+The game loads each candidate as a hidden scene, waits for its dependencies and scene instance, validates its stock animation bone bindings, and then commits the visibility/binding switch. The same player entity, physics, animation evaluator, camera and replay state remain in use. Stock modular scene visibility is restored when leaving the custom character. Converted characters include the reference board; the stock board customisation returns with the stock character. Custom selections are local visuals and are not transferred to multiplayer peers.
+
+The paired calibration reproduces the supplied stock character's bind geometry; arbitrary humanoids use the converter's rig fitting and may need adjustment for unusual proportions. This is not a promise of original weight recovery or identical deformation on every model.
+
+Build the separate executable with `cargo build --release --locked --target x86_64-pc-windows-msvc -p skate-game --bin skate3-custom-models --no-default-features`, using `RUSTFLAGS=-C target-feature=+crt-static`. Stage beside `support/custom-models` and launch with `--assets` pointing at the prepared owned asset directory.
+
+Verification: procedural Python conversion/library tests, Rust library discovery and candidate binding tests, release compilation, packaged importer conversion of the supplied FBX, thumbnail inspection, and independent Khronos glTF validation. No game launch or gameplay testing was performed; menu rendering and live visual swapping still need user playtesting.

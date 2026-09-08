@@ -1,6 +1,6 @@
 //! Skin stamps modify albedo before the unchanged StandardMaterial lighting.
 use bevy::{
-    asset::embedded_asset,
+    asset::{AssetPath, embedded_asset, embedded_path},
     pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
     render::render_resource::AsBindGroup,
@@ -29,10 +29,10 @@ pub(crate) struct SkinStamp {
 }
 impl MaterialExtension for SkinStamp {
     fn fragment_shader() -> ShaderRef {
-        "embedded://skate3rust/customiser_stamp.wgsl".into()
+        AssetPath::from(embedded_path!("customiser_stamp.wgsl")).with_source("embedded").into()
     }
     fn prepass_fragment_shader() -> ShaderRef {
-        "embedded://skate3rust/customiser_prepass.wgsl".into()
+        AssetPath::from(embedded_path!("customiser_prepass.wgsl")).with_source("embedded").into()
     }
     fn deferred_fragment_shader() -> ShaderRef {
         Self::fragment_shader()
@@ -64,13 +64,23 @@ pub(crate) fn placement(target: [f32; 4], art: [f32; 4]) -> (Vec4, Vec4) {
 mod tests {
     use super::*;
     #[test]
+    fn embedded_shader_paths_match_this_binary() {
+        for (shader, registered) in [
+            (SkinStamp::fragment_shader(), embedded_path!("customiser_stamp.wgsl")),
+            (SkinStamp::prepass_fragment_shader(), embedded_path!("customiser_prepass.wgsl")),
+        ] {
+            let ShaderRef::Path(path) = shader else { panic!("Expected embedded shader path") };
+            assert_eq!(path, AssetPath::from(registered).with_source("embedded"));
+        }
+    }
+    #[test]
     fn customiser_stamp_maps_authored_borders() {
         let (t, r) = placement([0.5, 0.0, 0.1, 0.4], [0.9, 0.1, 0.2, 0.8]);
         assert!((Vec2::new(r.x, r.y) * t.xy() + t.zw()).abs_diff_eq(Vec2::new(0.2, 0.1), 1e-6));
         assert!((Vec2::new(r.z, r.w) * t.xy() + t.zw()).abs_diff_eq(Vec2::new(0.8, 0.9), 1e-6));
         assert_eq!(
             bevy::asset::embedded_path!("customiser_stamp.wgsl"),
-            std::path::PathBuf::from("skate3rust/customiser_stamp.wgsl")
+            std::path::PathBuf::from(format!("{}/customiser_stamp.wgsl", module_path!().split("::").next().unwrap()))
         );
     }
     #[test]
