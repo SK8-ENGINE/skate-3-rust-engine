@@ -2,7 +2,7 @@
   "id": "community.mario-kart",
   "api": 1,
   "name": "Mario Kart",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Local vehicle SDK example",
   "description": "Rapier kart using your supplied model. F10 spawns nearby, E enters/exits, WASD drives, Space brakes, Shift handbrake, R resets. Slow down before exiting. Animation hooks are in vehicle.json.",
   "entry": "main.lua",
@@ -55,7 +55,7 @@
     "hud": {
       "type": "boolean",
       "label": "Show driving HUD",
-      "description": "Show controls, speed and vehicle state.",
+      "description": "Show keyboard and controller controls, current reset bind, speed and vehicle state.",
       "default": true
     },
     "reset_button": {

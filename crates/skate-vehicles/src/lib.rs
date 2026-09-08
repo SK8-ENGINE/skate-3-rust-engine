@@ -141,7 +141,8 @@ impl Simulation {
                 let driven = d.wheels.iter().filter(|w| w.driven).count() as f32;
                 for (wheel, def) in v.controller.wheels_mut().iter_mut().zip(&d.wheels) {
                     wheel.steering = if def.steering {
-                        -c.steering * d.steering_angle / (1. + speed.abs() * 0.025)
+                        // With +Z forward and +Y up, the driver's left is +X.
+                        c.steering * d.steering_angle / (1. + speed.abs() * 0.025)
                     } else {
                         0.
                     };

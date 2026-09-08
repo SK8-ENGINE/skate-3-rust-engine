@@ -4,6 +4,7 @@ E (controller Y) enters/exits within 4 metres (slow below 3 m/s to exit). WASD d
 left Shift is the handbrake; R or right-stick click rights/resets the kart. The controller bind can be changed to left-stick click in the mod settings. F10 replaces the kart.
 
 Controller: RT/LT accelerate/reverse, left stick steers, A brakes, B handbrakes.
+The enabled mod shows keyboard and controller controls on screen, including the current reset bind. Toggle Show driving HUD in its settings to hide/show them, even before spawning.
 
 The GLB is prepared from your supplied ZIP with tools/prepare_mario_kart.py and is
 kept out of Git. To rebuild it: python tools/prepare_mario_kart.py PATH_TO_ZIP mods/mario-kart

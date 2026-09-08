@@ -117,20 +117,29 @@ fn independent_vehicles_collide_and_remain_finite() {
 }
 
 #[test]
-fn positive_steering_turns_left() {
-    let mut s = simulation();
-    let id = s.spawn(definition(), [0., 1., 0.], 0.).unwrap();
-    for _ in 0..120 {
-        s.step(1. / 120.);
+fn steering_turns_toward_the_drivers_requested_side() {
+    for heading in [0., std::f32::consts::FRAC_PI_2] {
+        for steering in [-0.5, 0.5] {
+            let mut s = simulation();
+            let id = s.spawn(definition(), [0., 1., 0.], heading).unwrap();
+            for _ in 0..120 {
+                s.step(1. / 120.);
+            }
+            s.vehicles.get_mut(&id).unwrap().controls = Controls {
+                throttle: 1.,
+                steering,
+                ..Default::default()
+            };
+            for _ in 0..180 {
+                s.step(1. / 120.);
+            }
+            // Driver/camera left is up cross forward: +X at heading zero (+Z forward).
+            let p = s.pose(id).unwrap().0;
+            let left_displacement = p[0] * heading.cos() - p[2] * heading.sin();
+            assert!(
+                left_displacement * steering > 0.1,
+                "heading={heading}, steering={steering}, left displacement={left_displacement}"
+            );
+        }
     }
-    s.vehicles.get_mut(&id).unwrap().controls = Controls {
-        throttle: 1.,
-        steering: 0.5,
-        ..Default::default()
-    };
-    for _ in 0..180 {
-        s.step(1. / 120.);
-    }
-    let x = s.pose(id).unwrap().0[0];
-    assert!(x < -0.1, "left steering x={x}");
 }
