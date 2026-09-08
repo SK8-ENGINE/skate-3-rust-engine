@@ -1,7 +1,7 @@
-# Character customiser V3
+# Character customiser V4
 
-The dedicated local test build uses `Play Character Customiser V3.bat` and
-`skate3rust-customiser-v3.exe`. Open Escape/Start, then Character customiser.
+The dedicated local test build uses `Play Character Customiser V4.bat` and
+`skate3rust-customiser-v4.exe`. Open Escape/Start, then Character customiser.
 The game and launcher have not been executed for validation; the build is ready
 for user playtesting. No existing game executable is replaced.
 
@@ -50,6 +50,13 @@ with and without secondary UVs. Tests run without a game window or GPU. The hair
 fix still needs the user's visual playtest; no game process was launched here.
 
 ## Menu and controls
+
+Right stick left/right rotates the character preview through 360 degrees. A
+24% dead zone prevents stick drift; rotation accelerates with stick deflection
+up to 2 radians/second. It uses real frame time while gameplay is paused and
+keeps the existing automatic close-up framing. The viewing angle resets when
+opening the customiser and is not saved into the character profile. V4 retains
+the V3 hair and gameplay changes and uses the same prepared library.
 
 Four main sections: **Body, Clothes, Board, Style**. Item lists are alphabetical,
 fit the available panel height, and can be filtered by typing. Backspace edits a

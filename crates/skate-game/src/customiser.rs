@@ -24,6 +24,7 @@ struct Entry {
 #[derive(Resource, Default)]
 pub(crate) struct Navigation {
     pub pressed: u16,
+    preview_turn: f32,
     previous: u16,
     held_for: f32,
     repeat_at: f32,
@@ -33,6 +34,7 @@ pub(crate) struct Customiser {
     pub open: bool,
     pub enabled: bool,
     just_opened: bool,
+    preview_yaw: f32,
     index: Entry,
     path: Vec<usize>,
     selected: usize,
@@ -48,6 +50,7 @@ impl Customiser {
         self.open = true;
         self.enabled = true;
         self.just_opened = true;
+        self.preview_yaw = 0.;
         self.path.clear();
         self.search.clear();
         self.selected = 0;
@@ -80,6 +83,10 @@ impl Customiser {
             .collect()
     }
     pub fn preview_camera(&self) -> (f32, f32, f32) {
+        let (height, distance, yaw) = self.preview_framing();
+        (height, distance, yaw + self.preview_yaw)
+    }
+    fn preview_framing(&self) -> (f32, f32, f32) {
         let mut page = &self.index;
         let mut labels = vec![];
         for &i in &self.path {
@@ -223,7 +230,7 @@ impl Plugin for CustomiserPlugin {
             .add_systems(PostStartup, setup)
             .add_systems(
                 Update,
-                (interact, crate::customiser_parts::update, preferences, draw)
+                (interact, rotate_preview, crate::customiser_parts::update, preferences, draw)
                     .chain()
                     .after(crate::graphics_menu::interact)
                     .before(crate::app::FrameSet::Animation),
@@ -231,9 +238,11 @@ impl Plugin for CustomiserPlugin {
     }
 }
 fn navigation(mut nav: ResMut<Navigation>, time: Res<Time<Real>>, keys: Res<ButtonInput<KeyCode>>) {
-    let mut current = (0..4)
-        .find_map(|i| crate::input::platform::poll(i).ok())
-        .map_or(0, |p| {
+    let pad = (0..4).find_map(|i| crate::input::platform::poll(i).ok());
+    // Remap outside the dead zone so a resting stick cannot drift the preview.
+    let axis = pad.as_ref().map_or(0., |p| (p.state.right[0] as f32 / 32767.).clamp(-1., 1.));
+    nav.preview_turn = axis.signum() * ((axis.abs() - 0.24) / 0.76).max(0.);
+    let mut current = pad.map_or(0, |p| {
             p.state.buttons
                 | if p.state.left[1] > 16000 {
                     1
@@ -273,6 +282,14 @@ fn navigation(mut nav: ResMut<Navigation>, time: Res<Time<Real>>, keys: Res<Butt
     }
     nav.previous = current;
 }
+fn rotate_preview(mut state: ResMut<Customiser>, nav: Res<Navigation>, time: Res<Time<Real>>) {
+    if state.open && nav.preview_turn != 0. {
+        // Real time keeps inspection responsive while gameplay is paused.
+        state.preview_yaw = (state.preview_yaw + nav.preview_turn * 2.0 * time.delta_secs().min(0.1))
+            .rem_euclid(std::f32::consts::TAU);
+    }
+}
+
 fn page(label: impl Into<String>, children: Vec<Entry>) -> Entry {
     Entry {
         label: label.into(),
@@ -670,6 +687,7 @@ fn setup(mut commands: Commands, config: Res<crate::config::Config>, parts: Res<
         open: false,
         enabled,
         just_opened: false,
+        preview_yaw: 0.,
         index: menu(&parts.library, extras),
         path: vec![],
         selected: 0,
@@ -1256,9 +1274,10 @@ fn draw(
         });
         p.spawn((
             Text::new(if state.path.is_empty() {
-                "Done saves your changes and returns to skating."
+                "Right stick: Rotate   •   Done saves and resumes."
             } else {
-                "↑↓ Browse   ←→ Change   Type to search"
+                "↑↓ Browse   ←→ Change   Right stick: Rotate
+Type to search"
             }),
             TextFont {
                 font_size: 12.,
@@ -1340,6 +1359,7 @@ mod tests {
                 open: true,
                 enabled: true,
                 just_opened: false,
+                preview_yaw: 0.,
                 index: menu(&parts.library, extras.clone()),
                 path: vec![],
                 selected: 0,
