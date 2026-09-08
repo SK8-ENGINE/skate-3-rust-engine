@@ -8,10 +8,10 @@ import queue
 import re
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
 import urllib.request
+import urllib.error
 import zipfile
 
 REPO = 'SK8-ENGINE/skate-3-rust-engine'
@@ -21,10 +21,28 @@ FILES = ('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe'
 PREFIX = 'skate3rust-windows-x64/'
 
 
+class DownloadRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith('https://'):
+            raise ValueError('Insecure redirect')
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        # Private asset requests redirect to signed CDN URLs. Never forward a PAT.
+        if redirected is not None:
+            redirected.remove_header('Authorization')
+        return redirected
+
+
+def asset_url(asset):
+    return asset['url'] if os.environ.get('SKATE_UPDATE_GITHUB_TOKEN') else asset['browser_download_url']
+
+
 def atomic(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix('.tmp')
-    temp.write_text(json.dumps(value), encoding='utf-8')
+    with temp.open('w', encoding='utf-8') as output:
+        json.dump(value, output)
+        output.flush()
+        os.fsync(output.fileno())
     os.replace(temp, path)
 
 
@@ -36,23 +54,61 @@ def read_json(path, default=None):
 
 
 def identity(m):
+    if not isinstance(m, dict):
+        raise ValueError('Invalid release metadata')
     if (m.get('schema') != 1 or m.get('target') != 'windows-x64'
             or m.get('repository') != REPO or not isinstance(m.get('build'), int)
             or m['build'] <= 0 or not isinstance(m.get('tag'), str)
-            or not re.fullmatch(r'[0-9a-f]{40}', m.get('revision', ''))):
+            or not isinstance(m.get('revision'), str)
+            or not re.fullmatch(r'[0-9a-f]{40}', m['revision'])):
         raise ValueError('Incompatible release metadata')
     return m['build']
 
 
+def program_metadata(m):
+    identity(m)
+    files = m.get('files')
+    if not isinstance(files, dict) or any(not isinstance(files.get(name), str)
+            or not re.fullmatch('[0-9a-f]{64}', files[name]) for name in FILES[:-1]):
+        raise ValueError('Missing program hashes')
+
+
+def safe_local_paths(root):
+    # Never follow a user junction/symlink into asset stores or another install.
+    paths = [root / name for name in FILES]
+    tx = root / '.update-transaction'
+    paths += [tx / side / name for side in ('old', 'new') for name in FILES]
+    for path in paths:
+        while path != root:
+            if path.is_symlink() or path.is_junction():
+                raise ValueError('Updater program directories cannot contain links or junctions')
+            path = path.parent
+
+
 def fetch(url, cancel, limit, progress=lambda value: None):
+    if cancel.is_set():
+        raise InterruptedError('Cancelled')
     # URLs originate only from the fixed repository API, never notes/manifest.
     if not (url.startswith(API) or url.startswith(f'https://github.com/{REPO}/releases/download/')):
         raise ValueError('Unexpected download URL')
-    req = urllib.request.Request(url, headers={'User-Agent': 'Skate3RustEngine-Updater/1',
-                                              'X-GitHub-Api-Version': '2022-11-28'})
+    headers = {'User-Agent': 'Skate3RustEngine-Updater/1', 'X-GitHub-Api-Version': '2022-11-28'}
+    if url.startswith(API):
+        headers['Accept'] = 'application/octet-stream' if '/assets/' in url else 'application/vnd.github+json'
+        token = os.environ.get('SKATE_UPDATE_GITHUB_TOKEN')
+        if token:
+            headers['Authorization'] = 'Bearer ' + token
+    req = urllib.request.Request(url, headers=headers)
     deadline = time.monotonic() + 300
     result = bytearray()
-    with urllib.request.urlopen(req, timeout=15) as response:
+    try:
+        response = urllib.request.build_opener(DownloadRedirect()).open(req, timeout=15)
+    except urllib.error.HTTPError as error:
+        if error.code in (403, 429):
+            raise ValueError('GitHub rate limit or access restriction; try again later') from error
+        if error.code == 404:
+            raise ValueError('Releases are not publicly available, or private-release access is missing') from error
+        raise
+    with response:
         if not response.url.startswith('https://'):
             raise ValueError('Insecure redirect')
         while True:
@@ -75,6 +131,7 @@ def eligible(release, channel):
 
 
 def discover(current, channel, cancel):
+    current_build = identity(current)
     candidates = []
     deadline = time.monotonic() + 120
     # Exhaust pagination; never silently claim current after a truncated scan.
@@ -83,15 +140,18 @@ def discover(current, channel, cancel):
             raise TimeoutError('Release check timed out')
         releases = json.loads(fetch(f'{API}?per_page=100&page={page}', cancel, 8 * 1024 * 1024))
         for release in releases:
+            if time.monotonic() > deadline:
+                raise TimeoutError('Release check timed out')
             if not eligible(release, channel):
                 continue
             assets = {a['name']: a for a in release.get('assets', []) if a.get('state') == 'uploaded'}
             if not {PACKAGE, PACKAGE + '.sha256', 'release.json'} <= assets.keys():
                 continue
             try:
-                meta = json.loads(fetch(assets['release.json']['browser_download_url'], cancel, 65536))
+                meta = json.loads(fetch(asset_url(assets['release.json']), cancel, 65536))
                 build = identity(meta)
-                if meta['tag'] != release['tag_name'] or build <= identity(current):
+                program_metadata(meta)
+                if meta['tag'] != release['tag_name'] or build <= current_build:
                     continue
             except (ValueError, KeyError):
                 continue
@@ -105,10 +165,10 @@ def discover(current, channel, cancel):
 
 def stage(candidate, directory, cancel, progress):
     _, _, release, assets, meta = candidate
-    checksum = fetch(assets[PACKAGE + '.sha256']['browser_download_url'], cancel, 1024).decode('ascii').split()
+    checksum = fetch(asset_url(assets[PACKAGE + '.sha256']), cancel, 1024).decode('ascii').split()
     if len(checksum) != 2 or checksum[1] != PACKAGE or not re.fullmatch('[0-9a-fA-F]{64}', checksum[0]):
         raise ValueError('Invalid release checksum')
-    archive = fetch(assets[PACKAGE]['browser_download_url'], cancel, 1024 * 1024 * 1024, progress)
+    archive = fetch(asset_url(assets[PACKAGE]), cancel, 1024 * 1024 * 1024, progress)
     digest = hashlib.sha256(archive).hexdigest()
     if digest != checksum[0].lower():
         raise ValueError('Package checksum mismatch')
@@ -156,6 +216,7 @@ def retry(operation):
 
 
 def rollback(root, tx):
+    safe_local_paths(root)
     journal = read_json(tx / 'journal.json')
     if journal is None:
         return
@@ -168,6 +229,7 @@ def rollback(root, tx):
 
 
 def install(root, tx):
+    safe_local_paths(root)
     # Back up everything before the first replacement. Journal survives power loss.
     for name in FILES:
         backup = tx / 'old' / name
@@ -183,12 +245,14 @@ def install(root, tx):
         raise
 
 
-def main():
+def main(request=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--request', type=Path, required=True)
     args = parser.parse_args()
-    request = read_json(args.request)
+    request = request or read_json(args.request)
+    args.request.unlink(missing_ok=True)
     root = Path(request['root']).resolve()
+    safe_local_paths(root)
     tx = root / '.update-transaction'
     # OS releases the lock after crashes; concurrent game instances cannot install.
     lock = (root / '.update.lock').open('a+b')
@@ -257,6 +321,9 @@ def main():
         nonlocal candidate, generation
         generation += 1
         candidate = None
+        notes.configure(state='normal')
+        notes.delete('1.0', 'end')
+        notes.configure(state='disabled')
         cancel.clear()
         settings['channel'] = channel.get()
         settings[channel.get()] = time.time()
@@ -266,7 +333,16 @@ def main():
             pass
         status.set('Checking GitHub…')
         selected = channel.get()
-        work('checked', lambda: discover(read_json(root / 'release.json', {}), selected, cancel))
+        def perform_check():
+            current = read_json(root / 'release.json', {})
+            program_metadata(current)
+            with (root / 'skate3rust.exe').open('rb') as executable:
+                digest = hashlib.file_digest(executable, 'sha256').hexdigest()
+            if (current['revision'] != request['revision'] or str(current['build']) != request['build']
+                    or digest != current['files']['skate3rust.exe']):
+                raise ValueError('This executable does not match its release metadata')
+            return discover(current, selected, cancel)
+        work('checked', perform_check)
 
     def do_update():
         nonlocal automatic
@@ -376,4 +452,16 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # Suppress PyInstaller's generic exception/crash dialog for routine updater
+    # failures, including unwritable portable directories before UI creation.
+    import sys
+    request = read_json(Path(sys.argv[2]), {}) if len(sys.argv) == 3 and sys.argv[1] == '--request' else {}
+    try:
+        main(request)
+    except Exception as error:
+        if request and not request.get('automatic', True):
+            try:
+                import tkinter.messagebox
+                tkinter.messagebox.showerror('Updates unavailable', str(error)[:300] + '\nYou can keep playing. Try again later.')
+            except Exception:
+                pass

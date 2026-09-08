@@ -13,7 +13,7 @@ import updater as u
 
 def metadata(build=2):
     return dict(schema=1, repository=u.REPO, target='windows-x64', build=build,
-                tag=f'v{build}', revision='a' * 40)
+                tag=f'v{build}', revision='a' * 40, files={n: 'b'*64 for n in u.FILES[:-1]})
 
 
 class UpdaterTests(unittest.TestCase):
@@ -101,6 +101,34 @@ class UpdaterTests(unittest.TestCase):
                 self.assertEqual((root/name).read_bytes(), b'old')
             self.assertEqual((root/'player-data').read_bytes(), b'untouched')
             self.assertFalse((tx/'journal.json').exists())
+
+    def test_success_and_interrupted_recovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); tx = root/'.update-transaction'
+            for name in u.FILES:
+                (root/name).parent.mkdir(parents=True, exist_ok=True)
+                (root/name).write_bytes(b'old')
+                (tx/'new'/name).parent.mkdir(parents=True, exist_ok=True)
+                (tx/'new'/name).write_bytes(b'new')
+            u.install(root, tx)
+            self.assertTrue(all((root/n).read_bytes() == b'new' for n in u.FILES))
+            # Simulate interrupted replacement with durable backups/journal.
+            u.atomic(tx/'journal.json', {'protocol': 1})
+            u.rollback(root, tx)
+            self.assertTrue(all((root/n).read_bytes() == b'old' for n in u.FILES))
+            self.assertFalse((tx/'journal.json').exists())
+
+    def test_offline_and_rate_limit(self):
+        with patch.object(u, 'fetch', side_effect=OSError('offline')), self.assertRaises(OSError):
+            u.discover(metadata(1), 'Stable', threading.Event())
+        error = u.urllib.error.HTTPError(u.API, 429, 'rate limit', {}, None)
+        with patch.object(u.urllib.request.OpenerDirector, 'open', side_effect=error), self.assertRaisesRegex(ValueError, 'rate limit'):
+            u.fetch(u.API, threading.Event(), 100)
+
+    def test_redirect_never_forwards_private_token(self):
+        req = u.urllib.request.Request(u.API + '/assets/1', headers={'Authorization': 'Bearer test-only'})
+        redirected = u.DownloadRedirect().redirect_request(req, None, 302, 'Found', {}, 'https://release-assets.githubusercontent.com/file')
+        self.assertIsNone(redirected.get_header('Authorization'))
 
 
 if __name__ == '__main__':

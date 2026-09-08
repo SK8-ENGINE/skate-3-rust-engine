@@ -23,6 +23,7 @@ fn helper_command(recover: bool, automatic: bool) -> Result<(Command, PathBuf, P
     let signal = temp.join("ready");
     let request = temp.join("request.json");
     let data = serde_json::json!({
+        "revision": env!("SKATE_RELEASE_REVISION"), "build": env!("SKATE_RELEASE_BUILD"),
         "root": root, "signal": signal, "automatic": automatic, "recover": recover,
         "cwd": std::env::current_dir().map_err(|e| e.to_string())?,
         "args": std::env::args().skip(1).collect::<Vec<_>>()

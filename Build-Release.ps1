@@ -78,6 +78,7 @@ try {
     Copy-Item -LiteralPath docs/installation.md -Destination "$stage/docs/installation.md"
     Copy-Item -LiteralPath docs/retail-renderer.md -Destination "$stage/docs/retail-renderer.md"
     Copy-Item -LiteralPath docs/crash-reports.md -Destination "$stage/docs/crash-reports.md"
+    Copy-Item -LiteralPath docs/updates.md -Destination "$stage/docs/updates.md"
     New-Item -ItemType Directory -Path "$stage/licenses" -Force | Out-Null
     Copy-Item -LiteralPath tools/vendor/utt/LICENSE -Destination "$stage/licenses/UTT.txt"
     Copy-Item -LiteralPath tools/vendor/university/LICENSE-PROJECT.md -Destination "$stage/licenses/CustomEngineLayer.txt"
