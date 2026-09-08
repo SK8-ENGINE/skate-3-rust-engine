@@ -98,8 +98,8 @@ The copied build and launcher are in ignored `logs/scoring/build`. The launcher
 uses this worktree's HUD cache and the existing owned asset installation and
 starts paused. It checks required paths before running and retains failures on
 screen. The executable SHA256 is
-`cecfff20b647a56253f0aad3e9a37655143121a1ae8c883e7fc3dfc88e6e3de7`.
-The launcher now selects `skate3rust-hud-quality.exe`.
+`6853a0035cb3a8693681e574f1fae5829f2caec694657536b92217c6d8f7c63b`.
+The launcher now selects `skate3rust-hud-score-fix.exe`.
 
 The missing-HUD startup defect is fixed: HUD setup now depends on presentation
 setup, so Bevy applies the deferred camera spawn before the HUD queries it.
@@ -177,6 +177,16 @@ selects mLastClean rather than mLastSketchy; the scoring-flow audit verifies
 Air452 suspension in addition to landing lifetime, expiry and cancellation.
 Both pass, and the static-CRT release build succeeds. The game was not launched;
 pixel appearance and GPU resize behavior still require interactive verification.
+
+The first window-resolution build introduced a render-target invalidation
+regression: Bevy 0.18.1 `Assets::get_mut` queues a Modified event even for a
+read-only inspection. The size check therefore recreated the GPU image each
+frame while the UI material retained its earlier texture binding. The check
+now uses immutable access; a real resize refreshes the compositor material,
+including a following-frame refresh to account for independent image/material
+preparation order. An asset-only regression test checks that an unchanged
+target emits no Modified event and a resize invalidates both image and material.
+The test uses no window, renderer or gameplay systems.
 
 ## Native parity gaps
 

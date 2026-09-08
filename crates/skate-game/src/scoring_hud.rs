@@ -64,6 +64,8 @@ struct Slot {
 #[derive(Resource)]
 struct Hud {
     target: Handle<Image>,
+    composite: Handle<HudComposite>,
+    rebind_after_resize: bool,
     runtime: hud_runtime::Runtime,
     source: serde_json::Value,
     shapes: apt_scene::Shapes,
@@ -157,6 +159,8 @@ fn setup(
         }
         Ok(Hud {
             target: Handle::default(),
+            composite: Handle::default(),
+            rebind_after_resize: false,
             runtime,
             source,
             shapes,
@@ -193,8 +197,9 @@ fn setup(
                 RenderLayers::layer(31),
                 Msaa::Off,
             ));
+            hud.composite = composites.add(HudComposite { image: target });
             commands.spawn((
-                MaterialNode(composites.add(HudComposite { image: target })),
+                MaterialNode(hud.composite.clone()),
                 UiTargetCamera(output),
                 GlobalZIndex(1),
                 Pickable::IGNORE,
@@ -214,23 +219,136 @@ fn setup(
 // Rasterize at output pixel resolution; retain the original 1280x720 APT
 // coordinate space. This avoids a second enlargement of every glyph/glow.
 fn resize_target(
-    hud: Option<Res<Hud>>,
+    hud: Option<ResMut<Hud>>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut images: ResMut<Assets<Image>>,
+    mut composites: ResMut<Assets<HudComposite>>,
 ) {
-    let Some(hud) = hud else {
+    let Some(mut hud) = hud else {
         return;
     };
-    let Some(image) = images.get_mut(&hud.target) else {
-        return;
-    };
+    // Bevy 0.18's UI material preparation has no dependency on GpuImage
+    // preparation. Retry once on the following frame, when the replacement
+    // image is available regardless of preparation order during the resize.
+    if hud.rebind_after_resize {
+        if let Some(material) = composites.get_mut(&hud.composite) {
+            material.image = hud.target.clone();
+        }
+    }
     let size = Extent3d {
         width: window.physical_width().max(1),
         height: window.physical_height().max(1),
         depth_or_array_layers: 1,
     };
-    if image.texture_descriptor.size != size {
-        image.resize(size);
+    hud.rebind_after_resize = resize_image(
+        &mut images,
+        &mut composites,
+        &hud.target,
+        &hud.composite,
+        size,
+    );
+}
+fn resize_image(
+    images: &mut Assets<Image>,
+    composites: &mut Assets<HudComposite>,
+    target: &Handle<Image>,
+    composite: &Handle<HudComposite>,
+    size: Extent3d,
+) -> bool {
+    if images
+        .get(target)
+        .is_some_and(|image| image.texture_descriptor.size != size)
+    {
+        // Assets::get_mut emits Modified even without a write. Doing that
+        // every frame recreates the GPU target behind the compositor's
+        // cached bind group. Only invalidate the image on a real resize.
+        if let Some(image) = images.get_mut(target) {
+            image.resize(size);
+        }
+        // The UI material retains its bind group. A real target resize must
+        // reprepare it so it samples the replacement GPU texture view.
+        if let Some(material) = composites.get_mut(composite) {
+            material.image = target.clone();
+        }
+        return true;
+    }
+    false
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hud_target_changes_only_on_resize_and_refreshes_composite() {
+        // Asset scheduling only: no render plugin, window or gameplay systems.
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<HudComposite>();
+        let target =
+            app.world_mut()
+                .resource_mut::<Assets<Image>>()
+                .add(Image::new_target_texture(
+                    1280,
+                    720,
+                    TextureFormat::Rgba8UnormSrgb,
+                    None,
+                ));
+        let composite = app
+            .world_mut()
+            .resource_mut::<Assets<HudComposite>>()
+            .add(HudComposite {
+                image: target.clone(),
+            });
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<Image>>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<HudComposite>>>()
+            .clear();
+        for (width, height, changed) in
+            [(1280, 720, false), (1920, 1080, true), (1920, 1080, false)]
+        {
+            app.world_mut()
+                .resource_scope(|world, mut images: Mut<Assets<Image>>| {
+                    let mut composites = world.resource_mut::<Assets<HudComposite>>();
+                    resize_image(
+                        &mut images,
+                        &mut composites,
+                        &target,
+                        &composite,
+                        Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                });
+            app.update();
+            let images: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<AssetEvent<Image>>>()
+                .drain()
+                .collect();
+            let materials: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<AssetEvent<HudComposite>>>()
+                .drain()
+                .collect();
+            assert_eq!(
+                images
+                    .iter()
+                    .any(|e| matches!(e, AssetEvent::Modified { id } if *id == target.id())),
+                changed
+            );
+            assert_eq!(
+                materials
+                    .iter()
+                    .any(|e| matches!(e, AssetEvent::Modified { id } if *id == composite.id())),
+                changed
+            );
+        }
     }
 }
 fn reset(
