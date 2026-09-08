@@ -81,3 +81,12 @@ and malformed input). A user-supplied v15 custom map passed the ignored CPU
 material/mesh preparation, publication, custom-light classification and scene
 retirement. Supply `SKATE_TEST_CUSTOM_MAP` and `SKATE_TEST_CUSTOM_ASSETS` to run
 that check on another local custom map; no user map bytes are committed.
+
+A subsequent offboard-query exit was traced to validating the unused fourth
+SIMD lane as a position coordinate. Static swept-line queries now validate
+only XYZ and radius, matching their dot3/Vector3 collision math. The regression
+checks identical hits with infinite/NaN fourth lanes and rejection of invalid
+XYZ/radius. Six contact-toolkit tests pass. The existing
+`embedded_static_rwcm_hits_distinct_actor_query_ids` test fails its metadata
+expectation (`matching_group == -1 && geometry == 0`) before executing the
+changed query path; that unrelated fixture expectation remains unchanged.
