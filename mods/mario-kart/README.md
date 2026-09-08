@@ -21,3 +21,8 @@ Rebuild rider.json with Blender and tools/export_kart_rider.py, passing --enter 
 --reference the stock skater.glb and --output the local
 rider.json path. Character/model assets and exported animation data stay out of Git.
 See docs/vehicle-sdk.md for the animation format and lifecycle details.
+
+Ramp tuning uses a shorter rounded chassis and a lower centre of mass, with mass
+distribution independent of the collider. The shared engine_audio definition enables
+throttle/speed-responsive synthesized engine sound; Engine volume in the mod window
+controls it live (zero mutes). Full authoring guide: docs/mixamo-vehicle-workflow.md.

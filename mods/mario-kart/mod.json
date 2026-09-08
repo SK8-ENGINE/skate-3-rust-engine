@@ -2,7 +2,7 @@
   "id": "community.mario-kart",
   "api": 1,
   "name": "Mario Kart",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Local vehicle SDK example",
   "description": "Rapier kart using your supplied model. F10 spawns nearby, E enters/exits, WASD drives, Space brakes, Shift handbrake, R resets. Slow down before exiting. Fitted entry/exit and steering animations included locally.",
   "entry": "main.lua",
@@ -67,6 +67,15 @@
         "Right stick",
         "Left stick"
       ]
+    },
+    "engine_volume": {
+      "type": "number",
+      "label": "Engine volume",
+      "default": 0.45,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "description": "Engine loudness; zero mutes the motor."
     }
   }
 }

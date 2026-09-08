@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $privateDirectory = Join-Path $PSScriptRoot '.local/vehicle-sdk'
 $buildDirectory = Join-Path $privateDirectory 'build'
 $artifact = Join-Path $buildDirectory 'skate3rust-vehicle-sdk.exe'
-$destination = Join-Path $privateDirectory 'skate3-vehicle-smooth.exe'
+$destination = Join-Path $privateDirectory 'skate3-vehicle-ramp-audio.exe'
 Push-Location $PSScriptRoot
 $previousFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
 try {
@@ -51,6 +51,7 @@ try {
     }
     New-Item -ItemType Directory -Force -Path (Join-Path $privateDirectory 'docs'), (Join-Path $privateDirectory 'sdk') | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/vehicle-sdk.md') -Destination (Join-Path $privateDirectory 'docs/vehicle-sdk.md') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/mixamo-vehicle-workflow.md') -Destination (Join-Path $privateDirectory 'docs/mixamo-vehicle-workflow.md') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'sdk/skate.lua') -Destination (Join-Path $privateDirectory 'sdk/skate.lua') -Force
     $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
     if ($hash -ne (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash) {

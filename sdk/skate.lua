@@ -116,6 +116,7 @@ function sdk.trainer.apply(tuning) end
 ---@field brake? number 0..1
 ---@field handbrake? boolean
 ---@class VehicleTuning
+---@field engine_volume? number 0..1; requires engine_audio.enabled in definition
 ---@field engine_force? number 0..100000 N
 ---@field max_speed? number 1..100 m/s, engine limit
 ---@field brake_impulse? number 0..10000

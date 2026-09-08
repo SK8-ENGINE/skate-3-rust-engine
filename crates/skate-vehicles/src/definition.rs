@@ -8,6 +8,12 @@ pub struct VehicleDefinition {
     pub model_offset: [f32; 3],
     pub model_yaw: f32,
     pub half_extents: [f32; 3],
+    pub center_of_mass: [f32; 3],
+    pub inertia_half_extents: Option<[f32; 3]>,
+    pub collider_offset: [f32; 3],
+    pub collider_rounding: f32,
+    pub chassis_friction: f32,
+    pub engine_audio: EngineAudio,
     pub mass: f32,
     pub engine_force: f32,
     pub brake_impulse: f32,
@@ -23,6 +29,18 @@ pub struct VehicleDefinition {
     pub camera_distance: f32,
     pub camera_height: f32,
     pub animations: Animations,
+}
+/// Built-in synthesized engine; no external recording is required.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EngineAudio {
+    pub enabled: bool,
+    pub volume: f32,
+    pub idle_pitch: f32,
+    pub max_pitch: f32,
+}
+impl Default for EngineAudio {
+    fn default() -> Self { Self { enabled: false, volume: 0.45, idle_pitch: 0.7, max_pitch: 2.8 } }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -56,6 +74,12 @@ impl Default for VehicleDefinition {
             model_offset: [0.; 3],
             model_yaw: 0.,
             half_extents: [0.7, 0.2, 1.1],
+            center_of_mass: [0.; 3],
+            inertia_half_extents: None,
+            collider_offset: [0.; 3],
+            collider_rounding: 0.,
+            chassis_friction: 0.3,
+            engine_audio: EngineAudio::default(),
             mass: 220.,
             engine_force: 1800.,
             brake_impulse: 100.,
@@ -96,6 +120,14 @@ impl VehicleDefinition {
             || !point(&self.model_offset, 100.)
             || !self.model_yaw.is_finite()
             || !self.half_extents.iter().all(|x| range(*x, 0.05, 10.))
+            || !point(&self.center_of_mass, 10.)
+            || self.inertia_half_extents.is_some_and(|v| !v.iter().all(|&x| range(x, 0.05, 10.)))
+            || !point(&self.collider_offset, 10.)
+            || !range(self.collider_rounding, 0., self.half_extents.iter().copied().fold(f32::INFINITY, f32::min) * 0.95)
+            || !range(self.chassis_friction, 0., 2.)
+            || !range(self.engine_audio.volume, 0., 1.)
+            || !range(self.engine_audio.idle_pitch, 0.25, 2.)
+            || !range(self.engine_audio.max_pitch, self.engine_audio.idle_pitch, 5.)
             || !range(self.mass, 10., 10000.)
             || !range(self.engine_force, 0., 100000.)
             || !range(self.brake_impulse, 0., 10000.)
@@ -156,6 +188,7 @@ impl VehicleDefinition {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct VehicleTuning {
+    pub engine_volume: Option<f32>,
     pub engine_force: Option<f32>,
     pub max_speed: Option<f32>,
     pub brake_impulse: Option<f32>,
@@ -165,6 +198,7 @@ pub struct VehicleTuning {
 impl VehicleTuning {
     pub fn apply(&self, definition: &VehicleDefinition) -> Result<VehicleDefinition, String> {
         let mut d = definition.clone();
+        if let Some(v) = self.engine_volume { d.engine_audio.volume = v; }
         if let Some(v) = self.engine_force {
             d.engine_force = v;
         }
@@ -185,6 +219,7 @@ impl VehicleTuning {
     }
     pub fn valid(&self) -> bool {
         [
+            self.engine_volume.map(|x| (x, 0., 1.)),
             self.engine_force.map(|x| (x, 0., 100000.)),
             self.max_speed.map(|x| (x, 1., 100.)),
             self.brake_impulse.map(|x| (x, 0., 10000.)),

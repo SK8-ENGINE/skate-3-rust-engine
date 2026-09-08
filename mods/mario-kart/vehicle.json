@@ -2,9 +2,9 @@
   "version": 1,
   "model": "kart.glb",
   "half_extents": [
-    0.67,
-    0.18,
-    1.05
+    0.5,
+    0.14,
+    0.65
   ],
   "mass": 220,
   "engine_force": 1800,
@@ -83,5 +83,28 @@
     "brake": "drive",
     "steer_left": "steer_left",
     "steer_right": "steer_right"
-  }
+  },
+  "collider_offset": [
+    0,
+    0,
+    0
+  ],
+  "collider_rounding": 0.1,
+  "chassis_friction": 0.05,
+  "engine_audio": {
+    "enabled": true,
+    "volume": 0.45,
+    "idle_pitch": 0.7,
+    "max_pitch": 2.8
+  },
+  "center_of_mass": [
+    0,
+    -0.2,
+    0
+  ],
+  "inertia_half_extents": [
+    0.7,
+    0.2,
+    1.05
+  ]
 }

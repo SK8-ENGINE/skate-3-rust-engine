@@ -75,6 +75,15 @@ impl Simulation {
             return Err("Invalid vehicle spawn pose".into());
         }
         let d = &definition;
+        let r = d.collider_rounding;
+        let shape = if r > 0. {
+            ColliderBuilder::round_cuboid(d.half_extents[0]-r, d.half_extents[1]-r, d.half_extents[2]-r, r)
+        } else {
+            ColliderBuilder::cuboid(d.half_extents[0], d.half_extents[1], d.half_extents[2])
+        };
+        let [x, y, z] = d.inertia_half_extents.unwrap_or(d.half_extents);
+        let inertia = Vector::new(y*y+z*z, x*x+z*z, x*x+y*y) * (d.mass / 3.);
+        let mass_properties = MassProperties::new(Vector::from_array(d.center_of_mass) - Vector::from_array(d.collider_offset), d.mass, inertia);
         let (body, _) = self.world.insert(
             RigidBodyBuilder::dynamic()
                 .translation(Vector::from_array(position))
@@ -82,9 +91,9 @@ impl Simulation {
                 .ccd_enabled(true)
                 .linear_damping(0.08)
                 .angular_damping(0.5),
-            ColliderBuilder::cuboid(d.half_extents[0], d.half_extents[1], d.half_extents[2])
-                .mass(d.mass)
-                .friction(0.3),
+            shape.translation(Vector::from_array(d.collider_offset))
+                .mass_properties(mass_properties)
+                .friction(d.chassis_friction),
         );
         let mut controller = DynamicRayCastVehicleController::new(body);
         controller.index_up_axis = 1;

@@ -1,5 +1,7 @@
 //! Native vehicle host: isolated Rapier world, mod ownership and driver lifecycle.
 mod animations;
+mod audio;
+mod engine_sound;
 mod interpolation;
 use bevy::prelude::*;
 use serde_json::{Value, json};
@@ -77,6 +79,7 @@ impl Vehicles {
     }
 }
 pub(super) fn install(app: &mut App) {
+    audio::install(app);
     app.init_resource::<Vehicles>()
         .add_systems(
             FixedUpdate,
