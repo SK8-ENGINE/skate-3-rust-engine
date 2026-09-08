@@ -324,7 +324,8 @@ fn advance(
     ) {
         physics.failed = true;
         error!(
-            "{message}; tick={}; mapped_input={:?}; force_mode={}; board_axis_y={}; flags={:08x}/{:08x}/{:08x}/{:08x}/{:08x}",
+            "{message}; state={:?}; tick={}; mapped_input={:?}; force_mode={}; board_axis_y={}; flags={:08x}/{:08x}/{:08x}/{:08x}/{:08x}",
+            skater.player_state.current(),
             physics.ticks,
             input.0.actions(),
             skater.skeleton_input.force_mode,

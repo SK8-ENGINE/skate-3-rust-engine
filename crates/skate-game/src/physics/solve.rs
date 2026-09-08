@@ -1,6 +1,7 @@
 //! One physical solve for the board, skater and original animation targets.
 //! The caller publishes forces and drive targets before entering this phase.
 mod assembly_contacts;
+mod diagnostics;
 use super::{GamePhysics, SkaterRuntime, colliders, skeleton_colliders};
 use skate_core::physics::{
     board::BodyId,
@@ -14,6 +15,8 @@ pub(super) fn advance(
     skater: &mut SkaterRuntime,
     truck_targets: [f32; 2],
 ) -> Result<(), String> {
+    let before = diagnostics::snapshot(physics, skater);
+    diagnostics::validate(&before, "before shared solve")?;
     let board_volumes = if skater.offboard.board_policy.volumes_enabled {
         colliders::world_volumes(&physics.board, &physics.settings)
     } else {
@@ -86,6 +89,11 @@ pub(super) fn advance(
             drives: &mut drives.rows,
         },
     );
+    if let Err(error) = diagnostics::validate(
+        &diagnostics::snapshot(physics, skater), "after shared solve",
+    ) {
+        return Err(format!("{error}; input_bodies={before:?}; contacts={contacts:?}; joints={joints:?}; drives={:?}", drives.rows));
+    }
     skater
         .skeleton
         .publish_physical_record(deck_frame(&physics.board));
