@@ -39,6 +39,7 @@ pub(crate) fn build(
 ) -> App {
     let retail_scene = config.map.as_ref().is_some_and(|map| map.materials.iter().any(|m| m.retail_definition.is_some()));
     let mut app = App::new();
+    crate::custom_models::register_source(&mut app);
     app.register_asset_source("mods", bevy::asset::io::AssetSourceBuilder::platform_default(
         &crate::modding::package_root().to_string_lossy(), None));
     app.add_plugins(
@@ -109,5 +110,6 @@ pub(crate) fn build(
         crate::performance::PerformancePlugin,
     ));
     app.add_plugins((crate::session_marker::SessionMarkerPlugin, crate::customiser::CustomiserPlugin, crate::modding::ModdingPlugin));
+    app.add_plugins(crate::custom_models::CustomModelsPlugin);
     app
 }

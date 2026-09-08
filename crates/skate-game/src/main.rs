@@ -22,6 +22,7 @@ mod modding;
 mod customiser;
 mod customiser_parts;
 mod customiser_material;
+mod custom_models;
 mod render_capacity;
 mod retail_render;
 mod presentation;

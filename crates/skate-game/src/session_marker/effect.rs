@@ -1,7 +1,7 @@
 //! Native noise pass, composited before the original HUD.
 use super::noise::Noise;
 use bevy::{
-    asset::{RenderAssetUsages, embedded_asset},
+    asset::{AssetPath, RenderAssetUsages, embedded_asset, embedded_path},
     camera::visibility::RenderLayers,
     image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
@@ -27,7 +27,7 @@ struct Effect {
 }
 impl Material2d for Effect {
     fn fragment_shader() -> ShaderRef {
-        "embedded://skate3rust/session_marker/effect.wgsl".into()
+        AssetPath::from(embedded_path!("effect.wgsl")).with_source("embedded").into()
     }
     fn alpha_mode(&self) -> AlphaMode2d {
         AlphaMode2d::Blend
@@ -38,6 +38,15 @@ struct Runtime {
     noise: Noise,
     material: Handle<Effect>,
     time: f64,
+}
+#[cfg(test)]
+mod shader_path_tests {
+    use super::*;
+    #[test]
+    fn embedded_shader_paths_match_this_binary() {
+        let ShaderRef::Path(path) = Effect::fragment_shader() else { panic!("Expected embedded shader path") };
+        assert_eq!(path, AssetPath::from(embedded_path!("effect.wgsl")).with_source("embedded"));
+    }
 }
 #[derive(Component)]
 struct Screen;
