@@ -240,6 +240,24 @@ pub(super) fn advance(
         events,
     });
     camera_output::advance(physics, skater, &feedback, camera)?;
+    let score = &skater.animation.motion.score_packet;
+    let deck_frame = physics.board.part_transforms()[BodyId::Deck.index()];
+    let position = deck.rates.position;
+    let velocity = deck.rates.linear_velocity;
+    let filtered = skater.player_state.filtered_output;
+    skater.scoring.advance(crate::scoring_runtime::Frame {
+        tick: tick as u32, dt: simulation.time_step,
+        category: filtered.map_or(Default::default(), |f|f.category),
+        state: skater.player_state.current() as u32,
+        descriptor: score.trick.or_else(||score.grab.map(|g|g.0)),
+        grind_id: filtered.map_or(-1, |f|f.grind.scorable_id), flags:score.flags,
+        position:[position.x,position.y,position.z], velocity:[velocity.x,velocity.y,velocity.z],
+        forward:deck_frame.basis.columns[2],
+        switch:skater.animation.packet.riding_switch,fakie:skater.animation.packet.riding_fakie,
+        nollie:skater.animation.packet.weight_forwards,body_flip:skater.player_input.physical.air.flag_441!=0,
+        suspend_air:skater.player_input.physical.air.use_air_reckoning_452!=0,
+        landing:skater.landing_quality,teleported,reverting:skater.player_state.state_flags[70-52],
+    })?;
     super::climbing::approach::advance(physics, skater, controls);
     skater.animation_input.finish_output_publication();
     skater.player_input.player.update_count_1316 =

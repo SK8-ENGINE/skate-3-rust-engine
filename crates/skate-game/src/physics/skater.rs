@@ -27,6 +27,7 @@ use std::path::Path;
 
 #[derive(Resource)]
 pub(crate) struct SkaterRuntime {
+    pub scoring: crate::scoring_runtime::Runtime,
     pub climbing: super::climbing::Runtime,
     /// Completed physical pose in native animation space, read by rendering.
     pub render_pose: Vec<skate_core::animation::output::NativeMatrix>,
@@ -197,6 +198,7 @@ impl SkaterRuntime {
         let respawn = super::respawn::Runtime::load(&data, spawn, animation.checkpoint_stance())?;
         Ok(Self {
             respawn,
+            scoring: crate::scoring_runtime::Runtime::load(&data)?,
             climbing: super::climbing::Runtime::load(asset_root, &animation.evaluator.frames.bone_names)?,
             offboard,
             render_pose: initial_hierarchy,
