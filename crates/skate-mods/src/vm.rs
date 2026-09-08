@@ -13,6 +13,7 @@ use std::{
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    NetworkState { key: String, #[serde(default)] value: Value },
     VehicleTune { key:String, tuning:skate_vehicles::VehicleTuning },
     VehicleSpawn { key:String, definition:String, position:[f32;3], heading:f32 },
     VehicleRemove { key:String }, VehicleEnter { key:String }, VehicleExit { key:String },
@@ -47,9 +48,10 @@ pub enum Command {
     },
 }
 impl Command {
-    fn validate(&self) -> bool {
+    pub fn validate(&self) -> bool {
         let point = |p: &[f32; 3]| p.iter().all(|v| v.is_finite() && v.abs() <= 100_000.);
         match self {
+            Self::NetworkState { key, value } => crate::schema::valid_id(key) && serde_json::to_vec(value).is_ok_and(|v| v.len() <= 512),
             Self::VehicleTune{key,tuning} => crate::schema::valid_id(key) && tuning.valid(),
             Self::VehicleSpawn{key,definition,position,heading} => crate::schema::valid_id(key) && skate_vehicles::package_path(definition) && point(position) && heading.is_finite(),
             Self::VehicleReset{key,position,heading} => crate::schema::valid_id(key) && point(position) && heading.is_finite(),

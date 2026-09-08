@@ -1,4 +1,12 @@
+> Current integrated build: `PLAY-MARIO-KART.bat` / `Build-VehicleSDK.ps1`.
+> Mod replication and car collisions use protocol 5. See [Multiplayer mod SDK](multiplayer-mods.md).
+> Older standalone test-launcher instructions below describe the original networking work.
+
 # Remote-player visual interpolation
+
+
+
+
 
 Use **PLAY-MULTIPLAYER-SMOOTH-2-INSTANCES.bat** for the new build. It starts two connected clients on University from `bin/multiplayer-interpolation-v4`; existing running games and the previous staged build are untouched. The launcher also accepts `-Players 10` and `-TwoControllers`.
 

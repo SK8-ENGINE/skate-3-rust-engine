@@ -10,6 +10,13 @@ pub const PING: u8 = 6;
 pub const PONG: u8 = 7;
 pub const REJECT: u8 = 8;
 pub const GOODBYE: u8 = 9;
+pub const APPLICATION: u8 = 10;
+pub const APPLICATION_ACK: u8 = 11;
+pub const MAX_APP_KEYS: usize = 256;
+pub const MAX_APP_VALUE: usize = 1024;
+#[derive(Clone, Debug)]
+pub struct Application { pub seq: u32, pub value: Vec<u8>, pub received: u64 }
+
 pub const DEFAULT_LINK_BUDGET: f64 = 180_000.;
 pub const DEFAULT_HOST_BUDGET: f64 = 1_000_000.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +71,7 @@ pub struct Actor {
     pub info: Info,
     pub body: Stream,
     pub pose: Stream,
+    pub application: BTreeMap<String, Application>,
 }
 impl Actor {
     fn new(info: Info) -> Self {
@@ -71,6 +79,7 @@ impl Actor {
             info,
             body: Stream::default(),
             pose: Stream::default(),
+            application: BTreeMap::new(),
         }
     }
     pub fn stream(&self, kind: u8) -> &Stream {
@@ -91,6 +100,9 @@ struct Link {
     sent: BTreeMap<(u64, u8), (u64, u32)>,
     keys: BTreeMap<(u64, u8), u64>,
     credits: f64,
+    app_sent: BTreeMap<(u64, String), (u64, u32)>,
+    app_acks: BTreeMap<(u64,String),u32>,
+    app_round: usize,
     last_ack: u64,
     last_ping: u64,
     rtt: u64,
@@ -104,6 +116,7 @@ impl Link {
             sent: BTreeMap::new(),
             keys: BTreeMap::new(),
             credits: 2400.,
+            app_sent: BTreeMap::new(), app_acks: BTreeMap::new(), app_round: 0,
             last_ack: 0,
             last_ping: 0,
             rtt: 0,
@@ -230,6 +243,17 @@ impl Session {
         });
         stream.push(seq, state, now);
     }
+    /// Latest owner-authenticated state. Empty values are persistent tombstones.
+    /// Repeated full records recover loss and initialize late joiners without replaying Lua.
+    pub fn publish_application(&mut self, key: &str, value: Vec<u8>, now: u64) -> bool {
+        if key.is_empty() || key.len() > 128 || value.len() > MAX_APP_VALUE { return false; }
+        let records = &mut self.actors.get_mut(&self.local).unwrap().application;
+        if records.len() >= MAX_APP_KEYS && !records.contains_key(key) { return false; }
+        if records.get(key).is_some_and(|r| r.value == value) { return true; }
+        let seq = records.get(key).map_or(1, |r| r.seq.saturating_add(1));
+        records.insert(key.into(), Application {seq, value, received: now});
+        true
+    }
     pub fn record_send(&mut self, len: usize, success: bool) {
         if success {
             self.stats.tx_bytes += len as u64;
@@ -355,7 +379,33 @@ impl Session {
             .into();
             return;
         }
-        if self.links[&peer].actor != actor && !matches!(kind, BODY | POSE) {
+        if self.links[&peer].actor != actor && !matches!(kind, BODY | POSE | APPLICATION) {
+            return;
+        }
+        if kind == APPLICATION_ACK {
+            let Some(origin)=r.u64() else {return;};
+            let Ok(key)=std::str::from_utf8(r.0) else {return;};
+            if self.actors.get(&origin).and_then(|a|a.application.get(key)).is_some_and(|record|seq<=record.seq) {
+                let link=self.links.get_mut(&peer).unwrap();
+                let ack=link.app_acks.entry((origin,key.into())).or_default();*ack=(*ack).max(seq);link.seen=now;
+            }
+            return;
+        }
+        if kind == APPLICATION {
+            if actor == self.local || (self.is_host() && self.links[&peer].actor != actor) { return; }
+            let Some(a) = self.actors.get_mut(&actor) else { return; };
+            let Some(length) = r.byte() else { return; };
+            let length = length as usize;
+            if length == 0 || length > 128 || r.0.len() < length || r.0.len() - length > MAX_APP_VALUE { return; }
+            let Ok(key) = std::str::from_utf8(&r.0[..length]) else { return; };
+            if a.application.len() >= MAX_APP_KEYS && !a.application.contains_key(key) { return; }
+            if a.application.get(key).is_none_or(|old| seq > old.seq) {
+                a.application.insert(key.into(), Application { seq, value: r.0[length..].to_vec(), received: now });
+            }
+            let latest=a.application.get(key).map_or(seq,|r|r.seq);
+            let mut ack=packed::header(self.session,self.local,APPLICATION_ACK,latest);
+            ack.extend(actor.to_le_bytes());ack.extend(key.as_bytes());self.queue(peer,ack);
+            self.links.get_mut(&peer).unwrap().seen = now;
             return;
         }
         if kind == GOODBYE {
@@ -620,6 +670,31 @@ impl Session {
                     }
                     output.push(Outgoing { peer, data });
                 }
+            }
+        }
+        // Rotate every record, not just actors, so a busy mod cannot starve later keys.
+        let mut app_peers:Vec<_>=self.links.keys().copied().collect();
+        if !app_peers.is_empty() {let offset=self.round%app_peers.len();app_peers.rotate_left(offset);}
+        for peer in app_peers {
+            let link=self.links.get_mut(&peer).unwrap();
+            link.app_sent.retain(|(id, _), _| self.actors.contains_key(id));
+            link.app_acks.retain(|(id,_),_|self.actors.contains_key(id));
+            let records: Vec<_> = self.actors.iter().filter(|(id, _)| **id != link.actor && (self.host.is_none() || **id == self.local))
+                .flat_map(|(&id, a)| a.application.iter().map(move |(key, record)| (id, key, record))).collect();
+            let count = records.len();
+            for offset in 0..count {
+                let index = (link.app_round + offset) % count;
+                let (id, key, record) = records[index];
+                if link.app_acks.get(&(id,key.clone())).is_some_and(|&seq|seq==record.seq) {continue;}
+                let previous = link.app_sent.get(&(id, key.clone()));
+                if previous.is_some_and(|&(at, seq)| now.saturating_sub(at) < if seq == record.seq { 110 + ((self.round as u64 + id) * 17) % 130 } else { 50 }) { continue; }
+                let mut data = packed::header(self.session, id, APPLICATION, record.seq);
+                data.push(key.len() as u8); data.extend(key.as_bytes()); data.extend(&record.value);
+                let bytes = data.len() as f64;
+                if bytes > link.credits || bytes > self.credits { link.app_round = index; break; }
+                link.credits -= bytes; self.credits -= bytes;
+                link.app_sent.insert((id, key.clone()), (now, record.seq));
+                output.push(Outgoing {peer, data});
             }
         }
         self.stats.rtt_ms = self.links.values().map(|l| l.rtt).max().unwrap_or(0);

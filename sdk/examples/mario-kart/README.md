@@ -34,3 +34,10 @@ Hard crashes, strong head/torso hits and sustained inversion now eject the rider
 native bail physics with carried momentum. An occupied-seat capsule protects the torso
 against map geometry. Tune rider_safety in vehicle.json; see docs/vehicle-sdk.md for
 threshold units, vehicle_bailed events and the native/Rapier collision boundary.
+
+## Multiplayer
+
+Use matching enabled ZIPs and the same integrated build on all peers. World objects
+and vehicles synchronize through the SDK; Lua shared rules use `sdk.net`.
+See [Multiplayer mod SDK](../../../docs/multiplayer-mods.md) for ownership, collisions,
+late joins and shared-state examples.

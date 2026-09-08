@@ -9,8 +9,9 @@ Do not invent API calls or assume this is an unrestricted Lua/native-code plugin
 1. `docs/mod-packages.md`: ZIP structure, packaging and installation.
 2. `sdk/skate.lua`: callable functions, argument types and bounds; annotations only.
 3. `docs/lua-modding.md`: manifest, settings, lifecycle, quotas, callbacks and examples.
-4. For vehicles, `docs/vehicle-sdk.md` and `sdk/examples/mario-kart/vehicle.json`.
-5. For rider animations, `docs/mixamo-vehicle-workflow.md`. For character conversion,
+4. `docs/multiplayer-mods.md`: automatic replication, matching packages, ownership and shared state.
+5. For vehicles, `docs/vehicle-sdk.md` and `sdk/examples/mario-kart/vehicle.json`.
+6. For rider animations, `docs/mixamo-vehicle-workflow.md`. For character conversion,
    `docs/mixamo-to-skate.md` and `docs/custom-models.md`.
 
 Paths are relative to the repository root. Authoritative implementations are
@@ -28,6 +29,10 @@ or implement/test a shared host API; do not fake an unsupported call in the mod.
 - Return a callback table from main.lua. Use owner-local stable keys for visuals,
   read settings via sdk.settings, edge-detect held inputs, and clean/reset transient
   state on world_changed. Refresh vehicle controls from on_fixed_update.
+- Decide which player owns each shared rule. Cubes and vehicles replicate automatically;
+  UI/input stay local. Use sdk.net.publish/read for Lua state and retain player IDs as strings.
+  Reuse stable keys; do not broadcast one-frame events or independently award shared scores
+  on every client. Consider host changes, late joins and mod disable cleanup.
 - Keep assets inside the package and use relative forward-slash paths. The entry
   and vehicle filenames need not be the example names, but their references must match.
   The game loads one Lua entry file; do not assume require/dofile or arbitrary file I/O.
@@ -38,7 +43,7 @@ cargo run --locked -p skate-mods --example check_mod -- sdk/examples/your-mod
 python tools/package_mod.py sdk/examples/your-mod mods/your-mod.zip
 ```
 
-- For code/API changes, also run `cargo test --locked -p skate-mods -p skate-vehicles`.
+- For code/API changes, also run `cargo test --locked -p skate-mods -p skate-vehicles -p skate-net`.
   Check the game crate and build with `Build-VehicleSDK.ps1` when the host changed.
   The helper packages the two bundled examples; package a new mod separately.
 - The checker checks structure, limits, schema and Lua syntax without running the mod.

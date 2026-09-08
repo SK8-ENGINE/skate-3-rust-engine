@@ -13,7 +13,7 @@ Includes skating, tricks, grinds, offboard movement, difficulty settings and
 Drop mod ZIPs into top-level `mods/` and use `PLAY-MARIO-KART.bat` for the integrated
 mod build in this checkout. **Point your coding agent at [sdk/AGENTS.md](sdk/AGENTS.md)**
 to make a mod. See [package structure](docs/mod-packages.md), [Lua API](docs/lua-modding.md),
-[vehicle API](docs/vehicle-sdk.md) and [Mixamo workflow](docs/mixamo-vehicle-workflow.md).
+[vehicle API](docs/vehicle-sdk.md), [multiplayer mod SDK](docs/multiplayer-mods.md) and [Mixamo workflow](docs/mixamo-vehicle-workflow.md).
 Editable examples live in `sdk/examples/`; `tools/package_mod.py` validates and packages them.
 
 ## Play

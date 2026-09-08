@@ -1,5 +1,6 @@
 //! Native vehicle host: isolated Rapier world, mod ownership and driver lifecycle.
 mod animations;
+pub(crate) mod network;
 mod audio;
 mod engine_sound;
 mod interpolation;
@@ -20,6 +21,7 @@ struct Instance {
     scene: Handle<Scene>,
     clips: animations::Clips,
     last_control: f32,
+    definition_path: String,
 }
 struct Driver {
     owner: String,
@@ -32,12 +34,15 @@ struct Driver {
 #[derive(Resource, Default)]
 pub(crate) struct Vehicles {
     simulation: Simulation,
+    remote: BTreeMap<u64, network::Target>,
+    skaters: BTreeMap<(u64,usize),skate_vehicles::rapier3d::prelude::RigidBodyHandle>,
     owned: BTreeMap<(String, String), Instance>,
     driver: Option<Driver>,
     pub(super) events: Vec<Value>,
     clock: f32,
     hidden: Vec<(Entity, Visibility)>,
     pub(crate) pose: Option<Vec<Mat4>>,
+    pub(crate) network_pose: Option<skate_net::packed::PoseState>,
     last_visual: Vec<(Entity, Transform)>,
     blend_from: Vec<(Entity, Transform)>,
     visual_phase: String,
@@ -85,7 +90,7 @@ pub(super) fn install(app: &mut App) {
         .add_systems(
             FixedUpdate,
             tick.after(super::fixed)
-                .run_if(crate::graphics_menu::gameplay_active),
+                .run_if(network::simulation_active),
         )
         .add_systems(
             Update,
@@ -203,6 +208,7 @@ pub(super) fn retire(world: &mut World, owner: &str) {
                 v.simulation.remove(i.id);
                 v.previous_motion.remove(&i.id);
                 v.rendered_motion.remove(&i.id);
+                v.remote.remove(&i.id);
                 world.despawn(i.entity);
             }
         }
@@ -225,6 +231,9 @@ pub(super) fn clear(world: &mut World) {
         v.crash_handoff=false;
         v.previous_motion.clear();
         v.rendered_motion.clear();
+        v.remote.clear();
+        v.skaters.clear();
+        v.network_pose=None;
         v.simulation = Simulation::default();
         v.events.clear();
     });
@@ -278,7 +287,7 @@ pub(super) fn command(
                 if v.owned.contains_key(&owned_key) {
                     return Err("Vehicle key already spawned; remove it before respawning".into());
                 }
-                if v.owned.keys().filter(|(o, _)| o == owner).count() >= 8 || v.owned.len() >= 32 {
+                if v.owned.keys().filter(|(o, _)| o == owner).count() >= 8 || v.owned.keys().filter(|(o,_)|o.starts_with('@')==owner.starts_with('@')).count() >= if owner.starts_with('@') {288} else {32} {
                     return Err("Vehicle limit: 8 per mod, 32 total".into());
                 }
                 let bytes = skate_mods::read_bounded(root, &definition, 128 * 1024)?;
@@ -337,6 +346,7 @@ pub(super) fn command(
                         scene,
                         clips,
                         last_control: clock,
+                        definition_path: definition,
                     },
                 );
                 event(&mut v, owner, &key, "vehicle_spawned");
@@ -352,6 +362,7 @@ pub(super) fn command(
                     v.simulation.remove(i.id);
                 v.previous_motion.remove(&i.id);
                 v.rendered_motion.remove(&i.id);
+                v.remote.remove(&i.id);
                     world.despawn(i.entity);
                     event(&mut v, owner, &key, "vehicle_removed");
                 }
@@ -476,6 +487,8 @@ fn tick(world: &mut World) {
     let dt = world.resource::<Time<Fixed>>().delta_secs();
     world.resource_scope(|world, mut v: Mut<Vehicles>| {
         v.clock += dt;
+        network::skater_proxies(world,&mut v);
+        network::advance(&mut v, dt);
         let clock = v.clock;
         let parked: Vec<_> = v
             .owned
@@ -506,10 +519,10 @@ fn tick(world: &mut World) {
         }
         let occupied_id=v.driver.as_ref().and_then(|d|v.owned.get(&(d.owner.clone(),d.key.clone()))).map(|i|i.id);
         let ids:Vec<_>=v.simulation.vehicles.keys().copied().collect();
-        for id in ids {v.simulation.set_occupied(id,Some(id)==occupied_id);}
+        for id in ids { if !v.remote.contains_key(&id) { v.simulation.set_occupied(id,Some(id)==occupied_id); }}
         if !v.owned.is_empty() {
             v.previous_motion = v.simulation.vehicles.keys().filter_map(|&id|
-                interpolation::Motion::capture(&v.simulation, id).map(|m| (id, m))).collect();
+                network::motion(&v, id).map(|m| (id, m))).collect();
             v.simulation.step(dt);
         }
         if let Some(id)=occupied_id {
@@ -583,7 +596,7 @@ pub(crate) fn present(world: &mut World) {
         }
         // Chassis, wheels, rider and camera share one fixed-step render sample.
         v.rendered_motion = v.simulation.vehicles.keys().filter_map(|&id| {
-            let current = interpolation::Motion::capture(&v.simulation, id)?;
+            let current = network::motion(&v, id)?;
             let sample = v.previous_motion.get(&id).map_or_else(|| current.clone(),
                 |previous| previous.sample(&current, alpha));
             Some((id, sample))
@@ -719,6 +732,7 @@ pub(crate) fn present(world: &mut World) {
             crate::animation::blend_vehicle_visual(world,&v.blend_from,t*t*(3.-2.*t));
         } else {v.blend_from.clear();v.crash_handoff=false;}
         v.last_visual=crate::animation::capture_vehicle_visual(world);
+        v.network_pose=if v.driver.is_some() || !v.blend_from.is_empty() {Some(crate::animation::network_visual(world))} else {None};
     });
 }
 

@@ -27,6 +27,7 @@
 ---@field player PlayerSnapshot
 ---@field map MapSnapshot
 ---@field animation AnimationInfo
+---@field network NetworkInfo
 ---@field tick integer
 ---@field keys table<string,boolean>
 ---@field actions number[] 18 values; Lua index 1 corresponds to native action 64.
@@ -167,3 +168,23 @@ function sdk.vehicle.input() end
 ---@field velocity number[] Carried world velocity plus launch lift, m/s
 ---@field angular_velocity number[] World angular velocity, rad/s
 -- Configure rider_safety in the vehicle definition; see docs/vehicle-sdk.md.
+
+---@class NetworkInfo
+---@field active boolean
+---@field local_id string Keep 64-bit player IDs as strings. Offline: "0".
+---@field is_host boolean
+---@field states table<string,table<string,table<string,any>>> Mod ID -> peer ID -> state keys.
+---@field status string Matching/limit diagnostics.
+sdk.net = {}
+---@return NetworkInfo
+function sdk.net.info() end
+---@param key string Stable owner-local key, 1..64 characters.
+---@param value any JSON-compatible value, at most 512 encoded bytes; nil clears.
+function sdk.net.publish(key,value) end
+---@param peer string Player ID from sdk.net.info(), never converted to a number.
+---@param key string
+---@return any Latest value for this mod/peer/key, or nil.
+function sdk.net.read(peer,key) end
+-- State coalesces; this is not an exactly-once event channel.
+-- World cubes and owned vehicles replicate automatically for matching enabled mods.
+-- See docs/multiplayer-mods.md for ownership, collision and late-join behavior.

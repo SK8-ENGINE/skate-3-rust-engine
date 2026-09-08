@@ -1,4 +1,10 @@
+> Current integrated build: `PLAY-MARIO-KART.bat` / `Build-VehicleSDK.ps1`.
+> Mod replication and car collisions use protocol 5. See [Multiplayer mod SDK](multiplayer-mods.md).
+> Older standalone test-launcher instructions below describe the original networking work.
+
 > Current implementation: ten-player transport-neutral host/guest sessions with v2 compression and scheduling. See [multiplayer-test.md](multiplayer-test.md). Earlier planning/baseline notes below are retained for context.
+
+
 
 # Steam P2P multiplayer plan
 

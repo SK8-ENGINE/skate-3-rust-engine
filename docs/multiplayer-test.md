@@ -1,6 +1,14 @@
-> Latest build: **PLAY-MULTIPLAYER-MENU.bat**, staged in `bin/multiplayer-lobbies`. It opens University offline. Esc > Multiplayer provides public Steam hosting, a paginated lobby browser and joining by stable numeric lobby code. **PLAY-MULTIPLAYER-SMOOTH-2-INSTANCES.bat** uses this same build for the automatic two-player local test. Earlier performance results below are historical.
+> Current integrated build: `PLAY-MARIO-KART.bat` / `Build-VehicleSDK.ps1`.
+> Mod replication and car collisions use protocol 5. See [Multiplayer mod SDK](multiplayer-mods.md).
+> Older standalone test-launcher instructions below describe the original networking work.
 
-## Steam lobby test (current build)
+> Historical standalone build: **PLAY-MULTIPLAYER-MENU.bat**, staged in `bin/multiplayer-lobbies`. It opens University offline. Esc > Multiplayer provides public Steam hosting, a paginated lobby browser and joining by stable numeric lobby code. **PLAY-MULTIPLAYER-SMOOTH-2-INSTANCES.bat** uses this same build for the automatic two-player local test. Earlier performance results below are historical.
+
+
+
+
+
+## Original standalone Steam lobby test
 
 Use the menu launcher on each PC with matching assets/build and separate Steam accounts. Choose Host via Steam / Spacewar on one PC. On the other, choose Browse public Steam lobbies, select the matching University row, then Resume. Refresh updates membership counts. You can also type the numeric lobby code and use Join via Steam. Steam is initialized only by Steam multiplayer actions; offline play remains available when Steam is closed. After opening Steam following an error, refresh or retry.
 

@@ -63,3 +63,13 @@ end
 
 function sdk.vehicle.tune(key,tuning) submit{kind="vehicle_tune",key=key,tuning=tuning} end
 function sdk.vehicle.input() return sdk.snapshot.vehicle_input end
+
+-- Owner-scoped latest state: changes replicate, callbacks never execute remotely.
+sdk.net = {}
+function sdk.net.info() return sdk.snapshot.network or {active=false,local_id="0",is_host=true} end
+function sdk.net.publish(key,value) submit{kind="network_state",key=key,value=value} end
+function sdk.net.read(peer,key)
+    local n = sdk.snapshot.network or {}
+    local state = ((n.states or {})[sdk.mod_id] or {})[tostring(peer)] or {}
+    return state[key]
+end

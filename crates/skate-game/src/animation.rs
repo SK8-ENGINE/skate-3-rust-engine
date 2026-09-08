@@ -244,3 +244,19 @@ pub(crate) fn capture_vehicle_visual(world: &mut World) -> Vec<(Entity, Transfor
 pub(crate) fn blend_vehicle_visual(world:&mut World, from:&[(Entity,Transform)], alpha:f32) {
  for &(id,previous) in from {if let Some(mut current)=world.get_mut::<Transform>(id) {*current=crate::presentation::blend(previous,*current,alpha);}}
 }
+
+/// Read the final displayed hierarchy, including vehicle steering and stance blends.
+pub(crate) fn network_visual(world: &mut World) -> skate_net::packed::PoseState {
+ let root=world.query_filtered::<&Transform,With<PlayerRoot>>().iter(world).next().copied().unwrap_or_default();
+ let status=world.resource::<AnimationStatus>();
+ let mut locals=std::collections::BTreeMap::new();
+ for b in &status.bindings {if let Some(t)=world.get::<Transform>(b.entity) {locals.entry(b.bone).or_insert((b.parent_bone,t.to_matrix()));}}
+ fn global(i:usize,locals:&std::collections::BTreeMap<usize,(Option<usize>,Mat4)>,depth:usize)->Mat4 {
+  if depth>128 {return Mat4::IDENTITY;}
+  let Some(&(parent,m))=locals.get(&i) else {return Mat4::IDENTITY;};
+  parent.map_or(m,|p|global(p,locals,depth+1)*m)
+ }
+ let anchors=crate::physics::network::anchors(world.resource::<SkaterRuntime>());
+ let basis=render_basis().inverse();
+ skate_net::packed::PoseState{root:crate::physics::network::pose(root.to_matrix()),bones:anchors.into_iter().map(|i|skate_net::Bone{index:i as u16,pose:crate::physics::network::pose(if locals.contains_key(&i) {global(i,&locals,0)*basis} else {native_matrix(world.resource::<SkaterRuntime>().render_pose[i])})}).collect()}
+}

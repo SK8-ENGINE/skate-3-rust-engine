@@ -192,7 +192,7 @@ Matrices are affine, column-major 4×4 global joint transforms. Every frame must
 
 ## Trust, assets, compatibility and limits
 
-Only install mods from authors you trust. Isolation is an engine fault-containment boundary, **not** an OS sandbox or a promise to safely execute hostile code. There is no raw world/entity access, pointer API, FFI, network API, writable Lua filesystem API, `io`, `os`, `debug`, `package`, `require`, coroutine library, `load`, `dofile`, `loadfile`, `pcall`, `xpcall`, or Lua GC controls. Standard base operations plus table/string/math/UTF8 are available. Removing protected calls prevents catching and endlessly retrying quota errors. Scripts must be UTF-8 source returning a callback table. Errors are reported rather than caught by mods.
+Only install mods from authors you trust. Isolation is an engine fault-containment boundary, **not** an OS sandbox or a promise to safely execute hostile code. There is no raw world/entity access, pointer API, FFI, raw socket/network access, writable Lua filesystem API, `io`, `os`, `debug`, `package`, `require`, coroutine library, `load`, `dofile`, `loadfile`, `pcall`, `xpcall`, or Lua GC controls. Standard base operations plus table/string/math/UTF8 are available. Removing protected calls prevents catching and endlessly retrying quota errors. Scripts must be UTF-8 source returning a callback table. Errors are reported rather than caught by mods.
 
 Each Lua allocator is limited to 8 MiB and each entry evaluation/invocation to approximately 101000 VM instructions (hook every 1000 instructions). A long-running C library operation does not execute VM hooks; parsing, garbage collection, file I/O and host work are not hard wall-clock bounded. Aggregate mod load can still lower frame rate. There is no process isolation, hostile-filesystem race defense, hard timeout for native operations or guarantee against implementation bugs in dependencies. Package paths reject traversal and absolute paths, canonicalize within the root and reject escapes. Symlink entries are rejected during scanning; do not use junctions/links in mods. Do not mutate package trees maliciously while reading them.
 
@@ -205,7 +205,7 @@ parsers. Vehicles support embedded GLB models and synthesized engine audio. Arbi
 scene/texture/font/audio-bank loading is not exposed. Text uses the existing engine font.
 
 
-No camera-controller override, native audio command, customiser-profile mutation, physics force injection, collision-geometry insertion, climbing controller installation, map-selection command, score manipulation, networking, cross-mod messages or persistent Lua save store is exposed in API 1. Existing character customisation, native audio integration and private climbing loaders retain their own lifetimes. Broad engine-internal access is deliberately absent. Useful current extension types include HUDs, timers, route/training challenges, native-reset navigation tools, visual world annotations, grind/bail instrumentation and constrained original body animation replacement.
+No camera-controller override, native audio command, customiser-profile mutation, physics force injection, collision-geometry insertion, climbing controller installation, map-selection command, score manipulation, arbitrary network messaging, cross-mod messages or persistent Lua save store is exposed in API 1. Existing character customisation, native audio integration and private climbing loaders retain their own lifetimes. Broad engine-internal access is deliberately absent. Useful current extension types include HUDs, timers, route/training challenges, native-reset navigation tools, visual world annotations, grind/bail instrumentation and constrained original body animation replacement.
 
 The runtime pins `mlua = 0.12.1`, with `lua54`, `vendored`, `serde`, `send`; Cargo.lock pins transitive build inputs. `send` supports Bevy Resource storage, but host scheduling keeps execution on the main thread. Lua is compiled into the application using the vendored static build; no player-side DLL/Lua install is required. The dependency has no Bevy coupling and compiles against the engine's Bevy 0.18.1/local patches. Release uses Windows MSVC with `-C target-feature=+crt-static` and no default game features. Primary selection references: [mlua source/readme](https://github.com/mlua-rs/mlua), [Lua memory and hook API](https://docs.rs/mlua/0.12.1/mlua/struct.Lua.html). A lockfile entry for the optional LuaJIT source builder does not enable LuaJIT: the selected language feature is Lua 5.4.
 
@@ -243,3 +243,15 @@ are local-only. Both examples are packaged as ZIPs in top-level mods/ for this b
 
 All owner-created visuals are removed on disable, reload or fault. Native skating and
 vehicle physics remain host-controlled; Lua does not receive memory pointers or World.
+
+## Multiplayer
+
+The integrated launcher includes native multiplayer. Matching enabled mod packages
+automatically replicate world cubes and vehicles. Trainer/animation/teleport results
+follow native player replication; UI and input remain local. `sdk.net.info()`,
+`sdk.net.publish(key,value)` and `sdk.net.read(peer,key)` expose bounded, owner-scoped
+latest state for custom Lua rules. This is not an exactly-once event API.
+
+Read [Multiplayer mod SDK](multiplayer-mods.md) before authoring shared scores,
+races or world objects. It specifies exact matching, string player IDs, limits,
+collision authority, cleanup, host changes and supported versus local-only features.

@@ -34,6 +34,7 @@ pub struct Vehicle {
     pub controls: Controls,
     rider: ColliderHandle,
     occupied: bool,
+    pub remote: bool,
     inverted_time: f32,
     pub ejection: Option<Ejection>,
 }
@@ -136,7 +137,7 @@ impl Simulation {
                 body,
                 controller,
                 controls: Controls::default(),
-                rider, occupied: false, inverted_time: 0., ejection: None,
+                rider, remote: false, occupied: false, inverted_time: 0., ejection: None,
             },
         );
         Ok(id)
@@ -157,6 +158,7 @@ impl Simulation {
             let before = self.capture_riders();
             self.world.integration_parameters.dt = h;
             for v in self.vehicles.values_mut() {
+                if v.remote {continue;}
                 let c = v.controls;
                 let speed = v.controller.current_vehicle_speed;
                 let d = &v.definition;

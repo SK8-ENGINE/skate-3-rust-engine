@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $privateDirectory = Join-Path $PSScriptRoot '.local/vehicle-sdk'
 $buildDirectory = Join-Path $privateDirectory 'build'
 $artifact = Join-Path $buildDirectory 'skate3rust-vehicle-sdk.exe'
-$destination = Join-Path $privateDirectory 'skate3-vehicle-bails.exe'
+$destination = Join-Path $privateDirectory 'skate3-multiplayer-mods.exe'
 Push-Location $PSScriptRoot
 $previousFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
 try {
@@ -14,7 +14,7 @@ try {
         # artifact directly, never staging the cache's generic skate3rust.exe.
         # Shared target fingerprints can refer to another worktree's local crates.
         # Refresh only our local source timestamps; never clean the shared cache.
-        foreach ($crate in @('skate-core', 'skate-data', 'skate-mods', 'skate-vehicles')) {
+        foreach ($crate in @('skate-core', 'skate-data', 'skate-mods', 'skate-vehicles', 'skate-net')) {
             (Get-Item -LiteralPath (Join-Path $PSScriptRoot "crates/$crate/src/lib.rs")).LastWriteTime = Get-Date
         }
         & cargo rustc --release --locked --target x86_64-pc-windows-msvc `
@@ -23,9 +23,22 @@ try {
             -o (Join-Path $buildDirectory 'skate3rust.exe')
         if ($LASTEXITCODE -ne 0) { throw 'Lua SDK build failed.' }
     }
+    $relayDirectory = Join-Path $privateDirectory 'steam-relay'
+    New-Item -ItemType Directory -Force -Path $relayDirectory | Out-Null
+    if (-not $StageOnly) {
+        & cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $DependencyTargetDirectory -p skate-steam-relay --bin skate-steam-relay -- -o (Join-Path $relayDirectory 'skate-steam-relay.exe')
+        if ($LASTEXITCODE -ne 0) { throw 'Steam relay build failed.' }
+    }
+    $metadata = (& cargo metadata --format-version 1 --locked) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not locate Steam redistributable.' }
+    $sdk = [regex]::Match($metadata, '"name":"steamworks-sys","version":"0\.13\.0".*?"manifest_path":("(?:[^"\\]|\\.)*")')
+    if (-not $sdk.Success) { throw 'Steamworks SDK package was not found.' }
+    $manifest = ConvertFrom-Json -InputObject $sdk.Groups[1].Value
+    $dll = Join-Path (Split-Path -Parent $manifest) 'lib/steam/redistributable_bin/win64/steam_api64.dll'
+    Copy-Item -LiteralPath $dll -Destination $relayDirectory -Force
     $bytes = [System.IO.File]::ReadAllBytes($artifact)
     $text = [System.Text.Encoding]::ASCII.GetString($bytes)
-    foreach ($required in @('--start-paused', 'Wheel or drag scrollbar', 'Drag // to resize', 'hold_fakie', 'Vehicle key already spawned', 'ZIP must contain mod.json at its root', 'Native trainer controls are already owned by another mod')) {
+    foreach ($required in @('--start-paused', 'Wheel or drag scrollbar', 'Drag // to resize', 'hold_fakie', 'Vehicle key already spawned', 'ZIP must contain mod.json at its root', 'Native trainer controls are already owned by another mod', 'Matching mods synchronized', 'SK8NET05')) {
         if (-not $text.Contains($required)) { throw "Wrong vehicle-sdk artifact: missing $required" }
     }
     Copy-Item -LiteralPath $artifact -Destination $destination -Force
@@ -52,6 +65,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/mod-packages.md') -Destination (Join-Path $privateDirectory 'docs/mod-packages.md') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/lua-modding.md') -Destination (Join-Path $privateDirectory 'docs/lua-modding.md') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'sdk/skate.lua') -Destination (Join-Path $privateDirectory 'sdk/skate.lua') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/multiplayer-mods.md') -Destination (Join-Path $privateDirectory 'docs/multiplayer-mods.md') -Force
     $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
     if ($hash -ne (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash) {
         throw 'Staged executable hash mismatch.'

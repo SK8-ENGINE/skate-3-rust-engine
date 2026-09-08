@@ -7,6 +7,7 @@ struct RemoteSkins {
     actors: BTreeMap<u64, RemoteSkin>,
     rest: Vec<Mat4>,
     parents: Vec<i32>,
+    board: Option<usize>,
 }
 #[derive(Default)]
 struct RemoteSkin {
@@ -58,7 +59,9 @@ impl Plugin for RemoteRenderPlugin {
             .iter()
             .map(|&p| p as i32)
             .collect();
+        let board=skater.animation.evaluator.frames.bone_names.iter().position(|n|n=="SKATEBOARD_ROOT");
         app.insert_resource(RemoteSkins {
+            board,
             reported: 0.,
             actors: BTreeMap::new(),
             rest,
@@ -66,7 +69,7 @@ impl Plugin for RemoteRenderPlugin {
         })
         .add_systems(
             Update,
-            (spawn, bind, present).chain().after(FrameSet::Animation),
+            (spawn, bind, present).chain().after(crate::modding::vehicles::present),
         );
     }
 }
@@ -188,6 +191,7 @@ fn globals(bones: &[skate_net::Bone], skin: &RemoteSkins) -> Vec<Mat4> {
 }
 fn present(
     mut net: ResMut<Multiplayer>,
+    vehicles: Res<crate::modding::vehicles::Vehicles>,
     mut skins: ResMut<RemoteSkins>,
     mut nodes: Query<&mut Transform>,
 ) {
@@ -272,6 +276,11 @@ fn present(
                 }
             }
         }
+        if let Some(root)=skin.root {
+            if let Some(attached)=crate::modding::vehicles::network::attached_root(&vehicles,id) {if let Ok(mut t)=nodes.get_mut(root) {*t=attached;}}
+        }
+        let seated=remote.body.enabled & (1u64<<62)!=0;
+        for &(entity,i,_) in &skin.bindings {if skins.board==Some(i) {if let Ok(mut t)=nodes.get_mut(entity) {t.scale=Vec3::splat(if seated {0.001} else {1.});}}}
         skins.actors.insert(id, skin);
     }
     if now < skins.reported || now - skins.reported >= 1. {

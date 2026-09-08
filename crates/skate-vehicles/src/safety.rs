@@ -22,7 +22,7 @@ impl Simulation {
         self.vehicles.get_mut(&id)?.ejection.take()
     }
     pub(super) fn capture_riders(&self) -> BTreeMap<u64, (Vector, Vector)> {
-        self.vehicles.iter().filter(|(_, v)| v.occupied && v.definition.rider_safety.enabled)
+        self.vehicles.iter().filter(|(_, v)| !v.remote && v.occupied && v.definition.rider_safety.enabled)
             .map(|(&id, v)| {
                 let body=&self.world.bodies[v.body];
                 let point=body.position().transform_point(Vector::from_array(v.definition.seat));

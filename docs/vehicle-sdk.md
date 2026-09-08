@@ -154,13 +154,17 @@ the mod (or wait for automatic rescan) to install new clips. Never edit .cache.
 
 ## Current boundaries
 
-The native skating simulation is suspended while driving, and normal skating
-resumes on exit. Vehicle time pauses with Escape and during replay. Replay entry
-and session-marker controls are blocked while driving. Vehicle motion is not
-recorded in skating replays. Native skater-versus-vehicle impact forces are not
-bridged yet: vehicles collide with the map and one another, but parked vehicles
-are not native skating obstacles. This API does not include weapons, damage,
-network synchronization or a racing ruleset.
+The native skating simulation is suspended while driving and resumes on exit.
+Offline vehicle time pauses with Escape; online physics continues while menus are
+open and unattended controls fall back to braking. Replay entry and session-marker
+controls are blocked while driving. Vehicle motion is not recorded in skating replays.
+
+Vehicles collide with the map, other cars and nearby native player/board proxies.
+Native skating collision queries include car chassis. Matching enabled packages
+replicate vehicles, tuning, wheel/rider poses, occupancy and engine audio. Crash bails
+return to normal native ragdoll networking. See [Multiplayer mod SDK](multiplayer-mods.md)
+for owner simulation, latency limits, hitbox approximations and late joins. Driving
+another player's vehicle, passengers, weapons, damage and race rules are not built in.
 
 Verification uses headless Rapier tests and window-free Lua tests. The game is
 not launched automatically; rendering, entry/exit and handling need manual playtesting.
@@ -205,7 +209,7 @@ Opt in per definition:
 ```
 
 The host synthesizes an original layered exhaust pulse with filtered noise. No downloaded
-sound asset or extra file is required. It plays for the occupied vehicle; parked engines
+sound asset or extra file is required. It plays for occupied local and remote vehicles, with distance attenuation for remote engines; parked engines
 are silent. Pitch follows speed and absolute throttle, including reverse and free revving
 while stopped. Full throttle increases volume; releasing it smoothly drops the engine back
 towards idle. Pitch/volume changes are smoothed, Escape/replay fades it silent, and exiting

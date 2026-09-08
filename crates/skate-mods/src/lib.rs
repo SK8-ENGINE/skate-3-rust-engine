@@ -49,6 +49,7 @@ pub struct Package {
     pending: Option<(u64, Instant)>,
 }
 impl Package {
+    pub fn content_fingerprint(&self) -> u64 { self.fingerprint }
     pub fn running(&self) -> bool {
         self.vm.is_some()
     }
@@ -433,7 +434,7 @@ fn fingerprint(root: &Path) -> Result<u64, String> {
                 if *bytes > 64 * 1024 * 1024 {
                     return Err("Package exceeds 64 MiB".into());
                 }
-                p.hash(h);
+                p.strip_prefix(root).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/").hash(h);
                 std::fs::read(&p).map_err(|e| e.to_string())?.hash(h);
             }
         }

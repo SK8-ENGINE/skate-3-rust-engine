@@ -246,3 +246,29 @@ fn occupied_ramp_driving_does_not_false_bail() {
     }
     assert!(climbed);
 }
+
+#[test]
+fn local_car_collides_with_remote_chassis_and_can_eject() {
+    use skate_vehicles::rapier3d::prelude::*;
+    let mut s=simulation();let local=s.spawn(definition(),[0.,0.7,-4.],0.).unwrap();
+    let remote=s.spawn(definition(),[0.,0.7,0.],0.).unwrap();
+    for _ in 0..120 {s.step(1./120.);}
+    let remote_body=s.vehicles[&remote].body;
+    s.vehicles.get_mut(&remote).unwrap().remote=true;
+    s.world.bodies[remote_body].set_body_type(RigidBodyType::KinematicVelocityBased,true);
+    s.world.bodies[remote_body].set_linvel(Vector::ZERO,true);
+    s.world.bodies[remote_body].set_angvel(Vector::ZERO,true);
+    let before=s.pose(remote).unwrap().0;
+    s.set_occupied(local,true);
+    let body=s.vehicles[&local].body;
+    s.world.bodies[body].set_linvel(Vector::Z*15.,true);
+    let mut contact=false;let mut ejected=false;
+    for _ in 0..120 {
+        s.step(1./120.);
+        contact |= s.world.narrow_phase.contact_pairs().any(|p|p.total_impulse_magnitude()>0.);
+        ejected |= s.take_ejection(local).is_some();
+    }
+    assert!(contact);assert!(ejected,"crash should produce a native bail request");
+    assert!(s.pose(local).unwrap().0[2]<before[2]+1.,"car passed through remote chassis");
+    assert_eq!(s.pose(remote).unwrap().0,before,"remote simulation must not change its owner's pose");
+}

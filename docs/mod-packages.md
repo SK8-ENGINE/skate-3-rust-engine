@@ -132,3 +132,10 @@ outdated copy indefinitely. Cache contents do not become independent installed m
 - [Native Trainer](../sdk/examples/native-trainer/README.md): tuning, HUD, markers, timers.
 - [Vehicle SDK](vehicle-sdk.md): physics, controller input, ramp tuning and engine audio.
 - [Mixamo workflow](mixamo-vehicle-workflow.md): calibrated native-rig animation authoring.
+
+## Multiplayer
+
+Use matching enabled ZIPs and the same integrated build on all peers. World objects
+and vehicles synchronize through the SDK; Lua shared rules use `sdk.net`.
+See [Multiplayer mod SDK](multiplayer-mods.md) for ownership, collisions,
+late joins and shared-state examples.

@@ -1,5 +1,6 @@
 //! Main-thread SDK adapter. Lua never receives World, entity IDs, or asset handles.
 mod menu;
+pub(crate) mod network;
 mod panel;
 pub(crate) mod vehicles;
 use bevy::prelude::*;
@@ -92,6 +93,7 @@ impl Plugin for ModdingPlugin {
         )
         .add_systems(Update, update.after(crate::app::FrameSet::Animation));
         vehicles::install(app);
+        network::install(app);
         menu::install(app);
         panel::install(app);
     }
@@ -115,7 +117,7 @@ fn snapshot(world: &World) -> serde_json::Value {
     let vehicle_pose=world.resource::<vehicles::Vehicles>().player_pose();
     let player_position=vehicle_pose.map(|p|p.0).unwrap_or_else(||s.animated_skeleton.roots.animation_to_world[3][..3].try_into().unwrap());
     json!({"player":{"position":player_position,"velocity": &p.skateboard.vector_80.map(f32::from_bits)[..3],"heading":vehicle_pose.map(|p|p.1).unwrap_or_else(||s.animated_skeleton.roots.animation_to_world[2][0].atan2(s.animated_skeleton.roots.animation_to_world[2][2])),"on_board":p.state.category_12!=500,"state":p.state.state_16,"category":p.state.category_12,"bailing":physics.board_wiping_out,"grind":{"active":grinding,"name":grind_name,"kind":grind_kind,"distance":grind_distance}},
-        "vehicles":vehicles::snapshot(world),"vehicle_input":vehicles::input(world),
+        "network":network::snapshot(world),"vehicles":vehicles::snapshot(world),"vehicle_input":vehicles::input(world),
         "animation":world.resource::<Mods>().animation_info,
         "map":{"name":map.name,"generation":map.generation},"tick":physics.ticks,"keys":keys,"actions":actions,
         "paused":world.resource::<crate::graphics_menu::Menu>().open,"replay":world.resource::<crate::replay::Replay>().active})
@@ -129,6 +131,7 @@ fn maintenance(world: &mut World) {
             .generation;
         if mods.generation != generation {
             vehicles::clear(world);
+            network::clear(world);
             let ids: Vec<_> = mods.owned.keys().cloned().collect();
             for key in ids {
                 retire(world, &mut mods, &key);
@@ -230,6 +233,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
     world.resource_mut::<crate::physics::GamePhysics>().trainer =
         mods.trainer.as_ref().map(|(_, t)| *t).unwrap_or_default();
     for id in &retired {
+        network::retire(world,id);
         vehicles::retire(world, id);
         world
             .resource::<crate::physics::SkaterRuntime>()
@@ -361,7 +365,9 @@ fn apply_one(world: &mut World, mods: &mut Mods, id: &str, command: Command) -> 
             return Err("64 owned objects per mod maximum".into());
         }
     }
+    if !id.starts_with('@') { network::record(world, id, &command)?; }
     match command {
+        Command::NetworkState { .. } => {},
         command @ (Command::VehicleTune{..}|Command::VehicleSpawn{..}|Command::VehicleRemove{..}|Command::VehicleEnter{..}|Command::VehicleExit{..}|Command::VehicleReset{..}|Command::VehicleControl{..}) => {
             vehicles::command(world, &mods.manager.packages[id].root, id, command)?;
         }

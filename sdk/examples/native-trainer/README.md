@@ -51,3 +51,10 @@ Hold fakie stance disables automatic fakie stance switching; normal steering and
 
 Authoring folder: sdk/examples/native-trainer. Package with tools/package_mod.py into
 mods/native-trainer.zip. See sdk/AGENTS.md and docs/mod-packages.md.
+
+## Multiplayer
+
+Use matching enabled ZIPs and the same integrated build on all peers. World objects
+and vehicles synchronize through the SDK; Lua shared rules use `sdk.net`.
+See [Multiplayer mod SDK](../../../docs/multiplayer-mods.md) for ownership, collisions,
+late joins and shared-state examples.

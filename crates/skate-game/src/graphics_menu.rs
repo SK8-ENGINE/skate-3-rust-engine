@@ -624,7 +624,7 @@ fn labels(
             }
         )
     } else {
-        menu.status.clone()
+        if transition.busy() { format!("Loading{}", ".".repeat((time.elapsed_secs()*2.) as usize % 4)) } else {menu.status.clone()}
     };
     for (row, interaction, mut color, mut node) in &mut buttons {
         node.display = if (menu.multiplayer || menu.browser) && row.0 >= 11 { Display::None } else { Display::Flex };

@@ -18,3 +18,10 @@ Development folders are also supported. Do not install duplicate IDs (including 
 folder and its ZIP). Ignore .cache: it is managed by the loader. Settings live outside
 packages. Standalone executables default to a mods folder beside the executable;
 SKATE3_MODS is the explicit override used by this project's launcher.
+
+## Multiplayer
+
+Use matching enabled ZIPs and the same integrated build on all peers. World objects
+and vehicles synchronize through the SDK; Lua shared rules use `sdk.net`.
+See [Multiplayer mod SDK](../docs/multiplayer-mods.md) for ownership, collisions,
+late joins and shared-state examples.

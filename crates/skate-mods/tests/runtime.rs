@@ -440,3 +440,37 @@ fn kart_controller_reset_is_edge_triggered_and_rebindable() {
  assert_eq!(m.commands.iter().filter(|(_,c)|matches!(c,Command::VehicleReset{..})).count(),1);
  assert!(m.packages["community.mario-kart"].running());
 }
+
+#[test]
+fn fingerprints_are_portable_and_include_assets() {
+    let a=Fixture::new("return {}");let b=Fixture::new("return {}");
+    std::fs::write(a.0.join("mods/example/asset.txt"),"same").unwrap();
+    std::fs::write(b.0.join("mods/example/asset.txt"),"same").unwrap();
+    let first=a.manager().packages["example"].content_fingerprint();
+    assert_eq!(first,b.manager().packages["example"].content_fingerprint());
+    std::fs::write(b.0.join("mods/example/asset.txt"),"changed").unwrap();
+    assert_ne!(first,b.manager().packages["example"].content_fingerprint());
+}
+#[test]
+fn shared_state_api_is_owner_scoped_and_transactional() {
+    let f=Fixture::new(r#"return {on_update=function()
+        assert(sdk.net.info().active)
+        assert(sdk.net.read("2","score")==7)
+        sdk.net.publish("score",8)
+    end}"#);
+    let mut m=f.manager();m.snapshot=json!({"network":{"active":true,"states":{"example":{"2":{"score":7}}}}});
+    m.enable("example",true).unwrap();m.dispatch("on_update",json!({"dt":0.1}));
+    assert!(matches!(&m.commands[0].1,Command::NetworkState{key,value} if key=="score" && value==8));
+    let f=Fixture::new(r#"return {on_update=function() sdk.net.publish("a",1); error("abort") end}"#);
+    let mut m=f.manager();m.enable("example",true).unwrap();m.dispatch("on_update",json!({"dt":0.1}));
+    assert!(m.commands.is_empty());
+}
+
+#[test]
+fn network_nil_clears_and_oversized_values_fail() {
+    let f=Fixture::new(r#"return {on_load=function() sdk.net.publish("score",nil) end}"#);
+    let mut m=f.manager();m.enable("example",true).unwrap();
+    assert!(matches!(&m.commands[0].1,Command::NetworkState{value,..} if value.is_null()));
+    let f=Fixture::new(r#"return {on_load=function() sdk.net.publish("score",string.rep("x",513)) end}"#);
+    let mut m=f.manager();m.enable("example",true).unwrap();assert!(m.packages["example"].error.is_some());assert!(m.commands.is_empty());
+}
