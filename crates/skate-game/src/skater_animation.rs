@@ -77,6 +77,20 @@ pub(crate) struct SkaterAnimation {
 }
 
 impl SkaterAnimation {
+    ///Actor82592B68: interface32/82B97388, inverted by interface12's fakie bit.
+    pub fn foot_forward(&self) -> bool {
+        let p = &self.state.publication;
+        (p.natural_stance == p.relative_stance) ^ self.state.fakie()
+    }
+    ///Actor82592C08 ->82B97350 queues the stance applied by82B97308/82B972A8.
+    ///Only orientation/mirror and relative stance change; natural stance survives.
+    pub fn restore_foot_forward(&mut self, forward: bool) {
+        self.state.flags = (self.state.flags & 0x3fff_ffff)
+            | if forward { 0xc000_0000 } else { 0 };
+        let natural = self.state.publication.natural_stance;
+        self.state.publication.relative_stance = if forward { natural } else { 1 - natural };
+        self.motion.animation.skater_animation_flags = Some(self.state.flags);
+    }
     pub fn stance(&self) -> (bool, bool) {
         (self.state.fakie(), self.state.mirrored())
     }

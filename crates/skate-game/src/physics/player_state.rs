@@ -121,7 +121,10 @@ pub(crate) fn enter_after_teleport(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
 ) -> Result<(), String> {
-    transition::set(physics, skater, PhysicalStateId::PhysicsGround)
+    let target = if skater.teleport_state.take_manual_on_board() == Some(false) {
+        PhysicalStateId::BipedGround
+    } else { PhysicalStateId::PhysicsGround };
+    transition::set(physics, skater, target)
 }
 
 /// Custom authored climbing completes at a validated standing surface.
