@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import importlib
 
 # Presentation calibration against the supplied retail HUD captures. These are
 # host compositor adjustments, not recovered APT constants. Keep the original
@@ -17,10 +18,11 @@ PANEL_OPACITY = 0.75
 SHADOW_COVERAGE_GAMMA = 2.2
 
 
-def compile_hud(cache_root: Path, output: Path) -> None:
-    from skate3_ui_extract.scene_graph import AssetCache, SceneFlattener, transform_point
-    from skate3_ui_extract.bitmap_font import measure_bitmap_text
-    from skate3_ui_extract.timeline import playback_frame
+def compile_hud(cache_root: Path, output: Path, toolkit="vendor.skate3_ui") -> None:
+    scene = importlib.import_module(toolkit + ".scene_graph")
+    AssetCache, SceneFlattener, transform_point = scene.AssetCache, scene.SceneFlattener, scene.transform_point
+    measure_bitmap_text = importlib.import_module(toolkit + ".bitmap_font").measure_bitmap_text
+    playback_frame = importlib.import_module(toolkit + ".timeline").playback_frame
     cache = AssetCache(cache_root)
     bundle = "data/fe/source/screens/hud2/hudphonelist"
     labels = json.loads((cache_root / "metadata/languages/english_global.json").read_text())
@@ -148,21 +150,26 @@ def compile_hud(cache_root: Path, output: Path) -> None:
 
 
 
+def prepare(game: Path, output: Path, toolkit="vendor.skate3_ui"):
+    extract_project = importlib.import_module(toolkit + ".project").extract_project
+    cache = output / "source-cache"
+    extract_project(game, cache, include_dynamic=True, prefixes=(
+        "data/fe/source/screens/hud2/hudphonelist", "data/fe/source/controls/button_item2",
+        "data/fe/source/images/buttons/xbox360"), update=True)
+    compile_hud(cache, output, toolkit)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game", type=Path, required=True)
-    parser.add_argument("--ui-toolkit", type=Path, required=True)
+    parser.add_argument("--ui-toolkit", type=Path, help="Optional external toolkit; defaults to the vendored extractor")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.resolve().is_relative_to(args.game.resolve()):
         parser.error("Output must be outside the owned game source")
-    sys.path.insert(0, str(args.ui_toolkit.resolve()))
-    from skate3_ui_extract.project import extract_project
-    cache = args.output / "source-cache"
-    extract_project(args.game, cache, include_dynamic=True, prefixes=(
-        "data/fe/source/screens/hud2/hudphonelist", "data/fe/source/controls/button_item2",
-        "data/fe/source/images/buttons/xbox360"), update=True)
-    compile_hud(cache, args.output)
+    if args.ui_toolkit:
+        sys.path.insert(0, str(args.ui_toolkit.resolve()))
+    prepare(args.game, args.output, "skate3_ui_extract" if args.ui_toolkit else "vendor.skate3_ui")
     print(f"Private original session-marker HUD: {args.output / 'hud.json'}")
 
 

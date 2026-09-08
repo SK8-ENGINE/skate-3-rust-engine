@@ -77,7 +77,7 @@ fn load(
         Ok(h) => h,
         Err(e) => {
             warn!(
-                "Original session-marker HUD unavailable at {}: {e}",
+                "Original session-marker HUD unavailable at {}: {e}. See docs/hud-installation.md",
                 folder.display()
             );
             return;
@@ -123,6 +123,7 @@ fn load(
         error!("Invalid marker HUD geometry");
         return;
     }
+    info!("Original session-marker HUD loaded from {}", folder.display());
     commands
         .spawn((MarkerHudRoot, Transform::default(), Visibility::Hidden))
         .with_children(|parent| {
