@@ -148,6 +148,7 @@ pub struct TrainerTuning {
     pub grip: f32,
     pub turn_power: f32,
     pub manual_drag: f32,
+    pub hold_fakie: bool,
 }
 impl Default for TrainerTuning {
     fn default() -> Self {
@@ -163,6 +164,7 @@ impl Default for TrainerTuning {
             grip: 1.,
             turn_power: 1.,
             manual_drag: 1.,
+            hold_fakie: false,
         }
     }
 }

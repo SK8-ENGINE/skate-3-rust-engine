@@ -177,6 +177,7 @@ pub struct MotionHost {
     pub applying_body_tilt: bool,
     pub crouching_physical: Option<skate_core::animation::crouching::Physical>,
     pub body_tilt_physical: Option<skate_core::animation::body_tilt::Physical>,
+    pub hold_fakie: bool,
     pub fakie_physical: Option<skate_core::animation::riding_fakie::Physical>,
     /// PhysOutAnimation158/157, used directly by IsRidingGoofy82BA5AA8.
     pub physical_stance: Option<(bool, bool)>,
@@ -298,6 +299,7 @@ impl MotionHost {
             applying_body_tilt: false,
             crouching_physical: None,
             body_tilt_physical: None,
+            hold_fakie: false,
             fakie_physical: None,
             physical_stance: None,
             flags: Default::default(),

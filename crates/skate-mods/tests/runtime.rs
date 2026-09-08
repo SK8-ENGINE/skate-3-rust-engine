@@ -383,3 +383,26 @@ fn showcase_reuses_trail_keys_and_updates_hud_settings() {
             .any(|(_, c)| matches!(c,Command::Trainer{tuning} if tuning.grip==2.))
     );
 }
+
+#[test]
+fn showcase_hold_fakie_is_optional_live_and_reversible() {
+    let f = Fixture::new("return {}");
+    let mut m = showcase_manager(&f);
+    let id = "community.native-trainer";
+    assert!(!TrainerTuning::default().hold_fakie);
+    assert_eq!(m.packages[id].settings["hold_fakie"], json!(false));
+    for enabled in [true, false] {
+        m.commands.clear();
+        m.setting(id, "hold_fakie", json!(enabled)).unwrap();
+        let tuning = m.commands.iter().find_map(|(_, command)| match command {
+            Command::Trainer { tuning } => Some(tuning),
+            _ => None,
+        }).expect("setting update must emit native trainer tuning");
+        assert_eq!(tuning.hold_fakie, enabled);
+        assert_eq!(tuning.pop, 1.);
+        assert!(tuning.valid());
+    }
+    m.setting(id, "hold_fakie", json!(true)).unwrap();
+    m.enable(id, false).unwrap();
+    assert!(m.retired.iter().any(|owner| owner == id));
+}

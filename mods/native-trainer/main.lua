@@ -1,5 +1,5 @@
 -- Native Trainer Showcase: original Lua, no game assets.
-local tuning_keys={'pop','grind_pop','push_speed','push_power','braking','steering','wobble','offboard_jump','grip','turn_power','manual_drag'}
+local tuning_keys={'pop','grind_pop','push_speed','push_power','braking','steering','wobble','offboard_jump','grip','turn_power','manual_drag','hold_fakie'}
 local previous, checkpoint, last_position, last_trail = {}, nil, nil, nil
 local trail_index, beacon_index = 0, 0
 local stats = {distance=0,peak=0,bails=0,grinds=0,grind_time=0}

@@ -2,7 +2,7 @@
   "id": "community.native-trainer",
   "api": 1,
   "name": "Native Trainer Showcase",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "Skate Rust Engine",
   "description": "Native tuning, telemetry, checkpoint return, stopwatch, breadcrumbs and beacons in one original Lua mod. Manage options here; default keyboard shortcuts F5 save, F6 return, F7 stopwatch, F8 reset, F9 beacon. Stock tuning is 1x.",
   "entry": "main.lua",
@@ -225,6 +225,12 @@
         "KeyL"
       ],
       "description": "Choose distinct shortcuts. If keys coincide, save, return, timer, reset, beacon run in that order."
+    },
+    "hold_fakie": {
+      "type": "boolean",
+      "label": "Hold fakie stance",
+      "description": "Disables automatic FakieTurn correction. Normal steering, slides and tricks remain available. Turn off to restore stock correction.",
+      "default": false
     }
   }
 }

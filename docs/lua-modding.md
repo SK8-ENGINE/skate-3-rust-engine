@@ -265,3 +265,14 @@ package-relative text loading. No private game assets are shipped.
 Standalone Lua tests exercise save/return command payloads, stopwatch creation,
 world-change cleanup, bounded trail keys and immediate HUD/tuning settings. Actual
 native gameplay effects and visuals remain user-run; no game process was launched.
+
+
+Trainer 2.1 adds `sdk.trainer.apply { hold_fakie = true }` (default false).
+It suppresses the native `FakieTurn` correction input in SetTurning; normal
+steering, slide overrides and trick inputs remain native. Turning the setting
+off, disabling the mod or retiring its owner restores stock behavior.
+
+Enabled-mod windows default to 360 by 760 pixels, bounded by the display.
+Drag the bottom-right `//` grip to resize (minimum 320 by 260); the settings
+viewport grows with the window and keeps mouse-wheel scrolling. Window sizes
+are retained in memory while the game runs, alongside position/collapse state.

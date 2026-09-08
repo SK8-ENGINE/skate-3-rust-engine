@@ -93,7 +93,7 @@ function sdk.animation.info() end
 ---@param path string Package-relative original body-clip JSON, <=4 MiB; host validates supported slots and exact timing.
 function sdk.animation.replace(path) end
 
----@class TrainerTuning All fields default to 1; multipliers of current stock settings.
+---@class TrainerTuning Numeric fields default to 1; multipliers of current stock settings.
 ---@field pop? number 0.25..4, native ground pop heights.
 ---@field grind_pop? number 0.25..4, native grind launch height.
 ---@field push_speed? number 0.25..4, push target and maximum pushable speed.
@@ -104,6 +104,7 @@ function sdk.animation.replace(path) end
 ---@field offboard_jump? number 0.25..4, native biped launch height.
 ---@field grip? number 0.25..4, wheel static/dynamic and sideways slide friction.
 ---@field turn_power? number 0.25..4, native heading turn strength.
+---@field hold_fakie? boolean Defaults false; suppress automatic fakie turn correction.
 ---@field manual_drag? number 0.25..4, manual balance linear drag.
 sdk.trainer = {}
 ---@param tuning TrainerTuning Owned, reversible native tuning. Conflicting owner is rejected.

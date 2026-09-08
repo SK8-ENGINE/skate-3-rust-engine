@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 struct Layout {
     position: Vec2,
+    size: Vec2,
     collapsed: bool,
     selected: usize,
     status: String,
@@ -18,11 +19,12 @@ pub(crate) struct EnabledPanel {
     active: Option<String>,
     layouts: BTreeMap<String, Layout>,
     drag: Option<(String, Vec2)>,
+    resize: Option<(String, Vec2)>,
     signature: Vec<(String, Vec<String>)>,
 }
 impl EnabledPanel {
     pub fn dragging(&self) -> bool {
-        self.drag.is_some()
+        self.drag.is_some() || self.resize.is_some()
     }
 }
 #[derive(Component)]
@@ -33,6 +35,8 @@ struct Body(String);
 struct Viewport(String);
 #[derive(Component)]
 struct Header(String);
+#[derive(Component)]
+struct ResizeGrip(String);
 #[derive(Component)]
 struct Row(String, usize);
 #[derive(Component)]
@@ -113,6 +117,7 @@ fn sync(
     }
     panel.signature = signature.clone();
     panel.drag = None;
+    panel.resize = None;
     if !signature
         .iter()
         .any(|(id, _)| panel.active.as_ref() == Some(id))
@@ -122,6 +127,7 @@ fn sync(
     }
     for (index, (id, settings)) in signature.iter().enumerate() {
         panel.layouts.entry(id.clone()).or_insert_with(|| Layout {
+            size: Vec2::new(360., 760.),
             position: Vec2::new(16. + index as f32 * 22., 64. + index as f32 * 34.),
             ..default()
         });
@@ -133,7 +139,8 @@ fn sync(
                 Node {
                     display: Display::None,
                     position_type: PositionType::Absolute,
-                    width: px(320.),
+                    width: px(360.),
+                    height: px(760.),
                     max_width: percent(95),
                     padding: UiRect::all(px(10.)),
                     row_gap: px(8.),
@@ -199,6 +206,8 @@ fn sync(
                     .spawn((
                         Body(id.clone()),
                         Node {
+                            flex_grow: 1.,
+                            min_height: px(0.),
                             flex_direction: FlexDirection::Column,
                             row_gap: px(6.),
                             ..default()
@@ -209,8 +218,9 @@ fn sync(
                             Viewport(id.clone()),
                             ScrollPosition::default(),
                             Node {
-                                height: px(280.),
-                                max_height: Val::Vh(45.),
+                                flex_grow: 1.,
+                                flex_basis: px(0.),
+                                min_height: px(0.),
                                 overflow: Overflow::scroll_y(),
                                 flex_direction: FlexDirection::Column,
                                 row_gap: px(6.),
@@ -279,6 +289,30 @@ fn sync(
                             },
                             TextColor(Color::srgb(0.65, 0.85, 0.85)),
                         ));
+                        body.spawn((
+                            Button,
+                            ResizeGrip(id.clone()),
+                            Node {
+                                align_self: AlignSelf::FlexEnd,
+                                width: px(28.),
+                                height: px(22.),
+                                flex_shrink: 0.,
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.12, 0.20, 0.26)),
+                        ))
+                        .with_children(|grip| {
+                            grip.spawn((
+                                Text::new("//"),
+                                TextFont {
+                                    font_size: 18.,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
                     });
             });
     }
@@ -293,12 +327,14 @@ fn input(
     mouse: Res<ButtonInput<MouseButton>>,
     nav: Res<crate::customiser::Navigation>,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    grips: Query<(&Interaction, &ResizeGrip), Changed<Interaction>>,
     headers: Query<(&Interaction, &Header), Changed<Interaction>>,
     buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
 ) {
     if !pause.open || menu.open || custom.open {
         panel.focused = false;
         panel.drag = None;
+        panel.resize = None;
         return;
     }
     let ids: Vec<_> = mods
@@ -311,6 +347,7 @@ fn input(
     if ids.is_empty() {
         panel.focused = false;
         panel.drag = None;
+        panel.resize = None;
         return;
     }
     if keys.just_pressed(KeyCode::Tab) || nav.pressed & 0x4000 != 0 {
@@ -331,16 +368,38 @@ fn input(
     }
     if !mouse.pressed(MouseButton::Left) {
         panel.drag = None;
+        panel.resize = None;
     }
     for (interaction, header) in &headers {
         if *interaction == Interaction::Pressed && mouse.pressed(MouseButton::Left) {
             if let (Some(cursor), Some(layout)) =
                 (window.cursor_position(), panel.layouts.get(&header.0))
             {
-                panel.drag = Some((header.0.clone(), cursor - layout.position));
+                panel.drag = Some((header.0.clone(), cursor - fitted_position(layout, &window)));
                 panel.active = Some(header.0.clone());
                 panel.focused = true;
             }
+        }
+    }
+    for (interaction, grip) in &grips {
+        if *interaction == Interaction::Pressed && mouse.pressed(MouseButton::Left) {
+            if let (Some(cursor), Some(layout)) =
+                (window.cursor_position(), panel.layouts.get(&grip.0))
+            {
+                let size = fit_size(layout.size, &window);
+                let position = fitted_position(layout, &window);
+                panel.layouts.get_mut(&grip.0).unwrap().position = position;
+                panel.resize = Some((grip.0.clone(), size - cursor));
+                panel.drag = None;
+                panel.active = Some(grip.0.clone());
+                panel.focused = true;
+            }
+        }
+    }
+    if let (Some((id, offset)), Some(cursor)) = (panel.resize.clone(), window.cursor_position()) {
+        if let Some(layout) = panel.layouts.get_mut(&id) {
+            layout.size = fit_size(cursor + offset, &window)
+                .min(Vec2::new(window.width(), window.height()) - layout.position);
         }
     }
     if let (Some((id, offset)), Some(cursor)) = (panel.drag.clone(), window.cursor_position()) {
@@ -348,8 +407,14 @@ fn input(
             layout.position = (cursor - offset).clamp(
                 Vec2::ZERO,
                 Vec2::new(
-                    (window.width() - 320.).max(0.),
-                    (window.height() - 48.).max(0.),
+                    (window.width() - fit_size(layout.size, &window).x).max(0.),
+                    (window.height()
+                        - if layout.collapsed {
+                            48.
+                        } else {
+                            fit_size(layout.size, &window).y
+                        })
+                    .max(0.),
                 ),
             );
         }
@@ -479,8 +544,21 @@ fn draw(
             } else {
                 Display::None
             };
-            node.left = px(layout.position.x.clamp(0., (window.width() - 320.).max(0.)));
-            node.top = px(layout.position.y.clamp(0., (window.height() - 48.).max(0.)));
+            let size = fit_size(layout.size, &window);
+            node.width = px(size.x);
+            node.height = if layout.collapsed {
+                Val::Auto
+            } else {
+                px(size.y)
+            };
+            node.left = px(layout
+                .position
+                .x
+                .clamp(0., (window.width() - size.x).max(0.)));
+            node.top = px(layout.position.y.clamp(
+                0.,
+                (window.height() - if layout.collapsed { 48. } else { size.y }).max(0.),
+            ));
             z.0 = if panel.active.as_ref() == Some(&root.0) {
                 14
             } else {
@@ -526,7 +604,7 @@ fn draw(
         if let Some(h) = hint {
             if let Some(l) = panel.layouts.get(&h.0) {
                 **t = format!(
-                    "Drag title to move | +/- change values\nScroll wheel: more settings | Tab / X: focus\n{}",
+                    "Drag title to move | Drag // to resize\nScroll wheel: more settings | Tab / X: focus\n{}",
                     l.status
                 );
             }
@@ -583,7 +661,7 @@ fn scroll(
             MouseScrollUnit::Pixel => event.y,
         })
         .sum();
-    if !pause.open || menu.open || custom.open || panel.drag.is_some() {
+    if !pause.open || menu.open || custom.open || panel.dragging() {
         return;
     }
     let hovered = window.physical_cursor_position().and_then(|cursor| {
@@ -628,4 +706,23 @@ fn scroll(
         let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor).max(0.);
         position.0.y = position.0.y.clamp(0., max);
     }
+}
+
+fn fit_size(size: Vec2, window: &Window) -> Vec2 {
+    let maximum = Vec2::new(
+        (window.width() - 16.).max(1.),
+        (window.height() - 32.).max(1.),
+    );
+    size.clamp(Vec2::new(320., 260.).min(maximum), maximum)
+}
+
+fn fitted_position(layout: &Layout, window: &Window) -> Vec2 {
+    let mut size = fit_size(layout.size, window);
+    if layout.collapsed {
+        size.y = 48.;
+    }
+    layout.position.clamp(
+        Vec2::ZERO,
+        (Vec2::new(window.width(), window.height()) - size).max(Vec2::ZERO),
+    )
 }
