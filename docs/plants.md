@@ -191,3 +191,22 @@ The user's folded-body report remains unresolved. HANDPLANT_POSE now records
 COM/orientation, root transform, target versus physical hips/head/hands/toes and
 external hand targets at entry and every six ticks. This distinguishes pose/IK
 errors from physical tracking errors on the next user-provided reproduction.
+
+## Handplant apex correction (8 September, folded-body trace)
+
+The 17:48 run shows the head/hips tracking their targets while feet fall roughly
+0.5m behind at tick486. A later attempt at1353 produces a NaN incoming arc from
+COM[-6.9291053,3.925457,4.9562364]. These are observations; visual recovery still
+requires the user's gameplay validation.
+
+TU3 Launch82D61458 calls cosine82473930, then82D61464 calls sine824531C8.
+Raw byte-permute mask822FBAC0 is00010203000102030001020314151617. Applying it
+to the sine/cosine registers and shifting eight bytes produces[sin,cos,0,0].
+82D61520..C4 therefore multiplies UP by radius*cos and side by radius*sin.
+The port had these components reversed. With stock radius0.8/angle-0.3 and
+copingY3.8850045/Z5.5987973, the corrected apex isY4.649274/Z5.362381;
+the old target wasY3.648588/Z6.363067. This placed the old target below and
+beyond the lip, consistent with the blocked feet and invalid late-entry arc.
+The port now uses the native component order and standalone sin/cos helpers.
+Regression tests cover the observed late-entry COM, apex arrival/zero vertical
+velocity, and zero-angle symmetry. Pose traces remain enabled for verification.

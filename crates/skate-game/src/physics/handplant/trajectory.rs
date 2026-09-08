@@ -17,12 +17,7 @@ impl Handplant {
             side = scale(side, -1.0);
         }
         self.direction = scale(side, -1.0);
-        let (sin, cos) = skate_core::trigonometry::sin_cos(self.settings.apex_angle);
-        let apex = madd(
-            side,
-            self.settings.apex_radius * cos,
-            madd(UP, self.settings.apex_radius * sin, c.point),
-        );
+        let apex = apex_position(c.point, side, self.settings.apex_radius, self.settings.apex_angle);
         self.initial = to_apex(com, apex);
         self.apex = apex_time(self.initial);
         self.warped = 0.0;
@@ -246,9 +241,46 @@ impl Handplant {
         (blended, frame[1], frame[2])
     }
 }
+///82D61458/64 call standalone Cos/Sin. Permute mask822FBAC0 followed
+///by vsldoi8 produces[sin,cos,0,0]: sine goes sideways, cosine goes up.
+fn apex_position(coping: V, side: V, radius: f32, angle: f32) -> V {
+    let sin = skate_core::trigonometry::sin(angle);
+    let cos = skate_core::trigonometry::cos(angle);
+    madd(side, radius * sin, madd(UP, radius * cos, coping))
+}
 fn to_apex(start: V, end: V) -> Trajectory {
     let t = ((-2.0 * GRAVITY[1]) * (end[1] - start[1])).sqrt() * reciprocal(-GRAVITY[1]);
     arc_between(start, end, t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn stock_handplant_apex_is_above_coping_and_back_towards_ramp() {
+        let coping = [-7.0, 3.8850045, 5.5987973, 0.0];
+        let apex = apex_position(coping, [0.0,0.0,1.0,0.0], 0.8, -0.3);
+        assert!((apex[1]-4.649274).abs()<0.00001);
+        assert!((apex[2]-5.362381).abs()<0.00001);
+        //Observed late attempt COM previously exceeded the incorrectly lowered
+        //apex. The original geometry admits a finite ascending trajectory.
+        let start = [-6.9291053,3.925457,4.9562364,0.0];
+        let trajectory = to_apex(start,apex);
+        assert!(trajectory.velocity.iter().all(|v|v.is_finite()));
+        assert!(trajectory.duration>0.0);
+        let end=trajectory.position_at(trajectory.duration);
+        for i in 0..3 { assert!((end[i]-apex[i]).abs()<0.00001); }
+        assert!(trajectory.velocity_at(trajectory.duration)[1].abs()<0.00001);
+    }
+    #[test]
+    fn apex_angle_zero_places_com_directly_above_lip_for_either_edge_direction() {
+        for direction in [-1.0,1.0] {
+            let apex=apex_position([2.0,3.0,4.0,0.0],[direction,0.0,0.0,0.0],0.8,0.0);
+            assert!((apex[1]-3.8).abs()<0.00001);
+            assert!((apex[0]-2.0).abs()<0.00001);
+            assert!((apex[2]-4.0).abs()<0.00001);
+        }
+    }
 }
 fn from_apex(start: V, end: V) -> Trajectory {
     let t = ((-2.0 * GRAVITY[1]) * (start[1] - end[1])).sqrt() * reciprocal(-GRAVITY[1]);
