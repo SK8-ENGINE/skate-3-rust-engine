@@ -15,6 +15,7 @@ mod skater_animation;
 mod verification;
 mod performance;
 mod graphics_menu;
+mod customiser;
 mod render_capacity;
 mod retail_render;
 mod presentation;

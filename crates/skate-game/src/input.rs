@@ -7,7 +7,7 @@ pub(crate) mod gesture_catalog;
 mod gesture_mapping_data;
 pub(crate) mod gesture_mapping;
 pub(crate) mod gesture_input;
-mod platform;
+pub(crate) mod platform;
 pub(crate) use controllers::{ControllerInput, ControllerStatus};
 use skate_core::input::tick::TickInput;
 

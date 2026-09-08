@@ -1,10 +1,43 @@
-# Character customisation: extraction boundary and native blockers
+# Character customisation test build
 
-Status: **not a playable customiser**. The runtime, Escape menu, character
-loader, physics defaults, and renderer are unchanged by this work. No dummy
-controls or replacement models were added. A faithful implementation is
-blocked on the CAC material/compositor contract and the remaining native
-assembly/profile application described below.
+A dedicated local executable and `Play Character Customiser.bat` are now prepared.
+The game was **not launched**: validation here is compilation, synthetic unit tests,
+and offline retail asset assembly. User playtesting is still required.
+
+The Escape/Start menu opens a left-side character menu with the actual animated
+skater framed on the right. Supported male model/material selections are assembled
+on demand through the existing RX2/ABIN-to-GLB pipeline. The current character
+stays visible during conversion or a failed request. Completed replacements reset
+skin bindings before the animation system runs. Save commits the profile;
+Back at the top discards unsaved changes. F5/controller X saves; Escape/controller
+B goes back; arrows/D-pad select and adjust; Enter/controller A chooses.
+
+Working paths in this test include hair, hats, authored skin/facial-hair material
+variants, clothing and accessories, boards, all 19 individual body/face morph
+weights, native truck/wheel ranges, and posture selection. Equipment retains
+its 0.7 defaults. Posture takes effect through the next eligible native motion
+construction when skating resumes. The original character loads unchanged when
+there is no saved custom profile.
+
+**This is not a complete retail CAC implementation.** Gender switching, facial
+presets, tattoos, gestures, stance and style remain explicit informational pages.
+The existing StandardMaterial shading is retained. Native stamp compositing,
+colour-zone controls, unlock filtering, full material parity and all outfit
+compatibility cases are unfinished. Authored asset names are shown where localized
+retail display names have not been resolved. Do not describe this test as full
+retail customiser parity.
+
+`tools/asset_pipeline/customisation_worker.py` provides the JSON worker and menu
+index. A private `worker.json` holds local Python, source and asset-root paths;
+retail data stays outside Git. The private test overlay links the existing stock,
+skies and maps and owns its character cache and settings. It does not overwrite
+an existing game executable or require another installation/conversion.
+
+Validation: 18 synthetic Python tests pass. Offline retail assemblies cover the
+baseline, body/face changes, skin, beard, hair, hat, hoodie, pants, shoes, deck and
+glasses. Packed 11/11/10 signed normal deltas accompany weighted body morphs;
+normalization occurs after accumulating deltas. These checks are not a rendered
+or interactive gameplay test.
 
 ## Implemented, private-data-only tooling
 
@@ -151,16 +184,16 @@ CAC profile initialization must be traced before changing it.
    both genders against authored component skinning/bind matrices. Preserve
    hair-under-hat variants, arm/leg substitutions, socks, layered inner/outer
    tops, removed necklaces/wrist items and multiple material instances. The
-   existing GLB pipeline accepts only the fixed fallback component manifest;
-   extend it after the assembly contract is established.
+   test worker now supports male single-material mesh groups and applies the
+   explicit garment/hair/removal flags, but full native sequence parity remains.
 3. **Complete profile/menu semantics.** Apply parent-row inheritance and
    native face presets, colour zones, available-item/unlock filters, tattoos,
    gestures, stance, style and posture. Keep physical board adjustments
    separate. Use actual saved defaults rather than constructor placeholders.
-4. **Runtime/UI.** Implement the requested hierarchy, left controls and right
-   preview only for working native paths. Add transactional preview/apply/back,
-   coherent persistence, controller navigation and in-process character
-   replacement. No runtime or menu integration is present in this commit.
+4. **Runtime/UI validation.** The test implementation now includes navigation,
+   preview/save/back, persistence and in-process replacement. It still requires
+   user gameplay testing, particularly replacement while paused, reopening saved
+   outfits and controller navigation. No game-based validation was run.
 
 The requested hierarchy is recorded verbatim in `HIERARCHY`. It is a scope
 contract, not a declaration that those pages work. The map-switch task's

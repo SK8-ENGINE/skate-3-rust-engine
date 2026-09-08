@@ -32,8 +32,8 @@ class Glb:
         path.write_bytes(struct.pack('<III',0x46546c67,2,28+len(text)+len(self.data))+
                         struct.pack('<I4s',len(text),b'JSON')+text+struct.pack('<I4s',len(self.data),b'BIN\0')+self.data)
 
-def convert(models,private,recipe):
-    source=AnimSource(private/'stock/data/anim/OnBoard.abin')
+def convert(models,private,recipe,*,stock=None,output=None,materials=None):
+    source=AnimSource((stock or private/'stock')/'data/anim/OnBoard.abin')
     skeleton=SkeletonSet(str(models))
     if skeleton.errors:raise ValueError(str(skeleton.errors))
     mapping=skeleton.index_map(ABIN.BONE_NAMES,source.parents)
@@ -76,11 +76,13 @@ def convert(models,private,recipe):
         raw=raw[0];positions=np.asarray(mesh['pos'],dtype=np.float64)
         morphs=decode_dense_morphs(path,parsed,len(positions),RX2)
         if [m['name'] for m in morphs]!=recipe['morph_assembly']['expected_targets'][slot]:raise ValueError('Unexpected morph set '+slot)
+        normals=np.asarray(raw['normals'],dtype=np.float64)
         for morph in morphs:
             weight=morph_weight(morph['name'],recipe)
-            if weight and morph['nonzero_normal_deltas']:raise ValueError('Unsupported morph normals '+slot)
             positions+=np.asarray(morph['deltas'])*weight
-        normals=np.asarray(raw['normals'],dtype=np.float64);normals/=np.maximum(np.linalg.norm(normals,axis=1,keepdims=True),1e-20)
+            if weight:
+                normals+=np.asarray(morph['normal_deltas'])*weight
+        normals/=np.maximum(np.linalg.norm(normals,axis=1,keepdims=True),1e-20)
         joints=np.zeros((len(positions),4),dtype=np.uint16);weights=np.zeros((len(positions),4),dtype=np.float32)
         if not mesh['skin']:raise ValueError('Missing skin '+slot)
         for i,influences in enumerate(mesh['skin']):
@@ -89,7 +91,7 @@ def convert(models,private,recipe):
             if len(combined)>4 or not combined:raise ValueError('Invalid skin influences '+slot)
             for j,(bone,w) in enumerate(combined.items()):joints[i,j]=joint_index[bone];weights[i,j]=w
         weights/=weights.sum(axis=1,keepdims=True)
-        folder=private/'default_skater/textures/materials'
+        folder=materials or private/'default_skater/textures/materials'
         pbr={'baseColorFactor':[*component['tint'],1.0],
              'baseColorTexture':glb.texture(folder/(slot+'_base_color.png')),
              'metallicFactor':0.65 if slot=='SkateTruck' else 0.0,
@@ -113,7 +115,7 @@ def convert(models,private,recipe):
     root=len(nodes);nodes.append({'name':'Skate3_RX2_Rig','children':root_children+[mesh_node]})
     glb.doc.update(nodes=nodes,meshes=[{'primitives':primitives}],skins=[{'joints':list(range(len(indices))),
                     'inverseBindMatrices':inverse}],scenes=[{'nodes':[root]}],scene=0)
-    glb.save(private/'skater.glb')
+    glb.save(output or private/'skater.glb')
 
 if __name__=='__main__':
     import argparse

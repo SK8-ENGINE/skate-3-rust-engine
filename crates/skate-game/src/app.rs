@@ -101,6 +101,7 @@ pub(crate) fn build(
         crate::grind_world::GrindGeometryPlugin,
         camera::CameraPlugin,
         crate::graphics_menu::GraphicsMenuPlugin,
+        crate::customiser::CustomiserPlugin,
         crate::render_capacity::RenderCapacityPlugin,
         verification::VerificationPlugin,
         crate::performance::PerformancePlugin,

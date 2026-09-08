@@ -2,7 +2,7 @@
 //! converter without Bevy/gilrs deadzones or normalized-axis reconstruction.
 use skate_core::input::xbox::XboxState;
 
-pub(super) struct DevicePacket {
+pub(crate) struct DevicePacket {
     pub number: u32,
     pub state: XboxState,
     pub subtype: u8,
@@ -95,7 +95,7 @@ mod windows {
     }
 }
 
-pub(super) fn poll(index: usize) -> Result<DevicePacket, DeviceError> {
+pub(crate) fn poll(index: usize) -> Result<DevicePacket, DeviceError> {
     assert!(index < 4);
     #[cfg(windows)]
     return windows::poll(index as u32);
