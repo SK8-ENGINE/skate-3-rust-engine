@@ -18,6 +18,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
                 | PhysicalStateId::GroundAnimation
             | PhysicalStateId::SlideGround
+            | PhysicalStateId::RevertGround
             | PhysicalStateId::WipeoutGround
             | PhysicalStateId::Teleporting
             | PhysicalStateId::BipedAir

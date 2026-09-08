@@ -127,7 +127,7 @@ pub fn check_animation(state: &mut Requests, s: &Settings, mode: &Mode, f: &Fram
     }
 }
 
-///82D8FDC0, shared FootPlant/HandPlant postphysics collision checks.
+///82D8FDC0, FootPlant postphysics checks. HandPlant calls check_air(false).
 pub fn check_plant(state: &mut Requests, s: &Settings, f: &Frame) {
     state.mode = 3;
     if f.maximum_pose_error > s.ground.max_squash {

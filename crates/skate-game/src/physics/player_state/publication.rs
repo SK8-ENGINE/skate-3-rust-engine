@@ -19,6 +19,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
                 | PhysicalStateId::GroundAnimation
             | PhysicalStateId::SlideGround
+            | PhysicalStateId::RevertGround
             | PhysicalStateId::WipeoutGround
             | PhysicalStateId::Teleporting
             | PhysicalStateId::BipedAir
@@ -58,6 +59,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     // State63 is set only by LandingOnDeckManager::Fill82D4E0E8..E0F4
     // when byte246 && time240<.02. Ordinary Ground never invokes that Fill,
     // so it retains the template zero here; State65 carries Ground requests.
+    set(66, state == PhysicalStateId::RevertGround && skater.revert_state.active);
     set(65, skater.wipeout.requests_wipeout(p));
     set(78, skater.wipeout.requests_runout(p));
     set(71, player.flags_1296 & (1 << 24) != 0);
@@ -128,6 +130,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     physical.state = CurrentStateFields {
         category_12: state.category(),
         state_16: state as u32,
+        flag_66: u8::from(state == PhysicalStateId::RevertGround && skater.revert_state.active),
         flag_74: u8::from(state==PhysicalStateId::HandPlant && skater.handplant.continuation),
         //ProcessOutput82DB7104..7128: selector57 requests State69 here.
         //The next input/selection enters702; never reset inside selection.

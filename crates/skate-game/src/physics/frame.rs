@@ -112,6 +112,7 @@ pub(super) fn advance(
     }
     player_state::pre_state(physics, skater)?;
     match skater.player_state.current() {
+        skate_core::player::state::PhysicalStateId::RevertGround => super::revert_state::update(physics,skater)?,
         skate_core::player::state::PhysicalStateId::HandPlant => super::handplant::update(physics,skater)?,
         skate_core::player::state::PhysicalStateId::FootPlant => super::footplant::ground::update(physics, skater)?,
         skate_core::player::state::PhysicalStateId::Boneless => super::boneless::update(physics, skater)?,

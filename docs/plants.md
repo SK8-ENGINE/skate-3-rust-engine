@@ -117,7 +117,7 @@ operands take precedence over unreliable decompiler output and community names.
 | Handplant skeleton | State600 vtable `823273CC`; entry/update `82D4C350/82D4C3D8`; reckoning `82D8E1C0`; hand IK `82D633B0`, target clamp `82BD9728/82BD97D0`, upper-body volume suppression `82D91298`. |
 | Shared skeleton | Anchored-foot path `82BDEC48`, COM path `82BDF090`, root positioning `82BDEEB8/82BE0E80`. Uses the existing completed animation, physical skeleton, board and four-limb IK owners. |
 | Graph timing | `IsFootPlanting` `82BBD888`; preparation `82BBD7F0`; FootPlantAbsorb Update `82BBE4E0`; handplant phase/new-position `82BBDA98/82BBDB98`; antic Begin `82BBE5D0`; handplant scoring Update `82BBF758`. |
-| Lifecycle | Footplant release `82D8B970` reads big-endian byte2480 bit0, hence full-word bit24. Common handplant publication `82DB7130..82DB7190`; shared plant wipeout check `82D8FDC0`. Teleport/reset paths clear active plant state. |
+| Lifecycle | Footplant release `82D8B970` reads big-endian byte2480 bit0, hence full-word bit24. Common handplant publication `82DB7130..82DB7190`; FootPlant wipeout check `82D8FDC0`; HandPlant post `82D4C530` calls Air `82D90358(false)`. Teleport/reset paths clear active plant state. |
 
 Settings are loaded from the installation, using the schema's cached layout:
 
@@ -155,3 +155,25 @@ reuse existing engine math; bit-exact Xenon/VMX execution is not claimed.
 Handplant scoring updates the existing internal score packet, whose presentation
 remains outside this change. Stock assets and private research/build files are
 excluded from the commit.
+
+## Handplant bail and delayed revert crash (8 September)
+
+The supplied run entered HandPlant at tick745 and WipeoutGround at746, then
+stopped at tick1318 on the missing PhysicsGround -> RevertGround adapter.
+HandPlant incorrectly used FootPlant collision checks with unconditional trick
+impact limits (stock XZ0.1/Y0.6). It now dispatches the native Air(false) checks,
+including their contact, difficulty, cooldown and actual danger-state gates.
+The original bail reason was not recorded, so the causal gameplay result still
+requires a user retest. PLANT_BAIL now records reason indices and collision/pose
+observations when either plant requests a bail.
+
+RevertGround102 now owns Enter82D43488, Update82D43518, empty Exit, Ground
+Post82D4C070 and Fill82D43B10. It loads the five fields from stock class
+018E8A2E5028AB3F, captures approach velocity after the authored delay, applies
+the directed rotation-speed curve, manual/anti-flip corrections and pumping,
+and publishes active State66 for the existing selector's normal exit.
+No gameplay execution was performed during this repair.
+
+Validation for this repair: six core wipeout tests and two revert numerical
+tests passed. Two pre-existing game test fixtures were updated for their current
+map-menu and render-material API signatures so these tests could compile.
