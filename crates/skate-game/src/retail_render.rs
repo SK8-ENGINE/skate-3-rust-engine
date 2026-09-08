@@ -15,6 +15,9 @@ impl Plugin for RetailRenderPlugin {
     fn build(&self, app: &mut App) {
         shadow::install(app);
         exposure::install(app);
+        if std::env::var_os("SKATE_WEATHERING_COMPARE").is_some_and(|v| v == "1") {
+            app.add_systems(Update, compare_weathering);
+        }
         app.add_plugins(crate::retail_character::CharacterLightingPlugin);
         if std::env::var_os("SKATE_DEBUG_FOLIAGE").is_some_and(|v| v == "1") {
             eprintln!("SKATE_FOLIAGE_DEBUG: solid cyan tree-wall cards, magenta other foliage; alpha rejection disabled for foliage only");
@@ -28,6 +31,34 @@ impl Plugin for RetailRenderPlugin {
             MaterialPlugin::<RetailSkyMaterial>::default(),
         ));
     }
+}
+
+// Diagnostic only: mutate materials once per keypress, never continuously.
+// Separate bits preserve the original texture-presence flags for restoration.
+fn compare_weathering(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut mode: Local<u32>,
+    mut materials: ResMut<Assets<RetailWorldMaterial>>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+) {
+    if !keys.just_pressed(KeyCode::F8) { return; }
+    *mode = (*mode + 1) % 4;
+    let label = match *mode {
+        1 => "Repeating grime OFF; decals ON",
+        2 => "Repeating grime ON; decals OFF",
+        3 => "Repeating grime OFF; decals OFF",
+        _ => "Authored grime and decals ON",
+    };
+    for (_, material) in materials.iter_mut() {
+        let family = material.params.mode.x as u32;
+        if !(1..=8).contains(&family) { continue; }
+        let flags = material.params.mode.y as u32;
+        material.params.mode.y = ((flags & !768) | (*mode << 8)) as f32;
+    }
+    for mut window in &mut windows {
+        window.title = format!("Skate 3 - {label} [F8: next comparison]");
+    }
+    info!("WEATHERING_COMPARE: {label}");
 }
 
 #[path = "retail_exposure.rs"]

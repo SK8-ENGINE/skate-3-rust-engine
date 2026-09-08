@@ -1,5 +1,31 @@
 # Authored props and grime follow-up
 
+## Grime investigation after user retest
+
+The UV-scale correction did not resolve the user's reported visual mismatch.
+The current runtime log confirms the pictured Super Ultra Mega Park area is in
+the University package. The separately named MegaPark district inspected earlier
+contains different stadium geometry; it is not the correct visual test location.
+
+The actual University's MPboards/MPCutStn materials contain both repeating macro
+weathering and separate grime-puddle, long-grunge, water-stain and building-stain
+decals. Binary material channel GUIDs agree with the exported bindings. Fifteen
+sampled ramp/wood meshes in the current private University package match their
+source cache positions, base UVs and independent decal UVs exactly after the
+writer's V flip. This rules out a missing decal UV channel in those samples; it
+does not establish visual parity or prove which layer causes the reported marks.
+
+An opt-in `SKATE_WEATHERING_COMPARE=1` diagnostic enables F8 to cycle authored
+layers, repeating grime off, decals off, and both off. The window title and log
+identify the selected mode. The comparison launcher fixes exposure at 2.5 so
+automatic brightness adaptation cannot counteract each layer change. Normal
+launches retain their original rendering. Material uniforms change only on a
+keypress; the original texture flags remain intact for restoration.
+
+This is an isolation tool, not another claimed grime fix. The remaining
+strength/scale mismatch needs a user-run layer comparison and ideally a matching
+original-game view. No arbitrary opacity or UV scale change was applied.
+
 ## Hair rollback
 
 Removed the hair-specific changes from 96adff5 at the user's request: coverage

@@ -174,8 +174,8 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
         lin = d;
         if fam == 11u { lin *= p.family.w; }
     } else {
-        if (fam == 3u || fam == 4u) && (flags & 8u) != 0u { d = mix(d,art.rgb*art.rgb,art.a); }
-        if (flags & 4u) != 0u && fam < 13u { d *= saturate((overlay_sample-0.5)*p.surface.y+0.5); }
+        if (fam == 3u || fam == 4u) && (flags & 8u) != 0u && (flags & 512u) == 0u { d = mix(d,art.rgb*art.rgb,art.a); }
+        if (flags & 4u) != 0u && fam < 13u && (flags & 256u) == 0u { d *= saturate((overlay_sample-0.5)*p.surface.y+0.5); }
         var kd = 0.93429;
         if (fam <= 6u || fam == 13u) && (flags & 1u) != 0u {
             var dxy = vec2<f32>(0.5);
