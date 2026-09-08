@@ -96,9 +96,13 @@ impl PreparedScene {
         if let Some(map) = map {
             crate::skate_world::spawn(map, &mut self.commands, &mut self.meshes,
                 &mut self.materials, &mut self.retail, &mut self.images, &crate::retail_render::MaterialTuning::load(root));
-            crate::retail_render::spawn_backdrop(&map.name, root, &mut self.commands, &mut self.meshes, &mut self.materials, &mut self.retail, &mut self.images);
-            crate::retail_render::spawn_sky(&map.name, root, &mut self.commands,
-                &mut self.meshes, &mut self.images, &mut self.sky, &mut self.retail);
+            if crate::retail_render::RetailScene::for_map(map) {
+                crate::retail_render::spawn_backdrop(&map.name, root, &mut self.commands, &mut self.meshes, &mut self.materials, &mut self.retail, &mut self.images);
+                crate::retail_render::spawn_sky(&map.name, root, &mut self.commands,
+                    &mut self.meshes, &mut self.images, &mut self.sky, &mut self.retail);
+            } else {
+                custom_lighting(map, &mut self.commands);
+            }
         } else {
             crate::world::spawn_test_world(&mut self.commands, &mut self.meshes, &mut self.materials);
         }
@@ -122,6 +126,41 @@ pub(crate) struct MapAssets {
     sky: Vec<AssetId<RetailSkyMaterial>>,
     images: Vec<AssetId<Image>>,
 }
+
+/// Fixed authored start hour; dynamic refers to real-time surface lighting and
+/// shadows, not a new day/night simulation. All lights are scene-owned.
+fn custom_lighting(map: &skate_data::skate_map::SkateMap, commands: &mut SceneCommands) {
+    let e = &map.environment;
+    let hour = e[10].rem_euclid(24.);
+    let elevation = ((hour - 6.) * std::f32::consts::PI / 12.).sin();
+    let daylight = elevation.max(0.);
+    let azimuth = e[11];
+    let extended = e.len() == 45;
+    let rgb = |i: usize| Color::linear_rgb(e[i].max(0.), e[i + 1].max(0.), e[i + 2].max(0.));
+    let night = elevation < 0.;
+    let color = if extended { rgb(if night { 35 } else { 32 }) } else { Color::WHITE };
+    let strength = if extended { e[if night { 39 } else { 38 }].max(0.) } else { 1. };
+    let ambient = if extended { e[41] + (e[40] - e[41]) * daylight } else { 0.32 };
+    commands.insert_resource(GlobalAmbientLight {
+        color: Color::WHITE, brightness: ambient.max(0.) * 1000., ..default()
+    });
+    let horizontal = (1. - elevation * elevation).max(0.).sqrt();
+    let direction = Vec3::new(azimuth.cos() * horizontal, elevation.abs().max(0.001), azimuth.sin() * horizontal).normalize();
+    commands.spawn((
+        Name::new("Custom map sun/moon"),
+        DirectionalLight {
+            color, illuminance: 10_000. * strength * elevation.abs(),
+            shadows_enabled: true,
+            // Preserve authored indirect/baked diffuse on custom lightmapped meshes.
+            affects_lightmapped_mesh_diffuse: false,
+            ..default()
+        },
+        Transform::default().looking_to(-direction, Vec3::Y),
+        bevy::light::CascadeShadowConfigBuilder {
+            maximum_distance: 100., first_cascade_far_bound: 10., ..default()
+        }.build(),
+    ));
+}
 impl MapAssets {
     pub fn retire(world: &mut World) {
         let entities: Vec<_> = world.query_filtered::<Entity, With<MapEntity>>().iter(world).collect();
@@ -143,6 +182,32 @@ impl MapAssets {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn custom_lighting_switches_without_accumulation_and_keeps_pbr() {
+        let mut world = world();
+        let mut map = skate_data::skate_map::SkateMap::parse(include_bytes!("../../../maps/format-demo.skate")).unwrap();
+        map.name = "university".into(); // Names cannot select retail rendering.
+        map.materials[0].retail_definition = None;
+        map.extensions.clear();
+        for retail in [false, true, false, true] {
+            map.extensions.clear();
+            if retail {
+                // Legacy retail imports can retain provenance without definitions.
+                map.extensions.push(skate_data::skate_map::Extension {
+                    tag: *b"WMET", schema: 1, payload: b"{}".to_vec(),
+                });
+            }
+            assert_eq!(crate::retail_render::RetailScene::for_map(&map), retail);
+            let mut scene = PreparedScene::new(&world);
+            scene.prepare(Some(&map), std::path::Path::new("unused"));
+            scene.publish(&mut world);
+            assert_eq!(world.query::<&DirectionalLight>().iter(&world).count(), usize::from(!retail));
+            assert!(world.resource::<Assets<StandardMaterial>>().iter().all(|(_, m)| !m.unlit));
+            MapAssets::retire(&mut world);
+            assert_eq!(world.query::<&DirectionalLight>().iter(&world).count(), 0);
+        }
+    }
+
     fn world() -> World {
         let mut world = World::new();
         world.init_resource::<Assets<Mesh>>();

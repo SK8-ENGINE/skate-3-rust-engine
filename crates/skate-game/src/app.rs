@@ -37,7 +37,7 @@ pub(crate) fn build(
     physics: GamePhysics,
     skater: SkaterRuntime,
 ) -> App {
-    let retail_scene = config.map.as_ref().is_some_and(|map| map.materials.iter().any(|m| m.retail_definition.is_some()));
+    let retail_scene = config.map.as_ref().is_some_and(|map| crate::retail_render::RetailScene::for_map(map));
     let mut app = App::new();
     crate::custom_models::register_source(&mut app);
     app.add_plugins(

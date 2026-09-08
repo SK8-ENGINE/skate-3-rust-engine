@@ -110,7 +110,7 @@ fn start(world: &World, entry: Entry) -> Result<Phase, String> {
         if let Some(map) = &map { crate::skate_world::validate_runtime(map)?; }
         let validation_time = validation_started.elapsed();
         let metadata = CurrentMap::from_package(selected.path, map.as_ref());
-        let retail = map.as_ref().is_some_and(|m| m.materials.iter().any(|m| m.retail_definition.is_some()));
+        let retail = map.as_ref().is_some_and(|m| crate::retail_render::RetailScene::for_map(m));
         // Both builders only read the decoded package. Reserve render handles
         // on a second worker while the first constructs fresh simulation state;
         // neither publishes to the live world until both have succeeded.
