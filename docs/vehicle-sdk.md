@@ -179,7 +179,7 @@ and camera share the same interpolated fixed-step motion sample, avoiding relati
 jitter from separate camera damping. Resets discard the old motion sample.
 The board root is scaled away during vehicle playback and restored by the vanilla blend.
 The local Mario Kart package supplies fitted entry/exit, seated and steering clips;
-its proprietary rider.json is generated locally and is not included in source control.
+its fitted rider.json is included in source control with the prepared kart model.
 
 ## Ramp clearance and mass distribution
 These are shared definition fields, available to any mod, not Mario-specific code:

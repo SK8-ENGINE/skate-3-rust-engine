@@ -1,5 +1,9 @@
 # Mods
 
+Native Trainer and Mario Kart are included here as committed, ready-to-install ZIPs.
+Mario Kart includes the prepared model and fitted rider animations. Both remain
+disabled by default for new users; enable them through Escape > Mods.
+
 Drop community `.zip` packages here. PLAY-MARIO-KART.bat loads this project-root folder;
 Escape → Mods lets you enable, disable, reload and configure them. Open mods folder
 returns here. ZIPs must have mod.json at their root; the game extracts them automatically.

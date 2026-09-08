@@ -51,7 +51,9 @@ python tools/package_mod.py sdk/examples/your-mod mods/your-mod.zip
   Run appropriate headless tests. Do not launch the game automatically in this workspace;
   provide `PLAY-MARIO-KART.bat` for the user to test and state what remains unverified.
 - Report the ZIP path, controls/settings, validation results and relevant limitations.
-  Keep proprietary assets and resulting ZIPs out of Git; commit original source/docs.
+  The Native Trainer and Mario Kart ZIPs are intentionally committed, as are the
+  prepared kart.glb and rider.json source assets. Keep those ZIPs in sync with their
+  editable examples. Other imported assets/raw authoring files remain ignored.
 
 ## Available building blocks
 
@@ -70,5 +72,6 @@ python tools/package_mod.py sdk/examples/your-mod mods/your-mod.zip
 
 No native DLL/EXE loading, arbitrary network/filesystem access, external Lua imports,
 inter-mod dependencies, custom audio recordings or arbitrary rig playback are exposed.
-Vehicle replay recording, native skater/vehicle impact-force bridging and multiplayer
-are not implemented. Assets can be bundled but only documented asset types have loaders.
+Vehicle replay recording is not implemented. Multiplayer and car/player collision
+bridging are available; see docs/multiplayer-mods.md for ownership and approximation
+limits. Assets can be bundled but only documented asset types have loaders.

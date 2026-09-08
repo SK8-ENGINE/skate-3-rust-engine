@@ -7,11 +7,11 @@ Controller: RT/LT accelerate/reverse, left stick steers, A brakes, B handbrakes.
 The enabled mod shows keyboard and controller controls on screen, including the current reset bind. Toggle Show driving HUD in its settings to hide/show them, even before spawning.
 
 The GLB is prepared from your supplied ZIP with tools/prepare_mario_kart.py and is
-kept out of Git. To rebuild it: python tools/prepare_mario_kart.py PATH_TO_ZIP sdk/examples/mario-kart
-The script requires NumPy. No third-party model is downloaded or bundled in source commits.
+committed with the mod. To rebuild it: python tools/prepare_mario_kart.py PATH_TO_ZIP sdk/examples/mario-kart
+The script requires NumPy. The prepared kart.glb and fitted rider.json are included in source control and in mods/mario-kart.zip.
 
 Edit vehicle.json for dimensions, wheels, suspension, seat, exit and camera offsets.
-The local rider.json contains fitted entry, exit, seated and left/right steering poses.
+The bundled rider.json contains fitted entry, exit, seated and left/right steering poses.
 The host blends steering with stick input and eases between vanilla and vehicle poses
 using the native local-transform interpolation routine. The skateboard is hidden while
 seated and restored during the exit hand-off. Camera changes are eased too.
@@ -19,7 +19,7 @@ seated and restored during the exit hand-off. Camera changes are eased too.
 Rebuild rider.json with Blender and tools/export_kart_rider.py, passing --enter and
 --exit fitted .blend previews, --bone-names a JSON list from the stock bank hierarchy,
 --reference the stock skater.glb and --output the local
-rider.json path. Character/model assets and exported animation data stay out of Git.
+rider.json path. Raw FBX files, Blender projects and the stock character mesh remain local; only the prepared kart model and fitted rider clips are bundled.
 See docs/vehicle-sdk.md for the animation format and lifecycle details.
 
 Ramp tuning uses a shorter rounded chassis and a lower centre of mass, with mass

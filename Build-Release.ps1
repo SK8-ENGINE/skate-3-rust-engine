@@ -19,6 +19,8 @@ try {
     $stage = Join-Path $PSScriptRoot "target/release-packages/$stamp/skate3rust-windows-x64"
     New-Item -ItemType Directory -Path "$stage/support" -Force | Out-Null
     Copy-Item -LiteralPath target/x86_64-pc-windows-msvc/release/skate3rust.exe -Destination "$stage/skate3rust.exe"
+    New-Item -ItemType Directory -Path "$stage/mods" -Force | Out-Null
+    Copy-Item -LiteralPath mods/native-trainer.zip,mods/mario-kart.zip,mods/README.md -Destination "$stage/mods"
     $sourceStage = Join-Path $stage '../setup-source'
     $toolsRoot = Join-Path $PSScriptRoot 'tools'
     foreach ($source in Get-ChildItem -LiteralPath $toolsRoot -File -Recurse) {

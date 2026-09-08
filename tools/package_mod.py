@@ -32,7 +32,12 @@ def main():
                 if path.is_symlink():
                     raise ValueError(f'Symlinks are not allowed: {path}')
                 if path.is_file():
-                    archive.write(path, path.relative_to(source).as_posix())
+                    # Stable metadata keeps committed packages unchanged on a clean rebuild.
+                    entry = zipfile.ZipInfo(path.relative_to(source).as_posix(), (1980, 1, 1, 0, 0, 0))
+                    entry.create_system = 3
+                    entry.external_attr = 0o100644 << 16
+                    entry.compress_type = zipfile.ZIP_DEFLATED
+                    archive.writestr(entry, path.read_bytes(), compresslevel=6)
         subprocess.run(command + ['--', temporary], cwd=ROOT, check=True)
         os.replace(temporary, output)
         print(f'Ready: {output} ({output.stat().st_size:,} bytes)')

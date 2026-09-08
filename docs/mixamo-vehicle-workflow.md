@@ -124,6 +124,6 @@ stances, steering in both directions, ramps, braking, reset, Escape, and mod dis
 Also try characters with different proportions; native-rig compatibility does not
 promise exact contact for every body size. Gameplay is never launched by these tools.
 
-Source code and authoring scripts are reusable. Proprietary FBX, GLB, .blend and exported
-rider data remain local and ignored by Git. Distribute only assets you have permission
-to redistribute; the SDK source itself does not include the stock mesh or these clips.
+Source code and authoring scripts are reusable. The supplied Mario Kart model and
+fitted rider.json are committed as the bundled example, including mods/mario-kart.zip.
+Raw FBX/Blender authoring files and the stock skater mesh remain local and ignored.

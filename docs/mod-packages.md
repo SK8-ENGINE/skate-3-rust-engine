@@ -103,8 +103,9 @@ The checker does not execute Lua callbacks. Passing it is not a gameplay test.
 `Build-VehicleSDK.ps1` builds the host, packages both example sources and stages a
 standalone copy with docs. Older mod folders in its private staging directory are
 preserved under hidden .legacy-* names to avoid duplicate IDs. It does not delete
-personal mod edits. Example-specific model/rider files must exist locally to package
-an asset-complete Mario Kart; source checkout alone does not contain those assets.
+personal mod edits. Both installable example ZIPs are committed, along with the
+Mario Kart model/rider source assets, so a fresh checkout can use or rebuild both mods.
+ZIP metadata is deterministic; an unchanged source folder produces identical package bytes.
 
 ## Limits and extraction rules
 

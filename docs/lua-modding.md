@@ -238,8 +238,8 @@ These are parameter multipliers, not guarantees of measured speed or height.
 breadcrumbs, beacons and configurable shortcuts. Defaults: F5 save checkpoint, F6 return,
 F7 stopwatch, F8 clear transient data, F9 beacon. Its text data stays in the package.
 `sdk/examples/mario-kart` demonstrates vehicles, controller binds, driving HUD, fitted
-rider animations, steering, ramp collision tuning and engine audio. Proprietary assets
-are local-only. Both examples are packaged as ZIPs in top-level mods/ for this build.
+rider animations, steering, ramp collision tuning and engine audio. Both complete
+example ZIPs are committed in top-level mods/, including the prepared kart model and rider clips.
 
 All owner-created visuals are removed on disable, reload or fault. Native skating and
 vehicle physics remain host-controlled; Lua does not receive memory pointers or World.
