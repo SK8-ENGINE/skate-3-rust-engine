@@ -16,6 +16,7 @@ mod assets;
 mod camera;
 mod config;
 mod setup;
+mod updater;
 mod map_library;
 mod map_render;
 mod map_transition;
@@ -42,6 +43,11 @@ mod grind_world;
 mod skate_world;
 
 fn main() -> bevy::app::AppExit {
+    match updater::recover() {
+        Ok(true) => return bevy::app::AppExit::Success,
+        Err(error) => { eprintln!("{error}"); return bevy::app::AppExit::Success; },
+        Ok(false) => {}
+    }
     if let Some(code) = crash_report::entry() { std::process::exit(code); }
     eprintln!("REPORT_META stage=configuration_and_installation");
     let config = match config::Config::from_env() {

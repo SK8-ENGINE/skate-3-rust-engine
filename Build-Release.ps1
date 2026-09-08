@@ -56,6 +56,22 @@ try {
         --add-data "$sourceStage/tools;tools" --add-data "$PSScriptRoot/docs/images/skating-crab.ico;docs/images" `
         --distpath "$stage/support" --workpath target/setup-build/work --specpath target/setup-build tools/setup.py
     if ($LASTEXITCODE -ne 0) { throw 'Setup packaging failed' }
+    & $packagePython -m PyInstaller --noconfirm --clean --onefile --windowed --name skate3update `
+        --distpath "$stage/support" --workpath target/updater-build/work --specpath target/updater-build tools/updater.py
+    if ($LASTEXITCODE -ne 0) { throw 'Updater packaging failed' }
+    # GitHub run number is monotonic across releases, including prereleases. Re-runs
+    # deliberately retain identity; publish a new run/tag for a new eligible build.
+    $build = if ($env:GITHUB_RUN_NUMBER) { [long]$env:GITHUB_RUN_NUMBER } else { 0 }
+    $tag = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { 'development' }
+    $files = @{}
+    foreach ($name in @('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe')) {
+        $files[$name] = (Get-FileHash -LiteralPath (Join-Path $stage $name) -Algorithm SHA256).Hash.ToLower()
+    }
+    @{
+        schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
+        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
+    Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $PSScriptRoot 'target/release.json')
     Copy-Item -LiteralPath README.md,THIRD_PARTY_NOTICES.md -Destination $stage
     New-Item -ItemType Directory -Path "$stage/docs/images" -Force | Out-Null
     Copy-Item -LiteralPath docs/images/skating-crab.png -Destination "$stage/docs/images/skating-crab.png"

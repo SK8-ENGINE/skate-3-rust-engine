@@ -1,0 +1,379 @@
+"""Release updater protocol 1. No game assets, shell commands or archive extractall."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import queue
+import re
+import shutil
+import subprocess
+import tempfile
+import threading
+import time
+import urllib.request
+import zipfile
+
+REPO = 'SK8-ENGINE/skate-3-rust-engine'
+API = f'https://api.github.com/repos/{REPO}/releases'
+PACKAGE = 'skate3rust-windows-x64.zip'
+FILES = ('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe', 'release.json')
+PREFIX = 'skate3rust-windows-x64/'
+
+
+def atomic(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix('.tmp')
+    temp.write_text(json.dumps(value), encoding='utf-8')
+    os.replace(temp, path)
+
+
+def read_json(path, default=None):
+    try:
+        return json.loads(path.read_text(encoding='utf-8-sig'))
+    except (OSError, ValueError):
+        return default
+
+
+def identity(m):
+    if (m.get('schema') != 1 or m.get('target') != 'windows-x64'
+            or m.get('repository') != REPO or not isinstance(m.get('build'), int)
+            or m['build'] <= 0 or not isinstance(m.get('tag'), str)
+            or not re.fullmatch(r'[0-9a-f]{40}', m.get('revision', ''))):
+        raise ValueError('Incompatible release metadata')
+    return m['build']
+
+
+def fetch(url, cancel, limit, progress=lambda value: None):
+    # URLs originate only from the fixed repository API, never notes/manifest.
+    if not (url.startswith(API) or url.startswith(f'https://github.com/{REPO}/releases/download/')):
+        raise ValueError('Unexpected download URL')
+    req = urllib.request.Request(url, headers={'User-Agent': 'Skate3RustEngine-Updater/1',
+                                              'X-GitHub-Api-Version': '2022-11-28'})
+    deadline = time.monotonic() + 300
+    result = bytearray()
+    with urllib.request.urlopen(req, timeout=15) as response:
+        if not response.url.startswith('https://'):
+            raise ValueError('Insecure redirect')
+        while True:
+            if cancel.is_set():
+                raise InterruptedError('Cancelled')
+            if time.monotonic() > deadline:
+                raise TimeoutError('Download timed out')
+            block = response.read(256 * 1024)
+            if not block:
+                return bytes(result)
+            result.extend(block)
+            if len(result) > limit:
+                raise ValueError('Download exceeds size limit')
+            progress(f'Downloaded {len(result) // (1024 * 1024)} MB')
+
+
+def eligible(release, channel):
+    return (not release.get('draft') and bool(release.get('published_at'))
+            and (channel == 'Latest' or not release.get('prerelease')))
+
+
+def discover(current, channel, cancel):
+    candidates = []
+    deadline = time.monotonic() + 120
+    # Exhaust pagination; never silently claim current after a truncated scan.
+    for page in range(1, 101):
+        if time.monotonic() > deadline:
+            raise TimeoutError('Release check timed out')
+        releases = json.loads(fetch(f'{API}?per_page=100&page={page}', cancel, 8 * 1024 * 1024))
+        for release in releases:
+            if not eligible(release, channel):
+                continue
+            assets = {a['name']: a for a in release.get('assets', []) if a.get('state') == 'uploaded'}
+            if not {PACKAGE, PACKAGE + '.sha256', 'release.json'} <= assets.keys():
+                continue
+            try:
+                meta = json.loads(fetch(assets['release.json']['browser_download_url'], cancel, 65536))
+                build = identity(meta)
+                if meta['tag'] != release['tag_name'] or build <= identity(current):
+                    continue
+            except (ValueError, KeyError):
+                continue
+            candidates.append((build, release['id'], release, assets, meta))
+        if len(releases) < 100:
+            break
+    else:
+        raise ValueError('Too many release pages; check again later')
+    return max(candidates, key=lambda item: item[:2]) if candidates else None
+
+
+def stage(candidate, directory, cancel, progress):
+    _, _, release, assets, meta = candidate
+    checksum = fetch(assets[PACKAGE + '.sha256']['browser_download_url'], cancel, 1024).decode('ascii').split()
+    if len(checksum) != 2 or checksum[1] != PACKAGE or not re.fullmatch('[0-9a-fA-F]{64}', checksum[0]):
+        raise ValueError('Invalid release checksum')
+    archive = fetch(assets[PACKAGE]['browser_download_url'], cancel, 1024 * 1024 * 1024, progress)
+    digest = hashlib.sha256(archive).hexdigest()
+    if digest != checksum[0].lower():
+        raise ValueError('Package checksum mismatch')
+    api_digest = assets[PACKAGE].get('digest')
+    if api_digest and api_digest != 'sha256:' + digest:
+        raise ValueError('GitHub asset digest mismatch')
+    import io
+    with zipfile.ZipFile(io.BytesIO(archive)) as z:
+        names = set()
+        total = 0
+        for info in z.infolist():
+            name = info.filename
+            parts = name.rstrip('/').split('/')
+            if (not name.startswith(PREFIX) or '\\' in name or ':' in name
+                    or any(p in ('', '.', '..') for p in parts)
+                    or name.lower() in names or (info.external_attr >> 16) & 0o170000 == 0o120000):
+                raise ValueError('Unsafe archive path')
+            names.add(name.lower())
+            total += info.file_size
+            if total > 2 * 1024 * 1024 * 1024:
+                raise ValueError('Expanded package too large')
+        for name in FILES:
+            if cancel.is_set():
+                raise InterruptedError('Cancelled')
+            payload = z.read(PREFIX + name)
+            if name != 'release.json':
+                if hashlib.sha256(payload).hexdigest() != meta['files'][name]:
+                    raise ValueError('Program checksum mismatch')
+            elif json.loads(payload.decode('utf-8-sig')) != meta:
+                raise ValueError('Package identity mismatch')
+            dest = directory / 'new' / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(payload)
+
+
+def retry(operation):
+    deadline = time.monotonic() + 45
+    while True:
+        try:
+            return operation()
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(.25)
+
+
+def rollback(root, tx):
+    journal = read_json(tx / 'journal.json')
+    if journal is None:
+        return
+    # Fixed paths only, even when recovering a corrupted journal.
+    for name in reversed(FILES):
+        backup = tx / 'old' / name
+        if backup.is_file():
+            retry(lambda: shutil.copy2(backup, root / name))
+    (tx / 'journal.json').unlink()
+
+
+def install(root, tx):
+    # Back up everything before the first replacement. Journal survives power loss.
+    for name in FILES:
+        backup = tx / 'old' / name
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / name, backup)
+    atomic(tx / 'journal.json', {'protocol': 1})
+    try:
+        for name in FILES:
+            retry(lambda: os.replace(tx / 'new' / name, root / name))
+        (tx / 'journal.json').unlink()
+    except Exception:
+        rollback(root, tx)
+        raise
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--request', type=Path, required=True)
+    args = parser.parse_args()
+    request = read_json(args.request)
+    root = Path(request['root']).resolve()
+    tx = root / '.update-transaction'
+    # OS releases the lock after crashes; concurrent game instances cannot install.
+    lock = (root / '.update.lock').open('a+b')
+    lock.write(b'0')
+    lock.flush()
+    lock.seek(0)
+    if os.name == 'nt':
+        import msvcrt
+        try:
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return
+    if request.get('recover'):
+        time.sleep(3)
+        try:
+            rollback(root, tx)
+        except Exception as error:
+            import tkinter.messagebox
+            tkinter.messagebox.showerror('Update recovery', 'Could not restore the previous program. Close other game instances and try again. Backups remain in .update-transaction/old.\n' + str(error))
+            return
+        lock.close()
+        subprocess.Popen([str(root / 'skate3rust.exe'), *request['args']], cwd=request['cwd'])
+        return
+    import tkinter as tk
+    from tkinter import ttk
+    win = tk.Tk()
+    win.title('Skate 3 Rust Engine — Updates')
+    win.geometry('660x520')
+    automatic = request['automatic']
+    if automatic:
+        win.withdraw()
+    settings_path = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'Skate3RustEngine/settings/updates.json'
+    settings = read_json(settings_path, {})
+    channel = tk.StringVar(value=settings.get('channel') if settings.get('channel') in ('Stable', 'Latest') else 'Stable')
+    status = tk.StringVar(value='Ready to check')
+    ttk.Label(win, text='Updates — Update downloads, then closes and restarts the game.').pack(pady=8)
+    choice = ttk.Combobox(win, textvariable=channel, values=('Stable', 'Latest'), state='readonly')
+    choice.pack()
+    ttk.Label(win, text='Stable: published releases. Latest: includes experimental prereleases.').pack()
+    notes = tk.Text(win, wrap='word', height=19)
+    notes.pack(fill='both', expand=True, padx=12, pady=8)
+    notes.configure(state='disabled')
+    ttk.Label(win, textvariable=status, wraplength=620).pack()
+    events = queue.Queue()
+    cancel = threading.Event()
+    candidate = None
+    busy = False
+    generation = 0
+    closing = False
+
+    def work(kind, operation):
+        nonlocal busy
+        busy = True
+        update.configure(state='disabled')
+        check.configure(state='disabled')
+        choice.configure(state='disabled')
+        token = generation
+        def run():
+            try:
+                events.put((token, kind, operation()))
+            except Exception as e:
+                events.put((token, 'error', str(e)))
+        threading.Thread(target=run, daemon=True).start()
+
+    def check_now():
+        nonlocal candidate, generation
+        generation += 1
+        candidate = None
+        cancel.clear()
+        settings['channel'] = channel.get()
+        settings[channel.get()] = time.time()
+        try:
+            atomic(settings_path, settings)
+        except OSError:
+            pass
+        status.set('Checking GitHub…')
+        selected = channel.get()
+        work('checked', lambda: discover(read_json(root / 'release.json', {}), selected, cancel))
+
+    def do_update():
+        nonlocal automatic
+        automatic = False
+        if candidate is None or busy:
+            return
+        cancel.clear()
+        def prepare():
+            if (tx / 'journal.json').exists():
+                raise ValueError('An interrupted update needs recovery. Restart the game first.')
+            tx.mkdir(exist_ok=True)
+            stage(candidate, tx, cancel, lambda text: events.put((generation, 'progress', text)))
+        status.set('Downloading and verifying. Cancel keeps the game running.')
+        work('staged', prepare)
+
+    def close():
+        nonlocal closing
+        if busy:
+            cancel.set()
+            closing = True
+            status.set('Cancelling…')
+        else:
+            win.destroy()
+
+    check = ttk.Button(win, text='Check now', command=check_now)
+    check.pack(side='left', padx=12, pady=12)
+    update = ttk.Button(win, text='Update', command=do_update, state='disabled')
+    update.pack(side='left', padx=12)
+    back = ttk.Button(win, text='Cancel', command=close)
+    back.pack(side='right', padx=12)
+    win.protocol('WM_DELETE_WINDOW', close)
+    choice.bind('<<ComboboxSelected>>', lambda _: check_now())
+
+    def poll():
+        nonlocal candidate, busy, automatic
+        try:
+            while True:
+                token, kind, value = events.get_nowait()
+                if token != generation:
+                    continue
+                if kind == 'progress':
+                    status.set(value)
+                    continue
+                busy = False
+                if closing:
+                    win.destroy()
+                    return
+                check.configure(state='normal')
+                choice.configure(state='readonly')
+                if kind == 'error':
+                    back.configure(state='normal')
+                    win.protocol('WM_DELETE_WINDOW', close)
+                    status.set('Update unavailable: ' + value[:250] + '. You can keep playing and try again later.')
+                    if automatic:
+                        win.destroy()
+                        return
+                elif kind == 'checked':
+                    candidate = value
+                    if candidate:
+                        automatic = False
+                        win.deiconify()
+                        notes.configure(state='normal')
+                        notes.delete('1.0', 'end')
+                        notes.insert('end', candidate[4]['tag'] + '\n\n' + (candidate[2].get('body') or 'No release notes.')[:50000])
+                        notes.configure(state='disabled')
+                        update.configure(state='normal')
+                        status.set('New release available. Cancel keeps your current version.')
+                    elif automatic:
+                        win.destroy()
+                        return
+                    else:
+                        status.set('No newer compatible release in this channel.')
+                elif kind == 'staged':
+                    if cancel.is_set():
+                        continue
+                    status.set('Closing game and installing… Please keep this window open.')
+                    back.configure(state='disabled')
+                    win.protocol('WM_DELETE_WINDOW', lambda: None)
+                    def finish():
+                        Path(request['signal']).write_text('ready', encoding='ascii')
+                        # Wait for game and supervisor to release the PE. Replacement retries
+                        # are the lock authority; no PID reuse or process termination.
+                        time.sleep(3)
+                        try:
+                            install(root, tx)
+                        except Exception:
+                            if not (tx / 'journal.json').exists():
+                                subprocess.Popen([str(root / 'skate3rust.exe'), *request['args']], cwd=request['cwd'])
+                            raise
+                        lock.close()
+                        subprocess.Popen([str(root / 'skate3rust.exe'), *request['args']], cwd=request['cwd'])
+                    work('installed', finish)
+                elif kind == 'installed':
+                    win.destroy()
+                    return
+        except queue.Empty:
+            pass
+        win.after(100, poll)
+
+    if not automatic or time.time() - settings.get(channel.get(), 0) >= 21600:
+        check_now()
+    else:
+        win.destroy()
+        return
+    win.after(100, poll)
+    win.mainloop()
+
+
+if __name__ == '__main__':
+    main()

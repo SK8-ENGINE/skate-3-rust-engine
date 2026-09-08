@@ -218,7 +218,7 @@ fn setup(
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("GAME MENU"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..13 {
+            for i in 0..14 {
                 panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(32),padding:UiRect::all(px(6)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
@@ -272,6 +272,7 @@ pub(crate) fn interact(
     mut exit: MessageWriter<AppExit>,
     mut net: ResMut<crate::multiplayer::Multiplayer>,
     mut typing: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut updater: ResMut<crate::updater::Updater>,
 ) {
     if transition.busy() {
         menu.open = true;
@@ -304,7 +305,7 @@ pub(crate) fn interact(
         }
     }
     if menu.open {
-        let rows = if menu.multiplayer { 11 } else { 13 };
+        let rows = if menu.multiplayer { 11 } else { 14 };
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
             menu.selected = (menu.selected + rows - 1) % rows;
         }
@@ -423,6 +424,7 @@ pub(crate) fn interact(
                     menu.selected = 0;
                 }
                 12 => custom_models.begin(),
+                13 => menu.status = updater.open(false),
                 _ => {}
             }
         }
@@ -607,6 +609,7 @@ fn labels(
                 9 => "Quit game".into(),
                 10 => "Character customiser".into(),
                 12 => "Custom models".into(),
+                13 => "Updates".into(),
                 _ => "Multiplayer".into(),
             }
         };
