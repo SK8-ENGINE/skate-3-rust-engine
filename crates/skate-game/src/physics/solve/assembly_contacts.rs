@@ -75,7 +75,7 @@ fn group_pair_allowed(a: u32, b: u32) -> bool {
     b < 21 && ALLOWED.get(a as usize).is_some_and(|row| row & (1 << b) != 0)
 }
 
-fn append_pair(contacts: &mut Vec<BoardCollision>, a: &BoardWorldVolume, b: &BoardWorldVolume) {
+pub(super) fn append_pair(contacts: &mut Vec<BoardCollision>, a: &BoardWorldVolume, b: &BoardWorldVolume) {
     //8277B0F0 and8277B2C0 enter the same8277A508 primitive walker with
     //identical padding/triangle settings. Keep A/B orientation and point order.
     let Some(manifold) = primitive_pair_contacts(

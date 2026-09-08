@@ -1,4 +1,5 @@
 mod animation;
+mod multiplayer;
 mod animation_pose;
 mod app;
 mod assets;
@@ -62,13 +63,18 @@ fn main() -> bevy::app::AppExit {
         }
     }
     eprintln!("SKATE_DIFFICULTY mode={} native_index={}", config.difficulty.key(), config.difficulty as u32);
-    let physics = match physics::GamePhysics::load_with_difficulty(&config.asset_root, config.map.as_ref(), config.difficulty) {
+    let mut physics = match physics::GamePhysics::load_with_difficulty(&config.asset_root, config.map.as_ref(), config.difficulty) {
         Ok(physics) => physics,
         Err(error) => {
             eprintln!("{error}");
             return bevy::app::AppExit::error();
         }
     };
+    if config.multiplayer.spawn_offset != 0.0 {
+        let mut spawn = physics.board.part_transforms()[skate_core::physics::board::BodyId::Deck.index()];
+        spawn.translation.x += config.multiplayer.spawn_offset;
+        physics.board.set_transform(spawn);
+    }
     let skater = match physics::SkaterRuntime::load(&config.asset_root, &graphs, &physics, config.difficulty.key()) {
         Ok(skater) => skater,
         Err(error) => {

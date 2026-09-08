@@ -33,6 +33,7 @@ impl CurrentMap {
 }
 
 struct PreparedWorld {
+    map_fingerprint: u64,
     scene: PreparedScene,
     physics: GamePhysics,
     skater: SkaterRuntime,
@@ -103,6 +104,7 @@ fn start(world: &World, entry: Entry) -> Result<Phase, String> {
     let job = std::thread::Builder::new().name("map-loader".into()).spawn(move || {
         let started = Instant::now();
         let map = selected.path.as_deref().map(skate_data::skate_map::SkateMap::load).transpose()?;
+        let map_fingerprint = crate::config::map_fingerprint(selected.path.as_deref())?;
         let read_time = started.elapsed();
         let validation_started = Instant::now();
         if let Some(map) = &map { crate::skate_world::validate_runtime(map)?; }
@@ -145,7 +147,7 @@ fn start(world: &World, entry: Entry) -> Result<Phase, String> {
             simulation_time.as_millis(), render_time.as_millis(), started.elapsed().as_millis());
         // Drop the decoded package on this worker. Physics and rendering now
         // own their data; retaining it would double large-city CPU memory.
-        Ok(PreparedWorld { scene, physics, skater, controls, camera, metadata, retail, difficulty })
+        Ok(PreparedWorld { map_fingerprint, scene, physics, skater, controls, camera, metadata, retail, difficulty })
     }).map_err(|e| format!("Could not start map loader: {e}"))?;
     Ok(Phase::Loading { entry, progress, job })
 }
@@ -220,6 +222,7 @@ fn commit(world: &mut World, mut prepared: PreparedWorld) -> String {
     world.resource_mut::<ButtonInput<MouseButton>>().reset_all();
     let mut config = world.resource_mut::<Config>();
     config.map_path = prepared.metadata.path.clone();
+    config.map_fingerprint = prepared.map_fingerprint;
     config.difficulty = prepared.difficulty;
     let notice = format!("Loaded {}.", prepared.metadata.name);
     info!("MAP_TRANSITION_COMMITTED generation={} name={:?} spawn={:?} heading={} pid={}",

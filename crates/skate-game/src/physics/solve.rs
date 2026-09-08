@@ -47,6 +47,19 @@ pub(super) fn advance(
         physics.board.collision_group(),
         &skater.skeleton_collision,
     )?;
+    // Remote actors use separate reaction indices after skeleton and targets.
+    // Never apply the single-skater self-culling bitmap to another player.
+    let before_remote = contacts.len();
+    for a in board_volumes.iter().chain(&skeleton_volumes) {
+        for b in &physics.network_proxies.volumes {
+            let (ac, ar) = super::network::bounds(a.primitive);
+            let (bc, br) = super::network::bounds(b.primitive);
+            if ac.distance_squared(bc) <= (ar + br + 0.05).powi(2) {
+                assembly_contacts::append_pair(&mut contacts, a, b);
+            }
+        }
+    }
+    physics.network_contacts = contacts.len() - before_remote;
     physics.contact_count = contacts.len();
     let dt = physics.settings.step.simulation.time_step;
     let mut joints =
@@ -74,6 +87,7 @@ pub(super) fn advance(
         .bodies_mut()
         .iter_mut()
         .chain(skater.skeleton_drives.targets.bodies.iter_mut())
+        .chain(physics.network_proxies.bodies.iter_mut())
         .collect();
     physics.board.advance_attached(
         &contacts,

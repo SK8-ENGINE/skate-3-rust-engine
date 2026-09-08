@@ -27,7 +27,7 @@ fn installed_worlds_prepare_commit_and_retire_without_simulation() {
     };
     let mut world = World::new();
     world.insert_resource(Config { asset_root: root.clone(), verification_capture: None,
-        map: None, map_path: None, difficulty, check_assets: false, start_paused: false });
+        map: None, map_path: None, difficulty, check_assets: false, start_paused: false, multiplayer: Default::default(), map_fingerprint: crate::config::map_fingerprint(None).unwrap() });
     world.insert_resource(CurrentMap::from_package(None, None));
     world.insert_resource(graphs);
     world.insert_resource(physics);

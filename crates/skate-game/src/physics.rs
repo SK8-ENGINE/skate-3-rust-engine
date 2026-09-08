@@ -25,6 +25,7 @@ mod skeleton_feedback;
 mod skeleton_input_runtime;
 mod skeleton_output;
 mod solve;
+pub(crate) mod network;
 pub(crate) use skater::SkaterRuntime;
 mod animation_feedback;
 mod animation_feedback_settings;
@@ -70,6 +71,9 @@ use skate_data::collections::Collections;
 
 #[derive(Resource)]
 pub(crate) struct GamePhysics {
+    pub(crate) network_proxies: network::Proxies,
+    pub(crate) network_active: bool,
+    pub(crate) network_contacts: usize,
     clock: clock::SimulationClock,
     pub board: BoardRuntime,
     pub riding: RidingOutputs,
@@ -238,6 +242,9 @@ impl GamePhysics {
         let riding = RidingOutputs::load(&data, &board, processed_flags_2468)?;
         let (query, retention) = ground::query_settings();
         Ok(Self {
+            network_proxies: network::Proxies::default(),
+            network_active: false,
+            network_contacts: 0,
             clock: clock::SimulationClock::default(),
             grind: grind::Runtime::load(&data, map)?,
             board,

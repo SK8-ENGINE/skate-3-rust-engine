@@ -8,6 +8,11 @@ publish.workspace = true
 name = "skate3rust"
 path = "src/main.rs"
 
+[[bin]]
+name = "skate3-multiplayer"
+path = "src/multiplayer_main.rs"
+test = false
+
 [features]
 default = ["dev-dynamic"]
 dev-dynamic = ["bevy/dynamic_linking"]
@@ -19,3 +24,4 @@ skate-data.workspace = true
 half = "=2.7.1"
 serde_json.workspace = true
 serde.workspace = true
+skate-net = { path = "../skate-net" }
