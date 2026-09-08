@@ -83,8 +83,11 @@ native scale/offset fields. The community symbol calling `82809168`
 GetFontByAptName is misleading: that function searches the filename column;
 `82809208` searches the APT-name column.
 
-Pause, map-change generation reset, resource reuse and the final task-specific
-release build/launcher remain to be integrated and checked. No game/recomp,
+Pause, map-change generation reset and resource reuse remain to be integrated
+and checked. A release compilation succeeds; its executable is copied into
+the ignored task-local `logs/scoring/build` directory, with an untracked
+`Launch scoring worktree.bat`. This is a compilation checkpoint, not a working
+scoring/HUD feature build. No game/recomp,
 controller harness, gameplay automation, `--check-assets`, or screenshot
 capture has been run for this work.
 
