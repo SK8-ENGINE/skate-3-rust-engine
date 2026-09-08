@@ -93,10 +93,10 @@ impl RidingOutputs {
     ///Board82C0D680 resets CollisionInfo and both probes, preserving7692.
     pub fn reset_for_teleport(&mut self) {
         let elapsed = self.ground.time_without_wheel_contact;
-        let drag = self.ground.wheel_linear_drag;
+        let drag = self.ground.wheel_angular_drag;
         self.ground = BoardGroundState::default();
         self.ground.time_without_wheel_contact = elapsed;
-        self.ground.wheel_linear_drag = drag;
+        self.ground.wheel_angular_drag = drag;
         self.wheel_lines = WheelLineState::default();
         self.probes.reset_results();
         //Original82C0D680 preserves query handles203C..2050. EndBoard
@@ -369,9 +369,10 @@ impl RidingOutputs {
         self.ground.advance_contact_time(time_step);
         for (body, drag) in board.bodies_mut()[..4]
             .iter_mut()
-            .zip(self.ground.wheel_linear_drag)
+            .zip(self.ground.wheel_angular_drag)
         {
-            body.inertia.linear_drag = drag;
+            //82C08634 writes inertia+36 (angular); +32 is linear drag.
+            body.inertia.angular_drag = drag;
         }
         self.motion = BoardMotionOutput::from_board(
             board,

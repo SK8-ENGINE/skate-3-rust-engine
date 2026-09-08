@@ -121,7 +121,7 @@ pub struct BoardGroundState {
     ///Body7692, accumulated only while all four physical wheels lack contact.
     pub time_without_wheel_contact: f32,
     /// Native wheel inertia+36 writes made after normal selection.
-    pub wheel_linear_drag: [f32; 4],
+    pub wheel_angular_drag: [f32; 4],
 }
 impl Default for BoardGroundState {
     fn default() -> Self {
@@ -137,7 +137,7 @@ impl Default for BoardGroundState {
             surface_twelve_height: 0.0,
             collision_flags: 0,
             valid_wheel_normals: [false; 4], part_contact_count: 0,
-            wheel_contact_count: 0, time_without_wheel_contact: 0.0, wheel_linear_drag: [0.0; 4],
+            wheel_contact_count: 0, time_without_wheel_contact: 0.0, wheel_angular_drag: [0.0; 4],
         }
     }
 }
@@ -266,7 +266,7 @@ impl BoardGroundState {
             } else {
                 f32::from_bits(0x3BC4_9BA6)
             };
-            self.wheel_linear_drag[i] = drag * f32::from_bits(0x426F_FFFF);
+            self.wheel_angular_drag[i] = drag * f32::from_bits(0x426F_FFFF);
         }
         let squared = dot(sum, sum);
         if self.wheel_contact_count > 0 && squared > f32::from_bits(0x3780_0000) {

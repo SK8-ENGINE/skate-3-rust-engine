@@ -106,6 +106,10 @@ impl GroundState {
                 fields = ?frame.animation.fields,
                 steering = ?self.steering, speed_model = ?self.speed,
                 outcome = ?outcome, "RIDING_GROUND");
+            bevy::log::debug!(target: "skate_game::riding_trace",
+                frame = p.frames_since_teleport_2584,
+                parts = ?board.bodies(), contacts = ?board.contact_reports(),
+                forces = ?board.forces().entries(), "RIDING_BOARD");
         }
         let normal = p.vectors_464_480_496_512_528[0].map(f32::from_bits);
         if let Some(delta) = motion::future_deck_displacement(
