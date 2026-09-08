@@ -1,4 +1,8 @@
-# Visual parity status — 2026-09-08
+# Visual parity status – 2026-09-08
+
+Follow-up: the hair changes below were rolled back at the user's request.
+See [dynamic-props-and-grime.md](dynamic-props-and-grime.md) for the current
+hair rollback, grime coordinate correction and authored prop placement status.
 
 Implemented and compiled offline; game/recomp not launched. User-run checks are
 still needed for the previously reported crash, shadow silhouette and performance.

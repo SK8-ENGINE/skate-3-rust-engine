@@ -120,6 +120,12 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
     build_archive(manifest_path,collision)
     final=maps/(label+'.skate')
     write_map(manifest_path,final,collision,report)
+    from .dynamic_props import export as write_props
+    caches=list((work/'dmo/cache').glob('DMO_*'))
+    if not caches:
+        raise RuntimeError('Missing prepared DMO catalog')
+    placed, unresolved=write_props(manifest_path,caches,stage/'assets/private/native-props'/(label+'.skate'))
+    report(f'{label}: placed {placed} authored DMO instances, {unresolved} unresolved templates')
     report('Checking converted map: '+label)
     run([game_exe,'--assets',stage/'assets','--map',final,'--check-assets'],log,report)
     entry={'name':label,'path':'maps/'+final.name,'sha256':digest(final)}
@@ -202,6 +208,9 @@ def install(iso,base,game_exe,report,game_root=None):
             report('Preparing global foliage backdrops')
             from .backdrop import convert as write_backdrops
             write_backdrops(game_root,stage/'assets',converted)
+            report('Preparing authored movable-object models')
+            from .dynamic_props import prepare_catalog
+            prepare_catalog(game_root,work/'dmo')
             report('Validating skater, input and animation data')
             run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
             archives=list((game_root/'data/content').glob('worldDIST_*.big'))

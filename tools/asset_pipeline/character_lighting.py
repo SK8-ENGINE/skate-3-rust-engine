@@ -30,10 +30,6 @@ def convert(models, private, converted):
         rows = fields[key_hash('m_params')]['array']['items']
         result['materials']['Retail_'+slot.name] = dict(shader=shader,
             params=[struct.unpack('>4f', bytes.fromhex(row)) for row in rows])
-        coverage = components[slot.name]['textures'].get('alpha')
-        if shader == 'character.hair' and coverage:
-            result['materials']['Retail_'+slot.name]['coverage'] = (
-                'private/default_skater/textures/decoded/'+coverage+'.png')
         specular = components[slot.name]['textures'].get('specular')
         if specular:
             # The native skin shader consumes R, not luminance or roughness.

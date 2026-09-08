@@ -25,6 +25,12 @@ struct WorldParams {
 struct FrameState { shadow: vec4<f32>, clock: vec4<f32>, pca: array<vec4<f32>, 7> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(16) var<storage, read> frame_state: FrameState;
 
+// Textures and base UVs both have V flipped by the exporter. Scale in the
+// authored coordinate system, then return to the flipped texture rows.
+fn scaled_uv(uv: vec2<f32>, scale: f32) -> vec2<f32> {
+    return vec2<f32>(uv.x*scale, 1.0-(1.0-uv.y)*scale);
+}
+
 @fragment
 fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     let fam = u32(p.mode.x);
@@ -41,13 +47,13 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     var masks = vec3<f32>(0.0);
     if (flags & 1u) != 0u && (fam <= 6u || fam == 13u) { nm = textureSample(normal_map,normal_sampler,i.uv).rgb; }
     if (flags & 2u) != 0u && fam != 2u {
-        detail = textureSample(detail_map,detail_sampler,i.uv*p.surface.z).rg;
+        detail = textureSample(detail_map,detail_sampler,scaled_uv(i.uv,p.surface.z)).rg;
     }
     if fam == 5u || fam == 6u || fam == 13u {
         // The reference folds the reflective material's constant detail texel.
         if (flags & 128u) != 0u { detail = textureLoad(detail_map,vec2<i32>(0),0).rg; }
     }
-    if (flags & 4u) != 0u { overlay_sample = textureSample(macro_map,macro_sampler,i.uv*p.surface.x).rgb; }
+    if (flags & 4u) != 0u { overlay_sample = textureSample(macro_map,macro_sampler,scaled_uv(i.uv,p.surface.x)).rgb; }
     if (flags & 8u) != 0u && (fam == 3u || fam == 4u) { art = textureSample(decal_map,decal_sampler,i.color.xy); }
     if (flags & 16u) != 0u { masks = textureSample(specular_map,specular_sampler,i.uv).rgb; }
     var wn = normalize(i.world_normal);

@@ -315,6 +315,8 @@ def load_district_stream(
     root = Path(stream_directory)
     records = read_atoc(root / f"{district_name}_{stream_name}.xst")
     stream_files = sorted(root.glob(f"c{stream_name}_*.xsf"))
+    if not records and not stream_files:
+        return []
     if not stream_files:
         raise StreamFormatError(
             f"{root} contains no c{stream_name}_*.xsf stream files"

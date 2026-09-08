@@ -16,9 +16,6 @@ class Glb:
         return len(self.doc['bufferViews'])-1
     def accessor(self,values,kind,component=5126,bounds=False):
         a=np.asarray(values,dtype={5126:'<f4',5123:'<u2',5125:'<u4'}[component])
-        width={'SCALAR':1,'VEC2':2,'VEC3':3,'VEC4':4,'MAT4':16}[kind]
-        if (kind=='SCALAR' and a.ndim!=1) or (kind!='SCALAR' and (a.ndim!=2 or a.shape[1]!=width)):
-            raise ValueError('Character accessor shape does not match '+kind)
         if component==5126 and not np.isfinite(a).all():raise ValueError('Non-finite character data')
         item={'bufferView':self.view(a.tobytes()),'componentType':component,'count':len(a),'type':kind}
         if bounds:item.update(min=a.min(axis=0).tolist(),max=a.max(axis=0).tolist())
@@ -110,8 +107,6 @@ def convert(models,private,recipe):
         attributes={'POSITION':glb.accessor(positions,'VEC3',bounds=True),'NORMAL':glb.accessor(normals,'VEC3'),
                     'TEXCOORD_0':glb.accessor(raw['uvs'],'VEC2'),'JOINTS_0':glb.accessor(joints,'VEC4',5123),
                     'WEIGHTS_0':glb.accessor(weights,'VEC4')}
-        if raw.get('uvs2'):
-            attributes['TEXCOORD_1']=glb.accessor(raw['uvs2'],'VEC2')
         primitives.append({'attributes':attributes,'indices':glb.accessor(np.asarray(mesh['tris']).ravel(),'SCALAR',5125),
                            'material':len(glb.doc['materials'])-1})
     mesh_node=len(nodes);nodes.append({'name':'Skate3_SkaterAndBoard','mesh':0,'skin':0})

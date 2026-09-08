@@ -1,4 +1,4 @@
-//! Global authored foliage that lives outside the district stream.
+//! Authored presentation supplements outside the static district geometry.
 use bevy::prelude::*;
 use skate_data::skate_map::SkateMap;
 use std::path::Path;
@@ -12,7 +12,22 @@ pub(crate) fn spawn_backdrop(
     retail_materials: &mut Assets<super::RetailWorldMaterial>,
     images: &mut Assets<Image>,
 ) {
-    let path = asset_root.join("private/native-backdrops").join(format!("{name}.skate"));
+    for folder in ["native-backdrops", "native-props"] {
+        spawn_package(name, asset_root, folder, commands, meshes, materials, retail_materials, images);
+    }
+}
+
+fn spawn_package(
+    name: &str,
+    asset_root: &Path,
+    folder: &str,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    retail_materials: &mut Assets<super::RetailWorldMaterial>,
+    images: &mut Assets<Image>,
+) {
+    let path = asset_root.join("private").join(folder).join(format!("{name}.skate"));
     if !path.is_file() {
         return;
     }
@@ -31,6 +46,6 @@ pub(crate) fn spawn_backdrop(
         error!("SKATE_BACKDROP: invalid render-only package {}", path.display());
         return;
     }
-    info!("SKATE_BACKDROP: {name} authored foliage triangles={}", map.geometry.indices.len() / 3);
+    info!("SKATE_BACKDROP: {name} {folder} triangles={}", map.geometry.indices.len() / 3);
     crate::skate_world::spawn(&map, commands, meshes, materials, retail_materials, images, &super::MaterialTuning::load(asset_root));
 }

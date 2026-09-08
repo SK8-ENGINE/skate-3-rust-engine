@@ -26,7 +26,6 @@ struct MaterialData {
     shader: String,
     params: Vec<[f32; 4]>,
     specular: Option<String>,
-    coverage: Option<String>,
 }
 #[derive(Deserialize)]
 struct LightingData {
@@ -62,9 +61,6 @@ struct CharacterMaterial {
     #[texture(5)]
     #[sampler(6)]
     mask: Option<Handle<Image>>,
-    #[texture(7)]
-    #[sampler(8)]
-    coverage: Option<Handle<Image>>,
     alpha: AlphaMode,
 }
 impl Material for CharacterMaterial {
@@ -224,8 +220,8 @@ fn bind(
                 options: Vec4::new(
                     f32::from(m.normal_map_texture.is_some()),
                     f32::from(data.specular.is_some()),
-                    if data.coverage.is_some() { -1. } else { alpha_cutoff },
-                    if data.coverage.is_some() { 2. } else { f32::from(data.shader == "character.hair") },
+                    alpha_cutoff,
+                    f32::from(data.shader == "character.hair"),
                 ),
                 rows: std::array::from_fn(|i| Vec4::from_array(data.params[i])),
                 sh: lighting
@@ -243,9 +239,7 @@ fn bind(
                     },
                 )
             }),
-            coverage: data.coverage.as_ref().map(|path| server.load_with_settings(
-                path.clone(), |settings: &mut bevy::image::ImageLoaderSettings| { settings.is_srgb = false; })),
-            alpha: if data.coverage.is_some() { AlphaMode::Blend } else { m.alpha_mode },
+            alpha: m.alpha_mode,
         });
         commands
             .entity(entity)
