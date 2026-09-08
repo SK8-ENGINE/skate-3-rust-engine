@@ -5,6 +5,7 @@ mod air_phase;
 mod air_trajectory;
 pub(crate) mod camera_output;
 mod clock;
+mod climbing;
 mod colliders;
 mod controls;
 mod foot_ik;

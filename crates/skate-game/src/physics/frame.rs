@@ -30,6 +30,9 @@ pub(super) fn advance(
         //Publishing Ground here runs its ForcePhysics Begin before the initial
         //input reset82DB8998, which would immediately clear that mode again.
     }
+    if super::climbing::advance(physics, skater, controls, camera)? {
+        return Ok(());
+    }
     if skater.trajectory.edges.is_empty() { skater.trajectory.edges.clone_from(&physics.grind.primitives); }
     physics.board.clear_forces();
     let query_timer = crate::performance::Scope::new("wheel_and_foot_queries");
@@ -219,6 +222,7 @@ pub(super) fn advance(
         events,
     });
     camera_output::advance(physics, skater, &feedback, camera)?;
+    super::climbing::approach::advance(physics, skater, controls);
     skater.animation_input.finish_output_publication();
     skater.player_input.player.update_count_1316 =
         skater.player_input.player.update_count_1316.wrapping_add(1);

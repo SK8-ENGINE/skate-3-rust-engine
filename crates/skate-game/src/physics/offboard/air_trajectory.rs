@@ -24,7 +24,7 @@ pub(crate) fn prepare(skater: &SkaterRuntime, current: bool) -> Result<air_launc
         up_544: p.vectors_544_560_592_608[0].map(f32::from_bits),
         velocity_608: p.vectors_544_560_592_608[3].map(f32::from_bits),
         position_592: p.vectors_544_560_592_608[2].map(f32::from_bits),
-        target_112: toolkit.effective[3],
+        target_112: toolkit.deck[3],
         velocity_912: p.vectors_880_896_912_928_944[2].map(f32::from_bits),
         //Retained live grind primitive, published before native state entry.
         grind_position_1120: p.grind_position_1120.map(f32::from_bits),

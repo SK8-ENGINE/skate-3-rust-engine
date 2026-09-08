@@ -158,7 +158,11 @@ fn jump(out: &mut Launch, p: &Input, j: &JumpInput<'_>) {
                 redirected = scale(unit_unchecked(projected), sqrt(speed2));
             } else if angle < 90. * f32::from_bits(0x3c8efa35) {
                 redirected = scale(
-                    limit_angle(unit_unchecked(projected), initial, 45.),
+                    limit_angle(
+                        unit_unchecked(projected),
+                        initial,
+                        45. * f32::from_bits(0x3c8efa35),
+                    ),
                     sqrt(speed2),
                 );
             }

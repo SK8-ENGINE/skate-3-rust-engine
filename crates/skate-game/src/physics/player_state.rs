@@ -124,6 +124,35 @@ pub(crate) fn enter_after_teleport(
     transition::set(physics, skater, PhysicalStateId::PhysicsGround)
 }
 
+/// Custom authored climbing completes at a validated standing surface.
+pub(crate) fn resume_after_climb(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
+    super::offboard::ground_state::exit(physics, skater);
+    skater.offboard.air_prediction = None;
+    skater.collision_extra_displacements = [[0.; 4]; 2];
+    skater.animated_skeleton.motion.velocity_world = [0.; 4];
+    skater.player_input.processed.vectors_544_560_592_608[3] = [0; 4];
+    if skater.player_state.current() == PhysicalStateId::BipedGround {
+        super::offboard::ground_state::enter(physics, skater)?;
+    } else {
+        transition::set(physics, skater, PhysicalStateId::BipedGround)?;
+    }
+    // Climbing bypassed the ground query pipeline. Complete real observations
+    // at the new position before the next native job can interpret no contact
+    // as a fall, or consume the old foot hits from below the ledge.
+    super::foot_ik_queries::query(&physics.world, &skater.skeleton)?
+        .publish(&mut skater.player_input.player);
+    let frame = skater.offboard.ground.frame_80;
+    let observation = super::offboard::contact_queries::submit_toolkit(
+        &physics.world, &skater.offboard.layout,
+        skate_core::player::offboard::contact_queries::Input {
+            position: frame[3], surface_right: frame[0], surface_up: frame[1], surface_forward: frame[2],
+            animation_right: frame[0], animation_up: frame[1], velocity: [0.;4],
+        }, skater.player_input.processed.actor_query_2948,
+    )?;
+    skater.offboard.contacts.submit(observation);
+    publish(physics, skater)
+}
+
 ///Original82DB6050 prefix; coordinator calls the selected state pre-update next.
 pub(crate) fn pre_state(
     physics: &mut GamePhysics,

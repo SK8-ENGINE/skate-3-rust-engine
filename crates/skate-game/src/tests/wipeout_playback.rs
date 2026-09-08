@@ -265,7 +265,8 @@ fn offboard_stability(map: Option<&skate_data::skate_map::SkateMap>) {
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
     for difficulty in crate::difficulty::Difficulty::ALL {
-        for walking in [false, true] {
+        for scenario in 0..3 {
+            let walking=scenario!=0;
             let mut physics = GamePhysics::load_with_difficulty(root, map, difficulty).unwrap();
             let mut skater =
                 SkaterRuntime::load(root, &graphs, &physics, difficulty.key()).unwrap();
@@ -287,7 +288,7 @@ fn offboard_stability(map: Option<&skate_data::skate_map::SkateMap>) {
                     } else {
                         0
                     },
-                    triggers: [0; 2],
+                    triggers: if scenario==2&&(tick==180||tick==420) {[255,0]} else {[0; 2]},
                     left: if walking && tick > 200 {
                         [0, 16000]
                     } else {
@@ -312,7 +313,7 @@ fn offboard_stability(map: Option<&skate_data::skate_map::SkateMap>) {
                     &mut camera,
                 )
                 .unwrap_or_else(|error| {
-                    panic!("Runout {difficulty:?} walking={walking} tick{tick}: {error}")
+                    panic!("Offboard {difficulty:?} scenario={scenario} tick{tick}: {error}")
                 });
                 assert_finite(&physics, &skater, tick);
                 visited.insert(skater.player_state.current() as u32);

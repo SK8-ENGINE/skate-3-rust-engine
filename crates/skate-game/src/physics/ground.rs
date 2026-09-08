@@ -20,7 +20,7 @@ pub(crate) const FLOOR_HEIGHT: f32 = HEIGHT - 1.5;
 
 /// Shared quads for rendering and collision: landing floor, starting box, half pipe.
 /// Quads use the same winding as the original floor (0,2,1 and 0,3,2).
-pub(crate) fn surfaces() -> [Vec<[Vector3; 4]>; 3] {
+pub(crate) fn surfaces() -> [Vec<[Vector3; 4]>; 4] {
     let v = Vector3::new;
     let floor = vec![[
         v(-50.0, FLOOR_HEIGHT, -50.0),
@@ -104,7 +104,21 @@ pub(crate) fn surfaces() -> [Vec<[Vector3; 4]>; 3] {
         let y = FLOOR_HEIGHT + radius;
         half_pipe.push([v(x0, y, -6.0), v(x1, y, -6.0), v(x1, y, 6.0), v(x0, y, 6.0)]);
     }
-    [floor, platform, half_pipe]
+    // A separate 2.2 m ledge on the left of the course makes the custom
+    // climbing flow directly testable without altering the riding routes.
+    let climb_top = [
+        v(-9., FLOOR_HEIGHT + 2.2, -2.),
+        v(-5., FLOOR_HEIGHT + 2.2, -2.),
+        v(-5., FLOOR_HEIGHT + 2.2, 2.),
+        v(-9., FLOOR_HEIGHT + 2.2, 2.),
+    ];
+    let mut climbing = vec![climb_top];
+    for i in 0..4 {
+        let a = climb_top[i];
+        let b = climb_top[(i + 1) % 4];
+        climbing.push([b, a, v(a.x, FLOOR_HEIGHT, a.z), v(b.x, FLOOR_HEIGHT, b.z)]);
+    }
+    [floor, platform, half_pipe, climbing]
 }
 
 pub(super) fn world(material: RetailContactMaterial) -> BoardWorld {

@@ -43,6 +43,7 @@ fn spawn(
         Color::srgb(0.16, 0.19, 0.21),
         Color::srgb(0.48, 0.35, 0.22),
         Color::srgb(0.30, 0.43, 0.48),
+        Color::srgb(0.24, 0.48, 0.31),
     ];
     for (quads, color) in crate::physics::ground::surfaces().into_iter().zip(colors) {
         let positions: Vec<[f32; 3]> = quads.into_iter().flat_map(|vertices| {

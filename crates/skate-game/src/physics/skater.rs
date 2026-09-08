@@ -27,6 +27,7 @@ use std::path::Path;
 
 #[derive(Resource)]
 pub(crate) struct SkaterRuntime {
+    pub climbing: super::climbing::Runtime,
     /// Completed physical pose in native animation space, read by rendering.
     pub render_pose: Vec<skate_core::animation::output::NativeMatrix>,
     pub pose_generation: u64,
@@ -180,6 +181,7 @@ impl SkaterRuntime {
             &data, asset_root, &animation.evaluator.frames.source_sha256,
         )?;
         Ok(Self {
+            climbing: super::climbing::Runtime::load(asset_root, &animation.evaluator.frames.bone_names)?,
             offboard,
             render_pose: initial_hierarchy,
             pose_generation: 0,

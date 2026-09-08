@@ -6,3 +6,25 @@
 /maps/private/
 /maps/*.skate
 !/maps/format-demo.skate
+
+# Local extraction, animation authoring, archives and credentials.
+*.zip
+*.7z
+*.rar
+*.xex
+*.iso
+*.i64
+*.idb
+*.glb
+*.gltf
+*.fbx
+*.blend
+*.abin
+*.vlt
+*.stategraph
+*.rwcmset
+!/crates/skate-data/tests/fixtures/retail-collision.rwcmset
+.env
+.env.*
+*.pem
+*.key
