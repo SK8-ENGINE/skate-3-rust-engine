@@ -115,3 +115,31 @@ there has been no matched-camera pixel comparison against the recomp.
 
 The shaders are embedded in the executable. Sky and map payloads are extracted
 from the user's game and must never be committed or bundled with releases.
+
+### Treeline investigation and diagnostic (2026-09-08)
+
+The user's mega-park screenshots refer to the bowl/cliffs in University, not
+DIST_MegaPark (the separate create-a-park venue). A read-only decode of the installed
+University SKATE14 package found 8,546 materials, 1,645,617 render triangles,
+1,180 tree-family mesh materials and all 86 TreeWall meshes from the source cache.
+TreeWall diffuse texture 0x2c70170a00053a88 retains its RGBA cutout, and the tree
+materials retain masked alpha and two-sided flags. A TOC audit of all 479 full
+models found no extra vertex or face buffers omitted by the parser.
+
+Proxy comparisons must resolve mesh material GUIDs with
+`_bind_material_groups_by_guid`; `mdl_parser.Mesh.name` is in material-table order
+and can label proxy terrain as trees. With GUID bindings, the 14 proxy foliage
+meshes intersecting x=200..550, z=-850..-600 contain 3,878 distinct triangles;
+3,813 match full geometry after unordered-vertex quantization to 1 mm. The small
+remainder does not establish absent trees (different triangulation/rounding also
+changes these keys). DMO_University and DMO_Global contain movable props, not a
+second background forest. These checks do not prove visual parity or a fix.
+
+For a user-run discriminating capture, `SKATE_DEBUG_FOLIAGE=1` renders tree-wall
+cards cyan and other tree-family surfaces magenta, opaque and unlit. Geometry,
+camera, depth testing and occlusion remain authored. This bypasses texture alpha
+in both colour and depth passes without adding proxy geometry. Return to the
+reported viewpoint: solid foliage appearing in the missing area implicates the
+normal shading/alpha path; an empty area requires checking placement, camera or
+source selection. Unset the variable to restore normal rendering. This diagnostic
+has been prepared without launching the game.

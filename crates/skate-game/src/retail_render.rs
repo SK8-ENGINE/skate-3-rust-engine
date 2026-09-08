@@ -18,6 +18,9 @@ use std::collections::BTreeMap;
 pub(crate) struct RetailRenderPlugin;
 impl Plugin for RetailRenderPlugin {
     fn build(&self, app: &mut App) {
+        if std::env::var_os("SKATE_DEBUG_FOLIAGE").is_some_and(|v| v == "1") {
+            eprintln!("SKATE_FOLIAGE_DEBUG: solid cyan tree-wall cards, magenta other foliage; alpha rejection disabled for foliage only");
+        }
         embedded_asset!(app, "retail_world.wgsl");
         embedded_asset!(app, "retail_tone.wgsl");
         embedded_asset!(app, "retail_depth.wgsl");
@@ -58,6 +61,8 @@ impl FullscreenMaterial for RetailTone {
 pub(crate) struct WorldParams {
     // family, texture flags, alpha cutoff (-1 for opaque), exposure
     pub mode: Vec4,
+    // Diagnostic solid foliage colour; w=0 keeps retail shading.
+    pub foliage_debug: Vec4,
     // macro UV scale, opacity, detail UV scale, material multiplier
     pub surface: Vec4,
     // tree LM scale/floor/tint, proxy multiplier: reference day capture
@@ -254,9 +259,15 @@ impl Definition {
             | (u32::from(detail.is_some()) << 7);
         // scene.hlsl's retail world ALPHAREF is 30, not the portable 0.5.
         let cutoff = 30. / 255.;
-        let alpha = match m.alpha_mode {
-            1 => AlphaMode::Mask(cutoff),
-            2 => AlphaMode::Blend,
+        let debug_foliage = matches!(self.family, 9 | 10)
+            && std::env::var_os("SKATE_DEBUG_FOLIAGE").is_some_and(|v| v == "1");
+        let tree_wall = m.retail_definition.as_deref().is_some_and(|bytes| {
+            bytes.windows(b"TreeWall".len()).any(|s| s == b"TreeWall")
+        });
+        let alpha = match (debug_foliage, m.alpha_mode) {
+            (true, _) => AlphaMode::Opaque,
+            (_, 1) => AlphaMode::Mask(cutoff),
+            (_, 2) => AlphaMode::Blend,
             _ => AlphaMode::Opaque,
         };
         RetailWorldMaterial {
@@ -264,9 +275,16 @@ impl Definition {
                 mode: Vec4::new(
                     self.family as f32,
                     flags as f32,
-                    if m.alpha_mode == 1 { cutoff } else { -1. },
+                    if m.alpha_mode == 1 && !debug_foliage { cutoff } else { -1. },
                     2.5,
                 ),
+                foliage_debug: if !debug_foliage {
+                    Vec4::ZERO
+                } else if tree_wall {
+                    Vec4::new(0., 1., 1., 1.)
+                } else {
+                    Vec4::new(1., 0., 1., 1.)
+                },
                 surface: Vec4::new(macro_scale, macro_opacity, detail_scale, 1.),
                 family: Vec4::new(0.3435, 0.02, 1., 0.45),
                 fog_ramp: Vec4::new(0., 0., 1., 0.),

@@ -1,7 +1,7 @@
 #import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings as frame}
 
 struct WorldParams {
-    mode: vec4<f32>, surface: vec4<f32>, family: vec4<f32>,
+    mode: vec4<f32>, foliage_debug: vec4<f32>, surface: vec4<f32>, family: vec4<f32>,
     fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: WorldParams;
@@ -130,6 +130,7 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     var xe = max((lin*fog_a+p.fog_color.rgb*f)*p.mode.w,vec3<f32>(0.0));
     // Reduced curve is the full curve with the linear input capped at one.
     if fam == 8u { xe = min(xe,vec3<f32>(1.0)); }
+    if p.foliage_debug.w != 0.0 { return vec4<f32>(p.foliage_debug.rgb, 1.0); }
     if a.a < p.mode.z { discard; }
     return vec4<f32>(xe,alpha);
 }
