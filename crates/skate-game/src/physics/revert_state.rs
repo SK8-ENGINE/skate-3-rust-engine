@@ -107,6 +107,9 @@ pub(super) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
     r.elapsed = 0.0;
     r.captured = false;
     r.active = true;
+    bevy::log::info!(tick = physics.ticks, direction = r.direction,
+        speed = skater.player_input.processed.scalar_2656,
+        "REVERT_ENTER");
     skater.wipeout.state.enter_ground();
     Ok(())
 }

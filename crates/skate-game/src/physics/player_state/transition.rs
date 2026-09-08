@@ -59,12 +59,8 @@ pub(super) fn set(
     skater: &mut SkaterRuntime,
     requested: PhysicalStateId,
 ) -> Result<(), String> {
-    // Selected archive behavior: revert requests continue through the ordinary
-    // ground solver. The user's previous dedicated revert owner is not entered.
-    let requested = match requested {
-        PhysicalStateId::RevertGround => PhysicalStateId::PhysicsGround,
-        state => state,
-    };
+    // RevertGround owns a real native Enter/Update/Fill lifecycle. Preserve
+    // the selector request so its turning controller can run.
     skater.player_state.requested_state = requested;
     let current = skater.player_state.current();
     if current == requested {
@@ -157,7 +153,10 @@ pub(super) fn set(
     //Native82DB8540 publishes Processed state/history BEFORE old Exit. The
     //same retained objects then receive Exit followed by the new Enter.
     match current {
-        PhysicalStateId::RevertGround => {}, //Exit82B61BB8
+        PhysicalStateId::RevertGround => {
+            // Native Exit is empty; this is diagnostic-only host reporting.
+            info!(tick = physics.ticks, requested = ?requested, "REVERT_EXIT");
+        },
         PhysicalStateId::HandPlant => skater.handplant.reset(),
         PhysicalStateId::FootPlant => skater.footplant.reset(), //Exit82D4C5A8
         PhysicalStateId::Boneless => {}, //empty82D4C9B4

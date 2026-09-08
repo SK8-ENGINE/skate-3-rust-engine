@@ -14,7 +14,7 @@ the archive was not applied as a replacement source tree.
 | Off-board movement, board possession, mounting/landing | Archive systems |
 | Grinds, spline queries, material/family handling | Archive systems |
 | Powerslides | Archive runtime and settings |
-| Reverts | Archive fallback, explicitly selected by the user |
+| Reverts | Dedicated controller enabled after reported non-working reverts |
 | Manuals and FPS display | Add archive support |
 | Session markers and automatic bail recovery | Keep user's features |
 | Plants, boneless and handplants | Keep user's behavior; adapt query interfaces |
@@ -22,10 +22,13 @@ the archive was not applied as a replacement source tree.
 | Map management, multiplayer, menus, replay | Keep user's features |
 | Pose sampling, authored clip overrides, blend-space evaluator | Keep current implementation |
 
-The archive redirects `RevertGround` requests to ordinary ground physics; it
-does not supply a dedicated revert solver. That fallback is intentional in this
-merge. The previous revert owner is not entered through normal state selection.
-Powerslide runtime, update and settings files match the archive.
+The archive redirects `RevertGround` requests to ordinary ground physics and
+does not supply a dedicated revert solver. After the user reported non-working
+reverts, this redirect was removed so the existing revert Enter/Update/Fill
+lifecycle can execute. Entry and exit now emit `REVERT_ENTER` / `REVERT_EXIT`
+diagnostics. The local native reference has a dedicated revert Update at
+`0x82D43518` (vtable `0x82327330`); enabling the owner does not establish runtime
+parity. Powerslide runtime, update and settings files still match the archive.
 
 ## Integration details
 
@@ -76,7 +79,9 @@ push, merge into the main branch, or release is performed by this task.
    remains visible and the HUD/FPS display appears.
 2. Push, steer, brake, ollie, flip and manual. Try powerslides in both directions
    and at low/high speeds; watch for sudden spins, loss of control or stuck poses.
-   Try revert input too, remembering this build uses the archive's fallback.
+   Try reverts in both directions while rolling, including switch stance. Watch
+   for missing turns, continuous spinning or failure to return to normal riding.
+   If they fail, include the launch log and whether `REVERT_ENTER` appears.
 3. Dismount, run, jump, fall, throw/retrieve and remount. Watch for floating feet,
    immediate landing poses, board separation and unexpected bails.
 4. Enter/exit grinds from both sides; exercise plants, handplants and boneless.
