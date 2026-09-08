@@ -1,30 +1,20 @@
 # Mods
 
-PLAY-MARIO-KART.bat loads this project-root folder directly through SKATE3_MODS.
-Use this folder to add or edit mods; you do not need to find the executable in .local.
-The in-game Open mods folder button opens the same location.
+Drop community `.zip` packages here. PLAY-MARIO-KART.bat loads this project-root folder;
+Escape → Mods lets you enable, disable, reload and configure them. Open mods folder
+returns here. ZIPs must have mod.json at their root; the game extracts them automatically.
 
-For a standalone game distribution, the default layout is beside the executable:
+Editable example sources live in `sdk/examples/`. Rebuild after editing:
 
-```
-skate3rust.exe
-mods/
-  native-trainer/
-    mod.json
-    main.lua
+```powershell
+python tools/package_mod.py sdk/examples/native-trainer mods/native-trainer.zip
+python tools/package_mod.py sdk/examples/mario-kart mods/mario-kart.zip
 ```
 
-Drop each community mod's folder here, then open Escape -> Mods. New mods start
-disabled. Use Open mods folder to return here from the game. Added/changed files
-are discovered automatically, or choose Rescan packages. Keep personal settings
-out of this folder. SKATE3_MODS is an optional explicit directory override.
+For a new mod, point your agent at **sdk/AGENTS.md**. Full structure and rules are in
+**docs/mod-packages.md**; API signatures are in **sdk/skate.lua**.
 
-Native Trainer Showcase is original Lua source, with stock tuning defaults.
-Read its README for controls and examples of supported SDK capabilities.
-Do not distribute private Skate assets with mods.
-
-Current loader: unpacked mod folders containing mod.json and main.lua, plus assets.
-ZIP files are not loaded directly yet. For sharing, ZIP one package with mod.json
-at the archive root, then extract it into mods/<mod-name>/ before use.
-A future ZIP installer can validate/extract packages while keeping folder support
-for mod development. See docs/vehicle-sdk.md for asset types and package limits.
+Development folders are also supported. Do not install duplicate IDs (including a
+folder and its ZIP). Ignore .cache: it is managed by the loader. Settings live outside
+packages. Standalone executables default to a mods folder beside the executable;
+SKATE3_MODS is the explicit override used by this project's launcher.

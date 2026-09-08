@@ -33,7 +33,7 @@ try {
     $modDestination = Join-Path $privateDirectory 'mods/native-trainer'
     New-Item -ItemType Directory -Force -Path $modDestination | Out-Null
     foreach ($name in @('mod.json','main.lua','help.txt','README.md')) {
-        $source = Join-Path $PSScriptRoot "mods/native-trainer/$name"
+        $source = Join-Path $PSScriptRoot "sdk/examples/native-trainer/$name"
         $target = Join-Path $modDestination $name
         if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath $source -Destination $target }
         elseif ((Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $target).Hash) {

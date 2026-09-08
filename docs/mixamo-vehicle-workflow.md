@@ -57,8 +57,8 @@ and skin inverse-bind matrices must remain unchanged. Fix the calibration/source
 ## 4. Fit the approved poses to the kart
 
 ```powershell
-& $blender -b --python tools/fit_kart_animation_preview.py -- --raw .local/raw-enter/Raw-Skate-Animation.blend --kart mods/mario-kart/kart.glb --mode enter --output .local/fit-enter
-& $blender -b --python tools/fit_kart_animation_preview.py -- --raw .local/raw-exit/Raw-Skate-Animation.blend --kart mods/mario-kart/kart.glb --mode exit --output .local/fit-exit
+& $blender -b --python tools/fit_kart_animation_preview.py -- --raw .local/raw-enter/Raw-Skate-Animation.blend --kart sdk/examples/mario-kart/kart.glb --mode enter --output .local/fit-enter
+& $blender -b --python tools/fit_kart_animation_preview.py -- --raw .local/raw-exit/Raw-Skate-Animation.blend --kart sdk/examples/mario-kart/kart.glb --mode exit --output .local/fit-exit
 ```
 
 This example script aligns the seated hips, eases torso lean and solves arms/legs to
@@ -82,7 +82,7 @@ bones, including reparented helpers. Generate the JSON list with the provided ut
 
 ```powershell
 cargo run --locked -p skate-data --example vehicle_bone_names -- assets/private/stock/data/anim/OnBoard.abin .local/bone-names.json
-& $blender -b --python tools/export_kart_rider.py -- --enter .local/fit-enter/Kart-enter.blend --exit .local/fit-exit/Kart-exit.blend --reference assets/private/skater.glb --bone-names .local/bone-names.json --output mods/mario-kart/rider.json
+& $blender -b --python tools/export_kart_rider.py -- --enter .local/fit-enter/Kart-enter.blend --exit .local/fit-exit/Kart-exit.blend --reference assets/private/skater.glb --bone-names .local/bone-names.json --output sdk/examples/mario-kart/rider.json
 ```
 
 The exporter preserves the glTF skin bind basis while converting Blender poses into
@@ -99,21 +99,26 @@ frames with a different rate. The output is a full native pose, not additive rot
 
 ## 6. Package, validate and playtest
 
-Put `rider.json`, the embedded `kart.glb`, `vehicle.json`, `mod.json` and `main.lua` in the
-project-root mods/mario-kart folder when using PLAY-MARIO-KART.bat. Standalone
-builds default to an executable-adjacent mods folder. Set animations.file to rider.json, enter/exit to their
-names, idle/drive/reverse/brake to drive for this example, and steer_left/steer_right to
-the corresponding endpoints. See vehicle-sdk.md for limits, schema and lifecycle.
+Put `rider.json`, the embedded `kart.glb`, `vehicle.json`, `mod.json` and `main.lua` in
+`sdk/examples/mario-kart` (or your own authoring folder). Set animations.file to rider.json,
+enter/exit to their names, idle/drive/reverse/brake to drive for this example, and
+steer_left/steer_right to the corresponding endpoints. Package it with:
+
+```powershell
+python tools/package_mod.py sdk/examples/mario-kart mods/mario-kart.zip
+```
+
+The archive has mod.json at its root. The game extracts it automatically; do not edit
+mods/.cache. See mod-packages.md and vehicle-sdk.md for limits, schema and lifecycle.
 
 The host validates names, frame counts, finite rigid transforms and clip references at
 load. The source loader tests cover malformed inputs; local validation also checked the
 export against the actual stock bank and matched the final entry pose to drive. The
 runtime applies the same native pose to whichever compatible character is selected.
 
-`Build-VehicleSDK.ps1` stages a build and documentation. It preserves differing local
-mod files; copy your approved changed files into the playable mod directory explicitly
-when it reports them for standalone builds. The project launcher reads the top-level
-mods folder directly. Reload/disable-enable the mod to load changed animation files.
+`Build-VehicleSDK.ps1` stages a build, example ZIPs and documentation. Repackage approved
+source changes to update the live ZIP. The game rescans and reloads enabled changed mods;
+use Rescan packages to force discovery. Existing compatible settings survive updates.
 Use PLAY-MARIO-KART.bat for a manual session. Check entry/exit from multiple vanilla
 stances, steering in both directions, ramps, braking, reset, Escape, and mod disable.
 Also try characters with different proportions; native-rig compatibility does not

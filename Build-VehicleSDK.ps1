@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $privateDirectory = Join-Path $PSScriptRoot '.local/vehicle-sdk'
 $buildDirectory = Join-Path $privateDirectory 'build'
 $artifact = Join-Path $buildDirectory 'skate3rust-vehicle-sdk.exe'
-$destination = Join-Path $privateDirectory 'skate3-vehicle-ramp-audio.exe'
+$destination = Join-Path $privateDirectory 'skate3-zip-mods.exe'
 Push-Location $PSScriptRoot
 $previousFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
 try {
@@ -25,33 +25,32 @@ try {
     }
     $bytes = [System.IO.File]::ReadAllBytes($artifact)
     $text = [System.Text.Encoding]::ASCII.GetString($bytes)
-    foreach ($required in @('--start-paused', 'Wheel or drag scrollbar', 'Drag // to resize', 'hold_fakie', 'Vehicle key already spawned', 'Native trainer controls are already owned by another mod')) {
+    foreach ($required in @('--start-paused', 'Wheel or drag scrollbar', 'Drag // to resize', 'hold_fakie', 'Vehicle key already spawned', 'ZIP must contain mod.json at its root', 'Native trainer controls are already owned by another mod')) {
         if (-not $text.Contains($required)) { throw "Wrong vehicle-sdk artifact: missing $required" }
     }
     Copy-Item -LiteralPath $artifact -Destination $destination -Force
-    # Only original SDK example sources are staged. Never copy extracted assets.
-    $modDestination = Join-Path $privateDirectory 'mods/native-trainer'
-    New-Item -ItemType Directory -Force -Path $modDestination | Out-Null
-    foreach ($name in @('mod.json','main.lua','help.txt','README.md')) {
-        $source = Join-Path $PSScriptRoot "mods/native-trainer/$name"
-        $target = Join-Path $modDestination $name
-        if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath $source -Destination $target }
-        elseif ((Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $target).Hash) {
-            Write-Warning "Preserving existing mod file: $target. Copy the updated source there when ready."
+    # Build ZIPs from the editable SDK examples. The project launcher reads root/mods.
+    $modRoot = Join-Path $privateDirectory 'mods'
+    New-Item -ItemType Directory -Force -Path $modRoot | Out-Null
+    foreach ($name in @('native-trainer','mario-kart')) {
+        & python (Join-Path $PSScriptRoot 'tools/package_mod.py') (Join-Path $PSScriptRoot "sdk/examples/$name") (Join-Path $PSScriptRoot "mods/$name.zip") --target-dir (Join-Path $PSScriptRoot '.local/vehicle-tests')
+        if ($LASTEXITCODE -ne 0) { throw "Failed to package $name" }
+        $old = [System.IO.Path]::GetFullPath((Join-Path $modRoot $name))
+        if (Test-Path -LiteralPath $old -PathType Container) {
+            $archive = [System.IO.Path]::GetFullPath((Join-Path $modRoot ('.legacy-' + $name + '-' + [guid]::NewGuid().ToString('N'))))
+            $bound = [System.IO.Path]::GetFullPath($modRoot) + [System.IO.Path]::DirectorySeparatorChar
+            if (-not $old.StartsWith($bound) -or -not $archive.StartsWith($bound)) { throw 'Invalid mod migration path' }
+            Move-Item -LiteralPath $old -Destination $archive
         }
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot "mods/$name.zip") -Destination (Join-Path $modRoot "$name.zip") -Force
     }
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'mods/README.md') -Destination (Join-Path $privateDirectory 'mods/README.md') -Force
-    $kartDestination = Join-Path $privateDirectory 'mods/mario-kart'
-    New-Item -ItemType Directory -Force -Path $kartDestination | Out-Null
-    foreach ($name in @('mod.json','main.lua','vehicle.json','README.md','kart.glb','rider.json')) {
-        $source = Join-Path $PSScriptRoot "mods/mario-kart/$name"
-        $target = Join-Path $kartDestination $name
-        if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath $source -Destination $target }
-        elseif ((Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $target).Hash) { Write-Warning "Preserving $target" }
-    }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'mods/README.md') -Destination (Join-Path $modRoot 'README.md') -Force
     New-Item -ItemType Directory -Force -Path (Join-Path $privateDirectory 'docs'), (Join-Path $privateDirectory 'sdk') | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/vehicle-sdk.md') -Destination (Join-Path $privateDirectory 'docs/vehicle-sdk.md') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/mixamo-vehicle-workflow.md') -Destination (Join-Path $privateDirectory 'docs/mixamo-vehicle-workflow.md') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'sdk/AGENTS.md') -Destination (Join-Path $privateDirectory 'sdk/AGENTS.md') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/mod-packages.md') -Destination (Join-Path $privateDirectory 'docs/mod-packages.md') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs/lua-modding.md') -Destination (Join-Path $privateDirectory 'docs/lua-modding.md') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'sdk/skate.lua') -Destination (Join-Path $privateDirectory 'sdk/skate.lua') -Force
     $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
     if ($hash -ne (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash) {

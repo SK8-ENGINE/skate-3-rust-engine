@@ -1,4 +1,4 @@
-# Native Trainer Showcase 2.0
+# Native Trainer Showcase 2.1
 
 One original mod demonstrating the actual SDK, with no game assets. Enable it in
 Escape -> Mods. Its independent draggable settings window opens on Escape.
@@ -48,3 +48,6 @@ telemetry overlays and original visual extensions. The engine's full API referen
 is docs/lua-modding.md and language-server annotations are sdk/skate.lua.
 
 Hold fakie stance disables automatic fakie stance switching; normal steering and slides still work. Off by default. Escape settings windows can be resized by dragging the bottom-right // grip.
+
+Authoring folder: sdk/examples/native-trainer. Package with tools/package_mod.py into
+mods/native-trainer.zip. See sdk/AGENTS.md and docs/mod-packages.md.

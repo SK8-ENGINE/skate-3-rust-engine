@@ -1,6 +1,6 @@
 use skate_vehicles::*;
 fn definition() -> VehicleDefinition {
-    serde_json::from_str(include_str!("../../../mods/mario-kart/vehicle.json")).unwrap()
+    serde_json::from_str(include_str!("../../../sdk/examples/mario-kart/vehicle.json")).unwrap()
 }
 fn simulation() -> Simulation {
     let mut s = Simulation::default();

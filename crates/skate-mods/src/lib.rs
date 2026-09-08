@@ -1,5 +1,6 @@
 //! Window-free, versioned Lua package runtime. Host commands commit only after callbacks succeed.
 mod schema;
+mod archive;
 mod vm;
 pub use schema::*;
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,24 @@ use std::{
     time::{Duration, Instant},
 };
 pub use vm::Command;
+
+/// Inspect a folder or ZIP and compile its Lua entry without executing callbacks.
+pub fn validate_package(source: &Path) -> Result<Manifest, String> {
+    let source = source.canonicalize().map_err(|e| e.to_string())?;
+    let mut cache = archive::Cache::default();
+    let root = if source.is_dir() { source.clone() } else {
+        cache.materialize(source.parent().ok_or("Missing package parent")?, &source)?
+    };
+    let manifest: Manifest = serde_json::from_slice(&read_bounded(&root, "mod.json", 64 * 1024)?)
+        .map_err(|e| e.to_string())?;
+    manifest.validate()?;
+    fingerprint(&root)?;
+    let source = read_bounded(&root, &manifest.entry, 256 * 1024)?;
+    let source = std::str::from_utf8(&source).map_err(|e| e.to_string())?;
+    if source.starts_with('\u{1b}') { return Err("Lua bytecode is unsupported".into()); }
+    mlua::Lua::new().load(source).set_mode(mlua::chunk::ChunkMode::Text).into_function().map_err(|e|e.to_string())?;
+    Ok(manifest)
+}
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,6 +64,7 @@ pub struct Manager {
     last_scan: Instant,
     pub snapshot: Value,
     invalid_since: BTreeMap<String, Instant>,
+    archives: archive::Cache,
 }
 impl Manager {
     pub fn root(&self) -> &Path {
@@ -61,6 +81,7 @@ impl Manager {
             last_scan: Instant::now() - Duration::from_secs(2),
             snapshot: Value::Null,
             invalid_since: BTreeMap::new(),
+            archives: archive::Cache::default(),
         }
     }
     pub fn scan(&mut self, force: bool) {
@@ -89,16 +110,23 @@ impl Manager {
         let mut paths: Vec<_> = dirs
             .filter_map(Result::ok)
             .map(|d| d.path())
-            .filter(|p| p.is_dir())
+            .filter(|p| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'))
+                && (p.is_dir() || p.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"))))
             .collect();
         paths.sort();
         if paths.len() > 128 {
             self.diagnostics.push(
-                "Only the first 128 package directories are supported; remove excess packages"
+                "Only the first 128 packages are supported; remove excess packages"
                     .into(),
             );
         }
-        for path in paths.into_iter().take(128) {
+        for source in paths.into_iter().take(128) {
+            let path = if source.is_file() {
+                match self.archives.materialize(&self.root, &source) {
+                    Ok(path) => path,
+                    Err(e) => { self.diagnostics.push(format!("{}: {e}", source.display())); continue; }
+                }
+            } else { source.clone() };
             // Invalid edits retire the old package: never silently retain outdated gameplay.
             let result = (|| {
                 let bytes = read_bounded(&path, "mod.json", 64 * 1024)?;
@@ -116,7 +144,7 @@ impl Manager {
                     }
                     found.insert(id, (path, manifest, hash));
                 }
-                Err(e) => self.diagnostics.push(format!("{}: {e}", path.display())),
+                Err(e) => self.diagnostics.push(format!("{}: {e}", source.display())),
             }
         }
         for id in duplicates {

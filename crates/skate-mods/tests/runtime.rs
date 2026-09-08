@@ -142,7 +142,7 @@ fn traversal_and_unknown_dependencies_rejected() {
 }
 #[test]
 fn examples_load_and_run() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../mods");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/examples");
     if !root.exists() {
         panic!("Examples missing");
     }
@@ -299,7 +299,7 @@ fn trainer_commands_validate_and_follow_settings() {
 }
 
 fn showcase_manager(f: &Fixture) -> Manager {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../mods");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/examples");
     let mut m = Manager::new(root, f.0.join("showcase-settings"));
     m.snapshot = json!({"player":{"position":[0,0,0],"velocity":[3,0,0],"heading":0.5,"state":100,"on_board":true,"bailing":false,"grind":{"active":false}},"keys":{},"map":{"name":"test","generation":0},"actions":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]});
     m.scan(true);
@@ -430,7 +430,7 @@ fn vehicle_api_rejects_traversal_and_invalid_controls() {
 
 #[test]
 fn kart_controller_reset_is_edge_triggered_and_rebindable() {
- let f=Fixture::new("return {}");let mut m=Manager::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../mods"),f.0.join("kart-settings"));
+ let f=Fixture::new("return {}");let mut m=Manager::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/examples"),f.0.join("kart-settings"));
  m.snapshot=json!({"player":{"position":[0,0,0],"heading":0},"keys":{},"vehicles":{"community.mario-kart":{"kart":{"position":[2,1,3],"heading":0.5,"occupied":true,"phase":"driving","speed":0,"ready":true}}},"vehicle_input":{"throttle":0,"steering":0,"brake":0,"handbrake":false,"interact":false,"pad_buttons":0}});
  m.scan(true);m.enable("community.mario-kart",true).unwrap();m.commands.clear();
  for buttons in [128,128,128,0,128] {m.snapshot["vehicle_input"]["pad_buttons"]=json!(buttons);m.dispatch("on_fixed_update",json!({"dt":0.016}));}

@@ -19,18 +19,19 @@ Controller: **Y** enter/exit, **RT/LT** accelerate/reverse, **left stick** steer
 **A** brake, **B** handbrake, **right-stick click** reset while driving. The reset bind can be changed to left-stick click in the mod settings. F10 remains the keyboard spawn shortcut.
 Release controls before switching between driving and skating.
 
-`mods/mario-kart/kart.glb` is generated from the user-supplied ZIP. It is excluded
+`sdk/examples/mario-kart/kart.glb` is generated from the user-supplied ZIP. It is excluded
 from Git. The importer preserves meshes/materials/embedded textures, normalizes
 the model to metres and creates named wheel pivots. To regenerate:
 
 ```powershell
-python tools/prepare_mario_kart.py C:/Users/Daddy/Downloads/kart-de-mario.zip mods/mario-kart
+python tools/prepare_mario_kart.py C:/Users/Daddy/Downloads/kart-de-mario.zip sdk/examples/mario-kart
 ```
 
-NumPy is required by the importer. Run Build-VehicleSDK.ps1 to build/stage the
-executable and original mod sources. The helper preserves existing modified mod
-files; copy updates manually when it reports a preserved file. PLAY-MARIO-KART.bat loads the top-level project `mods/` directory via SKATE3_MODS.
-A standalone executable defaults to its adjacent mods directory. No model or game assets are committed.
+NumPy is required by the model importer. Editable sources live in `sdk/examples/`;
+`Build-VehicleSDK.ps1` packages them into top-level `mods/*.zip` and stages a release.
+The project launcher loads top-level mods/; a standalone executable defaults to its
+adjacent mods directory. See [mod-packages.md](mod-packages.md) for the ZIP layout,
+validation, update rules and development-folder support. No game assets are committed.
 
 ## Lua API
 
@@ -76,7 +77,7 @@ mod errors; they retire the mod's vehicles instead of crashing the game.
 
 ## Vehicle definition
 
-See `mods/mario-kart/vehicle.json` for a complete working definition. Coordinates
+See `sdk/examples/mario-kart/vehicle.json` for a complete working definition. Coordinates
 are metres, +Y up, +Z forward, +X driver-left, with heading in radians around +Y.
 `half_extents` describes the outer chassis collision bounds. `mass` is kilograms. `model_scale`,
 `model_offset` and `model_yaw` affect the model only, not its collider.
@@ -147,7 +148,8 @@ Driving slots loop; brake and reverse select their respective base clips, with d
 as fallback. Steering continuously blends that base towards the left/right pose.
 Vehicle phase changes blend with native bone-local interpolation; brake/reverse
 base-clip changes currently cut, so author compatible seated poses.
-Edit vehicle.json or rider.json and reload the mod to install new clips.
+Edit vehicle.json or rider.json in the authoring folder, rebuild its ZIP, then reload
+the mod (or wait for automatic rescan) to install new clips. Never edit .cache.
 
 ## Current boundaries
 

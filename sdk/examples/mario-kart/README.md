@@ -7,7 +7,7 @@ Controller: RT/LT accelerate/reverse, left stick steers, A brakes, B handbrakes.
 The enabled mod shows keyboard and controller controls on screen, including the current reset bind. Toggle Show driving HUD in its settings to hide/show them, even before spawning.
 
 The GLB is prepared from your supplied ZIP with tools/prepare_mario_kart.py and is
-kept out of Git. To rebuild it: python tools/prepare_mario_kart.py PATH_TO_ZIP mods/mario-kart
+kept out of Git. To rebuild it: python tools/prepare_mario_kart.py PATH_TO_ZIP sdk/examples/mario-kart
 The script requires NumPy. No third-party model is downloaded or bundled in source commits.
 
 Edit vehicle.json for dimensions, wheels, suspension, seat, exit and camera offsets.
@@ -26,3 +26,6 @@ Ramp tuning uses a shorter rounded chassis and a lower centre of mass, with mass
 distribution independent of the collider. The shared engine_audio definition enables
 throttle/speed-responsive synthesized engine sound; Engine volume in the mod window
 controls it live (zero mutes). Full authoring guide: docs/mixamo-vehicle-workflow.md.
+
+Author here, then run `python tools/package_mod.py sdk/examples/mario-kart mods/mario-kart.zip`.
+The live ZIP loads automatically; do not edit mods/.cache. See sdk/AGENTS.md.

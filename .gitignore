@@ -32,4 +32,6 @@ __pycache__/
 *.pem
 *.key
 
-/mods/mario-kart/rider.json
+/sdk/examples/mario-kart/rider.json
+
+/mods/.cache/
