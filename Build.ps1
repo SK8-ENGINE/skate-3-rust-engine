@@ -27,6 +27,13 @@ try {
         $destination = Join-Path $binDirectory $name
         Copy-Item -LiteralPath $source -Destination $destination -Force
         $staged += @{name = $name; sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash}
+        # Keep development backtraces useful after staging the EXE and Bevy DLLs.
+        $pdb = [IO.Path]::ChangeExtension($source, '.pdb')
+        if (Test-Path -LiteralPath $pdb) {
+            $symbolDestination = Join-Path $binDirectory (Split-Path -Leaf $pdb)
+            Copy-Item -LiteralPath $pdb -Destination $symbolDestination -Force
+            $staged += @{name = (Split-Path -Leaf $pdb); sha256 = (Get-FileHash -LiteralPath $symbolDestination -Algorithm SHA256).Hash}
+        }
         $imports = & $readobj --coff-imports $source
         if ($LASTEXITCODE -ne 0) { throw "Could not inspect DLL imports: $source" }
         foreach ($line in $imports) {

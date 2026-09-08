@@ -65,6 +65,9 @@ pub(crate) fn sample(
             previous.gpu_recorded = true;
         }
     }
+    if let Some(multiplayer) = &multiplayer {
+        eprintln!("REPORT_META network={}", multiplayer.diagnostic_summary());
+    }
     let state = format!(
         "map_fingerprint:{:016x} generation:{} difficulty:{} physical:{:?} paused:{} map_loading:{} multiplayer_active:{} physics_failed:{}",
         config.map_fingerprint,

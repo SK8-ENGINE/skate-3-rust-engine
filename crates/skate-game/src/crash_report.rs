@@ -29,7 +29,7 @@ impl Capture {
         if let Some(value) = line.strip_prefix("REPORT_META ") {
             if let Some((key, _)) = value.split_once('=') {
                 // A fixed key vocabulary prevents arbitrary diagnostic accumulation.
-                if ["startup", "stage", "gpu", "state", "graphics"].contains(&key) {
+                if ["startup", "stage", "gpu", "state", "graphics", "network"].contains(&key) {
                     self.metadata.insert(key.into(), entry.clone());
                 }
             }
