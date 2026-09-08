@@ -110,14 +110,25 @@ impl MotionHost {
                 match operation {
                     crate::graph_host::motion_reset::Operation::SkaterAnimation => {
                         self.action_intents.clear();
+                        self.action_controls = Default::default();
                         self.animation.motion_intents.clear();
                         self.animation.filtered_intents.clear();
+                        //825953B0's represented selective MG output reset.
+                        self.flags = Default::default();
+                        self.is_power_sliding = false;
+                        self.riding.last_good_landing_velocity = 0.0;
+                        self.riding.manual_out_timer = 0.0;
+                        self.hand_services.busy_hands = [0; 2];
+                        self.gesture_publication = None;
                         self.animation.reset_from_stock();
                     }
                     crate::graph_host::motion_reset::Operation::GivenStance => {
-                        self.animation.posture.set_requested(false);
+                        self.animation.reset_to_given_stance()?;
                     }
                 }
+                //Later PlayAnimation nodes in this same traversal see the reset.
+                self.playback_context.is_mirrored = self.animation.skater_animation_flags.map(|f| f & 0x4000_0000 != 0);
+                self.playback_context.is_switch = Some(self.animation.relative_stance == 1);
             }
             return Ok(());
         }

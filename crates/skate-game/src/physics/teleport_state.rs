@@ -36,20 +36,20 @@ impl Runtime {
     }
     /// Update82D431F0 calls the actor only without Processed2468 bit1.
     ///825926F8 stores the reply and marks it for the next input publication.
-    pub fn update(&mut self, input: &ProcessedPhysicsInput) {
-        if self
+    pub fn update(&mut self, input: &ProcessedPhysicsInput) -> bool {
+        self
             .state
             .update(input.flags_2468, input.matrix_1536, input.byte_1600)
             == Update::RequestCheckpoint
-        {
-            self.request_checkpoint();
-        }
     }
     /// Host response for an independently verified actor-reset request.
     pub fn request_checkpoint(&mut self) {
+        self.reply(self.checkpoint);
+    }
+    pub fn reply(&mut self, checkpoint: Checkpoint) {
         self.pending_reply = Some(Target {
-            transform: self.checkpoint.transform.map(|row| row.map(f32::to_bits)),
-            on_board: self.checkpoint.on_board,
+            transform: checkpoint.transform.map(|row| row.map(f32::to_bits)),
+            on_board: checkpoint.on_board,
         });
     }
     /// Consume at the next actor-reset publication boundary. Publish this as

@@ -1,143 +1,135 @@
-# Native bail checkpoint investigation
+# Native bail recovery
 
-Status: **selector port only; gameplay integration is incomplete**. The existing
-fixed-spawn response in `physics/teleport_state.rs` remains active. This change
-must not be described as a working native bail-respawn fix.
+Automatic bail recovery now uses the TU3 actor checkpoint manager instead of
+always replying with the map's initial spawn. The integration targets the
+engine's existing single-player, static-map world. Gameplay validation is
+reserved for the user; no game, recomp, controller harness, screenshot capture,
+asset-check mode or test executable was launched during this work.
 
-## Reference and scope
+## Behavior
 
-Reference: TU3 memory image `default_82000000_011B0000.bin`, mapped at
-`0x82000000`, SHA256
-`f4aa113eb541bfba03dbc108cf5ab43f58c965b20fa3b82f9c40938a0ad841c4`.
-Addresses below were inspected in the matching generated PPC instruction
-comments; constants were checked against the raw image. The read-only IDA
-lookup for `82BFB1E0` found no defined function in the locally available dump
-database, so it did not provide independent decompiler confirmation.
+The actor first validates its current physical COM position using the retained
+riding heading. If that fails, it ranks recorded checkpoints and consumes the
+selected entry. Entries rejected by validation are also removed, so repeated
+bails can walk back through history. Exhaustion uses the initial map transform
+and current actor stance. Ordinary recovery preserves history; constructing a
+new skater for a map constructs a new history.
 
-No game, recomp, controller harness, screenshot capture or asset-check launch
-was performed. No binary/data files belong in this commit.
+Recording uses completed physical publications, not render transforms or a
+last-grounded shortcut. It requires 120 empirical measurements, more than the
+stock 15 frames in an eligible state, expired 20-update cooldown, and at least
+1.5 units from every recorded position. The ring retains 32 entries. Surface
+categories 5, 6, 9, 12 and 13 are excluded; category 8 requests offboard recovery.
+Scores are 100 for categories 1/2, 50 for 3/4, 20 for 11 and zero otherwise. The
+newest entry receives a 100-point penalty and entries older than five receive a
+200-point penalty; newest wins ties.
 
-## Implemented core
+The selected position, heading, stance and offboard byte go through the existing
+State702 request/reply publication boundary. Selection does not reset physical
+bodies. Existing wipeout timers, recovery countdown, physical reset and ragdoll
+restoration remain in place. The explicit fixed-checkpoint helper used by the
+existing manual test remains separate from automatic selection.
 
-`skate-core/src/player/respawn.rs` contains the actor history and ordinary
-automatic selector, with required scene-validation callbacks. It has no host
-default that silently accepts missing geometry or occupant providers.
+## Native evidence
 
-- `82BFB068` constructs the manager, seeds the history and starts a 20-update
-  cooldown. The native 33-slot ring has 32 usable entries.
-- `82BFB1E0` publishes current COM position every actor tick. Recording needs
-  at least 120 empirical measurements, expired cooldown and a root at least
-  1.5 units from every recorded position. Falling below 120 clears cooldown.
-- `82BFB3F8` rejects State69. Riding states 100/104 publish the current
-  orientation before testing state age, Ground323 and surface eligibility.
-  Offboard states 500/502 require the state-age gate and no OffBoard333
-  correction. Both paths require strictly more than the configured 15 frames.
-- Surface categories 5, 6, 9, 12 and 13 are rejected for riding/ground checks.
-  Category 8 requests offboard recovery. Scores are 100 for categories 1/2,
-  50 for 3/4, 20 for 11, and zero otherwise.
-- Recording checks location, edges, then ground unless alternate-world mode
-  bypasses ground. It stores the original candidate, discarding the ray hit's
-  position and offboard result.
-- `82BFC9B0` tries current position (`82BFC038`), scored history (`82BFC378`),
-  then fallback (`82BFC718`). Current selection checks ground, location,
-  occupants and edges, in that order. An offboard ray result replaces only Y.
-- `82BFC550` ranks newest to oldest: newest gets a 100-point penalty; entries
-  older than five get a 200-point penalty. Strict comparisons make newest win
-  ties. Selection removes the entry before validation, including successful
-  entries. History validation repeats location/occupant checks only.
-- Exhaustion falls back to initial transform, **current actor stance**, on-board
-  mode and score zero. Manual/session-marker selector `82BFC828` has a different
-  non-destructive history walk and must remain separate.
+Reference memory image `default_82000000_011B0000.bin`, mapped at 0x82000000:
+SHA256 `f4aa113eb541bfba03dbc108cf5ab43f58c965b20fa3b82f9c40938a0ad841c4`.
+Instruction comments in the matching generated PPC were inspected; numeric
+constants were checked in the raw image. A read-only IDA lookup found no defined
+function for 82BFB1E0 in the available dump database, so decompiler output was
+not used as independent confirmation. This is a scalar translation, not a
+claim of demonstrated bit-exact PPC floating-point equivalence.
 
-The six compile-only unit cases cover consumption/validation order, rejection
-and reranking, current-position Y correction, cooldown/distance/capacity
-boundaries, surface categories, and exhausted-history stance. They have not
-been executed. This is a scalar Rust translation, not demonstrated bit-exact
-PPC floating-point equivalence.
-
-## Required host bindings
-
-| Native input | Producer / current Rust connection |
+| Address | Recovered behavior |
 | --- | --- |
-| State20 | Conditioner164, incremented by `82DE5858`, reset by `82DE5588`; **not** frames in current physical state. No equivalent empirical counter is currently published. |
-| State4 / State16 / State69 | Published physical state age, ID and teleport request. |
-| Skeleton64 | Physical skeleton COM16144, published by `82BE1AE8`; corresponds to physical reckoning vector64. |
-| Skeleton416 | Translation of Skeleton368, the unmirrored animation-to-world11920 matrix; corresponds to `animated_skeleton.roots.animation_to_world`. |
-| Ground323 | `82DB6EC0` reads PhysicalPlayer1872 (GrindManager), word460 bit27. Constructor `82D8A318` places its 416-byte result at +48; the relevant result word is +412. The live Rust grind owner has no published equivalent. Its actual set/clear producer still needs recovery. Do not substitute `active`, `grounded`, or constant false. |
-| OffBoard333 | Biped708, the offboard contact-correction active flag. |
-| OffBoard52/56 | Both are populated from Processed2596 in `82DB6EC0`; category is packed bits7..11. Do not use Processed2600 for the second field. |
+| 82BFB068 / 82BFCB38 | History construction and insertion |
+| 82BFB1E0 / 82BFB3F8 | Recording gates, current orientation and COM publication |
+| 82BFC9B0 | Current -> scored history -> fallback selector |
+| 82BFC038 / 82BFC378 / 82BFC550 / 82BFC718 | Current candidate, history validation, scoring/removal, fallback |
+| 82BFC828 | Separate non-destructive manual/session-marker query; not used here |
+| 82592518 / 825926F8 | Save selected stance, queue deferred actor reset reply |
+| 82D431F0 / 82D43280 | State702 reply capture and physical output |
+| 82591E30 / 82592A00 / 82C01BF8 | Recording transform and solved deck source |
+| 82BFBC18 / 82BFB6F8 | Ground/capsule and authored-edge validation |
+| 82DE5858 / 82DE5588 | Empirical measurement count and reset lifecycle |
+| 82B97350 / 82B97308 / 82B972A8 | Save15200 and deferred stance restoration |
+| 82B98050 / 825953B0 | Selective animation and motion-output reset |
 
-`82591E30` builds the recording transform. Riding reads the actor's board
-frame through `82592A00` and adds 0.2 Y. Offboard uses Skeleton432 (mirrored
-variant from `82BE3650`). If deck velocity squared exceeds 0.25, it normalizes
-the velocity, constructs a world-up basis, and accepts that basis only when
-the projected forward length squared exceeds 0.9. The exact host board-frame
-binding and floating-point operation ordering still need completion.
+## Host bindings
 
-`82BFBC18` traces from candidate position +0.1 Y with delta [0,-10,0], using
-query `82E0AAD0` with actor identity. It checks normal Y, ray drop and category,
-then tests the vertical capsule above the **ray start**. `82BFB6F8` queries
-authored edges in a [0.3,0.6,0.3] half-bound, with the native provider order and
-40-edge capacity, and rejects squared segment distance below 0.09. Triangle
-diagonals are not a replacement for authored edge data.
+Riding checkpoints use the solved board frame, with Processed2468 bit20
+inverting X/Z, plus 0.2 Y. Above speed squared 0.25, a velocity-derived upright
+basis is accepted only when projected forward length squared exceeds 0.9.
+Offboard checkpoints use the animation-to-world frame with Processed2476 bit2
+inverting X/Z; the native function returns before the velocity-heading branch.
 
-`82BFB928` occupant predicates come from the LivingWorldManager provider
-(SimController +212), not simply static collision geometry. `82BFBB48`
-conditionally invokes the alternate-world location provider. The host adapter
-must explicitly account for the actual available providers and world mode;
-these predicates have not been connected or proven equivalent.
+Current position is Skeleton64 (physical COM16144); spacing uses Skeleton416,
+the unmirrored animation-to-world translation. OffBoard333 comes from the
+canonical contact-correction owner. Both native OffBoard52/56 fields receive
+Processed2596; their category is packed bits7..11. State age comes from the
+physical state publication. The actor-owned empirical count increments once per
+completed physical output and resets with physical teleport, retaining history.
 
-## Stock settings found
+Ground323 is GrindManager460/result412 bit27. The producer was recovered in
+82D875A8: after accepted-family attempts fail, the raw truck/deck/inverted/tip
+contact path at 82D87DE8 sets 0x08000000. The host retains those same raw query
+results and publishes the rejection flag separately from active grind state.
+No new rail distance or last-grounded heuristic is used.
 
-The installed collection data already includes class `Hash_12B64C0E804B0853`,
-key `default`. These are read from data, not new tuning defaults:
+Ground validation casts from candidate +0.1 Y down ten units, checks normal Y,
+maximum drop and category, then tests a vertical capsule above the ray start.
+It reuses the canonical triangle query and matching groups. Edge validation
+uses authored static edges in provider order, capacity40, with bounds
+[0.3,0.6,0.3] and squared segment distance threshold0.09. It does not use triangle
+diagonals. Current candidates repeat all predicates; historical candidates
+repeat location/occupant checks only, matching native selection.
 
-| Field hash | Value | Use |
+Normal-world location validation returns true before invoking the alternate
+provider. Occupancy predicates in 82BFB928 belong to LivingWorldManager, not
+static terrain. This engine scene has no pedestrian/vehicle actors or alternate
+challenge controller, so those providers are empty; static obstacles remain
+covered by the capsule. Adding living-world actors or alternate-world maps will
+require binding their providers here, as with the existing offboard adapters.
+
+Saved stance survives ResetSkaterAnimation and is consumed by
+ResetToGivenStance at the actual MotionGraph dispatch. Updated flags/relative
+stance are visible to later nodes in the same traversal, including TELEPORT
+playback. The canonical actor publication then receives the modified values.
+The animation reset now preserves the native local-player/board flags and saved
+request rather than clearing all flags. The stock `teleport.xml` confirms the
+ordered ResetSkaterAnimation -> ResetToGivenStance -> PlayAnimation sequence.
+
+## Stock data
+
+Class `Hash_12B64C0E804B0853`, key `default`, already exists in installed data.
+No new tuning file or fallback tuning values were introduced.
+
+| Field hash | Value | Meaning |
 | --- | --- | --- |
 | C0526C883AF0ECCA | 0.4 | Capsule height |
 | CEB092E418A5B001 | 0.5 | Capsule radius |
 | 8ABE098D3806D273 | 1.0 | Maximum ray drop |
 | ADD032CACF6A1C15 | 0.75 | Minimum normal Y |
-| E64C980EE2114070 | 1.0 | Occupant query radius |
-| 59E1F2B3CDC4E658 | 2.0 | Occupant query radius |
 | 10B7C3A9CC8D3721 | 15 (Int32) | Minimum state age |
 
-Source `skatercollections.vlt` SHA256:
+Native occupant-query radii E64C980EE2114070 and 59E1F2B3CDC4E658 are 1 and 2;
+the current empty living-world provider does not consume them.
+Source skatercollections.vlt SHA256:
 `3b7dbd062bb1c906a085514355afff35cfa22f486ae70820c5ad1a42a7aab25b`.
 
-## Stance and deferred reset dependency
+## Validation and user testing
 
-Actor reset `82592518` chooses the candidate, then calls `82592C08` to save
-stance before queuing the reset reply (`825926F8`). Setter `82B97350` writes
-animator15200; it does not immediately overwrite relative stance15196.
-Getter `82592B68` combines natural15188, relative15196 and the fakie flag.
+Release compilation uses the requested x86_64-pc-windows-msvc static CRT flags,
+locked dependencies, and no default game features. The six core selector cases
+compile with --no-run; they have not been executed. Added host cases cover real
+scene recording/recovery, heading thresholds and the actual stock reset dispatch.
+The whole game test target cannot currently compile because pre-existing tests
+in graphics_menu.rs omit Menu.maps/selected_map, and skate_world.rs omits the
+RetailWorldMaterial argument. Those unrelated map/render fixtures were not edited.
 
-MotionGraph `ResetToGivenStance` invokes `82B97308` / `82B972A8`, consuming
-saved15200, updating flags15180 and relative15196, then clearing saved15200.
-The current game handler instead only clears the posture request. Saved15200
-is absent from the canonical animation owner. The existing pure
-`player/offboard/reset_animation.rs` helper and `motion_offboard/reset.rs`
-owner contract are not integrated into this dispatch.
-
-`ResetSkaterAnimation` also needs selective native owner resets: the existing
-`MotionAnimation::reset_from_stock` replaces all animation flags with zero,
-where `82B98050` applies a selective mask. Connecting saved checkpoint stance
-without completing this lifecycle would not preserve native recovery.
-
-Keep State702's request -> next actor input reply -> State702 output -> physical
-reset ordering. Preserve the existing wipeout timers and recovery countdown.
-Do not reset bodies from the selector. Map replacement should create a fresh
-history; ordinary automatic recovery should retain the consumed history.
-
-## Validation and remaining work
-
-The Windows release game build passed with the requested static CRT flags.
-After the fallback correction, the core library and six new cases compiled
-with `cargo test --release --locked --target x86_64-pc-windows-msvc -p skate-core
---lib --no-run`. No test executable was run.
-
-Remaining: recover the grind flag producer; complete canonical stance/reset
-ownership; bind transforms and empirical counter; implement native scene
-predicates; connect observation and actor callback at their publication
-boundaries; compile the integrated executable. Gameplay parity remains for
-user testing after those dependencies are completed.
+The final executable is copied into this task's ignored bin/native-bail-recovery
+directory; Test-Native-Bail-Recovery.bat uses that exact copy and installed assets.
+It has not been executed. Its sibling gameplay.log records passive BAIL_CHECKPOINT
+selection messages. Test riding away from spawn for several seconds, bailing on
+open ground and near an edge, repeated bails, both stances, and offboard recovery.
+Gameplay parity and visual behavior remain unverified until the user runs it.

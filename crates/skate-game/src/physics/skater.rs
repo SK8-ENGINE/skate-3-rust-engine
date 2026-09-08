@@ -47,6 +47,7 @@ pub(crate) struct SkaterRuntime {
     pub footplant: super::footplant::Footplant,
     pub wipeout: super::wipeout::Wipeout,
     pub wipeout_state: super::wipeout_states::WipeoutState,
+    pub respawn: super::respawn::Runtime,
     pub teleport_state: super::teleport_state::Runtime,
     pub offboard: super::offboard::runtime::Runtime,
     pub skeleton: SkeletonBody,
@@ -180,7 +181,9 @@ impl SkaterRuntime {
         let wipeout_state = super::wipeout_states::WipeoutState::load(
             &data, asset_root, &animation.evaluator.frames.source_sha256,
         )?;
+        let respawn = super::respawn::Runtime::load(&data, spawn, animation.checkpoint_stance())?;
         Ok(Self {
+            respawn,
             climbing: super::climbing::Runtime::load(asset_root, &animation.evaluator.frames.bone_names)?,
             offboard,
             render_pose: initial_hierarchy,

@@ -34,6 +34,11 @@ pub struct MotionAnimation {
     ///Actual fullSkaterAnim15180 flags. AddBindPose consumes bits22/21 on
     ///construction; the owner publishes the updated flags back to the actor.
     pub skater_animation_flags: Option<u32>,
+    /// SkaterAnim15188/15196/15200 at the graph publication boundary.
+    pub natural_stance: u32,
+    pub relative_stance: u32,
+    pub requested_stance: u32,
+    pub reset_action_intents: bool,
     attribute_mirror: std::sync::Arc<skate_core::animation::playback_attributes::AttributeMirror>,
     settable: SettableAttributes,
     tree_attributes: Vec<AnimationAttribute>,
@@ -72,7 +77,20 @@ impl MotionAnimation {
         self.motion_attributes.clear();
         self.tree_attributes.clear();
         self.settable.clear();
-        self.skater_animation_flags = Some(0);
+        //82B98050 preserves local-player and board-present flags, and saved15200.
+        self.skater_animation_flags = self.skater_animation_flags.map(|f| f & 0x0ff7_ffff);
+        self.relative_stance = 0;
+        self.reset_action_intents = true;
+        self.property = AdvanceResult { crossed_end: false, overshoot: -1.0, remaining_before_wrap: -1.0 };
+    }
+    pub fn reset_to_given_stance(&mut self) -> Result<(), String> {
+        let flags = self.skater_animation_flags.as_mut().ok_or("Stance reset requires SkaterAnim flags")?;
+        let mut relative = self.relative_stance != 0;
+        skate_core::player::offboard::reset_animation::given_stance(
+            self.natural_stance, &mut self.requested_stance, flags, &mut relative,
+        );
+        self.relative_stance = u32::from(relative);
+        Ok(())
     }
     pub fn from_metadata(metadata: AnimationMetadata) -> Self {
         Self {
@@ -88,6 +106,10 @@ impl MotionAnimation {
             posture: PendingPosture::default(),
             posture_bank_valid: false,
             skater_animation_flags: None,
+            natural_stance: 1,
+            relative_stance: 0,
+            requested_stance: 0,
+            reset_action_intents: false,
             attribute_mirror: std::sync::Arc::new(
                 skate_core::animation::playback_attributes::AttributeMirror(Vec::new()),
             ),

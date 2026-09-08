@@ -76,6 +76,7 @@ pub(super) fn advance(
         skater.player_input.processed.surface_mode_2540,
     )?;
     if teleported {
+        skater.respawn.reset_measurements();
         skater.player_state.reset_for_teleport();
         skater.centre_of_mass_filter.reset();
         skater.animation_feedback.reset();
@@ -153,7 +154,9 @@ pub(super) fn advance(
         }
         skate_core::player::state::PhysicalStateId::Teleporting => {
             //VT823272FC slot8=82D431F0; slots12/40 are original empty leaves.
-            skater.teleport_state.update(&skater.player_input.processed);
+            if skater.teleport_state.update(&skater.player_input.processed) {
+                super::respawn::request(physics, skater)?;
+            }
         }
         state => return Err(format!("Selected {state:?} requires its physical update")),
     }
@@ -189,6 +192,7 @@ pub(super) fn advance(
         physical.reckoning.vector_16.map(f32::from_bits),
     );
     let feedback = animation_phase::publish_feedback(physics, skater);
+    super::respawn::observe(physics, skater)?;
     let deck = physics.board.bodies()[BodyId::Deck.index()];
     let rider = skater
         .skeleton

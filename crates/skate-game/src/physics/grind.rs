@@ -27,6 +27,8 @@ pub(crate) struct Runtime {
     pub candidate: Option<FiftyFiftyCandidate>,
     pub name: String,
     pub active: bool,
+    ///82D875A8 fallback result412 bit27: raw contact without accepted family.
+    pub checkpoint_suppressed: bool,
     pub kind: u32,
     pub front_contact: bool,
     chromosome: chromosome::Chromosome,
@@ -71,6 +73,7 @@ impl Runtime {
             candidate: None,
             name: String::new(),
             active: false,
+            checkpoint_suppressed: false,
             kind: 0,
             front_contact: false,
             chromosome: chromosome::Chromosome::default(),
@@ -192,6 +195,7 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
     let p = &mut skater.player_input.processed;
     let runtime = &mut physics.grind;
     runtime.entry_velocity = None;
+    runtime.checkpoint_suppressed = false;
     let board = super::solve::deck_frame(&physics.board);
     let mut effective_board = board;
     if p.flags_2468 & 0x0010_0000 != 0 {
@@ -258,15 +262,15 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
         &runtime.primitives,
     );
     let velocity = p.vectors_400_416[0].map(f32::from_bits);
-    let slide = grind_contact::deck_contact(
+    let deck_hit = grind_contact::deck_contact(
         board,
         p.flags_2484,
         runtime.test_depth_epsilon,
         runtime.test_depth,
         runtime.deck_to_truck,
         &edges,
-    )
-    .and_then(|mut hit| {
+    );
+    let slide = deck_hit.and_then(|mut hit| {
         hit.primitive = nearby[hit.primitive];
         grind_contact::boardslide_candidate(
             board,
@@ -314,14 +318,14 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
         skater.animation_input.fields.balance,
         p.vectors_464_480_496_512_528[0].map(f32::from_bits),
     );
-    let dark = families::inverted_contact(
+    let inverted_hit = families::inverted_contact(
         board,
         p.flags_2484,
         runtime.test_depth_epsilon,
         runtime.test_depth,
         &edges,
-    )
-    .and_then(|mut hit| {
+    );
+    let dark = inverted_hit.and_then(|mut hit| {
         hit.primitive = nearby[hit.primitive];
         families::darkslide(
             board,
@@ -355,6 +359,9 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
         None
     };
     let selected = current.or(fifty).or(five).or(tip).or(slide).or(dark);
+    runtime.checkpoint_suppressed = (gated || selected.is_none())
+        && (hits.iter().any(Option::is_some) || deck_hit.is_some()
+            || inverted_hit.is_some() || tip_hits.iter().any(Option::is_some));
     let candidate = selected.map(|c| c.geometry);
     let mut kind = selected.map_or(0, |c| c.kind);
     runtime.front_contact = selected.is_some_and(|c| c.front);
@@ -396,6 +403,7 @@ pub(super) fn query(physics: &mut GamePhysics, skater: &mut SkaterRuntime) {
     if p.category_2512 != 200
         && !grind_contact::within_approach_angle(candidate.direction, velocity, angle)
     {
+        runtime.checkpoint_suppressed = true;
         return;
     }
     runtime.candidate = Some(candidate);

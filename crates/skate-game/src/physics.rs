@@ -45,6 +45,7 @@ mod settings;
 mod wipeout;
 mod wipeout_states;
 mod teleport_state;
+mod respawn;
 mod offboard;
 mod known_air;
 use crate::{
