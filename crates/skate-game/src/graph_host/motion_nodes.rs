@@ -149,6 +149,9 @@ impl OperationFactory for MotionFactory {
                     )),
                     "ClearTrickAttr" => Some(MotionOperation::ClearTrickAttr),
                     "SetTrickHeight"
+                    | "FootPlantAbsorb"
+                    | "SetHandPlantAnticLength"
+                    | "ScoringHandPlants"
                     | "SetTrickAttr"
                     | "ScoringTrick"
                     | "MonitorUnderflip"

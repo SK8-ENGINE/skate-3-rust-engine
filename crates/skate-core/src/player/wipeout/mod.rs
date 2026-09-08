@@ -7,7 +7,7 @@ mod ground;
 mod requests;
 pub use air::check as check_air;
 pub use data::{AirSettings, Frame, GroundSettings, Mode, RequestInput, Settings, V};
-pub use ground::{check as check_ground, check_animation as check_ground_animation};
+pub use ground::{check as check_ground, check_animation as check_ground_animation, check_plant};
 pub use requests::Requests;
 pub use common::force as regional_force;
 

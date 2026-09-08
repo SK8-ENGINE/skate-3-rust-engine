@@ -103,3 +103,21 @@ pub fn finish_known_air(
     roots.predicted_board_position = effective_board[3];
     roots.supplied_prediction = Some(effective_board[3]);
 }
+
+///82BDEEB8/82BE0E80: anchor an animation bone or COM in world space.
+///Plants retain heading_alignment and do not consume board prediction.
+pub fn update_plant_roots(
+    roots: &mut SkeletonRootFrames,
+    reckoning: &Transform,
+    world_anchor: [f32; 4],
+    animation_anchor: [f32; 4],
+) {
+    let mut world = compose_affine(reckoning, &roots.heading_alignment);
+    world[3] = std::array::from_fn(|i| {
+        let x = world[0][i] * animation_anchor[0];
+        let y = world[1][i].mul_add(animation_anchor[1], x);
+        world_anchor[i] - world[2][i].mul_add(animation_anchor[2], y)
+    });
+    roots.animation_to_world = orthonormalize(world);
+    roots.world_to_animation = inverse_rigid(&roots.animation_to_world);
+}

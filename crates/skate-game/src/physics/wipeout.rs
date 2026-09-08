@@ -94,6 +94,13 @@ pub(super) fn check_after_physics(
         grind_normal: skater.trajectory.selector.grind_normal(),
     };
     match skater.player_state.current() {
+        PhysicalStateId::FootPlant | PhysicalStateId::HandPlant => {
+            wipeout::check_plant(&mut skater.wipeout.state, &skater.wipeout.settings, &observations.frame()?);
+            if skater.player_state.current() == PhysicalStateId::FootPlant {
+                super::footplant::ground::post_physics(skater);
+            }
+            Ok(())
+        }
         PhysicalStateId::BipedAir => {
             let mode = skater.wipeout.mode(&skater.player_input.processed)?;
             let frame = observations.frame()?;

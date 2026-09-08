@@ -19,6 +19,12 @@ pub struct GameplayConditions {
     pub can_land_on_board: bool,
     pub hippy_hurdling: bool,
     pub handplant_flags: u32,
+    pub handplant_time: f32,
+    /// anim_handplant/default layout0/4/8: out, into, antic.
+    pub handplant_thresholds: [f32; 3],
+    pub footplant_active: bool,
+    pub footplant_duration: f32,
+    pub footplant_contact_time: f32,
     pub time_to_skitch: f32,
     pub skitch_transition_time: f32,
     /// TimeToLand82BA7250 reads Air184 when Air437 is valid.
@@ -50,6 +56,10 @@ pub enum GameplayCondition {
     DarkCatchRequested,
     OkToDoTrickOnStairs,
     HandPlanting { state: u8, direction: u8 },
+    FootPlanting,
+    PrepareFootplant,
+    NewHandplantPosition,
+    PlayHandplant { phase: usize },
     EnteringSkitch,
     Skitching,
 }
@@ -75,6 +85,10 @@ impl GameplayCondition {
                 | "IsDarkCatchRequested"
                 | "OkToDoTrickOnStairs"
                 | "IsHandPlanting"
+                | "IsFootPlanting"
+                | "ShouldPrepareOneFootAirForFootplant"
+                | "HasNewHandPlantPos"
+                | "ShouldPlayHandPlantAnim"
                 | "IsEnteringSkitch"
                 | "IsSkitching"
         )
@@ -102,6 +116,13 @@ impl GameplayCondition {
             "OkToDoTrickOnStairs" => Self::OkToDoTrickOnStairs,
             "IsEnteringSkitch" => Self::EnteringSkitch,
             "IsSkitching" => Self::Skitching,
+            "IsFootPlanting" => Self::FootPlanting,
+            "ShouldPrepareOneFootAirForFootplant" => Self::PrepareFootplant,
+            "HasNewHandPlantPos" => Self::NewHandplantPosition,
+            "ShouldPlayHandPlantAnim" => Self::PlayHandplant { phase: match a.text("anim") {
+                Some("antic") => 2, Some("into") => 1, Some("out") => 0,
+                value => return Err(format!("Unauthored handplant animation phase {value:?}")),
+            } },
             "IsHandPlanting" => Self::HandPlanting {
                 //82BA54A0 compares these authored strings in this order.
                 state: match a.text("state").unwrap_or("") {
@@ -154,6 +175,17 @@ impl GameplayCondition {
                         0 => p.handplant_flags & 0x2000_0000 == 0,
                         _ => false,
                     }
+            }
+            // Factory82BCB308 -> VT82321070 slot48=82BBD888.
+            // Both graphs read Air448 and Air212, including the entry frame.
+            Self::FootPlanting => p.footplant_active && p.footplant_duration >= 0.0,
+            //82BBD7F0, literals820641A8 and8209975C.
+            Self::PrepareFootplant => p.footplant_contact_time >= 0.1 && p.footplant_contact_time <= 0.5,
+            Self::NewHandplantPosition => p.handplant_flags & 0x4000_0000 != 0, //82BBDB98
+            Self::PlayHandplant { phase } => {
+                //82BBDA98 subtracts one simulation tick before the comparison.
+                let threshold = p.handplant_thresholds[*phase];
+                p.handplant_time - f32::from_bits(0x3c888889) < if *phase == 0 { -threshold } else { threshold }
             }
             Self::DroppingBoard
             | Self::Dark

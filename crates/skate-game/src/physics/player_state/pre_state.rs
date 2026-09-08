@@ -15,7 +15,8 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             | PhysicalStateId::GrindBoardslide | PhysicalStateId::GrindFiftyFifty | PhysicalStateId::GrindTipslide | PhysicalStateId::GrindFiveO | PhysicalStateId::GrindBackslash | PhysicalStateId::GrindDarkslide
             | PhysicalStateId::Nonspecific
             | PhysicalStateId::KnownAir
-            | PhysicalStateId::GroundAnimation
+            | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant
+                | PhysicalStateId::GroundAnimation
             | PhysicalStateId::SlideGround
             | PhysicalStateId::WipeoutGround
             | PhysicalStateId::Teleporting

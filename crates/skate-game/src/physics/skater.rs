@@ -45,6 +45,8 @@ pub(crate) struct SkaterRuntime {
     pub slide_state: super::slide_state::SlideState,
     pub trajectory: super::air_trajectory::AirTrajectoryRuntime,
     pub footplant: super::footplant::Footplant,
+    pub boneless: super::boneless::Boneless,
+    pub handplant: super::handplant::Handplant,
     pub wipeout: super::wipeout::Wipeout,
     pub wipeout_state: super::wipeout_states::WipeoutState,
     pub teleport_state: super::teleport_state::Runtime,
@@ -206,6 +208,8 @@ impl SkaterRuntime {
             slide_state: super::slide_state::SlideState::load(&data)?,
             trajectory: super::air_trajectory::AirTrajectoryRuntime::load(&data)?,
             footplant: super::footplant::Footplant::load(&data)?,
+            boneless: super::boneless::Boneless::load(&data)?,
+            handplant: super::handplant::Handplant::load(&data)?,
             wipeout: super::wipeout::Wipeout::load(&data)?,
             wipeout_state,
             teleport_state: super::teleport_state::Runtime::new(super::teleport_state::Checkpoint {

@@ -126,3 +126,16 @@ pub fn check_animation(state: &mut Requests, s: &Settings, mode: &Mode, f: &Fram
         state.request(20, 0.0);
     }
 }
+
+///82D8FDC0, shared FootPlant/HandPlant postphysics collision checks.
+pub fn check_plant(state: &mut Requests, s: &Settings, f: &Frame) {
+    state.mode = 3;
+    if f.maximum_pose_error > s.ground.max_squash {
+        state.request(18, 0.0);
+    } else if super::common::length(f.pose_error) > s.air.max_displacement {
+        state.request(1, 0.0);
+    } else if super::common::force(f, s.air.max_contact, s.air.max_arm_contact) {
+        state.request(0, 0.0);
+    }
+    common::closing(state, f, s.air.xz_trick, s.air.y_trick);
+}

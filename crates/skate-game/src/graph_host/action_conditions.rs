@@ -39,7 +39,7 @@ impl ActionCondition {
                 target: None,
                 numeric: super::condition_nodes::numeric(a),
             },
-            "IsGrabbingObject" | "IsHandPlanting" => Self::Physical(GameplayCondition::parse(a)?),
+            "IsGrabbingObject" | "IsHandPlanting" | "IsFootPlanting" => Self::Physical(GameplayCondition::parse(a)?),
             "IsTricking" => Self::Tricking,
             "IsInLocomotion" => Self::InLocomotion,
             "DisableDismount" => Self::DisableDismount,

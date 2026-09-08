@@ -104,6 +104,9 @@ pub(super) fn advance(
     }
     player_state::pre_state(physics, skater)?;
     match skater.player_state.current() {
+        skate_core::player::state::PhysicalStateId::HandPlant => super::handplant::update(physics,skater)?,
+        skate_core::player::state::PhysicalStateId::FootPlant => super::footplant::ground::update(physics, skater)?,
+        skate_core::player::state::PhysicalStateId::Boneless => super::boneless::update(physics, skater)?,
         skate_core::player::state::PhysicalStateId::GrindBoardslide
         | skate_core::player::state::PhysicalStateId::GrindFiftyFifty
         | skate_core::player::state::PhysicalStateId::GrindTipslide
@@ -134,6 +137,7 @@ pub(super) fn advance(
             //after Reckoning; this frame's propulsion may then set it again.
             skater.ground.state.push_suppressed_2730 = false;
             ground_phase::advance(physics, skater)?;
+            super::handplant::ground_update(physics,skater)?;
             input_phase::update_ground(physics, skater)?;
         }
         skate_core::player::state::PhysicalStateId::PhysicsAir => {

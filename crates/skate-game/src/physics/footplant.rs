@@ -2,10 +2,11 @@
 //! Query results are retained separately from pending query ownership.
 use skate_core::air::trajectory::{QueryResult, Trajectory};
 use skate_data::collections::Collections;
-mod math;
+pub(super) mod math;
 mod pose;
 mod settings;
 mod update;
+pub(super) mod ground;
 use settings::Settings;
 pub(crate) use update::FootplantFrame;
 pub(crate) type V = [f32; 4];
@@ -36,11 +37,13 @@ pub(crate) struct Footplant {
     pub(super) selected_record: V, //272
     pub(super) leg_direction: V,   //336
     pub(super) vectors_352_368: [V; 2],
+    pub(super) curve: [V; 4], //448/464/480/496
     pub(super) physical_com: V,     //384
     pub(super) animation_com: V,    //400
     pub(super) launch_direction: V, //416
     pub(super) locked_target: V,    //432
     pub(super) request: Trajectory, //528..591
+    pub(super) completed_trajectory: Trajectory, //query144, retained with result
 }
 impl Footplant {
     pub fn load(data: &Collections) -> Result<Self, String> {
@@ -73,6 +76,7 @@ impl Footplant {
             selected_record: [0.0; 4],
             leg_direction: [0.0; 4],
             vectors_352_368: [[0.0; 4]; 2],
+            curve: [[0.0; 4]; 4],
             physical_com: [0.0; 4],
             animation_com: [0.0; 4],
             launch_direction: [0.0; 4],
@@ -83,6 +87,7 @@ impl Footplant {
                 acceleration: [0.0; 4],
                 duration: -1.0,
             },
+            completed_trajectory: Trajectory { position: [0.0;4], velocity: [0.0;4], acceleration: [0.0;4], duration: -1.0 },
         };
         state.reset();
         Ok(state)
@@ -122,5 +127,18 @@ impl Footplant {
     pub fn full_reset(&mut self) {
         self.enabled = false;
         self.reset();
+    }
+    /// Common ProcessOutput82DB71B0 calls82D71040 before selected state Fill.
+    pub fn publish(&self, out: &mut skate_core::player::input_phase::AirOutputFields) {
+        if self.hit {
+            out.footplant_contact_time_208 = self.contact_time;
+            out.footplant_duration_212 = self.scalar_596;
+            out.flag_447 = u8::from(self.perform);
+            out.flag_448 = u8::from(self.perform || self.flag_627);
+            out.footplant_surface_224 = self.surface;
+            out.footplant_left_449 = u8::from(self.flag_627 && self.selected_toe == Some(15));
+            out.footplant_right_450 = u8::from(self.flag_627 && self.selected_toe == Some(19));
+            out.footplant_surface_height_216 = self.contact[1];
+        }
     }
 }

@@ -85,7 +85,9 @@ impl StateSelector {
             PhysicalStateId::FootPlant => {
                 if facts.wipeout {
                     PhysicalStateId::WipeoutGround
-                } else if !p.has_2480(1) {
+                //82D8B970 loads the first byte of the big-endian word,
+                //then tests its low bit: full-word bit24 is Air448.
+                } else if !p.has_2480(0x0100_0000) {
                     p.air_variant_from_2468()
                 } else {
                     current

@@ -294,6 +294,7 @@ impl KnownAirRuntime for Runtime<'_> {
             body: &self.skater.skeleton,
             gravity: [g.x, g.y, g.z, 0.0],
             world: &self.physics.world,
+            edges: &self.physics.grind.primitives,
         };
         self.skater.footplant.update_candidate(input, &f);
     }
@@ -309,6 +310,7 @@ impl KnownAirRuntime for Runtime<'_> {
             body: &self.skater.skeleton,
             gravity: [g.x, g.y, g.z, 0.0],
             world: &self.physics.world,
+            edges: &self.physics.grind.primitives,
         };
         let result = self.skater.footplant.consume_and_submit(
             input,

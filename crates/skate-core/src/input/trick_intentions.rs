@@ -81,6 +81,24 @@ pub fn produce(controller: &DerivedControllerInput) -> Vec<TrickIntent> {
     if right_y != 0.0 {
         emit("TweakY", right_y);
     }
+    //Fill8259A554/8259AF60: current packed bit28 (RB), without an actor gate.
+    //The stock ground graph attaches GrabWorld; physics selects valid coping.
+    if current_flags & (1 << 28) != 0 {
+        emit("GrabWorld", 1.0);
+    }
+    //Fill calls8259BB18 with the CURRENT RawControllerInput (words7..13).
+    //Descriptor constructors82F84F28..82F84F98 establish these five names.
+    if right_x != 0.0 {
+        emit("HandPlantTweakX", right_x);
+    }
+    if right_y != 0.0 {
+        emit("HandPlantTweakY", right_y);
+    }
+    for (bit, name) in [(20, "HandPlantDismount"), (21, "HandPlantOneFootRight"), (23, "HandPlantOneFootLeft")] {
+        if current_flags & (1 << bit) != 0 {
+            emit(name, 1.0);
+        }
+    }
     output
 }
 

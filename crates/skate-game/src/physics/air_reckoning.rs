@@ -16,6 +16,10 @@ pub(crate) struct AirReckoning {
     modes: [settings::Mode; 5],
 }
 impl AirReckoning {
+    pub fn update_plant(&mut self,riding:&mut RidingOutputs,p:&ProcessedPhysicsInput,up:[f32;4],heading:[f32;4]) {
+        reckoning::update_plant(&mut riding.reckoning,&mut riding.reckoning_frames,
+            &mut riding.body_spin,&mut self.state,&self.settings,up,heading,p.flags_2468&(1<<20)!=0);
+    }
     pub fn load(data: &Collections) -> Result<Self, String> {
         let (settings, modes) = settings::load(data)?;
         Ok(Self {

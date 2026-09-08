@@ -22,6 +22,7 @@ pub(crate) struct FootplantFrame<'a> {
     pub body: &'a SkeletonBody,
     pub gravity: V,
     pub world: &'a BoardWorld,
+    pub edges: &'a [skate_core::physics::grind_contact::Primitive],
 }
 impl Footplant {
     pub fn update_candidate(&mut self, input: &KnownAirFootplantInput, frame: &FootplantFrame<'_>) {
@@ -106,7 +107,7 @@ impl Footplant {
             self.contact = self.result.contact_position;
             self.surface = self.result.surface;
             self.hit = true;
-            //82D6FBB0's nearby-edge scan is empty in our explicitly edge-free BoardWorld.
+            self.nearby_edge(frame);
             self.adjusted_contact = madd(
                 input.landing_normal,
                 self.settings.foot_volume_y_offset,
@@ -134,28 +135,61 @@ impl Footplant {
             }
         }
         self.current_up = frame.processed.vectors_544_560_592_608[0].map(f32::from_bits);
+        let submitted = Trajectory {
+            position: self.request.position, velocity: self.request.velocity,
+            acceleration: frame.gravity, duration: 1.0,
+        };
         let next = AirTrajectoryRuntime::query(
             frame.world,
             QueryRequest {
-                trajectory: Trajectory {
-                    position: self.request.position,
-                    velocity: self.request.velocity,
-                    acceleration: frame.gravity,
-                    duration: 1.0,
-                },
+                trajectory: submitted,
                 radius: f32::from_bits(0x3d23d70a),
                 start_error: 1.0,
                 end_error: 1.0,
             },
         )?;
         self.result = next;
+        self.completed_trajectory = submitted;
         self.enabled = true;
         Ok(())
     }
     fn clear_contact(&mut self) {
         self.surface = 0;
         self.hit = false;
-        self.contact_time = -1.0;
+        self.contact_time = 0.0; //82D6FA80/82D6FAC4, distinct from Reset's -1.
         self.contact = [0.0; 4];
+    }
+
+    ///82D6FBB0: query the real edge geometry within the native two-metre box.
+    fn nearby_edge(&mut self, frame: &FootplantFrame<'_>) {
+        use skate_core::{math::Vector3, player::offboard::{air_ledge::visible_edges, ground_query::Edge}};
+        let xyz = |v: V| Vector3::new(v[0], v[1], v[2]);
+        let lanes = |v: Vector3| [v.x, v.y, v.z, 0.0];
+        let edges: Vec<_> = frame.edges.iter().filter(|e| (0..3).all(|i|
+            e.start[i].min(e.end[i]) <= self.contact[i] + 2.0 && e.start[i].max(e.end[i]) >= self.contact[i] - 2.0
+        )).map(|e| Edge { start: xyz(e.start), end: xyz(e.end) }).collect();
+        let original_height = self.contact[1];
+        let mut best = 0.25; //820C6D98
+        for edge in visible_edges(&edges, frame.toolkit.deck[3]) {
+            let start = lanes(edge.start);
+            let delta = sub(lanes(edge.end), start);
+            let raw_normal = cross(cross(delta, [0.0,1.0,0.0,0.0]), delta);
+            let normal = if length(raw_normal) > f32::from_bits(0x3586_37bd) { normalize(raw_normal) } else { [0.0,1.0,0.0,0.0] };
+            let Some(time) = skate_core::air::trajectory::grind::descending_plane_time(self.completed_trajectory, start, normal) else { continue; };
+            let arc = self.completed_trajectory.position_at(time);
+            let edge_length = length(delta);
+            let direction = if edge_length > f32::from_bits(0x3780_0000) { scale(delta, reciprocal(edge_length)) } else { delta };
+            let point = madd(direction, dot(direction, sub(arc, start)).min(edge_length).max(0.0), start);
+            let distance = length(sub(arc, point));
+            //Globals3644 at822F943C permits at most 3cm below the triangle hit.
+            if distance < best && point[1] - original_height > f32::from_bits(0xbcf5_c28f) {
+                self.contact_time = time;
+                self.current_up = normal;
+                self.contact = point;
+                self.surface = 0;
+                self.hit = true;
+                best = distance;
+            }
+        }
     }
 }

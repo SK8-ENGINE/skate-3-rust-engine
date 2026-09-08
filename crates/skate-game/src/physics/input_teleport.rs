@@ -44,6 +44,8 @@ impl Callbacks<'_, '_> {
             self.wiping_out,
         );
         self.skeleton_air.reset_board(); //Board Reset82C0606C.
+        self.footplant.full_reset();
+        self.handplant.full_reset();
         self.riding.reset_for_teleport();
         {
             let mut owners = SkeletonOwners {

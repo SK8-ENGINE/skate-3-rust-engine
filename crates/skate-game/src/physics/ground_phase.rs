@@ -164,6 +164,7 @@ pub(crate) fn advance(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
 ) -> Result<GroundBoardOutcome, String> {
+    super::handplant::ground_query(physics,skater);
     let p = &skater.player_input.processed;
     let toolkit = skater
         .player_input
