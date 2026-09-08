@@ -29,8 +29,8 @@ python tools/prepare_mario_kart.py C:/Users/Daddy/Downloads/kart-de-mario.zip mo
 
 NumPy is required by the importer. Run Build-VehicleSDK.ps1 to build/stage the
 executable and original mod sources. The helper preserves existing modified mod
-files; copy updates manually when it reports a preserved file. The mods directory
-sits beside the executable. No model or game assets are committed.
+files; copy updates manually when it reports a preserved file. PLAY-MARIO-KART.bat loads the top-level project `mods/` directory via SKATE3_MODS.
+A standalone executable defaults to its adjacent mods directory. No model or game assets are committed.
 
 ## Lua API
 

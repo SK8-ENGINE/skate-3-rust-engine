@@ -100,7 +100,8 @@ frames with a different rate. The output is a full native pose, not additive rot
 ## 6. Package, validate and playtest
 
 Put `rider.json`, the embedded `kart.glb`, `vehicle.json`, `mod.json` and `main.lua` in the
-executable-adjacent mod folder. Set animations.file to rider.json, enter/exit to their
+project-root mods/mario-kart folder when using PLAY-MARIO-KART.bat. Standalone
+builds default to an executable-adjacent mods folder. Set animations.file to rider.json, enter/exit to their
 names, idle/drive/reverse/brake to drive for this example, and steer_left/steer_right to
 the corresponding endpoints. See vehicle-sdk.md for limits, schema and lifecycle.
 
@@ -111,7 +112,8 @@ runtime applies the same native pose to whichever compatible character is select
 
 `Build-VehicleSDK.ps1` stages a build and documentation. It preserves differing local
 mod files; copy your approved changed files into the playable mod directory explicitly
-when it reports them. Reload/disable-enable the mod to load changed animation files.
+when it reports them for standalone builds. The project launcher reads the top-level
+mods folder directly. Reload/disable-enable the mod to load changed animation files.
 Use PLAY-MARIO-KART.bat for a manual session. Check entry/exit from multiple vanilla
 stances, steering in both directions, ramps, braking, reset, Escape, and mod disable.
 Also try characters with different proportions; native-rig compatibility does not

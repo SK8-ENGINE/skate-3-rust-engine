@@ -14,11 +14,12 @@ if not exist "%~dp0.local\vehicle-sdk\skate3-vehicle-ramp-audio.exe" (
   pause
   exit /b 1
 )
+set "SKATE3_MODS=%~dp0mods"
 set "SKATE3_MOD_SETTINGS=%~dp0.local\vehicle-sdk\settings"
 if exist "%~dp0.local\vehicle-sdk\overlay.path" set /p "SKATE3_SESSION_MARKER_OVERLAY="<"%~dp0.local\vehicle-sdk\overlay.path"
 echo Open Mods and ENABLE Mario Kart. F10 spawns the kart; E enters/exits. Escape shows draggable settings windows. Drag the title to move, drag // to resize, or scroll for more settings.
 echo WASD drive, Space brake, Shift handbrake, R reset. Slow down before exiting.
-echo Mods folder: %~dp0.local\vehicle-sdk\mods
+echo Mods folder: %SKATE3_MODS%
 echo Trainer log: %~dp0.local\vehicle-sdk\session.log
 "%~dp0.local\vehicle-sdk\skate3-vehicle-ramp-audio.exe" --assets "%SKATE3_ASSETS%" --start-paused %* > "%~dp0.local\vehicle-sdk\session.log" 2>&1
 if errorlevel 1 pause
