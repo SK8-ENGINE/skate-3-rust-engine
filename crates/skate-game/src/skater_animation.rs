@@ -62,6 +62,18 @@ pub(crate) struct SkaterAnimation {
 }
 
 impl SkaterAnimation {
+    /// Native Initialize82B97E38 selects both orientation/mirror bits for
+    /// regular stance. A profile edit changes the natural basis while retaining
+    /// the current relative stance and trick state.
+    pub(crate) fn set_customisation(&mut self, natural: u32, style: u32) {
+        if natural <= 1 && self.state.publication.natural_stance != natural as i32 {
+            self.state.publication.natural_stance = natural as i32;
+            self.state.flags ^= 0xC000_0000;
+        }
+        // GetCACSettings82590D20..D84: 0=null,1=Loose,2=Gonzo,3=Aggressive.
+        let name: &[u8] = match style { 1 => b"Loose", 2 => b"Gonzo", 3 => b"Aggressive", _ => b"" };
+        self.motion.playback_context.pro_skater = encode(name);
+    }
     pub fn stance(&self) -> (bool, bool) {
         (self.state.fakie(), self.state.mirrored())
     }

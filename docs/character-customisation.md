@@ -1,124 +1,115 @@
-# Character customisation test build
+# Character customiser V2
 
-A dedicated local executable and `Play Character Customiser.bat` are now prepared.
-The game was **not launched**: validation here is compilation, synthetic unit tests,
-and offline retail asset assembly. User playtesting is still required.
+The dedicated local test build uses `Play Character Customiser V2.bat` and
+`skate3rust-customiser-v2.exe`. Open Escape/Start, then Character customiser.
+The game and launcher have not been executed for validation; the build is ready
+for user playtesting. No existing game executable is replaced.
 
-The Escape/Start menu opens a left-side character menu with the actual animated
-skater framed on the right. Supported male model/material selections are assembled
-on demand through the existing RX2/ABIN-to-GLB pipeline. The current character
-stays visible during conversion or a failed request. Completed replacements reset
-skin bindings before the animation system runs. Save commits the profile;
-Back at the top discards unsaved changes. F5/controller X saves; Escape/controller
-B goes back; arrows/D-pad select and adjust; Enter/controller A chooses.
+## Menu and controls
 
-Working paths in this test include hair, hats, authored skin/facial-hair material
-variants, clothing and accessories, boards, all 19 individual body/face morph
-weights, native truck/wheel ranges, and posture selection. Equipment retains
-its 0.7 defaults. Posture takes effect through the next eligible native motion
-construction when skating resumes. The original character loads unchanged when
-there is no saved custom profile.
+Four main sections: **Body, Clothes, Board, Style**. Item lists are alphabetical,
+fit the available panel height, and can be filtered by typing. Backspace edits a
+search; Escape/B clears it before going back. Arrows/D-pad/left stick browse,
+left/right or visible minus/plus buttons adjust, and Enter/A chooses. Mouse wheel
+and page buttons move through lists. Back returns one level. **Done**, present
+only at the root, writes the profile and resumes skating. There are no repeated
+Save buttons or material submenus.
 
-**This is not a complete retail CAC implementation.** Gender switching, facial
-presets, tattoos, gestures, stance and style remain explicit informational pages.
-The existing StandardMaterial shading is retained. Native stamp compositing,
-colour-zone controls, unlock filtering, full material parity and all outfit
-compatibility cases are unfinished. Authored asset names are shown where localized
-retail display names have not been resolved. Do not describe this test as full
-retail customiser parity.
+Names remove exporter terms and distinguish new/worn finishes. Board graphics,
+trucks and wheels are individually named entries instead of hundreds of hidden
+variants behind one model. The camera frames the selected area, and turns around
+for back tattoos. Tattoo previews temporarily use the authored viewing outfit;
+this does not change the saved clothes.
 
-`tools/asset_pipeline/customisation_worker.py` provides the JSON worker and menu
-index. A private `worker.json` holds local Python, source and asset-root paths;
-retail data stays outside Git. The private test overlay links the existing stock,
-skies and maps and owns its character cache and settings. It does not overwrite
-an existing game executable or require another installation/conversion.
+## Implemented controls
 
-Validation: 18 synthetic Python tests pass. Offline retail assemblies cover the
-baseline, body/face changes, skin, beard, hair, hat, hoodie, pants, shoes, deck and
-glasses. Packed 11/11/10 signed normal deltas accompany weighted body morphs;
-normalization occurs after accumulating deltas. These checks are not a rendered
-or interactive gameplay test.
+- Both bodies use their authored fallback outfits and retail rigs.
+- Seven native skin colours, native hair colours, hairstyles and facial hair.
+- Body weight/definition and all 17 individual facial controls, with native
+  `0..0.5` ranges and unchanged defaults.
+- Ten native face presets per body, decoded by target hash and normalized range.
+- Upper/lower tattoos: 170 owned designs; left/right limbs plus chest/back
+  placement for upper-body stamps. Tattoos can be removed and are saved.
+- Hats, T-shirts, shirts, hoodies, jackets, sweaters, pants/shorts, shoes, socks,
+  accessories, decks, trucks and wheels. Authored variants and primary clothing
+  colours are selectable. Hat/hair, sleeves, inner tops, legs/socks and accessory
+  removal dependencies are resolved together.
+- All 37 gestures in each of the four direction slots, regular/goofy stance,
+  Standard/Loose/Gonzo/Aggressive skating styles, and native posture options.
+- Truck tightness and wheel hardness retain `0..1`, step `0.1`, default `0.7`.
 
-## Implemented, private-data-only tooling
+Physical/animation preferences apply to the running actor. Posture and skating
+style are consumed by the appropriate native motion construction when skating
+resumes; selecting them does not fabricate a separate preview animation.
 
-`tools/asset_pipeline/customisation_catalog.py` reads the user's existing
-`createacharacter.big` and `db.big` directly. It indexes the authored XML,
-exports CAC BIN/VLT data with complete arrays, and optionally extracts only
-explicitly selected models and their texture dependencies. It does not require
-an ISO dialog, map conversion, downloads, a running game, or Blender.
+## Immediate appearance updates
 
-```powershell
-python -m tools.asset_pipeline.customisation_catalog `
-  --game-root <owned-extracted-game> --output <private-task-staging>
-```
+The Python converter is no longer invoked by the game. Preparation creates 480
+resident part GLBs and shared textures. Visible choices also prefetch their
+resolved sleeve, leg, hair and skin dependencies. Selection changes visibility
+and material handles as one transaction after dependencies are ready. Morph
+weights update directly on the GPU. Existing parts stay visible during initial
+asset loading. First-time GPU/texture loading can still take frames; no measured
+zero-latency or frame-rate claim is made without gameplay testing.
 
-Outputs are private `catalog.json`, `native.json`, `extraction-report.json`,
-the source XML, and five small database inputs. Do not commit, bundle, or
-publish these files. The output directory must be separate from the owned
-source. Existing staged resources are reused only when their bytes match;
-different content is never overwritten. Publication of a resource is atomic.
+Each visible rig is bound to the existing stock pose. Shared joint entities are
+bound once. The untouched original character remains in use until the customiser
+is opened or a valid saved profile is found. The profile lives at
+`settings/character.json` beside the test assets and is written through a temporary
+file and rename. Legacy profiles without a gender field are interpreted as male.
+Map restarts reuse the same asset/settings root and reload the saved profile.
 
-`--selection <private.json>` accepts an array like the following, with IDs
-copied from that user's catalog rather than invented:
+## Asset preparation and validation
 
-```text
-[{"slot": <component slot>, "asset_id": <model variant ID>, "lod": 0,
-  "material_ids": [<one material ID for each ordered material instance>]}]
-```
+Retail payloads, catalogues, converted parts and machine paths remain private.
+The source archive and installed stock assets are reused; no downloads, Blender,
+ISO prompts, or map reconversion are needed. The non-geometric Misc model is the
+stamp catalogue, not a missing renderable part. The female face's extra XML
+material group is retained in metadata; its high-LOD source has one drawable mesh.
 
-This validates **extraction membership**, not outfit compatibility. A successful
-extraction must not be presented as a renderable or gameplay-ready character.
-The report explicitly sets `runtime_ready` to false. The existing installer
-still prepares only the fallback skater; this tool is an opt-in preparation
-boundary until the runtime dependencies are implemented.
-
-The catalog keeps original shader names, every shader parameter and texture
-channel in order, authoring flags including empty values, model names and
-IDs, both LODs, and ordered material instances. Unknown scalar/sampler/UV
-attributes are retained in `authored`; missing runtime constants are never
-filled with guessed values. The original XML bytes are also preserved.
-
-The native export preserves reflected fields and inheritance links, including
-complete `MorphPreset`/`ColourPreset` arrays and relocated text-array strings.
-It resolves class/collection names using the archive's own summary report;
-it does not require an IDA dump or a personal hash-name cache. Its `morphs`
-index preserves target order and UI-zone index separately. The two native
-gender-branch parameter triples remain labelled A/B pending verification of
-the caller's boolean convention; both triples match in the inspected bank.
-
-## Owned-data validation
-
-The inspected archive contains **19 component slots, 481 model variants,
-962 LOD records and 3,328 material definitions**. Every referenced model and
-texture exists in the same archive. These are authored counts, not counts of
-unlocked or compatible menu choices.
-
-The female Rostral has two material instances at each LOD. The extractor
-requires both; it does not silently keep the first. The high-LOD mesh has
-1,432 vertices and 7,362 indices. How the two native material loops contribute
-to that mesh remains part of the compositor investigation.
-
-The ten fallback components resolve to the exact model IDs, arena IDs,
-material IDs, texture bindings and resource SHA-256s in
-`tools/default_skater_retail_manifest.json`. Forty-four resources including
-the catalog XML were staged; a second run reused all forty-four unchanged.
-A separate female-head request staged both material-loop dependency sets.
-
-The native export contains 267 CAC-related collections, 19 morph mappings,
-and 21 complete morph-preset arrays with 19 elements each (the schema default
-plus ten male and ten female presets). This is raw authored data; parent-row
-inheritance and preset application still need the native consumer.
-
-Synthetic verification, requiring no game content:
+Preparation commands, using a private configuration with the existing source and
+asset roots:
 
 ```text
-python -m unittest tools.asset_pipeline.test_customisation_catalog tools.asset_pipeline.test_vlt
+python -m tools.asset_pipeline.customisation_library <private-worker.json>
+python -m tools.asset_pipeline.customisation_profiles <private-customisation-directory>
 ```
 
-Thirteen tests cover VLT array bounds/alignment/text relocation, material-loop
-ordering, broken references, missing resources, staging isolation, no-clobber
-reuse, separate UI/target indices and malformed morph ranges. No game,
-recomp, screenshot process, or `--check-assets` run was launched.
+The old worker remains an offline compatibility tool. It is not the V2 runtime.
+
+Validation: 21 Python tests and five Rust customiser tests pass. Owned-data checks
+cover all 480 GLBs, indices, skin weights, 22 GPU target slots, texture references,
+both default outfits, all selectable model/material combinations against those
+outfits, presets, search, colour selection, JSON round trips, and temporary tattoo
+outfits. Shader composition is parsed and validated offline with Bevy's shader
+cache, with and without secondary UVs; this creates no window or GPU device.
+Release compilation also passes. Interactive layout, controller feel and visual
+appearance still require the user's game test.
+
+This is a sandbox catalogue, with owned items available irrespective of career
+unlock state. The existing StandardMaterial lighting remains in use. Full retail
+lighting/multipass material parity is outside this UI/profile update; primary
+clothing tint is not a claim of every native colour-zone effect.
+
+## Additional native evidence for V2
+
+- `GetCACSettings`, `0x82590B50`, including its complete tail: regular/goofy,
+  four gesture indices, posture, and style selectors Standard/Loose/Gonzo/Aggressive.
+- `ResetGestureSet`, `0x824FA730`: marks all 37 gesture entries available and
+  initializes the first four in table order.
+- `InitializeSkaterAnim`, `0x82B97E38`: stance basis and high flag bits. Changing
+  natural stance preserves the actor's relative stance.
+- `cac_presets`: 32-byte MorphPreset records, target hash at byte 8, normalized
+  float at byte 24; invert `0x8253CD18` normalization using native target ranges.
+- `cacstamp_skin_defaultVS`: transforms TEXCOORD1 with the two i_customGraphic
+  rows. `cacstamp_skin_defaultPS`: multiplies skin albedo by
+  `1 + (decal.rgb - 1) * decal.a`, before lighting. The V2 extension adds this
+  composition and retains Bevy's existing PBR/post-lighting entry point.
+- RX2 format `0x002C23A5` is Xenos format 37, FLOAT2, not SHORT4N. The secondary
+  UV decoder now reads two big-endian float32 values. Retail rectangle order is
+  top/bottom/left/right; conversion to downward texture V is corroborated by
+  artwork pixel bounds and exposed-limb UV regions. Left limb positions also
+  agree with the authored LeftArm bind positions.
 
 ## Native evidence
 
@@ -167,38 +158,3 @@ Do not equate low-level constructors with gameplay defaults.
 while the current Rust actor profile uses `0.7`, following its documented
 actor settings path. That current behavior is unchanged here. Saved/default
 CAC profile initialization must be traced before changing it.
-
-## Remaining implementation gates
-
-1. **CAC material composition.** The current character converter exports
-   `StandardMaterial`; its fallback image preparation explicitly skips
-   `decal/decal2` because they are shader inputs, not unconditional overlays.
-   It handles diffuse, hair alpha and normal reconstruction for that fallback.
-   The native catalog includes skin/face stamps, cloth stamps, colour shifts,
-   alpha and multi-instance cases. Recover the native compositor's input
-   constants, masks, UV transforms, stamp ordering and tint math, then connect
-   them to the renderer's character-material adapter. The renderer task
-   confirmed this dependency is not implemented. Do not multiply arbitrary
-   colours or paste tattoo textures into diffuse images as a substitute.
-2. **Assembly and rigs.** Finish the native correction sequence and validate
-   both genders against authored component skinning/bind matrices. Preserve
-   hair-under-hat variants, arm/leg substitutions, socks, layered inner/outer
-   tops, removed necklaces/wrist items and multiple material instances. The
-   test worker now supports male single-material mesh groups and applies the
-   explicit garment/hair/removal flags, but full native sequence parity remains.
-3. **Complete profile/menu semantics.** Apply parent-row inheritance and
-   native face presets, colour zones, available-item/unlock filters, tattoos,
-   gestures, stance, style and posture. Keep physical board adjustments
-   separate. Use actual saved defaults rather than constructor placeholders.
-4. **Runtime/UI validation.** The test implementation now includes navigation,
-   preview/save/back, persistence and in-process replacement. It still requires
-   user gameplay testing, particularly replacement while paused, reopening saved
-   outfits and controller navigation. No game-based validation was run.
-
-The requested hierarchy is recorded verbatim in `HIERARCHY`. It is a scope
-contract, not a declaration that those pages work. The map-switch task's
-proposed interface leaves a separate customiser resource and character
-entities alive, emits `WorldChanged` after `MapTransitionSet`, and reconstructs
-the skater using shared immutable animation data. Reapply saved profile values
-after that transition without moving selection ownership into transient
-physics state. This interface still needs integration against its final commit.

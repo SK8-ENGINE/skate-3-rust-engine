@@ -859,6 +859,7 @@ mod tests {
             &mut Commands::new(&mut queue, &world),
             &mut meshes,
             &mut materials,
+            &mut Assets::<crate::retail_render::RetailWorldMaterial>::default(),
             &mut images,
         );
         queue.apply(&mut world);

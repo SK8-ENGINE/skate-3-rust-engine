@@ -12,3 +12,8 @@ OffBoard clips to the same armature and action bank.
 
 They decode animation and skeleton files supplied locally by the user. No
 retail payload is included.
+
+Local CAC correction: vertex format `0x002C23A5` now decodes as two big-endian
+float32 values. Its Xenos surface-format field is 37 (32_32_FLOAT); the previous
+SHORT4N interpretation corrupted secondary tattoo UVs. Source declarations,
+owned-mesh UV bounds and synthetic decoding tests corroborate the change.

@@ -169,6 +169,9 @@ mod exchange_tests {
 }
 
 impl GamePhysics {
+    pub(crate) fn set_gesture_preferences(&mut self, gestures: Option<[u32; 4]>) {
+        self.animation_profile.gesture_selections = gestures.filter(|g| g.iter().all(|v| *v < 37));
+    }
     pub(crate) fn set_equipment_preferences(&mut self, truck: f32, wheel: f32) {
         if truck.is_finite() && wheel.is_finite() {
             self.animation_profile.truck_tightness = truck.clamp(0.0, 1.0);

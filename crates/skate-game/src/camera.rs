@@ -66,12 +66,13 @@ fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
         if let Projection::Perspective(p) = &mut *projection {
             p.fov = previous.fov + (current.fov - previous.fov) * alpha;
         }
-        if customiser.as_ref().is_some_and(|c| c.open) {
-            let center = current.root.translation + Vec3::Y * 0.95;
-            let offset = current.root.rotation * Vec3::new(0.0, 0.25, 3.2);
+        if let Some(customiser) = customiser.as_ref().filter(|c| c.open) {
+            let (height,distance,yaw)=customiser.preview_camera();
+            let center = current.root.translation + Vec3::Y * height;
+            let offset = current.root.rotation * Quat::from_rotation_y(yaw) * Vec3::new(0.0, 0.25, distance);
             let eye = center + offset;
             let right = offset.normalize().cross(Vec3::Y).normalize();
-            *transform = Transform::from_translation(eye).looking_at(center + right * 0.85, Vec3::Y);
+            *transform = Transform::from_translation(eye).looking_at(center + right * (distance * 0.265625), Vec3::Y);
             if let Projection::Perspective(p) = &mut *projection { p.fov = 50_f32.to_radians(); }
         }
         camera.is_active = true;

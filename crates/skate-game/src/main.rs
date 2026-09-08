@@ -16,6 +16,8 @@ mod verification;
 mod performance;
 mod graphics_menu;
 mod customiser;
+mod customiser_parts;
+mod customiser_material;
 mod render_capacity;
 mod retail_render;
 mod presentation;
