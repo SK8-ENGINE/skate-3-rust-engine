@@ -73,3 +73,11 @@ directly into the worktree's ignored private output using the shared Cargo
 cache. All six focused CPU tests passed: `map_render::tests` (3),
 `retail_character::tests` (2), and `camera::environment_tests` (1). These checks
 do not validate GPU appearance; use the visual checklist above.
+
+SKATE15 loading is also covered by ten data-reader tests (including legacy
+versions, both compression codecs, all storage transforms, texture references
+and malformed input). A user-supplied v15 custom map passed the ignored CPU
+`supplied_custom_map_prepares_and_retires` check: decoding, runtime validation,
+material/mesh preparation, publication, custom-light classification and scene
+retirement. Supply `SKATE_TEST_CUSTOM_MAP` and `SKATE_TEST_CUSTOM_ASSETS` to run
+that check on another local custom map; no user map bytes are committed.

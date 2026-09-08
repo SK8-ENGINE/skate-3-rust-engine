@@ -183,6 +183,22 @@ impl MapAssets {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "requires user-supplied custom map; CPU preparation only"]
+    fn supplied_custom_map_prepares_and_retires() {
+        let path = std::env::var("SKATE_TEST_CUSTOM_MAP").unwrap();
+        let root = std::env::var("SKATE_TEST_CUSTOM_ASSETS").unwrap();
+        let map = skate_data::skate_map::SkateMap::load(std::path::Path::new(&path)).unwrap();
+        crate::skate_world::validate_runtime(&map).unwrap();
+        assert!(!crate::retail_render::RetailScene::for_map(&map));
+        let mut world = world();
+        let mut scene = PreparedScene::new(&world);
+        scene.prepare(Some(&map), std::path::Path::new(&root));
+        scene.publish(&mut world);
+        assert_eq!(world.query::<&DirectionalLight>().iter(&world).count(), 1);
+        MapAssets::retire(&mut world);
+        assert_eq!(world.query_filtered::<Entity, With<MapEntity>>().iter(&world).count(), 0);
+    }
+    #[test]
     fn custom_lighting_switches_without_accumulation_and_keeps_pbr() {
         let mut world = world();
         let mut map = skate_data::skate_map::SkateMap::parse(include_bytes!("../../../maps/format-demo.skate")).unwrap();

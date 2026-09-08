@@ -15,7 +15,7 @@ error and do not silently load the default level instead.
 
 | Data | Current support |
 | --- | --- |
-| SKATE01–14 records | Reader supports the documented layouts and raw, zlib and Zstandard blocks. |
+| SKATE01�15 records | Reader supports raw, zlib and Zstandard blocks, plus v15 compressed materials, filtered RGBA, vertex streams, delta indices, indexed collision and backward texture references. |
 | SKATE15+ | Rejected with a version error. V15's additional storage transforms are not implemented. |
 | Visual geometry | Authored positions, triangle winding, normals, UV0/UV1 and material groups. Packed v12+ tangent frames are reconstructed. |
 | Embedded materials | Albedo, normal, ORM, emissive, alpha mask/blend and indirect lightmaps. Lightmap RGB is decoded as `encoded² * 4` into half-float textures. |
