@@ -86,7 +86,14 @@ The root `hudintro` endpoint14,
 quick-menu `maximized` endpoint49 and three-item label endpoint18 supply the actual
 placements. No replacement typeface or redrawn panel is used. Source texture
 and extraction-manifest hashes remain in the private compiled manifest.
-Textures copy the extracted RGBA payload directly. Object Dropper is shown as
+Textures copy the extracted RGBA payload directly except for shadow coverage.
+Following the retail/current comparison screenshots, the host linear-light
+compositor uses shadow alpha `1-(1-a)^2.2` and panel opacity 0.75. These are
+**screenshot-calibrated presentation adjustments**, not recovered native
+constants or proof of native gamma equivalence. The shadow's original atlas
+footprint and RGB, foreground font, icon bytes and all geometry are preserved.
+Both source and output texture hashes are recorded in the private manifest.
+Object Dropper is shown as
 unavailable; its 0.3 opacity is a host presentation choice, not recovered
 ActionScript behavior. This change does not add Object Dropper functionality.
 
@@ -125,6 +132,10 @@ payload size passed data checks. These checks initialize no game or GPU device.
 A CPU-only rendering of the compiled HUD was inspected for font layering,
 icon size and the three-row panel. The corrected release was rebuilt and staged
 through `Build-SessionMarker.ps1`; its artifact/hash checks passed.
+The subsequent shadow/panel adjustment changes only the extracted HUD overlay;
+the same executable reads it on launch. Offline checks verified all output
+hashes, unchanged foreground/icon bytes, unchanged shadow footprint and
+increased shadow coverage. In-game comparison remains manual.
 
 Manual validation remains necessary: place/replace, return from riding and
 biped states, switch/fakie stance, interrupted holds, bail recovery, camera cuts,

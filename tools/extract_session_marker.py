@@ -10,6 +10,12 @@ import json
 from pathlib import Path
 import sys
 
+# Presentation calibration against the supplied retail HUD captures. These are
+# host compositor adjustments, not recovered APT constants. Keep the original
+# geometry, RGB artwork and foreground font untouched.
+PANEL_OPACITY = 0.75
+SHADOW_COVERAGE_GAMMA = 2.2
+
 
 def compile_hud(cache_root: Path, output: Path) -> None:
     from skate3_ui_extract.scene_graph import AssetCache, SceneFlattener, transform_point
@@ -38,19 +44,29 @@ def compile_hud(cache_root: Path, output: Path) -> None:
     textures = []
     texture_ids = {}
 
-    def texture(path, width=None, height=None):
+    def texture(path, width=None, height=None, *, shadow=False):
         path = str(path)
-        if path in texture_ids: return texture_ids[path]
+        key = (path, shadow)
+        if key in texture_ids: return texture_ids[key]
         src = cache_root / path
         data = src.read_bytes()
         if width is None or height is None or len(data) != width * height * 4:
             raise ValueError(f"Invalid source RGBA texture: {path}")
+        if shadow:
+            # Preserve the packaged blur profile. Compensate its coverage for
+            # linear-light black blending: 1-(1-a)^gamma. No blur/redrawn text.
+            pixels = bytearray(data)
+            for i in range(3, len(pixels), 4):
+                pixels[i] = round(255 * (1 - (1 - pixels[i] / 255) ** SHADOW_COVERAGE_GAMMA))
+            data = bytes(pixels)
         index = len(textures)
         name = f"texture-{index}.rgba"
         (output / name).write_bytes(data)
-        texture_ids[path] = index
+        texture_ids[key] = index
         textures.append({"file": name, "width": width, "height": height,
-            "source": path, "sha256": hashlib.sha256(src.read_bytes()).hexdigest()})
+            "source": path, "sha256": hashlib.sha256(src.read_bytes()).hexdigest(),
+            "output_sha256": hashlib.sha256(data).hexdigest(),
+            "shadow_coverage_gamma": SHADOW_COVERAGE_GAMMA if shadow else None})
         return index
 
     buttons_dir = Path("assets/data/fe/source/images/buttons/xbox360/buttons")
@@ -60,6 +76,7 @@ def compile_hud(cache_root: Path, output: Path) -> None:
         tex = primitive.get("texture")
         index = texture(tex["rgba"], tex["width"], tex["height"]) if tex else None
         role = "art"
+        primitive["color"][3] *= PANEL_OPACITY if "mButtonRender" not in primitive["path"] else 1
         if "mButtonRender" in primitive["path"]:
             role = ("return" if "/mButton0/" in primitive["path"] else
                     "place" if "/mButton1/" in primitive["path"] else "dropper")
@@ -85,7 +102,7 @@ def compile_hud(cache_root: Path, output: Path) -> None:
         definition = font["definition"]
         metrics = measure_bitmap_text(definition, value, text["font_height"])
         size = definition["textures"][0]
-        index = texture(font["texture"], size["width"], size["height"])
+        index = texture(font["texture"], size["width"], size["height"], shadow=offset == 0)
         atlas = textures[index]
         glyphs = {g["glyph_index"]: g for g in definition["glyphs"]}
         vertices = []
@@ -125,7 +142,8 @@ def compile_hud(cache_root: Path, output: Path) -> None:
         "meshes": sorted(meshes, key=lambda m:m["order"]),
         "source_manifest_sha256": hashlib.sha256((cache_root/"manifest.json").read_bytes()).hexdigest(),
         "timelines": {"hudintro": [1,14], "hudoutro": [15,30], "maximized": [27,49], "3": [9,18]},
-        "notes": "Authored three-row display list; native RenderButton dimensions and dual font passes. Object Dropper is unavailable; its 0.3 opacity is a host presentation choice."}
+        "presentation": {"panel_opacity": PANEL_OPACITY, "shadow_coverage_gamma": SHADOW_COVERAGE_GAMMA},
+        "notes": "Authored three-row display list; native RenderButton dimensions and dual font passes. Panel opacity and shadow coverage compensate the host compositor against reference screenshots; they are not recovered native constants. Object Dropper is unavailable; its 0.3 opacity is a host presentation choice."}
     (output/"hud.json").write_text(json.dumps(manifest, indent=2)+"\n")
 
 
