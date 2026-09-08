@@ -129,9 +129,11 @@ def write(manifest_path,output,collision,report=lambda _:None):
             entry=textures[name]
             if 'rgba' in entry:
                 width,height=entry['width'],entry['height']
-                rgba=np.frombuffer((root/entry['rgba']).read_bytes(),dtype=np.uint8).reshape(height,width,4)[::-1].tobytes()
+                pixels=np.frombuffer((root/entry['rgba']).read_bytes(),dtype=np.uint8).reshape(height,width,4)
+                rgba=(pixels if entry.get('cube_faces')==6 else pixels[::-1]).tobytes()
             else:
-                image=Image.open(root/entry['png']).convert('RGBA').transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+                image=Image.open(root/entry['png']).convert('RGBA')
+                if entry.get('cube_faces')!=6:image=image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
                 width,height=image.size;rgba=image.tobytes()
             string(f,name);u(f,width,height,1);stored(f,rgba)
         stored(f,vertices.getvalue());stored(f,indices.getvalue());stored(f,b'')

@@ -490,11 +490,11 @@ def prepare(
                         texture.data_offset :
                         texture.data_offset + texture.buffer_size
                     ]
-                    texture.rgba = decode_b5g6r5(
-                        raw_texture,
-                        texture.width,
-                        texture.height,
-                    )
+                    face_height = texture.height // texture.cube_faces
+                    texture.rgba = b''.join(decode_b5g6r5(
+                        raw_texture[face*texture.face_stride:] if texture.cube_faces == 6 else raw_texture,
+                        texture.width, face_height,
+                    ) for face in range(texture.cube_faces))
                     texture_decoder = B5G6R5_DECODER_NAME
                 texture_id = (
                     base_texture_id
@@ -518,6 +518,7 @@ def prepare(
                     "texture_index": texture_index,
                     "width": texture.width,
                     "height": texture.height,
+                    "cube_faces": texture.cube_faces,
                     "format": texture.fmt_name,
                     "warnings": list(parsed.warnings),
                 }

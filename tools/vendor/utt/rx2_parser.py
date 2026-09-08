@@ -130,7 +130,7 @@ class Texture(object):
     """A decoded texture: width x height RGBA8888 pixels in `rgba`."""
 
     __slots__ = ("index", "width", "height", "fmt_id", "rgba",
-                 "data_offset", "buffer_size")
+                 "data_offset", "buffer_size", "cube_faces", "face_stride")
 
     def __init__(self, index, width, height, fmt_id, rgba, data_offset, buffer_size):
         self.index = index
@@ -140,6 +140,8 @@ class Texture(object):
         self.rgba = rgba
         self.data_offset = data_offset
         self.buffer_size = buffer_size
+        self.cube_faces = 1
+        self.face_stride = 0
 
     @property
     def name(self):
@@ -263,7 +265,27 @@ class RX2File(object):
         except Exception as exc:
             self.warnings.append("texture entry %d: decode failed: %s" % (entry.index, exc))
             return None
-        return Texture(entry.index, width, height, fmt, rgba, base, size)
+        # Xbox fetch word 5, bits 9..10: kCube=3. A base mip contains
+        # six consecutive tiled face slices. Keep their native face/row order
+        # in a vertical strip; the map writer marks this as a cube source.
+        cube = hdr_off + 52 <= len(data) and (int.from_bytes(data[hdr_off+48:hdr_off+52], 'big') >> 9) & 3 == 3
+        stride = 0
+        if cube:
+            if width != height or fmt not in (FMT_DXT1, FMT_A8R8G8B8, FMT_B5G6R5):
+                raise RX2ParseError('Unsupported cube texture shape/format: %dx%d fmt=%x fetch=%s' % (width,height,fmt,data[hdr_off+28:hdr_off+52].hex()))
+            block = 4 if fmt == FMT_DXT1 else 1
+            pitch = 8 if fmt == FMT_DXT1 else 2 if fmt == FMT_B5G6R5 else 4
+            cols = ((width + block - 1)//block + 31) & ~31
+            rows = ((height + block - 1)//block + 31) & ~31
+            stride = (cols * rows * pitch + 4095) & ~4095
+            if len(raw) < stride * 6:
+                raise RX2ParseError('Truncated cube base faces')
+            rgba = b''.join(_decode_texture_data(raw[face*stride:(face+1)*stride], width, height, fmt, dxt5_variant) for face in range(6))
+            height *= 6
+        result = Texture(entry.index, width, height, fmt, rgba, base, size)
+        result.cube_faces = 6 if cube else 1
+        result.face_stride = stride
+        return result
 
     @staticmethod
     def _genrx2_geometry(hdr):

@@ -64,7 +64,7 @@ pub(crate) fn validate_runtime(map: &SkateMap) -> Result<(), String> {
     }
     if map.materials.iter().any(|m| m.retail_definition.is_some()) {
         eprintln!(
-            "SKATE LIMITATION: retail shader definitions retained; rendering uses the package's portable PBR material fields."
+            "SKATE_RENDER: retail world material adapter enabled; unsupported families retain portable PBR rendering."
         );
     }
     if map.textures.iter().any(|t| t.width == 0) {
@@ -85,7 +85,7 @@ pub(crate) fn validate_runtime(map: &SkateMap) -> Result<(), String> {
         );
     }
     eprintln!(
-        "SKATE LIMITATION: using existing game directional/ambient lighting with map horizon color; authored sky/day-night controller is not yet connected."
+        "SKATE LIMITATION: native frame-lighting/day-night controller is not connected; using package lighting and retail district sky where available."
     );
     eprintln!(
         "SKATE_MAP_LOADED name={:?} version={} render_triangles={} collision_triangles={} textures={} spawn={:?}",
@@ -395,7 +395,9 @@ fn material_ids(
                 m.alpha_mode,
                 m.alpha_cutoff.to_bits(),
             ];
-            *unique.entry(key).or_insert(i)
+            let retail = m.retail_definition.as_deref().and_then(crate::retail_render::Definition::parse)
+                .filter(|d| d.supported());
+            *unique.entry((key, retail)).or_insert(i)
         })
         .collect()
 }
@@ -423,6 +425,7 @@ pub(crate) fn spawn(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    retail_materials: &mut Assets<crate::retail_render::RetailWorldMaterial>,
     images: &mut Assets<Image>,
 ) {
     // Texture roles have different transfer functions even when sharing a record.
@@ -431,6 +434,10 @@ pub(crate) fn spawn(
     let mut texture = |id: u32, role: u8| -> Option<Handle<Image>> {
         let id = texture_ids[id as usize];
         if id == 0 {
+            return None;
+        }
+        if role == 5 && map.textures[id as usize - 1].height != map.textures[id as usize - 1].width * 6 {
+            // Older .skate exports contain only face zero. Never treat it as a cube.
             return None;
         }
         Some(
@@ -460,19 +467,32 @@ pub(crate) fn spawn(
                             source.rgba.clone(),
                         )
                     };
+                    let cube = role == 5;
+                    let height = if cube { source.height / 6 } else { source.height };
+                    let layers = if cube { 6 } else { 1 };
                     let mut image = Image::new(
                         Extent3d {
                             width: source.width,
-                            height: source.height,
-                            depth_or_array_layers: 1,
+                            height,
+                            depth_or_array_layers: layers,
                         },
                         TextureDimension::D2,
                         bytes,
                         format,
                         RenderAssetUsages::RENDER_WORLD,
                     );
+                    if role == 3 || cube {
+                        let (bytes, levels) = crate::retail_render::mip_chain(&source.rgba, source.width, height, layers);
+                        image.data = Some(bytes);
+                        image.texture_descriptor.mip_level_count = levels;
+                    }
+                    if cube {
+                        image.texture_view_descriptor = Some(bevy::render::render_resource::TextureViewDescriptor {
+                            dimension: Some(bevy::render::render_resource::TextureViewDimension::Cube), ..default()
+                        });
+                    }
                     let mut sampler = bevy::image::ImageSamplerDescriptor::linear();
-                    if role != 1 {
+                    if role != 1 && role != 4 && !cube {
                         sampler.address_mode_u = bevy::image::ImageAddressMode::Repeat;
                         sampler.address_mode_v = bevy::image::ImageAddressMode::Repeat;
                     }
@@ -529,6 +549,10 @@ pub(crate) fn spawn(
             Mesh::ATTRIBUTE_UV_1,
             vertices.iter().map(|v| v.lightmap_uv).collect::<Vec<_>>(),
         )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_COLOR,
+            vertices.iter().map(|v| { let uv = v.decal_uv.unwrap_or(v.uv); [uv[0], uv[1], 0., 1.] }).collect::<Vec<_>>(),
+        )
         .with_inserted_indices(bevy::mesh::Indices::U32(local));
         if vertices.iter().all(|v| v.tangent_frame.is_some()) {
             let tangents: Vec<[f32; 4]> = vertices
@@ -549,6 +573,15 @@ pub(crate) fn spawn(
                 warn!("SKATE material {} tangent generation: {error}", m.name);
             }
         }
+        if let Some(definition) = m.retail_definition.as_deref()
+            .and_then(crate::retail_render::Definition::parse).filter(|d| d.supported()) {
+            let material = definition.build(m, &mut texture);
+            let material = retail_materials.add(material);
+            commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
+            continue;
+        }
+        // Vertex colours above carry retail decal coordinates, never PBR tint.
+        mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
         let material = material_handles[pbr_ids[material_index]]
             .get_or_insert_with(|| {
                 let orm = texture(m.textures[3], 2);
@@ -630,14 +663,6 @@ pub(crate) fn spawn(
         map.environment[4],
         map.environment[5],
     )));
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 11000.,
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(4., 7., 4.).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
     info!(
         "SKATE_WORLD_READY name={:?} render_triangles={} collision_triangles={}",
         map.name,

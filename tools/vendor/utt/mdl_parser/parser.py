@@ -393,7 +393,16 @@ def _parse_material_table(
         cursor += block_size
 
         kind = _read_cstring(data, offset + type_offset)
-        value = _read_cstring(data, offset + value_offset)
+        # RX2 32-byte constant channels store their float in the first GUID
+        # word (+0x10), not at the string pointer (+0x18). Native scene capture
+        # uses the same field for these named scalar channels.
+        if block_size == 32 and kind in {
+            "detailNormalUVScale", "macroOverlayUVScale", "macroOverlayOpacity",
+            "uAnimationSpeed", "vAnimationSpeed",
+        }:
+            value = repr(struct.unpack_from(">f", data, cursor - block_size + 0x10)[0])
+        else:
+            value = _read_cstring(data, offset + value_offset)
         parameters.append(MaterialParameter(kind=kind, value=value))
         if kind == "Name":
             mesh_names.append(value)

@@ -37,6 +37,7 @@ pub(crate) fn build(
     physics: GamePhysics,
     skater: SkaterRuntime,
 ) -> App {
+    let retail_scene = config.map.as_ref().is_some_and(|map| map.materials.iter().any(|m| m.retail_definition.is_some()));
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -64,6 +65,7 @@ pub(crate) fn build(
             }),
     )
     .insert_resource(config)
+    .insert_resource(crate::retail_render::RetailScene(retail_scene))
     .insert_resource(assets::AssetManifest(manifest))
     .insert_resource(graphs)
     .insert_resource(physics)
@@ -88,6 +90,7 @@ pub(crate) fn build(
             .chain(),
     )
     .add_plugins((
+        crate::retail_render::RetailRenderPlugin,
         input::InputPlugin,
         PhysicsPlugin,
         crate::presentation::PresentationPlugin,

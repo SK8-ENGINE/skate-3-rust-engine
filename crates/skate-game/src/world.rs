@@ -23,6 +23,8 @@ fn spawn(
     manifest: Res<AssetManifest>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut retail_materials: ResMut<Assets<crate::retail_render::RetailWorldMaterial>>,
+    mut sky_materials: ResMut<Assets<crate::retail_render::RetailSkyMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut config: ResMut<crate::config::Config>,
 ) {
@@ -36,7 +38,8 @@ fn spawn(
     if let Some(map) = config.map.take() {
         // Physics has already consumed the package. Render assets own their
         // uploaded data; keeping another full city package wastes gigabytes.
-        crate::skate_world::spawn(&map, &mut commands, &mut meshes, &mut materials, &mut images);
+        crate::skate_world::spawn(&map, &mut commands, &mut meshes, &mut materials, &mut retail_materials, &mut images);
+        crate::retail_render::spawn_sky(&map.name, &config.asset_root, &mut commands, &mut meshes, &mut images, &mut sky_materials);
         return;
     }
     let colors = [

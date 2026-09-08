@@ -192,6 +192,9 @@ def install(iso,base,game_exe,report,game_root=None):
                            'action_graph':'private/stock/data/state/ActionGraph_OnBoard.stategraph',
                            'motion_graph':'private/stock/data/state/MotionGraph_OnBoard.stategraph'}
             (private/'game.json').write_text(json.dumps(game_manifest),encoding='utf-8')
+            report('Preparing retail sky domes')
+            from .sky import convert as write_skies
+            write_skies(game_root,stage/'assets')
             report('Validating skater, input and animation data')
             run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
             archives=list((game_root/'data/content').glob('worldDIST_*.big'))

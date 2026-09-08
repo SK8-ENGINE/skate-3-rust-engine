@@ -2,6 +2,10 @@
 
 Bevy sources retain their MIT and Apache licenses under `vendor/`.
 
+Retail world shading equations were referenced against Alex's Skate3Recomp
+native renderer. Source revision and implementation scope are documented in
+`docs/retail-renderer.md`. No game shaders or texture payloads are bundled.
+
 `tools/vendor/utt` contains the MIT-licensed UTT RX2/model parsers by duckyinnit.
 The full license is alongside the source. No UTT game payloads or executables
 are bundled.

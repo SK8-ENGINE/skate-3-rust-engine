@@ -16,6 +16,7 @@ mod verification;
 mod performance;
 mod graphics_menu;
 mod render_capacity;
+mod retail_render;
 mod presentation;
 mod replay;
 mod world;

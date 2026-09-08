@@ -33,16 +33,20 @@ impl Plugin for CameraPlugin {
             .add_systems(Update, present.after(FrameSet::Animation).before(FrameSet::Verification));
     }
 }
-fn spawn(mut commands: Commands, config: Res<Config>) {
+fn spawn(mut commands: Commands, config: Res<Config>, retail: Res<crate::retail_render::RetailScene>) {
     let runtime = CameraRuntime::load(&config.asset_root)
         .unwrap_or_else(|error| panic!("Cannot initialize normal gameplay camera: {error}"));
     commands.insert_resource(runtime);
-    commands.spawn((
+    let mut camera = commands.spawn((
         GameplayCamera,
         Camera3d::default(),
         Camera { is_active: false, ..default() },
         Transform::default(),
     ));
+    if retail.0 {
+        camera.insert((bevy::render::view::Hdr, bevy::core_pipeline::tonemapping::Tonemapping::None,
+            crate::retail_render::RetailTone::default()));
+    }
 }
 
 fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
