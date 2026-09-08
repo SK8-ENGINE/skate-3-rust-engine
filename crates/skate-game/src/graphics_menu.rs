@@ -209,7 +209,7 @@ fn setup(
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("PAUSED"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..11 {
+            for i in 0..12 {
                 panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(36),padding:UiRect::all(px(8)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
@@ -251,6 +251,7 @@ pub(crate) fn interact(
     mut config: ResMut<crate::config::Config>,
     mut transition: ResMut<crate::map_transition::MapTransition>,
     mut customiser: ResMut<crate::customiser::Customiser>,
+    mut mods: ResMut<crate::modding::ModMenu>,
     nav: Res<crate::customiser::Navigation>,
     mut physics: ResMut<crate::physics::GamePhysics>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -264,17 +265,17 @@ pub(crate) fn interact(
         time.pause();
         return;
     }
-    if customiser.open { return; }
+    if customiser.open || mods.open { return; }
     if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 {
         menu.open = !menu.open;
     }
     let mut action = None;
     if menu.open {
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
-            menu.selected = (menu.selected + 10) % 11;
+            menu.selected = (menu.selected + 11) % 12;
         }
         if keys.just_pressed(KeyCode::ArrowDown) || nav.pressed & 2 != 0 {
-            menu.selected = (menu.selected + 1) % 11;
+            menu.selected = (menu.selected + 1) % 12;
         }
         if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
             action = Some((menu.selected, -1));
@@ -329,6 +330,7 @@ pub(crate) fn interact(
                 exit.write(AppExit::Success);
             }
             10 => customiser.begin(),
+            11 => mods.begin(),
             _ => {}
         }
         if row < 5 {
@@ -404,13 +406,14 @@ fn labels(
     transition: Res<crate::map_transition::MapTransition>,
     time: Res<Time<Real>>,
     customiser: Res<crate::customiser::Customiser>,
+    mods: Res<crate::modding::ModMenu>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut root: Single<&mut Node, With<MenuRoot>>,
     mut labels: Query<(&MenuLabel, &mut Text), Without<StatusLabel>>,
     mut status: Single<&mut Text, With<StatusLabel>>,
     mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor)>,
 ) {
-    root.display = if menu.open && !customiser.open {
+    root.display = if menu.open && !customiser.open && !mods.open {
         Display::Flex
     } else {
         Display::None
@@ -449,7 +452,8 @@ fn labels(
             7 => if transition.busy() { "Loading map...".into() } else { "Load map".into() },
             8 => "Resume".into(),
             9 => "Quit game".into(),
-            _ => "Character customiser".into(),
+            10 => "Character customiser".into(),
+            _ => "Mods".into(),
         };
     }
     ***status = if transition.busy() {

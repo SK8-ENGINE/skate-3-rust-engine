@@ -1,0 +1,11 @@
+{
+  "id":"community.route-trainer","api":1,"name":"Route Trainer","version":"1.0.0",
+  "author":"Skate Rust SDK examples",
+  "description":"Record your own route: F6 adds a visual checkpoint at your feet; F7 starts a timed run; F8 clears. Visit each checkpoint in order. Routes reset on reload and map change. Cubes have no collision.",
+  "entry":"main.lua",
+  "settings":{
+    "radius":{"type":"number","label":"Checkpoint radius","description":"Distance in metres that counts as reaching the next checkpoint.","default":2,"min":0.5,"max":10,"step":0.5},
+    "reset_on_bail":{"type":"boolean","label":"Stop run on bail","description":"Stop timing when the existing physics system enters a bail.","default":true},
+    "record_key":{"type":"choice","label":"Record key","description":"Keyboard shortcut, sampled during Update.","default":"F6","choices":["F6","KeyJ","KeyK"]}
+  }
+}

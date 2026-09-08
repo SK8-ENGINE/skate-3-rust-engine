@@ -1,0 +1,14 @@
+{
+  "id": "community.speedometer",
+  "api": 1,
+  "name": "Speedometer",
+  "version": "1.0.0",
+  "author": "Skate Rust SDK examples",
+  "description": "Original speed HUD. Change settings or edit main.lua while enabled to try hot reload. Disabled by default.",
+  "entry": "main.lua",
+  "settings": {
+    "visible": {"type":"boolean","label":"Show HUD","description":"Display the board speed readout.","default":true},
+    "units": {"type":"choice","label":"Units","description":"Speed conversion only; does not change physics.","default":"km/h","choices":["km/h","mph","m/s"]},
+    "label": {"type":"string","label":"Label","description":"Your HUD label. Enter to edit with the keyboard.","default":"Speed"}
+  }
+}

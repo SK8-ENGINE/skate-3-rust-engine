@@ -170,6 +170,11 @@ mod exchange_tests {
 }
 
 impl GamePhysics {
+    /// Read-only SDK observation of the existing grind owner.
+    pub(crate) fn mod_grind(&self) -> (bool, &str, u32, f32) {
+        (self.grind.active, &self.grind.name, self.grind.kind, self.grind.distance)
+    }
+
     pub(crate) fn set_gesture_preferences(&mut self, gestures: Option<[u32; 4]>) {
         self.animation_profile.gesture_selections = gestures.filter(|g| g.iter().all(|v| *v < 37));
     }

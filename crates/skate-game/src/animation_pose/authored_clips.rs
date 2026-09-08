@@ -4,7 +4,7 @@ use bevy::math::{Mat4, Quat, Vec3};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 #[derive(Default)]
-pub(super) struct Replacements(BTreeMap<String, ClipFrames>);
+pub(super) struct Replacements(pub(super) BTreeMap<String, ClipFrames>);
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct File {
@@ -28,7 +28,7 @@ impl Replacements {
         };
         Self::parse(&text, frames).map_err(|e| format!("{}: {e}", path.display()))
     }
-    fn parse(text: &str, frames: &AnimationFrames) -> Result<Self, String> {
+    pub(super) fn parse(text: &str, frames: &AnimationFrames) -> Result<Self, String> {
         let file: File = serde_json::from_str(text).map_err(|e| e.to_string())?;
         if file.version != 1 || file.bone_names != frames.bone_names || file.clips.len() > 32 {
             return Err("Authored clip format or skeleton mismatch".into());
