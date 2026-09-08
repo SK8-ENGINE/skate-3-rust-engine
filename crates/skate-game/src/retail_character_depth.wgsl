@@ -9,6 +9,8 @@ struct CharacterParams { light: vec4<f32>, tint: vec4<f32>, options: vec4<f32>, 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: CharacterParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var diffuse_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var coverage: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var coverage_sampler: sampler;
 @fragment
 fn fragment(i: VertexOutput)
 #ifdef PREPASS_FRAGMENT
@@ -16,6 +18,10 @@ fn fragment(i: VertexOutput)
 #endif
 {
     if textureSample(diffuse,diffuse_sampler,i.uv).a < p.options.z { discard; }
+#ifdef VERTEX_UVS_B
+    // Retain strand holes in depth-only passes. Blended colour uses continuous coverage.
+    if p.options.w>1.5 && textureSample(coverage,coverage_sampler,i.uv_b).r*p.rows[6].x < 30.0/255.0 { discard; }
+#endif
 #ifdef PREPASS_FRAGMENT
     var out: FragmentOutput;
 #ifdef NORMAL_PREPASS

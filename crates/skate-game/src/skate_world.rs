@@ -395,8 +395,7 @@ fn material_ids(
                 m.alpha_mode,
                 m.alpha_cutoff.to_bits(),
             ];
-            let retail = m.retail_definition.as_deref().and_then(crate::retail_render::Definition::parse)
-                .filter(|d| d.supported());
+            let retail = m.retail_definition.as_deref().and_then(crate::retail_render::Definition::parse);
             *unique.entry((key, retail)).or_insert(i)
         })
         .collect()
@@ -427,6 +426,7 @@ pub(crate) fn spawn(
     materials: &mut Assets<StandardMaterial>,
     retail_materials: &mut Assets<crate::retail_render::RetailWorldMaterial>,
     images: &mut Assets<Image>,
+    tuning: &crate::retail_render::MaterialTuning,
 ) {
     // Texture roles have different transfer functions even when sharing a record.
     let texture_ids = render_texture_ids(&map.textures);
@@ -574,8 +574,8 @@ pub(crate) fn spawn(
             }
         }
         if let Some(definition) = m.retail_definition.as_deref()
-            .and_then(crate::retail_render::Definition::parse).filter(|d| d.supported()) {
-            let material = definition.build(m, &mut texture);
+            .and_then(crate::retail_render::Definition::parse).filter(|d| d.supported(tuning)) {
+            let material = definition.build(m, tuning, &mut texture);
             let material = retail_materials.add(material);
             commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
             continue;
@@ -862,6 +862,7 @@ mod tests {
             &mut materials,
             &mut retail_materials,
             &mut images,
+            &crate::retail_render::MaterialTuning::default(),
         );
         queue.apply(&mut world);
         assert_eq!(meshes.len(), 1);

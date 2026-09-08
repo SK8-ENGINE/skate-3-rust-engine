@@ -38,7 +38,7 @@ fn spawn(
     if let Some(map) = config.map.take() {
         // Physics has already consumed the package. Render assets own their
         // uploaded data; keeping another full city package wastes gigabytes.
-        crate::skate_world::spawn(&map, &mut commands, &mut meshes, &mut materials, &mut retail_materials, &mut images);
+        crate::skate_world::spawn(&map, &mut commands, &mut meshes, &mut materials, &mut retail_materials, &mut images, &crate::retail_render::MaterialTuning::load(&config.asset_root));
         crate::retail_render::spawn_backdrop(&map.name, &config.asset_root, &mut commands, &mut meshes, &mut materials, &mut retail_materials, &mut images);
         crate::retail_render::spawn_sky(&map.name, &config.asset_root, &mut commands, &mut meshes, &mut images, &mut sky_materials, &mut retail_materials);
         return;

@@ -62,8 +62,7 @@ def world_environment(collections, world_key):
         'anchor_height': floats(field(location, 'Hash_2E9AAECD1C29F81F'), 1)[0],
         'sky_model': field(world, 'Hash_C7A0A84F018E87BA'),
         'sky_textures': field(world, 'Hash_2A0BF629355AFB15'),
-        # These are authored inputs, not shader constants. The controller's
-        # colour/ramp transformation still needs to be recovered.
+        # Keep the authored values alongside the derived native shader rows.
         'fog': {'chain': fog_chain, **{n: floats(field(fog, n), 4 if n == 'fog_colour' else 1)
                 for n in ('fog_near', 'fog_far', 'fog_colour', 'fog_power', 'fog_max')}},
     }
@@ -81,3 +80,20 @@ def sky_parameters(collections, shader):
     if row[0] <= 0 or row[1] < 0:
         raise ValueError('Invalid authored sky parameters')
     return {'material_chain': chain, 'sun_scale': row[0], 'multiplier': row[1]}
+
+
+def fog_parameters(fog):
+    """TU3 0x828012D0: schema offsets 20/28/16/24 -> ramp and colour.
+
+    0x82F825F0 initializes the negative-one vector used for colour alpha.
+    Colour RGB is already linear here; do not square it again.
+    """
+    near, far, power, maximum = (fog[n][0] for n in
+        ('fog_near', 'fog_far', 'fog_power', 'fog_max'))
+    colour = fog['fog_colour']
+    if (len(colour) != 4 or not all(math.isfinite(v) for v in
+            [near, far, power, maximum, *colour]) or far <= near or near < 0
+            or power <= 0 or not 0 <= maximum <= 1):
+        raise ValueError('Invalid authored fog range/colour')
+    return {'ramp': [1 / (far - near), -near / (far - near), power, 0],
+            'colour': [v * maximum for v in colour[:3]] + [-maximum]}

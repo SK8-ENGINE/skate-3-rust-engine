@@ -398,7 +398,7 @@ VTX_FORMATS: Dict[int, Tuple[str, int]] = {
     0x001A215A: ("SHORT4",       8),   # raw int16[4]  -- position
     0x001A2286: ("UBYTE4",       4),   # raw uint8[4]  -- blend indices / weights
     0x002C2159: ("SHORT2N",      4),   # int16[2] / 32768 -- texcoord
-    0x002C23A5: ("SHORT4N",      8),   # int16[4] / 32768 -- texcoord pair
+    0x002C23A5: ("FLOAT2",       8),   # format 37: big-endian float2, hair strand UV
     0x002A2190: ("PACKED11_11_10N", 4),  # signed 11/11/10 -- tangent, binormal
 }
 
@@ -514,10 +514,9 @@ def _decode_vertices(d: bytes, vb: int, count: int, vdesc: dict) -> dict:
             for v in range(count):
                 u, w = struct.unpack_from(">2h", d, vb + v * stride + off)
                 vals.append((u / 32768.0, w / 32768.0))
-        elif fmt == "SHORT4N":
+        elif fmt == "FLOAT2":
             for v in range(count):
-                q = struct.unpack_from(">4h", d, vb + v * stride + off)
-                vals.append(tuple(c / 32768.0 for c in q))
+                vals.append(struct.unpack_from(">2f", d, vb + v * stride + off))
         elif fmt == "UBYTE4" and e["usage_name"] == "BLENDWEIGHT":
             for v in range(count):
                 q = struct.unpack_from(">4B", d, vb + v * stride + off)

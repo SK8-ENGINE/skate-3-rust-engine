@@ -12,6 +12,8 @@ struct CharacterParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var mask_map: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var mask_sampler: sampler;
 
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var coverage: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var coverage_sampler: sampler;
 @fragment
 fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     let albedo = textureSample(diffuse,diffuse_sampler,i.uv);
@@ -29,7 +31,12 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
         let hl=p.rows[1].rgb*(saturate(ndl*0.75+0.25)+p.rows[5].w*0.25)
             +p.rows[6].rgb*fres*saturate(ndl*1.75+0.25);
         if albedo.a<p.options.z { discard; }
-        return vec4<f32>(d*hl*p.light.w,albedo.a*p.tint.a);
+        var strand_alpha=albedo.a;
+#ifdef VERTEX_UVS_B
+        // cac_hair: raw second UV, red coverage, m_params[6].x scale.
+        if p.options.w>1.5 { strand_alpha=saturate(textureSample(coverage,coverage_sampler,i.uv_b).r*p.rows[6].x); }
+#endif
+        return vec4<f32>(d*hl*p.light.w,strand_alpha*p.tint.a);
     }
     let dp1=dpdx(rpos); let dp2=dpdy(rpos);
     let du1=dpdx(i.uv); let du2=dpdy(i.uv);

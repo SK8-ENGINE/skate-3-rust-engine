@@ -1,12 +1,12 @@
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 @group(0) @binding(0) var source: texture_2d<f32>;
 @group(0) @binding(1) var source_sampler: sampler;
-@group(0) @binding(2) var<uniform> enabled: vec4<f32>;
+@group(0) @binding(2) var<storage, read> exposure: vec4<f32>;
 
 @fragment
 fn fragment(i: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let c = textureSample(source,source_sampler,i.uv);
-    let xe = max(c.rgb,vec3<f32>(0.0));
+    let xe = max(c.rgb*exposure.x/2.5,vec3<f32>(0.0));
     let t = saturate(1.0-xe);
     let tm = max(xe*0.25+0.75,vec3<f32>(1.0))-t*t;
     let gamma = saturate(sqrt(max(tm*0.5,vec3<f32>(0.0)))*1.41);

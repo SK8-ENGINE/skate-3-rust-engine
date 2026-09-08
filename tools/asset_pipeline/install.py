@@ -197,6 +197,8 @@ def install(iso,base,game_exe,report,game_root=None):
             report('Preparing retail sky domes')
             from .sky import convert as write_skies
             write_skies(game_root,stage/'assets',converted)
+            from .render_parameters import convert as write_render_parameters
+            write_render_parameters(stage/'assets',converted)
             report('Preparing global foliage backdrops')
             from .backdrop import convert as write_backdrops
             write_backdrops(game_root,stage/'assets',converted)

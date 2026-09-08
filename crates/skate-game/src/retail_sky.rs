@@ -52,12 +52,20 @@ impl Material for RetailSkyMaterial {
 }
 
 #[derive(serde::Deserialize)]
+struct FogFrame {
+    ramp: [f32; 4],
+    colour: [f32; 4],
+}
+
+#[derive(serde::Deserialize)]
 struct Environment {
     anchor_height: f32,
     sun_direction: [f32; 3],
     sun_scale: f32,
     multiplier: f32,
     location_chain: Vec<String>,
+    #[serde(default)]
+    fog_frame: Option<FogFrame>,
 }
 #[derive(serde::Deserialize)]
 struct Sky {
@@ -115,6 +123,13 @@ fn load(root: &std::path::Path, name: &str) -> Result<(Sky, Vec<u8>, Option<Vec<
             || sky.sun_height != 16
         {
             return Err("Invalid authored sky environment".into());
+        }
+        if let Some(fog) = &env.fog_frame {
+            if !fog.ramp.iter().chain(fog.colour.iter()).all(|v| v.is_finite())
+                || fog.ramp[0] < 0. || fog.ramp[2] <= 0.
+                || !(-1. ..=0.).contains(&fog.colour[3]) {
+                return Err("Invalid authored fog frame".into());
+            }
         }
         let bytes = read(".sun.rgba")?;
         if u64::from(sky.sun_width) * u64::from(sky.sun_height) * 4 != bytes.len() as u64 {
@@ -175,6 +190,10 @@ pub(crate) fn spawn_sky(
             // Only the existing tangent-sign term uses this vector. No added
             // directional light energy or imported-world shadow map.
             material.params.sun_direction = params.sun_direction;
+            if let Some(fog) = &env.fog_frame {
+                material.params.fog_ramp = Vec4::from_array(fog.ramp);
+                material.params.fog_color = Vec4::from_array(fog.colour);
+            }
         }
         info!(
             "SKATE_SKY_READY map={name:?} location={:?} anchor={} sun_scale={} multiplier={} authored_direction={:?}",

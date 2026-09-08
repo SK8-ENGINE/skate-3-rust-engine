@@ -1,7 +1,7 @@
 """Synthetic environment references, independent of owned game assets."""
 import struct
 import unittest
-from .environment import Collections, field, key_hash, sky_parameters, world_environment
+from .environment import Collections, field, key_hash, sky_parameters, world_environment, fog_parameters
 
 
 def raw(*values):
@@ -34,6 +34,22 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(env['location_chain'], ['park', 'default'])
         self.assertEqual(env['fog']['fog_far'], [1000])
         self.assertEqual(env['sky_model'], 'world/models/sky')
+
+    def test_native_fog_rows_and_distance_boundaries(self):
+        fog = dict(fog_near=[100.], fog_far=[2000.], fog_power=[2.],
+                   fog_max=[.5], fog_colour=[.1, .2, .3, 1.])
+        frame = fog_parameters(fog)
+        self.assertEqual(frame['colour'], [.05, .1, .15, -.5])
+        def opacity(distance):
+            x = max(0., min(1., distance * frame['ramp'][0] + frame['ramp'][1]))
+            return .5 * x ** frame['ramp'][2]
+        self.assertEqual(opacity(0.), 0.)
+        self.assertAlmostEqual(opacity(100.), 0.)
+        self.assertAlmostEqual(opacity(1050.), .125)
+        self.assertAlmostEqual(opacity(2000.), .5)
+        self.assertAlmostEqual(opacity(3000.), .5)
+        fog['fog_far'] = [100.]
+        with self.assertRaises(ValueError): fog_parameters(fog)
 
     def test_unnamed_hashes_and_cycle_rejection(self):
         cls = f'Hash_{key_hash("world"):016X}'

@@ -3,7 +3,7 @@
 
 struct WorldParams {
     mode: vec4<f32>, foliage_debug: vec4<f32>, surface: vec4<f32>, family: vec4<f32>,
-    fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>,
+    fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>, water: array<vec4<f32>, 4>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: WorldParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse: texture_2d<f32>;
@@ -22,13 +22,16 @@ struct WorldParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(14) var specular_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(15) var environment_map: texture_cube<f32>;
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(16) var<storage, read> shadow_state: vec4<f32>;
+struct FrameState { shadow: vec4<f32>, clock: vec4<f32>, pca: array<vec4<f32>, 7> }
+@group(#{MATERIAL_BIND_GROUP}) @binding(16) var<storage, read> frame_state: FrameState;
 
 @fragment
 fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     let fam = u32(p.mode.x);
     let flags = u32(p.mode.y);
-    let a = textureSample(diffuse, diffuse_sampler, i.uv);
+    var diffuse_uv=i.uv;
+    if fam==14u { diffuse_uv+=fract(frame_state.clock.x*p.water[1].xy*vec2<f32>(1.0,-1.0)); }
+    let a = textureSample(diffuse, diffuse_sampler, diffuse_uv);
     let lm = textureSampleLevel(lightmap, lm_sampler, i.uv_b, 0.0).rgb;
     // Sample before alpha rejection: implicit derivatives must be uniform.
     var nm = vec3<f32>(0.5,0.5,1.0);
@@ -74,18 +77,90 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     var alpha = 1.0;
     var lin = vec3<f32>(0.0);
     var baked = lm*lm;
-    if shadow_state.w>0.0 && (fam<=8u || fam==13u) {
+    if frame_state.shadow.w>0.0 && (fam<=8u || fam==13u) {
         let view_z=(frame::view.view_from_world*i.world_position).z;
         for (var light_id=0u; light_id<frame::lights.n_directional_lights; light_id+=1u) {
             // The lightmapped receiver source contains only player/board casters.
             if (frame::lights.directional_lights[light_id].flags & 5u)==5u {
                 let visibility=fetch_directional_shadow(light_id,i.world_position,wn,view_z);
-                baked=min(baked,vec3<f32>(visibility)+shadow_state.rgb);
+                baked=min(baked,vec3<f32>(visibility)+frame_state.shadow.rgb);
                 break;
             }
         }
     }
-    if fam == 9u || fam == 10u {
+    if fam==14u {
+        lin=d*p.water[0].y;
+    } else if fam==32u {
+        lin=d*p.water[0].x;
+        alpha=saturate((i.world_position.y-p.water[0].z)/max(p.water[0].y-p.water[0].z,1e-4));
+    } else if fam==31u {
+        let raw_uv=vec2<f32>(i.uv.x,1.0-i.uv.y);
+        let uv=raw_uv*p.water[1].w;
+        let sample_uv=vec2<f32>(uv.x,1.0-uv.y);
+        let c0=textureSample(normal_map,normal_sampler,sample_uv)*2.0-1.0;
+        let c1=textureSample(detail_map,detail_sampler,sample_uv)*2.0-1.0;
+        let pca=(vec3<f32>(dot(c0,frame_state.pca[1])+dot(c1,frame_state.pca[2]),
+            dot(c0,frame_state.pca[3])+dot(c1,frame_state.pca[4]),
+            dot(c0,frame_state.pca[5])+dot(c1,frame_state.pca[6]))+frame_state.pca[0].xyz)*2.0-1.0;
+        var overlay=1.0;
+        if (flags & 4u)!=0u {
+            let uv_overlay=raw_uv*p.surface.x;
+            overlay=textureSample(macro_map,macro_sampler,vec2<f32>(uv_overlay.x,1.0-uv_overlay.y)).r;
+        }
+        let tonedown=2.0*p.water[1].z*saturate(dot(c1,frame_state.pca[6])+overlay);
+        let nt=normalize(max(abs(normalize(mix(vec3<f32>(0.0,0.0,1.0),pca,tonedown))),vec3<f32>(0.001)));
+        let n=nt.xzy;
+        let rv=vd-2.0*n*dot(vd,n);
+        var cube=vec3<f32>(0.0);
+        if (flags & 64u)!=0u { cube=textureSampleBias(environment_map,diffuse_sampler,vec3<f32>(-rv.x,-rv.y,rv.z),log2(frame::view.viewport.w/640.0)).rgb; }
+        let olm=textureSampleLevel(lightmap,lm_sampler,i.uv_b+0.01*nt.xy*vec2<f32>(1.0,-1.0),0.0).rgb;
+        let fres=0.25+0.75*pow(1.0-abs(dot(n,vd)),5.0);
+        let u=normalize(vec3<f32>(-n.z,0.0,n.x));
+        let v=cross(n,u);
+        let ax=p.water[2].z/p.water[2].x;
+        let ay=p.water[2].z/p.water[2].y;
+        let h=normalize(sun+vd);
+        let eu=dot(h,u)/ax;
+        let ev=dot(h,v)/ay;
+        let den=sqrt(abs(dot(n,sun)*dot(n,vd)))*12.566371*ax*ay;
+        let ward=exp(-2.0*(eu*eu+ev*ev)/(1.0+dot(h,n)))/max(den,1e-6);
+        lin=(cube*olm*olm*fres+ward*p.water[0].rgb)*p.water[1].y;
+        alpha=1.0;
+    } else if fam==30u {
+        let t=frame_state.clock.x;
+        // Convert to original UVs for scale/scroll, then back to flipped rows.
+        let raw_uv=vec2<f32>(i.uv.x,1.0-i.uv.y);
+        let uv1=raw_uv*p.water[2].xy+p.water[1].xy*t;
+        let uv2=raw_uv*p.water[2].zw+p.water[1].zw*t;
+        let n1=textureSample(normal_map,normal_sampler,vec2<f32>(uv1.x,1.0-uv1.y)).rgb;
+        let n2=textureSample(normal_map,normal_sampler,vec2<f32>(uv2.x,1.0-uv2.y)).rgb;
+        let vn=normalize((2.0*n1+2.0*n2-2.0)*p.water[0].xzw);
+        let water_n=normalize(vn.x*kt+vn.y*kb+vn.z*wn);
+        let wlm=textureSampleLevel(lightmap,lm_sampler,i.uv_b+0.01*vn.xz*vec2<f32>(1.0,-1.0),0.0).rgb;
+        var lml=wlm*wlm;
+        if frame_state.shadow.w>0.0 {
+            let vz=(frame::view.view_from_world*i.world_position).z;
+            for(var id=0u;id<frame::lights.n_directional_lights;id+=1u) {
+                if (frame::lights.directional_lights[id].flags & 5u)==5u {
+                    lml=min(lml,vec3<f32>(fetch_directional_shadow(id,i.world_position,wn,vz))+frame_state.shadow.rgb); break;
+                }
+            }
+        }
+        let kd=dot(water_n,vec3<f32>(0.58*sign(sun.x),0.62*sign(sun.y),0.39))*2.39562;
+        var wm=vec2<f32>(0.0);
+        if (flags & 16u)!=0u { wm=saturate(textureSample(specular_map,specular_sampler,i.uv).xz-p.water[3].y); }
+        let reflected_light=2.0*water_n*dot(water_n,sun)-sun;
+        let ks=pow(max(saturate(dot(vd,reflected_light)),1e-6),p.water[3].z);
+        var spec=ks*wm.x*vec3<f32>(2.1,1.8,1.5)*saturate(lml.g-0.1);
+        if (flags & 64u)!=0u {
+            let rv=vd-2.0*water_n*dot(vd,water_n);
+            let cube=textureSampleBias(environment_map,diffuse_sampler,vec3<f32>(-rv.x,-rv.y,rv.z),log2(frame::view.viewport.w/640.0)).rgb;
+            let lum=0.3*saturate(4.0*wm.y-2.6);
+            spec+=cube*(lml.g+lum*(1.0-lml.g))*wm.y*1.5;
+        }
+        lin=(lml*kd*d+spec)*p.water[0].y;
+        alpha=max(spec.g,p.water[3].w);
+    } else if fam == 9u || fam == 10u {
         lin = d * max(lm*lm,vec3<f32>(p.family.y)) * p.family.x;
         if fam == 9u { lin *= p.family.z; }
         alpha = a.a;

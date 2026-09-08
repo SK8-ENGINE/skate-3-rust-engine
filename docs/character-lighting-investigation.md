@@ -174,3 +174,10 @@ including smooth probe transitions, hitch limiting, caster isolation and cascade
 configuration. Release compilation passes. The updated private University
 launcher records stdout/stderr, backtraces and the exit code in
 `logs/renderer-work/player-shadow-runtime.log`. It has not been executed.
+
+
+## Later visual pass
+
+See [visual-parity-status.md](visual-parity-status.md) for the subsequent SH
+transition smoothing, second-UV blended hair coverage, GPU exposure meter and
+remaining shadow/CAC fidelity gaps. Earlier implementation sections are historical.

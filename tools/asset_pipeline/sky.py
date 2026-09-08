@@ -4,7 +4,7 @@ import struct
 import sys
 from pathlib import Path
 from tools.owned_game.big import BigArchive
-from .environment import Collections, NAMES, field, key_hash, sky_parameters, world_environment
+from .environment import Collections, NAMES, field, key_hash, sky_parameters, world_environment, fog_parameters
 
 
 def _material(raw, table):
@@ -72,6 +72,7 @@ def convert(game_root, assets, converted):
         sun = _texture(textures, channels['specular'])
         shader = next(p.value for p in model.materials if p.kind == 'AttribulatorMaterialName')
         env.update(sky_parameters(collections, shader))
+        env['fog_frame'] = fog_parameters(env['fog'])
         if len(model.meshes) != 1 or model.meshes[0].uvs is None:
             raise ValueError('Unexpected sky mesh layout')
         mesh = model.meshes[0]

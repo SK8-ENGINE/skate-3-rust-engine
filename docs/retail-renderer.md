@@ -86,36 +86,19 @@ selection and regional/streaming state also remain unverified.
 
 ## Remaining differences
 
-This is not a claim of pixel parity. Native frame constants are supplied by
-game hooks in the reference; this engine does not yet recover that controller.
-Scene exposure 2.5, world material multiplier 1, and tree/proxy values still use
-documented day-capture defaults. Imported maps have no additive directional sun:
-their world lighting comes from baked lightmaps, with a separate player-only
-projected shadow receiver described in the character-lighting notes. Normal-map
-sign terms use the initial world's authored direction when new sky metadata
-is available; old packages retain the previous direction. Regional changes
-and the runtime environment controller are not implemented. Fog selection
-and its authored near/far/colour/power/max are retained in sky metadata, but
-the CPU transformation to native frame rows is not yet proven, so shader fog
-remains disabled. The selected `material_fog/default` must not be confused
-with the different `fog_default` collection.
+The current pass enables authored distance fog, GPU exposure adaptation, flowing
+water, scrolling emissive signs, the global reflective water sheets and additional
+hair strand coverage. See [visual-parity-status.md](visual-parity-status.md) for
+provenance, validation and the distinction between native equations and adapters.
 
-Native water, SSAO, SSR, bloom and volumetric lighting are
-not yet ported. Character lighting now has a dedicated adapter; see
-[character-lighting-investigation.md](character-lighting-investigation.md) for
-implemented terms, spatial data, validation and remaining parity differences.
-The water arrays are recoverable now, but flowing-water
-normal/tangent unpacking, ocean PCA input bindings and the separate horizon
-water resource still need their own adapters. Character parity needs the
-native CAC-composed texture/mask inputs plus verified key/rim/specular and
-nine SH rows; portable GLB materials do not retain that contract. Reference
-post effects need their depth/normal/reflection inputs and native pass ordering;
-volumetric sun visibility also conflicts with the currently disabled world
-sun-shadow source. These gaps are not enabled using guessed settings.
-Characters without the new lighting sidecars and
-unsupported world families still use Bevy materials beneath the shared tone
-curve. Reflection normals use the reference's analytic world-up construction;
-there has been no matched-camera pixel comparison against the recomp.
+This is not pixel parity. Native regional environment selection is not ported;
+static map selection supplies the fog/sun and the default exposure tuning. The
+exposure meter uses portable HDR luminance samples instead of the native resolve
+surface. Shadow colour/filtering and CAC hair colour-register composition still
+have documented approximations. Ocean PCA wave reconstruction now uses the owned 30-frame table; its native
+phase/reset controller and the separate non-flowing water shader remain unported. SSAO, SSR, bloom and volumetric lighting
+are also outside the currently implemented renderer. Missing parameters retain
+fallback materials; these effects are not silently labelled complete.
 
 The shaders are embedded in the executable. Sky and map payloads are extracted
 from the user's game and must never be committed or bundled with releases.
@@ -163,7 +146,8 @@ the tree-family presentation meshes into `private/native-backdrops/<map>.skate`.
 Mesh-to-material and material-to-texture selection use binary GUIDs: texture
 name suffixes differ from the global texture resource GUIDs. Original positions,
 indices, UVs, masked alpha, two-sided rendering and baked lightmaps are retained.
-No water surfaces or synthetic forest placements are added.
+At that stage only tree-family meshes were selected. The later visual pass also
+retains the authored global reflective water sheets; no synthetic placements are added.
 
 The renderer loads this supplemental package after the district and before sky
 setup, through the existing retail mesh/material path. `parse_render_only` is

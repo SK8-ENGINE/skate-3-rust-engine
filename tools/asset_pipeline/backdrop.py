@@ -72,7 +72,7 @@ def convert(game_root, assets, converted):
             raw, prep._group_material_parameters(model.materials), len(model.meshes),
             allow_import_order_fallback=False)
         selected = [(i, prep._material_metadata(groups, i)) for i in range(len(model.meshes))]
-        selected = [(i, m) for i, m in selected if m['shader_name'] in ('tree.default', 'animated.tree')]
+        selected = [(i, m) for i, m in selected if m['shader_name'] in ('tree.default', 'animated.tree', 'ocean.reflection', 'environment.reflective_simple')]
         if not selected:
             continue
         textures = rx2_parser.parse_rx2(archive.read(entries['data/content/' + texture_name + '.rx2']))

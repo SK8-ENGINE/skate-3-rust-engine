@@ -26,6 +26,7 @@ struct MaterialData {
     shader: String,
     params: Vec<[f32; 4]>,
     specular: Option<String>,
+    coverage: Option<String>,
 }
 #[derive(Deserialize)]
 struct LightingData {
@@ -37,6 +38,7 @@ struct Lighting {
     data: LightingData,
     probes: Irradiance,
     light: Vec4,
+    display_sh: Option<[Vec4; 9]>,
 }
 #[derive(Clone, ShaderType)]
 struct CharacterParams {
@@ -60,6 +62,9 @@ struct CharacterMaterial {
     #[texture(5)]
     #[sampler(6)]
     mask: Option<Handle<Image>>,
+    #[texture(7)]
+    #[sampler(8)]
+    coverage: Option<Handle<Image>>,
     alpha: AlphaMode,
 }
 impl Material for CharacterMaterial {
@@ -141,6 +146,7 @@ fn load(mut commands: Commands, config: Res<crate::config::Config>) {
         data,
         probes,
         light,
+        display_sh: None,
     });
 }
 fn spawn_shadow_sources(commands: &mut Commands, light: Vec3) {
@@ -218,8 +224,8 @@ fn bind(
                 options: Vec4::new(
                     f32::from(m.normal_map_texture.is_some()),
                     f32::from(data.specular.is_some()),
-                    alpha_cutoff,
-                    f32::from(data.shader == "character.hair"),
+                    if data.coverage.is_some() { -1. } else { alpha_cutoff },
+                    if data.coverage.is_some() { 2. } else { f32::from(data.shader == "character.hair") },
                 ),
                 rows: std::array::from_fn(|i| Vec4::from_array(data.params[i])),
                 sh: lighting
@@ -237,7 +243,9 @@ fn bind(
                     },
                 )
             }),
-            alpha: m.alpha_mode,
+            coverage: data.coverage.as_ref().map(|path| server.load_with_settings(
+                path.clone(), |settings: &mut bevy::image::ImageLoaderSettings| { settings.is_srgb = false; })),
+            alpha: if data.coverage.is_some() { AlphaMode::Blend } else { m.alpha_mode },
         });
         commands
             .entity(entity)
@@ -278,9 +286,14 @@ fn update(
         .default_sh
         .map(|v| Vec3::from_array(v).extend(0.));
     let sh = lighting.probes.sample(root.translation, fallback);
+    let displayed = lighting.display_sh.map_or(sh, |old| {
+        let weight = 1. - (-time.delta_secs().clamp(0., 0.05) / 0.35).exp();
+        std::array::from_fn(|i| old[i].lerp(sh[i], weight))
+    });
     for (_, material) in materials.iter_mut() {
-        material.params.sh = sh;
+        material.params.sh = displayed;
     }
+    lighting.display_sh = Some(displayed);
     // Adapter floor: the local probe's direction-independent ambient term.
     // The native per-frame c8 shadow-colour controller remains unrecovered.
     shadow.approach(sh[0].truncate(), time.delta_secs());
