@@ -124,6 +124,44 @@ struct Reader<'a> {
     bytes: &'a [u8],
     at: usize,
 }
+
+/// MOBJ schema 3 stores editor ownership of ranges in the base geometry.
+/// Physics-disabled objects can use those unchanged static arrays. Explicit
+/// body types still require a runtime adapter and must not be flattened.
+pub fn validate_static_objects(map: &SkateMap, extension: &Extension) -> Result<(), String> {
+    if extension.schema != 3 { return Err("Unsupported MOBJ schema".into()); }
+    let mut r = Reader { bytes: &extension.payload, at: 0 };
+    let count = r.u()?;
+    r.check_count(count, 80)?;
+    let mut ids = std::collections::HashSet::new();
+    for _ in 0..count {
+        if !ids.insert(r.u()?) { return Err("Duplicate MOBJ identity".into()); }
+        let name = r.string()?;
+        r.floats::<3>()?;
+        for limit in [map.geometry.indices.len(), map.geometry.collision.len()] {
+            let first = r.u()? as usize;
+            let length = r.u()? as usize;
+            if first.checked_add(length).is_none_or(|end| end > limit) {
+                return Err(format!("MOBJ {name} geometry range is invalid"));
+            }
+        }
+        let rails = r.u()?;
+        r.check_count(rails, 4)?;
+        for _ in 0..rails {
+            if r.u()? as usize >= map.rails.len() { return Err(format!("MOBJ {name} rail index is invalid")); }
+        }
+        if r.u()? != 0 {
+            return Err(format!("MOBJ {name} requests object physics, which requires a body adapter"));
+        }
+        if r.u()? > 2 { return Err(format!("MOBJ {name} collision shape is invalid")); }
+        r.floats::<6>()?;
+        for _ in 0..2 {
+            if r.u()? > 1 { return Err(format!("MOBJ {name} has an invalid boolean")); }
+        }
+    }
+    if r.at != r.bytes.len() { return Err("MOBJ has trailing data".into()); }
+    Ok(())
+}
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
         let end = self.at.checked_add(n).ok_or("SKATE offset overflow")?;

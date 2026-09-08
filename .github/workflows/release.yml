@@ -1,0 +1,34 @@
+name: Windows release
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install setup packager
+        run: python -m pip install pyinstaller==6.19.0 numpy==2.2.6 Pillow==11.3.0
+      - name: Build source-only release
+        shell: pwsh
+        run: ./Build-Release.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skate3rust-windows-x64
+          path: |
+            target/skate3rust-windows-x64.zip
+            target/skate3rust-windows-x64.zip.sha256
+      - name: Attach to release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$env:RELEASE_TAG" target/skate3rust-windows-x64.zip target/skate3rust-windows-x64.zip.sha256 --clobber

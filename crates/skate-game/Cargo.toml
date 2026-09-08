@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "skate3rust"
+path = "src/main.rs"
+
+[features]
+default = ["dev-dynamic"]
+dev-dynamic = ["bevy/dynamic_linking"]
+
 [dependencies]
 bevy.workspace = true
 skate-core.workspace = true

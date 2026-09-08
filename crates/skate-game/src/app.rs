@@ -46,7 +46,7 @@ pub(crate) fn build(
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Skate 3".into(),
+                    title: "Skate 3 Rust Engine".into(),
                     resolution: (1280, 800).into(),
                     ..default()
                 }),

@@ -55,13 +55,17 @@ impl Collections {
 
     pub fn field(&self, class: &str, key: &str, name: &str) -> Result<&Field, String> {
         let mut current = key;
+        let class_hash = crate::attrib_hash::numeric_name(class);
+        let field_hash = crate::attrib_hash::numeric_name(name);
         for _ in 0..=self.collections.len() {
+            let key_hash = crate::attrib_hash::numeric_name(current);
             let item = self
                 .collections
                 .iter()
-                .find(|c| c.class_name == class && c.key == current)
+                .find(|c| (c.class_name == class || c.class_name == class_hash)
+                    && (c.key == current || c.key == key_hash))
                 .ok_or_else(|| format!("Missing stock collection {class}/{current}"))?;
-            if let Some(field) = item.fields.get(name) {
+            if let Some(field) = item.fields.get(name).or_else(|| item.fields.get(&field_hash)) {
                 return Ok(field);
             }
             if item.parent.is_empty() {

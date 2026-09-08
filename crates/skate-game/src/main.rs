@@ -4,6 +4,8 @@ mod app;
 mod assets;
 mod camera;
 mod config;
+mod setup;
+mod map_library;
 mod difficulty;
 mod graph_host;
 mod graph_runtime;
@@ -71,6 +73,14 @@ fn main() -> bevy::app::AppExit {
         Ok(controls) => controls,
         Err(error) => { eprintln!("{error}"); return bevy::app::AppExit::error(); }
     };
+    if config.check_assets {
+        if let Err(error) = camera::CameraRuntime::load(&config.asset_root) {
+            eprintln!("{error}");
+            return bevy::app::AppExit::error();
+        }
+        eprintln!("SKATE_ASSETS_READY");
+        return bevy::app::AppExit::Success;
+    }
     let mut app = app::build(config, manifest, graphs, physics, skater);
     app.insert_resource(controls);
     app.run()

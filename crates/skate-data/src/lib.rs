@@ -7,6 +7,7 @@ pub mod animation_banks;
 pub mod animation_frames;
 pub mod animation_metadata;
 pub mod collections;
+pub mod attrib_hash;
 pub mod input_config;
 pub mod gesture_patterns;
 pub mod physics_skeleton;

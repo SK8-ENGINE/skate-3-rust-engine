@@ -2,6 +2,8 @@
 /bin/
 /logs/
 /settings/
+__pycache__/
+*.pyc
 /assets/private/
 /maps/private/
 /maps/*.skate

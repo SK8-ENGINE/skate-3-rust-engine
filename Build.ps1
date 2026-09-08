@@ -7,7 +7,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Build failed; see the compiler output above.' }
     }
     $debugDirectory = Join-Path $TargetDirectory 'debug'
-    $executable = Join-Path $debugDirectory 'skate-game.exe'
+    $executable = Join-Path $debugDirectory 'skate3rust.exe'
     if (-not (Test-Path -LiteralPath $executable)) { throw "Missing executable: $executable" }
     $readobj = Join-Path $env:ProgramFiles 'LLVM/bin/llvm-readobj.exe'
     if (-not (Test-Path -LiteralPath $readobj)) { throw 'LLVM llvm-readobj is required to stage exact runtime DLL dependencies.' }
@@ -49,5 +49,5 @@ try {
         }
     }
     $staged | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $binDirectory 'manifest.json') -Encoding UTF8
-    Write-Host "Ready: $binDirectory/skate-game.exe"
+    Write-Host "Ready: $binDirectory/skate3rust.exe"
 } finally { Pop-Location }

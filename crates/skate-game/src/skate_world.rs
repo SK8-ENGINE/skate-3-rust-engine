@@ -42,6 +42,10 @@ pub(crate) fn validate_runtime(map: &SkateMap) -> Result<(), String> {
         if extension.tag == *b"RWCM" {
             continue;
         }
+        if extension.tag == *b"MOBJ" {
+            skate_data::skate_map::validate_static_objects(map, extension)?;
+            continue;
+        }
         if extension.tag == *b"SKYB" && extension.schema == 1 {
             eprintln!(
                 "SKATE LIMITATION: SKYB retail sky retained; using the map horizon until its shader adapter is available."

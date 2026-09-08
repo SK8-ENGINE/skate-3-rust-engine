@@ -2,7 +2,7 @@ param([string]$Map)
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
-    $executable = Join-Path $PSScriptRoot 'bin/skate-game.exe'
+    $executable = Join-Path $PSScriptRoot 'bin/skate3rust.exe'
     if (-not (Test-Path -LiteralPath $executable)) { throw 'Game is not built. Run BUILD.bat first.' }
     New-Item -ItemType Directory -Path (Join-Path $PSScriptRoot 'logs') -Force | Out-Null
     $log = Join-Path $PSScriptRoot ('logs/game-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')

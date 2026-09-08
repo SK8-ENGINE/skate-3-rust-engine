@@ -82,6 +82,8 @@ pub(crate) struct Menu {
     supported_msaa: Vec<u32>,
     difficulty: Difficulty,
     status: String,
+    maps: Vec<crate::map_library::Entry>,
+    selected_map: usize,
 }
 pub(crate) fn gameplay_active(menu: Option<Res<Menu>>) -> bool {
     menu.is_none_or(|m| !m.open)
@@ -196,7 +198,7 @@ fn setup(
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("PAUSED"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..8 {
+            for i in 0..10 {
                 panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(36),padding:UiRect::all(px(8)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
@@ -207,6 +209,8 @@ fn setup(
         });
     });
     commands.insert_resource(SceneTarget(target));
+    let maps = crate::map_library::discover(&config.asset_root);
+    let selected_map = maps.iter().position(|m| m.path.as_ref() == config.map_path.as_ref()).unwrap_or(0);
     commands.insert_resource(Menu {
         open: false,
         selected: 0,
@@ -215,6 +219,8 @@ fn setup(
         supported_msaa,
         difficulty: config.difficulty,
         status: String::new(),
+        maps,
+        selected_map,
     });
 }
 fn msaa(samples: u32) -> Msaa {
@@ -244,10 +250,10 @@ fn interact(
     let mut action = None;
     if menu.open {
         if keys.just_pressed(KeyCode::ArrowUp) {
-            menu.selected = (menu.selected + 7) % 8;
+            menu.selected = (menu.selected + 9) % 10;
         }
         if keys.just_pressed(KeyCode::ArrowDown) {
-            menu.selected = (menu.selected + 1) % 8;
+            menu.selected = (menu.selected + 1) % 10;
         }
         if keys.just_pressed(KeyCode::ArrowLeft) {
             action = Some((menu.selected, -1));
@@ -287,8 +293,19 @@ fn interact(
                     Err(e) => format!("Applied, but could not save: {e}"),
                 };
             }
-            6 => menu.open = false,
+            6 => {
+                menu.selected_map = (menu.selected_map as i32 + direction)
+                    .rem_euclid(menu.maps.len() as i32) as usize;
+                menu.status = "Choose Load map to switch".into();
+            }
             7 => {
+                match crate::map_library::switch(&config.asset_root, &menu.maps[menu.selected_map]) {
+                    Ok(()) => { exit.write(AppExit::Success); }
+                    Err(e) => menu.status = e,
+                }
+            }
+            8 => menu.open = false,
+            9 => {
                 exit.write(AppExit::Success);
             }
             _ => {}
@@ -404,7 +421,9 @@ fn labels(
             ),
             4 => format!("Occlusion culling     {}", if s.occlusion { "On" } else { "Off" }),
             5 => format!("Difficulty            {}", menu.difficulty.label()),
-            6 => "Resume".into(),
+            6 => format!("Map                   {}", menu.maps[menu.selected_map].label),
+            7 => "Load map (restarts session)".into(),
+            8 => "Resume".into(),
             _ => "Quit game".into(),
         };
     }
