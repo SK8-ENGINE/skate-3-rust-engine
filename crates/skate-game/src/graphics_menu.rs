@@ -270,9 +270,9 @@ pub(crate) fn interact(
     if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 {
         menu.open = !menu.open;
     }
-    if panel.focused && menu.open { return; }
     let mut action = None;
     if menu.open {
+        if !panel.focused {
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
             menu.selected = (menu.selected + 11) % 12;
         }
@@ -285,7 +285,9 @@ pub(crate) fn interact(
         if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::Enter) || nav.pressed & (8 | 0x1000) != 0 {
             action = Some((menu.selected, 1));
         }
+        }
         for (interaction, row) in &buttons {
+            if panel.dragging() { continue; }
             if *interaction == Interaction::Pressed {
                 menu.selected = row.0;
                 action = Some((row.0, 1));
@@ -409,16 +411,12 @@ fn labels(
     time: Res<Time<Real>>,
     customiser: Res<crate::customiser::Customiser>,
     mods: Res<crate::modding::ModMenu>,
-    enabled_mods: Res<crate::modding::Mods>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut root: Single<&mut Node, With<MenuRoot>>,
     mut labels: Query<(&MenuLabel, &mut Text), Without<StatusLabel>>,
     mut status: Single<&mut Text, With<StatusLabel>>,
     mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor)>,
 ) {
-    let has_enabled=enabled_mods.manager.packages.values().any(|p|p.running());
-    root.justify_content=if has_enabled {JustifyContent::FlexEnd}else{JustifyContent::Center};
-    root.padding.right=if has_enabled {percent(3)}else{px(0.)};
     root.display = if menu.open && !customiser.open && !mods.open {
         Display::Flex
     } else {

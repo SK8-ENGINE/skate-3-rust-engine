@@ -220,3 +220,9 @@ Source bindings: ground pop scales the current `GroundJumpMode` minimum/maximum 
 Trainer integration is compile-checked and the standalone Lua/schema suite covers command validation and setting delivery. Native gameplay effects, controller focus and two-panel layout still require the user-run launcher. No game was launched for this update.
 
 The trainer update passes 14 standalone Lua/schema tests and a static-CRT release build. Use **PLAY-NATIVE-TRAINER.bat** for this update; its executable and preferences are isolated from the previous SDK test build.
+
+## Draggable per-mod windows
+
+Use `PLAY-MOD-WINDOWS.bat` for the latest settings-window build (`Build-ModWindows.ps1`). The ordinary Escape menu stays in its original centered position. Each enabled mod receives its own compact window, initially at the left, with a title you can drag. The title-bar minus button collapses that window; plus expands it. Each setting has separate minus/plus controls to decrease/increase numbers (within the manifest bounds), cycle choices, or toggle booleans. String controls open the full editor. Values are still saved and delivered to Lua immediately.
+
+Positions and collapse state are retained for the current process, including closing Escape and disabling/re-enabling a mod; they are not saved across game restarts. Clicking a window brings it forward. Tab/controller X cycles focus through enabled mods and then back to the main pause controls; arrows select/adjust within the focused mod. Each window pages seven settings with its own previous/next buttons. Manage mod opens that mod's enable/disable page. The main pause controls remain mouse-clickable when a mod has keyboard focus. Dragging prevents accidental main-menu mouse actions. No game was launched to validate this UI update; its interactive behavior remains for user testing.

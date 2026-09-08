@@ -1,133 +1,271 @@
-//! Enabled mod settings beside the normal pause menu, with independent focus.
+//! Independent, draggable enabled-mod windows. Positions survive closing Escape.
 use super::{ModMenu, Mods};
 use bevy::prelude::*;
-#[derive(Resource, Default)]
-pub(crate) struct EnabledPanel {
-    pub focused: bool,
+use std::collections::BTreeMap;
+const PAGE: usize = 7;
+#[derive(Default)]
+struct Layout {
+    position: Vec2,
+    collapsed: bool,
     selected: usize,
     status: String,
 }
-#[derive(Component)]
-struct Root;
-#[derive(Component)]
-struct Row(usize);
-#[derive(Component)]
-struct Label(usize);
-#[derive(Component)]
-struct Hint;
-#[derive(Clone)]
-enum Entry {
-    Mod(String),
-    Setting(String, String),
+#[derive(Resource, Default)]
+pub(crate) struct EnabledPanel {
+    pub focused: bool,
+    active: Option<String>,
+    layouts: BTreeMap<String, Layout>,
+    drag: Option<(String, Vec2)>,
+    signature: Vec<(String, Vec<String>)>,
 }
-fn entries(mods: &Mods) -> Vec<(String, Entry)> {
-    let mut rows = vec![];
-    for (id, p) in &mods.manager.packages {
-        if p.running() {
-            rows.push((
-                format!("{}  -  ENABLED", p.manifest.name),
-                Entry::Mod(id.clone()),
-            ));
-            for (key, s) in &p.manifest.settings {
-                let value = &p.settings[key];
-                let display = value
-                    .as_f64()
-                    .map(|v| format!("{v:.2}"))
-                    .unwrap_or_else(|| {
-                        value
-                            .as_str()
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| value.to_string())
-                    });
-                rows.push((
-                    format!("{}   {}", s.label, display),
-                    Entry::Setting(id.clone(), key.clone()),
-                ));
-            }
-        }
+impl EnabledPanel {
+    pub fn dragging(&self) -> bool {
+        self.drag.is_some()
     }
-    rows
+}
+#[derive(Component)]
+struct Root(String);
+#[derive(Component)]
+struct Body(String);
+#[derive(Component)]
+struct Header(String);
+#[derive(Component)]
+struct Row(String, usize);
+#[derive(Component)]
+struct Label(String, usize);
+#[derive(Component)]
+struct ValueLabel(String, usize);
+#[derive(Component)]
+struct Hint(String);
+#[derive(Component)]
+struct CollapseLabel(String);
+#[derive(Component, Clone)]
+struct Action(String, Operation);
+#[derive(Clone)]
+enum Operation {
+    Adjust(usize, i32),
+    Collapse,
+    Configure,
+    Page(i32),
 }
 pub(super) fn install(app: &mut App) {
     app.init_resource::<EnabledPanel>()
-        .add_systems(PostStartup, setup)
         .add_systems(
             PreUpdate,
             input
                 .after(crate::graphics_menu::MenuInput)
                 .before(crate::map_transition::MapTransitionSet),
         )
-        .add_systems(Update, draw);
+        .add_systems(Update, (sync, draw).chain());
 }
-fn setup(mut commands: Commands) {
-    commands
+fn button(parent: &mut ChildSpawnerCommands, text: &str, action: Action) {
+    parent
         .spawn((
-            Root,
-            GlobalZIndex(12),
+            Button,
+            action,
             Node {
-                display: Display::None,
-                position_type: PositionType::Absolute,
-                left: percent(3),
-                top: percent(8),
-                width: percent(39),
-                padding: UiRect::all(px(16)),
-                row_gap: px(7),
-                flex_direction: FlexDirection::Column,
-                border_radius: BorderRadius::all(px(12)),
+                min_width: px(28.),
+                height: px(28.),
+                padding: UiRect::horizontal(px(5.)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.035, 0.055, 0.08)),
+            BackgroundColor(Color::srgb(0.12, 0.20, 0.26)),
         ))
-        .with_children(|panel| {
-            panel.spawn((
-                Text::new("ENABLED MOD SETTINGS"),
+        .with_children(|p| {
+            p.spawn((
+                Text::new(text),
                 TextFont {
-                    font_size: 23.,
+                    font_size: 16.,
                     ..default()
                 },
-                TextColor(Color::srgb(0.25, 1., 0.4)),
-            ));
-            for i in 0..10 {
-                panel
-                    .spawn((
-                        Row(i),
-                        Button,
-                        Node {
-                            padding: UiRect::all(px(7)),
-                            min_height: px(32),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.08, 0.11, 0.15)),
-                    ))
-                    .with_children(|row| {
-                        row.spawn((
-                            Label(i),
-                            Text::new(""),
-                            TextFont {
-                                font_size: 16.,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-            }
-            panel.spawn((
-                Hint,
-                Text::new(""),
-                TextFont {
-                    font_size: 14.,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.65, 0.85, 0.85)),
+                TextColor(Color::WHITE),
             ));
         });
 }
-fn visible(
-    pause: &crate::graphics_menu::Menu,
-    menu: &ModMenu,
-    custom: &crate::customiser::Customiser,
-) -> bool {
-    pause.open && !menu.open && !custom.open
+fn sync(
+    mut commands: Commands,
+    mods: Res<Mods>,
+    mut panel: ResMut<EnabledPanel>,
+    roots: Query<Entity, With<Root>>,
+) {
+    let signature: Vec<_> = mods
+        .manager
+        .packages
+        .iter()
+        .filter(|(_, p)| p.running())
+        .map(|(id, p)| {
+            (
+                id.clone(),
+                p.manifest.settings.keys().cloned().collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    if signature == panel.signature {
+        return;
+    }
+    for root in &roots {
+        commands.entity(root).despawn();
+    }
+    panel.signature = signature.clone();
+    panel.drag = None;
+    if !signature
+        .iter()
+        .any(|(id, _)| panel.active.as_ref() == Some(id))
+    {
+        panel.active = signature.first().map(|(id, _)| id.clone());
+        panel.focused = false;
+    }
+    for (index, (id, _)) in signature.iter().enumerate() {
+        panel.layouts.entry(id.clone()).or_insert_with(|| Layout {
+            position: Vec2::new(16. + index as f32 * 22., 64. + index as f32 * 34.),
+            ..default()
+        });
+        let name = &mods.manager.packages[id].manifest.name;
+        commands
+            .spawn((
+                Root(id.clone()),
+                GlobalZIndex(12),
+                Node {
+                    display: Display::None,
+                    position_type: PositionType::Absolute,
+                    width: px(320.),
+                    max_width: percent(95),
+                    padding: UiRect::all(px(10.)),
+                    row_gap: px(8.),
+                    flex_direction: FlexDirection::Column,
+                    border_radius: BorderRadius::all(px(9.)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.035, 0.055, 0.08)),
+            ))
+            .with_children(|window| {
+                window
+                    .spawn(Node {
+                        width: percent(100),
+                        column_gap: px(5.),
+                        ..default()
+                    })
+                    .with_children(|bar| {
+                        bar.spawn((
+                            Button,
+                            Header(id.clone()),
+                            Node {
+                                flex_grow: 1.,
+                                min_width: px(0.),
+                                padding: UiRect::all(px(5.)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.08, 0.18, 0.20)),
+                        ))
+                        .with_children(|title| {
+                            title.spawn((
+                                Text::new(name),
+                                TextFont {
+                                    font_size: 17.,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.25, 1., 0.4)),
+                            ));
+                        });
+                        bar.spawn((
+                            Button,
+                            Action(id.clone(), Operation::Collapse),
+                            Node {
+                                width: px(30.),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.12, 0.20, 0.26)),
+                        ))
+                        .with_children(|b| {
+                            b.spawn((
+                                CollapseLabel(id.clone()),
+                                Text::new("-"),
+                                TextFont {
+                                    font_size: 18.,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+                    });
+                window
+                    .spawn((
+                        Body(id.clone()),
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: px(6.),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|body| {
+                        for i in 0..PAGE {
+                            body.spawn((
+                                Row(id.clone(), i),
+                                Node {
+                                    align_items: AlignItems::Center,
+                                    column_gap: px(4.),
+                                    min_height: px(34.),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgb(0.08, 0.11, 0.15)),
+                            ))
+                            .with_children(|row| {
+                                row.spawn((
+                                    Label(id.clone(), i),
+                                    Text::new(""),
+                                    TextFont {
+                                        font_size: 14.,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    Node {
+                                        flex_grow: 1.,
+                                        width: px(132.),
+                                        ..default()
+                                    },
+                                ));
+                                button(row, "-", Action(id.clone(), Operation::Adjust(i, -1)));
+                                row.spawn((
+                                    ValueLabel(id.clone(), i),
+                                    Text::new(""),
+                                    TextFont {
+                                        font_size: 14.,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    Node {
+                                        width: px(51.),
+                                        ..default()
+                                    },
+                                ));
+                                button(row, "+", Action(id.clone(), Operation::Adjust(i, 1)));
+                            });
+                        }
+                        body.spawn(Node {
+                            column_gap: px(6.),
+                            ..default()
+                        })
+                        .with_children(|p| {
+                            button(p, "<", Action(id.clone(), Operation::Page(-1)));
+                            button(p, ">", Action(id.clone(), Operation::Page(1)));
+                            button(p, "Manage mod", Action(id.clone(), Operation::Configure));
+                        });
+                        body.spawn((
+                            Hint(id.clone()),
+                            Text::new(""),
+                            TextFont {
+                                font_size: 12.,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.65, 0.85, 0.85)),
+                        ));
+                    });
+            });
+    }
 }
 fn input(
     mut panel: ResMut<EnabledPanel>,
@@ -136,53 +274,145 @@ fn input(
     custom: Res<crate::customiser::Customiser>,
     mut mods: ResMut<Mods>,
     keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     nav: Res<crate::customiser::Navigation>,
-    buttons: Query<(&Interaction, &Row), Changed<Interaction>>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    headers: Query<(&Interaction, &Header), Changed<Interaction>>,
+    buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
 ) {
-    let rows = entries(&mods);
-    if !visible(&pause, &menu, &custom) || rows.is_empty() {
+    if !pause.open || menu.open || custom.open {
         panel.focused = false;
+        panel.drag = None;
+        return;
+    }
+    let ids: Vec<_> = mods
+        .manager
+        .packages
+        .iter()
+        .filter(|(_, p)| p.running())
+        .map(|(id, _)| id.clone())
+        .collect();
+    if ids.is_empty() {
+        panel.focused = false;
+        panel.drag = None;
         return;
     }
     if keys.just_pressed(KeyCode::Tab) || nav.pressed & 0x4000 != 0 {
-        panel.focused = !panel.focused;
+        let next = if panel.focused {
+            panel
+                .active
+                .as_ref()
+                .and_then(|id| ids.iter().position(|s| s == id))
+                .map(|i| i + 1)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        panel.focused = next < ids.len();
+        if panel.focused {
+            panel.active = Some(ids[next].clone());
+        }
     }
-    panel.selected = panel.selected.min(rows.len() - 1);
-    let mut direction = 0;
+    if !mouse.pressed(MouseButton::Left) {
+        panel.drag = None;
+    }
+    for (interaction, header) in &headers {
+        if *interaction == Interaction::Pressed && mouse.pressed(MouseButton::Left) {
+            if let (Some(cursor), Some(layout)) =
+                (window.cursor_position(), panel.layouts.get(&header.0))
+            {
+                panel.drag = Some((header.0.clone(), cursor - layout.position));
+                panel.active = Some(header.0.clone());
+                panel.focused = true;
+            }
+        }
+    }
+    if let (Some((id, offset)), Some(cursor)) = (panel.drag.clone(), window.cursor_position()) {
+        if let Some(layout) = panel.layouts.get_mut(&id) {
+            layout.position = (cursor - offset).clamp(
+                Vec2::ZERO,
+                Vec2::new(
+                    (window.width() - 320.).max(0.),
+                    (window.height() - 48.).max(0.),
+                ),
+            );
+        }
+    }
+    let mut action = None;
     if panel.focused {
-        if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
-            panel.selected = (panel.selected + rows.len() - 1) % rows.len();
-        }
-        if keys.just_pressed(KeyCode::ArrowDown) || nav.pressed & 2 != 0 {
-            panel.selected = (panel.selected + 1) % rows.len();
-        }
-        if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
-            direction = -1;
-        }
-        if keys.just_pressed(KeyCode::ArrowRight)
-            || keys.just_pressed(KeyCode::Enter)
-            || nav.pressed & (8 | 0x1000) != 0
-        {
-            direction = 1;
+        if let Some(id) = panel.active.clone() {
+            if let (Some(p), Some(layout)) =
+                (mods.manager.packages.get(&id), panel.layouts.get_mut(&id))
+            {
+                let count = p.manifest.settings.len();
+                if count > 0 {
+                    layout.selected = layout.selected.min(count - 1);
+                    if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
+                        layout.selected = (layout.selected + count - 1) % count;
+                    }
+                    if keys.just_pressed(KeyCode::ArrowDown) || nav.pressed & 2 != 0 {
+                        layout.selected = (layout.selected + 1) % count;
+                    }
+                    if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
+                        action = Some(Action(
+                            id.clone(),
+                            Operation::Adjust(layout.selected % PAGE, -1),
+                        ));
+                    }
+                    if keys.just_pressed(KeyCode::ArrowRight)
+                        || keys.just_pressed(KeyCode::Enter)
+                        || nav.pressed & (8 | 0x1000) != 0
+                    {
+                        action = Some(Action(
+                            id.clone(),
+                            Operation::Adjust(layout.selected % PAGE, 1),
+                        ));
+                    }
+                }
+            }
         }
     }
-    let offset = panel.selected / 10 * 10;
-    for (interaction, row) in &buttons {
-        if *interaction == Interaction::Pressed && offset + row.0 < rows.len() {
+    for (interaction, button) in &buttons {
+        if *interaction == Interaction::Pressed {
+            action = Some(button.clone());
+            panel.active = Some(button.0.clone());
             panel.focused = true;
-            panel.selected = offset + row.0;
-            direction = 1;
         }
     }
-    if direction == 0 {
+    let Some(Action(id, operation)) = action else {
+        return;
+    };
+    let Some(p) = mods.manager.packages.get(&id) else {
+        return;
+    };
+    if !p.running() {
         return;
     }
-    match &rows[panel.selected].1 {
-        Entry::Mod(id) => menu.configure(id.clone()),
-        Entry::Setting(id, key) => {
-            let p = &mods.manager.packages[id];
-            let s = &p.manifest.settings[key];
-            let v = &p.settings[key];
+    let Some(layout) = panel.layouts.get_mut(&id) else {
+        return;
+    };
+    match operation {
+        Operation::Collapse => {
+            layout.collapsed = !layout.collapsed;
+        }
+        Operation::Configure => menu.configure(id),
+        Operation::Page(direction) => {
+            let pages = p.manifest.settings.len().max(1).div_ceil(PAGE);
+            layout.selected = ((layout.selected / PAGE) as i32 + direction).rem_euclid(pages as i32)
+                as usize
+                * PAGE;
+        }
+        Operation::Adjust(row, direction) => {
+            if layout.collapsed {
+                return;
+            }
+            let selected = layout.selected / PAGE * PAGE + row;
+            let Some((key, s)) = p.manifest.settings.iter().nth(selected) else {
+                return;
+            };
+            let key = key.clone();
+            layout.selected = selected;
+            let v = &p.settings[&key];
             let next = match s.kind.as_str() {
                 "number" => Some(serde_json::json!(
                     (v.as_f64().unwrap() + direction as f64 * s.step.unwrap())
@@ -193,7 +423,7 @@ fn input(
                     let i = s
                         .choices
                         .iter()
-                        .position(|s| Some(s.as_str()) == v.as_str())
+                        .position(|c| Some(c.as_str()) == v.as_str())
                         .unwrap_or(0);
                     Some(serde_json::json!(
                         s.choices
@@ -206,7 +436,7 @@ fn input(
                 }
             };
             if let Some(v) = next {
-                panel.status = mods.manager.setting(id, key, v).err().unwrap_or_default();
+                layout.status = mods.manager.setting(&id, &key, v).err().unwrap_or_default();
             }
         }
     }
@@ -217,55 +447,114 @@ fn draw(
     menu: Res<ModMenu>,
     custom: Res<crate::customiser::Customiser>,
     mods: Res<Mods>,
-    mut root: Single<&mut Node, With<Root>>,
-    mut rows: Query<(&Row, &mut Node, &mut BackgroundColor), Without<Root>>,
-    mut labels: Query<(&Label, &mut Text), Without<Hint>>,
-    mut hint: Single<&mut Text, (With<Hint>, Without<Label>)>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    mut roots: Query<(&Root, &mut Node, &mut GlobalZIndex)>,
+    mut bodies: Query<(&Body, &mut Node), Without<Root>>,
+    mut rows: Query<(&Row, &mut Node, &mut BackgroundColor), (Without<Root>, Without<Body>)>,
+    mut text: Query<(
+        &mut Text,
+        Option<&Label>,
+        Option<&ValueLabel>,
+        Option<&Hint>,
+        Option<&CollapseLabel>,
+    )>,
 ) {
-    let list = entries(&mods);
-    root.display = if visible(&pause, &menu, &custom) && !list.is_empty() {
-        Display::Flex
-    } else {
-        Display::None
-    };
-    let offset = panel.selected / 10 * 10;
-    for (label, mut text) in &mut labels {
-        **text = list
-            .get(offset + label.0)
-            .map(|e| e.0.clone())
-            .unwrap_or_default();
+    let visible = pause.open && !menu.open && !custom.open;
+    for (root, mut node, mut z) in &mut roots {
+        if let Some(layout) = panel.layouts.get(&root.0) {
+            node.display = if visible
+                && mods
+                    .manager
+                    .packages
+                    .get(&root.0)
+                    .is_some_and(|p| p.running())
+            {
+                Display::Flex
+            } else {
+                Display::None
+            };
+            node.left = px(layout.position.x.clamp(0., (window.width() - 320.).max(0.)));
+            node.top = px(layout.position.y.clamp(0., (window.height() - 48.).max(0.)));
+            z.0 = if panel.active.as_ref() == Some(&root.0) {
+                14
+            } else {
+                12
+            };
+        }
     }
-    for (row, mut node, mut color) in &mut rows {
-        node.display = if offset + row.0 < list.len() {
+    for (body, mut node) in &mut bodies {
+        node.display = if panel.layouts.get(&body.0).is_some_and(|l| !l.collapsed) {
             Display::Flex
         } else {
             Display::None
         };
-        color.0 = if panel.focused && offset + row.0 == panel.selected {
+    }
+    for (row, mut node, mut color) in &mut rows {
+        let selected = panel.layouts.get(&row.0).map_or(0, |l| l.selected);
+        let index = selected / PAGE * PAGE + row.1;
+        node.display = if mods
+            .manager
+            .packages
+            .get(&row.0)
+            .is_some_and(|p| index < p.manifest.settings.len())
+        {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        color.0 = if panel.focused && panel.active.as_ref() == Some(&row.0) && index == selected {
             Color::srgb(0.10, 0.30, 0.34)
         } else {
             Color::srgb(0.08, 0.11, 0.15)
         };
     }
-    let description = list
-        .get(panel.selected)
-        .and_then(|(_, entry)| match entry {
-            Entry::Setting(id, key) => Some(
-                mods.manager.packages[id].manifest.settings[key]
-                    .description
-                    .as_str(),
-            ),
-            _ => None,
-        })
-        .unwrap_or("Select a mod name for its enable/disable controls.");
-    ***hint = format!(
-        "Tab / X: {}\nUp/Down select | Left/Right adjust | Click increases\n{}\n{}",
-        if panel.focused {
-            "return to pause controls"
-        } else {
-            "focus mod settings"
-        },
-        description,
-        panel.status
-    );
+    for (mut t, label, value, hint, collapse) in &mut text {
+        if let Some(c) = collapse {
+            **t = if panel.layouts.get(&c.0).is_some_and(|l| l.collapsed) {
+                "+"
+            } else {
+                "-"
+            }
+            .into();
+        }
+        if let Some(h) = hint {
+            if let Some(l) = panel.layouts.get(&h.0) {
+                **t = format!(
+                    "Drag title to move | +/- change values\nTab / X cycles windows; arrows adjust\n{}",
+                    l.status
+                );
+            }
+        }
+        let field = label
+            .map(|l| (&l.0, l.1, false))
+            .or_else(|| value.map(|v| (&v.0, v.1, true)));
+        if let Some((id, row, is_value)) = field {
+            let setting = mods
+                .manager
+                .packages
+                .get(id)
+                .zip(panel.layouts.get(id))
+                .and_then(|(p, l)| {
+                    p.manifest
+                        .settings
+                        .iter()
+                        .nth(l.selected / PAGE * PAGE + row)
+                        .map(|(k, s)| (p, k, s))
+                });
+            **t = setting
+                .map(|(p, key, s)| {
+                    if !is_value {
+                        s.label.clone()
+                    } else {
+                        let v = &p.settings[key];
+                        v.as_f64().map(|n| format!("{n:.2}")).unwrap_or_else(|| {
+                            v.as_str()
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| v.to_string())
+                        })
+                    }
+                })
+                .unwrap_or_default();
+        }
+    }
 }
