@@ -6,7 +6,7 @@ try {
     if (-not (Test-Path -LiteralPath $executable)) { throw 'Game is not built. Run BUILD.bat first.' }
     New-Item -ItemType Directory -Path (Join-Path $PSScriptRoot 'logs') -Force | Out-Null
     $log = Join-Path $PSScriptRoot ('logs/game-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
-    Write-Host 'Starting imported skater project. Use your XInput controller; Esc opens difficulty/graphics/pause settings.'
+    Write-Host 'Starting Skate 3 Rust Engine. Use your XInput controller; Esc opens difficulty/graphics/pause settings.'
     Write-Host "Log: $log"
     $errorLog = [System.IO.Path]::ChangeExtension($log, 'stderr.log')
     $assetArgument = '"' + (Join-Path $PSScriptRoot 'assets') + '"'

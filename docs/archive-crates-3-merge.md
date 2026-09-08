@@ -1,6 +1,6 @@
 # Merge of supplied crates (3).zip
 
-Source: `C:/Users/Daddy/Downloads/crates (3).zip`, SHA256
+Source: `crates (3).zip`, SHA256
 `beb4aabf83fe706b6678d78f4af10c85a6467e0fef1c3c2a8d92e922405134ad`.
 The archive contains a source snapshot without Git history. It was compared with
 the initial import (`a47da5b`), current HEAD (`0909877`), and the working tree.

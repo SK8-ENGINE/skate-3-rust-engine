@@ -30,12 +30,8 @@ Optional asset: `assets/private/custom/climbing.json`. Missing assets leave stoc
 
 The JSON contains version 1, two named clips (`reach`, `mantle`), FPS, joint names, parent indices, and local SQT samples. Sample order is scale XYZ, quaternion XYZW, translation XYZ. It uses native animation bone axes, not raw Blender matrix-basis channels. It does not modify the stock bank decoder or its SHA-bound cache format.
 
-The 60 FPS clips come from the reviewed Mixamo retargets:
-
-- `C:/Users/Daddy/Documents/skate3-climbing-retarget/stand-to-freehang/stand_to_freehang_skater.blend`
-- `C:/Users/Daddy/Documents/skate3-climbing-retarget/climbing_skater.blend`
-
-Rebake using Blender's background mode and `C:/Users/Daddy/Documents/skate3-climbing-retarget/runtime-export/export_climbing.py`. This script reads the masters without saving changes and derives the exact bone conversion from `assets/private/skater.glb`. Extraction and Blender tooling remain outside the game project.
+Custom clips and their authoring tools are not distributed. Export clips using the
+schema above and the native bone axes from your prepared skater rig.
 
 ## Verification
 

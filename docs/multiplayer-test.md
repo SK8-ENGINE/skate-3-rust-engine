@@ -1,4 +1,18 @@
-> Latest build: **PLAY-MULTIPLAYER-MENU.bat**, staged in `bin/multiplayer-lobbies`. It opens University offline. Esc > Multiplayer provides public Steam hosting, a paginated lobby browser and joining by stable numeric lobby code. **PLAY-MULTIPLAYER-SMOOTH-2-INSTANCES.bat** uses this same build for the automatic two-player local test. Earlier performance results below are historical.
+# Multiplayer development
+
+Build the game and Steam relay with `./scripts/build-multiplayer-test.ps1`.
+The output is staged in `bin/multiplayer`.
+
+Open the menu on a prepared installation:
+
+```powershell
+./scripts/launch-multiplayer-test.ps1 -AssetRoot <prepared-assets-directory> -MenuOnly
+```
+
+Use `-Players 2` through `-Players 10` instead of `-MenuOnly` for local clients,
+`-TwoControllers` for XInput slots 0 and 1, and `-MapPath <map.skate>` to select
+a map. The default map is University beside the supplied assets directory.
+`SKATE3_ASSETS` can supply the asset directory instead of `-AssetRoot`.
 
 ## Steam lobby test (current build)
 
@@ -10,13 +24,13 @@ Steam lobby-owner reassignment triggers automatic transport rerouting and a fres
 
 Twenty nongame tests passed, covering bounded discovery messages, Unicode labels, repeated ten-player session migration, local-state preservation, stale departed-host packets, production loopback packets, interpolation and physical contact. Release game/helper builds are staged. No game or Steam process was launched for this verification. Real public discovery, Steam relay connectivity and provider-driven migration still need the multi-PC test above.
 
-> New visual interpolation test: [multiplayer-interpolation.md](multiplayer-interpolation.md). Use its separate launcher for timestamped protocol v3. This page retains the original optimisation results.
+> New visual interpolation test: [multiplayer-interpolation.md](multiplayer-interpolation.md). It describes timestamped protocol v3. This page retains the original optimisation results.
 
 # Multiplayer optimisation / next test
 
-Run `PLAY-MULTIPLAYER-2-INSTANCES.bat`. It launches two connected games on **University** using the same ten-player session implementation as online play. Player A hosts; B uses an unavailable outfit identifier and spawns two metres away. Click a window to control that player with raw XInput. `-TwoControllers` assigns slots 0 and 1. Steam is only initialized when choosing Steam multiplayer from the menu.
+Run the launch script with `-Players 2`. It launches two connected games on **University** using the same ten-player session implementation as online play. Player A hosts; B uses an unavailable outfit identifier and spawns two metres away. Click a window to control that player with raw XInput. `-TwoControllers` assigns slots 0 and 1. Steam is only initialized when choosing Steam multiplayer from the menu.
 
-`PLAY-MULTIPLAYER-10-INSTANCES.bat` launches all ten local game windows. This also tests rendering and physics load on one PC; it is substantially heavier than one game with nine online players. Alternatively pass `-Players 3` through `-Players 10` to the two-instance launcher. Override the map with `-MapPath "C:/path/map.skate"`.
+Use `-Players 10` to launch ten local windows. This is substantially heavier than one game with nine online players.
 
 The HUD shows player count, application upload/download in decimal kB/s, worst current direct-link ping, stale packets, missing delta baselines and send errors. Steam sessions additionally show SDK transfer rates, worst link quality estimate, queue time and adapter drops/errors. Host ping is to guests; guest ping is to the host, not the full guest-to-guest path. Sequence gaps are not reported as packet loss because distance throttling intentionally skips source updates.
 
@@ -44,7 +58,7 @@ Physical collisions still use local ownership with temporary remote proxies, not
 
 ## Verification
 
-Release game and relay built and staged using `BUILD-MULTIPLAYER-TEST.bat`, which launches neither. Ten nongame tests passed: existing wire validation, real UDP, quantisation/deltas, truncation, full/mismatched admission, spoof rejection, disconnect/rejoin and a real core-solver contact using the last of nine 33-body remote blocks. The launcher was parsed without execution.
+Release game and relay built and staged using `scripts/build-multiplayer-test.ps1`, which launches neither. Ten nongame tests passed: existing wire validation, real UDP, quantisation/deltas, truncation, full/mismatched admission, spoof rejection, disconnect/rejoin and a real core-solver contact using the last of nine 33-body remote blocks. The launcher was parsed without execution.
 
 `cargo run --release --target x86_64-pc-windows-msvc -p skate-net --example lobby_audit --locked` runs the production codec/session with ten simulated peers for 30 seconds per scenario, measuring the final 25 seconds. It introduces independent 30–90 ms delay per link, reorder and optional 5% loss. The near scenario changes every body and anchor continuously. It checks all ten memberships, bounded packet sizes, replication freshness, and zero invalid packets/missing acknowledged baselines. It does not run a game, the renderer, Steam or a real WAN.
 
@@ -68,8 +82,8 @@ the loader cancels pending discovery/join requests and refreshes the map fingerp
 and physics schema before another session starts. Both players need matching maps.
 
 The build helper links into its own staging directory while reusing the dependency
-cache. All multiplayer BAT launchers use `bin/multiplayer`. A prepared local combined
-customiser asset view and session-marker overlay are reused when available.
+cache. Supply your prepared asset view through `-AssetRoot`. If using a separate
+session-marker overlay, set `SKATE3_SESSION_MARKER_OVERLAY` before launching.
 
 The merged game and Steam relay were compiled without launching either. Actual
 Steam connectivity still needs two PCs with separate Steam accounts. Remote clothing

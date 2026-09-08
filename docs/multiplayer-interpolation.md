@@ -1,6 +1,6 @@
 # Remote-player visual interpolation
 
-Use **PLAY-MULTIPLAYER-SMOOTH-2-INSTANCES.bat** for the new build. It starts two connected clients on University from `bin/multiplayer-interpolation-v4`; existing running games and the previous staged build are untouched. The launcher also accepts `-Players 10` and `-TwoControllers`.
+Use `scripts/launch-multiplayer-test.ps1` with your prepared `-AssetRoot` for two connected local clients. Add `-Players 10` or `-TwoControllers` as needed. See [multiplayer-test.md](multiplayer-test.md) for build instructions.
 
 Both peers must use this build: timestamped state uses protocol magic `SK8NET04`. The previous v2 executable cannot join it. Steam remains optional and has its matching helper beside this build.
 
@@ -49,4 +49,4 @@ The game and Steam helper were built and staged without launching either. User t
 - [Glenn Fiedler: Snapshot Interpolation](https://github.com/mas-bandwidth/gafferongames/blob/main/content/post/snapshot_interpolation.md) — buffered interpolation, Hermite curves, quaternion SLERP and extrapolation limitations.
 - [Mirror's snapshot interpolation implementation](https://github.com/MirrorNetworking/Mirror/blob/master/Assets/Mirror/Core/SnapshotInterpolation/SnapshotInterpolation.cs) — source timelines, jitter-based buffer adjustment and gentle catch-up/slowdown.
 
-Rebuild with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-multiplayer-test.ps1 -OutputDirectory bin/multiplayer-interpolation-v4`.
+Rebuild with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-multiplayer-test.ps1`.

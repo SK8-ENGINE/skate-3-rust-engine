@@ -17,7 +17,7 @@ starts University. No Blender, Python or Rust installation is needed.
 ISO extraction needs internet access. The first conversion can take a while.
 
 Use an XInput controller to play. Escape opens graphics, difficulty and map
-settings. Loading another map restarts the game session.
+settings. Maps can be switched without restarting the game.
 
 **Skate 3 assets are not included.** Your converted files stay in
 `%LOCALAPPDATA%/Skate3RustEngine`.

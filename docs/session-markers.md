@@ -1,7 +1,6 @@
 # Native session markers
 
-`PLAY-SESSION-MARKER.bat` runs this task's private executable and original HUD
-overlay, starting paused. Resume, hold **LB**, press **D-pad Down** to place;
+With the original HUD overlay prepared, hold **LB**, press **D-pad Down** to place;
 hold **LB + D-pad Up** to return. These are the original `input.cfg` bindings
 (`SessionMarkerSet`, `SessionMarkerUse`), including pressed versus held behavior.
 An unset marker cannot return. Releasing cancels the hold. A completed hold does
@@ -11,7 +10,7 @@ cancel an active return and require releasing LB before accepting another one.
 
 The branch includes map-transition baseline `4a92ad1`, cherry-picked as `1d89d85`.
 No game, recomp, controller harness or GPU gameplay validation was launched for
-this task. The launcher is for the user's manual validation.
+this task. Gameplay validation remains manual.
 
 ## Original evidence
 
@@ -115,14 +114,9 @@ Release compilation passed with the existing static-CRT Windows target flags:
 cargo build --release --locked --target x86_64-pc-windows-msvc -p skate-game --no-default-features
 ```
 
-The first staged executable was subsequently found to be an older build from
-the shared target directory: it contained neither `--start-paused` nor the
-marker shader. The compile result did not verify the staged artifact. That
-executable has been superseded by `.local/session-marker/skate3-session-marker.exe`.
-`Build-SessionMarker.ps1` now links directly into the task's private build
-directory with a distinct artifact name, checks the CLI/marker strings without
-executing it, and verifies the staged SHA-256. Use that script for future builds;
-`-DependencyTargetDirectory` can select an existing dependency cache.
+When sharing a Cargo target directory across worktrees, link the final executable
+to a checkout-specific output path and verify that artifact before staging it.
+A previous build copied a stale executable from the shared cache.
 
 Four standalone hold-state tests passed (cancellation/latching, unset/nearby/
 blocked returns and tail, distance ramp, actual distance-dependent trigger ticks).
@@ -131,7 +125,7 @@ and validation. Original HUD manifest counts, triangle structure and every RGBA
 payload size passed data checks. These checks initialize no game or GPU device.
 A CPU-only rendering of the compiled HUD was inspected for font layering,
 icon size and the three-row panel. The corrected release was rebuilt and staged
-through `Build-SessionMarker.ps1`; its artifact/hash checks passed.
+with artifact/hash checks.
 The subsequent shadow/panel adjustment changes only the extracted HUD overlay;
 the same executable reads it on launch. Offline checks verified all output
 hashes, unchanged foreground/icon bytes, unchanged shadow footprint and

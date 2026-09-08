@@ -1,16 +1,12 @@
-param([switch]$MenuOnly, [string]$MapPath = '', [switch]$TwoControllers, [ValidateRange(2,10)][int]$Players = 2, [string]$BuildDirectory = 'bin/multiplayer')
+param([string]$AssetRoot = $env:SKATE3_ASSETS, [switch]$MenuOnly, [string]$MapPath = '', [switch]$TwoControllers, [ValidateRange(2,10)][int]$Players = 2, [string]$BuildDirectory = 'bin/multiplayer')
 $ErrorActionPreference = 'Stop'
 $instanceCount = if ($MenuOnly) { 1 } else { $Players }
 $workspace = Split-Path -Parent $PSScriptRoot
 $binary = Join-Path (Join-Path $workspace $BuildDirectory) 'skate3-multiplayer.exe'
-$installation = 'C:/Users/Daddy/AppData/Local/Skate3RustEngine/installations/957f4f78db9b4f59959f10dff8ff6a84'
-$assets = Join-Path $installation 'assets'
-# Reuse the combined character asset view when this checkout has one prepared.
-$combinedAssets = Join-Path $workspace '.local/combined-customiser/assets'
-if (Test-Path -LiteralPath (Join-Path $combinedAssets 'private/game.json')) { $assets = $combinedAssets }
-$markerOverlay = Join-Path $workspace '.local/session-marker/overlay'
-if (Test-Path -LiteralPath (Join-Path $markerOverlay 'hud.json')) { $env:SKATE3_SESSION_MARKER_OVERLAY = $markerOverlay }
-if (-not (Test-Path -LiteralPath $binary)) { throw 'Build missing. Run BUILD-MULTIPLAYER-TEST.bat first.' }
+if (-not $AssetRoot) { $AssetRoot = Join-Path $workspace 'assets' }
+$assets = (Resolve-Path -LiteralPath $AssetRoot).Path
+$installation = Split-Path -Parent $assets
+if (-not (Test-Path -LiteralPath $binary)) { throw 'Build missing. Run scripts/build-multiplayer-test.ps1 first.' }
 if (-not (Test-Path -LiteralPath (Join-Path $assets 'private/game.json'))) { throw 'Prepared game assets are missing. No installer or conversion will be started.' }
 if (-not $MapPath) { $MapPath = Join-Path $installation 'maps/University.skate' }
 $MapPath = (Resolve-Path -LiteralPath $MapPath).Path

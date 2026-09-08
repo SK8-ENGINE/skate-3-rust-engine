@@ -31,3 +31,14 @@ __pycache__/
 .env.*
 *.pem
 *.key
+
+# Personal feature-test launchers and historical setup reports.
+/BUILD-MULTIPLAYER-TEST.bat
+/PLAY-MULTIPLAYER-10-INSTANCES.bat
+/PLAY-MULTIPLAYER-2-INSTANCES.bat
+/PLAY-MULTIPLAYER-MENU.bat
+/PLAY-MULTIPLAYER-SMOOTH-2-INSTANCES.bat
+/PLAY-SESSION-MARKER.bat
+/tools/launch_customiser_test.bat
+/Build-SessionMarker.ps1
+/SETUP-PROVENANCE.json
