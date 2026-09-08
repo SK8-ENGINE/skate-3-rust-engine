@@ -481,7 +481,7 @@ pub(crate) fn spawn(
                         format,
                         RenderAssetUsages::RENDER_WORLD,
                     );
-                    if role == 3 || cube {
+                    if role == 3 || role == 6 || cube {
                         let (bytes, levels) = crate::retail_render::mip_chain(&source.rgba, source.width, height, layers);
                         image.data = Some(bytes);
                         image.texture_descriptor.mip_level_count = levels;
@@ -492,7 +492,7 @@ pub(crate) fn spawn(
                         });
                     }
                     let mut sampler = bevy::image::ImageSamplerDescriptor::linear();
-                    if role != 1 && role != 4 && !cube {
+                    if role != 1 && role != 4 && role != 6 && !cube {
                         sampler.address_mode_u = bevy::image::ImageAddressMode::Repeat;
                         sampler.address_mode_v = bevy::image::ImageAddressMode::Repeat;
                     }

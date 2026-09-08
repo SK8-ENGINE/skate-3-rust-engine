@@ -47,7 +47,7 @@ fn compare_weathering(
         1 => "Repeating grime OFF; decals ON",
         2 => "Repeating grime ON; decals OFF",
         3 => "Repeating grime OFF; decals OFF",
-        _ => "Authored grime and decals ON",
+        _ => "Normal grime and decals ON",
     };
     for (_, material) in materials.iter_mut() {
         let family = material.params.mode.x as u32;
@@ -98,6 +98,8 @@ pub(crate) struct WorldParams {
     pub fog_color: Vec4,
     pub shadow_color: Vec4,
     pub sun_direction: Vec4,
+    // Wear-only visual tuning; artwork retains unit opacity.
+    pub decal: Vec4,
     pub water: [Vec4; 4],
 }
 
@@ -270,7 +272,7 @@ impl Definition {
             texture(
                 b.map_or(fallback, |b| b.texture),
                 if clamp || b.is_some_and(|b| b.u == 1 && b.v == 1) {
-                    4
+                    if role == "decal" { 6 } else { 4 }
                 } else {
                     3
                 },
@@ -339,6 +341,7 @@ impl Definition {
                 fog_color: Vec4::ZERO,
                 shadow_color: Vec4::ZERO,
                 sun_direction: Vec3::new(4., 7., 4.).normalize().extend(0.),
+                decal: Vec4::new(stain_opacity(self.parameters.get("decal").and_then(|v| v.first()).map(String::as_str).unwrap_or("")), 0., 0., 0.),
                 water,
             },
             diffuse,
@@ -352,6 +355,29 @@ impl Definition {
             shadow_state: shadow::BUFFER,
             alpha,
             two_sided: self.flags & 4 != 0,
+        }
+    }
+}
+
+// The source labels distinguish weathering from graphics. This is an explicit
+// visual tuning choice, not a recovered native material constant. Keep arrows,
+// logos, paint, scratches and edge wear at their authored alpha.
+fn stain_opacity(texture_label: &str) -> f32 {
+    let label = texture_label.to_ascii_lowercase();
+    if ["grime", "grunge", "stain", "oildirt", "drainage", "ground_decals"]
+        .iter().any(|word| label.contains(word)) { 0.35 } else { 1. }
+}
+
+#[cfg(test)]
+mod stain_tests {
+    use super::stain_opacity;
+    #[test]
+    fn weathering_tuning_preserves_artwork() {
+        for name in ["decal_WEAR_WaterStain_01", "subway_grunge03", "decal_GrimePuddle", "OT_Ground_decals"] {
+            assert_eq!(stain_opacity(name), 0.35);
+        }
+        for name in ["decal_Graphic_SP_UN_Shark_01", "decal_other_sp_arrowramps_01", "decal_Graphic_SP_UN_MegaRmp_01", "decal_Wear_GL_UN_MPedge_01", "decal_skateboardscratcheswood01", ""] {
+            assert_eq!(stain_opacity(name), 1.);
         }
     }
 }

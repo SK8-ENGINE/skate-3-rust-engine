@@ -1,5 +1,25 @@
 # Authored props and grime follow-up
 
+## Targeted decal correction after layer test
+
+The user rechecked the comparison and identified decals as the unwanted layer.
+Repeating grime is unchanged. Wear/stain decals now use 35% of their texture's
+alpha; source UVs, dimensions, texture RGB and placement are retained. This is
+explicit visual tuning based on the user's feedback, not proof of the original
+game's intended opacity and not a recovered native shader constant.
+
+Classification uses the material's authored `decal` texture label for grime,
+grunge, stain, oil-dirt, drainage and ground-decal entries. Arrows, logos,
+scratches and ramp edge paint retain full authored opacity. A regression test
+covers this separation. This is not a blanket fade on every decal material.
+
+Clamped decals also now receive a mip chain, independently of lightmaps, which
+remain bilinear mip zero. Previously the shared clamp texture role omitted mips
+for both, leaving fine decal alpha detail unfiltered at distance. The new decal
+role retains clamp addressing while permitting mip filtering. No map re-export
+or owned texture modification is needed. GPU visual verification remains for
+the user; source and shader checks cannot confirm the preferred visual strength.
+
 ## Grime investigation after user retest
 
 The UV-scale correction did not resolve the user's reported visual mismatch.

@@ -3,7 +3,7 @@
 
 struct WorldParams {
     mode: vec4<f32>, foliage_debug: vec4<f32>, surface: vec4<f32>, family: vec4<f32>,
-    fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>, water: array<vec4<f32>, 4>,
+    fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>, decal: vec4<f32>, water: array<vec4<f32>, 4>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: WorldParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse: texture_2d<f32>;
@@ -174,7 +174,7 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
         lin = d;
         if fam == 11u { lin *= p.family.w; }
     } else {
-        if (fam == 3u || fam == 4u) && (flags & 8u) != 0u && (flags & 512u) == 0u { d = mix(d,art.rgb*art.rgb,art.a); }
+        if (fam == 3u || fam == 4u) && (flags & 8u) != 0u && (flags & 512u) == 0u { d = mix(d,art.rgb*art.rgb,art.a*p.decal.x); }
         if (flags & 4u) != 0u && fam < 13u && (flags & 256u) == 0u { d *= saturate((overlay_sample-0.5)*p.surface.y+0.5); }
         var kd = 0.93429;
         if (fam <= 6u || fam == 13u) && (flags & 1u) != 0u {
