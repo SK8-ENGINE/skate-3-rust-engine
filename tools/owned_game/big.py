@@ -74,13 +74,17 @@ def _decompress_chunkref(data: bytes, expected_size: int) -> bytes:
 
 
 class BigArchive:
-    """Streaming reader for the EB BIG v3 archives used by Skate 3."""
+    """Streaming reader for Skate 3's EB BIG v3 and legacy BIG4/BIGF banks."""
 
     def __init__(self, path: Path):
         self.path = Path(path).resolve()
         self.file_size = self.path.stat().st_size
         with self.path.open("rb") as stream:
             header = stream.read(48)
+            if header[:4] in (b"BIG4", b"BIGF"):
+                self.metadata = b""
+                self.entries = self._parse_big4(stream, header)
+                return
             if len(header) != 48:
                 raise FormatError(f"{self.path}: truncated BIG header")
             header_reader = Reader(header, str(self.path))
@@ -92,6 +96,41 @@ class BigArchive:
             stream.seek(0)
             self.metadata = stream.read(metadata_size)
         self.entries = self._parse()
+
+    def _parse_big4(self, stream, header):
+        """Older EA containers, including the disc's music overlays bank."""
+        if len(header) < 16:
+            raise FormatError("truncated BIG4 header")
+        count = int.from_bytes(header[8:12], "big")
+        end = int.from_bytes(header[12:16], "big")
+        if count > 1_000_000 or end < 16 or end > self.file_size:
+            raise FormatError("invalid BIG4 directory bounds")
+        stream.seek(16)
+        directory = stream.read(end - 16)
+        cursor = 0
+        entries = []
+        for index in range(count):
+            if cursor + 8 > len(directory):
+                raise FormatError("truncated BIG4 entry")
+            offset = int.from_bytes(directory[cursor:cursor+4], "big")
+            size = int.from_bytes(directory[cursor+4:cursor+8], "big")
+            name_end = directory.find(b"\0", cursor + 8)
+            if name_end < 0 or offset < end or offset + size > self.file_size:
+                raise FormatError("invalid BIG4 entry bounds")
+            name = directory[cursor+8:name_end].decode("utf-8")
+            self.safe_relative(name)
+            stream.seek(offset)
+            prefix = stream.read(min(size, 6))
+            compressed = len(prefix) >= 2 and prefix[0] in (0x10, 0x90) and prefix[1] == 0xfb
+            unpacked = size
+            if compressed:
+                length = 6 if prefix[0] == 0x90 else 5
+                if len(prefix) < length:
+                    raise FormatError("truncated BIG4 RefPack header")
+                unpacked = int.from_bytes(prefix[2:length], "big")
+            entries.append(BigEntry(index, name, offset, size, unpacked, int(compressed)))
+            cursor = name_end + 1
+        return entries
 
     def _parse(self) -> list[BigEntry]:
         reader = Reader(self.metadata, str(self.path))
