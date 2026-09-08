@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 pub(crate) struct RetailRenderPlugin;
 impl Plugin for RetailRenderPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(crate::retail_character::CharacterLightingPlugin);
         if std::env::var_os("SKATE_DEBUG_FOLIAGE").is_some_and(|v| v == "1") {
             eprintln!("SKATE_FOLIAGE_DEBUG: solid cyan tree-wall cards, magenta other foliage; alpha rejection disabled for foliage only");
         }

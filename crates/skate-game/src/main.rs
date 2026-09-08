@@ -17,6 +17,8 @@ mod performance;
 mod graphics_menu;
 mod render_capacity;
 mod retail_render;
+mod retail_character;
+mod retail_irradiance;
 mod presentation;
 mod replay;
 mod world;

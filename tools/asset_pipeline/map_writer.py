@@ -151,6 +151,9 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
         for tag,data in extensions:
             f.write(tag);u(f,1,len(data));stored(f,data)
     report('Map written: '+m['map_name'])
+    if not render_only:
+        from tools.asset_pipeline.irradiance import write as write_irradiance
+        write_irradiance(manifest_path, output.with_suffix('.irradiance'))
 
 if __name__=='__main__':
     import argparse

@@ -188,6 +188,8 @@ def install(iso,base,game_exe,report,game_root=None):
             report('Building the skater model and rig')
             from .character_glb import convert as write_character
             write_character(character/'selected/models',private,manifest)
+            from .character_lighting import convert as write_character_lighting
+            write_character_lighting(character/'selected/models',private,converted)
             game_manifest={'version':1,'character_scene':'private/skater.glb','initial_animation':'R_IDLE_HCOM_000',
                            'action_graph':'private/stock/data/state/ActionGraph_OnBoard.stategraph',
                            'motion_graph':'private/stock/data/state/MotionGraph_OnBoard.stategraph'}

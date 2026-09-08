@@ -853,12 +853,14 @@ mod tests {
         let mut queue = bevy::ecs::world::CommandQueue::default();
         let mut meshes = Assets::<Mesh>::default();
         let mut materials = Assets::<StandardMaterial>::default();
+        let mut retail_materials = Assets::<crate::retail_render::RetailWorldMaterial>::default();
         let mut images = Assets::<Image>::default();
         spawn(
             &map,
             &mut Commands::new(&mut queue, &world),
             &mut meshes,
             &mut materials,
+            &mut retail_materials,
             &mut images,
         );
         queue.apply(&mut world);

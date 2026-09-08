@@ -99,8 +99,11 @@ the CPU transformation to native frame rows is not yet proven, so shader fog
 remains disabled. The selected `material_fog/default` must not be confused
 with the different `fog_default` collection.
 
-Native water, character shaders, SSAO, SSR, bloom and volumetric lighting are
-not yet ported. The water arrays are recoverable now, but flowing-water
+Native water, SSAO, SSR, bloom and volumetric lighting are
+not yet ported. Character lighting now has a dedicated adapter; see
+[character-lighting-investigation.md](character-lighting-investigation.md) for
+implemented terms, spatial data, validation and remaining parity differences.
+The water arrays are recoverable now, but flowing-water
 normal/tangent unpacking, ocean PCA input bindings and the separate horizon
 water resource still need their own adapters. Character parity needs the
 native CAC-composed texture/mask inputs plus verified key/rim/specular and
@@ -108,7 +111,7 @@ nine SH rows; portable GLB materials do not retain that contract. Reference
 post effects need their depth/normal/reflection inputs and native pass ordering;
 volumetric sun visibility also conflicts with the currently disabled world
 sun-shadow source. These gaps are not enabled using guessed settings.
-The character and
+Characters without the new lighting sidecars and
 unsupported world families still use Bevy materials beneath the shared tone
 curve. Reflection normals use the reference's analytic world-up construction;
 there has been no matched-camera pixel comparison against the recomp.
