@@ -1,6 +1,7 @@
 /target/
 /bin/
 /logs/
+/.local/
 /settings/
 __pycache__/
 *.pyc

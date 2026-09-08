@@ -106,5 +106,6 @@ pub(crate) fn build(
         verification::VerificationPlugin,
         crate::performance::PerformancePlugin,
     ));
+    app.add_plugins(crate::session_marker::SessionMarkerPlugin);
     app
 }

@@ -88,6 +88,15 @@ impl SkaterAnimation {
         let natural = self.state.publication.natural_stance;
         self.motion.animation.requested_stance = u32::from(if foot == 0 { natural != 1 } else { natural == 1 });
     }
+    /// Manual markers use the same native leading-foot query as bail checkpoints.
+    pub fn foot_forward(&self) -> bool {
+        self.checkpoint_stance() != 0
+    }
+    /// Queue the native stance request; the teleport graph applies it after reset.
+    pub fn restore_foot_forward(&mut self, forward: bool) {
+        self.request_checkpoint_stance(u32::from(forward));
+
+    }
     pub fn stance(&self) -> (bool, bool) {
         (self.state.fakie(), self.state.mirrored())
     }

@@ -22,13 +22,22 @@ pub(crate) struct Runtime {
     state: TeleportState,
     checkpoint: Checkpoint,
     pending_reply: Option<Target>,
+    manual_on_board: Option<bool>,
 }
 impl Runtime {
+    /// Explicit manual return uses the actor-reset publication without replacing
+    /// the automatic recovery checkpoint owned by this runtime.
+    pub fn request_manual(&mut self, transform: AnimationPartTransform, on_board: bool) {
+        self.pending_reply = Some(Target { transform: transform.map(|r| r.map(f32::to_bits)), on_board });
+        self.manual_on_board = Some(on_board);
+    }
+    pub fn take_manual_on_board(&mut self) -> Option<bool> { self.manual_on_board.take() }
     pub fn new(checkpoint: Checkpoint) -> Self {
         Self {
             state: TeleportState::default(),
             checkpoint,
             pending_reply: None,
+            manual_on_board: None,
         }
     }
     pub fn enter(&mut self) {

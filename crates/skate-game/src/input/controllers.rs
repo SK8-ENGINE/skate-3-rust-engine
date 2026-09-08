@@ -52,6 +52,19 @@ impl Default for ControllerInput {
 }
 
 impl ControllerInput {
+    /// Original input.cfg: LB.held && DPadD.pressed / LB.held && DPadU.held.
+    /// Use the same debounced native Pad publication as ordinary gameplay.
+    pub(crate) fn session_marker_actions(&self) -> (bool, bool, bool) {
+        let Some(device) = self.status.iter().position(|s| *s == ControllerStatus::Ready) else {
+            return (false, false, false);
+        };
+        let pad = &self.pads[device];
+        if pad.count() == 0 { return (false, false, false); }
+        let flags = |i: usize| pad.records().get(i).map_or(0, |r| r[1]);
+        let modifier = flags(8) & 0xff00 != 0;
+        (modifier, modifier && flags(1) & 0xff00_0000 != 0,
+            modifier && flags(0) & 0xff00 != 0)
+    }
     pub(crate) fn raw_input(&self) -> RawInput {
         self.status.iter().position(|s| *s == ControllerStatus::Ready)
             .map_or(RawInput::default(), |i| self.raw[i])
