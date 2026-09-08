@@ -187,3 +187,42 @@ for the user. The normal launcher clears SKATE_DEBUG_FOLIAGE.
 For integration with staged map switching, prepare this supplement alongside the
 district, before applying sky lighting. Track its entities and assets in the
 same map lifetime. The current adapter is in `retail_backdrop.rs`.
+
+### Black texture/lightmap bands (2026-09-08)
+
+The University bark rings and mega-park shark logo expose an exporter defect in
+the shared Xbox texture decoder. `XGAddress2DTiledX/Y` returns coordinates in the
+padded physical tile. `_untile360` flattened `y * logical_width + x` before
+rejecting columns outside the logical width. Padding columns consequently aliased
+onto later valid rows, overwriting colour blocks with padding or other tile data.
+The NumPy implementation reproduced the scalar bug, including last-write wins.
+Both implementations now reject `x >= logical_width` before writing.
+
+The logo's diffuse is `0x2c70170a001d01bb`; its 64x64 DXT1 lightmap is
+`0x8b068e5c4f70dd7a`. Re-decoding that lightmap removes the black stripes while
+the logo diffuse remains unchanged. Nine lightmaps bound to the spring/fall-tree
+bark diffuse textures `0x00007e2903e3870a` and `0x00007dc403e3870a` have the same
+corruption. The shared decoder affects colour textures as well: the 64x128 palm
+fringe texture `0x00007e3103e3870a` also loses artificial horizontal bands.
+This establishes an asset-decoding cause independently of shader lighting.
+
+A separate colour-palette error was corrected in both decoders: DXT3/DXT5 colour
+blocks must retain four interpolated colours even when their endpoints are in
+ascending order. The old code reused DXT1's three-colour/black branch and merely
+made that black opaque. DXT1's transparent palette remains intact. See Microsoft's
+[block compression reference](https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression)
+for the format layouts and separate BC2/BC3 alpha blocks.
+
+The private University repair re-decodes the original RX2 sources and changes
+723 of 2,046 texture payloads: 720 DXT1 (logical widths 16/32/64), two DXT5 and
+one A8R8G8B8. It preserves the exporter's dedicated B5G6R5 decoder output. Every
+original payload was checked against its source cache before replacement;
+material definitions and the entire geometry/collision/metadata tail remain
+byte-identical. The repaired package passes the offline SKATE reader.
+
+Regression tests cover narrow/wide tile layouts at 2/4/8/16 bytes per unit,
+DXT1 transparency, and DXT3/DXT5 reversed colour endpoints with independent alpha,
+using both scalar and NumPy paths. All 16 asset-pipeline tests pass. The game was
+not launched; visual confirmation remains user-run. Existing exported maps need
+their textures regenerated from RX2, since changing the decoder cannot repair
+already-baked PNG/RGBA cache files. Fresh conversions use the fix across maps.
