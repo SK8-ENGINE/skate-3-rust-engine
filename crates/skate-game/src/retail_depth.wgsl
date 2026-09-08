@@ -5,7 +5,7 @@
 #ifdef MOTION_VECTOR_PREPASS
 #import bevy_pbr::pbr_prepass_functions::calculate_motion_vector
 #endif
-struct WorldParams { mode: vec4<f32>, surface: vec4<f32>, family: vec4<f32>, fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32> }
+struct WorldParams { mode: vec4<f32>, surface: vec4<f32>, family: vec4<f32>, fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: WorldParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var diffuse_sampler: sampler;

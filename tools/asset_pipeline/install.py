@@ -194,7 +194,7 @@ def install(iso,base,game_exe,report,game_root=None):
             (private/'game.json').write_text(json.dumps(game_manifest),encoding='utf-8')
             report('Preparing retail sky domes')
             from .sky import convert as write_skies
-            write_skies(game_root,stage/'assets')
+            write_skies(game_root,stage/'assets',converted)
             report('Validating skater, input and animation data')
             run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
             archives=list((game_root/'data/content').glob('worldDIST_*.big'))

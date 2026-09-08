@@ -18,10 +18,19 @@ Implemented:
   colour and depth passes. Foliage is two-sided.
 - Lightmaps remain bilinear, clamped and fixed at mip zero. Repeating world
   textures have mipmaps.
-- The three major districts use their actual sky geometry and diffuse texture
-  from `miscload.big`. Texture selection follows material GUIDs through the
-  RX2 reference table. Sky X/Z follow the camera; Y uses the reference's
-  documented 165-metre default.
+- All ten installed worlds resolve sky geometry/texture paths through their
+  authored `world` collection inheritance. The parks inherit the default
+  panorama; Downtown and Industrial override it. Sky X/Z follow the camera;
+  Y comes from the selected `render_locations` chain, not camera height.
+- The sky uses its material's diffuse and specular GUID bindings. The latter
+  is the 512x16 radial sun gradient: sine-angle lookup, squared RGB divided
+  by saturated alpha + 0.01, then the material multiplier and scene exposure.
+  `material_sky/default.m_params[0]` supplies scale 0.75 and multiplier 0.35;
+  these are decoded inputs, not constants copied from one frame. This follows
+  `scene.hlsl`'s sky branch and `skate3_native_scene.cpp`'s sky-bank layout.
+- The selected render location supplies the normalized sun vector used by
+  the sky and existing world tangent-sign terms. This adds no directional
+  light energy or shadow map to imported worlds.
 
 The converter reads scalar material channels at record offset 0x10.
 Earlier exports incorrectly read their string pointer and saved empty strings.
@@ -29,19 +38,77 @@ Reconvert maps to obtain those constants and complete reflection cubes.
 Old packages still load; missing constants disable the relevant layer and
 single-face environment textures are not treated as cubes.
 
+The VLT converter now adds `array` to array fields, retaining the existing
+`type` and `data` unchanged. `array.items` contains complete big-endian element
+hex strings without padding; `capacity`, `element_size` and `alignment`
+describe the source layout. Text arrays additionally retain decoded
+`text_items` before the binary bank is discarded. The layout follows
+VaultLib's `VLTArrayType`: four big-endian u16 header lanes followed by
+individually aligned elements. Alignment in the schema is a base-two exponent.
+
+Skies can be refreshed independently of map/character conversion:
+
+```text
+python -m tools.asset_pipeline.sky --game-root OWNED_EXTRACTED_GAME --assets PRIVATE_ASSET_ROOT
+```
+
+Use a private staging asset directory for experiments. This reads only the
+database pair and sky resources; it does not require an ISO or Blender.
+Legacy sky metadata retains its previous multiplier and has no sun gradient.
+
+## Treeline investigation
+
+The missing forest in the supplied University / Super Ultra Mega Park
+comparison is not resolved by this change. The camera-relative
+`WorldPresEntityOptimesh` anchor from `sub_82792900` is consistent with the sky
+placement above, but the decoded University panorama has mountains and city
+scenery, not a dense forest layer. Its RX2 contains one 380-triangle dome.
+The separate `DIST_MegaPark` archive contains 102 mesh parts and no tree mesh;
+it is not a source for additional trees at University's park.
+
+The main University export retains 479 model assets, 8,546 mesh parts and 86
+named TreeWall parts. Those named walls are outside the immediate park area;
+their absence at that location does not prove geometry is missing. Nearby
+proxy geometry demonstrably overlaps the main trees: in cell 350/-750,
+451 of 456 proxy long-tree triangles match triangles in the 912-triangle
+main tree after quantization to one millimetre, independent of winding.
+The five nonmatching triangles are not evidence for an extra forest.
+The main tree's diffuse and transparent channels resolve the same DXT5
+texture, with nonconstant alpha, and its baked lightmap is retained. The
+renderer already uses the retail cutoff in colour/depth and two-sided foliage.
+
+No proxy geometry has been added. `skate3_draw_distance.cpp` documents the
+ProxyWorld/full-detail exchange; rendering both whole sets is not a valid
+fix. Identifying the specific missing silhouette now requires matched-camera
+reference evidence connecting it to a submitted mesh/material or a streaming
+collection. The two supplied images have different viewpoints. Native mip
+selection and regional/streaming state also remain unverified.
+
 ## Remaining differences
 
 This is not a claim of pixel parity. Native frame constants are supplied by
 game hooks in the reference; this engine does not yet recover that controller.
-Exposure 2.5, material multiplier 1, and tree/proxy values use documented
-day-capture defaults. Imported maps have no dynamic directional sun or realtime
+Scene exposure 2.5, world material multiplier 1, and tree/proxy values still use
+documented day-capture defaults. Imported maps have no dynamic directional sun or realtime
 sun shadows: their world lighting comes from the baked lightmaps. Normal-map
-sign terms retain the adapter's fixed direction until native frame data is
-available; this adds no light energy or shadow map. The fog inputs
-are wired into the shader but remain disabled without authored frame rows.
+sign terms use the initial world's authored direction when new sky metadata
+is available; old packages retain the previous direction. Regional changes
+and the runtime environment controller are not implemented. Fog selection
+and its authored near/far/colour/power/max are retained in sky metadata, but
+the CPU transformation to native frame rows is not yet proven, so shader fog
+remains disabled. The selected `material_fog/default` must not be confused
+with the different `fog_default` collection.
 
-Sky sun-gradient shading, park sky selection, native water, character shaders,
-SSAO, SSR, bloom and volumetric lighting are not yet ported. The character and
+Native water, character shaders, SSAO, SSR, bloom and volumetric lighting are
+not yet ported. The water arrays are recoverable now, but flowing-water
+normal/tangent unpacking, ocean PCA input bindings and the separate horizon
+water resource still need their own adapters. Character parity needs the
+native CAC-composed texture/mask inputs plus verified key/rim/specular and
+nine SH rows; portable GLB materials do not retain that contract. Reference
+post effects need their depth/normal/reflection inputs and native pass ordering;
+volumetric sun visibility also conflicts with the currently disabled world
+sun-shadow source. These gaps are not enabled using guessed settings.
+The character and
 unsupported world families still use Bevy materials beneath the shared tone
 curve. Reflection normals use the reference's analytic world-up construction;
 there has been no matched-camera pixel comparison against the recomp.

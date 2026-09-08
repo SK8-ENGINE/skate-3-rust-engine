@@ -2,7 +2,7 @@
 
 struct WorldParams {
     mode: vec4<f32>, surface: vec4<f32>, family: vec4<f32>,
-    fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>,
+    fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: WorldParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse: texture_2d<f32>;
@@ -64,10 +64,9 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
 #endif
     let rpos = i.world_position.xyz - frame::view.world_position;
     let vd = -normalize(rpos);
-    // Static reference axis for the tangent-space sign terms. This is not
-    // an additive light or a shadow source. Native frame direction remains
-    // an extraction gap; preserve the adapter's prior direction for now.
-    let sun = normalize(vec3<f32>(4.0,7.0,4.0));
+    // Authored render-location direction for the tangent-space sign terms.
+    // This does not add directional light energy or a shadow source.
+    let sun = p.sun_direction.xyz;
     var d = a.rgb*a.rgb;
     var alpha = 1.0;
     var lin = vec3<f32>(0.0);

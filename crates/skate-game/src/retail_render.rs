@@ -33,123 +33,9 @@ impl Plugin for RetailRenderPlugin {
 #[derive(Resource)]
 pub(crate) struct RetailScene(pub bool);
 
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub(crate) struct RetailSkyMaterial {
-    #[uniform(0)]
-    pub params: Vec4,
-    #[texture(1)]
-    #[sampler(2)]
-    pub diffuse: Handle<Image>,
-}
-impl Material for RetailSkyMaterial {
-    fn enable_prepass() -> bool {
-        false
-    }
-    fn enable_shadows() -> bool {
-        false
-    }
-    fn vertex_shader() -> ShaderRef {
-        "embedded://skate3rust/retail_sky.wgsl".into()
-    }
-    fn fragment_shader() -> ShaderRef {
-        Self::vertex_shader()
-    }
-    fn specialize(
-        _: &bevy::pbr::MaterialPipeline,
-        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
-        _: &bevy::mesh::MeshVertexBufferLayoutRef,
-        _: bevy::pbr::MaterialPipelineKey<Self>,
-    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
-        descriptor.primitive.cull_mode = None;
-        if let Some(depth) = &mut descriptor.depth_stencil {
-            depth.depth_write_enabled = false;
-        }
-        Ok(())
-    }
-}
-
-pub(crate) fn spawn_sky(
-    name: &str,
-    root: &std::path::Path,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    images: &mut Assets<Image>,
-    materials: &mut Assets<RetailSkyMaterial>,
-) {
-    // Parks need their authored sky selection from the environment controller;
-    // only these three district identities are currently resolved.
-    if !matches!(name, "University" | "DownTown" | "Industrial") {
-        return;
-    }
-    #[derive(serde::Deserialize)]
-    struct Sky {
-        width: u32,
-        height: u32,
-        positions: Vec<[f32; 3]>,
-        uvs: Vec<[f32; 2]>,
-        indices: Vec<u32>,
-    }
-    let load = || -> Result<(Sky, Vec<u8>), String> {
-        let base = root.join("private/native-skies");
-        let sky: Sky = serde_json::from_slice(
-            &std::fs::read(base.join(format!("{name}.json"))).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        let rgba = std::fs::read(base.join(format!("{name}.rgba"))).map_err(|e| e.to_string())?;
-        if sky.width == 0
-            || sky.height == 0
-            || u64::from(sky.width) * u64::from(sky.height) * 4 != rgba.len() as u64
-            || sky.positions.len() != sky.uvs.len()
-            || sky
-                .indices
-                .iter()
-                .any(|&i| i as usize >= sky.positions.len())
-        {
-            return Err("Invalid retail sky dimensions/geometry".into());
-        }
-        Ok((sky, rgba))
-    };
-    let (sky, rgba) = match load() {
-        Ok(v) => v,
-        Err(e) => {
-            warn!("Retail sky unavailable: {e}");
-            return;
-        }
-    };
-    let mut image = Image::new(
-        bevy::render::render_resource::Extent3d {
-            width: sky.width,
-            height: sky.height,
-            depth_or_array_layers: 1,
-        },
-        bevy::render::render_resource::TextureDimension::D2,
-        rgba,
-        bevy::render::render_resource::TextureFormat::Rgba8Unorm,
-        bevy::asset::RenderAssetUsages::RENDER_WORLD,
-    );
-    let mut sampler = bevy::image::ImageSamplerDescriptor::linear();
-    sampler.address_mode_u = bevy::image::ImageAddressMode::Repeat;
-    image.sampler = bevy::image::ImageSampler::Descriptor(sampler);
-    let mesh = Mesh::new(
-        bevy::mesh::PrimitiveTopology::TriangleList,
-        bevy::asset::RenderAssetUsages::RENDER_WORLD,
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, sky.positions)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, sky.uvs)
-    .with_inserted_indices(bevy::mesh::Indices::U32(sky.indices));
-    commands.spawn((
-        Name::new("Retail sky dome"),
-        Mesh3d(meshes.add(mesh)),
-        MeshMaterial3d(materials.add(RetailSkyMaterial {
-            params: Vec4::new(165., 2.5, 1., 0.),
-            diffuse: images.add(image),
-        })),
-        Transform::default(),
-        bevy::camera::visibility::NoFrustumCulling,
-        bevy::light::NotShadowCaster,
-        bevy::light::NotShadowReceiver,
-    ));
-}
+#[path = "retail_sky.rs"]
+mod sky;
+pub(crate) use sky::{spawn_sky, RetailSkyMaterial};
 
 #[derive(Component, ExtractComponent, Clone, Copy, ShaderType, Default)]
 pub(crate) struct RetailTone {
@@ -179,6 +65,7 @@ pub(crate) struct WorldParams {
     pub fog_ramp: Vec4,
     pub fog_color: Vec4,
     pub shadow_color: Vec4,
+    pub sun_direction: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -385,6 +272,7 @@ impl Definition {
                 fog_ramp: Vec4::new(0., 0., 1., 0.),
                 fog_color: Vec4::ZERO,
                 shadow_color: Vec4::ZERO,
+                sun_direction: Vec3::new(4., 7., 4.).normalize().extend(0.),
             },
             diffuse,
             lightmap,
