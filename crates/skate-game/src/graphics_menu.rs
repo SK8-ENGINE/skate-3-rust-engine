@@ -88,6 +88,9 @@ pub(crate) struct Menu {
     browser: bool,
 }
 impl Menu {
+    pub(crate) fn diagnostic_settings(&self) -> String {
+        format!("{:?}", self.settings)
+    }
     pub(crate) fn transition_finished(&mut self, status: String, resume: bool) {
         self.status = status;
         self.open = !resume;

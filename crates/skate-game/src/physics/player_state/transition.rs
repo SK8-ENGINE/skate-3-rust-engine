@@ -57,6 +57,7 @@ pub(super) fn set(
     if current == requested {
         return Ok(());
     }
+    crate::crash_context::requested(physics.ticks, current, requested);
     //Keep the actual selector request for the coordinator; do not publish a
     //state whose physical Enter/Exit owner has not been connected.
     let supported = match current {

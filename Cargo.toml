@@ -17,6 +17,10 @@ skate-data = { path = "crates/skate-data" }
 [profile.dev]
 opt-level = 3
 
+[profile.release]
+debug = 1
+strip = false
+
 [profile.dev.package."*"]
 opt-level = 3
 

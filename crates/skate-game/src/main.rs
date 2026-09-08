@@ -1,4 +1,6 @@
 mod animation;
+mod crash_report;
+mod crash_context;
 mod multiplayer;
 mod apt_vm;
 mod apt_display;
@@ -39,6 +41,8 @@ mod grind_world;
 mod skate_world;
 
 fn main() -> bevy::app::AppExit {
+    if let Some(code) = crash_report::entry() { std::process::exit(code); }
+    eprintln!("REPORT_META stage=configuration_and_installation");
     let config = match config::Config::from_env() {
         Ok(config) => config,
         Err(error) => {
@@ -46,10 +50,13 @@ fn main() -> bevy::app::AppExit {
             return bevy::app::AppExit::error();
         }
     };
+    eprintln!("REPORT_META startup=map_fingerprint:{:016x} difficulty:{} multiplayer_requested:{} custom_appearance:{} renderer:Vulkan", config.map_fingerprint, config.difficulty.key(), config.multiplayer.host.is_some() || config.multiplayer.direct.is_some(), config.multiplayer.appearance.is_some());
+    eprintln!("REPORT_META stage=gameplay_configuration");
     if let Err(error) = skate_data::input_config::StockGameplayConfig::load(&config.asset_root) {
         eprintln!("{error}");
         return bevy::app::AppExit::error();
     }
+    eprintln!("REPORT_META stage=asset_manifest");
     let manifest = match skate_data::GameAssets::load(&config.asset_root) {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -57,6 +64,7 @@ fn main() -> bevy::app::AppExit {
             return bevy::app::AppExit::error();
         }
     };
+    eprintln!("REPORT_META stage=stock_graphs");
     let graphs = match graph_runtime::StockGraphs::load(&config.asset_root, &manifest) {
         Ok(graphs) => graphs,
         Err(error) => {
@@ -64,6 +72,7 @@ fn main() -> bevy::app::AppExit {
             return bevy::app::AppExit::error();
         }
     };
+    eprintln!("REPORT_META stage=map_validation");
     if let Some(map) = &config.map {
         if let Err(error) = skate_world::validate_runtime(map) {
             eprintln!("{error}");
@@ -71,6 +80,7 @@ fn main() -> bevy::app::AppExit {
         }
     }
     eprintln!("SKATE_DIFFICULTY mode={} native_index={}", config.difficulty.key(), config.difficulty as u32);
+    eprintln!("REPORT_META stage=physics_initialization");
     let mut physics = match physics::GamePhysics::load_with_difficulty(&config.asset_root, config.map.as_ref(), config.difficulty) {
         Ok(physics) => physics,
         Err(error) => {
@@ -83,6 +93,7 @@ fn main() -> bevy::app::AppExit {
         spawn.translation.x += config.multiplayer.spawn_offset;
         physics.board.set_transform(spawn);
     }
+    eprintln!("REPORT_META stage=skater_initialization");
     let skater = match physics::SkaterRuntime::load(&config.asset_root, &graphs, &physics, config.difficulty.key()) {
         Ok(skater) => skater,
         Err(error) => {
@@ -90,6 +101,7 @@ fn main() -> bevy::app::AppExit {
             return bevy::app::AppExit::error();
         }
     };
+    eprintln!("REPORT_META stage=controls_initialization");
     let controls = match physics::PlayerControls::load(&config.asset_root) {
         Ok(controls) => controls,
         Err(error) => { eprintln!("{error}"); return bevy::app::AppExit::error(); }
@@ -102,8 +114,10 @@ fn main() -> bevy::app::AppExit {
         eprintln!("SKATE_ASSETS_READY");
         return bevy::app::AppExit::Success;
     }
+    eprintln!("REPORT_META stage=renderer_and_app_initialization");
     let mut app = app::build(config, manifest, graphs, physics, skater);
     app.insert_resource(controls);
+    eprintln!("REPORT_META stage=app_run");
     app.run()
 }
 
