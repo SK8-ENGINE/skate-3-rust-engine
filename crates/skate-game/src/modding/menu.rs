@@ -332,8 +332,9 @@ fn draw(
     if let Some((key, value)) = &menu.editing {
         description += &format!("\nEditing {key}: {value}_");
     }
-    if description.chars().count()>650 {
-        description=description.chars().take(650).collect::<String>()+"…\nFull errors are in the session log.";
+    if description.chars().count() > 650 {
+        description = description.chars().take(650).collect::<String>()
+            + "...\nFull errors are in the session log.";
     }
     ***detail = description;
 }
