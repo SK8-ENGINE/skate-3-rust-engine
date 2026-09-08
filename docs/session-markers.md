@@ -25,12 +25,15 @@ SHA-256 provenance:
 ```text
 Owned default.xex: 1db39496585c521d17a2137804f42cf73ebed2b32cac166ec42dbf772f4dcf7f
 TU3 disassembly image: f4aa113eb541bfba03dbc108cf5ab43f58c965b20fa3b82f9c40938a0ad841c4
-Corrected private manual executable: cf5e5e0cc4ed88547f03a8a1ebe628133d4b58ecc451ecad4d59276d1ba22cbf
+HUD-corrected private manual executable: 169d6258cb2a62b4e6caa0ad54788ab66f2d9587231a9d056b9dc984169040d4
 ```
 
 | Native owner | Behavior represented |
 | --- | --- |
 | `82898FC8` PlayerUI::UpdateSessionMarker | Actions42/43; set/return ordering; retained timer and release latch |
+| `82DB6EC0`, `82BE1AE8` | Skeleton output+416 is animation-to-world translation, used for distance to the saved marker |
+| `825DF618` FrontEndManager::RenderButton | Full texture-sized quad, minimum corner (-24,-24), rather than the authored 32px placeholder |
+| `825D6B68`, `82CA1FD8` | Futura Shadow draws black first; original futuraheavy draws text color at local X+1 |
 | `8289B6D8`, `8289B140` | Saved transform, foot-forward and on-board byte; marker initially unset |
 | `8289B928`, `8289BAE0` | Ground/biped eligibility; wheel count, deck Up.Y threshold, excluded states |
 | `82BFBC18` | Downward10m line from Y+.1; VLT slope/drop/clearance; surface switch |
@@ -45,6 +48,10 @@ Corrected private manual executable: cf5e5e0cc4ed88547f03a8a1ebe628133d4b58ecc45
 
 Return duration is.2s through100m,1s from1000m, and a native fused linear ramp
 between them (`3A690453`, `3DE38E39`). The timer adds `3C888889` per UI tick.
+The host budgets those ticks from real UI time, once per frame, and consumes
+them alongside controller input; physics substeps no longer supply the clock.
+Distance uses the animation-root translation, not the board+.2 capture position.
+At 100m, 550m and 1000m the strict comparison fires on ticks 13, 36 and 61.
 Relocation uses a strict greater-than comparison. Within.5m there is no effect
 or relocation; the native timer still accumulates. The trigger tick and next two
 UI ticks publish full effect. The shader's recovered noise contribution uses
@@ -71,12 +78,17 @@ existing APT/GEO/RX2/font readers perform extraction; this adapter compiles only
 the marker subtree. Re-running updates its source cache incrementally.
 
 Sources: `hud2/hudphonelist`, imported `controls/button_item2`, the Xbox360
-`button_DPad_Up_hud.Texture` and `button_DPad_Down_hud.Texture`, original Futura
-Shadow atlas/metrics and English language labels. The compiler emits ten
-triangle meshes and five private RGBA textures. The root `hudintro` endpoint14,
-quick-menu `maximized` endpoint49 and two-item label endpoint8 supply the actual
+`button_DPad_Up_hud.Texture`, `button_DPad_Down_hud.Texture` and `button_B_hud.Texture`,
+original Futura Shadow and futuraheavy atlases/metrics and English language labels.
+The compiler emits fifteen triangle meshes and seven private RGBA textures.
+`futuraheavy` declares its bitmap font family as `Futura Std Medium`.
+The root `hudintro` endpoint14,
+quick-menu `maximized` endpoint49 and three-item label endpoint18 supply the actual
 placements. No replacement typeface or redrawn panel is used. Source texture
 and extraction-manifest hashes remain in the private compiled manifest.
+Textures copy the extracted RGBA payload directly. Object Dropper is shown as
+unavailable; its 0.3 opacity is a host presentation choice, not recovered
+ActionScript behavior. This change does not add Object Dropper functionality.
 
 Runtime accepts `SKATE3_SESSION_MARKER_OVERLAY`, falling back to
 `ASSET_ROOT/private/session-marker`. This is the narrow interface for a future
@@ -105,10 +117,14 @@ directory with a distinct artifact name, checks the CLI/marker strings without
 executing it, and verifies the staged SHA-256. Use that script for future builds;
 `-DependencyTargetDirectory` can select an existing dependency cache.
 
-Three standalone hold-state tests passed (cancellation/latching, unset/nearby/
-blocked returns and tail, distance ramp). The WGSL passed offline Naga27 parsing
+Four standalone hold-state tests passed (cancellation/latching, unset/nearby/
+blocked returns and tail, distance ramp, actual distance-dependent trigger ticks).
+The WGSL previously passed offline Naga27 parsing
 and validation. Original HUD manifest counts, triangle structure and every RGBA
 payload size passed data checks. These checks initialize no game or GPU device.
+A CPU-only rendering of the compiled HUD was inspected for font layering,
+icon size and the three-row panel. The corrected release was rebuilt and staged
+through `Build-SessionMarker.ps1`; its artifact/hash checks passed.
 
 Manual validation remains necessary: place/replace, return from riding and
 biped states, switch/fakie stance, interrupted holds, bail recovery, camera cuts,

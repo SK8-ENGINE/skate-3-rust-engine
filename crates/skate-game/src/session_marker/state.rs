@@ -91,8 +91,18 @@ mod tests {
     }
     #[test]
     fn distance_ramp_matches_native_endpoints() {
+        assert_eq!(duration(1.), 0.2);
         assert_eq!(duration(100.), 0.2);
         assert!((duration(550.) - 0.6).abs() < 0.000001);
         assert_eq!(duration(1000.), 1.);
+        assert_eq!(duration(2000.), 1.);
+    }
+    #[test]
+    fn distance_changes_the_actual_relocation_tick() {
+        for (distance, expected_tick) in [(100., 13), (550., 36), (1000., 61)] {
+            let mut hold = Hold::default();
+            let tick = (1..=120).find(|_| hold.update(true, true, distance, true).relocate);
+            assert_eq!(tick, Some(expected_tick), "distance {distance}");
+        }
     }
 }

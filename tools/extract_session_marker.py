@@ -25,9 +25,11 @@ def compile_hud(cache_root: Path, output: Path) -> None:
         if character["type_name"] in ("sprite", "animation"):
             count = character["movie"]["frame_count"]
             if owner["key"] == bundle:
-                label = {0: "hudintro", 17: "maximized", 16: "2"}.get(character["id"])
+                label = {0: "hudintro", 17: "maximized", 16: "3"}.get(character["id"])
                 if label: return {"frame": playback_frame(character, label, play=True)}
             if count <= 1: return {"frame": 0}
+        if character["type_name"] == "text" and "/text2/" in path:
+            return {"text": language["ID_PHONELIST_OBJECTDROPPER"]}
         return {}
 
     flat = SceneFlattener(cache, state).flatten(bundle, 0)
@@ -39,14 +41,13 @@ def compile_hud(cache_root: Path, output: Path) -> None:
     def texture(path, width=None, height=None):
         path = str(path)
         if path in texture_ids: return texture_ids[path]
-        from PIL import Image
         src = cache_root / path
-        with Image.open(src) as im:
-            im = im.convert("RGBA")
-            width, height = im.size
-            index = len(textures)
-            name = f"texture-{index}.rgba"
-            (output / name).write_bytes(im.tobytes())
+        data = src.read_bytes()
+        if width is None or height is None or len(data) != width * height * 4:
+            raise ValueError(f"Invalid source RGBA texture: {path}")
+        index = len(textures)
+        name = f"texture-{index}.rgba"
+        (output / name).write_bytes(data)
         texture_ids[path] = index
         textures.append({"file": name, "width": width, "height": height,
             "source": path, "sha256": hashlib.sha256(src.read_bytes()).hexdigest()})
@@ -57,39 +58,41 @@ def compile_hud(cache_root: Path, output: Path) -> None:
     meshes = []
     for primitive in flat["primitives"]:
         tex = primitive.get("texture")
-        index = texture(tex["preview"]) if tex else None
+        index = texture(tex["rgba"], tex["width"], tex["height"]) if tex else None
         role = "art"
         if "mButtonRender" in primitive["path"]:
-            role = "return" if "/mButton0/" in primitive["path"] else "place"
-            name = "button_DPad_Up_hud.Texture" if role == "return" else "button_DPad_Down_hud.Texture"
+            role = ("return" if "/mButton0/" in primitive["path"] else
+                    "place" if "/mButton1/" in primitive["path"] else "dropper")
+            name = {"return": "button_DPad_Up_hud.Texture",
+                    "place": "button_DPad_Down_hud.Texture", "dropper": "button_B_hud.Texture"}[role]
             item = next(t for t in buttons if t["name"] == name)
-            index = texture(buttons_dir / item["preview_file"])
-            # SetButtonType replaces the authored 32px button render rectangle.
-            # Preserve its original geometry/placement and bind the retail icon.
-            inv = primitive["matrix"]
-            for triangle in primitive["triangles"]:
-                for vertex in triangle:
-                    x, y = vertex["position"]
-                    vertex["uv"] = [(x - inv[4] + 16.5) / 32, (y - inv[5] + 16.5) / 32]
+            index = texture(buttons_dir / item["rgba_file"], item["width"], item["height"])
+            # RenderButton 825DF618 replaces the placeholder: full texture size,
+            # with (dimension - 48)/2 offset before +/- dimension/2.
+            corners = [(-24, -24, 0, 0), (item["width"]-24, -24, 1, 0),
+                       (item["width"]-24, item["height"]-24, 1, 1),
+                       (-24, item["height"]-24, 0, 1)]
+            vertices = [{"position": transform_point(primitive["matrix"], [x, y]), "uv": [u, v]}
+                        for x, y, u, v in corners]
+            primitive["triangles"] = [[vertices[i] for i in indices] for indices in ((0,1,2),(0,2,3))]
             primitive["color"] = [1, 1, 1, primitive["color"][3]]
+            if role == "dropper": primitive["color"][3] *= 0.3
         meshes.append({"texture": index, "role": role, "color": primitive["color"],
             "vertices": [dict(position=v["position"], uv=v.get("uv", [0, 0]))
                          for tri in primitive["triangles"] for v in tri],
             "order": primitive["draw_order"], "source": primitive["path"]})
-    for text in flat["text"]:
-        value = language.get(text["value"], text["value"])
-        if value.startswith("ID_"): raise ValueError(f"Missing retail text {value}")
-        font = text["font_asset"]
+    def emit_text(text, value, font, tint, offset, role):
         definition = font["definition"]
         metrics = measure_bitmap_text(definition, value, text["font_height"])
-        index = texture(font["preview"])
+        size = definition["textures"][0]
+        index = texture(font["texture"], size["width"], size["height"])
         atlas = textures[index]
         glyphs = {g["glyph_index"]: g for g in definition["glyphs"]}
         vertices = []
         scale = metrics["scale"]
         for used in metrics["glyphs"]:
             g = glyphs[used["glyph_index"]]
-            x = text["bounds"][0] + 2 + used["left"]
+            x = text["bounds"][0] + 2 + used["left"] + offset
             y = text["bounds"][1] + 2 + text["font_height"] - g["y_offset"] * scale
             w, h = g["width"] * scale, g["height"] * scale
             a, b, c, d = g["atlas_bounds"]
@@ -98,16 +101,33 @@ def compile_hud(cache_root: Path, output: Path) -> None:
                 px,py,u,v = corners[corner]
                 vertices.append({"position": transform_point(text["matrix"], [px,py]),
                     "uv": [u/atlas["width"],v/atlas["height"]]})
+        meshes.append({"texture": index, "role": role, "color": tint,
+            "vertices": vertices, "order": text["draw_order"] + offset * 0.1,
+            "source": text["path"], "font_pass": "shadow" if offset == 0 else "foreground"})
+
+    for text in flat["text"]:
+        value = language.get(text["value"], text["value"])
+        if value.startswith("ID_"): raise ValueError(f"Missing retail text {value}")
+        role = ("return" if "/text0/" in text["path"] else
+                "place" if "/text1/" in text["path"] else "dropper")
         argb = int(text["color_argb"].lstrip("#"), 16)
-        meshes.append({"texture": index, "role": "return" if "/text0/" in text["path"] else "place",
-            "color": [((argb >> n) & 255)/255 for n in (16,8,0)] + [text["alpha"]*((argb>>24)&255)/255],
-            "vertices": vertices, "order": text["draw_order"], "source": text["path"]})
+        color = [((argb >> n) & 255)/255 for n in (16,8,0)] + [text["alpha"]*((argb>>24)&255)/255]
+        if role == "dropper": color[3] *= 0.3
+        # AllocateString 825D6B68 / SkateAptString::Render 82CA1FD8:
+        # Futura Shadow is black, then futuraheavy in the text color at x+1.
+        passes = [(text["font_asset"], [0, 0, 0, color[3]], 0),
+                  (cache.font_asset("Futura Std Medium"), color, 1)]
+        for font, tint, offset in passes:
+            if font is None: raise ValueError("Missing original futuraheavy font")
+            emit_text(text, value, font, tint, offset, role)
+
     manifest = {"version": 1, "canvas": [1280,720], "textures": textures,
         "meshes": sorted(meshes, key=lambda m:m["order"]),
         "source_manifest_sha256": hashlib.sha256((cache_root/"manifest.json").read_bytes()).hexdigest(),
-        "timelines": {"hudintro": [1,14], "hudoutro": [15,30], "maximized": [27,49]},
-        "notes": "Authored display lists; two session-marker rows; dynamic button textures resolved by native SetButtonType names."}
+        "timelines": {"hudintro": [1,14], "hudoutro": [15,30], "maximized": [27,49], "3": [9,18]},
+        "notes": "Authored three-row display list; native RenderButton dimensions and dual font passes. Object Dropper is unavailable; its 0.3 opacity is a host presentation choice."}
     (output/"hud.json").write_text(json.dumps(manifest, indent=2)+"\n")
+
 
 
 def main():

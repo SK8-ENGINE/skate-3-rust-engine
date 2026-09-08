@@ -75,6 +75,7 @@ fn suspend(
     map: Res<CurrentMap>,
     menu: Res<crate::graphics_menu::Menu>,
     replay: Res<crate::replay::Replay>,
+    time: Res<Time<Real>>,
 ) {
     if marker.generation != map.generation {
         *marker = SessionMarker {
@@ -89,6 +90,9 @@ fn suspend(
         marker.progress = 0.;
         marker.blocked_until_release = true;
         marker.ui_time = 0.;
+    } else if !marker.blocked_until_release {
+        // PlayerUI runs on the UI clock, independently of physics substeps.
+        marker.ui_time += time.delta_secs_f64();
     }
 }
 
@@ -100,7 +104,6 @@ fn update(
     mut skater: ResMut<SkaterRuntime>,
     validation: Res<validation::Validation>,
     replay: Res<crate::replay::Replay>,
-    time: Res<Time<Fixed>>,
     mut audio: MessageWriter<SessionMarkerAudio>,
 ) {
     if replay.active {
@@ -175,10 +178,12 @@ fn update(
         && !(physics.board_wiping_out && p.skeleton.teleport_pending_604 != 0)
         && skater.player_input.pending_teleport().is_none();
     let distance = session.marker.map_or(0., |m| {
-        Vec3::from_slice(&transform[3][..3]).distance(Vec3::from_slice(&m.transform[3][..3]))
+        // 82DB6EC0 -> 82BE1AE8 publishes animation-to-world at output+368;
+        // UpdateSessionMarker reads its translation at output+416.
+        Vec3::from_slice(&skater.animated_skeleton.roots.animation_to_world[3][..3])
+            .distance(Vec3::from_slice(&m.transform[3][..3]))
     });
     let usable = session.can_return;
-    session.ui_time += time.delta_secs_f64();
     while session.ui_time >= 1. / 60. {
         session.ui_time -= 1. / 60.;
         let step = session.hold.update(held, usable, distance, ready);
