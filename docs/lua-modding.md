@@ -15,7 +15,7 @@ mods/my-mod/
   assets/             # optional original text data or authored body clip JSON
 ```
 
-`SKATE3_MODS` overrides the discovery directory; its default is `mods` relative to the process working directory. Only immediate child directories are packages. Archives are not loaded. `SKATE3_MOD_SETTINGS` overrides the writable preferences directory; the default is `settings/mods` beside the engine asset directory. Keep preferences outside packages.
+`SKATE3_MODS` overrides the discovery directory; its default is the top-level `mods` folder **beside the running game executable**, independent of the working directory. The engine creates it if absent and logs its full path; the Mods list has an **Open mods folder** action. Only immediate child directories are packages. Archives are not loaded. `SKATE3_MOD_SETTINGS` overrides the writable preferences directory; the default is `settings/mods` beside the engine asset directory. Keep preferences outside packages.
 
 A minimal manifest:
 
@@ -226,3 +226,42 @@ The trainer update passes 14 standalone Lua/schema tests and a static-CRT releas
 Use `PLAY-MOD-WINDOWS.bat` for the latest settings-window build (`Build-ModWindows.ps1`). The ordinary Escape menu stays in its original centered position. Each enabled mod receives its own compact window, initially at the left, with a title you can drag. The title-bar minus button collapses that window; plus expands it. Each setting has separate minus/plus controls to decrease/increase numbers (within the manifest bounds), cycle choices, or toggle booleans. String controls open the full editor. Values are still saved and delivered to Lua immediately.
 
 Positions and collapse state are retained for the current process, including closing Escape and disabling/re-enabling a mod; they are not saved across game restarts. Clicking a window brings it forward. Tab/controller X cycles focus through enabled mods and then back to the main pause controls; arrows select/adjust within the focused mod. Each window pages seven settings with its own previous/next buttons. Manage mod opens that mod's enable/disable page. The main pause controls remain mouse-clickable when a mod has keyboard focus. Dragging prevents accidental main-menu mouse actions. No game was launched to validate this UI update; its interactive behavior remains for user testing.
+
+## Showcase 2.0 and top-level packages
+
+`PLAY-SHOWCASE.bat` / `Build-Showcase.ps1` provide the current showcase build.
+The build directory contains the executable and a real `mods/native-trainer`
+folder beside it. Only original Lua/JSON/text documentation is copied there.
+Existing edited mod files are preserved on rebuilding, with a diagnostic if they
+differ from bundled sources. The launcher relies on executable-relative discovery;
+it does not redirect mods to the checkout. `SKATE3_MODS` remains an explicit override.
+`mods/README.md` documents this layout for players; use Open mods folder in-game.
+
+Native Trainer 2.0 now has 23 declarative settings: eleven native multipliers plus
+HUD/units/label/help, breadcrumbs/spacing/colour and five keyboard shortcut choices.
+The four added `sdk.trainer.apply` fields are `offboard_jump`, `grip`, `turn_power`
+and `manual_drag` (all default 1, finite 0.25..4). Off-board jump scales the existing
+biped `JumpInput.height_792` before native launch preparation. Grip scales ground
+wheel static/dynamic friction and slide-friction strength. Turn power scales the
+heading controller's turn strength; manual drag scales its balance drag. No raw
+velocity, gravity, mass or state-controller replacement was added.
+
+The player snapshot now additionally includes `heading:number`, the animation-root
+yaw in radians (atan2 of forward X/Z), for source-backed checkpoint orientation.
+The expanded Lua example demonstrates this native teleport request with a separate
+trainer checkpoint; F5 saves and F6 returns by default. F7 starts/stops the active-play
+stopwatch, F8 clears transient session data/markers, and F9 places a visual beacon.
+All shortcuts are configurable choices. Saving is intended on valid clear ground;
+a blocked native return reports a mod error rather than bypassing engine gates.
+
+The HUD displays board speed/peak, approximate travel, position and observed bail/
+grind statistics. It is not the career scoring system or precise odometry. Optional
+breadcrumbs reuse 24 keys; beacons reuse eight; all visual objects have no collision.
+Timers remove temporary notices; settings update visuals immediately; map changes
+clear checkpoint, stopwatch, markers and statistics. Script reload resets transient
+Lua state while preserving compatible saved settings. `help.txt` demonstrates
+package-relative text loading. No private game assets are shipped.
+
+Standalone Lua tests exercise save/return command payloads, stopwatch creation,
+world-change cleanup, bounded trail keys and immediate HUD/tuning settings. Actual
+native gameplay effects and visuals remain user-run; no game process was launched.

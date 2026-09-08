@@ -144,6 +144,10 @@ pub struct TrainerTuning {
     pub braking: f32,
     pub steering: f32,
     pub wobble: f32,
+    pub offboard_jump: f32,
+    pub grip: f32,
+    pub turn_power: f32,
+    pub manual_drag: f32,
 }
 impl Default for TrainerTuning {
     fn default() -> Self {
@@ -155,6 +159,10 @@ impl Default for TrainerTuning {
             braking: 1.,
             steering: 1.,
             wobble: 1.,
+            offboard_jump: 1.,
+            grip: 1.,
+            turn_power: 1.,
+            manual_drag: 1.,
         }
     }
 }
@@ -167,6 +175,10 @@ impl TrainerTuning {
             self.push_power,
             self.braking,
             self.steering,
+            self.offboard_jump,
+            self.grip,
+            self.turn_power,
+            self.manual_drag,
         ]
         .into_iter()
         .all(|v| v.is_finite() && (0.25..=4.).contains(&v))

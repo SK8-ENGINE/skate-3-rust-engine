@@ -39,6 +39,7 @@ enum Action {
     Reset(String),
     Setting(String, String),
     Scan,
+    OpenFolder,
     Back,
 }
 fn rows(menu: &ModMenu, mods: &Mods) -> Vec<(String, Action)> {
@@ -75,6 +76,7 @@ fn rows(menu: &ModMenu, mods: &Mods) -> Vec<(String, Action)> {
         .iter()
         .map(|(id, p)| (p.manifest.name.clone(), Action::Select(id.clone())))
         .collect();
+    rows.push(("Open mods folder".into(), Action::OpenFolder));
     rows.push(("Rescan packages".into(), Action::Scan));
     rows.push(("Back to pause menu".into(), Action::Back));
     rows
@@ -199,6 +201,19 @@ fn input(
             }
             menu.selected = 0;
             Ok(())
+        }
+        Action::OpenFolder => {
+            #[cfg(target_os = "windows")]
+            let program = "explorer.exe";
+            #[cfg(target_os = "macos")]
+            let program = "open";
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            let program = "xdg-open";
+            std::process::Command::new(program)
+                .arg(mods.manager.root())
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("Could not open mods folder: {e}"))
         }
         Action::Scan => {
             mods.manager.scan(true);

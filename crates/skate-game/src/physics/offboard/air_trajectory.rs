@@ -4,7 +4,7 @@ use ground_query::GroundQueryScene;
 use skate_core::player::offboard::{
     air_completion, air_launch, air_prediction, air_queries, ground_query,
 };
-pub(crate) fn prepare(skater: &SkaterRuntime, current: bool) -> Result<air_launch::Launch, String> {
+pub(crate) fn prepare(skater: &SkaterRuntime, current: bool, height_multiplier: f32) -> Result<air_launch::Launch, String> {
     let p = &skater.player_input.processed;
     let toolkit = skater
         .player_input
@@ -39,7 +39,7 @@ pub(crate) fn prepare(skater: &SkaterRuntime, current: bool) -> Result<air_launc
         &air_launch::JumpInput {
             reference_up_144: c.state.frame_output.frame[1],
             contact_active_708: c.state.contact.active,
-            height_792: skater.offboard.jump_height,
+            height_792: skater.offboard.jump_height * height_multiplier,
             velocity_scalar_796: skater.offboard.jump_speed_scalar,
             speed_704: c.state.motion.speed_704,
             steering_760: c.state.intent.steering,

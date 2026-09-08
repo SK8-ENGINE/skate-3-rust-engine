@@ -297,3 +297,89 @@ fn trainer_commands_validate_and_follow_settings() {
     m.enable("example", false).unwrap();
     assert!(m.retired.contains(&"example".into()));
 }
+
+fn showcase_manager(f: &Fixture) -> Manager {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../mods");
+    let mut m = Manager::new(root, f.0.join("showcase-settings"));
+    m.snapshot = json!({"player":{"position":[0,0,0],"velocity":[3,0,0],"heading":0.5,"state":100,"on_board":true,"bailing":false,"grind":{"active":false}},"keys":{},"map":{"name":"test","generation":0},"actions":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]});
+    m.scan(true);
+    m.enable("community.native-trainer", true).unwrap();
+    m.commands.clear();
+    m
+}
+#[test]
+fn showcase_checkpoint_stopwatch_and_world_cleanup() {
+    let f = Fixture::new("return {}");
+    let mut m = showcase_manager(&f);
+    m.snapshot["keys"] = json!({"F5":true});
+    m.dispatch("on_update", json!({"dt":0.1}));
+    assert!(
+        m.commands
+            .iter()
+            .any(|(_, c)| matches!(c,Command::Cube{key,..} if key=="checkpoint"))
+    );
+    m.commands.clear();
+    m.snapshot["keys"] = json!({"F6":true,"F7":true});
+    m.dispatch("on_update", json!({"dt":0.1}));
+    assert!(
+        m.commands
+            .iter()
+            .any(|(_, c)| matches!(c,Command::Teleport{heading,..} if *heading==0.5))
+    );
+    assert!(
+        m.commands
+            .iter()
+            .any(|(_, c)| matches!(c,Command::Overlay{key,..} if key=="timer"))
+    );
+    m.commands.clear();
+    m.snapshot["keys"] = json!({});
+    m.dispatch("on_event", json!({"name":"world_changed"}));
+    assert!(
+        m.commands
+            .iter()
+            .any(|(_, c)| matches!(c,Command::Remove{key} if key=="checkpoint"))
+    );
+    m.commands.clear();
+    m.snapshot["keys"] = json!({"F6":true});
+    m.dispatch("on_update", json!({"dt":0.1}));
+    assert!(
+        !m.commands
+            .iter()
+            .any(|(_, c)| matches!(c, Command::Teleport { .. }))
+    );
+    assert!(m.packages["community.native-trainer"].running());
+}
+#[test]
+fn showcase_reuses_trail_keys_and_updates_hud_settings() {
+    let f = Fixture::new("return {}");
+    let mut m = showcase_manager(&f);
+    let id = "community.native-trainer";
+    m.setting(id, "trail", json!(true)).unwrap();
+    m.commands.clear();
+    let mut trail = std::collections::BTreeSet::new();
+    for i in 0..100 {
+        m.snapshot["player"]["position"] = json!([i * 10, 0, 0]);
+        m.dispatch("on_update", json!({"dt":0.1}));
+        for (_, c) in &m.commands {
+            if let Command::Cube { key, .. } = c {
+                trail.insert(key.clone());
+            }
+        }
+        m.commands.clear();
+    }
+    assert_eq!(trail.len(), 24);
+    assert!(m.packages[id].running());
+    m.setting(id, "hud", json!("off")).unwrap();
+    assert!(
+        m.commands
+            .iter()
+            .any(|(_, c)| matches!(c,Command::Remove{key} if key=="hud"))
+    );
+    m.commands.clear();
+    m.setting(id, "grip", json!(2)).unwrap();
+    assert!(
+        m.commands
+            .iter()
+            .any(|(_, c)| matches!(c,Command::Trainer{tuning} if tuning.grip==2.))
+    );
+}

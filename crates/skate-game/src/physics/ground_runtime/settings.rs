@@ -215,6 +215,11 @@ impl GroundSettings {
         result.propulsion.braking.override_force *= tuning.braking;
         result.steering.general_scalar *= tuning.steering;
         result.wobble_amplitude *= tuning.wobble;
+        result.slide.friction *= tuning.grip;
+        result.wheel_material.static_friction *= tuning.grip;
+        result.wheel_material.dynamic_friction *= tuning.grip;
+        result.heading.turn_strength *= tuning.turn_power;
+        result.drag.balance_drag *= tuning.manual_drag;
         result
     }
     pub fn board(&self) -> GroundBoardSettings<'_> {

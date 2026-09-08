@@ -29,7 +29,16 @@ impl Plugin for ModdingPlugin {
     fn build(&self, app: &mut App) {
         let root = std::env::var_os("SKATE3_MODS")
             .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from("mods"));
+            .unwrap_or_else(|| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.join("mods")))
+                    .unwrap_or_else(|| std::path::PathBuf::from("mods"))
+            });
+        if let Err(e) = std::fs::create_dir_all(&root) {
+            warn!("Cannot create mods folder {}: {e}", root.display());
+        }
+        info!("Mod packages folder: {}", root.display());
         let settings = std::env::var_os("SKATE3_MOD_SETTINGS")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
@@ -108,7 +117,7 @@ fn snapshot(world: &World) -> serde_json::Value {
         .0
         .actions()
         .values();
-    json!({"player":{"position":&s.animated_skeleton.roots.animation_to_world[3][..3],"velocity": &p.skateboard.vector_80.map(f32::from_bits)[..3],"on_board":p.state.category_12!=500,"state":p.state.state_16,"category":p.state.category_12,"bailing":physics.board_wiping_out,"grind":{"active":grinding,"name":grind_name,"kind":grind_kind,"distance":grind_distance}},
+    json!({"player":{"position":&s.animated_skeleton.roots.animation_to_world[3][..3],"velocity": &p.skateboard.vector_80.map(f32::from_bits)[..3],"heading":s.animated_skeleton.roots.animation_to_world[2][0].atan2(s.animated_skeleton.roots.animation_to_world[2][2]),"on_board":p.state.category_12!=500,"state":p.state.state_16,"category":p.state.category_12,"bailing":physics.board_wiping_out,"grind":{"active":grinding,"name":grind_name,"kind":grind_kind,"distance":grind_distance}},
         "animation":world.resource::<Mods>().animation_info,
         "map":{"name":map.name,"generation":map.generation},"tick":physics.ticks,"keys":keys,"actions":actions,
         "paused":world.resource::<crate::graphics_menu::Menu>().open,"replay":world.resource::<crate::replay::Replay>().active})

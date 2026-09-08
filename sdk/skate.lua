@@ -11,6 +11,7 @@
 ---@class PlayerSnapshot
 ---@field position Vec3 Animation root position.
 ---@field velocity Vec3 Physical board velocity, including when offboard.
+---@field heading number Animation-root yaw in radians, zero faces +Z.
 ---@field on_board boolean
 ---@field state integer Native state identifier, not a trick name.
 ---@field category integer
@@ -100,6 +101,10 @@ function sdk.animation.replace(path) end
 ---@field braking? number 0.25..4, foot and tail brake force.
 ---@field steering? number 0.25..4, general steering scalar.
 ---@field wobble? number 0..2, speed wobble amplitude.
+---@field offboard_jump? number 0.25..4, native biped launch height.
+---@field grip? number 0.25..4, wheel static/dynamic and sideways slide friction.
+---@field turn_power? number 0.25..4, native heading turn strength.
+---@field manual_drag? number 0.25..4, manual balance linear drag.
 sdk.trainer = {}
 ---@param tuning TrainerTuning Owned, reversible native tuning. Conflicting owner is rejected.
 function sdk.trainer.apply(tuning) end

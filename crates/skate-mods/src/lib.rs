@@ -47,6 +47,9 @@ pub struct Manager {
     invalid_since: BTreeMap<String, Instant>,
 }
 impl Manager {
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
     pub fn new(root: PathBuf, preferences: PathBuf) -> Self {
         Self {
             packages: BTreeMap::new(),
