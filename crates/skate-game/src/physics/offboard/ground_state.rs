@@ -120,12 +120,6 @@ struct Services<'a> {
     skater: &'a mut SkaterRuntime,
     error: Option<String>,
 }
-impl Services<'_> {
-    fn missing(&mut self, name: &str) {
-        self.error
-            .get_or_insert_with(|| format!("Biped Sync requires {name}"));
-    }
-}
 impl GroundQueryScene for Services<'_> {
     type Error = &'static str;
     fn edge_candidates(
@@ -159,7 +153,10 @@ impl GroundQueryScene for Services<'_> {
 }
 impl ground_sync::Services for Services<'_> {
     type Launch = Result<skate_core::player::offboard::air_launch::Launch, String>;
-    type Candidate = ();
+    //The host world currently loads static collision geometry, not native
+    //interactable object instances. Its object-candidate set is empty. Use an
+    //uninhabited candidate so a miss cannot accidentally bind a fabricated key.
+    type Candidate = std::convert::Infallible;
     fn processed(&self) -> ground_sync::Processed {
         let p = &self.skater.player_input.processed;
         ground_sync::Processed {
@@ -205,12 +202,12 @@ impl ground_sync::Services for Services<'_> {
     fn board_flags_12836(&self) -> u8 {
         self.skater.ground_lifecycle.trajectory.flags_12836
     }
-    fn probe_board(&mut self, _: Vector) -> Option<()> {
-        self.missing("world-object probe");
+    fn probe_board(&mut self, _: Vector) -> Option<Self::Candidate> {
+        //82D4D150 returns false when candidate count12752 is zero.
         None
     }
-    fn candidate_key_188(&self, _: &()) -> [u32; 2] {
-        unreachable!()
+    fn candidate_key_188(&self, candidate: &Self::Candidate) -> [u32; 2] {
+        match *candidate {}
     }
     fn bone_23_position(&mut self) -> Vector {
         skate_core::physics::skeleton_animation_record::compose_affine(
@@ -220,15 +217,17 @@ impl ground_sync::Services for Services<'_> {
     }
     fn classify_board(
         &mut self,
-        _: &(),
+        candidate: &Self::Candidate,
         _: Vector,
         _: ground_sync::Bounds,
         _: ground_sync::BoardLimits,
     ) -> bool {
-        unreachable!()
+        match *candidate {}
     }
     fn query_board(&mut self, _: Vector, _: ground_sync::Bounds, _: ground_sync::BoardLimits) {
-        self.missing("world-object query");
+        //An object query over this host's empty object population has no hits.
+        //Static line/edge queries still execute below through GroundQueryScene.
+        //Do not treat terrain triangles or the player's board as grabbed objects.
     }
     fn bind_board(&mut self, _: [u32; 2]) {
         unreachable!()
@@ -237,7 +236,8 @@ impl ground_sync::Services for Services<'_> {
         unreachable!()
     }
     fn commit_free_board(&mut self, _: Frame) {
-        self.missing("world-object action");
+        //No selected object means no object action to commit. Holding GrabWorld
+        //still reaches the authored graphs, skeleton, toolkit and edge queries.
     }
     fn reset_board(&mut self) {
         self.skater.ground_lifecycle.trajectory.cancel();

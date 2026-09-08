@@ -52,8 +52,16 @@ foot part15 carried volume group4. This is the existing native
 DisableCollisionWithWorld classification, not an unsupported shape. Enabled
 group4 shapes now stay in the assembly collision pass but are excluded from
 the world query. Re-enabling world collision by restoring group0 takes effect
-on the next query. This fixes that explicit exit; the separately logged
-off-board world-object query and non-finite-pose failures remain under investigation.
+on the next query. This fixes that explicit exit.
+
+Off-board GrabWorld no longer exits when the host has no interactable object
+instances. The current static-world adapter returns an empty candidate result
+(`82D4D150`'s zero-count path), cannot manufacture a candidate key, and commits
+no object action. Authored input, static line/edge queries and skeleton updates
+continue. Actual interactable-object loading, queries and actions still require
+an object-scene adapter; this change does not implement those features.
+The separately logged off-board non-finite follower velocity remains under
+investigation, with source target values included in diagnostic builds.
 
 The task executable is a separate copy, built with:
 
