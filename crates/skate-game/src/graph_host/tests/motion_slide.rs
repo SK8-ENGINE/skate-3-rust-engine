@@ -249,3 +249,29 @@ fn slide_direction_preserves_native_unordered_threshold_branch() {
         1.0
     );
 }
+
+#[test]
+#[ignore = "requires installed stock graph assets; compile-only during bail work"]
+fn bail_reset_restores_saved_stance_in_the_real_graph_dispatch() {
+    use crate::graph_host::motion_reset::Operation as Reset;
+    let mut host = host();
+    let reset = behavior(&host, |op| matches!(op, MotionOperation::ResetAnimation(Reset::SkaterAnimation)));
+    let stance = behavior(&host, |op| matches!(op, MotionOperation::ResetAnimation(Reset::GivenStance)));
+    for natural in [0, 1] {
+        for requested in [0, 1] {
+            host.animation.skater_animation_flags = Some(0xf80a_0000);
+            host.animation.natural_stance = natural;
+            host.animation.relative_stance = 1;
+            host.animation.requested_stance = requested;
+            host.begin(reset, [0; 6], &frame());
+            assert_eq!(host.animation.requested_stance, requested);
+            assert_eq!(host.animation.skater_animation_flags, Some(0x0802_0000));
+            host.begin(stance, [0; 6], &frame());
+            assert_eq!(host.animation.requested_stance, 0);
+            let backwards = natural == requested;
+            assert_eq!(host.playback_context.is_mirrored, Some(backwards));
+            assert_eq!(host.animation.relative_stance, requested);
+            assert!(host.errors.is_empty(), "{:?}", host.errors);
+        }
+    }
+}

@@ -118,7 +118,7 @@ pub(crate) fn submit(
 fn xyz(v: [f32; 4]) -> Vector3 {
     Vector3::new(v[0], v[1], v[2])
 }
-fn query(world: &BoardWorld, probe: Probe, matching_id: u32) -> Result<Option<Hit>, String> {
+pub(crate) fn query(world: &BoardWorld, probe: Probe, matching_id: u32) -> Result<Option<Hit>, String> {
     let metadata = world.query_metadata().map_err(str::to_owned)?;
     let start = xyz(probe.start);
     let end = xyz(probe.end);

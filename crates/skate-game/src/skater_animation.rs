@@ -77,6 +77,17 @@ pub(crate) struct SkaterAnimation {
 }
 
 impl SkaterAnimation {
+    ///82592B68: physical leading foot, including the fakie inversion.
+    pub fn checkpoint_stance(&self) -> u32 {
+        let p = &self.state.publication;
+        u32::from(((p.natural_stance == 0 && p.relative_stance == 0)
+            || (p.natural_stance == 1 && p.relative_stance == 1)) ^ self.state.fakie())
+    }
+    ///82592C08/82B97350: save15200; ResetToGivenStance consumes it later.
+    pub fn request_checkpoint_stance(&mut self, foot: u32) {
+        let natural = self.state.publication.natural_stance;
+        self.motion.animation.requested_stance = u32::from(if foot == 0 { natural != 1 } else { natural == 1 });
+    }
     pub fn stance(&self) -> (bool, bool) {
         (self.state.fakie(), self.state.mirrored())
     }
@@ -211,6 +222,10 @@ impl SkaterAnimation {
             .animation
             .skater_animation_flags
             .ok_or("MotionGraph lost the SkaterAnim flag owner")?;
+        self.state.publication.relative_stance = self.motion.animation.relative_stance as i32;
+        if std::mem::take(&mut self.motion.animation.reset_action_intents) {
+            self.action.action_intents.clear();
+        }
 
         self.motion.animation.apply_parameters()?;
         if let Some(phase) = self.motion.phase_write.take() {
@@ -261,6 +276,8 @@ impl SkaterAnimation {
     }
 
     fn publish_physical(&mut self, p: AnimationPhysical) -> Result<(), String> {
+        self.motion.animation.natural_stance = self.state.publication.natural_stance as u32;
+        self.motion.animation.relative_stance = self.state.publication.relative_stance as u32;
         let speed = p
             .conditions
             .speeds
