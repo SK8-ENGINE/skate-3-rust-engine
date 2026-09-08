@@ -10,6 +10,10 @@ pub(crate) struct ModMenu {
     status: String,
 }
 impl ModMenu {
+    pub fn configure(&mut self, id: String) {
+        self.begin();
+        self.id = Some(id);
+    }
     pub fn begin(&mut self) {
         self.open = true;
         self.just_opened = true;
@@ -23,6 +27,8 @@ struct Root;
 struct Row(usize);
 #[derive(Component)]
 struct Label(usize);
+#[derive(Component)]
+struct Badge(usize);
 #[derive(Component)]
 struct Detail;
 #[derive(Clone)]
@@ -41,17 +47,11 @@ fn rows(menu: &ModMenu, mods: &Mods) -> Vec<(String, Action)> {
         if let Some(p) = manager.packages.get(id) {
             let mut rows = vec![
                 (
-                    format!(
-                        "{} — {}",
-                        if p.enabled { "Disable" } else { "Enable" },
-                        if p.running() {
-                            "Running"
-                        } else if p.error.is_some() {
-                            "Error"
-                        } else {
-                            "Disabled"
-                        }
-                    ),
+                    if p.running() {
+                        "DISABLE MOD".into()
+                    } else {
+                        "ENABLE MOD".into()
+                    },
                     Action::Enable(id.clone()),
                 ),
                 ("Reload from disk".into(), Action::Reload(id.clone())),
@@ -73,22 +73,7 @@ fn rows(menu: &ModMenu, mods: &Mods) -> Vec<(String, Action)> {
     let mut rows: Vec<_> = manager
         .packages
         .iter()
-        .map(|(id, p)| {
-            (
-                format!(
-                    "{} [{}]",
-                    p.manifest.name,
-                    if p.running() {
-                        "Running"
-                    } else if p.error.is_some() {
-                        "Error"
-                    } else {
-                        "Disabled"
-                    }
-                ),
-                Action::Select(id.clone()),
-            )
-        })
+        .map(|(id, p)| (p.manifest.name.clone(), Action::Select(id.clone())))
         .collect();
     rows.push(("Rescan packages".into(), Action::Scan));
     rows.push(("Back to pause menu".into(), Action::Back));
@@ -108,7 +93,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((Root,GlobalZIndex(20),Node{display:Display::None,width:percent(100),height:percent(100),position_type:PositionType::Absolute,align_items:AlignItems::Center,justify_content:JustifyContent::Center,..default()},BackgroundColor(Color::srgba(0.015,0.025,0.04,0.98)))).with_children(|root| {
         root.spawn((Node{width:px(760),max_width:percent(95),padding:UiRect::all(px(18)),flex_direction:FlexDirection::Column,row_gap:px(5),..default()},BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("MODS — Lua SDK 1"),TextFont{font_size:28.,..default()},TextColor(Color::WHITE)));
-            for i in 0..8 { panel.spawn((Button,Row(i),Node{min_height:px(32),padding:UiRect::all(px(6)),..default()},BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {row.spawn((Label(i),Text::new(""),TextFont{font_size:17.,..default()},TextColor(Color::WHITE)));}); }
+            for i in 0..8 { panel.spawn((Button,Row(i),Node{min_height:px(32),padding:UiRect::all(px(6)),justify_content:JustifyContent::SpaceBetween,..default()},BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {row.spawn((Label(i),Text::new(""),TextFont{font_size:17.,..default()},TextColor(Color::WHITE)));row.spawn((Badge(i),Text::new(""),TextFont{font_size:16.,..default()},TextColor(Color::WHITE)));}); }
             panel.spawn((Detail,Text::new(""),TextFont{font_size:15.,..default()},TextColor(Color::srgb(0.65,0.85,0.85))));
             panel.spawn((Text::new("Arrows / D-pad: select & adjust  |  Enter / A: choose  |  Esc / B: back\nStrings: Enter then type; Enter saves, Esc cancels. More rows scroll automatically."),TextFont{font_size:14.,..default()},TextColor(Color::WHITE)));
         });
@@ -220,7 +205,7 @@ fn input(
             Ok(())
         }
         Action::Enable(id) => {
-            let enabled = !mods.manager.packages[&id].enabled;
+            let enabled = !mods.manager.packages[&id].running();
             mods.manager.enable(&id, enabled)
         }
         Action::Reload(id) => {
@@ -269,9 +254,10 @@ fn draw(
     menu: Res<ModMenu>,
     mods: Res<Mods>,
     mut root: Single<&mut Node, With<Root>>,
-    mut labels: Query<(&Label, &mut Text)>,
+    mut labels: Query<(&Label, &mut Text), Without<Badge>>,
+    mut badges: Query<(&Badge, &mut Text, &mut TextColor), Without<Label>>,
     mut buttons: Query<(&Row, &mut Node, &mut BackgroundColor), Without<Root>>,
-    mut detail: Single<&mut Text, (With<Detail>, Without<Label>)>,
+    mut detail: Single<&mut Text, (With<Detail>, Without<Label>, Without<Badge>)>,
 ) {
     root.display = if menu.open {
         Display::Flex
@@ -300,6 +286,21 @@ fn draw(
             Color::srgb(0.10, 0.30, 0.34)
         } else {
             Color::srgb(0.08, 0.11, 0.15)
+        };
+    }
+    for (badge, mut text, mut color) in &mut badges {
+        let package = entries.get(offset + badge.0).and_then(|(_, a)| match a {
+            Action::Select(id) | Action::Enable(id) => mods.manager.packages.get(id),
+            _ => None,
+        });
+        **text = package
+            .map(|p| if p.running() { "ENABLED" } else { "DISABLED" })
+            .unwrap_or("")
+            .into();
+        color.0 = if package.is_some_and(|p| p.running()) {
+            Color::srgb(0.25, 1., 0.4)
+        } else {
+            Color::srgb(1., 0.25, 0.25)
         };
     }
     let mut description = format!("{} / {}\n{}", selected + 1, entries.len(), menu.status);

@@ -252,6 +252,7 @@ pub(crate) fn interact(
     mut transition: ResMut<crate::map_transition::MapTransition>,
     mut customiser: ResMut<crate::customiser::Customiser>,
     mut mods: ResMut<crate::modding::ModMenu>,
+    panel: Res<crate::modding::EnabledPanel>,
     nav: Res<crate::customiser::Navigation>,
     mut physics: ResMut<crate::physics::GamePhysics>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -269,6 +270,7 @@ pub(crate) fn interact(
     if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 {
         menu.open = !menu.open;
     }
+    if panel.focused && menu.open { return; }
     let mut action = None;
     if menu.open {
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
@@ -407,12 +409,16 @@ fn labels(
     time: Res<Time<Real>>,
     customiser: Res<crate::customiser::Customiser>,
     mods: Res<crate::modding::ModMenu>,
+    enabled_mods: Res<crate::modding::Mods>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut root: Single<&mut Node, With<MenuRoot>>,
     mut labels: Query<(&MenuLabel, &mut Text), Without<StatusLabel>>,
     mut status: Single<&mut Text, With<StatusLabel>>,
     mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor)>,
 ) {
+    let has_enabled=enabled_mods.manager.packages.values().any(|p|p.running());
+    root.justify_content=if has_enabled {JustifyContent::FlexEnd}else{JustifyContent::Center};
+    root.padding.right=if has_enabled {percent(3)}else{px(0.)};
     root.display = if menu.open && !customiser.open && !mods.open {
         Display::Flex
     } else {

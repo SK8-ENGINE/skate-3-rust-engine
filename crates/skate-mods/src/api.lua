@@ -45,3 +45,6 @@ end
 sdk.animation = {}
 function sdk.animation.replace(path) submit{kind="animation",path=path} end
 function sdk.animation.info() return sdk.snapshot.animation end
+
+sdk.trainer = {}
+function sdk.trainer.apply(tuning) submit{kind="trainer",tuning=tuning} end

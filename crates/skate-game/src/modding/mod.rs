@@ -1,7 +1,9 @@
 //! Main-thread SDK adapter. Lua never receives World, entity IDs, or asset handles.
 mod menu;
+mod panel;
 use bevy::prelude::*;
 pub(crate) use menu::ModMenu;
+pub(crate) use panel::EnabledPanel;
 use serde_json::json;
 use skate_mods::{Command, Manager};
 use std::collections::BTreeMap;
@@ -10,6 +12,7 @@ use std::collections::BTreeMap;
 pub(crate) struct Mods {
     pub manager: Manager,
     animation_info: serde_json::Value,
+    trainer: Option<(String, skate_mods::TrainerTuning)>,
     owned: BTreeMap<(String, String), Owned>,
     generation: u64,
     last_bail: bool,
@@ -65,6 +68,7 @@ impl Plugin for ModdingPlugin {
         let animation_info = json!({"bone_names":frames.bone_names,"slots":slots});
         app.insert_resource(Mods {
             animation_info,
+            trainer: None,
             manager: Manager::new(root, settings),
             owned: BTreeMap::new(),
             generation: u64::MAX,
@@ -85,6 +89,7 @@ impl Plugin for ModdingPlugin {
         )
         .add_systems(Update, update.after(crate::app::FrameSet::Animation));
         menu::install(app);
+        panel::install(app);
     }
 }
 fn snapshot(world: &World) -> serde_json::Value {
@@ -205,6 +210,15 @@ fn retire(world: &mut World, mods: &mut Mods, key: &(String, String)) {
 }
 fn apply(world: &mut World, mods: &mut Mods) {
     let retired = std::mem::take(&mut mods.manager.retired);
+    if mods
+        .trainer
+        .as_ref()
+        .is_some_and(|(id, _)| retired.contains(id))
+    {
+        mods.trainer = None;
+    }
+    world.resource_mut::<crate::physics::GamePhysics>().trainer =
+        mods.trainer.as_ref().map(|(_, t)| *t).unwrap_or_default();
     for id in &retired {
         world
             .resource::<crate::physics::SkaterRuntime>()
@@ -273,6 +287,10 @@ fn apply(world: &mut World, mods: &mut Mods) {
         if let Err(e) = result {
             warn!("Lua mod {id}: {e}");
             mods.manager.fail(&id, e);
+            if mods.trainer.as_ref().is_some_and(|(owner, _)| owner == &id) {
+                mods.trainer = None;
+                world.resource_mut::<crate::physics::GamePhysics>().trainer = Default::default();
+            }
             world
                 .resource::<crate::physics::SkaterRuntime>()
                 .animation
@@ -331,6 +349,13 @@ fn apply_one(world: &mut World, mods: &mut Mods, id: &str, command: Command) -> 
         }
     }
     match command {
+        Command::Trainer { tuning } => {
+            if mods.trainer.as_ref().is_some_and(|(owner, _)| owner != id) {
+                return Err("Native trainer controls are already owned by another mod".into());
+            }
+            mods.trainer = Some((id.to_owned(), tuning));
+            world.resource_mut::<crate::physics::GamePhysics>().trainer = tuning;
+        }
         Command::Animation { path } => {
             let root = &mods.manager.packages[id].root;
             let bytes = skate_mods::read_bounded(root, &path, 4 * 1024 * 1024)?;

@@ -75,6 +75,9 @@ pub(super) fn advance(
         skater.player_input.processed.state_variant_index_2528,
         skater.player_input.processed.surface_mode_2540,
     )?;
+    if physics.trainer != skate_mods::TrainerTuning::default() {
+        skater.ground_settings = std::sync::Arc::new(skater.ground_settings.tuned(physics.trainer));
+    }
     if teleported {
         skater.respawn.reset_measurements();
         skater.player_state.reset_for_teleport();

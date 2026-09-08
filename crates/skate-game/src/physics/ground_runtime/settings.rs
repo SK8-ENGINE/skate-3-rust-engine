@@ -39,6 +39,7 @@ impl GroundProfiles {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct GroundSettings {
     steering: SteeringSettings,
     wobble: SpeedWobbleSettings,
@@ -57,6 +58,7 @@ pub(crate) struct GroundSettings {
     contact_force_time: f32,
     pub wheel_material: RetailContactMaterial,
     pub foot_force_offset: f32,
+    pub push_target_multiplier: f32,
     pub absorption_front: f32,
     pub absorption_rear: f32,
     pub surface_braking_factor: f32,
@@ -74,6 +76,7 @@ impl GroundSettings {
         //broadcasts82165A10 (zero) into830BD380 for speed override direction.
         let threshold = [f32::from_bits(0x3586_37bd); 4];
         Ok(Self {
+            push_target_multiplier: 1.,
             foot_force_offset: f("physics_feet", "FootForceOffset")?,
             absorption_front: f("physics_feet", "AbsorptionFootForceScalar")?,
             absorption_rear: f("physics_feet", "AbsorptionFootForceRearScalar")?,
@@ -202,6 +205,17 @@ impl GroundSettings {
             wobble_activation: m("Hash_77AFCE78FE1206CA")?,
             wobble_amplitude: m("Hash_5B57F2CCCCEEF430")?,
         })
+    }
+    pub fn tuned(&self, tuning: skate_mods::TrainerTuning) -> Self {
+        let mut result=self.clone();
+        result.push_target_multiplier = tuning.push_speed;
+        result.propulsion.maximum_pushable_speed *= tuning.push_speed;
+        for dv in &mut result.propulsion.mode_speed_changes { *dv *= tuning.push_power; }
+        result.propulsion.braking.input_force *= tuning.braking;
+        result.propulsion.braking.override_force *= tuning.braking;
+        result.steering.general_scalar *= tuning.steering;
+        result.wobble_amplitude *= tuning.wobble;
+        result
     }
     pub fn board(&self) -> GroundBoardSettings<'_> {
         GroundBoardSettings {

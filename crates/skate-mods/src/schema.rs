@@ -132,3 +132,45 @@ impl Setting {
         }
     }
 }
+
+/// Whitelisted native trainer multipliers. 1.0 preserves the installed stock value.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TrainerTuning {
+    pub pop: f32,
+    pub grind_pop: f32,
+    pub push_speed: f32,
+    pub push_power: f32,
+    pub braking: f32,
+    pub steering: f32,
+    pub wobble: f32,
+}
+impl Default for TrainerTuning {
+    fn default() -> Self {
+        Self {
+            pop: 1.,
+            grind_pop: 1.,
+            push_speed: 1.,
+            push_power: 1.,
+            braking: 1.,
+            steering: 1.,
+            wobble: 1.,
+        }
+    }
+}
+impl TrainerTuning {
+    pub fn valid(&self) -> bool {
+        [
+            self.pop,
+            self.grind_pop,
+            self.push_speed,
+            self.push_power,
+            self.braking,
+            self.steering,
+        ]
+        .into_iter()
+        .all(|v| v.is_finite() && (0.25..=4.).contains(&v))
+            && self.wobble.is_finite()
+            && (0. ..=2.).contains(&self.wobble)
+    }
+}

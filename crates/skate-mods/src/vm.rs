@@ -13,6 +13,9 @@ use std::{
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    Trainer {
+        tuning: crate::TrainerTuning,
+    },
     Log {
         text: String,
     },
@@ -42,6 +45,7 @@ impl Command {
     fn validate(&self) -> bool {
         let point = |p: &[f32; 3]| p.iter().all(|v| v.is_finite() && v.abs() <= 100_000.);
         match self {
+            Self::Trainer { tuning } => tuning.valid(),
             Self::Animation { path } => !path.is_empty() && path.len() <= 256,
             Self::Log { text } => text.len() <= 2048,
             Self::Overlay { key, text } => crate::schema::valid_id(key) && text.len() <= 1024,

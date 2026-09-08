@@ -2,6 +2,7 @@
 use super::vector::{clamp, dot3};
 use crate::{point_graph::PointGraph, trigonometry::acos};
 
+#[derive(Clone)]
 pub struct SlideFrictionSettings {
     pub angle_response: PointGraph<16>, // +196/+260
     pub speed_response: PointGraph<8>,  // +324/+356

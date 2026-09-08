@@ -2,6 +2,7 @@
 //! The research index has not recovered its original name. Keep its four
 //! caller-supplied scalar arguments explicit instead of inventing units.
 use super::vector::{clamp, dot3, normalize};
+#[derive(Clone)]
 pub struct GroundForceSettings {
     pub range_1220: f32,
     pub speed_scale_1224: f32,

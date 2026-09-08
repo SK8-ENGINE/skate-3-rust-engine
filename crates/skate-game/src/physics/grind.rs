@@ -575,7 +575,7 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
             c.direction,
             board[3],
             c.centre,
-            (1.0 - strength).mul_add(min, max * strength),
+            (1.0 - strength).mul_add(min, max * strength) * physics.trainer.grind_pop,
             skater.animation_input.extra.grind_stability_nudge,
             physics.grind.manager_age,
         );

@@ -91,3 +91,15 @@ function sdk.time.cancel(key) end
 function sdk.animation.info() end
 ---@param path string Package-relative original body-clip JSON, <=4 MiB; host validates supported slots and exact timing.
 function sdk.animation.replace(path) end
+
+---@class TrainerTuning All fields default to 1; multipliers of current stock settings.
+---@field pop? number 0.25..4, native ground pop heights.
+---@field grind_pop? number 0.25..4, native grind launch height.
+---@field push_speed? number 0.25..4, push target and maximum pushable speed.
+---@field push_power? number 0.25..4, native push velocity-change limits.
+---@field braking? number 0.25..4, foot and tail brake force.
+---@field steering? number 0.25..4, general steering scalar.
+---@field wobble? number 0..2, speed wobble amplitude.
+sdk.trainer = {}
+---@param tuning TrainerTuning Owned, reversible native tuning. Conflicting owner is rejected.
+function sdk.trainer.apply(tuning) end

@@ -1,6 +1,7 @@
 //! Complete TU3 Toolkit_CalcStraightenOutTorque 82D92B60.
 use super::vector::{clamp, cross, dot3};
 use crate::point_graph::PointGraph;
+#[derive(Clone)]
 pub struct StraightenSettings {
     pub time_response: PointGraph<16>, // settings +768/+832
     pub opposite_turn_limit: f32,      // +896

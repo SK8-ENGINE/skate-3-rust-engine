@@ -152,7 +152,7 @@ fn examples_load_and_run() {
     m.scan(true);
     assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
     let ids: Vec<_> = m.packages.keys().cloned().collect();
-    assert!(ids.len() >= 2);
+    assert_eq!(ids, vec!["community.native-trainer"]);
     for id in ids {
         m.enable(&id, true).unwrap();
         for _ in 0..5 {
@@ -270,4 +270,30 @@ fn changed_source_waits_for_debounce() {
     std::thread::sleep(std::time::Duration::from_millis(510));
     m.scan(false);
     assert_eq!(m.commands.len(), 1);
+}
+
+#[test]
+fn trainer_commands_validate_and_follow_settings() {
+    let f = Fixture::new(
+        "return {on_load=function() sdk.trainer.apply{pop=2,push_speed=3,wobble=0} end, on_settings=function() sdk.trainer.apply{pop=sdk.settings.count} end}",
+    );
+    let mut m = f.manager();
+    m.enable("example", true).unwrap();
+    assert!(
+        matches!(&m.commands[0].1,Command::Trainer{tuning} if tuning.pop==2. && tuning.push_speed==3. && tuning.wobble==0. && tuning.braking==1.)
+    );
+    m.setting("example", "count", json!(4)).unwrap();
+    assert!(matches!(&m.commands.last().unwrap().1,Command::Trainer{tuning} if tuning.pop==4.));
+    m.setting("example", "count", json!(5)).unwrap();
+    assert!(!m.packages["example"].running());
+    assert!(m.commands.is_empty());
+    assert!(
+        !TrainerTuning {
+            pop: f32::NAN,
+            ..Default::default()
+        }
+        .valid()
+    );
+    m.enable("example", false).unwrap();
+    assert!(m.retired.contains(&"example".into()));
 }

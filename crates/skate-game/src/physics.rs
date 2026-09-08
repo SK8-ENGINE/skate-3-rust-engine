@@ -88,6 +88,7 @@ pub(crate) struct GamePhysics {
     pub processed_flags_2468: u32,
     /// Toolkit ctor82C0680C clears8384bit7; wipeout entry/exit owns changes.
     pub board_wiping_out: bool,
+    pub trainer: skate_mods::TrainerTuning,
 }
 
 /// Cross-phase records for the current fixed tick. Subsystems retain their
@@ -258,6 +259,7 @@ impl GamePhysics {
             exchange: SimulationExchange::new(0),
             processed_flags_2468,
             board_wiping_out: false,
+            trainer: Default::default(),
         })
     }
 

@@ -1,0 +1,74 @@
+{
+  "id": "community.native-trainer",
+  "api": 1,
+  "name": "Native Trainer",
+  "version": "1.0.0",
+  "author": "Skate Rust Engine",
+  "description": "Live native gameplay tuning. All values are multipliers of the current stock difficulty/surface. Disable to restore stock. Editable from the left Escape panel.",
+  "entry": "main.lua",
+  "settings": {
+    "pop": {
+      "type": "number",
+      "label": "Pop height",
+      "description": "Multiplies native ground-jump minimum and maximum heights. 1.00x is stock.",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "step": 0.25
+    },
+    "grind_pop": {
+      "type": "number",
+      "label": "Grind pop height",
+      "description": "Multiplies the existing grind-launch height. 1.00x is stock.",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "step": 0.25
+    },
+    "push_speed": {
+      "type": "number",
+      "label": "Maximum push speed",
+      "description": "Multiplies the speed up to which pushing works. This is not a downhill speed cap. 1.00x is stock.",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "step": 0.25
+    },
+    "push_power": {
+      "type": "number",
+      "label": "Push power",
+      "description": "Multiplies native difficulty-specific push velocity changes. 1.00x is stock.",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "step": 0.25
+    },
+    "braking": {
+      "type": "number",
+      "label": "Brake strength",
+      "description": "Multiplies foot and tail braking forces. 1.00x is stock.",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "step": 0.25
+    },
+    "steering": {
+      "type": "number",
+      "label": "Steering response",
+      "description": "Multiplies the native general steering scalar. 1.00x is stock.",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "step": 0.25
+    },
+    "wobble": {
+      "type": "number",
+      "label": "Speed wobble",
+      "description": "Multiplies native wobble amplitude. Zero removes wobble. 1.00x is stock.",
+      "default": 1,
+      "min": 0,
+      "max": 2,
+      "step": 0.25
+    }
+  }
+}
