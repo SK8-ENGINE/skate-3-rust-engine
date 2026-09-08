@@ -65,6 +65,10 @@ impl GroundState {
         //source-owned wrapper flag. Authored board volumes stay enabled.
         *targets.board_flags_8384 &= 0x7f;
         board.bodies_mut()[6].inertia.angular_drag = self.entry_settings.deck_angular_drag;
+        //82C090C0 restores assembly+24 and every part+92 to collision group4.
+        //Remount releases the carried board into group7; retaining that group
+        //allows the riding skeleton (group5) to collide with its own board.
+        board.set_collision_group(4);
         for body in board.bodies_mut() {
             body.state_flags = 4;
         }
