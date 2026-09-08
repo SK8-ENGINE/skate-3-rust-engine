@@ -227,3 +227,9 @@ using both scalar and NumPy paths. All 16 asset-pipeline tests pass. The game wa
 not launched; visual confirmation remains user-run. Existing exported maps need
 their textures regenerated from RX2, since changing the decoder cannot repair
 already-baked PNG/RGBA cache files. Fresh conversions use the fix across maps.
+
+Player-shadow stability follow-up: the ambient floor is now a smoothed shared
+16-byte GPU buffer, updated without rebuilding world materials. The player-only
+source uses one 24 m cascade and reduced receiver bias. Native colour/filter
+parity and runtime visual/performance verification remain outstanding; see the
+character lighting investigation. The private launcher now captures crash output.

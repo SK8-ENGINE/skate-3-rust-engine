@@ -22,6 +22,8 @@ struct WorldParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(14) var specular_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(15) var environment_map: texture_cube<f32>;
 
+@group(#{MATERIAL_BIND_GROUP}) @binding(16) var<storage, read> shadow_state: vec4<f32>;
+
 @fragment
 fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     let fam = u32(p.mode.x);
@@ -72,13 +74,13 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     var alpha = 1.0;
     var lin = vec3<f32>(0.0);
     var baked = lm*lm;
-    if p.shadow_color.w>0.0 && (fam<=8u || fam==13u) {
+    if shadow_state.w>0.0 && (fam<=8u || fam==13u) {
         let view_z=(frame::view.view_from_world*i.world_position).z;
         for (var light_id=0u; light_id<frame::lights.n_directional_lights; light_id+=1u) {
             // The lightmapped receiver source contains only player/board casters.
             if (frame::lights.directional_lights[light_id].flags & 5u)==5u {
                 let visibility=fetch_directional_shadow(light_id,i.world_position,wn,view_z);
-                baked=min(baked,vec3<f32>(visibility)+p.shadow_color.rgb);
+                baked=min(baked,vec3<f32>(visibility)+shadow_state.rgb);
                 break;
             }
         }

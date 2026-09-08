@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 pub(crate) struct RetailRenderPlugin;
 impl Plugin for RetailRenderPlugin {
     fn build(&self, app: &mut App) {
+        shadow::install(app);
         app.add_plugins(crate::retail_character::CharacterLightingPlugin);
         if std::env::var_os("SKATE_DEBUG_FOLIAGE").is_some_and(|v| v == "1") {
             eprintln!("SKATE_FOLIAGE_DEBUG: solid cyan tree-wall cards, magenta other foliage; alpha rejection disabled for foliage only");
@@ -33,6 +34,10 @@ impl Plugin for RetailRenderPlugin {
         ));
     }
 }
+
+#[path = "retail_shadow.rs"]
+mod shadow;
+pub(crate) use shadow::ShadowState;
 
 #[derive(Resource)]
 pub(crate) struct RetailScene(pub bool);
@@ -106,6 +111,8 @@ pub(crate) struct RetailWorldMaterial {
     pub specular: Option<Handle<Image>>,
     #[texture(15, dimension = "cube")]
     pub environment: Option<Handle<Image>>,
+    #[storage(16, read_only)]
+    pub shadow_state: Handle<bevy::render::storage::ShaderStorageBuffer>,
     pub alpha: AlphaMode,
     pub two_sided: bool,
 }
@@ -305,6 +312,7 @@ impl Definition {
             decal,
             specular,
             environment,
+            shadow_state: shadow::BUFFER,
             alpha,
             two_sided: self.flags & 4 != 0,
         }

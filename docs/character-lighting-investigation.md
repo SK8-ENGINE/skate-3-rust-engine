@@ -141,3 +141,36 @@ composition/validation; a windowless ECS regression test verifies the caster-lay
 separation and zero illuminance. Release compilation passes. The prepared user
 launcher retains the texture-band repairs and prior character lighting. No game
 or recomp was launched, and no physics/animation implementation changed.
+
+## Shadow stability follow-up, 2026-09-08
+
+User testing reported thin/warped limbs in the shadow, heavy lag, a crash, and
+abrupt changes in darkness. The previous implementation changed every world
+material when nearest-probe selection changed. This both stepped the ambient
+floor and invalidated all those material assets. It is a confirmed code defect
+and a plausible source of the reported stalls; no contemporaneous crash dump or
+Application error record was found, so the crash itself is not diagnosed.
+
+World materials now bind one persistent 16-byte storage buffer. An extracted
+resource supplies the shadow floor, and the render queue writes it in place
+after asset preparation. Neither the storage asset nor world materials are
+mutated during probe changes; existing bind groups remain valid. The floor uses
+an exponential 0.35-second transition, with each frame's contribution capped at
+50 ms to avoid a jump after a hitch. These are adapter settings, not recovered
+native constants. The initial sample is applied directly.
+
+The player-only source now uses one 24-metre cascade instead of four extending
+to 100 metres. This removes its internal cascade transitions and three shadow
+views. Its receiver normal offset is zero and depth bias is 0.002 metres; the
+previous defaults were 1.8 texels and 0.02 metres. World-plus-character self
+shadowing retains its original source and bias. The new settings target the
+reported silhouette distortion, but visible improvement is not confirmed offline.
+A single cascade trades distant coverage for stability; shadows outside its
+24-metre camera range are intentionally unavailable. Exact console parity is
+still pending the native colour controller and filtering work above.
+
+Offline world/character/depth shader validation and six filtered unit tests pass,
+including smooth probe transitions, hitch limiting, caster isolation and cascade
+configuration. Release compilation passes. The updated private University
+launcher records stdout/stderr, backtraces and the exit code in
+`logs/renderer-work/player-shadow-runtime.log`. It has not been executed.

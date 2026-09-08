@@ -37,7 +37,6 @@ struct Lighting {
     data: LightingData,
     probes: Irradiance,
     light: Vec4,
-    shadow_floor: Option<Vec3>,
 }
 #[derive(Clone, ShaderType)]
 struct CharacterParams {
@@ -142,7 +141,6 @@ fn load(mut commands: Commands, config: Res<crate::config::Config>) {
         data,
         probes,
         light,
-        shadow_floor: None,
     });
 }
 fn spawn_shadow_sources(commands: &mut Commands, light: Vec3) {
@@ -171,13 +169,16 @@ fn spawn_shadow_sources(commands: &mut Commands, light: Vec3) {
             illuminance: 0.,
             shadows_enabled: true,
             affects_lightmapped_mesh_diffuse: true,
+            // Receiver-only map: no self-shadow acne to hide with large bias.
+            shadow_depth_bias: 0.002,
+            shadow_normal_bias: 0.0,
             ..default()
         },
         RenderLayers::layer(31),
         Transform::default().looking_to(-light, Vec3::Y),
         bevy::light::CascadeShadowConfigBuilder {
-            maximum_distance: 100.,
-            first_cascade_far_bound: 10.,
+            num_cascades: 1,
+            maximum_distance: 24.,
             ..default()
         }
         .build(),
@@ -266,7 +267,8 @@ fn update(
     lighting: Option<ResMut<Lighting>>,
     root: Query<&Transform, With<crate::world::PlayerRoot>>,
     mut materials: ResMut<Assets<CharacterMaterial>>,
-    mut world_materials: ResMut<Assets<crate::retail_render::RetailWorldMaterial>>,
+    mut shadow: ResMut<crate::retail_render::ShadowState>,
+    time: Res<Time>,
 ) {
     let (Some(mut lighting), Ok(root)) = (lighting, root.single()) else {
         return;
@@ -281,13 +283,7 @@ fn update(
     }
     // Adapter floor: the local probe's direction-independent ambient term.
     // The native per-frame c8 shadow-colour controller remains unrecovered.
-    let floor = sh[0].truncate().clamp(Vec3::ZERO, Vec3::ONE);
-    if lighting.shadow_floor != Some(floor) {
-        for (_, material) in world_materials.iter_mut() {
-            material.params.shadow_color = floor.extend(1.);
-        }
-        lighting.shadow_floor = Some(floor);
-    }
+    shadow.approach(sh[0].truncate(), time.delta_secs());
 }
 
 #[cfg(test)]
@@ -304,8 +300,8 @@ mod tests {
         let terrain = RenderLayers::default();
         let mut receivers = 0;
         let mut character_sources = 0;
-        for (light, layers) in world
-            .query::<(&DirectionalLight, Option<&RenderLayers>)>()
+        for (light, layers, cascades) in world
+            .query::<(&DirectionalLight, Option<&RenderLayers>, &bevy::light::CascadeShadowConfig)>()
             .iter(&world)
         {
             let layers = layers.cloned().unwrap_or_default();
@@ -314,6 +310,9 @@ mod tests {
             assert!(layers.intersects(&player));
             if light.affects_lightmapped_mesh_diffuse {
                 assert!(!layers.intersects(&terrain));
+                assert_eq!(cascades.bounds, vec![24.]);
+                assert_eq!(light.shadow_normal_bias, 0.);
+                assert!(light.shadow_depth_bias < 0.005);
                 receivers += 1;
             } else {
                 assert!(layers.intersects(&terrain));
