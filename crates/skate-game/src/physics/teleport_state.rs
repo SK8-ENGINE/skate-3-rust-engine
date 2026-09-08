@@ -24,6 +24,10 @@ pub(crate) struct Runtime {
     pending_reply: Option<Target>,
 }
 impl Runtime {
+    pub(super) fn set_checkpoint(&mut self, checkpoint: Checkpoint) {
+        self.checkpoint = checkpoint;
+        self.pending_reply = None;
+    }
     pub fn new(checkpoint: Checkpoint) -> Self {
         Self {
             state: TeleportState::default(),

@@ -205,6 +205,9 @@ def install(iso,base,game_exe,report,game_root=None):
             write_skies(game_root,stage/'assets',converted)
             from .render_parameters import convert as write_render_parameters
             write_render_parameters(stage/'assets',converted)
+            report('Extracting original travel destinations and location names')
+            from .teleports import convert as write_teleports
+            write_teleports(game_root,stage/'assets',converted)
             report('Preparing global foliage backdrops')
             from .backdrop import convert as write_backdrops
             write_backdrops(game_root,stage/'assets',converted)

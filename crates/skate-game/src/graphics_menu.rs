@@ -84,6 +84,8 @@ pub(crate) struct Menu {
     status: String,
     maps: Vec<crate::map_library::Entry>,
     selected_map: usize,
+    destinations: Vec<crate::teleport_menu::Destination>,
+    travel_page: Option<usize>,
 }
 pub(crate) fn gameplay_active(menu: Option<Res<Menu>>) -> bool {
     menu.is_none_or(|m| !m.open)
@@ -117,6 +119,7 @@ fn setup(
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     cameras: Query<Entity, With<Camera3d>>,
     adapter: Res<RenderAdapter>,
+    mut skater: ResMut<crate::physics::SkaterRuntime>,
 ) {
     let path = config
         .asset_root
@@ -194,23 +197,32 @@ fn setup(
         display: Display::None, width:percent(100), height:percent(100), align_items:AlignItems::Center,
         justify_content:JustifyContent::Center, position_type:PositionType::Absolute, ..default()
     }, BackgroundColor(Color::srgba(0.015,0.025,0.04,0.88)))).with_children(|root| {
-        root.spawn((Node { width:px(560),max_width:percent(95),padding:UiRect::all(px(18)),flex_direction:FlexDirection::Column,row_gap:px(6),border_radius:BorderRadius::all(px(12)),..default() },
+        root.spawn((Node { width:px(720),max_width:percent(95),padding:UiRect::all(px(18)),flex_direction:FlexDirection::Column,row_gap:px(6),border_radius:BorderRadius::all(px(12)),..default() },
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
-            panel.spawn((Text::new("PAUSED"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
-            panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..10 {
+            panel.spawn((MenuLabel(usize::MAX),Text::new("PAUSED"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
+            panel.spawn((MenuLabel(usize::MAX-1),Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
+            for i in 0..11 {
                 panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(36),padding:UiRect::all(px(8)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
                 });
             }
             panel.spawn((StatusLabel,Text::new(""),TextFont {font_size:15.,..default()},TextColor(Color::srgb(0.65,0.75,0.8))));
-            panel.spawn((Text::new("Click to cycle | Up/Down select | Left/Right change\nEsc resume | Changes save automatically"),TextFont {font_size:14.,..default()},TextColor(Color::srgb(0.65,0.75,0.8))));
+            panel.spawn((MenuLabel(usize::MAX-2),Text::new(""),TextFont {font_size:14.,..default()},TextColor(Color::srgb(0.65,0.75,0.8))));
         });
     });
     commands.insert_resource(SceneTarget(target));
     let maps = crate::map_library::discover(&config.asset_root);
     let selected_map = maps.iter().position(|m| m.path.as_ref() == config.map_path.as_ref()).unwrap_or(0);
+    let (destinations, mut status) = match crate::teleport_menu::load(&config.asset_root) {
+        Ok(locations) => (locations, String::new()),
+        Err(e) => (Vec::new(), e),
+    };
+    if let Some(id) = &config.teleport {
+        if let Some(target) = destinations.iter().find(|d| &d.id == id).and_then(|d| d.matrix) {
+            if let Err(e) = skater.travel_to(target) { status = e; }
+        }
+    }
     commands.insert_resource(Menu {
         open: false,
         selected: 0,
@@ -218,9 +230,11 @@ fn setup(
         path,
         supported_msaa,
         difficulty: config.difficulty,
-        status: String::new(),
+        status,
         maps,
         selected_map,
+        destinations,
+        travel_page: None,
     });
 }
 fn msaa(samples: u32) -> Msaa {
@@ -238,6 +252,7 @@ fn cycle<T: PartialEq + Copy>(values: &[T], value: T, direction: i32) -> T {
 fn interact(
     config: Res<crate::config::Config>,
     mut physics: ResMut<crate::physics::GamePhysics>,
+    mut skater: ResMut<crate::physics::SkaterRuntime>,
     keys: Res<ButtonInput<KeyCode>>,
     mut menu: ResMut<Menu>,
     mut time: ResMut<Time<Virtual>>,
@@ -245,20 +260,25 @@ fn interact(
     mut exit: MessageWriter<AppExit>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        menu.open = !menu.open;
+        if menu.open && menu.travel_page.is_some() {
+            menu.travel_page = None;
+            menu.selected = 8;
+        } else { menu.open = !menu.open; }
     }
     let mut action = None;
     if menu.open {
         if keys.just_pressed(KeyCode::ArrowUp) {
-            menu.selected = (menu.selected + 9) % 10;
+            menu.selected = (menu.selected + 10) % 11;
         }
         if keys.just_pressed(KeyCode::ArrowDown) {
-            menu.selected = (menu.selected + 1) % 10;
+            menu.selected = (menu.selected + 1) % 11;
         }
-        if keys.just_pressed(KeyCode::ArrowLeft) {
+        if menu.travel_page.is_some() && (keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::ArrowRight)) {
+            action = Some((if keys.just_pressed(KeyCode::ArrowLeft) { 8 } else { 9 }, 1));
+        } else if keys.just_pressed(KeyCode::ArrowLeft) {
             action = Some((menu.selected, -1));
         }
-        if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::Enter) {
+        if (menu.travel_page.is_none() && keys.just_pressed(KeyCode::ArrowRight)) || keys.just_pressed(KeyCode::Enter) {
             action = Some((menu.selected, 1));
         }
         for (interaction, row) in &buttons {
@@ -269,6 +289,30 @@ fn interact(
         }
     }
     if let Some((row, direction)) = action {
+        if let Some(page) = menu.travel_page {
+            match row {
+                0..=7 => {
+                    if let Some(destination) = menu.destinations.get(page * 8 + row).cloned() {
+                        if let Some(transform) = destination.matrix {
+                            if config.map_path.as_ref().is_some_and(|p| crate::teleport_menu::same_map(p, &destination.map)) {
+                                match skater.travel_to(transform) {
+                                    Ok(()) => { menu.open = false; menu.travel_page = None; menu.status = format!("Arrived at {}", destination.name); }
+                                    Err(e) => menu.status = e,
+                                }
+                            } else if let Some(entry) = menu.maps.iter().find(|m| m.path.as_ref().is_some_and(|p| crate::teleport_menu::same_map(p, &destination.map))) {
+                                match crate::map_library::switch_to(&config.asset_root, entry, Some(&destination.id)) {
+                                    Ok(()) => { exit.write(AppExit::Success); }
+                                    Err(e) => menu.status = e,
+                                }
+                            } else { menu.status = format!("{} is not installed", destination.map); }
+                        } else { menu.status = destination.unavailable_reason.unwrap_or_else(|| "Destination unavailable".into()); }
+                    }
+                }
+                8 => menu.travel_page = Some(page.saturating_sub(1)),
+                9 => menu.travel_page = Some((page + 1).min(menu.destinations.len().saturating_sub(1) / 8)),
+                _ => { menu.travel_page = None; menu.selected = 8; }
+            }
+        } else {
         match row {
             0 => {
                 let size = cycle(
@@ -304,8 +348,9 @@ fn interact(
                     Err(e) => menu.status = e,
                 }
             }
-            8 => menu.open = false,
-            9 => {
+            8 => { menu.travel_page = Some(0); menu.selected = 0; menu.status = "Select a destination | Left/Right: pages | Esc: back".into(); },
+            9 => menu.open = false,
+            10 => {
                 exit.write(AppExit::Success);
             }
             _ => {}
@@ -323,6 +368,7 @@ fn interact(
                 Ok(()) => "Saved".into(),
                 Err(e) => format!("Could not save: {e}"),
             };
+        }
         }
     }
     if menu.open {
@@ -397,6 +443,26 @@ fn labels(
     let s = &menu.settings;
     let size = s.internal_size(window.physical_size());
     for (label, mut text) in &mut labels {
+        if label.0 >= usize::MAX-2 {
+            let travel = menu.travel_page.is_some();
+            **text = if label.0 == usize::MAX {
+                if travel { "TELEPORT" } else { "PAUSED" }
+            } else if label.0 == usize::MAX-1 {
+                if travel { "ORIGINAL GAME LOCATIONS" } else { "GAMEPLAY & GRAPHICS" }
+            } else if travel {
+                "Click or Enter to travel | Up/Down select | Left/Right pages\nEsc back | Travelling to another map restarts the session"
+            } else { "Click to cycle | Up/Down select | Left/Right change\nEsc resume | Changes save automatically" }.into();
+            continue;
+        }
+        if let Some(page) = menu.travel_page {
+            **text = match label.0 {
+                0..=7 => menu.destinations.get(page * 8 + label.0).map(|d| format!("{}  —  {}{}", d.name, d.map, if d.matrix.is_none() { " (unavailable)" } else { "" })).unwrap_or_default(),
+                8 => "Previous page".into(),
+                9 => format!("Next page  ({}/{})", page + 1, menu.destinations.len().div_ceil(8).max(1)),
+                _ => "Back to pause menu".into(),
+            };
+            continue;
+        }
         **text = match label.0 {
             0 => format!("Resolution          {} x {}", s.width, s.height),
             1 => format!(
@@ -423,7 +489,8 @@ fn labels(
             5 => format!("Difficulty            {}", menu.difficulty.label()),
             6 => format!("Map                   {}", menu.maps[menu.selected_map].label),
             7 => "Load map (restarts session)".into(),
-            8 => "Resume".into(),
+            8 => "Teleport…".into(),
+            9 => "Resume".into(),
             _ => "Quit game".into(),
         };
     }
@@ -462,7 +529,7 @@ mod tests {
             .insert_resource(Menu {
                 open: false, selected: 0, settings: GraphicsSettings::default(),
                 difficulty: Difficulty::Easy, path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
-                maps: Vec::new(), selected_map: 0,
+                maps: Vec::new(), selected_map: 0, destinations: Vec::new(), travel_page: None,
             })
             .add_systems(Update, apply);
         app.world_mut().spawn((Window::default(), PrimaryWindow));

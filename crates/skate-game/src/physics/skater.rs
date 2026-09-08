@@ -82,6 +82,11 @@ pub(crate) struct SkaterRuntime {
 }
 
 impl SkaterRuntime {
+    pub(crate) fn travel_to(&mut self, transform: [[f32; 4]; 4]) -> Result<(), String> {
+        self.player_input.request_teleport(transform)?;
+        self.teleport_state.set_checkpoint(super::teleport_state::Checkpoint { transform, on_board: true });
+        Ok(())
+    }
     pub fn load(
         asset_root: &Path,
         graphs: &StockGraphs,

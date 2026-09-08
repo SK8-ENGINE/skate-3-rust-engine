@@ -9,6 +9,7 @@ pub(crate) struct Config {
     pub map_path: Option<PathBuf>,
     pub difficulty: crate::difficulty::Difficulty,
     pub check_assets: bool,
+    pub teleport: Option<String>,
 }
 
 impl Config {
@@ -20,6 +21,7 @@ impl Config {
             map_path: None,
             difficulty: crate::difficulty::Difficulty::default(),
             check_assets: false,
+            teleport: None,
         };
         let mut difficulty_override = None;
         let mut explicit_map = false;
@@ -37,6 +39,7 @@ impl Config {
                 }
                 Some("--test-world") => { explicit_map = true; config.map = None; config.map_path = None; }
                 Some("--check-assets") => config.check_assets = true,
+                Some("--teleport") => config.teleport = Some(args.next().ok_or("--teleport requires a destination ID")?.to_string_lossy().into_owned()),
                 Some("--difficulty") => {
                     let value = args.next().ok_or("--difficulty requires easy, normal or hardcore")?;
                     difficulty_override = Some(crate::difficulty::Difficulty::parse(&value.to_string_lossy())?);
@@ -67,6 +70,13 @@ impl Config {
             if let Some(path) = crate::map_library::default_map(&config.asset_root)? {
                 config.map = Some(skate_data::skate_map::SkateMap::load(&path)?);
                 config.map_path = Some(path.canonicalize().map_err(|e| e.to_string())?);
+            }
+        }
+        if let Some(id) = &config.teleport {
+            let destinations = crate::teleport_menu::load(&config.asset_root)?;
+            let target = destinations.iter().find(|d| &d.id == id).ok_or("Unknown teleport destination")?;
+            if target.matrix.is_none() || !config.map_path.as_ref().is_some_and(|p| crate::teleport_menu::same_map(p, &target.map)) {
+                return Err("Teleport destination is unavailable or belongs to a different map".into());
             }
         }
         if let Some(path) = &mut config.verification_capture {

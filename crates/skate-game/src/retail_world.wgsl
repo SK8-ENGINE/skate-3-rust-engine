@@ -132,29 +132,68 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
         let ward=exp(-2.0*(eu*eu+ev*ev)/(1.0+dot(h,n)))/max(den,1e-6);
         lin=(cube*olm*olm*fres+ward*p.water[0].rgb)*p.water[1].y;
         alpha=1.0;
-    } else if fam==30u {
+    } else if fam==30u || fam==33u {
         let t=frame_state.clock.x;
         // Convert to original UVs for scale/scroll, then back to flipped rows.
         let raw_uv=vec2<f32>(i.uv.x,1.0-i.uv.y);
-        let uv1=raw_uv*p.water[2].xy+p.water[1].xy*t;
-        let uv2=raw_uv*p.water[2].zw+p.water[1].zw*t;
-        let n1=textureSample(normal_map,normal_sampler,vec2<f32>(uv1.x,1.0-uv1.y)).rgb;
-        let n2=textureSample(normal_map,normal_sampler,vec2<f32>(uv2.x,1.0-uv2.y)).rgb;
-        let vn=normalize((2.0*n1+2.0*n2-2.0)*p.water[0].xzw);
-        let water_n=normalize(vn.x*kt+vn.y*kb+vn.z*wn);
-        let wlm=textureSampleLevel(lightmap,lm_sampler,i.uv_b+0.01*vn.xz*vec2<f32>(1.0,-1.0),0.0).rgb;
+        let uv_scale=select(1.0,p.water[3].x,fam==33u);
+        let uv1=raw_uv*p.water[2].xy*uv_scale+p.water[1].xy*t;
+        let uv2=raw_uv*p.water[2].zw*uv_scale+p.water[1].zw*t;
+        let n1=textureSample(normal_map,normal_sampler,vec2<f32>(uv1.x,1.0-uv1.y));
+        let n2=textureSample(normal_map,normal_sampler,vec2<f32>(uv2.x,1.0-uv2.y));
+        var vn=normalize((2.0*n1.rgb+2.0*n2.rgb-2.0)*p.water[0].xzw);
+        var water_n=normalize(vn.x*kt+vn.y*kb+vn.z*wn);
+        var sample_uv=i.uv;
+        if fam==33u {
+            let c1=textureSample(detail_map,detail_sampler,vec2<f32>(uv1.x,1.0-uv1.y))*2.0-1.0;
+            let c2=textureSample(detail_map,detail_sampler,vec2<f32>(uv2.x,1.0-uv2.y))*2.0-1.0;
+            let a1=n1*2.0-1.0;
+            let a2=n2*2.0-1.0;
+            // water_defaultPS instructions 22..54: the native mean is XYZ,
+            // weights are R/G/B pairs. FrameState stores the ocean's R/B/G
+            // arrangement; recover those original registers here.
+            let mean=frame_state.pca[0].xzy;
+            let pca1=vec3<f32>(dot(a1,frame_state.pca[1])+dot(c1,frame_state.pca[2])+mean.x,
+                dot(a1,frame_state.pca[5])+dot(c1,frame_state.pca[6])+mean.y,
+                dot(a1,frame_state.pca[3])+dot(c1,frame_state.pca[4])+mean.z);
+            let pca2=vec3<f32>(dot(a2,frame_state.pca[1])+dot(c2,frame_state.pca[2])+mean.x,
+                dot(a2,frame_state.pca[5])+dot(c2,frame_state.pca[6])+mean.y,
+                dot(a2,frame_state.pca[3])+dot(c2,frame_state.pca[4])+mean.z);
+            let first=vec3<f32>((pca2.x*2.0-1.0)*p.water[0].z,
+                1.0+2.0*(pca2.y-1.0)*p.water[0].z,(pca2.z*2.0-1.0)*p.water[0].z);
+            let second=vec3<f32>((pca1.x*2.0-1.0)*p.water[0].w,
+                1.0+2.0*(pca1.y-1.0)*p.water[0].w,(pca1.z*2.0-1.0)*p.water[0].w);
+            water_n=first*inverseSqrt(max(dot(first,first),1e-12));
+            let refract=second*inverseSqrt(max(dot(second,second),1e-12));
+            sample_uv+=0.02*refract.xz*vec2<f32>(1.0,-1.0);
+            d=textureSample(diffuse,diffuse_sampler,sample_uv).rgb;
+            d*=d;
+            vn=water_n;
+        }
+        let water_lm_uv=i.uv_b+0.01*vn.xz*vec2<f32>(1.0,-1.0);
+        var wlm=textureSampleLevel(lightmap,lm_sampler,water_lm_uv,0.0).rgb;
+        if fam==33u {
+            // Native tf3 fetches at all four half-texel corners, averages,
+            // then squares. Squaring each tap would change baked lighting.
+            let texel=0.5/vec2<f32>(textureDimensions(lightmap));
+            wlm=(textureSampleLevel(lightmap,lm_sampler,water_lm_uv+texel,0.0).rgb
+                +textureSampleLevel(lightmap,lm_sampler,water_lm_uv-texel,0.0).rgb
+                +textureSampleLevel(lightmap,lm_sampler,water_lm_uv+texel*vec2<f32>(-1.0,1.0),0.0).rgb
+                +textureSampleLevel(lightmap,lm_sampler,water_lm_uv+texel*vec2<f32>(1.0,-1.0),0.0).rgb)*0.25;
+        }
         var lml=wlm*wlm;
         if frame_state.shadow.w>0.0 {
             let vz=(frame::view.view_from_world*i.world_position).z;
             for(var id=0u;id<frame::lights.n_directional_lights;id+=1u) {
                 if (frame::lights.directional_lights[id].flags & 5u)==5u {
-                    lml=min(lml,vec3<f32>(fetch_directional_shadow(id,i.world_position,wn,vz))+frame_state.shadow.rgb); break;
+                    let floor=select(frame_state.shadow.rgb,vec3<f32>(0.09,0.13,0.05),fam==33u);
+                    lml=min(lml,vec3<f32>(fetch_directional_shadow(id,i.world_position,wn,vz))+floor); break;
                 }
             }
         }
         let kd=dot(water_n,vec3<f32>(0.58*sign(sun.x),0.62*sign(sun.y),0.39))*2.39562;
         var wm=vec2<f32>(0.0);
-        if (flags & 16u)!=0u { wm=saturate(textureSample(specular_map,specular_sampler,i.uv).xz-p.water[3].y); }
+        if (flags & 16u)!=0u { wm=saturate(textureSample(specular_map,specular_sampler,sample_uv).xz-p.water[3].y); }
         let reflected_light=2.0*water_n*dot(water_n,sun)-sun;
         let ks=pow(max(saturate(dot(vd,reflected_light)),1e-6),p.water[3].z);
         var spec=ks*wm.x*vec3<f32>(2.1,1.8,1.5)*saturate(lml.g-0.1);

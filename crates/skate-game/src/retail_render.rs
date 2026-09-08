@@ -208,7 +208,10 @@ impl Definition {
         let mut r = Reader(bytes);
         r.take(16)?;
         let shader = r.text()?;
-        let family = r.u32()?;
+        let stored_family = r.u32()?;
+        // Older map packages retained the complete bindings but classified
+        // non-flowing water as unknown. Upgrade without re-exporting geometry.
+        let family = if matches!(shader.as_str(), "water.default" | "water.alpha" | "water.skatepark") { 33 } else { stored_family };
         let flags = r.u32()?;
         let mut bindings = BTreeMap::new();
         for _ in 0..r.u32()? {
@@ -258,6 +261,7 @@ impl Definition {
             14 | 32 => tuning.rows.get(&self.shader).is_some_and(|r| !r.is_empty()),
             31 => tuning.pca_available && tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 3),
             30 => tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 4),
+            33 => tuning.pca_available && self.bindings.contains_key("normal") && self.bindings.contains_key("normal2") && tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 4),
             _ => false,
         }
     }
@@ -281,7 +285,7 @@ impl Definition {
         let diffuse = fetch("diffuse", m.textures[0], false);
         let lightmap = fetch("lightmap", m.textures[1], true);
         let normal = fetch("normal", m.textures[2], false);
-        let detail = fetch(if self.family == 31 { "normal2" } else { "detail" }, 0, false);
+        let detail = fetch(if matches!(self.family, 31 | 33) { "normal2" } else { "detail" }, 0, false);
         let macro_map = fetch("macrooverlay", 0, false);
         let decal = fetch("decal", 0, self.family == 3);
         let specular = fetch("specular", 0, false);
@@ -310,7 +314,7 @@ impl Definition {
             (_, 2) => AlphaMode::Blend,
             _ => AlphaMode::Opaque,
         };
-        let alpha = if self.family == 32 || (self.family == 30 && self.shader.ends_with("alpha")) {
+        let alpha = if self.family == 32 || (matches!(self.family, 30 | 33) && self.shader.ends_with("alpha")) {
             AlphaMode::Blend
         } else { alpha };
         let mut water = [Vec4::ZERO; 4];

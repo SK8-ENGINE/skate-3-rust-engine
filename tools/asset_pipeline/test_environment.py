@@ -2,6 +2,7 @@
 import struct
 import unittest
 from .environment import Collections, field, key_hash, sky_parameters, world_environment, fog_parameters
+from .render_parameters import exposure_parameters
 
 
 def raw(*values):
@@ -14,6 +15,14 @@ def row(cls, key, parent='', **fields):
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_exposure_follows_location_reference_and_inheritance(self):
+        rows = [row('render_locations', 'park', Hash_C345507C4B9B6F62=struct.pack('>2Q', key_hash('park_exposure'), 0).hex()),
+                row('rendering', 'base', auto_exposure_target_luminance=raw(.25), auto_exposure_min=raw(.75), auto_exposure_max=raw(2.5), auto_exposure_damping=raw(.5)),
+                row('rendering', 'park_exposure', 'base', auto_exposure_max=raw(1.5))]
+        result = exposure_parameters(Collections({'collections': rows}), 'park')
+        self.assertEqual(result['max'], 1.5)
+        self.assertEqual(result['min'], .75)
+        self.assertEqual(result['rendering_chain'], ['park_exposure', 'base'])
     def test_world_reference_and_inheritance_select_default_fog(self):
         rows = [
             row('world', 'base', Hash_C7A0A84F018E87BA='world/models/sky',

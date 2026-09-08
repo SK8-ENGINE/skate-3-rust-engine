@@ -72,11 +72,15 @@ fn load(config: Res<crate::config::Config>, mut settings: ResMut<Settings>) {
         info!("RETAIL_EXPOSURE: fixed 2.5 comparison mode");
         return;
     }
-    let data = std::fs::read(config.asset_root.join("private/exposure.json"));
-    if let Some(a) = data
+    let profile = config.map_path.as_ref().and_then(|p| p.file_stem()).and_then(|name| {
+        let bytes = std::fs::read(config.asset_root.join("private/exposure-profiles.json")).ok()?;
+        let mut profiles: std::collections::BTreeMap<String, Authored> = serde_json::from_slice(&bytes).ok()?;
+        profiles.remove(&name.to_string_lossy().to_lowercase())
+    });
+    let fallback = || std::fs::read(config.asset_root.join("private/exposure.json"))
         .ok()
-        .and_then(|b| serde_json::from_slice::<Authored>(&b).ok())
-    {
+        .and_then(|b| serde_json::from_slice::<Authored>(&b).ok());
+    if let Some(a) = profile.or_else(fallback) {
         if [a.target_luminance, a.min, a.max, a.damping]
             .iter()
             .all(|x| x.is_finite())

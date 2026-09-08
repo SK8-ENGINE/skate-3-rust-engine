@@ -4,6 +4,15 @@ import struct
 from .environment import Collections, key_hash
 
 
+def exposure_parameters(collections, location):
+    fields, chain = collections.resolve('render_locations', location)
+    key = int(fields[key_hash('Hash_C345507C4B9B6F62')]['data'][:16], 16)
+    rendering, rendering_chain = collections.resolve('rendering', key)
+    values = {n: struct.unpack('>f', bytes.fromhex(rendering[key_hash('auto_exposure_'+n)]['data']))[0]
+              for n in ('target_luminance', 'min', 'max', 'damping')}
+    return dict(values, location_chain=chain, rendering_chain=rendering_chain)
+
+
 def convert(assets, converted):
     collections = Collections(converted)
     result = {}
@@ -26,4 +35,15 @@ def convert(assets, converted):
     exposure = {n: struct.unpack('>f', bytes.fromhex(fields[key_hash('auto_exposure_'+n)]['data']))[0]
                 for n in ('target_luminance', 'min', 'max', 'damping')}
     (assets / 'private/exposure.json').write_text(json.dumps(exposure), encoding='utf-8')
+    profiles = {}
+    for (cls, key), row in collections.rows.items():
+        if cls != key_hash('world'):
+            continue
+        own_stream = next((v['data'] for k, v in row['fields'].items() if key_hash(k) == key_hash('WorldStream')), None)
+        if not own_stream or not own_stream.startswith('DIST_'):
+            continue
+        world, _ = collections.resolve(cls, key)
+        location = int(world[key_hash('Hash_7E23D10785C43717')]['data'][:16], 16)
+        profiles[own_stream.removeprefix('DIST_').casefold()] = exposure_parameters(collections, location)
+    (assets / 'private/exposure-profiles.json').write_text(json.dumps(profiles, indent=2), encoding='utf-8')
     return len(result)

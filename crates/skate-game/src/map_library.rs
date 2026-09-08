@@ -46,12 +46,17 @@ pub(crate) fn default_map(assets: &Path) -> Result<Option<PathBuf>, String> {
 }
 
 pub(crate) fn switch(assets: &Path, entry: &Entry) -> Result<(), String> {
+    switch_to(assets, entry, None)
+}
+
+pub(crate) fn switch_to(assets: &Path, entry: &Entry, destination: Option<&str>) -> Result<(), String> {
     if let Some(path) = &entry.path {
         let map = skate_data::skate_map::SkateMap::load(path)?;
         crate::skate_world::validate_runtime(&map)?;
     }
     let mut command = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
     command.arg("--assets").arg(assets);
+    if let Some(id) = destination { command.arg("--teleport").arg(id); }
     if let Some(path) = &entry.path {
         command.arg("--map").arg(path);
     } else {
