@@ -90,9 +90,9 @@ pub(crate) fn present(vehicles: Res<crate::modding::vehicles::Vehicles>, mut run
             if vehicle_blend.elapsed<0.5 && from.translation.distance(transform.translation)<50. {
                 let t=(vehicle_blend.elapsed/0.5).clamp(0.,1.);*transform=crate::presentation::blend(from,*transform,t*t*(3.-2.*t));
             } else {vehicle_blend.from=None;}
-        } else if active {
-            if let Some(previous)=vehicle_blend.previous {*transform=crate::presentation::blend(previous,*transform,1.-(-18.*virtual_time.delta_secs()).exp());}
         }
+        // Vehicle motion is already interpolated with the rider/chassis. A separate
+        // follow filter introduces relative motion and makes fixed ticks visible.
         vehicle_blend.previous=Some(*transform);
         camera.is_active = true;
     }

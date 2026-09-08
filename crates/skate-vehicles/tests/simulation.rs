@@ -63,6 +63,7 @@ fn definitions_and_controls_reject_invalid_inputs() {
     d.model = "../outside.glb".into();
     assert!(d.validate().is_err());
     let mut d = definition();
+    d.animations.file = None;
     d.animations.drive = Some("drive".into());
     assert!(d.validate().is_err());
     let mut d = definition();

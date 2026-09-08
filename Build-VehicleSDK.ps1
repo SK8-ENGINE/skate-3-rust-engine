@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $privateDirectory = Join-Path $PSScriptRoot '.local/vehicle-sdk'
 $buildDirectory = Join-Path $privateDirectory 'build'
 $artifact = Join-Path $buildDirectory 'skate3rust-vehicle-sdk.exe'
-$destination = Join-Path $privateDirectory 'skate3-vehicle-animations.exe'
+$destination = Join-Path $privateDirectory 'skate3-vehicle-smooth.exe'
 Push-Location $PSScriptRoot
 $previousFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
 try {

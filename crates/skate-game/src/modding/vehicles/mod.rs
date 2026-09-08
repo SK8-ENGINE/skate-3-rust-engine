@@ -1,5 +1,6 @@
 //! Native vehicle host: isolated Rapier world, mod ownership and driver lifecycle.
 mod animations;
+mod interpolation;
 use bevy::prelude::*;
 use serde_json::{Value, json};
 use skate_mods::Command;
@@ -40,6 +41,8 @@ pub(crate) struct Vehicles {
     visual_phase: String,
     blend_time: f32,
     steering_visual: f32,
+    previous_motion: BTreeMap<u64, interpolation::Motion>,
+    rendered_motion: BTreeMap<u64, interpolation::Motion>,
 }
 impl Vehicles {
     pub(crate) fn occupied(&self) -> bool {
@@ -60,10 +63,10 @@ impl Vehicles {
     pub(crate) fn camera(&self) -> Option<Transform> {
         let d = self.driver.as_ref()?;
         let i = self.owned.get(&(d.owner.clone(), d.key.clone()))?;
-        let (p, q) = self.simulation.pose(i.id)?;
-        let q = Quat::from_array(q);
+        let pose = self.rendered_motion.get(&i.id)?.body;
+        let q = pose.rotation;
         let def = &self.simulation.vehicles[&i.id].definition;
-        let center = Vec3::from_array(p) + Vec3::Y * 0.5;
+        let center = pose.translation + Vec3::Y * 0.5;
         let forward = (q * Vec3::Z).with_y(0.).normalize_or_zero();
         Some(
             Transform::from_translation(
@@ -165,6 +168,8 @@ pub(super) fn retire(world: &mut World, owner: &str) {
         for key in keys {
             if let Some(i) = v.owned.remove(&key) {
                 v.simulation.remove(i.id);
+                v.previous_motion.remove(&i.id);
+                v.rendered_motion.remove(&i.id);
                 world.despawn(i.entity);
             }
         }
@@ -184,6 +189,8 @@ pub(super) fn clear(world: &mut World) {
         v.driver = None;
         v.pose = None;
         v.last_visual.clear();v.blend_from.clear();v.visual_phase.clear();v.steering_visual=0.;
+        v.previous_motion.clear();
+        v.rendered_motion.clear();
         v.simulation = Simulation::default();
         v.events.clear();
     });
@@ -309,6 +316,8 @@ pub(super) fn command(
                 }
                 if let Some(i) = v.owned.remove(&owned_key) {
                     v.simulation.remove(i.id);
+                v.previous_motion.remove(&i.id);
+                v.rendered_motion.remove(&i.id);
                     world.despawn(i.entity);
                     event(&mut v, owner, &key, "vehicle_removed");
                 }
@@ -398,6 +407,8 @@ pub(super) fn command(
                 let i = v.owned.get(&owned_key).ok_or("Unknown vehicle")?;
                 let id = i.id;
                 v.simulation.reset(id, position, heading)?;
+                v.previous_motion.remove(&id);
+                v.rendered_motion.remove(&id);
                 event(&mut v, owner, &key, "vehicle_reset");
             }
             _ => unreachable!(),
@@ -460,6 +471,8 @@ fn tick(world: &mut World) {
             }
         }
         if !v.owned.is_empty() {
+            v.previous_motion = v.simulation.vehicles.keys().filter_map(|&id|
+                interpolation::Motion::capture(&v.simulation, id).map(|m| (id, m))).collect();
             v.simulation.step(dt);
         }
         if let Some((owner, key, phase)) = driver_info {
@@ -491,6 +504,7 @@ fn tick(world: &mut World) {
 }
 pub(crate) fn present(world: &mut World) {
     let dt=world.resource::<Time<Virtual>>().delta_secs();
+    let alpha=world.resource::<Time<Fixed>>().overstep_fraction();
     let phase=world.resource::<Vehicles>().driver.as_ref().map_or("vanilla",|d|d.phase).to_owned();
     let current=crate::animation::capture_vehicle_visual(world);
     {
@@ -524,11 +538,17 @@ pub(crate) fn present(world: &mut World) {
                 .manager
                 .fail(&owner, error);
         }
+        // Chassis, wheels, rider and camera share one fixed-step render sample.
+        v.rendered_motion = v.simulation.vehicles.keys().filter_map(|&id| {
+            let current = interpolation::Motion::capture(&v.simulation, id)?;
+            let sample = v.previous_motion.get(&id).map_or_else(|| current.clone(),
+                |previous| previous.sample(&current, alpha));
+            Some((id, sample))
+        }).collect();
         for i in v.owned.values() {
-            if let Some((p, q)) = v.simulation.pose(i.id) {
+            if let Some(sample) = v.rendered_motion.get(&i.id) {
                 if let Some(mut t) = world.get_mut::<Transform>(i.entity) {
-                    *t = Transform::from_translation(Vec3::from_array(p))
-                        .with_rotation(Quat::from_array(q));
+                    *t = sample.body;
                 }
             }
         }
@@ -582,15 +602,12 @@ pub(crate) fn present(world: &mut World) {
             .query::<(&WheelVisual, &mut Transform)>()
             .iter_mut(world)
         {
-            if let Some(car) = v.simulation.vehicles.get(&wheel.vehicle) {
-                let physical = &car.controller.wheels()[wheel.index];
-                *transform = wheel.rest;
-                transform.translation.y += (car.definition.suspension_length
-                    - physical.raycast_info().suspension_length)
-                    / car.definition.model_scale;
-                transform.rotation = wheel.rest.rotation
-                    * Quat::from_rotation_y(physical.steering)
-                    * Quat::from_rotation_x(-physical.rotation);
+            if let Some(sample) = v.rendered_motion.get(&wheel.vehicle) {
+                if let Some(offset) = sample.wheels.get(wheel.index) {
+                    *transform = wheel.rest;
+                    transform.translation += offset.translation;
+                    transform.rotation = wheel.rest.rotation * offset.rotation;
+                }
             }
         }
         v.pose = None;
@@ -622,9 +639,9 @@ pub(crate) fn present(world: &mut World) {
         let steering=v.steering_visual+(target_steering-v.steering_visual)*(1.-(-12.*dt).exp());
         let pose = i.clips.pose(name, d.time, d.phase == "driving");
         let turn=if d.phase=="driving" {i.clips.pose(if steering>=0. {a.steer_left.as_ref()} else {a.steer_right.as_ref()},d.time,true)} else {None};
-        let (p, q) = v.simulation.pose(i.id).unwrap();
-        let q = Quat::from_array(q);
-        let seat = Vec3::from_array(p) + q * Vec3::from_array(car.definition.seat);
+        let body = v.rendered_motion[&i.id].body;
+        let q = body.rotation;
+        let seat = body.translation + q * Vec3::from_array(car.definition.seat);
         v.steering_visual=steering;
         let roots: Vec<_> = world
             .query_filtered::<Entity, With<crate::world::PlayerRoot>>()
