@@ -177,3 +177,17 @@ No gameplay execution was performed during this repair.
 Validation for this repair: six core wipeout tests and two revert numerical
 tests passed. Two pre-existing game test fixtures were updated for their current
 map-menu and render-material API signatures so these tests could compile.
+
+## Folded-pose report and wall-jump exit (8 September, later run)
+
+Log plants-20260908-174254-418-287 entered HandPlant at tick581, returned to
+PhysicsGround at603 and stopped at605 in Ground's wall-jump callback. That
+callback was still an explicit error stub. It now converts the complete retained
+launch packet to the existing trajectory selector and executes Launch/Update,
+including the wall-jump velocity in both native velocity fields. A focused packet
+transfer test passes. No gameplay was executed to validate the result.
+
+The user's folded-body report remains unresolved. HANDPLANT_POSE now records
+COM/orientation, root transform, target versus physical hips/head/hands/toes and
+external hand targets at entry and every six ticks. This distinguishes pose/IK
+errors from physical tracking errors on the next user-provided reproduction.

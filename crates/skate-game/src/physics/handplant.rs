@@ -275,5 +275,19 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
         heading,
     );
     ik::update(skater, false);
-    plant_skeleton::advance(physics, skater, com, None)
+    plant_skeleton::advance(physics, skater, com, None)?;
+    if physics.ticks % 6 == 0 || skater.handplant.elapsed <= STEP * 1.5 {
+        let root = &skater.animated_skeleton.roots.animation_to_world;
+        let parts = [23, 1, 3, 7, 15, 19]; //hips, head, hands, toes
+        let targets = parts.map(|i| point(root, skater.skeleton_input.drive_frames[i][3]));
+        let actual = skater.skeleton.part_transforms();
+        let actual = parts.map(|i| actual[i][3]);
+        let hands = [2, 3].map(|i| (skater.foot_ik.state.external_targets[i].world_position,
+            skater.foot_ik.state.limbs[i].target_blend));
+        bevy::log::info!("HANDPLANT_POSE tick={} elapsed={} phase={} com={com:?} up={up:?} heading={heading:?} root={root:?} targets={targets:?} actual={actual:?} hands={hands:?} force_mode={} flags={:08x}/{:08x}/{:08x}",
+            physics.ticks, skater.handplant.elapsed, skater.handplant.phase,
+            skater.skeleton_input.force_mode, skater.player_input.processed.flags_2468,
+            skater.player_input.processed.flags_2472, skater.player_input.processed.flags_2476);
+    }
+    Ok(())
 }

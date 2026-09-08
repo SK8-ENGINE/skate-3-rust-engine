@@ -165,6 +165,7 @@ pub(crate) fn advance(
     skater: &mut SkaterRuntime,
 ) -> Result<GroundBoardOutcome, String> {
     super::handplant::ground_query(physics,skater);
+    let selector_input = super::air_phase::selector_input(physics, skater)?;
     let p = &skater.player_input.processed;
     let toolkit = skater
         .player_input
@@ -197,8 +198,11 @@ pub(crate) fn advance(
         Ok(())
     };
     let mut launch = |info: &GroundLaunchInfo| {
-        life.pending_wall_jump = Some(info.clone());
-        Err("Ground selected wall jump; its retained launch requires TrajectorySelector::Launch/Update".into())
+        let mut input = selector_input;
+        input.board_vertical_velocity = info.velocity[1];
+        skater.trajectory.launch(info.selector_launch(), input, &physics.world)?;
+        skater.trajectory.update(input, &physics.world)?;
+        Ok(())
     };
     let physical = GroundPhysicalFrame {
         skeleton_record: &skater.animated_skeleton.record,
