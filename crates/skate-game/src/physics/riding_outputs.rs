@@ -156,17 +156,32 @@ impl RidingOutputs {
         coffin: bool,
         processed: &skate_core::player::input_phase::ProcessedPhysicsInput,
     ) {
+        let deck = board.part_transforms()[BodyId::Deck.index()];
+        // Ordinary ground riding follows the physical deck (82D4E250).
+        self.update_ground_reckoning_with_heading(
+            board, pose, processed_flags_2468, animation_balance, coffin, processed,
+            [deck.basis.columns[2][0], deck.basis.columns[2][1], deck.basis.columns[2][2], 0.0],
+        );
+    }
+
+    /// Animated takeoff retains the rider's heading while the deck begins its
+    /// authored spin. Feeding the driven deck axis back into this frame would
+    /// apply that spin to the whole skater again on each ground-animation tick.
+    pub fn update_ground_reckoning_with_heading(
+        &mut self,
+        board: &BoardRuntime,
+        pose: RidingPoseInputs,
+        processed_flags_2468: u32,
+        animation_balance: f32,
+        coffin: bool,
+        processed: &skate_core::player::input_phase::ProcessedPhysicsInput,
+        heading: [f32; 4],
+    ) {
         let observations = ground_input::GroundPacketInputs::from_processed(processed);
         let deck = board.part_transforms()[BodyId::Deck.index()];
-        //82D4E250 overrides heading1200 from input752 (raw board Z).
         //The source takes the previous final frame X for the damping step.
         let previous_right = self.reckoning_frames.system[0];
-        self.reckoning_frames.heading = [
-            deck.basis.columns[2][0],
-            deck.basis.columns[2][1],
-            deck.basis.columns[2][2],
-            0.0,
-        ];
+        self.reckoning_frames.heading = heading;
         body_spin::update_ground(&mut self.body_spin, pose.body_spin);
         let effective = BoardMotionOutput::from_board(
             board,

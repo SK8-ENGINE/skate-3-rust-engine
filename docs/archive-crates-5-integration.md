@@ -95,3 +95,14 @@ push, merge into the main branch, or release is performed by this task.
 
 Report failures with the diagnostic report, map/difficulty and last controller
 action. Compile and source-preservation checks do not establish gameplay parity.
+
+## Takeoff heading regression
+
+Restored the `c70726d` takeoff-heading separation removed by the re-merge.
+GroundAnimation retains the rider heading while the authored deck begins to
+spin; ordinary ground riding still follows the physical deck. The imported
+processed ground-input observations remain in use. The existing
+`nollie_inward_heel_keeps_body_heading_at_pop` regression compiles but was not
+executed (private gameplay assets required). Check nollie inward heels and
+other flip tricks, stationary and rolling, for an abrupt sideways body turn
+at takeoff while ensuring the board still spins and intentional body spins work.
