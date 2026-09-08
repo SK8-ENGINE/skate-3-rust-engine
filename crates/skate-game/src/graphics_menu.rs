@@ -85,6 +85,12 @@ pub(crate) struct Menu {
     maps: Vec<crate::map_library::Entry>,
     selected_map: usize,
 }
+impl Menu {
+    pub(crate) fn transition_finished(&mut self, status: String, resume: bool) {
+        self.status = status;
+        self.open = !resume;
+    }
+}
 pub(crate) fn gameplay_active(menu: Option<Res<Menu>>) -> bool {
     menu.is_none_or(|m| !m.open)
 }
@@ -101,12 +107,16 @@ struct MenuLabel(usize);
 #[derive(Component)]
 struct StatusLabel;
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct MenuInput;
+
 pub(crate) struct GraphicsMenuPlugin;
 impl Plugin for GraphicsMenuPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FramePacer(Instant::now()))
             .add_systems(PostStartup, setup)
-            .add_systems(Update, (interact, apply, labels).chain())
+            .add_systems(PreUpdate, interact.in_set(MenuInput).after(bevy::input::InputSystems))
+            .add_systems(Update, (apply, labels).chain())
             .add_systems(Last, pace);
     }
 }
@@ -117,6 +127,7 @@ fn setup(
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     cameras: Query<Entity, With<Camera3d>>,
     adapter: Res<RenderAdapter>,
+    mut time: ResMut<Time<Virtual>>,
 ) {
     let path = config
         .asset_root
@@ -211,8 +222,9 @@ fn setup(
     commands.insert_resource(SceneTarget(target));
     let maps = crate::map_library::discover(&config.asset_root);
     let selected_map = maps.iter().position(|m| m.path.as_ref() == config.map_path.as_ref()).unwrap_or(0);
+    if config.start_paused { time.pause(); }
     commands.insert_resource(Menu {
-        open: false,
+        open: config.start_paused,
         selected: 0,
         settings,
         path,
@@ -236,7 +248,8 @@ fn cycle<T: PartialEq + Copy>(values: &[T], value: T, direction: i32) -> T {
     values[(index + direction).rem_euclid(values.len() as i32) as usize]
 }
 fn interact(
-    config: Res<crate::config::Config>,
+    mut config: ResMut<crate::config::Config>,
+    mut transition: ResMut<crate::map_transition::MapTransition>,
     mut physics: ResMut<crate::physics::GamePhysics>,
     keys: Res<ButtonInput<KeyCode>>,
     mut menu: ResMut<Menu>,
@@ -244,6 +257,11 @@ fn interact(
     buttons: Query<(&Interaction, &MenuRow), Changed<Interaction>>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    if transition.busy() {
+        menu.open = true;
+        time.pause();
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         menu.open = !menu.open;
     }
@@ -288,6 +306,7 @@ fn interact(
             5 => {
                 menu.difficulty = cycle(&Difficulty::ALL, menu.difficulty, direction);
                 physics.set_difficulty(menu.difficulty);
+                config.difficulty = menu.difficulty;
                 menu.status = match menu.difficulty.save(&config.asset_root) {
                     Ok(()) => "Difficulty saved".into(),
                     Err(e) => format!("Applied, but could not save: {e}"),
@@ -299,10 +318,8 @@ fn interact(
                 menu.status = "Choose Load map to switch".into();
             }
             7 => {
-                match crate::map_library::switch(&config.asset_root, &menu.maps[menu.selected_map]) {
-                    Ok(()) => { exit.write(AppExit::Success); }
-                    Err(e) => menu.status = e,
-                }
+                transition.request(menu.maps[menu.selected_map].clone());
+                menu.status = "Loading map...".into();
             }
             8 => menu.open = false,
             9 => {
@@ -380,6 +397,8 @@ fn apply(
 }
 fn labels(
     menu: Res<Menu>,
+    transition: Res<crate::map_transition::MapTransition>,
+    time: Res<Time<Real>>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut root: Single<&mut Node, With<MenuRoot>>,
     mut labels: Query<(&MenuLabel, &mut Text), Without<StatusLabel>>,
@@ -422,12 +441,14 @@ fn labels(
             4 => format!("Occlusion culling     {}", if s.occlusion { "On" } else { "Off" }),
             5 => format!("Difficulty            {}", menu.difficulty.label()),
             6 => format!("Map                   {}", menu.maps[menu.selected_map].label),
-            7 => "Load map (restarts session)".into(),
+            7 => if transition.busy() { "Loading map...".into() } else { "Load map".into() },
             8 => "Resume".into(),
             _ => "Quit game".into(),
         };
     }
-    ***status = menu.status.clone();
+    ***status = if transition.busy() {
+        format!("{} {}\nGameplay is paused. Please wait.", ["|", "/", "-", "\\"][(time.elapsed_secs() * 4.) as usize % 4], transition.label())
+    } else { menu.status.clone() };
     for (row, interaction, mut color) in &mut buttons {
         color.0 = if row.0 == menu.selected || *interaction == Interaction::Hovered {
             Color::srgb(0.10, 0.30, 0.34)
@@ -462,6 +483,7 @@ mod tests {
             .insert_resource(Menu {
                 open: false, selected: 0, settings: GraphicsSettings::default(),
                 difficulty: Difficulty::Easy, path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
+                maps: vec![crate::map_library::Entry { label: "Test world".into(), path: None }], selected_map: 0,
             })
             .add_systems(Update, apply);
         app.world_mut().spawn((Window::default(), PrimaryWindow));

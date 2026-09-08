@@ -71,10 +71,10 @@ impl Material for RetailSkyMaterial {
 pub(crate) fn spawn_sky(
     name: &str,
     root: &std::path::Path,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    images: &mut Assets<Image>,
-    materials: &mut Assets<RetailSkyMaterial>,
+    commands: &mut crate::map_render::SceneCommands,
+    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
+    images: &mut impl crate::map_render::AssetSink<Image>,
+    materials: &mut impl crate::map_render::AssetSink<RetailSkyMaterial>,
 ) {
     // Parks need their authored sky selection from the environment controller;
     // only these three district identities are currently resolved.

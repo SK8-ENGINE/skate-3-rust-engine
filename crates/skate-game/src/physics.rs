@@ -175,6 +175,8 @@ impl GamePhysics {
         self.animation_profile.physics_mode = difficulty as u32;
     }
 
+    pub(crate) fn period(&self) -> std::time::Duration { self.clock.period() }
+
     pub(crate) fn difficulty_index(&self) -> u32 { self.animation_profile.physics_mode }
 
     pub(crate) fn world(&self) -> &BoardWorld {
