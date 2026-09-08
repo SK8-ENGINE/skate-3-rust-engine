@@ -16,7 +16,14 @@ pub(super) fn advance(
     truck_targets: [f32; 2],
 ) -> Result<(), String> {
     let before = diagnostics::snapshot(physics, skater);
-    diagnostics::validate(&before, "before shared solve")?;
+    diagnostics::validate(&before, "before shared solve").map_err(|error| format!(
+        "{error}; com_frame={:?}; lifted_com_frame={:?}; animation_root={:?}; biped_position={:?}; biped_surface={:?}",
+        skater.animated_skeleton.board_frames.com_frame,
+        skater.animated_skeleton.board_frames.lifted_com_frame,
+        skater.animated_skeleton.roots.animation_to_world,
+        skater.offboard.controller.output().position,
+        skater.offboard.controller.state.surface,
+    ))?;
     let board_volumes = if skater.offboard.board_policy.volumes_enabled {
         colliders::world_volumes(&physics.board, &physics.settings)
     } else {
