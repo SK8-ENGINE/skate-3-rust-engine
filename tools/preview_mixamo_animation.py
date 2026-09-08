@@ -14,7 +14,7 @@ import bmesh
 from mathutils import Matrix, Quaternion, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'mixamo_to_skate'))
-from converter import MAP
+from converter import MAP, sha
 
 
 def aim(obj, point):
@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--reference', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--profile', type=Path, help='Paired-stock calibration JSON')
     args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:])
     args.output.mkdir(parents=True, exist_ok=False)
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -103,6 +104,26 @@ def main():
             world = source.matrix_world @ source.pose.bones[source_names[key]].matrix
             corrections[name] = world.to_quaternion().inverted() @ yaw @ rests[name].to_quaternion()
     reverse = {v: k for k, v in MAP.items() if k in source_names}
+    calibrated = {}
+    profile_errors = {}
+    if args.profile:
+        profile = json.loads(args.profile.read_text(encoding='utf-8'))
+        if profile['reference_sha256'] != sha(args.reference):
+            raise ValueError('Calibration does not match the reference character')
+        # FBX and glTF importer world axes agree after glTF Y-up -> Blender Z-up.
+        basis = Matrix(((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
+        paired = {k: basis @ Matrix(v) for k, v in profile['bones'].items()}
+        scale = profile['normalization_scale']
+        offset = paired['hips'].translation - position('hips') * scale
+        for name, key in reverse.items():
+            reference = paired[key]
+            angle = source_rests[key].to_quaternion().rotation_difference(reference.to_quaternion()).angle
+            error = (position(key)*scale+offset-reference.translation).length
+            profile_errors[key] = {'angle_radians': angle, 'position_metres': error}
+            if angle > .02 or error > .02:
+                raise ValueError('Source bind rig differs from paired calibration: '+key)
+            rigid = Matrix.LocRotScale(reference.translation, reference.to_quaternion(), Vector((1, 1, 1)))
+            calibrated[name] = rigid.inverted() @ rests[name]
     target.animation_data_clear()
     for bone in target.pose.bones:
         bone.rotation_mode = 'QUATERNION'
@@ -131,7 +152,14 @@ def main():
                 location = inherited.translation
                 if name == 'HIPS':
                     location = rests['HIPS'].translation + (world.translation-position('hips')) * scale
-                bone.matrix = Matrix.LocRotScale(location, rotation, Vector((1, 1, 1)))
+                if calibrated:
+                    # Transfer the measured source deformation to the matching
+                    # native bind frame; no anatomical aim or standing-pose overrides.
+                    rigid = Matrix.LocRotScale(world.translation*scale+offset,
+                                               world.to_quaternion(), Vector((1, 1, 1)))
+                    bone.matrix = rigid @ calibrated[name]
+                else:
+                    bone.matrix = Matrix.LocRotScale(location, rotation, Vector((1, 1, 1)))
             else:
                 # Extra stock spine/neck joints keep their actual local rest transform.
                 bone.matrix = inherited
@@ -146,7 +174,8 @@ def main():
     report = {'source': str(args.source), 'reference': str(args.reference),
               'frames': [start, end], 'fps': scene.render.fps, 'motion_scale': scale,
               'mapping': MAP, 'rest_bones_unchanged': True, 'constraints': 0,
-              'vehicle_adjustments': False, 'samples': {}}
+              'vehicle_adjustments': False, 'profile': str(args.profile) if args.profile else None,
+              'profile_errors': profile_errors, 'samples': {}}
     samples = sorted({start, start+(end-start)//3, start+2*(end-start)//3, end})
     positions = []
     for frame in range(start, end+1):
@@ -203,7 +232,7 @@ def main():
                 'No kart, IK, seat alignment, grip edits or animation cleanup.\n'
                 'Original source action and character retained hidden.\n'
                 'Native rest bones unchanged. Space plays/pauses.\n'
-                'Root travel is scaled by leg-length ratio; no ground snapping.\n')
+                + ('Uses matching paired-stock calibration; no anatomical aim overrides.\n' if calibrated else 'Root travel is scaled by leg-length ratio; no ground snapping.\n'))
     bpy.ops.object.select_all(action='DESELECT')
     target.select_set(True)
     bpy.context.view_layer.objects.active = target
