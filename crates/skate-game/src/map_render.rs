@@ -155,7 +155,7 @@ fn custom_lighting(map: &skate_data::skate_map::SkateMap, commands: &mut SceneCo
             affects_lightmapped_mesh_diffuse: false,
             ..default()
         },
-        Transform::default().looking_to(-direction, Vec3::Y),
+        Transform::default().looking_to(-direction, if direction.y > 0.99 { Vec3::Z } else { Vec3::Y }),
         bevy::light::CascadeShadowConfigBuilder {
             maximum_distance: 100., first_cascade_far_bound: 10., ..default()
         }.build(),

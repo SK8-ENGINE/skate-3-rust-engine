@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use crate::{app::FrameSet, config::Config};
 
 #[derive(Component)]
-struct GameplayCamera;
+pub(crate) struct GameplayCamera;
 
 pub(crate) struct CameraPlugin;
 impl Plugin for CameraPlugin {

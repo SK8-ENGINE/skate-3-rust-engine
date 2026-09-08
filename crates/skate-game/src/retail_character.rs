@@ -77,10 +77,31 @@ impl Material for CharacterMaterial {
 }
 #[derive(Component)]
 struct ShadowSource;
-fn load(mut commands: Commands, config: Res<crate::config::Config>, sources: Query<Entity, With<ShadowSource>>, mut shadow: ResMut<crate::retail_render::ShadowState>) {
+
+#[derive(Component)]
+struct OriginalCharacterMaterial {
+    material: Handle<StandardMaterial>,
+    layers: Option<RenderLayers>,
+}
+fn load(mut commands: Commands, config: Res<crate::config::Config>, sources: Query<Entity, With<ShadowSource>>, mut shadow: ResMut<crate::retail_render::ShadowState>,
+    retail: Res<crate::retail_render::RetailScene>,
+    originals: Query<(Entity, &OriginalCharacterMaterial)>,
+    cameras: Query<(Entity, &RenderLayers), With<crate::camera::GameplayCamera>>,
+) {
     commands.remove_resource::<Lighting>();
     for e in &sources { commands.entity(e).despawn(); }
     *shadow = Default::default();
+    for (entity, original) in &originals {
+        let mut entity = commands.entity(entity);
+        entity.remove::<(MeshMaterial3d<CharacterMaterial>, OriginalCharacterMaterial)>()
+            .insert(MeshMaterial3d(original.material.clone()));
+        if let Some(layers) = &original.layers { entity.insert(layers.clone()); }
+        else { entity.remove::<RenderLayers>(); }
+    }
+    for (entity, layers) in &cameras {
+        commands.entity(entity).insert(layers.clone().without(28));
+    }
+    if !retail.0 { return; }
     let Some(map_path) = &config.map_path else {
         return;
     };
@@ -201,12 +222,15 @@ fn bind(
     source: Res<Assets<StandardMaterial>>,
     server: Res<AssetServer>,
     mut materials: ResMut<Assets<CharacterMaterial>>,
-    entities: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>)>,
+    entities: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, Option<&RenderLayers>)>,
+    parents: Query<&ChildOf>,
+    players: Query<(), With<crate::world::PlayerRoot>>,
 ) {
     let Some(lighting) = lighting else {
         return;
     };
-    for (entity, name, handle) in &entities {
+    for (entity, name, handle, layers) in &entities {
+        if !parents.iter_ancestors(entity).any(|e| players.contains(e)) { continue; }
         let Some(data) = lighting.data.materials.get(&name.0) else {
             continue;
         };
@@ -253,6 +277,7 @@ fn bind(
             .entity(entity)
             .remove::<MeshMaterial3d<StandardMaterial>>()
             .insert((
+                OriginalCharacterMaterial { material: handle.0.clone(), layers: layers.cloned() },
                 MeshMaterial3d(material),
                 RenderLayers::from_layers(&[0, 28]),
             ));
@@ -261,7 +286,7 @@ fn bind(
 fn shadow_views(
     mut commands: Commands,
     lighting: Option<Res<Lighting>>,
-    cameras: Query<(Entity, Option<&RenderLayers>), With<Camera3d>>,
+    cameras: Query<(Entity, Option<&RenderLayers>), With<crate::camera::GameplayCamera>>,
 ) {
     if lighting.is_none() {
         return;
@@ -304,6 +329,37 @@ fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_scene_restores_character_and_removes_only_gameplay_shadow_layer() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.insert_resource(crate::config::Config {
+            asset_root: "unused".into(), verification_capture: None,
+            map: None, map_path: None, difficulty: crate::difficulty::Difficulty::Hardcore,
+            check_assets: false, start_paused: false, teleport: None,
+            multiplayer: Default::default(), map_fingerprint: 0,
+        });
+        world.insert_resource(crate::retail_render::RetailScene(false));
+        world.insert_resource(crate::retail_render::ShadowState(Vec4::ONE, Vec4::ONE, [Vec4::ONE; 7]));
+        let material = Handle::<StandardMaterial>::default();
+        let player = world.spawn((
+            OriginalCharacterMaterial { material: material.clone(), layers: None },
+            MeshMaterial3d(Handle::<CharacterMaterial>::default()),
+            RenderLayers::from_layers(&[0, 28]),
+        )).id();
+        let light = world.spawn(ShadowSource).id();
+        let camera = world.spawn((crate::camera::GameplayCamera, RenderLayers::from_layers(&[0, 28]))).id();
+        let overlay = world.spawn(RenderLayers::layer(31)).id();
+        world.run_system_once(load).unwrap();
+        assert!(world.get_entity(light).is_err());
+        assert_eq!(world.get::<MeshMaterial3d<StandardMaterial>>(player).unwrap().0, material);
+        assert!(world.get::<MeshMaterial3d<CharacterMaterial>>(player).is_none());
+        assert!(world.get::<RenderLayers>(player).is_none());
+        assert_eq!(world.get::<RenderLayers>(camera).unwrap(), &RenderLayers::default());
+        assert_eq!(world.get::<RenderLayers>(overlay).unwrap(), &RenderLayers::layer(31));
+        assert_eq!(world.resource::<crate::retail_render::ShadowState>().0, Vec4::ZERO);
+    }
 
     #[test]
     fn world_receiver_source_excludes_world_casters_and_emits_no_light() {

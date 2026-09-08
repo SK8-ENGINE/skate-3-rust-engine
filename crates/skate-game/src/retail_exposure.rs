@@ -68,8 +68,11 @@ pub(super) fn install(app: &mut App) {
     }
 }
 
-fn load(config: Res<crate::config::Config>, mut settings: ResMut<Settings>) {
+fn load(config: Res<crate::config::Config>, retail: Res<super::RetailScene>, mut settings: ResMut<Settings>) {
+    let generation = settings.timing.y + 1.;
     *settings = Settings::default();
+    settings.timing.y = generation;
+    if !retail.0 { return; }
     if std::env::var_os("SKATE_FIXED_EXPOSURE").is_some_and(|v| v == "1") {
         info!("RETAIL_EXPOSURE: fixed 2.5 comparison mode");
         return;
