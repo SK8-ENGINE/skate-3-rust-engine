@@ -4,6 +4,7 @@
 use super::vector::{clamp, dot3, normalize};
 use crate::point_graph::PointGraph;
 
+#[derive(Clone)]
 pub struct SpeedModelSettings {
     /// physics_speedmodel layout +0,+8,+16,+20,+24.
     pub negative_gain: f32,

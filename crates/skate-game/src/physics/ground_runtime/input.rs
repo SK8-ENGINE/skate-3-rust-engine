@@ -118,7 +118,7 @@ impl GroundSettings {
             propulsion: GroundPropulsionInput {
                 flags_2468: p.flags_2468,
                 flags_2472: p.flags_2472,
-                target_speed: a.contacts.push_speed,
+                target_speed: a.contacts.push_speed * self.push_target_multiplier,
                 signed_speed: p.scalar_2612,
                 absolute_body_speed: t.absolute_speed,
                 scalar_2660: t.total_mass,

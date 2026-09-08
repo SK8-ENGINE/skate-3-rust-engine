@@ -1,6 +1,6 @@
 //! Bounded control messages between the game and the optional discovery helper.
 use serde::{Deserialize, Serialize};
-pub const NAMESPACE: &str = "skate3rust-free-skate-v4";
+pub const NAMESPACE: &str = "skate3rust-free-skate-v5";
 pub const PAGE_SIZE: usize = 5;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Request {

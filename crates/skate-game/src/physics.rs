@@ -115,6 +115,7 @@ pub(crate) struct GamePhysics {
     pub processed_flags_2468: u32,
     /// Toolkit ctor82C0680C clears8384bit7; wipeout entry/exit owns changes.
     pub board_wiping_out: bool,
+    pub trainer: skate_mods::TrainerTuning,
 }
 
 /// Cross-phase records for the current fixed tick. Subsystems retain their
@@ -230,7 +231,6 @@ impl GamePhysics {
 
     pub(crate) fn difficulty_index(&self) -> u32 { self.animation_profile.physics_mode }
 
-    #[cfg(test)]
     pub(crate) fn world_triangles(&self) -> &[skate_core::physics::board_world::WorldTriangle] { self.world.triangles() }
 
     pub(crate) fn world(&self) -> &BoardWorld {
@@ -344,6 +344,7 @@ impl GamePhysics {
             exchange: SimulationExchange::new(0),
             processed_flags_2468,
             board_wiping_out: false,
+            trainer: Default::default(),
         })
     }
 
@@ -408,6 +409,7 @@ impl Plugin for PhysicsPlugin {
 }
 
 fn advance(
+    vehicles: Res<crate::modding::vehicles::Vehicles>,
     mut physics: ResMut<GamePhysics>,
     mut skater: ResMut<SkaterRuntime>,
     mut controls: ResMut<PlayerControls>,
@@ -418,7 +420,7 @@ fn advance(
     mut exit: MessageWriter<AppExit>,
     mut performance: Option<ResMut<crate::performance::Performance>>,
 ) {
-    if physics.failed {
+    if physics.failed || vehicles.occupied() {
         return;
     }
     let timer = performance.as_ref().map(|_| std::time::Instant::now());
@@ -596,3 +598,16 @@ mod offboard_jump_playback_tests;
 #[cfg(test)]
 #[path = "tests/offboard_root_trace.rs"]
 mod offboard_root_trace;
+
+impl SkaterRuntime {
+    /// Observe the current grind publication without adding a second grind owner.
+    pub(crate) fn mod_grind(&self) -> (bool, &str, u32, f32) {
+        let out = &self.player_input.physical.grinds;
+        let active = self.grind.active_family().is_some();
+        let name = if active {
+            grind_chromosome::names::lookup(out.animation_chromosome_268)
+                .map(|name| name.attribute).unwrap_or("")
+        } else { "" };
+        (active, name, out.words_136_140[0], self.grind.last_grind_distance())
+    }
+}

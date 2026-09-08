@@ -33,6 +33,8 @@ try {
         pdb_sha256 = (Get-FileHash -LiteralPath "$symbols/skate3rust.pdb" -Algorithm SHA256).Hash
         compiler = (& rustc --version).Trim()
     } | ConvertTo-Json | Set-Content -LiteralPath "$symbols/build.json" -Encoding UTF8
+    New-Item -ItemType Directory -Path "$stage/mods" -Force | Out-Null
+    Copy-Item -LiteralPath mods/native-trainer.zip,mods/mario-kart.zip,mods/README.md -Destination "$stage/mods"
     $sourceStage = Join-Path $stage '../setup-source'
     $toolsRoot = Join-Path $PSScriptRoot 'tools'
     foreach ($source in Get-ChildItem -LiteralPath $toolsRoot -File -Recurse) {

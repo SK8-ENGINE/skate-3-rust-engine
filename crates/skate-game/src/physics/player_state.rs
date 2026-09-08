@@ -164,3 +164,23 @@ pub(crate) fn resume_after_climb(physics: &mut GamePhysics, skater: &mut SkaterR
 
     Ok(())
 }
+
+/// Vehicle ownership has ended; reset first, then enter the native ragdoll and seed momentum.
+pub(crate) fn apply_vehicle_ejection(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<bool, String> {
+    let Some((velocity, angular)) = skater.teleport_state.take_vehicle_ejection() else { return Ok(false); };
+    transition::set(physics, skater, PhysicalStateId::WipeoutGround)?;
+    let velocity=skate_core::math::Vector3::new(velocity[0],velocity[1],velocity[2]);
+    let angular=skate_core::math::Vector3::new(angular[0],angular[1],angular[2]);
+    for body in skater.skeleton.bodies_mut() {
+        body.rates.linear_velocity=velocity;
+        body.rates.angular_velocity=angular;
+    }
+    for body in physics.board.bodies_mut() {
+        body.rates.linear_velocity=velocity;
+        body.rates.angular_velocity=angular;
+    }
+    skater.animated_skeleton.motion.velocity_world=[velocity.x,velocity.y,velocity.z,0.];
+    skater.player_input.processed.vectors_544_560_592_608[3]=[velocity.x,velocity.y,velocity.z,0.].map(f32::to_bits);
+    skater.wipeout_state.state.velocity=[velocity.x,velocity.y,velocity.z,0.];
+    Ok(true)
+}

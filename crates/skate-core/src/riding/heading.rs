@@ -2,6 +2,7 @@
 //! AntiFlipTorque; the two are distinct. The caller owns board+284 history.
 use crate::{physics::reciprocal_sqrt::estimate, point_graph::PointGraph, trigonometry::acos};
 
+#[derive(Clone)]
 pub struct HeadingSettings {
     pub manual_wrong_wheel_scalar: f32,      // +904
     pub manual_damping: f32,                 // +908

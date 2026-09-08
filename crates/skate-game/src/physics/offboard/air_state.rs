@@ -43,7 +43,7 @@ pub(crate) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
         .skeleton_controller
         .request(4, &mut skater.skeleton_collision)?;
     if skater.offboard.air_prediction.is_none() {
-        let launch = super::air_trajectory::prepare(skater, false)?;
+        let launch = super::air_trajectory::prepare(skater, false, physics.trainer.offboard_jump)?;
         super::air_trajectory::launch(physics, skater, launch)?;
     }
     let p = &skater.player_input.processed;
@@ -136,7 +136,7 @@ pub(crate) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
         can_requery,
         &mut skater.wipeout.state,
     ) {
-        let mut launch = super::air_trajectory::prepare(skater, false)?;
+        let mut launch = super::air_trajectory::prepare(skater, false, physics.trainer.offboard_jump)?;
         launch.velocity = relaunch.velocity;
         launch.has_target = true;
         let feet = feet_world(skater);

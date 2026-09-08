@@ -1,6 +1,7 @@
 //! Complete TU3 Toolkit_AntiFlipTorque 82D94190, distinct from heading/manual.
 use super::vector::{cross, dot3, normalize};
 use crate::{point_graph::PointGraph, trigonometry::acos};
+#[derive(Clone)]
 pub struct AntiFlipSettings {
     pub axis_96_response: PointGraph<8>, // +1832/+1864
     pub axis_64_response: PointGraph<8>, // +1912/+1944

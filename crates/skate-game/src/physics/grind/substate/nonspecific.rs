@@ -25,7 +25,7 @@ pub(crate) fn execute(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
                 Family::FiftyFifty,
                 p.state_variant_index_2528,
                 skater.animation_input.extra.jump_strength,
-            )?,
+            )? * physics.trainer.grind_pop,
         };
         let velocity = super::super::launch::apply(
             &mut physics.board,

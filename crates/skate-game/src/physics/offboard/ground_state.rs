@@ -177,7 +177,7 @@ impl ground_sync::Services for Services<'_> {
         }
     }
     fn prepare_biped_launch(&mut self) -> Self::Launch {
-        super::air_trajectory::prepare(self.skater, false)
+        super::air_trajectory::prepare(self.skater, false, self.physics.trainer.offboard_jump)
     }
     fn skeleton_point_10960(&self) -> Vector {
         self.skater.animated_skeleton.record.centre_of_mass

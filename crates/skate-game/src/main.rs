@@ -31,6 +31,7 @@ mod skater_animation;
 mod verification;
 mod performance;
 mod graphics_menu;
+mod modding;
 mod customiser;
 mod customiser_parts;
 mod customiser_material;

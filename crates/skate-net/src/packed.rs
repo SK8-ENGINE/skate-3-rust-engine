@@ -1,10 +1,10 @@
-//! Version 4: one datagram per independently decodable stream update.
+//! Version 5: one datagram per independently decodable stream update.
 //! Position error <= 0.5 mm/axis within 32 m; larger offsets use full floats.
 //! Quaternion uses smallest-three 10-bit components. Velocities use binary16.
 use crate::{Body, Bone, Pose};
 use half::f16;
 pub const MTU: usize = 1200;
-pub const MAGIC: &[u8; 8] = b"SK8NET04";
+pub const MAGIC: &[u8; 8] = b"SK8NET05";
 pub const HEADER: usize = 29;
 pub const BODY: u8 = 1;
 pub const POSE: u8 = 2;
@@ -167,7 +167,7 @@ impl Packed {
         self.root == other.root && self.enabled == other.enabled && self.rows == other.rows
     }
     pub fn body(s: &BodyState) -> Option<Self> {
-        if !s.root.valid() || s.bodies.len() != 33 || (s.enabled & !(1 << 63)) >> 33 != 0 {
+        if !s.root.valid() || s.bodies.len() != 33 || (s.enabled & !((1 << 63) | (1 << 62))) >> 33 != 0 {
             return None;
         }
         let mut rows = Vec::with_capacity(33);
@@ -222,7 +222,7 @@ impl Packed {
     pub fn unpack_body(&self) -> Option<BodyState> {
         let root = unroot(self.root)?;
         let mut bodies = vec![];
-        if self.rows.len() != 33 || (self.enabled & !(1 << 63)) >> 33 != 0 {
+        if self.rows.len() != 33 || (self.enabled & !((1 << 63) | (1 << 62))) >> 33 != 0 {
             return None;
         }
         for row in &self.rows {

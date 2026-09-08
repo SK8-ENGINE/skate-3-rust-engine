@@ -17,6 +17,7 @@ mod authored_clips;
 pub(crate) struct PoseEvaluator {
     pub frames: AnimationFrames,
     authored: authored_clips::Replacements,
+    mod_clips: std::sync::RwLock<std::collections::BTreeMap<String, authored_clips::Replacements>>,
 }
 
 impl PoseEvaluator {
@@ -29,6 +30,7 @@ impl PoseEvaluator {
         Ok(Self {
             frames: AnimationFrames::from_banks(banks)?,
             authored: Default::default(),
+            mod_clips: Default::default(),
         })
     }
 
@@ -37,9 +39,29 @@ impl PoseEvaluator {
         Ok(())
     }
 
+    /// Reuses the existing constrained body-clip parser; never replaces board/trajectory data.
+    pub(crate) fn install_mod_clips(&self, owner: &str, text: &str) -> Result<(), String> {
+        let clips = authored_clips::Replacements::parse(text, &self.frames)?;
+        let mut all = self.mod_clips.write().map_err(|_| "Animation override lock poisoned")?;
+        for (id, other) in all.iter() {
+            if id != owner && clips.0.keys().any(|k| other.0.contains_key(k)) {
+                return Err(format!("Animation slots conflict with mod {id}"));
+            }
+        }
+        all.insert(owner.to_owned(), clips);
+        Ok(())
+    }
+    pub(crate) fn remove_mod_clips(&self, owner: &str) {
+        if let Ok(mut all) = self.mod_clips.write() { all.remove(owner); }
+    }
+    pub(crate) fn clear_mod_clips(&self) {
+        if let Ok(mut all) = self.mod_clips.write() { all.clear(); }
+    }
+
     /// Executes the ordered stock tree. This uses the native immediate ACS
     /// arithmetic; the host does not recreate packed animation job commands.
     pub fn evaluate(&self, commands: &[PoseCommand]) -> Result<Vec<Sqt>, String> {
+        let mod_clips = self.mod_clips.read().map_err(|_| "Animation override lock poisoned")?;
         let mut stack: Vec<Vec<Sqt>> = Vec::new();
         for command in commands {
             match command {
@@ -91,7 +113,7 @@ impl PoseEvaluator {
                     loops,
                 } => {
                     let stock = self.frames.clip(name)?;
-                    let clip = self.authored.clip(&stock.name).unwrap_or(stock);
+                    let clip = mod_clips.values().find_map(|c|c.clip(&stock.name)).or_else(||self.authored.clip(&stock.name)).unwrap_or(stock);
                     let mut pose = sample_clip(clip, *time)?;
                     if self.frames.has_trajectory {
                         let previous = sample_bone(clip, *previous_time, 0)?;

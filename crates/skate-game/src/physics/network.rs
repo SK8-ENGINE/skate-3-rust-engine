@@ -336,3 +336,26 @@ impl Proxies {
         }
     }
 }
+
+impl Proxies {
+    /// Vehicle chassis join the existing native contact solver; reactions remain local.
+    pub fn append_vehicle(&mut self,shape:&crate::modding::vehicles::network::CollisionShape,physics:&GamePhysics,skater:&SkaterRuntime) {
+        let p=Vec3::from_array(shape.position);
+        if !physics.board.bodies().iter().chain(skater.skeleton.bodies()).any(|b|Vec3::from_array(xyz(b.rates.position)).distance_squared(p)<100.) {return;}
+        let base=skater.skeleton.bodies().len()+skater.skeleton_drives.targets.bodies.len()+self.bodies.len();
+        let mut body=physics.board.bodies()[0];
+        let q=Quat::from_array(shape.rotation).normalize();
+        body.rates.position=vector(shape.position);
+        body.rates.orientation=RetailQuaternion{x:q.x,y:q.y,z:q.z,w:q.w};
+        body.rates.basis=skate_core::math::Basis3{columns:Mat3::from_quat(q).to_cols_array_2d()};
+        body.inertia.inverse_mass=1./shape.mass;
+        let [x,y,z]=shape.half; body.inertia.inverse_tensor=vector([3./(shape.mass*(y*y+z*z)),3./(shape.mass*(x*x+z*z)),3./(shape.mass*(x*x+y*y))]);
+        body.rates.world_inverse_inertia=world_inverse_inertia(body.rates.basis,body.inertia.inverse_tensor);
+        body.rates.linear_velocity=vector(shape.velocity);body.rates.angular_velocity=vector(shape.angular);
+        body.rates.force_acceleration=Vector3::ZERO;body.rates.torque_acceleration=Vector3::ZERO;body.state_flags=4;
+        self.bodies.push(body);
+        self.volumes.push(BoardWorldVolume{body:CollisionBody::Attached(base),primitive:ContactPrimitive::RoundedBox{
+            center:vector((p+q*Vec3::from_array(shape.offset)).to_array()),basis:body.rates.basis,
+            half_extents:vector(shape.half.map(|x|x-shape.rounding)),radius:shape.rounding},linear_velocity:body.rates.linear_velocity,material:skate_core::physics::contact::RetailContactMaterial{static_friction:0.4,dynamic_friction:0.3,restitution:0.1}});
+    }
+}

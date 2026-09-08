@@ -43,6 +43,7 @@ pub(super) fn execute(
             p.state_variant_index_2528,
             skater.animation_input.extra.jump_strength,
         )?;
+        let vertical_jump = vertical_jump * physics.trainer.grind_pop;
         let geometry_side_jump = settings::side(family, p.grind.geometry_kind_1464);
         let input = LaunchInput {
             velocity_400: p.vectors_400_416[0].map(f32::from_bits),

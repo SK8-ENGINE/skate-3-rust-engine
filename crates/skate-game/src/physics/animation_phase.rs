@@ -251,6 +251,7 @@ pub(crate) fn advance(
             surface_up_y: physics.riding.ground.wheel_normal.y,
         },
     );
+    skater.animation.motion.hold_fakie = physics.trainer.hold_fakie;
     let observations = AnimationPhysical {
         conditions,
         feedback,
