@@ -406,6 +406,7 @@ def prepare(
     allow_material_import_order_fallback: bool = False,
     grind_coordinate_mode: str = "world_space",
     excluded_static_model_asset_ids: tuple[str, ...] = (),
+    raw_texture_cache: bool = False,
 ) -> Path:
     sys.path.insert(0, str(utt_root))
     import rx2_parser
@@ -504,15 +505,16 @@ def prepare(
                     output_root
                     / "textures"
                     / "by_asset"
-                    / f"{asset_id:016X}_{texture_index}.png"
+                    / f"{asset_id:016X}_{texture_index}{'.rgba' if raw_texture_cache else '.png'}"
                 )
                 png_path.parent.mkdir(parents=True, exist_ok=True)
-                texture.save_png(png_path)
+                if raw_texture_cache:png_path.write_bytes(texture.rgba)
+                else:texture.save_png(png_path)
                 new_entry = {
                     "stream_asset_id": f"0x{asset_id:016X}",
                     "stream_file": source_file,
                     "rx2": str(rx2_path.relative_to(output_root)),
-                    "png": str(png_path.relative_to(output_root)),
+                    "rgba" if raw_texture_cache else "png": str(png_path.relative_to(output_root)),
                     "texture_index": texture_index,
                     "width": texture.width,
                     "height": texture.height,
@@ -733,7 +735,8 @@ def prepare(
                         },
                     }
                 )
-            numpy.savez_compressed(npz_path, **arrays)
+            # Temporary arrays are read again immediately by the map writer.
+            numpy.savez(npz_path, **arrays)
             minimum, maximum = parsed.bounds
             models.append(
                 {

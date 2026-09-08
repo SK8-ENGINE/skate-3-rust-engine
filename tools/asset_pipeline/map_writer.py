@@ -10,7 +10,7 @@ def floats(f,*v):f.write(struct.pack('<'+'f'*len(v),*v))
 def string(f,s):
     b=str(s).encode();u(f,len(b));f.write(b)
 def stored(f,data):
-    packed=zlib.compress(data,6)
+    packed=zlib.compress(data,1)
     method=1
     if len(packed)>=len(data):method=0;packed=data
     u(f,method,len(packed));f.write(packed)
@@ -22,20 +22,40 @@ def spawn_point(manifest,root):
     best=None
     for entry in manifest['simulation_assets']:
         if not entry.get('collision_meshes'):continue
+        # Bound the exact same search before decoding distant collision
+        # meshes. A triangle's centroid cannot be closer than its AABB.
+        bounds=[mesh['bounds'] for mesh in entry['collision_meshes']]
+        if university:
+            if not any(b['minimum'][0]<=330<=b['maximum'][0] and
+                       b['minimum'][2]<=-710<=b['maximum'][2] for b in bounds):continue
+        elif best is not None:
+            def nearest_square(b):
+                return sum(max(b['minimum'][j],-b['maximum'][j],0.)**2 for j in (0,2))
+            if min(map(nearest_square,bounds))>best[0]+.01:continue
         for mesh in decode_rx2_clustered_meshes((root/entry['rx2']).read_bytes()):
-            for tri in mesh.triangles:
-                a,b,c=np.asarray([tri.a,tri.b,tri.c]);cross=np.cross(b-a,c-a);length=np.linalg.norm(cross)
-                if length<4 or cross[1]/length<0.9:continue
-                if university:
-                    x,z=330.,-710.;basis=np.array([[b[0]-a[0],c[0]-a[0]],[b[2]-a[2],c[2]-a[2]]])
-                    if abs(np.linalg.det(basis))<1e-12:continue
-                    weights=np.linalg.solve(basis,[x-a[0],z-a[2]])
-                    if weights.min() < -1e-5 or weights.sum()>1.00001:continue
-                    height=a[1]+weights[0]*(b[1]-a[1])+weights[1]*(c[1]-a[1]);score=abs(height-132.)
-                    point=(x,height+1.,z)
-                else:
-                    p=(a+b+c)/3;score=p[0]**2+p[2]**2;point=(p[0],p[1]+1.,p[2])
-                if best is None or score<best[0]:best=(score,point)
+            if not mesh.triangles:continue
+            if university and not (mesh.bounds_min[0]<=330<=mesh.bounds_max[0] and mesh.bounds_min[2]<=-710<=mesh.bounds_max[2]):continue
+            triangles=np.asarray([(tri.a,tri.b,tri.c) for tri in mesh.triangles],dtype=np.float64)
+            a,b,c=triangles[:,0],triangles[:,1],triangles[:,2]
+            cross=np.cross(b-a,c-a);length=np.linalg.norm(cross,axis=1)
+            valid=(length>=4)&(cross[:,1]>=.9*length)
+            a,b,c=a[valid],b[valid],c[valid]
+            if not len(a):continue
+            if university:
+                ab=b-a;ac=c-a;dx=330.-a[:,0];dz=-710.-a[:,2]
+                det=ab[:,0]*ac[:,2]-ac[:,0]*ab[:,2]
+                valid=np.abs(det)>=1e-12
+                first=np.divide(dx*ac[:,2]-ac[:,0]*dz,det,out=np.zeros_like(det),where=valid)
+                second=np.divide(ab[:,0]*dz-dx*ab[:,2],det,out=np.zeros_like(det),where=valid)
+                valid&=(first>=-1e-5)&(second>=-1e-5)&(first+second<=1.00001)
+                height=a[:,1]+first*ab[:,1]+second*ac[:,1]
+                points=np.column_stack((np.full(len(a),330.),height+1.,np.full(len(a),-710.)))
+                scores=np.where(valid,np.abs(height-132.),np.inf)
+            else:
+                points=(a+b+c)/3;scores=points[:,0]**2+points[:,2]**2
+                points[:,1]+=1.
+            index=np.argmin(scores);score=scores[index]
+            if np.isfinite(score) and (best is None or score<best[0]):best=(score,tuple(points[index]))
     if best is None:raise ValueError('No supported spawn surface in '+manifest['map_name'])
     return best[1]
 
@@ -106,8 +126,14 @@ def write(manifest_path,output,collision,report=lambda _:None):
         f.write(b'SKATE14\0');u(f,0x12345678);string(f,m['map_name']);floats(f,*spawn,0.,*environment)
         u(f,nm,len(ids),nv,ni,0,len(rails),0,0,0);f.write(mats.getvalue())
         for name in sorted(ids):
-            image=Image.open(root/textures[name]['png']).convert('RGBA').transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-            string(f,name);u(f,image.width,image.height,1);stored(f,image.tobytes())
+            entry=textures[name]
+            if 'rgba' in entry:
+                width,height=entry['width'],entry['height']
+                rgba=np.frombuffer((root/entry['rgba']).read_bytes(),dtype=np.uint8).reshape(height,width,4)[::-1].tobytes()
+            else:
+                image=Image.open(root/entry['png']).convert('RGBA').transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+                width,height=image.size;rgba=image.tobytes()
+            string(f,name);u(f,width,height,1);stored(f,rgba)
         stored(f,vertices.getvalue());stored(f,indices.getvalue());stored(f,b'')
         for rail in rails:
             string(f,f"{rail['asset_id']}_{rail['section_index']}_{rail['rail_index']}")

@@ -88,6 +88,14 @@ def decompress_refpack(source: bytes) -> bytes:
         raise StreamFormatError("RefPack payload has no 0x10FB header")
 
     expected_size = int.from_bytes(source[2:5], "big")
+    try:
+        from tools.asset_pipeline.fast_refpack import decode as fast_decode
+    except ImportError:
+        fast_decode = None
+    if fast_decode is not None:
+        try: decoded = fast_decode(source, expected_size, 5, True)
+        except ValueError as error: raise StreamFormatError(str(error)) from error
+        if decoded is not None: return decoded
     cursor = 5
     output = bytearray()
 

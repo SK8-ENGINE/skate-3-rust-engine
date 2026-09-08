@@ -160,7 +160,7 @@ class Texture(object):
 
     def save_png(self, path):
         """Save the texture as a PNG (requires Pillow)."""
-        self.to_pil().save(path, "PNG")
+        self.to_pil().save(path, "PNG", compress_level=1)
 
     def __str__(self):
         return "%s | %dx%d | %s" % (self.name, self.width, self.height, self.fmt_name)
@@ -977,6 +977,13 @@ def _main(argv=None):
             print("saved", p)
     return 0
 
+
+try:
+    from rx2_fast import (decode_dxt1, decode_dxt1_normal, decode_dxt3,
+                         decode_dxt5, decode_ati2, _untile360,
+                         _decode_raw_a8r8g8b8, _decode_raw_b5g6r5, _decode_raw_a8)
+except ImportError:
+    pass  # Standalone authoring tools without NumPy use the scalar decoder.
 
 if __name__ == "__main__":
     raise SystemExit(_main())

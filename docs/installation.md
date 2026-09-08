@@ -3,6 +3,7 @@
 `Build-Release.ps1` produces `target/skate3rust-windows-x64.zip`. Keep its
 `support` directory beside `skate3rust.exe`. The game links Bevy and the MSVC
 runtime statically; the setup helper bundles Python, NumPy, Pillow and Tcl/Tk.
+It also bundles a small Rust RefPack decoder. Users need no compiler.
 
 On first launch, setup accepts a local Xbox 360 Skate 3 ISO, `default.xex`,
 or an extracted game folder. Selecting `default.xex` uses the surrounding
@@ -65,3 +66,21 @@ only unusable contact primitives are omitted. Skate School's first spline
 header word is `0001 0002`, meaning two rails, not 65,538. TU3 function
 `82C1EEF0` reads the count with `lhz +2` (also at `82C1EFBC`). The reader now
 uses that halfword and retains the other halfword in the map metadata.
+
+## Setup performance
+
+On the development PC, a full packaged conversion of the same extracted disc
+dropped from approximately 13 minutes to 81 seconds. This includes skater
+preparation, all ten maps, runtime load checks and cleanup; ISO extraction is
+excluded. Timing depends on CPU, available memory and storage.
+
+Setup uses native RefPack decompression, batched NumPy texture decoding,
+uncompressed temporary geometry/texture caches and faster lossless final
+compression. The spawn search evaluates triangles in batches and rejects
+distant collision bounds before decoding them. Up to three isolated map
+workers run together, limited by available RAM, with the largest districts
+scheduled first. Per-map conversion and load logs remain in the installation.
+
+Decoded map geometry, material data, texture pixels, native collision archives,
+rail payloads and the character GLB were compared with the earlier outputs.
+Final map storage uses a different compression level, without reducing quality.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .binary import FormatError
+from tools.asset_pipeline.fast_refpack import decode as fast_decode
 
 
 def _copy_backref(output: bytearray, distance: int, count: int) -> None:
@@ -40,6 +41,10 @@ def decompress(data: bytes, expected_size: int | None = None) -> bytes:
             f"{expected_size}"
         )
 
+    if expected_size is not None:
+        try: decoded = fast_decode(data, expected_size, position)
+        except ValueError as error: raise FormatError(str(error)) from error
+        if decoded is not None: return decoded
     output = bytearray()
 
     def literal(count: int) -> None:

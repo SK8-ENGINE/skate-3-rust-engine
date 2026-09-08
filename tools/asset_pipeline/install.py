@@ -1,11 +1,26 @@
 """Local owned-disc installation. No game content is downloaded or packaged."""
 from pathlib import Path
 import hashlib,json,os,shutil,subprocess,sys,urllib.request,uuid,zipfile
+from concurrent.futures import ThreadPoolExecutor,as_completed
 from tools.owned_game.big import BigArchive
 from .vlt import convert as convert_vlt
 from .physics_skeleton import convert as convert_skeleton
 
 TOOLS=Path(__file__).resolve().parents[1]
+
+def map_workers():
+    count=min(3,max(1,(os.cpu_count() or 1)//2))
+    if os.name=='nt':
+        import ctypes
+        class Memory(ctypes.Structure):
+            _fields_=[('length',ctypes.c_ulong),('load',ctypes.c_ulong)]+[(name,ctypes.c_ulonglong) for name in
+                ('total','available','page_total','page_available','virtual_total','virtual_available','extended')]
+        memory=Memory();memory.length=ctypes.sizeof(memory)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):
+            # Reserve memory for the desktop; each map and its loader can
+            # briefly hold several copies of geometry and textures.
+            count=min(count,max(1,(memory.available-2*1024**3)//(3*1024**3)))
+    return count
 XISO_URL='https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso-Win64_Release.zip'
 XISO_SHA='fec88d03c7efd6205ab09be4abba70c0afd0eb27a5709f0a6235b828ba5ac11e'
 
@@ -100,7 +115,7 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
         package_name='Skate 3 owned disc',cache_format='skate3-rust-map-v1',
         # Smaller parks keep their textures in Pres rather than a Tex stream.
         texture_stream_names=('Tex',) if any(stream.glob('cTex_*.xsf')) else (),
-        excluded_normal_texture_ids=EXCLUDED_NORMAL_TEXTURE_IDS)
+        excluded_normal_texture_ids=EXCLUDED_NORMAL_TEXTURE_IDS,raw_texture_cache=True)
     collision=district_work/'collision.rwcmset'
     build_archive(manifest_path,collision)
     final=maps/(label+'.skate')
@@ -181,10 +196,23 @@ def install(iso,base,game_exe,report,game_root=None):
             run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
             archives=list((game_root/'data/content').glob('worldDIST_*.big'))
             archives.sort(key=lambda p:(p.stem!='worldDIST_University',p.name.lower()))
-            catalog=[]
-            for number,archive in enumerate(archives,1):
-                report(f'Converting map {number}/{len(archives)}: {archive.stem}')
-                catalog.append(convert_map(archive,work,maps,stage,game_exe,log,report))
+            workers=map_workers()
+            report(f'Converting {len(archives)} maps with {workers} workers')
+            def map_job(archive):
+                result=work/(archive.stem+'.json')
+                with (stage/(archive.stem+'-conversion.log')).open('w',encoding='utf-8') as map_log:
+                    run(task(TOOLS/'asset_pipeline/map_job.py','--archive',archive,'--stage',stage,
+                             '--game-exe',game_exe,'--result',result),map_log,report)
+                return json.loads(result.read_text(encoding='utf-8'))
+            completed={}
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                # Start the expensive districts together so one does not
+                # remain queued behind a string of small parks.
+                futures={pool.submit(map_job,a):a for a in sorted(archives,key=lambda p:-p.stat().st_size)}
+                for future in as_completed(futures):
+                    archive=futures[future];completed[archive.name]=future.result()
+                    report(f"Converted {len(completed)}/{len(archives)} maps: {completed[archive.name]['name']}")
+            catalog=[completed[a.name] for a in archives]
             if not any(m['name']=='University' for m in catalog):raise RuntimeError('University was not converted')
             report('Validating installed runtime inputs')
             run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)

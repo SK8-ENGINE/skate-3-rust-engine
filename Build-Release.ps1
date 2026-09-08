@@ -12,6 +12,9 @@ try {
     $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static'
     & cargo build --release --locked --target x86_64-pc-windows-msvc -p skate-game --no-default-features
     if ($LASTEXITCODE -ne 0) { throw 'Release compilation failed' }
+    New-Item -ItemType Directory -Path target/native -Force | Out-Null
+    & rustc --edition 2024 --crate-type cdylib -C opt-level=3 -C panic=abort -C target-feature=+crt-static tools/asset_pipeline/refpack_native.rs -o target/native/refpack.dll
+    if ($LASTEXITCODE -ne 0) { throw 'Native converter compilation failed' }
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $stage = Join-Path $PSScriptRoot "target/release-packages/$stamp/skate3rust-windows-x64"
     New-Item -ItemType Directory -Path "$stage/support" -Force | Out-Null
@@ -33,6 +36,7 @@ try {
     & $packagePython -m PyInstaller --noconfirm --clean --onefile --name skate3setup `
         --icon "$PSScriptRoot/docs/images/skating-crab.ico" --paths $PSScriptRoot `
         --hidden-import numpy --hidden-import PIL.Image --hidden-import tkinter `
+        --add-binary "$PSScriptRoot/target/native/refpack.dll;tools/asset_pipeline" `
         --exclude-module bpy --exclude-module mathutils `
         --copy-metadata numpy --copy-metadata Pillow --copy-metadata PyInstaller `
         --add-data "$sourceStage/tools;tools" --add-data "$PSScriptRoot/docs/images/skating-crab.ico;docs/images" `
