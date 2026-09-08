@@ -35,6 +35,11 @@ pub(crate) struct Vehicles {
     clock: f32,
     hidden: Vec<(Entity, Visibility)>,
     pub(crate) pose: Option<Vec<Mat4>>,
+    last_visual: Vec<(Entity, Transform)>,
+    blend_from: Vec<(Entity, Transform)>,
+    visual_phase: String,
+    blend_time: f32,
+    steering_visual: f32,
 }
 impl Vehicles {
     pub(crate) fn occupied(&self) -> bool {
@@ -178,6 +183,7 @@ pub(super) fn clear(world: &mut World) {
         }
         v.driver = None;
         v.pose = None;
+        v.last_visual.clear();v.blend_from.clear();v.visual_phase.clear();v.steering_visual=0.;
         v.simulation = Simulation::default();
         v.events.clear();
     });
@@ -361,6 +367,7 @@ pub(super) fn command(
                     if d.owner != owner || d.key != key {
                         return Ok(());
                     }
+                    if d.phase != "driving" { return Ok(()); }
                 }
                 if let Some(i) = v.owned.get(&owned_key) {
                     if v.simulation.vehicles[&i.id]
@@ -483,6 +490,17 @@ fn tick(world: &mut World) {
     });
 }
 pub(crate) fn present(world: &mut World) {
+    let dt=world.resource::<Time<Virtual>>().delta_secs();
+    let phase=world.resource::<Vehicles>().driver.as_ref().map_or("vanilla",|d|d.phase).to_owned();
+    let current=crate::animation::capture_vehicle_visual(world);
+    {
+        let mut v=world.resource_mut::<Vehicles>();
+        if phase!=v.visual_phase {
+            v.blend_from=if v.last_visual.is_empty() {current} else {v.last_visual.clone()};
+            v.visual_phase=phase;v.blend_time=0.;
+        }
+        v.blend_time+=dt;
+    }
     world.resource_scope(|world, mut v: Mut<Vehicles>| {
         let failures: Vec<_> = v
             .owned
@@ -592,10 +610,6 @@ pub(crate) fn present(world: &mut World) {
                     a.brake.as_ref()
                 } else if car.controller.current_vehicle_speed < -0.5 {
                     a.reverse.as_ref()
-                } else if car.controls.steering > 0.2 {
-                    a.steer_left.as_ref()
-                } else if car.controls.steering < -0.2 {
-                    a.steer_right.as_ref()
                 } else if car.controller.current_vehicle_speed.abs() > 0.5 {
                     a.drive.as_ref()
                 } else {
@@ -604,10 +618,14 @@ pub(crate) fn present(world: &mut World) {
             }
         }
         .or(a.drive.as_ref());
+        let target_steering=car.controls.steering;
+        let steering=v.steering_visual+(target_steering-v.steering_visual)*(1.-(-12.*dt).exp());
         let pose = i.clips.pose(name, d.time, d.phase == "driving");
+        let turn=if d.phase=="driving" {i.clips.pose(if steering>=0. {a.steer_left.as_ref()} else {a.steer_right.as_ref()},d.time,true)} else {None};
         let (p, q) = v.simulation.pose(i.id).unwrap();
         let q = Quat::from_array(q);
         let seat = Vec3::from_array(p) + q * Vec3::from_array(car.definition.seat);
+        v.steering_visual=steering;
         let roots: Vec<_> = world
             .query_filtered::<Entity, With<crate::world::PlayerRoot>>()
             .iter(world)
@@ -630,9 +648,17 @@ pub(crate) fn present(world: &mut World) {
             }
         }
         if let Some(pose) = &pose {
-            crate::animation::vehicle_pose(world, pose);
+            crate::animation::vehicle_pose(world, pose, turn.as_deref().map(|p|(p,steering.abs())));
         }
         v.pose = pose;
+    });
+    world.resource_scope(|world,mut v:Mut<Vehicles>| {
+        let duration=if v.visual_phase=="vanilla" {0.5} else {0.4};
+        if v.blend_time<duration {
+            let t=(v.blend_time/duration).clamp(0.,1.);
+            crate::animation::blend_vehicle_visual(world,&v.blend_from,t*t*(3.-2.*t));
+        } else {v.blend_from.clear();}
+        v.last_visual=crate::animation::capture_vehicle_visual(world);
     });
 }
 

@@ -160,3 +160,13 @@ network synchronization, engine audio or a racing ruleset.
 
 Verification uses headless Rapier tests and window-free Lua tests. The game is
 not launched automatically; rendering, entry/exit and handling need manual playtesting.
+
+### Rider transitions and steering
+The host blends vehicle phase changes over 0.4 seconds and the return to vanilla over
+0.5 seconds, using the game's bone-local translation/scale lerp and quaternion slerp.
+Steering input is smoothed and blends the current driving pose towards steer_left or
+steer_right continuously, so these slots should contain compatible seated poses.
+Vehicle camera hand-offs ease over 0.5 seconds; the follow camera is damped while driving.
+The board root is scaled away during vehicle playback and restored by the vanilla blend.
+The local Mario Kart package supplies fitted entry/exit, seated and steering clips;
+its proprietary rider.json is generated locally and is not included in source control.

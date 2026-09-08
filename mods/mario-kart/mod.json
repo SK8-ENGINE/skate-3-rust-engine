@@ -2,9 +2,9 @@
   "id": "community.mario-kart",
   "api": 1,
   "name": "Mario Kart",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "author": "Local vehicle SDK example",
-  "description": "Rapier kart using your supplied model. F10 spawns nearby, E enters/exits, WASD drives, Space brakes, Shift handbrake, R resets. Slow down before exiting. Animation hooks are in vehicle.json.",
+  "description": "Rapier kart using your supplied model. F10 spawns nearby, E enters/exits, WASD drives, Space brakes, Shift handbrake, R resets. Slow down before exiting. Fitted entry/exit and steering animations included locally.",
   "entry": "main.lua",
   "settings": {
     "engine": {

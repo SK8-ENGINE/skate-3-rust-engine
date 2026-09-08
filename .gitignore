@@ -31,3 +31,5 @@ __pycache__/
 .env.*
 *.pem
 *.key
+
+/mods/mario-kart/rider.json

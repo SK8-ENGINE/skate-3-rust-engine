@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $privateDirectory = Join-Path $PSScriptRoot '.local/vehicle-sdk'
 $buildDirectory = Join-Path $privateDirectory 'build'
 $artifact = Join-Path $buildDirectory 'skate3rust-vehicle-sdk.exe'
-$destination = Join-Path $privateDirectory 'skate3-vehicle-sdk-controls.exe'
+$destination = Join-Path $privateDirectory 'skate3-vehicle-animations.exe'
 Push-Location $PSScriptRoot
 $previousFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
 try {
@@ -43,7 +43,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'mods/README.md') -Destination (Join-Path $privateDirectory 'mods/README.md') -Force
     $kartDestination = Join-Path $privateDirectory 'mods/mario-kart'
     New-Item -ItemType Directory -Force -Path $kartDestination | Out-Null
-    foreach ($name in @('mod.json','main.lua','vehicle.json','README.md','kart.glb')) {
+    foreach ($name in @('mod.json','main.lua','vehicle.json','README.md','kart.glb','rider.json')) {
         $source = Join-Path $PSScriptRoot "mods/mario-kart/$name"
         $target = Join-Path $kartDestination $name
         if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath $source -Destination $target }

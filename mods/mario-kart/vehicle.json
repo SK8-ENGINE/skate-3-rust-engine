@@ -63,8 +63,8 @@
   ],
   "seat": [
     0,
-    0.15,
-    -0.15
+    0.18,
+    -0.2
   ],
   "exit": [
     1.8,
@@ -74,14 +74,14 @@
   "camera_distance": 5,
   "camera_height": 2,
   "animations": {
-    "file": null,
-    "enter": null,
-    "exit": null,
-    "drive": null,
-    "idle": null,
-    "reverse": null,
-    "brake": null,
-    "steer_left": null,
-    "steer_right": null
+    "file": "rider.json",
+    "enter": "enter",
+    "exit": "exit",
+    "drive": "drive",
+    "idle": "drive",
+    "reverse": "drive",
+    "brake": "drive",
+    "steer_left": "steer_left",
+    "steer_right": "steer_right"
   }
 }
