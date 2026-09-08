@@ -107,7 +107,7 @@ def prepare(config):
                     mat=catalog['materials'][mid];tex={t['channel']:t['id'] for t in mat['textures']}
                     if 'diffuse' not in tex:continue
                     diffuse=texture(tex['diffuse'])
-                    if 'alpha' in tex:
+                    if 'alpha' in tex and slot!='Hair':
                         alpha_path=assets/texture(tex['alpha']);combined=out/'textures'/(tex['diffuse']+'_'+tex['alpha']+'.png')
                         if not combined.exists():
                             im=Image.open(assets/diffuse).convert('RGBA');alpha=Image.open(alpha_path).convert('RGBA')
@@ -118,6 +118,7 @@ def prepare(config):
                     mat_data[mid]=dict(name=variant_label(slot,model['name'],v['name']),flags={k[4:]:val for k,val in mat['flags'].items() if val},
                         diffuse=diffuse,normal=texture(tex['normal'],'normal') if 'normal' in tex else None,
                         rough=texture(tex['specular'],'rough') if 'specular' in tex else None,
+                        opacity=texture(tex['alpha']) if slot=='Hair' and 'alpha' in tex else None,
                         alpha='alpha' in tex,tint=defaults.get(mid,{}).get('tint',
                             [0.72,0.57,0.49] if mat['flags'].get('cas.SkinTone')=='light' else
                             [0.33,0.26,0.23] if mat['flags'].get('cas.SkinTone')=='dark' else
@@ -148,7 +149,7 @@ def prepare(config):
     colours.sort(key=lambda c:c['name'])
     library=dict(version=3,colours=colours,tattoos=tattoos,models=model_data,materials=mat_data,defaults={'male':male,'female':female},
                  morphs=recipe_base['morph_assembly']['live_targets'],errors=errors)
-    (cache/'library.json').write_text(json.dumps(library,separators=(',',':')))
+    (cache/config.get('library_index','library.json')).write_text(json.dumps(library,separators=(',',':')))
     print('LIBRARY_READY',len(model_data),len(mat_data),'errors',errors,flush=True)
     return library
 

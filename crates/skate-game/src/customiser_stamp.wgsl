@@ -7,6 +7,8 @@ struct SkinStamp {
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var stamp_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var stamp_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var hair_opacity: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(104) var hair_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> stamp: SkinStamp;
 #import bevy_pbr::{
     pbr_types,
@@ -77,6 +79,10 @@ fn fragment(
 
 
 #ifdef VERTEX_UVS_B
+    // The diffuse alpha is NOT coverage. Hair has a separate red-channel
+    // opacity map on secondary UVs (cac_hair_defaultVS/PS).
+    let hair_alpha = textureSample(hair_opacity, hair_sampler, in.uv_b).r;
+    pbr_input.material.base_color.a = mix(pbr_input.material.base_color.a, hair_alpha, stamp.enabled.y);
     // cacstamp_skin_defaultPS: skin * (1 + (decal.rgb - 1) * decal.a).
     // Its VS transforms TEXCOORD1 by the two i_customGraphic rows.
     let stamp_uv = in.uv_b * stamp.transform.xy + stamp.transform.zw;

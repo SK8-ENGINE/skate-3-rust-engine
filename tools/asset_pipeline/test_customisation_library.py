@@ -61,6 +61,9 @@ class LibraryTests(unittest.TestCase):
                     for target in primitive['targets']:
                         self.assertEqual(len(array(target['POSITION'])),count)
                         self.assertEqual(len(array(target['NORMAL'])),count)
+                    if part['slot'] == 'Hair':
+                        self.assertIn('TEXCOORD_1', a)
+                        self.assertEqual(len(array(a['TEXCOORD_1'])), count)
                     if (part['slot']=='Arm' and part['flags'].get('ArmModelType')=='shoulder') or (part['slot']=='Leg' and part['flags'].get('LegModelType') in ['thigh','thighdown'] and part['flags'].get('RequiresSockStyle','none') in ['','none']):
                         uv = array(a['TEXCOORD_1'])
                         for side in ['Q3','Q4']:
@@ -68,8 +71,22 @@ class LibraryTests(unittest.TestCase):
                             inside=(uv[:,0]>=left)&(uv[:,0]<=right)&(uv[:,1]>=1-top)&(uv[:,1]<=1-bottom)
                             self.assertTrue(inside.any(),part['name']+' '+side)
         for material in library['materials'].values():
-            for channel in ['diffuse','normal','rough']:
-                if material[channel]: self.assertTrue((assets/material[channel]).is_file())
+            for channel in ['diffuse','normal','rough','opacity']:
+                if material.get(channel): self.assertTrue((assets/material[channel]).is_file())
+        # V3 preserves the native hair opacity texture independently of diffuse.
+        hair = [m for m in library['materials'].values() if m.get('opacity')]
+        self.assertEqual(len(hair), 31)
+        for material in hair:
+            self.assertNotEqual(material['diffuse'], material['opacity'])
+            self.assertIn('/decoded/', material['diffuse'])
+            self.assertTrue(material['alpha'])
+        # Native moussed-up hair demonstrates why diffuse A cannot be coverage.
+        from PIL import Image
+        sample = library['materials']['00000c5603e38817']
+        diffuse = np.asarray(Image.open(assets/sample['diffuse']).convert('RGBA'))
+        opacity = np.asarray(Image.open(assets/sample['opacity']).convert('RGBA'))
+        self.assertLess(np.mean(diffuse[:,:,3] >= 128), .01)
+        self.assertGreater(np.mean(opacity[:,:,0] >= 128), .4)
         for tattoo in library['tattoos'].values():
             self.assertTrue((assets/tattoo['texture']).is_file())
 

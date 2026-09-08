@@ -1,9 +1,53 @@
-# Character customiser V2
+# Character customiser V3
 
-The dedicated local test build uses `Play Character Customiser V2.bat` and
-`skate3rust-customiser-v2.exe`. Open Escape/Start, then Character customiser.
+The dedicated local test build uses `Play Character Customiser V3.bat` and
+`skate3rust-customiser-v3.exe`. Open Escape/Start, then Character customiser.
 The game and launcher have not been executed for validation; the build is ready
 for user playtesting. No existing game executable is replaced.
+
+## Hair coverage and gameplay verification (V3)
+
+Hair now uses its independent opacity texture's **red channel on TEXCOORD1**.
+The owned `cac_hair_defaultVS` copies primary/secondary UVs into XY/ZW, and
+`cac_hair_defaultPS` samples diffuse RGB from XY and opacity R from ZW. Output
+alpha is opacity R times `i_params.x`. The old combined diffuse-alpha texture
+was incorrect: on the moussed-up example only 0.29% of diffuse pixels exceed the
+0.5 cutoff, versus 42.18% of the opacity red channel. That discarded most raised
+hair geometry. All 31 opacity-bearing hair materials now retain separate maps.
+Thin hair cards render from both sides. The colour and depth/shadow passes use
+the same corrected coverage; existing PBR lighting formulas remain unchanged.
+
+V3 uses `library-v3.json` when present, with a legacy `library.json` fallback.
+For side-by-side preparation set `"library_index":"library-v3.json"` in the
+private preparation config. V2's index, executable and launcher are retained.
+
+Offline checks use the same `apply_preferences` function called by the menu,
+then the real stock actor publication, processed physics input and consumers:
+
+- Truck tightness reaches processed field 2760. At identical steering input,
+  loose/default/tight produce tilt 0.08955247 / 0.07074646 / 0.062686734. The
+  tight/loose ratio is the loaded native `tight_trucks_scalar`, 0.7.
+- Wheel hardness reaches processed field 2764. At identical sideways travel,
+  soft/default/hard produce side force -23.31247 / -15.153105 / -11.656235.
+  Ratios match `physicswheels/default/SoftestWheelSideFrictionScalar` from the
+  extracted collection data. Straightening torque also changes, from -1.113991
+  to 1.1697853 at the endpoints. These are controlled test samples, not universal
+  steering angles, grip percentages or speed ratings.
+- Standard/Loose/Gonzo/Aggressive select distinct stock push clips through the
+  `PROSKATER` selector: default, Hsu, Gonzales and PJ respectively. Evaluated bone
+  poses differ. Stiff/Slouch/Buff add their respective authored posture poses
+  and change the evaluated result. Switching natural stance changes its basis
+  and switching back restores it.
+
+The stock riding idle is shared between styles. Style differences appear in
+specific authored movements (including pushes and selected tricks), and posture
+is applied on eligible motion-tree construction. Wheel/truck merchandise models
+are appearance choices; **Wheel hardness** and **Truck tightness** are the native
+handling controls. No invented brand-dependent statistics are added.
+
+Shader validation covers colour, depth/shadow and normal prepass paths, each
+with and without secondary UVs. Tests run without a game window or GPU. The hair
+fix still needs the user's visual playtest; no game process was launched here.
 
 ## Menu and controls
 
@@ -75,9 +119,9 @@ python -m tools.asset_pipeline.customisation_library <private-worker.json>
 python -m tools.asset_pipeline.customisation_profiles <private-customisation-directory>
 ```
 
-The old worker remains an offline compatibility tool. It is not the V2 runtime.
+The old worker remains an offline compatibility tool. It is not the runtime.
 
-Validation: 21 Python tests and five Rust customiser tests pass. Owned-data checks
+Validation: 21 Python tests and eight Rust customiser tests pass. Owned-data checks
 cover all 480 GLBs, indices, skin weights, 22 GPU target slots, texture references,
 both default outfits, all selectable model/material combinations against those
 outfits, presets, search, colour selection, JSON round trips, and temporary tattoo

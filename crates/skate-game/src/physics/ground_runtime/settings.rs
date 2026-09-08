@@ -293,3 +293,21 @@ mod tests {
         super::super::GroundState::load(&data, "default", true).unwrap();
     }
 }
+
+#[cfg(test)]
+#[test]
+#[ignore = "requires extracted private stock collections"]
+fn customiser_truck_tightness_changes_authored_steering() {
+    use skate_core::riding::steering::{SteeringInput, calculate_tilt};
+    let root = std::path::PathBuf::from(std::env::var_os("SKATE3_ASSET_ROOT").unwrap());
+    let data = Collections::load(&root).unwrap();
+    let settings = GroundSettings::load(&data, "default", "default").unwrap();
+    let samples: Vec<_> = [0.0, 0.7, 1.0].into_iter().map(|tightness| calculate_tilt(
+        &settings.steering,
+        SteeringInput { turn: 0.6, absolute_body_speed: 5.0, flipped_controls_scalar: 1.0,
+            truck_tightness: tightness, ..Default::default() }, None, None,
+    )).collect();
+    assert!(samples[0].abs() > samples[2].abs());
+    assert!((samples[2] / samples[0] - settings.steering.tight_trucks_scalar).abs() < 0.00001);
+    eprintln!("Authored truck tightness tilt samples: {samples:?}; tight scalar {}", settings.steering.tight_trucks_scalar);
+}

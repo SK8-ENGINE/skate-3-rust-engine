@@ -26,6 +26,8 @@ pub(crate) struct Material {
     normal: Option<String>,
     rough: Option<String>,
     alpha: bool,
+    #[serde(default)]
+    opacity: Option<String>,
     tint: [f32; 3],
     metallic: f32,
     roughness: f32,
@@ -413,12 +415,19 @@ impl Parts {
         let diffuse = load(&m.diffuse, false);
         let normal = m.normal.as_ref().map(|p| load(p, true));
         let rough = m.rough.as_ref().map(|p| load(p, true));
+        let opacity = m.opacity.as_ref().map(|p| load(p, true));
         let material = materials.add(SkaterMaterial {
             base: StandardMaterial {
                 base_color: Color::srgb(m.tint[0], m.tint[1], m.tint[2]),
                 base_color_texture: Some(diffuse),
                 normal_map_texture: normal,
                 metallic_roughness_texture: rough,
+                double_sided: m.opacity.is_some(),
+                cull_mode: if m.opacity.is_some() {
+                    None
+                } else {
+                    Some(bevy::render::render_resource::Face::Back)
+                },
                 metallic: m.metallic,
                 perceptual_roughness: if m.rough.is_some() { 1. } else { m.roughness },
                 alpha_mode: if m.alpha {
@@ -428,7 +437,15 @@ impl Parts {
                 },
                 ..default()
             },
-            extension: SkinStamp::default(),
+            extension: SkinStamp {
+                hair_opacity: opacity,
+                enabled: if m.opacity.is_some() {
+                    Vec4::Y
+                } else {
+                    Vec4::ZERO
+                },
+                ..default()
+            },
         });
         self.materials.insert(id.into(), (material, images));
     }
@@ -438,10 +455,15 @@ pub(crate) fn setup(
     config: Res<crate::config::Config>,
     server: Res<AssetServer>,
 ) {
-    let library = std::fs::read(config.asset_root.join("private/customisation/library.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice::<Library>(&b).ok())
-        .unwrap_or_default();
+    let library = std::fs::read(
+        config
+            .asset_root
+            .join("private/customisation/library-v3.json"),
+    )
+    .or_else(|_| std::fs::read(config.asset_root.join("private/customisation/library.json")))
+    .ok()
+    .and_then(|b| serde_json::from_slice::<Library>(&b).ok())
+    .unwrap_or_default();
     let geometry = library
         .models
         .iter()
@@ -638,7 +660,17 @@ pub(crate) fn update(
         let selected = stamp["id"]
             .as_str()
             .and_then(|id| parts.library.tattoos.get(id).map(|t| (id, t)));
-        let mut extension = SkinStamp::default();
+        let mut extension = SkinStamp {
+            hair_opacity: materials
+                .get(&handle)
+                .and_then(|m| m.extension.hair_opacity.clone()),
+            enabled: if source.opacity.is_some() {
+                Vec4::Y
+            } else {
+                Vec4::ZERO
+            },
+            ..default()
+        };
         if let Some((tid, t)) = selected {
             let key = match stamp["side"].as_u64().unwrap_or(0) {
                 1 => "StampUVConstraintQ4",
@@ -659,6 +691,7 @@ pub(crate) fn update(
                     transform,
                     rectangle,
                     enabled: Vec4::X,
+                    ..default()
                 };
             }
         }

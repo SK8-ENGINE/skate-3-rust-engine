@@ -973,11 +973,18 @@ fn preferences(
     mut physics: ResMut<crate::physics::GamePhysics>,
     mut skater: ResMut<crate::physics::SkaterRuntime>,
 ) {
+    apply_preferences(&state.draft, &mut physics, &mut skater.animation);
+}
+pub(crate) fn apply_preferences(
+    profile: &Value,
+    physics: &mut crate::physics::GamePhysics,
+    animation: &mut crate::skater_animation::SkaterAnimation,
+) {
     physics.set_equipment_preferences(
-        scalar(&state.draft, "truck", 0.7) as f32,
-        scalar(&state.draft, "wheel", 0.7) as f32,
+        scalar(profile, "truck", 0.7) as f32,
+        scalar(profile, "wheel", 0.7) as f32,
     );
-    physics.set_gesture_preferences(state.draft["gestures"].as_object().map(|g| {
+    physics.set_gesture_preferences(profile["gestures"].as_object().map(|g| {
         // ResetGestureSet824FA730 marks all 37 entries available and selects
         // the first four in table order for Up,Down,Left,Right.
         std::array::from_fn(|i| {
@@ -986,16 +993,15 @@ fn preferences(
                 .unwrap_or(i as u64) as u32
         })
     }));
-    skater.animation.set_customisation(
-        scalar(&state.draft, "stance", 1.) as u32,
-        scalar(&state.draft, "style", 0.) as u32,
+    animation.set_customisation(
+        scalar(profile, "stance", 1.) as u32,
+        scalar(profile, "style", 0.) as u32,
     );
-    skater
-        .animation
+    animation
         .motion
         .animation
         .posture
-        .set_profile(scalar(&state.draft, "posture", 0.) as u32);
+        .set_profile(scalar(profile, "posture", 0.) as u32);
 }
 fn draw(
     mut commands: Commands,

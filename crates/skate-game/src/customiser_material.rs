@@ -14,6 +14,10 @@ pub(crate) struct SkinStamp {
     #[texture(100)]
     #[sampler(101)]
     pub texture: Option<Handle<Image>>,
+    /// cac_hair_defaultPS samples opacity.r on TEXCOORD1, independently of diffuse alpha.
+    #[texture(103)]
+    #[sampler(104)]
+    pub hair_opacity: Option<Handle<Image>>,
     /// Scale.xy, translation.zw in the authored secondary UV stream.
     #[uniform(102)]
     pub transform: Vec4,
@@ -27,12 +31,16 @@ impl MaterialExtension for SkinStamp {
     fn fragment_shader() -> ShaderRef {
         "embedded://skate3rust/customiser_stamp.wgsl".into()
     }
+    fn prepass_fragment_shader() -> ShaderRef {
+        "embedded://skate3rust/customiser_prepass.wgsl".into()
+    }
     fn deferred_fragment_shader() -> ShaderRef {
         Self::fragment_shader()
     }
 }
 pub(crate) fn register(app: &mut App) {
     embedded_asset!(app, "customiser_stamp.wgsl");
+    embedded_asset!(app, "customiser_prepass.wgsl");
     app.add_plugins(MaterialPlugin::<SkaterMaterial>::default());
 }
 
@@ -118,28 +126,57 @@ mod tests {
             let h = assets.add(shader.clone());
             cache.set_shader(h.id(), shader);
         }
-        let shader = Shader::from_wgsl(
-            include_str!("customiser_stamp.wgsl"),
-            "customiser_stamp.wgsl",
-        );
-        let h = assets.add(shader.clone());
-        cache.set_shader(h.id(), shader);
-        for secondary_uv in [false, true] {
-            let mut d = defs.clone();
-            for name in [
-                "VERTEX_UVS_A",
-                "VERTEX_OUTPUT_INSTANCE_INDEX",
-                "VERTEX_NORMALS",
-                "MESH_PIPELINE",
-                "STANDARD_MATERIAL",
-                "STANDARD_MATERIAL_BASE_COLOR_TEXTURE",
-            ] {
-                d.push(ShaderDefVal::Bool(name.into(), true));
+        for (source, path, prepass) in [
+            (
+                include_str!("customiser_stamp.wgsl"),
+                "customiser_stamp.wgsl",
+                false,
+            ),
+            (
+                include_str!("customiser_prepass.wgsl"),
+                "customiser_prepass.wgsl",
+                true,
+            ),
+        ] {
+            let shader = Shader::from_wgsl(source, path);
+            let h = assets.add(shader.clone());
+            cache.set_shader(h.id(), shader);
+            for secondary_uv in [false, true] {
+                let mut d = defs.clone();
+                for name in [
+                    "VERTEX_UVS",
+                    "MAY_DISCARD",
+                    "VERTEX_UVS_A",
+                    "VERTEX_OUTPUT_INSTANCE_INDEX",
+                    "VERTEX_NORMALS",
+                    "MESH_PIPELINE",
+                    "STANDARD_MATERIAL",
+                    "STANDARD_MATERIAL_BASE_COLOR_TEXTURE",
+                ] {
+                    d.push(ShaderDefVal::Bool(name.into(), true));
+                }
+                if secondary_uv {
+                    d.push(ShaderDefVal::Bool("VERTEX_UVS_B".into(), true));
+                }
+                if prepass {
+                    d.push(ShaderDefVal::Bool("PREPASS_PIPELINE".into(), true));
+                }
+                cache
+                    .get(&(), 0, h.id(), &d)
+                    .unwrap_or_else(|e| panic!("{path} secondary UV {secondary_uv}: {e:?}"));
+                if prepass {
+                    for name in [
+                        "PREPASS_FRAGMENT",
+                        "NORMAL_PREPASS",
+                        "NORMAL_PREPASS_OR_DEFERRED_PREPASS",
+                    ] {
+                        d.push(ShaderDefVal::Bool(name.into(), true));
+                    }
+                    cache
+                        .get(&(), 0, h.id(), &d)
+                        .unwrap_or_else(|e| panic!("Normal {path} UV {secondary_uv}: {e:?}"));
+                }
             }
-            if secondary_uv {
-                d.push(ShaderDefVal::Bool("VERTEX_UVS_B".into(), true));
-            }
-            cache.get(&(), 0, h.id(), &d).unwrap();
         }
     }
 }
