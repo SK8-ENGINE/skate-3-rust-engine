@@ -17,9 +17,10 @@ reference: https://github.com/NFSTools/VaultLib. Its lookup8 hash and record
 reader preserve data from the user's BIN/VLT files; no settings payload is
 bundled.
 
-First-run setup downloads Blender 5.0.1 and XboxDev extract-xiso from their
-publishers and verifies pinned SHA-256 hashes. Their distributions retain their
-own license files. Game assets are never downloaded from this project.
+Release setup is paused pending direct asset conversion. Blender is not
+downloaded by setup. The retained authoring scripts can use a separately
+supplied Blender executable. XboxDev extract-xiso retains its own license
+files. Game assets are never downloaded from this project.
 
 The setup executable bundles Python, NumPy, Pillow, Tcl/Tk and PyInstaller's
 bootloader. Their license information is retained by the packager alongside

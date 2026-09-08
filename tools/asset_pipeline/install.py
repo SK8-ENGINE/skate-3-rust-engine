@@ -6,8 +6,6 @@ from .vlt import convert as convert_vlt
 from .physics_skeleton import convert as convert_skeleton
 
 TOOLS=Path(__file__).resolve().parents[1]
-BLENDER_URL='https://download.blender.org/release/Blender5.0/blender-5.0.1-windows-x64.zip'
-BLENDER_SHA='921d77f6c505a35b2c2f6e67d4ad1c10b72418338ba0e0d3ea7f582a5e5fe46e'
 XISO_URL='https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso-Win64_Release.zip'
 XISO_SHA='fec88d03c7efd6205ab09be4abba70c0afd0eb27a5709f0a6235b828ba5ac11e'
 
@@ -53,7 +51,6 @@ def dependency(cache,name,url,sha,report):
     return executable
 
 def run(args,log,report):
-    report('Running '+Path(args[0]).name)
     kwargs={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
     external=os.name=='nt' and getattr(sys,'frozen',False) and Path(args[0]).resolve()!=Path(sys.executable).resolve()
     if external:
@@ -74,7 +71,6 @@ def run(args,log,report):
     with child as process:
         for line in process.stdout:
             log.write(line);log.flush()
-            if line.strip():report(line.strip()[-180:])
         if process.wait():raise RuntimeError('Conversion failed. See '+str(log.name))
 
 def task(script,*args):
@@ -110,6 +106,7 @@ def convert_map(archive,work,maps,stage,blender,game_exe,log,report):
     build_archive(manifest_path,collision)
     final=maps/(label+'.skate')
     embed_archive(raw_package,collision,final)
+    report('Checking converted map: '+label)
     run([game_exe,'--assets',stage/'assets','--map',final,'--check-assets'],log,report)
     entry={'name':label,'path':'maps/'+final.name,'sha256':digest(final)}
     remove_intermediate(district_work,work)
@@ -117,6 +114,10 @@ def convert_map(archive,work,maps,stage,blender,game_exe,log,report):
 
 
 def install(iso,base,game_exe,report,game_root=None):
+    raise RuntimeError('ISO setup is paused while direct asset conversion is implemented. No Blender will be downloaded or installed.')
+
+
+def _authoring_install(iso,base,game_exe,report,blender,game_root=None):
     base=base.resolve();base.mkdir(parents=True,exist_ok=True)
     lock=base/'setup.lock'
     try:fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
@@ -135,6 +136,7 @@ def install(iso,base,game_exe,report,game_root=None):
                 if not iso.is_file() or iso.suffix.lower()!='.iso':raise RuntimeError('Select an Xbox 360 Skate 3 ISO')
                 extractor=dependency(base/'tools','extract-xiso',XISO_URL,XISO_SHA,report)
                 game_root=work/'disc'
+                report('Extracting your ISO')
                 run([extractor,'-x',iso,'-d',game_root],log,report)
             else:game_root=game_root.resolve()
             for required in ['default.xex','data/big/miscload.big','data/big/miscboot.big','data/big/db.big',
@@ -166,9 +168,7 @@ def install(iso,base,game_exe,report,game_root=None):
             character=work/'character'
             run(task(TOOLS/'extract_default_skater.py','--owned-data-root',stock,'--work-root',character,
                      '--private-root',private/'default_skater','--utt-root',TOOLS/'vendor/utt'),log,report)
-            # Blender is a portable conversion dependency, downloaded from its
-            # publisher and hash checked. It is never installed system-wide.
-            blender=dependency(base/'tools','blender',BLENDER_URL,BLENDER_SHA,report)
+            report('Building the skater model and rig')
             blend=character/'skater.blend'
             run([blender,'--background','--factory-startup','--python-exit-code','1',
                  '--python',TOOLS/'vendor/skate3_anim/blender_rx2_abin_export.py','--',

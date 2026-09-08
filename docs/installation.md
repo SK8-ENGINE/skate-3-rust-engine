@@ -1,5 +1,10 @@
 # Windows installation
 
+**Paused:** the Blender-based conversion approach below was rejected. The
+public setup entry point and release packaging are disabled pending direct
+conversion. The notes below describe the earlier implementation, not a ready
+release. Setup no longer downloads Blender.
+
 `Build-Release.ps1` produces `target/skate3rust-windows-x64.zip`. Keep its
 `support` directory beside `skate3rust.exe`. The game links Bevy and the MSVC
 runtime statically; the setup helper bundles Python, NumPy, Pillow and Tcl/Tk.

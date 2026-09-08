@@ -1,5 +1,6 @@
 param()
 $ErrorActionPreference = 'Stop'
+throw 'Release packaging is paused until the Blender-free ISO converter is ready.'
 Push-Location $PSScriptRoot
 try {
     $packagePython = Join-Path $PSScriptRoot 'target/package-venv/Scripts/python.exe'

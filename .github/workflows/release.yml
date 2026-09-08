@@ -16,7 +16,7 @@ jobs:
           python-version: '3.13'
       - name: Install setup packager
         run: python -m pip install pyinstaller==6.19.0 numpy==2.2.6 Pillow==11.3.0
-      - name: Build source-only release
+      - name: Build Windows package
         shell: pwsh
         run: ./Build-Release.ps1
       - uses: actions/upload-artifact@v4
