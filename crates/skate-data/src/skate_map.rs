@@ -368,6 +368,22 @@ impl SkateMap {
     /// Data tools can request one worker for reproducible serial comparisons.
     /// The decoder caps concurrency at eight and skips threading for small maps.
     pub fn parse_with_decode_workers(data: &[u8], workers: usize) -> Result<Self, String> {
+        Self::parse_inner(data, workers, true)
+    }
+
+    /// Decode a supplemental presentation package without requiring collision.
+    /// Playable map loading continues to use `parse`/`load`.
+    pub fn parse_render_only(data: &[u8]) -> Result<Self, String> {
+        let map = Self::parse_inner(data, 4, false)?;
+        if !map.geometry.collision.is_empty() || !map.rails.is_empty()
+            || !map.doors.is_empty() || !map.lights.is_empty() || !map.routes.is_empty()
+            || map.extensions.iter().any(|e| e.tag != *b"WMET")
+        {
+            return Err("SKATE render-only package contains non-presentation data".into());
+        }
+        Ok(map)
+    }
+    fn parse_inner(data: &[u8], workers: usize, require_collision: bool) -> Result<Self, String> {
         let parse_started = Instant::now();
         let mut r = Reader { bytes: data, at: 0 };
         let magic = r.take(8)?;
@@ -671,7 +687,7 @@ impl SkateMap {
                 });
             }
         }
-        if geometry.collision.is_empty() && !extensions.iter().any(|e| e.tag == *b"RWCM" && e.schema == 1 && !e.payload.is_empty()) {
+        if require_collision && geometry.collision.is_empty() && !extensions.iter().any(|e| e.tag == *b"RWCM" && e.schema == 1 && !e.payload.is_empty()) {
             return Err("SKATE requires triangle collision or an embedded RWCM archive".into());
         }
         if r.at != data.len() {

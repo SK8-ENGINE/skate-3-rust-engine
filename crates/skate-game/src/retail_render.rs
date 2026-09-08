@@ -1,14 +1,9 @@
 //! Retail world shading. See docs/retail-renderer.md for provenance and gaps.
 use bevy::{
     asset::{AssetPath, embedded_asset, embedded_path},
-    core_pipeline::{
-        core_3d::graph::Node3d,
-        fullscreen_material::{FullscreenMaterial, FullscreenMaterialPlugin},
-    },
     prelude::*,
     render::{
         extract_component::ExtractComponent,
-        render_graph::{InternedRenderLabel, RenderLabel},
         render_resource::{AsBindGroup, ShaderType},
     },
     shader::ShaderRef,
@@ -23,6 +18,15 @@ fn retail_shader(path: &str) -> ShaderRef {
 }
 impl Plugin for RetailRenderPlugin {
     fn build(&self, app: &mut App) {
+        shadow::install(app);
+        exposure::install(app);
+        if std::env::var_os("SKATE_WEATHERING_COMPARE").is_some_and(|v| v == "1") {
+            app.add_systems(Update, compare_weathering);
+        }
+        app.add_plugins(crate::retail_character::CharacterLightingPlugin);
+        if std::env::var_os("SKATE_DEBUG_FOLIAGE").is_some_and(|v| v == "1") {
+            eprintln!("SKATE_FOLIAGE_DEBUG: solid cyan tree-wall cards, magenta other foliage; alpha rejection disabled for foliage only");
+        }
         embedded_asset!(app, "retail_world.wgsl");
         embedded_asset!(app, "retail_tone.wgsl");
         embedded_asset!(app, "retail_depth.wgsl");
@@ -30,153 +34,67 @@ impl Plugin for RetailRenderPlugin {
         app.add_plugins((
             MaterialPlugin::<RetailWorldMaterial>::default(),
             MaterialPlugin::<RetailSkyMaterial>::default(),
-            FullscreenMaterialPlugin::<RetailTone>::default(),
         ));
     }
 }
 
+// Diagnostic only: mutate materials once per keypress, never continuously.
+// Separate bits preserve the original texture-presence flags for restoration.
+fn compare_weathering(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut mode: Local<u32>,
+    mut materials: ResMut<Assets<RetailWorldMaterial>>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+) {
+    if !keys.just_pressed(KeyCode::F8) { return; }
+    *mode = (*mode + 1) % 4;
+    let label = match *mode {
+        1 => "Repeating grime OFF; decals ON",
+        2 => "Repeating grime ON; decals OFF",
+        3 => "Repeating grime OFF; decals OFF",
+        _ => "Normal grime and decals ON",
+    };
+    for (_, material) in materials.iter_mut() {
+        let family = material.params.mode.x as u32;
+        if !(1..=8).contains(&family) { continue; }
+        let flags = material.params.mode.y as u32;
+        material.params.mode.y = ((flags & !768) | (*mode << 8)) as f32;
+    }
+    for mut window in &mut windows {
+        window.title = format!("Skate 3 - {label} [F8: next comparison]");
+    }
+    info!("WEATHERING_COMPARE: {label}");
+}
+
+#[path = "retail_exposure.rs"]
+mod exposure;
+
+#[path = "retail_shadow.rs"]
+mod shadow;
+pub(crate) use shadow::ShadowState;
+
 #[derive(Resource)]
 pub(crate) struct RetailScene(pub bool);
 
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub(crate) struct RetailSkyMaterial {
-    #[uniform(0)]
-    pub params: Vec4,
-    #[texture(1)]
-    #[sampler(2)]
-    pub diffuse: Handle<Image>,
-}
-impl Material for RetailSkyMaterial {
-    fn enable_prepass() -> bool {
-        false
-    }
-    fn enable_shadows() -> bool {
-        false
-    }
-    fn vertex_shader() -> ShaderRef {
-        retail_shader("retail_sky.wgsl")
-    }
-    fn fragment_shader() -> ShaderRef {
-        Self::vertex_shader()
-    }
-    fn specialize(
-        _: &bevy::pbr::MaterialPipeline,
-        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
-        _: &bevy::mesh::MeshVertexBufferLayoutRef,
-        _: bevy::pbr::MaterialPipelineKey<Self>,
-    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
-        descriptor.primitive.cull_mode = None;
-        if let Some(depth) = &mut descriptor.depth_stencil {
-            depth.depth_write_enabled = false;
-        }
-        Ok(())
-    }
-}
+#[path = "retail_sky.rs"]
+mod sky;
+pub(crate) use sky::{spawn_sky, RetailSkyMaterial};
 
-pub(crate) fn spawn_sky(
-    name: &str,
-    root: &std::path::Path,
-    commands: &mut crate::map_render::SceneCommands,
-    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
-    images: &mut impl crate::map_render::AssetSink<Image>,
-    materials: &mut impl crate::map_render::AssetSink<RetailSkyMaterial>,
-) {
-    // Parks need their authored sky selection from the environment controller;
-    // only these three district identities are currently resolved.
-    if !matches!(name, "University" | "DownTown" | "Industrial") {
-        return;
-    }
-    #[derive(serde::Deserialize)]
-    struct Sky {
-        width: u32,
-        height: u32,
-        positions: Vec<[f32; 3]>,
-        uvs: Vec<[f32; 2]>,
-        indices: Vec<u32>,
-    }
-    let load = || -> Result<(Sky, Vec<u8>), String> {
-        let base = root.join("private/native-skies");
-        let sky: Sky = serde_json::from_slice(
-            &std::fs::read(base.join(format!("{name}.json"))).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        let rgba = std::fs::read(base.join(format!("{name}.rgba"))).map_err(|e| e.to_string())?;
-        if sky.width == 0
-            || sky.height == 0
-            || u64::from(sky.width) * u64::from(sky.height) * 4 != rgba.len() as u64
-            || sky.positions.len() != sky.uvs.len()
-            || sky
-                .indices
-                .iter()
-                .any(|&i| i as usize >= sky.positions.len())
-        {
-            return Err("Invalid retail sky dimensions/geometry".into());
-        }
-        Ok((sky, rgba))
-    };
-    let (sky, rgba) = match load() {
-        Ok(v) => v,
-        Err(e) => {
-            warn!("Retail sky unavailable: {e}");
-            return;
-        }
-    };
-    let mut image = Image::new(
-        bevy::render::render_resource::Extent3d {
-            width: sky.width,
-            height: sky.height,
-            depth_or_array_layers: 1,
-        },
-        bevy::render::render_resource::TextureDimension::D2,
-        rgba,
-        bevy::render::render_resource::TextureFormat::Rgba8Unorm,
-        bevy::asset::RenderAssetUsages::RENDER_WORLD,
-    );
-    let mut sampler = bevy::image::ImageSamplerDescriptor::linear();
-    sampler.address_mode_u = bevy::image::ImageAddressMode::Repeat;
-    image.sampler = bevy::image::ImageSampler::Descriptor(sampler);
-    let mesh = Mesh::new(
-        bevy::mesh::PrimitiveTopology::TriangleList,
-        bevy::asset::RenderAssetUsages::RENDER_WORLD,
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, sky.positions)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, sky.uvs)
-    .with_inserted_indices(bevy::mesh::Indices::U32(sky.indices));
-    commands.spawn((
-        Name::new("Retail sky dome"),
-        Mesh3d(meshes.add(mesh)),
-        MeshMaterial3d(materials.add(RetailSkyMaterial {
-            params: Vec4::new(165., 2.5, 1., 0.),
-            diffuse: images.add(image),
-        })),
-        Transform::default(),
-        bevy::camera::visibility::NoFrustumCulling,
-        bevy::light::NotShadowCaster,
-        bevy::light::NotShadowReceiver,
-    ));
-}
+#[path = "retail_backdrop.rs"]
+mod backdrop;
+pub(crate) use backdrop::spawn_backdrop;
 
 #[derive(Component, ExtractComponent, Clone, Copy, ShaderType, Default)]
 pub(crate) struct RetailTone {
     pub enabled: Vec4,
-}
-impl FullscreenMaterial for RetailTone {
-    fn fragment_shader() -> ShaderRef {
-        retail_shader("retail_tone.wgsl")
-    }
-    fn node_edges() -> Vec<InternedRenderLabel> {
-        vec![
-            Node3d::Tonemapping.intern(),
-            Self::node_label().intern(),
-            Node3d::EndMainPassPostProcessing.intern(),
-        ]
-    }
 }
 
 #[derive(Clone, Debug, ShaderType)]
 pub(crate) struct WorldParams {
     // family, texture flags, alpha cutoff (-1 for opaque), exposure
     pub mode: Vec4,
+    // Diagnostic solid foliage colour; w=0 keeps retail shading.
+    pub foliage_debug: Vec4,
     // macro UV scale, opacity, detail UV scale, material multiplier
     pub surface: Vec4,
     // tree LM scale/floor/tint, proxy multiplier: reference day capture
@@ -184,6 +102,10 @@ pub(crate) struct WorldParams {
     pub fog_ramp: Vec4,
     pub fog_color: Vec4,
     pub shadow_color: Vec4,
+    pub sun_direction: Vec4,
+    // Wear-only visual tuning; artwork retains unit opacity.
+    pub decal: Vec4,
+    pub water: [Vec4; 4],
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -214,6 +136,8 @@ pub(crate) struct RetailWorldMaterial {
     pub specular: Option<Handle<Image>>,
     #[texture(15, dimension = "cube")]
     pub environment: Option<Handle<Image>>,
+    #[storage(16, read_only)]
+    pub shadow_state: Handle<bevy::render::storage::ShaderStorageBuffer>,
     pub alpha: AlphaMode,
     pub two_sided: bool,
 }
@@ -263,6 +187,7 @@ pub(crate) struct Binding {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Definition {
+    pub shader: String,
     pub family: u32,
     pub flags: u32,
     pub bindings: BTreeMap<String, Binding>,
@@ -287,8 +212,11 @@ impl Definition {
         }
         let mut r = Reader(bytes);
         r.take(16)?;
-        let _shader = r.text()?;
-        let family = r.u32()?;
+        let shader = r.text()?;
+        let stored_family = r.u32()?;
+        // Older map packages retained the complete bindings but classified
+        // non-flowing water as unknown. Upgrade without re-exporting geometry.
+        let family = if matches!(shader.as_str(), "water.default" | "water.alpha" | "water.skatepark") { 33 } else { stored_family };
         let flags = r.u32()?;
         let mut bindings = BTreeMap::new();
         for _ in 0..r.u32()? {
@@ -318,6 +246,7 @@ impl Definition {
             return None;
         }
         Some(Self {
+            shader,
             family,
             flags,
             bindings,
@@ -332,12 +261,19 @@ impl Definition {
             .ok()
             .filter(|v| v.is_finite())
     }
-    pub fn supported(&self) -> bool {
-        (1..=12).contains(&self.family) || self.family == 13
+    pub fn supported(&self, tuning: &MaterialTuning) -> bool {
+        (1..=13).contains(&self.family) || match self.family {
+            14 | 32 => tuning.rows.get(&self.shader).is_some_and(|r| !r.is_empty()),
+            31 => tuning.pca_available && tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 3),
+            30 => tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 4),
+            33 => tuning.pca_available && self.bindings.contains_key("normal") && self.bindings.contains_key("normal2") && tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 4),
+            _ => false,
+        }
     }
     pub fn build(
         &self,
         m: &skate_data::skate_map::Material,
+        tuning: &MaterialTuning,
         texture: &mut impl FnMut(u32, u8) -> Option<Handle<Image>>,
     ) -> RetailWorldMaterial {
         let mut fetch = |role: &str, fallback: u32, clamp: bool| {
@@ -345,7 +281,7 @@ impl Definition {
             texture(
                 b.map_or(fallback, |b| b.texture),
                 if clamp || b.is_some_and(|b| b.u == 1 && b.v == 1) {
-                    4
+                    if role == "decal" { 6 } else { 4 }
                 } else {
                     3
                 },
@@ -354,7 +290,7 @@ impl Definition {
         let diffuse = fetch("diffuse", m.textures[0], false);
         let lightmap = fetch("lightmap", m.textures[1], true);
         let normal = fetch("normal", m.textures[2], false);
-        let detail = fetch("detail", 0, false);
+        let detail = fetch(if matches!(self.family, 31 | 33) { "normal2" } else { "detail" }, 0, false);
         let macro_map = fetch("macrooverlay", 0, false);
         let decal = fetch("decal", 0, self.family == 3);
         let specular = fetch("specular", 0, false);
@@ -364,7 +300,7 @@ impl Definition {
         let detail_scale = self.scalar("detailNormalUVScale").unwrap_or(0.);
         let flags = u32::from(normal.is_some())
             | (u32::from(detail.is_some() && detail_scale > 0.) << 1)
-            | (u32::from(macro_map.is_some() && macro_scale > 0. && macro_opacity > 0.) << 2)
+            | (u32::from(macro_map.is_some() && macro_scale > 0. && (macro_opacity > 0. || self.family == 31)) << 2)
             | (u32::from(decal.is_some()) << 3)
             | (u32::from(specular.is_some()) << 4)
             | (u32::from(lightmap.is_some()) << 5)
@@ -372,24 +308,50 @@ impl Definition {
             | (u32::from(detail.is_some()) << 7);
         // scene.hlsl's retail world ALPHAREF is 30, not the portable 0.5.
         let cutoff = 30. / 255.;
-        let alpha = match m.alpha_mode {
-            1 => AlphaMode::Mask(cutoff),
-            2 => AlphaMode::Blend,
+        let debug_foliage = matches!(self.family, 9 | 10)
+            && std::env::var_os("SKATE_DEBUG_FOLIAGE").is_some_and(|v| v == "1");
+        let tree_wall = m.retail_definition.as_deref().is_some_and(|bytes| {
+            bytes.windows(b"TreeWall".len()).any(|s| s == b"TreeWall")
+        });
+        let alpha = match (debug_foliage, m.alpha_mode) {
+            (true, _) => AlphaMode::Opaque,
+            (_, 1) => AlphaMode::Mask(cutoff),
+            (_, 2) => AlphaMode::Blend,
             _ => AlphaMode::Opaque,
         };
+        let alpha = if self.family == 32 || (matches!(self.family, 30 | 33) && self.shader.ends_with("alpha")) {
+            AlphaMode::Blend
+        } else { alpha };
+        let mut water = [Vec4::ZERO; 4];
+        if let Some(rows) = tuning.rows.get(&self.shader) {
+            for (to, from) in water.iter_mut().zip(rows) { *to = Vec4::from_array(*from); }
+        }
+        if self.family == 14 {
+            water[1] = Vec4::new(self.scalar("uAnimationSpeed").unwrap_or(0.), self.scalar("vAnimationSpeed").unwrap_or(0.), 0., 0.);
+        }
         RetailWorldMaterial {
             params: WorldParams {
                 mode: Vec4::new(
                     self.family as f32,
                     flags as f32,
-                    if m.alpha_mode == 1 { cutoff } else { -1. },
+                    if m.alpha_mode == 1 && !debug_foliage { cutoff } else { -1. },
                     2.5,
                 ),
+                foliage_debug: if !debug_foliage {
+                    Vec4::ZERO
+                } else if tree_wall {
+                    Vec4::new(0., 1., 1., 1.)
+                } else {
+                    Vec4::new(1., 0., 1., 1.)
+                },
                 surface: Vec4::new(macro_scale, macro_opacity, detail_scale, 1.),
                 family: Vec4::new(0.3435, 0.02, 1., 0.45),
                 fog_ramp: Vec4::new(0., 0., 1., 0.),
                 fog_color: Vec4::ZERO,
                 shadow_color: Vec4::ZERO,
+                sun_direction: Vec3::new(4., 7., 4.).normalize().extend(0.),
+                decal: Vec4::new(stain_opacity(self.parameters.get("decal").and_then(|v| v.first()).map(String::as_str).unwrap_or("")), 0., 0., 0.),
+                water,
             },
             diffuse,
             lightmap,
@@ -399,8 +361,32 @@ impl Definition {
             decal,
             specular,
             environment,
+            shadow_state: shadow::BUFFER,
             alpha,
             two_sided: self.flags & 4 != 0,
+        }
+    }
+}
+
+// The source labels distinguish weathering from graphics. This is an explicit
+// visual tuning choice, not a recovered native material constant. Keep arrows,
+// logos, paint, scratches and edge wear at their authored alpha.
+fn stain_opacity(texture_label: &str) -> f32 {
+    let label = texture_label.to_ascii_lowercase();
+    if ["grime", "grunge", "stain", "oildirt", "drainage", "ground_decals"]
+        .iter().any(|word| label.contains(word)) { 0.35 } else { 1. }
+}
+
+#[cfg(test)]
+mod stain_tests {
+    use super::stain_opacity;
+    #[test]
+    fn weathering_tuning_preserves_artwork() {
+        for name in ["decal_WEAR_WaterStain_01", "subway_grunge03", "decal_GrimePuddle", "OT_Ground_decals"] {
+            assert_eq!(stain_opacity(name), 0.35);
+        }
+        for name in ["decal_Graphic_SP_UN_Shark_01", "decal_other_sp_arrowramps_01", "decal_Graphic_SP_UN_MegaRmp_01", "decal_Wear_GL_UN_MPedge_01", "decal_skateboardscratcheswood01", ""] {
+            assert_eq!(stain_opacity(name), 1.);
         }
     }
 }
@@ -444,3 +430,21 @@ pub(crate) fn mip_chain(rgba: &[u8], width: u32, height: u32, layers: u32) -> (V
     }
     (bytes, count)
 }
+
+
+#[derive(Default)]
+pub(crate) struct MaterialTuning {
+    rows: BTreeMap<String, Vec<[f32; 4]>>,
+    pca_available: bool,
+}
+impl MaterialTuning {
+    pub(crate) fn load(root: &std::path::Path) -> Self {
+        let path = root.join("private/render-parameters.json");
+        match std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<BTreeMap<String, Vec<[f32; 4]>>>(&b).ok()) {
+            Some(rows) if rows.values().flatten().flatten().all(|x| x.is_finite()) => Self { rows, pca_available: shadow::pca_available(root) },
+            _ => { warn!("Retail water/scroll tuning unavailable: {}", path.display()); Self::default() }
+        }
+    }
+}
+
+pub(crate) fn world_changed(mut messages: MessageReader<crate::map_transition::WorldChanged>) -> bool { messages.read().count() != 0 }

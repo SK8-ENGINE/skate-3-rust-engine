@@ -5,8 +5,8 @@
 #ifdef MOTION_VECTOR_PREPASS
 #import bevy_pbr::pbr_prepass_functions::calculate_motion_vector
 #endif
-struct WorldParams { mode: vec4<f32>, foliage_debug: vec4<f32>, surface: vec4<f32>, family: vec4<f32>, fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>, decal: vec4<f32>, water: array<vec4<f32>, 4> }
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: WorldParams;
+struct CharacterParams { light: vec4<f32>, tint: vec4<f32>, options: vec4<f32>, rows: array<vec4<f32>,9>, sh: array<vec4<f32>,9> }
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: CharacterParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var diffuse_sampler: sampler;
 @fragment
@@ -15,7 +15,7 @@ fn fragment(i: VertexOutput)
     -> FragmentOutput
 #endif
 {
-    if textureSample(diffuse,diffuse_sampler,i.uv).a < p.mode.z { discard; }
+    if textureSample(diffuse,diffuse_sampler,i.uv).a < p.options.z { discard; }
 #ifdef PREPASS_FRAGMENT
     var out: FragmentOutput;
 #ifdef NORMAL_PREPASS

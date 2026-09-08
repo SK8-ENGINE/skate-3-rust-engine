@@ -17,7 +17,9 @@ def _layout(units,width,pitch):
     y=(((m//(aligned>>5))<<2)+((t>>(6+log))&1)+((b&2048)>>10))<<3
     y+=(((t&(((pitch<<6)-1)&~31))+((t&15)<<1))>>(3+log))&~1
     y+=(t&16)>>4
-    dest=y*width+x;valid=dest<units
+    # Padded tile columns are outside the logical image. Flattening them
+    # first aliases them onto later rows and overwrites valid blocks.
+    dest=y*width+x;valid=(x<width)&(dest<units)
     # Match scalar last-write ordering even for narrow padded surfaces.
     source=np.full(units,-1,dtype=np.int64)
     np.maximum.at(source,dest[valid],offset[valid])
@@ -39,7 +41,9 @@ def _blocks(data,w,h,size):
 def _colour(b,transparent):
     c=b[:,:4].astype(np.uint32);c0=c[:,0]*256+c[:,1];c1=c[:,2]*256+c[:,3]
     def rgb(v):return np.stack((((v>>11)&31)*255//31,((v>>5)&63)*255//63,(v&31)*255//31),axis=1)
-    a=rgb(c0);z=rgb(c1);four=c0>c1
+    # BC2/BC3 always use four colours. Only BC1 uses endpoint ordering
+    # to select the three-colour + transparent-black palette.
+    a=rgb(c0);z=rgb(c1);four=(c0>c1) | (not transparent)
     pal=np.zeros((len(b),4,4),dtype=np.uint8);pal[:,:,3]=255
     pal[:,0,:3]=a;pal[:,1,:3]=z
     pal[:,2,:3]=np.where(four[:,None],(2*a+z+1)//3,(a+z)//2)

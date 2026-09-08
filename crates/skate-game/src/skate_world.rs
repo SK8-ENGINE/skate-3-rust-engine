@@ -395,8 +395,7 @@ fn material_ids(
                 m.alpha_mode,
                 m.alpha_cutoff.to_bits(),
             ];
-            let retail = m.retail_definition.as_deref().and_then(crate::retail_render::Definition::parse)
-                .filter(|d| d.supported());
+            let retail = m.retail_definition.as_deref().and_then(crate::retail_render::Definition::parse);
             *unique.entry((key, retail)).or_insert(i)
         })
         .collect()
@@ -427,6 +426,7 @@ pub(crate) fn spawn(
     materials: &mut impl crate::map_render::AssetSink<StandardMaterial>,
     retail_materials: &mut impl crate::map_render::AssetSink<crate::retail_render::RetailWorldMaterial>,
     images: &mut impl crate::map_render::AssetSink<Image>,
+    tuning: &crate::retail_render::MaterialTuning,
 ) {
     // Texture roles have different transfer functions even when sharing a record.
     let texture_ids = render_texture_ids(&map.textures);
@@ -481,7 +481,7 @@ pub(crate) fn spawn(
                         format,
                         RenderAssetUsages::RENDER_WORLD,
                     );
-                    if role == 3 || cube {
+                    if role == 3 || role == 6 || cube {
                         let (bytes, levels) = crate::retail_render::mip_chain(&source.rgba, source.width, height, layers);
                         image.data = Some(bytes);
                         image.texture_descriptor.mip_level_count = levels;
@@ -492,7 +492,7 @@ pub(crate) fn spawn(
                         });
                     }
                     let mut sampler = bevy::image::ImageSamplerDescriptor::linear();
-                    if role != 1 && role != 4 && !cube {
+                    if role != 1 && role != 4 && role != 6 && !cube {
                         sampler.address_mode_u = bevy::image::ImageAddressMode::Repeat;
                         sampler.address_mode_v = bevy::image::ImageAddressMode::Repeat;
                     }
@@ -574,8 +574,8 @@ pub(crate) fn spawn(
             }
         }
         if let Some(definition) = m.retail_definition.as_deref()
-            .and_then(crate::retail_render::Definition::parse).filter(|d| d.supported()) {
-            let material = definition.build(m, &mut texture);
+            .and_then(crate::retail_render::Definition::parse).filter(|d| d.supported(tuning)) {
+            let material = definition.build(m, tuning, &mut texture);
             let material = retail_materials.add(material);
             commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
             continue;

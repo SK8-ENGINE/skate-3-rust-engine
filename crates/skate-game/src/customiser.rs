@@ -239,7 +239,7 @@ impl Plugin for CustomiserPlugin {
             );
     }
 }
-fn navigation(mut nav: ResMut<Navigation>, time: Res<Time<Real>>, keys: Res<ButtonInput<KeyCode>>) {
+pub(crate) fn navigation(mut nav: ResMut<Navigation>, time: Res<Time<Real>>, keys: Res<ButtonInput<KeyCode>>) {
     let pad = (0..4).find_map(|i| crate::input::platform::poll(i).ok());
     // Remap outside the dead zone so a resting stick cannot drift the preview.
     let axis = pad.as_ref().map_or(0., |p| (p.state.right[0] as f32 / 32767.).clamp(-1., 1.));

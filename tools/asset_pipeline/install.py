@@ -120,6 +120,12 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
     build_archive(manifest_path,collision)
     final=maps/(label+'.skate')
     write_map(manifest_path,final,collision,report)
+    from .dynamic_props import export as write_props
+    caches=list((work/'dmo/cache').glob('DMO_*'))
+    if not caches:
+        raise RuntimeError('Missing prepared DMO catalog')
+    placed, unresolved=write_props(manifest_path,caches,stage/'assets/private/native-props'/(label+'.skate'))
+    report(f'{label}: placed {placed} authored DMO instances, {unresolved} unresolved templates')
     report('Checking converted map: '+label)
     run([game_exe,'--assets',stage/'assets','--map',final,'--check-assets'],log,report)
     entry={'name':label,'path':'maps/'+final.name,'sha256':digest(final)}
@@ -188,13 +194,26 @@ def install(iso,base,game_exe,report,game_root=None):
             report('Building the skater model and rig')
             from .character_glb import convert as write_character
             write_character(character/'selected/models',private,manifest)
+            from .character_lighting import convert as write_character_lighting
+            write_character_lighting(character/'selected/models',private,converted)
             game_manifest={'version':1,'character_scene':'private/skater.glb','initial_animation':'R_IDLE_HCOM_000',
                            'action_graph':'private/stock/data/state/ActionGraph_OnBoard.stategraph',
                            'motion_graph':'private/stock/data/state/MotionGraph_OnBoard.stategraph'}
             (private/'game.json').write_text(json.dumps(game_manifest),encoding='utf-8')
             report('Preparing retail sky domes')
             from .sky import convert as write_skies
-            write_skies(game_root,stage/'assets')
+            write_skies(game_root,stage/'assets',converted)
+            from .render_parameters import convert as write_render_parameters
+            write_render_parameters(stage/'assets',converted)
+            report('Extracting original travel destinations and location names')
+            from .teleports import convert as write_teleports
+            write_teleports(game_root,stage/'assets',converted)
+            report('Preparing global foliage backdrops')
+            from .backdrop import convert as write_backdrops
+            write_backdrops(game_root,stage/'assets',converted)
+            report('Preparing authored movable-object models')
+            from .dynamic_props import prepare_catalog
+            prepare_catalog(game_root,work/'dmo')
             report('Validating skater, input and animation data')
             run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
             archives=list((game_root/'data/content').glob('worldDIST_*.big'))

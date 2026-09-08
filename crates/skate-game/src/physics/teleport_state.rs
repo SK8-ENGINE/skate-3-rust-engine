@@ -32,6 +32,10 @@ impl Runtime {
         self.manual_on_board = Some(on_board);
     }
     pub fn take_manual_on_board(&mut self) -> Option<bool> { self.manual_on_board.take() }
+    pub(super) fn set_checkpoint(&mut self, checkpoint: Checkpoint) {
+        self.checkpoint = checkpoint;
+        self.pending_reply = None;
+    }
     pub fn new(checkpoint: Checkpoint) -> Self {
         Self {
             state: TeleportState::default(),

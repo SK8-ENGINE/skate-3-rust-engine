@@ -18,6 +18,9 @@ pub(crate) struct StagedAssets<A: Asset> {
     values: Vec<(Handle<A>, A)>,
 }
 impl<A: Asset> StagedAssets<A> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (AssetId<A>, &mut A)> {
+        self.values.iter_mut().map(|(h, a)| (h.id(), a))
+    }
     fn new(world: &World) -> Self {
         Self { provider: world.resource::<Assets<A>>().get_handle_provider(), values: Vec::new() }
     }
@@ -92,9 +95,10 @@ impl PreparedScene {
         });
         if let Some(map) = map {
             crate::skate_world::spawn(map, &mut self.commands, &mut self.meshes,
-                &mut self.materials, &mut self.retail, &mut self.images);
+                &mut self.materials, &mut self.retail, &mut self.images, &crate::retail_render::MaterialTuning::load(root));
+            crate::retail_render::spawn_backdrop(&map.name, root, &mut self.commands, &mut self.meshes, &mut self.materials, &mut self.retail, &mut self.images);
             crate::retail_render::spawn_sky(&map.name, root, &mut self.commands,
-                &mut self.meshes, &mut self.images, &mut self.sky);
+                &mut self.meshes, &mut self.images, &mut self.sky, &mut self.retail);
         } else {
             crate::world::spawn_test_world(&mut self.commands, &mut self.meshes, &mut self.materials);
         }

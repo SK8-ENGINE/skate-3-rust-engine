@@ -31,6 +31,8 @@ def _retail_shader_family(shader_name: str) -> int:
         return 12
     if shader.startswith("water.flowing"):
         return 30
+    if shader in ("water.default", "water.alpha", "water.skatepark"):
+        return 33
     if shader.startswith("ocean.default"):
         return 31
     if shader.startswith("ocean.reflection"):

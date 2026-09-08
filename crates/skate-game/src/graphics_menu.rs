@@ -218,7 +218,7 @@ fn setup(
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("GAME MENU"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..14 {
+            for i in 0..15 {
                 panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(32),padding:UiRect::all(px(6)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
@@ -273,13 +273,14 @@ pub(crate) fn interact(
     mut net: ResMut<crate::multiplayer::Multiplayer>,
     mut typing: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut updater: ResMut<crate::updater::Updater>,
+    mut travel: ResMut<crate::teleport_menu::Travel>,
 ) {
     if transition.busy() {
         menu.open = true;
         time.pause();
         return;
     }
-    if customiser.open || custom_models.open { return; }
+    if travel.open || travel.closed_this_frame || customiser.open || custom_models.open { return; }
     if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 {
         menu.open = !menu.open;
     }
@@ -305,7 +306,7 @@ pub(crate) fn interact(
         }
     }
     if menu.open {
-        let rows = if menu.multiplayer { 11 } else { 14 };
+        let rows = if menu.multiplayer { 11 } else { 15 };
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
             menu.selected = (menu.selected + rows - 1) % rows;
         }
@@ -425,6 +426,7 @@ pub(crate) fn interact(
                 }
                 12 => custom_models.begin(),
                 13 => menu.status = updater.open(false),
+                14 => travel.open = true,
                 _ => {}
             }
         }
@@ -509,6 +511,7 @@ fn labels(
     time: Res<Time<Real>>,
     customiser: Res<crate::customiser::Customiser>,
     custom_models: Res<crate::custom_models::CustomModels>,
+    travel: Res<crate::teleport_menu::Travel>,
     net: Res<crate::multiplayer::Multiplayer>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut root: Single<&mut Node, With<MenuRoot>>,
@@ -516,7 +519,7 @@ fn labels(
     mut status: Single<&mut Text, With<StatusLabel>>,
     mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor, &mut Node), Without<MenuRoot>>,
 ) {
-    root.display = if menu.open && !customiser.open && !custom_models.open {
+    root.display = if menu.open && !travel.open && !customiser.open && !custom_models.open {
         Display::Flex
     } else {
         Display::None
@@ -610,6 +613,7 @@ fn labels(
                 10 => "Character customiser".into(),
                 12 => "Custom models".into(),
                 13 => "Updates".into(),
+                14 => "Teleport…".into(),
                 _ => "Multiplayer".into(),
             }
         };

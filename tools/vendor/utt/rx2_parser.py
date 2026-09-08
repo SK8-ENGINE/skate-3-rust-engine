@@ -426,7 +426,7 @@ def _untile360(src, width_units, texel_pitch):
             y = _x360_tiled_y(j * width_units + i, width_units, texel_pitch)
             dst_idx = (y * width_units + x) * texel_pitch
             src_idx = (j * width_units + i) * texel_pitch
-            if dst_idx + texel_pitch <= len(dst) and src_idx + texel_pitch <= len(src):
+            if x < width_units and dst_idx + texel_pitch <= len(dst) and src_idx + texel_pitch <= len(src):
                 dst[dst_idx:dst_idx + texel_pitch] = src[src_idx:src_idx + texel_pitch]
     return bytes(dst)
 
@@ -473,7 +473,8 @@ def _dxt1_block(blk, transparent):
     c0, c1 = struct.unpack_from(">HH", blk, 0)
     r0, g0, b0 = _rgb565(c0)
     r1, g1, b1 = _rgb565(c1)
-    if c0 > c1:
+    # DXT3/DXT5 have independent alpha and always use four colour entries.
+    if c0 > c1 or not transparent:
         c2, c3 = _rgb565_interp((c0 >> 11) & 0x1F, (c1 >> 11) & 0x1F,
                                 (c0 >> 5) & 0x3F, (c1 >> 5) & 0x3F,
                                 c0 & 0x1F, c1 & 0x1F)
