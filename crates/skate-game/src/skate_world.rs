@@ -322,19 +322,28 @@ pub(crate) fn collision_world(
             .ok_or("Invalid SKATE collision volume")?,
         );
     }
-    let bounds = Bounds::from_points(triangles.iter().flat_map(|t| t.triangle.vertices))
-        .ok_or("SKATE collision bounds empty")?;
-    let metadata = QueryMetadata {
-        packed_surfaces,
-        meshes: vec![QueryMesh {
+    // Portable maps have no native cluster hierarchy. Bound contiguous ranges
+    // once at load time so the existing BVH can reject distant geometry. Keep
+    // triangle order and mesh identity/filter values: contact tie-breaking,
+    // packed surfaces and adjacency must not change with this acceleration.
+    let mut meshes = Vec::new();
+    for start in (0..triangles.len()).step_by(64) {
+        let end = (start + 64).min(triangles.len());
+        let bounds = Bounds::from_points(triangles[start..end].iter().flat_map(|t| t.triangle.vertices))
+            .ok_or("SKATE collision bounds empty")?;
+        meshes.push(QueryMesh {
             geometry: 0, rejection_flags: 0,
-            triangle_range: 0..triangles.len(),
+            triangle_range: start..end,
             local_to_world: RetailAffineTransform::IDENTITY,
             world_to_local: RetailAffineTransform::IDENTITY,
             local_bounds: bounds,
             matching_group: -1,
             pool: QueryPool::Ground,
-        }],
+        });
+    }
+    let metadata = QueryMetadata {
+        packed_surfaces,
+        meshes,
         static_edges: vec![],
         island_flags: 0,
     };
@@ -676,6 +685,61 @@ pub(crate) fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn compare_cluster_queries(world: &BoardWorld) -> (usize, usize) {
+        let mut metadata = world.query_metadata().unwrap().clone();
+        let mut single = metadata.meshes[0].clone();
+        single.triangle_range = 0..world.triangles().len();
+        single.local_bounds = Bounds::from_points(world.triangles().iter().flat_map(|t| t.triangle.vertices)).unwrap();
+        metadata.meshes = vec![single];
+        let baseline = BoardWorld::with_query_metadata(world.triangles().to_vec(), metadata).unwrap();
+        let mut visited = [0usize; 2];
+        let mut times = [std::time::Duration::ZERO; 2];
+        for triangle in world.triangles().iter().step_by((world.triangles().len() / 256).max(1)) {
+            let p = triangle.triangle.vertices[0];
+            let start = Vector3::new(p.x, p.y + 1., p.z);
+            let end = Vector3::new(p.x, p.y - 1., p.z);
+            let mut candidates = Vec::new();
+            for (i, scene) in [&baseline, world].into_iter().enumerate() {
+                let bounds = scene.line_candidate_bounds(start, end, 0.1);
+                visited[i] += scene.candidate_ranges(bounds).iter().map(|r| r.len()).sum::<usize>();
+                let now = std::time::Instant::now();
+                candidates.push(scene.line_candidates(start, end, 0.1).map(|(id, _)| id).collect::<Vec<_>>());
+                times[i] += now.elapsed();
+            }
+            assert_eq!(candidates[0], candidates[1], "candidate identity/order changed");
+        }
+        eprintln!("CUSTOM_QUERY_BENCH baseline_triangles={} clustered_triangles={} baseline_ms={} clustered_ms={} clusters={}",
+            visited[0], visited[1], times[0].as_secs_f64()*1000., times[1].as_secs_f64()*1000.,
+            world.query_metadata().unwrap().meshes.len());
+        (visited[0], visited[1])
+    }
+
+    #[test]
+    fn portable_collision_clusters_preserve_queries_and_cull_distant_geometry() {
+        let mut map = demo();
+        let source = map.geometry.collision.remove(0);
+        map.geometry.collision.clear();
+        for i in 0..256 {
+            map.geometry.collision.push(skate_data::skate_map::Collision {
+                points: source.points.map(|p| [p[0] + i as f32 * 100., p[1], p[2]]),
+                surface: source.surface, material: source.material, native_edges: source.native_edges,
+            });
+        }
+        let world = collision_world(&map, material()).unwrap();
+        assert_eq!(world.query_metadata().unwrap().meshes.len(), 4);
+        let (before, after) = compare_cluster_queries(&world);
+        assert!(after < before / 2);
+    }
+
+    #[test]
+    #[ignore = "requires a supplied map; static collision-query benchmark only"]
+    fn supplied_custom_map_collision_query_benchmark() {
+        let path = std::env::var("SKATE_TEST_CUSTOM_MAP").unwrap();
+        let map = SkateMap::load(std::path::Path::new(&path)).unwrap();
+        let world = collision_world(&map, material()).unwrap();
+        let (before, after) = compare_cluster_queries(&world);
+        assert!(after < before);
+    }
     fn demo() -> SkateMap {
         SkateMap::parse(include_bytes!("../../../maps/format-demo.skate")).unwrap()
     }

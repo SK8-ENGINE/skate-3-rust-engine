@@ -90,3 +90,22 @@ XYZ/radius. Six contact-toolkit tests pass. The existing
 `embedded_static_rwcm_hits_distinct_actor_query_ids` test fails its metadata
 expectation (`matching_group == -1 && geometry == 0`) before executing the
 changed query path; that unrelated fixture expectation remains unchanged.
+
+## Custom collision performance
+
+Portable map collision previously occupied one query mesh, so nearby queries
+scanned the entire map. It now uses contiguous 64-triangle bounds in the
+existing static hierarchy, built once during loading. Triangle order, geometry
+IDs, filters, packed surfaces and adjacency remain unchanged. Native RWCM
+clusters retain their existing path.
+
+A static query benchmark on the supplied custom map (89,613 triangles) sampled
+257 local segments with identical candidate IDs/order before and after.
+Triangle checks fell from 23,030,541 to 4,198,157; measured candidate-query time
+fell from 16.51 ms to 3.82 ms total (about 4.3x). A 16-triangle partition was
+also tried, but had higher query time (4.69 ms) despite fewer triangle checks.
+These are CPU microbenchmark results, not gameplay FPS or GPU measurements.
+Ten map tests passed. The supplied-map benchmark is opt-in via
+`SKATE_TEST_CUSTOM_MAP`. Frame timing can be captured with the existing
+`SKATE_PERF_REPORT` environment setting (10-second warmup, report/exit after
+25 seconds); no automated gameplay was run.
