@@ -53,7 +53,10 @@ impl Plugin for ScoringHudPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "hud_render.wgsl");
         app.add_plugins(Material2dPlugin::<HudMaterial>::default())
-            .add_systems(PostStartup, setup)
+            .add_systems(
+                PostStartup,
+                setup.after(crate::graphics_menu::PresentationSetup),
+            )
             .add_systems(
                 FixedUpdate,
                 advance
@@ -73,6 +76,12 @@ fn setup(
     cameras: Query<Entity, With<IsDefaultUiCamera>>,
     mut images: ResMut<Assets<Image>>,
 ) {
+    // The startup dependency also applies the presentation system's deferred
+    // camera spawn before this query. Without it, setup silently lost the HUD.
+    let Ok(output) = cameras.single() else {
+        error!("Original HUD requires the presentation camera");
+        return;
+    };
     let root = std::env::var_os("SKATE_SCORING_HUD_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| config.asset_root.join("private/hud"));
@@ -143,10 +152,6 @@ fn setup(
                 RenderLayers::layer(31),
                 Msaa::Off,
             ));
-            let Ok(output) = cameras.single() else {
-                error!("Original HUD requires the presentation camera");
-                return;
-            };
             commands.spawn((
                 ImageNode::new(target),
                 UiTargetCamera(output),

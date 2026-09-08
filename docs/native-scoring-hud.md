@@ -98,7 +98,14 @@ The copied build and launcher are in ignored `logs/scoring/build`. The launcher
 uses this worktree's HUD cache and the existing owned asset installation and
 starts paused. It checks required paths before running and retains failures on
 screen. The executable SHA256 is
-`775264c02f456665052355d466b99cb2e3ead1e359af3123c9a53afd68e1e182`.
+`deb1045925e1dd0e7143825d0320172eb2c26cf77e1c0f336d3475887557435d`.
+
+The missing-HUD startup defect is fixed: HUD setup now depends on presentation
+setup, so Bevy applies the deferred camera spawn before the HUD queries it.
+Previously the two PostStartup systems were unordered and a missing camera
+caused HUD initialization to return permanently. The rebuilt launcher also
+saves runtime output to `logs/scoring/build/scoring-test.log`. This fix is
+release-compiled; interactive rendering has not been launched for verification.
 
 ## Native parity gaps
 

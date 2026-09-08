@@ -110,11 +110,15 @@ struct StatusLabel;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct MenuInput;
 
+/// The presentation camera must exist before overlays select their UI target.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PresentationSetup;
+
 pub(crate) struct GraphicsMenuPlugin;
 impl Plugin for GraphicsMenuPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FramePacer(Instant::now()))
-            .add_systems(PostStartup, setup)
+            .add_systems(PostStartup, setup.in_set(PresentationSetup))
             .add_systems(PreUpdate, interact.in_set(MenuInput).after(bevy::input::InputSystems))
             .add_systems(Update, (apply, labels).chain())
             .add_systems(Last, pace);
