@@ -65,6 +65,20 @@ def array_items(data, pos, size, alignment):
             'alignment': boundary, 'items': items}
 
 
+def array_text_items(binary, items):
+    values = []
+    for raw in items:
+        ptr, = unpack('I', bytes.fromhex(raw), 0)
+        if not ptr:
+            values.append('')
+            continue
+        end = binary.find(b'\0', ptr)
+        if end < 0:
+            raise ValueError(f'Unterminated VLT array text at {ptr:#x}')
+        values.append(take(binary, ptr, end-ptr).decode('utf-8'))
+    return values
+
+
 def chunks(data):
     at=0
     while at<len(data):
@@ -140,6 +154,9 @@ def convert(schema_stem, collections_stem, names):
                     # Keep the legacy data field unchanged for existing
                     # gameplay consumers. New readers use the full array.
                     out[name(fkey)]['array']=array_items(data,pos,n,alignment)
+                    if t=='EA::Reflection::Text':
+                        array=out[name(fkey)]['array']
+                        array['text_items']=array_text_items(cb,array['items'])
         for fk,f in fields.items():
             if f[4]&2 and layout: value(fk,cb,layout+f[1])
         entries=at+48+typeslen*8

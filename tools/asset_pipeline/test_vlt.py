@@ -1,7 +1,7 @@
 """Synthetic fixtures for the binary array layout; contains no game data."""
 import struct
 import unittest
-from .vlt import array_items
+from .vlt import array_items, array_text_items
 
 
 class ArrayLayoutTests(unittest.TestCase):
@@ -31,6 +31,13 @@ class ArrayLayoutTests(unittest.TestCase):
                     struct.pack('>4HI', 2, 1, 4, 0, 123)]:
             with self.assertRaises(ValueError):
                 array_items(raw, 0, 4, 2)
+
+    def test_text_array_resolves_relocated_pointers(self):
+        binary = bytes(8) + 'test\0caf\u00e9\0'.encode()
+        self.assertEqual(array_text_items(binary, ['00000008', '0000000D', '00000000']),
+                         ['test', 'caf\u00e9', ''])
+        with self.assertRaises(ValueError):
+            array_text_items(binary, ['0000FFFF'])
 
 
 if __name__ == '__main__':
