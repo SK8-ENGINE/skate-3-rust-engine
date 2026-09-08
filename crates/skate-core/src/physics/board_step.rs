@@ -103,6 +103,9 @@ pub struct BoardStep {
     contacts: Vec<RetailContactJacobian>,
     reports: Vec<BoardContactReport>,
     reactions: Vec<RetailReactionCorrections>,
+    pub diagnostic_capture: bool,
+    diagnostic_tick: u64,
+    pub diagnostic_snapshot: Option<String>,
 }
 
 impl BoardStep {
@@ -206,6 +209,21 @@ impl BoardStep {
             &mut self.reactions,
             settings.iterations,
         );
+        self.diagnostic_tick = self.diagnostic_tick.wrapping_add(1);
+        if self.diagnostic_capture && self.diagnostic_tick % 6 == 0 {
+            let deck = BodyId::Deck.index();
+            self.diagnostic_snapshot = Some(format!(
+                "tick={} body={:?} hook={:?} reaction={:?} joints={:?} drives={:?}",
+                self.diagnostic_tick, bodies[deck], hook, self.reactions[deck],
+                constraints.joints.iter().enumerate()
+                    .filter(|(_, j)| j.reaction_a == deck || j.reaction_b == deck)
+                    .map(|(i, j)| (i, j.reaction_a, j.reaction_b, j.jacobian.words.map(f32::from_bits)))
+                    .collect::<Vec<_>>(),
+                constraints.drives.iter().enumerate()
+                    .filter(|(_, d)| d.frame_a_body.reaction_index == deck || d.frame_b_body.reaction_index == deck)
+                    .collect::<Vec<_>>(),
+            ));
+        }
         // Every solver family finishes before ANY body integrates. The native
         // job tree places BatchIntegrator after all island solver jobs.
         for (body, reaction) in bodies

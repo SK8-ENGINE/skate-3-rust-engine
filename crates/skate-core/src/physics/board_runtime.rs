@@ -50,6 +50,11 @@ pub struct BoardRuntime {
 }
 
 impl BoardRuntime {
+    /// Opt-in inspection of completed rows; capture never changes solver inputs.
+    pub fn take_solver_diagnostics(&mut self, enabled: bool) -> Option<String> {
+        self.step.diagnostic_capture = enabled;
+        self.step.diagnostic_snapshot.take()
+    }
     /// `authored` contains part poses in board space. `spawn` places the deck
     /// part in world space, and moves the other parts by the same rigid delta.
     /// All mass properties come from the caller's physical data producer.

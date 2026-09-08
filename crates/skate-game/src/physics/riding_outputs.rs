@@ -355,6 +355,10 @@ impl RidingOutputs {
         processed_flags_2468: u32,
         time_step: f32,
     ) -> Result<(), String> {
+        let capture = bevy::log::tracing::enabled!(target: "skate_game::riding_trace", bevy::log::tracing::Level::DEBUG);
+        if let Some(snapshot) = board.take_solver_diagnostics(capture) {
+            bevy::log::debug!(target: "skate_game::riding_trace", "RIDING_SOLVER {snapshot}");
+        }
         self.ground.update(
             board.contact_reports(),
             &self.wheel_lines,
