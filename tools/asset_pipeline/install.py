@@ -98,7 +98,9 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
     manifest_path=prepare(stream_directory=stream,output_root=district_work/'intermediate',
         utt_root=TOOLS/'vendor/utt',district_name=district,map_name=label,
         package_name='Skate 3 owned disc',cache_format='skate3-rust-map-v1',
-        texture_stream_names=('Tex',),excluded_normal_texture_ids=EXCLUDED_NORMAL_TEXTURE_IDS)
+        # Smaller parks keep their textures in Pres rather than a Tex stream.
+        texture_stream_names=('Tex',) if any(stream.glob('cTex_*.xsf')) else (),
+        excluded_normal_texture_ids=EXCLUDED_NORMAL_TEXTURE_IDS)
     collision=district_work/'collision.rwcmset'
     build_archive(manifest_path,collision)
     final=maps/(label+'.skate')

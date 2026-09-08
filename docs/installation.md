@@ -46,3 +46,19 @@ game process and closes the current session so physics and render resources
 are recreated. A fresh launch defaults to University. Development checkouts
 with `assets/private/game.json` retain their existing local assets and default
 test world; `--assets DIRECTORY` also selects a prepared asset set explicitly.
+
+## Conversion checks
+
+The direct converter was checked against an extracted Xbox 360 disc containing
+the three main districts, Skate School, and six separately stored parks:
+Black Box, Downtown Skate Park, Industrial Skate Park, Maloof, Mega Park and
+Start Park. All ten outputs passed the runtime's asset, spline and collision
+load checks. This does not establish visual or gameplay parity, and the
+original ISO extraction step still needs checking with an ISO.
+
+Two retail spline details needed corrections. Downtown contains duplicate
+knots and sub-millimetre chords. The native cubic records remain intact;
+only unusable contact primitives are omitted. Skate School's first spline
+header word is `0001 0002`, meaning two rails, not 65,538. TU3 function
+`82C1EEF0` reads the count with `lhz +2` (also at `82C1EFBC`). The reader now
+uses that halfword and retains the other halfword in the map metadata.

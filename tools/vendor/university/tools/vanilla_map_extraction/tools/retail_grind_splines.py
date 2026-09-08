@@ -168,8 +168,11 @@ def decode_grind_splines(data: bytes) -> list[dict[str, object]]:
         ):
             raise ValueError("RX2 spline section extends beyond the file")
 
-        rail_count, segment_count, rail_table, segment_table = (
-            struct.unpack_from(">4I", data, section_offset)
+        # TU3 GrindData::Add (82C1EEF0) reads lhz +2, including its loop
+        # bound at 82C1EFBC. The first halfword is not part of the count:
+        # Skate School has header 0001 0002, two rails, table end 0x50.
+        header_halfword, rail_count, segment_count, rail_table, segment_table = (
+            struct.unpack_from(">HH3I", data, section_offset)
         )
         expected_segment_table = (
             SPLINE_HEADER_SIZE + rail_count * SPLINE_RAIL_SIZE
@@ -271,6 +274,7 @@ def decode_grind_splines(data: bytes) -> list[dict[str, object]]:
                 {
                     "section_index": record_index,
                     "section_offset": section_offset,
+                    "section_header_halfword": header_halfword,
                     "rail_index": rail_index,
                     "spline_id": f"0x{spline_id:016X}",
                     "type_signature": f"0x{type_signature:016X}",

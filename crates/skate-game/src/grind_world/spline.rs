@@ -102,8 +102,15 @@ pub(crate) fn primitives(map: Option<&SkateMap>) -> Result<Vec<Primitive>,String
         let [a,b,c,d] = coefficients;
         let end = std::array::from_fn(|j| (a[j]+b[j])+(c[j]+d[j]));
         let length: f32 = (0..3).map(|j| (end[j]-d[j]).powi(2)).sum();
-        if !length.is_finite() || length <= 0.000001 {
-            return Err(format!("Spline segment {i} has a degenerate contact chord"));
+        if !length.is_finite() {
+            return Err(format!("Spline segment {i} has a non-finite contact chord"));
+        }
+        if length <= 0.000001 {
+            // Retail Downtown contains duplicate knots and sub-millimetre
+            // chords. They cannot provide a usable contact direction. Keep
+            // their cubic records and links in build(), but omit them from
+            // this adapter's independent contact-primitive array.
+            continue;
         }
         result.push(Primitive { start:d,end,owner:((word(r) as u64)<<32)|word(r+4) as u64 });
     }
