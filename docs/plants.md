@@ -33,6 +33,12 @@ test course is useful for no-complys and reachable footplant surfaces; handplant
 need transition/coping geometry satisfying the native selector. An installed
 converted map can be chosen in the map menu or supplied with `--map`.
 
+Every launcher run now saves both console output streams, build identity and the
+exit code to a separate `logs/plants-<timestamp>-<random>.log`. Rust panic
+backtraces are enabled. On failure the launcher displays the saved output and
+keeps the console open. Earlier launcher runs did not save output, so their
+simulation error messages cannot be recovered from this directory.
+
 The task executable is a separate copy, built with:
 
 ```powershell

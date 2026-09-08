@@ -8,7 +8,29 @@ if not exist "%PLANT_EXE%" (
     pause
     exit /b 1
 )
-"%PLANT_EXE%" --assets "%PLANT_ASSETS%" --test-world %*
+if not exist "%~dp0logs" mkdir "%~dp0logs"
+set "PLANT_STAMP="
+for /f %%T in ('powershell.exe -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss-fff"') do set "PLANT_STAMP=%%T"
+if not defined PLANT_STAMP set "PLANT_STAMP=run"
+set "PLANT_LOG=%~dp0logs\plants-%PLANT_STAMP%-%RANDOM%.log"
+> "%PLANT_LOG%" echo Plants run: %DATE% %TIME%
+if errorlevel 1 (
+    echo Cannot write crash log: "%PLANT_LOG%"
+    pause
+    exit /b 1
+)
+if exist "%~dp0bin\plants\BUILD.txt" type "%~dp0bin\plants\BUILD.txt" >> "%PLANT_LOG%"
+set "RUST_BACKTRACE=full"
+set "RUST_LOG_STYLE=never"
+set "NO_COLOR=1"
+echo Saving game output to "%PLANT_LOG%"
+"%PLANT_EXE%" --assets "%PLANT_ASSETS%" --test-world %* >> "%PLANT_LOG%" 2>&1
 set "PLANT_EXIT=%ERRORLEVEL%"
-if not "%PLANT_EXIT%"=="0" pause
+>> "%PLANT_LOG%" echo Exit code: %PLANT_EXIT%
+if not "%PLANT_EXIT%"=="0" (
+    type "%PLANT_LOG%"
+    echo.
+    echo Game exited with code %PLANT_EXIT%. Log saved to "%PLANT_LOG%"
+    pause
+)
 exit /b %PLANT_EXIT%
