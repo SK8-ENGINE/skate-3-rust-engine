@@ -59,10 +59,8 @@ pub(super) fn set(
     skater: &mut SkaterRuntime,
     requested: PhysicalStateId,
 ) -> Result<(), String> {
-    // RevertGround is a transient selector owner in TU3. Its Enter/Exit
-    // production methods are the empty adapter and it must not replace the
-    // live ground solver. Keep the selected solver on PhysicsGround while
-    // preserving the selector's next-frame flags.
+    // Selected archive behavior: revert requests continue through the ordinary
+    // ground solver. The user's previous dedicated revert owner is not entered.
     let requested = match requested {
         PhysicalStateId::RevertGround => PhysicalStateId::PhysicsGround,
         state => state,

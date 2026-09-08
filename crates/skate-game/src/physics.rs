@@ -1,5 +1,6 @@
 //! Host game physics ownership and schedule. Physical calculations stay in core.
 /// Shared stock physics_mode key for loaded settings and per-frame mode packets.
+#[cfg(test)]
 pub(crate) const PHYSICS_MODE: &str = "easy";
 
 mod air_phase;
@@ -270,8 +271,8 @@ impl GamePhysics {
         let settings = PhysicsSettings::load(&data)?;
         let animation_profile = animation_phase::AnimationProfile::load(&data, difficulty.key())?;
         eprintln!(
-            "SKATE_PHYSICS_MODE {PHYSICS_MODE} index={}",
-            animation_profile.physics_mode
+            "SKATE_PHYSICS_MODE {} index={}",
+            difficulty.key(), animation_profile.physics_mode
         );
         let mut spawn = RetailAffineTransform {
             translation: Vector3::new(
