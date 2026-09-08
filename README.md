@@ -2,7 +2,7 @@
   <img src="docs/images/skating-crab.png" alt="Rust crab riding a skateboard" width="480">
 </p>
 
-# Skate 3 Imported
+# Skate 3 Rust Engine
 
 A Rust and Bevy skating project built from Skate 3 reverse-engineering research.
 Includes skating, tricks, grinds, offboard movement, difficulty settings and
