@@ -59,7 +59,7 @@ def spawn_point(manifest,root):
     if best is None:raise ValueError('No supported spawn surface in '+manifest['map_name'])
     return best[1]
 
-def write(manifest_path,output,collision,report=lambda _:None):
+def write(manifest_path,output,collision,report=lambda _:None, *, render_only=False):
     root=manifest_path.parent;m=json.loads(manifest_path.read_text());textures=m['textures']
     ids={name:i+1 for i,name in enumerate(sorted(textures))}
     excluded=set(m['normal_texture_policy']['excluded_texture_ids'])
@@ -115,7 +115,7 @@ def write(manifest_path,output,collision,report=lambda _:None):
                     record['frame'][:,:3]=np.rint(np.clip(binormal,-1,1)*127).astype('i1');record['frame'][:,3]=np.rint(sign*127).astype('i1')
                 if not np.isfinite(pos).all():raise ValueError('Non-finite map geometry')
                 vertices.write(record.tobytes());indices.write((faces+nv).astype('<u4').tobytes());nv+=len(pos);ni+=faces.size;nm+=1
-    report('Selecting starting position: '+m['map_name']);spawn=spawn_point(m,root)
+    report('Selecting starting position: '+m['map_name']);spawn=(0.,0.,0.) if render_only else spawn_point(m,root)
     # Match the supplied exporter's environment defaults. Native sky shaders
     # remain a separate runtime feature; no geometry is synthesized here.
     environment=[.10,.36,.75,.64,.82,1.,.18,.24,.30,0.,11.,0.,18.,0.,
@@ -145,8 +145,10 @@ def write(manifest_path,output,collision,report=lambda _:None):
                 raw=bytes.fromhex(segment)
                 if len(raw)!=120:raise ValueError('Invalid native spline segment')
                 f.write(np.frombuffer(raw,dtype='>u4').astype('<u4').tobytes())
-        u(f,2)
-        for tag,data in [(b'RWCM',collision.read_bytes()),(b'WMET',json.dumps(m,separators=(',',':')).encode())]:
+        extensions=[(b'WMET',json.dumps(m,separators=(',',':')).encode())]
+        if not render_only:extensions.insert(0,(b'RWCM',collision.read_bytes()))
+        u(f,len(extensions))
+        for tag,data in extensions:
             f.write(tag);u(f,1,len(data));stored(f,data)
     report('Map written: '+m['map_name'])
 

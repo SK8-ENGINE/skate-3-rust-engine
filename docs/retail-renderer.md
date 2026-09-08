@@ -143,3 +143,44 @@ reported viewpoint: solid foliage appearing in the missing area implicates the
 normal shading/alpha path; an empty area requires checking placement, camera or
 source selection. Unset the variable to restore normal rendering. This diagnostic
 has been prepared without launching the game.
+
+### Missing global tree-wall backdrop resolved (2026-09-08)
+
+The user-run opaque-foliage diagnostic left the same empty background. The
+missing surfaces are in `world/models/DIST_Water_University.rx2`, not in
+`DIST_University` or its proxy stream. Despite its name, this global model has
+both an ocean plane and a separate tree material: mesh 1 contains 1,572 vertices
+and 786 tree-wall triangles. World fields `951898F6C0FA6856` and
+`CA5A157A65E75934` select this model and its texture resource. The global
+Industrial model likewise contains 716 foliage triangles.
+
+`tools.asset_pipeline.backdrop` follows those world references and exports only
+the tree-family presentation meshes into `private/native-backdrops/<map>.skate`.
+Mesh-to-material and material-to-texture selection use binary GUIDs: texture
+name suffixes differ from the global texture resource GUIDs. Original positions,
+indices, UVs, masked alpha, two-sided rendering and baked lightmaps are retained.
+No water surfaces or synthetic forest placements are added.
+
+The renderer loads this supplemental package after the district and before sky
+setup, through the existing retail mesh/material path. `parse_render_only` is
+an explicit data-reader entry point for presentation packages; ordinary playable
+map loading still requires collision. Presentation loading rejects collision,
+rails, doors, lights, routes and extensions other than WMET. This does not alter
+the playable map's collision or gameplay state. Future installation runs prepare
+the supplement automatically; existing assets can be updated with:
+
+```powershell
+python -m tools.asset_pipeline.backdrop --game-root <owned-game> --assets <assets-root>
+```
+
+Static verification: the University supplement contains exactly the source's
+786 triangles and matching vertex positions/indices/UVs. Zero of these triangles
+match the 86 existing district TreeWall meshes after unordered-vertex 1 mm
+quantization. Both University and Industrial supplements pass the runtime data
+reader's offline inspector. Synthetic GUID tests and map-reader regression tests
+pass. The executable was compiled but not launched; visual confirmation remains
+for the user. The normal launcher clears SKATE_DEBUG_FOLIAGE.
+
+For integration with staged map switching, prepare this supplement alongside the
+district, before applying sky lighting. Track its entities and assets in the
+same map lifetime. The current adapter is in `retail_backdrop.rs`.

@@ -1,5 +1,22 @@
 use skate_data::skate_map::SkateMap;
 
+#[test]
+fn presentation_loading_does_not_relax_playable_map_validation() {
+    let mut data = fixture(1);
+    let counts = 8 + 4 + 4 + "Fixture".len() + (4 + 12) * 4;
+    data[counts + 16..counts + 24].fill(0); // No collision or rails.
+    let needle: Vec<u8> = [0u32, 1, 2].into_iter().flat_map(u32::to_le_bytes).collect();
+    let indices = data.windows(12).position(|w| w == needle).unwrap();
+    data.truncate(indices + 12);
+    assert!(SkateMap::parse(&data).unwrap_err().contains("requires triangle collision"));
+    let render = SkateMap::parse_render_only(&data).unwrap();
+    assert_eq!(render.geometry.indices, [0, 1, 2]);
+    assert!(render.geometry.collision.is_empty());
+    data[indices..indices+4].copy_from_slice(&99u32.to_le_bytes());
+    assert!(SkateMap::parse_render_only(&data).unwrap_err().contains("indices"));
+    assert!(SkateMap::parse_render_only(&fixture(1)).unwrap_err().contains("non-presentation"));
+}
+
 fn u(b: &mut Vec<u8>, value: u32) {
     b.extend(value.to_le_bytes());
 }

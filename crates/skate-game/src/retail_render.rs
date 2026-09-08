@@ -40,6 +40,10 @@ pub(crate) struct RetailScene(pub bool);
 mod sky;
 pub(crate) use sky::{spawn_sky, RetailSkyMaterial};
 
+#[path = "retail_backdrop.rs"]
+mod backdrop;
+pub(crate) use backdrop::spawn_backdrop;
+
 #[derive(Component, ExtractComponent, Clone, Copy, ShaderType, Default)]
 pub(crate) struct RetailTone {
     pub enabled: Vec4,

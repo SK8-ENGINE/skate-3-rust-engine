@@ -343,6 +343,21 @@ impl SkateMap {
         Self::parse(&data).map_err(|e| format!("{}: {e}", path.display()))
     }
     pub fn parse(data: &[u8]) -> Result<Self, String> {
+        Self::parse_inner(data, true)
+    }
+    /// Decode a supplemental presentation package without requiring collision.
+    /// Playable map loading continues to use `parse`/`load`.
+    pub fn parse_render_only(data: &[u8]) -> Result<Self, String> {
+        let map = Self::parse_inner(data, false)?;
+        if !map.geometry.collision.is_empty() || !map.rails.is_empty()
+            || !map.doors.is_empty() || !map.lights.is_empty() || !map.routes.is_empty()
+            || map.extensions.iter().any(|e| e.tag != *b"WMET")
+        {
+            return Err("SKATE render-only package contains non-presentation data".into());
+        }
+        Ok(map)
+    }
+    fn parse_inner(data: &[u8], require_collision: bool) -> Result<Self, String> {
         let mut r = Reader { bytes: data, at: 0 };
         let magic = r.take(8)?;
         if &magic[..5] != b"SKATE"
@@ -637,7 +652,7 @@ impl SkateMap {
                 });
             }
         }
-        if geometry.collision.is_empty() && !extensions.iter().any(|e| e.tag == *b"RWCM" && e.schema == 1 && !e.payload.is_empty()) {
+        if require_collision && geometry.collision.is_empty() && !extensions.iter().any(|e| e.tag == *b"RWCM" && e.schema == 1 && !e.payload.is_empty()) {
             return Err("SKATE requires triangle collision or an embedded RWCM archive".into());
         }
         if r.at != data.len() {
