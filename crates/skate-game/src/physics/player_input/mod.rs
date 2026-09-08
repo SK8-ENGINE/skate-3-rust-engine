@@ -76,16 +76,14 @@ impl PlayerInputRuntime {
     ///Run after the current board/contact solve, before ProcessOutput publishes.
     pub fn update_dynamic_normal(
         &mut self,
-        board: &BoardRuntime,
+        _board: &BoardRuntime,
         riding: &RidingOutputs,
         gravity: Vector3,
-        dt: f32,
+        _dt: f32,
     ) {
         self.dynamic_normal.update(
-            board,
             &riding.ground,
             gravity,
-            dt,
             self.processed.scalar_2656,
             &self.normal_settings,
         );

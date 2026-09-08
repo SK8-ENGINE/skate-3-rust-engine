@@ -1,10 +1,8 @@
 //! Dynamic wheel-response normal, original TU3 82C02388, with acceleration
 //! history from82C082AC..8348. This is Ground64, distinct from wheel normals.
 use super::{
-    board::{BODY_COUNT, BodyId},
     board_ground::BoardGroundState,
     board_motion_output::{add, dot, inverse_length_squared, scale, subtract},
-    board_runtime::BoardRuntime,
 };
 use crate::{math::Vector3, point_graph::PointGraph};
 const UP: Vector3 = Vector3::new(0., 1., 0.);
@@ -26,8 +24,6 @@ pub struct BoardDynamicNormal {
     /// Skateboard144 and160, retained independently by the source.
     pub acceleration: Vector3,
     pub last_contact_normal: Vector3,
-    previous_velocities: [Vector3; BODY_COUNT],
-    pub part_accelerations: [Vector3; BODY_COUNT],
 }
 impl BoardDynamicNormal {
     ///82C00ED0 initializes112/128 to UP and144/160 to zero. The full board
@@ -38,32 +34,20 @@ impl BoardDynamicNormal {
             delta: UP,
             acceleration: ZERO,
             last_contact_normal: ZERO,
-            previous_velocities: [ZERO; BODY_COUNT],
-            part_accelerations: [ZERO; BODY_COUNT],
         }
-    }
-    /// Board reset clears acceleration history but preserves wrapper112/128.
-    pub fn reset_body_history(&mut self) {
-        self.previous_velocities.fill(ZERO);
-        self.part_accelerations.fill(ZERO);
     }
     pub fn update(
         &mut self,
-        board: &BoardRuntime,
         contacts: &BoardGroundState,
         gravity: Vector3,
-        dt: f32,
         previous_ground_speed: f32,
         settings: &DynamicNormalSettings,
     ) {
-        let frequency = 1.0 / dt;
-        for part in BodyId::ORDER {
-            let i = part.index();
-            let velocity = board.bodies()[i].rates.linear_velocity;
-            self.part_accelerations[i] =
-                scale(subtract(velocity, self.previous_velocities[i]), frequency);
-            self.previous_velocities[i] = velocity;
-        }
+        //82C02344 runs Body::UpdatePostPhysics before82C0234C calls this
+        //filter.82C02444/60/7C read the existing Body432/448/464 array.
+        //Paired S2:82B37E5C/64 calls Body::UpdatePostPhysics then
+        //UpdateUpVector82B26158, which reads CollisionInfo acceleration.
+        //No live body, timestep, duplicate history or mirror belongs here.
         if contacts.wheel_contact_count == 0 {
             self.acceleration = ZERO;
             return;
@@ -73,7 +57,7 @@ impl BoardDynamicNormal {
         //fourth-wheel accumulation in this function; retain that distinction.
         for i in 0..3 {
             if contacts.parts[i].in_contact {
-                sum = subtract(add(sum, self.part_accelerations[i]), gravity);
+                sum = subtract(add(sum, contacts.accelerations[i]), gravity);
             }
         }
         let target = normalize(sum);
@@ -99,6 +83,10 @@ impl BoardDynamicNormal {
         self.last_contact_normal = contacts.overall_normal;
     }
 }
+
+#[cfg(test)]
+#[path = "tests/board_dynamic_normal_history.rs"]
+mod tests;
 fn normalize(v: Vector3) -> Vector3 {
     normalize_length(v).0
 }

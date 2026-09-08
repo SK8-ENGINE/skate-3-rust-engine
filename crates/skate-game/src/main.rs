@@ -23,6 +23,7 @@ mod difficulty;
 mod graph_host;
 mod graph_runtime;
 mod input;
+mod fps_overlay;
 mod session_marker;
 mod physics;
 mod skater_animation;

@@ -27,13 +27,15 @@ pub struct AnimationOutputFields {
     pub profile_148: u32,
     /// PhysOutAnimation+166, tested by OkToDoTrickOnStairs82BA6930.
     pub tricks_blocked_on_stairs_166: u8,
+    /// Ground manual opposition, read by PhysicsWantsManualExit82BA7930.
+    pub manual_opposition_168: u8,
 }
 impl Default for AnimationOutputFields {
     fn default() -> Self {
         // Animation82DE3F38 stores FLT_MAX at144 and zero at148.
         // Reset82DE3F38 clears byte166. Ordinary Ground Fill82D3A388
         // and common ProcessOutput82DB6EC0 do not overwrite this byte.
-        Self { collision_time_144: f32::MAX, profile_148: 0, tricks_blocked_on_stairs_166: 0 }
+        Self { collision_time_144: f32::MAX, profile_148: 0, tricks_blocked_on_stairs_166: 0, manual_opposition_168: 0 }
     }
 }
 

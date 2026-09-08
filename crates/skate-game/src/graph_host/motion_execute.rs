@@ -167,6 +167,20 @@ impl MotionHost {
             .get_mut(behavior)
             .ok_or("Unallocated MotionGraph behavior")?;
         match (operation, instance) {
+            (MotionOperation::SetManualAngle, Instance::Manual(state)) => {
+                match phase {
+                    0 => state.begin(),
+                    1 => {
+                        let value = state.update(self.animation.motion_intent("Manual"), &self.manual);
+                        self.animation.set_attribute(SettableAttribute {
+                            // Factory82BC9678 binds the stock name without an authored override.
+                            name: encode(b"manual_angle"), value, normalized: false, sequence_id: -1,
+                        });
+                    }
+                    _ => {} // Native End is the empty leaf.
+                }
+            }
+
             (MotionOperation::AddRunoutAttribs, Instance::Runout(state)) => {
                 if phase == 0 {
                     *state = Some(super::super::motion_runout::capture(

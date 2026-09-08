@@ -24,6 +24,7 @@ pub enum MotionCondition {
     StandingOnMovingObject,
     LocoState(super::motion_cadence::LocoState),
     ManualOutTimerIsActive,
+    PhysicsWantsManualExit,
     Gesture(crate::input::gesture_catalog::Group),
     Landing(super::motion_landing::Condition),
     Wipeout(super::motion_wipeout::Condition),
@@ -124,6 +125,7 @@ impl MotionCondition {
             "IsHoldingSkateboard" => Self::HoldingSkateboard, //82BA5E10
             "IsBipedGroundThin" => Self::BipedGroundThin,     //82BA8110: OffBoard+330
             "LocoState" => Self::LocoState(super::motion_cadence::LocoState::parse(a)?),
+            "PhysicsWantsManualExit" => Self::PhysicsWantsManualExit,
             "ManualOutTimerIsActive" => Self::ManualOutTimerIsActive,
             "HasGestureIntent" => Self::Gesture(crate::input::gesture_catalog::Group::parse(
                 a.text("group").unwrap_or(""),
@@ -273,6 +275,7 @@ impl MotionCondition {
                 )
                 .map_err(str::to_owned)?,
             //82BA78B0 -> specific getter: strictly positive retained timer.
+            Self::PhysicsWantsManualExit => host.manual_exit.ok_or("PhysicsWantsManualExit requires completed Animation168")?,
             Self::ManualOutTimerIsActive => host.riding.manual_out_timer > 0.0,
             Self::Gameplay(condition) => condition.evaluate(host)?,
             Self::Riding(condition) => condition.evaluate(host)?,

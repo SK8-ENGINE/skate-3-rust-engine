@@ -4,6 +4,7 @@ pub mod gesture;
 pub mod anticipation_intentions;
 pub mod animation_packet;
 pub mod controller;
+pub mod manual_intentions;
 pub mod gameplay_map;
 pub mod tick;
 pub mod graph_intents;

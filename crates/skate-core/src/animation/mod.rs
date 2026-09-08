@@ -1,5 +1,6 @@
 //! Animation timing and event semantics recovered from Skate 3 TU3.
 pub mod bump;
+pub mod manual;
 pub mod clip_clock;
 pub mod commands;
 pub mod output;

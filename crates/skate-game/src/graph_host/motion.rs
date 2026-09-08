@@ -54,6 +54,7 @@ enum Instance {
     Trick(i32),
     JumpInto(bool),
     Stateless,
+    Manual(skate_core::animation::manual::State),
     IntentFilter(skate_core::animation::intent_filter::State),
     Landing(super::motion_landing::State),
     Wipeout(super::motion_wipeout::State),
@@ -95,6 +96,7 @@ impl Instance {
                 smoothed: 0.0,
                 mode: 2,
             }),
+            MotionOperation::SetManualAngle => Self::Manual(Default::default()),
             MotionOperation::Crouching(_) => Self::Crouching(None),
             MotionOperation::SettingBodyTilt(_) => {
                 Self::BodyTilt(skate_core::animation::body_tilt::State::default())
@@ -199,6 +201,8 @@ pub struct MotionHost {
     pushing: PushingSettings,
     turning: set_turning::Settings,
     crouching: skate_core::animation::crouching::Settings,
+    manual: skate_core::animation::manual::Settings,
+    pub manual_exit: Option<bool>,
     body_tilt: skate_core::animation::body_tilt::Settings,
     pumping: skate_core::animation::pumping_channel::Settings,
     sliding: super::motion_sliding::Settings,
@@ -324,6 +328,8 @@ impl MotionHost {
             pushing,
             turning: super::turning_settings::load(data)?,
             crouching: super::crouching_settings::load(data)?,
+            manual: super::motion_manual::settings(data)?,
+            manual_exit: None,
             body_tilt: super::motion_riding::body_tilt_settings(data)?,
             pumping: super::pumping_settings::load(data)?,
             sliding: super::motion_sliding::Settings::load(data)?,

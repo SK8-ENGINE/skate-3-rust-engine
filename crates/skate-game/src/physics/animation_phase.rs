@@ -30,6 +30,7 @@ pub(crate) fn advance(
     skater.animation.motion.score_packet = Default::default();
     let p = &skater.player_input.processed;
     let physical = &skater.player_input.physical;
+    skater.animation.motion.manual_exit = Some(physical.animation.manual_opposition_168 != 0);
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
     let (fakie, mirrored) = skater.animation.stance();
     let feedback = skater.physical_feedback;

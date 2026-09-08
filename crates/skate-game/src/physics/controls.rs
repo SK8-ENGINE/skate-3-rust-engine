@@ -98,6 +98,7 @@ impl PlayerControls {
         );
         self.intents =
             riding_intentions::produce(&self.controller, self.actor_flags, self.preferences);
+        self.intents.extend(skate_core::input::manual_intentions::produce(&self.controller, self.actor_flags));
         self.intents.extend(wipeout_intentions::produce(
             &self.controller, self.actor_flags, physical_capabilities,
         ));

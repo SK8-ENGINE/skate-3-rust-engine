@@ -61,17 +61,7 @@ impl GroundState {
         toolkit: &BoardToolkit,
         targets: GroundEntryTargets<'_>,
     ) -> Result<(), String> {
-        //SetStandard82C03AF8: standard dynamic part mode, deck damping and
-        //source-owned wrapper flag. Authored board volumes stay enabled.
-        *targets.board_flags_8384 &= 0x7f;
-        board.bodies_mut()[6].inertia.angular_drag = self.entry_settings.deck_angular_drag;
-        //82C090C0 restores assembly+24 and every part+92 to collision group4.
-        //Remount releases the carried board into group7; retaining that group
-        //allows the riding skeleton (group5) to collide with its own board.
-        board.set_collision_group(4);
-        for body in board.bodies_mut() {
-            body.state_flags = 4;
-        }
+        restore_standard_board_fields(board, targets.board_flags_8384, self.entry_settings.deck_angular_drag);
         targets.foot_ik.enable_feet(true);
         *targets.skeleton_elapsed_16505 = false;
         (targets.set_skeleton_collision_state)(6)?;
@@ -155,3 +145,13 @@ impl ManualGroundProjection for Projection {
         Ok(dot_product(n, v))
     }
 }
+
+// SetStandard restores collision groups; activation flags belong to body state.
+fn restore_standard_board_fields(board: &mut BoardRuntime, flags: &mut u8, drag: f32) {
+    *flags &= 0x7f;
+    board.bodies_mut()[6].inertia.angular_drag = drag;
+    board.set_collision_group(4);
+}
+#[cfg(test)]
+#[path = "entry_restoration_tests.rs"]
+mod restoration_tests;
