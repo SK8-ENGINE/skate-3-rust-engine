@@ -112,11 +112,22 @@ impl Handplant {
             if hit.contact_time < 0.0 {
                 continue;
             }
-            let point = hit.contact_position; //PredictionResults::GetPosition82D2D988.
-            if self.anchor[1] - point[1] <= 0.5 {
+            let contact = hit.contact_position; //Admission uses GetPosition82D2D988.
+            if self.anchor[1] - contact[1] <= 0.5 {
                 continue;
             }
             let normal = hit.landing_normal;
+            //82D66B64..98/82D66BC0..BF8 evaluate the query trajectory at
+            //contact time for the landing anchor, not the surface contact.
+            let point = trajectory.position_at(hit.contact_time);
+            //The host sphere query can return a nearby ledge whose lifted
+            //landing target lies above the apex. It cannot define a descending
+            //arc (82D608A0 takes sqrt(2*g*drop)). Keep searching; if none is
+            //feasible, use the existing native three-second fallback below.
+            let destination = madd(normal, 0.56, point);
+            if !destination.iter().all(|v| v.is_finite()) || !(destination[1] < apex[1]) {
+                continue;
+            }
             if normal[1] < 0.71 {
                 selected = Some((point, normal));
                 break;

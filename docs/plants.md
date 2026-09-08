@@ -63,6 +63,15 @@ an object-scene adapter; this change does not implement those features.
 The separately logged off-board non-finite follower velocity remains under
 investigation, with source target values included in diagnostic builds.
 
+The handplant outgoing selector now distinguishes the surface contact used
+for admission from the trajectory position at contact time used for the
+landing anchor (`82D66B64..98`, `82D66BC0..BF8`). The host query adapter also
+rejects lifted landing targets at or above the apex: those cannot produce a
+descending `82D608A0` arc and previously reached its negative square root.
+It continues the six authored queries and uses the existing three-second
+fallback if none is feasible. This feasibility gate is a host query adaptation,
+not a claim that the additional gate occurs in TU3.
+
 The task executable is a separate copy, built with:
 
 ```powershell
