@@ -208,6 +208,7 @@ pub(crate) fn advance(
         facing_backwards: physics.grind.name.starts_with("BF_"),
         dropping_in: physical.grinds.dropping_in_324 != 0,
     };
+    skater.animation.action.dropping_in = Some(physical.grinds.dropping_in_324 != 0);
     let conditions = ConditionInputs {
         speeds: Some(physics.riding.graph_speeds()),
         physical_state: Some(PhysicalStateInputs {

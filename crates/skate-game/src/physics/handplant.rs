@@ -148,6 +148,8 @@ pub(super) fn ground_update(
             candidate.point,
             skater.handplant.settings.truck_distance,
         )?;
+        bevy::log::info!("HANDPLANT_SURFACE tick={} kind={:?} point={:?}",
+            physics.ticks, surface.as_ref().map(|s| s.evidence.kind), candidate.point);
         if surface.is_some_and(|s| s.evidence.kind != 3) {
             skater.handplant.launch(
                 candidate,
@@ -208,6 +210,12 @@ pub(super) fn ground_query(physics: &GamePhysics, skater: &mut SkaterRuntime) {
         h.direction_hint,
         &physics.grind.primitives,
     );
+    if candidate.is_some() || physics.ticks % 30 == 0 {
+        bevy::log::info!("HANDPLANT_QUERY tick={} speed={} vy={} normal={:?} minimum_speed={} minimum_slope={} edges={} candidate={:?} prior_flags={:08x} phase={} processed={:08x}/{:08x}",
+            physics.ticks, length(velocity), velocity[1], normal, h.settings.minimum_speed,
+            h.settings.minimum_slope, physics.grind.primitives.len(), candidate.map(|c| c.point),
+            h.flags, h.phase, p.flags_2476, p.flags_2480);
+    }
     //82D61268 clears the active output when submission begins.
     let old_point = h.candidate.map_or([0.0; 4], |c| c.point);
     let hint = h.direction_hint;

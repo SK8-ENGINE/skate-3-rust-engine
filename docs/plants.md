@@ -72,6 +72,14 @@ It continues the six authored queries and uses the existing three-second
 fallback if none is feasible. This feasibility gate is a host query adaptation,
 not a claim that the additional gate occurs in TU3.
 
+The tick2032 grind crash reached `IsDroppingIn` in the ActionGraph, which
+previously registered the condition only in MotionGraph. Both now read the
+same completed Grinds324 flag. Handplant attempts additionally log admission
+inputs every half second while GrabWorld is held on ground, every selected
+candidate and its surface classification, and relevant state transitions.
+These traces diagnose rejected entries and bails; they do not establish that
+handplants are gameplay-validated.
+
 The task executable is a separate copy, built with:
 
 ```powershell

@@ -94,6 +94,14 @@ pub(super) fn advance(
     player_state::post_input_and_select(physics, skater)?;
     let state_after_selection = skater.player_state.current();
     if state_before_selection != state_after_selection {
+        if skater.player_input.processed.flags_2476 & (1 << 22) != 0
+            || state_before_selection == skate_core::player::state::PhysicalStateId::HandPlant
+            || state_after_selection == skate_core::player::state::PhysicalStateId::HandPlant {
+            bevy::log::info!("HANDPLANT_STATE tick={tick} from={state_before_selection:?} to={state_after_selection:?} flags={:08x} phase={} processed={:08x}/{:08x}/{:08x}",
+                skater.handplant.flags, skater.handplant.phase,
+                skater.player_input.processed.flags_2468, skater.player_input.processed.flags_2476,
+                skater.player_input.processed.flags_2480);
+        }
         physics.exchange.emit_event(
             tick,
             PhysicsEvent::StateChanged {
