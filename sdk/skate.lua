@@ -1,0 +1,93 @@
+---@meta
+-- SDK 1 language-server declarations. Add this directory as a Lua workspace library.
+-- This file is not executed. Runtime reference: docs/lua-modding.md.
+---@alias Vec3 number[] Three finite components, 1-based, Y up, metres.
+---@alias SettingValue boolean|number|string
+---@class GrindSnapshot
+---@field active boolean
+---@field name string
+---@field kind integer
+---@field distance number
+---@class PlayerSnapshot
+---@field position Vec3 Animation root position.
+---@field velocity Vec3 Physical board velocity, including when offboard.
+---@field on_board boolean
+---@field state integer Native state identifier, not a trick name.
+---@field category integer
+---@field bailing boolean
+---@field grind GrindSnapshot
+---@class MapSnapshot
+---@field name string
+---@field generation integer
+---@class AnimationInfo
+---@field bone_names string[]
+---@field slots table<string, {fps:number,frame_count:integer}>
+---@class SDKSnapshot
+---@field player PlayerSnapshot
+---@field map MapSnapshot
+---@field animation AnimationInfo
+---@field tick integer
+---@field keys table<string,boolean>
+---@field actions number[] 18 values; Lua index 1 corresponds to native action 64.
+---@field paused boolean
+---@field replay boolean
+---@class ModCallbacks
+---@field on_load? fun()
+---@field on_unload? fun() Commands discarded; host always cleans up.
+---@field on_update? fun(event:{dt:number}) Active render time; max dt 0.25 seconds.
+---@field on_fixed_update? fun(event:{dt:number}) After native physics, before next input publication.
+---@field on_settings? fun(event:{key:string,value:SettingValue}) sdk.settings already updated.
+---@field on_event? fun(event:ModEvent)
+---@class ModEvent
+---@field name 'world_changed'|'bail_changed'|'player_state_changed'|'grind_changed'
+---@field map? MapSnapshot world_changed only
+---@field bailing? boolean bail_changed only
+---@field previous? integer player_state_changed only
+---@field state? integer player_state_changed only
+---@field grind? GrindSnapshot grind_changed only
+sdk = {
+    api_version = 1,
+    ---@type table<string,SettingValue>
+    settings = {},
+    ---@type SDKSnapshot
+    snapshot = {},
+    player = {}, input = {}, ui = {}, scene = {}, animation = {},
+    time = {elapsed = 0},
+}
+---@param text string At most 2048 UTF-8 bytes; queues labelled INFO output.
+function sdk.log(text) end
+---@param path string Relative within mod root; max 256 KiB, UTF-8 only; errors on failure.
+---@return string
+function sdk.read_text(path) end
+---@return PlayerSnapshot
+function sdk.player.read() end
+---@param position Vec3 Components within ±100000 metres; author supplies a valid destination.
+---@param heading number Radians around world Y; zero faces +Z.
+---@param on_board boolean
+function sdk.player.teleport(position, heading, on_board) end
+---@param key string Bevy physical KeyCode name, e.g. KeyJ, F6, Space. Unknown returns false.
+---@return boolean
+function sdk.input.down(key) end
+---@param id integer Native published gameplay action 64..81; invalid ID raises an error.
+---@return number
+function sdk.input.action(id) end
+---@param key string Owner-local stable visual key, 1..64 lowercase ASCII letters/digits/._-
+---@param text string At most 1024 UTF-8 bytes.
+function sdk.ui.text(key, text) end
+---@param key string Same namespace as sdk.ui.text; repeated key updates/replaces.
+---@param position Vec3
+---@param size Vec3 Each component >0 and <=100 metres.
+---@param color Vec3 Each sRGB component in 0..1.
+function sdk.scene.cube(key, position, size, color) end
+---@param key string Remove owner's text or cube; absent is a no-op.
+function sdk.scene.remove(key) end
+---@param key string Timer key, 1..64 bytes. Existing timer is replaced.
+---@param seconds number Finite delay 0..86400 active Update seconds.
+---@param callback function One-shot callback, part of the on_update transaction/quota.
+function sdk.time.after(key, seconds, callback) end
+---@param key string Absent is a no-op.
+function sdk.time.cancel(key) end
+---@return AnimationInfo
+function sdk.animation.info() end
+---@param path string Package-relative original body-clip JSON, <=4 MiB; host validates supported slots and exact timing.
+function sdk.animation.replace(path) end
