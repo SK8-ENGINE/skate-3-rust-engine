@@ -8,6 +8,9 @@ pub struct SkeletonOutputFields {
     pub hips_up_angle_500: f32,
     /// Skeleton Fill82BE2268: signed physical twist, before animation mirroring.
     pub twist_504: f32,
+    /// Skeleton Fill82BE1C84/82BE1D50: animation deck forward, stance-adjusted.
+    pub deck_yaw_536: f32,
+    pub deck_pitch_540: f32,
     pub scalar_544: f32,
     pub no_support_time_548: f32,
     pub time_until_teleport_576: f32,
@@ -24,6 +27,24 @@ pub struct SkeletonOutputFields {
 }
 
 impl SkeletonOutputFields {
+    /// Fill82BE1AE8: Skeleton6512 is animation-record pose0's forward column.
+    /// Packet10368 flips that vector; pitch is its dot with world up, not asin.
+    pub fn publish_deck_angles(&mut self, forward: [f32; 4], board_flipped: bool) {
+        use crate::physics::native_arithmetic::{dot3, reciprocal_estimate};
+        let forward = if board_flipped { forward.map(|v| -v) } else { forward };
+        let [x, _, z, _] = forward;
+        let reciprocal = reciprocal_estimate(z);
+        let refined = reciprocal.mul_add((-reciprocal).mul_add(z, 1.0), reciprocal);
+        let basic = crate::input::angle::atan(x.mul_add(refined, 0.0));
+        let sign = x.to_bits() & 0x8000_0000;
+        let pi = f32::from_bits(0x4049_0fdb | sign);
+        let half_pi = f32::from_bits(0x3fc9_0fdb | sign);
+        let angle = if 0.0 > z { pi + basic } else { basic };
+        // Native equality selection includes +/-zero, even when x is also zero.
+        self.deck_yaw_536 = if z == 0.0 { half_pi } else { angle };
+        self.deck_pitch_540 = dot3(forward, [0.0, 1.0, 0.0, 0.0]);
+    }
+
     /// Skeleton Fill82BE2148..2268. Read the completed physical record, the
     /// current input toolkit's Processed352 and Reckoning1152. No pose fitting
     /// or animation mirror: GrindControlFade applies that mirror once on Begin.
@@ -74,3 +95,7 @@ impl Default for AnimationOutputFields {
 pub struct ScoringOutputFields {
     pub capabilities_204: u32,
 }
+
+#[cfg(test)]
+#[path = "deck_angles_tests.rs"]
+mod deck_angles_tests;

@@ -33,6 +33,10 @@ pub(crate) fn advance(
     let p = &skater.player_input.processed;
     let physical = &skater.player_input.physical;
     skater.animation.motion.manual_exit = Some(physical.animation.manual_opposition_168 != 0);
+    skater.animation.motion.deck_yaw_pitch = Some([
+        physical.skeleton.deck_yaw_536,
+        physical.skeleton.deck_pitch_540,
+    ]);
     // ProcessOutput82DB7250/7258 publishes shared Biped720/716 as
     //OffBoard80/84. BipedCadence/MatchCadence/LocoState consume that completed
     //physical packet, preserving the publication boundary across transitions.

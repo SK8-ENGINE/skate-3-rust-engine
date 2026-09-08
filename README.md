@@ -34,11 +34,11 @@ settings. Maps can be switched without restarting the game.
 
 Requires Windows, Rust with the MSVC toolchain, and LLVM installed in its default
 location. Run `BUILD.bat` to build, then `PLAY.bat` to launch the test world.
-Use `PLAY-MAP.bat` to select a map. An XInput controller is required for gameplay;
+`PLAY.bat` opens your saved map (University by default); use the in-game menu to switch maps, or drag a `.skate` file onto `PLAY.bat`. An XInput controller is required for gameplay;
 Escape opens difficulty and graphics settings.
 
 Development builds use a prepared asset set in `assets/private/` or the
-installed asset directory. `Build-Release.ps1` builds the portable Windows
+installed asset directory. `scripts/Build-Release.ps1` builds the portable Windows
 package and requires Python 3.13. Published GitHub releases build and attach
 the package automatically.
 

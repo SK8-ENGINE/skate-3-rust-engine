@@ -45,8 +45,18 @@ pub(super) fn execute(
                     _ => state.end(&mut host.animation),
                 }
             }
-            (MotionOperation::SetDeckPitchAndYaw, _) => {
-                return Err("SetDeckPitchAndYaw has no recovered native implementation".into());
+            (MotionOperation::SetDeckPitchAndYaw { yaw, pitch }, _) => {
+                // Begin82BAF100 copies completed Skeleton536 then540.
+                // Vtable8231FF24 Update/End both point to empty82B61BB8.
+                if phase == 0 {
+                    let values = host.deck_yaw_pitch
+                        .ok_or("SetDeckPitchAndYaw requires completed Skeleton output")?;
+                    for (name, value) in [yaw, pitch].into_iter().zip(values) {
+                        host.animation.set_attribute(SettableAttribute {
+                            name, value, normalized: false, sequence_id: -1,
+                        });
+                    }
+                }
             }
             //Retail ctor82BA58E8 retains only diagnostic text/layout. All three
             //lifecycle slots in82309664 are82B61BB8 (blr), with no state writes.

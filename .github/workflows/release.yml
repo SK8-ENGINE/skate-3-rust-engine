@@ -22,7 +22,7 @@ jobs:
         shell: pwsh
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: ./Build-Release.ps1
+        run: ./scripts/Build-Release.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: skate3rust-windows-x64

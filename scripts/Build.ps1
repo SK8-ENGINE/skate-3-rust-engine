@@ -1,6 +1,7 @@
-param([switch]$StageOnly, [string]$TargetDirectory = (Join-Path $PSScriptRoot 'target'))
+param([switch]$StageOnly, [string]$TargetDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'target'))
+$ProjectRoot = Split-Path $PSScriptRoot -Parent
 $ErrorActionPreference = 'Stop'
-Push-Location $PSScriptRoot
+Push-Location $ProjectRoot
 try {
     if (-not $StageOnly) {
         & cargo build -p skate-game --locked --target-dir $TargetDirectory
@@ -13,7 +14,7 @@ try {
     if (-not (Test-Path -LiteralPath $readobj)) { throw 'LLVM llvm-readobj is required to stage exact runtime DLL dependencies.' }
     $rustLibraries = (& rustc --print target-libdir).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Could not locate Rust runtime libraries.' }
-    $binDirectory = Join-Path $PSScriptRoot 'bin'
+    $binDirectory = Join-Path $ProjectRoot 'bin'
     New-Item -ItemType Directory -Path $binDirectory -Force | Out-Null
     $queue = [System.Collections.Generic.Queue[string]]::new()
     $queue.Enqueue($executable)

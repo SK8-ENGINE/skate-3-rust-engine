@@ -13,6 +13,18 @@ fn bump_multi_blend_accumulates_before_normalizing_without_hemisphere_flip() {
     for i in 0..4 {assert!((output.rotation[i]-raw[i]/norm).abs()<1e-6);}
 }
 
+#[test]
+fn weighted_rejects_invalid_weights_and_rotations() {
+    let identity = pose([0.0, 0.0, 0.0, 1.0]);
+    for weight in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert_eq!(super::weighted(&[vec![identity]], &[weight]), Err(super::PoseBufferError::NonFiniteWeight));
+    }
+    for rotation in [[0.0; 4], [f32::INFINITY; 4], [f32::NAN; 4]] {
+        assert_eq!(super::weighted(&[vec![pose(rotation)]], &[1.0]), Err(super::PoseBufferError::InvalidQuaternion));
+    }
+    assert!(super::weighted(&[vec![identity]], &[1.0]).is_ok());
+}
+
 fn pose(rotation: [f32; 4]) -> Sqt {
     Sqt {
         scale: [1.0; 4],

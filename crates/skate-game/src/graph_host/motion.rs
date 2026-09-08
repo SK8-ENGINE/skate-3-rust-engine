@@ -65,6 +65,8 @@ pub struct MotionHost {
     pub condition_inputs: ConditionInputs,
     pub gameplay_conditions: Option<super::motion_gameplay_conditions::GameplayConditions>,
     pub manual_exit: Option<bool>,
+    /// Completed Skeleton PhysOut536/540, in native yaw-then-pitch order.
+    pub deck_yaw_pitch: Option<[f32; 2]>,
     pub riding_conditions: Option<super::motion_riding_conditions::RidingConditionInputs>,
     pub condition_random: super::motion_riding_conditions::MotionRandom,
     pub native_physical: Option<super::motion_native::Physical>,
@@ -221,6 +223,7 @@ impl MotionHost {
             condition_inputs: ConditionInputs::default(),
             gameplay_conditions: None,
             manual_exit: None,
+            deck_yaw_pitch: None,
             riding_conditions: None,
             condition_random: super::motion_riding_conditions::MotionRandom::new(),
             native_physical: None,
@@ -417,3 +420,7 @@ mod slide_tests;
 #[cfg(test)]
 #[path = "tests/motion_jump_into.rs"]
 mod jump_into_tests;
+
+#[cfg(test)]
+#[path = "tests/motion_deck_angles.rs"]
+mod deck_angles_tests;

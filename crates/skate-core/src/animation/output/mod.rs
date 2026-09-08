@@ -18,6 +18,8 @@ pub type NativeMatrix = [[f32; 4]; 4];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PoseBufferError {
+    NonFiniteWeight,
+    InvalidQuaternion,
     CountOverflow,
     ShortInput,
     ShortOutput,
