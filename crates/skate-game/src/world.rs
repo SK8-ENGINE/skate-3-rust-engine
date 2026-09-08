@@ -17,31 +17,28 @@ impl Plugin for WorldPlugin {
             .add_systems(Startup, spawn);
     }
 }
-fn spawn(
-    mut commands: Commands,
-    server: Res<AssetServer>,
-    manifest: Res<AssetManifest>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut retail_materials: ResMut<Assets<crate::retail_render::RetailWorldMaterial>>,
-    mut sky_materials: ResMut<Assets<crate::retail_render::RetailSkyMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    mut config: ResMut<crate::config::Config>,
+fn spawn(world: &mut World) {
+    let scene = {
+        let server = world.resource::<AssetServer>();
+        let manifest = world.resource::<AssetManifest>();
+        server.load(GltfAssetLabel::Scene(0).from_asset(manifest.0.character_scene.clone()))
+    };
+    world.spawn((PlayerRoot, Transform::default(), Visibility::default()))
+        .with_children(|parent| { parent.spawn(SceneRoot(scene)); });
+    let mut prepared = crate::map_render::PreparedScene::new(world);
+    let (map, root) = {
+        let mut config = world.resource_mut::<crate::config::Config>();
+        (config.map.take(), config.asset_root.clone())
+    };
+    prepared.prepare(map.as_ref(), &root);
+    prepared.publish(world);
+}
+
+pub(crate) fn spawn_test_world(
+    commands: &mut crate::map_render::SceneCommands,
+    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
+    materials: &mut impl crate::map_render::AssetSink<StandardMaterial>,
 ) {
-    commands
-        .spawn((PlayerRoot, Transform::default(), Visibility::default()))
-        .with_children(|parent| {
-            parent.spawn(SceneRoot(server.load(
-                GltfAssetLabel::Scene(0).from_asset(manifest.0.character_scene.clone()),
-            )));
-        });
-    if let Some(map) = config.map.take() {
-        // Physics has already consumed the package. Render assets own their
-        // uploaded data; keeping another full city package wastes gigabytes.
-        crate::skate_world::spawn(&map, &mut commands, &mut meshes, &mut materials, &mut retail_materials, &mut images);
-        crate::retail_render::spawn_sky(&map.name, &config.asset_root, &mut commands, &mut meshes, &mut images, &mut sky_materials);
-        return;
-    }
     let colors = [
         Color::srgb(0.16, 0.19, 0.21),
         Color::srgb(0.48, 0.35, 0.22),

@@ -30,7 +30,21 @@ use skate_core::{
     riding::push_behaviors::PushFootFrame,
 };
 use skate_data::collections::Collections;
-use std::path::Path;
+use std::{path::Path, sync::Arc};
+
+/// Immutable bank bytes and decoded poses survive world changes.
+pub(crate) struct AnimationSource {
+    banks: skate_data::animation_banks::AnimationBanks,
+    evaluator: Arc<PoseEvaluator>,
+}
+impl AnimationSource {
+    fn load(root: &Path) -> Result<Arc<Self>, String> {
+        let banks = skate_data::animation_banks::AnimationBanks::load(root)?;
+        let mut evaluator = PoseEvaluator::from_banks(&banks)?;
+        evaluator.load_authored_clips(root)?;
+        Ok(Arc::new(Self { banks, evaluator: Arc::new(evaluator) }))
+    }
+}
 
 /// Completed native publications, never inferred from a render transform.
 pub(crate) struct AnimationPhysical {
@@ -51,7 +65,8 @@ pub(crate) struct AnimationPhysical {
 pub(crate) struct SkaterAnimation {
     pub action: ActionHost,
     pub motion: MotionHost,
-    pub evaluator: PoseEvaluator,
+    pub evaluator: Arc<PoseEvaluator>,
+    pub source: Arc<AnimationSource>,
     pub pose: Vec<Sqt>,
     pub packet: PhysicsPosePacket,
     pub attributes: PacketAttributes,
@@ -82,15 +97,19 @@ impl SkaterAnimation {
         graphs: &StockGraphs,
         pro_skater: &[u8],
     ) -> Result<Self, String> {
-        let banks = skate_data::animation_banks::AnimationBanks::load(root)?;
-        let mut evaluator = PoseEvaluator::from_banks(&banks)?;
-        evaluator.load_authored_clips(root)?;
+        Self::from_source(data, graphs, pro_skater, AnimationSource::load(root)?)
+    }
+
+    pub fn from_source(
+        data: &Collections, graphs: &StockGraphs, pro_skater: &[u8], source: Arc<AnimationSource>,
+    ) -> Result<Self, String> {
+        let evaluator = source.evaluator.clone();
         let state = state::AnimationState::new(true);
         let count = evaluator.frames.bone_names.len();
         let mut motion = MotionHost::from_graph(
             &graphs.motion,
             data,
-            banks.metadata()?,
+            source.banks.metadata()?,
             PlaybackContext {
                 is_switch: Some(state.switch()),
                 is_mirrored: Some(state.mirrored()),
@@ -123,6 +142,7 @@ impl SkaterAnimation {
                 .map_err(|error| format!("Stock ActionGraph initialization: {error}"))?,
             motion,
             evaluator,
+            source,
             pose: Vec::new(),
             attributes: PacketAttributes::default(),
             state,

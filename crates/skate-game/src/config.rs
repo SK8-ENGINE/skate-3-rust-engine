@@ -9,6 +9,7 @@ pub(crate) struct Config {
     pub map_path: Option<PathBuf>,
     pub difficulty: crate::difficulty::Difficulty,
     pub check_assets: bool,
+    pub start_paused: bool,
 }
 
 impl Config {
@@ -20,6 +21,7 @@ impl Config {
             map_path: None,
             difficulty: crate::difficulty::Difficulty::default(),
             check_assets: false,
+            start_paused: false,
         };
         let mut difficulty_override = None;
         let mut explicit_map = false;
@@ -37,6 +39,7 @@ impl Config {
                 }
                 Some("--test-world") => { explicit_map = true; config.map = None; config.map_path = None; }
                 Some("--check-assets") => config.check_assets = true,
+                Some("--start-paused") => config.start_paused = true,
                 Some("--difficulty") => {
                     let value = args.next().ok_or("--difficulty requires easy, normal or hardcore")?;
                     difficulty_override = Some(crate::difficulty::Difficulty::parse(&value.to_string_lossy())?);
@@ -50,7 +53,7 @@ impl Config {
                 }
                 _ => {
                     return Err(format!(
-                        "Unknown argument {arg:?}. Usage: skate3rust [--assets DIRECTORY] [--map MAP.skate | --test-world] [--difficulty easy|normal|hardcore] [--verify CAPTURE.png] [--check-assets]"
+                        "Unknown argument {arg:?}. Usage: skate3rust [--assets DIRECTORY] [--map MAP.skate | --test-world] [--difficulty easy|normal|hardcore] [--verify CAPTURE.png] [--check-assets] [--start-paused]"
                     ));
                 }
             }

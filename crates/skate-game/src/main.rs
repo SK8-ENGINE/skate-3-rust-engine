@@ -6,6 +6,8 @@ mod camera;
 mod config;
 mod setup;
 mod map_library;
+mod map_render;
+mod map_transition;
 mod difficulty;
 mod graph_host;
 mod graph_runtime;

@@ -88,13 +88,23 @@ impl SkaterRuntime {
         physics: &GamePhysics,
         mode: &str,
     ) -> Result<Self, String> {
+        Self::load_for_world(asset_root, graphs, physics, mode, None)
+    }
+
+    pub(crate) fn load_for_world(
+        asset_root: &Path, graphs: &StockGraphs, physics: &GamePhysics, mode: &str,
+        source: Option<std::sync::Arc<crate::skater_animation::AnimationSource>>,
+    ) -> Result<Self, String> {
         let data = Collections::load(asset_root)?;
         let ground_profiles = super::ground_runtime::GroundProfiles::load(&data)?;
         let mode_index = crate::difficulty::NATIVE_MODES.iter().position(|m| *m == mode)
             .ok_or_else(|| format!("Invalid skater mode {mode}"))? as u32;
         // The host's current character is a custom skater with no pro selector
         // or equipped physical hat. These are profile choices, not force values.
-        let mut animation = SkaterAnimation::load(asset_root, &data, graphs, b"")?;
+        let mut animation = match source {
+            Some(source) => SkaterAnimation::from_source(&data, graphs, b"", source)?,
+            None => SkaterAnimation::load(asset_root, &data, graphs, b"")?,
+        };
         let initial_hierarchy = animation.evaluate_initial_pose()?;
         let offboard = super::offboard::runtime::Runtime::load(&data, animation.motion.animation.metadata())?;
         let mut animated_skeleton =

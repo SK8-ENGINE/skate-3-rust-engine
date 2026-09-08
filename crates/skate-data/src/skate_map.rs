@@ -1,9 +1,10 @@
 //! Little-endian SKATE01..14 reader. Layout follows the supplied
 //! SK8R15/Source/tools/blender_owned_map/SKATE_FORMAT.md and
 //! owned/world/src/owned_map_package.cpp. No geometry or physics is inferred.
-use std::{io::Read, path::Path};
+use std::{io::Read, path::Path, time::Instant};
+mod texture_decode;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct SkateMap {
     pub version: u8,
     pub name: String,
@@ -20,7 +21,7 @@ pub struct SkateMap {
     pub routes: Vec<Route>,
     pub extensions: Vec<Extension>,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Material {
     pub name: String,
     pub flags: u32,
@@ -41,7 +42,7 @@ pub struct Material {
     /// Complete v12+ retail definition bytes; distinct from portable PBR fields.
     pub retail_definition: Option<Vec<u8>>,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Texture {
     pub name: String,
     pub width: u32,
@@ -49,7 +50,7 @@ pub struct Texture {
     pub color_space: u32,
     pub rgba: Vec<u8>,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
@@ -59,27 +60,27 @@ pub struct Vertex {
     pub decal_uv: Option<[f32; 2]>,
     pub tangent_frame: Option<[u8; 4]>,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Collision {
     pub points: [[f32; 3]; 3],
     pub surface: u32,
     pub material: u32,
     pub native_edges: Option<[u8; 3]>,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Geometry {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub collision: Vec<Collision>,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Rail {
     pub name: String,
     pub closed: bool,
     pub points: Vec<[f32; 3]>,
     pub native: Option<Vec<u8>>,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Door {
     pub name: String,
     /// Hinge position/axis, closed width/depth axes, local min/max.
@@ -93,7 +94,7 @@ pub struct Door {
     pub surface: u32,
     pub geometry: Geometry,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Light {
     pub name: String,
     pub kind: u32,
@@ -106,14 +107,14 @@ pub struct Light {
     pub inner_cos: f32,
     pub outer_cos: f32,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Route {
     pub rail: Rail,
     pub skaters: u32,
     pub speed: f32,
     pub spacing: f32,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Extension {
     pub tag: [u8; 4],
     pub schema: u32,
@@ -204,43 +205,17 @@ impl<'a> Reader<'a> {
         self.check_count(n, 12)?;
         (0..n).map(|_| self.floats()).collect()
     }
-    fn stored(&mut self, expected: usize) -> Result<Vec<u8>, String> {
+    fn stored_block(&mut self, expected: usize) -> Result<StoredBlock<'a>, String> {
         if expected > 2_147_483_648 {
             return Err("SKATE decoded block exceeds 2 GiB reader limit".into());
         }
         let method = self.u()?;
         let n = self.u()? as usize;
         let bytes = self.take(n)?;
-        let decoded = match method {
-            0 => bytes.to_vec(),
-            1 => {
-                let mut result = Vec::new();
-                let mut decoder = flate2::read::ZlibDecoder::new(bytes);
-                decoder
-                    .by_ref()
-                    .take(expected as u64 + 1)
-                    .read_to_end(&mut result)
-                    .map_err(|e| format!("SKATE DEFLATE: {e}"))?;
-                if decoder.total_in() as usize != bytes.len() {
-                    return Err("SKATE compressed block has unused input".into());
-                }
-                result
-            }
-            2 => {
-                let mut result = Vec::new();
-                zstd::stream::read::Decoder::new(bytes)
-                    .map_err(|e| e.to_string())?
-                    .take(expected as u64 + 1)
-                    .read_to_end(&mut result)
-                    .map_err(|e| format!("SKATE Zstandard: {e}"))?;
-                result
-            }
-            _ => return Err(format!("Unsupported SKATE storage method {method}")),
-        };
-        if decoded.len() != expected {
-            return Err("SKATE decoded block size mismatch".into());
-        }
-        Ok(decoded)
+        Ok(StoredBlock { expected, method, bytes })
+    }
+    fn stored(&mut self, expected: usize) -> Result<Vec<u8>, String> {
+        self.stored_block(expected)?.decode()
     }
     fn geometry(
         &mut self,
@@ -337,12 +312,63 @@ impl<'a> Reader<'a> {
         })
     }
 }
+/// Borrow compressed payloads while scanning; decompression does not mutate
+/// the package or depend on any other texture.
+struct StoredBlock<'a> { expected: usize, method: u32, bytes: &'a [u8] }
+impl StoredBlock<'_> {
+    fn decode(&self) -> Result<Vec<u8>, String> {
+        let Self { expected, method, bytes } = *self;
+        let decoded = match method {
+            0 => bytes.to_vec(),
+            1 => {
+                let mut result = Vec::with_capacity(expected.min(8 * 1024 * 1024));
+                let mut decoder = flate2::read::ZlibDecoder::new(bytes);
+                decoder
+                    .by_ref()
+                    .take(expected as u64 + 1)
+                    .read_to_end(&mut result)
+                    .map_err(|e| format!("SKATE DEFLATE: {e}"))?;
+                if decoder.total_in() as usize != bytes.len() {
+                    return Err("SKATE compressed block has unused input".into());
+                }
+                result
+            }
+            2 => {
+                let mut result = Vec::with_capacity(expected.min(8 * 1024 * 1024));
+                zstd::stream::read::Decoder::new(bytes)
+                    .map_err(|e| e.to_string())?
+                    .take(expected as u64 + 1)
+                    .read_to_end(&mut result)
+                    .map_err(|e| format!("SKATE Zstandard: {e}"))?;
+                result
+            }
+            _ => return Err(format!("Unsupported SKATE storage method {method}")),
+        };
+        if decoded.len() != expected {
+            return Err("SKATE decoded block size mismatch".into());
+        }
+        Ok(decoded)
+    }
+}
 impl SkateMap {
     pub fn load(path: &Path) -> Result<Self, String> {
+        let started = Instant::now();
         let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Self::parse(&data).map_err(|e| format!("{}: {e}", path.display()))
+        let disk = started.elapsed();
+        let parse_started = Instant::now();
+        let map = Self::parse(&data).map_err(|e| format!("{}: {e}", path.display()))?;
+        eprintln!("MAP_READ_TIMING name={:?} disk_ms={} parse_ms={} file_bytes={}",
+            map.name, disk.as_millis(), parse_started.elapsed().as_millis(), data.len());
+        Ok(map)
     }
     pub fn parse(data: &[u8]) -> Result<Self, String> {
+        let workers = std::thread::available_parallelism().map_or(1, |n| n.get().min(4));
+        Self::parse_with_decode_workers(data, workers)
+    }
+    /// Data tools can request one worker for reproducible serial comparisons.
+    /// The decoder caps concurrency at eight and skips threading for small maps.
+    pub fn parse_with_decode_workers(data: &[u8], workers: usize) -> Result<Self, String> {
+        let parse_started = Instant::now();
         let mut r = Reader { bytes: data, at: 0 };
         let magic = r.take(8)?;
         if &magic[..5] != b"SKATE"
@@ -470,8 +496,10 @@ impl SkateMap {
             }
             materials.push(m);
         }
+        let texture_started = Instant::now();
         r.check_count(counts[1], 20)?;
         let mut textures = Vec::new();
+        let mut texture_blocks = Vec::new();
         for _ in 0..counts[1] {
             let name = r.string()?;
             let width = r.u()?;
@@ -481,23 +509,27 @@ impl SkateMap {
                 return Err("Invalid SKATE embedded texture".into());
             }
             let expected = width as usize * height as usize * 4;
-            let rgba = if version >= 9 {
-                r.stored(expected)?
+            let block = if version >= 9 {
+                r.stored_block(expected)?
             } else {
                 let bytes = r.u()? as usize;
                 if bytes != expected {
                     return Err("Invalid SKATE embedded texture size".into());
                 }
-                r.take(bytes)?.to_vec()
+                StoredBlock { expected, method: 0, bytes: r.take(bytes)? }
             };
+            texture_blocks.push(block);
             textures.push(Texture {
                 name,
                 width,
                 height,
                 color_space,
-                rgba,
+                rgba: Vec::new(),
             });
         }
+        let texture_workers = texture_decode::decode(&mut textures, &texture_blocks, workers)?;
+        let texture_time = texture_started.elapsed();
+        let geometry_started = Instant::now();
         let geometry_counts = [counts[2], counts[3], counts[4]];
         let geometry = if version >= 9 {
             let mut bytes = r.stored(counts[2] as usize * if version >= 12 { 56 } else { 44 })?;
@@ -511,6 +543,7 @@ impl SkateMap {
         } else {
             r.geometry(geometry_counts, materials.len(), version)?
         };
+        let geometry_time = geometry_started.elapsed();
         if materials.is_empty()
             || geometry.vertices.is_empty()
             || geometry.indices.is_empty()
@@ -622,6 +655,7 @@ impl SkateMap {
                 spacing,
             });
         }
+        let extension_started = Instant::now();
         let mut extensions = Vec::new();
         if version >= 12 {
             let n = r.u()?;
@@ -646,6 +680,9 @@ impl SkateMap {
                 data.len() - r.at
             ));
         }
+        eprintln!("MAP_DECODE_TIMING name={:?} textures_ms={} texture_workers={} geometry_ms={} extensions_ms={} total_ms={}",
+            name, texture_time.as_millis(), texture_workers, geometry_time.as_millis(),
+            extension_started.elapsed().as_millis(), parse_started.elapsed().as_millis());
         Ok(Self {
             version,
             name,
