@@ -57,6 +57,7 @@ fn fixture(version: u8) -> Vec<u8> {
     if version >= 8 {
         u(&mut b, 1);
     }
+    let material_start = b.len();
     s(&mut b, "Surface");
     u(&mut b, 1);
     fs(&mut b, &[0.6, 0.1, 1., 0.5, 0.25, 0.8, 0.]);
@@ -77,6 +78,11 @@ fn fixture(version: u8) -> Vec<u8> {
     }
     if version >= 12 {
         u(&mut b, 0);
+    }
+    if version >= 15 {
+        let material = b.split_off(material_start);
+        u(&mut b, material.len() as u32);
+        stored(&mut b, &material, 2);
     }
     s(&mut b, "Pixel");
     for n in [1, 1, 1] {
@@ -172,7 +178,7 @@ fn stored(b: &mut Vec<u8>, data: &[u8], method: u8) {
 }
 #[test]
 fn reads_all_documented_versions_without_moving_geometry() {
-    for version in 1..=14 {
+    for version in 1..=15 {
         let map = SkateMap::parse(&fixture(version)).unwrap();
         assert_eq!(map.version, version);
         assert_eq!(map.spawn, [2., 0., 3.]);
@@ -193,6 +199,36 @@ fn reads_all_documented_versions_without_moving_geometry() {
             );
         }
     }
+}
+
+#[test]
+fn v15_texture_references_preserve_order_and_reject_forward_or_wrong_size() {
+    let mut data = fixture(15);
+    let header_counts = 8 + 4 + 4 + "Fixture".len() + 49 * 4;
+    data[header_counts + 4..header_counts + 8].copy_from_slice(&3u32.to_le_bytes());
+    let mut needle = Vec::new();
+    s(&mut needle, "Pixel");
+    let start = data.windows(needle.len()).position(|w| w == needle).unwrap();
+    let metadata_end = start + needle.len() + 12;
+    let texture_end = metadata_end + 8 + 4; // fixture v15 uses raw RGBA
+    let mut references = Vec::new();
+    for source in [0, 1] {
+        references.extend_from_slice(&data[start..metadata_end]);
+        u(&mut references, 11);
+        u(&mut references, 4);
+        u(&mut references, source);
+    }
+    data.splice(texture_end..texture_end, references);
+    let map = SkateMap::parse(&data).unwrap();
+    assert_eq!(map.textures.len(), 3);
+    assert!(map.textures.iter().all(|t| t.rgba == [255, 128, 64, 255]));
+    let reference = texture_end + (metadata_end - start) + 8;
+    data[reference..reference + 4].copy_from_slice(&1u32.to_le_bytes());
+    assert!(SkateMap::parse(&data).unwrap_err().contains("forward texture reference"));
+    data[reference..reference + 4].copy_from_slice(&0u32.to_le_bytes());
+    let width = texture_end + needle.len();
+    data[width..width + 4].copy_from_slice(&2u32.to_le_bytes());
+    assert!(SkateMap::parse(&data).unwrap_err().contains("reference size mismatch"));
 }
 #[test]
 fn rejects_every_truncated_prefix_and_trailing_data() {

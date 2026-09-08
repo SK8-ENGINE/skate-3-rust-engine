@@ -1,8 +1,9 @@
-//! Little-endian SKATE01..14 reader. Layout follows the supplied
+//! Little-endian SKATE01..15 reader. Layout follows the supplied
 //! SK8R15/Source/tools/blender_owned_map/SKATE_FORMAT.md and
 //! owned/world/src/owned_map_package.cpp. No geometry or physics is inferred.
 use std::{io::Read, path::Path, time::Instant};
 mod texture_decode;
+mod storage_v15;
 
 #[derive(Debug, PartialEq)]
 pub struct SkateMap {
@@ -314,6 +315,7 @@ impl<'a> Reader<'a> {
 }
 /// Borrow compressed payloads while scanning; decompression does not mutate
 /// the package or depend on any other texture.
+#[derive(Clone, Copy)]
 struct StoredBlock<'a> { expected: usize, method: u32, bytes: &'a [u8] }
 impl StoredBlock<'_> {
     fn decode(&self) -> Result<Vec<u8>, String> {
@@ -342,6 +344,7 @@ impl StoredBlock<'_> {
                     .map_err(|e| format!("SKATE Zstandard: {e}"))?;
                 result
             }
+            3..=10 => return storage_v15::decode(method, bytes, expected),
             _ => return Err(format!("Unsupported SKATE storage method {method}")),
         };
         if decoded.len() != expected {
@@ -395,8 +398,8 @@ impl SkateMap {
             return Err("Invalid SKATE magic/version".into());
         }
         let version = (magic[5] - b'0') * 10 + magic[6] - b'0';
-        if !(1..=14).contains(&version) {
-            return Err("Unsupported SKATE version: reader supports 01 through 14; newer packages require an update".into());
+        if !(1..=15).contains(&version) {
+            return Err("Unsupported SKATE version: reader supports 01 through 15; newer packages require an update".into());
         }
         if r.u()? != 0x12345678 {
             return Err("Invalid SKATE endian marker".into());
@@ -427,6 +430,15 @@ impl SkateMap {
         };
         for c in &mut counts[..n] {
             *c = r.u()?;
+        }
+        let material_bytes = if version >= 15 {
+            let size = r.u()? as usize;
+            Some(r.stored(size)?)
+        } else { None };
+        let mut package_reader = None;
+        if let Some(bytes) = &material_bytes {
+            package_reader = Some(r);
+            r = Reader { bytes, at: 0 };
         }
         r.check_count(counts[0], if version >= 2 { 80 } else { 48 })?;
         let mut materials = Vec::new();
@@ -512,10 +524,14 @@ impl SkateMap {
             }
             materials.push(m);
         }
+        if let Some(package) = package_reader {
+            if r.at != r.bytes.len() { return Err("SKATE material block has trailing bytes".into()); }
+            r = package;
+        }
         let texture_started = Instant::now();
         r.check_count(counts[1], 20)?;
         let mut textures = Vec::new();
-        let mut texture_blocks = Vec::new();
+        let mut texture_blocks: Vec<StoredBlock<'_>> = Vec::new();
         for _ in 0..counts[1] {
             let name = r.string()?;
             let width = r.u()?;
@@ -534,6 +550,13 @@ impl SkateMap {
                 }
                 StoredBlock { expected, method: 0, bytes: r.take(bytes)? }
             };
+            let block = if version >= 15 && block.method == 11 {
+                let index = u32::from_le_bytes(block.bytes.try_into()
+                    .map_err(|_| "Invalid SKATE texture reference size")?) as usize;
+                let source = *texture_blocks.get(index).ok_or("Invalid SKATE forward texture reference")?;
+                if source.expected != expected { return Err("SKATE texture reference size mismatch".into()); }
+                source
+            } else { block };
             texture_blocks.push(block);
             textures.push(Texture {
                 name,
