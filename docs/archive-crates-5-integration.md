@@ -26,7 +26,9 @@ The archive redirects `RevertGround` requests to ordinary ground physics and
 does not supply a dedicated revert solver. After the user reported non-working
 reverts, this redirect was removed so the existing revert Enter/Update/Fill
 lifecycle can execute. Entry and exit now emit `REVERT_ENTER` / `REVERT_EXIT`
-diagnostics. The local native reference has a dedicated revert Update at
+diagnostics. Scoring consumes the published State66 revert-active flag; the
+previous State70 lookup was always false and suppressed revert HUD announcements.
+The local native reference has a dedicated revert Update at
 `0x82D43518` (vtable `0x82327330`); enabling the owner does not establish runtime
 parity. Powerslide runtime, update and settings files still match the archive.
 
