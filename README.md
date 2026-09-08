@@ -11,9 +11,10 @@ Includes skating, tricks, grinds, offboard movement, difficulty settings and
 ## Play
 
 Extract the Windows release ZIP and run `skate3rust.exe`. Select your Skate 3
-Xbox 360 ISO. Setup prepares the skater, animations and all disc maps, then
+Xbox 360 ISO, or select `default.xex` in an extracted game folder. Keep its
+`data` folder alongside it. Setup prepares the skater, animations and all disc maps, then
 starts University. No Blender, Python or Rust installation is needed.
-The first setup needs internet access and can take a while.
+ISO extraction needs internet access. The first conversion can take a while.
 
 Use an XInput controller to play. Escape opens graphics, difficulty and map
 settings. Loading another map restarts the game session.

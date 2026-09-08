@@ -4,7 +4,10 @@
 `support` directory beside `skate3rust.exe`. The game links Bevy and the MSVC
 runtime statically; the setup helper bundles Python, NumPy, Pillow and Tcl/Tk.
 
-On first launch, setup asks for a local Xbox 360 Skate 3 ISO. It downloads
+On first launch, setup accepts a local Xbox 360 Skate 3 ISO, `default.xex`,
+or an extracted game folder. Selecting `default.xex` uses the surrounding
+folder, which must still contain the full game data. Extracted copies skip
+ISO extraction and need no tool download. For ISO input, setup downloads
 the hash-pinned extract-xiso utility from XboxDev. Asset conversion runs in
 the bundled setup helper. Blender is neither required nor downloaded.
 No game files are downloaded or included in the package.

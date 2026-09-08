@@ -113,6 +113,13 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
 
 
 def install(iso,base,game_exe,report,game_root=None):
+    if game_root is None and iso is not None:
+        selected=iso.resolve()
+        if selected.is_dir():game_root=selected
+        elif selected.suffix.lower()=='.xex':
+            if selected.name.lower()!='default.xex' or not selected.is_file():
+                raise RuntimeError('Select default.xex inside your extracted Skate 3 game folder')
+            game_root=selected.parent
     base=base.resolve();base.mkdir(parents=True,exist_ok=True)
     lock=base/'setup.lock'
     try:fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
