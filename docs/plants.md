@@ -39,6 +39,14 @@ backtraces are enabled. On failure the launcher displays the saved output and
 keeps the console open. Earlier launcher runs did not save output, so their
 simulation error messages cannot be recovered from this directory.
 
+The RMB/RB crash recorded at tick259 was an explicit Ground error on
+`GrabWorld` (Processed2476 bit22). That older placeholder misidentified
+`82D38430` as an unsupported Skitch query. The TU3 function actually submits
+the handplant candidate via `82D61268`, or resets it via `82D62F20` when the
+input is released. Those paths already run through `handplant::ground_query`
+and `ground_update`. The obsolete error and its unused duplicate manager have
+been removed; input still reaches the stock graphs and handplant selector.
+
 The task executable is a separate copy, built with:
 
 ```powershell

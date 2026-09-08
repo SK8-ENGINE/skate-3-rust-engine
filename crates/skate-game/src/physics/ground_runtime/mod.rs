@@ -4,7 +4,6 @@ mod corrections;
 mod entry;
 mod state;
 mod update;
-mod world_grab;
 pub(crate) use update::{GroundUpdateFrame, GroundUpdateTargets};
 mod trajectory;
 pub(crate) use entry::GroundEntryTargets;

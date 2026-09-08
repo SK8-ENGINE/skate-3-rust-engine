@@ -268,7 +268,6 @@ pub(crate) fn advance(
             skeleton_elapsed_16505: &mut life.skeleton_elapsed_16505,
             skeleton_ground_16388: &mut life.skeleton_ground_16388,
             // Original830BD4A0 initializer82F825F0 splats8216DEE0=-1.
-            world_grab_reset_direction: [-1.0; 4],
             move_future_deck: &mut move_future,
             trajectory: &mut life.trajectory,
         },
