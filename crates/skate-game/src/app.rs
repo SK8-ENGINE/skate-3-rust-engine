@@ -109,5 +109,6 @@ pub(crate) fn build(
     ));
     app.add_plugins((crate::session_marker::SessionMarkerPlugin, crate::customiser::CustomiserPlugin));
     app.add_plugins(crate::multiplayer::MultiplayerPlugin);
+    app.add_systems(Last, crate::crash_context::sample);
     app
 }
