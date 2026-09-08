@@ -210,3 +210,23 @@ beyond the lip, consistent with the blocked feet and invalid late-entry arc.
 The port now uses the native component order and standalone sin/cos helpers.
 Regression tests cover the observed late-entry COM, apex arrival/zero vertical
 velocity, and zero-angle symmetry. Pose traces remain enabled for verification.
+
+## Arm and variation investigation (8 September, 17:54 run)
+
+User reports the normal body animation improved, with one arm misplaced;
+A/B variations still bail. In plants-20260908-175441-712-2596.log, HandPlant
+requests reason1 (pose displacement) at ticks2209 and5093, without board
+contact or closing velocity. The previous HANDPLANT_POSE samples compare
+current targets with the previous physical pose and cannot identify the
+within-tick source of that displacement.
+
+HANDPLANT_SOLVED now captures authored, IK-adjusted and solved arm positions
+in world coordinates, arm drive strengths, four limb modes/blends, partial
+ragdoll state and per-part pose errors before the handplant bail check. It
+samples every six ticks, or every tick when maximum pose error reaches0.15.
+This is diagnostic only: neither the arm problem nor variation bails are
+claimed fixed. Native82D633B0,82BE3220,82BD9728 and82BEDC10 were inspected;
+the selected arm, two0.65m clamps and feet-only external post pass match the
+existing port. Need another normal/A/B reproduction to locate the divergence.
+The same run later terminates in unsupported IsGrindBluntingBackslash at8059;
+that separate grind condition remains unresolved by this diagnostic change.

@@ -97,6 +97,7 @@ pub(super) fn check_after_physics(
         PhysicalStateId::FootPlant | PhysicalStateId::HandPlant => {
             let frame = observations.frame()?;
             if skater.player_state.current() == PhysicalStateId::HandPlant {
+                super::handplant::trace_solved(physics, skater);
                 //HandPlant vtable823273CC slot40 ->82D4C530 ->82D90358(false).
                 //FootPlant's82D4C6D8 alone uses82D8FDC0. Its low trick-impact
                 //thresholds must not replace HandPlant's normal air checks.

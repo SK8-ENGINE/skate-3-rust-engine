@@ -166,6 +166,27 @@ pub(super) fn ground_update(
     }
     Ok(())
 }
+
+/// Capture the solved pose before the bail check, rather than comparing this
+/// tick's targets against last tick's bodies in HANDPLANT_POSE.
+pub(super) fn trace_solved(physics: &GamePhysics, skater: &SkaterRuntime) {
+    if physics.ticks % 6 != 0 && skater.collision_maximum_error.unwrap_or(0.0) < 0.15 {
+        return;
+    }
+    let root = &skater.animated_skeleton.roots.animation_to_world;
+    let actual = skater.skeleton.part_transforms();
+    let parts = [3, 4, 5, 6, 7, 8, 9, 10];
+    let authored = parts.map(|i| point(root, skater.animated_skeleton.record.pose[i][3]));
+    let targets = parts.map(|i| point(root, skater.skeleton_input.drive_frames[i][3]));
+    let solved = parts.map(|i| actual[i][3]);
+    let strengths = parts.map(|i| skater.skeleton_drives.bones[i].as_ref()
+        .map(|bone| (bone.active, bone.dynamics.strengths)));
+    let ik = &skater.foot_ik.state.limbs;
+    let feedback = &skater.collision_feedback;
+    bevy::log::info!("HANDPLANT_SOLVED tick={} phase={} parts={parts:?} authored={authored:?} targets={targets:?} solved={solved:?} strengths={strengths:?} ik={ik:?} partial={} collision_weight={} pose_errors={:?} anchor={:?}",
+        physics.ticks, skater.handplant.phase, skater.skeleton_collision.partial_ragdoll,
+        feedback.drive_weight, skater.pose_errors.parts, skater.handplant.anchor);
+}
 ///Ground82D38430 submits the candidate before82D37F38 consumes its investigation.
 pub(super) fn ground_query(physics: &GamePhysics, skater: &mut SkaterRuntime) {
     let p = &skater.player_input.processed;
