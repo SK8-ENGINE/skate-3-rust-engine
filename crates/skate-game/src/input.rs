@@ -34,9 +34,15 @@ impl Plugin for InputPlugin {
     }
 }
 
-pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>) {
+pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<crate::config::Config>,net:Option<Res<crate::multiplayer::Multiplayer>>,windows:Query<&Window>) {
     let previous = input.status;
-    input.collect(std::array::from_fn(platform::poll));
+    let focused=windows.iter().any(|w|w.focused);
+    let active=net.is_some_and(|n|n.active());
+    input.collect(std::array::from_fn(|slot| {
+        if active && ((!focused && config.multiplayer.controller.is_none()) || config.multiplayer.controller.is_some_and(|selected|selected as usize!=slot)) {
+            Err(platform::DeviceError::Disconnected)
+        } else {platform::poll(slot)}
+    }));
     for (index, (&before, &after)) in previous.iter().zip(&input.status).enumerate() {
         if before != after {
             match after {
@@ -53,7 +59,9 @@ pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>) {
 fn publish_actions(
     mut input: ResMut<ControllerInput>,
     mut published: ResMut<PublishedTickInput>,
+    menu:Option<Res<crate::graphics_menu::Menu>>,
 ) {
+    if !crate::graphics_menu::gameplay_active(menu) {input.discard_gameplay();}
     input.publish_actions();
     published.0 = input.tick_input();
 }

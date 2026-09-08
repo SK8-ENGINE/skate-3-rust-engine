@@ -159,7 +159,12 @@ fn controls(
     motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
     time: Res<Time<Real>>,
     menu: Option<Res<crate::graphics_menu::Menu>>,
+    net: Option<Res<crate::multiplayer::Multiplayer>>,
 ) {
+    if net.is_some_and(|n| n.active()) {
+        if replay.active {replay.exit();}
+        return;
+    }
     let pad = input.raw_input();
     let pressed = pad.buttons & !replay.previous_buttons;
     replay.previous_buttons = pad.buttons;

@@ -1,4 +1,8 @@
+> Current implementation: ten-player transport-neutral host/guest sessions with v2 compression and scheduling. See [multiplayer-test.md](multiplayer-test.md). Earlier planning/baseline notes below are retained for context.
+
 # Steam P2P multiplayer plan
+
+> **Superseded design:** this document records the original planning pass. The user's subsequent implementation request requires collisions and a transport-neutral game. See [the implemented two-player test](multiplayer-test.md) for current behavior. Its first collision implementation uses locally owned physics with dynamic remote proxies, not the no-collision recommendation below. Steam is an optional out-of-process byte relay, and local testing works without Steam.
 
 Research date: 8 September 2026. Inspected engine baseline: `da364c9` (Bevy **0.18.1**, with local `bevy_pbr` and `bevy_core_pipeline` patches). **Design only; no multiplayer implementation is authorized by this document.**
 
