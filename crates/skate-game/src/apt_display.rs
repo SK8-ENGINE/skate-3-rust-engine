@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Control {
+    pub label: Option<String>,
     pub type_name: String,
     #[serde(default)]
     pub flags: u32,

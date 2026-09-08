@@ -8,6 +8,7 @@ pub const SCORABLE_COUNT: usize = 332;
 pub const SCORE_TYPE_COUNT: usize = 14;
 pub mod carrier;
 pub mod catalog;
+pub mod conversions;
 pub mod session;
 pub mod timer;
 
@@ -64,6 +65,26 @@ impl Default for ScoreHolder {
 }
 
 impl ScoreHolder {
+    pub fn has_pending_sequence(&self) -> bool {
+        self.pending_sequence
+    }
+    /// Non-air collectors use6198 then add directly to accumulator32.
+    pub fn credit_trick(&mut self, scorable: Scorable, reward: f32) {
+        if !scorable.valid() || self.suppressed {
+            return;
+        }
+        self.count_trick(scorable);
+        self.snapshot.accumulated += reward;
+    }
+    fn count_trick(&mut self, scorable: Scorable) {
+        self.repetitions[scorable.id] = self.repetitions[scorable.id].saturating_add(1);
+        if scorable.score_type != 0 {
+            self.sequence_history[scorable.id] =
+                self.sequence_history[scorable.id].saturating_add(1);
+            self.type_history[scorable.score_type] =
+                self.type_history[scorable.score_type].saturating_add(1);
+        }
+    }
     pub fn set_suppressed(&mut self, suppressed: bool) {
         self.suppressed = suppressed;
     }
@@ -75,13 +96,7 @@ impl ScoreHolder {
         if !scorable.valid() || self.suppressed {
             return;
         }
-        self.repetitions[scorable.id] = self.repetitions[scorable.id].saturating_add(1);
-        if scorable.score_type != 0 {
-            self.sequence_history[scorable.id] =
-                self.sequence_history[scorable.id].saturating_add(1);
-            self.type_history[scorable.score_type] =
-                self.type_history[scorable.score_type].saturating_add(1);
-        }
+        self.count_trick(scorable);
         let s = &mut self.snapshot;
         if scorable.class != 5 {
             s.general_pending += s.fingerflip_pending;

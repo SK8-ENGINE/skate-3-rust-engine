@@ -86,6 +86,8 @@ def prepare(game: Path, output: Path, collections: Path):
         'characters': list(bundle['characters'].values()),
         'shapes': shapes, 'fonts': fonts, 'actions': blocks,
         'font_mappings':mappings,
+        'language': {row['label'].strip(): row['value'] for row in
+                     json.loads((output / 'metadata/languages/english_global.json').read_text(encoding='utf-8'))['entries']},
         'unresolved_fonts': [family for family, asset in fonts.items() if asset is None],
     }
     target = output / 'runtime' / 'trickdisplay.json'

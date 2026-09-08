@@ -8,6 +8,7 @@ pub mod animation_frames;
 pub mod animation_metadata;
 pub mod collections;
 pub mod scoring;
+mod scoring_fields;
 pub mod attrib_hash;
 pub mod input_config;
 pub mod gesture_patterns;

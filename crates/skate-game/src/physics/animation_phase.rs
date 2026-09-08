@@ -27,6 +27,7 @@ pub(crate) fn advance(
     graphs: &StockGraphs,
     profile: &AnimationProfile,
 ) -> Result<AnimationPhaseOutput, String> {
+    skater.animation.motion.score_packet = Default::default();
     let p = &skater.player_input.processed;
     let physical = &skater.player_input.physical;
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];

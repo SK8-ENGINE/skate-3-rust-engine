@@ -114,10 +114,14 @@ struct Function {
 
 struct Scope {
     this: usize,
+    local_definitions: bool,
     locals: BTreeMap<String, Value>,
 }
 
 pub trait Host {
+    fn property_changed(&mut self, _vm: &mut Vm, _object: usize, _key: &str) -> Result<(), String> {
+        Ok(())
+    }
     fn call(
         &mut self,
         vm: &mut Vm,
@@ -129,6 +133,7 @@ pub trait Host {
 #[derive(Default)]
 pub struct Vm {
     pub objects: Vec<Object>,
+    free_objects: Vec<usize>,
     functions: Vec<Function>,
     pub global: usize,
     remaining: usize,
@@ -151,6 +156,14 @@ impl Vm {
         vm
     }
     pub fn object(&mut self, kind: ObjectKind) -> usize {
+        if let Some(id) = self.free_objects.pop() {
+            self.objects[id] = Object {
+                kind,
+                fields: BTreeMap::new(),
+                prototype: None,
+            };
+            return id;
+        }
         let id = self.objects.len();
         self.objects.push(Object {
             kind,
@@ -158,6 +171,45 @@ impl Vm {
             prototype: None,
         });
         id
+    }
+    /// Collect only between updates. Host-owned movie handles are explicit
+    /// roots; script references and prototypes preserve retired clips when
+    /// they remain reachable. Stable handles never move during collection.
+    pub fn collect(&mut self, host_roots: impl IntoIterator<Item = usize>) -> Result<(), String> {
+        if self.depth != 0 {
+            return Err("Cannot collect during an APT call".into());
+        }
+        let mut marked = vec![false; self.objects.len()];
+        let mut pending: Vec<_> = host_roots.into_iter().collect();
+        pending.push(self.global);
+        while let Some(id) = pending.pop() {
+            let seen = marked.get_mut(id).ok_or("Invalid APT collection root")?;
+            if *seen {
+                continue;
+            }
+            *seen = true;
+            let object = &self.objects[id];
+            if let Some(id) = object.prototype {
+                pending.push(id);
+            }
+            for value in object.fields.values() {
+                if let Value::Object(id) = value {
+                    pending.push(*id);
+                }
+            }
+        }
+        self.free_objects.clear();
+        for (id, live) in marked.into_iter().enumerate() {
+            if !live {
+                self.objects[id] = Object {
+                    kind: ObjectKind::Plain,
+                    fields: BTreeMap::new(),
+                    prototype: None,
+                };
+                self.free_objects.push(id);
+            }
+        }
+        Ok(())
     }
     pub fn set(
         &mut self,
@@ -219,6 +271,7 @@ impl Vm {
             &mut Vec::new(),
             &mut Scope {
                 this: object,
+                local_definitions: false,
                 locals: BTreeMap::new(),
             },
             host,
@@ -261,6 +314,7 @@ impl Vm {
         let mut reg = 1;
         let mut scope = Scope {
             this,
+            local_definitions: true,
             locals: BTreeMap::new(),
         };
         if f.code.flags & 2 == 0 {
@@ -351,6 +405,17 @@ impl Vm {
             };
             match op {
                 0 => break,
+                0x70 => stack.push(Value::Object(scope.this)),
+                0xa1 => stack.push(Value::Text(
+                    i.operand
+                        .as_str()
+                        .ok_or("APT string operand missing")?
+                        .into(),
+                )),
+                0xa4 => stack.push(self.variable(
+                    scope,
+                    i.operand.as_str().ok_or("APT variable operand missing")?,
+                )),
                 0x06 | 0x07 => {
                     host.call(
                         self,
@@ -426,7 +491,8 @@ impl Vm {
                     let k = pop(&mut stack)?.text();
                     let o = pop(&mut stack)?;
                     if let Value::Object(id) = o {
-                        self.set(id, k, v)?;
+                        self.set(id, &k, v)?;
+                        host.property_changed(self, id, &k)?;
                     }
                 }
                 0x1c => {
@@ -436,10 +502,11 @@ impl Vm {
                 0x1d | 0x3c => {
                     let v = pop(&mut stack)?;
                     let k = pop(&mut stack)?.text();
-                    if op == 0x3c || scope.locals.contains_key(&k) {
+                    if (op == 0x3c && scope.local_definitions) || scope.locals.contains_key(&k) {
                         scope.locals.insert(k, v);
                     } else {
-                        self.set(scope.this, k, v)?;
+                        self.set(scope.this, &k, v)?;
+                        host.property_changed(self, scope.this, &k)?;
                     }
                 }
                 0x3a => {

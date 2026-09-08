@@ -105,6 +105,7 @@ pub(crate) fn build(
         crate::render_capacity::RenderCapacityPlugin,
         verification::VerificationPlugin,
         crate::performance::PerformancePlugin,
-    ));
+    ))
+    .add_plugins(crate::scoring_hud::ScoringHudPlugin);
     app
 }

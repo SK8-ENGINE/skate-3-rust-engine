@@ -1,6 +1,12 @@
 mod animation;
 mod apt_vm;
 mod apt_display;
+mod apt_movie;
+mod apt_text;
+mod apt_scene;
+mod hud_runtime;
+mod scoring_runtime;
+mod scoring_hud;
 mod animation_pose;
 mod app;
 mod assets;

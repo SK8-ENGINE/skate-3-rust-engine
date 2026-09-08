@@ -25,6 +25,7 @@ pub struct Definition {
 
 #[derive(Clone, Debug)]
 pub struct ScoringData {
+    pub collector: CollectorTuning,
     pub definitions: Vec<Definition>,
     pub repetition: PointGraph<8>,
     pub announcement: PointGraph<8>,
@@ -37,6 +38,7 @@ pub struct ScoringData {
     pub combo_refresh_threshold: f32,
     pub unannounced_factor: f32,
     pub bail_factor: f32,
+    pub sketchy_side_speed: f32,
 }
 
 impl ScoringData {
@@ -103,6 +105,7 @@ impl ScoringData {
         };
         let f = |field| data.float(TUNING, "default", field);
         Ok(Self {
+            collector: CollectorTuning::load(data)?,
             definitions,
             repetition: graph("Hash_59D91EAABF033A24")?,
             announcement: graph("Hash_263B277F8CA17126")?,
@@ -118,6 +121,7 @@ impl ScoringData {
             combo_refresh_threshold: f("Hash_E36197BFC8EA1CAD")?,
             unannounced_factor: f("Hash_2577DF0FCE5251E4")?,
             bail_factor: f("Hash_B0B56FF046508506")?,
+            sketchy_side_speed: f("Hash_6DC5982591F80A4C")?,
         })
     }
     pub fn by_name(&self, name: AttributeName) -> Option<&Definition> {
@@ -125,5 +129,43 @@ impl ScoringData {
     }
     pub fn by_id(&self, id: usize) -> Option<&Definition> {
         self.definitions.iter().find(|d| d.metadata.id == id)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CollectorTuning {
+    scalars: std::collections::BTreeMap<u16, f32>,
+    curves: std::collections::BTreeMap<u16, PointGraph<8>>,
+}
+impl CollectorTuning {
+    fn load(data: &Collections) -> Result<Self, String> {
+        let mut out = Self {
+            scalars: Default::default(),
+            curves: Default::default(),
+        };
+        for &(offset, field, size) in crate::scoring_fields::FIELDS {
+            if size == 4 {
+                out.scalars.insert(
+                    offset,
+                    data.float("Hash_546C36B656038E04", "default", field)?,
+                );
+            } else {
+                let w = data.words::<20>("Hash_546C36B656038E04", "default", field)?;
+                out.curves.insert(
+                    offset,
+                    PointGraph {
+                        x: std::array::from_fn(|i| f32::from_bits(w[4 + i])),
+                        y: std::array::from_fn(|i| f32::from_bits(w[12 + i])),
+                    },
+                );
+            }
+        }
+        Ok(out)
+    }
+    pub fn scalar(&self, native_offset: u16) -> f32 {
+        self.scalars[&native_offset]
+    }
+    pub fn curve(&self, native_offset: u16, input: f32) -> f32 {
+        self.curves[&native_offset].evaluate(input)
     }
 }

@@ -59,40 +59,65 @@ The original movie is authored at 1280 by 720. Its score, line, stance,
 multiplier and trick-name timelines must control presentation; replacing them
 with a new overlay would not meet this port's requirements.
 
-## Remaining implementation
+## Production integration and validation
 
-Collectors are not wired into the production tick yet. Recognition still
-requires conditioner gates, descriptor conversion, air/ground/grind collector
-transitions, spin/flip bonuses, gaps, landing and sequence publication ordering.
-Announcement delay conversion uses the verified binary32 60 at `8303745C`.
-The carrier's start/current tick source still needs to be connected at the
-matching production phase.
+The production fixed tick now supplies animation descriptors, conditioned category,
+grind IDs, landing output and physical motion to `scoring_runtime`. The runtime
+loads native VLT points, repetition, announcement and collector curves, maintains
+carriers and continuous distance rewards, and publishes sequence/line accounting.
+It is a usable integration for testing, **not a finished native-parity port**.
 
-The HUD still needs a complete movie object hierarchy, native bindings,
-timeline execution and rendering with multiplicative and additive colors.
-Superclass preloads and supported action coverage also remain incomplete.
-The audit's dummy host intentionally does not establish native binding parity.
+The HUD executes the owned trickdisplay ActionScript and timelines, including
+score, multiplier, line meter, stance and trick-name updates. It renders original
+shape atlases and font glyphs through a separate 1280x720 camera with inherited
+multiplicative/additive colors. Movie objects are collected and mesh/material
+slots reused. Fixed updates pause with gameplay; map-generation changes recreate
+the movie even while paused. Missing assets or unsupported actions are logged.
 
-Font resolution is recovered from FontManager initialization `82808AE8`,
-APT-name lookup `82809208` and loading `82809308`. VLT class
-`FECFBCAF356518C4` maps the APT name (field `340832CCFD9FDEB4`, layout +8) to
-`FileName` (layout +4). In particular, `FuturaOuterGlow` maps to `futurashadow`,
-not the prior extractor's inferred `Futura Glow`. The prepared movie has no
-unresolved font references. The manifest retains VLT record provenance and
-native scale/offset fields. The community symbol calling `82809168`
-GetFontByAptName is misleading: that function searches the filename column;
-`82809208` searches the APT-name column.
+Font resolution follows FontManager initialization `82808AE8`, APT-name lookup
+`82809208` and loading `82809308`. VLT class `FECFBCAF356518C4` maps AptName to
+FileName; `FuturaOuterGlow` resolves to `futurashadow`. Glyph advance and placement
+use native scale/ascent metrics. English text resolves through the owned language
+asset. No replacement interface or bundled game assets are introduced.
 
-Pause, map-change generation reset and resource reuse remain to be integrated
-and checked. A release compilation succeeds; its executable is copied into
-the ignored task-local `logs/scoring/build` directory, with an untracked
-`Launch scoring worktree.bat`. This is a compilation checkpoint, not a working
-scoring/HUD feature build. No game/recomp,
-controller harness, gameplay automation, `--check-assets`, or screenshot
-capture has been run for this work.
+Validation on 2026-09-08:
 
-Validation so far: nine scoring unit tests pass (including unsigned clock
-rollover, early completion, conversion, timer thresholds, one-time banking and
-cancelled rewards); the owned-data loader audit resolves 300 definitions; the
-APT data-only audit passes placement validation and constructor checks.
+- All nine scoring unit tests pass, covering clock wrap, early completion,
+  conversion, cancellation, repetition, timer thresholds and one-time banking.
+- The data-only scoring-flow example credits the authored 100-point stationary
+  kickflip once and verifies idle stability and teleport cancellation.
+- The original HUD data-only audit passes 1,800 frames, with 172 VM slots,
+  116 display instances, at most 31 draw batches and finite geometry.
+- The release target builds successfully with static MSVC CRT, without default
+  features. Compiler warnings remain in the existing game and audit-only code.
+- No game, recomp, controller harness, gameplay automation, `--check-assets`
+  or screenshot capture was run. GPU rendering and interactive behavior remain
+  unverified until the user launches the build.
 
+The copied build and launcher are in ignored `logs/scoring/build`. The launcher
+uses this worktree's HUD cache and the existing owned asset installation and
+starts paused. It checks required paths before running and retains failures on
+screen. The executable SHA256 is
+`775264c02f456665052355d466b99cb2e3ead1e359af3123c9a53afd68e1e182`.
+
+## Native parity gaps
+
+These are implementation gaps, not merely missing gameplay validation:
+
+- Collector activation gates and exact publication timing need further porting;
+  the current runtime uses conditioned categories and an idle countdown.
+- Air spin uses accumulated board heading rather than the complete native
+  transform accumulator. Body-flip direction and some landing modifiers remain
+  incomplete.
+- Gap/context collectors and their native ground-query inputs, contextual
+  bonuses and off-board height rewards are not wired.
+- Revert recognition depends on an unpublished physical state flag in the
+  current host. Full native revert scoring is not yet available.
+- Trick-name spin/direction modifiers and the HUD manager's stance transitions
+  are incomplete. The bindings expose five metric slots but currently only
+  supply the base trick label and default modifier flags.
+- The compact VM supports the exercised movie paths, not arbitrary APT programs.
+  Superclass/native constructor behavior is limited, and Math.random uses a
+  local presentation RNG rather than the original engine RNG stream.
+
+Do not describe this build as fully finished or an exact native recreation.
