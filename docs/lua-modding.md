@@ -276,3 +276,5 @@ Enabled-mod windows default to 360 by 760 pixels, bounded by the display.
 Drag the bottom-right `//` grip to resize (minimum 320 by 260); the settings
 viewport grows with the window and keeps mouse-wheel scrolling. Window sizes
 are retained in memory while the game runs, alongside position/collapse state.
+
+Each enabled-mod settings viewport also has a right-side scrollbar. Drag its thumb or click the track to jump; wheel and keyboard scrolling update the same thumb. It resizes with the window and dims when all settings fit.

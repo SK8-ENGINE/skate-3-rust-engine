@@ -3,6 +3,7 @@ use super::{ModMenu, Mods};
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use std::collections::BTreeMap;
+mod scrollbar;
 
 #[derive(Default)]
 struct Layout {
@@ -20,11 +21,12 @@ pub(crate) struct EnabledPanel {
     layouts: BTreeMap<String, Layout>,
     drag: Option<(String, Vec2)>,
     resize: Option<(String, Vec2)>,
+    scroll_drag: Option<(String, f32)>,
     signature: Vec<(String, Vec<String>)>,
 }
 impl EnabledPanel {
     pub fn dragging(&self) -> bool {
-        self.drag.is_some() || self.resize.is_some()
+        self.drag.is_some() || self.resize.is_some() || self.scroll_drag.is_some()
     }
 }
 #[derive(Component)]
@@ -63,7 +65,7 @@ pub(super) fn install(app: &mut App) {
                 .after(crate::graphics_menu::MenuInput)
                 .before(crate::map_transition::MapTransitionSet),
         )
-        .add_systems(Update, (sync, draw, scroll).chain());
+        .add_systems(Update, (sync, draw, scroll, scrollbar::update).chain());
 }
 fn button(parent: &mut ChildSpawnerCommands, text: &str, action: Action) {
     parent
@@ -118,6 +120,7 @@ fn sync(
     panel.signature = signature.clone();
     panel.drag = None;
     panel.resize = None;
+    panel.scroll_drag = None;
     if !signature
         .iter()
         .any(|(id, _)| panel.active.as_ref() == Some(id))
@@ -214,64 +217,84 @@ fn sync(
                         },
                     ))
                     .with_children(|body| {
-                        body.spawn((
-                            Viewport(id.clone()),
-                            ScrollPosition::default(),
-                            Node {
-                                flex_grow: 1.,
-                                flex_basis: px(0.),
-                                min_height: px(0.),
-                                overflow: Overflow::scroll_y(),
-                                flex_direction: FlexDirection::Column,
-                                row_gap: px(6.),
-                                ..default()
-                            },
-                        ))
-                        .with_children(|list| {
-                            for i in 0..settings.len() {
-                                list.spawn((
-                                    Row(id.clone(), i),
-                                    Node {
-                                        align_items: AlignItems::Center,
-                                        column_gap: px(4.),
-                                        min_height: px(34.),
-                                        flex_shrink: 0.,
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgb(0.08, 0.11, 0.15)),
-                                ))
-                                .with_children(|row| {
-                                    row.spawn((
-                                        Label(id.clone(), i),
-                                        Text::new(""),
-                                        TextFont {
-                                            font_size: 14.,
-                                            ..default()
-                                        },
-                                        TextColor(Color::WHITE),
+                        body.spawn(Node {
+                            flex_grow: 1.,
+                            flex_basis: px(0.),
+                            min_height: px(0.),
+                            column_gap: px(6.),
+                            ..default()
+                        })
+                        .with_children(|area| {
+                            area.spawn((
+                                Viewport(id.clone()),
+                                ScrollPosition::default(),
+                                Node {
+                                    flex_grow: 1.,
+                                    flex_basis: px(0.),
+                                    min_height: px(0.),
+                                    min_width: px(0.),
+                                    height: percent(100),
+                                    overflow: Overflow::scroll_y(),
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: px(6.),
+                                    ..default()
+                                },
+                            ))
+                            .with_children(|list| {
+                                for i in 0..settings.len() {
+                                    list.spawn((
+                                        Row(id.clone(), i),
                                         Node {
-                                            flex_grow: 1.,
-                                            width: px(132.),
+                                            align_items: AlignItems::Center,
+                                            column_gap: px(4.),
+                                            min_height: px(34.),
+                                            flex_shrink: 0.,
                                             ..default()
                                         },
-                                    ));
-                                    button(row, "-", Action(id.clone(), Operation::Adjust(i, -1)));
-                                    row.spawn((
-                                        ValueLabel(id.clone(), i),
-                                        Text::new(""),
-                                        TextFont {
-                                            font_size: 14.,
-                                            ..default()
-                                        },
-                                        TextColor(Color::WHITE),
-                                        Node {
-                                            width: px(51.),
-                                            ..default()
-                                        },
-                                    ));
-                                    button(row, "+", Action(id.clone(), Operation::Adjust(i, 1)));
-                                });
-                            }
+                                        BackgroundColor(Color::srgb(0.08, 0.11, 0.15)),
+                                    ))
+                                    .with_children(|row| {
+                                        row.spawn((
+                                            Label(id.clone(), i),
+                                            Text::new(""),
+                                            TextFont {
+                                                font_size: 14.,
+                                                ..default()
+                                            },
+                                            TextColor(Color::WHITE),
+                                            Node {
+                                                flex_grow: 1.,
+                                                width: px(132.),
+                                                ..default()
+                                            },
+                                        ));
+                                        button(
+                                            row,
+                                            "-",
+                                            Action(id.clone(), Operation::Adjust(i, -1)),
+                                        );
+                                        row.spawn((
+                                            ValueLabel(id.clone(), i),
+                                            Text::new(""),
+                                            TextFont {
+                                                font_size: 14.,
+                                                ..default()
+                                            },
+                                            TextColor(Color::WHITE),
+                                            Node {
+                                                width: px(51.),
+                                                ..default()
+                                            },
+                                        ));
+                                        button(
+                                            row,
+                                            "+",
+                                            Action(id.clone(), Operation::Adjust(i, 1)),
+                                        );
+                                    });
+                                }
+                            });
+                            scrollbar::spawn(area, id);
                         });
                         body.spawn(Node {
                             column_gap: px(6.),
@@ -335,6 +358,7 @@ fn input(
         panel.focused = false;
         panel.drag = None;
         panel.resize = None;
+        panel.scroll_drag = None;
         return;
     }
     let ids: Vec<_> = mods
@@ -348,6 +372,7 @@ fn input(
         panel.focused = false;
         panel.drag = None;
         panel.resize = None;
+        panel.scroll_drag = None;
         return;
     }
     if keys.just_pressed(KeyCode::Tab) || nav.pressed & 0x4000 != 0 {
@@ -369,6 +394,7 @@ fn input(
     if !mouse.pressed(MouseButton::Left) {
         panel.drag = None;
         panel.resize = None;
+        panel.scroll_drag = None;
     }
     for (interaction, header) in &headers {
         if *interaction == Interaction::Pressed && mouse.pressed(MouseButton::Left) {
@@ -604,7 +630,7 @@ fn draw(
         if let Some(h) = hint {
             if let Some(l) = panel.layouts.get(&h.0) {
                 **t = format!(
-                    "Drag title to move | Drag // to resize\nScroll wheel: more settings | Tab / X: focus\n{}",
+                    "Drag title to move | Drag // to resize\nWheel or drag scrollbar | Tab / X: focus\n{}",
                     l.status
                 );
             }
