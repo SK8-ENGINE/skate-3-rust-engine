@@ -207,12 +207,12 @@ fn setup(
         display: Display::None, width:percent(100), height:percent(100), align_items:AlignItems::Center,
         justify_content:JustifyContent::Center, position_type:PositionType::Absolute, ..default()
     }, BackgroundColor(Color::srgba(0.015,0.025,0.04,0.88)))).with_children(|root| {
-        root.spawn((Node { width:px(560),max_width:percent(95),padding:UiRect::all(px(18)),flex_direction:FlexDirection::Column,row_gap:px(6),border_radius:BorderRadius::all(px(12)),..default() },
+        root.spawn((Node { width:px(560),max_width:percent(95),padding:UiRect::all(px(18)),flex_direction:FlexDirection::Column,row_gap:px(4),border_radius:BorderRadius::all(px(12)),..default() },
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("GAME MENU"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..12 {
-                panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(36),padding:UiRect::all(px(8)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
+            for i in 0..13 {
+                panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(32),padding:UiRect::all(px(6)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
                 });
@@ -255,6 +255,7 @@ pub(crate) fn interact(
     mut config: ResMut<crate::config::Config>,
     mut transition: ResMut<crate::map_transition::MapTransition>,
     mut customiser: ResMut<crate::customiser::Customiser>,
+    mut custom_models: ResMut<crate::custom_models::CustomModels>,
     nav: Res<crate::customiser::Navigation>,
     mut physics: ResMut<crate::physics::GamePhysics>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -270,7 +271,7 @@ pub(crate) fn interact(
         time.pause();
         return;
     }
-    if customiser.open { return; }
+    if customiser.open || custom_models.open { return; }
     if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 {
         menu.open = !menu.open;
     }
@@ -296,7 +297,7 @@ pub(crate) fn interact(
         }
     }
     if menu.open {
-        let rows = if menu.multiplayer { 11 } else { 12 };
+        let rows = if menu.multiplayer { 11 } else { 13 };
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
             menu.selected = (menu.selected + rows - 1) % rows;
         }
@@ -409,11 +410,12 @@ pub(crate) fn interact(
                 9 => {
                     exit.write(AppExit::Success);
                 }
-                10 => customiser.begin(),
+                10 => { custom_models.request_stock(); customiser.begin(); },
                 11 => {
                     menu.multiplayer = true;
                     menu.selected = 0;
                 }
+                12 => custom_models.begin(),
                 _ => {}
             }
         }
@@ -497,6 +499,7 @@ fn labels(
     transition: Res<crate::map_transition::MapTransition>,
     time: Res<Time<Real>>,
     customiser: Res<crate::customiser::Customiser>,
+    custom_models: Res<crate::custom_models::CustomModels>,
     net: Res<crate::multiplayer::Multiplayer>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut root: Single<&mut Node, With<MenuRoot>>,
@@ -504,7 +507,7 @@ fn labels(
     mut status: Single<&mut Text, With<StatusLabel>>,
     mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor, &mut Node), Without<MenuRoot>>,
 ) {
-    root.display = if menu.open && !customiser.open {
+    root.display = if menu.open && !customiser.open && !custom_models.open {
         Display::Flex
     } else {
         Display::None
@@ -596,6 +599,7 @@ fn labels(
                 8 => "Resume".into(),
                 9 => "Quit game".into(),
                 10 => "Character customiser".into(),
+                12 => "Custom models".into(),
                 _ => "Multiplayer".into(),
             }
         };
@@ -618,7 +622,7 @@ fn labels(
         menu.status.clone()
     };
     for (row, interaction, mut color, mut node) in &mut buttons {
-        node.display = if menu.multiplayer && row.0 == 11 { Display::None } else { Display::Flex };
+        node.display = if menu.multiplayer && row.0 >= 11 { Display::None } else { Display::Flex };
         color.0 = if row.0 == menu.selected || *interaction == Interaction::Hovered {
             Color::srgb(0.10, 0.30, 0.34)
         } else {
@@ -656,7 +660,6 @@ mod tests {
             .insert_resource(images)
             .insert_resource(Menu {
                 open: false, selected: 0, settings: GraphicsSettings::default(),
-                maps: Vec::new(), selected_map: 0,
                 difficulty: Difficulty::Easy, path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
                 multiplayer: false, browser: false,
                 maps: vec![crate::map_library::Entry { label: "Test world".into(), path: None }], selected_map: 0,

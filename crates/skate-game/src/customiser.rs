@@ -990,10 +990,16 @@ fn interact(
 }
 fn preferences(
     state: Res<Customiser>,
+    models: Res<crate::custom_models::CustomModels>,
     mut physics: ResMut<crate::physics::GamePhysics>,
     mut skater: ResMut<crate::physics::SkaterRuntime>,
 ) {
     apply_preferences(&state.draft, &mut physics, &mut skater.animation);
+    if let Some(style) = models.native_style() {
+        skater.animation.motion.playback_context.pro_skater = skate_core::animation::skeleton_input::name::encode(style.as_bytes());
+        skater.animation.motion.animation.posture.set_profile(0);
+        physics.set_gesture_preferences(None);
+    }
 }
 pub(crate) fn apply_preferences(
     profile: &Value,
