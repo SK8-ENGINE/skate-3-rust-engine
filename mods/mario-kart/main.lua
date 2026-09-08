@@ -1,6 +1,7 @@
 -- The original Lua/JSON example uses the user's separately supplied kart model.
 local previous={}
 local interact_was_down=false
+local reset_was_down=false
 local function pressed(key)
  local down=sdk.input.down(key);local edge=down and not previous[key];previous[key]=down;return edge
 end
@@ -27,7 +28,10 @@ return {
   local interact=sdk.vehicle.input().interact
   local interact_pressed=interact and not interact_was_down;interact_was_down=interact
   if interact_pressed then if car.occupied then sdk.vehicle.exit('kart') else sdk.vehicle.enter('kart') end end
-  if pressed('KeyR') then
+  local reset_mask=sdk.settings.reset_button=='Left stick' and 0x40 or 0x80
+  local reset_down=car.occupied and ((sdk.vehicle.input().pad_buttons or 0) & reset_mask)~=0
+  local reset_pressed=reset_down and not reset_was_down;reset_was_down=reset_down
+  if pressed('KeyR') or reset_pressed then
    local p,h=nearby()
    if car.occupied then p={car.position[1],car.position[2]+1,car.position[3]};h=car.heading end
    sdk.vehicle.reset('kart',p,h)
@@ -35,8 +39,8 @@ return {
   if car.phase=='driving' then sdk.vehicle.control('kart',sdk.vehicle.input() and {
    throttle=sdk.vehicle.input().throttle,steering=sdk.vehicle.input().steering,
    brake=sdk.vehicle.input().brake,handbrake=sdk.vehicle.input().handbrake}) end
-  if sdk.settings.hud then sdk.ui.text('kart-hud',string.format('MARIO KART | %.0f km/h | %s | E enter/exit | WASD drive | Space brake | Shift handbrake | R reset',math.abs(car.speed)*3.6,car.ready and car.phase or 'loading')) else sdk.scene.remove('kart-hud') end
+  if sdk.settings.hud then sdk.ui.text('kart-hud',string.format('MARIO KART | %.0f km/h | %s | E enter/exit | WASD drive | Space brake | Shift handbrake | R / stick click reset',math.abs(car.speed)*3.6,car.ready and car.phase or 'loading')) else sdk.scene.remove('kart-hud') end
  end,
  on_settings=function() if sdk.vehicle.read('kart') then tune() end end,
- on_event=function(e) if e.name=='world_changed' then previous={};sdk.ui.text('kart-hud','MARIO KART | F10: spawn kart in this map') end end,
+ on_event=function(e) if e.name=='world_changed' then previous={};interact_was_down=false;reset_was_down=false;sdk.ui.text('kart-hud','MARIO KART | F10: spawn kart in this map') end end,
 }

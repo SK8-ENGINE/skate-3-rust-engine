@@ -1,7 +1,7 @@
 # Mario Kart vehicle mod
 Enable this mod in Mods, resume, then press F10 to spawn the kart in front of you.
 E (controller Y) enters/exits within 4 metres (slow below 3 m/s to exit). WASD drives; Space brakes;
-left Shift is the handbrake; R rights/resets the kart. F10 replaces the kart.
+left Shift is the handbrake; R or right-stick click rights/resets the kart. The controller bind can be changed to left-stick click in the mod settings. F10 replaces the kart.
 
 Controller: RT/LT accelerate/reverse, left stick steers, A brakes, B handbrakes.
 

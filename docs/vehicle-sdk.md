@@ -10,13 +10,13 @@ is split into substeps of approximately 1/120 second or smaller.
 
 Run PLAY-MARIO-KART.bat, enable **Mario Kart** in Mods, resume and press **F10**.
 Walk/skate within four metres and press **E** to enter. **W/S** accelerate/reverse,
-**A/D** steer, **Space** brakes, **left Shift** handbrakes, **R** rights/resets.
+**A/D** steer, **Space** brakes, **left Shift** handbrakes, **R / right-stick click** rights/resets.
 **E** exits once speed is below 3 m/s. F10 replaces a parked kart or resets an
 occupied kart. Live engine, speed, brake, steering and grip controls appear in its
 own draggable, resizable, scrollable mod window.
 
 Controller: **Y** enter/exit, **RT/LT** accelerate/reverse, **left stick** steer,
-**A** brake, **B** handbrake. F10 and R remain keyboard shortcuts in this example.
+**A** brake, **B** handbrake, **right-stick click** reset while driving. The reset bind can be changed to left-stick click in the mod settings. F10 remains the keyboard spawn shortcut.
 Release controls before switching between driving and skating.
 
 `mods/mario-kart/kart.glb` is generated from the user-supplied ZIP. It is excluded
