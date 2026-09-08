@@ -109,3 +109,50 @@ function sdk.animation.replace(path) end
 sdk.trainer = {}
 ---@param tuning TrainerTuning Owned, reversible native tuning. Conflicting owner is rejected.
 function sdk.trainer.apply(tuning) end
+
+---@class VehicleControls
+---@field throttle? number -1..1, reverse to forward
+---@field steering? number -1..1, right to left
+---@field brake? number 0..1
+---@field handbrake? boolean
+---@class VehicleTuning
+---@field engine_force? number 0..100000 N
+---@field max_speed? number 1..100 m/s, engine limit
+---@field brake_impulse? number 0..10000
+---@field steering_angle? number 0.01..1.2 radians
+---@field tire_grip? number 0.1..20
+---@class VehicleSnapshot
+---@field position number[] metres
+---@field rotation number[] quaternion xyzw
+---@field heading number radians
+---@field speed number signed m/s
+---@field phase 'parked'|'entering'|'driving'|'exiting'
+---@field occupied boolean
+---@field ready boolean
+sdk.vehicle = {}
+---@param key string Owner-local key
+---@param definition string Package-relative vehicle JSON
+---@param position number[] World position
+---@param heading? number Radians
+function sdk.vehicle.spawn(key,definition,position,heading) end
+---@param key string
+---@return VehicleSnapshot?
+function sdk.vehicle.read(key) end
+---@param key string
+---@param controls VehicleControls Refresh every fixed tick
+function sdk.vehicle.control(key,controls) end
+---@param key string
+---@param tuning VehicleTuning
+function sdk.vehicle.tune(key,tuning) end
+---@param key string
+function sdk.vehicle.enter(key) end
+---@param key string
+function sdk.vehicle.exit(key) end
+---@param key string
+---@param position number[]
+---@param heading? number
+function sdk.vehicle.reset(key,position,heading) end
+---@param key string
+function sdk.vehicle.remove(key) end
+---@return table Normalized keyboard/controller axes plus interact and pad_buttons
+function sdk.vehicle.input() end

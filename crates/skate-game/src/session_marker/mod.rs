@@ -97,6 +97,7 @@ fn suspend(
 }
 
 fn update(
+    vehicles: Res<crate::modding::vehicles::Vehicles>,
     mut session: ResMut<SessionMarker>,
     input: Res<ControllerInput>,
     map: Res<CurrentMap>,
@@ -106,6 +107,7 @@ fn update(
     replay: Res<crate::replay::Replay>,
     mut audio: MessageWriter<SessionMarkerAudio>,
 ) {
+    if vehicles.occupied() {session.blocked_until_release = true;return;}
     if replay.active {
         return;
     }

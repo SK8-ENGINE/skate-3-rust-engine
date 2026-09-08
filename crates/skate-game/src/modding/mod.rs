@@ -1,6 +1,7 @@
 //! Main-thread SDK adapter. Lua never receives World, entity IDs, or asset handles.
 mod menu;
 mod panel;
+pub(crate) mod vehicles;
 use bevy::prelude::*;
 pub(crate) use menu::ModMenu;
 pub(crate) use panel::EnabledPanel;
@@ -27,14 +28,7 @@ struct Owned {
 pub(crate) struct ModdingPlugin;
 impl Plugin for ModdingPlugin {
     fn build(&self, app: &mut App) {
-        let root = std::env::var_os("SKATE3_MODS")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.join("mods")))
-                    .unwrap_or_else(|| std::path::PathBuf::from("mods"))
-            });
+        let root = package_root();
         if let Err(e) = std::fs::create_dir_all(&root) {
             warn!("Cannot create mods folder {}: {e}", root.display());
         }
@@ -97,6 +91,7 @@ impl Plugin for ModdingPlugin {
                 .run_if(crate::graphics_menu::gameplay_active),
         )
         .add_systems(Update, update.after(crate::app::FrameSet::Animation));
+        vehicles::install(app);
         menu::install(app);
         panel::install(app);
     }
@@ -117,7 +112,10 @@ fn snapshot(world: &World) -> serde_json::Value {
         .0
         .actions()
         .values();
-    json!({"player":{"position":&s.animated_skeleton.roots.animation_to_world[3][..3],"velocity": &p.skateboard.vector_80.map(f32::from_bits)[..3],"heading":s.animated_skeleton.roots.animation_to_world[2][0].atan2(s.animated_skeleton.roots.animation_to_world[2][2]),"on_board":p.state.category_12!=500,"state":p.state.state_16,"category":p.state.category_12,"bailing":physics.board_wiping_out,"grind":{"active":grinding,"name":grind_name,"kind":grind_kind,"distance":grind_distance}},
+    let vehicle_pose=world.resource::<vehicles::Vehicles>().player_pose();
+    let player_position=vehicle_pose.map(|p|p.0).unwrap_or_else(||s.animated_skeleton.roots.animation_to_world[3][..3].try_into().unwrap());
+    json!({"player":{"position":player_position,"velocity": &p.skateboard.vector_80.map(f32::from_bits)[..3],"heading":vehicle_pose.map(|p|p.1).unwrap_or_else(||s.animated_skeleton.roots.animation_to_world[2][0].atan2(s.animated_skeleton.roots.animation_to_world[2][2])),"on_board":p.state.category_12!=500,"state":p.state.state_16,"category":p.state.category_12,"bailing":physics.board_wiping_out,"grind":{"active":grinding,"name":grind_name,"kind":grind_kind,"distance":grind_distance}},
+        "vehicles":vehicles::snapshot(world),"vehicle_input":vehicles::input(world),
         "animation":world.resource::<Mods>().animation_info,
         "map":{"name":map.name,"generation":map.generation},"tick":physics.ticks,"keys":keys,"actions":actions,
         "paused":world.resource::<crate::graphics_menu::Menu>().open,"replay":world.resource::<crate::replay::Replay>().active})
@@ -130,6 +128,7 @@ fn maintenance(world: &mut World) {
             .resource::<crate::map_transition::CurrentMap>()
             .generation;
         if mods.generation != generation {
+            vehicles::clear(world);
             let ids: Vec<_> = mods.owned.keys().cloned().collect();
             for key in ids {
                 retire(world, &mut mods, &key);
@@ -145,6 +144,8 @@ fn maintenance(world: &mut World) {
             mods.manager
                 .dispatch("on_event", json!({"name":"world_changed","map":map}));
         }
+        let events = std::mem::take(&mut world.resource_mut::<vehicles::Vehicles>().events);
+        for event in events { mods.manager.dispatch("on_event", event); }
         mods.manager.scan(false);
         apply(world, &mut mods);
     });
@@ -229,6 +230,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
     world.resource_mut::<crate::physics::GamePhysics>().trainer =
         mods.trainer.as_ref().map(|(_, t)| *t).unwrap_or_default();
     for id in &retired {
+        vehicles::retire(world, id);
         world
             .resource::<crate::physics::SkaterRuntime>()
             .animation
@@ -296,6 +298,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
         if let Err(e) = result {
             warn!("Lua mod {id}: {e}");
             mods.manager.fail(&id, e);
+            vehicles::retire(world, &id);
             if mods.trainer.as_ref().is_some_and(|(owner, _)| owner == &id) {
                 mods.trainer = None;
                 world.resource_mut::<crate::physics::GamePhysics>().trainer = Default::default();
@@ -326,6 +329,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
     }
 }
 fn teleport_ready(world: &World) -> Result<(), String> {
+    if world.resource::<vehicles::Vehicles>().occupied() { return Err("Exit the vehicle before teleporting the skater".into()); }
     if world
         .resource::<crate::map_transition::MapTransition>()
         .busy()
@@ -358,6 +362,9 @@ fn apply_one(world: &mut World, mods: &mut Mods, id: &str, command: Command) -> 
         }
     }
     match command {
+        command @ (Command::VehicleTune{..}|Command::VehicleSpawn{..}|Command::VehicleRemove{..}|Command::VehicleEnter{..}|Command::VehicleExit{..}|Command::VehicleReset{..}|Command::VehicleControl{..}) => {
+            vehicles::command(world, &mods.manager.packages[id].root, id, command)?;
+        }
         Command::Trainer { tuning } => {
             if mods.trainer.as_ref().is_some_and(|(owner, _)| owner != id) {
                 return Err("Native trainer controls are already owned by another mod".into());
@@ -491,4 +498,9 @@ fn apply_one(world: &mut World, mods: &mut Mods, id: &str, command: Command) -> 
         }
     }
     Ok(())
+}
+
+pub(crate) fn package_root()->std::path::PathBuf {
+    std::env::var_os("SKATE3_MODS").map(std::path::PathBuf::from).unwrap_or_else(||
+        std::env::current_exe().ok().and_then(|p|p.parent().map(|p|p.join("mods"))).unwrap_or_else(||"mods".into()))
 }

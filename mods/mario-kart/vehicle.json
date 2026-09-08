@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "model": "kart.glb",
+  "half_extents": [
+    0.67,
+    0.18,
+    1.05
+  ],
+  "mass": 220,
+  "engine_force": 1800,
+  "max_speed": 25,
+  "brake_impulse": 90,
+  "steering_angle": 0.5,
+  "suspension_length": 0.25,
+  "suspension_stiffness": 30,
+  "suspension_damping": 4,
+  "tire_grip": 3,
+  "wheels": [
+    {
+      "node": "wheel_rl",
+      "position": [
+        0.5815213608992547,
+        0.057323790779298445,
+        -0.673016238225116
+      ],
+      "radius": 0.3338663063949073,
+      "steering": false,
+      "driven": true
+    },
+    {
+      "node": "wheel_rr",
+      "position": [
+        -0.5302057197312625,
+        0.06093891045413358,
+        -0.6730162402958683
+      ],
+      "radius": 0.3338663063949072,
+      "steering": false,
+      "driven": true
+    },
+    {
+      "node": "wheel_fl",
+      "position": [
+        0.5573244172948093,
+        0.016883687342375997,
+        0.4261990809959044
+      ],
+      "radius": 0.31535000391066886,
+      "steering": true,
+      "driven": false
+    },
+    {
+      "node": "wheel_fr",
+      "position": [
+        -0.5201046643741327,
+        0.01739195285686146,
+        0.4231450809914261
+      ],
+      "radius": 0.31535000391066886,
+      "steering": true,
+      "driven": false
+    }
+  ],
+  "seat": [
+    0,
+    0.15,
+    -0.15
+  ],
+  "exit": [
+    1.8,
+    0,
+    0
+  ],
+  "camera_distance": 5,
+  "camera_height": 2,
+  "animations": {
+    "file": null,
+    "enter": null,
+    "exit": null,
+    "drive": null,
+    "idle": null,
+    "reverse": null,
+    "brake": null,
+    "steer_left": null,
+    "steer_right": null
+  }
+}

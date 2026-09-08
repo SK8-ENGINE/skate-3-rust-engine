@@ -313,6 +313,7 @@ impl Plugin for PhysicsPlugin {
 }
 
 fn advance(
+    vehicles: Res<crate::modding::vehicles::Vehicles>,
     mut physics: ResMut<GamePhysics>,
     mut skater: ResMut<SkaterRuntime>,
     mut controls: ResMut<PlayerControls>,
@@ -323,7 +324,7 @@ fn advance(
     mut exit: MessageWriter<AppExit>,
     mut performance: Option<ResMut<crate::performance::Performance>>,
 ) {
-    if physics.failed {
+    if physics.failed || vehicles.occupied() {
         return;
     }
     let timer = performance.as_ref().map(|_| std::time::Instant::now());

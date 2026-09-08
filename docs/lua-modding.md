@@ -278,3 +278,5 @@ viewport grows with the window and keeps mouse-wheel scrolling. Window sizes
 are retained in memory while the game runs, alongside position/collapse state.
 
 Each enabled-mod settings viewport also has a right-side scrollbar. Drag its thumb or click the track to jump; wheel and keyboard scrolling update the same thumb. It resizes with the window and dims when all settings fit.
+
+Vehicle SDK v1 adds Rapier vehicles and the Mario Kart example. See [vehicle-sdk.md](vehicle-sdk.md) for commands, animation hooks, limits and controls. Packages now allow 64 MiB for embedded models/animations.

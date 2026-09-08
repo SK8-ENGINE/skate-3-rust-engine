@@ -146,3 +146,15 @@ pub(crate) fn native_matrix(matrix: NativeMatrix) -> Mat4 {
         Vec3::from_array(matrix[3][..3].try_into().unwrap()).extend(1.0),
     )
 }
+
+/// Vehicle clips use the same native model-space skeleton matrices as the SDK.
+pub(crate) fn vehicle_pose(world:&mut World, pose:&[Mat4]) {
+ world.resource_scope(|world,animation:Mut<AnimationStatus>| {
+  let basis=render_basis();
+  for binding in &animation.bindings {
+   let Some(global)=pose.get(binding.bone).map(|m|*m*basis) else {continue;};
+   let local=if let Some(parent)=binding.parent_bone {let Some(parent)=pose.get(parent) else {continue;};(*parent*basis).inverse()*global} else {global};
+   if let Some(mut transform)=world.get_mut::<Transform>(binding.entity) {*transform=Transform::from_matrix(local);}
+  }
+ });
+}

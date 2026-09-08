@@ -1,0 +1,62 @@
+{
+  "id": "community.mario-kart",
+  "api": 1,
+  "name": "Mario Kart",
+  "version": "1.0.0",
+  "author": "Local vehicle SDK example",
+  "description": "Rapier kart using your supplied model. F10 spawns nearby, E enters/exits, WASD drives, Space brakes, Shift handbrake, R resets. Slow down before exiting. Animation hooks are in vehicle.json.",
+  "entry": "main.lua",
+  "settings": {
+    "engine": {
+      "type": "number",
+      "label": "Engine force",
+      "description": "Applied live to the kart.",
+      "default": 1800,
+      "min": 100,
+      "max": 8000,
+      "step": 100
+    },
+    "speed": {
+      "type": "number",
+      "label": "Maximum speed (m/s)",
+      "description": "Applied live to the kart.",
+      "default": 25,
+      "min": 5,
+      "max": 60,
+      "step": 1
+    },
+    "brake": {
+      "type": "number",
+      "label": "Brake impulse",
+      "description": "Applied live to the kart.",
+      "default": 90,
+      "min": 10,
+      "max": 300,
+      "step": 10
+    },
+    "steering": {
+      "type": "number",
+      "label": "Steering angle",
+      "description": "Applied live to the kart.",
+      "default": 0.5,
+      "min": 0.1,
+      "max": 1,
+      "step": 0.05
+    },
+    "grip": {
+      "type": "number",
+      "label": "Tire grip",
+      "description": "Applied live to the kart.",
+      "default": 3,
+      "min": 0.5,
+      "max": 8,
+      "step": 0.25
+    },
+    "hud": {
+      "type": "boolean",
+      "label": "Show driving HUD",
+      "description": "Show controls, speed and vehicle state.",
+      "default": true
+    }
+  }
+}

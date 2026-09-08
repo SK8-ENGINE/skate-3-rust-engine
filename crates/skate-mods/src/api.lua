@@ -48,3 +48,18 @@ function sdk.animation.info() return sdk.snapshot.animation end
 
 sdk.trainer = {}
 function sdk.trainer.apply(tuning) submit{kind="trainer",tuning=tuning} end
+
+sdk.vehicle = {}
+function sdk.vehicle.spawn(key,definition,position,heading) submit{kind="vehicle_spawn",key=key,definition=definition,position=position,heading=heading or 0} end
+function sdk.vehicle.remove(key) submit{kind="vehicle_remove",key=key} end
+function sdk.vehicle.enter(key) submit{kind="vehicle_enter",key=key} end
+function sdk.vehicle.exit(key) submit{kind="vehicle_exit",key=key} end
+function sdk.vehicle.reset(key,position,heading) submit{kind="vehicle_reset",key=key,position=position,heading=heading or 0} end
+function sdk.vehicle.control(key,controls) submit{kind="vehicle_control",key=key,controls=controls} end
+function sdk.vehicle.read(key)
+    local owned = (sdk.snapshot.vehicles or {})[sdk.mod_id]
+    return owned and owned[key] or nil
+end
+
+function sdk.vehicle.tune(key,tuning) submit{kind="vehicle_tune",key=key,tuning=tuning} end
+function sdk.vehicle.input() return sdk.snapshot.vehicle_input end

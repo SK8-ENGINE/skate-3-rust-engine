@@ -13,6 +13,11 @@ use std::{
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    VehicleTune { key:String, tuning:skate_vehicles::VehicleTuning },
+    VehicleSpawn { key:String, definition:String, position:[f32;3], heading:f32 },
+    VehicleRemove { key:String }, VehicleEnter { key:String }, VehicleExit { key:String },
+    VehicleReset { key:String, position:[f32;3], heading:f32 },
+    VehicleControl { key:String, controls:skate_vehicles::Controls },
     Trainer {
         tuning: crate::TrainerTuning,
     },
@@ -45,6 +50,11 @@ impl Command {
     fn validate(&self) -> bool {
         let point = |p: &[f32; 3]| p.iter().all(|v| v.is_finite() && v.abs() <= 100_000.);
         match self {
+            Self::VehicleTune{key,tuning} => crate::schema::valid_id(key) && tuning.valid(),
+            Self::VehicleSpawn{key,definition,position,heading} => crate::schema::valid_id(key) && skate_vehicles::package_path(definition) && point(position) && heading.is_finite(),
+            Self::VehicleReset{key,position,heading} => crate::schema::valid_id(key) && point(position) && heading.is_finite(),
+            Self::VehicleControl{key,controls} => crate::schema::valid_id(key) && controls.valid(),
+            Self::VehicleRemove{key}|Self::VehicleEnter{key}|Self::VehicleExit{key} => crate::schema::valid_id(key),
             Self::Trainer { tuning } => tuning.valid(),
             Self::Animation { path } => !path.is_empty() && path.len() <= 256,
             Self::Log { text } => text.len() <= 2048,
@@ -121,6 +131,7 @@ impl Vm {
             let out = queue.clone();
             let sdk = lua.create_table()?;
             sdk.set("api_version", 1)?;
+            sdk.set("mod_id", manifest.id.clone())?;
             sdk.set(
                 "_submit",
                 lua.create_function(move |lua, value: mlua::Value| {

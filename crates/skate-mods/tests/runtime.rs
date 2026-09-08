@@ -152,7 +152,7 @@ fn examples_load_and_run() {
     m.scan(true);
     assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
     let ids: Vec<_> = m.packages.keys().cloned().collect();
-    assert_eq!(ids, vec!["community.native-trainer"]);
+    assert_eq!(ids, vec!["community.mario-kart", "community.native-trainer"]);
     for id in ids {
         m.enable(&id, true).unwrap();
         for _ in 0..5 {
@@ -405,4 +405,25 @@ fn showcase_hold_fakie_is_optional_live_and_reversible() {
     m.setting(id, "hold_fakie", json!(true)).unwrap();
     m.enable(id, false).unwrap();
     assert!(m.retired.iter().any(|owner| owner == id));
+}
+
+#[test]
+fn vehicle_api_validates_and_queues_owner_scoped_commands() {
+ let f=Fixture::new(r#"return {on_load=function()
+ sdk.vehicle.spawn('kart','vehicle.json',{0,2,0},0)
+ sdk.vehicle.tune('kart',{max_speed=20})
+ sdk.vehicle.control('kart',{throttle=1,steering=0.2})
+ sdk.vehicle.enter('kart');sdk.vehicle.exit('kart');sdk.vehicle.reset('kart',{0,2,0},0);sdk.vehicle.remove('kart')
+ end}"#);
+ let mut m=f.manager();m.enable("example",true).unwrap();assert_eq!(m.commands.len(),7);
+ assert!(m.commands.iter().all(|(owner,_)|owner=="example"));
+ assert!(matches!(&m.commands[0].1,Command::VehicleSpawn{definition,..} if definition=="vehicle.json"));
+ assert!(matches!(&m.commands[2].1,Command::VehicleControl{controls,..} if controls.throttle==1.));
+ m.enable("example",false).unwrap();assert!(m.commands.is_empty());
+}
+#[test]
+fn vehicle_api_rejects_traversal_and_invalid_controls() {
+ for script in ["sdk.vehicle.spawn('kart','../vehicle.json',{0,0,0},0)","sdk.vehicle.control('kart',{throttle=2})","sdk.vehicle.tune('kart',{max_speed=-1})"] {
+ let f=Fixture::new(&format!("return {{on_load=function() {script} end}}"));let mut m=f.manager();m.enable("example",true).unwrap();assert!(!m.packages["example"].running());assert!(m.commands.is_empty());
+ }
 }

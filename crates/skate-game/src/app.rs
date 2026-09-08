@@ -39,6 +39,8 @@ pub(crate) fn build(
 ) -> App {
     let retail_scene = config.map.as_ref().is_some_and(|map| map.materials.iter().any(|m| m.retail_definition.is_some()));
     let mut app = App::new();
+    app.register_asset_source("mods", bevy::asset::io::AssetSourceBuilder::platform_default(
+        &crate::modding::package_root().to_string_lossy(), None));
     app.add_plugins(
         DefaultPlugins
             .set(AssetPlugin {

@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use crate::{app::FrameSet, config::Config};
 
 #[derive(Component)]
-struct GameplayCamera;
+pub(crate) struct GameplayCamera;
 
 pub(crate) struct CameraPlugin;
 impl Plugin for CameraPlugin {
@@ -49,7 +49,7 @@ fn spawn(mut commands: Commands, config: Res<Config>, retail: Res<crate::retail_
     }
 }
 
-fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
+pub(crate) fn present(vehicles: Res<crate::modding::vehicles::Vehicles>, mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
     history: Res<crate::presentation::Presentation>, time: Res<Time<Fixed>>,
     replay: Res<crate::replay::Replay>,
     customiser: Option<Res<crate::customiser::Customiser>>,
@@ -75,6 +75,7 @@ fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
             *transform = Transform::from_translation(eye).looking_at(center + right * (distance * 0.265625), Vec3::Y);
             if let Projection::Perspective(p) = &mut *projection { p.fov = 50_f32.to_radians(); }
         }
+        if let Some(pose) = vehicles.camera() { *transform = pose; }
         camera.is_active = true;
     }
 }

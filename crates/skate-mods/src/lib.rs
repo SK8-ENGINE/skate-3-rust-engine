@@ -402,8 +402,8 @@ fn fingerprint(root: &Path) -> Result<u64, String> {
             } else {
                 let m = p.metadata().map_err(|e| e.to_string())?;
                 *bytes += m.len();
-                if *bytes > 8 * 1024 * 1024 {
-                    return Err("Package exceeds 8 MiB".into());
+                if *bytes > 64 * 1024 * 1024 {
+                    return Err("Package exceeds 64 MiB".into());
                 }
                 p.hash(h);
                 std::fs::read(&p).map_err(|e| e.to_string())?.hash(h);
