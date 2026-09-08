@@ -47,4 +47,4 @@ Use this as a practical starting point for training tools, navigation helpers,
 telemetry overlays and original visual extensions. The engine's full API reference
 is docs/lua-modding.md and language-server annotations are sdk/skate.lua.
 
-Hold fakie stance disables automatic fakie turn correction; normal steering and slides still work. Off by default. Escape settings windows can be resized by dragging the bottom-right // grip.
+Hold fakie stance disables automatic fakie stance switching; normal steering and slides still work. Off by default. Escape settings windows can be resized by dragging the bottom-right // grip.

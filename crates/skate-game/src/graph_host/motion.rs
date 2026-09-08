@@ -1,3 +1,5 @@
+#[path = "motion_fakie_hold.rs"]
+mod fakie_hold;
 #[path = "motion_stock_execute.rs"]
 mod stock_execution;
 #[path = "motion_air_execute.rs"]
@@ -178,6 +180,7 @@ pub struct MotionHost {
     pub crouching_physical: Option<skate_core::animation::crouching::Physical>,
     pub body_tilt_physical: Option<skate_core::animation::body_tilt::Physical>,
     pub hold_fakie: bool,
+    automatic_fakie_conditions: Vec<bool>,
     pub fakie_physical: Option<skate_core::animation::riding_fakie::Physical>,
     /// PhysOutAnimation158/157, used directly by IsRidingGoofy82BA5AA8.
     pub physical_stance: Option<(bool, bool)>,
@@ -300,6 +303,7 @@ impl MotionHost {
             crouching_physical: None,
             body_tilt_physical: None,
             hold_fakie: false,
+            automatic_fakie_conditions: fakie_hold::bind(&graph.binding),
             fakie_physical: None,
             physical_stance: None,
             flags: Default::default(),
@@ -356,6 +360,12 @@ impl MotionHost {
 }
 impl ConditionHost for MotionHost {
     fn condition_activation(&mut self, condition: usize, frame: &Frame) -> u32 {
+        // Gate only the authored automatic switch transitions. Other fakie
+        // conditions (tricks, pushes, dismounts) still see the real stance.
+        if self.remap.conditions.get(condition).is_some_and(|&id|
+            fakie_hold::blocked(self.hold_fakie, &self.automatic_fakie_conditions, id)) {
+            return 0;
+        }
         let result = self
             .remap
             .conditions

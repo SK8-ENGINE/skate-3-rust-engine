@@ -553,9 +553,7 @@ impl MotionHost {
                         .physical
                         .ok_or("SetTurning requires actual PhysOutAnimation and stance outputs")?;
                     let intents = set_turning::Intents {
-                        // Trainer suppresses only the automatic fakie correction.
-                        // Slide branches and ordinary steering retain their native inputs.
-                        fakie_turn: if self.hold_fakie { None } else { self.animation.motion_intent("FakieTurn") },
+                        fakie_turn: self.animation.motion_intent("FakieTurn"),
                         mode_0_slide: self.animation.motion_intent("LeftSlide"),
                         mode_1_slide: self.animation.motion_intent("RightSlide"),
                     };

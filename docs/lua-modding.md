@@ -268,7 +268,7 @@ native gameplay effects and visuals remain user-run; no game process was launche
 
 
 Trainer 2.1 adds `sdk.trainer.apply { hold_fakie = true }` (default false).
-It suppresses the native `FakieTurn` correction input in SetTurning; normal
+It blocks the automatic idle/bump transitions into the native stance-switch animation; normal
 steering, slide overrides and trick inputs remain native. Turning the setting
 off, disabling the mod or retiring its owner restores stock behavior.
 

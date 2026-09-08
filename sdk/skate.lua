@@ -104,7 +104,7 @@ function sdk.animation.replace(path) end
 ---@field offboard_jump? number 0.25..4, native biped launch height.
 ---@field grip? number 0.25..4, wheel static/dynamic and sideways slide friction.
 ---@field turn_power? number 0.25..4, native heading turn strength.
----@field hold_fakie? boolean Defaults false; suppress automatic fakie turn correction.
+---@field hold_fakie? boolean Defaults false; suppress automatic fakie stance switching.
 ---@field manual_drag? number 0.25..4, manual balance linear drag.
 sdk.trainer = {}
 ---@param tuning TrainerTuning Owned, reversible native tuning. Conflicting owner is rejected.

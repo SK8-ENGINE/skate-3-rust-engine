@@ -229,7 +229,7 @@
     "hold_fakie": {
       "type": "boolean",
       "label": "Hold fakie stance",
-      "description": "Disables automatic FakieTurn correction. Normal steering, slides and tricks remain available. Turn off to restore stock correction.",
+      "description": "Prevents the automatic idle/bump stance-switch animation. Normal steering, slides and tricks remain available. Turn off to restore stock correction.",
       "default": false
     }
   }
