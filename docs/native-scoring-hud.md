@@ -18,6 +18,9 @@ Implemented source components:
 * `skate-core::scoring`: ScoreHolder accounting at `82DA6198`, `82DA6260`,
   `82DA6408`, `82DA6468`, `82DA6538`; point timers at `82DA4C28`; carrier
   announcement/completion at `82DA45C8`, `82DA46D0`, `82DA5DE0`, `82DA5F98`.
+  Session publication at `82DA37B0` captures the multiplier before crediting
+  this reward to the combo timer. Settlement at `82DA3B38` preserves repetition
+  on an empty line timer while a collector is active.
 * `skate-data::scoring`: resolves authored VLT points, labels, delay, repetition,
   announcement curves, combo thresholds and timer settings. Missing data is
   an error. The executable's 332-entry identifier metadata includes unused
@@ -61,8 +64,9 @@ with a new overlay would not meet this port's requirements.
 Collectors are not wired into the production tick yet. Recognition still
 requires conditioner gates, descriptor conversion, air/ground/grind collector
 transitions, spin/flip bonuses, gaps, landing and sequence publication ordering.
-The native clock frequency must be recovered before converting authored
-announcement delays to ticks. A physics-frame count is not a safe substitute.
+Announcement delay conversion uses the verified binary32 60 at `8303745C`.
+The carrier's start/current tick source still needs to be connected at the
+matching production phase.
 
 The HUD still needs a complete movie object hierarchy, native bindings,
 timeline execution and rendering with multiplicative and additive colors.
@@ -84,7 +88,8 @@ release build/launcher remain to be integrated and checked. No game/recomp,
 controller harness, gameplay automation, `--check-assets`, or screenshot
 capture has been run for this work.
 
-Validation so far: eight scoring unit tests pass (including unsigned clock
+Validation so far: nine scoring unit tests pass (including unsigned clock
 rollover, early completion, conversion, timer thresholds, one-time banking and
 cancelled rewards); the owned-data loader audit resolves 300 definitions; the
 APT data-only audit passes placement validation and constructor checks.
+

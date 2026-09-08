@@ -8,6 +8,7 @@ pub const SCORABLE_COUNT: usize = 332;
 pub const SCORE_TYPE_COUNT: usize = 14;
 pub mod carrier;
 pub mod catalog;
+pub mod session;
 pub mod timer;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,9 +134,16 @@ impl ScoreHolder {
     }
     /// Module82DA3B38 banks the line when its timer expires or reset is requested.
     pub fn finish_line(&mut self) {
+        self.bank_line(true);
+    }
+    /// A zero line timer banks the current line even while a collector is
+    /// active, but 82DA3B38 retains repetition in that case.
+    pub fn bank_line(&mut self, clear_repetition: bool) {
         self.snapshot.completed_lines += self.snapshot.line;
         self.snapshot.line = 0.0;
-        self.repetitions.fill(0);
+        if clear_repetition {
+            self.repetitions.fill(0);
+        }
     }
     /// Native Reset82DA5C78 retains lifetime completed-lines (+24).
     pub fn reset(&mut self) {

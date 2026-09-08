@@ -2,6 +2,12 @@
 //! Collectors supply the native clock and already-conditioned point factor.
 use super::Scorable;
 
+/// 82DA45C8 multiplies the sum of authored and collector delay by the
+/// binary32 constant at 8303745C (0x42700000), then truncates to integer.
+pub fn delay_ticks(authored_seconds: f32, extra_seconds: f32) -> u32 {
+    (((authored_seconds + extra_seconds) * f32::from_bits(0x42700000)) as i64) as u32
+}
+
 #[derive(Clone, Debug)]
 pub struct Carrier {
     pub scorable: Scorable,

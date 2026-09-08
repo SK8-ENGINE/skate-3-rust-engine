@@ -40,6 +40,15 @@ pub struct ScoringData {
 }
 
 impl ScoringData {
+    pub fn session_rules(&self) -> skate_core::scoring::session::Rules {
+        skate_core::scoring::session::Rules {
+            combo_capacity: self.combo_capacity,
+            combo_levels: self.combo_levels,
+            combo_refresh_threshold: self.combo_refresh_threshold,
+            line_capacity: self.line_capacity,
+            bail_factor: self.bail_factor,
+        }
+    }
     pub fn load(data: &Collections) -> Result<Self, String> {
         let mut definitions = Vec::new();
         for (id, &(identifier, class, score_type)) in IDENTIFIERS.iter().enumerate() {
