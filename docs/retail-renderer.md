@@ -89,8 +89,9 @@ selection and regional/streaming state also remain unverified.
 This is not a claim of pixel parity. Native frame constants are supplied by
 game hooks in the reference; this engine does not yet recover that controller.
 Scene exposure 2.5, world material multiplier 1, and tree/proxy values still use
-documented day-capture defaults. Imported maps have no dynamic directional sun or realtime
-sun shadows: their world lighting comes from the baked lightmaps. Normal-map
+documented day-capture defaults. Imported maps have no additive directional sun:
+their world lighting comes from baked lightmaps, with a separate player-only
+projected shadow receiver described in the character-lighting notes. Normal-map
 sign terms use the initial world's authored direction when new sky metadata
 is available; old packages retain the previous direction. Regional changes
 and the runtime environment controller are not implemented. Fog selection

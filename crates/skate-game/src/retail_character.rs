@@ -2,6 +2,7 @@
 use crate::retail_irradiance::Irradiance;
 use bevy::{
     asset::embedded_asset,
+    camera::visibility::RenderLayers,
     gltf::GltfMaterialName,
     prelude::*,
     render::render_resource::{AsBindGroup, ShaderType},
@@ -17,7 +18,7 @@ impl Plugin for CharacterLightingPlugin {
         embedded_asset!(app, "retail_character_depth.wgsl");
         app.add_plugins(MaterialPlugin::<CharacterMaterial>::default())
             .add_systems(Startup, load)
-            .add_systems(Update, (bind, update).chain());
+            .add_systems(Update, (bind, shadow_views, update).chain());
     }
 }
 #[derive(Deserialize)]
@@ -36,6 +37,7 @@ struct Lighting {
     data: LightingData,
     probes: Irradiance,
     light: Vec4,
+    shadow_floor: Option<Vec3>,
 }
 #[derive(Clone, ShaderType)]
 struct CharacterParams {
@@ -135,16 +137,25 @@ fn load(mut commands: Commands, config: Res<crate::config::Config>) {
         light[i] = v as f32;
     }
     info!("SKATE_CHARACTER_LIGHTING: loaded authored {name} irradiance and character parameters");
-    // Shadow visibility only. World shaders do not sample this map; zero lux
-    // also prevents additive energy on any remaining StandardMaterials.
+    spawn_shadow_sources(&mut commands, light.truncate());
+    commands.insert_resource(Lighting {
+        data,
+        probes,
+        light,
+        shadow_floor: None,
+    });
+}
+fn spawn_shadow_sources(commands: &mut Commands, light: Vec3) {
+    // World + skater casters, sampled only by the character shader.
     commands.spawn((
         Name::new("Character shadow visibility"),
         DirectionalLight {
             illuminance: 0.,
             shadows_enabled: true,
+            affects_lightmapped_mesh_diffuse: false,
             ..default()
         },
-        Transform::default().looking_to(-light.truncate(), Vec3::Y),
+        Transform::default().looking_to(-light, Vec3::Y),
         bevy::light::CascadeShadowConfigBuilder {
             maximum_distance: 100.,
             first_cascade_far_bound: 10.,
@@ -152,12 +163,27 @@ fn load(mut commands: Commands, config: Res<crate::config::Config>) {
         }
         .build(),
     ));
-    commands.insert_resource(Lighting {
-        data,
-        probes,
-        light,
-    });
+    // Only skinned player pieces inhabit layer 31. The world receiver samples
+    // this separate map so baked building/terrain shadows are not re-applied.
+    commands.spawn((
+        Name::new("Player shadow onto baked world"),
+        DirectionalLight {
+            illuminance: 0.,
+            shadows_enabled: true,
+            affects_lightmapped_mesh_diffuse: true,
+            ..default()
+        },
+        RenderLayers::layer(31),
+        Transform::default().looking_to(-light, Vec3::Y),
+        bevy::light::CascadeShadowConfigBuilder {
+            maximum_distance: 100.,
+            first_cascade_far_bound: 10.,
+            ..default()
+        }
+        .build(),
+    ));
 }
+
 fn bind(
     mut commands: Commands,
     lighting: Option<Res<Lighting>>,
@@ -215,13 +241,32 @@ fn bind(
         commands
             .entity(entity)
             .remove::<MeshMaterial3d<StandardMaterial>>()
-            .insert(MeshMaterial3d(material));
+            .insert((
+                MeshMaterial3d(material),
+                RenderLayers::from_layers(&[0, 31]),
+            ));
+    }
+}
+fn shadow_views(
+    mut commands: Commands,
+    lighting: Option<Res<Lighting>>,
+    cameras: Query<(Entity, Option<&RenderLayers>), With<Camera3d>>,
+) {
+    if lighting.is_none() {
+        return;
+    }
+    for (entity, layers) in &cameras {
+        let layers = layers.cloned().unwrap_or_default();
+        if !layers.intersects(&RenderLayers::layer(31)) {
+            commands.entity(entity).insert(layers.with(31));
+        }
     }
 }
 fn update(
     lighting: Option<ResMut<Lighting>>,
     root: Query<&Transform, With<crate::world::PlayerRoot>>,
     mut materials: ResMut<Assets<CharacterMaterial>>,
+    mut world_materials: ResMut<Assets<crate::retail_render::RetailWorldMaterial>>,
 ) {
     let (Some(mut lighting), Ok(root)) = (lighting, root.single()) else {
         return;
@@ -233,5 +278,48 @@ fn update(
     let sh = lighting.probes.sample(root.translation, fallback);
     for (_, material) in materials.iter_mut() {
         material.params.sh = sh;
+    }
+    // Adapter floor: the local probe's direction-independent ambient term.
+    // The native per-frame c8 shadow-colour controller remains unrecovered.
+    let floor = sh[0].truncate().clamp(Vec3::ZERO, Vec3::ONE);
+    if lighting.shadow_floor != Some(floor) {
+        for (_, material) in world_materials.iter_mut() {
+            material.params.shadow_color = floor.extend(1.);
+        }
+        lighting.shadow_floor = Some(floor);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn world_receiver_source_excludes_world_casters_and_emits_no_light() {
+        let mut world = World::new();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        spawn_shadow_sources(&mut Commands::new(&mut queue, &world), Vec3::Y);
+        queue.apply(&mut world);
+        let player = RenderLayers::from_layers(&[0, 31]);
+        let terrain = RenderLayers::default();
+        let mut receivers = 0;
+        let mut character_sources = 0;
+        for (light, layers) in world
+            .query::<(&DirectionalLight, Option<&RenderLayers>)>()
+            .iter(&world)
+        {
+            let layers = layers.cloned().unwrap_or_default();
+            assert_eq!(light.illuminance, 0.);
+            assert!(light.shadows_enabled);
+            assert!(layers.intersects(&player));
+            if light.affects_lightmapped_mesh_diffuse {
+                assert!(!layers.intersects(&terrain));
+                receivers += 1;
+            } else {
+                assert!(layers.intersects(&terrain));
+                character_sources += 1;
+            }
+        }
+        assert_eq!((receivers, character_sources), (1, 1));
     }
 }

@@ -105,3 +105,39 @@ colour, shadow and normal-depth shader variants pass offline Naga composition
 against the vendored Bevy 0.18 shader modules. Release compilation passes. The
 game/recomp was not launched. User visual checks should cover exposed terrain,
 sheltered spots, skin/clothing highlights, hair coverage and body/board shadows.
+
+## Player shadow receiver, 2026-09-08
+
+The baked-world receiver is now connected. Native `scene.hlsl` evaluates
+`min(lightmap * lightmap, shadow_visibility + shadow_colour)` before diffuse,
+normal/detail lighting and specular. This is a component-wise minimum cap, not
+an extra multiplicative darkening pass. The local native reference's caster path
+is corroborated by TU3 `0x827EBEF0` (CSM setup), `0x827F82F8` (CSM render) and
+the character-family shadow shader names in the executable. The animated mesh
+and board are the caster geometry; no ground decal or circular blob is used.
+
+Two zero-lux shadow sources separate the receiver contracts. The existing source
+includes world and player casters, and is sampled by the character. The new
+source includes only the ten skinned retail player/board pieces on reserved
+render layer 31. Camera views include that layer; ordinary world geometry stays
+on layer zero. World families 1–8 and 13 sample the player-only source and apply
+the recovered minimum clamp. This prevents terrain/building shadows from being
+applied a second time over the baked map. The source's lightmapped-diffuse flag
+identifies its role in the GPU light table, so entity ordering does not determine
+which shadow map the shaders select. Both lights have zero illuminance.
+
+This reproduces the projected-mesh and lightmap-combination method, **not full
+console parity**. Shadow map projection/filtering/biases still use Bevy cascades.
+The original per-frame c8 shadow-colour controller has not been recovered: the
+adapter currently uses the local irradiance probe's constant RGB coefficient as
+the ambient shadow floor. At University's starting point that is approximately
+(0.071711, 0.095925, 0.127945), read from the source sample, not a global preset.
+The floor updates when the selected probe changes. Native caster exclusions,
+atlas coverage encoding/blur, shadow colour and pixel matching remain separate
+parity work. Unsupported world material families still have no custom receiver.
+
+Offline validation: world, character and character depth shaders pass Naga
+composition/validation; a windowless ECS regression test verifies the caster-layer
+separation and zero illuminance. Release compilation passes. The prepared user
+launcher retains the texture-band repairs and prior character lighting. No game
+or recomp was launched, and no physics/animation implementation changed.

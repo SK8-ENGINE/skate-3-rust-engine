@@ -1,4 +1,5 @@
 #import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings as frame}
+#import bevy_pbr::shadows::fetch_directional_shadow
 
 struct WorldParams {
     mode: vec4<f32>, foliage_debug: vec4<f32>, surface: vec4<f32>, family: vec4<f32>,
@@ -70,6 +71,18 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     var d = a.rgb*a.rgb;
     var alpha = 1.0;
     var lin = vec3<f32>(0.0);
+    var baked = lm*lm;
+    if p.shadow_color.w>0.0 && (fam<=8u || fam==13u) {
+        let view_z=(frame::view.view_from_world*i.world_position).z;
+        for (var light_id=0u; light_id<frame::lights.n_directional_lights; light_id+=1u) {
+            // The lightmapped receiver source contains only player/board casters.
+            if (frame::lights.directional_lights[light_id].flags & 5u)==5u {
+                let visibility=fetch_directional_shadow(light_id,i.world_position,wn,view_z);
+                baked=min(baked,vec3<f32>(visibility)+p.shadow_color.rgb);
+                break;
+            }
+        }
+    }
     if fam == 9u || fam == 10u {
         lin = d * max(lm*lm,vec3<f32>(p.family.y)) * p.family.x;
         if fam == 9u { lin *= p.family.z; }
@@ -102,7 +115,7 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
             wn = normalize(raw.x*tt+raw.y*bb+wn*max(raw.z,0.05));
             kd = (vnd.x*0.58*sign(dot(kt,sun))+vnd.y*0.62*sign(dot(kb,sun))+vnd.z*0.39)*2.39562;
         }
-        var lml = lm*lm;
+        var lml = baked;
         lin = lml*kd*d;
         if fam == 13u { lin = lml*d*a.a; }
         if (flags & 16u) != 0u {

@@ -53,8 +53,12 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     let ndl=dot(vn,p.light.xyz);
     let view_z=(frame::view.view_from_world*i.world_position).z;
     var shadow=1.0;
-    if frame::lights.n_directional_lights>0u {
-        shadow=fetch_directional_shadow(0u,i.world_position,vn,view_z);
+    for (var light_id=0u; light_id<frame::lights.n_directional_lights; light_id+=1u) {
+        // All-caster visibility light does not affect lightmapped world diffuse.
+        if (frame::lights.directional_lights[light_id].flags & 5u)==1u {
+            shadow=fetch_directional_shadow(light_id,i.world_position,vn,view_z);
+            break;
+        }
     }
     var lit=p.rows[1].rgb*saturate(ndl)*shadow+irr*p.rows[5].w;
     let fb=1.0-saturate(dot(vn,vd));
