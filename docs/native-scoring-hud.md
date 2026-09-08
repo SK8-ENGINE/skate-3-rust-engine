@@ -87,7 +87,7 @@ Validation on 2026-09-08:
 - The data-only scoring-flow example credits the authored 100-point stationary
   kickflip once and verifies idle stability and teleport cancellation.
 - The original HUD data-only audit passes 1,800 frames, with 172 VM slots,
-  116 display instances, at most 31 draw batches and finite geometry.
+  116 display instances, at most 33 draw batches and finite geometry.
 - The release target builds successfully with static MSVC CRT, without default
   features. Compiler warnings remain in the existing game and audit-only code.
 - No game, recomp, controller harness, gameplay automation, `--check-assets`
@@ -98,7 +98,7 @@ The copied build and launcher are in ignored `logs/scoring/build`. The launcher
 uses this worktree's HUD cache and the existing owned asset installation and
 starts paused. It checks required paths before running and retains failures on
 screen. The executable SHA256 is
-`deb1045925e1dd0e7143825d0320172eb2c26cf77e1c0f336d3475887557435d`.
+`9b3458045e7078dcd6daca3e5bea89d16298315b751b4cac4f82f8a6531cd7c0`.
 
 The missing-HUD startup defect is fixed: HUD setup now depends on presentation
 setup, so Bevy applies the deferred camera spawn before the HUD queries it.
@@ -106,6 +106,44 @@ Previously the two PostStartup systems were unordered and a missing camera
 caused HUD initialization to return permanently. The rebuilt launcher also
 saves runtime output to `logs/scoring/build/scoring-test.log`. This fix is
 release-compiled; interactive rendering has not been launched for verification.
+
+## Landing lifetime and native font passes
+
+The landing hide bug came from sending `CloseTrickDisplay` at every score
+publication. Native `82775328` calls `82774E88` only on scoring output byte
+14630; `82DA4238` copies that from module byte128, selected by `82DA4010`
+for its reset/bail category. `82774E88` sets backend byte184, which
+`825E4F40` turns into event3, resolved by `825D3B38` to
+`_global.TrickDisplay.CloseTrickDisplay`. Normal banking no longer emits it.
+Line expiry clears the score and lets the authored Clear/outro actions run.
+
+The timer unit is now traced end-to-end: `82DA4238` writes line points divided
+by drain rate to output+40; `82775328` copies it to backend+32;
+`825C2910` and `825C2D90` truncate that value to seconds for ActionScript.
+The previous raw-point binding was wrong. Changes in that seconds field now
+also refresh `UpdateTrickScoring`.
+
+Observed font code: `825D6B68` compares the APT name with `Futura Shadow`
+(string at `8220BD44`) and attaches `futuraheavy` (`8220BD54`) as a secondary
+font, setting X adjustment 1 and the other adjustment 0. `82CA1FD8` first
+sets the primary RGB multiplier to black while retaining alpha, draws it,
+then restores the color and draws the foreground with the X adjustment.
+The scene renderer now follows those two passes. FuturaOuterGlow remains
+its separately authored tinted atlas pass. No outline radius, new glow
+color or replacement glyphs were invented.
+
+The offscreen adapter also needed premultiplied-alpha compositing. The
+mesh target already stores covered RGB; Bevy's ordinary ImageNode uses
+straight-alpha blending, which multiplied coverage again and weakened
+soft atlas edges. The dedicated HUD composite now uses premultiplied
+blending to preserve the original layers' coverage.
+
+Validation: supplied scoring data exercises landing, retained HUD visibility,
+seconds conversion, natural line expiry and teleport cancellation. The
+1,800-frame original movie audit checks a black shadow/foreground pair and
+finite geometry (33 maximum batches). Release compilation passes. User
+screenshots guided the investigation but did not supply rendering constants;
+no game, reference executable or GPU capture was launched for validation.
 
 ## Native parity gaps
 

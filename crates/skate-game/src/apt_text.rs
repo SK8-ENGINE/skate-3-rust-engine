@@ -14,6 +14,8 @@ pub struct Glyph {
 }
 #[derive(Clone)]
 pub struct Font {
+    /// 825D6B68 attaches futuraheavy to Futura Shadow; 82CA1FD8 draws both.
+    pub foreground: Option<i32>,
     pub texture: String,
     pub size: [u32; 2],
     pub scale: [f32; 2],
@@ -51,6 +53,7 @@ impl TextAssets {
                     .ok_or_else(|| format!("Missing native font {name}.{key}"))
             };
             let mut font = Font {
+                foreground: None,
                 texture: asset["texture"]
                     .as_str()
                     .ok_or("Font texture missing")?
@@ -92,6 +95,17 @@ impl TextAssets {
                 c["id"].as_i64().ok_or("Invalid font character id")? as i32,
                 font,
             );
+        }
+        for c in json["characters"].as_array().unwrap() {
+            if c["type_name"] == "font" && c["font"]["name"] == "Futura Shadow" {
+                let foreground = json["characters"].as_array().unwrap().iter().find(|f|
+                    f["type_name"] == "font" && json["font_mappings"][f["font"]["name"].as_str().unwrap_or("")]["file_name"] == "futuraheavy")
+                    .and_then(|f| f["id"].as_i64()).ok_or("Missing native Futura Shadow foreground font")? as i32;
+                out.fonts
+                    .get_mut(&(c["id"].as_i64().unwrap() as i32))
+                    .unwrap()
+                    .foreground = Some(foreground);
+            }
         }
         Ok(out)
     }

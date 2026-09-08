@@ -37,6 +37,7 @@ fn main() -> Result<(), String> {
     let shapes: apt_scene::Shapes =
         serde_json::from_value(json["shapes"].clone()).map_err(|e| e.to_string())?;
     let mut max_draws = 0;
+    let mut saw_native_shadow_pair = false;
     for tick in 0..1800 {
         let new_trick = tick % 180 == 10;
         if new_trick {
@@ -52,15 +53,23 @@ fn main() -> Result<(), String> {
             input.line_score += 100;
             input.clean = tick % 360 == 10;
             input.sketchy = !input.clean;
-            input.line_time = 400.0;
+            input.line_time = 8.0;
             input.multiplier = if input.multiplier == 1.5 { 2.0 } else { 1.5 };
         }
-        input.line_time = (input.line_time - 1.0).max(0.0);
+        input.line_time = (input.line_time - 1.0 / 60.0).max(0.0);
+        input.sequence_timer = input.line_time as i32;
         runtime
             .update(input.clone(), new_trick, false, tick % 180 == 120)
             .map_err(|e| format!("Data frame {tick}: {e}"))?;
         let draws = apt_scene::draw(&runtime.bindings.movie, &runtime.vm, &shapes)?;
         max_draws = max_draws.max(draws.len());
+        saw_native_shadow_pair |= draws.windows(2).any(|pair| {
+            pair[0].texture.contains("futurashadow")
+                && pair[0].multiply[..3] == [0., 0., 0.]
+                && pair[1].texture.contains("futuraheavy")
+                && pair[1].multiply[0] > 0.
+        });
+
         if draws
             .iter()
             .flat_map(|d| &d.vertices)
@@ -68,6 +77,9 @@ fn main() -> Result<(), String> {
         {
             return Err("Nonfinite authored draw geometry".into());
         }
+    }
+    if !saw_native_shadow_pair {
+        return Err("Missing native black shadow / heavy foreground pair".into());
     }
     println!(
         "Original HUD action audit passed 1800 authored frames; {} object slots, {} display instances",

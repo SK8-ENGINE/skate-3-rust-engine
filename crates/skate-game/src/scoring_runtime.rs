@@ -113,8 +113,8 @@ impl Runtime {
         hud_runtime::Input {
             sequence_score: self.sequence_score as i32,
             line_score: self.session.holder.snapshot.line as i32,
-            sequence_timer: self.session.line.points as i32,
-            line_time: self.session.line.points,
+            sequence_timer: (self.session.line.points / self.data.line_drain) as i32,
+            line_time: self.session.line.points / self.data.line_drain,
             line_capacity: self.data.line_capacity,
             multiplier: self.session.combo.multiplier,
             clean: self.clean,
@@ -561,7 +561,9 @@ impl Runtime {
                 self.session
                     .publish_sequence(&self.data.session_rules(), 1., bailout, true);
             self.sequence_active = false;
-            self.close_tricks = true;
+            // 82775328 -> 82774E88 closes only for ScoreModule reset/bail
+            // output 14630 (82DA4010/82DA4238), not a banked landing.
+            self.close_tricks = bailout;
         } else if self.sequence_active {
             let s = &self.session.holder.snapshot;
             self.sequence_score = (s.accumulated
@@ -589,6 +591,9 @@ impl Runtime {
                     .sum::<f32>()
                 + self.air_metrics.iter().sum::<f32>())
                 * self.session.combo.multiplier;
+        }
+        if self.session.line.expired || f.teleported || bailout {
+            self.sequence_score = 0.;
         }
         self.session.settle_line(f.teleported || bailout, active);
         self.previous = f.position;

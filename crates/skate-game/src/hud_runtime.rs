@@ -210,7 +210,8 @@ impl Runtime {
         if previous.multiplier != self.bindings.input.multiplier {
             methods.push("UpdateMultiplier");
         }
-        if previous.sequence_score != self.bindings.input.sequence_score
+        if previous.sequence_timer != self.bindings.input.sequence_timer
+            || previous.sequence_score != self.bindings.input.sequence_score
             || previous.clean != self.bindings.input.clean
             || previous.sketchy != self.bindings.input.sketchy
             || previous.line_score != self.bindings.input.line_score

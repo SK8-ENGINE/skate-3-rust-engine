@@ -123,70 +123,89 @@ fn visit(
     } else if let Some(text) = &character.text {
         let font = &movie.text_assets.fonts
             [&(text["font_id"].as_i64().ok_or("Invalid text font")? as i32)];
-        let height = text["font_height"].as_f64().ok_or("Invalid text height")? as f32;
-        let sx = font.scale[0] * height;
-        let sy = font.scale[1] * height;
-        let value = vm.get(id, "_displayText").text();
-        let bounds = character.bounds.ok_or("Missing text bounds")?;
-        let width = font.width(&value, height);
-        let alignment = text["alignment"].as_u64().unwrap_or(0);
-        let autosize = vm.get(id, "autoSize").text();
-        let alignment = if autosize == "left" { 0 } else { alignment };
-        let mut x = bounds[0]
-            + font.offset[0] * sx
-            + match alignment {
-                1 => bounds[2] - bounds[0] - width,
-                2 => (bounds[2] - bounds[0] - width) * 0.5,
-                _ => 0.,
-            };
-        let y = bounds[1] + font.offset[1] * sy;
-        let mut vertices = Vec::new();
-        for c in value.chars() {
-            if let Some(g) = font.glyph(c) {
-                let x0 = x + g.x_offset * sx;
-                let y0 = y + (font.ascent - g.y_offset) * sy;
-                let x1 = x0 + g.width * sx;
-                let y1 = y0 + g.height * sy;
-                let [u0, v0, u1, v1] = g.atlas_bounds;
-                let points = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
-                let uvs = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
-                for i in [0, 1, 2, 0, 2, 3] {
-                    vertices.push(transform(
-                        matrix,
-                        &Vertex {
-                            position: points[i],
-                            uv: [
-                                uvs[i][0] / font.size[0] as f32,
-                                uvs[i][1] / font.size[1] as f32,
-                            ],
-                        },
-                    ));
+        // Native shadow text uses a black atlas pass followed by the sharp
+        // futuraheavy glyphs translated +1 in text X (825D6B68/82CA1FD8).
+        let passes = if let Some(foreground) = font.foreground {
+            vec![
+                (font, true, 0.),
+                (&movie.text_assets.fonts[&foreground], false, 1.),
+            ]
+        } else {
+            vec![(font, false, 0.)]
+        };
+        for (font, shadow, advance_x) in passes {
+            let height = text["font_height"].as_f64().ok_or("Invalid text height")? as f32;
+            let sx = font.scale[0] * height;
+            let sy = font.scale[1] * height;
+            let value = vm.get(id, "_displayText").text();
+            let bounds = character.bounds.ok_or("Missing text bounds")?;
+            let width = font.width(&value, height);
+            let alignment = text["alignment"].as_u64().unwrap_or(0);
+            let autosize = vm.get(id, "autoSize").text();
+            let alignment = if autosize == "left" { 0 } else { alignment };
+            let mut x = bounds[0]
+                + advance_x
+                + font.offset[0] * sx
+                + match alignment {
+                    1 => bounds[2] - bounds[0] - width,
+                    2 => (bounds[2] - bounds[0] - width) * 0.5,
+                    _ => 0.,
+                };
+            let y = bounds[1] + font.offset[1] * sy;
+            let mut vertices = Vec::new();
+            for c in value.chars() {
+                if let Some(g) = font.glyph(c) {
+                    let x0 = x + g.x_offset * sx;
+                    let y0 = y + (font.ascent - g.y_offset) * sy;
+                    let x1 = x0 + g.width * sx;
+                    let y1 = y0 + g.height * sy;
+                    let [u0, v0, u1, v1] = g.atlas_bounds;
+                    let points = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+                    let uvs = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+                    for i in [0, 1, 2, 0, 2, 3] {
+                        vertices.push(transform(
+                            matrix,
+                            &Vertex {
+                                position: points[i],
+                                uv: [
+                                    uvs[i][0] / font.size[0] as f32,
+                                    uvs[i][1] / font.size[1] as f32,
+                                ],
+                            },
+                        ));
+                    }
+                    x = g.x_advance.mul_add(sx, x);
                 }
-                x = g.x_advance.mul_add(sx, x);
             }
-        }
-        let argb = u32::from_str_radix(
-            text["color_argb"]
-                .as_str()
-                .ok_or("Missing text color")?
-                .trim_start_matches('#'),
-            16,
-        )
-        .map_err(|e| e.to_string())?;
-        let color = [
-            ((argb >> 16) & 255) as f32 / 255.,
-            ((argb >> 8) & 255) as f32 / 255.,
-            (argb & 255) as f32 / 255.,
-            (argb >> 24) as f32 / 255.,
-        ];
-        if !vertices.is_empty() {
-            out.push(Draw {
-                texture: font.texture.clone(),
-                size: font.size,
-                vertices,
-                multiply: std::array::from_fn(|i| multiply[i] * color[i]),
-                add,
-            });
+            let argb = u32::from_str_radix(
+                text["color_argb"]
+                    .as_str()
+                    .ok_or("Missing text color")?
+                    .trim_start_matches('#'),
+                16,
+            )
+            .map_err(|e| e.to_string())?;
+            let color = [
+                ((argb >> 16) & 255) as f32 / 255.,
+                ((argb >> 8) & 255) as f32 / 255.,
+                (argb & 255) as f32 / 255.,
+                (argb >> 24) as f32 / 255.,
+            ];
+            if !vertices.is_empty() {
+                out.push(Draw {
+                    texture: font.texture.clone(),
+                    size: font.size,
+                    vertices,
+                    multiply: std::array::from_fn(|i| {
+                        if shadow && i < 3 {
+                            0.
+                        } else {
+                            multiply[i] * color[i]
+                        }
+                    }),
+                    add,
+                });
+            }
         }
     }
     for child in instance.children.values() {

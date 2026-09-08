@@ -5,10 +5,12 @@ use bevy::{
     camera::{RenderTarget, visibility::RenderLayers},
     prelude::*,
     render::render_resource::{
-        AsBindGroup, Extent3d, PrimitiveTopology, ShaderType, TextureDimension, TextureFormat,
+        AsBindGroup, BlendState, Extent3d, PrimitiveTopology, RenderPipelineDescriptor, ShaderType,
+        TextureDimension, TextureFormat,
     },
     shader::ShaderRef,
     sprite_render::{AlphaMode2d, Material2d, Material2dPlugin, MeshMaterial2d},
+    ui_render::UiMaterialPlugin,
 };
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -33,6 +35,26 @@ impl Material2d for HudMaterial {
         AlphaMode2d::Blend
     }
 }
+/// The offscreen target already contains RGB multiplied by coverage. Applying
+/// ImageNode's straight-alpha blend again suppresses the original soft glow.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+struct HudComposite {
+    #[texture(0)]
+    #[sampler(1)]
+    image: Handle<Image>,
+}
+impl UiMaterial for HudComposite {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://skate3rust/hud_composite.wgsl".into()
+    }
+    fn specialize(descriptor: &mut RenderPipelineDescriptor, _: UiMaterialKey<Self>) {
+        if let Some(fragment) = &mut descriptor.fragment {
+            for target in fragment.targets.iter_mut().flatten() {
+                target.blend = Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING);
+            }
+        }
+    }
+}
 struct Slot {
     entity: Entity,
     mesh: Handle<Mesh>,
@@ -52,21 +74,25 @@ pub(crate) struct ScoringHudPlugin;
 impl Plugin for ScoringHudPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "hud_render.wgsl");
-        app.add_plugins(Material2dPlugin::<HudMaterial>::default())
-            .add_systems(
-                PostStartup,
-                setup.after(crate::graphics_menu::PresentationSetup),
-            )
-            .add_systems(
-                FixedUpdate,
-                advance
-                    .after(crate::app::SimulationSet::Physics)
-                    .run_if(crate::graphics_menu::gameplay_active),
-            )
-            .add_systems(
-                Update,
-                (reset, render).chain().after(crate::app::FrameSet::Physics),
-            );
+        embedded_asset!(app, "hud_composite.wgsl");
+        app.add_plugins((
+            Material2dPlugin::<HudMaterial>::default(),
+            UiMaterialPlugin::<HudComposite>::default(),
+        ))
+        .add_systems(
+            PostStartup,
+            setup.after(crate::graphics_menu::PresentationSetup),
+        )
+        .add_systems(
+            FixedUpdate,
+            advance
+                .after(crate::app::SimulationSet::Physics)
+                .run_if(crate::graphics_menu::gameplay_active),
+        )
+        .add_systems(
+            Update,
+            (reset, render).chain().after(crate::app::FrameSet::Physics),
+        );
     }
 }
 fn setup(
@@ -75,6 +101,7 @@ fn setup(
     skater: Res<SkaterRuntime>,
     cameras: Query<Entity, With<IsDefaultUiCamera>>,
     mut images: ResMut<Assets<Image>>,
+    mut composites: ResMut<Assets<HudComposite>>,
 ) {
     // The startup dependency also applies the presentation system's deferred
     // camera spawn before this query. Without it, setup silently lost the HUD.
@@ -153,7 +180,7 @@ fn setup(
                 Msaa::Off,
             ));
             commands.spawn((
-                ImageNode::new(target),
+                MaterialNode(composites.add(HudComposite { image: target })),
                 UiTargetCamera(output),
                 GlobalZIndex(1),
                 Pickable::IGNORE,
