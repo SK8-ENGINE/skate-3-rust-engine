@@ -12,6 +12,7 @@ pub mod history;
 pub mod pad;
 pub mod power_sliding;
 pub mod riding_intentions;
+pub mod manual_intentions;
 pub mod trick_intentions;
 pub mod set_turning;
 pub mod steering_intentions;

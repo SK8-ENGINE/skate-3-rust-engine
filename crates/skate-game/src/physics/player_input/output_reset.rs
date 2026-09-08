@@ -15,7 +15,7 @@ pub(crate) fn reset_outputs(out: &mut PhysicalPlayerInput) {
             //82DE2F70..78 loads original world-up into144.82DE304C
             //splats-1 into the final four-word trajectory descriptor lane.
             landing_normal_144: UP,
-            selected_trajectory_240: [[0;4],[0;4],[0;4],[0xbf80_0000;4]],
+            selected_trajectory_240: [[0; 4], [0; 4], [0; 4], [0xbf80_0000; 4]],
             ..Default::default()
         },
         reckoning: SystemReckoningFields {
@@ -24,6 +24,7 @@ pub(crate) fn reset_outputs(out: &mut PhysicalPlayerInput) {
         }, //82DE3CC8
         ground: GroundOutputFields {
             vector_64: UP,
+            vector_80: UP,
             vector_96: UP,
             scalar_276: -1.,
             ..Default::default()

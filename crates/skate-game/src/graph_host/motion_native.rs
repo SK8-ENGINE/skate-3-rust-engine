@@ -80,8 +80,9 @@ impl Operation {
 #[derive(Default)]
 pub struct ScorePacket {
     pub handplant: Option<(skate_core::animation::output::attributes::AttributeName, [f32; 2])>,
+    /// ScoringGrabs 82BBEF60: selected authored name and tweak vector.
     pub grab: Option<(skate_core::animation::output::attributes::AttributeName, [f32; 2])>,
-    pub trick: Option<skate_core::animation::output::attributes::AttributeName>,
+    pub trick_names: super::motion_scoring_trick::Names,
     pub name: Option<u32>,
     pub flags: u32,
 }

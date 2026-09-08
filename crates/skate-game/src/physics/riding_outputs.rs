@@ -1,6 +1,7 @@
 //! Live board/query/solver outputs used by the riding gameplay owner.
 //! Physical calculations stay in core; this owns stock settings and scheduling
 //! state. Solved contacts and line probes remain distinct native inputs.
+mod ground_input;
 mod probes;
 pub(crate) use probes::BoardProbes;
 use skate_core::{
@@ -52,44 +53,6 @@ pub(crate) struct RidingOutputs {
     pending_wheel_queries: Option<[Option<WheelLineHit>; 4]>,
 }
 impl RidingOutputs {
-    ///Skeleton82BDE060's final82D8E3E0 call, argument7=true.
-    pub(crate) fn update_biped_reckoning(
-        &mut self,
-        air: &mut skate_core::air::reckoning::AirState,
-        input: super::offboard::skeleton_ground::ReckoningUpdate,
-        flags_2468: u32,
-        body_spin: f32,
-    ) {
-        let previous_up = lanes(self.reckoning.up);
-        skate_core::player::offboard::ground_reckoning::update(
-            &mut self.reckoning, &mut self.reckoning_frames, &mut self.body_spin, air,
-            skate_core::player::offboard::ground_reckoning::Settings {
-                ground_normal_smoothing: self.orientation_settings.ground_normal_smoothing,
-                tilt_vs_rotation: &self.tilt_vs_rotation,
-                tilt_vs_slope: &self.tilt_vs_slope,
-            },
-            skate_core::player::offboard::ground_reckoning::Input {
-                previous_up,
-                requested_up: input.up, requested_forward: input.forward, blend: input.blend,
-                reverse_stance: flags_2468 & 0x0010_0000 != 0,
-                enable_body_spin_input: true, physical_body_spin_2812: body_spin,
-            },
-        );
-    }
-    ///Shared Reckoning82D8E3E0, argument7=false for grind/nonspecific.
-    pub fn update_grind_reckoning(&mut self, air: &mut skate_core::air::reckoning::AirState,
-        normal: [f32;4], forward: [f32;4], flags: u32, blend: f32) {
-        let previous_up=lanes(self.reckoning.up);
-        skate_core::player::offboard::ground_reckoning::update(
-            &mut self.reckoning,&mut self.reckoning_frames,&mut self.body_spin,air,
-            skate_core::player::offboard::ground_reckoning::Settings {
-                ground_normal_smoothing:self.orientation_settings.ground_normal_smoothing,
-                tilt_vs_rotation:&self.tilt_vs_rotation,tilt_vs_slope:&self.tilt_vs_slope,
-            },skate_core::player::offboard::ground_reckoning::Input {
-                previous_up,requested_up:normal,requested_forward:forward,blend,
-                reverse_stance:flags&0x100000!=0,enable_body_spin_input:false,physical_body_spin_2812:0.,
-            });
-    }
     ///Board82C0D680 resets CollisionInfo and both probes, preserving7692.
     pub fn reset_for_teleport(&mut self) {
         let elapsed = self.ground.time_without_wheel_contact;
@@ -171,13 +134,6 @@ impl RidingOutputs {
         })
     }
 
-    ///PostInput82DB5E10 uses preceding physical outputs before state updates.
-    pub fn prepare_input(&mut self) {
-        self.heading_adjust_factor = self
-            .speed_settings
-            .calculate(self.ground.wheel_normal.y, self.motion.forward_speed);
-    }
-
     ///Original82DB5E10 reads current Processed464.y and2612 after Skeleton.
     pub fn update_input_heading(&mut self, normal_y: f32, speed: f32) -> f32 {
         self.heading_adjust_factor = self.speed_settings.calculate(normal_y, speed);
@@ -198,15 +154,12 @@ impl RidingOutputs {
         processed_flags_2468: u32,
         animation_balance: f32,
         coffin: bool,
+        processed: &skate_core::player::input_phase::ProcessedPhysicsInput,
     ) {
         let deck = board.part_transforms()[BodyId::Deck.index()];
         // Ordinary ground riding follows the physical deck (82D4E250).
         self.update_ground_reckoning_with_heading(
-            board,
-            pose,
-            processed_flags_2468,
-            animation_balance,
-            coffin,
+            board, pose, processed_flags_2468, animation_balance, coffin, processed,
             [deck.basis.columns[2][0], deck.basis.columns[2][1], deck.basis.columns[2][2], 0.0],
         );
     }
@@ -221,8 +174,10 @@ impl RidingOutputs {
         processed_flags_2468: u32,
         animation_balance: f32,
         coffin: bool,
+        processed: &skate_core::player::input_phase::ProcessedPhysicsInput,
         heading: [f32; 4],
     ) {
+        let observations = ground_input::GroundPacketInputs::from_processed(processed);
         let deck = board.part_transforms()[BodyId::Deck.index()];
         //The source takes the previous final frame X for the damping step.
         let previous_right = self.reckoning_frames.system[0];
@@ -233,22 +188,16 @@ impl RidingOutputs {
             self.reckoning.ground_normal,
             processed_flags_2468,
         );
-        // PrepareBoardToolkit82C01718..1744 selects +1 only for ordered >0.
-        let direction = if self.motion.forward_speed > 0.0 {
-            1.0
-        } else {
-            -1.0
-        };
         self.reckoning.update(
             &self.orientation_settings,
             GroundOrientationInput {
                 com_to_deck: pose.com_to_deck,
-                ground_normal: self.ground.wheel_normal,
-                dynamic_up: self.ground.overall_normal,
-                speed: self.motion.speed,
-                wheel_contact_count: i32::from(self.ground.wheel_contact_count),
+                ground_normal: observations.wheel_normal,
+                dynamic_up: observations.dynamic_up,
+                speed: observations.speed,
+                wheel_contact_count: observations.wheel_count,
                 animation_balance,
-                deck_angle_curve_input: self.motion.forward_speed * direction,
+                deck_angle_curve_input: observations.absolute_speed,
                 board_up: vector(deck.basis.columns[1]),
                 board_forward: vector(deck.basis.columns[2]),
                 effective_board_forward: vector(effective.effective_basis.columns[2]),
@@ -281,30 +230,42 @@ impl RidingOutputs {
         physical_body_spin: f32,
         balance: f32,
     ) {
-        let raw = |v:[u32;4]| {let v=v.map(f32::from_bits);Vector3::new(v[0],v[1],v[2])};
-        let xyz = |v:[f32;4]| Vector3::new(v[0],v[1],v[2]);
+        let raw = |v: [u32; 4]| {
+            let v = v.map(f32::from_bits);
+            Vector3::new(v[0], v[1], v[2])
+        };
+        let xyz = |v: [f32; 4]| Vector3::new(v[0], v[1], v[2]);
         let previous_right = self.reckoning_frames.system[0];
         self.reckoning_frames.heading = toolkit.deck[2];
         self.reckoning.dynamic_up = raw(p.vectors_464_480_496_512_528[4]);
         body_spin::update_ground(&mut self.body_spin, physical_body_spin);
-        self.reckoning.update(&self.orientation_settings, GroundOrientationInput {
-            com_to_deck: raw(p.animation_com_to_deck_752),
-            ground_normal: raw(p.vectors_464_480_496_512_528[0]),
-            dynamic_up: raw(p.vectors_464_480_496_512_528[4]),
-            speed: p.scalar_2652,
-            wheel_contact_count: p.wheel_count_2556 as i32,
-            animation_balance: balance,
-            deck_angle_curve_input: toolkit.absolute_speed,
-            board_up: xyz(toolkit.deck[1]), board_forward: xyz(toolkit.deck[2]),
-            effective_board_forward: xyz(toolkit.effective[2]),
-            previous_reckoning_right: xyz(previous_right),
-            prevent_up_behind_board: p.flags_2476 & 0x4000_0000 != 0,
-        });
+        self.reckoning.update(
+            &self.orientation_settings,
+            GroundOrientationInput {
+                com_to_deck: raw(p.animation_com_to_deck_752),
+                ground_normal: raw(p.vectors_464_480_496_512_528[0]),
+                dynamic_up: raw(p.vectors_464_480_496_512_528[4]),
+                speed: p.scalar_2652,
+                wheel_contact_count: p.wheel_count_2556 as i32,
+                animation_balance: balance,
+                deck_angle_curve_input: toolkit.absolute_speed,
+                board_up: xyz(toolkit.deck[1]),
+                board_forward: xyz(toolkit.deck[2]),
+                effective_board_forward: xyz(toolkit.effective[2]),
+                previous_reckoning_right: xyz(previous_right),
+                prevent_up_behind_board: p.flags_2476 & 0x4000_0000 != 0,
+            },
+        );
         let up = lanes(self.reckoning.up);
-        self.reckoning_frames.calculate_transform(up, lanes(self.reckoning.ground_normal));
-        self.reckoning_frames.calculate_dynamic_lean(up, lanes(self.reckoning.dynamic_up));
-        self.reckoning_frames.calculate_tilt(p.flags_2468 & 0x100000 != 0,
-            &self.tilt_vs_rotation, &self.tilt_vs_slope);
+        self.reckoning_frames
+            .calculate_transform(up, lanes(self.reckoning.ground_normal));
+        self.reckoning_frames
+            .calculate_dynamic_lean(up, lanes(self.reckoning.dynamic_up));
+        self.reckoning_frames.calculate_tilt(
+            p.flags_2468 & 0x100000 != 0,
+            &self.tilt_vs_rotation,
+            &self.tilt_vs_slope,
+        );
     }
 
     /// StartSkateboardLineTests82DB6310 ->82C07788: four current wheel positions,
@@ -339,7 +300,9 @@ impl RidingOutputs {
     ///PostInput/state work. These results are available to this frame's state
     ///selector, independently of the subsequent solve's contact reports.
     pub fn finish_wheel_queries(&mut self) -> Result<(), String> {
-        let hits = self.pending_wheel_queries.take()
+        let hits = self
+            .pending_wheel_queries
+            .take()
             .ok_or("EndBoard requires its submitted wheel query batch")?;
         self.wheel_lines.publish(hits);
         self.probes.publish()
@@ -355,10 +318,6 @@ impl RidingOutputs {
         processed_flags_2468: u32,
         time_step: f32,
     ) -> Result<(), String> {
-        let capture = bevy::log::tracing::enabled!(target: "skate_game::riding_trace", bevy::log::tracing::Level::DEBUG);
-        if let Some(snapshot) = board.take_solver_diagnostics(capture) {
-            bevy::log::debug!(target: "skate_game::riding_trace", "RIDING_SOLVER {snapshot}");
-        }
         self.ground.update(
             board.contact_reports(),
             &self.wheel_lines,
@@ -375,7 +334,8 @@ impl RidingOutputs {
             .iter_mut()
             .zip(self.ground.wheel_angular_drag)
         {
-            //82C08634 writes inertia+36 (angular); +32 is linear drag.
+            // S3 82C08634 writes inertia+36; S2 82B372E0 names this
+            // mAngularDrag. Linear drag belongs to separate state controls.
             body.inertia.angular_drag = drag;
         }
         self.motion = BoardMotionOutput::from_board(

@@ -2,6 +2,7 @@
 //! geometry is explicit; this owner never treats an unimplemented query as a miss.
 use skate_core::physics::skeleton_animation_record::{AnimationPartTransform, IDENTITY};
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) struct PreInputResult {
     pub position: [f32; 4],
     pub normal: [f32; 4],

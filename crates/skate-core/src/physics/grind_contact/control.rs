@@ -34,16 +34,16 @@ impl Control {
             let mut target = input;
             if tilt.abs() > 0.26 {
                 target = if selected {
-                    input.max(0.0)
-                } else {
                     input.min(0.0)
+                } else {
+                    input.max(0.0)
                 };
             }
             if height < -0.25 {
                 target = if selected {
-                    input.min(0.0)
-                } else {
                     input.max(0.0)
+                } else {
+                    input.min(0.0)
                 };
             }
             let sign = (if front { 1.0 } else { -1.0 }) * if switched { -1.0 } else { 1.0 };
@@ -58,7 +58,10 @@ impl Control {
             if hanging_back {
                 target = (target + sign * 0.5).clamp(-1.0, 1.0);
             }
-            let yaw = (deadzone(translation) * 0.85 + deadzone(nudge) * 0.79).clamp(-0.85, 0.85);
+            //82D8A238/240: round the nudge product, then fused translation.
+            let yaw = deadzone(translation)
+                .mul_add(0.85, deadzone(nudge) * 0.79)
+                .clamp(-0.85, 0.85);
             (yaw * yaw * yaw, target * target * target, target != input)
         } else {
             (0.0, 0.0, false)

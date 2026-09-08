@@ -33,6 +33,9 @@ pub(crate) struct AnimatedSkeleton {
     pub bone_indices: [usize; 24],
     pub physics_frames: [AnimationPartTransform; 24],
     pub animation_board: AnimationPartTransform,
+    ///Skeleton12560, copied BEFORE board offsets and IK by82BD8CB0..8D10.
+    pub unadjusted_board: AnimationPartTransform,
+    landing_on_board_blend: PointGraph<8>,
     pub animation_hips: AnimationPartTransform,
     pub motion: SkeletonMotion,
     pub board_at_y_delta: f32,
@@ -109,6 +112,16 @@ impl AnimatedSkeleton {
             bone_indices,
             physics_frames,
             animation_board: IDENTITY,
+            unadjusted_board: IDENTITY,
+            landing_on_board_blend: {
+                let words = data
+                    .words::<20>("physics_animation", "default", "LandingOnDeckBLendVsTime")?
+                    .map(f32::from_bits);
+                PointGraph {
+                    x: words[4..12].try_into().unwrap(),
+                    y: words[12..20].try_into().unwrap(),
+                }
+            },
             animation_hips: IDENTITY,
             motion: SkeletonMotion::default(),
             board_at_y_delta: 0.0,
@@ -129,11 +142,13 @@ impl AnimatedSkeleton {
         dt: f32,
         flags_2468: &mut u32,
         flags_2472: &mut u32,
+        landing_on_board: Option<(AnimationPartTransform, [f32; 4], u32, f32)>,
     ) -> Result<(), String> {
         let trajectory = globals.first().ok_or("Animation has no trajectory bone")?;
         self.motion
             .process_trajectory(trajectory, &self.roots.animation_to_world, dt);
         let mut parts = map_animation_parts(globals, &self.bone_indices, &self.physics_frames)?;
+        self.unadjusted_board = parts[0];
         SkeletonMotion::publish_unadjusted_board(&parts[0], flags_2472);
         for (target, part) in [15, 19, 3, 7].into_iter().enumerate() {
             let bone = globals
@@ -142,6 +157,22 @@ impl AnimatedSkeleton {
             self.targets[target] = compose_affine(bone, &self.physics_frames[part]);
         }
         landing.animation_com_height = self.record.centre_of_mass[1] - parts[0][3][1];
+        if let Some((deck, offset, flags2480, time)) = landing_on_board {
+            if let Some(adjustment) =
+                skate_core::physics::skeleton_landing_on_board::pose_adjustment(
+                    &self.roots.world_to_animation,
+                    &deck,
+                    &parts[0],
+                    offset,
+                    self.board_frames.com_velocity[1],
+                    flags2480,
+                    time,
+                    &self.landing_on_board_blend,
+                )
+            {
+                self.board_offset.refresh_transform(adjustment);
+            }
+        }
         self.landing
             .update(landing, &self.landing_settings, &mut self.board_offset);
         self.board_offset.update(&mut parts[0], &mut self.targets);

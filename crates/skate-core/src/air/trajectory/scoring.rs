@@ -1,6 +1,8 @@
-//! TU3 scoring82D68FE8/82D68AF0/82D69790 with world-supplied grind admission.
+//! TU3 scoring82D68FE8/82D68AF0/82D69790 for a world with no grind edges.
+//! That topology is supplied by the authored BoardWorld, not inferred from a
+//! failed collision. Every wall probe still queries real world geometry.
 use super::{
-    launch::adjust_trajectory, math::*, Prediction, SelectorInput, SelectorSettings, SurfaceHit,
+    Prediction, SelectorInput, SelectorSettings, SurfaceHit, launch::adjust_trajectory, math::*,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -54,25 +56,20 @@ pub(super) fn score(
         let force_score = (force_dot * s.score_landing_force) * scalar;
         let direction_score = (sideways * s.score_landing_direction) * scalar;
 
-        //82D69C00 attempts acquisition only on the first-pass centre trajectory.
-        let mut evaluation = grind(
+        let evaluation = grind(
             &mut c.prediction,
             middle
                 && !(input.flags_2472 & 0x2000_0000 != 0
                     && input.offboard_flags_1776 & 0x0400_0000 != 0
                     && input.offboard_flags_1776 & 0x0800_0000 == 0),
         )?;
-        if adjusted_on_vert && input.directional_input < 0.5 && evaluation.score > 0.0 {
-            evaluation.target = None;
-            evaluation.score = s.grind_penalty_vs_distance.evaluate(0.0);
-        }
         c.grind = evaluation.target;
-        let grind_score = if input.flags_2476 & 0x0200_0000 != 0 {
+        let mut grind_score = if input.flags_2476 & 0x0200_0000 != 0 {
             0.0
         } else if evaluation.score != 0.0 {
             evaluation.score
         } else if input.grind_lock_distance > 0.5 || !middle {
-            s.grind_penalty_vs_distance.evaluate(evaluation.distance)
+            s.grind_penalty_vs_distance.evaluate(evaluation.penalty_input())
         } else {
             0.0
         };
@@ -109,6 +106,10 @@ pub(super) fn score(
         c.normal = c.prediction.result.contact_normal;
         let mut transition = 0.0;
         if adjusted_on_vert {
+            if input.directional_input < 0.5 && grind_score > 0.0 {
+                c.grind = None;
+                grind_score = s.grind_penalty_vs_distance.evaluate(0.0);
+            }
             let sign = if input.directional_input >= 0.5 {
                 1.0
             } else {

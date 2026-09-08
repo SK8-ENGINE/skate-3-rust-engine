@@ -44,6 +44,8 @@ impl GroundAnimationSettings {
                 adjust_z_factor: f("JumpAdjustZFactor")?,
                 adjust_x_factor: f("JumpAdjustXFactor")?,
                 absolute_minimum_height: f("AbsoluteMinHeight")?,
+                hippy_minimum_height: f("HippyJumpMinHeight")?,
+                hippy_maximum_height: f("HippyJumpMaxHeight")?,
             },
         })
     }

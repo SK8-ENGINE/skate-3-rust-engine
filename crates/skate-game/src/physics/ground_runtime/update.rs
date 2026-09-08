@@ -7,7 +7,7 @@ use super::{
         riding_outputs::RidingOutputs,
     },
     GroundControllers, GroundInputObservations, GroundPhysicalFrame, GroundRuntime, GroundSettings,
-    GroundState, GroundTrajectoryState,
+    GroundState,
 };
 use skate_core::{
     math::Vector3,
@@ -28,16 +28,17 @@ pub(crate) struct GroundUpdateFrame<'a> {
     pub base_trucks: [RetailAffineTransform; 2],
     pub extra: GroundInputObservations,
 }
-pub(crate) struct GroundUpdateTargets<'a, T> {
+pub(crate) struct GroundUpdateTargets<'a> {
     pub foot_ik: &'a mut FootIk,
     pub skeleton_elapsed_16505: &'a mut bool,
-    pub skeleton_ground_16388: &'a mut bool,
+    /// Borrow the canonical SkeletonOutput correction latch (Skeleton16388).
+    pub board_correction_pending: &'a mut bool,
     ///Applies to SkeletonDrives hook432 body and Skeleton16112 together.
     pub move_future_deck: &'a mut dyn FnMut(Vector3) -> Result<(), String>,
-    pub trajectory: &'a mut GroundTrajectoryState<T>,
+    pub offboard_grab: &'a mut super::super::biped_ground::grab_runtime::Owner,
 }
 impl GroundState {
-    pub fn update<T>(
+    pub fn update(
         &mut self,
         runtime: &mut GroundRuntime,
         board: &mut BoardRuntime,
@@ -45,7 +46,7 @@ impl GroundState {
         settings: &GroundSettings,
         frame: GroundUpdateFrame<'_>,
         physical: GroundPhysicalFrame<'_>,
-        targets: GroundUpdateTargets<'_, T>,
+        targets: GroundUpdateTargets<'_>,
     ) -> Result<GroundBoardOutcome, String> {
         if !self.entered {
             return Err("Ground::Enter must finish before Ground::Update".into());
@@ -97,18 +98,6 @@ impl GroundState {
             input,
             physical,
         )?;
-        if p.frames_since_teleport_2584 % 6 == 0 {
-            bevy::log::debug!(target: "skate_game::riding_trace",
-                frame = p.frames_since_teleport_2584,
-                speed = p.scalar_2612, wheels = p.wheel_count_2556,
-                fields = ?frame.animation.fields,
-                steering = ?self.steering, speed_model = ?self.speed,
-                outcome = ?outcome, "RIDING_GROUND");
-            bevy::log::debug!(target: "skate_game::riding_trace",
-                frame = p.frames_since_teleport_2584,
-                parts = ?board.bodies(), contacts = ?board.contact_reports(),
-                forces = ?board.forces().entries(), "RIDING_BOARD");
-        }
         let normal = p.vectors_464_480_496_512_528[0].map(f32::from_bits);
         if let Some(delta) = motion::future_deck_displacement(
             board.forces(),
@@ -123,9 +112,10 @@ impl GroundState {
         if self.state.flag_2722 {
             targets.foot_ik.state.contacts.support_failed_this_update = true;
         }
-        *targets.skeleton_ground_16388 = true;
+        *targets.board_correction_pending = true;
         self.state.finish_update(p.timestep_2604);
-        targets.trajectory.cancel();
+        //82D37F10 calls82D749D0 on the same PlayerGrabSpline owner as offboard.
+        targets.offboard_grab.invalidate();
         Ok(outcome)
     }
 }

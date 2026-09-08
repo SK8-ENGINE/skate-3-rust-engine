@@ -2,9 +2,22 @@
 //! triangle query: exact parallel rejection and closed segment/barycentric bounds.
 use super::native_arithmetic::dot3;
 type V = [f32; 4];
+#[path = "grind_contact/families.rs"]
 pub mod families;
+#[path = "grind_contact/entry.rs"]
 pub mod entry;
+#[path = "grind_contact/control.rs"]
 pub mod control;
+#[path = "grind_contact/admission.rs"]
+pub mod admission;
+#[path = "grind_contact/arithmetic.rs"]
+mod arithmetic;
+#[path = "grind_contact/investigator.rs"]
+pub mod investigator;
+#[path = "grind_contact/manager.rs"]
+pub mod manager;
+#[path = "grind_contact/balance.rs"]
+pub mod balance;
 
 /// Native query entry: endpoints plus a spline owner, not three vectors.
 #[derive(Clone, Copy, Debug)]
@@ -81,36 +94,39 @@ pub fn boardslide_candidate(
     flags_2476: u32,
     deck_center_to_truck: f32,
     truck_to_wheel: f32,
+    admission: &admission::Admission<'_>,
 ) -> Option<FiftyFiftyCandidate> {
     if flags_2476 & 0x4000_0000 != 0 {
         return None;
     }
     let delta = sub(edge.end, edge.start);
-    let direction = scale(delta, dot3(delta, delta).sqrt().recip());
+    let direction = scale(delta, arithmetic::reciprocal(arithmetic::square_root(dot3(delta, delta))));
     if dot3(upright_normal(direction), board[1]) <= 0.65 {
         return None;
     }
+    if !admission.test(400, direction, false).allowed { return None; }
     let depth = dot3(sub(board[3], contact.position), board[1]);
-    if depth * depth >= f32::from_bits(0x3b6b_edfa) {
+    let projected = scale(board[1], depth);
+    if dot3(projected, projected) >= f32::from_bits(0x3b6b_edfa) {
         return None;
     }
     if category == 100 && dot3(velocity, direction).abs() <= 0.75 && manager_frames <= 10 {
         return None;
     }
     let horizontal = sub(delta, scale(board[1], dot3(delta, board[1])));
-    let length = dot3(horizontal, horizontal).sqrt();
+    let length = arithmetic::square_root(dot3(horizontal, horizontal));
     if !(length > 0.0) {
         return None;
     }
-    let horizontal = scale(horizontal, length.recip());
+    let horizontal = scale(horizontal, arithmetic::reciprocal(length));
     let alignment = dot3(horizontal, board[2]).abs();
     let from = sub(contact.position, board[3]);
     let across = sub(from, scale(board[1], dot3(from, board[1])));
-    let remaining = deck_center_to_truck - dot3(across, across).sqrt();
+    let remaining = deck_center_to_truck - arithmetic::square_root(dot3(across, across));
     let clearance = if alignment > 0.0 {
-        remaining / alignment * (1.0 - alignment * alignment).sqrt()
+        remaining / alignment * arithmetic::square_root(1.0 - alignment * alignment)
     } else {
-        1000000.0
+        999.0
     };
     if !(clearance > truck_to_wheel) {
         return None;
@@ -152,7 +168,7 @@ pub fn fifty_fifty_candidate_on_splines(
     if front.primitive != rear.primitive {
         let edge = primitives.get(front.primitive)?;
         let delta = sub(edge.end, edge.start);
-        let direction = scale(delta, dot3(delta, delta).sqrt().recip());
+        let direction = scale(delta, arithmetic::inverse_square_root(dot3(delta, delta)));
         let across = cross(upright_normal(direction), direction);
         //820641A8. This comparison is signed in the original routine.
         if dot3(sub(front.position, rear.position), across) > 0.1 {
@@ -165,13 +181,8 @@ pub fn fifty_fifty_candidate_on_splines(
         return None;
     }
     let difference = sub(front.position, rear.position);
-    let length = dot3(difference, difference).sqrt();
-    // A degenerate pair cannot define a finite native grind frame.
-    if !length.is_finite() || length == 0.0 {
-        return None;
-    }
     Some(FiftyFiftyCandidate {
-        direction: scale(difference, length.recip()),
+        direction: scale(difference, arithmetic::inverse_square_root(dot3(difference, difference))),
         centre: scale(add(front.position, rear.position), 0.5),
         front: front.position,
         rear: rear.position,
@@ -182,15 +193,15 @@ pub fn fifty_fifty_candidate_on_splines(
 ///82D370F8: upward-facing normal perpendicular to the spline direction.
 pub fn upright_normal(direction: V) -> V {
     let cross_up = cross([0.0, 1.0, 0.0, 0.0], direction);
-    let mut normal = cross(cross_up, direction);
-    let length = dot3(normal, normal).sqrt();
+    let normal = cross(cross_up, direction);
+    let mut length = arithmetic::square_root(dot3(normal, normal));
     if length <= 0.0 {
         return [1.0, 0.0, 0.0, 0.0];
     }
     if normal[1] < 0.0 {
-        normal = scale(normal, -1.0);
+        length = -length;
     }
-    scale(normal, length.recip())
+    scale(normal, arithmetic::reciprocal(length))
 }
 
 ///82D88518, common active-grind angular admission. Plane projection occurs
@@ -198,12 +209,12 @@ pub fn upright_normal(direction: V) -> V {
 pub fn within_approach_angle(direction: V, velocity: V, degrees: f32) -> bool {
     let normal = upright_normal(direction);
     let projected = sub(velocity, scale(normal, dot3(velocity, normal)));
-    let length = dot3(projected, projected).sqrt();
+    let length = arithmetic::square_root(dot3(projected, projected));
     if length <= 0.001 {
         return true;
     }
-    let alignment = dot3(scale(projected, length.recip()), direction).abs();
-    alignment > (degrees * f32::from_bits(0x3c8e_fa35)).cos()
+    let alignment = dot3(scale(projected, arithmetic::reciprocal(length)), direction).abs();
+    alignment > crate::trigonometry::cos(degrees * f32::from_bits(0x3c8e_fa35))
 }
 
 /// Truck rectangles from82C1FDC0. The geometry dimensions come from the
@@ -301,3 +312,7 @@ fn cross(a: V, b: V) -> V {
         0.0,
     ]
 }
+
+#[cfg(test)]
+#[path = "grind_contact/tests.rs"]
+mod tests;

@@ -1,271 +1,210 @@
-//! BipedToolkit refresh82D81610. Query observations are owned by the scene;
-//! this owner retains native contact history and executes the classifier chain.
-use super::{
-    contact_intersections::plane_segment,
-    contact_output::History,
-    contact_packet::{Packet, SupportHit},
-    contact_queries::{Input, Layout, V},
-    contact_records::{Direction, Records, Source},
-    contact_segments::Segments,
-    ground_query::Edge,
-};
-use crate::{math::Vector3, physics::native_arithmetic::dot3};
-#[derive(Clone, Copy, Debug)]
-pub struct Hit {
-    pub position: V,
-    pub normal: V,
+//! OffboardGroundAnalyzer query ownership (TU3 82D81068/82D811C8).
+//!
+//! Submitted queries become visible only through the ordered analyzer refresh.
+mod analyzer_math;
+mod candidate;
+mod classification;
+mod collection;
+mod generation;
+mod infill;
+mod prefix;
+mod probes;
+mod profile;
+mod publication;
+mod samples;
+mod sweep;
+#[cfg(test)]
+mod tests;
+
+use crate::air::trajectory::QueryResult;
+pub use prefix::ContactPrefix;
+pub use probes::{Batch, Input, LineProbe, ProbeLayout};
+pub use samples::{ContactSample, Samples};
+pub use sweep::query_sweep;
+
+pub type Vector = [f32; 4];
+pub type Frame = [Vector; 4];
+pub const UP: Vector = [0., 1., 0., 0.];
+pub const ZERO: Vector = [0.; 4];
+pub const IDENTITY: Frame = [[1., 0., 0., 0.], UP, [0., 0., 1., 0.], ZERO];
+
+/// Unit face normal shared by the toolkit's scene adapter and query kernels.
+pub fn triangle_normal([a, b, c]: [Vector; 3]) -> Vector {
+    let normal = cross(sub(b, a), sub(c, a));
+    let square = dot(normal, normal);
+    let mut inverse = crate::physics::reciprocal_sqrt::estimate(square);
+    for _ in 0..2 {
+        inverse = (inverse * 0.5).mul_add((-square).mul_add(inverse * inverse, 1.), inverse);
+    }
+    scale(normal, inverse)
 }
-pub struct Observations {
-    pub input: Input,
-    pub support: [Option<SupportHit>; 3],
-    /// Provider IDs from Layout, including the reverse horizontal queries.
-    pub obstacles: [Option<Hit>; 44],
-    /// Actual82C1EAD8 results in native provider order and capped at40.
-    pub edges: Vec<Edge>,
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LineHit {
+    pub position: Vector,
+    pub normal: Vector,
+    pub fraction: f32,
+    pub surface: u16,
+    pub mesh_frame: Frame,
+    pub geometry: u32,
 }
-#[derive(Default)]
-pub struct Toolkit {
-    pub packet: Packet,
-    pub history: History,
-    pub contact_age: i32,
-    pub pending: Option<Observations>,
+
+/// Actual batch results, indexed in submission order, not sorted by distance.
+#[derive(Clone, Debug)]
+pub struct QueryResults {
+    pub trajectories: [QueryResult; 3],
+    pub lines: Vec<Option<LineHit>>,
+    /// Authored static query edges in canonical traversal order, at most forty.
+    pub edges: Vec<[Vector; 2]>,
 }
-fn vector(v: Vector3) -> V {
-    [v.x, v.y, v.z, 0.]
+
+/// The scene owns geometry; the toolkit owns query lifetime and retained output.
+pub trait Scene {
+    type Error;
+    fn execute(&self, batch: &Batch) -> Result<QueryResults, Self::Error>;
 }
-fn xyz(v: V) -> Vector3 {
-    Vector3::new(v[0], v[1], v[2])
+
+#[derive(Clone, Debug)]
+pub struct Collected {
+    pub batch: Batch,
+    pub results: QueryResults,
+    pub prefix: ContactPrefix,
+    pub samples: Samples,
 }
-fn sub(a: V, b: V) -> V {
+
+/// Canonical lifetime of submission316, readiness320, and input0..96.
+/// No executor or scene reference is retained across frames.
+#[derive(Clone, Debug)]
+pub struct Owner {
+    layout: ProbeLayout,
+    pending: Option<(Batch, QueryResults)>,
+    readiness: u32,
+    prefix: ContactPrefix,
+    candidate: candidate::Candidate,
+    history: classification::History,
+}
+impl Default for Owner {
+    fn default() -> Self {
+        Self {
+            layout: ProbeLayout::stock(),
+            pending: None,
+            readiness: 0,
+            prefix: ContactPrefix::reset(),
+            candidate: candidate::Candidate::default(),
+            history: classification::History::default(),
+        }
+    }
+}
+impl Owner {
+    /// Update1_ProcessInput82DB405C..4094 ages then completes the preceding
+    /// batch before physical input is processed, regardless of active state.
+    pub fn begin_input(&mut self) {
+        self.readiness = self.readiness.saturating_sub(1);
+        self.refresh();
+    }
+
+    /// Ground Reset82D30C20..40 / physical reset82DB93B0..CC.
+    /// Complete outstanding work first; only readiness and classification
+    /// history are cleared. The original does not erase the retained candidate.
+    pub fn reset_history(&mut self) {
+        self.refresh();
+        self.readiness = 0;
+        self.history = classification::History::default();
+    }
+
+    pub fn prefix(&self) -> ContactPrefix {
+        self.prefix
+    }
+
+    /// GroundSync82D32164 supplies the seven vectors after Skeleton Update.
+    /// Host execution is synchronous, but visibility remains next-consume only.
+    pub fn submit<S: Scene>(
+        &mut self,
+        input: Input,
+        matching_group: i32,
+        scene: &S,
+    ) -> Result<(), S::Error> {
+        let batch = self.layout.prepare(input, matching_group);
+        let results = scene.execute(&batch)?;
+        self.readiness = 0;
+        self.pending = Some((batch, results));
+        Ok(())
+    }
+
+    /// Consume the prior submission through every analyzer stage. Candidate and
+    /// classification history persist; query observations are frame-local.
+    pub fn refresh(&mut self) -> Option<Collected> {
+        //82D81610 resets the publication even when there is no pending batch.
+        self.prefix = ContactPrefix::reset();
+        self.readiness = 30;
+        let (batch, results) = self.pending.take()?;
+        let mut prefix = ContactPrefix::reset();
+        prefix.consume_support(batch.input, &results.trajectories, self.candidate.flags);
+        let mut samples = collection::collect(&batch, &self.layout, &results);
+        infill::insert_obstacles(batch.input, &mut samples);
+        infill::correct_normals(batch.input, &mut samples);
+        let (obstruction, active_count) = profile::simplify(batch.input, &mut samples.ground);
+        prefix.distance_172 = obstruction;
+        let profile = profile::build(batch.input, &samples.ground[..active_count]);
+        let mut candidates = generation::generate(
+            batch.input,
+            &profile,
+            &prefix,
+            obstruction,
+            self.candidate.flags,
+        );
+        publication::publish(
+            batch.input,
+            &profile,
+            &samples,
+            &mut candidates,
+            obstruction,
+            &mut self.candidate,
+            &mut self.history,
+            &mut prefix,
+        );
+        self.prefix = prefix;
+        Some(Collected {
+            batch,
+            results,
+            prefix,
+            samples,
+        })
+    }
+
+    pub fn has_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+    pub fn readiness(&self) -> u32 {
+        self.readiness
+    }
+}
+
+pub(super) fn dot(a: Vector, b: Vector) -> f32 {
+    crate::physics::native_arithmetic::dot3(a, b)
+}
+pub(super) fn sub(a: Vector, b: Vector) -> Vector {
     std::array::from_fn(|i| a[i] - b[i])
 }
-impl Toolkit {
-    /// Player Update82DB4048 completes the preceding Sync's submission before
-    /// any physical-state PreUpdate. The source decrements320, then refreshes
-    /// unconditionally (refresh itself publishes30 even with no pending query).
-    pub fn begin_player_update(&mut self, layout: &Layout) {
-        self.contact_age = self.contact_age.saturating_sub(1).max(0);
-        self.refresh(layout);
-    }
-    /// Reset82D30BD0 / Exit82D30CC0 must finish outstanding providers before
-    /// clearing the completion latch and classifier history.
-    pub fn reset_contacts(&mut self, layout: &Layout) {
-        self.refresh(layout);
-        self.contact_age = 0;
-        self.history = History::default();
-    }
-    pub fn submit(&mut self, observations: Observations) {
-        self.pending = Some(observations);
-        self.contact_age = 0;
-    }
-    pub fn refresh(&mut self, layout: &Layout) {
-        self.packet = Packet::default();
-        self.contact_age = 30;
-        let Some(observations) = self.pending.take() else {
-            return;
-        };
-        let input = observations.input;
-        let previous_flags = self.history.retained_candidate.map_or(0, |c| c.flags);
-        let mut records = Records::default();
-        self.packet
-            .consume_support(input, observations.support, previous_flags, &mut records);
-        gather(layout, &observations, &mut records);
-        super::contact_sort::sort(&mut records.surface);
-        super::contact_sort::sort(&mut records.obstacle);
-        super::contact_promotion::promote(input, &mut records);
-        super::contact_intersections::constrain(input, &mut records);
-        let reduction = super::contact_simplify::simplify(input, &mut records.surface);
-        self.packet.distance_172 = reduction.forward_limit;
-        let mut segments = Segments::default();
-        segments.rebuild(input, &records.surface);
-        let mut candidates = super::contact_classify::candidates(
-            input,
-            &self.packet,
-            &segments,
-            reduction.forward_limit,
-            previous_flags,
-        );
-        super::contact_output::publish(
-            input,
-            &mut self.packet,
-            &records,
-            &segments,
-            &reduction,
-            &mut candidates,
-            &mut self.history,
-        );
-    }
+pub(super) fn scale(a: Vector, s: f32) -> Vector {
+    a.map(|v| v * s)
 }
-
-/// Bounds at19056/19072, used by the scene to obtain real query edges.
-pub fn edge_bounds(input: Input) -> (V, V) {
-    let center: V = std::array::from_fn(|i| {
-        input.surface_up[i].mul_add(
-            f32::from_bits(0x3e99_9999),
-            input.surface_forward[i].mul_add(f32::from_bits(0x3f66_6666), input.position[i]),
-        )
-    });
-    let extent: V = std::array::from_fn(|i| {
-        input.surface_forward[i].abs().mul_add(
-            f32::from_bits(0x3f66_6666),
-            input.surface_up[i].abs().mul_add(
-                f32::from_bits(0x3f8c_cccd),
-                input.surface_right[i].abs() * f32::from_bits(0x3d19_999a),
-            ),
-        )
-    });
-    (
-        std::array::from_fn(|i| center[i] - extent[i]),
-        std::array::from_fn(|i| center[i] + extent[i]),
-    )
+pub(super) fn cross(a: Vector, b: Vector) -> Vector {
+    [
+        (-a[2]).mul_add(b[1], a[1] * b[2]),
+        (-a[0]).mul_add(b[2], a[2] * b[0]),
+        (-a[1]).mul_add(b[0], a[0] * b[1]),
+        0.,
+    ]
 }
-fn edge_angle(delta: V, forward: V) -> f32 {
-    let angle = crate::physics::board_ground::angle_between(xyz(delta), xyz(forward));
-    let turns = angle * f32::from_bits(0x3e22_f983);
-    let fraction = turns - turns.floor();
-    let wrapped = (fraction - if fraction > 0.5 { 1. } else { 0. }) * f32::from_bits(0x40c9_0fdb);
-    let sign = if wrapped > 0. { 1. } else { -1. };
-    let absolute = wrapped * sign;
-    sign * if absolute > f32::from_bits(0x3fc9_0fdb) {
-        absolute - f32::from_bits(0x4049_0fdb)
-    } else {
-        absolute
+pub(super) fn length(v: Vector) -> f32 {
+    let square = dot(v, v);
+    if square == 0. {
+        return 0.;
     }
-}
-fn gather(layout: &Layout, observations: &Observations, records: &mut Records) {
-    let input = observations.input;
-    let (_, world) = layout.world_probes(input);
-    let mut overrides: Vec<Option<V>> = vec![None; layout.vertical.len()];
-    for edge in observations.edges.iter().take(40) {
-        let start = vector(edge.start);
-        let end = vector(edge.end);
-        let delta = sub(end, start);
-        if edge_angle(delta, input.surface_forward).abs() > 30. * f32::from_bits(0x3c8e_fa35) {
-            if let Some(position) = plane_segment(input.position, input.surface_right, start, end) {
-                let mut normal = input.surface_up;
-                records.insert(
-                    input,
-                    position,
-                    &mut normal,
-                    Source::Intersection,
-                    Direction::None,
-                    -1.,
-                );
-            }
-            continue;
-        }
-        let a = dot3(sub(start, input.position), input.surface_forward);
-        let b = dot3(sub(end, input.position), input.surface_forward);
-        let crossing: V = std::array::from_fn(|i| delta[i].mul_add(a / (a - b), start[i]));
-        if dot3(input.surface_right, sub(crossing, input.position)).abs() > 0.5 {
-            continue;
-        }
-        let (low, high) = if a - b >= 0. { (b, a) } else { (a, b) };
-        for (i, probe) in layout.vertical.iter().enumerate() {
-            let forward = probe.start[2];
-            if !(forward >= low && high >= forward) {
-                continue;
-            }
-            let t = (forward - a) / (b - a);
-            let edge_point: V = std::array::from_fn(|k| delta[k].mul_add(t, start[k]));
-            let base = world[i].start;
-            let h = dot3(input.surface_up, sub(edge_point, base));
-            let point: V = std::array::from_fn(|k| input.surface_up[k].mul_add(h, base[k]));
-            if dot3(input.surface_right, sub(point, edge_point)).abs()
-                >= f32::from_bits(0x3d4c_cccd)
-            {
-                continue;
-            }
-            if overrides[i].is_none_or(|previous| point[1] > previous[1]) {
-                overrides[i] = Some(point);
-            }
-        }
+    let mut inverse = crate::physics::reciprocal_sqrt::estimate(square);
+    for _ in 0..2 {
+        inverse = (inverse * 0.5).mul_add((-square).mul_add(inverse * inverse, 1.), inverse);
     }
-    for (i, probe) in layout.vertical.iter().enumerate() {
-        let hit = observations.obstacles[probe.id];
-        let chosen = match (hit, overrides[i]) {
-            (Some(hit), Some(position)) if position[1] > hit.position[1] => Some(Hit {
-                position,
-                normal: input.surface_up,
-            }),
-            (Some(hit), _) => Some(hit),
-            (None, Some(position)) => Some(Hit {
-                position,
-                normal: input.surface_up,
-            }),
-            (None, None) => None,
-        };
-        if let Some(hit) = chosen {
-            let mut normal = hit.normal;
-            records.insert(
-                input,
-                hit.position,
-                &mut normal,
-                Source::Support,
-                Direction::None,
-                -1.,
-            );
-        }
-    }
-    for probe in &layout.horizontal {
-        for id in std::iter::once(probe.id).chain(probe.reverse_id) {
-            if let Some(hit) = observations.obstacles[id] {
-                let mut normal = hit.normal;
-                records.insert(
-                    input,
-                    hit.position,
-                    &mut normal,
-                    Source::Probe,
-                    Direction::None,
-                    -1.,
-                );
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn reduced_forward_limit_reaches_the_retained_ground_packet() {
-        let input = Input {
-            position: [0.; 4],
-            surface_right: [1., 0., 0., 0.],
-            surface_up: [0., 1., 0., 0.],
-            surface_forward: [0., 0., 1., 0.],
-            animation_right: [1., 0., 0., 0.],
-            animation_up: [0., 1., 0., 0.],
-            velocity: [0., 0., 2., 0.],
-        };
-        let layout = Layout::default();
-        let mut obstacles = [None; 44];
-        for i in 0..3 {
-            obstacles[layout.vertical[i].id] = Some(Hit {
-                position: [
-                    0.,
-                    if i == 0 { 0. } else { 1. },
-                    layout.vertical[i].start[2],
-                    0.,
-                ],
-                normal: input.surface_up,
-            });
-        }
-        let support = SupportHit {
-            position: [0.; 4],
-            normal: input.surface_up,
-            frame: Packet::default().support_frame,
-            support_id: 1,
-        };
-        let mut toolkit = Toolkit::default();
-        toolkit.submit(Observations {
-            input,
-            support: [Some(support), None, None],
-            obstacles,
-            edges: Vec::new(),
-        });
-        toolkit.refresh(&layout);
-        assert_eq!(toolkit.packet.distance_172, layout.vertical[1].start[2]);
-        assert!(toolkit.packet.position.iter().all(|x| x.is_finite()));
-    }
+    square * inverse
 }

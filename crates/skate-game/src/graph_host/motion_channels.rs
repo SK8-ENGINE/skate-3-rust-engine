@@ -25,9 +25,9 @@ impl MotionChannels {
         mut prepare: impl FnMut(&mut PlaybackTree) -> Result<(), String>,
     ) -> Result<(), String> {
         for channel in &mut self.channels {
-            if channel.playback.weight > 0.0 {
-                prepare(&mut channel.tree)?;
-            }
+            // Channel::SetAttributes82B96B20 reaches the child even before
+            // fade-in becomes visible. Prepare its selection subtree likewise.
+            prepare(&mut channel.tree)?;
         }
         Ok(())
     }
@@ -37,13 +37,6 @@ impl MotionChannels {
             .any(|c| intent_key(&c.name) == intent_key(name))
     }
     ///82D1D5F8: missing channel returns zero; clamp remaining child time.
-    ///82D1D4B8: child time clamped to its length.
-    pub fn time(&self, name: &str) -> f32 {
-        self.channels
-            .iter()
-            .find(|c| intent_key(&c.name) == intent_key(name))
-            .map_or(0., |c| c.tree.time().max(0.).min(c.tree.length()))
-    }
     pub fn remaining(&self, name: &str) -> f32 {
         self.channels
             .iter()
@@ -170,9 +163,9 @@ impl MotionChannels {
     }
     pub fn set_attributes(&mut self, attributes: &[SettableAttribute]) -> Result<(), String> {
         for c in &mut self.channels {
-            if c.playback.weight > 0.0 {
-                c.tree.set_attributes(attributes)?;
-            }
+            //82B96B50..64 forwards parameters unconditionally. Weight gates
+            // pose evaluation (82B965D8), not parameter publication.
+            c.tree.set_attributes(attributes)?;
         }
         Ok(())
     }

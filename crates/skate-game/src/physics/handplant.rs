@@ -141,16 +141,21 @@ pub(super) fn ground_update(
         return Ok(());
     }
     if let Some((candidate, com, velocity, normal, heading)) = skater.handplant.pending.take() {
-        let surface = skate_core::air::trajectory::grind_surface::investigate(
-            &physics.world,
-            candidate.edge.start,
-            candidate.edge.end,
-            candidate.point,
-            skater.handplant.settings.truck_distance,
-        )?;
+        use skate_core::air::trajectory::grind_surface::{self, InvestigationInput, GeometryType};
+        let query = InvestigationInput {
+            start: candidate.edge.start,
+            end: candidate.edge.end,
+            reference: candidate.point,
+            optional_probe: None,
+            deck_center_to_truck: skater.handplant.settings.truck_distance,
+        };
+        let surface = grind_surface::investigate(query, |index, probe| {
+            super::player_input::grind::world::surface_probe(&physics.world,
+                [p.actor_query_2948, p.actor_query_2952], index, probe)
+        })?;
         bevy::log::info!("HANDPLANT_SURFACE tick={} kind={:?} point={:?}",
-            physics.ticks, surface.as_ref().map(|s| s.evidence.kind), candidate.point);
-        if surface.is_some_and(|s| s.evidence.kind != 3) {
+            physics.ticks, surface.kind, candidate.point);
+        if grind_surface::prepare(query).is_some() && surface.kind != GeometryType::Impossible {
             skater.handplant.launch(
                 candidate,
                 com,
@@ -229,12 +234,12 @@ pub(super) fn ground_query(physics: &GamePhysics, skater: &mut SkaterRuntime) {
         velocity,
         normal,
         h.direction_hint,
-        &physics.grind.primitives,
+        physics.grind_world.primitives(),
     );
     if candidate.is_some() || physics.ticks % 30 == 0 {
         bevy::log::info!("HANDPLANT_QUERY tick={} speed={} vy={} normal={:?} minimum_speed={} minimum_slope={} edges={} candidate={:?} prior_flags={:08x} phase={} processed={:08x}/{:08x}",
             physics.ticks, length(velocity), velocity[1], normal, h.settings.minimum_speed,
-            h.settings.minimum_slope, physics.grind.primitives.len(), candidate.map(|c| c.point),
+            h.settings.minimum_slope, physics.grind_world.primitives().len(), candidate.map(|c| c.point),
             h.flags, h.phase, p.flags_2476, p.flags_2480);
     }
     //82D61268 clears the active output when submission begins.

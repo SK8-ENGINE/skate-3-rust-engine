@@ -35,9 +35,9 @@ impl StateSelector {
                     return PhysicalStateId::WipeoutGround;
                 }
                 if !p.has_2480(0x10) {
-                    //82D8ADE8's BipedAir branch reads lhz2484, then tests its low bit. On
-                    //big-endian Xenon this is full-word bit16 (Offboard328),
-                    //not bit0 (the unrelated BipedBoardOnGround attribute).
+                    //82D8B8D4 loads a BIG-ENDIAN halfword at2484, then
+                    //B8D8 tests its low bit: bit16 of the stored u32.
+                    //This is OffBoard328, not BipedBoardOnGround bit0.
                     if p.has_2484(0x1_0000) {
                         if p.has_2476(0x8000) || p.has_2476(0x80) {
                             current
@@ -113,3 +113,7 @@ impl StateSelector {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/offboard.rs"]
+mod tests;

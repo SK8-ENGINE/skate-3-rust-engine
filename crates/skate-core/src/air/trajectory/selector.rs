@@ -1,10 +1,9 @@
 //! Original selector Launch82D67848 and Update82D68800 with typed batch ownership.
 use super::{
-    launch,
+    LaunchInfo, Prediction, QueryRequest, QueryResult, SelectorInput, SelectorSettings, SurfaceHit,
+    Trajectory, launch,
     math::*,
     scoring::{self, Candidate},
-    LaunchInfo, Prediction, QueryRequest, QueryResult, SelectorInput, SelectorSettings, SurfaceHit,
-    Trajectory,
 };
 
 ///The current authored world contains collision triangles and no grind edges.
@@ -23,8 +22,8 @@ pub struct Selection {
     pub collision_position: Vector, //2688
     pub com_trajectory: Trajectory, //2704
     pub surface_category: u32,      //9640
-    pub wall_ride: bool,
-    pub grind: Option<super::grind::GrindTarget>, //9661
+    pub wall_ride: bool,            //9661
+    pub grind: Option<super::grind::GrindTarget>,
 }
 #[derive(Clone, Debug, Default)]
 pub struct TrajectorySelector {
@@ -200,28 +199,6 @@ impl TrajectorySelector {
         results: &[QueryResult],
         input: SelectorInput,
         s: &SelectorSettings,
-        _topology: WorldWithoutGrindEdges,
-        line: impl FnMut(Vector, Vector, f32) -> Result<Option<SurfaceHit>, String>,
-    ) -> Result<bool, String> {
-        self.complete_batch_with_grinds(
-            results,
-            input,
-            s,
-            |_, _| {
-                Ok(super::grind::GrindEvaluation {
-                    target: None,
-                    score: 0.0,
-                    distance: 1000.0,
-                })
-            },
-            line,
-        )
-    }
-    pub fn complete_batch_with_grinds(
-        &mut self,
-        results: &[QueryResult],
-        input: SelectorInput,
-        s: &SelectorSettings,
         grind: impl FnMut(&mut Prediction, bool) -> Result<super::grind::GrindEvaluation, String>,
         line: impl FnMut(Vector, Vector, f32) -> Result<Option<SurfaceHit>, String>,
     ) -> Result<bool, String> {
@@ -257,6 +234,9 @@ impl TrajectorySelector {
             }
         }
         let c = self.candidates[index];
+        if let Some(target) = self.candidates.iter().take(count).find_map(|c| c.grind) {
+            self.grind_normal = Some(target.vertical_normal);
+        }
         self.selected_index = Some(index);
         //The copied COM trajectory is only recalculated on a valid-time result.
         let previous_com = self.selection.map(|v| v.com_trajectory);
@@ -287,18 +267,11 @@ impl TrajectorySelector {
         }
         selection.surface_category = (c.prediction.result.surface >> 7) & 31;
         selection.com_trajectory = self.com_trajectory(selection, input, s);
-        //82D68C80: an accepted middle trajectory owns9653 and skips the second pass.
+        //82D68C80: only a winning centre acquisition locks the grind.
         self.grind_locked_to_middle = index == 0 && c.grind.is_some();
-        if let Some(target) = self.candidates.iter().take(count).find_map(|c| c.grind) {
-            //82D6AF30/82E0A120 publish the rail-derived upright plane normal.
-            self.grind_normal = Some(crate::physics::grind_contact::upright_normal(sub(
-                target.edge.end,
-                target.edge.start,
-            )));
-        }
-        let second_pass = !self.grind_locked_to_middle
-            && self.pass == 1
+        let second_pass = self.pass == 1
             && count >= 2
+            && !self.grind_locked_to_middle
             && !(angle_between(selection.landing_normal, input.ground_normal)
                 < s.minimum_normal_delta_second_pass);
         self.selection = Some(selection);

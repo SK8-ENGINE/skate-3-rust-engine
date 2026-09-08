@@ -1,6 +1,16 @@
 //! Complete Air checks82D90358 including bad landing82D90D08.
 use super::{common, Frame, Mode, Requests, Settings};
 use crate::physics::native_arithmetic::dot3;
+///82D8FEE8, shared off-board air collision check; no on-board cooldown/landing tests.
+pub fn check_collision(state: &mut Requests, s: &Settings, mode: &Mode, f: &Frame) {
+    if mode.check_squash && f.maximum_pose_error > s.air.max_squash {
+        state.request(18, 0.0);
+    } else if dot3(f.pose_error, f.pose_error) > s.air.max_displacement * s.air.max_displacement {
+        state.request(1, 0.0);
+    } else if common::force(f, s.air.max_contact, s.air.max_arm_contact) {
+        state.request(0, 0.0);
+    }
+}
 pub fn check(state: &mut Requests, s: &Settings, mode: &Mode, f: &Frame, use_com: bool) {
     if state.mode != 2 {
         state.mode = 2;

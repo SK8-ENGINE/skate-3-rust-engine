@@ -34,8 +34,9 @@ pub struct ManualSettings {
 
 #[derive(Clone, Copy, Debug)]
 pub struct ManualMode {
-    /// physics_mode+32 Hash_84CB2F459F3FC811, compared to abs(local angular Z).
-    /// Original field name remains unresolved; this name describes its use.
+    /// physics_mode+32 Hash_84CB2F459F3FC811, compared to abs(local ground
+    /// velocity Z). Legacy Rust field name; the source reads Processed416,
+    /// not the angular velocity at720. Original stock name remains unresolved.
     pub correction_angular_speed_threshold: f32,
     /// physics_mode+36 Hash_F8CBC0F5FEF2240E, read as a byte.
     pub corrective_force_enabled: bool,

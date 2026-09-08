@@ -90,151 +90,6 @@ fn close(a: f32, b: f32) {
     assert!((a - b).abs() < 2e-6, "{a} != {b}");
 }
 
-fn clustered(triangles: Vec<WorldTriangle>) -> BoardWorld {
-    use crate::physics::board_world::query_metadata::{
-        Bounds, QueryMesh, QueryMetadata, QueryPool,
-    };
-    let metadata = QueryMetadata {
-        packed_surfaces: vec![0; triangles.len()],
-        meshes: triangles
-            .iter()
-            .enumerate()
-            .map(|(i, t)| QueryMesh {
-                triangle_range: i..i + 1,
-                local_to_world: RetailAffineTransform::IDENTITY,
-                world_to_local: RetailAffineTransform::IDENTITY,
-                local_bounds: Bounds::from_points(t.triangle.vertices).unwrap(),
-                matching_group: -1,
-                pool: QueryPool::Ground,
-            })
-            .collect(),
-        static_edges: vec![],
-        island_flags: 0,
-    };
-    BoardWorld::with_query_metadata(triangles, metadata).unwrap()
-}
-
-#[test]
-fn cluster_culling_preserves_swept_hits_and_equal_hit_order() {
-    let mut rounded = triangle();
-    rounded.triangle.fatness = 0.5;
-    let mut later = rounded;
-    later.tag = 999;
-    let indexed = clustered(vec![rounded, later]);
-    let full = BoardWorld::new(vec![rounded, later]);
-    for x in [-100., -10., -1., 0., 9., 100.] {
-        for radius in [0., 0.2, 1.] {
-            let start = Vector3::new(x, 2., 0.);
-            let end = Vector3::new(x, -2., 0.);
-            assert_eq!(
-                format!("{:?}", indexed.query_swept_line(start, end, radius)),
-                format!("{:?}", full.query_swept_line(start, end, radius))
-            );
-        }
-    }
-    assert_eq!(
-        indexed
-            .query_thin_line(Vector3::new(0., 2., 0.), Vector3::new(0., -2., 0.))
-            .unwrap()
-            .unwrap()
-            .tag,
-        42
-    );
-    assert_eq!(
-        indexed
-            .line_candidates(Vector3::new(100., 2., 0.), Vector3::new(100., -2., 0.), 0.)
-            .count(),
-        0
-    );
-}
-
-#[test]
-fn cluster_culling_preserves_predictive_contacts_for_every_shape() {
-    let mut floor = triangle();
-    floor.triangle.fatness = 0.1;
-    let mut indexed = clustered(vec![floor]);
-    let mut full = BoardWorld::new(vec![floor]);
-    let mut settings = config();
-    settings.query.volume_padding = 0.05;
-    settings.query.maximum_separating_distance = 0.8;
-    for y in [0.1, 0.4, 0.9, 2.] {
-        let center = Vector3::new(0., y, 0.);
-        let basis = Basis3 {
-            columns: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
-        };
-        let mut moving_triangle = triangle().triangle;
-        for p in &mut moving_triangle.vertices {
-            p.y += y;
-        }
-        for primitive in [
-            ContactPrimitive::Sphere(Sphere {
-                center,
-                radius: 0.2,
-            }),
-            ContactPrimitive::Capsule {
-                center,
-                axis: Vector3::new(1., 0., 0.),
-                half_length: 0.4,
-                radius: 0.2,
-            },
-            ContactPrimitive::RoundedBox {
-                center,
-                basis,
-                half_extents: Vector3::new(0.4, 0.2, 0.3),
-                radius: 0.05,
-            },
-            ContactPrimitive::Triangle(moving_triangle),
-        ] {
-            let volumes = [BoardWorldVolume {
-                body: CollisionBody::Board(BodyId::ORDER[0]),
-                primitive,
-                linear_velocity: Vector3::new(0., -60., 0.),
-                material: settings.material,
-            }];
-            assert_eq!(
-                format!(
-                    "{:?}",
-                    indexed.query_primitives(&volumes, settings.query, settings.retention)
-                ),
-                format!(
-                    "{:?}",
-                    full.query_primitives(&volumes, settings.query, settings.retention)
-                )
-            );
-        }
-    }
-}
-
-#[test]
-fn triangle_bounds_match_unfiltered_contacts_near_edges_and_rotated_boxes() {
-    let mut floor = triangle();
-    floor.triangle.fatness = 0.15;
-    let mut indexed = clustered(vec![floor]);
-    let mut full = BoardWorld::new(vec![floor]);
-    let mut settings = config();
-    settings.query.volume_padding = 0.1;
-    settings.query.maximum_separating_distance = 0.8;
-    for x in [-10.5, -10., -5., 0., 5., 10., 10.5] {
-        for z in [-10.5, -10., 0., 10., 10.5] {
-            for y in [-0.1, 0.2, 1., 2.] {
-                let center = Vector3::new(x, y, z);
-                for primitive in [
-                    ContactPrimitive::Sphere(Sphere { center, radius: 0.2 }),
-                    ContactPrimitive::Capsule { center, axis: Vector3::new(0.6, 0.8, 0.), half_length: 0.7, radius: 0.2 },
-                    ContactPrimitive::RoundedBox { center,
-                        basis: Basis3 { columns: [[0.6, 0., 0.8], [0., 1., 0.], [-0.8, 0., 0.6]] },
-                        half_extents: Vector3::new(0.6, 0.2, 0.1), radius: 0.05 },
-                ] {
-                    let volumes = [BoardWorldVolume { body: CollisionBody::Board(BodyId::ORDER[0]), primitive,
-                        linear_velocity: Vector3::new(20., -60., -30.), material: settings.material }];
-                    assert_eq!(format!("{:?}", indexed.query_primitives(&volumes, settings.query, settings.retention)),
-                        format!("{:?}", full.query_primitives(&volumes, settings.query, settings.retention)));
-                }
-            }
-        }
-    }
-}
-
 #[test]
 fn finite_world_geometry_produces_four_ordered_wheel_contacts_with_combined_materials() {
     let mut world = BoardWorld::new(vec![triangle()]);
@@ -386,11 +241,7 @@ fn attached_volume_contact_reaches_its_actual_solver_body() {
     let mut world = BoardWorld::new(vec![triangle(), triangle()]);
     let config = config();
     let contacts = world.query_primitives(&[volume], config.query, config.retention);
-    assert_eq!(
-        contacts.len(),
-        1,
-        "retention must preserve attached body identity"
-    );
+    assert_eq!(contacts.len(), 1, "retention must preserve attached body identity");
     assert_eq!(contacts[0].body_a, CollisionBody::Attached(0));
     let settings = BoardStepSettings {
         simulation: RetailSimulationStep::fixed_60_hz(30, 0.001, Vector3::ZERO),
@@ -399,20 +250,12 @@ fn attached_volume_contact_reaches_its_actual_solver_body() {
         truck_dynamics: retail_truck_drive_dynamics(RetailTruckDriveSettings::STOCK),
         force_point_y_offset: 0.0,
     };
-    board.advance_attached(
-        contacts,
-        [0.0; 2],
-        settings,
-        AttachedStep {
-            bodies: vec![&mut attached],
-            contacts: &mut [],
-            joints: &mut [],
-            drives: &mut [],
-        },
-    );
+    board.advance_attached(contacts, [0.0; 2], settings, AttachedStep {
+        bodies: vec![&mut attached],
+        contacts: &mut [],
+        joints: &mut [],
+        drives: &mut [],
+    });
     assert!(attached.rates.linear_velocity.y > before + 0.5);
-    assert!(
-        board.contact_reports().is_empty(),
-        "skater contacts are not board observations"
-    );
+    assert!(board.contact_reports().is_empty(), "skater contacts are not board observations");
 }

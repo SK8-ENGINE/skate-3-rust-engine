@@ -1,74 +1,119 @@
-//! LandingOnDeckManager trajectory preparation,82D78B28/82D78EE8/82D78D30.
-//! The board frame and velocity are observations of the canonical live board.
-use super::air_launch::{V,dot,length,madd,scale,sub};
-use crate::air::trajectory::Trajectory;
-const ZERO:V=[0.;4];
-const GRAVITY:V=[0.,-9.8,0.,0.];
-#[derive(Clone,Copy,Debug)]
-pub struct Settings {pub deck_min_uprightness:f32,pub approximate_com_height:f32}
-#[derive(Clone,Copy,Debug)]
-pub struct Input {
- pub board_position:V,pub board_velocity:V,pub board_up:V,pub up:V,
- pub board_contact_count:i32,pub flags_2480:u32,
+//! Shared LandingOnDeckManager68 for BipedAir501 and LandingOnDeck503.
+//! Original S3 TU3 SHA256:
+//! 431b8eba23565affdc10d137df19b06fe286244cefb3e1a13f32693e9600395a.
+//! Host submits returned queries and acknowledges success; no world/solver owner.
+//! PC arithmetic retains recovered formulas/refinements, not Xenon bit parity.
+mod query;
+mod trajectory;
+mod types;
+mod update;
+pub use crate::air::trajectory::{QueryRequest, QueryResult, Trajectory};
+use crate::player::wipeout_state::math::{add, sub};
+use trajectory::{adjust, frames};
+pub use types::*;
+
+pub type Vector = [f32; 4];
+pub type Frame = [Vector; 4];
+pub const STEP: f32 = f32::from_bits(0x3c88_8889);
+pub const GRAVITY: Vector = [0., f32::from_bits(0xc11c_cccd), 0., 0.];
+const EMPTY: Trajectory = Trajectory {
+    position: [0.; 4],
+    velocity: [0.; 4],
+    acceleration: [0.; 4],
+    duration: -1.,
+};
+
+///One retained owner. Public fields permit the source-backed503 InitTraj producer
+///to initialize this SAME trajectory and force flag, not a parallel state object.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Manager {
+    pub trajectory_32: Trajectory,
+    pub proposed_96: Trajectory,
+    pub elapsed_160: f32,
+    pub trajectory_valid_164: bool,
+    pub ik_offset_176: Vector,
+    pub vector_192: Vector,
+    pub moving_contact_208: Vector,
+    pub vector_224: Vector,
+    pub obstruction_height_240: f32,
+    pub time_to_land_244: f32,
+    pub proposed_time_248: f32,
+    pub completed_queries_252: u32,
+    pub can_land_256: bool,
+    pub force_257: bool,
+    pub blocked_258: bool,
+    pub tested_259: bool,
+    pub hippy_hurdling_260: bool,
+    pub publish_moving_contact_261: bool,
+    pub pending_262: bool,
 }
-#[derive(Clone,Debug)]
-pub struct State {
- pub trajectory:Trajectory,pub proposed:Trajectory,pub elapsed:f32,pub trajectory_valid:bool,
- pub horizontal_correction:V,pub remaining:f32,pub proposed_remaining:f32,
- pub contact_height:f32,pub query_count:i32,pub can_land:bool,pub force:bool,
- pub blocked:bool,pub first_query:bool,pub hippy_hurdling:bool,pub collision_override:bool,
- pub collision_normal:V,pub query_pending:bool,
+
+impl Default for Manager {
+    ///Host allocation seed, NOT a substitute for503 InitTraj or Air assistance.
+    fn default() -> Self {
+        Self {
+            trajectory_32: EMPTY,
+            proposed_96: EMPTY,
+            elapsed_160: 0.,
+            trajectory_valid_164: false,
+            ik_offset_176: [0.; 4],
+            vector_192: [0.; 4],
+            moving_contact_208: [0.; 4],
+            vector_224: [0.; 4],
+            obstruction_height_240: 0.,
+            time_to_land_244: 0.,
+            proposed_time_248: 0.,
+            completed_queries_252: 0,
+            can_land_256: false,
+            force_257: false,
+            blocked_258: false,
+            tested_259: false,
+            hippy_hurdling_260: false,
+            publish_moving_contact_261: false,
+            pending_262: false,
+        }
+    }
 }
-impl Default for State {
- fn default()->Self {
-  let trajectory=Trajectory{position:ZERO,velocity:ZERO,acceleration:ZERO,duration:-1.};
-  Self{trajectory,proposed:trajectory,elapsed:0.,trajectory_valid:false,horizontal_correction:ZERO,
-   remaining:0.,proposed_remaining:0.,contact_height:0.,query_count:0,can_land:false,force:false,
-   blocked:false,first_query:false,hippy_hurdling:false,collision_override:false,collision_normal:ZERO,query_pending:false}
- }
-}
-impl State {
- ///82D78EE8: solve the descending crossing of the deck's COM-height plane,
- ///then prepare the velocity matching trajectory. No scene hit is invented.
- pub fn probe(&mut self,input:Input,settings:Settings,position:V,velocity:V)->bool {
-  let mut board_velocity=input.board_velocity;
-  let acceleration=if input.board_contact_count==0 {board_velocity[1]=0.;scale(GRAVITY,0.5)} else {GRAVITY};
-  let relative=sub(velocity,board_velocity);
-  let plane=madd(input.up,settings.approximate_com_height,input.board_position);
-  let a=dot(scale(acceleration,0.5),input.up);
-  let b=dot(relative,input.up);let c=dot(sub(position,plane),input.up);
-  let discriminant=b*b-4.*a*c;
-  if discriminant<0. {self.can_land=false;return false;}
-  //82D60B98 picks the larger root of82D60C80; the caller requires t>0.
-  let root=discriminant.sqrt();
-  let time=((-b+root)/(2.*a)).max((-b-root)/(2.*a));
-  if !(time>0.) {self.can_land=false;return false;}
-  let distance=length(sub(position,plane));
-  let duration=(2.*distance/9.8).sqrt().max(time*0.75).min(time*1.3);
-  self.proposed=Trajectory{position,
-   velocity:madd(input.board_velocity,1.,sub(scale(sub(plane,position),1./duration),scale(GRAVITY,0.5*duration))),
-   acceleration:GRAVITY,duration:-1.};
-  let relative_arc=Trajectory{position,velocity:relative,acceleration,duration:-1.};
-  self.horizontal_correction=sub(plane,relative_arc.position_at(time));self.horizontal_correction[1]=0.;
-  self.remaining=time;self.proposed_remaining=duration;
-  true
- }
- ///82D78D30, before the world's obstruction query82D79948. Some is the
- ///actual duration to submit to that query; None means no submission this tick.
- pub fn update_air(&mut self,input:Input,settings:Settings,position:V,velocity:V,maximum_velocity_difference:f32)->Option<f32> {
-  self.query_count=0;self.first_query=false;
-  if (!self.force&&input.flags_2480&0x8000!=0)||!(input.board_up[1]>settings.deck_min_uprightness) {return None;}
-  self.probe(input,settings,position,velocity);
-  if self.remaining>0.4 {
-   self.trajectory=self.proposed;self.trajectory_valid=true;self.remaining=self.proposed_remaining;
-   self.can_land=length(sub(velocity,self.proposed.velocity))<maximum_velocity_difference;
-  }
-  if self.can_land&&!self.first_query {self.first_query=true;Some(self.proposed_remaining)} else {None}
- }
- ///82D79948 uses a distinct obstruction trajectory to the moving deck +.2m.
- pub fn obstruction_query(&mut self,input:Input,position:V,duration:f32)->Trajectory {
-  let mut target=madd(input.board_velocity,duration,input.board_position);target[1]+=f32::from_bits(0x3e4cccce);
-  self.blocked=false;self.query_pending=true;self.contact_height=target[1]-0.1;
-  Trajectory{position,velocity:sub(scale(sub(target,position),1./duration),scale(GRAVITY,duration*0.5)),acceleration:GRAVITY,duration}
- }
+impl Manager {
+    ///82D78B28: notably does NOT clear proposed96 or outstanding query262.
+    pub fn reset(&mut self) {
+        self.trajectory_32 = EMPTY;
+        self.elapsed_160 = 0.;
+        self.trajectory_valid_164 = false;
+        self.ik_offset_176 = [0.; 4];
+        self.vector_192 = [0.; 4];
+        self.moving_contact_208 = [0.; 4];
+        self.vector_224 = [0.; 4];
+        self.obstruction_height_240 = 0.;
+        self.time_to_land_244 = 0.;
+        self.proposed_time_248 = 0.;
+        self.completed_queries_252 = 0;
+        self.can_land_256 = false;
+        self.force_257 = false;
+        self.blocked_258 = false;
+        self.tested_259 = false;
+        self.hippy_hurdling_260 = false;
+        self.publish_moving_contact_261 = false;
+    }
+
+    ///82D78C38: preserve the native correction sign and positive-frame guard.
+    pub fn correct_trajectory(&mut self, com: Vector) {
+        let error = sub(self.trajectory_32.position_at(self.elapsed_160), com);
+        let remaining = frames(self.time_to_land_244);
+        if remaining > 0 {
+            self.trajectory_32.position = add(self.trajectory_32.position, error);
+            adjust(&mut self.trajectory_32, remaining, error.map(|v| -v), 0.5);
+        }
+    }
+
+    ///82D79420. None means no write to skeleton3482/48, not clear those fields.
+    pub fn fill(&self) -> FillOutput {
+        FillOutput {
+            can_land_316: self.can_land_256 && !self.blocked_258,
+            hippy_hurdling_317: self.hippy_hurdling_260 && !self.blocked_258,
+            moving_contact: self
+                .publish_moving_contact_261
+                .then_some(self.moving_contact_208),
+        }
+    }
 }

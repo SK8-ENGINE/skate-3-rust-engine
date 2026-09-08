@@ -5,7 +5,10 @@ use skate_core::physics::{
     assembly::BodySnapshot,
     board_step::CollisionBody,
     contact_feedback::spy_contact_jacobians,
+    skeleton_animation_record::AnimationPartTransform,
+    skeleton_board_frames::SkeletonBoardFrames,
     skeleton_body::{SkeletonCollisionInput, SkeletonContactBody, SkeletonContactReport},
+    skeleton_root::SkeletonRootFrames,
 };
 
 pub(super) fn publish(
@@ -71,20 +74,31 @@ pub(super) fn publish(
             .normal_response(&skater.collision_feedback, [n.x, n.y, n.z, 0.0])
     };
     skater.collision_pose_error = response.impulse;
-    skater.collision_extra_displacements = response.extra;
+    skater.collision_extra_errors = response.extra;
     skater.collision_maximum_error = Some(response.maximum_error);
-    skater
-        .animated_skeleton
-        .board_frames
-        .publish_centre_of_mass(
-            skater.skeleton.record.centre_of_mass,
-            physics.settings.step.simulation.time_step,
-            p.flags_2472,
-        );
-    skater
-        .animated_skeleton
-        .board_frames
-        .publish_local_observations(&skater.animated_skeleton.roots, &deck);
+    publish_board_observations(
+        &mut skater.animated_skeleton.board_frames,
+        &skater.animated_skeleton.roots,
+        &deck,
+        skater.skeleton.record.centre_of_mass,
+        physics.settings.step.simulation.time_step,
+        p.flags_2472,
+    );
+}
+
+fn publish_board_observations(
+    frames: &mut SkeletonBoardFrames,
+    roots: &SkeletonRootFrames,
+    deck: &AnimationPartTransform,
+    physical_com: [f32; 4],
+    dt: f32,
+    flags_2472: u32,
+) {
+    //82BD9F3C..9F70 transforms retained16144 into16208;9F90 uses the
+    //current deck for16240. Only later82BDA024 replaces16144 with physical
+    //COM10928. Contact/error processing above does not consume these locals.
+    frames.publish_local_observations(roots, deck);
+    frames.publish_centre_of_mass(physical_com, dt, flags_2472);
 }
 
 fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContactReport> {
@@ -179,5 +193,48 @@ fn contact_body(body: Option<&BodySnapshot>) -> SkeletonContactBody {
             inverse_mass: 0.0,
             linear_velocity: [0.0; 4],
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use skate_core::physics::skeleton_animation_record::IDENTITY;
+
+    #[test]
+    fn retained_com_is_localized_before_new_physical_com_publication() {
+        let mut roots = SkeletonRootFrames::default();
+        roots.world_to_animation[3] = [-10.0, -20.0, -30.0, 0.0];
+        let mut deck = IDENTITY;
+        deck[3] = [15.0, 26.0, 37.0, 0.0];
+        let old_com = [11.0, 22.0, 33.0, 4.0];
+        let new_com = [13.0, 26.0, 39.0, 8.0];
+        for flags in [0, 0x400] {
+            let mut frames = SkeletonBoardFrames {
+                centre_of_mass: old_com,
+                ..Default::default()
+            };
+            publish_board_observations(&mut frames, &roots, &deck, new_com, 0.5, flags);
+            assert_eq!(frames.local_centre_of_mass, [1.0, 2.0, 3.0, 0.0]);
+            assert_eq!(frames.local_board_position, [5.0, 6.0, 7.0, 0.0]);
+            assert_eq!(frames.centre_of_mass, new_com);
+            assert_eq!(frames.com_velocity, [4.0, 8.0, 12.0, 8.0]);
+            assert_eq!(
+                frames.previous_centre_of_mass,
+                if flags == 0 { old_com } else { new_com }
+            );
+
+            //The next observation uses the last published COM, but the new
+            //root and deck. The history flag must not erase this distinction.
+            roots.world_to_animation[3] = [-12.0, -24.0, -36.0, 0.0];
+            deck[3] = [20.0, 30.0, 40.0, 0.0];
+            publish_board_observations(&mut frames, &roots, &deck, old_com, 0.5, flags);
+            assert_eq!(frames.local_centre_of_mass, [1.0, 2.0, 3.0, 0.0]);
+            assert_eq!(frames.local_board_position, [8.0, 6.0, 4.0, 0.0]);
+            assert_eq!(frames.centre_of_mass, old_com);
+            assert_eq!(frames.com_velocity, [-4.0, -8.0, -12.0, -8.0]);
+            roots.world_to_animation[3] = [-10.0, -20.0, -30.0, 0.0];
+            deck[3] = [15.0, 26.0, 37.0, 0.0];
+        }
     }
 }

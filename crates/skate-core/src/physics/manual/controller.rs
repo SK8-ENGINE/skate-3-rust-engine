@@ -32,11 +32,14 @@ pub struct ManualInput {
     pub reference_z: [f32; 4],
     /// Deck part6 transform's z-axis from 82585CB0, not an animation pose.
     pub deck_z: [f32; 4],
-    /// Processed transform third column+224 and angular velocity+416.
+    /// Processed effective transform third column+224 and ground velocity+416.
     pub velocity_frame_z: [f32; 4],
+    /// Legacy field name: this is Processed416, NOT angular velocity720.
+    /// Native82C04C88 projects it into the effective frame;82C04E60..EC4
+    /// emits -400 times this same translational velocity for correction.
     pub angular_velocity_world: [f32; 4],
-    /// Native body caches. Producers/original names remain unresolved; these
-    /// layout identities stay at the input boundary instead of guessed levers.
+    /// Front/back truck drive-frame translations (7840+48 and7904+48).
+    ///82C0B9C0 steering rotates the bases and preserves these translations.
     pub correction_point_7888: [f32; 4],
     pub correction_point_7952: [f32; 4],
 }
@@ -171,8 +174,8 @@ fn apply_correction(
     measured: f32,
 ) {
     let frame = input.velocity_frame_z;
-    let omega = input.angular_velocity_world;
-    let local_z = frame[2].mul_add(omega[2], frame[1].mul_add(omega[1], frame[0] * omega[0]));
+    let velocity = input.angular_velocity_world;
+    let local_z = frame[2].mul_add(velocity[2], frame[1].mul_add(velocity[1], frame[0] * velocity[0]));
     if !input.braking || !(0.0 > local_z * input.balance) {
         return;
     }
@@ -198,7 +201,7 @@ fn apply_correction(
     } else {
         input.correction_point_7952
     };
-    effect.corrective_force_world = omega.map(|component| (component * -1.0) * 400.0);
+    effect.corrective_force_world = velocity.map(|component| (component * -1.0) * 400.0);
     effect.correction_active = true;
 }
 

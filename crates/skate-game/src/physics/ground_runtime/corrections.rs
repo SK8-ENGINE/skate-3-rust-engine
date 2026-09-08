@@ -79,14 +79,6 @@ impl GroundRuntime {
             position,
         );
     }
-    pub fn apply_wheel_catch(&mut self, board: &mut BoardRuntime) {
-        let frame = board.part_transforms()[BodyId::Deck.index()].basis.columns;
-        let value = ground_correction_math::wheel_catch_displacement(
-            [frame[1][0], frame[1][1], frame[1][2], 0.],
-            [frame[2][0], frame[2][1], frame[2][2], 0.],
-        );
-        self.apply_angular_displacement(board, value);
-    }
     pub fn pin_to_position(
         &mut self,
         board: &mut BoardRuntime,

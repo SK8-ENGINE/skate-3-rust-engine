@@ -1,7 +1,39 @@
 use skate_core::physics::{
     skeleton_animation_record::{AnimationPartTransform as Transform, compose_affine},
+    skeleton_board_frames::SkeletonBoardFrames,
     skeleton_root::SkeletonRootFrames,
 };
+pub(super) fn prepare_pose(
+    roots: &mut SkeletonRootFrames,
+    board_frames: &mut SkeletonBoardFrames,
+    animation_board: &Transform,
+    mapped: &Transform,
+    retained: &mut Transform,
+    input: super::Input<'_>,
+    flags_2476: u32,
+    flags_2484: u32,
+    flags_2468: &mut u32,
+) -> Transform {
+    //82BDEE08 consumes animation record6464+16 using the OLD world root.
+    board_frames.skate_root = compose_affine(&roots.animation_to_world, animation_board);
+    //82BDE310 also uses the old basis, with world-space state1056 COM.
+    board_frames.update_com_lift(
+        &roots.animation_to_world,
+        input.centre_of_mass_1056,
+        f32::from_bits(0x3e75_c28f),
+    );
+    let target = prepare(
+        roots,
+        input.world_frame,
+        mapped,
+        retained,
+        flags_2476,
+        flags_2484,
+        flags_2468,
+    );
+    board_frames.animation_target = target;
+    target
+}
 pub(super) fn prepare(
     roots: &mut SkeletonRootFrames,
     world: &Transform,

@@ -1,5 +1,5 @@
 use super::{
-    Bounds, Scene,
+    Bounds, Mesh, Scene,
     transform::{self, sub},
 };
 use skate_core::{
@@ -20,6 +20,13 @@ pub(super) fn query(
             &[]
         },
     ];
+    query_pools(pools, packet)
+}
+
+pub(super) fn query_pools(
+    pools: [&[Mesh<'_>]; 3],
+    packet: &GroundQueryPacket,
+) -> Result<[Option<LineHit>; 7], &'static str> {
     for pool in pools {
         for mesh in pool {
             if mesh.triangles.len() != mesh.surfaces.len() {

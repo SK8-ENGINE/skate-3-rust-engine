@@ -10,7 +10,11 @@ pub(super) fn publish(
 ) -> Result<(), String> {
     let deck = deck_frame(&physics.board);
     let p = &skater.player_input.processed;
-    let wiping_out = skater.skeleton_collision.is_ragdoll;
+    //82DB6DDC/6DF8 passes IsWipeout82DB9100 after state postphysics, not the
+    //collision controller's ragdoll mode. Both correction and IK use this result.
+    let wiping_out = skater.wipeout.requests_wipeout(p);
+    //Consume the state producer's sole Skeleton16388 owner. Blocked branches
+    //retain it; no per-tick copy may resurrect an already consumed request.
     skater.skeleton_output.correction.apply(
         &mut skater.skeleton,
         p.vectors_544_560_592_608[0].map(f32::from_bits),
@@ -27,7 +31,7 @@ pub(super) fn publish(
             state_id: p.state_2508,
             category_id: p.category_2512,
             board_body_flag_868: physics.riding.ground.part_contact_count != 0,
-            wipeout: skater.wipeout.requests_wipeout(p),
+            wipeout: wiping_out,
             flags_2468: p.flags_2468,
             flags_2484: p.flags_2484,
             value_2664: p.state_timer_2664,
@@ -85,8 +89,9 @@ pub(super) fn publish(
         &mut globals,
         &mut locals,
     )?;
-    // Native output changes truck/wheel locals after globals. Recompose those
-    // final locals for the host skin instead of displaying the stale globals.
+    // The renderer consumes render_pose as global matrices. Physical output
+    // publishes final locals for mapped bones, so rebuild the complete global
+    // hierarchy for every mode, including ragdoll.
     output::compose_hierarchy_in_place(
         locals.len() as i32,
         &skater.animation.evaluator.frames.parents,

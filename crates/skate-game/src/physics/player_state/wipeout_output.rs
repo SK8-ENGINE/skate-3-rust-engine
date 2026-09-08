@@ -31,13 +31,17 @@ pub(super) fn publish(skater: &mut SkaterRuntime) {
     physical.state.surface_height_32 = output.surface_height_32;
     let flags = &mut skater.player_state.state_flags;
     for (offset, value) in [
-        (72, output.can_leave_72), (81, output.special_surface_81),
-        (82, output.below_surface_82), (83, output.surface_height_valid_83),
+        (72, output.can_leave_72),
+        (81, output.special_surface_81),
+        (82, output.below_surface_82),
+        (83, output.surface_height_valid_83),
     ] {
         flags[offset - 52] = value;
     }
     // These source branches only store true, preserving earlier publication.
-    if output.teleport_countdown_68 { flags[68 - 52] = true; }
+    if output.teleport_countdown_68 {
+        flags[68 - 52] = true;
+    }
     if output.request_teleport_69 {
         flags[69 - 52] = true;
         physical.state.flag_69 = 1;

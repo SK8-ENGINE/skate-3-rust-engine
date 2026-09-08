@@ -162,7 +162,7 @@ impl Footplant {
 
     ///82D6FBB0: query the real edge geometry within the native two-metre box.
     fn nearby_edge(&mut self, frame: &FootplantFrame<'_>) {
-        use skate_core::{math::Vector3, player::offboard::{air_ledge::visible_edges, ground_query::Edge}};
+        use skate_core::{math::Vector3, player::offboard::{air_selector::ledge::filter_edges as visible_edges, ground_query::Edge}};
         let xyz = |v: V| Vector3::new(v[0], v[1], v[2]);
         let lanes = |v: Vector3| [v.x, v.y, v.z, 0.0];
         let edges: Vec<_> = frame.edges.iter().filter(|e| (0..3).all(|i|

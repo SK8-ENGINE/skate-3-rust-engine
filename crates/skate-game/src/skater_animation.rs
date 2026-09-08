@@ -233,8 +233,10 @@ impl SkaterAnimation {
             tick: action_output.tick,
             action: action_output,
         });
+        self.motion.animation_phase = self.state.phase;
         self.motion_controller
             .update(&graphs.motion.runtime.program, dt, &mut self.motion);
+        self.state.phase = self.motion.animation_phase;
         if !self.motion.errors.is_empty() {
             return Err(self.motion.errors.join("\n"));
         }
@@ -249,9 +251,6 @@ impl SkaterAnimation {
         }
 
         self.motion.animation.apply_parameters()?;
-        if let Some(phase) = self.motion.phase_write.take() {
-            self.state.phase = phase;
-        }
         self.motion.animation.advance(dt, self.state.phase);
         //Collect before pose evaluation consumes clip history;82B98980 then
         //uses those exact records for board/mirror/switch event publication.

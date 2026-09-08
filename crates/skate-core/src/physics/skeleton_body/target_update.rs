@@ -45,18 +45,26 @@ pub struct SkeletonTargetUpdate {
 }
 
 impl SkeletonTargets {
+    ///82BE1618 updates only the two hook targets and returns the board-space
+    /// transform consumed by the skeleton input owner.
+    pub fn update_hook_positions(&mut self, input: &SkeletonTargetInput<'_>) -> Transform {
+        let hips = compose_affine(input.animation_to_world, input.animation_hips);
+        let board = compose_affine(input.animation_to_world, input.animation_board);
+        let animation_board_to_physics = compose_affine(input.inverse_board, &board);
+        self.set_transform(0, orthonormalize(hips));
+        self.set_transform(1, orthonormalize(*input.skate_root));
+        animation_board_to_physics
+    }
+
     pub fn update_positions(
         &mut self,
         input: SkeletonTargetInput<'_>,
         skeleton: &mut SkeletonBody,
     ) -> SkeletonTargetUpdate {
-        let hips = compose_affine(input.animation_to_world, input.animation_hips);
-        let board = compose_affine(input.animation_to_world, input.animation_board);
-        let animation_board_to_physics = compose_affine(input.inverse_board, &board);
         let previous = self.transform(0)[3];
-        let change = std::array::from_fn(|i| previous[i] - hips[3][i]);
-        self.set_transform(0, orthonormalize(hips));
-        self.set_transform(1, orthonormalize(*input.skate_root));
+        let animation_board_to_physics = self.update_hook_positions(&input);
+        let hips = self.transform(0)[3];
+        let change = std::array::from_fn(|i| previous[i] - hips[i]);
         let positions =
             self.update_extra_targets(skeleton, input.com_frame, input.lifted_com_frame);
         //82BE18A0 checks strictly greater; unordered distance alone does not

@@ -4,6 +4,7 @@
 mod post_input;
 mod pre_state;
 mod publication;
+mod registry;
 mod selection;
 mod transition;
 mod wipeout_output;
@@ -19,6 +20,7 @@ use skate_core::{
 use skate_data::collections::Collections;
 
 pub(crate) struct PlayerState {
+    pub registry: registry::StateRegistry,
     pub lifecycle: PhysicalPlayerStateLifecycle,
     pub selector: StateSelector,
     pub requested_state: PhysicalStateId,
@@ -44,6 +46,7 @@ impl PlayerState {
             })
         };
         Ok(Self {
+            registry: registry::StateRegistry::new(),
             //82DB3008 selects the owned Sleeping object before SetPhysicsState100.
             lifecycle: PhysicalPlayerStateLifecycle::new(PhysicalStateId::Sleeping),
             selector: StateSelector::default(),
@@ -108,9 +111,9 @@ pub(crate) fn post_input_and_select(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
 ) -> Result<(), String> {
-    super::grind::query(physics, skater);
     post_input::advance(physics, skater)?;
-    selection::advance(physics, skater, skater.player_input.processed_snapshot(physics.ticks))
+    let processed = skater.player_input.processed_snapshot(physics.ticks);
+    selection::advance(physics, skater, processed)
 }
 ///The reset/board/skeleton publications precede this selected-state FillPhysOut.
 pub(crate) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
@@ -127,39 +130,37 @@ pub(crate) fn enter_after_teleport(
     transition::set(physics, skater, target)
 }
 
-/// Custom authored climbing completes at a validated standing surface.
-pub(crate) fn resume_after_climb(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
-    super::offboard::ground_state::exit(physics, skater);
-    skater.offboard.air_prediction = None;
-    skater.collision_extra_displacements = [[0.; 4]; 2];
-    skater.animated_skeleton.motion.velocity_world = [0.; 4];
-    skater.player_input.processed.vectors_544_560_592_608[3] = [0; 4];
-    if skater.player_state.current() == PhysicalStateId::BipedGround {
-        super::offboard::ground_state::enter(physics, skater)?;
-    } else {
-        transition::set(physics, skater, PhysicalStateId::BipedGround)?;
-    }
-    // Climbing bypassed the ground query pipeline. Complete real observations
-    // at the new position before the next native job can interpret no contact
-    // as a fall, or consume the old foot hits from below the ledge.
-    super::foot_ik_queries::query(&physics.world, &skater.skeleton)?
-        .publish(&mut skater.player_input.player);
-    let frame = skater.offboard.ground.frame_80;
-    let observation = super::offboard::contact_queries::submit_toolkit(
-        &physics.world, &skater.offboard.layout,
-        skate_core::player::offboard::contact_queries::Input {
-            position: frame[3], surface_right: frame[0], surface_up: frame[1], surface_forward: frame[2],
-            animation_right: frame[0], animation_up: frame[1], velocity: [0.;4],
-        }, skater.player_input.processed.actor_query_2948,
-    )?;
-    skater.offboard.contacts.submit(observation);
-    publish(physics, skater)
-}
-
 ///Original82DB6050 prefix; coordinator calls the selected state pre-update next.
 pub(crate) fn pre_state(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
 ) -> Result<(), String> {
     pre_state::advance(physics, skater)
+}
+
+/// Custom traversal bypasses native queries; discard old work before re-entry.
+pub(crate) fn resume_after_climb(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
+    super::biped_ground::exit(skater);
+    skater.offboard_air_selector.reset();
+    skater.collision_extra_errors = [[0.; 4]; 2];
+    skater.animated_skeleton.motion.velocity_world = [0.; 4];
+    skater.player_input.processed.vectors_544_560_592_608[3] = [0; 4];
+    if skater.player_state.current() == PhysicalStateId::BipedGround {
+        super::biped_ground::enter(physics, skater)?;
+    } else {
+        transition::set(physics, skater, PhysicalStateId::BipedGround)?;
+    }
+    super::foot_ik_queries::query(&physics.world, &skater.skeleton)?
+        .publish(&mut skater.player_input.player);
+    let frame = skater.biped_ground.ground.frame_80;
+    skater.offboard_contact.submit(
+        skate_core::player::offboard::contact_toolkit::Input {
+            position: frame[3], right: frame[0], up: frame[1], forward: frame[2],
+            animation_right: frame[0], animation_up: frame[1], velocity: [0.; 4],
+        },
+        skater.player_input.processed.actor_query_2952 as i32,
+        &super::offboard::contact_toolkit::StaticScene::new(&physics.world)?,
+    )?;
+
+    Ok(())
 }

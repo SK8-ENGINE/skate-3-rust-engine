@@ -84,7 +84,9 @@ fn inverse_mass_frame(forward: RetailLocalMassFrame, inertia: Vector3) -> Retail
     );
     let minimum_offset_squared =
         ((inertia.y + inertia.z) + inertia.x) * f32::from_bits(0x3586_37BE);
-    let translated = center_squared >= minimum_offset_squared;
+    // S3 82AE78EC / S2 82AE9BE0: bge after fcmpu means LT is clear,
+    // so an unordered comparison also retains the inverse mass frame.
+    let translated = !(center_squared < minimum_offset_squared);
     let rotated = forward
         .basis
         .columns
@@ -219,10 +221,18 @@ fn finalize_principal_mass(
         refined_reciprocal(principal_moments.y),
         refined_reciprocal(principal_moments.z),
     );
-    let smallest_inverse = native_arithmetic::vector_min(
-        native_arithmetic::vector_min(inverse_tensor.x, inverse_tensor.y),
-        inverse_tensor.z,
-    );
+    // S3 82AE7A98/7AAC and S2 82AE9DA0/9DB4 retain the left operand
+    // only for ordered LT. Rust min would discard a right-hand NaN.
+    let smallest_xy = if inverse_tensor.x < inverse_tensor.y {
+        inverse_tensor.x
+    } else {
+        inverse_tensor.y
+    };
+    let smallest_inverse = if smallest_xy < inverse_tensor.z {
+        smallest_xy
+    } else {
+        inverse_tensor.z
+    };
     RetailBodyMassProperties {
         local_mass_frame,
         dynamics: RetailInertiaDynamics {

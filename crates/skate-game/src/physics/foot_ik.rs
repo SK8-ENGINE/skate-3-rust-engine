@@ -42,9 +42,6 @@ pub(crate) struct PhysicalInput<'a> {
 
 pub(crate) struct DriveOutput {
     pub frames: [Transform; 24],
-    pub updated_limbs: [bool; 4],
-    pub support_failed: bool,
-    pub support_failed_this_update: bool,
 }
 
 impl FootIk {
@@ -139,7 +136,6 @@ impl FootIk {
         let mut drives = skeleton.record.pose;
         //GeneralUpdate skips all IK stages for702 but still submits mapped
         //animation drives. Preserve histories across that skipped update.
-        let mut updated_limbs = [false; 4];
         if input.state_id != 702 {
             let mut originals = skeleton.record.pose;
             for (part, &bone) in self.bone_indices.iter().enumerate() {
@@ -161,7 +157,7 @@ impl FootIk {
                     &skeleton.roots.inverse_board,
                 )
             };
-            updated_limbs = self.state.update(
+            let _ = self.state.update(
                 UpdateInput {
                     flags_2468: input.flags_2468,
                     flags_2472: input.flags_2472,
@@ -184,12 +180,7 @@ impl FootIk {
                 &mut drives,
             );
         }
-        Ok(DriveOutput {
-            frames: drives,
-            updated_limbs,
-            support_failed: self.state.contacts.support_failed,
-            support_failed_this_update: self.state.contacts.support_failed_this_update,
-        })
+        Ok(DriveOutput { frames: drives })
     }
 }
 

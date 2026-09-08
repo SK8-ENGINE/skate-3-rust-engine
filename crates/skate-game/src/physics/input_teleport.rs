@@ -20,6 +20,16 @@ impl Callbacks<'_, '_> {
             .skeleton_controller
             .request_ground(self.collision_mode)?;
         let target = horizontal_spawn(requested);
+        bevy::log::info!(
+            on_board = p.byte_1600 & 1 != 0,
+            requested_x = requested[3][0],
+            requested_y = requested[3][1],
+            requested_z = requested[3][2],
+            applied_x = target[3][0],
+            applied_y = target[3][1],
+            applied_z = target[3][2],
+            "player teleport spawn"
+        );
         player.flags_1296 = ((player.flags_1296 & 0xffef_ffff) & 0x81ff_ffff) | 0x6000_0000;
         player.previous_spin_input_1360 = 0.0;
         player.spin_same_direction_frames_1324 = 0;
@@ -87,6 +97,7 @@ impl Callbacks<'_, '_> {
             p.flags_2468,
             self.animation_input.fields.balance,
             false,
+            p,
         );
         self.wipeout.state.reset_systems();
         self.life.skeleton_controller.effective = 0;
@@ -94,10 +105,8 @@ impl Callbacks<'_, '_> {
         self.life.skeleton_controller.has_request = false;
         self.life.skeleton_controller.override_enabled = false;
         self.life.skeleton_controller.flag_18 = false;
-        self.life.trajectory.pending_request = None;
-        self.life.trajectory.primary_valid_288 = false;
-        self.life.trajectory.secondary_valid_592 = false;
-        self.life.trajectory.result_valid_9840 = false;
+        //82DB93E8/93EC resets Player1840 through82D749D0, not ballistic work.
+        self.offboard_grab.invalidate();
         player.manager_1856_counter_320 = 0;
         player.probe = Default::default();
 

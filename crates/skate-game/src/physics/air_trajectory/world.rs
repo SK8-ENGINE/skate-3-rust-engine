@@ -2,11 +2,11 @@
 //!82772028, across the host's world-format boundary. BoardWorld stores static
 //!world-space triangles, so their source geometry transform is identity.
 use skate_core::{
-    air::trajectory::SurfaceHit,
+    air::trajectory::{SurfaceHit, WorldWithoutGrindEdges},
     math::Vector3,
     physics::{
         board_world::BoardWorld,
-        triangle_query::{triangle_segment, TriangleLineHit},
+        triangle_query::{TriangleLineHit, triangle_segment},
     },
 };
 type Vector = [f32; 4];
@@ -17,22 +17,21 @@ const IDENTITY: [[f32; 4]; 4] = [
     [0.0; 4],
 ];
 
+///BoardWorld's authored format contains triangles only; no grind primitive
+///collection is present. Update this adapter together with any world format
+///extension that introduces actual grind edges.
+pub(super) fn topology(_world: &BoardWorld) -> WorldWithoutGrindEdges {
+    WorldWithoutGrindEdges
+}
+
 pub(super) fn line(
     world: &BoardWorld,
     start: Vector,
     end: Vector,
     radius: f32,
 ) -> Result<Option<SurfaceHit>, String> {
-    // Native vectors retain a fourth SIMD lane, but the segment predicate,
-    // broadphase and vec3 conversion below consume XYZ only. That carry lane
-    // is not a homogeneous coordinate and need not be a finite float.
-    if !radius.is_finite()
-        || radius < 0.0
-        || start[..3].iter().chain(&end[..3]).any(|v| !v.is_finite())
-    {
-        return Err(format!(
-            "Non-finite trajectory collision coordinates or invalid radius: start={start:?}, end={end:?}, radius={radius}"
-        ));
+    if !radius.is_finite() || radius < 0.0 || start.into_iter().chain(end).any(|v| !v.is_finite()) {
+        return Err("Non-finite trajectory collision request or invalid radius".into());
     }
     let start = vec3(start);
     let delta = Vector3::new(end[0] - start.x, end[1] - start.y, end[2] - start.z);

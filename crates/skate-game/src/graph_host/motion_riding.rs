@@ -105,8 +105,8 @@ impl RidingOperation {
             "UpdateTimeSinceKickturn" => Self::TimeSinceKickturn,
             "UpdateManualOutTimer" => Self::ManualOutTimer,
             "SetManualOutTimer" => Self::SetManualOutTimer(f32::from_bits(
-                a.float_bits("length", 0x3e29fbe7))), //82BCA058 constructor default
-
+                a.float_bits("length", 0x3e29_fbe7), //factory82BCA0FC
+            )),
             _ => return None,
         })
     }
@@ -218,10 +218,6 @@ impl RidingState {
                     self.time_since_kickturn += frame.dt;
                 }
             } //82BAE848/8258F940
-            RidingOperation::SetManualOutTimer(length) => {
-                //82BB9158 is the End callback (vtable8232090C+56).
-                if phase == 2 { self.manual_out_timer = length; }
-            }
             RidingOperation::ManualOutTimer => {
                 if phase == 2 {
                     self.manual_out_timer = 0.0;
@@ -231,6 +227,12 @@ impl RidingState {
                     let remaining = self.manual_out_timer - frame.dt;
                     self.manual_out_timer = if remaining >= 0.0 { remaining } else { 0.0 };
                 } //82BB91A8/8258F998
+            }
+            RidingOperation::SetManualOutTimer(length) => {
+                //Vtable8232090C: Begin/Update empty; End82BB9158 sets length.
+                if phase == 2 {
+                    self.manual_out_timer = length;
+                }
             }
         }
         Ok(())

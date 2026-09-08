@@ -1,10 +1,113 @@
-//! Input timing/gates from82D8A828/82D8ABD8. The geometry query/scorer runs
-//! in physics::grind after input completion, before the state selector.
-use skate_core::{player::input_phase::ProcessedPhysicsInput, point_graph::PointGraph};
+//! Host manager82D8A828/82D8AB08, using CURRENT player-input ownership.
+//! Static authored-world scope. Gameplay leaves live in skate-core; world
+//! filtering, primitive provenance and board material application stay explicit.
+mod history;
+mod post;
+mod pre;
+mod publication;
+mod settings;
+#[cfg(test)]
+mod tests;
+pub(crate) mod world;
+
+use crate::{grind_world::StaticProvider, physics::grind::ManagerObservation};
+use skate_core::{
+    air::trajectory::grind_surface::{self, GrindSurface, Probe, ProbeHit},
+    physics::{
+        board_world::BoardWorld,
+        grind_contact::{balance, control, entry, manager},
+    },
+    player::input_phase::{GrindInvestigationFields, ProcessedPhysicsInput},
+};
 use skate_data::collections::Collections;
+type V = [f32; 4];
+
+/// These are real physical/animation producers omitted from the old shared
+/// input subset. There are deliberately no guessed defaults.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct NoGrindEdges;
-#[derive(Debug)]
+pub(crate) struct PreContext {
+    /// Physical Processed64..127, not effective animation transform192.
+    pub board: [V; 4],
+    pub air_counter: i32,
+    pub tip_state: u32,
+    pub air_targeting_grind_9653: bool,
+    pub balance_2720: f32,
+    pub translation_2796: f32,
+    pub stability_nudge_2800: f32,
+    pub up_down_2804: f32,
+    pub grab_min_height_2808: f32,
+}
+
+///Fresh physical/animation values read by82D8AB08 after intervening producers.
+///Candidate selection and submitted geometry hits remain cached in Pending.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PostContext {
+    ///Current physical Processed64..127, not animation transform192.
+    pub board: [V; 4],
+    pub balance_2720: f32,
+    pub translation_2796: f32,
+    pub stability_nudge_2800: f32,
+    pub up_down_2804: f32,
+    pub grab_min_height_2808: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MaterialMode {
+    ///82D89DC0 leaves materials and its air-target history untouched.
+    Unchanged,
+    ///Restore the initialized standard material triplet (82D89DC0).
+    ///Not the broader SetStandard routine's unrelated body/volume writes.
+    Standard,
+    ///All parts group4; wheels board8316, deck8328, trucks8340.
+    Grind,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PrimitiveMetadata {
+    pub spline_guids: Option<[u64; 2]>,
+}
+
+/// Callbacks execute the original grind line-batch contract against current
+/// world metadata (see world), not the contact-fatness BoardWorld line query.
+/// Query errors propagate, never become misses. The host owns actual body and
+/// material tables; a material mode must be applied before this call returns.
+pub(crate) trait Host {
+    fn apply_material_mode(&mut self, mode: MaterialMode) -> Result<(), String>;
+    fn surface_probe(
+        &mut self,
+        world: &BoardWorld,
+        actor: [u32; 2],
+        index: usize,
+        probe: Probe,
+    ) -> Result<Option<ProbeHit>, String>;
+    fn force_exit_line(
+        &mut self,
+        world: &BoardWorld,
+        actor: [u32; 2],
+        probe: balance::ForceExitProbe,
+    ) -> Result<Option<balance::ForceExitHit>, String>;
+}
+
+/// Not Clone: the caller consumes one pre result in one post phase.
+pub(crate) struct Pending {
+    fields: GrindInvestigationFields,
+    geometry: Option<GeometryWork>,
+    metadata: Option<PrimitiveMetadata>,
+}
+struct GeometryWork {
+    input: grind_surface::InvestigationInput,
+    plan: Option<grind_surface::Investigation>,
+    hits: [Option<ProbeHit>; 7],
+}
+
+pub(crate) struct PostResult {
+    /// One entry per native Request call, including two simultaneous impacts.
+    /// Main delivers these through its actual wipeout manager (which updates
+    /// reason flags, timers and request count); processed bit18 is set here.
+    pub wipeout_reasons: Vec<usize>,
+    pub observation: ManagerObservation,
+}
+
 pub(crate) struct GrindInputState {
     previous_state: u32,
     engagement_counter: u32,
@@ -19,17 +122,21 @@ pub(crate) struct GrindInputState {
     pub grounded_frames: u32,
     pub air_frames: u32,
     pub low_wheel_frames: u32,
-    previous_candidate: bool,
-    curve: PointGraph<4>,
+    previous_proximity: bool,
+    previous_air_target: bool,
+    previous_direction: V,
+    gravity_timer: f32,
+    pub balance: balance::BalanceState,
+    pub engagement: entry::Engagement,
+    pub control: control::Control,
+    /// Physical pop consumes this same cache/energy/cooldown, not a copy.
+    pub jumper: manager::Jumper,
+    pub investigation: GrindInvestigationFields,
+    settings: settings::Settings,
 }
+
 impl GrindInputState {
     pub fn load(data: &Collections) -> Result<Self, String> {
-        //XML C7220-C70E0=320; native PointGraph X336/Y352 skips header16.
-        let graph = data
-            .words::<12>("physics_grinds", "default", "FrictionVsTime")?
-            .map(f32::from_bits);
-        //82D8A318 scorer storesC/10/14/18/1C/20 and48 tozero;82D8A638
-        //resets main464/468/472/476/477/480/484 and all416outputbytes.
         Ok(Self {
             previous_state: 0,
             engagement_counter: 0,
@@ -44,82 +151,50 @@ impl GrindInputState {
             grounded_frames: 0,
             air_frames: 0,
             low_wheel_frames: 0,
-            previous_candidate: false,
-            curve: PointGraph {
-                x: graph[4..8].try_into().unwrap(),
-                y: graph[8..12].try_into().unwrap(),
-            },
+            previous_proximity: false,
+            previous_air_target: false,
+            previous_direction: [0.; 4],
+            gravity_timer: 0.,
+            balance: balance::BalanceState::default(),
+            engagement: entry::Engagement::default(),
+            control: control::Control::default(),
+            jumper: manager::Jumper::default(),
+            investigation: GrindInvestigationFields::default(),
+            settings: settings::Settings::load(data)?,
         })
     }
-    pub fn update(
-        &mut self,
-        _world: NoGrindEdges,
-        p: &ProcessedPhysicsInput,
-        air_counter: i32,
-    ) -> Result<(), String> {
-        let state = p.state_2508;
-        if state != self.previous_state {
-            self.engagement_counter = self.engagement_counter.wrapping_add(match state {
-                400 | 402 | 404 => 50,
-                403 => 20,
-                _ => 0,
-            });
-            self.previous_state = state;
-        }
-        self.engagement_counter = decrement(self.engagement_counter);
-        self.suppressed = self.engagement_counter > 151;
-        self.cooldown = if self.suppressed {
-            90
-        } else {
-            decrement(self.cooldown)
-        };
-        self.disabled = p.flags_2468 & 0x1800_0000 != 0
-            || p.flags_2472 & 0x8008 != 0
-            || p.flags_2476 & 0x0040_0000 != 0
-            || self.cooldown > 0
-            || (p.category_2512 == 200
-                && (p.state_timer_2664 <= f32::from_bits(0x3da3_d70a)
-                    || air_counter <= 10))
-            || p.category_2512 == 500
-            || (p.flags_2472 & 4 != 0 && p.category_2512 != 400);
-        self.elapsed = if p.category_2512 == 400 || state == 701 {
-            self.elapsed + p.timestep_2604
-        } else {
-            0.
-        };
-        self.low_wheel_frames = if self.previous_candidate
-            && state == 100
-            && p.wheel_count_2556 < 2
-            && p.scalar_2652 < 0.8
-        {
-            self.low_wheel_frames.wrapping_add(1)
-        } else {
-            0
-        };
-        self.grind_history = if p.grind_words_2532_2536[1] == 2 {
-            70
-        } else {
-            decrement(self.grind_history)
-        };
-        self.secondary_history = decrement(self.secondary_history);
-        self.grounded_frames = if p.category_2512 == 100 {
-            self.grounded_frames.wrapping_add(1)
-        } else {
-            0
-        };
-        self.air_frames = if p.category_2512 == 100 {
-            0
-        } else {
-            self.air_frames.wrapping_add(1)
-        };
-        //82D875A8 LABEL80 on edge count0 clears candidate384 and owner32.
-        self.previous_candidate = false;
-        self.previous_velocity = p.vectors_400_416[0];
-        self.friction_vs_time = self.curve.evaluate(self.elapsed);
-        Ok(())
+
+    ///82D8A638 resets the manager, not the separately constructed child objects.
+    pub fn reset(&mut self) {
+        self.previous_state = 0;
+        self.engagement_counter = 0;
+        self.cooldown = 0;
+        self.disabled = false;
+        self.suppressed = false;
+        self.elapsed = 0.;
+        self.gravity_timer = 0.;
+        self.friction_vs_time = 0.;
+        self.previous_direction = [0.; 4];
+        self.investigation = GrindInvestigationFields::default();
     }
 }
-fn decrement(value: u32) -> u32 {
-    let next = value.wrapping_sub(1);
-    if next & 0x8000_0000 != 0 { 0 } else { next }
+
+fn float(v: [u32; 4]) -> V {
+    v.map(f32::from_bits)
+}
+fn raw(v: V) -> [u32; 4] {
+    v.map(f32::to_bits)
+}
+
+impl core::fmt::Debug for GrindInputState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GrindInputState")
+            .field("disabled", &self.disabled)
+            .field("suppressed", &self.suppressed)
+            .field("investigation", &self.investigation)
+            .field("balance", &self.balance)
+            .field("engagement", &self.engagement)
+            .field("jumper", &self.jumper)
+            .finish_non_exhaustive()
+    }
 }

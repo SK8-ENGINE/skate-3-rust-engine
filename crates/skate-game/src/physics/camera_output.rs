@@ -2,7 +2,7 @@
 //! Reset82DE53F0 runs before the actual producers82DB6EC0/82D3A388.
 use super::{GamePhysics, SkaterRuntime};
 use crate::camera::{
-    CameraAirOutput, CameraAnimationOutput, CameraEventsOutput,
+    CameraAirOutput, CameraAnimationOutput, CameraEventsOutput, CameraGrindOutput,
     CameraOffboardOutput, CameraPreferences, CameraPublicationInputs, CameraStateOutput,
 };
 use skate_core::{
@@ -15,26 +15,31 @@ use skate_core::{
 /// The user's selected normal High camera is graph type1. This custom world
 /// has no road/ledge/camera-volume annotations or other moving actors.
 pub(crate) fn advance(
-    physics: &mut GamePhysics,
+    physics: &GamePhysics,
     skater: &SkaterRuntime,
     feedback: &PhysicalFeedback,
     camera: &mut crate::camera::CameraRuntime,
 ) -> Result<(), String> {
-    let output = physics.exchange.output()
+    let output = physics
+        .exchange
+        .output()
         .ok_or("Camera requires the completed physical output snapshot")?;
-    let completed_tick = physics.ticks.checked_sub(1)
-        .ok_or("Camera received output before the first completed tick")?;
+    let completed_tick = physics
+        .ticks
+        .checked_sub(1)
+        .ok_or("Camera received physical output before the first completed tick")?;
     if output.tick != completed_tick || output.state != skater.player_state.current() {
-        return Err(format!("Camera received stale physical output: tick={}, completed={completed_tick}", output.tick));
+        return Err(format!(
+            "Camera received stale physical output: output_tick={}, completed_tick={}, output_state={:?}, selected_state={:?}",
+            output.tick,
+            completed_tick,
+            output.state,
+            skater.player_state.current(),
+        ));
     }
-    //Once per physical publication, preserving conditioner history across
-    //direct grind-type changes and invalidating it on the first non-grind tick.
-    physics.grind.advance_camera(
-        skater.player_input.processed.vectors_400_416[0].map(f32::from_bits),
-    )?;
     let inputs = publish(
-        physics,
         skater,
+        output,
         feedback,
         skater.centre_of_mass_output,
         CameraPreferences {
@@ -48,6 +53,7 @@ pub(crate) fn advance(
         // SkaterAnim vtable8231E170+28=82B97140: full15180 bit30.
         u8::from(skater.animation.stance().1),
         1, // Stable host player identity replaces the original actor pointer.
+        output.tick,
     )?;
     let snapshot = crate::camera::publish_camera_subject(physics, skater, &inputs)?;
     let environment = crate::camera::CameraGraphEnvironment {
@@ -83,24 +89,22 @@ impl MovingObstacleProvider for StaticWorld {
 /// published, before clearing AnimationControlOutput's per-frame intent bits.
 ///Selected state owners publish their output before this common consumer.
 pub(crate) fn publish(
-    physics: &GamePhysics,
     skater: &SkaterRuntime,
+    output: &skate_core::physics::phase::PhysicalOutputSnapshot,
     feedback: &PhysicalFeedback,
     com: CentreOfMassOutput,
     preferences: CameraPreferences,
     skater_animation_stance: u8,
     context: u32,
+    tick: u64,
 ) -> Result<CameraPublicationInputs, String> {
     let p = &skater.player_input.processed;
     let physical = &skater.player_input.physical;
     let fields = &skater.animation_input.fields;
     let intents = skater.animation_input.output.flags;
     let packet = &skater.animation.packet;
-    let output = physics.exchange.output()
-        .ok_or("Camera requires the completed physical output snapshot")?;
-    let normal = output.ground_normal;
     Ok(CameraPublicationInputs {
-        tick: output.tick,
+        tick,
         state: CameraStateOutput {
             height_32: physical.state.surface_height_32,
             physically_pushing_55: bit(p.flags_2468, 25),
@@ -134,34 +138,19 @@ pub(crate) fn publish(
             apex_time_196: physical.air.time_to_apex_196,
             flag_440: bit(p.flags_2468, 22),
         },
-        //Offboard82DE4010 has a distinct board-present327=1. None of that
-        //record's alternate trajectory fields becomes valid while riding.
-        offboard: CameraOffboardOutput {
-            duration_92: 0.0,
-            time_152: 0.0,
-            apex_time_156: 0.0,
-            launch_normal_160: [0.0; 4],
-            launch_position_176: [0.0; 4],
-            landing_normal_192: [0.0; 4],
-            landing_position_208: [0.0; 4],
-            heading_224: [0.0; 4],
-            apex_240: [0.0; 4],
-            //82DB76E0 overwrites the Ground Fill's earlier304 publication.
-            object_held_304: bit(p.flags_2480, 19),
-            hurdle_317: physical.off_board.hippy_hurdling_317,
-            use_trajectory_331: 0,
-            dropping_in_334: 0,
+        offboard: offboard_output(&physical.off_board),
+        grinds: CameraGrindOutput {
+            direction_0: physical.grinds.direction_0.map(f32::from_bits),
+            camera_target_96: physical.grinds.camera_target_96.map(f32::from_bits),
+            grinding_316: physical.grinds.grinding_316,
         },
-        //Shared grind Fill82D40EA0 publishes the directed rail tangent;
-        //conditioner82DF0640 supplies the continuous contact anchor.
-        grinds: physics.grind.camera_output(),
         events: CameraEventsOutput {
             intent_51: bit(intents, 28),
             preparing_52: bit(intents, 27),
             dropping_in_63: bit(intents, 22),
             trick_125: bit(p.flags_2480, 11),
-            //Ground322 resets in82DE3728. Air/trick states own active writes.
-            hippy_jump_322: 0,
+            //Completed State503 Fill82D4E0A8, consumed as Ground322 by the camera.
+            hippy_jump_322: physical.ground.hippy_jumping_322,
             //Scoring2 reset82DE4468; HoM duration stays inactive in this host.
             broken_bone_duration_200: 0.0,
             //AirCollector82DA78D0 publishes the world conditioner capability mask.
@@ -169,14 +158,24 @@ pub(crate) fn publish(
         },
         damped_com_80: com.position,
         //82C03304..3340 copies actual BoardBody80 into Ground80 and96.
-        ground_up_80: [normal.x, normal.y, normal.z, 0.0],
+        ground_up_80: [
+            output.ground_normal.x,
+            output.ground_normal.y,
+            output.ground_normal.z,
+            0.0,
+        ],
         //Ground288 resets82DE3728; selected ordinary Ground Fill leaves it.
         ground_scalar_288: 0.0,
         look_552_556: [
             skater.animation_input.extra.look_x,
             skater.animation_input.extra.look_y,
         ],
-        collision_look_target_64: [output.predicted_position.x, output.predicted_position.y, output.predicted_position.z, 0.0],
+        collision_look_target_64: [
+            output.predicted_position.x,
+            output.predicted_position.y,
+            output.predicted_position.z,
+            0.0,
+        ],
         preferences,
         context,
     })
@@ -186,6 +185,32 @@ fn bit(value: u32, shift: u32) -> u8 {
     ((value >> shift) & 1) as u8
 }
 
+///82DF6A68..6B8C copies the distinct OffBoard trajectory when byte331 is set.
+///Keep the owner's actual availability byte: neither state category nor the
+///existence of this packet establishes that a trajectory has been produced.
+fn offboard_output(
+    output: &skate_core::player::input_phase::OffBoardOutputFields,
+) -> CameraOffboardOutput {
+    CameraOffboardOutput {
+        duration_92: output.scalar_92,
+        time_152: output.scalar_152,
+        apex_time_156: output.scalar_156,
+        //82DF6B74..6B8C supplies OffBoard160 to setter52 at82DF6CA0.
+        launch_normal_160: output.vector_160.map(f32::from_bits),
+        launch_position_176: output.vector_176.map(f32::from_bits),
+        landing_normal_192: output.vector_192.map(f32::from_bits),
+        landing_position_208: output.vector_208.map(f32::from_bits),
+        heading_224: output.vector_224.map(f32::from_bits),
+        apex_240: output.vector_240.map(f32::from_bits),
+        //82DF74E4 reads308; the camera packet's historical name is misleading.
+        object_held_304: output.flag_308,
+        hurdle_317: output.hippy_hurdling_317,
+        use_trajectory_331: output.trajectory_valid_331,
+        //82DF7474..7490 combines this byte with the dropping-in event.
+        dropping_in_334: output.flag_334,
+    }
+}
+
 #[cfg(test)]
-#[path = "camera_tricks.rs"]
+#[path = "camera_output_tests.rs"]
 mod tests;

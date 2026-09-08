@@ -4,6 +4,9 @@ pub mod manager;
 pub mod math;
 pub mod lifecycle;
 pub mod motion;
+pub mod angular;
+#[cfg(test)]
+mod tests;
 pub type Vector = [f32;4];
 pub type Frame = [Vector;4];
 pub const IDENTITY: Frame = [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.;4]];

@@ -1,168 +1,162 @@
-//! Geometry fields consumed by trajectory assist:82C20728,82C20C08,
-//!82C21828 and82C21930. Material/foot-placement flags have other consumers.
-use super::{grind::GrindSurfaceEvidence, math::*};
-use crate::math::Vector3;
-use crate::physics::{
-    board_world::BoardWorld,
-    ground_hang_geometry::{hang_lines, HangGeometryInput},
-};
+//! Static geometry investigation from original S3 TU3 82C20728/82C20C08.
+//! Query execution is supplied by the world owner; a miss is not missing data.
+//! No moving-object observations or authored material codes are synthesized.
+use super::math::*;
+
+mod classify;
+mod orientation;
+mod landing;
+pub use landing::{LandingOrientation, update_landing_orientation};
+#[cfg(test)]
+mod tests;
+
+pub type V = [f32; 4];
+
+#[derive(Clone, Copy, Debug)]
+pub struct InvestigationInput {
+    pub start: V,
+    pub end: V,
+    pub reference: V,
+    /// Input +48, enabled by input byte +64: a six-unit world-down probe.
+    pub optional_probe: Option<V>,
+    /// physics_grinds layout +636, supplied from the stock collection.
+    pub deck_center_to_truck: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Probe {
+    pub start: V,
+    pub end: V,
+    pub radius: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ProbeHit {
+    pub fraction: f32,
+    pub position: V,
+    pub normal: V,
+    /// Original query result +100, NOT a rendering tag or triangle index.
+    pub packed_surface: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct Investigation {
+    pub center: V,
+    pub upmost_normal: V,
+    pub direction: V,
+    pub probes: Vec<Probe>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum GeometryType {
+    ThinRail = 0,
+    FatRail = 1,
+    Ledge = 2,
+    Impossible = 3,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct GrindSurface {
-    pub evidence: GrindSurfaceEvidence,
-    pub normal: Vector,
-    ///Investigation16/32: far-side query endpoints, consumed by82D883E0.
-    pub far_points: [Vector; 2],
-}
-
-///The query consists of six consecutive48-byte descriptors; descriptor4 is
-///the vertical centre line and descriptor5 the raised cross line. The optional
-///seventh descriptor is a separate caller probe. Result indexing stays intact.
-pub fn investigate(
-    world: &BoardWorld,
-    start: Vector,
-    end: Vector,
-    reference: Vector,
-    deck_center_to_truck: f32,
-) -> Result<Option<GrindSurface>, &'static str> {
-    let Some(lines) = hang_lines(
-        HangGeometryInput {
-            edge_start: xyz(start),
-            edge_end: xyz(end),
-            reference_point: xyz(reference),
-        },
-        deck_center_to_truck,
-    ) else {
-        return Ok(None);
-    };
-    let mut hits = [None; 6];
-    for (i, line) in lines.iter().enumerate() {
-        hits[i] = world.query_swept_line(line.start, line.end, line.radius)?;
-    }
-    let direction = normalize(sub(end, start));
-    let up = normalize(cross(direction, cross(UP, direction)));
-    let side = normalize(cross(UP, direction));
-    //82C20ED8 reads result5 (stack448), not the centre probe atstack384.
-    let kind = if (hits[0].is_some() && hits[1].is_some()) || hits[5].is_some() {
-        3
-    } else if hits[0].is_some() {
-        if hits[2].is_some_and(|h| h.geometry.fraction < 0.65) {
-            2
-        } else {
-            1
-        }
-    } else if hits[1].is_some() {
-        if hits[3].is_some_and(|h| h.geometry.fraction < 0.65) {
-            2
-        } else {
-            1
-        }
-    } else {
-        0
-    };
-    let side = if hits[0].is_none() && hits[1].is_some() {
-        scale(side, -1.0)
-    } else {
-        side
-    };
-    let centre = madd(direction, dot(sub(reference, start), direction), start);
-    let far: [Vector; 2] = std::array::from_fn(|i| {
-        let p = hits[i + 2].map_or(lines[i + 2].end, |h| h.geometry.position);
-        [p.x, p.y, p.z, 0.0]
-    });
-    //82C212CC..82C213F4: clearance angle16degrees expands both sides.
-    let clearance = f32::from_bits(0x3e8e_fa35);
-    let angle0 = crate::trigonometry::acos(
-        dot(scale(up, -1.0), normalize(sub(far[0], centre))).clamp(-1.0, 1.0),
-    ) + std::f32::consts::FRAC_PI_2
-        + clearance;
-    let angle1 = std::f32::consts::TAU
-        - crate::trigonometry::acos(
-            dot(scale(up, -1.0), normalize(sub(far[1], centre))).clamp(-1.0, 1.0),
-        )
-        - std::f32::consts::FRAC_PI_2
-        - clearance;
-    let pi = std::f32::consts::PI;
-    let normal = if angle0 < angle1 && angle0 < pi && angle1 > pi {
-        up
-    } else {
-        let angle = if angle0 < angle1 {
-            if (pi - angle0).abs() < (pi - angle1).abs() {
-                angle0
-            } else {
-                angle1
-            }
-        } else {
-            (angle0 + angle1) * 0.5
-        };
-        rotate(direction, scale(up, -1.0), angle)
-    };
-    Ok(Some(GrindSurface {
-        evidence: GrindSurfaceEvidence { kind, side },
-        normal,
-        far_points: far,
-    }))
-}
-
-///82C1E220 constructs a half-angle quaternion and rotates the supplied vector.
-fn rotate(axis: Vector, value: Vector, angle: f32) -> Vector {
-    let (sin, cos) = crate::trigonometry::sin_cos(angle * 0.5);
-    let q = scale(axis, sin);
-    madd(cross(q, madd(value, cos, cross(q, value))), 2.0, value)
-}
-fn xyz(v: Vector) -> Vector3 {
-    Vector3::new(v[0], v[1], v[2])
+    pub center: V,
+    pub far_points: [V; 2],
+    pub upmost_normal: V,
+    pub direction: V,
+    pub high_side: V,
+    pub normal_limits: [f32; 2],
+    pub kind: GeometryType,
+    pub audio_surface: u32,
+    pub physics_surface: u32,
+    /// Native output +116. Preserve unnamed bits, rather than invent meaning.
+    pub flags: u32,
+    /// 82C21828 evaluated from the geometric limits; distinct from +48 upmost.
+    pub tilted_upmost_normal: V,
 }
 
 impl GrindSurface {
-    ///82C21930's three angular reference directions for GrindAirAdjust.
-    pub fn air_limits(
-        &self,
-        start: Vector,
-        end: Vector,
-        point: Vector,
-        board_position: Vector,
-    ) -> [Vector; 3] {
-        let rail = normalize(sub(end, start));
-        let up = normalize(cross(rail, cross(UP, rail)));
-        let side = cross(up, rail);
-        if self.evidence.kind == 0 {
-            let sign = if dot(side, sub(board_position, point)) > 0.0 {
-                1.0
-            } else {
-                -1.0
-            };
-            let oriented = scale(side, sign);
-            let axis = cross(oriented, up);
-            [
-                side,
-                rotate(axis, oriented, f32::from_bits(0x3eb2b8c3)),
-                rotate(axis, oriented, f32::from_bits(0x401a25c2)),
-            ]
-        } else {
-            let sign = if dot(side, self.evidence.side) > 0.0 {
-                1.0
-            } else {
-                -1.0
-            };
-            let axis = cross(side, up);
-            [
-                if self.evidence.kind == 1 {
-                    side
-                } else {
-                    cross(self.normal, rail)
-                },
-                rotate(
-                    scale(axis, -sign),
-                    scale(side, -sign),
-                    f32::from_bits(0x3eb2b8c3),
-                ),
-                rotate(
-                    scale(axis, sign),
-                    scale(side, sign),
-                    f32::from_bits(0x3f3ba866),
-                ),
-            ]
+    pub const INVALID: u32 = 0x8000_0000;
+    pub const CURB: u32 = 0x4000_0000;
+    pub const BLOCKED_CROSS_SECTION: u32 = 0x2000_0000;
+    pub const STAIR: u32 = 0x1000_0000;
+    pub const OPTIONAL_NORMAL_TEST: u32 = 0x0800_0000;
+    pub const OPTIONAL_DROP_TEST: u32 = 0x0400_0000;
+
+    /// 82C20C08's no-submission output; not an artificial startup blocker.
+    fn not_submitted(input: InvestigationInput) -> Self {
+        let distance = input.deck_center_to_truck;
+        let x = [1., 0., 0., 0.];
+        let z = [0., 0., 1., 0.];
+        Self {
+            center: input.reference,
+            far_points: [madd(x, distance, input.reference), sub(input.reference, scale(x, distance))],
+            upmost_normal: z,
+            direction: z,
+            high_side: z,
+            normal_limits: [0.; 2],
+            kind: GeometryType::Impossible,
+            audio_surface: 3,
+            physics_surface: 1,
+            flags: Self::INVALID,
+            tilted_upmost_normal: orientation::tilted_normal(z, z, [0.; 2]),
         }
     }
+}
+
+/// 82C20728: six fixed descriptors and the optional seventh descriptor.
+/// Returns None exactly for the native inadequate-up-vector gate.
+pub fn prepare(input: InvestigationInput) -> Option<Investigation> {
+    let delta = sub(input.end, input.start);
+    let raw_up = cross(delta, cross(UP, delta));
+    let up_length = length(raw_up);
+    let retain_normalized = |v| {
+        let square = dot(v, v);
+        let inverse = inverse_length(square);
+        let magnitude = if square == 0. { 0. } else { square * inverse };
+        if magnitude > f32::from_bits(0x3586_37bd) { scale(v, inverse) } else { v }
+    };
+    let up = retain_normalized(raw_up);
+    let direction = retain_normalized(delta);
+    if up_length < f32::from_bits(0x3727_c5ac) { return None; }
+    let projected = madd(direction, dot(sub(input.reference, input.start), direction), input.start);
+    let center = sub(input.reference, sub(input.reference, projected));
+    let side = cross(up, direction);
+    let short_up = scale(up, f32::from_bits(0x3d23_d70a));
+    let near_side = scale(side, f32::from_bits(0x3db8_51ec));
+    let far_side = scale(side, input.deck_center_to_truck);
+    let far_up = scale(up, input.deck_center_to_truck * f32::from_bits(0x3f87_ae14));
+    let raised = scale(up, f32::from_bits(0x3db8_51ec));
+    let line = |at, half, radius| Probe { start: add(at, half), end: sub(at, half), radius };
+    let mut probes = vec![
+        line(add(center, near_side), short_up, 0.),
+        line(sub(center, near_side), short_up, 0.),
+        line(add(center, far_side), far_up, 0.),
+        line(sub(center, far_side), far_up, 0.),
+        line(center, short_up, 0.),
+        line(add(center, raised), near_side, f32::from_bits(0x3a83_126f)),
+    ];
+    if let Some(start) = input.optional_probe {
+        probes.push(Probe { start, end: add(start, [0., -6., 0., 0.]), radius: 0. });
+    }
+    Some(Investigation { center, upmost_normal: up, direction, probes })
+}
+
+/// Full synchronous host equivalent of prepare/submit/wait/read/classify.
+/// The callback must provide the original nearest-hit contract and packed
+/// surface code for each probe, honoring its world-query filtering context.
+pub fn investigate<E>(
+    input: InvestigationInput,
+    mut query: impl FnMut(usize, Probe) -> Result<Option<ProbeHit>, E>,
+) -> Result<GrindSurface, E> {
+    let Some(plan) = prepare(input) else { return Ok(GrindSurface::not_submitted(input)); };
+    let mut hits = [None; 7];
+    for (index, &probe) in plan.probes.iter().enumerate() {
+        hits[index] = query(index, probe)?;
+    }
+    Ok(classify::resolve(&plan, &hits, 0))
+}
+
+/// Explicit result processing also permits a native-style reused output flag
+/// word. Bit29 is set on obstruction, not cleared on the other native branch.
+pub fn resolve(plan: &Investigation, hits: &[Option<ProbeHit>; 7], previous_flags: u32) -> GrindSurface {
+    classify::resolve(plan, hits, previous_flags)
 }

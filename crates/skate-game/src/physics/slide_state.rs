@@ -62,11 +62,5 @@ pub(crate) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
     super::input_phase::update_ground(physics, skater)?;
     update::board(physics, skater)
 }
-/// Fill82D3B010 writes only State84. Common output publication owns other fields.
-pub(crate) fn fill(_physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
-    skater.player_input.physical.state.signed_ground_step_84 =
-        u8::from(skater.slide_state.state.wall_riding);
-    Ok(())
-}
 // Post vtable+40 is the same82D387A8 as Ground. The shared coordinator invokes
 // Wipeout::check_ground with the actual complete solved Observations once.

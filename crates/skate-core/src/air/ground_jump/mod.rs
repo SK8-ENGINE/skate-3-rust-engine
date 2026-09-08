@@ -14,7 +14,8 @@ pub fn calculate(
     mode: GroundJumpMode,
     s: &GroundJumpSettings,
 ) -> GroundJump {
-    if input.flags_2468 & 0x0040_0000 == 0 {
+    let hippy = input.flags_2480 & 0x0000_1000 != 0;
+    if input.flags_2468 & 0x0040_0000 == 0 && !hippy {
         return GroundJump::default();
     }
     let normal = input.filtered_ground_normal;
@@ -32,7 +33,9 @@ pub fn calculate(
         value[1] += 1.0;
         value
     } else {
-        let minimum = if input.flags_2484 & 0x800 != 0 {
+        let minimum = if hippy {
+            s.hippy_minimum_height
+        } else if input.flags_2484 & 0x800 != 0 {
             mode.minimum_height_64
         } else {
             mode.minimum_height_68
@@ -43,7 +46,8 @@ pub fn calculate(
             s.absolute_minimum_height,
         );
         let high = s.maximum_height_vs_speed.evaluate(speed_fraction).mul_add(
-            mode.maximum_height - s.absolute_minimum_height,
+            if hippy { s.hippy_maximum_height } else { mode.maximum_height }
+                - s.absolute_minimum_height,
             s.absolute_minimum_height,
         );
         let height = low.mul_add(1.0 - input.jump_strength, high * input.jump_strength);

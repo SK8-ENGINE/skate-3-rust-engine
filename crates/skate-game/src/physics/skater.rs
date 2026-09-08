@@ -8,7 +8,7 @@ use super::{
     foot_ik::FootIk,
     foot_physical_output::FootPhysicalOutputs,
     ground_runtime::{GroundRuntime, GroundSettings, GroundState},
-    player_input::{NoGrindEdges, PlayerInputRuntime},
+    player_input::PlayerInputRuntime,
     skeleton_body,
     skeleton_input_runtime::SkeletonInputRuntime,
     skeleton_output::SkeletonOutput,
@@ -41,11 +41,16 @@ pub(crate) struct SkaterRuntime {
     pub air_state: skate_core::air::state::PhysicsAirState,
     pub air_settings: super::air_phase::AirSettings,
     pub known_air: super::known_air::KnownAir,
+    pub biped_air: super::biped_air::BipedAir,
+    pub landing_on_deck: super::landing_on_deck::Runtime,
+    pub landing_deck: super::offboard::landing_deck::Owner,
     pub ground_animation: super::ground_animation::GroundAnimationRuntime,
     pub ground_animation_settings: super::ground_animation::GroundAnimationSettings,
     pub revert_state: super::revert_state::RevertState,
     pub slide_state: super::slide_state::SlideState,
     pub trajectory: super::air_trajectory::AirTrajectoryRuntime,
+    pub grind_camera: super::grind_camera::GrindCamera,
+    pub grind: super::grind::Runtime,
     pub footplant: super::footplant::Footplant,
     pub boneless: super::boneless::Boneless,
     pub handplant: super::handplant::Handplant,
@@ -53,7 +58,6 @@ pub(crate) struct SkaterRuntime {
     pub wipeout_state: super::wipeout_states::WipeoutState,
     pub respawn: super::respawn::Runtime,
     pub teleport_state: super::teleport_state::Runtime,
-    pub offboard: super::offboard::runtime::Runtime,
     pub skeleton: SkeletonBody,
     pub skeleton_joints: SkeletonJoints,
     pub skeleton_drives: SkeletonDrives,
@@ -61,8 +65,8 @@ pub(crate) struct SkaterRuntime {
     pub collision_feedback: skate_core::physics::skeleton_body::SkeletonCollisionFeedback,
     pub pose_errors: skate_core::physics::skeleton_body::SkeletonPoseErrors,
     pub collision_pose_error: [f32; 4],
-    ///Skeleton16288/16304, published by the completed collision response.
-    pub collision_extra_displacements: [[f32; 4]; 2],
+    /// Skeleton16288/16304, retained by the post-solver response producer.
+    pub collision_extra_errors: [[f32; 4]; 2],
     ///Skeleton16384 is published by the completed pose-error response. Wipeout
     ///runs after that publication; no fabricated pre-solve measurement exists.
     pub collision_maximum_error: Option<f32>,
@@ -74,9 +78,14 @@ pub(crate) struct SkaterRuntime {
     pub skeleton_input: SkeletonInputRuntime,
     pub ground: GroundState,
     pub ground_runtime: GroundRuntime,
-    pub ground_settings: std::sync::Arc<GroundSettings>,
     pub ground_profiles: super::ground_runtime::GroundProfiles,
+    pub ground_settings: std::sync::Arc<GroundSettings>,
     pub ground_lifecycle: super::ground_phase::GroundLifecycle,
+    pub biped_ground: super::biped_ground::Owner,
+    pub offboard_contact: super::offboard::contact_toolkit::Owner,
+    pub offboard_air_selector: super::offboard::air_selector::AirSelector,
+    pub offboard_feet: skate_core::player::offboard::board_possession::manager::State,
+    pub offboard_grab: super::biped_ground::grab_runtime::Owner,
     pub animation_input: AnimationInput,
     pub animation_feedback: AnimationFeedback,
     pub physical_feedback: skate_core::animation::physical_feedback::PhysicalFeedback,
@@ -84,6 +93,8 @@ pub(crate) struct SkaterRuntime {
     pub landing_quality_settings: skate_core::animation::landing_quality::Settings,
     pub skeleton_output: SkeletonOutput,
     pub skateboard_controller: super::skateboard_controller::SkateboardController,
+    pub board_possession: super::offboard::board_manager::Owner,
+    pub board_possession_live: super::offboard::board_manager::runtime::LiveState,
 }
 
 impl SkaterRuntime {
@@ -106,9 +117,8 @@ impl SkaterRuntime {
         source: Option<std::sync::Arc<crate::skater_animation::AnimationSource>>,
     ) -> Result<Self, String> {
         let data = Collections::load(asset_root)?;
-        let ground_profiles = super::ground_runtime::GroundProfiles::load(&data)?;
-        let mode_index = crate::difficulty::NATIVE_MODES.iter().position(|m| *m == mode)
-            .ok_or_else(|| format!("Invalid skater mode {mode}"))? as u32;
+        let banks = skate_data::animation_banks::AnimationBanks::load(asset_root)?;
+        let animation_metadata = banks.metadata()?;
         // The host's current character is a custom skater with no pro selector
         // or equipped physical hat. These are profile choices, not force values.
         let mut animation = match source {
@@ -116,7 +126,6 @@ impl SkaterRuntime {
             None => SkaterAnimation::load(asset_root, &data, graphs, b"")?,
         };
         let initial_hierarchy = animation.evaluate_initial_pose()?;
-        let offboard = super::offboard::runtime::Runtime::load(&data, animation.motion.animation.metadata())?;
         let mut animated_skeleton =
             AnimatedSkeleton::load(asset_root, &data, &animation.evaluator.frames, false)?;
         let initial_parts = map_animation_parts(
@@ -198,14 +207,24 @@ impl SkaterRuntime {
             false,
         )?;
         let wipeout_state = super::wipeout_states::WipeoutState::load(
-            &data, asset_root, &animation.evaluator.frames.source_sha256,
+            &data,
+            asset_root,
+            &animation.evaluator.frames.source_sha256,
         )?;
         let respawn = super::respawn::Runtime::load(&data, spawn, animation.checkpoint_stance())?;
+        let mut trajectory = super::air_trajectory::AirTrajectoryRuntime::load(&data)?;
+        trajectory.bind_grind_world(std::sync::Arc::clone(&physics.grind_world));
+        let mut skeleton_input = SkeletonInputRuntime::load(&data)?;
+        skeleton_input.drive_frames = initial_parts;
+        skeleton_input.extra_target_positions = [
+            initial_targets.com,
+            initial_targets.lifted_com,
+            initial_targets.following_com,
+        ];
         Ok(Self {
             respawn,
             scoring: crate::scoring_runtime::Runtime::load(&data)?,
             climbing: super::climbing::Runtime::load(asset_root, &animation.evaluator.frames.bone_names)?,
-            offboard,
             render_pose: initial_hierarchy,
             pose_generation: 0,
             centre_of_mass_filter: Default::default(),
@@ -224,19 +243,27 @@ impl SkaterRuntime {
             air_state: Default::default(),
             air_settings: super::air_phase::AirSettings::load(&data)?,
             known_air: super::known_air::KnownAir::load(&data)?,
+            biped_air: super::biped_air::BipedAir::load(&data)?,
+            landing_on_deck: super::landing_on_deck::Runtime::load(&data)?,
+            landing_deck: super::offboard::landing_deck::Owner::load(&data)?,
             ground_animation: Default::default(),
             ground_animation_settings: super::ground_animation::GroundAnimationSettings::load(&data)?,
             revert_state: super::revert_state::RevertState::load(&data)?,
             slide_state: super::slide_state::SlideState::load(&data)?,
-            trajectory: super::air_trajectory::AirTrajectoryRuntime::load(&data)?,
+            trajectory,
+            grind_camera: super::grind_camera::GrindCamera::default(),
+            grind: super::grind::Runtime::load(&data)?,
             footplant: super::footplant::Footplant::load(&data)?,
             boneless: super::boneless::Boneless::load(&data)?,
             handplant: super::handplant::Handplant::load(&data)?,
             wipeout: super::wipeout::Wipeout::load(&data)?,
             wipeout_state,
-            teleport_state: super::teleport_state::Runtime::new(super::teleport_state::Checkpoint {
-                transform: spawn, on_board: true,
-            }),
+            teleport_state: super::teleport_state::Runtime::new(
+                super::teleport_state::Checkpoint {
+                    transform: spawn,
+                    on_board: true,
+                },
+            ),
             skeleton,
             skeleton_joints,
             skeleton_drives,
@@ -251,33 +278,35 @@ impl SkaterRuntime {
                 ..Default::default()
             },
             collision_pose_error: [0.0; 4],
-            collision_extra_displacements: [[0.0; 4]; 2],
+            collision_extra_errors: [[0.0; 4]; 2],
             collision_maximum_error: None,
             solved_drives: None,
             foot_ik,
             foot_physical: FootPhysicalOutputs::load(&data)?,
-            player_input: PlayerInputRuntime::load(&data, NoGrindEdges)?,
+            player_input: PlayerInputRuntime::load(&data)?,
             player_state: super::player_state::PlayerState::load(&data, mode)?,
-            skeleton_input: SkeletonInputRuntime {
-                grind_air_settings: Some(SkeletonInputRuntime::load_grind_settings(&data)?),
-                drive_frames: initial_parts,
-                extra_target_positions: [
-                    initial_targets.com,
-                    initial_targets.lifted_com,
-                    initial_targets.following_com,
-                ],
-                ..Default::default()
-            },
+            skeleton_input,
             ground: GroundState::load(&data, mode, true)?,
             ground_runtime: GroundRuntime::load(&data)?,
-            ground_settings: ground_profiles.select(mode_index, 1)?,
-            ground_profiles,
+            ground_profiles: super::ground_runtime::GroundProfiles::load(&data)?,
+            ground_settings: std::sync::Arc::new(GroundSettings::load(&data, mode, "smooth")?),
             ground_lifecycle: super::ground_phase::GroundLifecycle::new(),
+            biped_ground: super::biped_ground::Owner::load(&data, &animation_metadata)?,
+            offboard_contact: Default::default(),
+            offboard_air_selector: super::offboard::air_selector::AirSelector::new(
+                super::offboard::air_selector::Settings::load(&data)?,
+            ),
+            offboard_feet: Default::default(),
+            offboard_grab: Default::default(),
             animation_input,
             animation_feedback: AnimationFeedback::load(&data)?,
             physical_feedback: super::animation_phase::initial_feedback(),
             skeleton_output,
             skateboard_controller: super::skateboard_controller::SkateboardController::new(),
+            board_possession: super::offboard::board_manager::Owner::load(&data)?,
+            board_possession_live: super::offboard::board_manager::runtime::LiveState::load(
+                &data, physics,
+            )?,
         })
     }
 }

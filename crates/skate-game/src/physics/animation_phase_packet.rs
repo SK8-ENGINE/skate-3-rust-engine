@@ -1,12 +1,9 @@
 //! Owned PlayerInput packet storage; original actor publication825937EC.
 use skate_core::{
-    animation::{
-        output::{
-            actor_packet::ExternalPhysicsInput,
-            packet_reset::{AdditionalResetFields, RESET_POSE},
-            physics_packet::PhysicsPosePacket,
-        },
-        physical_feedback::PhysicalFeedback,
+    animation::output::{
+        actor_packet::ExternalPhysicsInput,
+        packet_reset::{AdditionalResetFields, RESET_POSE},
+        physics_packet::PhysicsPosePacket,
     },
     input::animation_packet::AnimationPacketFields,
     player::input_phase::AnimationInputPacket,
@@ -68,8 +65,6 @@ impl AnimationProfile {
 }
 
 pub(crate) struct AnimationPhaseOutput {
-    /// Camera reuses this result; never run the conditioner a second time.
-    pub feedback: PhysicalFeedback,
     pub(super) reset: AdditionalResetFields,
     publication: AnimationPacketFields,
     external: ExternalPhysicsInput,
@@ -79,9 +74,8 @@ pub(crate) struct AnimationPhaseOutput {
     // Actor825938FC/393C consumes these request bits after publication.
 }
 impl AnimationPhaseOutput {
-    pub(super) fn new(feedback: PhysicalFeedback) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            feedback,
             //Reserved storage: native reset writes every field before use.
             reset: AdditionalResetFields {
                 compression: 0.0,
@@ -163,7 +157,8 @@ impl AnimationPhaseOutput {
     }
     ///Actor825926F8 reply ->10704/10768/10784, then82DB5BE0 maps physical input.
     pub(super) fn publish_external_reset(
-        &mut self, reply: skate_core::animation::output::actor_packet::ExternalReset,
+        &mut self,
+        reply: skate_core::animation::output::actor_packet::ExternalReset,
     ) {
         self.publication.matrix_10704 = reply.transform;
         self.publication.byte_10768 = reply.byte64;

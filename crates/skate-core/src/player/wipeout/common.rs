@@ -17,7 +17,7 @@ fn selected_max(a: f32, b: f32) -> f32 {
     }
 }
 ///82BD88A0 reads unweighted regional forces in this exact pair order.
-pub fn force(frame: &Frame, body: f32, arms: f32) -> bool {
+pub(crate) fn force(frame: &Frame, body: f32, arms: f32) -> bool {
     let f = frame.regions_force;
     let a = selected_max(f[0], f[1]);
     let b = selected_max(f[5], f[4]);

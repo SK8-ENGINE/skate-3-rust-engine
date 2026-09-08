@@ -30,3 +30,21 @@ fn given_stance_retains_lower_flags_and_consumes_request() {
         assert_eq!(request, 0);
     }
 }
+
+#[test]
+fn playback_reset_preserves_unrelated_flags_and_resets_only_meaningful_request_words() {
+    let mut flags = u32::MAX;
+    let mut mirrored = true;
+    let mut word_15320 = 17;
+    skater_flags(&mut flags, &mut mirrored, &mut word_15320);
+    assert_eq!(flags, 0x0ff7_ffff);
+    assert!(!mirrored);
+    assert_eq!(word_15320, 0);
+    // The local-player bit controls later animation culling and must survive.
+    assert_ne!(flags & 0x0800_0000, 0);
+    let mut request = [u32::MAX; 4];
+    let mut active = true;
+    motion_request(&mut request, &mut active);
+    assert_eq!(request, [0, 0x3e4c_cccd, 0, 0]);
+    assert!(!active);
+}

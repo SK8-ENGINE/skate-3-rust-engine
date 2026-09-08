@@ -113,7 +113,18 @@ pub(super) fn board(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
         launch.player_jumped = true;
         let input = super::super::air_phase::selector_input(physics, skater)?;
         skater.trajectory.launch(launch, input, &physics.world)?;
-        skater.trajectory.update(input, &physics.world)?;
+        let grind_context = super::super::air_trajectory::GrindContext::from_processed(
+            &skater.player_input.processed,
+            skater
+                .player_input
+                .toolkit
+                .as_ref()
+                .ok_or("Slide trajectory requires current board toolkit")?
+                .deck[3],
+        );
+        skater
+            .trajectory
+            .update(input, &physics.world, grind_context)?;
         //82D3AB10 branches directly to the epilogue. No ordinary force tail.
         return Ok(());
     }

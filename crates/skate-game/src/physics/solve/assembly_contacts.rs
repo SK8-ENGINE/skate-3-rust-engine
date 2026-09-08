@@ -16,28 +16,25 @@ pub(super) fn append(
     board_group: u32,
     collision: &SkeletonCollisionMode,
 ) -> Result<(), String> {
-    //82765EF0 initializes the single-player (Island flags3) group bitmap.
-    //Rows1/2/3 are culled except2/3 against0;4<->5 is always culled.
-    //Its later extra4..7 exclusions run only for the online/non3 branch.
-    if board_group > 7 || collision.assembly_group > 7 {
-        return Err("Skater assembly collision requires its original group-table extension".into());
-    }
+    //8277AF90 first culls the assembly pair;8277A6C0 then culls each
+    //primitive pair using its part group, not Volume84's world-query group.
+    if board_group >= 21
+        || collision.assembly_group >= 21
+        || collision.parts.iter().any(|part| part.part_group >= 21)
     {
+        return Err("Skater collision group is outside the original21x21 table".into());
+    }
+    if group_pair_allowed(board_group, collision.assembly_group) {
         for a in board {
             for b in rider {
                 let CollisionBody::Attached(part) = b.body else {
                     unreachable!()
                 };
-                // The per-part group is independently assigned in Biped mode:
-                // hands5, legs17, torso18 and the two controller capsules20.
-                // Using assembly6 here makes the carried board collide with
-                // its own hand drive and the capsules that feed root correction.
+                //82DC3BD0/82DC4260 copy Part92 into VolumeData212
+                //(assembly96 + volume212 = assembly308). Skate2's
+                //82E0B690 names this producer part.m_userData. Biped assigns
+                //hands5, legs17, torso18 and controller capsules20.
                 if !group_pair_allowed(board_group, collision.parts[part].part_group) {
-                    continue;
-                }
-                //Serialized volume+212 is source Volume+84 group.
-                //Stock board child constructors leave that field zero.
-                if !group_pair_allowed(0, collision.parts[part].volume_group) {
                     continue;
                 }
                 append_pair(contacts, a, b);
@@ -64,16 +61,21 @@ pub(super) fn append(
 }
 
 fn group_pair_allowed(a: u32, b: u32) -> bool {
-    // Single-player21x21 bitmap constructed by82765EF0 through the
-    // Island.flags==3 branch. One allowed bit per column, inverted from the
-    // native culling bits. Keep special Biped groups instead of truncating to8.
+    //82765EF0..827679AC, Island.flags==3: inverted native culling bits.
+    //Skate2 827B8C10 has19 groups and different pairs; do not import it.
     const ALLOWED: [u32; 21] = [
-        0x1876fd, 0, 0x120001, 1, 0x79d1, 0x1079e1, 0x1079f1,
-        0x279f1, 0x1676f0, 0x7101, 0x5101, 0x1008f0, 0x1d77f1,
-        0x233f1, 0xa57f1, 0, 0x1000, 0x6184, 0x1100, 0x5001, 0x1965,
+        0x1876fd, 0, 0x120001, 1, 0x79d1, 0x1079e1, 0x1079f1, 0x279f1, 0x1676f0, 0x7101, 0x5101,
+        0x1008f0, 0x1d77f1, 0x233f1, 0xa57f1, 0, 0x1000, 0x6184, 0x1100, 0x5001, 0x1965,
     ];
-    b < 21 && ALLOWED.get(a as usize).is_some_and(|row| row & (1 << b) != 0)
+    b < 21
+        && ALLOWED
+            .get(a as usize)
+            .is_some_and(|row| row & (1 << b) != 0)
 }
+
+#[cfg(test)]
+#[path = "assembly_contacts_tests.rs"]
+mod tests;
 
 pub(super) fn append_pair(contacts: &mut Vec<BoardCollision>, a: &BoardWorldVolume, b: &BoardWorldVolume) {
     //8277B0F0 and8277B2C0 enter the same8277A508 primitive walker with

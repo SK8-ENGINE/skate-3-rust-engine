@@ -54,12 +54,6 @@ impl SkeletonLineTests {
         player.left_line_test_1536 = fields(self.feet[0]);
         player.right_line_test_1584 = fields(self.feet[1]);
     }
-
-    /// These observations become Processed960/1008. SkeletonIK retains its
-    ///own previous query and consumes it before importing this pair.
-    pub fn foot_contacts(&self) -> [Option<[f32; 4]>; 2] {
-        self.feet.map(|foot| foot.hit.then_some(foot.position))
-    }
 }
 
 pub(crate) fn query(world: &BoardWorld, body: &SkeletonBody) -> Result<SkeletonLineTests, String> {

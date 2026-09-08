@@ -40,9 +40,11 @@ impl ActionCondition {
                 target: None,
                 numeric: super::condition_nodes::numeric(a),
             },
-            "IsGrabbingObject" | "IsHandPlanting" | "IsFootPlanting" => Self::Physical(GameplayCondition::parse(a)?),
-            "IsTricking" => Self::Tricking,
+            "IsGrabbingObject" | "IsHandPlanting" | "IsFootPlanting" => {
+                Self::Physical(GameplayCondition::parse(a)?)
+            }
             "IsDroppingIn" => Self::DroppingIn,
+            "IsTricking" => Self::Tricking,
             "IsInLocomotion" => Self::InLocomotion,
             "DisableDismount" => Self::DisableDismount,
             "TimeToLand" => Self::TimeToLand(super::condition_nodes::numeric(a)),
@@ -51,15 +53,6 @@ impl ActionCondition {
     }
     pub fn evaluate(&self, host: &ActionHost, frame: &Frame) -> Result<bool, String> {
         Ok(match self {
-            Self::DroppingIn => host.dropping_in
-                .ok_or("IsDroppingIn requires physical grind publication")?,
-            // Same native physical leaf used by MotionGraph::TimeToLand.
-            Self::TimeToLand(numeric) => numeric.matches(
-                host.gameplay_conditions
-                    .as_ref()
-                    .ok_or("TimeToLand requires physical condition publication")?
-                    .time_to_land,
-            ),
             Self::Gesture(group) => group.has_intent(|name| host.action_intents.contains_key(name)),
             Self::AnimationAttribute {
                 name,
@@ -82,19 +75,18 @@ impl ActionCondition {
                 )
                 .ok_or("Condition is not a physical-only original leaf")?,
             //82BA56B8 uses specific MotionGraph virtual100=8258F8D8 bit27.
+            Self::DroppingIn => host.dropping_in.ok_or("IsDroppingIn requires completed grind output")?,
             Self::Tricking => host
                 .is_tricking
                 .ok_or("IsTricking requires actual MotionGraph flag27")?,
             //Factory82BC3F68 installs8231ED5C; virtual48=8274CA90 is li r3,0;blr.
             Self::InLocomotion => false,
-            Self::DisableDismount => {
-                //82BA5368:822F8C9C > Ground80.Y OR Skeleton598.
-                let p = host
-                    .condition_inputs
-                    .push_brake
-                    .as_ref()
-                    .ok_or("DisableDismount requires actual ground axis and skeleton598")?;
-                f32::from_bits(0x3f23d70a) > p.ground_axis_y || p.skeleton_disables_push_brake
+            Self::DisableDismount => super::motion_dismount::Condition
+                .evaluate(host.condition_inputs.push_brake.as_ref())?,
+            Self::TimeToLand(numeric) => {
+                let p = host.gameplay_conditions.as_ref()
+                    .ok_or("ActionGraph TimeToLand requires actual physical condition outputs")?;
+                p.time_to_land_valid && numeric.matches(p.time_to_land)
             }
         })
     }

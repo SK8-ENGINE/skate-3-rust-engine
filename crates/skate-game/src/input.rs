@@ -65,3 +65,6 @@ fn publish_actions(
     input.publish_actions();
     published.0 = input.tick_input();
 }
+
+#[cfg(test)]
+pub(crate) mod manual_replay;

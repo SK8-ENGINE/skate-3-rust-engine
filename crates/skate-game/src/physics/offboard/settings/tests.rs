@@ -85,7 +85,4 @@ fn actual_stock_settings_and_metrics_load_together() {
     });
     assert!(speeds[0] > 0.0 && speeds[0] < speeds[1] && speeds[1] < speeds[2]);
     assert_eq!(settings.controller.movement_intent.sprint_time_cap, 4.0);
-    //Independent native lookup8 keys:893DA1B966231D76 /6CFF6F2C43F0AD41.
-    assert_eq!(settings.possession.hide_distance, 30.0);
-    assert_eq!(settings.possession.hide_offset, 1000.0);
 }

@@ -2,7 +2,7 @@
 //! preparation is performed here; the two callbacks address the shared
 //! skeleton/whole-player owners that cannot be borrowed twice by the host.
 use super::{
-    grind::{GrindInputState, NoGrindEdges},
+    grind::{GrindInputState, Pending},
     pre_input::PreInputManager,
 };
 use crate::physics::ground_runtime::GroundRuntime;
@@ -31,6 +31,15 @@ pub(crate) struct InputHostFrame {
 }
 
 pub(crate) trait PlayerInputCallbacks {
+    fn prepare_grind(
+        &mut self,
+        board: &mut BoardRuntime,
+        grind: &mut GrindInputState,
+        processed: &ProcessedPhysicsInput,
+        world: &skate_core::physics::board_world::BoardWorld,
+        provider: &crate::grind_world::StaticProvider,
+        air_counter: i32,
+    ) -> Result<Pending, String>;
     fn process_skeleton(
         &mut self,
         board: &mut BoardRuntime,
@@ -61,7 +70,9 @@ pub(super) struct Services<'a, C> {
     pub callbacks: &'a mut C,
     pub pre_input: &'a mut PreInputManager,
     pub grind: &'a mut GrindInputState,
-    pub world_edges: NoGrindEdges,
+    pub world_edges: &'a crate::grind_world::StaticProvider,
+    pub world: &'a skate_core::physics::board_world::BoardWorld,
+    pub pending_grind: &'a mut Option<Pending>,
     pub toolkit: &'a mut Option<BoardToolkit>,
     pub pending_teleport: &'a mut Option<AnimationPartTransform>,
 }
@@ -149,7 +160,10 @@ impl<C: PlayerInputCallbacks> InputPhaseServices for Services<'_, C> {
         _physical: &mut PhysicalPlayerInput,
         output: &mut ProcessedPhysicsInput,
     ) -> Result<(), String> {
-        *self.toolkit = Some(self.ground.prepare_toolkit(self.board, output));
+        let toolkit = self.ground.prepare_toolkit(self.board, output);
+        //82C01744 publishes this during toolkit preparation, not PhysOut fill.
+        output.scalar_2616 = toolkit.absolute_speed;
+        *self.toolkit = Some(toolkit);
         Ok(())
     }
     fn process_skeleton_82bd8918(
@@ -171,7 +185,17 @@ impl<C: PlayerInputCallbacks> InputPhaseServices for Services<'_, C> {
         _physical: &mut PhysicalPlayerInput,
         output: &mut ProcessedPhysicsInput,
     ) -> Result<(), String> {
-        self.grind
-            .update(self.world_edges, output, self.host.air_counter_40)
+        if self.pending_grind.is_some() {
+            return Err("Previous grind input was not consumed by PostInput".into());
+        }
+        *self.pending_grind = Some(self.callbacks.prepare_grind(
+            self.board,
+            self.grind,
+            output,
+            self.world,
+            self.world_edges,
+            self.host.air_counter_40,
+        )?);
+        Ok(())
     }
 }

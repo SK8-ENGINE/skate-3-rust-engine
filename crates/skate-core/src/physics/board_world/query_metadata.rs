@@ -74,7 +74,7 @@ impl Bounds {
             && p.z >= self.min.z
             && p.z <= self.max.z
     }
-    fn valid(self) -> bool {
+    pub(super) fn valid(self) -> bool {
         finite(self.min)
             && finite(self.max)
             && self.min.x <= self.max.x
@@ -97,6 +97,11 @@ pub struct QueryMesh {
     pub world_to_local: RetailAffineTransform,
     pub local_bounds: Bounds,
     pub matching_group: i32,
+    /// S3 mesh184: trajectory rejection mask, separate from surface/material.
+    pub rejection_flags: u32,
+    /// S3 mesh176 support/body identity; static registration uses0. This is
+    /// separate from the host metadata index and authored mesh/unit names.
+    pub geometry: u32,
     pub pool: QueryPool,
 }
 

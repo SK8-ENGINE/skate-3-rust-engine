@@ -60,10 +60,11 @@ pub(crate) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         p.flags_2468,
         skater.animation_input.fields.balance,
         p.flags_2476 & 0x4000_0000 != 0,
+        p,
         heading,
     );
     skeleton::advance(physics, skater)?;
-    skater.ground_lifecycle.skeleton_ground_16388 = true;
+    skater.skeleton_output.correction.pending = true;
     board::advance(physics, skater)
 }
 pub(crate) fn exit(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {

@@ -1,6 +1,7 @@
 //! Concrete original Skate3 player input phase for the authored riding world.
 mod dynamic_normal;
-mod grind;
+pub(crate) mod grind;
+mod grind_output;
 mod ground_position;
 mod initial;
 mod output_reset;
@@ -8,7 +9,6 @@ mod pre_input;
 mod reset;
 mod services;
 use super::{ground_runtime::GroundRuntime, riding_outputs::RidingOutputs};
-pub(crate) use grind::NoGrindEdges;
 pub(crate) use output_reset::reset_outputs;
 pub(crate) use services::{InputHostFrame, PlayerInputCallbacks};
 use skate_core::{
@@ -39,10 +39,23 @@ pub(crate) struct PlayerInputRuntime {
     pub pre_input: pre_input::PreInputManager,
     pub grind: grind::GrindInputState,
     pending_teleport: Option<AnimationPartTransform>,
-    world_edges: NoGrindEdges,
+    pub pending_grind: Option<grind::Pending>,
+    pub grind_observation: Option<super::grind::ManagerObservation>,
 }
 impl PlayerInputRuntime {
-    pub fn load(data: &Collections, world_edges: NoGrindEdges) -> Result<Self, String> {
+    pub fn pending_teleport(&self) -> Option<AnimationPartTransform> {
+        self.pending_teleport
+    }
+
+    pub fn request_teleport(&mut self, target: AnimationPartTransform) -> Result<(), String> {
+        if self.pending_teleport.is_some() {
+            return Err("A pending teleport must complete before replacement".into());
+        }
+        self.pending_teleport = Some(target);
+        Ok(())
+    }
+
+    pub fn load(data: &Collections) -> Result<Self, String> {
         let mut physical = PhysicalPlayerInput::default();
         reset_outputs(&mut physical);
         let mut processed = ProcessedPhysicsInput::default();
@@ -57,35 +70,21 @@ impl PlayerInputRuntime {
             pre_input: pre_input::PreInputManager::new(),
             grind: grind::GrindInputState::load(data)?,
             pending_teleport: None,
-            world_edges,
+            pending_grind: None,
+            grind_observation: None,
         })
     }
-    pub fn request_teleport(&mut self, target: AnimationPartTransform) -> Result<(), String> {
-        if self.pending_teleport.is_some() {
-            return Err("A pending teleport must complete before replacement".into());
-        }
-        self.pending_teleport = Some(target);
-        Ok(())
-    }
-    pub fn pending_teleport(&self) -> Option<AnimationPartTransform> {
-        self.pending_teleport
-    }
-    pub fn processed_snapshot(&self, tick: u64) -> skate_core::player::input_phase::ProcessedPhysicsSnapshot {
+    pub fn processed_snapshot(
+        &self,
+        tick: u64,
+    ) -> skate_core::player::input_phase::ProcessedPhysicsSnapshot {
         skate_core::player::input_phase::ProcessedPhysicsSnapshot::new(tick, self.processed)
     }
     ///Run after the current board/contact solve, before ProcessOutput publishes.
-    pub fn update_dynamic_normal(
-        &mut self,
-        board: &BoardRuntime,
-        riding: &RidingOutputs,
-        gravity: Vector3,
-        dt: f32,
-    ) {
+    pub fn update_dynamic_normal(&mut self, riding: &RidingOutputs, gravity: Vector3) {
         self.dynamic_normal.update(
-            board,
             &riding.ground,
             gravity,
-            dt,
             self.processed.scalar_2656,
             &self.normal_settings,
         );
@@ -108,6 +107,10 @@ impl PlayerInputRuntime {
                 processed_flags_2476: self.processed.flags_2476,
             },
         );
+        // Board Fill82C03318 and common ProcessOutput82DB7598.
+        let normal = riding.ground.wheel_normal;
+        self.physical.ground.vector_80 = [normal.x, normal.y, normal.z, 0.0].map(f32::to_bits);
+        self.physical.ground.flag_273 = u8::from(self.processed.flags_2468 & 0x0010_0000 != 0);
         Ok(())
     }
     pub fn process_stage<C: PlayerInputCallbacks>(
@@ -119,6 +122,8 @@ impl PlayerInputRuntime {
         host: InputHostFrame,
         callbacks: &mut C,
         stage: InputStage,
+        world: &skate_core::physics::board_world::BoardWorld,
+        world_edges: &crate::grind_world::StaticProvider,
     ) -> Result<Option<input_phase::InputContinuation>, String> {
         let mut service = services::Services {
             board,
@@ -128,19 +133,30 @@ impl PlayerInputRuntime {
             callbacks,
             pre_input: &mut self.pre_input,
             grind: &mut self.grind,
-            world_edges: self.world_edges,
+            world,
+            world_edges,
+            pending_grind: &mut self.pending_grind,
             toolkit: &mut self.toolkit,
             pending_teleport: &mut self.pending_teleport,
         };
         match stage {
             InputStage::ThroughTeleport => input_phase::start_input(
-                &mut self.player, &mut self.physical, packet,
-                &mut self.processed, &mut service,
-            ).map(Some),
+                &mut self.player,
+                &mut self.physical,
+                packet,
+                &mut self.processed,
+                &mut service,
+            )
+            .map(Some),
             InputStage::AfterTeleport(continuation) => input_phase::finish_input(
-                continuation, &mut self.player, &mut self.physical, packet,
-                &mut self.processed, &mut service,
-            ).map(|()| None),
+                continuation,
+                &mut self.player,
+                &mut self.physical,
+                packet,
+                &mut self.processed,
+                &mut service,
+            )
+            .map(|()| None),
         }
         .map_err(|e| format!("Player input: {e:?}"))
     }
@@ -159,11 +175,10 @@ mod tests {
             std::env::var_os("SKATE3_ASSET_ROOT").expect("SKATE3_ASSET_ROOT"),
         );
         let data = Collections::load(&assets).unwrap();
-        let state = PlayerInputRuntime::load(&data, NoGrindEdges).unwrap();
+        let state = PlayerInputRuntime::load(&data).unwrap();
         assert_eq!(state.player.flags_1296, 0xe00c0000);
         assert!(state.pending_teleport().is_none());
         assert_eq!(state.physical.ground.scalar_276, -1.0);
         assert_eq!(state.dynamic_normal.normal, Vector3::new(0.0, 1.0, 0.0));
     }
 }
-

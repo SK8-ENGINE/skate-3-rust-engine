@@ -20,8 +20,8 @@ impl StateSelector {
         if p.has_2476(0x8000) {
             return PhysicalStateId::BipedGround;
         }
-        //Native lbz2484 selects the high byte of the big-endian flag word.
-        if p.has_2476(0x80) && !p.has_2484(0x100_0000) {
+        //82D8B490 lbz2484 reads the high byte of the big-endian flag word.
+        if p.has_2476(0x80) && !p.has_2484(0x0100_0000) {
             return PhysicalStateId::BipedAir;
         }
         if facts.force_known_air {
@@ -73,7 +73,8 @@ impl StateSelector {
         {
             return PhysicalStateId::WipeoutGround;
         }
-        if p.has_2476(0x80) && !p.has_2484(0x100_0000) {
+        //82D8B5F0 uses the same byte load for the offboard dismount gate.
+        if p.has_2476(0x80) && !p.has_2484(0x0100_0000) {
             return PhysicalStateId::BipedAir;
         }
         if p.has_2476(0x8000) {

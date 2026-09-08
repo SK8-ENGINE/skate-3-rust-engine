@@ -2,21 +2,15 @@
 mod board;
 mod curves;
 mod metrics;
-mod possession;
 #[cfg(test)]
 mod tests;
 use skate_core::{
-    player::offboard::{controller, movement_intent, movement_velocity},
+    player::offboard::{air_launch, controller, movement_intent, movement_velocity},
     point_graph::PointGraph,
 };
 use skate_data::{animation_metadata::AnimationMetadata, collections::Collections};
 
 pub(crate) struct Settings {
-    pub air_blend_curve: PointGraph<8>,
-    pub air_query: skate_core::player::offboard::air_queries::Settings,
-    pub jump_height: f32,
-    pub jump_speed_scalar: f32,
-    pub possession: skate_core::player::offboard::board_possession::lifecycle::Settings,
     pub controller: controller::Settings,
     pub board: skate_core::player::offboard::ground_sync::BoardSettings,
     pub metrics: [Option<controller::ClipMetric>; 3],
@@ -24,6 +18,7 @@ pub(crate) struct Settings {
     pub movement_vs_stick_angle: PointGraph<8>,
     ///82D310F8 full key2DD95B399BAE313E.
     pub turn_vs_stick_angle: PointGraph<8>,
+    pub air_launch: air_launch::Settings,
 }
 impl Settings {
     /// Share the same native ABIN metadata loaded for SkaterAnimation. Required
@@ -32,32 +27,6 @@ impl Settings {
         let biped = |name| curves::load::<8>(data, "physics_biped", name);
         let (sprint_blend, bounds) = biped("Hash_6B93C51256A30FB4")?;
         Ok(Self {
-            air_blend_curve: curves::load::<8>(
-                data,
-                "physics_state_offboard_air",
-                "TrajBlendAmountVsTime",
-            )?
-            .0,
-            air_query: skate_core::player::offboard::air_queries::Settings {
-                height: data.float(
-                    "physics_state_offboard_air",
-                    "default",
-                    "Hash_AB0D9EAEBFC584E9",
-                )?,
-                sphere_radius: data.float(
-                    "physics_state_offboard_air",
-                    "default",
-                    "TrajectorySphereRadius",
-                )?,
-                start_index: data.integer(
-                    "physics_state_offboard_air",
-                    "default",
-                    "TrajectoryStartIndex",
-                )?,
-            },
-            jump_height: data.float("physics_biped", "default", "JumpHeight")?,
-            jump_speed_scalar: data.float("physics_biped", "default", "JumpSpeedScalar")?,
-            possession: possession::load(data)?,
             controller: controller::Settings {
                 movement_intent: movement_intent::Settings {
                     sprint_speed: curves::load::<4>(
@@ -94,6 +63,28 @@ impl Settings {
                 "TurnVsStickAngle",
             )?
             .0,
+            air_launch: air_launch::Settings {
+                jump_speed_scalar: data.float("physics_biped", "default", "JumpSpeedScalar")?,
+                jump_height: data.float("physics_biped", "default", "JumpHeight")?,
+            },
         })
+    }
+
+    pub(crate) fn into_controller_parts(
+        self,
+    ) -> (
+        controller::Settings,
+        [Option<controller::ClipMetric>; 3],
+        PointGraph<8>,
+        PointGraph<8>,
+        air_launch::Settings,
+    ) {
+        (
+            self.controller,
+            self.metrics,
+            self.movement_vs_stick_angle,
+            self.turn_vs_stick_angle,
+            self.air_launch,
+        )
     }
 }

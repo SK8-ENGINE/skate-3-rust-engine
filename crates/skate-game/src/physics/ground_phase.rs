@@ -5,7 +5,7 @@ use super::{
     GamePhysics,
     ground_runtime::{
         GroundEntryTargets, GroundInputObservations, GroundLaunchInfo, GroundLaunchPhysical,
-        GroundPhysicalFrame, GroundTrajectoryState, GroundUpdateFrame, GroundUpdateTargets,
+        GroundPhysicalFrame, GroundUpdateFrame, GroundUpdateTargets,
     },
     skater::SkaterRuntime,
     skeleton_controller::SkeletonControllerState,
@@ -31,16 +31,14 @@ pub(crate) struct GroundEdge {
 
 pub(crate) struct GroundLifecycle {
     pub skeleton_controller: SkeletonControllerState,
-    /// These are the actual retained Skeleton lifecycle flags, also shared
-    /// with teleport and GeneralUpdate by the coordinator.
+    /// Retained Skeleton lifecycle flag, also shared with teleport.
+    /// Skeleton16388 instead belongs solely to SkeletonOutput::correction.
     pub skeleton_elapsed_16505: bool,
-    pub skeleton_ground_16388: bool,
     pub board_animated_290: u8,
     /// Processed2724: Reset82BFA35C clears this. The original image contains
     /// no other direct scalar writer at that offset.
     pub manual_drag_2724: f32,
     pub edge: Option<GroundEdge>,
-    pub trajectory: GroundTrajectoryState<GroundLaunchInfo>,
     /// A selected wall jump is retained for its actual selector continuation.
     /// It cannot be discarded as if Ground's ordinary tail had completed.
     pub pending_wall_jump: Option<GroundLaunchInfo>,
@@ -50,17 +48,9 @@ impl GroundLifecycle {
         Self {
             skeleton_controller: SkeletonControllerState::new(),
             skeleton_elapsed_16505: false,
-            skeleton_ground_16388: false,
             board_animated_290: 0,
             manual_drag_2724: 0.0,
             edge: None,
-            trajectory: GroundTrajectoryState {
-                pending_request: None,
-                primary_valid_288: false,
-                secondary_valid_592: false,
-                result_valid_9840: false,
-                flags_12836: 0,
-            },
             pending_wall_jump: None,
         }
     }
@@ -90,6 +80,19 @@ pub(crate) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
         .toolkit
         .as_ref()
         .ok_or("Ground entry requires PlayerInput's current board toolkit")?;
+    //82D37560: full SetStandard, after SetPhysicsState's possession Stop and
+    //old-state Exit, before Ground disables the animation drives. Use retained
+    //stock materials and publish the actual collider flags, not reset defaults.
+    use skate_core::player::offboard::board_possession::lifecycle::Effects as _;
+    skater
+        .board_possession_live
+        .effects(
+            physics,
+            &mut skater.ground_lifecycle.board_animated_290,
+            skater.player_input.processed.timestep_2604,
+        )
+        .standard_board();
+    skater.board_possession_live.publish_volumes(physics);
     enter_components(
         &mut physics.board,
         &skater.player_input.processed,
@@ -197,11 +200,12 @@ pub(crate) fn advance(
         predicted[2] += delta.z;
         Ok(())
     };
+    let grind_context = super::air_trajectory::GrindContext::from_processed(&skater.player_input.processed, super::solve::deck_frame(&physics.board)[3]);
     let mut launch = |info: &GroundLaunchInfo| {
         let mut input = selector_input;
         input.board_vertical_velocity = info.velocity[1];
         skater.trajectory.launch(info.selector_launch(), input, &physics.world)?;
-        skater.trajectory.update(input, &physics.world)?;
+        skater.trajectory.update(input, &physics.world, grind_context)?;
         Ok(())
     };
     let physical = GroundPhysicalFrame {
@@ -270,10 +274,10 @@ pub(crate) fn advance(
         GroundUpdateTargets {
             foot_ik: &mut skater.foot_ik,
             skeleton_elapsed_16505: &mut life.skeleton_elapsed_16505,
-            skeleton_ground_16388: &mut life.skeleton_ground_16388,
+            board_correction_pending: &mut skater.skeleton_output.correction.pending,
             // Original830BD4A0 initializer82F825F0 splats8216DEE0=-1.
             move_future_deck: &mut move_future,
-            trajectory: &mut life.trajectory,
+            offboard_grab: &mut skater.offboard_grab,
         },
     );
     // These source writes occur during update. Publish even on a later branch
@@ -291,3 +295,7 @@ fn lanes(v: Vector3) -> [f32; 4] {
 fn xyz(v: [f32; 4]) -> Vector3 {
     Vector3::new(v[0], v[1], v[2])
 }
+
+#[cfg(test)]
+#[path = "onboard_correction_tests.rs"]
+mod correction_tests;

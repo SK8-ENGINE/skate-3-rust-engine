@@ -13,10 +13,9 @@ pub(super) fn advance(
     let p = &snapshot.input;
     let input = StateSelectionInput {
         processed: ProcessedStateInput {
-            //The retained contact owner publishes native kind and candidate384.
-            grind_type_1248: physics.grind.kind,
-            grind_candidate_1488: physics.grind.candidate.is_some(),
-            grind_investigation_flags_1516: 0,
+            grind_type_1248: p.grind.family_1248,
+            grind_candidate_1488: p.grind.valid_1488,
+            grind_investigation_flags_1516: p.grind.flags_1516,
             field_1776: p.external_physics_1616.flags as i32,
             flags_2468: p.flags_2468,
             flags_2472: p.flags_2472,

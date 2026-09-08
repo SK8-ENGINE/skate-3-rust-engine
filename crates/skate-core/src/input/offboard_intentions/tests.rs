@@ -47,6 +47,16 @@ fn physical_and_modifier_gates_block_both_but_actor_gate_only_blocks_new() {
 }
 
 #[test]
+fn y_remains_toggle_for_stock_offboard_mount_not_board_recall() {
+    //S3 listener8259A604..A6C0 has no physical-state input. The stock
+    //OffBoard/OBGround/Default graph consumes both of these for remount.
+    let output = values(toggle_words(false, 0.0), 0, false);
+    assert!(has(&output, "NewToggleOffBoardState"));
+    assert!(has(&output, "ToggleOffBoardState"));
+    assert!(!has(&output, "OB_RetrieveBoard"));
+}
+
+#[test]
 fn jump_requires_new_button_and_does_not_inherit_toggle_gates() {
     let mut words = [0; 26];
     words[13] = (1 << 23) | (1 << 29);

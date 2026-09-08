@@ -1,11 +1,13 @@
 //! Additional TU3 deck/truck contact queries and family admission leaves.
 use super::*;
+use super::admission::{Admission, EntryKind};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Contact {
     pub geometry: FiftyFiftyCandidate,
     pub front: bool,
     pub kind: u32,
+    pub entry_kind: EntryKind,
 }
 
 fn rectangle(a: V, b: V, c: V, d: V, reference: V, edges: &[Primitive]) -> Option<TruckContact> {
@@ -79,7 +81,7 @@ pub fn tip_contacts(
 fn geometry(hit: TruckContact, edge: Primitive) -> FiftyFiftyCandidate {
     let delta = sub(edge.end, edge.start);
     FiftyFiftyCandidate {
-        direction: scale(delta, dot3(delta, delta).sqrt().recip()),
+        direction: scale(delta, arithmetic::inverse_square_root(dot3(delta, delta))),
         centre: hit.position,
         front: edge.end,
         rear: edge.start,
@@ -121,13 +123,19 @@ pub fn darkslide(
     velocity: V,
     category: u32,
     low_wheel_frames: u32,
+    admission: &Admission<'_>,
 ) -> Option<Contact> {
-    let g = geometry(hit, edge);
-    if dot3(upright_normal(g.direction), scale(board[1], -1.0)) <= 0.65 {
+    let mut g = geometry(hit, edge);
+    let delta = sub(edge.end, edge.start);
+    g.direction = scale(delta, arithmetic::reciprocal(arithmetic::square_root(dot3(delta, delta))));
+    if dot3(upright_normal(g.direction), scale(board[1], -1.0)) <= 0.45 {
         return None;
     }
+    //82D8907C deliberately tests state400, even for darkslide kind5.
+    let decision = admission.test(400, g.direction, false);
+    if !decision.allowed { return None; }
     let depth = dot3(sub(board[3], hit.position), board[1]);
-    if depth * depth >= f32::from_bits(0x3b6bedfa) {
+    if dot3(scale(board[1], depth), scale(board[1], depth)) >= 0.005625 {
         return None;
     }
     if category == 100 && dot3(velocity, g.direction).abs() <= 0.75 && low_wheel_frames <= 10 {
@@ -137,6 +145,7 @@ pub fn darkslide(
         geometry: g,
         front: false,
         kind: 5,
+        entry_kind: decision.kind,
     })
 }
 
@@ -151,6 +160,7 @@ pub fn five_o(
     flags_2472: u32,
     ground_frames: u32,
     translation: f32,
+    admission: &Admission<'_>,
 ) -> Option<Contact> {
     if flags_2476 & 0x4000_0000 != 0 {
         return None;
@@ -159,14 +169,13 @@ pub fn five_o(
         hit.and_then(|hit| {
             let g = geometry(hit, edges[hit.primitive]);
             let depth = dot3(sub(board[3], hit.position), board[1]);
-            if depth * depth >= f32::from_bits(0x3c8a71de)
+            let projected = scale(board[1], depth);
+            if dot3(projected, projected) >= f32::from_bits(0x3c8a71de) { return None; }
+            let decision = admission.test(403, g.direction, true);
+            if !decision.allowed
                 || dot3(board[0], g.direction).abs() >= 0.906
-                || dot3(board[1], g.direction).abs() >= 0.46
-            {
-                None
-            } else {
-                Some(g)
-            }
+                || dot3(board[1], g.direction).abs() >= 0.46 { return None; }
+            Some((g, decision.kind))
         })
     });
     let forwards = dot3(board[2], velocity) > 0.0;
@@ -194,9 +203,10 @@ pub fn five_o(
         return None;
     };
     Some(Contact {
-        geometry: valid[index]?,
+        geometry: valid[index]?.0,
         front: index == 0,
         kind: 3,
+        entry_kind: valid[index]?.1,
     })
 }
 
@@ -213,6 +223,7 @@ pub fn tipslide(
     ground_frames: u32,
     balance: f32,
     reference_right: V,
+    admission: &Admission<'_>,
 ) -> Option<Contact> {
     if flags_2476 & 0x4000_0000 != 0 {
         return None;
@@ -220,12 +231,16 @@ pub fn tipslide(
     let front = hits[0].is_some();
     let hit = if front { hits[0]? } else { hits[1]? };
     let g = geometry(hit, edges[hit.primitive]);
-    if velocity[1] < 0.0 && category != 400 && board[3][1] <= hit.position[1] {
+    let decision = admission.test(402, g.direction, true);
+    if !decision.allowed { return None; }
+    if (decision.kind == EntryKind::DropIn || velocity[1] < 0.0 && category != 400)
+        && board[3][1] <= hit.position[1] {
         return None;
     }
     let delta = sub(board[3], hit.position);
     let depth = dot3(delta, board[1]);
-    if depth * depth >= f32::from_bits(0x3b6bedfa) {
+    let projected = scale(board[1], depth);
+    if dot3(projected, projected) >= f32::from_bits(0x3b6bedfa) {
         return None;
     }
     let perpendicular = sub(velocity, scale(g.direction, dot3(g.direction, velocity)));
@@ -245,5 +260,6 @@ pub fn tipslide(
         geometry: g,
         front,
         kind: 2,
+        entry_kind: decision.kind,
     })
 }

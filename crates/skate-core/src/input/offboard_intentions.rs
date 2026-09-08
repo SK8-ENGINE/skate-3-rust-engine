@@ -55,6 +55,8 @@ pub fn produce_discrete(
     emit("OB_AirBodyTweakY", right_y);
 
     //8259A604..A6C0 computes both;8259AF80 gates only NewToggle by actor bit10.
+    //The listener has no biped/category gate. Stock OffBoard AG maps these
+    //same toggle intentions to OB_Mount/OB_MountRaw; trigger edges recall.
     if !air_reckoning_active && !held(29) && held(22) {
         //Native bge does not take the branch for unordered timer values.
         if (rising(22) || !(axis(23) >= f32::from_bits(0x3cf5_c28f)))
@@ -87,14 +89,6 @@ pub fn produce_analog(
 ) -> [OffboardIntent; 4] {
     let words = controller.words();
     let stick = [f32::from_bits(words[7]), 0.0, f32::from_bits(words[8]), 0.0];
-    produce_analog_world(stick, observation)
-}
-
-/// Host camera conversion precedes the native world-space Biped attributes.
-pub fn produce_analog_world(
-    stick: [f32; 4],
-    observation: AnalogObservation,
-) -> [OffboardIntent; 4] {
     let mut horizontal = observation.effective_skeleton_z;
     horizontal[1] = 0.0;
     let forward = safe_unit(horizontal);
@@ -143,4 +137,3 @@ fn safe_unit(vector: [f32; 4]) -> [f32; 4] {
 #[cfg(test)]
 #[path = "offboard_intentions/tests.rs"]
 mod tests;
-

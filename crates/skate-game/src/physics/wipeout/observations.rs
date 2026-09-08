@@ -30,7 +30,7 @@ pub(crate) struct Observations<'a> {
     pub grind_normal: Option<[f32; 4]>,
 }
 impl Observations<'_> {
-    pub(super) fn frame(&self) -> Result<Frame, String> {
+    pub(crate) fn frame(&self) -> Result<Frame, String> {
         let p = self.processed;
         let c = self.collision;
         let b = self.board;
