@@ -1,6 +1,5 @@
 param()
 $ErrorActionPreference = 'Stop'
-throw 'Release packaging is paused until the Blender-free ISO converter is ready.'
 Push-Location $PSScriptRoot
 try {
     $packagePython = Join-Path $PSScriptRoot 'target/package-venv/Scripts/python.exe'
@@ -23,6 +22,10 @@ try {
         if ($source.FullName -match '[\\/]__pycache__[\\/]') { continue }
         if ($source.Extension -notin '.py','.json','.txt','.md','.toml' -and $source.Name -ne 'LICENSE') { continue }
         $relative = [IO.Path]::GetRelativePath($toolsRoot, $source.FullName)
+        $portableName = $relative.Replace('\','/')
+        if ($portableName -match '(^|/)blender[^/]*(/|$)' -or
+            $portableName -in @('asset_pipeline/build_map.py','asset_pipeline/finish_character.py',
+                'add_onboard_ik_targets.py','apply_default_skater_materials.py','export_bevy_glb.py')) { continue }
         $destination = Join-Path "$sourceStage/tools" $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath $source.FullName -Destination $destination
@@ -30,6 +33,7 @@ try {
     & $packagePython -m PyInstaller --noconfirm --clean --onefile --name skate3setup `
         --icon "$PSScriptRoot/docs/images/skating-crab.ico" --paths $PSScriptRoot `
         --hidden-import numpy --hidden-import PIL.Image --hidden-import tkinter `
+        --exclude-module bpy --exclude-module mathutils `
         --copy-metadata numpy --copy-metadata Pillow --copy-metadata PyInstaller `
         --add-data "$sourceStage/tools;tools" --add-data "$PSScriptRoot/docs/images/skating-crab.ico;docs/images" `
         --distpath "$stage/support" --workpath target/setup-build/work --specpath target/setup-build tools/setup.py

@@ -54,8 +54,8 @@ def run(args,log,report):
     kwargs={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
     external=os.name=='nt' and getattr(sys,'frozen',False) and Path(args[0]).resolve()!=Path(sys.executable).resolve()
     if external:
-        # PyInstaller's DLL directory is inherited by children. Blender and
-        # the game must load their own libraries, not the setup bundle's.
+        # External tools and the game must load their own libraries, not
+        # the setup bundle's DLL directory inherited by child processes.
         import ctypes
         ctypes.windll.kernel32.SetDllDirectoryW(None)
         env=os.environ.copy()
@@ -82,13 +82,13 @@ def extract(archive,destination,entries=None):
     data.extract_entries(data.entries if entries is None else [e for e in data.entries if entries(e)],destination)
     return data
 
-def convert_map(archive,work,maps,stage,blender,game_exe,log,report):
+def convert_map(archive,work,maps,stage,game_exe,log,report):
     map_tools=TOOLS/'vendor/university/tools/vanilla_map_extraction/tools'
     sys.path.insert(0,str(map_tools))
     from prepare_hawaiian_dream import prepare
     from prepare_university import EXCLUDED_NORMAL_TEXTURE_IDS
     from build_retail_collision_archive import build_archive
-    from embed_retail_collision_archive import embed_archive
+    from .map_writer import write as write_map
     district=archive.stem.removeprefix('world')
     label=district.removeprefix('DIST_')
     district_work=work/district
@@ -99,13 +99,10 @@ def convert_map(archive,work,maps,stage,blender,game_exe,log,report):
         utt_root=TOOLS/'vendor/utt',district_name=district,map_name=label,
         package_name='Skate 3 owned disc',cache_format='skate3-rust-map-v1',
         texture_stream_names=('Tex',),excluded_normal_texture_ids=EXCLUDED_NORMAL_TEXTURE_IDS)
-    raw_package=district_work/(label+'.skate')
-    run([blender,'--background','--factory-startup','--python-exit-code','1','--python',
-         TOOLS/'asset_pipeline/build_map.py','--',TOOLS,manifest_path,district_work/'map.blend',raw_package,district],log,report)
     collision=district_work/'collision.rwcmset'
     build_archive(manifest_path,collision)
     final=maps/(label+'.skate')
-    embed_archive(raw_package,collision,final)
+    write_map(manifest_path,final,collision,report)
     report('Checking converted map: '+label)
     run([game_exe,'--assets',stage/'assets','--map',final,'--check-assets'],log,report)
     entry={'name':label,'path':'maps/'+final.name,'sha256':digest(final)}
@@ -114,10 +111,6 @@ def convert_map(archive,work,maps,stage,blender,game_exe,log,report):
 
 
 def install(iso,base,game_exe,report,game_root=None):
-    raise RuntimeError('ISO setup is paused while direct asset conversion is implemented. No Blender will be downloaded or installed.')
-
-
-def _authoring_install(iso,base,game_exe,report,blender,game_root=None):
     base=base.resolve();base.mkdir(parents=True,exist_ok=True)
     lock=base/'setup.lock'
     try:fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
@@ -169,13 +162,8 @@ def _authoring_install(iso,base,game_exe,report,blender,game_root=None):
             run(task(TOOLS/'extract_default_skater.py','--owned-data-root',stock,'--work-root',character,
                      '--private-root',private/'default_skater','--utt-root',TOOLS/'vendor/utt'),log,report)
             report('Building the skater model and rig')
-            blend=character/'skater.blend'
-            run([blender,'--background','--factory-startup','--python-exit-code','1',
-                 '--python',TOOLS/'vendor/skate3_anim/blender_rx2_abin_export.py','--',
-                 '--abin',stock/'data/anim/OnBoard.abin','--rx2',character/'selected/models',
-                 '--clip','R_IDLE_HCOM_000','--output',blend],log,report)
-            run([blender,'--background','--factory-startup','--python-exit-code','1',blend,'--python',
-                 TOOLS/'asset_pipeline/finish_character.py','--',TOOLS,character,private],log,report)
+            from .character_glb import convert as write_character
+            write_character(character/'selected/models',private,manifest)
             game_manifest={'version':1,'character_scene':'private/skater.glb','initial_animation':'R_IDLE_HCOM_000',
                            'action_graph':'private/stock/data/state/ActionGraph_OnBoard.stategraph',
                            'motion_graph':'private/stock/data/state/MotionGraph_OnBoard.stategraph'}
@@ -187,7 +175,7 @@ def _authoring_install(iso,base,game_exe,report,blender,game_root=None):
             catalog=[]
             for number,archive in enumerate(archives,1):
                 report(f'Converting map {number}/{len(archives)}: {archive.stem}')
-                catalog.append(convert_map(archive,work,maps,stage,blender,game_exe,log,report))
+                catalog.append(convert_map(archive,work,maps,stage,game_exe,log,report))
             if not any(m['name']=='University' for m in catalog):raise RuntimeError('University was not converted')
             report('Validating installed runtime inputs')
             run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)

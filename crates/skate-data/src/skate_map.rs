@@ -514,9 +514,8 @@ impl SkateMap {
         if materials.is_empty()
             || geometry.vertices.is_empty()
             || geometry.indices.is_empty()
-            || geometry.collision.is_empty()
         {
-            return Err("SKATE requires materials, render geometry, and collision".into());
+            return Err("SKATE requires materials and render geometry".into());
         }
         r.check_count(counts[5], 12)?;
         let mut rails = Vec::new();
@@ -637,6 +636,9 @@ impl SkateMap {
                     payload: r.stored(bytes)?,
                 });
             }
+        }
+        if geometry.collision.is_empty() && !extensions.iter().any(|e| e.tag == *b"RWCM" && e.schema == 1 && !e.payload.is_empty()) {
+            return Err("SKATE requires triangle collision or an embedded RWCM archive".into());
         }
         if r.at != data.len() {
             return Err(format!(

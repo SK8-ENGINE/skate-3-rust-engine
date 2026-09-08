@@ -10,9 +10,10 @@ Includes skating, tricks, grinds, offboard movement, difficulty settings and
 
 ## Play
 
-ISO setup is under development. Release packaging is paused while the asset
-converter is changed to work without Blender. Use a prepared local asset set
-for now.
+Extract the Windows release ZIP and run `skate3rust.exe`. Select your Skate 3
+Xbox 360 ISO. Setup prepares the skater, animations and all disc maps, then
+starts University. No Blender, Python or Rust installation is needed.
+The first setup needs internet access and can take a while.
 
 Use an XInput controller to play. Escape opens graphics, difficulty and map
 settings. Loading another map restarts the game session.
@@ -28,8 +29,9 @@ Use `PLAY-MAP.bat` to select a map. An XInput controller is required for gamepla
 Escape opens difficulty and graphics settings.
 
 Development builds use a prepared asset set in `assets/private/` or the
-installed asset directory. The Windows release workflow is present, but
-packaging is disabled until direct ISO conversion is ready.
+installed asset directory. `Build-Release.ps1` builds the portable Windows
+package and requires Python 3.13. Published GitHub releases build and attach
+the package automatically.
 
 Custom animations and climbing support remain available, but no custom clips
 are shipped. The included format-demo map is original procedural content.

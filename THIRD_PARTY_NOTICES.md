@@ -17,10 +17,11 @@ reference: https://github.com/NFSTools/VaultLib. Its lookup8 hash and record
 reader preserve data from the user's BIN/VLT files; no settings payload is
 bundled.
 
-Release setup is paused pending direct asset conversion. Blender is not
-downloaded by setup. The retained authoring scripts can use a separately
-supplied Blender executable. XboxDev extract-xiso retains its own license
-files. Game assets are never downloaded from this project.
+Release setup uses direct Python GLB and SKATE writers adapted from those
+source converters. Blender is not downloaded, bundled or invoked. The retained
+editor authoring scripts are excluded from release packages. XboxDev
+extract-xiso retains its own license files. Game assets are never downloaded
+from this project.
 
 The setup executable bundles Python, NumPy, Pillow, Tcl/Tk and PyInstaller's
 bootloader. Their license information is retained by the packager alongside
