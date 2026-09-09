@@ -57,12 +57,15 @@ fn upload(
     queue: Res<RenderQueue>,
 ) {
     if let Some(buffer) = buffers.get(BUFFER.id()) {
-        let bytes: Vec<u8> = [state.0, state.1]
+        let values = [state.0, state.1]
             .into_iter()
             .chain(state.2)
             .flat_map(|v| v.to_array())
-            .flat_map(f32::to_le_bytes)
-            .collect();
+            .flat_map(f32::to_le_bytes);
+        let mut bytes = [0u8; 144];
+        for (destination, value) in bytes.iter_mut().zip(values) {
+            *destination = value;
+        }
         // Keep the buffer and all material bind groups alive; upload 144 frame bytes.
         queue.write_buffer(&buffer.buffer, 0, &bytes);
     }

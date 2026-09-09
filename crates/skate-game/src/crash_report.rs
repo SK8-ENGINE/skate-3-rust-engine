@@ -25,6 +25,9 @@ struct Capture {
 impl Capture {
     fn line(&mut self, stream: &str, line: &[u8], elapsed: f64) {
         let line = sanitize(&String::from_utf8_lossy(line));
+        // Advanced capture status must reach the launch console even while the
+        // supervisor keeps normal logs bounded and private. Sanitize first.
+        if line.starts_with("TRACE ") { eprintln!("{line}"); }
         let entry = format!("+{elapsed:.3}s {stream}: {line}");
         if let Some(value) = line.strip_prefix("REPORT_META ") {
             if let Some((key, _)) = value.split_once('=') {
