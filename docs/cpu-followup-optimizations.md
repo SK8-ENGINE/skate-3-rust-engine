@@ -74,3 +74,12 @@ single-thread kernel benchmark measured 22.1027 ms flat versus 4.1048 ms indexed
 (81.4% lower query time), with a 1.8785 ms index build. It excludes ECS refresh,
 dynamic casters, deferred visibility writes and the upstream parallel scheduler;
 it is not an 81.4% reduction in whole shadow-system time or frame time.
+
+The private v9 static-CRT release compiled from
+`1c62e56fd62f5ffe7f4eee21d3b272db00d88c16`. Embedded revision, PDB presence and
+system-only DLL imports were verified without running gameplay. EXE SHA-256:
+`c83d68d2ccb344a353ffe9a27896966a2c0a9f541cb594e18adaf65693b4e4e2`.
+`TRACE-UNIVERSITY-CPU-FOLLOWUP.bat` selects v9; the earlier CPU-FIX launcher keeps
+v8 for comparison. The new capture is armed until F9 and records 20 seconds.
+Existing compiler warnings remain. Runtime appearance and FPS acceptance are
+pending the user's test; the agent's GPU runs were isolated headless tests only.
