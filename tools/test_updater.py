@@ -17,6 +17,12 @@ def metadata(build=2):
 
 
 class UpdaterTests(unittest.TestCase):
+    def test_steam_relay_is_part_of_the_update_transaction(self):
+        self.assertIn('steam-relay/skate-steam-relay.exe', u.FILES)
+        self.assertIn('steam-relay/steam_api64.dll', u.FILES)
+        # Metadata is replaced last, after all program components.
+        self.assertEqual(u.FILES[-1], 'release.json')
+
     def test_channels_and_identity(self):
         release = dict(draft=False, published_at='2026-01-01', prerelease=True)
         self.assertFalse(u.eligible(release, 'Stable'))
