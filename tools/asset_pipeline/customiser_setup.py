@@ -11,6 +11,11 @@ def fingerprint(tools=None):
     tools = tools or Path(__file__).resolve().parents[1]
     paths = {p for pattern in ('asset_pipeline/customis*.py', 'asset_pipeline/native_roster.py',
                               'asset_pipeline/character_glb.py', 'asset_pipeline/retail_character.py',
+                              'asset_pipeline/vlt.py', 'asset_pipeline/environment.py',
+                              'asset_pipeline/names.txt', 'extract_default_skater.py',
+                              'owned_game/**/*.py', 'vendor/utt/**/*.py',
+                              'vendor/skate3_anim/abin_importer.py', 'vendor/skate3_anim/rx2_skeleton.py',
+                              'mixamo_to_skate/*.py', 'requirements-setup.txt',
                               'default_skater_retail_manifest.json') for p in tools.glob(pattern)
              if not p.name.startswith('test_')}
     digest = hashlib.sha256()
