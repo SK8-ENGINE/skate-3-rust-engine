@@ -12,8 +12,8 @@ use std::collections::BTreeMap;
 
 pub(crate) struct RetailRenderPlugin;
 #[cfg(test)]
-#[path = "retail_bindless_tests.rs"]
-mod bindless_tests;
+#[path = "retail_shader_tests.rs"]
+mod shader_tests;
 // Use the same path derivation as embedded_asset!: alternate binary targets
 // have a different crate namespace even though they share these source files.
 fn retail_shader(path: &str) -> ShaderRef {
@@ -31,7 +31,6 @@ impl Plugin for RetailRenderPlugin {
             eprintln!("SKATE_FOLIAGE_DEBUG: solid cyan tree-wall cards, magenta other foliage; alpha rejection disabled for foliage only");
         }
         embedded_asset!(app, "retail_world.wgsl");
-        bevy::shader::load_shader_library!(app, "retail_material_bindings.wgsl");
         embedded_asset!(app, "retail_tone.wgsl");
         embedded_asset!(app, "retail_depth.wgsl");
         embedded_asset!(app, "retail_sky.wgsl");
@@ -114,9 +113,8 @@ pub(crate) struct WorldParams {
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 #[bind_group_data(RetailKey)]
-#[data(0, WorldParams, binding_array(17))]
-#[bindless(limit(64))]
 pub(crate) struct RetailWorldMaterial {
+    #[uniform(0)]
     pub params: WorldParams,
     #[texture(1)]
     #[sampler(2)]
@@ -141,13 +139,10 @@ pub(crate) struct RetailWorldMaterial {
     pub specular: Option<Handle<Image>>,
     #[texture(15, dimension = "cube")]
     pub environment: Option<Handle<Image>>,
-    #[storage(16, read_only, binding_array(18))]
+    #[storage(16, read_only)]
     pub shadow_state: Handle<bevy::render::storage::ShaderStorageBuffer>,
     pub alpha: AlphaMode,
     pub two_sided: bool,
-}
-impl From<&RetailWorldMaterial> for WorldParams {
-    fn from(material: &RetailWorldMaterial) -> Self { material.params.clone() }
 }
 /// Identity of the actual GPU inputs, independent of unused source metadata.
 #[derive(PartialEq, Eq, Hash)]

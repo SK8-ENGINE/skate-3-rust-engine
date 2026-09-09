@@ -5,25 +5,17 @@
 #ifdef MOTION_VECTOR_PREPASS
 #import bevy_pbr::pbr_prepass_functions::calculate_motion_vector
 #endif
-#import skate_retail::material_bindings as bindings
-#ifdef BINDLESS
-#import bevy_pbr::mesh_bindings::mesh
-#endif
+struct WorldParams { mode: vec4<f32>, foliage_debug: vec4<f32>, surface: vec4<f32>, family: vec4<f32>, fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>, decal: vec4<f32>, water: array<vec4<f32>, 4> }
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: WorldParams;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var diffuse_sampler: sampler;
 @fragment
 fn fragment(i: VertexOutput)
 #ifdef PREPASS_FRAGMENT
     -> FragmentOutput
 #endif
 {
-#ifdef BINDLESS
-    let index = bindings::indices[mesh[i.instance_index].material_and_lightmap_bind_group_slot & 0xffffu];
-    let alpha = textureSample(bindings::textures[index.diffuse],bindings::samplers[index.diffuse_sampler],i.uv).a;
-    let cutoff = bindings::params[index.params].mode.z;
-#else
-    let alpha = textureSample(bindings::diffuse,bindings::diffuse_sampler,i.uv).a;
-    let cutoff = bindings::p.mode.z;
-#endif
-    if alpha < cutoff { discard; }
+    if textureSample(diffuse,diffuse_sampler,i.uv).a < p.mode.z { discard; }
 #ifdef PREPASS_FRAGMENT
     var out: FragmentOutput;
 #ifdef NORMAL_PREPASS

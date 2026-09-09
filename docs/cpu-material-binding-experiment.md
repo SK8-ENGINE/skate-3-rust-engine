@@ -1,5 +1,19 @@
 # CPU material binding experiment
 
+**Withdrawn after the user's runtime test.** Build `bea625f` exited with native
+access violation `0xC0000005` about 11.4 seconds after launch, shortly after map
+initialization, on an RTX 5090 using Vulkan. The report contains no native stack
+or module map, so it cannot establish the faulting subsystem or blame the driver.
+The binding-array change is treated as a suspected regression, not a confirmed
+root cause. Passing Naga tests did not establish runtime safety.
+
+The recovery revision restores the exact pre-v6 main/depth shader source and
+original uniform, texture and storage bindings. It removes the array shader
+library and adds a regression assertion that RetailWorldMaterial has no bindless
+descriptor or slot count. The v5 shadow proxies remain disabled. Recovery does
+not claim an FPS improvement or a confirmed crash fix until the user runs it.
+The remaining sections describe the withdrawn experiment for reference.
+
 The user reports poor FPS while looking into University and good FPS looking out
 of the map, still CPU bound. The map being resident does not establish that every
 triangle is drawn. The captured CPU render work is the actionable bottleneck.

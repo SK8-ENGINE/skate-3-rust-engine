@@ -1,11 +1,29 @@
 #import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings as frame}
 #import bevy_pbr::shadows::fetch_directional_shadow
 
-#import skate_retail::material_bindings::{WorldParams, FrameState}
-#import skate_retail::material_bindings as bindings
-#ifdef BINDLESS
-#import bevy_pbr::mesh_bindings::mesh
-#endif
+struct WorldParams {
+    mode: vec4<f32>, foliage_debug: vec4<f32>, surface: vec4<f32>, family: vec4<f32>,
+    fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>, decal: vec4<f32>, water: array<vec4<f32>, 4>,
+}
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: WorldParams;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var diffuse: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var diffuse_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var lightmap: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var lm_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var normal_map: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var normal_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var detail_map: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var detail_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(9) var macro_map: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var macro_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var decal_map: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(12) var decal_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(13) var specular_map: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(14) var specular_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(15) var environment_map: texture_cube<f32>;
+
+struct FrameState { shadow: vec4<f32>, clock: vec4<f32>, pca: array<vec4<f32>, 7> }
+@group(#{MATERIAL_BIND_GROUP}) @binding(16) var<storage, read> frame_state: FrameState;
 
 // Textures and base UVs both have V flipped by the exporter. Scale in the
 // authored coordinate system, then return to the flipped texture rows.
@@ -13,25 +31,8 @@ fn scaled_uv(uv: vec2<f32>, scale: f32) -> vec2<f32> {
     return vec2<f32>(uv.x*scale, 1.0-(1.0-uv.y)*scale);
 }
 
-fn shade(i: VertexOutput,
-    p: WorldParams,
-    frame_state: FrameState,
-    diffuse: texture_2d<f32>,
-    diffuse_sampler: sampler,
-    lightmap: texture_2d<f32>,
-    lm_sampler: sampler,
-    normal_map: texture_2d<f32>,
-    normal_sampler: sampler,
-    detail_map: texture_2d<f32>,
-    detail_sampler: sampler,
-    macro_map: texture_2d<f32>,
-    macro_sampler: sampler,
-    decal_map: texture_2d<f32>,
-    decal_sampler: sampler,
-    specular_map: texture_2d<f32>,
-    specular_sampler: sampler,
-    environment_map: texture_cube<f32>
-) -> vec4<f32> {
+@fragment
+fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     let fam = u32(p.mode.x);
     let flags = u32(p.mode.y);
     var diffuse_uv=i.uv;
@@ -267,48 +268,4 @@ fn shade(i: VertexOutput,
     if p.foliage_debug.w != 0.0 { return vec4<f32>(p.foliage_debug.rgb, 1.0); }
     if a.a < p.mode.z { discard; }
     return vec4<f32>(xe,alpha);
-}
-
-@fragment
-fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
-#ifdef BINDLESS
-    let index = bindings::indices[mesh[i.instance_index].material_and_lightmap_bind_group_slot & 0xffffu];
-    return shade(i,
-        bindings::params[index.params],
-        bindings::frames[index.frame_state],
-        bindings::textures[index.diffuse],
-        bindings::samplers[index.diffuse_sampler],
-        bindings::textures[index.lightmap],
-        bindings::samplers[index.lm_sampler],
-        bindings::textures[index.normal_map],
-        bindings::samplers[index.normal_sampler],
-        bindings::textures[index.detail_map],
-        bindings::samplers[index.detail_sampler],
-        bindings::textures[index.macro_map],
-        bindings::samplers[index.macro_sampler],
-        bindings::textures[index.decal_map],
-        bindings::samplers[index.decal_sampler],
-        bindings::textures[index.specular_map],
-        bindings::samplers[index.specular_sampler],
-        bindings::cubes[index.environment_map]);
-#else
-    return shade(i,
-        bindings::p,
-        bindings::frame_state,
-        bindings::diffuse,
-        bindings::diffuse_sampler,
-        bindings::lightmap,
-        bindings::lm_sampler,
-        bindings::normal_map,
-        bindings::normal_sampler,
-        bindings::detail_map,
-        bindings::detail_sampler,
-        bindings::macro_map,
-        bindings::macro_sampler,
-        bindings::decal_map,
-        bindings::decal_sampler,
-        bindings::specular_map,
-        bindings::specular_sampler,
-        bindings::environment_map);
-#endif
 }

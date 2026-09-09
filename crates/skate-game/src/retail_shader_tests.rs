@@ -1,26 +1,14 @@
-//! GPU-free validation of the actual material shaders and binding-array access.
+//! GPU-free validation of the original retail material shaders.
 //! Bevy vertex interfaces are real; unrelated lighting functions/resources use
 //! interface fixtures. Runtime pipeline/device validation remains a user check.
 use naga_oil::compose::{Composer, ComposableModuleDescriptor, NagaModuleDescriptor, ShaderDefValue};
 use std::collections::HashMap;
 
 #[test]
-fn material_index_table_matches_shader_resources() {
-    use bevy::render::render_resource::{AsBindGroup, BindlessResourceType as R};
-    let descriptor = super::RetailWorldMaterial::bindless_descriptor().unwrap();
-    assert_eq!(descriptor.resources.as_ref(), &[
-        R::DataBuffer, R::Texture2d, R::SamplerFiltering,
-        R::Texture2d, R::SamplerFiltering, R::Texture2d, R::SamplerFiltering,
-        R::Texture2d, R::SamplerFiltering, R::Texture2d, R::SamplerFiltering,
-        R::Texture2d, R::SamplerFiltering, R::Texture2d, R::SamplerFiltering,
-        R::TextureCube, R::Buffer,
-    ]);
-    assert_eq!(descriptor.index_tables.len(), 1);
-    let table = &descriptor.index_tables[0];
-    assert_eq!((table.binding_number.0, table.indices.start.0, table.indices.end.0), (0, 0, 17));
-    let mut buffers: Vec<_> = descriptor.buffers.iter().map(|b| (b.bindless_index.0, b.binding_number.0)).collect();
-    buffers.sort_unstable();
-    assert_eq!(buffers, [(0, 17), (16, 18)]);
+fn retail_material_uses_original_bindings() {
+    use bevy::render::render_resource::AsBindGroup;
+    assert!(super::RetailWorldMaterial::bindless_descriptor().is_none());
+    assert!(super::RetailWorldMaterial::bindless_slot_count().is_none());
 }
 
 fn validate(bindless: bool, prepass: bool, extras: &[&str]) {
@@ -37,7 +25,6 @@ fn validate(bindless: bool, prepass: bool, extras: &[&str]) {
         ("frame", "#define_import_path bevy_pbr::mesh_view_bindings\nstruct View {view_from_world:mat4x4<f32>,viewport:vec4<f32>,world_position:vec3<f32>,padding:f32}\nstruct Light {flags:u32}\nstruct Lights {n_directional_lights:u32,directional_lights:array<Light,10>}\n@group(0) @binding(0) var<uniform> view:View;\n@group(0) @binding(1) var<storage> lights:Lights;"),
         ("shadows", "#define_import_path bevy_pbr::shadows\nfn fetch_directional_shadow(id:u32,p:vec4<f32>,n:vec3<f32>,z:f32)->f32 {return 1.0;}"),
         ("motion", "#define_import_path bevy_pbr::pbr_prepass_functions\nfn calculate_motion_vector(p:vec4<f32>,q:vec4<f32>)->vec2<f32> {return vec2<f32>(0.0);}"),
-        ("bindings",include_str!("retail_material_bindings.wgsl")),
     ];
     for (path,source) in fixtures {
         if let Err(error) = composer.add_composable_module(ComposableModuleDescriptor {source,file_path:path,shader_defs:defs.clone(),..Default::default()}) {
@@ -51,8 +38,8 @@ fn validate(bindless: bool, prepass: bool, extras: &[&str]) {
 }
 
 #[test]
-fn material_shaders_validate_with_bindless_and_fallback_bindings() {
-    for bindless in [false,true] {
+fn original_material_shaders_validate() {
+    for bindless in [false] {
         validate(bindless,false,&[]);
         validate(bindless,true,&[]);
         validate(bindless,true,&["PREPASS_FRAGMENT","NORMAL_PREPASS","NORMAL_PREPASS_OR_DEFERRED_PREPASS","MOTION_VECTOR_PREPASS","UNCLIPPED_DEPTH_ORTHO_EMULATION"]);
