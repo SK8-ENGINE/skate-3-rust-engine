@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 Push-Location $ProjectRoot
 try {
     if (-not $StageOnly) {
-        & cargo build -p skate-game --locked --target-dir $TargetDirectory
+        & cargo build -p skate-game -p skate-steam-relay --locked --target-dir $TargetDirectory
         if ($LASTEXITCODE -ne 0) { throw 'Build failed; see the compiler output above.' }
     }
     $debugDirectory = Join-Path $TargetDirectory 'debug'
@@ -55,6 +55,10 @@ try {
                 }
             }
         }
+    }
+    & (Join-Path $PSScriptRoot 'Stage-SteamRelay.ps1') -TargetDirectory $TargetDirectory -BinDirectory $binDirectory
+    foreach ($name in @('steam-relay/skate-steam-relay.exe', 'steam-relay/steam_api64.dll')) {
+        $staged += @{name = $name; sha256 = (Get-FileHash -LiteralPath (Join-Path $binDirectory $name) -Algorithm SHA256).Hash}
     }
     $staged | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $binDirectory 'manifest.json') -Encoding UTF8
     Write-Host "Ready: $binDirectory/skate3rust.exe"
