@@ -12,6 +12,8 @@ jobs:
     if: github.event_name != 'release' || github.event.release.tag_name != 'experimental'
     runs-on: windows-2025
     timeout-minutes: 90
+    env:
+      SCCACHE_GHA_ENABLED: "true"
     concurrency:
       group: windows-build-${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
       cancel-in-progress: true
@@ -27,6 +29,9 @@ jobs:
         with:
           shared-key: windows-release
           cache-on-failure: true
+      # Cargo's dependency cache excludes our vendored Bevy crates. Cache their
+      # compiler outputs by content as well, independent of checkout timestamps.
+      - uses: mozilla-actions/sccache-action@v0.0.11
       - name: Check updater and publisher without starting game
         run: python -m unittest discover -s tools -p "test_*release*.py" -v
       - name: Check updater protocol
@@ -37,7 +42,12 @@ jobs:
         shell: pwsh
         env:
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || 'experimental' }}
+          RUSTC_WRAPPER: sccache
         run: ./scripts/Build-Release.ps1
+      - name: Report compiler cache hits
+        if: always()
+        shell: pwsh
+        run: sccache --show-stats
       - uses: actions/upload-artifact@v4
         with:
           name: skate3rust-windows-x64
