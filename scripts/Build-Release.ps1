@@ -3,9 +3,15 @@ $ProjectRoot = Split-Path $PSScriptRoot -Parent
 $ErrorActionPreference = 'Stop'
 Push-Location $ProjectRoot
 try {
-    $packagePython = Join-Path $ProjectRoot 'target/package-venv/Scripts/python.exe'
+    # Cargo cache restoration can prune Python package files under target.
+    # Hosted builds get a fresh packaging environment outside that cache.
+    $packageEnvironment = if ($env:GITHUB_ACTIONS -eq 'true') {
+        if (-not $env:RUNNER_TEMP) { throw 'RUNNER_TEMP is required in GitHub Actions' }
+        Join-Path $env:RUNNER_TEMP ('skate-package-' + $env:GITHUB_RUN_ID + '-' + $env:GITHUB_RUN_ATTEMPT)
+    } else { Join-Path $ProjectRoot 'target/package-venv' }
+    $packagePython = Join-Path $packageEnvironment 'Scripts/python.exe'
     if (-not (Test-Path -LiteralPath $packagePython)) {
-        & python -m venv target/package-venv
+        & python -m venv $packageEnvironment
         if ($LASTEXITCODE -ne 0) { throw 'Could not create packaging environment' }
     }
     & $packagePython -m pip install -r tools/requirements-setup.txt
