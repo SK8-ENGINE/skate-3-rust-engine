@@ -23,7 +23,8 @@ struct SkinStamp {
     pbr_deferred_functions::deferred_output,
 }
 #else
-#import skate_character_lighting::{CharacterParams, shade_character}
+#import skate_character_lighting::{CharacterParams, shade_character, character_normal, character_albedo}
+#import bevy_pbr::pbr_bindings
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var retail_mask: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(106) var retail_mask_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(107) var<uniform> retail: CharacterParams;
@@ -80,6 +81,17 @@ fn fragment(
 
     // generate a PbrInput struct from the StandardMaterial bindings
     var pbr_input = pbr_input_from_standard_material(in, is_front);
+#ifndef PREPASS_PIPELINE
+    // Preserve authored alpha as specular data before opacity/tattoos/discard.
+    let retail_albedo=textureSample(pbr_bindings::base_color_texture,pbr_bindings::base_color_sampler,in.uv);
+    let retail_mapped=character_normal(in.world_position,in.world_normal,in.uv,
+        textureSample(pbr_bindings::normal_map_texture,pbr_bindings::normal_map_sampler,in.uv).xy);
+    let retail_n=select(normalize(in.world_normal),retail_mapped,retail.options.x>0.0);
+    if retail.light.w>0.0 && retail.tint.w>0.0 {
+        pbr_input.material.base_color=vec4<f32>(character_albedo(retail_albedo.rgb)*retail.tint.rgb,retail_albedo.a);
+    }
+#endif
+
 
 
 #ifdef VERTEX_UVS_B
@@ -113,9 +125,9 @@ fn fragment(
     var out: FragmentOutput;
     if retail.light.w > 0.0 && retail.tint.w > 0.0 {
         let mask = textureSample(retail_mask, retail_mask_sampler, in.uv).r;
-        out.color = shade_character(retail, pbr_input.N, pbr_input.world_position,
+        out.color = shade_character(retail, retail_n, pbr_input.world_position,
             pbr_input.material.base_color.rgb,
-            select(pbr_input.material.base_color.a, mask, retail.options.y > 0.0),
+            select(retail_albedo.a, mask, retail.options.y > 0.0),
             pbr_input.material.base_color.a);
     } else if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
         out.color = apply_pbr_lighting(pbr_input);

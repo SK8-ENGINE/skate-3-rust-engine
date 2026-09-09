@@ -181,3 +181,22 @@ launcher records stdout/stderr, backtraces and the exit code in
 See [visual-parity-status.md](visual-parity-status.md) for the subsequent SH
 transition smoothing, second-UV blended hair coverage, GPU exposure meter and
 remaining shadow/CAC fidelity gaps. Earlier implementation sections are historical.
+
+## Stock surface restoration, September 9
+
+Returning from an imported/native model reapplies the modular stock outfit. Its
+geometry-only GLBs have normal maps in the material library but no tangent
+attributes, so the StandardMaterial input path silently omitted their detail.
+The customiser shader also used alpha after `alpha_discard` as the clothing
+specular mask; opaque coverage had already replaced that authored mask with 1.
+
+Both original and modular retail shaders now share the derivative normal basis
+and gamma-two albedo decode. Modular materials retain the source diffuse alpha
+for highlights, independently of opacity and tattoos, and use the dedicated skin
+specular mask where authored. Profile updates retain texture handles and apply
+colour tint separately. This shared material path covers local and remote stock
+outfits without changing imported PBR materials or globally lowering gloss.
+
+Fourteen focused tests pass with the prepared library, including offline shader
+compilation, stock restoration and per-profile material preservation. No game was
+launched; visual verification of stock -> imported/pro -> stock remains manual.

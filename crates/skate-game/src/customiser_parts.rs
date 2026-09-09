@@ -430,6 +430,9 @@ impl Parts {
             retail: material.extension.retail.clone(), retail_mask: material.extension.retail_mask.clone(),
             enabled: if source.opacity.is_some() {Vec4::Y} else {Vec4::ZERO}, ..default()
         };
+        if extension.retail.tint.w > 0. {
+            extension.retail.tint = Vec4::from_array(material.base.base_color.to_linear().to_f32_array());
+        }
         if let Some((tid,t)) = stamp["id"].as_str().and_then(|id| self.library.tattoos.get(id).map(|t|(id,t))) {
             let key=match stamp["side"].as_u64().unwrap_or(0) {1=>"StampUVConstraintQ4",2=>"StampUVConstraintQ1",3=>"StampUVConstraintQ2",_=>"StampUVConstraintQ3"};
             let bounds:Vec<f32>=part.flag(key).split(',').filter_map(|n|n.parse().ok()).collect();
@@ -472,16 +475,16 @@ impl Parts {
         let opacity = m.opacity.as_ref().map(|p| load(p, true));
         let retail_mask = m.lighting.as_ref().and_then(|l| l.specular.as_ref()).map(|p| load(p, true));
         let retail = m.lighting.as_ref().filter(|l| l.params.len() == 9).map(|l| crate::retail_character::CharacterParams {
-            tint: Vec4::ONE,
-            options: Vec4::new(0., f32::from(retail_mask.is_some()), -1., f32::from(l.shader.starts_with("character.hair"))),
+            tint: Vec4::from_array(Color::srgb(m.tint[0],m.tint[1],m.tint[2]).to_linear().to_f32_array()),
+            options: Vec4::new(f32::from(normal.is_some()), f32::from(retail_mask.is_some()), -1., f32::from(l.shader.starts_with("character.hair"))),
             rows: std::array::from_fn(|i| Vec4::from_array(l.params[i])),
             ..default()
         }).unwrap_or_default();
         let material = materials.add(SkaterMaterial {
             base: StandardMaterial {
                 base_color: Color::srgb(m.tint[0], m.tint[1], m.tint[2]),
-                base_color_texture: Some(diffuse),
-                normal_map_texture: normal,
+                base_color_texture: Some(diffuse.clone()),
+                normal_map_texture: normal.clone(),
                 metallic_roughness_texture: rough,
                 double_sided: m.opacity.is_some(),
                 cull_mode: if m.opacity.is_some() {
@@ -814,11 +817,21 @@ mod online_tests {
         parts.library.tattoos.insert("ink".into(),Tattoo{name:"ink".into(),texture:String::new(),bounds:[0.,0.,1.,1.]});
         let mut images=Assets::<Image>::default();let image=images.add(Image::default());parts.tattoos.insert("ink".into(),image.clone());
         let mut materials=Assets::<SkaterMaterial>::default();
-        let handle=materials.add(SkaterMaterial{base:StandardMaterial::default(),extension:SkinStamp::default()});
+        let handle=materials.add(SkaterMaterial{base:StandardMaterial{normal_map_texture:Some(image.clone()),base_color_texture:Some(image.clone()),..default()},extension:SkinStamp {
+            retail_mask:Some(image.clone()),
+            retail:crate::retail_character::CharacterParams{tint:Vec4::ONE,options:Vec4::new(1.,1.,-1.,0.),..default()},..default()
+        }});
         parts.materials.insert("skin".into(),(handle.clone(),vec![]));
         let red=parts.profile_material("body","skin",&serde_json::json!({"skin_tint":[1,0,0],"tattoos":{"Arm":{"id":"ink","side":0}}}),&materials).unwrap();
         let blue=parts.profile_material("body","skin",&serde_json::json!({"skin_tint":[0,0,1]}),&materials).unwrap();
         assert_eq!(red.base.base_color,Color::srgb(1.,0.,0.));assert_eq!(blue.base.base_color,Color::srgb(0.,0.,1.));
+        for material in [&red,&blue] {
+            assert_eq!(material.base.normal_map_texture,Some(image.clone()));
+            assert_eq!(material.base.base_color_texture,Some(image.clone()));
+            assert_eq!(material.extension.retail_mask,Some(image.clone()));
+            assert_eq!(material.extension.retail.options,Vec4::new(1.,1.,-1.,0.));
+            assert_eq!(material.extension.retail.tint,Vec4::from_array(material.base.base_color.to_linear().to_f32_array()));
+        }
         assert_eq!(red.extension.texture,Some(image));assert!(blue.extension.texture.is_none());
         assert_eq!(materials.get(&handle).unwrap().base.base_color,Color::WHITE);
         assert!(materials.get(&handle).unwrap().extension.texture.is_none());

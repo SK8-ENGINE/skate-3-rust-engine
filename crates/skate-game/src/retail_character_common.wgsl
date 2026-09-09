@@ -6,6 +6,26 @@ struct CharacterParams {
     rows: array<vec4<f32>,9>, sh: array<vec4<f32>,9>,
 }
 
+// Both original and modular stock meshes use the authored derivative basis.
+// Modular GLBs intentionally omit tangents, so StandardMaterial's tangent-only
+// normal mapping cannot supply this detail after an outfit/model swap.
+fn character_normal(position: vec4<f32>, normal: vec3<f32>, uv: vec2<f32>, sample: vec2<f32>) -> vec3<f32> {
+    let n=normalize(normal);
+    let rpos=position.xyz-frame::view.world_position;
+    let dp1=dpdx(rpos); let dp2=dpdy(rpos);
+    let du1=dpdx(uv); let du2=dpdy(uv);
+    var tt=cross(dp2,n)*du1.x+cross(n,dp1)*du2.x;
+    var bb=cross(dp2,n)*du1.y+cross(n,dp1)*du2.y;
+    tt *= -inverseSqrt(max(dot(tt,tt),1e-12));
+    bb *= inverseSqrt(max(dot(bb,bb),1e-12));
+    let nm=sample*2.0-1.0;
+    return normalize(nm.x*tt+nm.y*bb+n*sqrt(saturate(1.0-dot(nm,nm))));
+}
+fn character_albedo(linear: vec3<f32>) -> vec3<f32> {
+    let gamma=select(linear*12.92,1.055*pow(max(linear,vec3<f32>(0.0)),vec3<f32>(1.0/2.4))-0.055,linear>vec3<f32>(0.0031308));
+    return gamma*gamma;
+}
+
 fn shade_character(p: CharacterParams, vn: vec3<f32>, position: vec4<f32>, d: vec3<f32>, smask: f32, alpha: f32) -> vec4<f32> {
     let vd = -normalize(position.xyz-frame::view.world_position);
     if p.options.w>0.0 {
