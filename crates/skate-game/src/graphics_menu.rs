@@ -29,6 +29,7 @@ const RESOLUTIONS: &[(u32, u32)] = &[
     (3840, 2160),
 ];
 const SCALES: &[u32] = &[25, 50, 67, 75, 85, 100];
+const DAY_SPEEDS: &[u32] = &[0, 1, 10, 30, 60, 120, 360, 720];
 const LIMITS: &[u32] = &[0, 30, 60, 90, 120, 144, 165, 240];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -40,6 +41,8 @@ struct GraphicsSettings {
     samples: u32,
     fps: u32,
     occlusion: bool,
+    hour: f32,
+    day_speed: u32,
 }
 impl Default for GraphicsSettings {
     fn default() -> Self {
@@ -50,11 +53,15 @@ impl Default for GraphicsSettings {
             samples: 4,
             fps: 0,
             occlusion: true,
+            hour: 12.,
+            day_speed: 60,
         }
     }
 }
 impl GraphicsSettings {
     fn validated(mut self) -> Self {
+        self.hour = if self.hour.is_finite() { self.hour.rem_euclid(24.) } else { 12. };
+        if !DAY_SPEEDS.contains(&self.day_speed) { self.day_speed = 60; }
         if !RESOLUTIONS.contains(&(self.width, self.height)) {
             (self.width, self.height) = (1280, 800);
         }
@@ -86,8 +93,15 @@ pub(crate) struct Menu {
     selected_map: usize,
     multiplayer: bool,
     browser: bool,
+    daylight: bool,
 }
 impl Menu {
+    pub(crate) fn advance_day(&mut self, seconds: f32) -> f32 {
+        if !self.open && self.settings.day_speed > 0 {
+            self.settings.hour = (self.settings.hour + seconds * self.settings.day_speed as f32 / 3600.).rem_euclid(24.);
+        }
+        self.settings.hour
+    }
     pub(crate) fn diagnostic_settings(&self) -> String {
         format!("{:?}", self.settings)
     }
@@ -125,7 +139,7 @@ impl Plugin for GraphicsMenuPlugin {
         app.insert_resource(FramePacer(Instant::now()))
             .add_systems(PostStartup, setup.in_set(PresentationSetup))
             .add_systems(PreUpdate, interact.in_set(MenuInput).after(bevy::input::InputSystems))
-            .add_systems(Update, (apply, labels).chain())
+            .add_systems(Update, (crate::map_render::advance_day, apply, labels).chain())
             .add_systems(Last, pace);
     }
 }
@@ -218,8 +232,8 @@ fn setup(
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("GAME MENU"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..15 {
-                panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(32),padding:UiRect::all(px(6)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
+            for i in 0..16 {
+                panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(26),padding:UiRect::all(px(3)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
                 });
@@ -244,6 +258,7 @@ fn setup(
         selected_map,
         multiplayer: false,
         browser: false,
+        daylight: false,
     });
 }
 fn msaa(samples: u32) -> Msaa {
@@ -306,7 +321,7 @@ pub(crate) fn interact(
         }
     }
     if menu.open {
-        let rows = if menu.multiplayer { 11 } else { 15 };
+        let rows = if menu.daylight { 3 } else if menu.multiplayer { 11 } else { 16 };
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
             menu.selected = (menu.selected + rows - 1) % rows;
         }
@@ -327,7 +342,14 @@ pub(crate) fn interact(
         }
     }
     if let Some((row, direction)) = action {
-        if menu.browser {
+        let day_action = menu.daylight;
+        if menu.daylight {
+            match row {
+                0 => menu.settings.hour = ((menu.settings.hour * 4.).round() + direction as f32).rem_euclid(96.) / 4.,
+                1 => menu.settings.day_speed = cycle(DAY_SPEEDS, menu.settings.day_speed, direction),
+                _ => { menu.daylight = false; menu.selected = 15; }
+            }
+        } else if menu.browser {
             match row {
                 0 => net.browse(0),
                 1..=5 => net.join_row(row - 1),
@@ -427,10 +449,11 @@ pub(crate) fn interact(
                 12 => custom_models.begin(),
                 13 => menu.status = updater.open(false),
                 14 => travel.open = true,
+                15 => { menu.daylight = true; menu.selected = 0; menu.status = "Custom maps: change time and cycle speed. Retail lighting stays authored.".into(); },
                 _ => {}
             }
         }
-        if row < 5 && !menu.multiplayer {
+        if (row < 5 && !menu.multiplayer && !menu.daylight && !day_action) || (day_action && row < 2) {
             let save = (|| -> Result<(), String> {
                 std::fs::create_dir_all(menu.path.parent().unwrap()).map_err(|e| e.to_string())?;
                 std::fs::write(
@@ -530,7 +553,14 @@ fn labels(
     let s = &menu.settings;
     let size = s.internal_size(window.physical_size());
     for (label, mut text) in &mut labels {
-        **text = if menu.browser {
+        **text = if menu.daylight {
+            match label.0 {
+                0 => { let minutes = (s.hour * 60.).floor() as u32 % 1440; format!("Time of day          {:02}:{:02}", minutes / 60, minutes % 60) },
+                1 => if s.day_speed == 0 { "Cycle speed          Frozen".into() } else { format!("Cycle speed          {}x ({} min/day)", s.day_speed, 1440 / s.day_speed) },
+                2 => "Back".into(),
+                _ => String::new(),
+            }
+        } else if menu.browser {
             match label.0 {
                 0 => "Refresh public Steam lobbies".into(),
                 1..=5 => net
@@ -614,6 +644,7 @@ fn labels(
                 12 => "Custom models".into(),
                 13 => "Updates".into(),
                 14 => "Teleport…".into(),
+                15 => "Day & night…".into(),
                 _ => "Multiplayer".into(),
             }
         };
@@ -636,7 +667,7 @@ fn labels(
         menu.status.clone()
     };
     for (row, interaction, mut color, mut node) in &mut buttons {
-        node.display = if menu.multiplayer && row.0 >= 11 { Display::None } else { Display::Flex };
+        node.display = if (menu.daylight && row.0 >= 3) || (menu.multiplayer && row.0 >= 11) { Display::None } else { Display::Flex };
         color.0 = if row.0 == menu.selected || *interaction == Interaction::Hovered {
             Color::srgb(0.10, 0.30, 0.34)
         } else {
@@ -675,10 +706,21 @@ mod tests {
             .insert_resource(Menu {
                 open: false, selected: 0, settings: GraphicsSettings::default(),
                 difficulty: Difficulty::Easy, path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
-                multiplayer: false, browser: false,
+                multiplayer: false, browser: false, daylight: false,
                 maps: vec![crate::map_library::Entry { label: "Test world".into(), path: None }], selected_map: 0,
             })
             .add_systems(Update, apply);
+        {
+            let mut menu = app.world_mut().resource_mut::<Menu>();
+            menu.settings.hour = 23.5;
+            menu.settings.day_speed = 60;
+            assert!((menu.advance_day(60.) - 0.5).abs() < 0.0001);
+            menu.open = true;
+            assert_eq!(menu.advance_day(60.), 0.5);
+            menu.open = false;
+            menu.settings.day_speed = 0;
+            assert_eq!(menu.advance_day(60.), 0.5);
+        }
         app.world_mut().spawn((Window::default(), PrimaryWindow));
         let camera = app.world_mut().spawn((Camera3d::default(), Msaa::Off)).id();
         app.update();

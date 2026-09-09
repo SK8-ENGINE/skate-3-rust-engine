@@ -127,39 +127,56 @@ pub(crate) struct MapAssets {
     images: Vec<AssetId<Image>>,
 }
 
-/// Fixed authored start hour; dynamic refers to real-time surface lighting and
-/// shadows, not a new day/night simulation. All lights are scene-owned.
-fn custom_lighting(map: &skate_data::skate_map::SkateMap, commands: &mut SceneCommands) {
-    let e = &map.environment;
-    let hour = e[10].rem_euclid(24.);
-    let elevation = ((hour - 6.) * std::f32::consts::PI / 12.).sin();
+/// Scene-owned environment; retired with its sun when switching maps.
+#[derive(Component)]
+pub(crate) struct DayEnvironment {
+    values: Vec<f32>,
+    sky: Option<Color>,
+}
+fn daylight_values(e: &[f32], hour: f32) -> (Color, f32, f32, Transform, f32) {
+    let angle = (hour - 6.) * std::f32::consts::PI / 12.;
+    let elevation = angle.sin();
     let daylight = elevation.max(0.);
-    let azimuth = e[11];
     let extended = e.len() == 45;
-    let rgb = |i: usize| Color::linear_rgb(e[i].max(0.), e[i + 1].max(0.), e[i + 2].max(0.));
     let night = elevation < 0.;
-    let color = if extended { rgb(if night { 35 } else { 32 }) } else { Color::WHITE };
-    let strength = if extended { e[if night { 39 } else { 38 }].max(0.) } else { 1. };
-    let ambient = if extended { e[41] + (e[40] - e[41]) * daylight } else { 0.32 };
-    commands.insert_resource(GlobalAmbientLight {
-        color: Color::WHITE, brightness: ambient.max(0.) * 1000., ..default()
-    });
-    let horizontal = (1. - elevation * elevation).max(0.).sqrt();
-    let direction = Vec3::new(azimuth.cos() * horizontal, elevation.abs().max(0.001), azimuth.sin() * horizontal).normalize();
+    let rgb = |i: usize| Color::linear_rgb(e[i].max(0.), e[i + 1].max(0.), e[i + 2].max(0.));
+    let color = if extended { rgb(if night { 35 } else { 32 }) } else if night { Color::srgb(0.55, 0.65, 1.) } else { Color::WHITE };
+    let strength = if extended { e[if night { 39 } else { 38 }].max(0.) } else if night { 0.025 } else { 1. };
+    let ambient = if extended { e[41] + (e[40] - e[41]) * daylight } else { 0.025 + 0.295 * daylight };
+    // Signed horizontal motion carries the sun east-to-west. The moon follows
+    // the opposite hemisphere; both fade to zero at the horizon.
+    let horizontal = angle.cos() * if night { -1. } else { 1. };
+    let direction = Vec3::new(e[11].cos() * horizontal, elevation.abs().max(0.001), e[11].sin() * horizontal).normalize();
+    (color, 10_000. * strength * elevation.abs(), ambient.max(0.) * 1000.,
+        Transform::default().looking_to(-direction, if direction.y > 0.99 { Vec3::Z } else { Vec3::Y }), daylight)
+}
+fn custom_lighting(map: &skate_data::skate_map::SkateMap, commands: &mut SceneCommands) {
+    let (color, illuminance, brightness, transform, _) = daylight_values(&map.environment, map.environment[10].rem_euclid(24.));
+    commands.insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness, ..default() });
     commands.spawn((
         Name::new("Custom map sun/moon"),
-        DirectionalLight {
-            color, illuminance: 10_000. * strength * elevation.abs(),
-            shadows_enabled: true,
-            // Preserve authored indirect/baked diffuse on custom lightmapped meshes.
-            affects_lightmapped_mesh_diffuse: false,
-            ..default()
-        },
-        Transform::default().looking_to(-direction, if direction.y > 0.99 { Vec3::Z } else { Vec3::Y }),
-        bevy::light::CascadeShadowConfigBuilder {
-            maximum_distance: 100., first_cascade_far_bound: 10., ..default()
-        }.build(),
+        DayEnvironment { values: map.environment.to_vec(), sky: None },
+        DirectionalLight { color, illuminance, shadows_enabled: true, affects_lightmapped_mesh_diffuse: false, ..default() },
+        transform,
+        bevy::light::CascadeShadowConfigBuilder { maximum_distance: 100., first_cascade_far_bound: 10., ..default() }.build(),
     ));
+}
+pub(crate) fn advance_day(
+    time: Res<Time<Virtual>>, mut menu: ResMut<crate::graphics_menu::Menu>,
+    mut lights: Query<(&mut DayEnvironment, &mut DirectionalLight, &mut Transform)>,
+    mut ambient: ResMut<GlobalAmbientLight>, mut clear: ResMut<ClearColor>,
+) {
+    if lights.is_empty() { return; }
+    let hour = menu.advance_day(time.delta_secs());
+    for (mut environment, mut light, mut transform) in &mut lights {
+        let base = *environment.sky.get_or_insert(clear.0);
+        let (color, illuminance, brightness, pose, daylight) = daylight_values(&environment.values, hour);
+        light.color = color;
+        light.illuminance = illuminance;
+        *transform = pose;
+        ambient.brightness = brightness;
+        clear.0 = Color::srgb(0.003, 0.005, 0.015).mix(&base, daylight.sqrt());
+    }
 }
 impl MapAssets {
     pub fn retire(world: &mut World) {
@@ -182,6 +199,20 @@ impl MapAssets {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn daylight_orbit_and_authored_zero_intensity() {
+        let mut e = vec![0.; 12];
+        let (_, noon, ambient_day, pose, _) = daylight_values(&e, 12.);
+        let (_, midnight, ambient_night, _, _) = daylight_values(&e, 0.);
+        assert!(noon > midnight && ambient_day > ambient_night);
+        assert!(pose.rotation.is_finite());
+        let (_, _, _, morning, _) = daylight_values(&e, 9.);
+        let (_, _, _, evening, _) = daylight_values(&e, 15.);
+        assert!(morning.forward().x * evening.forward().x < 0.);
+        e.resize(45, 0.);
+        assert_eq!(daylight_values(&e, 12.).1, 0.);
+        assert_eq!(daylight_values(&e, 0.).1, 0.);
+    }
     #[test]
     #[ignore = "requires user-supplied custom map; CPU preparation only"]
     fn supplied_custom_map_prepares_and_retires() {

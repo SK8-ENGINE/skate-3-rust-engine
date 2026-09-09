@@ -9,10 +9,10 @@ lights retain their existing settings. Area lights remain unsupported.
 The environment header supplies start hour and orbit azimuth; extended headers
 also supply sun/moon colour, intensity and day/night ambient. The adapter maps
 unit sun intensity to 10,000 lux and unit ambient to 1,000 brightness. These are
-portable rendering choices, not recovered retail constants. The start hour is
-fixed: there is no new day/night controller or per-frame light update. Existing
+portable rendering choices, not recovered retail constants. The pause menu now provides a Day & night submenu with a saved start hour
+(default noon) and cycle speed (default 60x, a 24-minute day). Existing
 baked diffuse on lightmapped custom surfaces is retained. The package horizon
-colour remains the background; native sky sidecars are only loaded for retail
+colour supplies the daytime background; native sky sidecars are only loaded for retail
 scenes. Zero authored light intensity is respected.
 
 ## Provenance and ambiguity
@@ -144,3 +144,22 @@ Main/render sample buffers are preallocated. Reports still write only at the
 end of the capture; normal launches do not enable this instrumentation. The
 release compile check passed. Another user-run capture is required to locate
 the remaining stalls; no game or gameplay automation was launched.
+
+## Day/night controls
+
+Day & night in the pause menu offers 15-minute time steps and speeds Frozen,
+1x, 10x, 30x, 60x, 120x, 360x and 720x (two minutes per day). Click or Right
+advances; Left reverses. Both settings persist in settings/graphics.json.
+The running clock wraps at midnight and pauses with gameplay. Menu adjustments
+preview immediately. The cycle affects only custom map scene-owned lights;
+retail and the test world keep their existing lighting. Local lights and baked
+lightmaps retain their authored values, so baked surfaces may remain bright at
+night. The existing background colour blends toward dark blue at night; this
+is not a new sky dome or star renderer. No assets are rebuilt each frame.
+
+CPU tests cover wraparound, pause/freeze, sun orbit, zero authored intensity,
+settings compatibility and custom/retail scene retirement. Visual appearance
+and runtime FPS require a manual run; the assistant does not launch gameplay.
+
+Validation: seven focused CPU tests passed (graphics_menu::tests and
+map_render::tests); the user-map preparation test was not rerun.
