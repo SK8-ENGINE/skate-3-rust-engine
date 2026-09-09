@@ -104,26 +104,6 @@ fn libraries_are_restricted() {
     );
 }
 #[test]
-fn held_cube_command_is_typed_validated_and_queued() {
-    let f = Fixture::new(
-        "return {on_load=function() sdk.scene.held_cube('gun','RIGHTHAND',{0,-0.1,0.05},{0.1,0.3,0.1},{0.2,0.2,0.2}) end}",
-    );
-    let mut m = f.manager();
-    m.enable("example", true).unwrap();
-    assert!(matches!(
-        &m.commands[0].1,
-        Command::HeldCube { key, bone, .. } if key == "gun" && bone == "RIGHTHAND"
-    ));
-
-    let f = Fixture::new(
-        "return {on_load=function() sdk.scene.held_cube('gun','RIGHT-HAND',{0,0,0},{0.1,0.3,0.1},{1,1,1}) end}",
-    );
-    let mut m = f.manager();
-    m.enable("example", true).unwrap();
-    assert!(!m.packages["example"].running());
-    assert!(m.commands.is_empty());
-}
-#[test]
 fn immediate_settings_persist_and_validate() {
     let f = Fixture::new(
         "return {on_settings=function(e) sdk.log(tostring(sdk.settings.count)..':'..e.key) end}",
@@ -172,7 +152,7 @@ fn examples_load_and_run() {
     m.scan(true);
     assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
     let ids: Vec<_> = m.packages.keys().cloned().collect();
-    assert_eq!(ids, vec!["community.mario-kart", "community.native-trainer", "community.zombie-shooter"]);
+    assert_eq!(ids, vec!["community.mario-kart", "community.native-trainer"]);
     for id in ids {
         m.enable(&id, true).unwrap();
         for _ in 0..5 {

@@ -11,7 +11,6 @@ available. `Build.ps1` builds and stages both executables without launching them
 | SDK feature | Multiplayer behavior |
 | --- | --- |
 | `scene.cube` / `scene.remove` | Owner-scoped shared visual objects; updates, removal and late joins supported. Cubes remain non-colliding. |
-| `scene.held_cube` | Local visual attachment to the owning player's displayed skeleton. It is not replicated by SDK 1. |
 | `vehicle.spawn/remove/reset/tune/control` | Matching package supplies the model and definition. Owner sends chassis pose, velocities, wheel state, controls, tuning and occupancy. Other peers render and collide with replicas. |
 | Vehicle entry/exit/steering | The final displayed native skeleton, including stance blending and arm steering, is replicated. Seated riders follow the same car render sample. |
 | Vehicle engine audio | Each occupied car has a smoothed engine voice; other players' cars attenuate with distance. |

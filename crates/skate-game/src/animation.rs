@@ -16,13 +16,6 @@ struct BoneBinding {
     parent_bone: Option<usize>,
 }
 impl AnimationStatus {
-    pub(crate) fn entity_for_bone(&self, bone: usize) -> Option<Entity> {
-        self.bindings
-            .iter()
-            .find(|binding| binding.bone == bone)
-            .map(|binding| binding.entity)
-    }
-
     /// Prepare a hidden imported scene without disturbing the live bindings.
     pub(crate) fn for_scene(
         root: Entity,

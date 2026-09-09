@@ -25,11 +25,6 @@ struct Owned {
     entity: Entity,
     mesh: Option<AssetId<Mesh>>,
     material: Option<AssetId<StandardMaterial>>,
-    attachment: Option<usize>,
-}
-#[derive(Component)]
-struct HeldAttachment {
-    bone: usize,
 }
 pub(crate) struct ModdingPlugin;
 impl Plugin for ModdingPlugin {
@@ -96,12 +91,7 @@ impl Plugin for ModdingPlugin {
                 .after(crate::app::SimulationSet::Physics)
                 .run_if(crate::graphics_menu::gameplay_active),
         )
-        .add_systems(
-            Update,
-            (attach_held, update)
-                .chain()
-                .after(crate::app::FrameSet::Animation),
-        );
+        .add_systems(Update, update.after(crate::app::FrameSet::Animation));
         vehicles::install(app);
         network::install(app);
         menu::install(app);
@@ -220,22 +210,6 @@ fn update(world: &mut World) {
         apply(world, &mut mods);
     });
 }
-fn attach_held(
-    mut commands: Commands,
-    animation: Res<crate::animation::AnimationStatus>,
-    held: Query<(Entity, &HeldAttachment), Without<ChildOf>>,
-) {
-    if !animation.ready {
-        return;
-    }
-    for (entity, attachment) in &held {
-        if let Some(parent) = animation.entity_for_bone(attachment.bone) {
-            commands
-                .entity(entity)
-                .insert((ChildOf(parent), Visibility::Inherited));
-        }
-    }
-}
 fn retire(world: &mut World, mods: &mut Mods, key: &(String, String)) {
     if let Some(owned) = mods.owned.remove(key) {
         world.despawn(owned.entity);
@@ -297,9 +271,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
                     Command::Remove { key } => {
                         keys.remove(key);
                     }
-                    Command::Overlay { key, .. }
-                    | Command::Cube { key, .. }
-                    | Command::HeldCube { key, .. } => {
+                    Command::Overlay { key, .. } | Command::Cube { key, .. } => {
                         keys.insert(key.clone());
                         if keys.len() > 64 {
                             return Err("64 owned objects per mod maximum".into());
@@ -380,10 +352,7 @@ fn teleport_ready(world: &World) -> Result<(), String> {
 }
 fn apply_one(world: &mut World, mods: &mut Mods, id: &str, command: Command) -> Result<(), String> {
     let key = match &command {
-        Command::Cube { key, .. }
-        | Command::HeldCube { key, .. }
-        | Command::Overlay { key, .. }
-        | Command::Remove { key } => {
+        Command::Cube { key, .. } | Command::Overlay { key, .. } | Command::Remove { key } => {
             Some((id.to_owned(), key.clone()))
         }
         _ => None,
@@ -452,7 +421,6 @@ fn apply_one(world: &mut World, mods: &mut Mods, id: &str, command: Command) -> 
                     entity,
                     mesh: None,
                     material: None,
-                    attachment: None,
                 },
             );
         }
@@ -464,7 +432,7 @@ fn apply_one(world: &mut World, mods: &mut Mods, id: &str, command: Command) -> 
         } => {
             let key = key.unwrap();
             if let Some(owned) = mods.owned.get(&key) {
-                if owned.mesh.is_some() && owned.attachment.is_none() {
+                if owned.mesh.is_some() {
                     *world.get_mut::<Transform>(owned.entity).unwrap() =
                         Transform::from_translation(Vec3::from_array(position))
                             .with_scale(Vec3::from_array(size));
@@ -500,71 +468,8 @@ fn apply_one(world: &mut World, mods: &mut Mods, id: &str, command: Command) -> 
                     .id(),
                 mesh: Some(mesh.id()),
                 material: Some(material.id()),
-                attachment: None,
             };
             mods.owned.insert(key, owned);
-        }
-        Command::HeldCube {
-            bone,
-            offset,
-            size,
-            color,
-            ..
-        } => {
-            let key = key.unwrap();
-            let bone_index = world
-                .resource::<crate::physics::SkaterRuntime>()
-                .animation
-                .evaluator
-                .frames
-                .bone_names
-                .iter()
-                .position(|name| name.eq_ignore_ascii_case(&bone))
-                .ok_or_else(|| format!("Unknown held-cube bone {bone}"))?;
-            let transform = Transform::from_translation(Vec3::from_array(offset))
-                .with_scale(Vec3::from_array(size));
-            if let Some(owned) = mods.owned.get(&key) {
-                if owned.mesh.is_some() && owned.attachment == Some(bone_index) {
-                    *world.get_mut::<Transform>(owned.entity).unwrap() = transform;
-                    if let Some(material) = owned.material {
-                        if let Some(m) = world
-                            .resource_mut::<Assets<StandardMaterial>>()
-                            .get_mut(material)
-                        {
-                            m.base_color = Color::srgb(color[0], color[1], color[2]);
-                        }
-                    }
-                    return Ok(());
-                }
-            }
-            retire(world, mods, &key);
-            let mesh = world
-                .resource_mut::<Assets<Mesh>>()
-                .add(Cuboid::new(1., 1., 1.));
-            let material = world
-                .resource_mut::<Assets<StandardMaterial>>()
-                .add(StandardMaterial {
-                    base_color: Color::srgb(color[0], color[1], color[2]),
-                    ..default()
-                });
-            let entity = world
-                .spawn((
-                    Mesh3d(mesh.clone()),
-                    MeshMaterial3d(material.clone()),
-                    transform,
-                    Visibility::Hidden,
-                    HeldAttachment { bone: bone_index },
-                ))
-                .id();
-            mods.owned.insert(
-                key,
-                Owned {
-                    entity,
-                    mesh: Some(mesh.id()),
-                    material: Some(material.id()),
-                    attachment: Some(bone_index),
-                },
-            );
         }
         Command::Teleport {
             position,

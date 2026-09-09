@@ -38,13 +38,6 @@ pub enum Command {
         size: [f32; 3],
         color: [f32; 3],
     },
-    HeldCube {
-        key: String,
-        bone: String,
-        offset: [f32; 3],
-        size: [f32; 3],
-        color: [f32; 3],
-    },
     Remove {
         key: String,
     },
@@ -77,25 +70,6 @@ impl Command {
                 crate::schema::valid_id(key)
                     && point(position)
                     && size.iter().all(|v| v.is_finite() && *v > 0. && *v <= 100.)
-                    && color
-                        .iter()
-                        .all(|v| v.is_finite() && (0. ..=1.).contains(v))
-            }
-            Self::HeldCube {
-                key,
-                bone,
-                offset,
-                size,
-                color,
-            } => {
-                crate::schema::valid_id(key)
-                    && !bone.is_empty()
-                    && bone.len() <= 64
-                    && bone
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                    && offset.iter().all(|v| v.is_finite() && v.abs() <= 10.)
-                    && size.iter().all(|v| v.is_finite() && *v > 0. && *v <= 10.)
                     && color
                         .iter()
                         .all(|v| v.is_finite() && (0. ..=1.).contains(v))
