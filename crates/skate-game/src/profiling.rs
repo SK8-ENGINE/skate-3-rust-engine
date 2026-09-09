@@ -43,11 +43,13 @@ struct Options {
     delay: u64,
     wait: bool,
     gpu: bool,
+    min_us: u64,
 }
 impl Options {
     fn parse(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Self, String> {
         let mut result = Self {
             seconds: 30,
+            min_us: 25,
             ..Self::default()
         };
         let mut args = args;
@@ -63,6 +65,14 @@ impl Options {
                             .ok_or("--trace requires a new output JSON path")?
                             .into(),
                     );
+                }
+                Some("--trace-min-us") => {
+                    modifiers = true;
+                    result.min_us = args
+                        .next()
+                        .and_then(|a| a.to_str().and_then(|v| v.parse().ok()))
+                        .filter(|v| *v <= 1000)
+                        .ok_or("--trace-min-us requires 0..1000 microseconds")?;
                 }
                 Some("--trace-seconds" | "--trace-delay") => {
                     modifiers = true;
@@ -119,8 +129,17 @@ struct Capture {
     dropped: AtomicU64,
     sender: SyncSender<Value>,
     gpu: bool,
+    min_us: u64,
+    filtered: AtomicU64,
 }
 impl Capture {
+    fn retain_duration(&self, micros: u64) -> bool {
+        if micros >= self.min_us {
+            return true;
+        }
+        self.filtered.fetch_add(1, Ordering::Relaxed);
+        false
+    }
     fn send(&self, value: Value) {
         if self.sender.try_send(value).is_err() {
             self.dropped.fetch_add(1, Ordering::Relaxed);
@@ -168,6 +187,8 @@ fn init_options(options: Options) -> Result<Option<Guard>, String> {
             dropped: AtomicU64::new(0),
             sender,
             gpu: options.gpu,
+            min_us: options.min_us,
+            filtered: AtomicU64::new(0),
         });
         CAPTURE
             .set(capture.clone())
@@ -202,7 +223,7 @@ fn init_options(options: Options) -> Result<Option<Guard>, String> {
                 if bytes + line.len() + 2 > MAX_BYTES { reason = "size_limit"; break; }
                 writer.write_all(&line)?; writer.write_all(b",\n")?; bytes += line.len() + 2;
             }
-            let footer = json!({"name":"capture_complete","ph":"i","s":"g","pid":1,"tid":0,"ts":state.origin.elapsed().as_micros() as u64,"args":{"reason":reason,"dropped_events":state.dropped.load(Ordering::Relaxed)}});
+            let footer = json!({"name":"capture_complete","ph":"i","s":"g","pid":1,"tid":0,"ts":state.origin.elapsed().as_micros() as u64,"args":{"reason":reason,"dropped_events":state.dropped.load(Ordering::Relaxed),"filtered_short_spans":state.filtered.load(Ordering::Relaxed),"min_span_us":state.min_us}});
             serde_json::to_writer(&mut writer, &footer)?;
             writer.write_all(b"],\"displayTimeUnit\":\"ms\"}\n")?;
             writer.flush()?;
@@ -213,7 +234,7 @@ fn init_options(options: Options) -> Result<Option<Guard>, String> {
             if result.is_err() { eprintln!("TRACE export failed; check free disk space and destination access"); }
             result
         }).map_err(|_| "Cannot start trace writer")?;
-        capture.send(json!({"name":"build","ph":"i","s":"g","ts":0,"pid":1,"tid":0,"args":{"build_id":env!("SKATE_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"revision":env!("SKATE_RELEASE_REVISION"),"bevy":"0.18.1","wgpu":"27.0.1","debug_assertions":cfg!(debug_assertions),"gpu_requested":options.gpu,"seconds":options.seconds,"delay":options.delay,"wait":options.wait}}));
+        capture.send(json!({"name":"build","ph":"i","s":"g","ts":0,"pid":1,"tid":0,"args":{"build_id":env!("SKATE_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"revision":env!("SKATE_RELEASE_REVISION"),"bevy":"0.18.1","wgpu":"27.0.1","debug_assertions":cfg!(debug_assertions),"gpu_requested":options.gpu,"min_span_us":options.min_us,"seconds":options.seconds,"delay":options.delay,"wait":options.wait}}));
         eprintln!(
             "TRACE armed; F9 starts waiting capture, F10 stops/exports. Recording does not stop gameplay."
         );
@@ -244,6 +265,41 @@ fn init_options(options: Options) -> Result<Option<Guard>, String> {
 struct Timeline(Arc<Capture>);
 #[derive(Default)]
 struct SystemName(String);
+#[derive(Default)]
+struct ScheduleName(String);
+impl tracing::field::Visit for ScheduleName {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() != "name" {
+            return;
+        }
+        let name = format!("{value:?}");
+        if matches!(
+            name.as_str(),
+            "Main"
+                | "First"
+                | "PreUpdate"
+                | "StateTransition"
+                | "RunFixedMainLoop"
+                | "FixedMain"
+                | "FixedFirst"
+                | "FixedPreUpdate"
+                | "FixedUpdate"
+                | "FixedPostUpdate"
+                | "FixedLast"
+                | "Update"
+                | "SpawnScene"
+                | "PostUpdate"
+                | "Last"
+                | "ExtractSchedule"
+                | "Render"
+                | "Startup"
+                | "PreStartup"
+                | "PostStartup"
+        ) {
+            self.0 = name;
+        }
+    }
+}
 impl tracing::field::Visit for SystemName {
     fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
@@ -254,6 +310,15 @@ impl tracing::field::Visit for SystemName {
 }
 impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Timeline {
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+        if attrs.metadata().target().starts_with("bevy_ecs")
+            && attrs.metadata().name() == "schedule"
+        {
+            let mut name = ScheduleName::default();
+            attrs.record(&mut name);
+            if let Some(span) = ctx.span(id) {
+                span.extensions_mut().insert(SystemName(name.0));
+            }
+        }
         // Only Bevy ECS system labels may supply dynamic text. All other fields,
         // source locations, thread names and log events are deliberately omitted.
         if attrs.metadata().target().starts_with("bevy_ecs")
@@ -278,6 +343,10 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Timeline {
             Some(stack.remove(index).1)
         });
         if let Some(start) = start.filter(|_| self.0.active.load(Ordering::Relaxed)) {
+            let duration = start.elapsed().as_micros() as u64;
+            if !self.0.retain_duration(duration) {
+                return;
+            }
             if let Some(span) = ctx.span(id) {
                 let ext = span.extensions();
                 let label = ext
@@ -285,7 +354,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Timeline {
                     .filter(|s| !s.0.is_empty())
                     .map(|s| s.0.as_str())
                     .unwrap_or(span.metadata().name());
-                THREAD.with(|tid| self.0.send(json!({"name":label,"cat":span.metadata().name(),"ph":"X","pid":1,"tid":tid,"ts":start.duration_since(self.0.origin).as_micros() as u64,"dur":start.elapsed().as_micros() as u64})));
+                THREAD.with(|tid| self.0.send(json!({"name":label,"cat":span.metadata().name(),"ph":"X","pid":1,"tid":tid,"ts":start.duration_since(self.0.origin).as_micros() as u64,"dur":duration})));
             }
         }
     }
@@ -481,11 +550,16 @@ mod tests {
             dropped: AtomicU64::new(0),
             sender,
             gpu: false,
+            min_us: 25,
+            filtered: AtomicU64::new(0),
         };
         for _ in 0..3 {
             capture.counter("test", json!({"value":1}));
         }
         assert_eq!(capture.dropped.load(Ordering::Relaxed), 2);
+        assert!(!capture.retain_duration(24));
+        assert!(capture.retain_duration(25));
+        assert_eq!(capture.filtered.load(Ordering::Relaxed), 1);
     }
     fn parse(args: &[&str]) -> Result<Options, String> {
         Options::parse(args.iter().map(std::ffi::OsString::from))
@@ -499,12 +573,15 @@ mod tests {
             vec!["--trace-gpu"],
             vec!["--trace", "a", "--trace-wait", "--trace-delay", "1"],
             vec!["--trace", "a", "--trace", "b"],
+            vec!["--trace", "a", "--trace-min-us", "1001"],
+            vec!["--trace-min-us", "25"],
         ] {
             assert!(parse(&args).is_err());
         }
         let options = parse(&["--trace", "a", "--trace-seconds", "600", "--trace-wait"]).unwrap();
         assert!(options.wait);
         assert_eq!(options.seconds, 600);
+        assert_eq!(options.min_us, 25);
         assert!(
             parse(&["--player-title", "--trace"])
                 .unwrap()
@@ -532,6 +609,11 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(guard.0.active.load(Ordering::Relaxed));
+        // Headless ECS-only app proves real system labels survive release builds.
+        fn named_trace_test_system() {}
+        let mut app = App::new();
+        app.add_systems(Update, named_trace_test_system);
+        app.update();
         tracing::info_span!(
             "safe_test_span",
             secret = "CANARY_SECRET",
@@ -553,6 +635,20 @@ mod tests {
             "capture_complete"
         );
         assert!(!text.contains("CANARY"));
+        assert!(!text.contains("Enable the debug feature"));
+        assert!(parsed["traceEvents"].as_array().unwrap().iter().any(|e| {
+            e["cat"] == "system"
+                && e["name"]
+                    .as_str()
+                    .is_some_and(|n| n.ends_with("named_trace_test_system"))
+        }));
+        assert!(
+            parsed["traceEvents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["cat"] == "schedule" && e["name"] == "Update")
+        );
         assert_eq!(
             render_label("render/CANARY_SECRET/main_opaque_pass_3d/elapsed_gpu", 7).unwrap(),
             "render/7/main_opaque_pass_3d/elapsed_gpu"

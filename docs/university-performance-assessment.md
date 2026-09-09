@@ -209,3 +209,42 @@ nonblocking full-queue drops, and F9-style activation/stop/valid JSON export wit
 secret/path/log canaries omitted. The data-only exact-runtime-batch inventory test
 also passed. Existing compiler warnings remain; no game or GPU device was started.
 Runtime frame timings, capture overhead and visual validation remain user tests.
+
+## First user capture: limited CPU evidence
+
+The user recorded a CPU-only capture with build `c709b5d`. Capture SHA-256:
+`6ab11b1e174049507be2506f17d35ef6cd111fea63180ceb82a147c2067cf8d3`.
+It contains 1,194,743 events and 668 frame-interval samples covering approximately
+3.05 seconds of active recording. The 128 MiB byte bound terminated it early;
+the queue reported zero drops. The earlier timestamp range includes the armed
+waiting period and must not be mistaken for recorded gameplay duration.
+
+| Measurement | Median | 95th percentile | Interpretation |
+|---|---:|---:|---|
+| Main-frame interval | 3.59 ms | 7.50 ms | Instrumented, short sample; not scanout or baseline FPS |
+| CPU command-buffer generation | 0.83 ms | 4.25 ms | Includes waits/descheduling; not GPU execution |
+| CPU main opaque pass | 0.53 ms | 4.18 ms | Nested in command generation; do not add to it |
+| Fixed collision/solve | 0.36 ms | 0.45 ms | 183 recorded fixed-step subspans |
+| Fixed animation graphs | 0.12 ms | 0.22 ms | Fixed-step subspan, not all animation/presentation |
+
+Frame-interval p99 was 8.20 ms, maximum 9.21 ms and mean 4.57 ms. These values cannot
+describe a full skating route or quantify recorder overhead. Prepared mesh/image
+counts stayed at 4,927/2,173 over 11 sampled observations; waiting pipelines stayed
+at zero. This window supplies no evidence of asset churn or first-use pipeline
+compilation. The actual window/camera target was 2560×1369 while requested settings
+were 2560×1440, 100% scale, 8× MSAA, uncapped, occlusion off. No setting was changed
+to obtain those measurements. Device timestamp support was present, but GPU
+diagnostics were not requested, so GPU costs remain unmeasured.
+
+The recording exposed a release instrumentation defect: system names appeared as
+`<Enable the debug feature to see the name>`. Consequently, the aggregate anonymous
+system time cannot identify particular game or renderer systems. The recorder now
+retains Bevy's diagnostic names in release builds and tests a real headless ECS
+schedule to catch this regression. A 25 µs default slice threshold limits tiny
+scheduler events; applying that filter offline to this old recording would reduce
+its retained events from 1,194,743 to 61,607 (about 6.4 MB with the old labels).
+That is a file-volume calculation, not a measured improvement in runtime overhead.
+
+Next: repeat with the corrected build and `--trace-gpu`, using the same scene and
+settings. CPU command generation is a candidate for further investigation, but
+this short trace does not yet support material/culling redesign or a physics change.

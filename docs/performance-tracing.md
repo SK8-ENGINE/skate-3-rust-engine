@@ -27,6 +27,13 @@ delay range is 0–600 seconds. There is one capture per process. F9 cannot rest
 a completed recording. Trace modifiers without `--trace` are rejected. Existing
 `--assets` and `--map` options can select prepared data as usual.
 
+CPU slices shorter than **25 microseconds** are omitted by default to keep high-FPS
+captures useful within the file-size bound. Counters and metadata are not filtered.
+Use `--trace-min-us 0` for an unfiltered, usually much shorter capture, or a value
+up to 1000 for a coarser timeline. `capture_complete` reports `min_span_us` and
+`filtered_short_spans`, separately from queue losses. Slice counts and summed slice
+durations exclude those short scopes; do not treat the remainder as all CPU work.
+
 Open the completed JSON using **Open trace file** in [Perfetto](https://ui.perfetto.dev/).
 Select a CPU slice to see its duration; search for `physics::advance`,
 `fixed_collision_and_solve`, `fixed_animation_graphs`, `prepare_mesh_bind_groups`,
@@ -107,7 +114,9 @@ benchmark mode with different controls and collection semantics.
 
 ## Developer support and tooling choice
 
-The package always enables Bevy's `trace` feature; the normal static release build
+The package always enables Bevy's `trace` and `debug` features; `debug` retains ECS
+diagnostic names and does **not** select Cargo's debug profile or change rendering.
+The normal static release build
 (`cargo build --release --locked -p skate-game --bin skate3rust --no-default-features`)
 therefore supports the CLI. No separate `trace_chrome` or `trace_tracy` build feature
 is necessary. The custom subscriber retains event logging and the existing panic
@@ -143,3 +152,13 @@ For exact renderer canonicalization, the ignored, data-only
 `skate_world::performance_inventory::runtime_batches` test accepts
 `SKATE_MAP_INVENTORY` and `SKATE_MAP_INVENTORY_OUT`. Neither initializes Bevy or a GPU.
 Keep private inventory paths and personal launchers out of published docs/artifacts.
+
+For a capture summary using only Python's standard library:
+
+```text
+python tools/analyse_performance_trace.py CAPTURE.json > summary.json
+```
+
+The analyser streams the recorder's one-event-per-line format, reports frame-interval
+percentiles and inclusive CPU slice statistics, and flags truncation, missing system
+names and CPU-only captures. It does not infer GPU execution time from CPU spans.
