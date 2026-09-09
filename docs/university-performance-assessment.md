@@ -323,3 +323,55 @@ and existing shadow-source separation. The private static-CRT EXE/PDB built and
 its embedded revision/system-only PE imports were verified. The local comparison
 launcher records 20 seconds with unchanged settings; the preceding executable and
 capture remain available. No post-change gameplay result is claimed.
+
+## Third user capture: character-lighting change observed
+
+Build `d3f964b`, GPU diagnostics enabled, SHA-256
+`eb8a736ec1ad5d453f9b872525d619e1c8a37818b1ad97a51590df4e1a680ac3`.
+The recording completed its requested 20 seconds: 785,631 events, 4,750 frame
+intervals, zero queue drops and 8,314,179 intentionally filtered short spans.
+The file is 89,548,748 bytes, below the capture byte limit.
+
+| Measurement | Previous capture | Post-change capture |
+|---|---:|---:|
+| Main-frame mean | 3.52 ms | 4.21 ms |
+| Main-frame median | 3.11 ms | 4.62 ms |
+| Main-frame p95 | 6.33 ms | 6.06 ms |
+| Main-frame p99 | 7.11 ms | 6.87 ms |
+| Main-frame maximum | 9.71 ms | 74.70 ms |
+| Retained character-material preparation time per main frame | 0.124 ms | 0.064 ms |
+| Retained material-bind-group preparation time per main frame | 0.070 ms | 0.034 ms |
+| Character-material preparation spans at least 25 us / main frames | 6,997 / 6,997 | 2,962 / 4,750 |
+| Main opaque GPU mean | 0.191 ms | 0.248 ms |
+
+The reduced retained material work is consistent with suppressing identical SH
+asset modifications. It does not mean that the system stopped executing: slices
+below 25 us are omitted. During the first five seconds, only 125 preparation
+spans were retained across 892 main frames; during the last five seconds there
+were 1,232 across 1,232 frames. This fits the intended benefit for settled lighting
+and continued preparation when values change, but the trace does not independently
+record player movement or SH equality. Headless asset-event tests establish the
+bit-exact update behavior.
+
+These are observations across different capture intervals, not a controlled FPS
+gain. Graphics settings and the 2560x1369 target are unchanged, but prepared
+resources are now 4,939 meshes and 2,187 images instead of 4,936 and 2,195. All 79
+render-resource snapshots have those same counts and zero waiting pipelines.
+Command-generation CPU mean increased from 1.27 to 2.00 ms, while directional-light
+visibility averaged 0.421 ms and controller polling 0.242 ms. Different scene work,
+timing and instrumentation overhead prevent attributing aggregate differences to
+the small lighting change. No overall speedup or regression is established.
+
+The 74.70 ms frame interval occurs approximately 8.87 seconds into active capture.
+Its preceding `PreUpdate` schedule contains a 70.68 ms
+`bevy_gilrs::gilrs_system::gilrs_event_system` CPU slice. This locates the delay in
+controller-event processing; a wall-time trace cannot distinguish OS blocking,
+descheduling or internal processing as the root cause. It is not evidence of a
+character-material stall. Input behavior remains unchanged under the native-input
+constraint. No polling/cadence workaround is applied.
+
+The streaming analyser successfully processed the complete recording and the
+comparison was checked against event-level five-second windows and long slices.
+This capture supports retaining the exact lighting-update optimization, with no
+claim of an overall FPS improvement. User visual confirmation remains separate
+from timing evidence; the agent did not launch gameplay or alter quality settings.
