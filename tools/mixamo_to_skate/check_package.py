@@ -1,5 +1,6 @@
 """Exercise the shipped payload without UI, a game process, or private assets."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,11 +10,49 @@ import sys
 import tempfile
 
 
+def check_update_transaction(setup, install):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import updater
+    tx = install/'.update-transaction'
+    # Model an older three-program installation upgrading to the current payload.
+    old_names = ('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe')
+    new_names = (*old_names, 'steam-relay/skate-steam-relay.exe', 'steam-relay/steam_api64.dll')
+    for directory, names, content in ((install, old_names, b'old program'),
+                                      (tx/'new', new_names, b'new program')):
+        for name in names:
+            path = directory/name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        if directory == tx/'new':
+            shutil.copy2(setup, directory/'support/skate3setup.exe')
+        meta = {'files': {name: hashlib.sha256((directory/name).read_bytes()).hexdigest()
+                          for name in names}}
+        (directory/'release.json').write_text(json.dumps(meta), encoding='utf-8')
+    preserved = ('data/installation.json', 'settings/graphics.json',
+                 'support/custom-models/calibration.json')
+    for name in preserved:
+        (install/name).parent.mkdir(parents=True, exist_ok=True)
+        (install/name).write_bytes(b'preserve')
+    updater.install(install, tx)
+    assert all((install/name).read_bytes() == b'preserve' for name in preserved)
+    assert updater.installer.mismatches(install, meta) == []
+    return install/'support/skate3setup.exe'
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--setup', type=Path)
     parser.add_argument('--inside', action='store_true')
+    parser.add_argument('--transaction-only', action='store_true')
     args = parser.parse_args()
+    if args.transaction_only:
+        with tempfile.TemporaryDirectory(prefix='character update ') as temp:
+            root = Path(temp)
+            setup = root/'setup.exe'
+            setup.write_bytes(b'packaged importer fixture')
+            check_update_transaction(setup, root/'installation')
+        print('Character package update transaction passed.')
+        return
     if args.inside:
         # Fresh setup needs the same feature scripts that previously existed
         # only in manually prepared customiser/native-roster worktrees.
@@ -43,28 +82,8 @@ def main():
     env['PATH'] = str(Path(os.environ['SystemRoot'])/'System32')
     with tempfile.TemporaryDirectory(prefix='character package ') as temp:
         root = Path(temp)
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        import updater
         install = root/'old portable copy'
-        tx = install/'.update-transaction'
-        # Protocol 1 knows only these paths. Begin with no separate importer,
-        # replace setup through the real transaction, then test the delivered EXE.
-        assert updater.FILES == ('skate3rust.exe', 'support/skate3setup.exe',
-                                 'support/skate3update.exe', 'release.json')
-        for name in updater.FILES:
-            (install/name).parent.mkdir(parents=True, exist_ok=True)
-            (install/name).write_bytes(b'old program')
-            (tx/'new'/name).parent.mkdir(parents=True, exist_ok=True)
-            (tx/'new'/name).write_bytes(b'new program')
-        preserved = ('data/installation.json', 'settings/graphics.json',
-                     'support/custom-models/calibration.json')
-        for name in preserved:
-            (install/name).parent.mkdir(parents=True, exist_ok=True)
-            (install/name).write_bytes(b'preserve')
-        shutil.copy2(setup, tx/'new/support/skate3setup.exe')
-        updater.install(install, tx)
-        assert all((install/name).read_bytes() == b'preserve' for name in preserved)
-        setup = install/'support/skate3setup.exe'
+        setup = check_update_transaction(setup, install)
         def run(*arguments):
             return subprocess.run([str(setup), *map(str, arguments)], cwd=root,
                                   env=env, capture_output=True, timeout=180)
@@ -96,7 +115,7 @@ def main():
         assert result.returncode == 1 and response['status'] == 'error', response
         assert 'FBX conversion failed' in response['message'], response
         assert before == {p.relative_to(library): p.read_bytes() for p in library.rglob('*') if p.is_file()}
-    print('Packaged importer: protocol-1 migration, native runtime, GLB import, thumbnail, FBX failure and data preservation passed.')
+    print('Packaged importer: manifest update, native runtime, GLB import, thumbnail, FBX failure and data preservation passed.')
 
 
 if __name__ == '__main__':

@@ -36,6 +36,8 @@ jobs:
         run: python -m unittest discover -s tools -p "test_*release*.py" -v
       - name: Check updater protocol
         run: python -m unittest discover -s tools -p "test_update*.py" -v
+      - name: Check character package update transaction
+        run: python tools/mixamo_to_skate/check_package.py --transaction-only
       - name: Check isolated asset refresh and failure recovery
         run: python -m unittest tools.asset_pipeline.test_versions -v
       - name: Build Windows package
