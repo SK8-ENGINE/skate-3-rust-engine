@@ -34,6 +34,8 @@ impl Config {
         let mut args = std::env::args_os().skip(1);
         while let Some(arg) = args.next() {
             match arg.to_str() {
+                Some("--trace" | "--trace-seconds" | "--trace-delay") => { args.next().ok_or("Trace option requires a value")?; }
+                Some("--trace-wait" | "--trace-gpu") => {}
                 Some("--net-host") => config.multiplayer.host = Some(args.next().ok_or("Missing host bind address")?.to_string_lossy().parse().map_err(|_|"Invalid host bind address")?),
                 Some("--net-local") => {
                     let bind=args.next().ok_or("--net-local requires bind and peer addresses")?.to_string_lossy().parse().map_err(|_|"Invalid bind address")?;

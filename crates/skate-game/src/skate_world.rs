@@ -21,6 +21,7 @@ use skate_data::skate_map::SkateMap;
 use std::collections::HashMap;
 
 pub(crate) fn validate_runtime(map: &SkateMap) -> Result<(), String> {
+    let _span = info_span!("validate_map").entered();
     let archive = retail_archive(map)?;
     if map.geometry.collision.is_empty() && archive.is_none() {
         return Err("SKATE map has no collision geometry".into());
@@ -421,6 +422,39 @@ fn render_groups(
     groups
 }
 
+#[cfg(test)]
+mod performance_inventory {
+    use super::*;
+    /// Explicit read-only inventory, never initializes Bevy or a GPU. Asset path
+    /// stays in the environment; output contains counts/bounds only.
+    #[test]
+    #[ignore = "requires SKATE_MAP_INVENTORY and SKATE_MAP_INVENTORY_OUT"]
+    fn runtime_batches() {
+        let map = SkateMap::load(std::path::Path::new(&std::env::var_os("SKATE_MAP_INVENTORY").unwrap())).unwrap();
+        let textures = render_texture_ids(&map.textures);
+        let materials = render_material_ids(&map.materials, &textures);
+        let groups = render_groups(&map.geometry, &materials);
+        let mut spans = [0usize;4];
+        let mut triangles = [0usize;4];
+        let mut cells = std::collections::HashSet::new();
+        for (material, indices) in &groups {
+            let mut min = Vec3::splat(f32::INFINITY);
+            let mut max = Vec3::splat(f32::NEG_INFINITY);
+            for &i in indices { let p=Vec3::from_array(map.geometry.vertices[i as usize].position); min=min.min(p); max=max.max(p); }
+            let extent=(max.x-min.x).max(max.z-min.z);
+            for (i,threshold) in [50.,100.,250.,500.].iter().enumerate() {
+                if extent>*threshold {spans[i]+=1;triangles[i]+=indices.len()/3;}
+            }
+            for tri in indices.chunks_exact(3) {
+                let p=tri.iter().map(|&i|Vec3::from_array(map.geometry.vertices[i as usize].position)/3.).sum::<Vec3>();
+                cells.insert((*material,(p.x/32.).floor() as i32,(p.z/32.).floor() as i32));
+            }
+        }
+        let result=serde_json::json!({"schema":1,"runtime_material_batches":groups.len(),"extent_threshold_metres":[50,100,250,500],"batches_over_threshold":spans,"triangles_in_batches_over_threshold":triangles,"centroid_32m_cells":cells.len(),"note":"Exact current material canonicalization and grouping; no frustum, occlusion or runtime frame measurement"});
+        std::fs::write(std::env::var_os("SKATE_MAP_INVENTORY_OUT").unwrap(),serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+    }
+}
+
 pub(crate) fn spawn(
     map: &SkateMap,
     commands: &mut crate::map_render::SceneCommands,
@@ -431,6 +465,7 @@ pub(crate) fn spawn(
     tuning: &crate::retail_render::MaterialTuning,
 ) {
     // Texture roles have different transfer functions even when sharing a record.
+    let _span = info_span!("prepare_map_geometry_and_textures").entered();
     let texture_ids = render_texture_ids(&map.textures);
     let mut cache = HashMap::<(u32, u8), Handle<Image>>::new();
     let mut texture = |id: u32, role: u8| -> Option<Handle<Image>> {

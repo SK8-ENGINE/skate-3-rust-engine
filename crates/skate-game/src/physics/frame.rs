@@ -53,13 +53,13 @@ pub(super) fn advance(
         .riding
         .start_wheel_queries(&physics.board, &physics.world)?;
     let skeleton_queries = super::foot_ik_queries::query(&physics.world, &skater.skeleton)?;
-    let animation = animation_phase::advance(
+    let animation = bevy::log::info_span!("fixed_animation_graphs").in_scope(|| animation_phase::advance(
         physics,
         skater,
         controls,
         graphs,
         &physics.animation_profile,
-    )
+    ))
     .map_err(|e| format!("Animation tick{}: {e}", physics.ticks))?;
     super::offboard_audit_trace::stage(tick, "animation", physics, skater, controls);
     #[cfg(test)]
@@ -228,14 +228,14 @@ pub(super) fn advance(
     //World8275ECA4 ends skeleton tests after state/forces and before solving.
     //Teleport resets previous observations, but preserves this pending batch.
     skeleton_queries.publish(&mut skater.player_input.player);
-    solve::advance(physics, skater, skater.ground.steering.targets)?;
+    bevy::log::info_span!("fixed_collision_and_solve").in_scope(|| solve::advance(physics, skater, skater.ground.steering.targets))?;
     super::offboard_audit_trace::stage(tick, "solve", physics, skater, controls);
     #[cfg(test)]
     super::offboard_root_trace::trace(tick, "solve", skater);
     //ProcessOutput82DB6EE8 resets the packet before its component publishers.
     //All consumers of the preceding output have completed this frame's input.
     super::player_input::reset_outputs(&mut skater.player_input.physical);
-    physics.finish_skater(skater)?;
+    bevy::log::info_span!("fixed_finish_skater").in_scope(|| physics.finish_skater(skater))?;
     super::offboard_audit_trace::stage(tick, "finish", physics, skater, controls);
     #[cfg(test)]
     super::offboard_root_trace::trace(tick, "finish", skater);

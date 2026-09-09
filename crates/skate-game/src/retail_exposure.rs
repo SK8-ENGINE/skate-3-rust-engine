@@ -228,6 +228,8 @@ impl ViewNode for ExposureNode {
             return Ok(());
         };
         let post = view.post_process_write();
+        use bevy::render::diagnostic::RecordDiagnostics;
+        let diagnostics = context.diagnostic_recorder();
         let meter = context.render_device().create_bind_group(
             "retail meter",
             &cache.get_bind_group_layout(&p.compute_layout),
@@ -251,8 +253,10 @@ impl ViewNode for ExposureNode {
                     timestamp_writes: None,
                 });
             pass.set_pipeline(compute);
+            let span = diagnostics.pass_span(&mut pass, "retail_exposure_meter");
             pass.set_bind_group(0, &meter, &[]);
             pass.dispatch_workgroups(1, 1, 1);
+            span.end(&mut pass);
         }
         let mut pass = context.begin_tracked_render_pass(RenderPassDescriptor {
             label: Some("retail exposed tone"),
@@ -267,8 +271,10 @@ impl ViewNode for ExposureNode {
             occlusion_query_set: None,
         });
         pass.set_render_pipeline(tone);
+        let span = diagnostics.pass_span(&mut pass, "retail_exposed_tone");
         pass.set_bind_group(0, &output, &[]);
         pass.draw(0..3, 0..1);
+        span.end(&mut pass);
         Ok(())
     }
 }
