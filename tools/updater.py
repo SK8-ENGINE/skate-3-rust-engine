@@ -130,6 +130,20 @@ def eligible(release, channel):
             and (channel == 'Latest' or not release.get('prerelease')))
 
 
+def package_name(meta):
+    # Rolling asset names are derived from a validated integer, never a path
+    # supplied by release notes or an arbitrary manifest field.
+    return f'skate3rust-windows-x64-build-{identity(meta)}.zip' if meta['tag'] == 'experimental' else PACKAGE
+
+
+def release_candidates(assets, rolling):
+    if not rolling:
+        return [('release.json', PACKAGE)]
+    builds = sorted((int(m[1]) for name in assets
+                     if (m := re.fullmatch(r'release-([1-9][0-9]*)\.json', name))), reverse=True)
+    return [(f'release-{n}.json', f'skate3rust-windows-x64-build-{n}.zip') for n in builds]
+
+
 def discover(current, channel, cancel):
     current_build = identity(current)
     candidates = []
@@ -145,17 +159,19 @@ def discover(current, channel, cancel):
             if not eligible(release, channel):
                 continue
             assets = {a['name']: a for a in release.get('assets', []) if a.get('state') == 'uploaded'}
-            if not {PACKAGE, PACKAGE + '.sha256', 'release.json'} <= assets.keys():
-                continue
-            try:
-                meta = json.loads(fetch(asset_url(assets['release.json']), cancel, 65536))
-                build = identity(meta)
-                program_metadata(meta)
-                if meta['tag'] != release['tag_name'] or build <= current_build:
+            for manifest_name, package in release_candidates(assets, release.get('tag_name') == 'experimental'):
+                if not {package, package + '.sha256', manifest_name} <= assets.keys():
                     continue
-            except (ValueError, KeyError):
-                continue
-            candidates.append((build, release['id'], release, assets, meta))
+                try:
+                    meta = json.loads(fetch(asset_url(assets[manifest_name]), cancel, 65536))
+                    build = identity(meta)
+                    program_metadata(meta)
+                    if (meta['tag'] != release['tag_name'] or build <= current_build
+                            or package_name(meta) != package):
+                        continue
+                except (ValueError, KeyError):
+                    continue
+                candidates.append((build, release['id'], release, assets, meta))
         if len(releases) < 100:
             break
     else:
@@ -165,14 +181,15 @@ def discover(current, channel, cancel):
 
 def stage(candidate, directory, cancel, progress):
     _, _, release, assets, meta = candidate
-    checksum = fetch(asset_url(assets[PACKAGE + '.sha256']), cancel, 1024).decode('ascii').split()
-    if len(checksum) != 2 or checksum[1] != PACKAGE or not re.fullmatch('[0-9a-fA-F]{64}', checksum[0]):
+    package = package_name(meta)
+    checksum = fetch(asset_url(assets[package + '.sha256']), cancel, 1024).decode('ascii').split()
+    if len(checksum) != 2 or checksum[1] != package or not re.fullmatch('[0-9a-fA-F]{64}', checksum[0]):
         raise ValueError('Invalid release checksum')
-    archive = fetch(asset_url(assets[PACKAGE]), cancel, 1024 * 1024 * 1024, progress)
+    archive = fetch(asset_url(assets[package]), cancel, 1024 * 1024 * 1024, progress)
     digest = hashlib.sha256(archive).hexdigest()
     if digest != checksum[0].lower():
         raise ValueError('Package checksum mismatch')
-    api_digest = assets[PACKAGE].get('digest')
+    api_digest = assets[package].get('digest')
     if api_digest and api_digest != 'sha256:' + digest:
         raise ValueError('GitHub asset digest mismatch')
     import io
@@ -291,7 +308,7 @@ def main(request=None):
     ttk.Label(win, text='Updates — Update downloads, then closes and restarts the game.').pack(pady=8)
     choice = ttk.Combobox(win, textvariable=channel, values=('Stable', 'Latest'), state='readonly')
     choice.pack()
-    ttk.Label(win, text='Stable: published releases. Latest: includes experimental prereleases.').pack()
+    ttk.Label(win, text='Stable: published releases. Latest: rolling Experimental and newer releases.').pack()
     notes = tk.Text(win, wrap='word', height=19)
     notes.pack(fill='both', expand=True, padx=12, pady=8)
     notes.configure(state='disabled')

@@ -10,13 +10,16 @@ Includes skating, tricks, grinds, offboard movement, difficulty settings and
 
 ## Mods and agent authoring
 
-Drop mod ZIPs into top-level `mods/` and use `PLAY-MARIO-KART.bat` for the integrated
-mod build in this checkout. **Point your coding agent at [sdk/AGENTS.md](sdk/AGENTS.md)**
+Drop mod ZIPs into top-level `mods/` and enable them in the Mods menu. **Point your coding agent at [sdk/AGENTS.md](sdk/AGENTS.md)**
 to make a mod. See [package structure](docs/mod-packages.md), [Lua API](docs/lua-modding.md),
 [vehicle API](docs/vehicle-sdk.md), [multiplayer mod SDK](docs/multiplayer-mods.md) and [Mixamo workflow](docs/mixamo-vehicle-workflow.md).
 Editable examples live in `sdk/examples/`; `tools/package_mod.py` validates and packages them.
 
 ## Play
+
+[Download Experimental](https://github.com/SK8-ENGINE/skate-3-rust-engine/releases/tag/experimental).
+Successful `main` builds replace this prerelease. Choose **Latest** in Updates
+for experimental updates; **Stable** is the default.
 
 Extract the Windows release ZIP and run `skate3rust.exe`. Select your Skate 3
 Xbox 360 ISO, or select `default.xex` in an extracted game folder. Keep its
@@ -40,8 +43,8 @@ Escape opens difficulty and graphics settings.
 
 Development builds use a prepared asset set in `assets/private/` or the
 installed asset directory. `scripts/Build-Release.ps1` builds the portable Windows
-package and requires Python 3.13. Published GitHub releases build and attach
-the package automatically.
+package and requires Python 3.13. GitHub Actions builds `main` automatically;
+numbered releases are published separately.
 
 Custom animations and climbing support remain available, but no custom clips
 are shipped. The included format-demo map is original procedural content.

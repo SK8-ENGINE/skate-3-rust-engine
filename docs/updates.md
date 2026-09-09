@@ -44,13 +44,40 @@ exceeds its page/time bound fails rather than claiming the player is up to date.
 Older releases without this metadata are skipped. Existing installations predating
 the updater need one manual portable-package upgrade to bootstrap it.
 
-At implementation time the configured repository was private with no releases.
-Normal players need publicly accessible releases. For private testing, launch with
-`SKATE_UPDATE_GITHUB_TOKEN` set to a token with read access to repository contents.
-The updater does not store this credential; it uses authenticated API asset URLs
-and strips authorization on redirects. Never place tokens in launch arguments,
-tracked scripts or release packages. No repository visibility or release was
-changed by this implementation.
+The repository and release downloads are public. For private forks/testing,
+`SKATE_UPDATE_GITHUB_TOKEN` supplies a token with read access to repository contents.
+The updater never stores it and strips authorization on redirects.
+
+## Rolling Experimental
+
+Every push to `main` builds the Windows package. Successful builds update one
+mutable prerelease tagged `experimental`; it is never marked as GitHub's Latest
+stable release. Manual runs on `main` can publish it too. Builds on other branches
+produce only Actions artifacts. Published numbered releases retain the stable
+workflow. Do not mark the rolling release immutable.
+
+Select **Latest** in Updates to receive Experimental; **Stable** stays the default
+and ignores prereleases. Download the first Experimental ZIP manually if your
+installation predates this rolling-release updater.
+
+Builds share this workflow's existing increasing run number. Experimental asset
+names include that number: `skate3rust-windows-x64-build-N.zip`, its `.sha256`, and
+`release-N.json`. The manifest is uploaded last. The updater ignores incomplete
+sets and compares build numbers even when the release tag has not changed. The
+current and previous complete sets are kept; a very old pending download can
+expire after another publication and should be checked again. The internal ZIP
+folder and installed `release.json` names remain unchanged.
+
+Superseded compilation runs are cancelled. Publication is serialized and never
+cancelled by a newer push; stale source revisions and older/equal builds are not
+published. A failed build leaves the previous download available. Failed uploads
+cannot make a partial package eligible. The release body has a current download
+link, build/revision identity and ten recent commit summaries. Actions artifacts
+expire after seven days; dependency caching reduces repeat compilation cost.
+
+The publisher uses GitHub's workflow token with contents-write permission only in
+the publish job. No personal token or game assets are included. Standard hosted
+runners are free for public repositories; private forks use their own allowance.
 
 The ZIP checksum is mandatory; GitHub's asset digest is also checked when present.
 The internal/external manifests and individual executable hashes must agree.

@@ -42,6 +42,26 @@ class UpdaterTests(unittest.TestCase):
             self.assertEqual(u.discover(metadata(1), 'Latest', threading.Event())[0], 4)
             self.assertIsNone(u.discover(metadata(5), 'Latest', threading.Event()))
 
+    def test_rolling_release_same_tag_new_build_and_partial_upload(self):
+        def release():
+            names = []
+            for build in (2, 3):
+                names += [f'release-{build}.json', f'skate3rust-windows-x64-build-{build}.zip',
+                          f'skate3rust-windows-x64-build-{build}.zip.sha256']
+            names += ['release-4.json']  # Incomplete upload must not be offered.
+            return dict(id=1, tag_name='experimental', draft=False, prerelease=True,
+                        published_at='date', assets=[dict(name=n, state='uploaded', browser_download_url=n) for n in names])
+        def fetch(url, *args):
+            if url.startswith(u.API):
+                return json.dumps([release()]).encode()
+            build = int(url.removeprefix('release-').removesuffix('.json'))
+            return json.dumps({**metadata(build), 'tag': 'experimental'}).encode()
+        with patch.object(u, 'fetch', fetch):
+            current = {**metadata(2), 'tag': 'experimental'}
+            self.assertEqual(u.discover(current, 'Latest', threading.Event())[0], 3)
+            self.assertIsNone(u.discover(current, 'Stable', threading.Event()))
+            self.assertIsNone(u.discover({**current, 'build': 3}, 'Latest', threading.Event()))
+
     def package(self, extra=None):
         meta = metadata()
         meta['files'] = {n: hashlib.sha256(b'new').hexdigest() for n in u.FILES[:-1]}
