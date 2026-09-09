@@ -454,7 +454,7 @@ fn end_frame(
             "assets",
             json!({"meshes":meshes.len(),"images":images.len(),"entities":entities.iter().count()}),
         );
-        capture.send(json!({"name":"configuration","ph":"i","s":"g","pid":1,"tid":0,"ts":capture.origin.elapsed().as_micros() as u64,"args":{"map_fingerprint":format!("{:016x}",config.map_fingerprint),"difficulty":config.difficulty.key(),"timestamp_queries":device.as_ref().is_some_and(|d|d.features().contains(bevy::render::settings::WgpuFeatures::TIMESTAMP_QUERY)),"windows":windows.iter().map(|w|json!({"width":w.physical_width(),"height":w.physical_height(),"present_mode":format!("{:?}",w.present_mode)})).collect::<Vec<_>>(),"cameras":cameras.iter().map(|(c,m)|json!({"size":c.physical_target_size().map(|s|[s.x,s.y]),"msaa":m.samples()})).collect::<Vec<_>>()}}));
+        capture.send(json!({"name":"configuration","ph":"i","s":"g","pid":1,"tid":0,"ts":capture.origin.elapsed().as_micros() as u64,"args":{"map_fingerprint":format!("{:016x}",config.map_fingerprint),"difficulty":config.difficulty.key(),"retail_bindless":device.as_ref().map(|d|bevy::pbr::material_uses_bindless_resources::<crate::retail_render::RetailWorldMaterial>(d)),"timestamp_queries":device.as_ref().is_some_and(|d|d.features().contains(bevy::render::settings::WgpuFeatures::TIMESTAMP_QUERY)),"windows":windows.iter().map(|w|json!({"width":w.physical_width(),"height":w.physical_height(),"present_mode":format!("{:?}",w.present_mode)})).collect::<Vec<_>>(),"cameras":cameras.iter().map(|(c,m)|json!({"size":c.physical_target_size().map(|s|[s.x,s.y]),"msaa":m.samples()})).collect::<Vec<_>>()}}));
     }
     for diagnostic in diagnostics.iter() {
         let path = diagnostic.path().as_str();

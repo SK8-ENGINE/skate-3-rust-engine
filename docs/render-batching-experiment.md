@@ -1,5 +1,10 @@
 # University render batching experiment
 
+**Superseded in the active renderer:** the user's v5 test did not improve the
+reported bottleneck. The v6 [CPU material binding experiment](cpu-material-binding-experiment.md)
+removes the extra shadow meshes and layer adjustment. The inventory below records
+the historical v5 candidate, not the current production spawn path.
+
 The user authorized engine/content visual tradeoffs after the initial exact-output
 audit, while keeping resolution, MSAA, user settings and native gameplay timing
 unchanged. This first structural experiment targets redundant shadow submission;

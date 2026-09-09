@@ -4738,6 +4738,8 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "half",
+ "naga",
+ "naga_oil",
  "serde",
  "serde_json",
  "skate-core",

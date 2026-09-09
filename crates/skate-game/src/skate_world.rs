@@ -20,6 +20,7 @@ use skate_core::{
 use skate_data::skate_map::SkateMap;
 use std::collections::HashMap;
 
+#[cfg(test)]
 #[path = "retail_shadow_geometry.rs"]
 pub(crate) mod shadow_geometry;
 
@@ -625,7 +626,6 @@ pub(crate) fn spawn(
     // lighting still needs separate geometry batches but can share a PBR material.
     let pbr_ids = self::material_ids(&map.materials, &texture_ids, false);
     let groups = consolidated_groups(map, &texture_ids, tuning, &mut texture);
-    let mut shadow_geometry = shadow_geometry::ShadowGeometry::default();
     eprintln!(
         "SKATE_RENDER_BATCHES count={} triangles={}",
         groups.len(),
@@ -635,10 +635,6 @@ pub(crate) fn spawn(
         vec![None; map.materials.len()];
     for RenderGroup { material: material_index, indices, retail } in groups {
         let m = &map.materials[material_index];
-        let shadow_proxy = retail.as_ref().is_some_and(shadow_geometry::eligible);
-        if shadow_proxy {
-            shadow_geometry.add(&map.geometry, &indices, retail.as_ref().unwrap().two_sided);
-        }
         // Reindex each batch, preserving authored normals and both UV sets.
         let mut remap = HashMap::new();
         let mut vertices = Vec::new();
@@ -698,8 +694,7 @@ pub(crate) fn spawn(
         }
         if let Some(material) = retail {
             let material = retail_materials.add(material);
-            let mut entity = commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
-            if shadow_proxy { entity.insert(bevy::light::NotShadowCaster); }
+            commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
             continue;
         }
         // Vertex colours above carry retail decal coordinates, never PBR tint.
@@ -745,7 +740,6 @@ pub(crate) fn spawn(
             });
         }
     }
-    shadow_geometry.spawn(&map.geometry, commands, meshes, materials);
     for light in &map.lights {
         let color = Color::linear_rgb(light.color[0], light.color[1], light.color[2]);
         let transform = Transform::from_translation(Vec3::from_array(light.position));
@@ -850,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    fn opaque_shadow_batches_are_owned_and_retired_with_the_map() {
+    fn retail_batches_are_owned_and_retired_with_the_map() {
         let map = retail_demo();
         let mut world = World::new();
         world.init_resource::<Assets<Mesh>>();
@@ -861,8 +855,7 @@ mod tests {
         let mut scene = crate::map_render::PreparedScene::new(&world);
         scene.prepare(Some(&map), std::path::Path::new("unused"));
         scene.publish(&mut world);
-        assert!(world.query_filtered::<Entity, With<bevy::light::NotShadowCaster>>().iter(&world).count() > 0);
-        assert!(world.query::<&bevy::camera::visibility::RenderLayers>().iter(&world).any(|layers| layers.intersects(&bevy::camera::visibility::RenderLayers::layer(shadow_geometry::LAYER))));
+        assert_eq!(world.query_filtered::<Entity, With<bevy::light::NotShadowCaster>>().iter(&world).count(), 0);
         crate::map_render::MapAssets::retire(&mut world);
         assert_eq!(world.query_filtered::<Entity, With<crate::map_render::MapEntity>>().iter(&world).count(), 0);
         assert_eq!(world.resource::<Assets<Mesh>>().len(), 0);
