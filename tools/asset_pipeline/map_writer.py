@@ -1,6 +1,8 @@
 """Direct retail cache -> SKATE14 writer. All geometry remains in Y-up metres."""
 from pathlib import Path
 import io,json,struct,sys,zlib
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from PIL import Image
 from tools.asset_pipeline.retail_material import _retail_shader_family,_retail_render_flags
@@ -14,27 +16,49 @@ def stored(f,data):
     method=1
     if len(packed)>=len(data):method=0;packed=data
     u(f,method,len(packed));f.write(packed)
+
+def packed_texture(root,name,entry):
+    if 'rgba' in entry:
+        width,height=entry['width'],entry['height']
+        pixels=np.frombuffer((root/entry['rgba']).read_bytes(),dtype=np.uint8).reshape(height,width,4)
+        rgba=(pixels if entry.get('cube_faces')==6 else pixels[::-1]).tobytes()
+    else:
+        with Image.open(root/entry['png']) as source:
+            image=source.convert('RGBA')
+            if entry.get('cube_faces')!=6:image=image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+            width,height=image.size;rgba=image.tobytes()
+    result=io.BytesIO();string(result,name);u(result,width,height,1);stored(result,rgba)
+    return result.getvalue()
+
+def write_textures(output,root,textures):
+    # zlib releases the GIL. Bound outstanding work to two textures rather
+    # than retaining an entire district's decoded/compressed images.
+    names=iter(sorted(textures))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending=deque()
+        for _ in range(2):
+            name=next(names,None)
+            if name is not None:pending.append(pool.submit(packed_texture,root,name,textures[name]))
+        while pending:
+            output.write(pending.popleft().result())
+            name=next(names,None)
+            if name is not None:pending.append(pool.submit(packed_texture,root,name,textures[name]))
 def normalise(a):return a/np.maximum(np.linalg.norm(a,axis=1,keepdims=True),1e-20)
 
-def spawn_point(manifest,root):
-    from retail_collision_mesh import decode_rx2_clustered_meshes
-    university=manifest['district_name']=='DIST_University'
-    best=None
-    for entry in manifest['simulation_assets']:
-        if not entry.get('collision_meshes'):continue
-        # Bound the exact same search before decoding distant collision
-        # meshes. A triangle's centroid cannot be closer than its AABB.
-        bounds=[mesh['bounds'] for mesh in entry['collision_meshes']]
-        if university:
-            if not any(b['minimum'][0]<=330<=b['maximum'][0] and
-                       b['minimum'][2]<=-710<=b['maximum'][2] for b in bounds):continue
-        elif best is not None:
-            def nearest_square(b):
-                return sum(max(b['minimum'][j],-b['maximum'][j],0.)**2 for j in (0,2))
-            if min(map(nearest_square,bounds))>best[0]+.01:continue
-        for mesh in decode_rx2_clustered_meshes((root/entry['rx2']).read_bytes()):
+class SpawnSelector:
+    """Keep the original triangle search order while consuming decoded meshes."""
+    def __init__(self, district_name):
+        self.university=district_name=='DIST_University'
+        self.best=None
+
+    def consider(self, meshes):
+        university=self.university;best=self.best
+        for mesh in meshes:
             if not mesh.triangles:continue
             if university and not (mesh.bounds_min[0]<=330<=mesh.bounds_max[0] and mesh.bounds_min[2]<=-710<=mesh.bounds_max[2]):continue
+            if not university and best is not None:
+                nearest=sum(max(mesh.bounds_min[j],-mesh.bounds_max[j],0.)**2 for j in (0,2))
+                if nearest>best[0]+.01:continue
             triangles=np.asarray([(tri.a,tri.b,tri.c) for tri in mesh.triangles],dtype=np.float64)
             a,b,c=triangles[:,0],triangles[:,1],triangles[:,2]
             cross=np.cross(b-a,c-a);length=np.linalg.norm(cross,axis=1)
@@ -56,10 +80,30 @@ def spawn_point(manifest,root):
                 points[:,1]+=1.
             index=np.argmin(scores);score=scores[index]
             if np.isfinite(score) and (best is None or score<best[0]):best=(score,tuple(points[index]))
-    if best is None:raise ValueError('No supported spawn surface in '+manifest['map_name'])
-    return best[1]
+        self.best=best
 
-def write(manifest_path,output,collision,report=lambda _:None, *, render_only=False):
+    def result(self, map_name):
+        if self.best is None:raise ValueError('No supported spawn surface in '+map_name)
+        return self.best[1]
+
+
+def spawn_point(manifest,root):
+    from retail_collision_mesh import decode_rx2_clustered_meshes
+    selector=SpawnSelector(manifest['district_name'])
+    for entry in manifest['simulation_assets']:
+        if not entry.get('collision_meshes'):continue
+        bounds=[mesh['bounds'] for mesh in entry['collision_meshes']]
+        if selector.university:
+            if not any(b['minimum'][0]<=330<=b['maximum'][0] and
+                       b['minimum'][2]<=-710<=b['maximum'][2] for b in bounds):continue
+        elif selector.best is not None:
+            def nearest_square(b):
+                return sum(max(b['minimum'][j],-b['maximum'][j],0.)**2 for j in (0,2))
+            if min(map(nearest_square,bounds))>selector.best[0]+.01:continue
+        selector.consider(decode_rx2_clustered_meshes((root/entry['rx2']).read_bytes()))
+    return selector.result(manifest['map_name'])
+
+def write(manifest_path,output,collision,report=lambda _:None, *, render_only=False, prepared_spawn=None):
     root=manifest_path.parent;m=json.loads(manifest_path.read_text());textures=m['textures']
     ids={name:i+1 for i,name in enumerate(sorted(textures))}
     excluded=set(m['normal_texture_policy']['excluded_texture_ids'])
@@ -68,9 +112,13 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
                     ('mat','<u4'),('decal','<f4',(2,)),('frame','i1',(4,))])
     for number,model in enumerate(m['models']):
         if number%100==0:report(f"Writing {m['map_name']}: model {number+1}/{len(m['models'])}")
-        with np.load(root/model['npz'],allow_pickle=False) as arrays:
+        with np.load(root/model['npz'],allow_pickle=False) as archive:
             for mesh in model['meshes']:
-                i=mesh['index'];pos=arrays[f'vertices_{i}'];faces=arrays[f'faces_{i}'].astype('<u4')
+                i=mesh['index']
+                # NpzFile does not cache reads. Load this mesh once, including
+                # attributes reused by normals, UVs and tangent conversion.
+                arrays={key:archive[key] for key in archive.files if key.endswith('_'+str(i))}
+                pos=arrays[f'vertices_{i}'];faces=arrays[f'faces_{i}'].astype('<u4')
                 if not len(pos) or not len(faces):continue
                 if faces.max()>=len(pos):raise ValueError('Map face is outside vertex array')
                 shader=mesh.get('shader_name') or '';roles=mesh.get('retail_texture_ids',{})
@@ -115,7 +163,7 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
                     record['frame'][:,:3]=np.rint(np.clip(binormal,-1,1)*127).astype('i1');record['frame'][:,3]=np.rint(sign*127).astype('i1')
                 if not np.isfinite(pos).all():raise ValueError('Non-finite map geometry')
                 vertices.write(record.tobytes());indices.write((faces+nv).astype('<u4').tobytes());nv+=len(pos);ni+=faces.size;nm+=1
-    report('Selecting starting position: '+m['map_name']);spawn=(0.,0.,0.) if render_only else spawn_point(m,root)
+    report('Selecting starting position: '+m['map_name']);spawn=(0.,0.,0.) if render_only else (prepared_spawn if prepared_spawn is not None else spawn_point(m,root))
     # Match the supplied exporter's environment defaults. Native sky shaders
     # remain a separate runtime feature; no geometry is synthesized here.
     environment=[.10,.36,.75,.64,.82,1.,.18,.24,.30,0.,11.,0.,18.,0.,
@@ -125,17 +173,7 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
     with output.open('wb') as f:
         f.write(b'SKATE14\0');u(f,0x12345678);string(f,m['map_name']);floats(f,*spawn,0.,*environment)
         u(f,nm,len(ids),nv,ni,0,len(rails),0,0,0);f.write(mats.getvalue())
-        for name in sorted(ids):
-            entry=textures[name]
-            if 'rgba' in entry:
-                width,height=entry['width'],entry['height']
-                pixels=np.frombuffer((root/entry['rgba']).read_bytes(),dtype=np.uint8).reshape(height,width,4)
-                rgba=(pixels if entry.get('cube_faces')==6 else pixels[::-1]).tobytes()
-            else:
-                image=Image.open(root/entry['png']).convert('RGBA')
-                if entry.get('cube_faces')!=6:image=image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-                width,height=image.size;rgba=image.tobytes()
-            string(f,name);u(f,width,height,1);stored(f,rgba)
+        write_textures(f,root,textures)
         stored(f,vertices.getvalue());stored(f,indices.getvalue());stored(f,b'')
         for rail in rails:
             string(f,f"{rail['asset_id']}_{rail['section_index']}_{rail['rail_index']}")

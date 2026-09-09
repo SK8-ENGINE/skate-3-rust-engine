@@ -1,6 +1,6 @@
 """Local owned-disc installation. No game content is downloaded or packaged."""
 from pathlib import Path
-import hashlib,json,os,shutil,subprocess,sys,urllib.request,uuid,zipfile
+import hashlib,json,os,shutil,subprocess,sys,time,urllib.request,uuid,zipfile
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from tools.owned_game.big import BigArchive
 from .vlt import convert as convert_vlt
@@ -98,38 +98,57 @@ def extract(archive,destination,entries=None):
     return data
 
 def convert_map(archive,work,maps,stage,game_exe,log,report):
+    timings={};started=time.perf_counter()
+    def finished(phase):
+        nonlocal started
+        now=time.perf_counter();timings[phase]=round(now-started,3);started=now
+        report(f'{archive.stem}: {phase} {timings[phase]:.3f}s')
     map_tools=TOOLS/'vendor/university/tools/vanilla_map_extraction/tools'
     sys.path.insert(0,str(map_tools))
     from prepare_hawaiian_dream import prepare
     from prepare_university import EXCLUDED_NORMAL_TEXTURE_IDS
     from build_retail_collision_archive import build_archive
-    from .map_writer import write as write_map
+    from .map_writer import write as write_map, SpawnSelector
     district=archive.stem.removeprefix('world')
     label=district.removeprefix('DIST_')
     district_work=work/district
     extract(archive,district_work/'raw')
+    finished('extract')
     stream=district_work/'raw/data/content/world/stream'/district
     if not stream.is_dir():raise RuntimeError('Missing district stream '+str(stream))
+    spawn=SpawnSelector(district)
     manifest_path=prepare(stream_directory=stream,output_root=district_work/'intermediate',
         utt_root=TOOLS/'vendor/utt',district_name=district,map_name=label,
         package_name='Skate 3 owned disc',cache_format='skate3-rust-map-v1',
         # Smaller parks keep their textures in Pres rather than a Tex stream.
         texture_stream_names=('Tex',) if any(stream.glob('cTex_*.xsf')) else (),
-        excluded_normal_texture_ids=EXCLUDED_NORMAL_TEXTURE_IDS,raw_texture_cache=True)
+        excluded_normal_texture_ids=EXCLUDED_NORMAL_TEXTURE_IDS,raw_texture_cache=True,
+        collision_consumer=spawn.consider,
+        # Model/texture RX2 copies are unused by the direct writer and were
+        # deleted after conversion. Keep simulation and irradiance sources.
+        write_render_sources=False)
+    finished('prepare')
     collision=district_work/'collision.rwcmset'
     build_archive(manifest_path,collision)
+    finished('collision_archive')
     final=maps/(label+'.skate')
-    write_map(manifest_path,final,collision,report)
+    write_map(manifest_path,final,collision,report,prepared_spawn=spawn.result(label))
+    finished('write_map')
     from .dynamic_props import export as write_props
     caches=list((work/'dmo/cache').glob('DMO_*'))
     if not caches:
         raise RuntimeError('Missing prepared DMO catalog')
-    placed, unresolved=write_props(manifest_path,caches,stage/'assets/private/native-props'/(label+'.skate'))
+    placed, unresolved=write_props(manifest_path,caches,stage/'assets/private/native-props'/(label+'.skate'),
+                                  catalog_path=work/'dmo/catalog.json')
+    finished('props')
     report(f'{label}: placed {placed} authored DMO instances, {unresolved} unresolved templates')
     report('Checking converted map: '+label)
     run([game_exe,'--assets',stage/'assets','--map',final,'--check-assets'],log,report)
+    finished('validate')
     entry={'name':label,'path':'maps/'+final.name,'sha256':digest(final)}
     remove_intermediate(district_work,work)
+    finished('hash_and_cleanup')
+    entry['phase_seconds']=timings
     return entry
 
 

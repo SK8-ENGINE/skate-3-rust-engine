@@ -97,7 +97,8 @@ def template_meshes(raw):
 
 
 def transform_mesh(arrays, index, transform):
-    values = {key: np.array(value, copy=True) for key, value in arrays.items() if key.endswith('_'+str(index))}
+    # NpzFile.items() reads every array before the filter runs.
+    values = {key: np.array(arrays[key], copy=True) for key in arrays if key.endswith('_'+str(index))}
     key = f'vertices_{index}'
     values[key] = (values[key] @ transform[:3, :3] + transform[3, :3]).astype('f4')
     normal_matrix = np.linalg.inv(transform[:3, :3]).T
@@ -148,9 +149,31 @@ def catalog(cache_roots):
     return templates, textures
 
 
-def export(manifest_path, cache_roots, output):
-    district = json.loads(manifest_path.read_text())
+def save_catalog(cache_roots, output):
+    """Build once per installation; JSON keeps this local cache non-executable."""
     templates, textures = catalog(cache_roots)
+    serialised = {key: dict(value, matrix=value['matrix'].tolist(),
+        model_matrix=value['model_matrix'].tolist(), npz=str(value['npz'].resolve()))
+        for key, value in templates.items()}
+    temporary = output.with_suffix('.new')
+    temporary.write_text(json.dumps(dict(version=1, templates=serialised, textures=textures)), encoding='utf-8')
+    temporary.replace(output)
+
+
+def load_catalog(path):
+    data = json.loads(path.read_text(encoding='utf-8'))
+    if data['version'] != 1:
+        raise ValueError('Unsupported DMO catalog version')
+    for value in data['templates'].values():
+        value['matrix'] = np.array(value['matrix'], dtype=np.float64)
+        value['model_matrix'] = np.array(value['model_matrix'], dtype=np.float64)
+        value['npz'] = Path(value['npz'])
+    return data['templates'], data['textures']
+
+
+def export(manifest_path, cache_roots, output, *, catalog_path=None):
+    district = json.loads(manifest_path.read_text())
+    templates, textures = catalog(cache_roots) if catalog_path is None else load_catalog(catalog_path)
     placements = {}
     for source in district['simulation_assets']:
         raw = (manifest_path.parent/source['rx2']).read_bytes()
@@ -180,7 +203,7 @@ def export(manifest_path, cache_roots, output):
             report['instances'].append(dict(item, model_asset=template['asset_id'], meshes=len(meshes)))
         if models:
             manifest = dict(map_name=district['map_name'], district_name=district['district_name'],
-                models=models, textures={key:textures[key] for key in used},
+                models=models, textures={key:textures[key] for key in sorted(used)},
                 normal_texture_policy=dict(excluded_texture_ids=[]), grind_splines=[])
             (root/'manifest.json').write_text(json.dumps(manifest))
             # Publish only a complete package; preserve the previous one on failure.
@@ -209,6 +232,7 @@ def prepare_catalog(game_root, work):
         prepare(stream_directory=stream, output_root=root, utt_root=vendor/'utt',
                 district_name=stream.name, map_name=stream.name, raw_texture_cache=True)
         roots.append(root)
+    save_catalog(roots, work/'catalog.json')
     return roots
 
 

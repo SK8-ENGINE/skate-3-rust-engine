@@ -196,13 +196,15 @@ def read_sfil(
     records: list[AssetRecord],
     *,
     require_all_records: bool = True,
+    record_index: dict[int, AssetRecord] | None = None,
 ) -> list[StreamAsset]:
     source_path = Path(path)
     source = source_path.read_bytes()
     if len(source) < SFIL_HEADER_SIZE or source[:4] != b"SFIL":
         raise StreamFormatError(f"{source_path} is not an SFIL stream")
 
-    by_id = {record.asset_id: record for record in records}
+    by_id = record_index if record_index is not None else {record.asset_id: record for record in records}
+    source_view = memoryview(source)
     first_asset_offset = struct.unpack_from(">I", source, 16)[0]
     if first_asset_offset < SFIL_HEADER_SIZE or first_asset_offset > len(source):
         raise StreamFormatError(
@@ -214,10 +216,12 @@ def read_sfil(
     seen_ids: set[int] = set()
 
     while cursor < len(source):
-        if not any(source[cursor:]):
+        # bytes[cursor:] copied the entire remaining stream for every asset.
+        # A view preserves the same padding check without quadratic copying.
+        if not any(source_view[cursor:]):
             break
         if cursor + SFIL_SECTION_DATA_OFFSET > len(source):
-            if any(source[cursor:]):
+            if any(source_view[cursor:]):
                 raise StreamFormatError(f"truncated SFIL asset at 0x{cursor:X}")
             break
 
@@ -288,7 +292,7 @@ def read_sfil(
             )
         cursor += asset_stride
 
-    missing = set(by_id) - seen_ids
+    missing = set(by_id) - seen_ids if require_all_records else set()
     if require_all_records and missing:
         missing_text = ", ".join(f"0x{asset_id:016X}" for asset_id in sorted(missing))
         raise StreamFormatError(f"ATOC assets missing from SFIL: {missing_text}")
@@ -323,11 +327,13 @@ def load_district_stream(
         )
 
     assets_by_id: dict[int, StreamAsset] = {}
+    record_index = {record.asset_id: record for record in records}
     for stream_file in stream_files:
         for asset in read_sfil(
             stream_file,
             records,
             require_all_records=False,
+            record_index=record_index,
         ):
             asset_id = asset.record.asset_id
             previous = assets_by_id.get(asset_id)

@@ -90,10 +90,10 @@ def _default_stream_directory(workspace: Path) -> Path:
     )
 
 
-def _write_rx2(output_root: Path, category: str, asset: StreamAsset) -> Path:
+def _write_rx2(output_root: Path, category: str, asset: StreamAsset, *, write: bool = True) -> Path:
     target = output_root / "rx2" / category / f"{asset.record.asset_id:016X}.rx2"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(asset.data)
+    if write:
+        target.write_bytes(asset.data)
     return target
 
 
@@ -407,12 +407,19 @@ def prepare(
     grind_coordinate_mode: str = "world_space",
     excluded_static_model_asset_ids: tuple[str, ...] = (),
     raw_texture_cache: bool = False,
+    collision_consumer=None,
+    write_render_sources: bool = True,
 ) -> Path:
     sys.path.insert(0, str(utt_root))
     import rx2_parser
     from mdl_parser import parse_rx2 as parse_model
 
     output_root.mkdir(parents=True, exist_ok=True)
+    # Create each output directory once, rather than thousands of failing
+    # mkdir calls against directories already created for previous assets.
+    for directory in ("rx2/textures", "rx2/models", "rx2/presentation_other",
+                      "rx2/simulation", "textures/by_asset", "models"):
+        (output_root / directory).mkdir(parents=True, exist_ok=True)
     presentation_assets = load_district_stream(
         stream_directory,
         "Pres",
@@ -476,7 +483,7 @@ def prepare(
         asset_id = asset.record.asset_id
         source_file = asset.source_path.name
         if asset.record.asset_type == ASSET_TYPE_TEXTURE:
-            rx2_path = _write_rx2(output_root, "textures", asset)
+            rx2_path = _write_rx2(output_root, "textures", asset, write=write_render_sources)
             base_texture_id = _texture_id(asset.data, asset_id)
             parsed = rx2_parser.parse_rx2(asset.data)
             if not parsed.textures:
@@ -507,7 +514,6 @@ def prepare(
                     / "by_asset"
                     / f"{asset_id:016X}_{texture_index}{'.rgba' if raw_texture_cache else '.png'}"
                 )
-                png_path.parent.mkdir(parents=True, exist_ok=True)
                 if raw_texture_cache:png_path.write_bytes(texture.rgba)
                 else:texture.save_png(png_path)
                 new_entry = {
@@ -556,14 +562,13 @@ def prepare(
                 known_digests.add(texture_digest)
                 textures[texture_id] = new_entry
         elif asset.record.asset_type == ASSET_TYPE_MODEL:
-            rx2_path = _write_rx2(output_root, "models", asset)
+            rx2_path = _write_rx2(output_root, "models", asset, write=write_render_sources)
             parsed = parse_model(
                 asset.data,
                 source_path=rx2_path,
                 strict=False,
             )
             npz_path = output_root / "models" / f"{asset_id:016X}.npz"
-            npz_path.parent.mkdir(parents=True, exist_ok=True)
             arrays: dict[str, numpy.ndarray] = {}
             mesh_entries: list[dict[str, object]] = []
             source_material_groups = _group_material_parameters(parsed.materials)
@@ -791,6 +796,8 @@ def prepare(
         rx2_path = _write_rx2(output_root, "simulation", asset)
         asset_grinds = decode_grind_splines(asset.data)
         asset_collision_meshes = decode_rx2_clustered_meshes(asset.data)
+        if collision_consumer is not None:
+            collision_consumer(asset_collision_meshes)
         grind_spline_asset_count += bool(asset_grinds)
         collision_mesh_asset_count += bool(asset_collision_meshes)
         collision_mesh_count += len(asset_collision_meshes)

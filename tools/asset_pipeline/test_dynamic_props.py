@@ -1,8 +1,11 @@
 import struct
 import unittest
+from unittest.mock import patch
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import numpy as np
 
-from .dynamic_props import locators, transform_mesh, template_meshes
+from .dynamic_props import locators, transform_mesh, template_meshes, save_catalog, load_catalog
 
 
 def resource(kind, payload):
@@ -16,6 +19,33 @@ def resource(kind, payload):
 
 
 class DynamicPropsTests(unittest.TestCase):
+    def test_transform_does_not_read_other_meshes(self):
+        class LazyArrays(dict):
+            def __getitem__(self, key):
+                if key.endswith('_1'):
+                    raise AssertionError('Unrelated mesh was decompressed')
+                return super().__getitem__(key)
+        arrays = LazyArrays(vertices_0=np.zeros((3, 3)), faces_0=np.array([[0, 1, 2]]), vertices_1=None)
+        result = transform_mesh(arrays, 0, np.eye(4))
+        np.testing.assert_array_equal(result['faces_0'], [[0, 1, 2]])
+
+    def test_catalog_roundtrip_preserves_double_precision_and_bindings(self):
+        template = dict(matrix=np.arange(16, dtype=float).reshape(4, 4)/7,
+                        model_matrix=np.eye(4), npz=Path('model.npz'),
+                        meshes=[dict(retail_texture_ids={'diffuse': '0xf123456789abcdef'})],
+                        asset_id='original', mesh_info=[112])
+        textures={'0xf123456789abcdef': dict(width=4, height=4, rgba='original.rgba')}
+        with TemporaryDirectory() as work:
+            path=Path(work)/'catalog.json'
+            with patch('tools.asset_pipeline.dynamic_props.catalog', return_value=({'template':template}, textures)):
+                save_catalog([], path)
+            templates, actual_textures=load_catalog(path)
+        actual=templates['template']
+        for key in ('matrix','model_matrix'):
+            self.assertEqual(actual[key].tobytes(),template[key].tobytes())
+        self.assertEqual(actual['meshes'],template['meshes'])
+        self.assertEqual(actual_textures,textures)
+
     def test_locator_id_and_row_matrix(self):
         payload = bytearray(166)
         struct.pack_into('>5I', payload, 0, 0, 1, 1, 32, 160)
