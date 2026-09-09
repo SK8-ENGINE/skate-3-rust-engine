@@ -373,6 +373,8 @@ fn bind(
             commands.entity(old).despawn();
         }
         commands.entity(p.root).insert(Visibility::Inherited);
+        info!("ONLINE_CHARACTER_VISIBLE peer={id} joints={} kind={}", bindings.len(),
+            if matches!(p.look, Look::Imported(_)) { "import" } else { "retail" });
         skin.bindings = bindings;
         skin.poses = Buffer::default();
         skin.pending = None;
@@ -574,7 +576,12 @@ mod online_owned_tests {
             super::super::appearance::validate_glb(&bytes).unwrap();
             let cache = super::super::appearance::cache_directory();
             std::fs::create_dir_all(cache).unwrap();
-            std::fs::write(cache.join("received-test.glb"), bytes).unwrap();
+            let mut payload = vec![0];
+            payload.extend(bytes);
+            let received = super::super::appearance_transfer::transfer_over_udp(payload);
+            assert_eq!(received[0], 0);
+            super::super::appearance::validate_glb(&received[1..]).unwrap();
+            std::fs::write(cache.join("received-test.glb"), &received[1..]).unwrap();
             let handle = app
                 .world()
                 .resource::<AssetServer>()
@@ -604,14 +611,24 @@ mod online_owned_tests {
                 Query<&ChildOf>,
             )> = SystemState::new(app.world_mut());
             let (meshes, nodes, parents) = queries.get(app.world());
-            assert!(
-                !crate::animation::AnimationStatus::for_scene(
-                    root, &names, &meshes, &nodes, &parents
-                )
-                .unwrap()
-                .online_bindings()
-                .is_empty()
-            );
+            let animation = crate::animation::AnimationStatus::for_scene(
+                root, &names, &meshes, &nodes, &parents
+            ).unwrap();
+            let joints=animation.online_bindings();
+            assert!(!joints.is_empty());
+            // A received model must accept poses before display, then keep moving.
+            let first:Vec<_>=(0..names.len()).map(|i|Mat4::from_translation(Vec3::new(i as f32*0.01,1.,0.))).collect();
+            for (joint,pose) in animation.pose_transforms(&first) {
+                assert!(pose.to_matrix().is_finite());
+                *app.world_mut().get_mut::<Transform>(joint).unwrap()=pose;
+            }
+            *app.world_mut().get_mut::<Visibility>(root).unwrap()=Visibility::Inherited;
+            let second:Vec<_>=first.iter().enumerate().map(|(i,m)|*m*Mat4::from_rotation_z(0.01*(i+1) as f32)).collect();
+            for (joint,pose) in animation.pose_transforms(&second) {
+                assert!(pose.to_matrix().is_finite());
+                assert_ne!(*app.world().get::<Transform>(joint).unwrap(),pose);
+                *app.world_mut().get_mut::<Transform>(joint).unwrap()=pose;
+            }
             app.world_mut().entity_mut(root).despawn();
             app.update();
             std::fs::remove_file(cache.join("received-test.glb")).unwrap();

@@ -101,9 +101,6 @@ pub(crate) struct CustomModels {
     dirty: bool,
 }
 impl CustomModels {
-    pub(crate) fn online_imports(&self) -> Vec<(String,PathBuf)> {
-        self.entries.iter().filter(|e|e.native.is_none()).map(|e|(e.asset_path("character.glb"),self.directory.join("entries").join(&e.id).join("character.glb"))).collect()
-    }
     pub(crate) fn online_selection(&self) -> Option<(Option<String>, PathBuf)> {
         let e = self.entries.iter().find(|e| Some(&e.id)==self.active.as_ref())?;
         let directory = if e.asset_prefix.is_empty() { &self.directory } else { &self.native_directory };

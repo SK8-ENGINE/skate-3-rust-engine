@@ -10,16 +10,18 @@ prepared character library. The same setup update that supplies the local
 customiser supplies these online assets.
 
 Imported characters transfer their converted, self-contained GLB automatically;
-other players do not need to import the model. Installed imports are indexed on a
-background worker by content hash. When a matching file is already available, the
-receiver loads that local asset and requests no model data, including when a
-different character is currently equipped. Completed appearances are cached for
-the connection: switching back sends only the identity, and acknowledged model data
-stops sending. Departed receivers and completed requests are explicitly cleared.
-Updates and late joins use bounded,
-reliable chunks through the existing host relay. Movement/collision packets keep
-priority and existing internet bandwidth budgets. Loopback test connections use
-a larger local bandwidth budget. The HUD shows character transfer progress.
+other players do not need to import the model. There is no installed-library scan
+or local-file bypass. Direct and Steam use the same authenticated bulk stream.
+The host forwards available chunks while downloading. A sliding selective-ACK
+window replaces the old 32-chunk request/wait cycle. Each peer receives the current
+model once; completed content is cached for later swaps, and a late join receives
+the current selection. New selections cancel obsolete transfers.
+Movement/collision packets are serviced first. Bulk traffic has its own bounded
+4 MB/s per-link ceiling, grows its window as chunks are acknowledged, backs off
+on loss/relay congestion, and retries missing
+chunks. Datagram queues hold slow render frames' traffic on both direct sockets
+and Steam IPC. The Steam send-rate ceiling is raised from its small-message
+default. The HUD shows character transfer progress.
 Each remote keeps its visible character until the new scenes, textures and every
 clothing rig are ready. A replacement is posed before visibility is published;
 paused local swaps use the current skeleton and remote swaps use the latest
@@ -32,7 +34,8 @@ All players need this build to see appearances; older builds continue to display
 their stock fallback. Missing retail content or rejected imports also retain a
 fallback. Online imports are limited to 64 MiB, standard embedded PNG/JPEG glTF
 content, 8192 pixels per texture dimension and 64 million total texture pixels.
-A connection accepts at most 256 MiB of new appearance payloads. Temporary imports
+The network cache is bounded to twelve maximum-sized blobs (768 MiB), with inactive
+content evicted when needed; active actor content is retained for forwarding. Temporary imports
 are separate from the personal character library and cleaned up on leaving/exiting.
 
 Manual regression: use two PCs/accounts or local clients with separate settings.
@@ -131,6 +134,25 @@ cache. Supply your prepared asset view through `-AssetRoot`. If using a separate
 session-marker overlay, set `SKATE3_SESSION_MARKER_OVERLAY` before launching.
 
 The merged game and Steam relay were compiled without launching either. Actual
-Steam connectivity still needs two PCs with separate Steam accounts. Remote clothing
-replication remains the implementation's appearance-ID/fallback mechanism; merging
-the character customiser does not add transmission of its full clothing selections.
+Steam connectivity still needs two PCs with separate Steam accounts. Current
+appearance replication is described in the Online characters section above.
+
+### Network stream regression (September 9)
+
+The previous page exchange took approximately two minutes for the reported 32 MB
+model. The installed-file shortcut has been removed. Production UDP sockets now
+transfer 32,067,793 bytes through client -> host -> client in approximately 8.4 s
+at a deliberately limited 15 FPS, with movement continuing and no model chunks
+sent after acknowledgement. This is measured transfer time, not a claim of
+instantaneous delivery or a Steam/WAN measurement.
+
+Nine headless character tests pass, including the real owned import transferred
+through UDP before Bevy loads it from the receiver's private source, binds the
+rig and applies successive poses. Other checks cover male/female clothing rigs,
+material isolation, swapped rigs, invalid GLBs, and ten peers with delay/loss,
+reordering, late joins and changed selections. The transport adds explicit
+origin-authentication, stale-generation and corrupt-content regression tests.
+No game or Steam client was launched. Manual tests should check both screens,
+including skating/bailing and switching back to stock. Logs distinguish download
+completion (`ONLINE_CHARACTER_READY`) from a posed scene becoming visible
+(`ONLINE_CHARACTER_VISIBLE`).

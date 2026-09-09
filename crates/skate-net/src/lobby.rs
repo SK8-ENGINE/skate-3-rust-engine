@@ -158,6 +158,7 @@ pub struct Session {
     link_budget: f64,
     round: usize,
     loopback: bool,
+    pub blobs: crate::blob::Blobs,
 }
 impl Session {
     pub fn new(session: u64, info: Info, host: Option<u64>) -> Self {
@@ -190,6 +191,7 @@ impl Session {
             link_budget: DEFAULT_LINK_BUDGET,
             round: 0,
             loopback: false,
+            blobs: Default::default(),
         }
     }
     /// An external membership authority chooses the new endpoint. Preserve our
@@ -210,7 +212,7 @@ impl Session {
         self.budget = if host.is_none() {
             DEFAULT_HOST_BUDGET
         } else {
-            if self.loopback {2_000_000.} else {DEFAULT_LINK_BUDGET}
+            DEFAULT_LINK_BUDGET
         };
         self.credits = 12_000.;
         self.notice = if host.is_none() {
@@ -221,8 +223,6 @@ impl Session {
     }
     pub fn set_loopback(&mut self, enabled: bool) {
         self.loopback = enabled;
-        self.budget=if enabled {12_000_000.} else {DEFAULT_HOST_BUDGET};
-        self.set_congested(false);
     }
     pub fn is_host(&self) -> bool {
         self.host.is_none()
@@ -231,10 +231,11 @@ impl Session {
         self.is_host() || self.received_roster != 0
     }
     pub fn set_congested(&mut self, congested: bool) {
+        self.blobs.congested = congested;
         self.link_budget = if congested {
-            if self.loopback {1_000_000.} else {DEFAULT_LINK_BUDGET * 0.5}
+            DEFAULT_LINK_BUDGET * 0.5
         } else {
-            if self.loopback {2_000_000.} else {DEFAULT_LINK_BUDGET}
+            DEFAULT_LINK_BUDGET
         };
     }
     pub fn publish(&mut self, kind: u8, mut state: Packed, now: u64) {
@@ -381,6 +382,19 @@ impl Session {
             .into();
             return;
         }
+        if matches!(kind, crate::blob::META | crate::blob::DATA | crate::blob::ACK) {
+            let valid = if kind == crate::blob::ACK {
+                self.links[&peer].actor == actor
+            } else {
+                actor != self.local && self.actors.contains_key(&actor)
+                    && (!self.is_host() || self.links[&peer].actor == actor)
+            };
+            if valid {
+                self.blobs.receive(peer, actor, kind, seq, &data[HEADER..]);
+                self.links.get_mut(&peer).unwrap().seen = now;
+            }
+            return;
+        }
         if self.links[&peer].actor != actor && !matches!(kind, BODY | POSE | APPLICATION) {
             return;
         }
@@ -513,9 +527,9 @@ impl Session {
     pub fn service(&mut self, now: u64) -> Vec<Outgoing> {
         let dt = now.saturating_sub(self.last_service).min(1000) as f64 / 1000.;
         self.last_service = now;
-        self.credits = (self.credits + dt * self.budget).min(if self.loopback {128_000.} else {12_000.});
+        self.credits = (self.credits + dt * self.budget).min(12_000.);
         for l in self.links.values_mut() {
-            l.credits = (l.credits + dt * self.link_budget).min(if self.loopback {64_000.} else {3600.});
+            l.credits = (l.credits + dt * self.link_budget).min(3600.);
         }
         if self.is_host() {
             let expired: Vec<_> = self
@@ -699,6 +713,9 @@ impl Session {
                 output.push(Outgoing {peer, data});
             }
         }
+        let members = self.actors.keys().copied().collect();
+        let peers: Vec<_> = self.links.iter().map(|(&peer, link)| (peer, link.actor, link.rtt)).collect();
+        output.extend(self.blobs.service(self.session, self.local, self.host.is_none(), &members, &peers, now));
         self.stats.rtt_ms = self.links.values().map(|l| l.rtt).max().unwrap_or(0);
         output
     }

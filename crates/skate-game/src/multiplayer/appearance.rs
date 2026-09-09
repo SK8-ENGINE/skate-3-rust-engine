@@ -3,10 +3,7 @@ use super::{
     Multiplayer,
     appearance_transfer::{Exchange, MAX_BLOB},
 };
-use bevy::{
-    prelude::*,
-    tasks::{AsyncComputeTaskPool, Task, block_on, poll_once},
-};
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -33,32 +30,6 @@ pub(super) struct Appearances {
     cached: BTreeMap<[u8; 32], Look>,
     pub status: String,
     pub progress: String,
-    indexed: Vec<String>,
-    indexing: Option<Task<Vec<(super::appearance_transfer::Identity, Look)>>>,
-}
-fn index_imports(
-    imports: Vec<(String, PathBuf)>,
-) -> Vec<(super::appearance_transfer::Identity, Look)> {
-    imports
-        .into_iter()
-        .filter_map(|(asset, path)| {
-            if std::fs::metadata(&path).ok()?.len() as usize >= MAX_BLOB {
-                return None;
-            }
-            let bytes = std::fs::read(path).ok()?;
-            validate_glb(&bytes).ok()?;
-            let mut hash = blake3::Hasher::new();
-            hash.update(&[0]);
-            hash.update(&bytes);
-            Some((
-                super::appearance_transfer::Identity {
-                    hash: *hash.finalize().as_bytes(),
-                    size: bytes.len() + 1,
-                },
-                Look::Imported(asset),
-            ))
-        })
-        .collect()
 }
 pub(super) fn cleanup(mut exit: MessageReader<AppExit>) {
     // Generated process-private directory, never the personal import library.
@@ -89,24 +60,6 @@ pub(super) fn sync(
             connection: Some(connection),
             ..default()
         };
-    }
-    let imports = models.online_imports();
-    let keys: Vec<_> = imports.iter().map(|(key, _)| key.clone()).collect();
-    if state.indexed != keys {
-        state.indexed = keys;
-        state.indexing =
-            Some(AsyncComputeTaskPool::get().spawn(async move { index_imports(imports) }));
-    }
-    if let Some(found) = state
-        .indexing
-        .as_mut()
-        .and_then(|task| block_on(poll_once(task)))
-    {
-        for (id, look) in found {
-            state.cached.insert(id.hash, look);
-            state.exchange.remember(id);
-        }
-        state.indexing = None;
     }
     let selection = models.online_selection();
     let signature = models
@@ -160,9 +113,7 @@ pub(super) fn sync(
     }
     let now = net.started.elapsed().as_millis() as u64;
     let lobby = net.lobby.as_mut().unwrap();
-    if state.indexing.is_none() {
-        state.exchange.tick(lobby, now);
-    }
+    state.exchange.tick(lobby, now);
     state.progress = state.exchange.progress();
     state.looks.retain(|id, _| lobby.actors.contains_key(id));
     state.seen.retain(|id, _| lobby.actors.contains_key(id));
@@ -411,66 +362,5 @@ mod tests {
     fn online_appearance_accepts_owned_import() {
         let path = std::env::var("SKATE_ONLINE_TEST_GLB").unwrap();
         validate_glb(&std::fs::read(path).unwrap()).unwrap();
-    }
-}
-#[cfg(test)]
-mod local_reuse_tests {
-    use super::*;
-    #[test]
-    #[ignore = "requires SKATE_ONLINE_TEST_GLB"]
-    fn online_appearance_existing_import_needs_no_model_upload() {
-        let path = PathBuf::from(std::env::var("SKATE_ONLINE_TEST_GLB").unwrap());
-        let found = index_imports(vec![(
-            "characters://owned/character.glb".into(),
-            path.clone(),
-        )]);
-        assert_eq!(found.len(), 1);
-        let (identity, look) = found[0].clone();
-        assert!(matches!(look, Look::Imported(_)));
-        let mut bytes = vec![0];
-        bytes.extend(std::fs::read(path).unwrap());
-        assert_eq!(identity.hash, *blake3::hash(&bytes).as_bytes());
-        let mut sessions: Vec<_> = (0..2)
-            .map(|i| {
-                skate_net::lobby::Session::new(
-                    3,
-                    skate_net::lobby::Info {
-                        id: 10 + i,
-                        map: 1,
-                        rig: 1,
-                        physics: 1,
-                        appearance: 1,
-                    },
-                    if i == 0 { None } else { Some(1) },
-                )
-            })
-            .collect();
-        let mut transfer = [Exchange::default(), Exchange::default()];
-        transfer[0].publish(bytes);
-        transfer[1].publish(vec![1]);
-        transfer[1].remember(identity.clone());
-        for step in 0..200 {
-            let now = step * 10;
-            let mut wire = vec![];
-            for i in 0..2 {
-                transfer[i].tick(&mut sessions[i], now);
-                for packet in sessions[i].service(now) {
-                    assert!(
-                        packet.data.len() < 200,
-                        "local content must not send model chunks"
-                    );
-                    wire.push((i + 1, packet));
-                }
-            }
-            for (from, p) in wire {
-                sessions[p.peer as usize - 1].receive(from as u64, &p.data, now);
-            }
-        }
-        let (received, payload) = transfer[1]
-            .ready
-            .get(&10)
-            .expect("local appearance must be ready after handshake");
-        assert_eq!(received, &identity);
-        assert!(payload.is_empty());
     }
 }
