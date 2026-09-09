@@ -248,3 +248,10 @@ That is a file-volume calculation, not a measured improvement in runtime overhea
 Next: repeat with the corrected build and `--trace-gpu`, using the same scene and
 settings. CPU command generation is a candidate for further investigation, but
 this short trace does not yet support material/culling redesign or a physics change.
+
+Corrected build `2a74581` passed all four release recorder tests, including actual
+ECS system/schedule name assertions and the duration-filter boundary. The streaming
+analyser reproduced the capture's event/sample counts and limitation flags. The
+new private static-CRT release EXE/PDB built successfully; embedded revision and PE
+imports were verified. The original recording and executable were retained. No
+gameplay or GPU capture was launched by the agent.
