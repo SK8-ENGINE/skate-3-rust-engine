@@ -1,10 +1,9 @@
 # .skate maps
 
-Run `PLAY-MAP.bat` and enter the map number. Alternatively drag a `.skate`
-file onto `PLAY.bat` or `PLAY-MAP.bat`. Command-line equivalent:
+Drag a `.skate` file onto `PLAY.bat`. Command-line equivalent:
 
 ```powershell
-.\Launch.ps1 -Map 'C:\path with spaces\park.skate'
+.\scripts\Launch.ps1 -Map 'C:\path with spaces\park.skate'
 ```
 
 The original test environment remains available through PLAY.bat without a map.
@@ -15,10 +14,10 @@ error and do not silently load the default level instead.
 
 | Data | Current support |
 | --- | --- |
-| SKATE01–14 records | Reader supports the documented layouts and raw, zlib and Zstandard blocks. |
+| SKATE01–15 records | Reader supports raw, zlib and Zstandard blocks, plus v15 compressed materials, filtered RGBA, vertex streams, delta indices, indexed collision and backward texture references. |
 | SKATE15+ | Rejected with a version error. V15's additional storage transforms are not implemented. |
 | Visual geometry | Authored positions, triangle winding, normals, UV0/UV1 and material groups. Packed v12+ tangent frames are reconstructed. |
-| Embedded materials | Albedo, normal, ORM, emissive, alpha mask/blend and indirect lightmaps. Lightmap RGB is decoded as `encoded² * 4` into half-float textures. |
+| Embedded materials | Albedo, normal, ORM, emissive, alpha mask/blend and indirect lightmaps. Lightmap RGB is decoded as `encodedÂ² * 4` into half-float textures. |
 | Collision | Separate authored collision mesh, reference 1 mm vertex welding, adjacent-edge and coplanar-vertex metadata. No collision inferred from visible triangles. |
 | Surface types | Exact audio/physics/pattern packing from `EncodeRwSurfaceId`. Authored friction is retained; the original imported static-world contact combine remains in charge. |
 | Spawn | Package position interpreted as the wheel-ground anchor, with the supplied wheel/body offset. Heading rotates about Y; coordinates stay Y-up metres. |
@@ -131,7 +130,7 @@ cargo test -p skate-core --lib board_world --locked
 cargo run -p skate-data --example inspect_skate -- path/to/map.skate
 ```
 
-Reader tests cover versions 1–14 and all three supported compression methods,
+Reader tests cover versions 1â€“14 and all three supported compression methods,
 every truncated prefix of the v8 fixture, invalid references, non-finite input,
 oversized counts, wrong byte order and unknown versions. Adapter tests check
 separate collision ownership, packed surfaces, flat seam handling and embedded

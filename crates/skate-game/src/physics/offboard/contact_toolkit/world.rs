@@ -131,14 +131,14 @@ impl<'a> StaticScene<'a> {
     ) -> Result<Option<LineHit>, &'static str> {
         if !probe.radius.is_finite()
             || probe.radius < 0.
-            || probe
-                .start
-                .into_iter()
-                .chain(probe.end)
-                .any(|x| !x.is_finite())
+            // The native packet has four SIMD lanes, but static collision and
+            // query_sweep's dot3/length contract consume XYZ only. Lane 3 can
+            // carry non-finite intermediate values (e.g. inf - inf) without
+            // making the spatial segment invalid. Never relax XYZ/radius checks.
+            || probe.start[..3].iter().chain(&probe.end[..3]).any(|x| !x.is_finite())
         {
             // Temporary audit-only error detail: preserve the rejected producer
-            // packet and caller chain. No substitution or validation change.
+            // packet and caller chain. Invalid spatial values are never substituted.
             bevy::log::error!(
                 "OFFBOARD_INVALID_SWEEP start={:?} end={:?} radius={} start_bits={:08x?} end_bits={:08x?} radius_bits={:08x} group={} reject={:08x} caller={}",
                 probe.start,

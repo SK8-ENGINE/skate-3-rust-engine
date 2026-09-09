@@ -67,6 +67,40 @@ fn actual_world_hit_preserves_mesh_identity_and_packed_surface() {
     assert!((result.trajectories[0].landing_normal[1] - 1.).abs() < 1e-5);
     assert_eq!(result.lines.len(), 44);
 }
+
+#[test]
+fn nonfinite_unused_lane_preserves_sweep_hits_but_invalid_xyz_still_fails() {
+    let world = plane(0);
+    let scene = StaticScene::new(&world).unwrap();
+    let mut batch = ProbeLayout::stock().prepare(input(), -1);
+    let expected = scene.execute(&batch).unwrap();
+    // Reported crash: finite spatial endpoints, start.w=inf, end.w=NaN.
+    for request in &mut batch.trajectories {
+        request.trajectory.position[3] = f32::INFINITY;
+        request.trajectory.velocity[3] = f32::NEG_INFINITY;
+    }
+    for line in &mut batch.lines {
+        line.start[3] = f32::INFINITY;
+        line.end[3] = f32::NAN;
+    }
+    let actual = scene.execute(&batch).unwrap();
+    assert_eq!(actual.trajectories, expected.trajectories);
+    assert_eq!(actual.lines, expected.lines);
+    assert_eq!(actual.edges, expected.edges);
+    for axis in 0..3 {
+        let mut invalid = batch.clone();
+        invalid.lines[0].start[axis] = f32::NAN;
+        assert!(scene.execute(&invalid).is_err());
+        invalid.lines[0].start[axis] = 0.;
+        invalid.lines[0].end[axis] = f32::INFINITY;
+        assert!(scene.execute(&invalid).is_err());
+    }
+    for radius in [-1., f32::NAN, f32::INFINITY] {
+        let mut invalid = batch.clone();
+        invalid.lines[0].radius = radius;
+        assert!(scene.execute(&invalid).is_err());
+    }
+}
 #[test]
 fn mesh_filter_is_not_a_board_flag_or_material_tag() {
     let world = plane(0x2000);

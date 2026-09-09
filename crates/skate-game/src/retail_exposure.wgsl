@@ -8,6 +8,11 @@ struct Settings { tuning: vec4<f32>, timing: vec4<f32> }
 var<workgroup> sums: array<f32, 256>;
 @compute @workgroup_size(256)
 fn meter(@builtin(local_invocation_index) id: u32) {
+    if id == 0u && state.z != settings.timing.y {
+        state.x = clamp(2.5, settings.tuning.y, settings.tuning.z);
+        state.z = settings.timing.y;
+    }
+    storageBarrier();
     let uv=(vec2<f32>(f32(id%16u),f32(id/16u))+0.5)/16.0;
     let xy=uv*2.0-1.0;
     let weight=pow(1.0-abs(xy.x*xy.y),2.0);

@@ -76,6 +76,17 @@ pub(crate) use shadow::ShadowState;
 #[derive(Resource)]
 pub(crate) struct RetailScene(pub bool);
 
+impl RetailScene {
+    /// Package evidence, never the editable map name. Older Skate 2 exports
+    /// can retain native provenance/sky/collision without material definitions.
+    pub(crate) fn for_map(map: &skate_data::skate_map::SkateMap) -> bool {
+        map.materials.iter().any(|m| m.retail_definition.is_some())
+            || map.extensions.iter().any(|e| matches!(&e.tag, b"WMET" | b"RWCM" | b"SKYB"))
+            || map.geometry.collision.iter().any(|c| c.native_edges.is_some())
+            || map.rails.iter().any(|r| r.native.is_some())
+    }
+}
+
 #[path = "retail_sky.rs"]
 mod sky;
 pub(crate) use sky::{spawn_sky, RetailSkyMaterial};
