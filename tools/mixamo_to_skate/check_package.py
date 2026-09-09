@@ -15,6 +15,10 @@ def main():
     parser.add_argument('--inside', action='store_true')
     args = parser.parse_args()
     if args.inside:
+        # Fresh setup needs the same feature scripts that previously existed
+        # only in manually prepared customiser/native-roster worktrees.
+        from tools.asset_pipeline import customiser_setup, customiser_lighting
+        from tools.asset_pipeline import customisation_library, customisation_profiles, native_roster
         import hashlib
         import tkinter
         from PIL import Image
@@ -26,6 +30,7 @@ def main():
         result = subprocess.run([str(tool), '--version'], capture_output=True, timeout=30)
         assert result.returncode == 0, result.stderr
         assert b'0.9.7' in result.stdout + result.stderr
+        assert len(customiser_setup.fingerprint()) == 64
         return
     from test_converter import fixture
     from converter import validate_output

@@ -11,6 +11,12 @@ pub(crate) type SkaterMaterial = ExtendedMaterial<StandardMaterial, SkinStamp>;
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
 pub(crate) struct SkinStamp {
+    #[texture(105)]
+    #[sampler(106)]
+    pub retail_mask: Option<Handle<Image>>,
+    #[uniform(107)]
+    #[reflect(ignore)]
+    pub retail: crate::retail_character::CharacterParams,
     #[texture(100)]
     #[sampler(101)]
     pub texture: Option<Handle<Image>>,
@@ -137,6 +143,16 @@ mod tests {
             cache.set_shader(h.id(), shader);
         }
         for (source, path, prepass) in [
+            (
+                include_str!("retail_character_common.wgsl"),
+                "retail_character_common.wgsl",
+                false,
+            ),
+            (
+                include_str!("retail_character.wgsl"),
+                "retail_character.wgsl",
+                false,
+            ),
             (
                 include_str!("customiser_stamp.wgsl"),
                 "customiser_stamp.wgsl",

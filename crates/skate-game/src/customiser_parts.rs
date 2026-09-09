@@ -31,6 +31,8 @@ pub(crate) struct Material {
     tint: [f32; 3],
     metallic: f32,
     roughness: f32,
+    #[serde(default)]
+    lighting: Option<crate::retail_character::MaterialData>,
 }
 impl Material {
     pub fn flag(&self, key: &str) -> &str {
@@ -70,6 +72,16 @@ pub(crate) struct Parts {
 }
 #[derive(Component)]
 pub(crate) struct PartRoot(pub String);
+pub(crate) fn asset_directory(assets: &std::path::Path) -> std::path::PathBuf {
+    let base = assets.join("private/customisation");
+    if let Some(set) = std::fs::read(base.join("current.json")).ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v["set"].as_str().map(str::to_owned))
+        .filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return base.join("sets").join(set);
+    }
+    base
+}
 impl Parts {
     #[cfg(test)]
     pub fn for_test(library: Library) -> Self {
@@ -416,6 +428,13 @@ impl Parts {
         let normal = m.normal.as_ref().map(|p| load(p, true));
         let rough = m.rough.as_ref().map(|p| load(p, true));
         let opacity = m.opacity.as_ref().map(|p| load(p, true));
+        let retail_mask = m.lighting.as_ref().and_then(|l| l.specular.as_ref()).map(|p| load(p, true));
+        let retail = m.lighting.as_ref().filter(|l| l.params.len() == 9).map(|l| crate::retail_character::CharacterParams {
+            tint: Vec4::ONE,
+            options: Vec4::new(0., f32::from(retail_mask.is_some()), -1., f32::from(l.shader.starts_with("character.hair"))),
+            rows: std::array::from_fn(|i| Vec4::from_array(l.params[i])),
+            ..default()
+        }).unwrap_or_default();
         let material = materials.add(SkaterMaterial {
             base: StandardMaterial {
                 base_color: Color::srgb(m.tint[0], m.tint[1], m.tint[2]),
@@ -438,6 +457,8 @@ impl Parts {
                 ..default()
             },
             extension: SkinStamp {
+                retail,
+                retail_mask,
                 hair_opacity: opacity,
                 enabled: if m.opacity.is_some() {
                     Vec4::Y
@@ -455,12 +476,9 @@ pub(crate) fn setup(
     config: Res<crate::config::Config>,
     server: Res<AssetServer>,
 ) {
-    let library = std::fs::read(
-        config
-            .asset_root
-            .join("private/customisation/library-v3.json"),
-    )
-    .or_else(|_| std::fs::read(config.asset_root.join("private/customisation/library.json")))
+    let directory = asset_directory(&config.asset_root);
+    let library = std::fs::read(directory.join("library-v3.json"))
+    .or_else(|_| std::fs::read(directory.join("library.json")))
     .ok()
     .and_then(|b| serde_json::from_slice::<Library>(&b).ok())
     .unwrap_or_default();
@@ -524,6 +542,16 @@ pub(crate) fn update(
             ))
         })
         .collect();
+    // A missing/failed library is not a valid empty outfit. Never hide the
+    // fallback skater until a complete replacement can actually be published.
+    if desired.is_empty() || parts.resolve(&preview).is_err() {
+        let message = "Character assets are unavailable. Update this copy's character assets; your skater is unchanged.";
+        if state.status != message {
+            state.status = message.into();
+            state.redraw = true;
+        }
+        return;
+    }
     if parts.applied == preview && !state.open {
         return;
     }
@@ -615,7 +643,7 @@ pub(crate) fn update(
     let wanted: HashSet<_> = desired.iter().map(|(id, _)| id.as_str()).collect();
     let mut rebind = false;
     for (entity, part, mut visible) in &mut scenes {
-        if !parents.iter_ancestors(entity).any(|p| p == root) {
+        if !parents.get(entity).is_ok_and(|p| p.parent() == root) {
             continue;
         }
         let target = if part.is_some_and(|p| wanted.contains(p.0.as_str())) {
@@ -703,6 +731,8 @@ pub(crate) fn update(
         });
         if changed {
             if let Some(m) = materials.get_mut(&handle) {
+                extension.retail = m.extension.retail.clone();
+                extension.retail_mask = m.extension.retail_mask.clone();
                 m.extension = extension;
             }
         }
@@ -710,6 +740,7 @@ pub(crate) fn update(
             if !parents.iter_ancestors(e).any(|p| p == entity) {
                 continue;
             }
+            commands.entity(e).insert(bevy::camera::visibility::RenderLayers::from_layers(&[0, 28]));
             if let Some(mut material) = material {
                 if material.0 != handle {
                     material.0 = handle.clone();

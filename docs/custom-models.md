@@ -8,6 +8,15 @@ The existing updater already hashes and replaces the setup executable alongside 
 
 The library lives in `%LOCALAPPDATA%/Skate3RustEngine/custom-characters`. Each content-addressed entry contains `manifest.json`, `character.glb`, `source.glb`, `preview.png`, and a conversion report when converted. Imports publish through an atomic directory rename, so failed imports never appear as completed entries. Saved assets do not depend on the original FBX location. Import failures/cancellation preserve the existing character.
 
+Fresh setup also prepares the 41 pro/special definitions supplied by the owned
+retail character table, including the special/cheat-code models. These native
+entries live in this copy's prepared character generation, not the personal
+import library. The menu combines both sources and prefers the current native
+entry when a legacy native entry has the same ID. Existing saved selections
+continue to resolve; no personal library entries are removed or overwritten.
+The fuller database decoder uses the disc's schema report to recover roster
+names, instead of feeding hashed gameplay-only names into the roster builder.
+
 The game loads each candidate as a hidden scene, waits for its dependencies and scene instance, validates its stock animation bone bindings, and then commits the visibility/binding switch. The same player entity, physics, animation evaluator, camera and replay state remain in use. Stock modular scene visibility is restored when leaving the custom character. Converted characters include the reference board; the stock board customisation returns with the stock character. Custom selections are local visuals and are not transferred to multiplayer peers.
 
 The paired calibration reproduces the supplied stock character's bind geometry; arbitrary humanoids use the converter's rig fitting and may need adjustment for unusual proportions. This is not a promise of original weight recovery or identical deformation on every model.

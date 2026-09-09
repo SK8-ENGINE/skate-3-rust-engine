@@ -52,7 +52,7 @@ def prepare(config):
     from tools.extract_default_skater import import_rx2_parser,decode_texture,parse_fallback_recipe
     from tools.asset_pipeline.retail_character import RX2,decode_dense_morphs
     from tools.asset_pipeline.character_glb import convert
-    assets=Path(config['assets']);cache=assets/'private/customisation';out=cache/'library';out.mkdir(exist_ok=True)
+    assets=Path(config['assets']);cache=Path(config.get('directory',assets/'private/customisation'));out=cache/'library';out.mkdir(exist_ok=True)
     catalog=json.loads((cache/'catalog.json').read_text());archive=BigArchive(Path(config['game_root'])/'data/content/createacharacter.big')
     entries={e.path.lower():e for e in archive.entries}
     def extract(path):

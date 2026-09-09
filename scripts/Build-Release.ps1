@@ -83,13 +83,15 @@ try {
     $assetPipelinesJson = & $packagePython "$sourceStage/tools/asset_pipeline/versions.py" --tools "$sourceStage/tools"
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify asset extractors' }
     $assetPipelines = $assetPipelinesJson | ConvertFrom-Json
+    $characterCustomiser = (& $packagePython -m tools.asset_pipeline.customiser_setup --fingerprint).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Could not identify character customiser resources' }
     $files = @{}
     foreach ($name in @('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe')) {
         $files[$name] = (Get-FileHash -LiteralPath (Join-Path $stage $name) -Algorithm SHA256).Hash.ToLower()
     }
     @{
         schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
-        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files; asset_pipelines = $assetPipelines
+        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files; asset_pipelines = $assetPipelines; character_customiser = $characterCustomiser
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
     Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $ProjectRoot 'target/release.json')
     Copy-Item -LiteralPath README.md,docs/THIRD_PARTY_NOTICES.md -Destination $stage
@@ -100,6 +102,7 @@ try {
     Copy-Item -LiteralPath docs/crash-reports.md -Destination "$stage/docs/crash-reports.md"
     Copy-Item -LiteralPath docs/updates.md -Destination "$stage/docs/updates.md"
     Copy-Item -LiteralPath docs/custom-models.md,docs/mixamo-to-skate.md -Destination "$stage/docs"
+    Copy-Item -LiteralPath docs/character-customisation.md -Destination "$stage/docs"
     New-Item -ItemType Directory -Path "$stage/licenses" -Force | Out-Null
     Copy-Item -LiteralPath tools/mixamo_to_skate/licenses/FBX2glTF.txt -Destination "$stage/licenses/FBX2glTF.txt"
     Copy-Item -LiteralPath tools/vendor/utt/LICENSE -Destination "$stage/licenses/UTT.txt"
