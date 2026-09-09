@@ -10,13 +10,22 @@ pub(super) fn scale(a: Vector, s: f32) -> Vector { a.map(|v| v * s) }
 pub(super) fn sub(a: Vector, b: Vector) -> Vector { std::array::from_fn(|i| a[i] - b[i]) }
 pub(super) fn madd(a: Vector, s: f32, b: Vector) -> Vector { std::array::from_fn(|i| a[i].mul_add(s, b[i])) }
 fn inverse_squared(value: f32) -> f32 {
+    // The portable estimate preserves subnormals. For a tiny positive squared
+    // length, r*r can overflow even though both the length and inverse root
+    // are finite. Normalize its exponent before the recovered refinements;
+    // rsqrt(x * 2^24) * 2^12 = rsqrt(x). Normal inputs keep their old path.
+    let (value, rescale) = if value > 0.0 && value.is_subnormal() {
+        (value * 16_777_216.0, 4096.0)
+    } else {
+        (value, 1.0)
+    };
     //PC seed is not bit-exact Xenon; retain both original refinement stages.
     let mut r = crate::physics::reciprocal_sqrt::estimate(value);
     for _ in 0..2 {
         let error = (-value).mul_add(r * r, 1.0);
         r = (r * 0.5).mul_add(error, r);
     }
-    r
+    r * rescale
 }
 pub(super) fn length(v: Vector) -> f32 {
     let squared = dot(v, v);

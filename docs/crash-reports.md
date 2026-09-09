@@ -12,6 +12,46 @@ Coverage limits: a Windows unhandled-exception filter attempts a fixed, allocati
 
 For manual UI validation, run the executable with `--crash-report-preview`. This generates a clearly synthetic report and opens the popup without initializing the game, setup, Steam or assets. Check Copy report, clipboard text, Open folder, saved UTF-8 text and Close. Static tests do not validate desktop presentation.
 
+## Walking velocity convergence (2026-09-09)
+
+Observed user failure: clean revision `dff672a`, build timestamp
+`1788969088174193000`, report timestamp `1788969335`. At tick4059 in
+BipedGround on University, `OFFBOARD_GROUND_RESULT_NONFINITE` precedes
+`Invalid offboard swept-line request`. The job has finite spatial inputs;
+the controller publishes NaN velocity/position, a NaN right delta and a
+forward delta of approximately `-3.11e-43`. The collision query then rejects
+NaN XYZ coordinates. Its validation is correct and remains intact.
+
+The walking velocity limiter's portable reciprocal-square-root refinement
+formed `r*r` from a positive subnormal squared length. A finite correction
+of `1e-21` produces squared bits `0x000002CA` and a finite inverse root near
+`9.997e20`, whose square overflows to infinity. The two refinements then
+produce NaN. A focused pre-fix regression reproduced an all-NaN limited
+velocity from otherwise finite vectors. This establishes the numerical
+failure independently of the collision system; it is not a replay of all
+4059 input ticks.
+
+The fix normalizes only positive subnormal squared lengths by the exact
+power of two `2^24`, retains both refinement stages, and rescales the inverse
+root by `2^12`. It preserves the ordinary-input path, movement limits and
+invalid-input propagation. No global floating-point mode changes, collision
+bypass, arbitrary epsilon, or replacement player state are involved. This
+is a stability correction for the existing portable PC arithmetic, not a
+claim of bit-exact Xenon instruction emulation.
+
+Regressions cover the failing finite vectors, powers-of-two across the
+subnormal/normal boundary, limiting tiny corrections, steady walking updates,
+and the complete ground-controller publication (including position, lean and
+cadence). Zero and NaN checks ensure invalid inputs are not silently repaired.
+The report, matching stderr and arithmetic evidence are retained privately
+with the test builds. Gameplay validation remains with the user.
+
+Validation: the finite-delta regression failed before the arithmetic change
+with `[NaN, NaN, NaN, NaN]`. Afterward all 11 movement-velocity tests passed,
+followed by all 202 offboard library tests in the release MSVC configuration
+(`cargo test --release --locked --target x86_64-pc-windows-msvc -p skate-core
+--lib player::offboard::`). No game or renderer was launched.
+
 ## FingerFlipOut (2026-09-09)
 
 Observed user failure: clean revision `1a6e95b`, build timestamp
