@@ -316,3 +316,10 @@ zeros and NaN payloads are compared explicitly. Reusable scratch storage avoids 
 new per-frame allocation. This is expected to help settled-lighting frames; it may
 save nothing while every material's lighting changes. No FPS gain is claimed before
 a matching post-change capture and user visual test.
+
+Validation of `d3f964b`: both character-lighting release tests passed, covering
+unchanged asset events, changed values, newly bound pieces, float bit preservation
+and existing shadow-source separation. The private static-CRT EXE/PDB built and
+its embedded revision/system-only PE imports were verified. The local comparison
+launcher records 20 seconds with unchanged settings; the preceding executable and
+capture remain available. No post-change gameplay result is claimed.
