@@ -1,4 +1,49 @@
 use super::*;
+
+#[test]
+fn tiny_velocity_delta_remains_finite_and_reaches_target() {
+    // Flat-ground convergence can leave a tiny vertical correction while X/Z
+    // already match. Its squared length is positive but subnormal.
+    let current = [-1.6481168, 1.0e-21, 5.7692037, 0.0];
+    let target = [-1.6481168, 0.0, 5.7692037, 0.0];
+    let delta = sub(target, current);
+    assert!(dot(delta, delta).is_subnormal());
+    let result = limit_delta(target, current, 0.2);
+    assert_eq!(result, target);
+    assert!(length(delta).is_finite());
+    assert!((length(delta) / 1.0e-21 - 1.0).abs() < 0.001);
+}
+
+#[test]
+fn tiny_velocity_refinement_boundaries_preserve_limits_and_invalid_inputs() {
+    for exponent in -74..=-60 {
+        let component = 2.0f32.powi(exponent);
+        let delta = [component, 0.0, 0.0, 0.0];
+        let measured = length(delta);
+        assert!(measured.is_finite() && measured > 0.0);
+        assert!((measured / component - 1.0).abs() < 1e-6);
+        let maximum = component * 0.5;
+        let limited = limit_delta(delta, [0.0; 4], maximum);
+        assert!(limited.into_iter().all(f32::is_finite));
+        assert!((limited[0] / maximum - 1.0).abs() < 1e-6);
+    }
+    assert_eq!(length([0.0; 4]), 0.0);
+    assert!(length([f32::NAN, 0.0, 0.0, 0.0]).is_nan());
+    assert!(limit_delta([f32::NAN, 0.0, 0.0, 0.0], [0.0; 4], 0.2)[0].is_nan());
+}
+
+#[test]
+fn tiny_velocity_correction_does_not_poison_walking_state() {
+    let mut state = State { velocity: [0.0, 1.0e-21, 5.0, 0.0], speed: 5.0, ..State::default() };
+    let mut input = input();
+    input.steering = 0.0;
+    for _ in 0..120 {
+        state.update(&settings(), &input);
+        assert_eq!(state.velocity, [0.0, 0.0, 5.0, 0.0]);
+        assert_eq!(state.speed, 5.0);
+        assert!(state.forward_delta.is_finite() && state.right_delta.is_finite());
+    }
+}
 fn curve(value: f32) -> PointGraph<8> { PointGraph { x: std::array::from_fn(|i| i as f32), y: [value; 8] } }
 fn settings() -> Settings {
     Settings { slope_speed_scalar: curve(1.0), slope_mode_speed: curve(3.0), turn_vs_speed: curve(90.0), turn_delta_vs_speed: curve(15.0) }

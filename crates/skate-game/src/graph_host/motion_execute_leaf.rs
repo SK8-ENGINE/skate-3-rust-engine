@@ -290,6 +290,23 @@ pub(super) fn execute(
                 // matching conditions; the authored node itself must still
                 // advance that lifecycle instead of aborting graph execution.
                 match operation {
+                    crate::graph_host::motion_stock_gameplay::Operation::FingerFlipOut { grab_intent } => {
+                        let Instance::FingerFlipOut(state) = instance else {
+                            return Err("FingerFlipOut operation/instance mismatch".into());
+                        };
+                        if phase == 0 {
+                            state.begin();
+                        } else if phase == 1 {
+                            let value = state.update(
+                                host.animation.motion_intents.contains_key(&grab_intent),
+                                frame.dt, &host.finger_flip,
+                            );
+                            host.animation.set_attribute(SettableAttribute {
+                                name: encode(b"Grabbing"), value,
+                                normalized: false, sequence_id: -1,
+                            });
+                        }
+                    }
                     crate::graph_host::motion_stock_gameplay::Operation::MatchAirTime => {
                         let Instance::MatchAirTime(state) = instance else {
                             return Err("MatchAirTime operation/instance mismatch".into());

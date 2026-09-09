@@ -146,7 +146,7 @@ pub enum Operation {
         attribute_y: AttributeName,
     },
     FootPlantAbsorb,
-    FingerFlipOut,
+    FingerFlipOut { grab_intent: String },
     EnterSkitchingBehaviour,
     SkitchingBehaviour,
     SkitchShimmyingBehaviour,
@@ -217,7 +217,10 @@ impl Operation {
                 attribute_x: encode(b"tweak_x"),
                 attribute_y: encode(b"tweak_y"),
             }, "FootPlantAbsorb" => Self::FootPlantAbsorb,
-            "FingerFlipOut" => Self::FingerFlipOut,
+            "FingerFlipOut" => Self::FingerFlipOut {
+                //Factory82BC7C18 binds authored grabintent and literal Grabbing.
+                grab_intent: required_text(a, "grabintent"),
+            },
             "EnterSkitchingBehaviour" => Self::EnterSkitchingBehaviour,
             "SkitchingBehaviour" => Self::SkitchingBehaviour,
             "SkitchShimmyingBehaviour" => Self::SkitchShimmyingBehaviour,

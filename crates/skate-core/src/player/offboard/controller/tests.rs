@@ -86,6 +86,20 @@ fn constructor_uses_clip_metrics_and_original_initial_fields() {
     assert_eq!(s.motion.target_scale_784, -1.0);
     assert_eq!(s.cadence.phase.duration, None);
 }
+
+#[test]
+fn tiny_velocity_delta_keeps_ground_publication_finite() {
+    let mut controller = Controller::new(settings(), metrics());
+    controller.state.motion.velocity_480 = [0.0, 1.0e-21, 1.0, 0.0];
+    controller.state.motion.speed_704 = 1.0;
+    let result = controller.step_ground(&job());
+    assert!(result.position.into_iter().all(f32::is_finite));
+    assert!(result.velocity.into_iter().all(f32::is_finite));
+    assert!(result.physical_frame.into_iter().flatten().all(f32::is_finite));
+    assert!(result.animation_frame.into_iter().flatten().all(f32::is_finite));
+    assert!(controller.state.surface.lean.into_iter().all(f32::is_finite));
+    assert!(controller.state.cadence.phase.phase.is_finite());
+}
 #[test]
 fn absent_clip_queries_have_original_zero_speed() {
     let s = State::new([None; 3]);

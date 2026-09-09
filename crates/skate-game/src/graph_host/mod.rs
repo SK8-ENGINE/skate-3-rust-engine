@@ -30,6 +30,7 @@ pub(crate) mod motion_ground_slope;
 pub(crate) mod motion_hand_services;
 mod motion_hooks;
 mod motion_hippy_jump;
+mod motion_finger_flip;
 pub(crate) mod motion_intent_filter;
 mod motion_kickturn;
 pub(crate) mod motion_landing;

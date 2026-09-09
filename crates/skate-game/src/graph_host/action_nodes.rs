@@ -52,7 +52,8 @@ impl Parameter {
                 filter(attributes.text("mirrorFilter")),
             ],
             angle_filter: filter(attributes.text("angleFilter")),
-            negate_on_mirror: attributes.boolean_byte("negateOnMirror", 0) != 0,
+            //BoardAdjust82BA2A90 passes true as the constructor default.
+            negate_on_mirror: attributes.boolean_byte("negateOnMirror", 1) != 0,
         }
     }
 }

@@ -114,6 +114,7 @@ pub struct MotionHost {
     pub physical_stance: Option<(bool, bool)>,
     pub flags: super::motion_landing::Flags,
     hippy_jump: super::motion_hippy_jump::Settings,
+    finger_flip: super::motion_finger_flip::Settings,
     pub landing_physical: Option<super::motion_landing::Physical>,
     pub wipeout_physical: Option<super::motion_wipeout::Physical>,
     pub wipeout_controls: super::motion_wipeout::Controls,
@@ -290,6 +291,7 @@ impl MotionHost {
             kickturn: super::motion_kickturn::load_settings(data)?,
             manual: super::motion_manual::settings(data)?,
             hippy_jump: super::motion_hippy_jump::Settings::load(data)?,
+            finger_flip: super::motion_finger_flip::Settings::load(data)?,
             next_instance: 1,
         })
     }
@@ -424,3 +426,11 @@ mod jump_into_tests;
 #[cfg(test)]
 #[path = "tests/motion_deck_angles.rs"]
 mod deck_angles_tests;
+
+#[cfg(test)]
+#[path = "tests/motion_finger_flip.rs"]
+mod finger_flip_tests;
+
+#[cfg(test)]
+#[path = "tests/motion_board_adjust.rs"]
+mod board_adjust_tests;
