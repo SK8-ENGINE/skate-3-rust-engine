@@ -109,3 +109,23 @@ Ten map tests passed. The supplied-map benchmark is opt-in via
 `SKATE_TEST_CUSTOM_MAP`. Frame timing can be captured with the existing
 `SKATE_PERF_REPORT` environment setting (10-second warmup, report/exit after
 25 seconds); no automated gameplay was run.
+
+## Frame capture: mesh binding preparation
+
+The user-run capture after collision clustering measured 83.5 FPS / 11.98 ms
+mean frame time. Main schedule time was 2.80 ms, physics 1.55 ms/frame, and the
+render mesh-bind-group preparation section 9.75 ms. CPU query improvements
+therefore did not address the dominant measured render preparation cost.
+
+The vendored renderer now caches complete per-phase model/skin/morph/lightmap
+binding sets, retaining at most four rotating allocation combinations per
+phase. Buffer contents can update without recreating descriptors. Keys include
+model allocation/offset/size, current/previous skin and morph buffer IDs, morph
+mesh/texture/skin-layout identities, lightmap revision and layout identity.
+Pipeline changes clear the cache; removed phases and replaced map resources
+retire their entries. The existing opt-in GPU cache test covers rotating
+allocations, reuse, size changes, skin/morph replacement and bounded retention.
+A new gameplay capture is required to quantify the resulting FPS change.
+
+Validation: release build check passed, and the explicit Vulkan GPU cache
+regression test passed. No gameplay was launched for this change.

@@ -2745,7 +2745,7 @@ impl SpecializedMeshPipeline for MeshPipeline {
 ///
 /// If GPU mesh preprocessing isn't in use, these are global to the scene. If
 /// GPU mesh preprocessing is in use, these are specific to a single phase.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct MeshPhaseBindGroups {
     model_only: Option<BindGroup>,
     skinned: Option<MeshBindGroupPair>,
@@ -2843,9 +2843,94 @@ impl PhaseLightmapCache {
     }
 }
 
+#[derive(Clone)]
 pub struct MeshBindGroupPair {
     motion_vectors: BindGroup,
     no_motion_vectors: BindGroup,
+}
+
+/// Bindings refer to allocations, not their current animated contents. Keep a
+/// bounded set for the rotating current/previous skin and morph buffers.
+#[derive(Default)]
+pub struct PhaseMeshCache {
+    entries: std::collections::VecDeque<(LightmapTableKey, MeshBindingSignature, MeshPhaseBindGroups)>,
+}
+
+#[derive(PartialEq, Eq)]
+struct MeshBindingSignature {
+    skins: [BufferId; 2],
+    weights: [Option<BufferId>; 2],
+    morphs: Vec<(AssetId<Mesh>, TextureViewId, bool)>,
+    lightmaps: u64,
+    layout: BindGroupLayoutId,
+}
+
+impl PhaseMeshCache {
+    fn get(&mut self, model: &BindingResource, signature: &MeshBindingSignature) -> Option<MeshPhaseBindGroups> {
+        let BindingResource::Buffer(model) = model else { return None; };
+        let index = self.entries.iter().position(|(key, old, _)| {
+            &*key.buffer == model.buffer && key.offset == model.offset && key.size == model.size && old == signature
+        })?;
+        let entry = self.entries.remove(index).unwrap();
+        let groups = entry.2.clone();
+        self.entries.push_front(entry);
+        Some(groups)
+    }
+
+    fn insert(&mut self, model: &BindingResource, signature: MeshBindingSignature, groups: MeshPhaseBindGroups) {
+        let BindingResource::Buffer(model) = model else { return; };
+        // Old map resources must not be held by the rotating-buffer cache.
+        self.entries.retain(|(_, old, _)| old.morphs == signature.morphs && old.lightmaps == signature.lightmaps && old.layout == signature.layout);
+        self.entries.push_front((LightmapTableKey {
+            buffer: Buffer::from(model.buffer.clone()), offset: model.offset, size: model.size,
+            layout: signature.layout, revision: signature.lightmaps,
+        }, signature, groups));
+        self.entries.truncate(4);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn check_phase_mesh_cache(device: &RenderDevice, a: &Buffer, b: &Buffer, target: &TextureView) {
+    let layout = device.create_bind_group_layout(None, &[]);
+    let group = device.create_bind_group(None, &layout, &[]);
+    let model = |size| BindingResource::Buffer(BufferBinding { buffer: a, offset: 0, size: BufferSize::new(size) });
+    let signature = |reverse| MeshBindingSignature {
+        skins: if reverse { [b.id(), a.id()] } else { [a.id(), b.id()] },
+        weights: [Some(a.id()), Some(b.id())],
+        morphs: vec![(AssetId::default(), target.id(), true)],
+        lightmaps: 1, layout: layout.id(),
+    };
+    let groups = || MeshPhaseBindGroups { model_only: Some(group.clone()), ..default() };
+    let mut cache = PhaseMeshCache::default();
+    for reverse in [false, true] { cache.insert(&model(256), signature(reverse), groups()); }
+    for _ in 0..16 {
+        for reverse in [true, false] {
+            assert_eq!(cache.get(&model(256), &signature(reverse)).unwrap().model_only.unwrap().id(), group.id());
+        }
+    }
+    assert!(cache.get(&model(512), &signature(false)).is_none());
+    let mut changed = signature(false);
+    changed.weights.swap(0, 1);
+    assert!(cache.get(&model(256), &changed).is_none());
+    changed = signature(false);
+    changed.skins = [a.id(), a.id()];
+    assert!(cache.get(&model(256), &changed).is_none());
+    changed = signature(false);
+    changed.morphs[0].2 = false;
+    assert!(cache.get(&model(256), &changed).is_none());
+    changed = signature(false);
+    changed.morphs.clear();
+    assert!(cache.get(&model(256), &changed).is_none());
+    cache.insert(&model(256), changed, groups());
+    assert_eq!(cache.entries.len(), 1);
+    assert!(cache.get(&model(256), &signature(false)).is_none());
+    for size in 1..16 { cache.insert(&model(size * 16), signature(false), groups()); }
+    assert_eq!(cache.entries.len(), 4);
+    changed = signature(false);
+    changed.lightmaps += 1;
+    assert!(cache.get(&model(256), &changed).is_none());
+    cache.insert(&model(256), changed, groups());
+    assert_eq!(cache.entries.len(), 1);
 }
 
 /// All bind groups for meshes currently loaded.
@@ -2919,7 +3004,9 @@ pub fn prepare_mesh_bind_groups(
     mut render_lightmaps: ResMut<RenderLightmaps>,
     mut lightmap_tables: Local<TypeIdMap<PhaseLightmapCache>>,
     mut morph_meshes: Local<MorphMeshCache>,
+    mut mesh_tables: Local<TypeIdMap<PhaseMeshCache>>,
 ) {
+    if mesh_pipeline.is_changed() { mesh_tables.clear(); }
     if meshes.is_changed() {
         morph_meshes.refresh(&meshes);
     }
@@ -2929,6 +3016,7 @@ pub fn prepare_mesh_bind_groups(
             .into_inner()
             .instance_data_binding()
     {
+        mesh_tables.retain(|phase, _| *phase == TypeId::of::<()>());
         // In this path, we only have a single set of bind groups for all phases.
         let cpu_preprocessing_mesh_bind_groups = prepare_mesh_bind_groups_for_phase(
             instance_data_binding,
@@ -2941,6 +3029,7 @@ pub fn prepare_mesh_bind_groups(
             &mut render_lightmaps,
             lightmap_tables.entry(TypeId::of::<()>()).or_default(),
             &morph_meshes.0,
+            mesh_tables.entry(TypeId::of::<()>()).or_default(),
         );
 
         commands.insert_resource(MeshBindGroups::CpuPreprocessing(
@@ -2974,11 +3063,13 @@ pub fn prepare_mesh_bind_groups(
                 &mut render_lightmaps,
                 lightmap_tables.entry(*phase_type_id).or_default(),
                 &morph_meshes.0,
+                mesh_tables.entry(*phase_type_id).or_default(),
             );
 
             gpu_preprocessing_mesh_bind_groups.insert(*phase_type_id, mesh_phase_bind_groups);
         }
 
+        mesh_tables.retain(|phase, _| gpu_batched_instance_buffers.phase_instance_buffers.contains_key(phase));
         lightmap_tables.retain(|phase, _| {
             gpu_batched_instance_buffers
                 .phase_instance_buffers
@@ -3002,10 +3093,20 @@ fn prepare_mesh_bind_groups_for_phase(
     render_lightmaps: &mut RenderLightmaps,
     lightmap_table: &mut PhaseLightmapCache,
     morph_meshes: &[AssetId<Mesh>],
+    cache: &mut PhaseMeshCache,
 ) -> MeshPhaseBindGroups {
     let layouts = &mesh_pipeline.mesh_layouts;
+    let signature = MeshBindingSignature {
+        skins: [skins_uniform.current_buffer.id(), skins_uniform.prev_buffer.id()],
+        weights: [weights_uniform.current_buffer.buffer().map(Buffer::id), weights_uniform.prev_buffer.buffer().map(Buffer::id)],
+        morphs: morph_meshes.iter().filter_map(|&id| meshes.get(id).and_then(|mesh|
+            mesh.morph_targets.as_ref().map(|target| (id, target.id(), is_skinned(&mesh.layout))))).collect(),
+        lightmaps: render_lightmaps.binding_revision,
+        layout: pipeline_cache.get_bind_group_layout(&layouts.lightmapped).id(),
+    };
+    if let Some(groups) = cache.get(&model, &signature) { return groups; }
 
-    // TODO: Reuse allocations.
+    // Buffer contents change each frame; bindings only change with resources.
     let mut groups = MeshPhaseBindGroups {
         model_only: Some(layouts.model_only(render_device, pipeline_cache, &model)),
         ..default()
@@ -3103,6 +3204,7 @@ fn prepare_mesh_bind_groups_for_phase(
         lightmap_table.groups = std::sync::Arc::new(bindings);
     }
     groups.lightmaps = lightmap_table.groups.clone();
+    cache.insert(&model, signature, groups.clone());
 
     groups
 }

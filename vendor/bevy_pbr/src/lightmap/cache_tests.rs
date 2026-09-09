@@ -99,6 +99,7 @@ fn cache_tracks_binding_identity_and_texture_replacement() {
         mip_level_count: 1,
         had_data: false,
     };
+    crate::render::mesh::check_phase_mesh_cache(&device, &a, &b, &image.texture_view);
     let fallback = FallbackImage {
         d1: image.clone(),
         d2: image.clone(),
