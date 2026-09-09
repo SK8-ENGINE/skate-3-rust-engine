@@ -82,3 +82,11 @@ The capture includes `main_opaque_pass_close` and `main_opaque_encoder_finish` C
 scopes added in the preceding build. They should identify whether the dominant
 main-pass command time is draw traversal or pass/encoder completion before a larger
 material binding redesign is attempted. No FPS gain is claimed from the inventory.
+
+Private static-CRT release build `e109a0a` compiled successfully with the existing
+shared Cargo target. Its embedded revision and Windows-system-only PE imports were
+verified without executing it. The EXE SHA-256 is
+`c919bf6d8166c8f6ca65cdb41d598f37e24f10174282dc0e67af33f676099e35`.
+The local v5 launcher records 20 seconds with GPU diagnostics after F9. For an
+isolated comparison, use the preceding v4 audit launcher first, then v5 with the
+same scene, settings and route. Existing compiler warnings remain.
