@@ -17,6 +17,34 @@ pub(crate) enum DeviceError {
     UnsupportedPlatform,
 }
 
+/// Device identity is metadata; raw input is still sampled every host frame.
+/// Refresh periodically as well as after errors, so hot swaps cannot leave a
+/// subtype cached indefinitely even if Windows never exposes a disconnect.
+#[derive(Default)]
+pub(crate) struct CapabilityCache {
+    value: Option<(u8, std::time::Instant)>,
+}
+impl CapabilityCache {
+    pub(crate) fn invalidate(&mut self) {
+        self.value = None;
+    }
+    fn get(
+        &mut self,
+        now: std::time::Instant,
+        read: impl FnOnce() -> Result<u8, DeviceError>,
+    ) -> Result<u8, DeviceError> {
+        if let Some((subtype, expires)) = self.value {
+            if now < expires {
+                return Ok(subtype);
+            }
+        }
+        self.value = None;
+        let subtype = read()?;
+        self.value = Some((subtype, now + std::time::Duration::from_secs(1)));
+        Ok(subtype)
+    }
+}
+
 #[cfg(windows)]
 mod windows {
     use super::*;
@@ -62,26 +90,33 @@ mod windows {
         fn XInputGetCapabilities(index: u32, flags: u32, capabilities: *mut Capabilities) -> u32;
     }
 
-    pub(super) fn poll(index: u32) -> Result<DevicePacket, DeviceError> {
+    pub(super) fn poll(
+        index: u32,
+        cache: &mut CapabilityCache,
+    ) -> Result<DevicePacket, DeviceError> {
         let mut state = MaybeUninit::<State>::uninit();
         // SAFETY: properly aligned writable storage with the SDK's exact C ABI.
         let result = unsafe { XInputGetState(index, state.as_mut_ptr()) };
+        if result != 0 {
+            cache.invalidate();
+        }
         if result == 1167 {
             return Err(DeviceError::Disconnected);
         }
         if result != 0 {
             return Err(DeviceError::State(result));
         }
-        let mut capabilities = MaybeUninit::<Capabilities>::uninit();
-        // TU3 8296D480 obtains subtype with capability flags=1. A capability
-        // failure stays explicit; it must not invent the converter's byte 13.
-        // SAFETY: same output-storage contract as above.
-        let result = unsafe { XInputGetCapabilities(index, 1, capabilities.as_mut_ptr()) };
-        if result != 0 {
-            return Err(DeviceError::Capabilities(result));
-        }
-        // SAFETY: both successful SDK calls initialized their complete structs.
-        let (state, capabilities) = unsafe { (state.assume_init(), capabilities.assume_init()) };
+        let subtype = cache.get(std::time::Instant::now(), || {
+            let mut capabilities = MaybeUninit::<Capabilities>::uninit();
+            // SAFETY: writable storage with the SDK ABI; read only on success.
+            let result = unsafe { XInputGetCapabilities(index, 1, capabilities.as_mut_ptr()) };
+            if result != 0 {
+                return Err(DeviceError::Capabilities(result));
+            }
+            Ok(unsafe { capabilities.assume_init() }.subtype)
+        })?;
+        // SAFETY: successful XInputGetState initialized the complete structure.
+        let state = unsafe { state.assume_init() };
         Ok(DevicePacket {
             number: state.number,
             state: XboxState {
@@ -90,15 +125,52 @@ mod windows {
                 left: [state.gamepad.left_x, state.gamepad.left_y],
                 right: [state.gamepad.right_x, state.gamepad.right_y],
             },
-            subtype: capabilities.subtype,
+            subtype,
         })
     }
 }
 
-pub(crate) fn poll(index: usize) -> Result<DevicePacket, DeviceError> {
+pub(crate) fn poll_cached(
+    index: usize,
+    cache: &mut CapabilityCache,
+) -> Result<DevicePacket, DeviceError> {
     assert!(index < 4);
     #[cfg(windows)]
-    return windows::poll(index as u32);
+    return windows::poll(index as u32, cache);
     #[cfg(not(windows))]
     Err(DeviceError::UnsupportedPlatform)
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    #[test]
+    fn capability_cache_refreshes_and_never_caches_errors() {
+        let start = std::time::Instant::now();
+        let mut cache = CapabilityCache::default();
+        assert_eq!(cache.get(start, || Ok(1)), Ok(1));
+        assert_eq!(
+            cache.get(start + std::time::Duration::from_millis(999), || panic!(
+                "redundant capability query"
+            )),
+            Ok(1)
+        );
+        assert_eq!(
+            cache.get(start + std::time::Duration::from_secs(1), || Ok(2)),
+            Ok(2)
+        );
+        cache.invalidate();
+        assert_eq!(
+            cache.get(start, || Err(DeviceError::Capabilities(5))),
+            Err(DeviceError::Capabilities(5))
+        );
+        assert_eq!(cache.get(start, || Ok(3)), Ok(3));
+        cache.invalidate();
+        assert_eq!(cache.get(start, || Ok(4)), Ok(4));
+    }
+}
+
+// Preserve the uncached API for menu-only polling.
+pub(crate) fn poll(index: usize) -> Result<DevicePacket, DeviceError> {
+    poll_cached(index, &mut CapabilityCache::default())
 }

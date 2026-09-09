@@ -1,5 +1,14 @@
 # Local Bevy patch
 
+## Bindless material resource reuse
+
+`bevy_pbr/src/material_bind_groups.rs` chooses a fitting slab requiring the fewest
+new resource slots instead of first-fit allocation. It prefers already resident
+textures, then fuller slabs, while keeping existing allocation/refcount/free logic
+and capacity limits. This adds work during material allocation, not each frame.
+The game's explicit Vulkan shader probe tests reuse and retirement using real GPU
+texture identities. See `docs/cpu-followup-optimizations.md` for scope and limits.
+
 ## Conservative occlusion depth pyramid
 
 `bevy_core_pipeline` is vendored from crates.io 0.18.1 with its original licenses.

@@ -215,6 +215,7 @@ fn gpu_probe(prepass: bool) {
             })
             .await
             .unwrap();
+        allocation_reuses_resident_textures(&device);
         let module = validate(
             std::env::var_os("SKATE_SHADER_PROBE_FALLBACK").is_none(),
             prepass,
@@ -316,11 +317,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
                 module: &fragment,
                 entry_point: Some("fragment"),
                 compilation_options: Default::default(),
-                targets: if prepass {
-                    &[]
-                } else {
-                    &color_targets
-                },
+                targets: if prepass { &[] } else { &color_targets },
             }),
             multiview: None,
             cache: None,
@@ -581,4 +578,78 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
             readback.unmap();
         }
     });
+}
+
+// Exercise the real allocator against GPU resource identities and retirement.
+fn allocation_reuses_resident_textures(device: &wgpu::Device) {
+    use bevy::render::render_resource::{
+        BindGroupLayoutDescriptor, BindingNumber, BindingResources, BindlessDescriptor,
+        BindlessIndex, BindlessIndexTableDescriptor, BindlessResourceType,
+        BindlessSlabResourceLimit, OwnedBindingResource, UnpreparedBindGroup,
+    };
+    let render_device = bevy::render::renderer::RenderDevice::from(device.clone());
+    let layout = BindGroupLayoutDescriptor::new("allocation regression", &[]);
+    let descriptor = BindlessDescriptor {
+        resources: vec![BindlessResourceType::Texture2d; 2].into(),
+        buffers: vec![].into(),
+        index_tables: vec![BindlessIndexTableDescriptor {
+            indices: BindlessIndex(0)..BindlessIndex(2),
+            binding_number: BindingNumber(0),
+        }]
+        .into(),
+    };
+    let mut allocator = bevy::pbr::MaterialBindGroupAllocator::new(
+        &render_device,
+        "allocation regression",
+        Some(descriptor),
+        layout.clone(),
+        Some(BindlessSlabResourceLimit::Custom(2)),
+    );
+    let views: Vec<bevy::render::render_resource::TextureView> = (0..4)
+        .map(|_| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+                .into()
+        })
+        .collect();
+    let group = |a: usize, b: usize| UnpreparedBindGroup {
+        bindings: BindingResources(vec![
+            (
+                0,
+                OwnedBindingResource::TextureView(wgpu::TextureViewDimension::D2, views[a].clone()),
+            ),
+            (
+                1,
+                OwnedBindingResource::TextureView(wgpu::TextureViewDimension::D2, views[b].clone()),
+            ),
+        ]),
+    };
+    let first = allocator.allocate_unprepared(group(0, 1), &layout);
+    let second = allocator.allocate_unprepared(group(2, 3), &layout);
+    assert_ne!(first.group, second.group);
+    allocator.free(first);
+    let shared = allocator.allocate_unprepared(group(2, 3), &layout);
+    assert_eq!(
+        shared.group, second.group,
+        "reuse resident textures instead of duplicating into an empty earlier slab"
+    );
+    allocator.free(second);
+    allocator.free(shared);
+    let fresh = allocator.allocate_unprepared(group(0, 3), &layout);
+    assert_eq!(fresh.group, first.group);
+    eprintln!("PROBE allocator resource reuse and retirement passed");
 }

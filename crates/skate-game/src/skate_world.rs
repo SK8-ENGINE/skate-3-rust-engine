@@ -505,7 +505,13 @@ mod performance_inventory {
         source_shadow_triangles.sort_unstable(); batched_shadow_triangles.sort_unstable();
         assert_eq!(source_shadow_triangles, batched_shadow_triangles);
         let proxy_vertices: usize = shadows.batches.iter().map(|(_, indices)| indices.iter().collect::<std::collections::HashSet<_>>().len()).sum();
-        let result = serde_json::json!({"baseline_batches":baseline.len(),"consolidated_batches":groups.len(),"opaque":opaque,"masked":masked,"blended":blended,"fallback":fallback,"triangles":after.len(),"map_lights":map.lights.len(),"triangle_multiset_preserved":true,"replaced_opaque_shadow_casters":replaced_casters,"opaque_shadow_batches":shadows.batches.len(),"shadow_triangle_multiset_preserved":true,"opaque_shadow_triangles":source_shadow_triangles.len(),"proxy_vertices":proxy_vertices,"proxy_vertex_index_bytes":proxy_vertices*24+source_shadow_triangles.len()*12});
+        let bounds=groups.iter().filter(|g|g.retail.is_some()).map(|g| {
+            let mut min=Vec3::splat(f32::INFINITY);let mut max=-min;
+            for &i in &g.indices {let p=Vec3::from_array(map.geometry.vertices[i as usize].position);min=min.min(p);max=max.max(p);}
+            bevy::camera::primitives::Aabb::from_min_max(min,max)
+        }).collect();
+        let shadow_index=crate::retail_render::shadow_visibility::benchmark_bounds(bounds);
+        let result = serde_json::json!({"shadow_index":shadow_index,"baseline_batches":baseline.len(),"consolidated_batches":groups.len(),"opaque":opaque,"masked":masked,"blended":blended,"fallback":fallback,"triangles":after.len(),"map_lights":map.lights.len(),"triangle_multiset_preserved":true,"replaced_opaque_shadow_casters":replaced_casters,"opaque_shadow_batches":shadows.batches.len(),"shadow_triangle_multiset_preserved":true,"opaque_shadow_triangles":source_shadow_triangles.len(),"proxy_vertices":proxy_vertices,"proxy_vertex_index_bytes":proxy_vertices*24+source_shadow_triangles.len()*12});
         std::fs::write(std::env::var_os("SKATE_MAP_INVENTORY_OUT").unwrap(),serde_json::to_vec_pretty(&result).unwrap()).unwrap();
     }
     /// Explicit read-only inventory, never initializes Bevy or a GPU. Asset path
@@ -694,7 +700,7 @@ pub(crate) fn spawn(
         }
         if let Some(material) = retail {
             let material = retail_materials.add(material);
-            commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
+            commands.spawn((crate::retail_render::shadow_visibility::StaticShadowCaster, Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
             continue;
         }
         // Vertex colours above carry retail decal coordinates, never PBR tint.
