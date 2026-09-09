@@ -213,7 +213,7 @@ fn init_options(options: Options) -> Result<Option<Guard>, String> {
             if result.is_err() { eprintln!("TRACE export failed; check free disk space and destination access"); }
             result
         }).map_err(|_| "Cannot start trace writer")?;
-        capture.send(json!({"name":"build","ph":"M","pid":1,"tid":0,"args":{"build_id":env!("SKATE_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"revision":env!("SKATE_RELEASE_REVISION"),"bevy":"0.18.1","wgpu":"27.0.1","debug_assertions":cfg!(debug_assertions),"gpu_requested":options.gpu,"seconds":options.seconds,"delay":options.delay,"wait":options.wait}}));
+        capture.send(json!({"name":"build","ph":"i","s":"g","ts":0,"pid":1,"tid":0,"args":{"build_id":env!("SKATE_BUILD_ID"),"version":env!("CARGO_PKG_VERSION"),"revision":env!("SKATE_RELEASE_REVISION"),"bevy":"0.18.1","wgpu":"27.0.1","debug_assertions":cfg!(debug_assertions),"gpu_requested":options.gpu,"seconds":options.seconds,"delay":options.delay,"wait":options.wait}}));
         eprintln!(
             "TRACE armed; F9 starts waiting capture, F10 stops/exports. Recording does not stop gameplay."
         );
