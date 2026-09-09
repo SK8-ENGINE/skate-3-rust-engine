@@ -31,6 +31,8 @@ def main():
         assert result.returncode == 0, result.stderr
         assert b'0.9.7' in result.stdout + result.stderr
         assert len(customiser_setup.fingerprint()) == 64
+        menu = customisation_profiles.generate({'morphs': [], 'collections': []})
+        assert len(menu[-1]['children'][0]['children'][0]['children']) == 37
         return
     from test_converter import fixture
     from converter import validate_output
