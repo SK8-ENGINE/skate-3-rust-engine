@@ -152,7 +152,15 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
     return entry
 
 
-def install(iso,base,game_exe,report,game_root=None):
+def install(iso,base,game_exe,report,game_root=None,refresh=False):
+    from .versions import fingerprints, changed_groups, installed, GROUPS
+    target_versions=fingerprints()
+    previous=installed(base) if refresh else None
+    groups=changed_groups(previous[1].get('pipelines',{}),target_versions) if previous else set(GROUPS)
+    if not groups:
+        report('Game assets are already current')
+        return previous[0]
+    source=str((iso if iso is not None else game_root).resolve())
     if game_root is None and iso is not None:
         selected=iso.resolve()
         if selected.is_dir():game_root=selected
@@ -169,8 +177,13 @@ def install(iso,base,game_exe,report,game_root=None):
         install_id=uuid.uuid4().hex
         stage=base/'installations'/install_id
         stage.mkdir(parents=True)
-        private=stage/'assets/private';private.mkdir(parents=True)
-        maps=stage/'maps';maps.mkdir()
+        if previous:
+            report('Preparing an asset update; keeping the previous installation until it succeeds')
+            for name in ('assets','maps','settings'):
+                if (previous[0]/name).is_dir():shutil.copytree(previous[0]/name,stage/name)
+            shutil.copy2(previous[0]/'maps.json',stage/'maps.json')
+        private=stage/'assets/private';private.mkdir(parents=True,exist_ok=True)
+        maps=stage/'maps';maps.mkdir(exist_ok=True)
         work=stage/'conversion';work.mkdir()
         with (stage/'setup.log').open('w',encoding='utf-8') as log:
             if game_root is None:
@@ -184,89 +197,104 @@ def install(iso,base,game_exe,report,game_root=None):
             for required in ['default.xex','data/big/miscload.big','data/big/miscboot.big','data/big/db.big',
                              'data/content/createacharacter.big','data/content/worldDIST_University.big']:
                 if not (game_root/required).is_file():raise RuntimeError('This is not a supported Skate 3 disc: missing '+required)
-            report('Extracting animation banks, graphs and gameplay inputs')
+            source_hash=digest(game_root/'default.xex')
+            if previous and previous[1].get('source_hash',source_hash)!=source_hash:
+                raise RuntimeError('Select the same Xbox game edition used to set up this copy')
             stock=private/'stock'
-            extract(game_root/'data/big/miscload.big',stock)
-            extract(game_root/'data/big/miscboot.big',stock,lambda e:e.path.lower()=='data/config/input.cfg')
-            # Some disc banks are loose files rather than members of miscload.
-            loose=game_root/'data/anim'
-            if loose.is_dir():shutil.copytree(loose,stock/'data/anim',dirs_exist_ok=True)
-            report('Converting physics and difficulty settings')
-            database=work/'database'
-            extract(game_root/'data/big/db.big',database,lambda e:Path(e.path).name.lower() in {
-                'skaterschema.bin','skaterschema.vlt','skatercollections.bin','skatercollections.vlt'})
-            names=(TOOLS/'asset_pipeline/names.txt').read_text(encoding='utf-8').splitlines()
-            converted=convert_vlt(database/'data/db/skaterschema',database/'data/db/skatercollections',names)
-            (stock/'skater-collections.json').write_text(json.dumps(converted),encoding='utf-8')
-            skeleton=convert_skeleton(stock/'data/anim/OnBoard.abin')
-            (stock/'physics-skeletons.json').write_text(json.dumps(skeleton),encoding='utf-8')
-            report('Preparing original scoring and session-marker HUD assets')
-            run(task(TOOLS/'prepare_runtime_huds.py', '--game', game_root,
-                     '--assets', stage/'assets', '--work', work/'hud'), log, report)
-            report('Preparing the skater model and textures')
-            manifest=json.loads((TOOLS/'default_skater_retail_manifest.json').read_text())
-            needed=set()
-            for c in manifest['components']:
-                needed.add(f"data/content/createacharacter/model/cas_db/{c['slot']}/0x{c['model_id']}.rx2".lower())
-                needed.update(f'data/content/createacharacter/texture/0x{x}.rx2'.lower() for x in c['textures'].values())
-            extract(game_root/'data/content/createacharacter.big',stock,lambda e:e.path.lower() in needed)
-            character=work/'character'
-            run(task(TOOLS/'extract_default_skater.py','--owned-data-root',stock,'--work-root',character,
-                     '--private-root',private/'default_skater','--utt-root',TOOLS/'vendor/utt'),log,report)
-            report('Building the skater model and rig')
-            from .character_glb import convert as write_character
-            write_character(character/'selected/models',private,manifest)
-            from .character_lighting import convert as write_character_lighting
-            write_character_lighting(character/'selected/models',private,converted)
-            game_manifest={'version':1,'character_scene':'private/skater.glb','initial_animation':'R_IDLE_HCOM_000',
-                           'action_graph':'private/stock/data/state/ActionGraph_OnBoard.stategraph',
-                           'motion_graph':'private/stock/data/state/MotionGraph_OnBoard.stategraph'}
-            (private/'game.json').write_text(json.dumps(game_manifest),encoding='utf-8')
-            report('Preparing retail sky domes')
-            from .sky import convert as write_skies
-            write_skies(game_root,stage/'assets',converted)
-            from .render_parameters import convert as write_render_parameters
-            write_render_parameters(stage/'assets',converted)
-            report('Extracting original travel destinations and location names')
-            from .teleports import convert as write_teleports
-            write_teleports(game_root,stage/'assets',converted)
-            report('Preparing global foliage backdrops')
-            from .backdrop import convert as write_backdrops
-            write_backdrops(game_root,stage/'assets',converted)
-            report('Preparing authored movable-object models')
-            from .dynamic_props import prepare_catalog
-            prepare_catalog(game_root,work/'dmo')
+            if 'core' in groups:
+                report('Extracting animation banks, graphs and gameplay inputs')
+                extract(game_root/'data/big/miscload.big',stock)
+                extract(game_root/'data/big/miscboot.big',stock,lambda e:e.path.lower()=='data/config/input.cfg')
+                # Some disc banks are loose files rather than members of miscload.
+                loose=game_root/'data/anim'
+                if loose.is_dir():shutil.copytree(loose,stock/'data/anim',dirs_exist_ok=True)
+                report('Converting physics and difficulty settings')
+                database=work/'database'
+                extract(game_root/'data/big/db.big',database,lambda e:Path(e.path).name.lower() in {
+                    'skaterschema.bin','skaterschema.vlt','skatercollections.bin','skatercollections.vlt'})
+                names=(TOOLS/'asset_pipeline/names.txt').read_text(encoding='utf-8').splitlines()
+                converted=convert_vlt(database/'data/db/skaterschema',database/'data/db/skatercollections',names)
+                (stock/'skater-collections.json').write_text(json.dumps(converted),encoding='utf-8')
+                skeleton=convert_skeleton(stock/'data/anim/OnBoard.abin')
+                (stock/'physics-skeletons.json').write_text(json.dumps(skeleton),encoding='utf-8')
+            else:
+                converted=json.loads((stock/'skater-collections.json').read_text(encoding='utf-8'))
+            if 'hud' in groups:
+                for folder in (private/'hud',private/'session-marker'):
+                    if folder.is_dir():remove_intermediate(folder,stage)
+                report('Preparing original scoring and session-marker HUD assets')
+                run(task(TOOLS/'prepare_runtime_huds.py', '--game', game_root,
+                         '--assets', stage/'assets', '--work', work/'hud'), log, report)
+            if 'character' in groups:
+                report('Preparing the skater model and textures')
+                manifest=json.loads((TOOLS/'default_skater_retail_manifest.json').read_text())
+                needed=set()
+                for c in manifest['components']:
+                    needed.add(f"data/content/createacharacter/model/cas_db/{c['slot']}/0x{c['model_id']}.rx2".lower())
+                    needed.update(f'data/content/createacharacter/texture/0x{x}.rx2'.lower() for x in c['textures'].values())
+                extract(game_root/'data/content/createacharacter.big',stock,lambda e:e.path.lower() in needed)
+                character=work/'character'
+                run(task(TOOLS/'extract_default_skater.py','--owned-data-root',stock,'--work-root',character,
+                         '--private-root',private/'default_skater','--utt-root',TOOLS/'vendor/utt'),log,report)
+                report('Building the skater model and rig')
+                from .character_glb import convert as write_character
+                write_character(character/'selected/models',private,manifest)
+                from .character_lighting import convert as write_character_lighting
+                write_character_lighting(character/'selected/models',private,converted)
+                game_manifest={'version':1,'character_scene':'private/skater.glb','initial_animation':'R_IDLE_HCOM_000',
+                               'action_graph':'private/stock/data/state/ActionGraph_OnBoard.stategraph',
+                               'motion_graph':'private/stock/data/state/MotionGraph_OnBoard.stategraph'}
+                (private/'game.json').write_text(json.dumps(game_manifest),encoding='utf-8')
+            if 'environment' in groups:
+                report('Preparing retail sky domes')
+                from .sky import convert as write_skies
+                write_skies(game_root,stage/'assets',converted)
+                from .render_parameters import convert as write_render_parameters
+                write_render_parameters(stage/'assets',converted)
+                report('Extracting original travel destinations and location names')
+                from .teleports import convert as write_teleports
+                write_teleports(game_root,stage/'assets',converted)
+                report('Preparing global foliage backdrops')
+                from .backdrop import convert as write_backdrops
+                write_backdrops(game_root,stage/'assets',converted)
+            if 'maps' in groups:
+                report('Preparing authored movable-object models')
+                from .dynamic_props import prepare_catalog
+                prepare_catalog(game_root,work/'dmo')
             report('Validating skater, input and animation data')
             run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
-            archives=list((game_root/'data/content').glob('worldDIST_*.big'))
-            archives.sort(key=lambda p:(p.stem!='worldDIST_University',p.name.lower()))
-            workers=map_workers()
-            report(f'Converting {len(archives)} maps with {workers} workers')
-            def map_job(archive):
-                result=work/(archive.stem+'.json')
-                with (stage/(archive.stem+'-conversion.log')).open('w',encoding='utf-8') as map_log:
-                    run(task(TOOLS/'asset_pipeline/map_job.py','--archive',archive,'--stage',stage,
-                             '--game-exe',game_exe,'--result',result),map_log,report)
-                return json.loads(result.read_text(encoding='utf-8'))
-            completed={}
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                # Start the expensive districts together so one does not
-                # remain queued behind a string of small parks.
-                futures={pool.submit(map_job,a):a for a in sorted(archives,key=lambda p:-p.stat().st_size)}
-                for future in as_completed(futures):
-                    archive=futures[future];completed[archive.name]=future.result()
-                    report(f"Converted {len(completed)}/{len(archives)} maps: {completed[archive.name]['name']}")
-            catalog=[completed[a.name] for a in archives]
-            if not any(m['name']=='University' for m in catalog):raise RuntimeError('University was not converted')
+            if 'maps' in groups:
+                archives=list((game_root/'data/content').glob('worldDIST_*.big'))
+                archives.sort(key=lambda p:(p.stem!='worldDIST_University',p.name.lower()))
+                workers=map_workers()
+                report(f'Converting {len(archives)} maps with {workers} workers')
+                def map_job(archive):
+                    result=work/(archive.stem+'.json')
+                    with (stage/(archive.stem+'-conversion.log')).open('w',encoding='utf-8') as map_log:
+                        run(task(TOOLS/'asset_pipeline/map_job.py','--archive',archive,'--stage',stage,
+                                 '--game-exe',game_exe,'--result',result),map_log,report)
+                    return json.loads(result.read_text(encoding='utf-8'))
+                completed={}
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    # Start the expensive districts together so one does not
+                    # remain queued behind a string of small parks.
+                    futures={pool.submit(map_job,a):a for a in sorted(archives,key=lambda p:-p.stat().st_size)}
+                    for future in as_completed(futures):
+                        archive=futures[future];completed[archive.name]=future.result()
+                        report(f"Converted {len(completed)}/{len(archives)} maps: {completed[archive.name]['name']}")
+                catalog=[completed[a.name] for a in archives]
+                if not any(m['name']=='University' for m in catalog):raise RuntimeError('University was not converted')
             report('Validating installed runtime inputs')
             run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
-            settings=stage/'settings';settings.mkdir()
-            (settings/'default-map.json').write_text(json.dumps('maps/University.skate'),encoding='utf-8')
-            (stage/'maps.json').write_text(json.dumps(catalog,indent=2),encoding='utf-8')
+            settings=stage/'settings';settings.mkdir(exist_ok=True)
+            if not previous:
+                (settings/'default-map.json').write_text(json.dumps('maps/University.skate'),encoding='utf-8')
+            if 'maps' in groups:
+                (stage/'maps.json').write_text(json.dumps(catalog,indent=2),encoding='utf-8')
             remove_intermediate(work,stage)
             # Publish only after every conversion and the runtime's own load succeeds.
             marker=base/'installation.json.new'
-            marker.write_text(json.dumps({'version':1,'directory':'installations/'+install_id}),encoding='utf-8')
+            marker.write_text(json.dumps({'version':1,'directory':'installations/'+install_id,'source':source,'source_hash':source_hash,'pipelines':target_versions}),encoding='utf-8')
             marker.replace(base/'installation.json')
             report('Setup complete')
             return stage

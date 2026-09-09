@@ -1,6 +1,6 @@
 # Windows installation
 
-`Build-Release.ps1` produces `target/skate3rust-windows-x64.zip`. Keep its
+`scripts/Build-Release.ps1` produces `target/skate3rust-windows-x64.zip`. Keep its
 `support` directory beside `skate3rust.exe`. The game links Bevy and the MSVC
 runtime statically; the setup helper bundles Python, NumPy, Pillow and Tcl/Tk.
 It also bundles a small Rust RefPack decoder. Users need no compiler.
@@ -84,3 +84,40 @@ scheduled first. Per-map conversion and load logs remain in the installation.
 Decoded map geometry, material data, texture pixels, native collision archives,
 rail payloads and the character GLB were compared with the earlier outputs.
 Final map storage uses a different compression level, without reducing quality.
+
+## Separate portable installations and asset refresh
+
+Each copy uses `data/installation.json` beside its executable. A freshly unpacked
+ZIP has no record and always asks for an Xbox source. Startup does not search the
+working directory, another package, or `%LOCALAPPDATA%` for prepared game assets.
+Once that copy is set up, ordinary launches reuse its own data. `--assets` remains
+an explicit developer override and bypasses setup and asset-refresh management.
+Do not ship a local `data` folder in release ZIPs.
+
+The release manifest includes fingerprints for core data, HUDs, character,
+environment and maps. They are derived from the packaged extractor sources and
+shared dependencies, not the game build number. An in-place program update keeps
+`data` intact. Next startup offers an asset refresh only when these fingerprints
+change. A HUD extractor edit refreshes HUDs without converting maps; changes to
+core VLT/animation decoding invalidate dependent groups too. Shared map/material
+parsers can invalidate both maps and environment assets. New converter modules
+must be assigned to their consuming groups in `asset_pipeline/versions.py`.
+
+Refresh reuses the Xbox source path saved for this copy, asking for its location
+if it moved. ISO sources must be unpacked again when a refresh needs disc files;
+unchanged asset groups are copied, not reconverted. The chosen Xbox executable
+must match the original edition. Source paths stay in local installation records
+and are never included in published release metadata.
+
+Updates create a new generation within this copy's data directory, copy unchanged
+assets/maps/settings, and run only affected conversion stages. No hardlinks are
+used, so rebuilding an output cannot modify the previous generation. Runtime
+asset checks must pass before the installation record is atomically replaced.
+Cancellation/failure leaves the previous record and data intact. Previous data
+is retained for recovery; staging needs additional disk space. A copied stale
+record without fingerprints triggers a complete refresh once.
+
+Installations from releases that used the old global asset store need one setup
+in the new per-copy layout. There is deliberately no automatic global migration.
+Manually unpacking a ZIP over the same folder retains that folder's `data` and
+behaves like an in-place update; unpack into a new folder for a fresh setup.

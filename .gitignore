@@ -3,6 +3,7 @@
 /logs/
 /.local/
 /settings/
+/data/
 __pycache__/
 *.pyc
 /assets/private/

@@ -19,7 +19,10 @@ The helper replaces only `skate3rust.exe`, `support/skate3setup.exe`,
 `support/skate3update.exe`, and `release.json`. Assets, maps, settings, mods,
 character libraries and setup's installation marker are never replaced. The same
 working directory and arguments are used for restart; existing asset selection
-continues to work. Packaged releases are required; developer binaries do not
+continues to work. Each package owns its `data` installation. On the next normal
+launch, changed extractor fingerprints trigger an update of affected asset groups;
+unchanged groups are retained. Freshly unpacked copies run setup independently.
+Explicit `--assets` developer launches bypass this management. Packaged releases are required; developer binaries do not
 silently adopt a downloaded build.
 
 # Package protocol and release maintenance

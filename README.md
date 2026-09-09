@@ -32,7 +32,9 @@ Use an XInput controller to play. Escape opens graphics, difficulty and map
 settings. Maps can be switched without restarting the game.
 
 **Skate 3 assets are not included.** Your converted files stay in
-`%LOCALAPPDATA%/Skate3RustEngine`.
+the `data` folder beside your executable. Each freshly unpacked copy runs its
+own setup; it does not adopt another installation. In-place updates refresh
+only changed asset groups.
 
 ## Build
 

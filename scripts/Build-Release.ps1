@@ -40,7 +40,7 @@ try {
     $toolsRoot = Join-Path $ProjectRoot 'tools'
     foreach ($source in Get-ChildItem -LiteralPath $toolsRoot -File -Recurse) {
         if ($source.FullName -match '[\\/]__pycache__[\\/]') { continue }
-        if ($source.Extension -notin '.py','.json','.txt','.md','.toml' -and $source.Name -ne 'LICENSE') { continue }
+        if ($source.Extension -notin '.py','.json','.txt','.md','.toml','.rs' -and $source.Name -ne 'LICENSE') { continue }
         $relative = [IO.Path]::GetRelativePath($toolsRoot, $source.FullName)
         $portableName = $relative.Replace('\','/')
         if ($portableName -match '(^|/)blender[^/]*(/|$)' -or
@@ -66,13 +66,16 @@ try {
     # deliberately retain identity; publish a new run/tag for a new eligible build.
     $build = if ($env:GITHUB_RUN_NUMBER) { [long]$env:GITHUB_RUN_NUMBER } else { 0 }
     $tag = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { 'development' }
+    $assetPipelinesJson = & $packagePython "$sourceStage/tools/asset_pipeline/versions.py" --tools "$sourceStage/tools"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not identify asset extractors' }
+    $assetPipelines = $assetPipelinesJson | ConvertFrom-Json
     $files = @{}
     foreach ($name in @('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe')) {
         $files[$name] = (Get-FileHash -LiteralPath (Join-Path $stage $name) -Algorithm SHA256).Hash.ToLower()
     }
     @{
         schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
-        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files
+        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files; asset_pipelines = $assetPipelines
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
     Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $ProjectRoot 'target/release.json')
     Copy-Item -LiteralPath README.md,docs/THIRD_PARTY_NOTICES.md -Destination $stage

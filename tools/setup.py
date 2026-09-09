@@ -18,33 +18,39 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--base',type=Path,required=True)
     parser.add_argument('--game-exe',type=Path,required=True)
+    parser.add_argument('--refresh',action='store_true')
     args=parser.parse_args()
     import tkinter as tk
     from tkinter import filedialog,messagebox,ttk
     from tools.asset_pipeline.install import install
+    from tools.asset_pipeline.versions import installed, fingerprints, changed_groups
+    previous=installed(args.base) if args.refresh else None
+    changed=changed_groups(previous[1].get('pipelines',{}),fingerprints()) if previous else set()
+    updating=previous is not None
     window=tk.Tk()
     window.title('Skate 3 Rust Engine setup')
     window.geometry('700x420');window.resizable(False,False)
     icon=ROOT/'docs/images/skating-crab.ico'
     if icon.is_file():window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
-    ttk.Label(frame,text='Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
-    ttk.Label(frame,text='Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, animations and all disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
+    ttk.Label(frame,text='Update game assets' if updating else 'Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
+    ttk.Label(frame,text=('Changed asset groups: '+', '.join(sorted(changed))+'.\nOnly these groups will be extracted again.\nYour previous installation is kept until the update succeeds.\nUse Update game assets to reuse your selected Xbox source,\nor choose its new location if it has moved.') if updating else 'Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, animations and all disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
               font=('Segoe UI',11),justify='left').pack(anchor='w')
     status=tk.StringVar(value='Choose your game to begin.')
     ttk.Label(frame,textvariable=status,wraplength=600).pack(anchor='w',pady=(18,8))
     progress=ttk.Progressbar(frame,mode='indeterminate');progress.pack(fill='x')
     messages=queue.Queue();running=False;success=False
-    def start(folder=False):
+    def start(folder=False,reuse=False):
         nonlocal running
-        iso=(filedialog.askdirectory(parent=window,title='Select the Skate 3 folder containing default.xex') if folder else
+        saved=previous[1].get('source') if previous else None
+        iso=saved if reuse and saved and Path(saved).exists() else (filedialog.askdirectory(parent=window,title='Select the Skate 3 folder containing default.xex') if folder else
              filedialog.askopenfilename(parent=window,title='Select your Skate 3 Xbox 360 game',
                  filetypes=[('Xbox 360 game','*.iso *.xex'),('Xbox 360 ISO','*.iso'),('Xbox executable','*.xex')]))
         if not iso:return
         button.config(state='disabled');folder_button.config(state='disabled');running=True;progress.start()
         def work():
             try:
-                install(Path(iso),args.base,args.game_exe,lambda text:messages.put(('progress',text)))
+                install(Path(iso),args.base,args.game_exe,lambda text:messages.put(('progress',text)),refresh=updating)
                 messages.put(('done','Ready'))
             except Exception as error:
                 args.base.mkdir(parents=True,exist_ok=True)
@@ -57,7 +63,7 @@ def main():
         else:window.destroy()
     buttons=ttk.Frame(frame);buttons.pack(anchor='e',pady=18)
     folder_button=ttk.Button(buttons,text='Select extracted folder',command=lambda:start(True));folder_button.pack(side='left',padx=(0,8))
-    button=ttk.Button(buttons,text='Select ISO or default.xex',command=start);button.pack(side='left')
+    button=ttk.Button(buttons,text='Update game assets' if updating else 'Select ISO or default.xex',command=lambda:start(reuse=updating));button.pack(side='left')
     def poll():
         nonlocal running,success
         while not messages.empty():
