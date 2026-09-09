@@ -279,6 +279,7 @@ fn update(
     mut materials: ResMut<Assets<CharacterMaterial>>,
     mut shadow: ResMut<crate::retail_render::ShadowState>,
     time: Res<Time>,
+    mut changed: Local<Vec<AssetId<CharacterMaterial>>>,
 ) {
     let (Some(mut lighting), Ok(root)) = (lighting, root.single()) else {
         return;
@@ -292,18 +293,60 @@ fn update(
         let weight = 1. - (-time.delta_secs().clamp(0., 0.05) / 0.35).exp();
         std::array::from_fn(|i| old[i].lerp(sh[i], weight))
     });
-    for (_, material) in materials.iter_mut() {
-        material.params.sh = displayed;
-    }
+    publish_sh(&mut materials, displayed, &mut changed);
     lighting.display_sh = Some(displayed);
     // Adapter floor: the local probe's direction-independent ambient term.
     // The native per-frame c8 shadow-colour controller remains unrecovered.
     shadow.approach(sh[0].truncate(), time.delta_secs());
 }
 
+fn publish_sh(materials: &mut Assets<CharacterMaterial>, displayed: [Vec4; 9], changed: &mut Vec<AssetId<CharacterMaterial>>) {
+    // iter_mut emits Modified even for identical assignments, rebuilding GPU
+    // material bindings. Read first and mutate only bitwise-different SH payloads.
+    // Check every material so newly bound pieces still receive the current SH.
+    changed.clear();
+    changed.extend(materials.iter().filter_map(|(id, material)| {
+        (!material.params.sh.iter().zip(&displayed).all(|(a,b)| a.to_array().map(f32::to_bits)==b.to_array().map(f32::to_bits))).then_some(id)
+    }));
+    for &id in changed.iter() {
+        materials.get_mut(id).expect("material enumerated in this call").params.sh = displayed;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unchanged_sh_emits_no_asset_modification_but_new_values_and_pieces_do() {
+        let mut app=App::new();
+        app.add_plugins((MinimalPlugins,AssetPlugin::default())).init_asset::<CharacterMaterial>();
+        fn material() -> CharacterMaterial {
+            CharacterMaterial { params:CharacterParams {light:Vec4::ZERO,tint:Vec4::ONE,options:Vec4::ZERO,rows:[Vec4::ZERO;9],sh:[Vec4::ZERO;9]},diffuse:None,normal:None,mask:None,alpha:AlphaMode::Opaque }
+        }
+        let first=app.world_mut().resource_mut::<Assets<CharacterMaterial>>().add(material());
+        app.update();
+        app.world_mut().resource_mut::<Messages<AssetEvent<CharacterMaterial>>>().clear();
+        let mut scratch=Vec::new();
+        let mut displayed=[Vec4::ZERO;9];
+        publish_sh(&mut app.world_mut().resource_mut::<Assets<CharacterMaterial>>(),displayed,&mut scratch);
+        assert!(scratch.is_empty());
+        app.update();
+        assert_eq!(app.world_mut().resource_mut::<Messages<AssetEvent<CharacterMaterial>>>().drain().count(),0);
+        // Signed zero and NaN payloads must retain their bits, without epsilon tests.
+        displayed[0]=Vec4::new(-0.0,f32::from_bits(0x7fc01234),1.0,0.0);
+        publish_sh(&mut app.world_mut().resource_mut::<Assets<CharacterMaterial>>(),displayed,&mut scratch);
+        assert_eq!(scratch,vec![first.id()]);
+        app.update();
+        assert!(app.world_mut().resource_mut::<Messages<AssetEvent<CharacterMaterial>>>().drain().any(|e|matches!(e,AssetEvent::Modified{id} if id==first.id())));
+        publish_sh(&mut app.world_mut().resource_mut::<Assets<CharacterMaterial>>(),displayed,&mut scratch);
+        assert!(scratch.is_empty());
+        let second=app.world_mut().resource_mut::<Assets<CharacterMaterial>>().add(material());
+        publish_sh(&mut app.world_mut().resource_mut::<Assets<CharacterMaterial>>(),displayed,&mut scratch);
+        assert_eq!(scratch,vec![second.id()]);
+        let assets=app.world().resource::<Assets<CharacterMaterial>>();
+        for handle in [&first,&second] { assert_eq!(assets.get(handle).unwrap().params.sh[0].to_array().map(f32::to_bits),displayed[0].to_array().map(f32::to_bits)); }
+    }
 
     #[test]
     fn world_receiver_source_excludes_world_casters_and_emits_no_light() {

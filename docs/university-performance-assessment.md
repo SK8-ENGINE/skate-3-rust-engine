@@ -255,3 +255,64 @@ analyser reproduced the capture's event/sample counts and limitation flags. The
 new private static-CRT release EXE/PDB built successfully; embedded revision and PE
 imports were verified. The original recording and executable were retained. No
 gameplay or GPU capture was launched by the agent.
+
+## Second user capture: named CPU systems and measured GPU durations
+
+Build `2a74581`, GPU diagnostics enabled, SHA-256
+`03d97c8b8cd3980123ad6ea7c6e7c36d9d41ff2c5877077851ce93086b1747de`.
+The useful recording covers 24.62 seconds and 6,997 frame intervals. It ended at
+the byte bound, with zero queue drops and 12,213,517 intentionally filtered short
+spans. This is sufficient for the observations below despite not reaching 30 seconds.
+Another small file from this session contains only metadata and no active capture.
+
+Frame interval: mean **3.52 ms**, median **3.11 ms**, p95 **6.33 ms**, p99 **7.11 ms**,
+maximum **9.71 ms**. The mean corresponds to about 284 main-app updates per second,
+not verified display FPS. Settings and actual target size match the first capture.
+The samples cover a different interval and instrumentation configuration, so their
+lower timings are **not an A/B performance improvement**.
+
+| Scope | Mean | p95 | Measurement |
+|---|---:|---:|---|
+| Render schedule | 3.27 ms | 6.07 ms | Inclusive CPU wall time |
+| Main app | 2.25 ms | 2.98 ms | Inclusive CPU wall time; overlaps render work |
+| Command-buffer generation tasks | 1.27 ms | 3.59 ms | CPU work/waits |
+| Directional-light mesh visibility | 0.448 ms | 0.974 ms | CPU system |
+| Controller polling | 0.342 ms | 0.443 ms | CPU/OS calls |
+| Character-material preparation | 0.124 ms | 0.160 ms | CPU system |
+| Physics advance | 0.644 ms | 0.880 ms | Per fixed tick: 1,477 ticks, not per display frame |
+| Main opaque pass | 0.191 ms | 0.259 ms | GPU timestamp duration |
+| Retail exposure meter | 0.00781 ms | 0.00794 ms | GPU timestamp duration |
+| Retail exposed tone | 0.0157 ms | 0.0159 ms | GPU timestamp duration |
+
+CPU rendering/visibility is a stronger optimisation lead than main-pass shading
+for this scene. GPU figures cover instrumented passes, not the entire GPU frame;
+some anonymized shadow/other pass labels cannot be attributed individually from
+this export. CPU scope durations include scheduler and profiler overhead. The
+recorder's `end_frame` system itself averaged 0.115 ms; this is only one component
+of capture overhead, not its total. No GPU saturation claim follows from these data.
+
+Across 117 resource snapshots there were consistently 4,936 prepared meshes,
+2,195 prepared images, and zero waiting pipelines. There is still no indication
+of resource churn or shader compilation driving this interval. These counts
+differ from the first capture, so the two recordings are not identical workloads.
+
+The visibility source checks two distinct shadow sources: world/skater shadows
+for character lighting, and layer-28 player-only shadows received by the baked
+world. Removing casters or reducing cascades would change the image. It remains a
+substantial lead, but no visibility shortcut is applied without an exact equivalent.
+Controller polling calls XInput state and capabilities at the existing cadence;
+throttling absent slots or caching subtype data could alter reconnect/input semantics,
+so it is not changed under the timing constraint.
+
+One directly supported change is implemented in `retail_character.rs::update`.
+It previously used `Assets::iter_mut` to assign SH lighting to every character
+material every frame. Bevy emits `AssetEvent::Modified` for those mutable accesses,
+including identical assignments, causing needless preparation/binding work after
+lighting has settled. The new path reads each material first and only obtains a
+mutable reference if any SH float's **bits** differ. It still computes probe choice,
+smoothing and shadow state every frame and updates every changing/new material in
+the same frame. It uses no tolerance, cadence reduction or shader change. Signed
+zeros and NaN payloads are compared explicitly. Reusable scratch storage avoids a
+new per-frame allocation. This is expected to help settled-lighting frames; it may
+save nothing while every material's lighting changes. No FPS gain is claimed before
+a matching post-change capture and user visual test.
