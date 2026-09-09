@@ -1,8 +1,9 @@
-param([string]$TargetDirectory = (Join-Path $PSScriptRoot 'target'))
+param([string]$TargetDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'target'))
+$ProjectRoot = Split-Path $PSScriptRoot -Parent
 $ErrorActionPreference = 'Stop'
-Push-Location $PSScriptRoot
+Push-Location $ProjectRoot
 try {
-    $packagePython = Join-Path $PSScriptRoot 'target/package-venv/Scripts/python.exe'
+    $packagePython = Join-Path $ProjectRoot 'target/package-venv/Scripts/python.exe'
     if (-not (Test-Path -LiteralPath $packagePython)) {
         & python -m venv target/package-venv
         if ($LASTEXITCODE -ne 0) { throw 'Could not create packaging environment' }
@@ -11,8 +12,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not install packaging dependencies' }
     $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static'
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-ffff'
-    $stage = Join-Path $PSScriptRoot "target/release-packages/$stamp/skate3rust-windows-x64"
-    $symbols = Join-Path $PSScriptRoot "target/release-packages/$stamp/symbols"
+    $stage = Join-Path $ProjectRoot "target/release-packages/$stamp/skate3rust-windows-x64"
+    $symbols = Join-Path $ProjectRoot "target/release-packages/$stamp/symbols"
     New-Item -ItemType Directory -Path "$stage/support",$symbols -Force | Out-Null
     # Link this invocation directly into private staging; never copy a generic cache EXE.
     & cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-game --bin skate3rust --no-default-features -- -C extra-filename= -o "$stage/skate3rust.exe" -C "link-arg=/PDB:$symbols/skate3rust.pdb"
@@ -36,7 +37,7 @@ try {
     New-Item -ItemType Directory -Path "$stage/mods" -Force | Out-Null
     Copy-Item -LiteralPath mods/native-trainer.zip,mods/mario-kart.zip,mods/README.md -Destination "$stage/mods"
     $sourceStage = Join-Path $stage '../setup-source'
-    $toolsRoot = Join-Path $PSScriptRoot 'tools'
+    $toolsRoot = Join-Path $ProjectRoot 'tools'
     foreach ($source in Get-ChildItem -LiteralPath $toolsRoot -File -Recurse) {
         if ($source.FullName -match '[\\/]__pycache__[\\/]') { continue }
         if ($source.Extension -notin '.py','.json','.txt','.md','.toml' -and $source.Name -ne 'LICENSE') { continue }
@@ -50,12 +51,12 @@ try {
         Copy-Item -LiteralPath $source.FullName -Destination $destination
     }
     & $packagePython -m PyInstaller --noconfirm --clean --onefile --name skate3setup `
-        --icon "$PSScriptRoot/docs/images/skating-crab.ico" --paths $PSScriptRoot `
+        --icon "$ProjectRoot/docs/images/skating-crab.ico" --paths $ProjectRoot `
         --hidden-import numpy --hidden-import PIL.Image --hidden-import tkinter `
-        --add-binary "$PSScriptRoot/target/native/refpack.dll;tools/asset_pipeline" `
+        --add-binary "$ProjectRoot/target/native/refpack.dll;tools/asset_pipeline" `
         --exclude-module bpy --exclude-module mathutils `
         --copy-metadata numpy --copy-metadata Pillow --copy-metadata PyInstaller `
-        --add-data "$sourceStage/tools;tools" --add-data "$PSScriptRoot/docs/images/skating-crab.ico;docs/images" `
+        --add-data "$sourceStage/tools;tools" --add-data "$ProjectRoot/docs/images/skating-crab.ico;docs/images" `
         --distpath "$stage/support" --workpath target/setup-build/work --specpath target/setup-build tools/setup.py
     if ($LASTEXITCODE -ne 0) { throw 'Setup packaging failed' }
     & $packagePython -m PyInstaller --noconfirm --clean --onefile --windowed --name skate3update `
@@ -73,8 +74,8 @@ try {
         schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
         build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
-    Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $PSScriptRoot 'target/release.json')
-    Copy-Item -LiteralPath README.md,THIRD_PARTY_NOTICES.md -Destination $stage
+    Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $ProjectRoot 'target/release.json')
+    Copy-Item -LiteralPath README.md,docs/THIRD_PARTY_NOTICES.md -Destination $stage
     New-Item -ItemType Directory -Path "$stage/docs/images" -Force | Out-Null
     Copy-Item -LiteralPath docs/images/skating-crab.png -Destination "$stage/docs/images/skating-crab.png"
     Copy-Item -LiteralPath docs/installation.md -Destination "$stage/docs/installation.md"
@@ -91,7 +92,7 @@ try {
     foreach ($license in Get-ChildItem -LiteralPath "$pythonBase/tcl" -Filter license.terms -Recurse -ErrorAction SilentlyContinue) {
         Copy-Item -LiteralPath $license.FullName -Destination "$stage/licenses/$($license.Directory.Name).txt"
     }
-    $zip = Join-Path $PSScriptRoot 'target/skate3rust-windows-x64.zip'
+    $zip = Join-Path $ProjectRoot 'target/skate3rust-windows-x64.zip'
     Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
     (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower() + '  skate3rust-windows-x64.zip' |
         Set-Content -LiteralPath "$zip.sha256" -Encoding ascii

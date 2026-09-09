@@ -16,7 +16,7 @@ use skate_data::state_graph::{
 pub enum MotionOperation {
     Grind(super::motion_grind::Operation),
     Trick(super::motion_tricks::Operation),
-    SetDeckPitchAndYaw,
+    SetDeckPitchAndYaw { yaw: AttributeName, pitch: AttributeName },
     Play(PlayAnimation),
     ///TU3 vtable82309664: Begin/Update/End all point to the empty82B61BB8.
     PrintText2D,
@@ -115,7 +115,11 @@ impl OperationFactory for MotionFactory {
                 Some(MotionOperation::Shove(operation))
             } else {
                 match name {
-                    "SetDeckPitchAndYaw" => Some(MotionOperation::SetDeckPitchAndYaw),
+                    "SetDeckPitchAndYaw" => Some(MotionOperation::SetDeckPitchAndYaw {
+                        // Native constructor82BC7B20 retains authored FastStrings.
+                        yaw: encode(a.text("skateyaw").unwrap_or("skateyaw").as_bytes()),
+                        pitch: encode(a.text("skatepitch").unwrap_or("skatepitch").as_bytes()),
+                    }),
                     "ResetSkaterAnimation" | "ResetToGivenStance" => Some(MotionOperation::ResetAnimation(
                         super::motion_reset::Operation::parse(a).ok_or("Invalid reset operation")?,
                     )),

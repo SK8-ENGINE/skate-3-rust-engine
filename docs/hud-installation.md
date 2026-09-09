@@ -40,7 +40,7 @@ python tools/extract_session_marker.py --game <owned-game> --output <installed-a
 ```
 
 Startup logs report the loaded paths or a load failure. Check the executable and
-asset paths in the launcher as well: `PLAY.bat` delegates to `Launch.ps1`, which
+asset paths in the launcher as well: `PLAY.bat` delegates to `scripts/Launch.ps1`, which
 selects `bin/skate3rust.exe`, not a feature build elsewhere in `bin`.
 
 Session-marker prompts appear while holding LB during gameplay; they are not an

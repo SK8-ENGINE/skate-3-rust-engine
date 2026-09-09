@@ -65,6 +65,9 @@ pub fn weighted(poses: &[Vec<Sqt>], weights: &[f32]) -> Result<Vec<Sqt>, PoseBuf
     if poses.len()!=weights.len() || poses.iter().any(|p| p.len()!=first.len()) {
         return Err(PoseBufferError::ShortInput);
     }
+    if weights.iter().any(|weight| !weight.is_finite()) {
+        return Err(PoseBufferError::NonFiniteWeight);
+    }
     let mut output=first.iter().map(|s| Sqt {
         scale:s.scale.map(|v| v*weights[0]),
         rotation:s.rotation.map(|v| v*weights[0]),
@@ -81,11 +84,17 @@ pub fn weighted(poses: &[Vec<Sqt>], weights: &[f32]) -> Result<Vec<Sqt>, PoseBuf
     }
     for out in &mut output {
         let squared=native_arithmetic::dot4(out.rotation,out.rotation);
+        if !squared.is_finite() || squared <= 0.0 {
+            return Err(PoseBufferError::InvalidQuaternion);
+        }
         let mut inverse=native_arithmetic::reciprocal_square_root_estimate(squared);
         for _ in 0..2 {
             inverse=(inverse*0.5).mul_add((-squared).mul_add(inverse*inverse,1.),inverse);
         }
         out.rotation=out.rotation.map(|v| v*inverse);
+        if out.rotation.iter().any(|v| !v.is_finite()) {
+            return Err(PoseBufferError::InvalidQuaternion);
+        }
     }
     Ok(output)
 }
