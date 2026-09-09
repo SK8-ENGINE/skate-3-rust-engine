@@ -13,6 +13,13 @@ with only `--assets` could not find either cache. Setup now prepares both with
 the existing extractors. The marker extractor defaults to the vendored UI toolkit;
 the external `--ui-toolkit` argument remains supported.
 
+The original installer calls `prepare_runtime_huds.py` after VLT conversion.
+It exports only the scoring movie and marker subtree needed by the runtime,
+validates both, and installs their manifests and referenced RGBA payloads.
+Intermediate extraction files remain in the existing conversion workspace and
+are removed by the installer's normal cleanup. No full-disc or audio extraction
+stage is added, and the original map/skater/environment setup flow is retained.
+
 For an existing installation, reuse prepared caches without reconverting maps:
 
 ```powershell

@@ -29,7 +29,7 @@ def main():
     if icon.is_file():window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
     ttk.Label(frame,text='Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
-    ttk.Label(frame,text='Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup extracts all original content and prepares the maps,\nskater, clothing, animations, HUDs and environment assets.\nNo other apps need installing.\n\nAllow free disk space for original and converted content.\nISO extraction needs internet access.',
+    ttk.Label(frame,text='Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, animations and all disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
               font=('Segoe UI',11),justify='left').pack(anchor='w')
     status=tk.StringVar(value='Choose your game to begin.')
     ttk.Label(frame,textvariable=status,wraplength=600).pack(anchor='w',pady=(18,8))

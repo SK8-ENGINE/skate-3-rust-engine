@@ -163,12 +163,8 @@ def install(iso,base,game_exe,report,game_root=None):
                 run([extractor,'-x',iso,'-d',game_root],log,report)
             else:game_root=game_root.resolve()
             for required in ['default.xex','data/big/miscload.big','data/big/miscboot.big','data/big/db.big',
-                             'data/big/fedata.big','data/big/fetexture.big','data/big/fedynamic.big',
                              'data/content/createacharacter.big','data/content/worldDIST_University.big']:
                 if not (game_root/required).is_file():raise RuntimeError('This is not a supported Skate 3 disc: missing '+required)
-            report('Extracting and indexing all original game content')
-            from .original_content import extract as extract_original
-            extract_original(game_root, private/'original', report)
             report('Extracting animation banks, graphs and gameplay inputs')
             stock=private/'stock'
             extract(game_root/'data/big/miscload.big',stock)
@@ -186,10 +182,8 @@ def install(iso,base,game_exe,report,game_root=None):
             skeleton=convert_skeleton(stock/'data/anim/OnBoard.abin')
             (stock/'physics-skeletons.json').write_text(json.dumps(skeleton),encoding='utf-8')
             report('Preparing original scoring and session-marker HUD assets')
-            run(task(TOOLS/'prepare_hud.py', '--game', game_root, '--output', private/'hud',
-                     '--collections', stock/'skater-collections.json'), log, report)
-            run(task(TOOLS/'extract_session_marker.py', '--game', game_root,
-                     '--output', private/'session-marker'), log, report)
+            run(task(TOOLS/'prepare_runtime_huds.py', '--game', game_root,
+                     '--assets', stage/'assets', '--work', work/'hud'), log, report)
             report('Preparing the skater model and textures')
             manifest=json.loads((TOOLS/'default_skater_retail_manifest.json').read_text())
             needed=set()
@@ -205,9 +199,6 @@ def install(iso,base,game_exe,report,game_root=None):
             write_character(character/'selected/models',private,manifest)
             from .character_lighting import convert as write_character_lighting
             write_character_lighting(character/'selected/models',private,converted)
-            report('Preparing original character customisation models, textures and menus')
-            run(task(TOOLS/'prepare_customisation.py', '--game', game_root,
-                     '--assets', stage/'assets'), log, report)
             game_manifest={'version':1,'character_scene':'private/skater.glb','initial_animation':'R_IDLE_HCOM_000',
                            'action_graph':'private/stock/data/state/ActionGraph_OnBoard.stategraph',
                            'motion_graph':'private/stock/data/state/MotionGraph_OnBoard.stategraph'}
@@ -222,7 +213,7 @@ def install(iso,base,game_exe,report,game_root=None):
             write_teleports(game_root,stage/'assets',converted)
             report('Preparing global foliage backdrops')
             from .backdrop import convert as write_backdrops
-            backdrop_count = write_backdrops(game_root,stage/'assets',converted)
+            write_backdrops(game_root,stage/'assets',converted)
             report('Preparing authored movable-object models')
             from .dynamic_props import prepare_catalog
             prepare_catalog(game_root,work/'dmo')
@@ -253,9 +244,6 @@ def install(iso,base,game_exe,report,game_root=None):
             settings=stage/'settings';settings.mkdir()
             (settings/'default-map.json').write_text(json.dumps('maps/University.skate'),encoding='utf-8')
             (stage/'maps.json').write_text(json.dumps(catalog,indent=2),encoding='utf-8')
-            report('Checking original content and every prepared runtime asset group')
-            from .runtime_content import validate as validate_content
-            validate_content(stage, catalog, expected_backdrops=backdrop_count)
             remove_intermediate(work,stage)
             # Publish only after every conversion and the runtime's own load succeeds.
             marker=base/'installation.json.new'

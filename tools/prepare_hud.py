@@ -49,8 +49,7 @@ def font_mapping(collections: Path, cache: AssetCache) -> dict:
 
 
 def prepare(game: Path, output: Path, collections: Path):
-    extract_project(game, output, prefixes=("data/fe/source/screens/hud2/",
-                    "data/fe/source/controls/"), update=True)
+    extract_project(game, output, prefixes=("data/fe/source/screens/hud2/trickdisplay2",), update=True)
     cache = AssetCache(output)
     mappings = font_mapping(collections,cache)
     name = "data/fe/source/screens/hud2/trickdisplay2"
