@@ -21,7 +21,8 @@ Editable examples live in `sdk/examples/`; `tools/package_mod.py` validates and 
 Extract the Windows release ZIP and run `skate3rust.exe`. Select your Skate 3
 Xbox 360 ISO, or select `default.xex` in an extracted game folder. Keep its
 `data` folder alongside it. Setup prepares the skater, animations and all disc maps, then
-starts University. No Blender, Python or Rust installation is needed.
+starts University. The original scoring and session-marker HUD assets are also
+exported automatically during setup. No Blender, Python or Rust installation is needed.
 ISO extraction needs internet access. The first conversion can take a while.
 
 Use an XInput controller to play. Escape opens graphics, difficulty and map

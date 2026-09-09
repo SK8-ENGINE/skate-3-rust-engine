@@ -211,9 +211,9 @@ fn setup(
                 },
             ));
             commands.insert_resource(hud);
-            info!("Original scoring HUD loaded");
+            info!("Original scoring HUD loaded from {}", root.display());
         }
-        Err(error) => error!("Original scoring HUD could not load: {error}"),
+        Err(error) => error!("Original scoring HUD could not load from {}: {error}. See docs/hud-installation.md", root.display()),
     }
 }
 // Rasterize at output pixel resolution; retain the original 1280x720 APT
