@@ -197,3 +197,15 @@ specialization; dominant fixed solves favor order-preserving scratch/query work.
 First-use-only stalls favor upload/pipeline cache work. Any nonzero dropped-event
 count limits conclusions. Broad redesign waits for this evidence and manual visual
 verification. No percentage gain or final bottleneck is asserted in this assessment.
+
+## Verification
+
+The Windows static-CRT release compiled successfully using the existing shared
+Cargo target cache and an explicit worktree-private EXE/PDB output. The final
+executable's embedded source revision was checked against `c709b5d`; PE import
+inspection found only Windows system libraries, with no Bevy/Rust DLL dependency.
+Four release unit tests passed: option bounds/dependencies, disabled span filtering,
+nonblocking full-queue drops, and F9-style activation/stop/valid JSON export with
+secret/path/log canaries omitted. The data-only exact-runtime-batch inventory test
+also passed. Existing compiler warnings remain; no game or GPU device was started.
+Runtime frame timings, capture overhead and visual validation remain user tests.
