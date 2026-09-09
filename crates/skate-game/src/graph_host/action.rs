@@ -429,14 +429,6 @@ impl Host for ActionHost {
         let Some(instance) = self.operation(behavior).cloned() else {
             return;
         };
-        if matches!(instance.operation, ActionOperation::BoardAdjust) {
-            // TU3 82BA2EB8 removes both authored axes so the motion filters
-            // blend back to neutral even when End has no preceding Update.
-            for name in [instance.config.mg_intent_mag.as_deref(), instance.config.mg_intent_angle.as_deref()].into_iter().flatten() {
-                self.motion_intents.remove(name);
-            }
-            return;
-        }
         if matches!(instance.operation, ActionOperation::CreateTrickIntentFromGesture { .. }) {
             self.trick_handlers[behavior].end(&mut self.motion_intents);
             return;
