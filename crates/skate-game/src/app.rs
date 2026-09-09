@@ -65,7 +65,11 @@ pub(crate) fn build(
                     ..default()
                 }),
                 ..default()
-            }).build().disable::<bevy::log::LogPlugin>(),
+            }).build().disable::<bevy::log::LogPlugin>()
+            // Gameplay and menu navigation both use raw XInput. No game system
+            // consumes Bevy gamepad events/rumble; its second device backend can
+            // stall PreUpdate (70.68 ms in the University capture).
+            .disable::<bevy::gilrs::GilrsPlugin>(),
     )
     .insert_resource(bevy::winit::WinitSettings {focused_mode:bevy::winit::UpdateMode::Continuous,unfocused_mode:bevy::winit::UpdateMode::Continuous})
     .insert_resource(config)

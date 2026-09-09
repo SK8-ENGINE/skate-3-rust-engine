@@ -375,3 +375,63 @@ comparison was checked against event-level five-second windows and long slices.
 This capture supports retaining the exact lighting-update optimization, with no
 claim of an overall FPS improvement. User visual confirmation remains separate
 from timing evidence; the agent did not launch gameplay or alter quality settings.
+
+## Follow-up source audit and optimization order
+
+The third capture ranks the next work as follows. Times below are inclusive CPU
+wall time amortized over main frames, unless labeled GPU; nested and parallel
+rows must not be added. The 25 us filter omits short executions.
+
+| Priority | Area and observed cost | Concrete opportunity / decision |
+|---|---|---|
+| 1 | Command generation 2.004 ms/frame; main opaque scope 1.772 ms/frame | Draw traversal accounts for 0.418 ms opaque plus 0.141 ms masked. Added `main_opaque_pass_close` and `main_opaque_encoder_finish` scopes to locate the remaining cost before changing batching or submission. |
+| 2 | Directional shadow visibility 0.421 ms/frame | Bevy scans eligible meshes for each light/view and tests every cascade. A conservative static-mesh hierarchy or layer-based candidate index could reduce scans without changing final tests. It needs equivalence tests against the existing entity sets across moving cameras, map swaps, dynamic casters and near-plane exceptions. No culling replacement yet. |
+| 3 | Controller-event hitch: 70.68 ms in one call | Disable the unused Gilrs backend. Both gameplay and menu navigation use `input::platform::poll`; the repository has no Bevy gamepad-event or rumble consumer. Raw XInput state/capability calls, slot selection, errors and fixed publication remain unchanged. |
+| 4 | Raw controller polling 0.242 ms/frame; menu navigation 0.028 ms/frame | Menu and gameplay make separate OS polls. Sharing a snapshot would change their sample time; throttling disconnected slots or caching capabilities changes reconnect/error semantics. Keep this path unchanged under the native-input constraint. |
+| 5 | Character preparation 0.064 ms/frame; material bindings 0.034 ms/frame | Retain the existing bit-exact SH update guard. Further gains during changing lighting would require a separate per-character uniform/storage update path, preserving distinct materials and current-frame lighting. That is a renderer design change, not a safe skipped update. |
+| 6 | Hidden session effect: material preparation 0.020 ms/frame; specialization checks 0.035 ms/frame | `present` modified its material, scale and visibility every frame even when hidden. Skip hidden material publication; keep noise/time advancement and publish current values before making it visible. Guard identical visible parameters and unchanged scale/visibility. |
+| 7 | Render buffer preparation: indirect parameters 0.098 ms/frame; instances 0.086 ms/frame | Existing capacity reservation already prevents routine capacity churn. Static/dynamic partitioning could reduce uploads but needs explicit removal, previous-frame and camera-cut handling. Do not mark moving data static or disable motion history. |
+| 8 | Main visibility 0.134 ms/frame; transforms 0.059 ms/frame | Avoid unnecessary component change ticks first (session effect fixed). A shared static hierarchy is a future option; freezing visibility or transforms is not equivalent. |
+| 9 | Physics advance 0.152 ms/frame, including collision/solve 0.089 ms/frame | Existing collision hierarchy preserves source ordering. Reusing query scratch is possible but needs per-call ownership/reentrancy and result-order tests. These costs do not justify changing solver behavior or fixed cadence. |
+| 10 | Exposure GPU meter 0.00770 ms; tone 0.01548 ms | Preserve both passes every frame. Reuse their CPU bind groups and replace the per-frame 32-byte heap payload with a stack array. No change to dispatch count, uniform bytes or exposure adaptation. |
+
+The source review also checked map construction/transitions, texture deduplication,
+world/sky material writes and existing render-capacity management. The world and
+sky material loops run at scene construction or an explicit diagnostic keypress,
+not continuously. There is no evidence here for per-frame map parsing, ongoing
+texture reloads or pipeline compilation. Loading/memory peaks require a separate
+startup/transition capture; steady-state timings cannot rank those costs.
+
+### Implemented follow-up changes and limits
+
+Gilrs removal follows the additional consumer audit above. The earlier decision
+to leave input unchanged concerned the *used raw XInput path*, which remains
+untouched. Removing an unused backend removes this specific stall source; it does
+not guarantee that OS/controller stalls can never occur elsewhere. Keyboard and
+mouse input plugins remain enabled.
+
+The session effect retains the same 60 Hz noise advancement, including hidden
+frames and multi-step deltas. A headless regression test compares its sequence
+with continuous reference advancement through hidden/visible transitions and
+checks material modification events and the first visible payload. Visible
+parameters use exact float-bit comparison; no epsilon or effect quality reduction
+is introduced. Hidden materials may deliberately retain older parameters until
+the frame that displays them.
+
+Exposure caches at most eight `(source TextureViewId, meter bind group, tone bind
+group)` entries inside its Pipeline resource. Buffers, sampler and layouts are
+immutable for that resource's lifetime, and replacing the resource drops the cache.
+Alternating post-process sources have separate entries. Before rendering, prune
+entries against both current source views of every exposure camera, so camera
+removal/resizing releases retired textures rather than retaining large targets.
+Resized/recreated targets have new source identities. The
+destination is a render attachment, not a bind-group input, so it does not belong
+in the key. Buffer contents still update every frame. GPU execution/resize checks
+remain manual because this task does not authorize the agent to start the game.
+
+The strongest larger opportunity remains reducing CPU rendering work with exact
+output equivalence. A blanket 32 m map split would quadruple the estimated groups,
+so it is not an appropriate default for this capture. Bindless material access is
+a possible later experiment, but must preserve each texture's format, sampler,
+role and alpha ordering and cannot be inferred to help from material counts alone.
+No FPS gain is claimed for the follow-up changes before a matched user capture.

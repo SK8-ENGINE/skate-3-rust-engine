@@ -17,6 +17,11 @@ struct Params {
     second: Vec4,
     fade: Vec4,
 }
+impl Params {
+    fn bits(&self) -> [[u32; 4]; 4] {
+        [self.scroll, self.first, self.second, self.fade].map(|v| v.to_array().map(f32::to_bits))
+    }
+}
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 struct Effect {
     #[uniform(0)]
@@ -46,6 +51,57 @@ mod shader_path_tests {
     fn embedded_shader_paths_match_this_binary() {
         let ShaderRef::Path(path) = Effect::fragment_shader() else { panic!("Expected embedded shader path") };
         assert_eq!(path, AssetPath::from(embedded_path!("effect.wgsl")).with_source("embedded"));
+    }
+
+    #[test]
+    fn hidden_noise_keeps_its_sequence_and_publishes_before_becoming_visible() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Effect>()
+            .init_resource::<super::super::SessionMarker>();
+        let initial = Params { scroll: Vec4::ZERO, first: Vec4::X, second: Vec4::X, fade: Vec4::ZERO };
+        let material = app.world_mut().resource_mut::<Assets<Effect>>().add(Effect {
+            params: initial.clone(), texture: default(),
+        });
+        let mut noise = Noise::default();
+        noise.texture();
+        app.insert_resource(Runtime { noise, material: material.clone(), time: 0. });
+        app.world_mut().spawn(Window::default());
+        let screen = app.world_mut().spawn((Screen, Transform::default(), Visibility::Hidden)).id();
+        app.update();
+        app.world_mut().resource_mut::<Messages<AssetEvent<Effect>>>().clear();
+        let mut reference = Noise::default();
+        reference.texture();
+        let mut reference_time = 0.;
+        let mut published = initial;
+        for (dt, progress) in [(0.016, 0.), (0.25, 0.), (0., 0.5), (0., 0.5), (0.02, 0.7), (0.05, 0.), (0., 0.4)] {
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_secs_f64(dt));
+            app.world_mut().resource_mut::<super::super::SessionMarker>().progress = progress;
+            reference_time += dt;
+            while reference_time >= 1. / 60. {
+                reference_time -= 1. / 60.;
+                reference.advance();
+            }
+            let expected = Params {
+                scroll: Vec4::from_array(reference.scroll),
+                first: Vec4::from_array(Noise::weights(reference.phases[0])),
+                second: Vec4::from_array(Noise::weights(reference.phases[1])),
+                fade: Vec4::new(progress, 0., 0., 0.),
+            };
+            let modified = progress > 0. && expected.bits() != published.bits();
+            app.world_mut().run_system_once(present).unwrap();
+            if progress > 0. { published = expected; }
+            assert_eq!(app.world().resource::<Assets<Effect>>().get(&material).unwrap().params.bits(), published.bits());
+            let runtime = app.world().resource::<Runtime>();
+            assert_eq!(runtime.noise.scroll.map(f32::to_bits), reference.scroll.map(f32::to_bits));
+            assert_eq!(runtime.noise.phases.map(f32::to_bits), reference.phases.map(f32::to_bits));
+            assert_eq!(*app.world().get::<Visibility>(screen).unwrap(), if progress > 0. { Visibility::Inherited } else { Visibility::Hidden });
+            app.update();
+            let modifications = app.world_mut().resource_mut::<Messages<AssetEvent<Effect>>>().drain()
+                .filter(|e| matches!(e, AssetEvent::Modified { id } if *id == material.id())).count();
+            assert_eq!(modifications, usize::from(modified));
+        }
     }
 }
 #[derive(Component)]
@@ -116,20 +172,28 @@ fn present(
         runtime.time -= 1. / 60.;
         runtime.noise.advance();
     }
-    if let Some(material) = materials.get_mut(&runtime.material) {
-        material.params = Params {
+    // Advance the native noise stream even while hidden, then publish the current
+    // values on the first visible frame. Hidden assets need no GPU preparation.
+    if session.progress > 0. {
+        let params = Params {
             scroll: Vec4::from_array(runtime.noise.scroll),
             first: Vec4::from_array(Noise::weights(runtime.noise.phases[0])),
             second: Vec4::from_array(Noise::weights(runtime.noise.phases[1])),
             fade: Vec4::new(session.progress, 0., 0., 0.),
         };
+        if materials.get(&runtime.material).is_some_and(|m| m.params.bits() != params.bits()) {
+            materials.get_mut(&runtime.material).unwrap().params = params;
+        }
     }
     for (mut transform, mut visibility) in &mut screen {
-        transform.scale = Vec3::new(window.width(), window.height(), 1.);
-        *visibility = if session.progress > 0. {
+        let scale = Vec3::new(window.width(), window.height(), 1.);
+        if transform.scale != scale {
+            transform.scale = scale;
+        }
+        visibility.set_if_neq(if session.progress > 0. {
             Visibility::Inherited
         } else {
             Visibility::Hidden
-        };
+        });
     }
 }
