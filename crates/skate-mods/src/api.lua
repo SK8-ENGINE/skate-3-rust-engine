@@ -7,6 +7,9 @@ sdk.scene = {}
 function sdk.scene.cube(key,position,size,color)
     submit{kind="cube",key=key,position=position,size=size,color=color}
 end
+function sdk.scene.held_cube(key,bone,offset,size,color)
+    submit{kind="held_cube",key=key,bone=bone,offset=offset,size=size,color=color}
+end
 function sdk.scene.remove(key) submit{kind="remove",key=key} end
 sdk.player = {}
 function sdk.player.read() return sdk.snapshot.player end

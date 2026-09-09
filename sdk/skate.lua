@@ -81,7 +81,13 @@ function sdk.ui.text(key, text) end
 ---@param size Vec3 Each component >0 and <=100 metres.
 ---@param color Vec3 Each sRGB component in 0..1.
 function sdk.scene.cube(key, position, size, color) end
----@param key string Remove owner's text or cube; absent is a no-op.
+---@param key string Owner-local stable visual key.
+---@param bone string Exact installed skeleton bone name, e.g. RIGHTHAND.
+---@param offset Vec3 Local metres in the selected bone frame, each component within ±10.
+---@param size Vec3 Each component >0 and <=10 metres.
+---@param color Vec3 Each sRGB component in 0..1.
+function sdk.scene.held_cube(key, bone, offset, size, color) end
+---@param key string Remove owner's text, world cube, or held cube; absent is a no-op.
 function sdk.scene.remove(key) end
 ---@param key string Timer key, 1..64 bytes. Existing timer is replaced.
 ---@param seconds number Finite delay 0..86400 active Update seconds.
