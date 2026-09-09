@@ -53,6 +53,62 @@ fn gesture_behavior_publishes_and_releases_the_stock_tre_flip_intent() {
 }
 
 #[test]
+fn board_adjust_release_returns_filtered_pose_to_neutral() {
+    use skate_core::animation::intent_filter::{Settings, State};
+
+    // Stock T_BoardAdjust.xml: release uses blendOut, then exits below 0.4.
+    let settings = Settings {
+        starting_value: 0.0, default_value: 0.0, scale: 1.0,
+        filters: [0; 4], ramp_time: None,
+        blend_rising: 0.25, blend_falling: 0.25, blend_out: Some(0.08),
+        clamp_velocity: Some(0.2), clamp_acceleration: Some(0.03),
+    };
+    for direction in ["Left", "Right", "Up", "Down"] {
+        for mirrored in [false, true] {
+            let magnitude = format!("{direction}BoardAdjustMag");
+            let angle = format!("{direction}BoardAdjustAngle");
+            let mut config = parameter("", 0.0);
+            config.mg_intent = None;
+            config.mg_intent_mag = Some(magnitude.clone());
+            config.mg_intent_angle = Some(angle.clone());
+            config.negate_on_mirror = true;
+            let mut host = ActionHost::new(ActionInstances::new(vec![ActionInstance {
+                operation: ActionOperation::BoardAdjust, config, parameters: vec![],
+            }]), OperationRemap { behaviors: vec![0], conditions: vec![], hooks: vec![] });
+            host.stance = Some((false, mirrored));
+            host.motion_intents.insert("Unrelated", 0.75);
+            let frame = Frame { dt: 1.0 / 60.0, current: None, last: None, state_times: vec![] };
+            for _ in 0..2 {
+                let mut filters = [State::default(); 2];
+                host.action_intents.insert("BoardAdjustMag", 0.9);
+                host.action_intents.insert("BoardAdjustAngle", 0.8);
+                Host::begin(&mut host, 0, [0; 6], &frame);
+                for _ in 0..60 {
+                    Host::update(&mut host, 0, [0; 6], &frame);
+                    for (filter, key) in filters.iter_mut().zip([&magnitude, &angle]) {
+                        filter.update(&settings, host.motion_intents.get(key.as_str()).copied(), frame.dt, (false, mirrored));
+                    }
+                }
+                assert!(filters.iter().all(|filter| filter.value.abs() > 0.7));
+                host.action_intents.remove("BoardAdjustMag");
+                host.action_intents.remove("BoardAdjustAngle");
+                // Graph exits directly on release: no final Update callback.
+                Host::end(&mut host, 0, [0; 6], &frame);
+                for _ in 0..120 {
+                    for (filter, key) in filters.iter_mut().zip([&magnitude, &angle]) {
+                        filter.update(&settings, host.motion_intents.get(key.as_str()).copied(), frame.dt, (false, mirrored));
+                    }
+                }
+                assert!(filters.iter().all(|filter| filter.value.abs() < 0.001), "{direction}, mirrored={mirrored}: {filters:?}");
+                assert!(!host.motion_intents.contains_key(magnitude.as_str()));
+                assert!(!host.motion_intents.contains_key(angle.as_str()));
+                assert_eq!(host.motion_intents.get("Unrelated"), Some(&0.75));
+            }
+        }
+    }
+}
+
+#[test]
 fn const_callbacks_publish_then_remove_motion_intent() {
     let instance = ActionInstance {
         operation: ActionOperation::CreateConstMgIntent,
