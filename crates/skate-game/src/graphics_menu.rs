@@ -43,6 +43,7 @@ struct GraphicsSettings {
     occlusion: bool,
     hour: f32,
     day_speed: u32,
+    ambient_level: Option<u32>,
 }
 impl Default for GraphicsSettings {
     fn default() -> Self {
@@ -55,11 +56,13 @@ impl Default for GraphicsSettings {
             occlusion: true,
             hour: 12.,
             day_speed: 60,
+            ambient_level: None,
         }
     }
 }
 impl GraphicsSettings {
     fn validated(mut self) -> Self {
+        self.ambient_level = self.ambient_level.map(|level| level.min(100));
         self.hour = if self.hour.is_finite() { self.hour.rem_euclid(24.) } else { 12. };
         if !DAY_SPEEDS.contains(&self.day_speed) { self.day_speed = 60; }
         if !RESOLUTIONS.contains(&(self.width, self.height)) {
@@ -96,6 +99,9 @@ pub(crate) struct Menu {
     daylight: bool,
 }
 impl Menu {
+    pub(crate) fn ambient_brightness(&self, automatic: f32) -> f32 {
+        self.settings.ambient_level.map_or(automatic, |level| level as f32 * 10.)
+    }
     pub(crate) fn advance_day(&mut self, seconds: f32) -> f32 {
         if !self.open && self.settings.day_speed > 0 {
             self.settings.hour = (self.settings.hour + seconds * self.settings.day_speed as f32 / 3600.).rem_euclid(24.);
@@ -321,7 +327,7 @@ pub(crate) fn interact(
         }
     }
     if menu.open {
-        let rows = if menu.daylight { 3 } else if menu.multiplayer { 11 } else { 16 };
+        let rows = if menu.daylight { 4 } else if menu.multiplayer { 11 } else { 16 };
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
             menu.selected = (menu.selected + rows - 1) % rows;
         }
@@ -347,6 +353,12 @@ pub(crate) fn interact(
             match row {
                 0 => menu.settings.hour = ((menu.settings.hour * 4.).round() + direction as f32).rem_euclid(96.) / 4.,
                 1 => menu.settings.day_speed = cycle(DAY_SPEEDS, menu.settings.day_speed, direction),
+                2 => {
+                    // Auto, 0%, 5%, ... 100%, then Auto again.
+                    let index = menu.settings.ambient_level.map_or(0, |level| level as i32 / 5 + 1);
+                    let next = (index + direction).rem_euclid(22);
+                    menu.settings.ambient_level = if next == 0 { None } else { Some((next as u32 - 1) * 5) };
+                }
                 _ => { menu.daylight = false; menu.selected = 15; }
             }
         } else if menu.browser {
@@ -449,11 +461,11 @@ pub(crate) fn interact(
                 12 => custom_models.begin(),
                 13 => menu.status = updater.open(false),
                 14 => travel.open = true,
-                15 => { menu.daylight = true; menu.selected = 0; menu.status = "Custom maps: change time and cycle speed. Retail lighting stays authored.".into(); },
+                15 => { menu.daylight = true; menu.selected = 0; menu.status = "Custom maps: change time, cycle speed and ambient light. Retail lighting stays authored.".into(); },
                 _ => {}
             }
         }
-        if (row < 5 && !menu.multiplayer && !menu.daylight && !day_action) || (day_action && row < 2) {
+        if (row < 5 && !menu.multiplayer && !menu.daylight && !day_action) || (day_action && row < 3) {
             let save = (|| -> Result<(), String> {
                 std::fs::create_dir_all(menu.path.parent().unwrap()).map_err(|e| e.to_string())?;
                 std::fs::write(
@@ -557,7 +569,11 @@ fn labels(
             match label.0 {
                 0 => { let minutes = (s.hour * 60.).floor() as u32 % 1440; format!("Time of day          {:02}:{:02}", minutes / 60, minutes % 60) },
                 1 => if s.day_speed == 0 { "Cycle speed          Frozen".into() } else { format!("Cycle speed          {}x ({} min/day)", s.day_speed, 1440 / s.day_speed) },
-                2 => "Back".into(),
+                2 => match s.ambient_level {
+                    Some(level) => format!("Ambient light        {level}%"),
+                    None => "Ambient light        Auto (day/night)".into(),
+                },
+                3 => "Back".into(),
                 _ => String::new(),
             }
         } else if menu.browser {
@@ -667,7 +683,7 @@ fn labels(
         menu.status.clone()
     };
     for (row, interaction, mut color, mut node) in &mut buttons {
-        node.display = if (menu.daylight && row.0 >= 3) || (menu.multiplayer && row.0 >= 11) { Display::None } else { Display::Flex };
+        node.display = if (menu.daylight && row.0 >= 4) || (menu.multiplayer && row.0 >= 11) { Display::None } else { Display::Flex };
         color.0 = if row.0 == menu.selected || *interaction == Interaction::Hovered {
             Color::srgb(0.10, 0.30, 0.34)
         } else {

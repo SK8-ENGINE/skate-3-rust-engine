@@ -174,7 +174,7 @@ pub(crate) fn advance_day(
         light.color = color;
         light.illuminance = illuminance;
         *transform = pose;
-        ambient.brightness = brightness;
+        ambient.brightness = menu.ambient_brightness(brightness);
         clear.0 = Color::srgb(0.003, 0.005, 0.015).mix(&base, daylight.sqrt());
     }
 }

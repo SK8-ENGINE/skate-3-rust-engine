@@ -163,3 +163,10 @@ and runtime FPS require a manual run; the assistant does not launch gameplay.
 
 Validation: seven focused CPU tests passed (graphics_menu::tests and
 map_render::tests); the user-map preparation test was not rerun.
+
+Ambient light in the same submenu defaults to Auto (the day/night ambient).
+Left/Right or click cycles Auto and 0–100% in 5% steps. Manual levels override
+the cycle's ambient brightness, mapping 0% to zero and 100% to 1,000 brightness.
+They preview while paused and persist with graphics settings. Direct sun/moon,
+local lights, emissive materials and baked lightmaps are independent, so zero
+ambient does not make the whole scene black. Retail lighting remains authored.
