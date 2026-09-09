@@ -146,6 +146,7 @@ impl Plugin for GraphicsMenuPlugin {
             .add_systems(PostStartup, setup.in_set(PresentationSetup))
             .add_systems(PreUpdate, interact.in_set(MenuInput).after(bevy::input::InputSystems))
             .add_systems(Update, (crate::map_render::advance_day, apply, labels).chain())
+            .add_systems(PostUpdate, crate::map_render::position_celestial_bodies.before(bevy::transform::TransformSystems::Propagate))
             .add_systems(Last, pace);
     }
 }

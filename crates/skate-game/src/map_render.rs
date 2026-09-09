@@ -102,6 +102,7 @@ impl PreparedScene {
                     &mut self.meshes, &mut self.images, &mut self.sky, &mut self.retail);
             } else {
                 custom_lighting(map, &mut self.commands);
+                celestial_bodies(&mut self.commands, &mut self.meshes, &mut self.materials);
             }
         } else {
             crate::world::spawn_test_world(&mut self.commands, &mut self.meshes, &mut self.materials);
@@ -132,6 +133,47 @@ pub(crate) struct MapAssets {
 pub(crate) struct DayEnvironment {
     values: Vec<f32>,
     sky: Option<Color>,
+    sun_direction: Vec3,
+}
+fn orbit(azimuth: f32, hour: f32) -> Vec3 {
+    let angle = (hour - 6.) * std::f32::consts::PI / 12.;
+    Vec3::new(azimuth.cos() * angle.cos(), angle.sin(), azimuth.sin() * angle.cos())
+}
+
+#[derive(Component)]
+pub(crate) struct CelestialBody { moon: bool }
+fn celestial_bodies(commands: &mut SceneCommands, meshes: &mut StagedAssets<Mesh>, materials: &mut StagedAssets<StandardMaterial>) {
+    let disc = meshes.add(Circle::new(1.).mesh().resolution(64).build());
+    for moon in [false, true] {
+        let color = if moon { Color::srgb(0.78, 0.84, 0.96) } else { Color::srgb(1., 0.9, 0.55) };
+        commands.spawn((
+            Name::new(if moon { "Custom moon" } else { "Custom sun" }),
+            CelestialBody { moon }, Mesh3d(disc.clone()),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: color, unlit: true, cull_mode: None, ..default()
+            })),
+            Transform::default(), Visibility::Hidden,
+            bevy::light::NotShadowCaster, bevy::light::NotShadowReceiver,
+        ));
+    }
+}
+/// Follow the final gameplay camera before transform propagation, with no
+/// parallax. Ordinary depth testing lets buildings and terrain obscure them.
+pub(crate) fn position_celestial_bodies(
+    environment: Query<&DayEnvironment>,
+    camera: Query<(&Transform, &Projection), (With<crate::camera::GameplayCamera>, Without<CelestialBody>)>,
+    mut bodies: Query<(&CelestialBody, &mut Transform, &mut Visibility), Without<crate::camera::GameplayCamera>>,
+) {
+    let (Ok(environment), Ok((camera, projection))) = (environment.single(), camera.single()) else { return; };
+    let far = match projection { Projection::Perspective(p) => p.far, Projection::Orthographic(p) => p.far, _ => 1000. };
+    let distance = if far.is_finite() { far * 0.98 } else { 10_000. };
+    for (body, mut transform, mut visibility) in &mut bodies {
+        let direction = environment.sun_direction * if body.moon { -1. } else { 1. };
+        *visibility = if direction.y > 0. { Visibility::Inherited } else { Visibility::Hidden };
+        *transform = Transform::from_translation(camera.translation + direction * distance)
+            .looking_at(camera.translation, if direction.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y })
+            .with_scale(Vec3::splat(distance * if body.moon { 0.014 } else { 0.012 }));
+    }
 }
 fn daylight_values(e: &[f32], hour: f32) -> (Color, f32, f32, Transform, f32) {
     let angle = (hour - 6.) * std::f32::consts::PI / 12.;
@@ -155,7 +197,7 @@ fn custom_lighting(map: &skate_data::skate_map::SkateMap, commands: &mut SceneCo
     commands.insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness, ..default() });
     commands.spawn((
         Name::new("Custom map sun/moon"),
-        DayEnvironment { values: map.environment.to_vec(), sky: None },
+        DayEnvironment { values: map.environment.to_vec(), sky: None, sun_direction: orbit(map.environment[11], map.environment[10]) },
         DirectionalLight { color, illuminance, shadows_enabled: true, affects_lightmapped_mesh_diffuse: false, ..default() },
         transform,
         bevy::light::CascadeShadowConfigBuilder { maximum_distance: 100., first_cascade_far_bound: 10., ..default() }.build(),
@@ -171,6 +213,7 @@ pub(crate) fn advance_day(
     for (mut environment, mut light, mut transform) in &mut lights {
         let base = *environment.sky.get_or_insert(clear.0);
         let (color, illuminance, brightness, pose, daylight) = daylight_values(&environment.values, hour);
+        environment.sun_direction = orbit(environment.values[11], hour);
         light.color = color;
         light.illuminance = illuminance;
         *transform = pose;
@@ -249,7 +292,11 @@ mod tests {
             scene.prepare(Some(&map), std::path::Path::new("unused"));
             scene.publish(&mut world);
             assert_eq!(world.query::<&DirectionalLight>().iter(&world).count(), usize::from(!retail));
-            assert!(world.resource::<Assets<StandardMaterial>>().iter().all(|(_, m)| !m.unlit));
+            assert_eq!(world.query::<&CelestialBody>().iter(&world).count(), if retail { 0 } else { 2 });
+            // Only sky discs are unlit; world surfaces retain the PBR path.
+            let body_materials: Vec<_> = world.query_filtered::<&MeshMaterial3d<StandardMaterial>, With<CelestialBody>>()
+                .iter(&world).map(|m| m.0.id()).collect();
+            assert!(world.resource::<Assets<StandardMaterial>>().iter().all(|(id, m)| body_materials.contains(&id) || !m.unlit));
             MapAssets::retire(&mut world);
             assert_eq!(world.query::<&DirectionalLight>().iter(&world).count(), 0);
         }

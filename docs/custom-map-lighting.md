@@ -170,3 +170,13 @@ the cycle's ambient brightness, mapping 0% to zero and 100% to 1,000 brightness.
 They preview while paused and persist with graphics settings. Direct sun/moon,
 local lights, emissive materials and baked lightmaps are independent, so zero
 ambient does not make the whole scene black. Retail lighting remains authored.
+
+## Visible sun and moon
+
+Custom maps now have warm sun and cool full-moon discs following the same orbit
+as their directional lighting. They follow the gameplay camera without parallax,
+are hidden below the horizon, and use normal depth testing for scenery occlusion.
+They are placed just inside the camera far plane and have fixed angular sizes.
+These are lightweight unlit meshes, not extra lights or shadow casters. They
+remain visible with zero ambient. Their scene-owned meshes/materials retire on
+map switches; retail skies are unchanged. Moon phases and textures are not added.
