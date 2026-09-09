@@ -12,6 +12,33 @@ Coverage limits: a Windows unhandled-exception filter attempts a fixed, allocati
 
 For manual UI validation, run the executable with `--crash-report-preview`. This generates a clearly synthetic report and opens the popup without initializing the game, setup, Steam or assets. Check Copy report, clipboard text, Open folder, saved UTF-8 text and Close. Static tests do not validate desktop presentation.
 
+## Mixed-worktree dependency in f96be1d (2026-09-09)
+
+The DownTown report at tick1020 repeats the nonfinite walking result before
+the swept-line rejection. The full local stderr retains the finite GroundJob
+and tiny surface components omitted from the bounded report.
+
+The matching shipped PDB establishes that `movement_velocity/math.rs` was
+compiled from worktree `8186`, with SHA-256
+`4652072df4a51a6bf8eb2dd837e61d4fb6e01710d984334af8073deb4c4449ac`.
+That source lacks the earlier subnormal refinement fix. The intended source
+in this worktree has SHA-256
+`76de0780adb5ea015c57fa4118105669f1897ef01eafb611eed14cc829c5eda1`.
+The game build ID identified the game crate, but did not establish the identity
+of reused path dependencies. Matching EXE/PDB GUIDs alone did not catch this.
+
+`tools/build_verified_windows.ps1` now builds into a private
+`target/verified-windows` under the current worktree. Its verification step
+reads PDB source checksums and requires both current-worktree paths and matching
+SHA-256 for referenced project crates and vendored Bevy sources. It fails closed
+when required game/core/data source records are missing. The old shipped PDB
+fails this check (619 mismatched path/checksum entries).
+
+Use this build script for subsequent crash-test builds and retain its
+`source-checks.json` with the staged EXE/PDB and existing import/hash manifest.
+Do not share Cargo artifact directories between independently edited worktrees.
+This repair changes build provenance, not gameplay rules or collision validation.
+
 ## Walking velocity convergence (2026-09-09)
 
 Observed user failure: clean revision `dff672a`, build timestamp
