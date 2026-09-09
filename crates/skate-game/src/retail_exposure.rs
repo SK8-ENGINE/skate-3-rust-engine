@@ -19,6 +19,7 @@ use bevy::{
         view::ViewTarget,
     },
 };
+use std::{collections::VecDeque, sync::Mutex};
 
 #[derive(Resource, Clone, ExtractResource)]
 struct Settings {
@@ -56,6 +57,7 @@ pub(super) fn install(app: &mut App) {
         render
             .add_systems(RenderStartup, initialize)
             .add_systems(Render, upload.in_set(RenderSystems::PrepareResources))
+            .add_systems(Render, prune_bindings.in_set(RenderSystems::PrepareBindGroups))
             .add_render_graph_node::<ViewNodeRunner<ExposureNode>>(Core3d, ExposureLabel)
             .add_render_graph_edges(
                 Core3d,
@@ -115,6 +117,10 @@ struct Pipeline {
     settings: Buffer,
     state: Buffer,
     sampler: Sampler,
+    // The buffers, sampler and layouts are immutable for this Pipeline's life.
+    // Source views can alternate, resize or belong to different cameras. Keep a
+    // bounded cache so retired targets cannot accumulate across map/size changes.
+    bindings: Mutex<VecDeque<(TextureViewId, BindGroup, BindGroup)>>,
 }
 
 fn initialize(
@@ -192,6 +198,7 @@ fn initialize(
             min_filter: FilterMode::Linear,
             ..default()
         }),
+        bindings: default(),
     });
 }
 fn bytes<const N: usize>(values: [Vec4; N]) -> Vec<u8> {
@@ -202,11 +209,27 @@ fn bytes<const N: usize>(values: [Vec4; N]) -> Vec<u8> {
         .collect()
 }
 fn upload(settings: Res<Settings>, pipeline: Res<Pipeline>, queue: Res<RenderQueue>) {
+    let mut data = [0u8; 32];
+    for (chunk, value) in data.chunks_exact_mut(4).zip(
+        [settings.tuning, settings.timing].into_iter().flat_map(|v| v.to_array()),
+    ) {
+        chunk.copy_from_slice(&value.to_le_bytes());
+    }
     queue.write_buffer(
         &pipeline.settings,
         0,
-        &bytes([settings.tuning, settings.timing]),
+        &data,
     );
+}
+
+fn prune_bindings(pipeline: Res<Pipeline>, views: Query<&ViewTarget, With<super::RetailTone>>) {
+    // Bind groups retain their textures. Release retired camera/resize targets
+    // before rendering, including when there are no exposure views left.
+    pipeline.bindings.lock().unwrap().retain(|(id, _, _)| {
+        views.iter().any(|view| {
+            *id == view.main_texture_view().id() || *id == view.main_texture_other_view().id()
+        })
+    });
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
@@ -231,21 +254,34 @@ impl ViewNode for ExposureNode {
             return Ok(());
         };
         let post = view.post_process_write();
-        let meter = context.render_device().create_bind_group(
-            "retail meter",
-            &cache.get_bind_group_layout(&p.compute_layout),
-            &BindGroupEntries::sequential((
-                post.source,
-                &p.sampler,
-                p.settings.as_entire_binding(),
-                p.state.as_entire_binding(),
-            )),
-        );
-        let output = context.render_device().create_bind_group(
-            "retail exposed tone",
-            &cache.get_bind_group_layout(&p.tone_layout),
-            &BindGroupEntries::sequential((post.source, &p.sampler, p.state.as_entire_binding())),
-        );
+        use bevy::render::diagnostic::RecordDiagnostics;
+        let diagnostics = context.diagnostic_recorder();
+        let mut bindings = p.bindings.lock().unwrap();
+        let index = if let Some(index) = bindings.iter().position(|(id, _, _)| *id == post.source.id()) {
+            index
+        } else {
+            let meter = context.render_device().create_bind_group(
+                "retail meter",
+                &cache.get_bind_group_layout(&p.compute_layout),
+                &BindGroupEntries::sequential((
+                    post.source,
+                    &p.sampler,
+                    p.settings.as_entire_binding(),
+                    p.state.as_entire_binding(),
+                )),
+            );
+            let output = context.render_device().create_bind_group(
+                "retail exposed tone",
+                &cache.get_bind_group_layout(&p.tone_layout),
+                &BindGroupEntries::sequential((post.source, &p.sampler, p.state.as_entire_binding())),
+            );
+            if bindings.len() == 8 {
+                bindings.pop_front();
+            }
+            bindings.push_back((post.source.id(), meter, output));
+            bindings.len() - 1
+        };
+        let (_, meter, output) = &bindings[index];
         {
             let mut pass = context
                 .command_encoder()
@@ -254,8 +290,10 @@ impl ViewNode for ExposureNode {
                     timestamp_writes: None,
                 });
             pass.set_pipeline(compute);
-            pass.set_bind_group(0, &meter, &[]);
+            let span = diagnostics.pass_span(&mut pass, "retail_exposure_meter");
+            pass.set_bind_group(0, meter, &[]);
             pass.dispatch_workgroups(1, 1, 1);
+            span.end(&mut pass);
         }
         let mut pass = context.begin_tracked_render_pass(RenderPassDescriptor {
             label: Some("retail exposed tone"),
@@ -270,8 +308,10 @@ impl ViewNode for ExposureNode {
             occlusion_query_set: None,
         });
         pass.set_render_pipeline(tone);
-        pass.set_bind_group(0, &output, &[]);
+        let span = diagnostics.pass_span(&mut pass, "retail_exposed_tone");
+        pass.set_bind_group(0, output, &[]);
         pass.draw(0..3, 0..1);
+        span.end(&mut pass);
         Ok(())
     }
 }

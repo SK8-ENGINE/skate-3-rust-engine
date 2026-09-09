@@ -109,6 +109,7 @@ impl PreparedScene {
         }
     }
     pub fn publish(mut self, world: &mut World) {
+        let _span = info_span!("publish_map_assets").entered();
         let owned = MapAssets {
             meshes: self.meshes.publish(world), materials: self.materials.publish(world),
             retail: self.retail.publish(world), sky: self.sky.publish(world),

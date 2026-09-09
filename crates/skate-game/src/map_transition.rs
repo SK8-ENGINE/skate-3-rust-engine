@@ -102,8 +102,9 @@ fn start(world: &World, entry: Entry) -> Result<Phase, String> {
     let progress = Arc::new(AtomicU8::new(0));
     let stage = progress.clone();
     let job = std::thread::Builder::new().name("map-loader".into()).spawn(move || {
+        let _span = info_span!("load_map_transition").entered();
         let started = Instant::now();
-        let map = selected.path.as_deref().map(skate_data::skate_map::SkateMap::load).transpose()?;
+        let map = info_span!("read_map").in_scope(|| selected.path.as_deref().map(skate_data::skate_map::SkateMap::load).transpose())?;
         let map_fingerprint = crate::config::map_fingerprint(selected.path.as_deref())?;
         let read_time = started.elapsed();
         let validation_started = Instant::now();
@@ -125,7 +126,7 @@ fn start(world: &World, entry: Entry) -> Result<Phase, String> {
                 let simulation_started = Instant::now();
                 let simulation = (|| -> Result<_, String> {
                     stage.store(1, Ordering::Relaxed);
-                    let physics = GamePhysics::load_with_difficulty(&root, map.as_ref(), difficulty)?;
+                    let physics = info_span!("load_physics").in_scope(|| GamePhysics::load_with_difficulty(&root, map.as_ref(), difficulty))?;
                     stage.store(2, Ordering::Relaxed);
                     let skater = SkaterRuntime::load_for_world(&root, &graphs, &physics, difficulty.key(), Some(source))?;
                     let mut controls = PlayerControls::load(&root)?;

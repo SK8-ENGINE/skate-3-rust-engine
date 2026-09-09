@@ -815,19 +815,22 @@ impl MaterialBindGroupBindlessAllocator {
     /// created, and the material is allocated into it.
     fn allocate_unprepared(
         &mut self,
-        mut unprepared_bind_group: UnpreparedBindGroup,
+        unprepared_bind_group: UnpreparedBindGroup,
     ) -> MaterialBindingId {
-        for (slab_index, slab) in self.slabs.iter_mut().enumerate() {
-            trace!("Trying to allocate in slab {}", slab_index);
-            match slab.try_allocate(unprepared_bind_group, self.slab_capacity) {
-                Ok(slot) => {
-                    return MaterialBindingId {
-                        group: MaterialBindGroupIndex(slab_index as u32),
-                        slot,
-                    };
-                }
-                Err(bind_group) => unprepared_bind_group = bind_group,
-            }
+        // Prefer resources already resident in a slab. First-fit can duplicate a
+        // texture into an earlier slab even when a later slab already binds it,
+        // increasing per-pass resource tracking and splitting compatible draws.
+        // Allocation only: no extra scan is added to rendering steady-state.
+        let best = self.slabs.iter().enumerate().filter_map(|(index, slab)| {
+            let candidate = slab.check_allocation(&unprepared_bind_group)?;
+            let used = slab.allocated_resource_count;
+            (used == 0 || used + candidate.needed_free_slots <= self.slab_capacity)
+                .then_some(((candidate.needed_free_slots, core::cmp::Reverse(used)), index))
+        }).min_by_key(|(score, _)| *score).map(|(_, index)| index);
+        if let Some(index) = best {
+            let slot = self.slabs[index].try_allocate(unprepared_bind_group, self.slab_capacity)
+                .unwrap_or_else(|_| unreachable!("selected slab has sufficient capacity"));
+            return MaterialBindingId { group: MaterialBindGroupIndex(index as u32), slot };
         }
 
         let group = MaterialBindGroupIndex(self.slabs.len() as u32);

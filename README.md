@@ -54,3 +54,8 @@ are shipped. The included format-demo map is original procedural content.
 Implementation notes are in [`docs/`](docs/). Patched Bevy dependencies and
 their licenses are in [`vendor/`](vendor/). This is an unofficial project,
 not affiliated with EA.
+
+## Advanced diagnostics
+
+Windows builds support opt-in [performance timeline capture](docs/performance-tracing.md)
+through the `--trace` CLI option, including optional GPU pass diagnostics.

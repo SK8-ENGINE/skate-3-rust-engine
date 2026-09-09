@@ -133,8 +133,18 @@ impl ViewNode for MainOpaquePass3dNode {
             }
 
             pass_span.end(&mut render_pass);
-            drop(render_pass);
-            command_encoder.finish()
+            {
+                // wgpu may perform substantial validation/encoding when the pass
+                // closes. Separate that CPU work from draw-list traversal.
+                #[cfg(feature = "trace")]
+                let _span = info_span!("main_opaque_pass_close").entered();
+                drop(render_pass);
+            }
+            {
+                #[cfg(feature = "trace")]
+                let _span = info_span!("main_opaque_encoder_finish").entered();
+                command_encoder.finish()
+            }
         });
 
         Ok(())

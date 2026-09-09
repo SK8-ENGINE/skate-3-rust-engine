@@ -11,6 +11,9 @@ use bevy::{
 use std::collections::BTreeMap;
 
 pub(crate) struct RetailRenderPlugin;
+#[cfg(test)]
+#[path = "retail_shader_tests.rs"]
+mod shader_tests;
 // Use the same path derivation as embedded_asset!: alternate binary targets
 // have a different crate namespace even though they share these source files.
 fn retail_shader(path: &str) -> ShaderRef {
@@ -28,6 +31,7 @@ impl Plugin for RetailRenderPlugin {
             eprintln!("SKATE_FOLIAGE_DEBUG: solid cyan tree-wall cards, magenta other foliage; alpha rejection disabled for foliage only");
         }
         embedded_asset!(app, "retail_world.wgsl");
+        bevy::shader::load_shader_library!(app, "retail_material_bindings.wgsl");
         embedded_asset!(app, "retail_tone.wgsl");
         embedded_asset!(app, "retail_depth.wgsl");
         embedded_asset!(app, "retail_sky.wgsl");
@@ -37,6 +41,11 @@ impl Plugin for RetailRenderPlugin {
         ));
     }
 }
+
+// Retained for headless experiments; production uses Bevy directional visibility.
+#[cfg(test)]
+#[path = "retail_shadow_visibility.rs"]
+pub(crate) mod shadow_visibility;
 
 // Diagnostic only: mutate materials once per keypress, never continuously.
 // Separate bits preserve the original texture-presence flags for restoration.
@@ -121,8 +130,9 @@ pub(crate) struct WorldParams {
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 #[bind_group_data(RetailKey)]
+#[data(0, WorldParams, binding_array(17))]
+#[bindless(limit(64))]
 pub(crate) struct RetailWorldMaterial {
-    #[uniform(0)]
     pub params: WorldParams,
     #[texture(1)]
     #[sampler(2)]
@@ -147,10 +157,43 @@ pub(crate) struct RetailWorldMaterial {
     pub specular: Option<Handle<Image>>,
     #[texture(15, dimension = "cube")]
     pub environment: Option<Handle<Image>>,
-    #[storage(16, read_only)]
+    #[storage(16, read_only, binding_array(18))]
     pub shadow_state: Handle<bevy::render::storage::ShaderStorageBuffer>,
     pub alpha: AlphaMode,
     pub two_sided: bool,
+}
+impl From<&RetailWorldMaterial> for WorldParams {
+    fn from(material: &RetailWorldMaterial) -> Self { material.params.clone() }
+}
+/// Identity of the actual GPU inputs, independent of unused source metadata.
+#[derive(PartialEq, Eq, Hash)]
+pub(crate) struct WorldMaterialKey {
+    params: [[u32; 4]; 13],
+    images: [Option<AssetId<Image>>; 8],
+    shadow: AssetId<bevy::render::storage::ShaderStorageBuffer>,
+    alpha: [u32; 2],
+    two_sided: bool,
+}
+impl RetailWorldMaterial {
+    pub(crate) fn batch_key(&self) -> Option<WorldMaterialKey> {
+        // Blended geometry keeps its previous mesh centers and sorting groups.
+        let alpha = match self.alpha {
+            AlphaMode::Opaque => [0, 0],
+            AlphaMode::Mask(cutoff) => [1, cutoff.to_bits()],
+            _ => return None,
+        };
+        let p = &self.params;
+        Some(WorldMaterialKey {
+            params: [p.mode, p.foliage_debug, p.surface, p.family, p.fog_ramp,
+                p.fog_color, p.shadow_color, p.sun_direction, p.decal,
+                p.water[0], p.water[1], p.water[2], p.water[3]]
+                .map(|v| v.to_array().map(f32::to_bits)),
+            images: [&self.diffuse, &self.lightmap, &self.normal, &self.detail,
+                &self.macro_map, &self.decal, &self.specular, &self.environment]
+                .map(|h| h.as_ref().map(Handle::id)),
+            shadow: self.shadow_state.id(), alpha, two_sided: self.two_sided,
+        })
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct RetailKey {
