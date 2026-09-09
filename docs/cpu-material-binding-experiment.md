@@ -14,6 +14,14 @@ descriptor or slot count. The v5 shadow proxies remain disabled. Recovery does
 not claim an FPS improvement or a confirmed crash fix until the user runs it.
 The remaining sections describe the withdrawn experiment for reference.
 
+Recovery build `0b89cb8f47838bb1b7532a88f4bd3822c6d26ec6` compiled in release
+with static CRT. Both shader regression tests passed (three original shader
+variants plus the non-bindless material contract). Its embedded revision and
+system-only DLL imports were checked without gameplay execution. SHA-256:
+`ef9b2c8f0b51d80e43f2928eb3b7aba948fff4e4225d91c78435b38699a30b2e`.
+The private v7 recovery launcher is ready; the former bindless launcher now also
+points to v7. The v6 binary remains preserved but is no longer selected by it.
+
 The user reports poor FPS while looking into University and good FPS looking out
 of the map, still CPU bound. The map being resident does not establish that every
 triangle is drawn. The captured CPU render work is the actionable bottleneck.
