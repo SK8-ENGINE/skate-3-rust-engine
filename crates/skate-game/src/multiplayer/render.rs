@@ -1,8 +1,25 @@
+use super::appearance::{Appearances, Look, RemoteCharacter};
 use super::*;
-use bevy::mesh::skinning::SkinnedMesh;
+use crate::customiser_material::SkaterMaterial;
+use bevy::{
+    mesh::{morph::MorphWeights, skinning::SkinnedMesh},
+    scene::SceneInstance,
+};
+struct Candidate {
+    root: Entity,
+    scenes: Vec<Entity>,
+    look: Look,
+    started: Instant,
+}
+#[derive(Component)]
+struct OutfitPiece {
+    id: String,
+    mid: String,
+}
+
 use skate_net::interpolation::{Buffer, Clock, position};
 #[derive(Resource)]
-struct RemoteSkins {
+pub(super) struct RemoteSkins {
     reported: f64,
     actors: BTreeMap<u64, RemoteSkin>,
     rest: Vec<Mat4>,
@@ -13,6 +30,10 @@ struct RemoteSkins {
 struct RemoteSkin {
     root: Option<Entity>,
     bindings: Vec<(Entity, usize, Option<usize>)>,
+    visible: Option<Entity>,
+    pending: Option<Candidate>,
+    requested: Option<[u8; 32]>,
+
     positions: Buffer<[f32; 3]>,
     roots: Buffer<Transform>,
     poses: Buffer<Vec<Transform>>,
@@ -59,7 +80,13 @@ impl Plugin for RemoteRenderPlugin {
             .iter()
             .map(|&p| p as i32)
             .collect();
-        let board=skater.animation.evaluator.frames.bone_names.iter().position(|n|n=="SKATEBOARD_ROOT");
+        let board = skater
+            .animation
+            .evaluator
+            .frames
+            .bone_names
+            .iter()
+            .position(|n| n == "SKATEBOARD_ROOT");
         app.insert_resource(RemoteSkins {
             board,
             reported: 0.,
@@ -69,15 +96,20 @@ impl Plugin for RemoteRenderPlugin {
         })
         .add_systems(
             Update,
-            (spawn, bind, present).chain().after(crate::modding::vehicles::present),
+            (spawn, bind, present)
+                .chain()
+                .after(crate::modding::vehicles::present),
         );
     }
 }
-fn spawn(
+pub(super) fn spawn(
     mut commands: Commands,
     net: Res<Multiplayer>,
+    looks: Res<Appearances>,
     mut skins: ResMut<RemoteSkins>,
     server: Res<AssetServer>,
+    parts: Res<crate::customiser_parts::Parts>,
+    models: Res<crate::custom_models::CustomModels>,
 ) {
     let removed: Vec<_> = skins
         .actors
@@ -90,77 +122,236 @@ fn spawn(
             commands.entity(root).despawn();
         }
     }
-    for (&id, _) in &net.remotes {
+    for &id in net.remotes.keys() {
         let skin = skins.actors.entry(id).or_insert_with(|| RemoteSkin {
             clock: Clock::for_connection(net.loopback),
             ..default()
         });
-        if skin.root.is_some() {
-            continue;
-        }
-        skin.root = Some(
+        let root = *skin.root.get_or_insert_with(|| {
             commands
                 .spawn((
+                    RemoteCharacter,
                     Transform::default(),
-                    Visibility::default(),
-                    Name::new("Remote default skater"),
+                    Visibility::Inherited,
+                    Name::new("Remote skater"),
                 ))
-                .with_children(|root| {
-                    root.spawn(SceneRoot(
-                        server.load(GltfAssetLabel::Scene(0).from_asset("private/skater.glb")),
-                    ));
-                })
-                .id(),
-        );
+                .id()
+        });
+        let compatible = net
+            .lobby
+            .as_ref()
+            .and_then(|l| l.actors.get(&id))
+            .is_some_and(|a| a.info.rig == net.info.rig);
+        let (key, look) = if skin.visible.is_some() && compatible {
+            looks
+                .looks
+                .get(&id)
+                .cloned()
+                .unwrap_or(([0; 32], Look::Stock))
+        } else {
+            ([0; 32], Look::Stock)
+        };
+        if skin.requested == Some(key) {
+            continue;
+        }
+        skin.requested = Some(key);
+        if let Some(old) = skin.pending.take() {
+            commands.entity(old.root).despawn();
+        }
+        let mut scenes = vec![];
+        let mut specs = vec![];
+        let look = match look {
+            Look::Outfit(profile) => match parts.resolve(&profile) {
+                Ok(p) => Look::Outfit(p),
+                Err(e) => {
+                    warn!("Remote outfit: {e}");
+                    Look::Stock
+                }
+            },
+            other => other,
+        };
+        match &look {
+            Look::Stock => specs.push(("private/skater.glb".to_owned(), None)),
+            Look::Native(key) => {
+                if let Some(path) = models.online_native_path(key) {
+                    specs.push((path, None));
+                } else {
+                    specs.push(("private/skater.glb".to_owned(), None));
+                }
+            }
+            Look::Imported(path) => specs.push((path.clone(), None)),
+            Look::Outfit(profile) => {
+                for v in profile["selections"]
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|s| s.values())
+                {
+                    let Some((id, mid)) = v["asset_id"].as_str().zip(v["material_id"].as_str())
+                    else {
+                        continue;
+                    };
+                    if let Some(part) = parts.library.models.get(id) {
+                        specs.push((part.scene.clone(), Some((id.to_owned(), mid.to_owned()))));
+                    }
+                }
+            }
+        }
+        if specs.is_empty() || specs.len() > 32 {
+            continue;
+        }
+        let candidate = commands
+            .spawn((Transform::default(), Visibility::Hidden, ChildOf(root)))
+            .id();
+        if let Look::Native(key) = &look {
+            commands
+                .entity(candidate)
+                .insert(crate::custom_models::NativeModelRoot(key.clone()));
+        }
+        if matches!(look, Look::Imported(_)) {
+            commands
+                .entity(candidate)
+                .insert(crate::custom_models::CustomModelRoot);
+        }
+        for (path, piece) in specs {
+            let mut e = commands.spawn((
+                SceneRoot(server.load(GltfAssetLabel::Scene(0).from_asset(path))),
+                ChildOf(candidate),
+            ));
+            if let Some((id, mid)) = piece {
+                e.insert((
+                    crate::customiser_parts::PartRoot(id.clone()),
+                    OutfitPiece { id, mid },
+                ));
+            }
+            scenes.push(e.id());
+        }
+        skin.pending = Some(Candidate {
+            root: candidate,
+            scenes,
+            look,
+            started: Instant::now(),
+        });
     }
 }
 
 fn bind(
+    mut commands: Commands,
     mut skins: ResMut<RemoteSkins>,
     skater: Res<SkaterRuntime>,
     meshes: Query<(Entity, &SkinnedMesh)>,
-    names: Query<&Name>,
+    nodes: Query<(&Name, &Transform)>,
     parents: Query<&ChildOf>,
+    instances: Query<&SceneInstance>,
+    spawner: Res<SceneSpawner>,
+    server: Res<AssetServer>,
+    mut parts: ResMut<crate::customiser_parts::Parts>,
+    mut materials: ResMut<Assets<SkaterMaterial>>,
+    pieces: Query<&OutfitPiece>,
+    mut morphs: Query<(Entity, &mut MorphWeights)>,
 ) {
     for skin in skins.actors.values_mut() {
-        let Some(root) = skin.root else {
+        let Some(p) = skin.pending.as_ref() else {
             continue;
         };
-        if !skin.bindings.is_empty() {
+        if p.started.elapsed() > Duration::from_secs(120) {
+            warn!("Remote appearance loading timed out; previous skater retained");
+            commands.entity(p.root).despawn();
+            skin.pending = None;
             continue;
         }
-        let bone_names = &skater.animation.evaluator.frames.bone_names;
-        for (entity, mesh) in &meshes {
-            if !parents.iter_ancestors(entity).any(|p| p == root) {
+        if p.scenes.iter().any(|&e| {
+            !instances
+                .get(e)
+                .is_ok_and(|i| spawner.instance_is_ready(**i))
+        }) {
+            continue;
+        }
+        if let Look::Outfit(profile) = &p.look {
+            for e in &p.scenes {
+                if let Ok(piece) = pieces.get(*e) {
+                    parts.warm(&piece.mid, &server, &mut materials);
+                }
+            }
+            if !parts.tattoos_ready(profile, &server)
+                || p.scenes.iter().any(|&e| {
+                    pieces
+                        .get(e)
+                        .is_ok_and(|piece| !parts.material_ready(&piece.mid, &server))
+                })
+            {
                 continue;
             }
-            let mut bindings = vec![];
-            for &joint in &mesh.joints {
-                let Ok(name) = names.get(joint) else {
-                    return;
-                };
-                let Some(bone) = bone_names
-                    .iter()
-                    .position(|b| b.eq_ignore_ascii_case(name.as_str()))
-                else {
-                    return;
-                };
-                let parent = parents
-                    .iter_ancestors(joint)
-                    .take_while(|&p| p != root)
-                    .find_map(|p| {
-                        names.get(p).ok().and_then(|n| {
-                            bone_names
-                                .iter()
-                                .position(|b| b.eq_ignore_ascii_case(n.as_str()))
-                        })
-                    });
-                bindings.push((joint, bone, parent));
-            }
-            skin.bindings = bindings;
-            skin.poses = Buffer::default();
-            break;
         }
+        let bindings = match crate::animation::AnimationStatus::for_scene(
+            p.root,
+            &skater.animation.evaluator.frames.bone_names,
+            &meshes,
+            &nodes,
+            &parents,
+        ) {
+            Ok(b) => b.online_bindings(),
+            Err(e) => {
+                warn!("Remote appearance rejected: {e}");
+                commands.entity(p.root).despawn();
+                skin.pending = None;
+                continue;
+            }
+        };
+        if let Look::Outfit(profile) = &p.look {
+            for &scene in &p.scenes {
+                let Ok(piece) = pieces.get(scene) else {
+                    continue;
+                };
+                let Some(material) =
+                    parts.profile_material(&piece.id, &piece.mid, profile, &materials)
+                else {
+                    continue;
+                };
+                let handle = materials.add(material);
+                for (e, _) in &meshes {
+                    if parents.iter_ancestors(e).any(|p| p == scene) {
+                        commands
+                            .entity(e)
+                            .remove::<MeshMaterial3d<StandardMaterial>>()
+                            .insert(MeshMaterial3d(handle.clone()));
+                    }
+                }
+            }
+            let weights: Vec<f32> = parts
+                .library
+                .morphs
+                .iter()
+                .enumerate()
+                .map(|(i, n)| {
+                    profile["morphs"][n]
+                        .as_f64()
+                        .unwrap_or(if (2..19).contains(&i) { 0.25 } else { 0. })
+                        .clamp(0., 0.5) as f32
+                })
+                .collect();
+            for (e, mut m) in &mut morphs {
+                if parents.iter_ancestors(e).any(|e| e == p.root)
+                    && m.weights().len() == weights.len()
+                {
+                    m.weights_mut().copy_from_slice(&weights);
+                }
+            }
+        }
+        for (e, _) in &meshes {
+            if parents.iter_ancestors(e).any(|e| e == p.root) {
+                commands.entity(e).insert((
+                    bevy::camera::visibility::NoFrustumCulling,
+                    bevy::camera::visibility::RenderLayers::from_layers(&[0, 28]),
+                ));
+            }
+        }
+        if let Some(old) = skin.visible.replace(p.root) {
+            commands.entity(old).despawn();
+        }
+        commands.entity(p.root).insert(Visibility::Inherited);
+        skin.bindings = bindings;
+        skin.poses = Buffer::default();
+        skin.pending = None;
     }
 }
 
@@ -276,11 +467,22 @@ fn present(
                 }
             }
         }
-        if let Some(root)=skin.root {
-            if let Some(attached)=crate::modding::vehicles::network::attached_root(&vehicles,id) {if let Ok(mut t)=nodes.get_mut(root) {*t=attached;}}
+        if let Some(root) = skin.root {
+            if let Some(attached) = crate::modding::vehicles::network::attached_root(&vehicles, id)
+            {
+                if let Ok(mut t) = nodes.get_mut(root) {
+                    *t = attached;
+                }
+            }
         }
-        let seated=remote.body.enabled & (1u64<<62)!=0;
-        for &(entity,i,_) in &skin.bindings {if skins.board==Some(i) {if let Ok(mut t)=nodes.get_mut(entity) {t.scale=Vec3::splat(if seated {0.001} else {1.});}}}
+        let seated = remote.body.enabled & (1u64 << 62) != 0;
+        for &(entity, i, _) in &skin.bindings {
+            if skins.board == Some(i) {
+                if let Ok(mut t) = nodes.get_mut(entity) {
+                    t.scale = Vec3::splat(if seated { 0.001 } else { 1. });
+                }
+            }
+        }
         skins.actors.insert(id, skin);
     }
     if now < skins.reported || now - skins.reported >= 1. {
@@ -299,5 +501,122 @@ fn present(
             info!("MULTIPLAYER_INTERPOLATION {}", net.visual_status);
         }
         skins.reported = now;
+    }
+}
+
+#[cfg(test)]
+mod online_owned_tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires SKATE3_ASSET_ROOT prepared owned assets"]
+    fn online_appearance_owned_male_and_female_outfits_bind_every_clothing_rig() {
+        use bevy::{
+            asset::AssetPlugin, ecs::system::SystemState, gltf::GltfPlugin, image::ImagePlugin,
+            mesh::MeshPlugin, scene::ScenePlugin,
+        };
+        let assets = std::path::PathBuf::from(std::env::var("SKATE3_ASSET_ROOT").unwrap());
+        let banks = skate_data::animation_banks::AnimationBanks::load(&assets).unwrap();
+        let names = skate_data::animation_frames::AnimationFrames::from_banks(&banks)
+            .unwrap()
+            .bone_names;
+        let library: crate::customiser_parts::Library = serde_json::from_slice(
+            &std::fs::read(
+                crate::customiser_parts::asset_directory(&assets).join("library-v3.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let parts = crate::customiser_parts::Parts::for_test(library);
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin {
+                file_path: assets.to_string_lossy().into_owned(),
+                ..default()
+            },
+            ImagePlugin::default(),
+            MeshPlugin,
+            ScenePlugin,
+            GltfPlugin::default(),
+        ));
+        app.init_asset::<StandardMaterial>()
+            .init_asset::<AnimationClip>()
+            .register_type::<MeshMaterial3d<StandardMaterial>>();
+        app.finish();
+        app.cleanup();
+        for gender in ["male", "female"] {
+            let profile = parts.resolve(&parts.library.defaults[gender]).unwrap();
+            let candidate = app
+                .world_mut()
+                .spawn((Transform::default(), Visibility::Hidden))
+                .id();
+            let paths: Vec<_> = profile["selections"]
+                .as_object()
+                .unwrap()
+                .values()
+                .map(|v| {
+                    parts.library.models[v["asset_id"].as_str().unwrap()]
+                        .scene
+                        .clone()
+                })
+                .collect();
+            assert!(paths.len() > 3);
+            let mut scenes = vec![];
+            for path in paths {
+                let handle = app
+                    .world()
+                    .resource::<AssetServer>()
+                    .load(GltfAssetLabel::Scene(0).from_asset(path));
+                scenes.push(
+                    app.world_mut()
+                        .spawn((SceneRoot(handle), ChildOf(candidate)))
+                        .id(),
+                );
+            }
+            let started = Instant::now();
+            loop {
+                app.update();
+                let world = app.world();
+                if scenes.iter().all(|&e| {
+                    world
+                        .get::<SceneInstance>(e)
+                        .is_some_and(|i| world.resource::<SceneSpawner>().instance_is_ready(**i))
+                }) {
+                    break;
+                }
+                assert!(
+                    started.elapsed().as_secs() < 45,
+                    "{gender} scene loading timed out"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let mut queries: SystemState<(
+                Query<(Entity, &SkinnedMesh)>,
+                Query<(&Name, &Transform)>,
+                Query<&ChildOf>,
+            )> = SystemState::new(app.world_mut());
+            let (meshes, nodes, parents) = queries.get(app.world());
+            let binding = crate::animation::AnimationStatus::for_scene(
+                candidate, &names, &meshes, &nodes, &parents,
+            )
+            .unwrap()
+            .online_bindings();
+            let expected: std::collections::HashSet<_> = meshes
+                .iter()
+                .filter(|(e, _)| parents.iter_ancestors(*e).any(|e| e == candidate))
+                .flat_map(|(_, m)| m.joints.iter().copied())
+                .collect();
+            assert_eq!(binding.len(), expected.len());
+            for scene in scenes {
+                assert!(
+                    binding
+                        .iter()
+                        .any(|(e, _, _)| parents.iter_ancestors(*e).any(|e| e == scene)),
+                    "all outfit scene rigs must animate"
+                );
+            }
+            app.world_mut().entity_mut(candidate).despawn();
+            app.update();
+        }
     }
 }

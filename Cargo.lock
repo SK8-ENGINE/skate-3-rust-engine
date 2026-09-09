@@ -4731,7 +4731,9 @@ name = "skate-game"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "blake3",
  "half",
+ "image",
  "serde",
  "serde_json",
  "skate-core",

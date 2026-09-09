@@ -235,9 +235,10 @@ fn bind(
     mut materials: ResMut<Assets<CharacterMaterial>>,
     entities: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, Option<&RenderLayers>)>,
     parents: Query<&ChildOf>,
-    players: Query<(), With<crate::world::PlayerRoot>>,
+    players: Query<(), Or<(With<crate::world::PlayerRoot>, With<crate::multiplayer::appearance::RemoteCharacter>)>>,
     parts: Query<(), With<crate::customiser_parts::PartRoot>>,
     native: Query<&crate::custom_models::NativeModelRoot>,
+    imports: Query<(), With<crate::custom_models::CustomModelRoot>>,
 ) {
     let Some(lighting) = lighting else {
         return;
@@ -248,6 +249,7 @@ fn bind(
         // Giving them a second material races publication and can render twice.
         if parents.iter_ancestors(entity).any(|e| parts.contains(e)) { continue; }
         let native_key = parents.iter_ancestors(entity).find_map(|e| native.get(e).ok().map(|n| &n.0));
+        if native_key.is_none() && parents.iter_ancestors(entity).any(|e|imports.contains(e)) {continue;}
         let table = if let Some(key) = native_key {
             lighting.data.native.get(key)
         } else { Some(&lighting.data.materials) };

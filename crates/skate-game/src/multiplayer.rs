@@ -1,5 +1,7 @@
 //! Transport-neutral ten-player free-skate; each player owns their simulation.
 mod render;
+pub(crate) mod appearance;
+mod appearance_transfer;
 mod transport;
 use crate::{
     app::{FrameSet, SimulationSet},
@@ -101,9 +103,10 @@ impl Multiplayer {
     }
     pub(crate) fn mod_records(&self) -> Vec<(u64, String, u32, Vec<u8>)> {
         self.lobby.as_ref().map_or_else(Vec::new, |l| l.actors.iter().filter(|(id, _)| **id != l.local)
-            .flat_map(|(&id, actor)| actor.application.iter().map(move |(key,r)| (id,key.clone(),r.seq,r.value.clone()))).collect())
+            .flat_map(|(&id, actor)| actor.application.iter().filter(|(key,_)|!key.starts_with("@look/")).map(move |(key,r)| (id,key.clone(),r.seq,r.value.clone()))).collect())
     }
     pub(crate) fn publish_mod(&mut self, key: &str, value: Vec<u8>) -> bool {
+        if key.starts_with("@look/") {return false;}
         let now = self.started.elapsed().as_millis() as u64;
         self.lobby.as_mut().is_some_and(|l| l.publish_application(key,value,now))
     }
@@ -343,6 +346,9 @@ impl Plugin for MultiplayerPlugin {
                     .after(SimulationSet::Controls),
             )
             .add_systems(FixedUpdate, send.after(SimulationSet::Physics))
+            .init_resource::<appearance::Appearances>()
+            .add_systems(Last, appearance::cleanup)
+            .add_systems(Update, appearance::sync.before(render::spawn))
             .add_plugins(render::RemoteRenderPlugin);
     }
 }
@@ -481,9 +487,7 @@ fn receive(mut net: ResMut<Multiplayer>) {
             let Some(initial) = body.state.unpack_body() else {
                 continue;
             };
-            let fallback = actor.info.rig != net.info.rig
-                || actor.info.appearance
-                    != skate_net::hash(skate_net::DEFAULT_APPEARANCE.as_bytes());
+            let fallback = actor.info.rig != net.info.rig;
             info!("MULTIPLAYER_CONNECTED peer={id} fallback={fallback}");
             entry.insert(Remote {
                 roots: VecDeque::new(),
@@ -560,7 +564,7 @@ fn receive(mut net: ResMut<Multiplayer>) {
         lobby.notice.clone()
     } else if lobby.actors.len() > 1 {
         format!(
-            "Connected: {}/10 players | collisions on | default skaters",
+            "Connected: {}/10 players | collisions on | synced characters",
             lobby.actors.len()
         )
     } else {
@@ -638,15 +642,17 @@ fn hud(
     physics: Res<GamePhysics>,
     mut label: Single<&mut Text, With<NetworkHud>>,
     mods: Res<crate::modding::network::ModSync>,
+    appearances: Res<appearance::Appearances>,
 ) {
     ***label = if net.active() {
         format!(
-            "{}\n{}\n{}\n{}\n{}\nPlayer contacts: {} | Esc > Multiplayer",
+            "{}\n{}\n{}\n{}\n{}\n{} {}\nPlayer contacts: {} | Esc > Multiplayer",
             net.status,
             net.rates,
             net.provider_metrics,
             net.visual_status,
             mods.status,
+            appearances.progress, appearances.status,
             physics.network_contacts
         )
     } else {

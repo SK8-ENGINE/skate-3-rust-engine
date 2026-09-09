@@ -1,5 +1,40 @@
 # Multiplayer development
 
+
+## Online characters
+
+Current builds replicate the equipped outfit, including clothing/material choices,
+face/body morphs, colours and tattoos, and all prepared pro/special/DLC character
+identities. Each receiving installation resolves retail identities from its own
+prepared character library. The same setup update that supplies the local
+customiser supplies these online assets.
+
+Imported characters transfer their converted, self-contained GLB automatically;
+other players do not need to import the model. Updates and late joins use bounded,
+reliable chunks through the existing host relay. Movement/collision packets keep
+priority and existing bandwidth budgets. The HUD shows character transfer progress.
+Each remote keeps its visible character until the new scenes, textures and every
+clothing rig are ready. Imported textures retain their own materials; retail
+characters use their authored clothing lighting. Remote colours/tattoos never
+modify the local player or another remote's materials.
+
+All players need this build to see appearances; older builds continue to display
+their stock fallback. Missing retail content or rejected imports also retain a
+fallback. Online imports are limited to 64 MiB, standard embedded PNG/JPEG glTF
+content, 8192 pixels per texture dimension and 64 million total texture pixels.
+A connection accepts at most 256 MiB of new appearance payloads. Temporary imports
+are separate from the personal character library and cleaned up on leaving/exiting.
+
+Manual regression: use two PCs/accounts or local clients with separate settings.
+Choose different clothes, skin colours, tattoos and body/face morphs. Verify both
+views, then switch to a pro, a special/DLC skater, an imported model the other
+player does not own, and back to the customised stock skater. Join a third client
+after the selections; check it receives the latest appearances. Test a change
+while downloading, leave/rejoin, and a host departure with three Steam clients.
+Skate, bail, retrieve the board and enter vehicles; every remote clothing rig and
+board should follow the existing network pose. Nongame tests simulate ten players
+with loss, duplication, reordering, a late join and changes during transfer.
+
 Build the game and Steam relay with `./scripts/build-multiplayer-test.ps1`.
 The output is staged in `bin/multiplayer`.
 

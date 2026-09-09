@@ -33,3 +33,5 @@ skate-mods = { path = "../skate-mods" }
 
 skate-vehicles = { path = "../skate-vehicles" }
 skate-net = { path = "../skate-net" }
+blake3 = "=1.8.7"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }

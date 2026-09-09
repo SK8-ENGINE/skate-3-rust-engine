@@ -16,6 +16,10 @@ struct BoneBinding {
     parent_bone: Option<usize>,
 }
 impl AnimationStatus {
+    pub(crate) fn online_bindings(&self) -> Vec<(Entity,usize,Option<usize>)> {
+        self.bindings.iter().map(|b|(b.entity,b.bone,b.parent_bone)).collect()
+    }
+
     /// Prepare a hidden imported scene without disturbing the live bindings.
     pub(crate) fn for_scene(
         root: Entity,
