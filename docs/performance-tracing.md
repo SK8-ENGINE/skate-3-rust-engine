@@ -1,5 +1,21 @@
 # Advanced performance capture
 
+## Normal launch: tracing is off
+
+Double-clicking `skate3rust.exe`, or running it without `--trace`, starts normal
+play. It creates no performance capture file or export thread and installs no
+per-frame trace sampling systems or GPU profiling plugin. Ordinary event logging
+and crash reporting remain available. Trace support is compiled into the executable,
+but its recording spans are disabled by default.
+
+Tracing is an opt-in CLI diagnostic, not a graphics or gameplay setting. The private
+`TRACE-*.bat` launchers enable it by supplying the flags below; launching the same
+executable directly does not inherit those flags. F9/F10 capture controls are only
+installed for a tracing launch. After a diagnostic session, relaunch without the
+flags for normal play; completing a capture does not uninstall its instrumentation.
+
+## Enable a capture through the CLI
+
 Windows releases built from this revision include the recorder. No Rust, engine rebuild,
 profiler installation, network listener or menu setting is needed to **record**.
 From a terminal in the installed release directory:
