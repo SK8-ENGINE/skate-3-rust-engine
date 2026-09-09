@@ -18,6 +18,7 @@ fn retail_shader(path: &str) -> ShaderRef {
 }
 impl Plugin for RetailRenderPlugin {
     fn build(&self, app: &mut App) {
+        crate::skate_world::shadow_geometry::install(app);
         shadow::install(app);
         exposure::install(app);
         if std::env::var_os("SKATE_WEATHERING_COMPARE").is_some_and(|v| v == "1") {
@@ -140,6 +141,36 @@ pub(crate) struct RetailWorldMaterial {
     pub shadow_state: Handle<bevy::render::storage::ShaderStorageBuffer>,
     pub alpha: AlphaMode,
     pub two_sided: bool,
+}
+/// Identity of the actual GPU inputs, independent of unused source metadata.
+#[derive(PartialEq, Eq, Hash)]
+pub(crate) struct WorldMaterialKey {
+    params: [[u32; 4]; 13],
+    images: [Option<AssetId<Image>>; 8],
+    shadow: AssetId<bevy::render::storage::ShaderStorageBuffer>,
+    alpha: [u32; 2],
+    two_sided: bool,
+}
+impl RetailWorldMaterial {
+    pub(crate) fn batch_key(&self) -> Option<WorldMaterialKey> {
+        // Blended geometry keeps its previous mesh centers and sorting groups.
+        let alpha = match self.alpha {
+            AlphaMode::Opaque => [0, 0],
+            AlphaMode::Mask(cutoff) => [1, cutoff.to_bits()],
+            _ => return None,
+        };
+        let p = &self.params;
+        Some(WorldMaterialKey {
+            params: [p.mode, p.foliage_debug, p.surface, p.family, p.fog_ramp,
+                p.fog_color, p.shadow_color, p.sun_direction, p.decal,
+                p.water[0], p.water[1], p.water[2], p.water[3]]
+                .map(|v| v.to_array().map(f32::to_bits)),
+            images: [&self.diffuse, &self.lightmap, &self.normal, &self.detail,
+                &self.macro_map, &self.decal, &self.specular, &self.environment]
+                .map(|h| h.as_ref().map(Handle::id)),
+            shadow: self.shadow_state.id(), alpha, two_sided: self.two_sided,
+        })
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct RetailKey {

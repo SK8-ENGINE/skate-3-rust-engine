@@ -1,5 +1,10 @@
 # University: performance assessment, 9 September 2026
 
+Follow-up: the user subsequently authorized engine/content visual tradeoffs.
+See [the render batching experiment](render-batching-experiment.md) for the newer
+material census and static shadow batching implementation. The original constraints
+and capture findings below describe the preceding investigation.
+
 This investigation preserves the current rendered image and native-derived gameplay
 contract. It does not lower resolution, texture precision, sampler fidelity, density,
 draw distance, shadows, animation quality or physics cadence. It introduces no LOD.
