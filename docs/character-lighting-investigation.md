@@ -213,3 +213,11 @@ materials. The existing hair response and original textures are preserved.
 Fifteen focused tests pass, including a native hair binding regression and checks
 that skin/clothing are not classified as hair. No asset conversion is required;
 Benny's appearance still needs the user-run visual check.
+
+Stock-hair follow-up: all 31 modular stock hair materials use `character.hair`
+or `character.hair_ropa`; the original stock material also uses `character.hair`.
+The prepared-library regression passes a colour change/restore for every stock
+hair material, preserving hair shading, authored tint, normal/diffuse/opacity
+textures, specular masks and roughness. This rules out the same family-selection
+and tested profile-cache failure, not every possible visual lighting issue.
+No runtime change or new executable was needed for this audit.

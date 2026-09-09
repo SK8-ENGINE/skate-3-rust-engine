@@ -837,3 +837,44 @@ mod online_tests {
         assert!(materials.get(&handle).unwrap().extension.texture.is_none());
     }
 }
+
+#[cfg(test)]
+mod stock_hair_audit {
+    use super::*;
+    #[test]
+    #[ignore = "requires prepared owned SKATE_CAC_TEST_LIBRARY"]
+    fn stock_hair_keeps_authored_shading_and_textures_after_colour_restore() {
+        let path=std::env::var("SKATE_CAC_TEST_LIBRARY").unwrap();
+        let library:Library=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let pairs:Vec<_>=library.models.iter().filter(|(_,p)|p.slot=="Hair")
+            .flat_map(|(id,p)|p.materials.iter().map(move |mid|(id.clone(),mid.clone()))).collect();
+        assert!(!pairs.is_empty());
+        let mut app=App::new();
+        app.add_plugins((MinimalPlugins,AssetPlugin::default()));
+        app.init_asset::<Image>();
+        let server=app.world().resource::<AssetServer>();
+        let mut parts=Parts{library,..default()};
+        let mut materials=Assets::<SkaterMaterial>::default();
+        let mut checked=HashSet::new();
+        for (id,mid) in pairs {
+            parts.warm(&mid,server,&mut materials);
+            let handle=parts.materials[&mid].0.clone();
+            let original=materials.get(&handle).unwrap().clone();
+            assert_eq!(original.extension.retail.options.w,1.,"{mid} must use hair lighting");
+            let dyed=parts.profile_material(&id,&mid,&serde_json::json!({"hair_tint":[1,0,0]}),&materials).unwrap();
+            *materials.get_mut(&handle).unwrap()=dyed;
+            let restored=parts.profile_material(&id,&mid,&serde_json::json!({}),&materials).unwrap();
+            assert_eq!(restored.base.base_color,original.base.base_color);
+            assert_eq!(restored.extension.retail.tint,original.extension.retail.tint);
+            assert_eq!(restored.extension.retail.options,original.extension.retail.options);
+            assert_eq!(restored.base.base_color_texture,original.base.base_color_texture);
+            assert_eq!(restored.base.normal_map_texture,original.base.normal_map_texture);
+            assert_eq!(restored.extension.hair_opacity,original.extension.hair_opacity);
+            assert_eq!(restored.extension.retail_mask,original.extension.retail_mask);
+            assert_eq!(restored.base.perceptual_roughness,original.base.perceptual_roughness);
+            *materials.get_mut(&handle).unwrap()=restored;
+            checked.insert(mid);
+        }
+        eprintln!("STOCK_HAIR_AUDIT verified {} authored materials",checked.len());
+    }
+}
