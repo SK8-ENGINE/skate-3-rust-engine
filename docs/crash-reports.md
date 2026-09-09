@@ -12,6 +12,56 @@ Coverage limits: a Windows unhandled-exception filter attempts a fixed, allocati
 
 For manual UI validation, run the executable with `--crash-report-preview`. This generates a clearly synthetic report and opens the popup without initializing the game, setup, Steam or assets. Check Copy report, clipboard text, Open folder, saved UTF-8 text and Close. Static tests do not validate desktop presentation.
 
+## FingerFlipOut (2026-09-09)
+
+Observed user failure: clean revision `1a6e95b`, build timestamp
+`1788967727931108700`, report timestamp `1788968141`, University fingerprint
+`c911af6099e02b65`. At tick3467 in KnownAir, MotionGraph behavior3080 returned
+`MotionGraph stock gameplay producer FingerFlipOut is not implemented`.
+This was an explicit unsupported-operation exit, with no recorded panic or
+native exception. The matching launch stderr contains the same error.
+
+Native recovery from the TU3 image mapped at `0x82000000`:
+
+- Factory82BC7C18 binds authored `grabintent` and literal `Grabbing`.
+  Vtable8232072C allocates a private float through82BBCB50, calls
+  Begin82BB3198, Update82BB7C40 and empty End82B61BB8.
+- Begin sets the float to zero. Update reads the MotionGraph intent map
+  through Actor20/virtual16. Membership lookup82454FD8 counts a zero-valued
+  intent as present. Presence subtracts the time-service delta; absence adds
+  it. This does not read raw ActionGraph or filtered tweak input.
+- Update clamps the retained time to layout190/198, evaluates eight curve
+  keys at1A0 and values at1C0 through PointGraph82481E10, then writes
+  `Grabbing` through ISkaterAnim80 (unnormalized, sequence -1).
+- Global constructor8289FD10..30 selects collection `41DB0C4F82003A15` at
+  offset164. Helper8289D4E8 identifies class `anim_motion`. The retail schema
+  independently maps layout190 to field `E0C1407B688858AD`, type
+  `Sk8::PointNegGraphData8`. Its stock timer bounds are 0 and 0.5 seconds,
+  with a descending grab blend from 1 to 0. Numeric names remain supported
+  directly; no shared asset edit or invented curve is required.
+
+The implementation retains one timer per bound behavior and publishes only
+on Update. Begin resets time; End leaves the last parameter alone. Other
+unimplemented operations still report errors.
+
+Evidence identities (SHA-256): TU3 mapped image
+`f4aa113eb541bfba03dbc108cf5ab43f58c965b20fa3b82f9c40938a0ad841c4`;
+tested stock MotionGraph
+`806b2665e435be4e313d70a06fab4538e0adf60a2dfd3e80e82ae8d0b4a2e7c1`.
+Bounded decoded instructions, schema lookup and the original report are
+retained privately with this test build. IDA changes were confined to a
+disposable database copy. The instruction/data mapping is observed;
+successful gameplay reproduction after the fix remains user validation.
+
+Focused regressions cover release/regrab timing, clamping, entry reset,
+the actual stock behavior3080, zero-valued intent membership, raw-input
+separation, independent behavior instances and Begin/End publication rules.
+They do not launch the renderer or replay the user's full input sequence.
+
+Validation: `cargo test --release --locked --target x86_64-pc-windows-msvc
+-p skate-game --bin skate3rust --no-default-features finger_flip --
+--include-ignored` passed both tests against the prepared assets (0.18 seconds).
+
 ## SetDeckPitchAndYaw (2026-09-08)
 
 The supplied report stopped in KnownAir at tick4813, MotionGraph behavior3373:
