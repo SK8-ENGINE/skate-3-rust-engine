@@ -200,3 +200,16 @@ outfits without changing imported PBR materials or globally lowering gloss.
 Fourteen focused tests pass with the prepared library, including offline shader
 compilation, stock restoration and per-profile material preservation. No game was
 launched; visual verification of stock -> imported/pro -> stock remains manual.
+
+## Pro hair family classification, September 9
+
+Benny Fairfax's prepared `Retail_Hair` uses `character.default_hair`; other pro
+hair also uses `character.default_hair_ropa`. The renderer previously recognised
+only the `character.hair` prefix, so those pro materials entered clothing shading
+and received bright, untinted specular highlights. A shared material-family check
+now recognises all four authored hair names for local/native and modular/remote
+materials. The existing hair response and original textures are preserved.
+
+Fifteen focused tests pass, including a native hair binding regression and checks
+that skin/clothing are not classified as hair. No asset conversion is required;
+Benny's appearance still needs the user-run visual check.

@@ -476,7 +476,7 @@ impl Parts {
         let retail_mask = m.lighting.as_ref().and_then(|l| l.specular.as_ref()).map(|p| load(p, true));
         let retail = m.lighting.as_ref().filter(|l| l.params.len() == 9).map(|l| crate::retail_character::CharacterParams {
             tint: Vec4::from_array(Color::srgb(m.tint[0],m.tint[1],m.tint[2]).to_linear().to_f32_array()),
-            options: Vec4::new(f32::from(normal.is_some()), f32::from(retail_mask.is_some()), -1., f32::from(l.shader.starts_with("character.hair"))),
+            options: Vec4::new(f32::from(normal.is_some()), f32::from(retail_mask.is_some()), -1., f32::from(l.is_hair())),
             rows: std::array::from_fn(|i| Vec4::from_array(l.params[i])),
             ..default()
         }).unwrap_or_default();

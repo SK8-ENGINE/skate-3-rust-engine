@@ -31,6 +31,13 @@ pub(crate) struct MaterialData {
     pub params: Vec<[f32; 4]>,
     pub specular: Option<String>,
 }
+impl MaterialData {
+    pub(crate) fn is_hair(&self) -> bool {
+        matches!(self.shader.as_str(), "character.hair" | "character.hair_ropa"
+            | "character.default_hair" | "character.default_hair_ropa")
+    }
+}
+
 #[derive(Resource)]
 struct CharacterShader(#[allow(dead_code)] Handle<Shader>);
 #[derive(Deserialize)]
@@ -275,7 +282,7 @@ fn bind(
                     f32::from(m.normal_map_texture.is_some()),
                     f32::from(data.specular.is_some()),
                     alpha_cutoff,
-                    f32::from(data.shader.starts_with("character.hair")),
+                    f32::from(data.is_hair()),
                 ),
                 rows: std::array::from_fn(|i| Vec4::from_array(data.params[i])),
                 sh: lighting
@@ -358,6 +365,15 @@ fn update(
 mod tests {
     use super::*;
     #[test]
+    fn customiser_hair_families_include_pro_skater_defaults() {
+        for shader in ["character.hair", "character.hair_ropa", "character.default_hair", "character.default_hair_ropa"] {
+            assert!(MaterialData {shader:shader.into(),params:vec![],specular:None}.is_hair(), "{shader}");
+        }
+        for shader in ["character.default_skin", "character.default_cloth", "character.default_cloth_ropa"] {
+            assert!(!MaterialData {shader:shader.into(),params:vec![],specular:None}.is_hair(), "{shader}");
+        }
+    }
+    #[test]
     fn customiser_material_binding_uses_native_rows_and_leaves_cac_material_owned() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
@@ -376,7 +392,14 @@ mod tests {
         let torso = world.spawn((ChildOf(pro), GltfMaterialName("Retail_Torso".into()), MeshMaterial3d(material.clone()))).id();
         let part = world.spawn((crate::customiser_parts::PartRoot("shirt".into()), ChildOf(player))).id();
         let cloth = world.spawn((ChildOf(part), GltfMaterialName("Retail_Torso".into()), MeshMaterial3d(material))).id();
+        let hair_data=MaterialData {shader:"character.default_hair".into(),params:vec![[1.;4];9],specular:None};
+        world.resource_mut::<Lighting>().data.native.get_mut("pro").unwrap().insert("Retail_Hair".into(),hair_data);
+        let hair_material=world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
+        let hair=world.spawn((ChildOf(pro),GltfMaterialName("Retail_Hair".into()),MeshMaterial3d(hair_material))).id();
         world.run_system_once(bind).unwrap();
+        let hair_handle=&world.get::<MeshMaterial3d<CharacterMaterial>>(hair).unwrap().0;
+        assert_eq!(world.resource::<Assets<CharacterMaterial>>().get(hair_handle).unwrap().params.options.w,1.);
+
         let h = &world.get::<MeshMaterial3d<CharacterMaterial>>(torso).unwrap().0;
         assert_eq!(world.resource::<Assets<CharacterMaterial>>().get(h).unwrap().params.rows[0], Vec4::new(2., 3., 4., 5.));
         assert!(world.get::<MeshMaterial3d<StandardMaterial>>(torso).is_none());
