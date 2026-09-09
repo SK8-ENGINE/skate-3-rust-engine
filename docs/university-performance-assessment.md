@@ -435,3 +435,13 @@ so it is not an appropriate default for this capture. Bindless material access i
 a possible later experiment, but must preserve each texture's format, sampler,
 role and alpha ordering and cannot be inferred to help from material counts alone.
 No FPS gain is claimed for the follow-up changes before a matched user capture.
+
+Validation of `842b4ad`: 14 targeted release tests passed (two session-effect,
+four recorder, two character-lighting and six raw-controller tests). The session
+tests were rerun successfully after adding exposure-cache retirement. The private
+static-CRT release EXE/PDB built successfully using the shared Cargo target; its
+embedded revision and Windows-system-only PE imports were verified without running
+the game. Existing compiler warnings remain. The ignored v4 comparison launcher
+records 20 seconds with GPU diagnostics and the same settings/assets; earlier
+executables and captures are retained. Renderer runtime validation, visual checks
+and post-change frame timing await a user capture.
