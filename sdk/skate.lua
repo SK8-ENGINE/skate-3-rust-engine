@@ -112,6 +112,7 @@ sdk.trainer = {}
 function sdk.trainer.apply(tuning) end
 
 ---@class VehicleControls
+---@field pitch? number -1..1; airborne nose up to nose down (left stick vertical)
 ---@field throttle? number -1..1, reverse to forward
 ---@field steering? number -1..1, right to left
 ---@field brake? number 0..1

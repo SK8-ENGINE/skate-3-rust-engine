@@ -439,6 +439,10 @@ fn kart_controller_reset_is_edge_triggered_and_rebindable() {
  for buttons in [0,128,0,64,64] {m.snapshot["vehicle_input"]["pad_buttons"]=json!(buttons);m.dispatch("on_fixed_update",json!({"dt":0.016}));}
  assert_eq!(m.commands.iter().filter(|(_,c)|matches!(c,Command::VehicleReset{..})).count(),1);
  assert!(m.packages["community.mario-kart"].running());
+ m.commands.clear();
+ m.snapshot["vehicle_input"]["pitch"]=json!(0.75);
+ m.dispatch("on_fixed_update",json!({"dt":0.016}));
+ assert!(m.commands.iter().any(|(_,c)|matches!(c,Command::VehicleControl{controls,..} if controls.pitch==0.75)));
 }
 
 #[test]

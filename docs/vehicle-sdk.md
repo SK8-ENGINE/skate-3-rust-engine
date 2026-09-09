@@ -1,10 +1,63 @@
 # Vehicle SDK v1
+Arcade assist additions (kart package 1.5): optional `ground_stability` (0..1,
+default 0) adds road-normal roll stabilization while at least two wheels touch;
+optional `air_control` (0..10 rad/s², default 0) enables occupied-aircraft-style
+pitch/roll torque control when no wheels touch. These are authored gameplay
+assists inspired by the requested Burnout Paradise feel, not recovered constants.
+`VehicleControls.pitch` is optional, -1..1 (positive nose down), mapped from left
+stick vertical or Up/Down arrows. Existing steering maps to airborne roll.
+Neutral air input damps pitch/roll without adding linear acceleration.
+The kart uses ground_stability=0.8, air_control=6, broader inertia dimensions,
+crash_delta_v=12 m/s, rider hit_impulse=1200 N·s and a 1-second grounded inversion
+timer. Inversion without chassis/rider contact no longer causes an ejection.
+Default safety settings on other vehicle definitions are unchanged.
+
 
 `skate-vehicles` pins Rapier 3D 0.35.3 and owns an independent, fixed-step rigid-body
 world. The existing skating solver remains authoritative outside vehicles. Rapier
 uses the installed map's collision triangles and resolves chassis collisions with
 the map and other vehicles. Wheels use Rapier raycast suspension. Each host tick
 is split into substeps of approximately 1/120 second or smaller.
+
+### Force-based handling (September 2026)
+
+The shared `skate-vehicles/src/handling.rs` now owns tire forces. Rapier's built-in
+arcade tire impulses are disabled; its suspension queries and chassis collision
+solver remain active. Steering has a 2.5 rad/s travel rate, speed-sensitive lock
+and Ackermann front-wheel angles. Wheel torque integrates angular momentum;
+longitudinal slip and lateral slip angle produce contact impulses constrained by
+one load-dependent friction circle. Contact-point application produces chassis
+pitch/roll, and dynamic supports receive opposing tire and suspension impulses.
+
+`tire_grip` is now the tire friction coefficient, multiplied by the contacted
+collider's friction. The kart uses 1.3 for a dry setup. Its new `tire_friction`
+setting intentionally replaces the old arcade `grip` setting so a saved value of
+3 is not reused as a physical coefficient. Other saved settings remain compatible.
+Older third-party definitions should review their grip values with this build.
+
+Service brake overrides throttle; an opposing throttle request brakes before
+engaging the other direction near rest. Handbrake locks non-steering wheels.
+Brakes scale with simulation time (the legacy `brake_impulse` setting retains its
+120 Hz reference scale). Torque tapers with wheel speed rather than switching off
+at a chassis-speed threshold. Reverse is limited by torque taper at up to 8 m/s.
+Aerodynamic drag and axle rolling resistance slow coasting. Published speed is
+the post-solve longitudinal velocity; falling or sliding sideways does not count
+as forward speed. Reset clears steering, wheel angular momentum and displayed spin.
+
+This is a simplified physical kart model, not a measured tire/engine dataset:
+wheel inertia is estimated from chassis mass, lateral stiffness is a fixed model
+coefficient, and suspension still uses raycasts. There is no gearbox, tire heat,
+deformation, ABS, or validated moving-platform suspension damping. Engine sound
+still follows speed/throttle. Automated physics tests do not establish rendered
+handling quality; steering feel and unusual map surfaces require playtesting.
+
+Chassis contacts use the minimum friction combine rule: the kart's 0.05 body
+friction against a 1.0 map stays 0.05 instead of averaging to 0.525. Tire friction
+still reads the map material independently. The imported collision mesh welds
+identical vertices and enables internal-edge normal correction while retaining
+all authored triangles. Crash delta-v is sampled immediately before collision
+integration, after tire/suspension impulses, so ordinary driving forces are not
+included in that impact measurement. Rider contact and inversion tests remain active.
 
 ## First mod: Mario Kart
 

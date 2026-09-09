@@ -21,7 +21,7 @@ local function pressed(key)
 end
 local function tune()
  local s=sdk.settings
- sdk.vehicle.tune('kart',{engine_volume=s.engine_volume,engine_force=s.engine,max_speed=s.speed,brake_impulse=s.brake,steering_angle=s.steering,tire_grip=s.grip})
+ sdk.vehicle.tune('kart',{engine_volume=s.engine_volume,engine_force=s.engine,max_speed=s.speed,brake_impulse=s.brake,steering_angle=s.steering,tire_grip=s.tire_friction})
 end
 local function nearby()
  local p=sdk.player.read();local h=p.heading or 0
@@ -52,6 +52,7 @@ return {
   end
   if car.phase=='driving' then sdk.vehicle.control('kart',sdk.vehicle.input() and {
    throttle=sdk.vehicle.input().throttle,steering=sdk.vehicle.input().steering,
+   pitch=sdk.vehicle.input().pitch or 0,
    brake=sdk.vehicle.input().brake,handbrake=sdk.vehicle.input().handbrake}) end
   hud(car)
  end,

@@ -111,9 +111,19 @@ pub(crate) fn post_input_and_select(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
 ) -> Result<(), String> {
-    post_input::advance(physics, skater)?;
+    complete_post_input(physics, skater)?;
     let processed = skater.player_input.processed_snapshot(physics.ticks);
     selection::advance(physics, skater, processed)
+}
+
+/// Completes the mandatory PostInput half of the current ProcessInput pass.
+/// Host-owned transitions may need to retain their selected state, but they
+/// must still drain the query work produced by ProcessInput this tick.
+pub(crate) fn complete_post_input(
+    physics: &mut GamePhysics,
+    skater: &mut SkaterRuntime,
+) -> Result<(), String> {
+    post_input::advance(physics, skater)
 }
 ///The reset/board/skeleton publications precede this selected-state FillPhysOut.
 pub(crate) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {

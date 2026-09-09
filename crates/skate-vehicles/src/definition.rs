@@ -24,6 +24,8 @@ pub struct VehicleDefinition {
     pub suspension_stiffness: f32,
     pub suspension_damping: f32,
     pub tire_grip: f32,
+    pub ground_stability: f32,
+    pub air_control: f32,
     pub wheels: Vec<WheelDefinition>,
     pub seat: [f32; 3],
     pub exit: [f32; 3],
@@ -109,7 +111,9 @@ impl Default for VehicleDefinition {
             suspension_length: 0.25,
             suspension_stiffness: 30.,
             suspension_damping: 4.,
-            tire_grip: 3.,
+            tire_grip: 1.3,
+            ground_stability: 0.,
+            air_control: 0.,
             wheels: vec![],
             seat: [0., 0.25, 0.],
             exit: [1.8, 0., 0.],
@@ -166,6 +170,8 @@ impl VehicleDefinition {
             || !range(self.suspension_stiffness, 1., 200.)
             || !range(self.suspension_damping, 0.1, 30.)
             || !range(self.tire_grip, 0.1, 20.)
+            || !range(self.ground_stability, 0., 1.)
+            || !range(self.air_control, 0., 10.)
             || !point(&self.seat, 10.)
             || !point(&self.exit, 10.)
             || !range(self.camera_distance, 2., 30.)

@@ -202,7 +202,7 @@ fn occupied_crash_ejects_with_preimpact_momentum() {
 }
 
 #[test]
-fn inverted_rider_bails_but_parked_vehicle_does_not() {
+fn airborne_inversion_does_not_eject_a_stunt_driver() {
     use rapier3d::prelude::*;
     for occupied in [false,true] {
         let mut s=simulation();let id=s.spawn(definition(),[0.,4.,0.],0.).unwrap();
@@ -212,8 +212,7 @@ fn inverted_rider_bails_but_parked_vehicle_does_not() {
         s.world.bodies[h].set_linvel(Vector::new(5.,0.,0.),true);
         for _ in 0..30 {s.step(1./120.);}
         let e=s.take_ejection(id);
-        if occupied {let e=e.unwrap();assert_eq!(e.reason,"inverted");assert!(e.velocity[0]>4.);}
-        else {assert!(e.is_none());}
+        assert!(e.is_none(), "airborne inversion must remain controllable");
     }
 }
 

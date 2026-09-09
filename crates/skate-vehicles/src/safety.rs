@@ -36,11 +36,13 @@ impl Simulation {
             let body=&self.world.bodies[v.body];
             let safety=&v.definition.rider_safety;
             let up=body.rotation()*Vector::Y;
-            v.inverted_time=if up.y < safety.inverted_up_y {v.inverted_time+dt} else {0.};
             let hit=self.world.narrow_phase.contact_pairs_with(v.rider)
                 .map(|p|p.total_impulse_magnitude()).fold(0_f32,f32::max);
             let contact=body.colliders().iter().any(|&c| self.world.narrow_phase.contact_pairs_with(c)
                 .any(|p|p.total_impulse_magnitude()>0.));
+            // An aerial barrel roll is not a wreck. Require sustained physical
+            // contact while inverted; airborne time never advances this timer.
+            v.inverted_time=if contact && up.y < safety.inverted_up_y {v.inverted_time+dt} else {0.};
             let reason=if hit >= safety.hit_impulse {Some("rider_impact")}
                 else if contact && (body.linvel()-linear).length() >= safety.crash_delta_v {Some("crash")}
                 else if v.inverted_time >= safety.inverted_seconds {Some("inverted")}

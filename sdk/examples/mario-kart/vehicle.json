@@ -14,7 +14,9 @@
   "suspension_length": 0.25,
   "suspension_stiffness": 30,
   "suspension_damping": 4,
-  "tire_grip": 3,
+  "tire_grip": 1.3,
+  "ground_stability": 0.8,
+  "air_control": 6,
   "wheels": [
     {
       "node": "wheel_rl",
@@ -103,9 +105,9 @@
     0
   ],
   "inertia_half_extents": [
-    0.7,
-    0.2,
-    1.05
+    1.1,
+    0.35,
+    1.4
   ],
   "rider_safety": {
     "enabled": true,
@@ -116,10 +118,10 @@
     ],
     "radius": 0.25,
     "half_height": 0.25,
-    "crash_delta_v": 6,
-    "hit_impulse": 180,
+    "crash_delta_v": 12,
+    "hit_impulse": 1200,
     "inverted_up_y": -0.2,
-    "inverted_seconds": 0.2,
+    "inverted_seconds": 1.0,
     "eject_up_speed": 2
   }
 }
