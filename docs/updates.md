@@ -28,6 +28,18 @@ unchanged groups are retained. Freshly unpacked copies run setup independently.
 Explicit `--assets` developer launches bypass this management. Packaged releases are required; developer binaries do not
 silently adopt a downloaded build.
 
+Character import and its FBX/native dependencies are embedded in the setup
+executable. These are delivered by the original update protocol too, including
+to copies that never had a separate Custom Models helper. Importer-only changes
+do not require owned-disc extraction. Optional local calibration is preserved.
+
+`character_customiser` identifies the separate prepared clothing, preset,
+native-roster and character-lighting generation. A missing or outdated generation
+opens setup with the saved Xbox source available for reuse. Its update does not
+change existing map/core extractor identities. All generation files must be ready
+before the current character-generation record changes. Personal character
+libraries and settings remain outside this preparation job.
+
 # Package protocol and release maintenance
 
 `release.json` accompanies the ZIP and is also inside it. Schema 1 identifies the

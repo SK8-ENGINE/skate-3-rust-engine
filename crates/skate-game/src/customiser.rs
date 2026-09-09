@@ -678,9 +678,7 @@ fn setup(mut commands: Commands, config: Res<crate::config::Config>, parts: Res<
         }
     }
     let extras = std::fs::read(
-        config
-            .asset_root
-            .join("private/customisation/extra-menu.json"),
+        crate::customiser_parts::asset_directory(&config.asset_root).join("extra-menu.json"),
     )
     .ok()
     .and_then(|b| serde_json::from_slice(&b).ok())
@@ -1331,6 +1329,29 @@ fn matches_patch(profile: &Value, patch: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn customiser_missing_library_keeps_stock_scene_visible() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()));
+        app.init_resource::<crate::customiser_parts::Parts>()
+            .init_resource::<crate::custom_models::CustomModels>()
+            .init_resource::<crate::animation::AnimationStatus>()
+            .init_resource::<Assets<crate::customiser_material::SkaterMaterial>>();
+        let world = app.world_mut();
+        world.insert_resource(Customiser {
+            open: true, enabled: true, just_opened: false, preview_yaw: 0.,
+            index: Entry::default(), path: vec![], selected: 0, page_size: 6,
+            search: String::new(), draft: json!({"selections":{},"morphs":{}}),
+            settings: PathBuf::new(), status: String::new(), redraw: false,
+        });
+        let player = world.spawn(crate::world::PlayerRoot).id();
+        let stock = world.spawn((SceneRoot(default()), Visibility::Inherited, ChildOf(player))).id();
+        world.run_system_once(crate::customiser_parts::update).unwrap();
+        assert_eq!(*world.get::<Visibility>(stock).unwrap(), Visibility::Inherited);
+        assert!(world.resource::<Customiser>().status.contains("unavailable"));
+        assert!(world.resource::<Parts>().applied.is_null());
+    }
     #[test]
     fn customiser_colour_choice_is_distinct_from_the_original() {
         let entry = Entry {

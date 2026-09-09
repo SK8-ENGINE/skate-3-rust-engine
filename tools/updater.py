@@ -21,6 +21,7 @@ API = f'https://api.github.com/repos/{REPO}/releases'
 PACKAGE = 'skate3rust-windows-x64.zip'
 FILES = ('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe',
          'steam-relay/skate-steam-relay.exe', 'steam-relay/steam_api64.dll', 'release.json')
+
 PREFIX = 'skate3rust-windows-x64/'
 
 

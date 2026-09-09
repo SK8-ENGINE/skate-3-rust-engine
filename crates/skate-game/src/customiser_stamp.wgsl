@@ -23,6 +23,10 @@ struct SkinStamp {
     pbr_deferred_functions::deferred_output,
 }
 #else
+#import skate_character_lighting::{CharacterParams, shade_character}
+@group(#{MATERIAL_BIND_GROUP}) @binding(105) var retail_mask: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(106) var retail_mask_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(107) var<uniform> retail: CharacterParams;
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
@@ -107,7 +111,13 @@ fn fragment(
     // in forward mode, we calculate the lit color immediately, and then apply some post-lighting effects here.
     // in deferred mode the lit color and these effects will be calculated in the deferred lighting shader
     var out: FragmentOutput;
-    if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
+    if retail.light.w > 0.0 && retail.tint.w > 0.0 {
+        let mask = textureSample(retail_mask, retail_mask_sampler, in.uv).r;
+        out.color = shade_character(retail, pbr_input.N, pbr_input.world_position,
+            pbr_input.material.base_color.rgb,
+            select(pbr_input.material.base_color.a, mask, retail.options.y > 0.0),
+            pbr_input.material.base_color.a);
+    } else if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
         out.color = apply_pbr_lighting(pbr_input);
     } else {
         out.color = pbr_input.material.base_color;

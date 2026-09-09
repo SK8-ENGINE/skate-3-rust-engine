@@ -2,7 +2,6 @@
 import json,struct,re
 from pathlib import Path
 from tools.asset_pipeline.customisation_native import key_hash
-from tools.asset_pipeline.customisation_worker import ROOT
 
 def generate(native):
     def page(name,children):return dict(label=name,children=children)
@@ -25,9 +24,8 @@ def generate(native):
         if len(values)!=19:raise ValueError('Incomplete native face preset')
         gender,number=row['key'].split('_')
         presets.append(choice('Face '+str(int(number)),{'morphs':values},gender=gender))
-    source=(ROOT/'crates/skate-game/src/graph_host/motion_character_gesture.rs').read_text()
-    names=re.findall(r'"B_GSTR_([A-Z_]+)"',source)
-    if len(names)!=37:raise ValueError('Native gesture table changed')
+    # These indices match the runtime gesture table. Source-tree consistency
+    # belongs in tests; a player's setup has no Rust checkout.
     labels=['Air guitar','Airplane','Boxing','Bruce Lee','Check the time','Devil horns','Finger guns','Dunno',
             'Finger wag','Fists','Flex','Flip the table','The Fonz','Freedom','Raised fist','Get away','Get outta here',
             'Handcuffs','High fist pump','Low fist pump','Wind up','Peace','Point','Raise the roof','Shaka','Shrug',

@@ -30,3 +30,10 @@ from this project.
 The setup executable bundles Python, NumPy, Pillow, Tcl/Tk and PyInstaller's
 bootloader. Their license information is retained by the packager alongside
 its bundled libraries. No game content is included in the release archive.
+
+Character import also bundles Facebook FBX2glTF 0.9.7, including its Autodesk
+FBX SDK dependency, and the Microsoft Visual C++ redistributable runtime.
+FBX2glTF's BSD notice is in `licenses/FBX2glTF.txt` and inside the setup payload.
+The native converter is fetched from its official release and checked against
+the pinned SHA-256 before packaging. No private calibration or skater reference
+is distributed.

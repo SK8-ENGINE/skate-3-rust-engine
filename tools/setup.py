@@ -6,6 +6,13 @@ ROOT=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[1]))
 sys.path.insert(0,str(ROOT))
 
 def main():
+    if len(sys.argv)>1 and sys.argv[1]=='--character-import':
+        # Keep the importer inside the already versioned setup payload: even
+        # protocol-1 updaters deliver it atomically with the game executable.
+        importer=ROOT/'tools/mixamo_to_skate'
+        sys.path.insert(0,str(importer))
+        from main import main as import_character
+        return import_character(sys.argv[2:])
     if len(sys.argv)>2 and sys.argv[1]=='--task':
         script=Path(sys.argv[2])
         if not script.is_absolute():script=ROOT/script
@@ -22,7 +29,7 @@ def main():
     args=parser.parse_args()
     import tkinter as tk
     from tkinter import filedialog,messagebox,ttk
-    from tools.asset_pipeline.install import install
+    from tools.asset_pipeline.customiser_setup import install
     from tools.asset_pipeline.versions import installed, fingerprints, changed_groups
     previous=installed(args.base) if args.refresh else None
     changed=changed_groups(previous[1].get('pipelines',{}),fingerprints()) if previous else set()
@@ -34,7 +41,7 @@ def main():
     if icon.is_file():window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
     ttk.Label(frame,text='Update game assets' if updating else 'Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
-    ttk.Label(frame,text=('Changed asset groups: '+', '.join(sorted(changed))+'.\nOnly these groups will be extracted again.\nYour previous installation is kept until the update succeeds.\nUse Update game assets to reuse your selected Xbox source,\nor choose its new location if it has moved.') if updating else 'Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, animations and all disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
+    ttk.Label(frame,text=('Changed asset groups: '+(', '.join(sorted(changed)) or 'character customiser')+'.\nOnly changed groups will be prepared again.\nYour previous character data remains until preparation succeeds.\nUse Update game assets to reuse your selected Xbox source,\nor choose its new location if it has moved.') if updating else 'Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, customiser, animations and disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
               font=('Segoe UI',11),justify='left').pack(anchor='w')
     status=tk.StringVar(value='Choose your game to begin.')
     ttk.Label(frame,textvariable=status,wraplength=600).pack(anchor='w',pady=(18,8))

@@ -55,6 +55,8 @@ try {
         if ($source.Extension -notin '.py','.json','.txt','.md','.toml','.rs' -and $source.Name -ne 'LICENSE') { continue }
         $relative = [IO.Path]::GetRelativePath($toolsRoot, $source.FullName)
         $portableName = $relative.Replace('\','/')
+        # Calibration is derived from private models, never a release resource.
+        if ($portableName -like 'mixamo_to_skate/*.json') { continue }
         if ($portableName -match '(^|/)blender[^/]*(/|$)' -or
             $portableName -in @('asset_pipeline/build_map.py','asset_pipeline/finish_character.py',
                 'add_onboard_ik_targets.py','apply_default_skater_materials.py','export_bevy_glb.py')) { continue }
@@ -62,15 +64,21 @@ try {
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath $source.FullName -Destination $destination
     }
+    $importerBinaries = Join-Path $ProjectRoot 'target/importer-runtime'
+    & "$PSScriptRoot/Prepare-CharacterImporter.ps1" -Destination $importerBinaries
     & $packagePython -m PyInstaller --noconfirm --clean --onefile --name skate3setup `
         --icon "$ProjectRoot/docs/images/skating-crab.ico" --paths $ProjectRoot `
         --hidden-import numpy --hidden-import PIL.Image --hidden-import tkinter `
         --add-binary "$ProjectRoot/target/native/refpack.dll;tools/asset_pipeline" `
+        --add-binary "$importerBinaries/FBX2glTF.exe;tools/mixamo_to_skate/tools" `
+        --add-binary "$importerBinaries/*.dll;tools/mixamo_to_skate/tools" `
         --exclude-module bpy --exclude-module mathutils `
         --copy-metadata numpy --copy-metadata Pillow --copy-metadata PyInstaller `
         --add-data "$sourceStage/tools;tools" --add-data "$ProjectRoot/docs/images/skating-crab.ico;docs/images" `
         --distpath "$stage/support" --workpath target/setup-build/work --specpath target/setup-build tools/setup.py
     if ($LASTEXITCODE -ne 0) { throw 'Setup packaging failed' }
+    & $packagePython tools/mixamo_to_skate/check_package.py --setup "$stage/support/skate3setup.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged character importer verification failed' }
     & $packagePython -m PyInstaller --noconfirm --clean --onefile --windowed --name skate3update `
         --distpath "$stage/support" --workpath target/updater-build/work --specpath target/updater-build tools/updater.py
     if ($LASTEXITCODE -ne 0) { throw 'Updater packaging failed' }
@@ -81,6 +89,8 @@ try {
     $assetPipelinesJson = & $packagePython "$sourceStage/tools/asset_pipeline/versions.py" --tools "$sourceStage/tools"
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify asset extractors' }
     $assetPipelines = $assetPipelinesJson | ConvertFrom-Json
+    $characterCustomiser = (& $packagePython -m tools.asset_pipeline.customiser_setup --fingerprint).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Could not identify character customiser resources' }
     Copy-Item -LiteralPath README.md,docs/THIRD_PARTY_NOTICES.md -Destination $stage
     New-Item -ItemType Directory -Path "$stage/docs/images" -Force | Out-Null
     Copy-Item -LiteralPath docs/images/skating-crab.png -Destination "$stage/docs/images/skating-crab.png"
@@ -88,7 +98,10 @@ try {
     Copy-Item -LiteralPath docs/retail-renderer.md -Destination "$stage/docs/retail-renderer.md"
     Copy-Item -LiteralPath docs/crash-reports.md -Destination "$stage/docs/crash-reports.md"
     Copy-Item -LiteralPath docs/updates.md -Destination "$stage/docs/updates.md"
+    Copy-Item -LiteralPath docs/custom-models.md,docs/mixamo-to-skate.md -Destination "$stage/docs"
+    Copy-Item -LiteralPath docs/character-customisation.md -Destination "$stage/docs"
     New-Item -ItemType Directory -Path "$stage/licenses" -Force | Out-Null
+    Copy-Item -LiteralPath tools/mixamo_to_skate/licenses/FBX2glTF.txt -Destination "$stage/licenses/FBX2glTF.txt"
     Copy-Item -LiteralPath tools/vendor/utt/LICENSE -Destination "$stage/licenses/UTT.txt"
     Copy-Item -LiteralPath tools/vendor/university/LICENSE-PROJECT.md -Destination "$stage/licenses/CustomEngineLayer.txt"
     Copy-Item -LiteralPath vendor/bevy_pbr/LICENSE-MIT -Destination "$stage/licenses/Bevy-MIT.txt"
@@ -108,7 +121,7 @@ try {
     }
     @{
         schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
-        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files; asset_pipelines = $assetPipelines
+        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files; asset_pipelines = $assetPipelines; character_customiser = $characterCustomiser
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
     Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $ProjectRoot 'target/release.json')
     $zip = Join-Path $ProjectRoot 'target/skate3rust-windows-x64.zip'

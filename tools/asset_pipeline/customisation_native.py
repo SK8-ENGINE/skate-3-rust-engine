@@ -8,6 +8,7 @@ corroborated with the native code. See docs/character-customisation.md.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from pathlib import Path
 import struct
@@ -114,5 +115,9 @@ def read_database(game_root: Path, staging: Path) -> dict:
         names.extend(line.replace(".class", "").replace(".xml", "").split("/"))
     names.extend(["Sk8::CAC::MorphPreset", "Sk8::CAC::ColourPreset", "Sk8::CAC::MORPH_ZONES"])
     data = convert(staging / "skaterschema", staging / "skatercollections", names)
+    # Roster names also come from this owned schema report. The gameplay-only
+    # name list deliberately leaves these collections hashed and cannot supply
+    # a complete pro/special character catalogue.
+    write_private(staging / "collections.json", json.dumps(data).encode())
     rows = [r for r in data["collections"] if r["class"].startswith(("cac_", "cas_"))]
     return {"version": 1, "sources": sources, "collections": rows, "morphs": decode_morphs(rows)}

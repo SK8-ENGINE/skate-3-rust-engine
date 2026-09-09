@@ -1,9 +1,23 @@
-# Character customiser V4
+# Character customiser
 
-The dedicated local test build uses `Play Character Customiser V4.bat` and
-`skate3rust-customiser-v4.exe`. Open Escape/Start, then Character customiser.
-The game and launcher have not been executed for validation; the build is ready
-for user playtesting. No existing game executable is replaced.
+Open Escape/Start, then Character customiser in the complete Windows package.
+First-run setup now prepares the clothing/body library, presets, tattoos, all
+owned pro/special characters and their authored lighting. These preparation
+steps previously ran only in private feature-test folders.
+
+Character additions have their own release fingerprint. Updating an already
+prepared copy can build these assets from its original Xbox source without
+reconverting maps. Setup publishes a new character generation only after the
+library, lighting and native roster all succeed. Existing imported models and
+saved profiles are preserved; interrupted preparation can reuse its own cache.
+Players do not need Python, Blender or development tools.
+
+The runtime retains the visible skater if a library is missing or incomplete.
+Returning from a native/imported character reapplies the saved outfit and binds
+its visible rigs again. Native models use their own shader parameter rows and
+specular textures, including torso slots absent from the default stock model.
+Customiser pieces retain tattoo/hair composition and use character SH/key/rim
+lighting on retail maps. Custom maps continue to use their ordinary PBR lights.
 
 ## Hair coverage and gameplay verification (V3)
 
@@ -138,9 +152,9 @@ Release compilation also passes. Interactive layout, controller feel and visual
 appearance still require the user's game test.
 
 This is a sandbox catalogue, with owned items available irrespective of career
-unlock state. The existing StandardMaterial lighting remains in use. Full retail
-lighting/multipass material parity is outside this UI/profile update; primary
-clothing tint is not a claim of every native colour-zone effect.
+unlock state. The runtime now shares its retail character lighting with the
+customiser; full multipass retail parity and every native colour-zone effect
+remain outside this adapter's implementation.
 
 ## Additional native evidence for V2
 

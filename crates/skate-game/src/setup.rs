@@ -23,10 +23,12 @@ pub(crate) fn asset_root() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let root = exe.parent().ok_or("No executable directory")?;
     let base = root.join("data");
+    let mut expected_customiser = None;
     let expected = match std::fs::read(root.join("release.json")) {
         Ok(bytes) => {
             let text = std::str::from_utf8(&bytes).map_err(|e| e.to_string())?.trim_start_matches('\u{feff}');
             let release: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+            expected_customiser = release["character_customiser"].as_str().map(str::to_owned);
             release.get("asset_pipelines").cloned()
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -34,7 +36,8 @@ pub(crate) fn asset_root() -> Result<PathBuf, String> {
     };
     let existing = installed(&base)?;
     if let Some((assets, marker)) = &existing {
-        if expected.as_ref().is_none_or(|versions| marker.get("pipelines") == Some(versions)) {
+        if expected.as_ref().is_none_or(|versions| marker.get("pipelines") == Some(versions))
+            && customiser_current(assets, expected_customiser.as_deref()) {
             return Ok(assets.clone());
         }
     }
@@ -55,5 +58,19 @@ pub(crate) fn asset_root() -> Result<PathBuf, String> {
     if expected.as_ref().is_some_and(|versions| marker.get("pipelines") != Some(versions)) {
         return Err("Setup helper does not match this release's asset extractors. Unpack the complete package.".into());
     }
+    if !customiser_current(&assets, expected_customiser.as_deref()) {
+        return Err("Character customiser preparation did not complete for this release.".into());
+    }
     Ok(assets)
+}
+
+fn customiser_current(assets: &Path, expected: Option<&str>) -> bool {
+    expected.is_none_or(|expected| {
+        std::fs::read(assets.join("private/customisation/current.json")).ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .is_some_and(|v| v["version"].as_u64() == Some(1) && v["fingerprint"].as_str() == Some(expected)
+                && v["set"].as_str().is_some_and(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit())))
+            && ["library-v3.json", "extra-menu.json", "native-lighting.json", "native-roster/complete.json"].iter()
+                .all(|name| crate::customiser_parts::asset_directory(assets).join(name).is_file())
+    })
 }
