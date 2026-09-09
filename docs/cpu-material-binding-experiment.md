@@ -39,6 +39,15 @@ CPU batching is enabled again in v8. No FPS gain is claimed until a matched user
 capture measures main opaque encoder finish, total command generation and frame
 times. No gameplay was launched during this work.
 
+Private v8 release build `de37c6e16722e2e68259e458cc12d5f78aeb71cb` compiled
+with static CRT. The embedded revision, PDB presence and system-only DLL imports
+were verified without executing the game. EXE SHA-256:
+`b5c6d46b5861c3e34d75d47e061318f3ea3b69b7c8cb2aca87074fd7b2621532`.
+`TRACE-UNIVERSITY-CPU-FIX.bat` launches this build against the existing assets and
+records 20 seconds after F9. The former bindless launcher also selects v8;
+the recovery launcher still selects v7 for comparison. Existing compiler warnings
+remain. Headless GPU checks above passed; gameplay/FPS acceptance is still pending.
+
 ## v6/v7 history
 
 **Withdrawn after the user's runtime test.** Build `bea625f` exited with native
