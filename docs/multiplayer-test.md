@@ -38,7 +38,7 @@ Test skating into each other, board impacts, tricks, bails, walking, board retri
 
 ## Online setup
 
-On one PC choose **Esc > Multiplayer > Host via Steam / Spacewar**. On each other PC/account enter the same host code in the multiplayer menu and choose Join. Up to nine guests can join. Everyone needs compatible protocol and physical definitions. Map differences do not block joining; players on different maps can appear inside scenery or see different collisions. Visual outfit/rig differences use the default skater. Unknown identifiers never become asset paths. An incompatible visual hierarchy uses the default idle pose instead of foreign bone indices.
+On one PC choose **Esc > Multiplayer > Host via Steam / Spacewar**. On each other PC/account enter the same host code in the multiplayer menu and choose Join. Up to nine guests can join. Map, physics and version fingerprints do not block joining. Different wire protocols may still fail to communicate; players on different maps can appear inside scenery or see different collisions. Visual outfit/rig differences use the default skater. Unknown identifiers never become asset paths. An incompatible visual hierarchy uses the default idle pose instead of foreign bone indices.
 
 The host is an ordinary player, not a dedicated server. All guests connect to that host; it forwards the newest state to the other players. Transport, player IDs, codec, membership, budgets and rendering are independent of Steam. Spacewar/AppID 480 is the optional connection/relay provider. The game has no Steam DLL dependency and neither executable invokes Steam Input. Two processes under one Steam account still require the local launcher for testing.
 

@@ -200,11 +200,6 @@ impl Multiplayer {
         let Some(row) = self.browser_rows.get(index) else {
             return;
         };
-        if !row.compatible {
-            self.browser_status =
-                "Incompatible physics or multiplayer protocol. Use compatible game versions.".into();
-            return;
-        }
         if row.players >= row.capacity {
             self.browser_status = "Lobby is full. Refresh to check for a free slot.".into();
             return;

@@ -286,11 +286,8 @@ impl Session {
             if !r.0.is_empty() || info.id != actor || actor == self.local {
                 return;
             }
-            let own = self.local_info();
-            // Map identity is descriptive; joining different worlds is allowed.
-            let error = if info.physics != own.physics {
-                2
-            } else if !self.links.contains_key(&peer) && self.links.len() >= MAX_PLAYERS - 1 {
+            // Map, rig and physics fingerprints describe peers; they do not gate admission.
+            let error = if !self.links.contains_key(&peer) && self.links.len() >= MAX_PLAYERS - 1 {
                 3
             } else {
                 0
@@ -344,7 +341,6 @@ impl Session {
                 };
                 if info.id == 0
                     || infos.iter().any(|i: &Info| i.id == info.id)
-                    || info.physics != self.local_info().physics
                 {
                     return;
                 }

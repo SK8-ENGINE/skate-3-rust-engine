@@ -125,7 +125,7 @@ fn admission_full_lobby_mismatch_departure_and_rejoin() {
     bad.physics = 99;
     let mut guest = Session::new(1, bad, Some(1));
     exchange(&mut host, &mut guest, 12, 1300);
-    assert!(guest.notice.contains("Physics"));
+    assert!(guest.notice.contains("full"));
     host.receive(2, &packed::header(1, 2, skate_net::lobby::GOODBYE, 0), 1400);
     assert_eq!(host.actors.len(), 9);
     exchange(&mut host, &mut extra, 11, 1700);
@@ -261,10 +261,12 @@ fn occupied_driver_flag_preserves_root_without_native_collision_parts() {
 }
 
 #[test]
-fn different_maps_can_join_and_exchange_body_updates() {
+fn different_maps_physics_and_rigs_can_join_and_exchange_body_updates() {
     let mut host = Session::new(1, info(1), None);
     let mut other = info(2);
     other.map = 88;
+    other.physics = 99;
+    other.rig = 77;
     let mut guest = Session::new(1, other, Some(1));
     exchange(&mut host, &mut guest, 2, 100);
     assert!(guest.connected());
@@ -274,4 +276,11 @@ fn different_maps_can_join_and_exchange_body_updates() {
     exchange(&mut host, &mut guest, 2, 200);
     assert!(host.actors[&2].body.latest().is_some());
     assert!(guest.actors[&1].body.latest().is_some());
+}
+
+#[test]
+fn discovery_accepts_other_game_versions_but_not_unrelated_spacewar_lobbies() {
+    assert!(skate_net::directory::is_game_lobby("skate3rust-free-skate-v4"));
+    assert!(skate_net::directory::is_game_lobby("skate3rust-free-skate-v5"));
+    assert!(!skate_net::directory::is_game_lobby("another-game"));
 }

@@ -5,8 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 use steamworks::{
-    Client, DistanceFilter, LobbyId, LobbyKey, LobbyType, Matchmaking, StringFilter,
-    StringFilterKind,
+    Client, DistanceFilter, LobbyId, LobbyKey, LobbyType, Matchmaking, StringFilter, StringFilterKind,
 };
 enum ResultEvent {
     List(u64, usize, u64, u64, Result<Vec<LobbyId>, String>),
@@ -73,10 +72,15 @@ impl Directory {
         let id = r.id;
         match r.command {
             Command::Browse { page, map, physics } => {
+                // Keep unrelated Spacewar lobbies out of Steam's bounded result set,
+                // while accepting every version of our namespace.
                 mm.add_request_lobby_list_string_filter(StringFilter(
-                    LobbyKey::new("sk8game"),
-                    directory::NAMESPACE,
-                    StringFilterKind::Equal,
+                    LobbyKey::new("sk8game"), "skate3rust-free-skate-v",
+                    StringFilterKind::EqualToOrGreaterThan,
+                ));
+                mm.add_request_lobby_list_string_filter(StringFilter(
+                    LobbyKey::new("sk8game"), "skate3rust-free-skate-w",
+                    StringFilterKind::LessThan,
                 ));
                 mm.set_request_lobby_list_distance_filter(DistanceFilter::Worldwide);
                 mm.request_lobby_list(move |result| {
@@ -124,10 +128,6 @@ impl Directory {
         };
         None
     }
-    fn compatible(mm: &Matchmaking, l: LobbyId, _map: u64, physics: u64) -> bool {
-        mm.lobby_data(l, "sk8game").as_deref() == Some(directory::NAMESPACE)
-            && mm.lobby_data(l, "physics") == Some(physics.to_string())
-    }
     fn owner_event(&mut self, mm: &Matchmaking, own: u64) -> Option<Event> {
         let l = self.lobby?;
         let owner = mm.lobby_owner(l).raw();
@@ -162,11 +162,11 @@ impl Directory {
                 continue;
             }
             let event = match result {
-                ResultEvent::List(_, page, map, physics, result) => match result {
+                ResultEvent::List(_, page, _map, _physics, result) => match result {
                     Err(e) => Event::Error(e),
                     Ok(mut list) => {
                         list.retain(|&l| {
-                            mm.lobby_data(l, "sk8game").as_deref() == Some(directory::NAMESPACE)
+                            mm.lobby_data(l, "sk8game").is_some_and(|name| directory::is_game_lobby(&name))
                         });
                         list.sort_by_key(LobbyId::raw);
                         let total = list.len();
@@ -183,7 +183,7 @@ impl Directory {
                                 ),
                                 players: mm.lobby_member_count(l).min(10),
                                 capacity: mm.lobby_member_limit(l).unwrap_or(10).min(10),
-                                compatible: Self::compatible(&mm, l, map, physics),
+                                compatible: true,
                             })
                             .collect();
                         Event::Rows { page, total, rows }
@@ -206,17 +206,12 @@ impl Directory {
                         }
                     }
                 },
-                ResultEvent::Join(_, map, physics, result) => match result {
+                ResultEvent::Join(_, _map, _physics, result) => match result {
                     Err(e) => Event::Error(e),
                     Ok(l) => {
-                        if !Self::compatible(&mm, l, map, physics) {
-                            mm.leave_lobby(l);
-                            Event::Error("Incompatible physics or multiplayer protocol. Use compatible game versions.".into())
-                        } else {
-                            self.lobby = Some(l);
-                            self.owner_event(&mm, own)
-                                .unwrap_or(Event::Error("Steam lobby owner unavailable".into()))
-                        }
+                        self.lobby = Some(l);
+                        self.owner_event(&mm, own)
+                            .unwrap_or(Event::Error("Steam lobby owner unavailable".into()))
                     }
                 },
             };
