@@ -10,6 +10,16 @@ use skate_core::{
 const SCORABLE: &str = "Hash_6918469984A8C596";
 const TUNING: &str = "Hash_349215E2E817703C";
 
+fn scorable_keys(data: &Collections) -> std::collections::BTreeSet<String> {
+    // Setup's name dictionary may resolve the class as `scoring_trick`.
+    // Presence checks must use the same native identities as Collections::field.
+    data.entries()
+        .iter()
+        .filter(|row| crate::attrib_hash::numeric_name(&row.class_name) == SCORABLE)
+        .map(|row| crate::attrib_hash::numeric_name(&row.key))
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 pub struct Definition {
     pub metadata: Scorable,
@@ -53,14 +63,11 @@ impl ScoringData {
     }
     pub fn load(data: &Collections) -> Result<Self, String> {
         let mut definitions = Vec::new();
+        let available = scorable_keys(data);
         for (id, &(identifier, class, score_type)) in IDENTIFIERS.iter().enumerate() {
             // The executable enum includes unused entries without VLT records.
             // Only actual records are eligible for recognition.
-            if !data.entries().iter().any(|r| {
-                r.class_name == SCORABLE
-                    && (r.key == identifier
-                        || r.key == crate::attrib_hash::numeric_name(identifier))
-            }) {
+            if !available.contains(&crate::attrib_hash::numeric_name(identifier)) {
                 continue;
             }
             let words = |name| data.words::<1>(SCORABLE, identifier, name).map(|v| v[0]);
@@ -129,6 +136,29 @@ impl ScoringData {
     }
     pub fn by_id(&self, id: usize) -> Option<&Definition> {
         self.definitions.iter().find(|d| d.metadata.id == id)
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn scoring_presence_accepts_readable_and_numeric_vault_names() {
+        let key = IDENTIFIERS[0].0;
+        let numeric_key = crate::attrib_hash::numeric_name(key);
+        for class in ["scoring_trick", SCORABLE, "0x6918469984a8c596"] {
+            for name in [key, numeric_key.as_str()] {
+                let data: Collections = serde_json::from_value(serde_json::json!({
+                    "version": 1,
+                    "collections": [{"class": class, "key": name, "parent": "",
+                        "source": "fixture", "sha256": "", "fields": {}},
+                        {"class": "unrelated", "key": "other", "parent": "",
+                        "source": "fixture", "sha256": "", "fields": {}}]
+                })).unwrap();
+                assert_eq!(scorable_keys(&data), [numeric_key.clone()].into());
+            }
+        }
     }
 }
 

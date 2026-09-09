@@ -24,11 +24,12 @@ def font_mapping(collections: Path, cache: AssetCache) -> dict:
     data = json.loads(collections.read_text(encoding='utf-8'))
     result = {}
     for row in data['collections']:
-        if row['class'] != 'Hash_FECFBCAF356518C4':
+        class_id = int(row['class'][5:], 16) if row['class'].startswith('Hash_') else hash64(row['class'])
+        if class_id != 0xFECFBCAF356518C4:
             continue
         def field(name):
             return row['fields'].get(name, row['fields'].get(f'Hash_{hash64(name):016X}'))
-        apt_name = row['fields']['Hash_340832CCFD9FDEB4']['data']
+        apt_name = field('AptName')['data']
         filename = field('FileName')['data']
         matches = [r for r in cache.manifest['bundles']
                    if 'font' in r and Path(r['name']).name == filename]
