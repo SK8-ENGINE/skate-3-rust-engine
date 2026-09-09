@@ -102,7 +102,7 @@ impl PreparedScene {
                     &mut self.meshes, &mut self.images, &mut self.sky, &mut self.retail);
             } else {
                 custom_lighting(map, &mut self.commands);
-                celestial_bodies(&mut self.commands, &mut self.meshes, &mut self.materials);
+                celestial_bodies(&mut self.commands, &mut self.meshes, &mut self.materials, &mut self.images);
             }
         } else {
             crate::world::spawn_test_world(&mut self.commands, &mut self.meshes, &mut self.materials);
@@ -142,24 +142,79 @@ fn orbit(azimuth: f32, hour: f32) -> Vec3 {
 
 #[derive(Component)]
 pub(crate) struct CelestialBody { moon: bool }
-fn celestial_bodies(commands: &mut SceneCommands, meshes: &mut StagedAssets<Mesh>, materials: &mut StagedAssets<StandardMaterial>) {
-    let disc = meshes.add(Circle::new(1.).mesh().resolution(64).build());
+fn celestial_bodies(commands: &mut SceneCommands, meshes: &mut StagedAssets<Mesh>, materials: &mut StagedAssets<StandardMaterial>, images: &mut StagedAssets<Image>) {
+    let disc = meshes.add(Rectangle::new(2., 2.).into());
     for moon in [false, true] {
-        let color = if moon { Color::srgb(0.78, 0.84, 0.96) } else { Color::srgb(1., 0.9, 0.55) };
+        let texture = images.add(celestial_texture(moon));
         commands.spawn((
             Name::new(if moon { "Custom moon" } else { "Custom sun" }),
             CelestialBody { moon }, Mesh3d(disc.clone()),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: color, unlit: true, cull_mode: None, ..default()
+                base_color_texture: Some(texture), alpha_mode: AlphaMode::Blend,
+                unlit: true, cull_mode: None, ..default()
             })),
             Transform::default(), Visibility::Hidden,
             bevy::light::NotShadowCaster, bevy::light::NotShadowReceiver,
         ));
     }
 }
+/// Generated once during off-thread map preparation, never during gameplay.
+/// A transparent border contains the corona/halo without a hard square edge.
+fn celestial_texture(moon: bool) -> Image {
+    const SIZE: u32 = 256;
+    let mut pixels = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    let craters = [(-0.35f32, 0.2f32, 0.22f32), (0.28, -0.3, 0.16),
+        (0.35, 0.4, 0.12), (-0.12, -0.58, 0.1), (-0.5, -0.28, 0.13),
+        (0.05, 0.15, 0.08), (0.62, 0.02, 0.1), (-0.15, 0.62, 0.09)];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let u = (x as f32 + 0.5) * 2. / SIZE as f32 - 1.;
+            let v = (y as f32 + 0.5) * 2. / SIZE as f32 - 1.;
+            let r = u.hypot(v);
+            let q = r / 0.35;
+            let edge = ((1. - q) * 60.).clamp(0., 1.);
+            let (rgb, alpha) = if q <= 1. {
+                if moon {
+                    let px = u / 0.35;
+                    let py = v / 0.35;
+                    let mut tone = 0.73 + 0.055 * (px * 19. + (py * 13.).sin()).sin()
+                        + 0.035 * (py * 37. + px * 29.).cos();
+                    for (cx, cy, radius) in craters {
+                        let d = (px - cx).hypot(py - cy) / radius;
+                        tone -= 0.19 * (-d * d * 2.).exp();
+                        tone += 0.12 * (-((d - 1.) * 7.).powi(2)).exp();
+                    }
+                    tone *= 0.65 + 0.35 * (1. - q * q).max(0.).sqrt();
+                    ([tone * 0.94, tone * 0.98, tone * 1.07], edge)
+                } else {
+                    ([1., 0.96 - q * 0.13, 0.78 - q * 0.32], edge)
+                }
+            } else {
+                let angle = v.atan2(u);
+                let rays = if moon { 1. } else {
+                    0.65 + 0.2 * (angle * 12. + r * 9.).sin().powi(2)
+                        + 0.15 * (angle * 23. - r * 6.).cos().powi(2)
+                };
+                let glow = (-(q - 1.) * if moon { 4. } else { 2.4 }).exp()
+                    * (1. - r).max(0.).powi(2) * rays;
+                (if moon { [0.55, 0.68, 1.] } else { [1., 0.63, 0.16] },
+                    glow * if moon { 0.36 } else { 0.85 })
+            };
+            for c in rgb { pixels.push((c.clamp(0., 1.) * 255.) as u8); }
+            pixels.push((alpha.clamp(0., 1.) * 255.) as u8);
+        }
+    }
+    Image::new(
+        bevy::render::render_resource::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2, pixels,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    )
+}
 /// Follow the final gameplay camera before transform propagation, with no
 /// parallax. Ordinary depth testing lets buildings and terrain obscure them.
 pub(crate) fn position_celestial_bodies(
+    time: Res<Time<Virtual>>,
     environment: Query<&DayEnvironment>,
     camera: Query<(&Transform, &Projection), (With<crate::camera::GameplayCamera>, Without<CelestialBody>)>,
     mut bodies: Query<(&CelestialBody, &mut Transform, &mut Visibility), Without<crate::camera::GameplayCamera>>,
@@ -172,7 +227,11 @@ pub(crate) fn position_celestial_bodies(
         *visibility = if direction.y > 0. { Visibility::Inherited } else { Visibility::Hidden };
         *transform = Transform::from_translation(camera.translation + direction * distance)
             .looking_at(camera.translation, if direction.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y })
-            .with_scale(Vec3::splat(distance * if body.moon { 0.014 } else { 0.012 }));
+            .with_scale(Vec3::splat(distance * if body.moon { 0.13 } else { 0.115 }));
+        if !body.moon {
+            transform.rotate_local_z(time.elapsed_secs() * 0.025);
+            transform.scale *= 1. + 0.012 * (time.elapsed_secs() * 0.8).sin();
+        }
     }
 }
 fn daylight_values(e: &[f32], hour: f32) -> (Color, f32, f32, Transform, f32) {

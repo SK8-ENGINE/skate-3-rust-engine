@@ -179,4 +179,10 @@ are hidden below the horizon, and use normal depth testing for scenery occlusion
 They are placed just inside the camera far plane and have fixed angular sizes.
 These are lightweight unlit meshes, not extra lights or shadow casters. They
 remain visible with zero ambient. Their scene-owned meshes/materials retire on
-map switches; retail skies are unchanged. Moon phases and textures are not added.
+map switches; retail skies are unchanged. Moon phases are not added.
+
+The sun and moon now have roughly 3.3x their original apparent diameter.
+Two scene-owned 256px procedural textures add a feathered golden solar corona
+and cool lunar halo with crater rims and mottled surface detail. The solar
+corona rotates slowly with a subtle pulse while gameplay runs. Texture creation
+stays in map preparation; runtime still uses two mesh draws and transform updates.
