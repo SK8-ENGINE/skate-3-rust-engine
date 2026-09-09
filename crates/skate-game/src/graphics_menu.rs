@@ -599,7 +599,7 @@ fn labels(
                             if r.compatible {
                                 ""
                             } else {
-                                " | different map/build"
+                                " | incompatible physics/protocol"
                             }
                         )
                     })

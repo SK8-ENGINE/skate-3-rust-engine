@@ -124,9 +124,8 @@ impl Directory {
         };
         None
     }
-    fn compatible(mm: &Matchmaking, l: LobbyId, map: u64, physics: u64) -> bool {
+    fn compatible(mm: &Matchmaking, l: LobbyId, _map: u64, physics: u64) -> bool {
         mm.lobby_data(l, "sk8game").as_deref() == Some(directory::NAMESPACE)
-            && mm.lobby_data(l, "map") == Some(map.to_string())
             && mm.lobby_data(l, "physics") == Some(physics.to_string())
     }
     fn owner_event(&mut self, mm: &Matchmaking, own: u64) -> Option<Event> {
@@ -212,7 +211,7 @@ impl Directory {
                     Ok(l) => {
                         if !Self::compatible(&mm, l, map, physics) {
                             mm.leave_lobby(l);
-                            Event::Error("Different map, physics, or game version. Load the matching map/build first.".into())
+                            Event::Error("Incompatible physics or multiplayer protocol. Use compatible game versions.".into())
                         } else {
                             self.lobby = Some(l);
                             self.owner_event(&mm, own)

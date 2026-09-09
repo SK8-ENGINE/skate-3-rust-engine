@@ -122,11 +122,6 @@ fn admission_full_lobby_mismatch_departure_and_rejoin() {
     assert!(extra.notice.contains("full"));
     assert!(!extra.connected());
     let mut bad = info(12);
-    bad.map = 88;
-    let mut guest = Session::new(1, bad, Some(1));
-    exchange(&mut host, &mut guest, 12, 1200);
-    assert!(guest.notice.contains("Map"));
-    bad.map = 1;
     bad.physics = 99;
     let mut guest = Session::new(1, bad, Some(1));
     exchange(&mut host, &mut guest, 12, 1300);
@@ -263,4 +258,20 @@ fn occupied_driver_flag_preserves_root_without_native_collision_parts() {
     let decoded=packed::apply(&bytes,None).unwrap().unpack_body().unwrap();
     assert_eq!(decoded.enabled,1u64<<62);assert_eq!(decoded.root.p,frame.root.p);
     frame.enabled=1u64<<61;assert!(Packed::body(&frame).is_none());
+}
+
+#[test]
+fn different_maps_can_join_and_exchange_body_updates() {
+    let mut host = Session::new(1, info(1), None);
+    let mut other = info(2);
+    other.map = 88;
+    let mut guest = Session::new(1, other, Some(1));
+    exchange(&mut host, &mut guest, 2, 100);
+    assert!(guest.connected());
+    assert_eq!(host.actors[&2].info.map, 88);
+    host.publish(packed::BODY, Packed::body(&body()).unwrap(), 150);
+    guest.publish(packed::BODY, Packed::body(&body()).unwrap(), 150);
+    exchange(&mut host, &mut guest, 2, 200);
+    assert!(host.actors[&2].body.latest().is_some());
+    assert!(guest.actors[&1].body.latest().is_some());
 }

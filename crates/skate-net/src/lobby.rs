@@ -287,9 +287,8 @@ impl Session {
                 return;
             }
             let own = self.local_info();
-            let error = if info.map != own.map {
-                1
-            } else if info.physics != own.physics {
+            // Map identity is descriptive; joining different worlds is allowed.
+            let error = if info.physics != own.physics {
                 2
             } else if !self.links.contains_key(&peer) && self.links.len() >= MAX_PLAYERS - 1 {
                 3
@@ -345,7 +344,6 @@ impl Session {
                 };
                 if info.id == 0
                     || infos.iter().any(|i: &Info| i.id == info.id)
-                    || info.map != self.local_info().map
                     || info.physics != self.local_info().physics
                 {
                     return;

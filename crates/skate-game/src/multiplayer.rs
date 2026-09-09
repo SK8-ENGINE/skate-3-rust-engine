@@ -202,7 +202,7 @@ impl Multiplayer {
         };
         if !row.compatible {
             self.browser_status =
-                "Different map/build. Load the matching map before joining.".into();
+                "Incompatible physics or multiplayer protocol. Use compatible game versions.".into();
             return;
         }
         if row.players >= row.capacity {
