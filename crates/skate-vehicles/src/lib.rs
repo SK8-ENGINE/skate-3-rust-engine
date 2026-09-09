@@ -1,6 +1,8 @@
 //! Bevy-independent, fixed-step Rapier vehicle simulation and validated mod definitions.
 mod definition;
 mod safety;
+mod handling;
+mod assists;
 pub use safety::Ejection;
 pub use definition::*;
 pub use rapier3d;
@@ -14,6 +16,8 @@ use std::collections::BTreeMap;
 pub struct Controls {
     pub throttle: f32,
     pub steering: f32,
+    /// Positive pitches the nose down in flight; ignored on the ground.
+    pub pitch: f32,
     pub brake: f32,
     pub handbrake: bool,
 }
@@ -22,6 +26,8 @@ impl Controls {
         self.throttle.is_finite()
             && self.steering.is_finite()
             && self.brake.is_finite()
+            && self.pitch.is_finite()
+            && (-1. ..=1.).contains(&self.pitch)
             && (-1. ..=1.).contains(&self.throttle)
             && (-1. ..=1.).contains(&self.steering)
             && (0. ..=1.).contains(&self.brake)
@@ -32,6 +38,7 @@ pub struct Vehicle {
     pub body: RigidBodyHandle,
     pub controller: DynamicRayCastVehicleController,
     pub controls: Controls,
+    handling: handling::Handling,
     rider: ColliderHandle,
     occupied: bool,
     pub remote: bool,
@@ -64,7 +71,10 @@ impl Simulation {
         if vertices.is_empty() {
             return Err("Vehicle collision world has no triangles".into());
         }
-        let collider = ColliderBuilder::trimesh(vertices, indices)
+        // Weld shared vertices and use neighboring face normals at internal edges.
+        // Keep authored triangles: this does not simplify or delete map geometry.
+        let collider = ColliderBuilder::trimesh_with_flags(vertices, indices,
+            rapier3d::parry::shape::TriMeshFlags::FIX_INTERNAL_EDGES)
             .map_err(|e| e.to_string())?
             .friction(1.);
         self.world.insert(RigidBodyBuilder::fixed(), collider);
@@ -100,7 +110,8 @@ impl Simulation {
                 .angular_damping(0.5),
             shape.translation(Vector::from_array(d.collider_offset))
                 .mass_properties(mass_properties)
-                .friction(d.chassis_friction),
+                .friction(d.chassis_friction)
+                .friction_combine_rule(CoefficientCombineRule::Min),
         );
         let mut controller = DynamicRayCastVehicleController::new(body);
         controller.index_up_axis = 1;
@@ -137,6 +148,7 @@ impl Simulation {
                 body,
                 controller,
                 controls: Controls::default(),
+                handling: handling::Handling::default(),
                 rider, remote: false, occupied: false, inverted_time: 0., ejection: None,
             },
         );
@@ -155,33 +167,10 @@ impl Simulation {
         let steps = (dt / 0.008334).ceil().clamp(1., 16.) as u32;
         let h = dt.min(0.1) / steps as f32;
         for _ in 0..steps {
-            let before = self.capture_riders();
             self.world.integration_parameters.dt = h;
             for v in self.vehicles.values_mut() {
                 if v.remote {continue;}
-                let c = v.controls;
-                let speed = v.controller.current_vehicle_speed;
-                let d = &v.definition;
-                let driven = d.wheels.iter().filter(|w| w.driven).count() as f32;
-                for (wheel, def) in v.controller.wheels_mut().iter_mut().zip(&d.wheels) {
-                    wheel.steering = if def.steering {
-                        // With +Z forward and +Y up, the driver's left is +X.
-                        c.steering * d.steering_angle / (1. + speed.abs() * 0.025)
-                    } else {
-                        0.
-                    };
-                    wheel.engine_force =
-                        if def.driven && (speed.abs() < d.max_speed || c.throttle * speed < 0.) {
-                            c.throttle * d.engine_force / driven
-                        } else {
-                            0.
-                        };
-                    wheel.brake = if c.handbrake && !def.steering {
-                        d.brake_impulse
-                    } else {
-                        c.brake * d.brake_impulse
-                    };
-                }
+                handling::prepare(v, &mut self.world.bodies, h);
                 let queries = self.world.broad_phase.as_query_pipeline_mut(
                     self.world.narrow_phase.query_dispatcher(),
                     &mut self.world.bodies,
@@ -189,8 +178,17 @@ impl Simulation {
                     QueryFilter::default().exclude_rigid_body(v.body),
                 );
                 v.controller.update_vehicle(h, queries);
+                handling::tires(v, &mut self.world.bodies, &self.world.colliders, h);
+                assists::apply(v, &mut self.world.bodies, h);
             }
+            // Capture after suspension/tire impulses so crash delta-v measures the
+            // collision solve, not the normal driving forces preceding it.
+            let before = self.capture_riders();
             self.world.step();
+            for v in self.vehicles.values_mut().filter(|v| !v.remote) {
+                let body = &self.world.bodies[v.body];
+                v.controller.current_vehicle_speed = body.linvel().dot(body.rotation() * Vector::Z);
+            }
             self.check_riders(&before, h);
         }
     }
@@ -209,6 +207,14 @@ impl Simulation {
         b.set_linvel(Vector::ZERO, true);
         b.set_angvel(Vector::ZERO, true);
         v.controls = Controls::default();
+        v.handling = handling::Handling::default();
+        v.controller.current_vehicle_speed = 0.;
+        for wheel in v.controller.wheels_mut() {
+            wheel.rotation = 0.;
+            wheel.steering = 0.;
+            wheel.forward_impulse = 0.;
+            wheel.side_impulse = 0.;
+        }
         v.ejection = None; v.inverted_time = 0.;
         Ok(())
     }

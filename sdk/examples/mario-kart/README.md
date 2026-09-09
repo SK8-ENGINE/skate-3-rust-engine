@@ -1,9 +1,22 @@
 # Mario Kart vehicle mod
+Version 1.5 adds arcade rollover resistance and airborne left-stick control.
+In air, stick left/right rolls, forward pitches the nose down, and back pitches
+the nose up. Keyboard: A/D roll, Up/Down arrows pitch. Neutral input damps rotation.
+No lift is added. Aerial inversion is allowed; sustained grounded inversion still
+ejects. Minor bumps are more forgiving; severe collisions still eject the rider.
+The matching updated host executable is required.
 Enable this mod in Mods, resume, then press F10 to spawn the kart in front of you.
 E (controller Y) enters/exits within 4 metres (slow below 3 m/s to exit). WASD drives; Space brakes;
 left Shift is the handbrake; R or right-stick click rights/resets the kart. The controller bind can be changed to left-stick click in the mod settings. F10 replaces the kart.
 
 Controller: RT/LT accelerate/reverse, left stick steers, A brakes, B handbrakes.
+Version 1.4 uses the updated host's physical tire model: progressive steering,
+Ackermann wheel angles, torque-driven wheel spin, shared braking/cornering grip,
+and contact-point weight transfer. Brake overrides throttle; the opposing pedal
+brakes before engaging reverse. Tire friction defaults to 1.3. The old arcade
+grip preference is replaced by this new coefficient; other settings are retained.
+This package requires the matching updated game executable. It remains a
+simplified raycast-wheel kart, without a gearbox or ABS.
 The enabled mod shows keyboard and controller controls on screen, including the current reset bind. Toggle Show driving HUD in its settings to hide/show them, even before spawning.
 
 The GLB is prepared from your supplied ZIP with tools/prepare_mario_kart.py and is

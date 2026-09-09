@@ -115,7 +115,16 @@ pub(super) fn advance(
         skater.offboard_grab.execute_queries(&scene)?;
     }
     let state_before_selection = skater.player_state.current();
-    if !vehicle_ejected { player_state::post_input_and_select(physics, skater)?; }
+    if vehicle_ejected {
+        // Vehicle ejection is a host transition that must retain WipeoutGround,
+        // so it bypasses the native state selector. ProcessInput has already
+        // prepared this tick's grind work, however, and native PostInput is its
+        // mandatory consumer. Skipping both phases leaves a stale request that
+        // aborts the following tick.
+        player_state::complete_post_input(physics, skater)?;
+    } else {
+        player_state::post_input_and_select(physics, skater)?;
+    }
     let state_after_selection = skater.player_state.current();
     super::offboard_audit_trace::stage(tick, "selected", physics, skater, controls);
     #[cfg(test)]

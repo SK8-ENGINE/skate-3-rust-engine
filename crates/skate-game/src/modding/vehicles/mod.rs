@@ -273,10 +273,6 @@ pub(super) fn command(
                 let id = v.owned.get(&owned_key).ok_or("Unknown vehicle")?.id;
                 let car = v.simulation.vehicles.get_mut(&id).unwrap();
                 car.definition = tuning.apply(&car.definition)?;
-                let grip = car.definition.tire_grip;
-                for wheel in car.controller.wheels_mut() {
-                    wheel.friction_slip = grip;
-                }
             }
             Command::VehicleSpawn {
                 definition,
@@ -742,5 +738,7 @@ pub(super) fn input(world: &World) -> Value {
         .resource::<crate::input::ControllerInput>()
         .raw_input();
     let pressed = |key| if keys.pressed(key) { 1. } else { 0. };
-    json!({"throttle":(pressed(KeyCode::KeyW)-pressed(KeyCode::KeyS)+pad.triggers[1]-pad.triggers[0]).clamp(-1.,1.),"steering":(pressed(KeyCode::KeyA)-pressed(KeyCode::KeyD)-if pad.left[0].abs()>0.15 {pad.left[0]} else {0.}).clamp(-1.,1.),"brake":if pad.buttons & 0x1000 != 0 {1.} else {pressed(KeyCode::Space)},"handbrake":keys.pressed(KeyCode::ShiftLeft) || pad.buttons & 0x2000 != 0,"interact":keys.pressed(KeyCode::KeyE) || pad.buttons & 0x8000 != 0,"pad_buttons":pad.buttons})
+    let pitch = (pressed(KeyCode::ArrowUp) - pressed(KeyCode::ArrowDown)
+        + if pad.left[1].abs() > 0.15 { pad.left[1] } else { 0. }).clamp(-1., 1.);
+    json!({"pitch":pitch,"throttle":(pressed(KeyCode::KeyW)-pressed(KeyCode::KeyS)+pad.triggers[1]-pad.triggers[0]).clamp(-1.,1.),"steering":(pressed(KeyCode::KeyA)-pressed(KeyCode::KeyD)-if pad.left[0].abs()>0.15 {pad.left[0]} else {0.}).clamp(-1.,1.),"brake":if pad.buttons & 0x1000 != 0 {1.} else {pressed(KeyCode::Space)},"handbrake":keys.pressed(KeyCode::ShiftLeft) || pad.buttons & 0x2000 != 0,"interact":keys.pressed(KeyCode::KeyE) || pad.buttons & 0x8000 != 0,"pad_buttons":pad.buttons})
 }
