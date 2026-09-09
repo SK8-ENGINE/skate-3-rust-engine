@@ -236,6 +236,7 @@ pub(super) fn spawn(
 
 fn bind(
     mut commands: Commands,
+    net: Res<Multiplayer>,
     mut skins: ResMut<RemoteSkins>,
     skater: Res<SkaterRuntime>,
     meshes: Query<(Entity, &SkinnedMesh)>,
@@ -249,7 +250,21 @@ fn bind(
     pieces: Query<&OutfitPiece>,
     mut morphs: Query<(Entity, &mut MorphWeights)>,
 ) {
-    for skin in skins.actors.values_mut() {
+    let initial_poses: BTreeMap<_, _> = skins
+        .actors
+        .iter()
+        .filter(|(_,skin)|skin.pending.is_some())
+        .map(|(&id,_)| {
+            let bones = net
+                .remotes
+                .get(&id)
+                .and_then(|r| r.poses.back())
+                .map(|p| p.bones.as_slice())
+                .unwrap_or(&[]);
+            (id, globals(bones, &skins))
+        })
+        .collect();
+    for (id, skin) in skins.actors.iter_mut() {
         let Some(p) = skin.pending.as_ref() else {
             continue;
         };
@@ -344,6 +359,15 @@ fn bind(
                     bevy::camera::visibility::RenderLayers::from_layers(&[0, 28]),
                 ));
             }
+        }
+        let pose = &initial_poses[id];
+        let basis = Mat4::from_cols(Vec4::X, -Vec4::Z, Vec4::Y, Vec4::W);
+        for &(entity, bone, parent) in &bindings {
+            let global = pose[bone] * basis;
+            let local = parent.map_or(global, |parent| (pose[parent] * basis).inverse() * global);
+            commands
+                .entity(entity)
+                .insert(Transform::from_matrix(local));
         }
         if let Some(old) = skin.visible.replace(p.root) {
             commands.entity(old).despawn();

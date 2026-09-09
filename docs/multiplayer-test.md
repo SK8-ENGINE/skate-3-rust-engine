@@ -10,15 +10,21 @@ prepared character library. The same setup update that supplies the local
 customiser supplies these online assets.
 
 Imported characters transfer their converted, self-contained GLB automatically;
-other players do not need to import the model. Completed appearances are cached for
+other players do not need to import the model. Installed imports are indexed on a
+background worker by content hash. When a matching file is already available, the
+receiver loads that local asset and requests no model data, including when a
+different character is currently equipped. Completed appearances are cached for
 the connection: switching back sends only the identity, and acknowledged model data
 stops sending. Departed receivers and completed requests are explicitly cleared.
 Updates and late joins use bounded,
 reliable chunks through the existing host relay. Movement/collision packets keep
 priority and existing internet bandwidth budgets. Loopback test connections use
-a larger local budget so large files do not take minutes on one machine. The HUD shows character transfer progress.
+a larger local bandwidth budget. The HUD shows character transfer progress.
 Each remote keeps its visible character until the new scenes, textures and every
-clothing rig are ready. Imported textures retain their own materials; retail
+clothing rig are ready. A replacement is posed before visibility is published;
+paused local swaps use the current skeleton and remote swaps use the latest
+received pose (or the idle pose while waiting for a sample).
+Imported textures retain their own materials; retail
 characters use their authored clothing lighting. Remote colours/tattoos never
 modify the local player or another remote's materials.
 

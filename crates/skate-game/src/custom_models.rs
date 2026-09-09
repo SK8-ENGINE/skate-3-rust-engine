@@ -101,6 +101,9 @@ pub(crate) struct CustomModels {
     dirty: bool,
 }
 impl CustomModels {
+    pub(crate) fn online_imports(&self) -> Vec<(String,PathBuf)> {
+        self.entries.iter().filter(|e|e.native.is_none()).map(|e|(e.asset_path("character.glb"),self.directory.join("entries").join(&e.id).join("character.glb"))).collect()
+    }
     pub(crate) fn online_selection(&self) -> Option<(Option<String>, PathBuf)> {
         let e = self.entries.iter().find(|e| Some(&e.id)==self.active.as_ref())?;
         let directory = if e.asset_prefix.is_empty() { &self.directory } else { &self.native_directory };
@@ -600,6 +603,9 @@ fn publish(
             if let Ok((_, _, mut visibility)) = scenes.get_mut(pending.root) {
                 *visibility = Visibility::Inherited;
             }
+            // Seed the new rig before publishing visibility, even when paused.
+            let pose:Vec<_>=skater.render_pose.iter().copied().map(crate::animation::native_matrix).collect();
+            for (joint,transform) in bindings.pose_transforms(&pose) {commands.entity(joint).insert(transform);}
             *animation = bindings;
             state.active = Some(pending.id.clone());
             state.status = match save_selection(&state.directory, Some(pending.id)) {
