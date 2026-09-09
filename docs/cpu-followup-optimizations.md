@@ -119,3 +119,12 @@ Visibility parity tests now also reset and verify per-entity ViewVisibility afte
 each lifecycle change, in addition to comparing cascade membership. The private
 v10 launcher is `TRACE-UNIVERSITY-SHADOW-FIX.bat`; v8 and v9 remain available.
 A matched user capture is required to determine the actual frame-time effect.
+
+
+v10 verification: all three targeted shadow tests and the University data-only
+inventory passed, including exact preservation of 1,645,617 triangles. The static
+CRT release built from `54b8f989ca74b62b0c3ff6094f60f414f43a0983`; embedded revision,
+PDB presence and system-only DLL imports were verified. EXE SHA-256:
+`e21c5de6d17f117ee512a2197bcc6443bd2c1c9bb8de775e131b5368805d2154`.
+No game was launched. GPU shaders were unchanged; v9 GPU probes were not repeated.
+Existing compiler warnings remain. Runtime FPS acceptance awaits the user capture.
