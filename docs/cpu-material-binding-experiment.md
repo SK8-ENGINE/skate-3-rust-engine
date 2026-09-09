@@ -53,9 +53,18 @@ resource index table and buffer bindings against the shader contract.
 The release shader tests passed (both tests, six shader variants). Eleven world
 adapter tests and two scene lifecycle tests passed; the offline map inventory
 test remains ignored in this ordinary regression run.
+Four tracing regression tests also passed, for 19 targeted tests in total.
 
 Runtime pipeline creation, appearance and FPS remain unverified until the user
 runs the private executable. The agent does not launch gameplay. Compare v4 and
 v6 from the same stationary inward-facing view with identical settings, then the
 same route. Inspect `retail_bindless`, main opaque encoder finish, total command
 generation and frame percentiles. Keep the earlier executables for rollback.
+
+The private v6 static-CRT release executable compiled successfully from
+`bea625f9878148347e0fda0529bd0d6ba7b1a327`. Its embedded revision, matching PDB
+presence and Windows-system-only PE imports were checked without executing it.
+EXE SHA-256: `cd52c92a709372f95a41d27f6fea794867c1e651f9b8f9d693662ff898dc7325`.
+The local `TRACE-UNIVERSITY-BINDLESS.bat` launcher uses the existing extracted
+University/assets and captures 20 seconds after F9. Earlier builds remain intact.
+Existing compiler warnings remain; this build does not establish a measured FPS gain.
