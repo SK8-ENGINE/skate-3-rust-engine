@@ -700,7 +700,7 @@ pub(crate) fn spawn(
         }
         if let Some(material) = retail {
             let material = retail_materials.add(material);
-            commands.spawn((crate::retail_render::shadow_visibility::StaticShadowCaster, Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
+            commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
             continue;
         }
         // Vertex colours above carry retail decal coordinates, never PBR tint.

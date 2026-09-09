@@ -83,3 +83,39 @@ system-only DLL imports were verified without running gameplay. EXE SHA-256:
 v8 for comparison. The new capture is armed until F9 and records 20 seconds.
 Existing compiler warnings remain. Runtime appearance and FPS acceptance are
 pending the user's test; the agent's GPU runs were isolated headless tests only.
+
+
+## v10: restore the measured shadow baseline
+
+The completed user captures `university-cpu-bindings-v8-8702-22955.json` and
+`university-cpu-followup-v9-5644-32244.json` each cover 20 seconds without dropped
+trace events. Median frame time improved from 4.578 to 3.976 ms, but mean frame
+time increased from 4.601 to 4.806 ms and p99 from 7.775 to 21.713 ms. These are
+not matched camera routes; neither the aggregate improvement nor the hitches
+can be attributed conclusively to a particular change.
+
+Directional shadow system plus deferred-command time increased from approximately
+0.525 + 0.036 = 0.561 ms/frame in v8 to 0.573 + 0.243 = 0.816 ms/frame in v9.
+The indexed implementation repeats visibility publication across cascade lists.
+A candidate using a reused entity set and a bulk mutable query passed visibility
+parity tests but did not improve a complete headless schedule benchmark: 0.0610
+versus 0.0590 ms/update for v9. That candidate was discarded.
+
+The same fixture measured upstream at 0.1410 ms/update, which disagrees with the
+relative result in gameplay. It uses actual University bounds but fixed frusta,
+two overlapping views, no moving casters and an otherwise idle ECS schedule.
+This makes it useful for detecting local overhead, not choosing the fastest
+production path or predicting FPS. The inventory now includes full schedule
+measurements, including deferred writes, alongside the older query-only kernel.
+
+v10 restores upstream Bevy directional shadow visibility by removing the custom
+system installation/replacement and the retail entity marker. The index remains
+compiled only for headless tests and experiments. Material resource reuse,
+controller metadata caching and the v8 bindless shader fix remain active.
+Shadow geometry, quality and distance are unchanged. This is a conservative
+return to the earlier measured path, not a claim that it resolves every hitch.
+
+Visibility parity tests now also reset and verify per-entity ViewVisibility after
+each lifecycle change, in addition to comparing cascade membership. The private
+v10 launcher is `TRACE-UNIVERSITY-SHADOW-FIX.bat`; v8 and v9 remain available.
+A matched user capture is required to determine the actual frame-time effect.

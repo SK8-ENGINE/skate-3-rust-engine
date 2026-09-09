@@ -150,7 +150,21 @@ fn indexed_system_matches_upstream_across_changes_and_removal() {
         }
         original.run(&mut world);
         let expected = read(&world);
+        for &entity in &entities {
+            if let Some(mut visibility) = world.get_mut::<ViewVisibility>(entity) {
+                *visibility = ViewVisibility::HIDDEN;
+            }
+        }
         indexed.run(&mut world);
+        for &entity in &entities {
+            if let Some(visibility) = world.get::<ViewVisibility>(entity) {
+                assert_eq!(
+                    visibility.get(),
+                    expected.iter().any(|list| list.contains(&entity)),
+                    "visibility marking at step {step}"
+                );
+            }
+        }
         assert_eq!(read(&world), expected, "step {step}");
     }
     for entity in entities {
@@ -178,6 +192,7 @@ pub(super) fn benchmark_bounds(bounds: Vec<Aabb>) -> serde_json::Value {
     let mut world = World::new();
     let mut index = Index::default();
     let count = bounds.len();
+    let system_bounds = bounds.clone();
     let start = std::time::Instant::now();
     index.rebuild(
         bounds
@@ -247,5 +262,84 @@ pub(super) fn benchmark_bounds(bounds: Vec<Aabb>) -> serde_json::Value {
         }
     }
     let indexed_ms = start.elapsed().as_secs_f64() * 1000.;
-    serde_json::json!({"static_batches":count,"queries":repetitions*frusta.len(),"flat_ms":flat_ms,"indexed_ms":indexed_ms,"build_ms":build_ms,"visible_sets_equal":true,"note":"real University material bounds; representative shadow frusta, single-thread query kernel only, not whole-frame FPS"})
+    serde_json::json!({"full_system":benchmark_systems(system_bounds),"static_batches":count,"queries":repetitions*frusta.len(),"flat_ms":flat_ms,"indexed_ms":indexed_ms,"build_ms":build_ms,"visible_sets_equal":true,"note":"real University material bounds; representative shadow frusta, single-thread query kernel only, not whole-frame FPS"})
+}
+
+fn benchmark_systems(bounds: Vec<Aabb>) -> serde_json::Value {
+    bevy::tasks::ComputeTaskPool::get_or_init(Default::default);
+    let mut world = World::new();
+    world.init_resource::<Index>();
+    let view = world.spawn_empty().id();
+    let center = Vec3::new(330., 133., -710.);
+    let direction = Vec3::new(-0.60385966, 0.73098797, 0.31782088);
+    let frusta: Vec<_> = [5., 10., 30., 100.]
+        .into_iter()
+        .map(|radius| {
+            Frustum::from_clip_from_world(
+                &(Mat4::orthographic_rh(-radius, radius, -radius, radius, 0.1, 400.)
+                    * Mat4::look_at_rh(center + direction * 200., center, Vec3::Y)),
+            )
+        })
+        .collect();
+    for layer in [0, 28] {
+        let mut cascades = CascadesFrusta::default();
+        cascades.frusta.insert(view, frusta.clone());
+        let light = world
+            .spawn((
+                DirectionalLight {
+                    shadows_enabled: true,
+                    ..default()
+                },
+                cascades,
+                CascadesVisibleEntities::default(),
+                RenderLayers::layer(layer),
+            ))
+            .id();
+        world
+            .get_mut::<ViewVisibility>(light)
+            .unwrap()
+            .set_visible();
+    }
+    for aabb in bounds {
+        world.spawn((
+            StaticShadowCaster,
+            Mesh3d::default(),
+            aabb,
+            GlobalTransform::IDENTITY,
+            InheritedVisibility::VISIBLE,
+        ));
+    }
+    // A second view has overlapping cascades, deliberately exercising duplicate
+    // visibility publication, which the old query-only benchmark omitted.
+    let second_view = world.spawn_empty().id();
+    for mut cascades in world.query::<&mut CascadesFrusta>().iter_mut(&mut world) {
+        cascades.frusta.insert(second_view, frusta.clone());
+    }
+    let mut old = bevy::ecs::schedule::Schedule::default();
+    old.add_systems((refresh, check_indexed).chain());
+    let mut upstream = bevy::ecs::schedule::Schedule::default();
+    upstream.add_systems(bevy::light::check_dir_light_mesh_visibility);
+    old.run(&mut world);
+    upstream.run(&mut world);
+    let mut old_times = vec![];
+    let mut upstream_times = vec![];
+    for round in 0..5 {
+        let mut run = |schedule: &mut bevy::ecs::schedule::Schedule| {
+            let start = std::time::Instant::now();
+            for _ in 0..200 {
+                schedule.run(&mut world);
+            }
+            start.elapsed().as_secs_f64() * 1000. / 200.
+        };
+        if round % 2 == 0 {
+            old_times.push(run(&mut old));
+            upstream_times.push(run(&mut upstream));
+        } else {
+            upstream_times.push(run(&mut upstream));
+            old_times.push(run(&mut old));
+        }
+    }
+    old_times.sort_by(f64::total_cmp);
+    upstream_times.sort_by(f64::total_cmp);
+    serde_json::json!({"v9_ms_per_update":old_times[2],"upstream_ms_per_update":upstream_times[2],"note":"complete headless schedules including refresh and deferred writes; real map bounds, fixed representative frusta, two overlapping views, not gameplay FPS"})
 }

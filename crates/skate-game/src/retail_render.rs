@@ -22,7 +22,6 @@ fn retail_shader(path: &str) -> ShaderRef {
 impl Plugin for RetailRenderPlugin {
     fn build(&self, app: &mut App) {
         shadow::install(app);
-        shadow_visibility::install(app);
         exposure::install(app);
         if std::env::var_os("SKATE_WEATHERING_COMPARE").is_some_and(|v| v == "1") {
             app.add_systems(Update, compare_weathering);
@@ -41,9 +40,10 @@ impl Plugin for RetailRenderPlugin {
             MaterialPlugin::<RetailSkyMaterial>::default(),
         ));
     }
-    fn finish(&self, app: &mut App) { shadow_visibility::finish(app); }
 }
 
+// Retained for headless experiments; production uses Bevy directional visibility.
+#[cfg(test)]
 #[path = "retail_shadow_visibility.rs"]
 pub(crate) mod shadow_visibility;
 
