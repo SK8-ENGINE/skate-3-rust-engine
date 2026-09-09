@@ -4,7 +4,7 @@ Pause → **Updates** opens a native desktop update window. Select **Stable**
 (default) or **Latest** (includes experimental prereleases), then **Check now**.
 Release notes appear as plain, scrollable text. **Update** authorizes downloading,
 verification, a clean game exit, replacement and restart. **Cancel** closes the
-offer, or cancels a download before shutdown. No installation occurs on a check.
+offer, or cancels a download before shutdown. Ordinary checks do not install updates. An incomplete update already accepted in an older updater is completed automatically.
 Save any gameplay you want to retain before choosing Update.
 
 Startup checks run in a separate process, at most once per six hours per channel.
@@ -15,9 +15,12 @@ Switching to Stable never downgrades an already installed experimental build;
 it waits for a newer stable build. Cancelled offers are checked again on a later
 eligible startup, or through the menu.
 
-The helper replaces only `skate3rust.exe`, `support/skate3setup.exe`,
-`support/skate3update.exe`, and `release.json`. Assets, maps, settings, mods,
-character libraries and setup's installation marker are never replaced. The same
+The release manifest owns every shipped program file: executables, helper tools,
+DLLs, documentation and licenses. Updates add new components, replace changed
+files and remove components owned by the previous release that are no longer
+shipped. Assets, maps, saves, settings, user mods and character libraries remain
+outside this manifest. Bundled mod archives are user-editable defaults and are
+not overwritten by program updates. The same
 working directory and arguments are used for restart; existing asset selection
 continues to work. Each package owns its `data` installation. On the next normal
 launch, changed extractor fingerprints trigger an update of affected asset groups;
@@ -29,7 +32,7 @@ silently adopt a downloaded build.
 
 `release.json` accompanies the ZIP and is also inside it. Schema 1 identifies the
 repository, `windows-x64` target, tag, full source revision, monotonically increasing
-release-workflow run number (`build`), and SHA-256 of all three program files.
+release-workflow run number (`build`), and SHA-256 of every managed program file.
 The executable embeds its revision and build number; its local metadata and hash
 must match before checking. Local builds use build 0 and are not update sources.
 
@@ -38,7 +41,7 @@ the workspace's currently fixed Cargo version, determine upgrade ordering. Never
 reset/replace the release workflow's run-number sequence without a protocol
 migration. Rerunning a build preserves its identity and does not offer an upgrade
 to an installation of that build. Publish a new release/run to ship another build.
-No downgrades are offered across channels. Equal build IDs are not upgrades.
+No downgrades are offered across channels. Equal build IDs are not upgrades, but the same package can repair missing or mismatched components.
 
 The updater scans pages of 100 published releases, rejects drafts, filters the
 channel, and requires the ZIP, checksum and compatible metadata. It selects the
@@ -132,3 +135,27 @@ Player manual checklist (use a disposable copy of a packaged installation):
 
 GitHub references: [release listing, pagination and latest-release semantics](https://docs.github.com/en/rest/releases/releases),
 [asset digests](https://docs.github.com/en/rest/releases/assets).
+
+## Integrity and recovery
+
+At startup the helper checks the installed files against `release.json` in its
+own process. Damaged or incomplete installs bypass the normal six-hour check
+interval and offer Repair, even when the installed build is already the latest.
+When an older updater changed the EXE and manifest but skipped other files, the
+new helper finishes that already-approved update using the same verified release.
+This transition can download the package a second time; it needs no manual ZIP
+extraction. Future updates use one complete transaction.
+
+Before replacement, the helper backs up every affected existing file and writes
+a recovery journal recording which files did not previously exist. It gives the
+game time to exit, then closes leftover executables belonging to this installation.
+It never closes another copy installed elsewhere. Version metadata is replaced
+last, after all installed program checksums pass. A failed replacement restores
+removed/replaced files and removes newly added files. Interrupted transactions are
+recovered on the next launch. Failed recovery retains its journal and backups.
+Updater errors are recorded in `.update-error.json` beside the executable.
+
+New program files require no changes to the updater file list: packaging discovers
+them from the release staging directory. Extracted retail content remains managed
+by the separate versioned asset pipelines; changed extractors refresh only their
+affected asset groups after the program update.

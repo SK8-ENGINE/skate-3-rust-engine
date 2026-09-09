@@ -68,12 +68,14 @@ class UpdaterTests(unittest.TestCase):
             self.assertIsNone(u.discover(current, 'Stable', threading.Event()))
             self.assertIsNone(u.discover({**current, 'build': 3}, 'Latest', threading.Event()))
 
-    def package(self, extra=None):
+    def package(self, extra=None, program=None):
         meta = metadata()
         meta['files'] = {n: hashlib.sha256(b'new').hexdigest() for n in u.FILES[:-1]}
+        if program:
+            meta['files'][program] = hashlib.sha256(b'new').hexdigest()
         data = io.BytesIO()
         with zipfile.ZipFile(data, 'w') as z:
-            for name in u.FILES:
+            for name in [*meta['files'], 'release.json']:
                 z.writestr(u.PREFIX+name, json.dumps(meta) if name == 'release.json' else b'new')
             if extra:
                 z.writestr(extra, b'evil')
@@ -83,6 +85,15 @@ class UpdaterTests(unittest.TestCase):
         def fetch(url, *args):
             return archive if url == u.PACKAGE else (hashlib.sha256(archive).hexdigest()+'  '+u.PACKAGE).encode()
         return candidate, fetch
+
+    def test_new_program_component_is_staged_without_updater_changes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            name='future-tools/importer/new.dll'
+            candidate, fetch=self.package(program=name)
+            with patch.object(u,'fetch',fetch):
+                u.stage(candidate,root,threading.Event(),lambda _:None)
+            self.assertEqual((root/'new'/name).read_bytes(),b'new')
 
     def test_safe_staging_and_traversal(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -96,6 +107,22 @@ class UpdaterTests(unittest.TestCase):
                 with patch.object(u, 'fetch', fetch), self.assertRaises(ValueError):
                     u.stage(candidate, root, threading.Event(), lambda _: None)
 
+    def test_same_build_repair_is_available_without_downgrade(self):
+        candidate, fetch = self.package()
+        meta = candidate[4]
+        release = dict(id=1, tag_name=meta['tag'], draft=False,
+                       published_at='date', prerelease=False,
+                       assets=[dict(name=n, state='uploaded', browser_download_url=n)
+                               for n in (u.PACKAGE, u.PACKAGE+'.sha256', 'release.json')])
+        def api(url, *args):
+            if url.startswith(u.API): return json.dumps([release]).encode()
+            if url=='release.json': return json.dumps(meta).encode()
+            return fetch(url,*args)
+        with patch.object(u,'fetch',api):
+            self.assertIsNone(u.discover(meta,'Stable',threading.Event()))
+            self.assertEqual(u.discover(meta,'Stable',threading.Event(),repair=True)[0],meta['build'])
+            self.assertIsNone(u.discover({**meta,'build':meta['build']+1},'Stable',threading.Event(),repair=True))
+
     def test_checksum_failure_and_cancel(self):
         candidate, fetch = self.package()
         def corrupt(url, *args):
@@ -106,43 +133,6 @@ class UpdaterTests(unittest.TestCase):
             cancelled = threading.Event(); cancelled.set()
             with patch.object(u, 'fetch', fetch), self.assertRaises(InterruptedError):
                 u.stage(candidate, Path(temp), cancelled, lambda _: None)
-
-    def test_replacement_rollback_preserves_data(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp); tx = root/'.update-transaction'
-            for name in u.FILES:
-                (root/name).parent.mkdir(parents=True, exist_ok=True)
-                (root/name).write_bytes(b'old')
-                (tx/'new'/name).parent.mkdir(parents=True, exist_ok=True)
-                (tx/'new'/name).write_bytes(b'new')
-            (root/'player-data').write_bytes(b'untouched')
-            replace = u.os.replace
-            def fail(src, dest):
-                if str(src).endswith('new\\support\\skate3setup.exe') or str(src).endswith('new/support/skate3setup.exe'):
-                    raise OSError('simulated locked file')
-                return replace(src, dest)
-            with patch.object(u.os, 'replace', fail), patch.object(u, 'retry', lambda op: op()), self.assertRaises(OSError):
-                u.install(root, tx)
-            for name in u.FILES:
-                self.assertEqual((root/name).read_bytes(), b'old')
-            self.assertEqual((root/'player-data').read_bytes(), b'untouched')
-            self.assertFalse((tx/'journal.json').exists())
-
-    def test_success_and_interrupted_recovery(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp); tx = root/'.update-transaction'
-            for name in u.FILES:
-                (root/name).parent.mkdir(parents=True, exist_ok=True)
-                (root/name).write_bytes(b'old')
-                (tx/'new'/name).parent.mkdir(parents=True, exist_ok=True)
-                (tx/'new'/name).write_bytes(b'new')
-            u.install(root, tx)
-            self.assertTrue(all((root/n).read_bytes() == b'new' for n in u.FILES))
-            # Simulate interrupted replacement with durable backups/journal.
-            u.atomic(tx/'journal.json', {'protocol': 1})
-            u.rollback(root, tx)
-            self.assertTrue(all((root/n).read_bytes() == b'old' for n in u.FILES))
-            self.assertFalse((tx/'journal.json').exists())
 
     def test_offline_and_rate_limit(self):
         with patch.object(u, 'fetch', side_effect=OSError('offline')), self.assertRaises(OSError):

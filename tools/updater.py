@@ -13,6 +13,8 @@ import time
 import urllib.request
 import urllib.error
 import zipfile
+import update_install as installer
+from update_processes import close_programs
 
 REPO = 'SK8-ENGINE/skate-3-rust-engine'
 API = f'https://api.github.com/repos/{REPO}/releases'
@@ -68,10 +70,7 @@ def identity(m):
 
 def program_metadata(m):
     identity(m)
-    files = m.get('files')
-    if not isinstance(files, dict) or any(not isinstance(files.get(name), str)
-            or not re.fullmatch('[0-9a-f]{64}', files[name]) for name in FILES[:-1]):
-        raise ValueError('Missing program hashes')
+    installer.manifest_files(m)
 
 
 def safe_local_paths(root):
@@ -145,7 +144,7 @@ def release_candidates(assets, rolling):
     return [(f'release-{n}.json', f'skate3rust-windows-x64-build-{n}.zip') for n in builds]
 
 
-def discover(current, channel, cancel):
+def discover(current, channel, cancel, repair=False):
     current_build = identity(current)
     candidates = []
     deadline = time.monotonic() + 120
@@ -167,7 +166,7 @@ def discover(current, channel, cancel):
                     meta = json.loads(fetch(asset_url(assets[manifest_name]), cancel, 65536))
                     build = identity(meta)
                     program_metadata(meta)
-                    if (meta['tag'] != release['tag_name'] or build <= current_build
+                    if (meta['tag'] != release['tag_name'] or build < current_build or (build == current_build and not repair)
                             or package_name(meta) != package):
                         continue
                 except (ValueError, KeyError):
@@ -208,7 +207,8 @@ def stage(candidate, directory, cancel, progress):
             total += info.file_size
             if total > 2 * 1024 * 1024 * 1024:
                 raise ValueError('Expanded package too large')
-        for name in FILES:
+        for name in [*installer.manifest_files(meta), "release.json"]:
+            installer.safe_paths(directory.parent, [name])
             if cancel.is_set():
                 raise InterruptedError('Cancelled')
             payload = z.read(PREFIX + name)
@@ -234,33 +234,11 @@ def retry(operation):
 
 
 def rollback(root, tx):
-    safe_local_paths(root)
-    journal = read_json(tx / 'journal.json')
-    if journal is None:
-        return
-    # Fixed paths only, even when recovering a corrupted journal.
-    for name in reversed(FILES):
-        backup = tx / 'old' / name
-        if backup.is_file():
-            retry(lambda: shutil.copy2(backup, root / name))
-    (tx / 'journal.json').unlink()
+    installer.rollback(root, tx)
 
 
 def install(root, tx):
-    safe_local_paths(root)
-    # Back up everything before the first replacement. Journal survives power loss.
-    for name in FILES:
-        backup = tx / 'old' / name
-        backup.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(root / name, backup)
-    atomic(tx / 'journal.json', {'protocol': 1})
-    try:
-        for name in FILES:
-            retry(lambda: os.replace(tx / 'new' / name, root / name))
-        (tx / 'journal.json').unlink()
-    except Exception:
-        rollback(root, tx)
-        raise
+    installer.install(root, tx)
 
 
 def main(request=None):
@@ -320,6 +298,8 @@ def main(request=None):
     busy = False
     generation = 0
     closing = False
+    repair_files = []
+    repair_after_update = False
 
     def work(kind, operation):
         nonlocal busy
@@ -352,6 +332,7 @@ def main(request=None):
         status.set('Checking GitHub…')
         selected = channel.get()
         def perform_check():
+            nonlocal repair_files, repair_after_update
             current = read_json(root / 'release.json', {})
             program_metadata(current)
             with (root / 'skate3rust.exe').open('rb') as executable:
@@ -359,7 +340,11 @@ def main(request=None):
             if (current['revision'] != request['revision'] or str(current['build']) != request['build']
                     or digest != current['files']['skate3rust.exe']):
                 raise ValueError('This executable does not match its release metadata')
-            return discover(current, selected, cancel)
+            repair_files = installer.mismatches(root, current)
+            previous = read_json(tx/'old/release.json', {})
+            repair_after_update = (bool(repair_files) and isinstance(previous.get('build'), int)
+                                   and previous['build'] < current['build'])
+            return discover(current, selected, cancel, repair=bool(repair_files))
         work('checked', perform_check)
 
     def do_update():
@@ -411,6 +396,7 @@ def main(request=None):
                 check.configure(state='normal')
                 choice.configure(state='readonly')
                 if kind == 'error':
+                    atomic(root / '.update-error.json', {'time': time.time(), 'error': value})
                     back.configure(state='normal')
                     win.protocol('WM_DELETE_WINDOW', close)
                     status.set('Update unavailable: ' + value[:250] + '. You can keep playing and try again later.')
@@ -426,13 +412,16 @@ def main(request=None):
                         notes.delete('1.0', 'end')
                         notes.insert('end', candidate[4]['tag'] + '\n\n' + (candidate[2].get('body') or 'No release notes.')[:50000])
                         notes.configure(state='disabled')
-                        update.configure(state='normal')
-                        status.set('New release available. Cancel keeps your current version.')
+                        update.configure(state='normal', text='Repair' if repair_files else 'Update')
+                        status.set(('Repair needed: ' + ', '.join(repair_files) + '. Download will repair the installation.') if repair_files else 'New release available. Cancel keeps your current version.')
+                        if repair_after_update and candidate[0] == identity(read_json(root/'release.json', {})):
+                            # Finish the update the user already accepted in the old helper.
+                            do_update()
                     elif automatic:
                         win.destroy()
                         return
                     else:
-                        status.set('No newer compatible release in this channel.')
+                        status.set('Repair needed, but this build is not available in the selected channel. Select its channel or a newer release.' if repair_files else 'No newer compatible release in this channel.')
                 elif kind == 'staged':
                     if cancel.is_set():
                         continue
@@ -441,9 +430,10 @@ def main(request=None):
                     win.protocol('WM_DELETE_WINDOW', lambda: None)
                     def finish():
                         Path(request['signal']).write_text('ready', encoding='ascii')
-                        # Wait for game and supervisor to release the PE. Replacement retries
-                        # are the lock authority; no PID reuse or process termination.
+                        # Allow normal shutdown, then release stale processes owned by this copy.
                         time.sleep(3)
+                        close_programs(root, set(installer.manifest_files(read_json(root/'release.json', {})))
+                                       | set(installer.manifest_files(read_json(tx/'new/release.json', {}))))
                         try:
                             install(root, tx)
                         except Exception:
@@ -460,7 +450,11 @@ def main(request=None):
             pass
         win.after(100, poll)
 
-    if not automatic or time.time() - settings.get(channel.get(), 0) >= 21600:
+    needs_repair = bool(installer.mismatches(root, read_json(root/'release.json', {})))
+    if needs_repair:
+        automatic = False
+        win.deiconify()
+    if not automatic or needs_repair or time.time() - settings.get(channel.get(), 0) >= 21600:
         check_now()
     else:
         win.destroy()

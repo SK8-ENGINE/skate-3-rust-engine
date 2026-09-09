@@ -81,18 +81,6 @@ try {
     $assetPipelinesJson = & $packagePython "$sourceStage/tools/asset_pipeline/versions.py" --tools "$sourceStage/tools"
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify asset extractors' }
     $assetPipelines = $assetPipelinesJson | ConvertFrom-Json
-    $files = @{}
-    foreach ($name in @('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe')) {
-        $files[$name] = (Get-FileHash -LiteralPath (Join-Path $stage $name) -Algorithm SHA256).Hash.ToLower()
-    }
-    foreach ($name in @('steam-relay/skate-steam-relay.exe', 'steam-relay/steam_api64.dll')) {
-        $files[$name] = (Get-FileHash -LiteralPath (Join-Path $stage $name) -Algorithm SHA256).Hash.ToLower()
-    }
-    @{
-        schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
-        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files; asset_pipelines = $assetPipelines
-    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
-    Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $ProjectRoot 'target/release.json')
     Copy-Item -LiteralPath README.md,docs/THIRD_PARTY_NOTICES.md -Destination $stage
     New-Item -ItemType Directory -Path "$stage/docs/images" -Force | Out-Null
     Copy-Item -LiteralPath docs/images/skating-crab.png -Destination "$stage/docs/images/skating-crab.png"
@@ -110,6 +98,19 @@ try {
     foreach ($license in Get-ChildItem -LiteralPath "$pythonBase/tcl" -Filter license.terms -Recurse -ErrorAction SilentlyContinue) {
         Copy-Item -LiteralPath $license.FullName -Destination "$stage/licenses/$($license.Directory.Name).txt"
     }
+    # Own every shipped program component, including future tools and libraries.
+    # Mods are user-editable content and remain outside program replacement.
+    $files = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $stage -File -Recurse) {
+        $name = [IO.Path]::GetRelativePath($stage, $file.FullName).Replace('\', '/')
+        if ($name -eq 'release.json' -or $name.StartsWith('mods/')) { continue }
+        $files[$name] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLower()
+    }
+    @{
+        schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
+        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files; asset_pipelines = $assetPipelines
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
+    Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $ProjectRoot 'target/release.json')
     $zip = Join-Path $ProjectRoot 'target/skate3rust-windows-x64.zip'
     Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
     (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower() + '  skate3rust-windows-x64.zip' |

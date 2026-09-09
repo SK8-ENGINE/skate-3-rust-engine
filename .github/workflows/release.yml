@@ -35,7 +35,7 @@ jobs:
       - name: Check updater and publisher without starting game
         run: python -m unittest discover -s tools -p "test_*release*.py" -v
       - name: Check updater protocol
-        run: python -m unittest discover -s tools -p test_updater.py -v
+        run: python -m unittest discover -s tools -p "test_update*.py" -v
       - name: Check isolated asset refresh and failure recovery
         run: python -m unittest tools.asset_pipeline.test_versions -v
       - name: Build Windows package
