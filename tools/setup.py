@@ -6,6 +6,13 @@ ROOT=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[1]))
 sys.path.insert(0,str(ROOT))
 
 def main():
+    if len(sys.argv)>1 and sys.argv[1]=='--character-import':
+        # Keep the importer inside the already versioned setup payload: even
+        # protocol-1 updaters deliver it atomically with the game executable.
+        importer=ROOT/'tools/mixamo_to_skate'
+        sys.path.insert(0,str(importer))
+        from main import main as import_character
+        return import_character(sys.argv[2:])
     if len(sys.argv)>2 and sys.argv[1]=='--task':
         script=Path(sys.argv[2])
         if not script.is_absolute():script=ROOT/script

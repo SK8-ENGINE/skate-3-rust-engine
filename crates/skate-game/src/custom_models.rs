@@ -348,9 +348,9 @@ fn start_import(directory: &Path, reference: &Path) -> Result<Import, String> {
         .map_err(|e| e.to_string())?
         .parent()
         .ok_or("Missing game directory")?
-        .join("support/custom-models/Mixamo to Skate.exe");
+        .join("support/skate3setup.exe");
     if !executable.is_file() {
-        return Err("Character importer is missing. Use the complete Custom Models build.".into());
+        return Err("Character importer is missing. Restore support/skate3setup.exe from the complete Windows package.".into());
     }
     let jobs = directory.join("jobs");
     std::fs::create_dir_all(&jobs).map_err(|e| e.to_string())?;
@@ -359,7 +359,13 @@ fn start_import(directory: &Path, reference: &Path) -> Result<Import, String> {
         .unwrap_or_default()
         .as_nanos();
     let result = jobs.join(format!("{}-{nonce}.json", std::process::id()));
-    let mut command = Command::new(executable);
+    let mut command = Command::new(&executable);
+    // Preserve optional calibration from earlier local Custom Models builds.
+    let profile = executable.parent().unwrap().join("custom-models/calibration.json");
+    command.arg("--character-import");
+    if profile.is_file() {
+        command.arg("--profile").arg(profile);
+    }
     command
         .arg("--library-import")
         .arg(directory)

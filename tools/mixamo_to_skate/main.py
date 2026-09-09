@@ -10,7 +10,12 @@ from glb import ConversionError, require
 
 
 def app_root():
-    return Path(sys.executable).parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
+    # Release setup carries source + native resources under its extraction root.
+    # A standalone frozen converter retains its legacy adjacent resource layout.
+    bundled = Path(__file__).resolve().parent
+    if (bundled/'tools/FBX2glTF.exe').is_file():
+        return bundled
+    return Path(sys.executable).parent if getattr(sys,'frozen',False) else bundled
 
 
 def find_reference(expected_hash=None):

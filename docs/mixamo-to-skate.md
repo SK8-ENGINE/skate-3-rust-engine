@@ -7,14 +7,12 @@ Use owned/local assets as the stock reference. Blender is not required.
 
 ## Player workflow
 
-The Windows package contains `Mixamo to Skate.exe` and `tools/FBX2glTF.exe`.
-Drag one or more FBX files onto the executable, or double-click it and choose
-files. Results appear in a new `<input>-skate` directory next to the input;
-existing results get a numeric suffix. The directory contains `character.glb`,
-`report.json`, and a short readme. The stock reference is found in the local
-Skate3RustEngine installation; multiple/missing installations prompt for it.
+In the Windows game package, use **Custom models → Import model...**. The
+importer and FBX2glTF are embedded in `support/skate3setup.exe`; the game
+provides the current copy's prepared stock reference. Successful imports become
+saved thumbnail cards and equip automatically. No additional software is needed.
 
-No settings are modified. Output publication is transactional: failure leaves
+Output publication is transactional: failure leaves
 existing characters and source files unchanged. No assets are uploaded.
 
 ## Source use
@@ -31,8 +29,12 @@ python tools/mixamo_to_skate/main.py model.glb --reference path/to/private/skate
 The input GLB option is for an already normalized Mixamo conversion, not an
 arbitrary rig. Arguments are passed directly to FBX2glTF without a shell.
 Embedded FBX media extraction goes to a disposable temporary directory.
+The in-game library also accepts an already converted stock-rig GLB when it
+passes validation against the active installation's stock reference.
 
-To package with an existing Python/NumPy/PyInstaller environment:
+The complete game release is built with `scripts/Build-Release.ps1`, including
+a frozen importer smoke check. The following optional standalone developer
+package is separate from the in-game release path:
 
 ```text
 python -m PyInstaller --onedir --console --name "Mixamo to Skate" --paths tools/mixamo_to_skate --distpath <output>/app --workpath <output>/build --specpath <output>/build tools/mixamo_to_skate/main.py
@@ -64,7 +66,8 @@ proportions require visual review; success is a structural validation result,
 not a guarantee that every skating motion looks correct.
 
 Generic fitting aligns limb directions and positions to the stock rig. An
-optional private `calibration.json` next to the executable improves fitting
+optional private `calibration.json` (legacy in-game location:
+`support/custom-models/calibration.json`, or explicit CLI `--profile`) improves fitting
 using the user's round-trip pair: the original stock GLB and a Mixamo-rigged
 copy of the same neutral geometry, normalized to GLB by FBX2glTF. Generate it
 with `--calibrate --profile calibration.json` and the normalized source GLB.
