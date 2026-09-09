@@ -40,10 +40,15 @@ pub struct Exchange {
     incoming: BTreeMap<u64, Incoming>,
     pub ready: BTreeMap<u64, (Identity, Vec<u8>)>,
     spent: usize,
+    known: BTreeMap<[u8; 32], Identity>,
     round: usize,
     next: u64,
+    serving: Option<([u8; 32], usize, u64)>,
 }
 impl Exchange {
+    pub fn remember(&mut self, id: Identity) {
+        self.known.insert(id.hash, id);
+    }
     pub fn progress(&self) -> String {
         let total: usize = self.incoming.values().map(|p| p.received.len()).sum();
         let done: usize = self
@@ -77,7 +82,7 @@ impl Exchange {
         if now < self.next {
             return;
         }
-        self.next = now + 150;
+        self.next = now + 25;
         self.incoming
             .retain(|id, _| session.actors.contains_key(id));
         self.ready.retain(|id, _| session.actors.contains_key(id));
@@ -115,6 +120,12 @@ impl Exchange {
                 continue;
             };
             if self.ready.get(&actor).is_some_and(|(old, _)| old == &id) {
+                self.incoming.remove(&actor);
+                continue;
+            }
+            if self.known.get(&id.hash) == Some(&id) {
+                self.incoming.remove(&actor);
+                self.ready.insert(actor, (id, vec![]));
                 continue;
             }
             if self.incoming.get(&actor).is_none_or(|p| p.id != id) {
@@ -164,11 +175,33 @@ impl Exchange {
                 records.push((format!("@look/r/{slot}"), vec![]));
             }
         }
+        // Requests occupy stable bounded slots, but actor ordering can change.
+        // Explicit tombstones stop transfers after completion/cache hits/departures.
+        for slot in 0..skate_net::lobby::MAX_PLAYERS {
+            let key = format!("@look/r/{slot}");
+            if !records.iter().any(|(k, _)| k == &key) {
+                records.push((key, vec![]));
+            }
+        }
+        if requests.is_empty() {
+            for slot in 0..WINDOW {
+                records.push((format!("@look/c/{slot}"), vec![]));
+            }
+        }
         if !requests.is_empty() {
             requests.sort_unstable();
             requests.dedup();
-            let page = requests[self.round % requests.len()];
-            self.round = self.round.wrapping_add(1);
+            let page = if let Some((hash, page, at)) = self.serving.filter(|(hash, page, at)| {
+                *hash == local.hash && requests.contains(page) && now.saturating_sub(*at) < 150
+            }) {
+                let _ = (hash, at);
+                page
+            } else {
+                let page = requests[self.round % requests.len()];
+                self.round = self.round.wrapping_add(1);
+                self.serving = Some((local.hash, page, now));
+                page
+            };
             for slot in 0..WINDOW {
                 let offset = (page * WINDOW + slot) * CHUNK;
                 if offset >= bytes.len() {
@@ -305,5 +338,99 @@ mod tests {
         assert!(Identity::read(&id.bytes()).is_none());
         let mut e = Exchange::default();
         assert!(!e.publish(vec![]));
+    }
+}
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    #[test]
+    fn online_appearance_large_model_delivered_once_cached_and_quiet_after_swap_back() {
+        let mut sessions: Vec<_> = (0..2)
+            .map(|i| {
+                Session::new(
+                    44,
+                    skate_net::lobby::Info {
+                        id: 10 + i,
+                        map: 1,
+                        rig: 1,
+                        physics: 1,
+                        appearance: 1,
+                    },
+                    if i == 0 { None } else { Some(1) },
+                )
+            })
+            .collect();
+        for s in &mut sessions {
+            s.set_loopback(true);
+        }
+        let mut exchanges = [Exchange::default(), Exchange::default()];
+        let model: Vec<u8> = (0..32_067_793).map(|i| (i * 17) as u8).collect();
+        exchanges[0].publish(model.clone());
+        exchanges[1].publish(vec![4]);
+        let mut phase = 0;
+        let mut finished_at = 0;
+        let mut last_model_packet = 0;
+        let mut reused = false;
+        for step in 0..18000 {
+            let now = step * 10;
+            let mut wire = vec![];
+            for i in 0..2 {
+                exchanges[i].tick(&mut sessions[i], now);
+                for p in sessions[i].service(now) {
+                    if p.data.get(24) == Some(&skate_net::lobby::APPLICATION) && p.data.len() > 100
+                    {
+                        last_model_packet = now;
+                        assert!(phase < 3, "completed model was retransmitted");
+                    }
+                    if step % 31 != 0 {
+                        wire.push((i + 1, p));
+                    }
+                }
+            }
+            for (from, p) in wire {
+                sessions[p.peer as usize - 1].receive(from as u64, &p.data, now);
+            }
+            if phase == 0
+                && exchanges[1]
+                    .ready
+                    .get(&10)
+                    .is_some_and(|(_, b)| b == &model)
+            {
+                assert!(now < 90000, "local model transfer is too slow: {now} ms");
+                let identity = exchanges[1].ready[&10].0.clone();
+                exchanges[1].remember(identity);
+                exchanges[1].ready.get_mut(&10).unwrap().1.clear();
+                exchanges[0].publish(vec![9]);
+                phase = 1;
+            }
+            if phase == 1
+                && exchanges[1]
+                    .ready
+                    .get(&10)
+                    .is_some_and(|(_, b)| b == &vec![9])
+            {
+                exchanges[0].publish(model.clone());
+                phase = 2;
+                finished_at = now;
+            }
+            if phase == 2
+                && exchanges[1]
+                    .ready
+                    .get(&10)
+                    .is_some_and(|(id, b)| id.size == model.len() && b.is_empty())
+            {
+                reused = true;
+                if now - finished_at > 2000 {
+                    phase = 3;
+                    finished_at = now;
+                }
+            }
+            if phase == 3 && now - finished_at > 5000 {
+                assert!(last_model_packet < finished_at);
+                break;
+            }
+        }
+        assert_eq!(phase, 3);
+        assert!(reused);
     }
 }

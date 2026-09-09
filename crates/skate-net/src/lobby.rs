@@ -210,7 +210,7 @@ impl Session {
         self.budget = if host.is_none() {
             DEFAULT_HOST_BUDGET
         } else {
-            DEFAULT_LINK_BUDGET
+            if self.loopback {2_000_000.} else {DEFAULT_LINK_BUDGET}
         };
         self.credits = 12_000.;
         self.notice = if host.is_none() {
@@ -221,6 +221,8 @@ impl Session {
     }
     pub fn set_loopback(&mut self, enabled: bool) {
         self.loopback = enabled;
+        self.budget=if enabled {12_000_000.} else {DEFAULT_HOST_BUDGET};
+        self.set_congested(false);
     }
     pub fn is_host(&self) -> bool {
         self.host.is_none()
@@ -230,9 +232,9 @@ impl Session {
     }
     pub fn set_congested(&mut self, congested: bool) {
         self.link_budget = if congested {
-            DEFAULT_LINK_BUDGET * 0.5
+            if self.loopback {1_000_000.} else {DEFAULT_LINK_BUDGET * 0.5}
         } else {
-            DEFAULT_LINK_BUDGET
+            if self.loopback {2_000_000.} else {DEFAULT_LINK_BUDGET}
         };
     }
     pub fn publish(&mut self, kind: u8, mut state: Packed, now: u64) {
@@ -511,9 +513,9 @@ impl Session {
     pub fn service(&mut self, now: u64) -> Vec<Outgoing> {
         let dt = now.saturating_sub(self.last_service).min(1000) as f64 / 1000.;
         self.last_service = now;
-        self.credits = (self.credits + dt * self.budget).min(12_000.);
+        self.credits = (self.credits + dt * self.budget).min(if self.loopback {128_000.} else {12_000.});
         for l in self.links.values_mut() {
-            l.credits = (l.credits + dt * self.link_budget).min(3600.);
+            l.credits = (l.credits + dt * self.link_budget).min(if self.loopback {64_000.} else {3600.});
         }
         if self.is_host() {
             let expired: Vec<_> = self

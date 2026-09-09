@@ -528,6 +528,7 @@ mod online_owned_tests {
         .unwrap();
         let parts = crate::customiser_parts::Parts::for_test(library);
         let mut app = App::new();
+        crate::custom_models::register_source(&mut app);
         app.add_plugins((
             MinimalPlugins,
             AssetPlugin {
@@ -544,6 +545,53 @@ mod online_owned_tests {
             .register_type::<MeshMaterial3d<StandardMaterial>>();
         app.finish();
         app.cleanup();
+        if let Ok(path) = std::env::var("SKATE_ONLINE_TEST_GLB") {
+            let bytes = std::fs::read(path).unwrap();
+            super::super::appearance::validate_glb(&bytes).unwrap();
+            let cache = super::super::appearance::cache_directory();
+            std::fs::create_dir_all(cache).unwrap();
+            std::fs::write(cache.join("received-test.glb"), bytes).unwrap();
+            let handle = app
+                .world()
+                .resource::<AssetServer>()
+                .load(GltfAssetLabel::Scene(0).from_asset("online-characters://received-test.glb"));
+            let root = app
+                .world_mut()
+                .spawn((SceneRoot(handle), Transform::default(), Visibility::Hidden))
+                .id();
+            let started = Instant::now();
+            loop {
+                app.update();
+                let w = app.world();
+                if w.get::<SceneInstance>(root)
+                    .is_some_and(|i| w.resource::<SceneSpawner>().instance_is_ready(**i))
+                {
+                    break;
+                }
+                assert!(
+                    started.elapsed().as_secs() < 45,
+                    "received online import failed to load"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let mut queries: SystemState<(
+                Query<(Entity, &SkinnedMesh)>,
+                Query<(&Name, &Transform)>,
+                Query<&ChildOf>,
+            )> = SystemState::new(app.world_mut());
+            let (meshes, nodes, parents) = queries.get(app.world());
+            assert!(
+                !crate::animation::AnimationStatus::for_scene(
+                    root, &names, &meshes, &nodes, &parents
+                )
+                .unwrap()
+                .online_bindings()
+                .is_empty()
+            );
+            app.world_mut().entity_mut(root).despawn();
+            app.update();
+            std::fs::remove_file(cache.join("received-test.glb")).unwrap();
+        }
         for gender in ["male", "female"] {
             let profile = parts.resolve(&parts.library.defaults[gender]).unwrap();
             let candidate = app

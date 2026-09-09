@@ -27,6 +27,7 @@ pub(super) struct Appearances {
     local: String,
     pub looks: BTreeMap<u64, ([u8; 32], Look)>,
     seen: BTreeMap<u64, [u8; 32]>,
+    cached: BTreeMap<[u8; 32], Look>,
     pub status: String,
     pub progress: String,
 }
@@ -61,7 +62,11 @@ pub(super) fn sync(
         };
     }
     let selection = models.online_selection();
-    let signature = format!("{:?}:{}", models.active, parts.applied);
+    let signature = models
+        .active
+        .as_ref()
+        .map(|id| format!("model:{id}"))
+        .unwrap_or_else(|| format!("outfit:{}", parts.applied));
     if state.local != signature {
         let payload = (|| -> Result<Vec<u8>, String> {
             if let Some((native, path)) = selection {
@@ -90,6 +95,10 @@ pub(super) fn sync(
         })();
         match payload {
             Ok(bytes) => {
+                info!(
+                    "ONLINE_CHARACTER_PUBLISH bytes={} selection={signature}",
+                    bytes.len()
+                );
                 state.exchange.publish(bytes);
                 state.status.clear();
             }
@@ -119,6 +128,13 @@ pub(super) fn sync(
         let bytes = std::mem::take(&mut state.exchange.ready.get_mut(&id).unwrap().1);
         state.seen.insert(id, hash);
         let result = (|| -> Result<Look, String> {
+            if bytes.is_empty() {
+                return state
+                    .cached
+                    .get(&hash)
+                    .cloned()
+                    .ok_or("Cached appearance missing".into());
+            }
             if bytes.first() == Some(&0) {
                 validate_glb(&bytes[1..])?;
                 let name = format!("{}.glb", blake3::Hash::from_bytes(hash).to_hex());
@@ -147,6 +163,18 @@ pub(super) fn sync(
         })();
         match result {
             Ok(look) => {
+                let identity = state.exchange.ready[&id].0.clone();
+                state.exchange.remember(identity);
+                state.cached.insert(hash, look.clone());
+                info!(
+                    "ONLINE_CHARACTER_READY peer={id} kind={} hash={}",
+                    if matches!(look, Look::Imported(_)) {
+                        "import"
+                    } else {
+                        "retail"
+                    },
+                    blake3::Hash::from_bytes(hash)
+                );
                 state.looks.insert(id, (hash, look));
             }
             Err(e) => warn!("Remote appearance {id}: {e}"),
