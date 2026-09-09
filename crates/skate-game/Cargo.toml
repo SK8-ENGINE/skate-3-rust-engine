@@ -38,3 +38,4 @@ skate-net = { path = "../skate-net" }
 [dev-dependencies]
 naga = { version = "=27.0.3", features = ["wgsl-in"] }
 naga_oil = { version = "=0.20.0", default-features = false }
+wgpu = { version = "=27.0.1", default-features = false, features = ["vulkan", "naga-ir"] }

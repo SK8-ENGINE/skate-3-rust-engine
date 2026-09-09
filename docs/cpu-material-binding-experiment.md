@@ -1,5 +1,46 @@
 # CPU material binding experiment
 
+## v8: repaired material-array shader
+
+The v6 native access violation was reproduced without launching gameplay: an
+isolated Vulkan pipeline compilation using the v6 material fragment shader exited
+with `0xC0000005` at `Device::create_render_pipeline`. The test used the same RTX
+5090, NVIDIA 616.56 and Vulkan backend reported by the user. The original shader
+compiled in the same harness. Inlining the v6 shading body also compiled, narrowing
+the trigger to that shader's function/resource-argument structure rather than map
+simulation or residency. This does not establish a specific driver instruction
+or rule out additional issues in the full game.
+
+v8 retains material-array batching but replaces the large `shade` function taking
+textures and samplers as arguments. Sampling helpers now receive only the material
+slot and coordinates; they access global texture/sampler arrays at the sampling
+site. One shading body serves both bindless and fallback paths. Existing shading
+operations, texture selection, alpha rejection and user settings are retained.
+
+Validation on that GPU passed for both bindless and fallback modes:
+
+- Native compilation of the main and shadow pipelines.
+- Offscreen main-pass drawing with 8x MSAA, command submission and pixel readback.
+  Material slots 0 and 1 produced the expected `[64,64,64,255]` and
+  `[191,191,191,255]` pixels; fallback produced the expected first value.
+- Six Naga shader variants and the Rust material index/buffer contract.
+- Eleven world adapter regressions.
+
+The GPU probes use real retail shaders and Bevy vertex interfaces, with small
+fixtures for unrelated lighting resources. They validate the reproduced pipeline
+crash and basic material-array execution, not the entire Bevy render graph or game.
+The two GPU tests are ignored by ordinary test runs and require explicit opt-in.
+`SKATE_SHADER_PROBE_FALLBACK=1` selects the fallback probe; the default tests the
+array path. The test-only `SKATE_SHADER_PROBE_SOURCE` can point to a directory with
+`v6-retail_world.wgsl` and `v6-retail_material_bindings.wgsl` extracted from `bea625f`
+to reproduce the old compiler crash using the main pipeline probe.
+
+CPU batching is enabled again in v8. No FPS gain is claimed until a matched user
+capture measures main opaque encoder finish, total command generation and frame
+times. No gameplay was launched during this work.
+
+## v6/v7 history
+
 **Withdrawn after the user's runtime test.** Build `bea625f` exited with native
 access violation `0xC0000005` about 11.4 seconds after launch, shortly after map
 initialization, on an RTX 5090 using Vulkan. The report contains no native stack
