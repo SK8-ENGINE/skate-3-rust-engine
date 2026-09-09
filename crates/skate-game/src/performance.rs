@@ -5,6 +5,12 @@ use std::sync::{Arc, Mutex};
 use std::{collections::BTreeMap, sync::OnceLock};
 use std::{path::PathBuf, time::Instant};
 
+static EPOCH: OnceLock<Instant> = OnceLock::new();
+static SLOW_SECTIONS: Mutex<Vec<(&'static str, f64, f64)>> = Mutex::new(Vec::new());
+fn timestamp(now: Instant) -> f64 {
+    EPOCH.get().map_or(0., |epoch| now.duration_since(*epoch).as_secs_f64() * 1000.)
+}
+
 static SECTIONS: Mutex<BTreeMap<&'static str, (f64, u64)>> = Mutex::new(BTreeMap::new());
 pub(crate) struct Scope {
     name: &'static str,
@@ -24,9 +30,14 @@ impl Scope {
 impl Drop for Scope {
     fn drop(&mut self) {
         if let Some(start) = self.start {
+            let elapsed = start.elapsed().as_secs_f64() * 1000.;
+            if elapsed >= 2. {
+                let mut slow = SLOW_SECTIONS.lock().unwrap();
+                if slow.len() < 256 { slow.push((self.name, timestamp(start), elapsed)); }
+            }
             let mut sections = SECTIONS.lock().unwrap();
             let entry = sections.entry(self.name).or_default();
-            entry.0 += start.elapsed().as_secs_f64() * 1000.;
+            entry.0 += elapsed;
             entry.1 += 1;
         }
     }
@@ -41,7 +52,8 @@ pub(crate) struct Performance {
     physics_ms: f64,
     ticks: u32,
     samples: Vec<[f64; 4]>,
-    render: Arc<Mutex<Vec<[f64; 5]>>>,
+    sample_times: Vec<f64>,
+    render: Arc<Mutex<Vec<[f64; 7]>>>,
 }
 impl Performance {
     pub(crate) fn physics(&mut self, elapsed: std::time::Duration) {
@@ -57,7 +69,8 @@ impl Plugin for PerformancePlugin {
             return;
         };
         let now = Instant::now();
-        let render = Arc::new(Mutex::new(Vec::new()));
+        let _ = EPOCH.set(now);
+        let render = Arc::new(Mutex::new(Vec::with_capacity(16384)));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .insert_resource(RenderPerformance {
@@ -126,7 +139,8 @@ impl Plugin for PerformancePlugin {
             previous: now,
             physics_ms: 0.,
             ticks: 0,
-            samples: Vec::new(),
+            samples: Vec::with_capacity(16384),
+            sample_times: Vec::with_capacity(16384),
             render,
         })
         .add_systems(First, begin)
@@ -183,6 +197,7 @@ fn finish(mut p: ResMut<Performance>, mut exit: MessageWriter<AppExit>) {
             f64::from(p.ticks),
         ];
         p.samples.push(sample);
+        p.sample_times.push(timestamp(now));
     }
     if elapsed > 25. && !p.samples.is_empty() {
         let mean = |column: usize| {
@@ -205,6 +220,14 @@ fn finish(mut p: ResMut<Performance>, mut exit: MessageWriter<AppExit>) {
             "render_assets_ms_mean": render_mean(2), "render_views_ms_mean": render_mean(3), "render_queue_ms_mean": render_mean(4),
             "sections_ms_per_call": SECTIONS.lock().unwrap().iter().map(|(&k, &(ms, n))| (k, ms / n as f64)).collect::<BTreeMap<_,_>>(),
             "samples": p.samples,
+            "sample_elapsed_ms": p.sample_times,
+            "render_samples": &*render,
+            "render_sample_columns": ["prepare_ms", "submit_ms", "assets_ms", "views_ms", "queue_ms", "elapsed_ms", "waiting_pipelines"],
+            "slow_sections": &*SLOW_SECTIONS.lock().unwrap(),
+            "slow_section_columns": ["section", "start_elapsed_ms", "duration_ms"],
+            "frame_ms_max": frames[frames.len()-1],
+            "frame_ms_p99": frames[(frames.len()-1)*99/100],
+            "frames_over_8ms": frames.iter().filter(|&&ms| ms > 8.).count(),
         });
         match std::fs::write(&p.path, serde_json::to_vec_pretty(&report).unwrap()) {
             Ok(()) => {
@@ -226,7 +249,7 @@ struct RenderPerformance {
     prepared: Instant,
     mark: Instant,
     phases: [f64; 3],
-    samples: Arc<Mutex<Vec<[f64; 5]>>>,
+    samples: Arc<Mutex<Vec<[f64; 7]>>>,
 }
 fn render_begin(mut p: ResMut<RenderPerformance>) {
     p.frame = Instant::now();
@@ -248,7 +271,7 @@ fn render_queue_done(mut p: ResMut<RenderPerformance>) {
 fn render_prepared(mut p: ResMut<RenderPerformance>) {
     p.prepared = Instant::now();
 }
-fn render_finish(mut p: ResMut<RenderPerformance>) {
+fn render_finish(mut p: ResMut<RenderPerformance>, pipelines: Res<bevy::render::render_resource::PipelineCache>) {
     let now = Instant::now();
     if now
         .duration_since(*p.start.get_or_insert(now))
@@ -261,6 +284,8 @@ fn render_finish(mut p: ResMut<RenderPerformance>) {
             p.phases[0],
             p.phases[1],
             p.phases[2],
+            timestamp(now),
+            pipelines.waiting_pipelines().count() as f64,
         ]);
     }
 }

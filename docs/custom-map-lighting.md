@@ -129,3 +129,18 @@ A new gameplay capture is required to quantify the resulting FPS change.
 
 Validation: release build check passed, and the explicit Vulkan GPU cache
 regression test passed. No gameplay was launched for this change.
+
+## Remaining hitch investigation
+
+The next user capture measured 525.1 FPS, 1.90 ms mean frame time and 0.126 ms
+mesh binding preparation. Two clusters of slow frames remained; the maximum
+was 26.71 ms, with only 4.01 ms in the main schedule and 2.71 ms in physics.
+Another 25.53 ms frame contained no physics tick. The aggregate render metrics
+cannot identify those individual stalls. No specific hitch cause is confirmed.
+
+The opt-in profiler now retains timestamped main/render samples, pending
+pipeline counts, and bounded slow-section events (at least 2 ms, at most 256).
+Main/render sample buffers are preallocated. Reports still write only at the
+end of the capture; normal launches do not enable this instrumentation. The
+release compile check passed. Another user-run capture is required to locate
+the remaining stalls; no game or gameplay automation was launched.
