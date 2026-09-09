@@ -181,3 +181,43 @@ launcher records stdout/stderr, backtraces and the exit code in
 See [visual-parity-status.md](visual-parity-status.md) for the subsequent SH
 transition smoothing, second-UV blended hair coverage, GPU exposure meter and
 remaining shadow/CAC fidelity gaps. Earlier implementation sections are historical.
+
+## Stock surface restoration, September 9
+
+Returning from an imported/native model reapplies the modular stock outfit. Its
+geometry-only GLBs have normal maps in the material library but no tangent
+attributes, so the StandardMaterial input path silently omitted their detail.
+The customiser shader also used alpha after `alpha_discard` as the clothing
+specular mask; opaque coverage had already replaced that authored mask with 1.
+
+Both original and modular retail shaders now share the derivative normal basis
+and gamma-two albedo decode. Modular materials retain the source diffuse alpha
+for highlights, independently of opacity and tattoos, and use the dedicated skin
+specular mask where authored. Profile updates retain texture handles and apply
+colour tint separately. This shared material path covers local and remote stock
+outfits without changing imported PBR materials or globally lowering gloss.
+
+Fourteen focused tests pass with the prepared library, including offline shader
+compilation, stock restoration and per-profile material preservation. No game was
+launched; visual verification of stock -> imported/pro -> stock remains manual.
+
+## Pro hair family classification, September 9
+
+Benny Fairfax's prepared `Retail_Hair` uses `character.default_hair`; other pro
+hair also uses `character.default_hair_ropa`. The renderer previously recognised
+only the `character.hair` prefix, so those pro materials entered clothing shading
+and received bright, untinted specular highlights. A shared material-family check
+now recognises all four authored hair names for local/native and modular/remote
+materials. The existing hair response and original textures are preserved.
+
+Fifteen focused tests pass, including a native hair binding regression and checks
+that skin/clothing are not classified as hair. No asset conversion is required;
+Benny's appearance still needs the user-run visual check.
+
+Stock-hair follow-up: all 31 modular stock hair materials use `character.hair`
+or `character.hair_ropa`; the original stock material also uses `character.hair`.
+The prepared-library regression passes a colour change/restore for every stock
+hair material, preserving hair shading, authored tint, normal/diffuse/opacity
+textures, specular masks and roughness. This rules out the same family-selection
+and tested profile-cache failure, not every possible visual lighting issue.
+No runtime change or new executable was needed for this audit.

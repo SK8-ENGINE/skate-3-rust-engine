@@ -32,7 +32,7 @@ fn run() -> Result<(), String> {
     let cookie = &args[3];
     let socket = UdpSocket::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     socket.connect(parent).map_err(|e| e.to_string())?;
-    socket.set_nonblocking(true).map_err(|e| e.to_string())?;
+    skate_net::socket::configure(&socket).map_err(|e| e.to_string())?;
     let status = |s: &str| {
         let _ = socket.send(format!("SK8RELAY {cookie} {s}").as_bytes());
     };
@@ -52,6 +52,19 @@ fn run() -> Result<(), String> {
         return Err("Same Steam identity".into());
     }
     client.networking_utils().init_relay_network_access();
+    // SDK defaults cap model uploads at 256 KB/s. Raise only the ceiling;
+    // retain Steam's congestion control and the lobby's bulk pacing/backoff.
+    // SAFETY: Steam is initialized and owns this interface for `client`'s lifetime.
+    unsafe {
+        let utils = steamworks::sys::SteamAPI_SteamNetworkingUtils_SteamAPI_v004();
+        if utils.is_null() || !steamworks::sys::SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32(
+            utils,
+            steamworks::sys::ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_SendRateMax,
+            4_500_000,
+        ) {
+            return Err("Could not configure Steam model transfer bandwidth".into());
+        }
+    }
     let messages = client.networking_messages();
     let mut attempts = 0;
     let mut window = Instant::now();
@@ -144,7 +157,7 @@ fn run() -> Result<(), String> {
             ));
             heartbeat = Instant::now();
         }
-        for _ in 0..256 {
+        for _ in 0..4096 {
             match socket.recv(&mut buffer) {
                 Ok(n) => {
                     if buffer[..n] == *ping.as_bytes() {
@@ -187,7 +200,7 @@ fn run() -> Result<(), String> {
                     }
                     parent_seen = Instant::now();
                     let state = matches!(kind, skate_net::packed::BODY | skate_net::packed::POSE);
-                    if state && peers.get(&target).is_some_and(|(_, queue)| *queue > 50) {
+                    if (state || kind == skate_net::blob::DATA) && peers.get(&target).is_some_and(|(_, queue)| *queue > 50) {
                         dropped += 1;
                         continue;
                     }
@@ -213,7 +226,7 @@ fn run() -> Result<(), String> {
                 Err(e) => return Err(e.to_string()),
             }
         }
-        for message in messages.receive_messages_on_channel(CHANNEL, 256) {
+        for message in messages.receive_messages_on_channel(CHANNEL, 4096) {
             let id = message
                 .identity_peer()
                 .steam_id()

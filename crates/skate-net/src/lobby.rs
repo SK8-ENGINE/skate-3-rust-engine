@@ -158,6 +158,7 @@ pub struct Session {
     link_budget: f64,
     round: usize,
     loopback: bool,
+    pub blobs: crate::blob::Blobs,
 }
 impl Session {
     pub fn new(session: u64, info: Info, host: Option<u64>) -> Self {
@@ -190,6 +191,7 @@ impl Session {
             link_budget: DEFAULT_LINK_BUDGET,
             round: 0,
             loopback: false,
+            blobs: Default::default(),
         }
     }
     /// An external membership authority chooses the new endpoint. Preserve our
@@ -229,6 +231,7 @@ impl Session {
         self.is_host() || self.received_roster != 0
     }
     pub fn set_congested(&mut self, congested: bool) {
+        self.blobs.congested = congested;
         self.link_budget = if congested {
             DEFAULT_LINK_BUDGET * 0.5
         } else {
@@ -371,6 +374,19 @@ impl Session {
                 _ => "Lobby rejected connection",
             }
             .into();
+            return;
+        }
+        if matches!(kind, crate::blob::META | crate::blob::DATA | crate::blob::ACK) {
+            let valid = if kind == crate::blob::ACK {
+                self.links[&peer].actor == actor
+            } else {
+                actor != self.local && self.actors.contains_key(&actor)
+                    && (!self.is_host() || self.links[&peer].actor == actor)
+            };
+            if valid {
+                self.blobs.receive(peer, actor, kind, seq, &data[HEADER..]);
+                self.links.get_mut(&peer).unwrap().seen = now;
+            }
             return;
         }
         if self.links[&peer].actor != actor && !matches!(kind, BODY | POSE | APPLICATION) {
@@ -691,6 +707,9 @@ impl Session {
                 output.push(Outgoing {peer, data});
             }
         }
+        let members = self.actors.keys().copied().collect();
+        let peers: Vec<_> = self.links.iter().map(|(&peer, link)| (peer, link.actor, link.rtt)).collect();
+        output.extend(self.blobs.service(self.session, self.local, self.host.is_none(), &members, &peers, now));
         self.stats.rtt_ms = self.links.values().map(|l| l.rtt).max().unwrap_or(0);
         output
     }

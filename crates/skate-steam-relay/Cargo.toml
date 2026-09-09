@@ -9,5 +9,5 @@ name = "skate-steam-relay"
 path = "src/main.rs"
 
 [dependencies]
-steamworks = "=0.13.1"
+steamworks = { version = "=0.13.1", features = ["raw-bindings"] }
 skate-net = { path = "../skate-net" }

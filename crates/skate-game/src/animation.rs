@@ -16,6 +16,18 @@ struct BoneBinding {
     parent_bone: Option<usize>,
 }
 impl AnimationStatus {
+    pub(crate) fn pose_transforms(&self, pose:&[Mat4])->Vec<(Entity,Transform)> {
+        self.bindings.iter().filter_map(|b|{
+            let global=*pose.get(b.bone)?*render_basis();
+            let local=if let Some(parent)=b.parent_bone {(*pose.get(parent)?*render_basis()).inverse()*global} else {global};
+            Some((b.entity,Transform::from_matrix(local)))
+        }).collect()
+    }
+
+    pub(crate) fn online_bindings(&self) -> Vec<(Entity,usize,Option<usize>)> {
+        self.bindings.iter().map(|b|(b.entity,b.bone,b.parent_bone)).collect()
+    }
+
     /// Prepare a hidden imported scene without disturbing the live bindings.
     pub(crate) fn for_scene(
         root: Entity,
@@ -193,6 +205,7 @@ fn bind(
 }
 fn present(
     history: Res<crate::presentation::Presentation>,
+    skater: Res<SkaterRuntime>,
     replay: Res<crate::replay::Replay>,
     time: Res<Time<Fixed>>,
     animation: Res<AnimationStatus>,
@@ -205,7 +218,11 @@ fn present(
     // rotated -90 degrees about X relative to the native frames. Both files'
     // world positions are Y-up. This is a skin basis change, not a physics turn.
     let basis = render_basis();
-    let Some((previous, current, alpha)) = history.view(&replay, time.overstep_fraction()) else { return; };
+    let Some((previous, current, alpha)) = history.view(&replay, time.overstep_fraction()) else {
+        let pose:Vec<_>=skater.render_pose.iter().copied().map(native_matrix).collect();
+        for (entity,transform) in animation.pose_transforms(&pose) {if let Ok(mut node)=nodes.get_mut(entity){*node=transform;}}
+        return;
+    };
     for binding in &animation.bindings {
         // Blend bone-local rotations, not matrix entries or independent world
         // positions: joints retain their hierarchy while limbs turn.
@@ -275,4 +292,39 @@ pub(crate) fn network_visual(world: &mut World) -> skate_net::packed::PoseState 
  let anchors=crate::physics::network::anchors(world.resource::<SkaterRuntime>());
  let basis=render_basis().inverse();
  skate_net::packed::PoseState{root:crate::physics::network::pose(root.to_matrix()),bones:anchors.into_iter().map(|i|skate_net::Bone{index:i as u16,pose:crate::physics::network::pose(if locals.contains_key(&i) {global(i,&locals,0)*basis} else {native_matrix(world.resource::<SkaterRuntime>().render_pose[i])})}).collect()}
+}
+#[cfg(test)]
+mod online_swap_tests {
+    use super::*;
+    use bevy::{ecs::system::SystemState,mesh::skinning::SkinnedMesh};
+    #[test]
+    fn online_appearance_swap_seeds_new_rig_and_keeps_animating() {
+        let mut world=World::new();
+        let mut roots=vec![];
+        for _ in 0..2 {
+            let root=world.spawn_empty().id();
+            let hip=world.spawn((Name::new("HIPS"),Transform::default(),ChildOf(root))).id();
+            let head=world.spawn((Name::new("HEAD"),Transform::default(),ChildOf(hip))).id();
+            world.spawn((ChildOf(root),SkinnedMesh{inverse_bindposes:default(),joints:vec![hip,head]}));
+            roots.push((root,hip,head));
+        }
+        let names=vec!["HIPS".to_owned(),"HEAD".to_owned()];
+        let bind=|world:&mut World,root| {
+            let mut query:SystemState<(Query<(Entity,&SkinnedMesh)>,Query<(&Name,&Transform)>,Query<&ChildOf>)>=SystemState::new(world);
+            let (skins,nodes,parents)=query.get(world);
+            AnimationStatus::for_scene(root,&names,&skins,&nodes,&parents).unwrap()
+        };
+        let old=bind(&mut world,roots[0].0);
+        let pose=[Mat4::from_translation(Vec3::new(1.,2.,3.)),Mat4::from_rotation_z(0.7)];
+        for (entity,t) in old.pose_transforms(&pose){*world.get_mut::<Transform>(entity).unwrap()=t;}
+        let replacement=bind(&mut world,roots[1].0);
+        assert_eq!(*world.get::<Transform>(roots[1].1).unwrap(),Transform::default());
+        for (entity,t) in replacement.pose_transforms(&pose){*world.get_mut::<Transform>(entity).unwrap()=t;}
+        assert_eq!(world.get::<Transform>(roots[0].1),world.get::<Transform>(roots[1].1));
+        assert_eq!(world.get::<Transform>(roots[0].2),world.get::<Transform>(roots[1].2));
+        let next=[Mat4::from_translation(Vec3::new(2.,3.,4.)),Mat4::from_rotation_z(1.2)];
+        for (entity,t) in replacement.pose_transforms(&next){*world.get_mut::<Transform>(entity).unwrap()=t;}
+        assert_ne!(world.get::<Transform>(roots[0].1),world.get::<Transform>(roots[1].1));
+        assert_ne!(world.get::<Transform>(roots[0].2),world.get::<Transform>(roots[1].2));
+    }
 }
