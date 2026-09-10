@@ -14,6 +14,25 @@ from .setup_state import source_directory, setup_lock, receipt, valid_receipt
 
 
 class SetupRecovery(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows directory aliases')
+    def test_receipts_accept_windows_aliases_but_reject_outside_files(self):
+        import _winapi
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            target = root/'long installation directory';target.mkdir()
+            alias = root/'alias'
+            _winapi.CreateJunction(str(target),str(alias))
+            try:
+                payload = target/'map.skate';payload.write_bytes(b'map')
+                expected = receipt(target,[payload])
+                self.assertEqual(receipt(alias,[payload]),expected)
+                self.assertEqual(receipt(target,[alias/'map.skate']),expected)
+                self.assertTrue(valid_receipt(alias,expected))
+                outside = root/'outside';outside.write_bytes(b'outside')
+                with self.assertRaises(ValueError):receipt(alias,[outside])
+            finally:
+                alias.rmdir()  # Remove the junction, never its target.
+
     def test_xex_refresh_failure_never_publishes_core_or_edits_user_data(self):
         with tempfile.TemporaryDirectory() as temp:
             base, old, source, current, marker = test_versions.AssetVersions().fixture(Path(temp))

@@ -57,6 +57,10 @@ def sha(path):
 
 
 def receipt(root, paths):
+    # Windows short names and directory junctions must use the same spelling
+    # on both sides of relative_to; also reject outputs outside the root.
+    root = root.resolve()
+    paths = (p.resolve() for p in paths)
     return {p.relative_to(root).as_posix(): {'size': p.stat().st_size, 'sha256': sha(p)}
             for p in sorted(set(paths)) if p.is_file()}
 
