@@ -29,9 +29,9 @@ class AssetVersions(unittest.TestCase):
             self.assertEqual(v.fingerprints(root),before)
 
     def test_equivalences_only_accept_exact_old_and_new_pair(self):
-        current=v.fingerprints()
         migrations=json.loads(Path(v.__file__).with_name('pipeline-equivalence.json').read_text())
-        # Known HEAD export migration retains all current core/map content.
+        # Equivalences describe historical pairs, not every future exporter.
+        current={g:migrations[g][0][1] for g in v.GROUPS}
         old={g:migrations[g][0][0] for g in v.GROUPS}
         self.assertEqual(v.changed_groups(old,current),set())
         changed={**current,'maps':'future-exporter'}

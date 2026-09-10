@@ -6,6 +6,7 @@ by its normal successful-install cleanup. No audio or full-disc extraction.
 """
 import argparse
 from pathlib import Path
+import tempfile
 
 from prepare_hud import prepare as prepare_scoring
 from extract_session_marker import prepare as prepare_marker
@@ -13,6 +14,13 @@ from install_prepared_hud import install
 
 
 def prepare(game, assets, work):
+    # Retail texture names plus the install/generation prefix can exceed legacy
+    # Windows path limits. Only compact runtime files belong in the installation.
+    with tempfile.TemporaryDirectory(prefix='sk8hud-') as temporary:
+        return prepare_in_workspace(game, assets, Path(temporary))
+
+
+def prepare_in_workspace(game, assets, work):
     scoring = work / 'scoring'
     marker = work / 'session-marker'
     prepare_scoring(game, scoring, assets / 'private/stock/skater-collections.json')

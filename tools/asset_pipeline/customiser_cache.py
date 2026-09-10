@@ -18,8 +18,8 @@ SOURCES = {
     'library': GEOMETRY + ('asset_pipeline/customisation_library.py', 'asset_pipeline/customisation_worker.py'),
     'menu': ('asset_pipeline/customisation_profiles.py',),
     'lighting': ('asset_pipeline/customiser_lighting.py', 'asset_pipeline/environment.py',
-                 'asset_pipeline/native_roster.py', 'extract_default_skater.py'),
-    'roster': GEOMETRY + ('asset_pipeline/native_roster.py', 'mixamo_to_skate/*.py'),
+                 'asset_pipeline/native_roster.py', 'asset_pipeline/marquee_assets.py', 'extract_default_skater.py'),
+    'roster': GEOMETRY + ('asset_pipeline/native_roster.py', 'asset_pipeline/marquee_assets.py', 'mixamo_to_skate/*.py'),
 }
 OUTPUTS = {
     'catalog': ('catalog.json', 'native.json', 'database', 'source/data/content/recipe'),

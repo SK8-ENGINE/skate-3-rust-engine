@@ -3,10 +3,10 @@ import json
 from pathlib import Path
 import struct
 import sys
-import xml.etree.ElementTree as ET
 from PIL import Image
 from .environment import Collections, key_hash
 from .native_roster import roster
+from .marquee_assets import Resources, MissingMarqueeAsset
 from tools.owned_game.big import BigArchive
 from tools.extract_default_skater import import_rx2_parser, decode_texture
 
@@ -36,7 +36,7 @@ def prepare(game, assets, directory, library):
     cac = BigArchive(game/'data/content/createacharacter.big')
     marquee = BigArchive(game/'data/content/marquee.big')
     cac_entries = {e.path.lower(): e for e in cac.entries}
-    marquee_entries = {e.path.lower(): e for e in marquee.entries}
+    resources = Resources(marquee)
     masks = directory/'specular'; masks.mkdir(exist_ok=True)
 
     def mask(archive, entries, prefix, tid):
@@ -46,7 +46,8 @@ def prepare(game, assets, directory, library):
         out = masks/(prefix+'-'+tid+'.png')
         if not out.exists():
             raw = masks/(prefix+'-'+tid+'.rx2')
-            raw.write_bytes(archive.read(entries[f'data/content/{prefix}/texture/0x{tid}.rx2'.lower()]))
+            name = f'data/content/{prefix}/texture/0x{tid}.rx2'.lower()
+            raw.write_bytes(resources.read(name) if archive is marquee else archive.read(entries[name]))
             decoded = masks/(prefix+'-'+tid+'-decoded.png')
             decode_texture(parser, raw, decoded)
             with Image.open(decoded) as image:
@@ -74,17 +75,21 @@ def prepare(game, assets, directory, library):
     native = {}
     for item in roster(converted['collections']):
         recipe = item['recipe']
-        root = ET.fromstring(marquee.read(marquee_entries[f'data/content/recipe/marquee/{recipe}.xml'.lower()]))
+        try:
+            root = resources.recipe(recipe)
+        except MissingMarqueeAsset as error:
+            print(f'Unavailable optional character {item["name"]}: {error}', flush=True)
+            continue
         definitions = {m.attrib['id']: m for m in root.findall('mat')}
         materials = {}
         for comp in root.findall('comp'):
             slot = comp.attrib['n']
             lod = next(l for l in comp.find('mod').findall('lod') if l.get('idx') == '0')
-            raw = marquee.read(marquee_entries[f'data/content/marquee/model/{recipe}/{slot}/{lod.attrib["arenaid"]}.rx2'.lower()])
+            raw = resources.read(f'data/content/marquee/model/{recipe}/{slot}/{lod.attrib["arenaid"]}.rx2')
             mat = definitions[lod.find('matinst/matvar').attrib['id']]
             textures = {s.attrib['chn']: s.attrib['id'] for s in mat.findall('sp')}
             materials['Retail_'+slot] = material_data(raw, collections, mdl_parser,
-                mask(marquee, marquee_entries, 'marquee', textures.get('specular')))
+                mask(marquee, resources.entries, 'marquee', textures.get('specular')))
         native[item['key']] = materials
     (directory/'native-lighting.json').write_text(json.dumps(native))
     (directory/'library-v3.json').write_text(json.dumps(library, separators=(',', ':')))

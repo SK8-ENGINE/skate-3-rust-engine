@@ -72,6 +72,11 @@ def compile_hud(cache_root: Path, output: Path, toolkit="vendor.skate3_ui") -> N
         return index
 
     buttons_dir = Path("assets/data/fe/source/images/buttons/xbox360/buttons")
+    if not (cache_root/buttons_dir/'manifest.json').is_file():
+        manifest = json.loads((cache_root/'manifest.json').read_text())
+        errors = manifest.get('errors', [])
+        raise RuntimeError('Session-marker Xbox button textures could not be extracted. '
+                           + ('; '.join(errors) if errors else 'The owned UI archives do not contain the required Xbox button texture bank.'))
     buttons = json.loads((cache_root / buttons_dir / "manifest.json").read_text())["textures"]
     meshes = []
     for primitive in flat["primitives"]:

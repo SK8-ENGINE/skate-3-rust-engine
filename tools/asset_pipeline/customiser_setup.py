@@ -11,7 +11,7 @@ def fingerprint(tools=None):
     tools = tools or Path(__file__).resolve().parents[1]
     paths = {p for pattern in ('asset_pipeline/customis*.py', 'asset_pipeline/setup_state.py', 'asset_pipeline/native_roster.py',
                               'asset_pipeline/character_glb.py', 'asset_pipeline/retail_character.py',
-                              'asset_pipeline/vlt.py', 'asset_pipeline/environment.py',
+                              'asset_pipeline/vlt.py', 'asset_pipeline/environment.py', 'asset_pipeline/marquee_assets.py',
                               'asset_pipeline/names.txt', 'extract_default_skater.py',
                               'owned_game/**/*.py', 'vendor/utt/**/*.py', 'vendor/utt/**/*.json',
                               'asset_pipeline/fast_refpack.py', 'asset_pipeline/refpack_native.rs',
@@ -100,9 +100,11 @@ def prepare(game, assets, report=print):
         if (directory/'roster-work').exists():shutil.rmtree(directory/'roster-work')
         roster = native_roster(game, assets, directory/'native-roster',
                               directory/'database/collections.json', directory/'roster-work')
-        if not roster or any(item['status'] != 'ready' for item in roster):
+        if not any(item['status'] == 'ready' for item in roster) or any(item['status'] not in ('ready','unavailable') for item in roster):
             raise RuntimeError('Native character roster preparation did not complete')
-        (directory/'native-roster/complete.json').write_text(json.dumps({'characters': len(roster)}))
+        unavailable = [item for item in roster if item['status'] == 'unavailable']
+        for item in unavailable:report(f'Unavailable optional character {item["name"]}: {item["error"]}')
+        (directory/'native-roster/complete.json').write_text(json.dumps({'characters': sum(item['status']=='ready' for item in roster), 'unavailable': unavailable}))
     run_stage('roster', build_roster)
     temporary = marker.with_suffix('.tmp')
     temporary.write_text(json.dumps(dict(version=1, set=identity, fingerprint=version, source=source)))

@@ -66,7 +66,8 @@ class CharacterSetup(unittest.TestCase):
             def roster(game, assets, library, collections, work):
                 library.mkdir(exist_ok=True)
                 return roster_results.pop(0)
-            roster_results = [[], [{'status': 'ready', 'key': 'pro'}]]
+            roster_results = [[], [{'status': 'ready', 'key': 'pro'},
+                                  {'status': 'unavailable', 'key': 'dem_bones', 'name': 'Dem Bones', 'error': 'missing head'}]]
             with patch('tools.asset_pipeline.customisation_catalog.prepare', side_effect=catalog), \
                  patch('tools.asset_pipeline.customisation_library.prepare', side_effect=library), \
                  patch('tools.asset_pipeline.customisation_profiles.generate', return_value=[]), \
@@ -81,6 +82,9 @@ class CharacterSetup(unittest.TestCase):
             generation = base/'sets'/current['set']
             for path in ('library-v3.json', 'extra-menu.json', 'native-lighting.json', 'native-roster/complete.json'):
                 self.assertTrue((generation/path).is_file(), path)
+            completeness=json.loads((generation/'native-roster/complete.json').read_text())
+            self.assertEqual(completeness['characters'],1)
+            self.assertEqual(completeness['unavailable'][0]['key'],'dem_bones')
             with patch('tools.asset_pipeline.customisation_catalog.prepare', side_effect=AssertionError('must reuse')):
                 s.prepare(Path(temp)/'source', assets, lambda _: None)
 

@@ -8,6 +8,7 @@ from tools.owned_game.big import BigArchive
 from tools.extract_default_skater import import_rx2_parser, decode_texture
 from tools.asset_pipeline.character_glb import Glb, convert
 from tools.asset_pipeline.retail_character import RX2, decode_dense_morphs
+from tools.asset_pipeline.marquee_assets import Resources, MissingMarqueeAsset
 
 # GetCACSettings 82590BE0..82590DBC, TU3: six named styles, Aggressive otherwise.
 STYLES={'danny_way':'DannyWay','mike_carroll':'MikeCarroll','pj_ladd':'PJLadd',
@@ -55,12 +56,13 @@ def roster(rows):
     return sorted(result,key=lambda r:r['name'])
 
 def prepare(game,assets,library,collections,work,only=None):
-    archive=BigArchive(game/'data/content/marquee.big');entries={e.path.lower():e for e in archive.entries}
+    archive=BigArchive(game/'data/content/marquee.big')
+    resources=Resources(archive)
     work.mkdir(parents=True,exist_ok=True)
     parser=import_rx2_parser(Path(__file__).resolve().parents[1]/'vendor/utt')
     def extract(path):
         dest=work/'source'/path
-        if not dest.exists():dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(archive.read(entries[path.lower()]))
+        if not dest.exists():dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(resources.read(path))
         return dest
     def texture(tid):
         dest=work/'decoded'/(tid+'.png');dest.parent.mkdir(exist_ok=True)
@@ -69,6 +71,12 @@ def prepare(game,assets,library,collections,work,only=None):
     records=roster(json.loads(collections.read_text())['collections']);report=[]
     for item in records:
         if only and item['key'] not in only:continue
+        try:
+            resources.recipe(item['recipe'])
+        except MissingMarqueeAsset as error:
+            report.append({**item,'status':'unavailable','error':str(error)})
+            print(f'Unavailable optional character {item["name"]}: {error}',flush=True)
+            continue
         key=item['key'];recipe_name=item['recipe'];folder=work/key;models=folder/'models';mats=folder/'materials'
         models.mkdir(parents=True,exist_ok=True);mats.mkdir(exist_ok=True)
         identity=hashlib.sha256(('native-marquee-v1:'+key).encode()).hexdigest();target=library/'entries'/identity
