@@ -16,7 +16,7 @@ try {
     }
     & $packagePython -m pip install -r tools/requirements-setup.txt
     if ($LASTEXITCODE -ne 0) { throw 'Could not install packaging dependencies' }
-    & $packagePython -m unittest tools.test_setup_assets tools.asset_pipeline.test_marquee_assets tools.asset_pipeline.test_customiser_setup tools.asset_pipeline.test_setup_recovery
+    & $packagePython -m unittest tools.test_setup_assets tools.asset_pipeline.test_marquee_assets tools.asset_pipeline.test_customiser_setup tools.asset_pipeline.test_setup_recovery tools.asset_pipeline.test_versions tools.asset_pipeline.test_optional_content
     if ($LASTEXITCODE -ne 0) { throw 'Setup extraction regression checks failed' }
     $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static'
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-ffff'

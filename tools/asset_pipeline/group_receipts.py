@@ -6,13 +6,14 @@ ROOTS = {
     'core': ('assets/private/stock/data/anim', 'assets/private/stock/data/state',
              'assets/private/stock/data/config', 'assets/private/stock/data/cacrecipes',
              'assets/private/stock/skater-collections.json', 'assets/private/stock/physics-skeletons.json'),
-    'hud': ('assets/private/hud', 'assets/private/session-marker'),
+    'hud': ('assets/private/hud', 'assets/private/session-marker',
+            'assets/private/hud-availability.json', 'assets/private/session-marker-availability.json'),
     'character': ('assets/private/game.json', 'assets/private/skater.glb', 'assets/private/default_skater',
                   'assets/private/native-character', 'assets/private/character-lighting.json'),
     'environment': ('assets/private/native-skies', 'assets/private/native-backdrops',
                     'assets/private/render-parameters.json', 'assets/private/exposure.json',
-                    'assets/private/exposure-profiles.json', 'assets/private/teleports.json'),
-    'maps': ('assets/private/native-props', 'maps.json'),
+                    'assets/private/exposure-profiles.json', 'assets/private/teleports.json', 'assets/private/environment-status'),
+    'maps': ('assets/private/native-props', 'maps.json', 'assets/private/map-status'),
 }
 
 
@@ -49,7 +50,7 @@ def damaged(root, marker, exclude=()):
             # Legacy packages have no receipts: require their declared roots
             # and verify the map checksums they already recorded. The runtime
             # validator also checks legacy core inputs before publication.
-            if any(not (root/name).exists() for name in roots):result.add(group)
+            if any(not (root/name).exists() for name in roots if not name.endswith(('-availability.json', '-status'))):result.add(group)
             if group == 'hud' and group not in result:
                 from tools.install_prepared_hud import runtime_files
                 try:

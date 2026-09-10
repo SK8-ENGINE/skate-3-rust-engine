@@ -120,9 +120,9 @@ Core refreshes create a new installation before publication. Unchanged prepared
 maps and immutable character generations use hardlinks (copy fallback on filesystems without support); mutable user files and
 outputs being rebuilt have independent storage. Customiser-only refreshes keep
 the current core installation and publish a new character generation. Custom
-models, profiles, settings, selections and mods are retained. Every required
-stage, including the complete character library and pro roster, must succeed
-before the installation record changes. Failures preserve the previous record.
+models, profiles, settings, selections and mods are retained. Core gameplay inputs and at least one map must pass validation before the
+installation record changes. Missing optional content is recorded separately;
+fatal failures preserve the previous record.
 A kernel lock prevents concurrent setup and releases automatically on process
 exit, including a crash; the harmless `setup.lock` file can remain on disk.
 
@@ -142,3 +142,24 @@ Installations from releases that used the old global asset store need one setup
 in the new per-copy layout. There is deliberately no automatic global migration.
 Manually unpacking a ZIP over the same folder retains that folder's `data` and
 behaves like an in-place update; unpack into a new folder for a fresh setup.
+
+## Missing content
+
+Setup isolates missing or malformed optional items. Clothing variants and tattoos
+that cannot be decoded are excluded from the customiser. Missing pro characters,
+lighting, HUD banks, environment extras and movable props do not block core setup.
+Scoring and session-marker artwork are prepared independently. Verified previous
+HUDs and customiser generations are kept when a replacement fails; otherwise the
+stock skater and available features remain usable.
+
+Each district converts independently. A failed or absent source district can use
+its previous converted map only after checksum and engine validation. Initial
+setup can select another available district if University is absent. Missing core
+animation, physics, the stock skater, or every playable map still requires repairing
+the source. Missing original artwork cannot be recreated by ignoring the error.
+
+Setup displays a notice and writes `setup-report.json` in the active installation,
+with unavailable items and error details. Availability records participate in
+output receipts so acknowledged missing extras do not cause a setup loop. A new
+extractor fingerprint requests preparation again. Disk and permission failures
+in in-process conversion still abort rather than publishing partial writes.

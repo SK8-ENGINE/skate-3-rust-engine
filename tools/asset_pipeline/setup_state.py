@@ -6,15 +6,17 @@ import os
 from pathlib import Path
 
 
-def source_directory(selected):
+def source_directory(selected, require_core=True):
     selected = Path(selected).resolve()
     if selected.is_file() and selected.name.lower() == 'default.xex':
         selected = selected.parent
     elif not selected.is_dir():
         raise RuntimeError('Select your Skate 3 default.xex or Xbox 360 ISO')
-    for name in ('default.xex', 'data/big/miscload.big', 'data/big/miscboot.big',
-                 'data/big/db.big', 'data/content/createacharacter.big',
-                 'data/content/marquee.big', 'data/content/worldDIST_University.big'):
+    required = ('default.xex',)
+    if require_core:
+        required += ('data/big/miscload.big', 'data/big/miscboot.big',
+                     'data/big/db.big', 'data/content/createacharacter.big')
+    for name in required:
         if not (selected/name).is_file():
             raise RuntimeError('Keep the Skate 3 game content beside default.xex; missing '+name)
     return selected

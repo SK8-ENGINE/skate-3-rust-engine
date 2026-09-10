@@ -12,7 +12,7 @@ def fingerprint(tools=None):
     paths = {p for pattern in ('asset_pipeline/customis*.py', 'asset_pipeline/setup_state.py', 'asset_pipeline/native_roster.py',
                               'asset_pipeline/character_glb.py', 'asset_pipeline/retail_character.py',
                               'asset_pipeline/vlt.py', 'asset_pipeline/environment.py', 'asset_pipeline/marquee_assets.py',
-                              'asset_pipeline/names.txt', 'extract_default_skater.py',
+                              'asset_pipeline/names.txt', 'asset_pipeline/optional_content.py', 'extract_default_skater.py',
                               'owned_game/**/*.py', 'vendor/utt/**/*.py', 'vendor/utt/**/*.json',
                               'asset_pipeline/fast_refpack.py', 'asset_pipeline/refpack_native.rs',
                               'vendor/skate3_anim/abin_importer.py', 'vendor/skate3_anim/rx2_skeleton.py',
@@ -30,12 +30,39 @@ def source_fingerprint(game):
     digest = hashlib.sha256()
     for name in ('data/content/createacharacter.big', 'data/content/marquee.big', 'data/big/db.big',
                  'data/big/miscload.big', 'default.xex'):
+        if name == 'data/content/marquee.big' and not (game/name).is_file():
+            digest.update(b'missing optional archive')
+            continue
         with (game/name).open('rb') as source:
             digest.update(hashlib.file_digest(source, 'sha256').digest())
     return digest.hexdigest()
 
 
 def prepare(game, assets, report=print):
+    from .optional_content import CONTENT_ERRORS, note
+    from .setup_state import atomic_json
+    base = assets/'private/customisation'
+    availability = base/'customiser-availability.json'
+    try:
+        _prepare(game, assets, report)
+        availability.unlink(missing_ok=True)
+    except CONTENT_ERRORS as error:
+        # Each generation is published atomically. Do not replace working
+        # profiles/generation pointers when an optional preparation stage fails.
+        from .customiser_cache import read, complete
+        saved = read(base/'current.json')
+        retained = (isinstance(saved.get('set'), str) and re.fullmatch('[0-9a-f]{32}', saved['set'])
+                    and complete(base/'sets'/saved['set']))
+        result = note(availability, 'Character customiser', error, bool(retained), report)
+        result['fingerprint'] = fingerprint()
+        if retained:result['set'] = saved['set']
+        atomic_json(availability, result)
+        if not retained:
+            # Remove only the pointer, not the user's profiles or old files.
+            (base/'current.json').unlink(missing_ok=True)
+
+
+def _prepare(game, assets, report=print):
     from tools.asset_pipeline.customisation_catalog import prepare as catalog
     from tools.asset_pipeline.customisation_library import prepare as library
     from tools.asset_pipeline.customisation_profiles import generate
@@ -79,12 +106,35 @@ def prepare(game, assets, report=print):
     report('Preparing character customiser clothing, bodies and textures')
     stage_versions = cache.versions()
     def run_stage(name, action):
-        cache.stage(directory, old_directory, name, stage_versions[name], source, action, assets, report)
+        def optional_action():
+            from .optional_content import CONTENT_ERRORS, note
+            try:action()
+            except CONTENT_ERRORS as error:
+                if name not in ('lighting','roster'):raise
+                # Failed optional output is never published as complete artwork.
+                import shutil
+                for relative in cache.OUTPUTS[name]:
+                    path=directory/relative
+                    if not path.resolve().is_relative_to(directory.resolve()):
+                        raise ValueError('Optional output escaped character generation')
+                    if path.is_dir():shutil.rmtree(path)
+                    else:path.unlink(missing_ok=True)
+                if name=='lighting':
+                    (directory/'native-lighting.json').write_text('{}')
+                    shutil.copy2(directory/'library-base.json',directory/'library-v3.json')
+                    availability=directory/'lighting-availability.json'
+                else:
+                    (directory/'native-roster').mkdir(exist_ok=True)
+                    (directory/'native-roster/complete.json').write_text('{"characters":0}')
+                    availability=directory/'native-roster/roster-availability.json'
+                note(availability,'Character '+name,error,report=report)
+        cache.stage(directory, old_directory, name, stage_versions[name], source, optional_action, assets, report)
     run_stage('catalog', lambda: catalog(game, directory))
     def build_library():
         data = library(dict(assets=str(assets), game_root=str(game), directory=str(directory), library_index='library-base.json'))
-        if data['errors'] or not data['models']:
+        if not data['models']:
             raise RuntimeError('Character library preparation failed: '+str(data['errors'])[:1000])
+        for error in data['errors']:report('Unavailable customiser item: '+str(error))
         for profile in data['defaults'].values():
             for selection in profile['selections'].values():
                 if selection['asset_id'] not in data['models'] or selection['material_id'] not in data['materials']:
@@ -98,11 +148,10 @@ def prepare(game, assets, report=print):
         # Work textures were not published or receipted; discard failed work.
         import shutil
         if (directory/'roster-work').exists():shutil.rmtree(directory/'roster-work')
+        (directory/'native-roster').mkdir(exist_ok=True)
         roster = native_roster(game, assets, directory/'native-roster',
                               directory/'database/collections.json', directory/'roster-work')
-        if not any(item['status'] == 'ready' for item in roster) or any(item['status'] not in ('ready','unavailable') for item in roster):
-            raise RuntimeError('Native character roster preparation did not complete')
-        unavailable = [item for item in roster if item['status'] == 'unavailable']
+        unavailable = [item for item in roster if item['status'] != 'ready']
         for item in unavailable:report(f'Unavailable optional character {item["name"]}: {item["error"]}')
         (directory/'native-roster/complete.json').write_text(json.dumps({'characters': sum(item['status']=='ready' for item in roster), 'unavailable': unavailable}))
     run_stage('roster', build_roster)
@@ -128,7 +177,7 @@ def install(iso, base, game_exe, report, refresh=False):
             with (Path(temp)/'extract.log').open('w') as log:
                 core.run([extractor, '-x', selected, '-d', source], log, report)
         else:
-            source = source_directory(selected)
+            source = source_directory(selected, require_core=not refresh)
         stage = core._install(iso, base, game_exe, report, game_root=source, refresh=refresh,
                              finalize=lambda stage: prepare(source, stage/'assets', report))
         return stage

@@ -74,6 +74,11 @@ pub(crate) struct Parts {
 pub(crate) struct PartRoot(pub String);
 pub(crate) fn asset_directory(assets: &std::path::Path) -> std::path::PathBuf {
     let base = assets.join("private/customisation");
+    if std::fs::read(base.join("customiser-availability.json")).ok()
+        .and_then(|bytes|serde_json::from_slice::<Value>(&bytes).ok())
+        .is_some_and(|v|v["version"]==1 && v["status"]=="unavailable") {
+        return base.join("unavailable");
+    }
     if let Some(set) = std::fs::read(base.join("current.json")).ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
         .and_then(|v| v["set"].as_str().map(str::to_owned))

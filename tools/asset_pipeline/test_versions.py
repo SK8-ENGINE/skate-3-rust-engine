@@ -88,7 +88,7 @@ class AssetVersions(unittest.TestCase):
             self.assertEqual((new/'maps/University.skate').read_bytes(),b'unchanged map')
             self.assertEqual((new/'settings/default-map.json').read_text(),'"custom.skate"')
             self.assertTrue((old/'assets/private/hud/old.txt').is_file())
-            self.assertFalse((new/'assets/private/hud/old.txt').exists())
+            self.assertTrue((new/'assets/private/hud/old.txt').exists())  # Kept until replacement validates.
             self.assertEqual(v.installed(base)[1]['pipelines'],current)
             self.assertTrue(any(any('prepare_runtime_huds.py' in a for a in args) for args in calls))
             self.assertFalse(any(any('map_job.py' in a for a in args) for args in calls))

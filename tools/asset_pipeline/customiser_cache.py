@@ -8,7 +8,7 @@ from .setup_state import atomic_json, receipt, valid_receipt
 
 SHARED = ('owned_game/**/*.py', 'vendor/utt/**/*.py', 'vendor/utt/**/*.json',
           'asset_pipeline/fast_refpack.py', 'asset_pipeline/refpack_native.rs',
-          'requirements-setup.txt')
+          'requirements-setup.txt', 'asset_pipeline/optional_content.py')
 GEOMETRY = ('asset_pipeline/character_glb.py', 'asset_pipeline/retail_character.py',
             'vendor/skate3_anim/abin_importer.py', 'vendor/skate3_anim/rx2_skeleton.py',
             'extract_default_skater.py', 'default_skater_retail_manifest.json')
@@ -25,7 +25,7 @@ OUTPUTS = {
     'catalog': ('catalog.json', 'native.json', 'database', 'source/data/content/recipe'),
     'library': ('library', 'decoded', 'source/data/content/createacharacter', 'library-base.json'),
     'menu': ('extra-menu.json',),
-    'lighting': ('specular', 'native-lighting.json', 'library-v3.json'),
+    'lighting': ('specular', 'native-lighting.json', 'library-v3.json', 'lighting-availability.json'),
     'roster': ('native-roster',),
 }
 REQUIRED = {

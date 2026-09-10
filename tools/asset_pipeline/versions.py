@@ -12,16 +12,16 @@ COMMON = ('owned_game/**/*.py', 'asset_pipeline/fast_refpack.py', 'asset_pipelin
 PARSERS = ('vendor/utt/**/*.py', 'vendor/university/**/*.py', 'vendor/utt/**/*.json', 'vendor/university/**/*.json')
 SOURCES = {
     'core': ('asset_pipeline/vlt.py', 'asset_pipeline/names.txt', 'asset_pipeline/physics_skeleton.py'),
-    'hud': ('prepare_hud.py', 'prepare_runtime_huds.py', 'install_prepared_hud.py',
+    'hud': ('asset_pipeline/optional_content.py', 'prepare_hud.py', 'prepare_runtime_huds.py', 'install_prepared_hud.py',
             'extract_session_marker.py', 'vendor/skate3_ui/**/*.py', 'vendor/skate3_ui/**/*.json'),
     'character': PARSERS + ('extract_default_skater.py', 'default_skater_retail_manifest.json',
                   'asset_pipeline/character*.py', 'asset_pipeline/retail_character.py',
                   'vendor/skate3_anim/abin_importer.py', 'vendor/skate3_anim/rx2_skeleton.py'),
-    'environment': PARSERS + ('asset_pipeline/sky.py', 'asset_pipeline/backdrop.py',
+    'environment': PARSERS + ('asset_pipeline/optional_content.py', 'asset_pipeline/sky.py', 'asset_pipeline/backdrop.py',
                   'asset_pipeline/render_parameters.py', 'asset_pipeline/teleports.py',
                   'asset_pipeline/environment.py', 'asset_pipeline/map_writer.py',
                   'asset_pipeline/retail_material.py', 'asset_pipeline/irradiance.py'),
-    'maps': PARSERS + ('asset_pipeline/map*.py', 'asset_pipeline/dynamic_props.py',
+    'maps': PARSERS + ('asset_pipeline/optional_content.py', 'asset_pipeline/map*.py', 'asset_pipeline/dynamic_props.py',
              'asset_pipeline/environment.py', 'asset_pipeline/irradiance.py',
              'asset_pipeline/retail_material.py', 'asset_pipeline/backdrop.py', 'asset_pipeline/sky.py'),
 }

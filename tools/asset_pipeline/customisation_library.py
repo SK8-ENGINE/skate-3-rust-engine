@@ -6,6 +6,7 @@ from PIL import Image,ImageChops
 from tools.asset_pipeline.customisation_worker import ROOT,default_profile,flag
 from tools.asset_pipeline.customisation_catalog import write_private
 from tools.owned_game.big import BigArchive
+from tools.asset_pipeline.optional_content import CONTENT_ERRORS
 
 def friendly(name):
     text=name.lower().replace('_',' ')
@@ -46,6 +47,17 @@ def variant_label(slot, model_name, native_name):
     label=re.sub(r'\s+',' ',label).strip()
     if not label: label='Original'
     return label+(' (Worn)' if worn else '')
+
+
+def prune_unavailable(models, materials, errors):
+    """Never expose a model selection that points at an absent material."""
+    for key, model in list(models.items()):
+        model['groups'] = [[mid for mid in group if mid in materials] for group in model['groups']]
+        if not model['groups'] or any(not group for group in model['groups']):
+            del models[key]
+            errors.append(dict(model=key, error='No available material for a mesh group'))
+        else:
+            model['materials'] = model['groups'][0]
 
 
 def prepare(config):
@@ -91,8 +103,9 @@ def prepare(config):
     for part in catalog['components']:
         for model in part['models']:
             if part['slot']=='Misc':continue  # Non-geometric stamp catalogue, indexed below.
-            slot=part['slot'];lod=next(l for l in model['lods'] if l['index']==0);key=model['id'];path=out/(key+'_v4.glb')
+            slot=part['slot'];key=model['id'];path=out/(key+'_v4.glb')
             try:
+                lod=next(l for l in model['lods'] if l['index']==0)
                 if not path.exists():
                     source=extract(lod['path']);folder=out/'work'/key/'models'/slot;folder.mkdir(parents=True,exist_ok=True)
                     mesh_file=folder/source.name
@@ -109,39 +122,48 @@ def prepare(config):
                 groups=[[v['id'] for v in group] for group in lod['material_instances']]
                 model_data[key]=dict(slot=slot,name=friendly(model['name']),flags={k[4:]:v for k,v in model['flags'].items() if v},
                     materials=groups[0],groups=groups,scene=path.relative_to(assets).as_posix())
-                for v in lod['material_instances'][0]:
-                    mid=v['id']
-                    if mid in mat_data:continue
-                    mat=catalog['materials'][mid];tex={t['channel']:t['id'] for t in mat['textures']}
-                    if 'diffuse' not in tex:continue
-                    diffuse=texture(tex['diffuse'])
-                    if 'alpha' in tex and slot!='Hair':
-                        alpha_path=assets/texture(tex['alpha']);combined=out/'textures'/(tex['diffuse']+'_'+tex['alpha']+'.png')
-                        if not combined.exists():
-                            im=Image.open(assets/diffuse).convert('RGBA');alpha=Image.open(alpha_path).convert('RGBA')
-                            alpha=alpha.resize(im.size,Image.Resampling.LANCZOS);mask=alpha.getchannel('A')
-                            if mask.getextrema()==(255,255):mask=alpha.convert('L')
-                            im.putalpha(ImageChops.multiply(im.getchannel('A'),mask));im.save(combined)
-                        diffuse=combined.relative_to(assets).as_posix()
-                    mat_data[mid]=dict(name=variant_label(slot,model['name'],v['name']),flags={k[4:]:val for k,val in mat['flags'].items() if val},
-                        diffuse=diffuse,normal=texture(tex['normal'],'normal') if 'normal' in tex else None,
-                        rough=texture(tex['specular'],'rough') if 'specular' in tex else None,
-                        opacity=texture(tex['alpha']) if slot=='Hair' and 'alpha' in tex else None,
-                        alpha='alpha' in tex,tint=defaults.get(mid,{}).get('tint',
-                            [0.72,0.57,0.49] if mat['flags'].get('cas.SkinTone')=='light' else
-                            [0.33,0.26,0.23] if mat['flags'].get('cas.SkinTone')=='dark' else
-                            [0.02,0.01,0.01] if slot=='Hair' else [1.,1.,1.]),
-                        metallic=.65 if slot=='SkateTruck' else 0.,roughness=.48 if slot in {'SkateTruck','SkateWheel'} else .72)
-            except Exception as e:errors.append(dict(model=key,slot=slot,error=str(e)))
+                for v in (v for group in lod['material_instances'] for v in group):
+                    try:
+                        mid=v['id']
+                        if mid in mat_data:continue
+                        mat=catalog['materials'][mid];tex={t['channel']:t['id'] for t in mat['textures']}
+                        if 'diffuse' not in tex:continue
+                        diffuse=texture(tex['diffuse'])
+                        if 'alpha' in tex and slot!='Hair':
+                            alpha_path=assets/texture(tex['alpha']);combined=out/'textures'/(tex['diffuse']+'_'+tex['alpha']+'.png')
+                            if not combined.exists():
+                                im=Image.open(assets/diffuse).convert('RGBA');alpha=Image.open(alpha_path).convert('RGBA')
+                                alpha=alpha.resize(im.size,Image.Resampling.LANCZOS);mask=alpha.getchannel('A')
+                                if mask.getextrema()==(255,255):mask=alpha.convert('L')
+                                im.putalpha(ImageChops.multiply(im.getchannel('A'),mask));im.save(combined)
+                            diffuse=combined.relative_to(assets).as_posix()
+                        mat_data[mid]=dict(name=variant_label(slot,model['name'],v['name']),flags={k[4:]:val for k,val in mat['flags'].items() if val},
+                            diffuse=diffuse,normal=texture(tex['normal'],'normal') if 'normal' in tex else None,
+                            rough=texture(tex['specular'],'rough') if 'specular' in tex else None,
+                            opacity=texture(tex['alpha']) if slot=='Hair' and 'alpha' in tex else None,
+                            alpha='alpha' in tex,tint=defaults.get(mid,{}).get('tint',
+                                [0.72,0.57,0.49] if mat['flags'].get('cas.SkinTone')=='light' else
+                                [0.33,0.26,0.23] if mat['flags'].get('cas.SkinTone')=='dark' else
+                                [0.02,0.01,0.01] if slot=='Hair' else [1.,1.,1.]),
+                            metallic=.65 if slot=='SkateTruck' else 0.,roughness=.48 if slot in {'SkateTruck','SkateWheel'} else .72)
+                    except CONTENT_ERRORS as error:
+                        errors.append(dict(model=key,material=v.get('id'),slot=slot,error=str(error)))
+            except CONTENT_ERRORS as e:errors.append(dict(model=key,slot=slot,error=str(e)))
         print('Prepared',part['slot'],len(model_data),'models',len(mat_data),'materials',flush=True)
     tattoos={}
-    misc=next(p for p in catalog['components'] if p['slot']=='Misc')
-    for variant in misc['models'][0]['lods'][0]['material_instances'][0]:
-        mid=variant['id'];mat=catalog['materials'][mid]
-        if not mat['flags'].get('cas.TattooCategory'):continue
-        tex={t['channel']:t['id'] for t in mat['textures']}
-        tattoos[mid]=dict(name=friendly(variant['name']),texture=texture(tex['decal']),
-            bounds=[float(v) for v in mat['flags']['cas.StampBorderConstraint'].split(',')])
+    misc=next((p for p in catalog['components'] if p['slot']=='Misc'),None)
+    variants=(v for m in (misc or {}).get('models',[]) for lod in m.get('lods',[])
+              for group in lod.get('material_instances',[]) for v in group)
+    for variant in variants:
+        try:
+            mid=variant['id'];mat=catalog['materials'][mid]
+            if not mat['flags'].get('cas.TattooCategory'):continue
+            tex={t['channel']:t['id'] for t in mat['textures']}
+            tattoos[mid]=dict(name=friendly(variant['name']),texture=texture(tex['decal']),
+                bounds=[float(v) for v in mat['flags']['cas.StampBorderConstraint'].split(',')])
+        except CONTENT_ERRORS as error:
+            errors.append(dict(tattoo=variant.get('id'),error=str(error)))
+    prune_unavailable(model_data,mat_data,errors)
     male=default_profile();male['gender']='male'
     female=copy.deepcopy(male);female['gender']='female';female['selections']={}
     raw=parse_fallback_recipe(assets/'private/stock/data/cacrecipes/SavedRecipeFallbackFemale.bin',16)

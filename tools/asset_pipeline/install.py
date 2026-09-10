@@ -134,10 +134,16 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
     finished('write_map')
     from .dynamic_props import export as write_props
     caches=list((work/'dmo/cache').glob('DMO_*'))
-    if not caches:
-        raise RuntimeError('Missing prepared DMO catalog')
-    placed, unresolved=write_props(manifest_path,caches,stage/'assets/private/native-props'/(label+'.skate'),
-                                  catalog_path=work/'dmo/catalog.json')
+    from .optional_content import CONTENT_ERRORS, note
+    props=stage/'assets/private/native-props'/(label+'.skate')
+    try:
+        if not caches:raise RuntimeError('Movable-object source catalog is unavailable')
+        placed, unresolved=write_props(manifest_path,caches,props,catalog_path=work/'dmo/catalog.json')
+        (stage/'assets/private/native-props'/(label+'-availability.json')).unlink(missing_ok=True)
+    except CONTENT_ERRORS as error:
+        if props.is_dir():remove_intermediate(props,stage)
+        note(stage/'assets/private/native-props'/(label+'-availability.json'),label+' movable props',error,report=report)
+        placed,unresolved=0,0
     finished('props')
     report(f'{label}: placed {placed} authored DMO instances, {unresolved} unresolved templates')
     report('Checking converted map: '+label)
@@ -175,7 +181,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
     base=base.resolve();base.mkdir(parents=True,exist_ok=True)
     from .setup_state import source_directory
     if game_root is not None:
-        game_root=source_directory(game_root)
+        game_root=source_directory(game_root, require_core=not previous)
         if previous and previous[1].get('source_hash') not in (None,digest(game_root/'default.xex')):
             raise RuntimeError('Select the same Xbox game edition used to set up this copy')
     if previous:groups.update(damaged(*previous, exclude=groups))
@@ -186,6 +192,8 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         with (base/'refresh-validation.log').open('w',encoding='utf-8') as log:
             run([game_exe,'--assets',previous[0]/'assets','--test-world','--check-assets'],log,report)
         if finalize:finalize(previous[0])
+        from .optional_content import summary
+        summary(previous[0])
         atomic_json(base/'installation.json', {**previous[1], 'pipelines':target_versions,
                     'outputs':outputs(previous[0]), 'source':source})
         report('Game assets are current')
@@ -235,8 +243,10 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
             report('Extracting your ISO')
             run([extractor,'-x',iso,'-d',game_root],log,report)
         else:game_root=game_root.resolve()
-        for required in ['default.xex','data/big/miscload.big','data/big/miscboot.big','data/big/db.big',
-                         'data/content/createacharacter.big','data/content/worldDIST_University.big']:
+        required_files=['default.xex']
+        if 'core' in groups:required_files += ['data/big/miscload.big','data/big/miscboot.big','data/big/db.big']
+        if 'character' in groups:required_files += ['data/content/createacharacter.big']
+        for required in required_files:
             if not (game_root/required).is_file():raise RuntimeError('This is not a supported Skate 3 disc: missing '+required)
         source_hash=digest(game_root/'default.xex')
         if previous and previous[1].get('source_hash',source_hash)!=source_hash:
@@ -255,7 +265,13 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         if 'maps' in groups:
             report('Preparing authored movable-object models')
             from .dynamic_props import prepare_catalog
-            prepare_catalog(game_root,work/'dmo')
+            from .optional_content import CONTENT_ERRORS, note
+            try:
+                prepare_catalog(game_root,work/'dmo')
+                (private/'native-props/props-availability.json').unlink(missing_ok=True)
+            except CONTENT_ERRORS as error:
+                if (work/'dmo').exists():remove_intermediate(work/'dmo',work)
+                note(private/'native-props/props-availability.json','Movable props',error,report=report)
         report('Validating skater, input and animation data')
         run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
         if 'maps' in groups:
@@ -275,22 +291,55 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
                 # remain queued behind a string of small parks.
                 futures={pool.submit(map_job,a):a for a in sorted(archives,key=lambda p:-p.stat().st_size)}
                 for future in as_completed(futures):
-                    archive=futures[future];completed[archive.name]=future.result()
+                    archive=futures[future]
+                    try:completed[archive.name]=future.result()
+                    except CONTENT_ERRORS as error:
+                        label=archive.stem.removeprefix('worldDIST_')
+                        (maps/(label+'.skate')).unlink(missing_ok=True)
+                        props=private/'native-props'/(label+'.skate')
+                        if props.is_dir():remove_intermediate(props,private)
+                        note(private/'map-status'/(label+'-availability.json'),label,error,report=report)
+                        continue
+                    (private/'map-status'/(completed[archive.name]['name']+'-availability.json')).unlink(missing_ok=True)
                     report(f"Converted {len(completed)}/{len(archives)} maps: {completed[archive.name]['name']}")
-            catalog=[completed[a.name] for a in archives]
-            if not any(m['name']=='University' for m in catalog):raise RuntimeError('University was not converted')
+            catalog=[completed[a.name] for a in archives if a.name in completed]
+            if previous:
+                # An absent/failed source district may still have a usable old
+                # converted copy. Validate its bytes AND load with this engine.
+                for old in json.loads((previous[0]/'maps.json').read_text()):
+                    if any(item['path']==old['path'] for item in catalog):continue
+                    src=(previous[0]/old['path']).resolve()
+                    if not src.is_relative_to((previous[0]/'maps').resolve()):raise ValueError('Invalid old map path')
+                    if not src.is_file() or digest(src)!=old.get('sha256'):continue
+                    try:run([game_exe,'--assets',stage/'assets','--map',src,'--check-assets'],log,report)
+                    except CONTENT_ERRORS:continue
+                    target=stage/old['path'];target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,target)
+                    catalog.append(old)
+                    note(private/'map-status'/(old['name']+'-availability.json'),old['name'],
+                         RuntimeError('New source map unavailable; previous map passed validation'),retained=True,report=report)
+            # Exclude invalid old retail maps from the runtime directory scan.
+            valid_paths={item['path'] for item in catalog}
+            if previous:
+                for old in json.loads((previous[0]/'maps.json').read_text()):
+                    if old['path'] not in valid_paths:(stage/old['path']).unlink(missing_ok=True)
+            if not catalog:raise RuntimeError('No playable map could be prepared or recovered. Restore at least one worldDIST_*.big archive beside default.xex and retry; the previous installation has been kept.')
         report('Validating installed runtime inputs')
         run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
         settings=stage/'settings';settings.mkdir(exist_ok=True)
         if not previous:
-            (settings/'default-map.json').write_text(json.dumps('maps/University.skate'),encoding='utf-8')
+            (settings/'default-map.json').write_text(json.dumps(next((m['path'] for m in catalog if m['name']=='University'),catalog[0]['path'])),encoding='utf-8')
         if 'maps' in groups:
             (stage/'maps.json').write_text(json.dumps(catalog,indent=2),encoding='utf-8')
+            selected=settings/'default-map.json'
+            if selected.is_file() and not (stage/json.loads(selected.read_text())).is_file():
+                selected.write_text(json.dumps(catalog[0]['path']))
         remove_intermediate(work,stage)
         if finalize:finalize(stage)
-        # Publish only after every conversion, including the customiser, succeeds.
+        from .optional_content import summary
+        warnings=summary(stage)
+        # Publish after core validation and all optional outcomes have been recorded.
         marker=base/'installation.json.new'
         marker.write_text(json.dumps({'version':1,'directory':'installations/'+install_id,'source':source,'source_hash':source_hash,'pipelines':target_versions,'outputs':outputs(stage)}),encoding='utf-8')
         marker.replace(base/'installation.json')
-        report('Setup complete')
+        report(f'Setup complete ({len(warnings)} unavailable/retained components; see setup-report.json)' if warnings else 'Setup complete')
         return stage

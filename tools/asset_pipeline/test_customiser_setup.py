@@ -29,7 +29,7 @@ class CharacterSetup(unittest.TestCase):
             old = {'set': 'a'*32, 'fingerprint': 'old'}
             (base/'current.json').write_text(json.dumps(old))
             with patch('tools.asset_pipeline.customisation_catalog.prepare', side_effect=RuntimeError('bad source')):
-                with self.assertRaises(RuntimeError): s.prepare(Path(temp)/'source', assets, lambda _: None)
+                with self.assertRaises(RuntimeError): s._prepare(Path(temp)/'source', assets, lambda _: None)
             self.assertEqual(json.loads((base/'current.json').read_text()), old)
 
     def test_crash_after_publication_cannot_resume_inside_the_live_generation(self):
@@ -42,7 +42,7 @@ class CharacterSetup(unittest.TestCase):
             (base/'pending.json').write_text(json.dumps(old))
             with patch.object(s,'fingerprint',return_value='v'), \
                  patch('tools.asset_pipeline.customisation_catalog.prepare',side_effect=RuntimeError('failed')):
-                with self.assertRaises(RuntimeError):s.prepare(Path(temp)/'source',assets,lambda _:None)
+                with self.assertRaises(RuntimeError):s._prepare(Path(temp)/'source',assets,lambda _:None)
             self.assertEqual((live/'catalog.json').read_text(),'working output')
             self.assertEqual(json.loads((base/'current.json').read_text()),old)
             self.assertNotEqual(json.loads((base/'pending.json').read_text())['set'],old['set'])
@@ -66,16 +66,13 @@ class CharacterSetup(unittest.TestCase):
             def roster(game, assets, library, collections, work):
                 library.mkdir(exist_ok=True)
                 return roster_results.pop(0)
-            roster_results = [[], [{'status': 'ready', 'key': 'pro'},
+            roster_results = [[{'status': 'ready', 'key': 'pro'},
                                   {'status': 'unavailable', 'key': 'dem_bones', 'name': 'Dem Bones', 'error': 'missing head'}]]
             with patch('tools.asset_pipeline.customisation_catalog.prepare', side_effect=catalog), \
                  patch('tools.asset_pipeline.customisation_library.prepare', side_effect=library), \
                  patch('tools.asset_pipeline.customisation_profiles.generate', return_value=[]), \
                  patch('tools.asset_pipeline.customiser_lighting.prepare', side_effect=lighting), \
                  patch('tools.asset_pipeline.native_roster.prepare', side_effect=roster):
-                with self.assertRaisesRegex(RuntimeError, 'roster preparation'):
-                    s.prepare(Path(temp)/'source', assets, lambda _: None)
-                self.assertFalse((assets/'private/customisation/current.json').exists())
                 s.prepare(Path(temp)/'source', assets, lambda _: None)
             base = assets/'private/customisation'
             current = json.loads((base/'current.json').read_text())

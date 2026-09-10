@@ -55,8 +55,10 @@ def main():
         button.config(state='disabled');running=True;progress.start()
         def work():
             try:
-                install(Path(iso),args.base,args.game_exe,lambda text:messages.put(('progress',text)),refresh=updating)
-                messages.put(('done','Ready'))
+                installed_root=install(Path(iso),args.base,args.game_exe,lambda text:messages.put(('progress',text)),refresh=updating)
+                from tools.asset_pipeline.optional_content import summary
+                warnings=summary(installed_root)
+                messages.put(('done',f'Ready with {len(warnings)} unavailable components. Details: {installed_root / "setup-report.json"}' if warnings else 'Ready'))
             except Exception as error:
                 args.base.mkdir(parents=True,exist_ok=True)
                 (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
@@ -73,6 +75,7 @@ def main():
         while not messages.empty():
             kind,text=messages.get_nowait();status.set(text)
             if kind=='done':
+                if text!='Ready':messagebox.showwarning('Setup completed with unavailable content',text,parent=window)
                 running=False;success=True;progress.stop();window.destroy();return
             if kind=='error':
                 running=False;progress.stop();button.config(state='normal')

@@ -30,8 +30,6 @@ def core(game_root, stage, work, report, log, converted=None):
 def hud(game_root, stage, work, report, log, converted=None):
     private=stage/"assets/private"
     stock=private/"stock"
-    for folder in (private/'hud',private/'session-marker'):
-        if folder.is_dir():engine.remove_intermediate(folder,stage)
     report('Preparing original scoring and session-marker HUD assets')
     engine.run(engine.task(engine.TOOLS/'prepare_runtime_huds.py', '--game', game_root,
              '--assets', stage/'assets', '--work', work/'hud'), log, report)
@@ -66,12 +64,23 @@ def environment(game_root, stage, work, report, log, converted=None):
     stock=private/"stock"
     report('Preparing retail sky domes')
     from .sky import convert as write_skies
-    write_skies(game_root,stage/'assets',converted)
+    def attempt(name, action):
+        from .optional_content import CONTENT_ERRORS, note
+        target=work/('environment-'+name)/'assets'
+        target.mkdir(parents=True,exist_ok=True)
+        availability=private/'environment-status'/(name+'-availability.json')
+        try:action(target)
+        except CONTENT_ERRORS as error:
+            note(availability,'Environment '+name,error,report=report)
+            return
+        shutil.copytree(target,stage/'assets',dirs_exist_ok=True)
+        availability.unlink(missing_ok=True)
+    attempt('skies',lambda assets:write_skies(game_root,assets,converted))
     from .render_parameters import convert as write_render_parameters
-    write_render_parameters(stage/'assets',converted)
+    attempt('parameters',lambda assets:write_render_parameters(assets,converted))
     report('Extracting original travel destinations and location names')
     from .teleports import convert as write_teleports
-    write_teleports(game_root,stage/'assets',converted)
+    attempt('teleports',lambda assets:write_teleports(game_root,assets,converted))
     report('Preparing global foliage backdrops')
     from .backdrop import convert as write_backdrops
-    write_backdrops(game_root,stage/'assets',converted)
+    attempt('backdrops',lambda assets:write_backdrops(game_root,assets,converted))

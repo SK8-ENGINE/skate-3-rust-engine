@@ -7,8 +7,8 @@ steps previously ran only in private feature-test folders.
 
 Character additions have their own release fingerprint. Updating an already
 prepared copy can build these assets from its original Xbox source without
-reconverting maps. Setup publishes a new character generation only after the
-library, lighting and native roster all succeed. Existing imported models and
+reconverting maps. Setup publishes validated character stages and records unavailable extras.
+If the base library fails, it keeps a verified previous generation or the stock skater. Existing imported models and
 saved profiles are preserved; interrupted preparation can reuse its own cache.
 Players do not need Python, Blender or development tools.
 

@@ -76,6 +76,19 @@ pub(crate) fn asset_root() -> Result<PathBuf, String> {
 
 fn customiser_current(assets: &Path, expected: Option<&str>) -> bool {
     expected.is_none_or(|expected| {
+        let degraded = std::fs::read(assets.join("private/customisation/customiser-availability.json")).ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        if let Some(v) = degraded.filter(|v| v["version"].as_u64()==Some(1)
+            && v["fingerprint"].as_str()==Some(expected)) {
+            if v["status"]=="unavailable" { return true; }
+            if v["status"]=="retained" {
+                let directory=crate::customiser_parts::asset_directory(assets);
+                return ["catalog","library","menu","lighting","roster"].iter().all(|stage|
+                    std::fs::read(directory.join(format!("{stage}-complete.json"))).ok()
+                        .and_then(|bytes|serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                        .is_some_and(|v|receipt_present(&directory,&v["files"])));
+            }
+        }
         std::fs::read(assets.join("private/customisation/current.json")).ok()
             .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
             .is_some_and(|v| v["version"].as_u64() == Some(1) && v["fingerprint"].as_str() == Some(expected)
@@ -106,6 +119,32 @@ fn receipt_present(root: &Path, files: &serde_json::Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn acknowledged_optional_failure_is_versioned_and_retained_data_is_checked() {
+        let root = std::env::temp_dir().join(format!("sk8-availability-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let base = root.join("private/customisation");
+        std::fs::create_dir_all(&base).unwrap();
+        let availability = base.join("customiser-availability.json");
+        std::fs::write(&availability, br#"{"version":1,"fingerprint":"new","status":"unavailable"}"#).unwrap();
+        assert!(customiser_current(&root, Some("new")));
+        assert!(!customiser_current(&root, Some("future")));
+        assert_eq!(crate::customiser_parts::asset_directory(&root), base.join("unavailable"));
+        std::fs::write(&availability, br#"{"version":1,"fingerprint":"new","status":"retained"}"#).unwrap();
+        assert!(!customiser_current(&root, Some("new")));
+        std::fs::write(base.join("current.json"), br#"{"set":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#).unwrap();
+        let directory = base.join("sets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("payload"), b"ok").unwrap();
+        for stage in ["catalog", "library", "menu", "lighting", "roster"] {
+            std::fs::write(directory.join(format!("{stage}-complete.json")),
+                br#"{"files":{"payload":{"size":2}}}"#).unwrap();
+        }
+        assert!(customiser_current(&root, Some("new")));
+        std::fs::remove_file(directory.join("payload")).unwrap();
+        assert!(!customiser_current(&root, Some("new")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn receipts_reject_missing_files_empty_lists_and_traversal() {
         let root = std::env::temp_dir();

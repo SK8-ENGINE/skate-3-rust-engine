@@ -8,7 +8,8 @@ from tools.owned_game.big import BigArchive
 from tools.extract_default_skater import import_rx2_parser, decode_texture
 from tools.asset_pipeline.character_glb import Glb, convert
 from tools.asset_pipeline.retail_character import RX2, decode_dense_morphs
-from tools.asset_pipeline.marquee_assets import Resources, MissingMarqueeAsset
+from tools.asset_pipeline.marquee_assets import Resources
+from tools.asset_pipeline.optional_content import CONTENT_ERRORS
 
 # GetCACSettings 82590BE0..82590DBC, TU3: six named styles, Aggressive otherwise.
 STYLES={'danny_way':'DannyWay','mike_carroll':'MikeCarroll','pj_ladd':'PJLadd',
@@ -73,7 +74,7 @@ def prepare(game,assets,library,collections,work,only=None):
         if only and item['key'] not in only:continue
         try:
             resources.recipe(item['recipe'])
-        except MissingMarqueeAsset as error:
+        except CONTENT_ERRORS as error:
             report.append({**item,'status':'unavailable','error':str(error)})
             print(f'Unavailable optional character {item["name"]}: {error}',flush=True)
             continue
@@ -121,7 +122,7 @@ def prepare(game,assets,library,collections,work,only=None):
                     stage.rename(target)
             report.append({**item,'id':identity,'status':'ready'})
             print('READY',key,flush=True)
-        except Exception as e:
+        except CONTENT_ERRORS as e:
             report.append({**item,'status':'error','error':str(e)});print('ERROR',key,str(e),flush=True)
     (work/'report.json').write_text(json.dumps(report,indent=2))
     return report

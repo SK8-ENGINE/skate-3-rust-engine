@@ -59,6 +59,7 @@ def install(assets, scoring_cache, marker_cache, replace=False):
     plan = []
     for source, name, marker in [(scoring_cache, "hud", False),
                                   (marker_cache, "session-marker", True)]:
+        if source is None:continue
         destination = assets / "private" / name
         for relative, sha256 in runtime_files(source, marker).items():
             target = contained(destination, relative)
