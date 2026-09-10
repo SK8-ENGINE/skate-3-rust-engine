@@ -5,8 +5,8 @@
 runtime statically; the setup helper bundles Python, NumPy, Pillow and Tcl/Tk.
 It also bundles a small Rust RefPack decoder. Users need no compiler.
 
-On first launch, setup accepts a local Xbox 360 Skate 3 ISO, `default.xex`,
-or an extracted game folder. Selecting `default.xex` uses the surrounding
+On first launch and after an extractor update, setup asks for a local Xbox 360
+Skate 3 `default.xex` or ISO. Selecting `default.xex` uses the surrounding
 folder, which must still contain the full game data. Extracted copies skip
 ISO extraction and need no tool download. For ISO input, setup downloads
 the hash-pinned extract-xiso utility from XboxDev. Asset conversion runs in
@@ -36,7 +36,7 @@ The conversion pipeline:
    This validates loading, not gameplay. Conversion intermediates are removed
    after their output succeeds. Failed workspaces retain logs for diagnosis.
 
-Data lives under `%LOCALAPPDATA%/Skate3RustEngine`. `installation.json` points
+Data lives in `data` beside this portable copy's executable. `installation.json` points
 to the completed installation. Conversion tools are cached separately, so
 retrying does not download them again. `setup-error.log` reports setup errors;
 each installation also has `setup.log` with converter output.
@@ -103,19 +103,40 @@ core VLT/animation decoding invalidate dependent groups too. Shared map/material
 parsers can invalidate both maps and environment assets. New converter modules
 must be assigned to their consuming groups in `asset_pipeline/versions.py`.
 
-Refresh reuses the Xbox source path saved for this copy, asking for its location
-if it moved. ISO sources must be unpacked again when a refresh needs disc files;
-unchanged asset groups are copied, not reconverted. The chosen Xbox executable
+Refresh uses the same `Select ISO or default.xex` file picker as initial setup;
+the player never needs to select an intermediate extraction folder. ISO sources
+must be unpacked again when a refresh needs disc files; unchanged asset groups
+are reused without conversion. The chosen Xbox executable
 must match the original edition. Source paths stay in local installation records
 and are never included in published release metadata.
 
-Updates create a new generation within this copy's data directory, copy unchanged
-assets/maps/settings, and run only affected conversion stages. No hardlinks are
-used, so rebuilding an output cannot modify the previous generation. Runtime
-asset checks must pass before the installation record is atomically replaced.
-Cancellation/failure leaves the previous record and data intact. Previous data
-is retained for recovery; staging needs additional disk space. A copied stale
-record without fingerprints triggers a complete refresh once.
+Updates run only affected exports. Core/HUD/character/environment/map recipes
+have separate dependency identities; setup UI and transaction changes do not
+invalidate every map. Explicit, exact old/new fingerprint equivalences cover
+verified unchanged exports when migrating the earlier broad fingerprint scheme.
+Unrecognized versions still refresh normally.
+
+Core refreshes create a new installation before publication. Unchanged prepared
+maps and immutable character generations use hardlinks (copy fallback on filesystems without support); mutable user files and
+outputs being rebuilt have independent storage. Customiser-only refreshes keep
+the current core installation and publish a new character generation. Custom
+models, profiles, settings, selections and mods are retained. Every required
+stage, including the complete character library and pro roster, must succeed
+before the installation record changes. Failures preserve the previous record.
+A kernel lock prevents concurrent setup and releases automatically on process
+exit, including a crash; the harmless `setup.lock` file can remain on disk.
+
+Character catalog, library, menu, lighting and roster stages have separate
+source/dependency identities and SHA-256 output receipts. Completed stages can
+be reused across generations or resumed after an interruption; partial stages
+are rebuilt before any existence-based converter sees them. Setup verifies
+checksums before reuse. Startup checks receipt paths and file sizes, avoiding a
+full map checksum scan on every launch. Same-size corruption is detected during
+setup validation, rather than ordinary startup. Old generations remain for
+recovery; this still requires space for genuinely changed output.
+
+See [character preparation measurements](setup-preparation-performance.md) for
+benchmark conditions, stage timings and output equivalence checks.
 
 Installations from releases that used the old global asset store need one setup
 in the new per-copy layout. There is deliberately no automatic global migration.

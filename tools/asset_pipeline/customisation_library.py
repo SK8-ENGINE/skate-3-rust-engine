@@ -50,7 +50,7 @@ def variant_label(slot, model_name, native_name):
 
 def prepare(config):
     from tools.extract_default_skater import import_rx2_parser,decode_texture,parse_fallback_recipe
-    from tools.asset_pipeline.retail_character import RX2,decode_dense_morphs
+    from tools.asset_pipeline.retail_character import RX2,decode_dense_morphs,AnimSource,SkeletonSet
     from tools.asset_pipeline.character_glb import convert
     assets=Path(config['assets']);cache=Path(config.get('directory',assets/'private/customisation'));out=cache/'library';out.mkdir(exist_ok=True)
     catalog=json.loads((cache/'catalog.json').read_text());archive=BigArchive(Path(config['game_root'])/'data/content/createacharacter.big')
@@ -84,6 +84,10 @@ def prepare(config):
         dest.parent.mkdir(parents=True,exist_ok=True)
         if not dest.exists():shutil.copyfile(src,dest)
     defaults={x['material_id']:x for x in recipe_base['components']}
+    # Read-only shared rig inputs live only for this preparation invocation.
+    # Per-item meshes and morphs are discarded after conversion, bounding RAM.
+    animation=AnimSource(assets/'private/stock/data/anim/OnBoard.abin')
+    reference_skeleton=SkeletonSet(str(reference))
     for part in catalog['components']:
         for model in part['models']:
             if part['slot']=='Misc':continue  # Non-geometric stamp catalogue, indexed below.
@@ -97,7 +101,11 @@ def prepare(config):
                     morphs=decode_dense_morphs(mesh_file,parsed,len(mesh['positions']),RX2)
                     recipe=copy.deepcopy(recipe_base);recipe['components']=[dict(slot=slot,textures={},tint=[1.,1.,1.])]
                     recipe['morph_assembly']['expected_targets']={slot:[m['name'] for m in morphs]}
-                    convert(folder.parent,assets/'private',recipe,output=path,geometry_only=True,live_morphs=True,reference_models=reference)
+                    temporary=path.with_suffix('.tmp')
+                    convert(folder.parent,assets/'private',recipe,output=temporary,geometry_only=True,live_morphs=True,reference_models=reference,
+                            source=animation,reference_skeleton=reference_skeleton,
+                            parsed_models={str(mesh_file):parsed},decoded_morphs={str(mesh_file):morphs})
+                    temporary.replace(path)
                 groups=[[v['id'] for v in group] for group in lod['material_instances']]
                 model_data[key]=dict(slot=slot,name=friendly(model['name']),flags={k[4:]:v for k,v in model['flags'].items() if v},
                     materials=groups[0],groups=groups,scene=path.relative_to(assets).as_posix())

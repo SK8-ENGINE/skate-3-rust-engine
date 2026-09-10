@@ -1,0 +1,92 @@
+"""Publication, interruption and cache-integrity regressions using tiny files."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+from . import test_versions
+from .install import install
+from . import versions, customiser_cache as cache
+from .setup_state import source_directory, setup_lock, receipt, valid_receipt
+
+
+class SetupRecovery(unittest.TestCase):
+    def test_xex_refresh_failure_never_publishes_core_or_edits_user_data(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base, old, source, current, marker = test_versions.AssetVersions().fixture(Path(temp))
+            (old/'mods').mkdir(); (old/'mods/user.lua').write_text('user mod')
+            (old/'maps/user.skate').write_text('user map')
+            (old/'assets/imported-profile.json').write_text('user profile')
+            def fail(stage):
+                self.assertEqual(json.loads((base/'installation.json').read_text()), marker)
+                self.assertTrue(os.path.samefile(old/'maps/University.skate', stage/'maps/University.skate'))
+                self.assertFalse(os.path.samefile(old/'maps/user.skate', stage/'maps/user.skate'))
+                self.assertEqual((stage/'mods/user.lua').read_text(), 'user mod')
+                (stage/'assets/imported-profile.json').write_text('staged change')
+                raise RuntimeError('customiser interrupted')
+            with patch.object(versions,'fingerprints',return_value=current), patch('tools.asset_pipeline.install.run'):
+                with self.assertRaisesRegex(RuntimeError,'customiser interrupted'):
+                    install(source/'default.xex',base,Path('unused.exe'),lambda _:None,refresh=True,finalize=fail)
+            self.assertEqual(json.loads((base/'installation.json').read_text()),marker)
+            self.assertEqual((old/'assets/imported-profile.json').read_text(),'user profile')
+
+    def test_current_core_still_validates_selected_source_and_runs_finalizer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base, old, source, current, marker = test_versions.AssetVersions().fixture(Path(temp))
+            marker['pipelines']=current
+            (base/'installation.json').write_text(json.dumps(marker))
+            with patch.object(versions,'fingerprints',return_value=current), patch('tools.asset_pipeline.install.run'), patch('builtins.print'):
+                with self.assertRaisesRegex(RuntimeError,'character failed'):
+                    install(source/'default.xex',base,Path('unused.exe'),lambda _:None,refresh=True,
+                            finalize=lambda _: (_ for _ in ()).throw(RuntimeError('character failed')))
+            self.assertEqual(json.loads((base/'installation.json').read_text()),marker)
+            with self.assertRaisesRegex(RuntimeError,'default.xex'):
+                source_directory(source/'other.xex')
+            (source/'data/content/createacharacter.big').unlink()
+            with self.assertRaisesRegex(RuntimeError,'createacharacter.big'):
+                source_directory(source/'default.xex')
+
+    def test_process_death_releases_lock_without_manual_file_deletion(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base=Path(temp)
+            script="from pathlib import Path; from tools.asset_pipeline.setup_state import setup_lock; import time; " \
+                   "ctx=setup_lock(Path(__import__('sys').argv[1])); ctx.__enter__(); print('locked',flush=True); time.sleep(60)"
+            child=subprocess.Popen([getattr(sys, '_base_executable', sys.executable),'-c',script,str(base)],stdout=subprocess.PIPE,text=True)
+            try:
+                self.assertEqual(child.stdout.readline().strip(),'locked')
+                with self.assertRaisesRegex(RuntimeError,'already running'):
+                    with setup_lock(base):pass
+            finally:
+                child.kill();child.wait();child.stdout.close()
+            with setup_lock(base):pass
+
+    def test_stage_reuses_only_matching_verified_outputs_and_repairs_partial_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            assets=Path(temp);old=assets/'old';new=assets/'new'
+            old.mkdir();new.mkdir()
+            def build(directory, text):
+                (directory/'extra-menu.json').write_text(json.dumps({'path':directory.relative_to(assets).as_posix()+'/item', 'text':text}))
+            cache.stage(old,None,'menu','v1','disc',lambda:build(old,'good'),assets,lambda _:None)
+            with patch.object(cache,'shutil', wraps=cache.shutil):
+                cache.stage(new,old,'menu','v1','disc',lambda:self.fail('valid cache must be reused'),assets,lambda _:None)
+            self.assertEqual(json.loads((new/'extra-menu.json').read_text())['path'],'new/item')
+            (new/'extra-menu.json').write_text('interrupted')
+            cache.stage(new,None,'menu','v1','disc',lambda:build(new,'repaired'),assets,lambda _:None)
+            self.assertEqual(json.loads((new/'extra-menu.json').read_text())['text'],'repaired')
+            cache.stage(new,old,'menu','v2','disc',lambda:build(new,'new extractor'),assets,lambda _:None)
+            self.assertEqual(json.loads((new/'extra-menu.json').read_text())['text'],'new extractor')
+            cache.stage(new,old,'menu','v1','different disc',lambda:build(new,'new source'),assets,lambda _:None)
+            self.assertEqual(json.loads((new/'extra-menu.json').read_text())['text'],'new source')
+
+    def test_same_size_corruption_and_escaping_receipts_are_not_current(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);file=root/'asset';file.write_bytes(b'good')
+            files=receipt(root,[file]);file.write_bytes(b'evil')
+            self.assertFalse(valid_receipt(root,files))
+            self.assertFalse(valid_receipt(root,{'../asset':files['asset']}))
+
+
+if __name__=='__main__':unittest.main()

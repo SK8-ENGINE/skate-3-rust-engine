@@ -32,11 +32,12 @@ class Glb:
         path.write_bytes(struct.pack('<III',0x46546c67,2,28+len(text)+len(self.data))+
                         struct.pack('<I4s',len(text),b'JSON')+text+struct.pack('<I4s',len(self.data),b'BIN\0')+self.data)
 
-def convert(models,private,recipe,*,stock=None,output=None,materials=None,live_morphs=False,geometry_only=False,reference_models=None):
-    source=AnimSource((stock or private/'stock')/'data/anim/OnBoard.abin')
-    skeleton=SkeletonSet(str(models))
+def convert(models,private,recipe,*,stock=None,output=None,materials=None,live_morphs=False,geometry_only=False,reference_models=None,
+            source=None,reference_skeleton=None,parsed_models=None,decoded_morphs=None):
+    source=source or AnimSource((stock or private/'stock')/'data/anim/OnBoard.abin')
+    skeleton=SkeletonSet(str(models),parsed_models)
     if reference_models:
-        reference_skeleton=SkeletonSet(str(reference_models))
+        reference_skeleton=reference_skeleton or SkeletonSet(str(reference_models))
         skeleton.bind={**reference_skeleton.bind,**skeleton.bind}
     if skeleton.errors:raise ValueError(str(skeleton.errors))
     mapping=skeleton.index_map(ABIN.BONE_NAMES,source.parents)
@@ -74,10 +75,11 @@ def convert(models,private,recipe,*,stock=None,output=None,materials=None,live_m
     if {m['folder'] for m in meshes}!=set(components):raise ValueError('Incomplete character mesh set')
     for mesh in meshes:
         slot=mesh['folder'];component=components[slot];path=models/slot/mesh['name']
-        parsed=RX2.parse_rx2(str(path));raw=[m for m in parsed['meshes'] if m.get('positions') and m.get('indices')]
+        parsed=parsed_models[str(path)] if parsed_models is not None else RX2.parse_rx2(str(path))
+        raw=[m for m in parsed['meshes'] if m.get('positions') and m.get('indices')]
         if len(raw)!=1:raise ValueError('Ambiguous character mesh '+slot)
         raw=raw[0];positions=np.asarray(mesh['pos'],dtype=np.float64)
-        morphs=decode_dense_morphs(path,parsed,len(positions),RX2)
+        morphs=decoded_morphs[str(path)] if decoded_morphs is not None else decode_dense_morphs(path,parsed,len(positions),RX2)
         if [m['name'] for m in morphs]!=recipe['morph_assembly']['expected_targets'][slot]:raise ValueError('Unexpected morph set '+slot)
         if 'normals' in raw:
             normals=np.asarray(raw['normals'],dtype=np.float64)

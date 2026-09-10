@@ -32,6 +32,21 @@ class CharacterSetup(unittest.TestCase):
                 with self.assertRaises(RuntimeError): s.prepare(Path(temp)/'source', assets, lambda _: None)
             self.assertEqual(json.loads((base/'current.json').read_text()), old)
 
+    def test_crash_after_publication_cannot_resume_inside_the_live_generation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            assets=Path(temp)/'assets';base=assets/'private/customisation'
+            live=base/'sets'/('a'*32);live.mkdir(parents=True)
+            (live/'catalog.json').write_text('working output')
+            old={'set':'a'*32,'fingerprint':'v','source':'owned-disc'}
+            (base/'current.json').write_text(json.dumps(old))
+            (base/'pending.json').write_text(json.dumps(old))
+            with patch.object(s,'fingerprint',return_value='v'), \
+                 patch('tools.asset_pipeline.customisation_catalog.prepare',side_effect=RuntimeError('failed')):
+                with self.assertRaises(RuntimeError):s.prepare(Path(temp)/'source',assets,lambda _:None)
+            self.assertEqual((live/'catalog.json').read_text(),'working output')
+            self.assertEqual(json.loads((base/'current.json').read_text()),old)
+            self.assertNotEqual(json.loads((base/'pending.json').read_text())['set'],old['set'])
+
     def test_fresh_generation_contains_customiser_profiles_lighting_and_native_roster(self):
         with tempfile.TemporaryDirectory() as temp:
             assets = Path(temp)/'assets'
@@ -39,11 +54,15 @@ class CharacterSetup(unittest.TestCase):
                         defaults={'male': {'selections': {'Body': {'asset_id': 'body', 'material_id': 'cloth'}}}})
             def catalog(game, out):
                 (out/'native.json').write_text('{}')
+                (out/'catalog.json').write_text('{}')
+                (out/'database').mkdir(exist_ok=True)
+                (out/'database/collections.json').write_text('{}')
             def library(config):
-                (Path(config['directory'])/'library-v3.json').write_text(json.dumps(data))
+                (Path(config['directory'])/config['library_index']).write_text(json.dumps(data))
                 return data
             def lighting(game, assets, directory, data):
                 (directory/'native-lighting.json').write_text('{"pro":{}}')
+                (directory/'library-v3.json').write_text(json.dumps(data))
             def roster(game, assets, library, collections, work):
                 library.mkdir(exist_ok=True)
                 return roster_results.pop(0)
@@ -69,7 +88,11 @@ class CharacterSetup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); source = root/'source'; source.mkdir()
             base = root/'data'; installed = base/'installations/old'
-            with patch('tools.asset_pipeline.install.install', return_value=installed) as install, \
+            def core_install(*args, **kwargs):
+                kwargs['finalize'](installed)
+                return installed
+            with patch('tools.asset_pipeline.setup_state.source_directory', return_value=source), \
+                 patch('tools.asset_pipeline.install._install', side_effect=core_install) as install, \
                  patch.object(s, 'prepare') as prepare:
                 s.install(source, base, Path('unused.exe'), lambda _: None, refresh=True)
             self.assertTrue(install.call_args.kwargs['refresh'])

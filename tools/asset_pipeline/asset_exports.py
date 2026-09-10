@@ -1,0 +1,77 @@
+"""Owned-disc exports, separate from setup transaction orchestration."""
+import json
+import shutil
+from pathlib import Path
+from . import install as engine
+from .vlt import convert as convert_vlt
+from .physics_skeleton import convert as convert_skeleton
+
+def core(game_root, stage, work, report, log, converted=None):
+    private=stage/"assets/private"
+    stock=private/"stock"
+    report('Extracting animation banks, graphs and gameplay inputs')
+    engine.extract(game_root/'data/big/miscload.big',stock)
+    engine.extract(game_root/'data/big/miscboot.big',stock,lambda e:e.path.lower()=='data/config/input.cfg')
+    # Some disc banks are loose files rather than members of miscload.
+    loose=game_root/'data/anim'
+    if loose.is_dir():shutil.copytree(loose,stock/'data/anim',dirs_exist_ok=True)
+    report('Converting physics and difficulty settings')
+    database=work/'database'
+    engine.extract(game_root/'data/big/db.big',database,lambda e:Path(e.path).name.lower() in {
+        'skaterschema.bin','skaterschema.vlt','skatercollections.bin','skatercollections.vlt'})
+    names=(engine.TOOLS/'asset_pipeline/names.txt').read_text(encoding='utf-8').splitlines()
+    converted=convert_vlt(database/'data/db/skaterschema',database/'data/db/skatercollections',names)
+    (stock/'skater-collections.json').write_text(json.dumps(converted),encoding='utf-8')
+    skeleton=convert_skeleton(stock/'data/anim/OnBoard.abin')
+    (stock/'physics-skeletons.json').write_text(json.dumps(skeleton),encoding='utf-8')
+    return converted
+
+
+def hud(game_root, stage, work, report, log, converted=None):
+    private=stage/"assets/private"
+    stock=private/"stock"
+    for folder in (private/'hud',private/'session-marker'):
+        if folder.is_dir():engine.remove_intermediate(folder,stage)
+    report('Preparing original scoring and session-marker HUD assets')
+    engine.run(engine.task(engine.TOOLS/'prepare_runtime_huds.py', '--game', game_root,
+             '--assets', stage/'assets', '--work', work/'hud'), log, report)
+
+
+def character(game_root, stage, work, report, log, converted=None):
+    private=stage/"assets/private"
+    stock=private/"stock"
+    report('Preparing the skater model and textures')
+    manifest=json.loads((engine.TOOLS/'default_skater_retail_manifest.json').read_text())
+    needed=set()
+    for c in manifest['components']:
+        needed.add(f"data/content/createacharacter/model/cas_db/{c['slot']}/0x{c['model_id']}.rx2".lower())
+        needed.update(f'data/content/createacharacter/texture/0x{x}.rx2'.lower() for x in c['textures'].values())
+    engine.extract(game_root/'data/content/createacharacter.big',stock,lambda e:e.path.lower() in needed)
+    character=work/'character'
+    engine.run(engine.task(engine.TOOLS/'extract_default_skater.py','--owned-data-root',stock,'--work-root',character,
+             '--private-root',private/'default_skater','--utt-root',engine.TOOLS/'vendor/utt'),log,report)
+    report('Building the skater model and rig')
+    from .character_glb import convert as write_character
+    write_character(character/'selected/models',private,manifest)
+    from .character_lighting import convert as write_character_lighting
+    write_character_lighting(character/'selected/models',private,converted)
+    game_manifest={'version':1,'character_scene':'private/skater.glb','initial_animation':'R_IDLE_HCOM_000',
+                   'action_graph':'private/stock/data/state/ActionGraph_OnBoard.stategraph',
+                   'motion_graph':'private/stock/data/state/MotionGraph_OnBoard.stategraph'}
+    (private/'game.json').write_text(json.dumps(game_manifest),encoding='utf-8')
+
+
+def environment(game_root, stage, work, report, log, converted=None):
+    private=stage/"assets/private"
+    stock=private/"stock"
+    report('Preparing retail sky domes')
+    from .sky import convert as write_skies
+    write_skies(game_root,stage/'assets',converted)
+    from .render_parameters import convert as write_render_parameters
+    write_render_parameters(stage/'assets',converted)
+    report('Extracting original travel destinations and location names')
+    from .teleports import convert as write_teleports
+    write_teleports(game_root,stage/'assets',converted)
+    report('Preparing global foliage backdrops')
+    from .backdrop import convert as write_backdrops
+    write_backdrops(game_root,stage/'assets',converted)

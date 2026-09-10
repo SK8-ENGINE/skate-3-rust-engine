@@ -98,7 +98,7 @@ class AnimSource:
 class SkeletonSet:
     """Blender-safe copy of SkateAnimViewer's RX2-to-ABIN mapper."""
 
-    def __init__(self, folder):
+    def __init__(self, folder, parsed_models=None):
         self.models = []
         self.bind = {}
         self.ibp = {}
@@ -108,7 +108,7 @@ class SkeletonSet:
         )
         for path in files:
             try:
-                parsed = RX2.parse_rx2(path)
+                parsed = parsed_models[path] if parsed_models is not None else RX2.parse_rx2(path)
             except Exception as error:
                 self.errors.append(f"{Path(path).name}: {error}")
                 continue

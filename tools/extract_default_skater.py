@@ -216,6 +216,17 @@ def import_rx2_parser(utt_root: Path):
         raise RuntimeError(f"Could not load RX2 decoder: {module_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # Loading by filename does not put the sibling directory on sys.path.
+    # In particular, character-only setup used the slow scalar fallback while
+    # map setup happened to make rx2_fast importable. Load the matching bundled
+    # implementation explicitly, independent of import order or global paths.
+    fast_spec = importlib.util.spec_from_file_location("skate3_local_rx2_fast", utt_root / "rx2_fast.py")
+    fast = importlib.util.module_from_spec(fast_spec)
+    fast_spec.loader.exec_module(fast)
+    for name in ('decode_dxt1', 'decode_dxt1_normal', 'decode_dxt3', 'decode_dxt5',
+                 'decode_ati2', '_untile360', '_decode_raw_a8r8g8b8',
+                 '_decode_raw_b5g6r5', '_decode_raw_a8'):
+        setattr(module, name, getattr(fast, name))
     return module
 
 
