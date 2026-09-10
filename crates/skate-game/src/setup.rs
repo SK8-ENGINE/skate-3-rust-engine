@@ -10,11 +10,18 @@ fn installed(base: &Path) -> Result<Option<(PathBuf, serde_json::Value)>, String
     let marker: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     if marker["version"].as_u64() != Some(1) { return Err("Unsupported installation version".into()); }
     let relative = Path::new(marker["directory"].as_str().ok_or("Invalid installation path")?);
-    if relative.is_absolute() || relative.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+    let parts: Vec<_> = relative.components().collect();
+    if parts.len() != 2 || parts[0].as_os_str() != "installations"
+        || !parts[1].as_os_str().to_str().is_some_and(|s| s.len() == 32
+            && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) {
         return Err("Invalid installation path".into());
     }
     let assets = base.join(relative).join("assets");
-    if !assets.join("private/game.json").is_file() { return Ok(None); }
+    if !assets.is_dir() { return Ok(None); }
+    if !assets.canonicalize().map_err(|e| e.to_string())?
+        .starts_with(base.canonicalize().map_err(|e| e.to_string())?) {
+        return Err("Installation escapes its package data directory".into());
+    }
     Ok(Some((assets, marker)))
 }
 
@@ -37,6 +44,9 @@ pub(crate) fn asset_root() -> Result<PathBuf, String> {
     let existing = installed(&base)?;
     if let Some((assets, marker)) = &existing {
         if expected.as_ref().is_none_or(|versions| marker.get("pipelines") == Some(versions))
+            && assets.join("private/game.json").is_file()
+            && marker.get("outputs").is_none_or(|groups| groups.as_object().is_some_and(|groups|
+                groups.values().all(|files| receipt_present(assets.parent().unwrap(), files))))
             && customiser_current(assets, expected_customiser.as_deref()) {
             return Ok(assets.clone());
         }
@@ -72,5 +82,35 @@ fn customiser_current(assets: &Path, expected: Option<&str>) -> bool {
                 && v["set"].as_str().is_some_and(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit())))
             && ["library-v3.json", "extra-menu.json", "native-lighting.json", "native-roster/complete.json"].iter()
                 .all(|name| crate::customiser_parts::asset_directory(assets).join(name).is_file())
+            && ["catalog", "library", "menu", "lighting", "roster"].iter().all(|stage| {
+                let directory = crate::customiser_parts::asset_directory(assets);
+                std::fs::read(directory.join(format!("{stage}-complete.json"))).ok()
+                    .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                    .is_some_and(|v| receipt_present(&directory, &v["files"]))
+            })
     })
+}
+
+// Cheap launch-time completeness check. Setup verifies SHA-256 before reuse;
+// hashing every map on every game launch would read gigabytes unnecessarily.
+fn receipt_present(root: &Path, files: &serde_json::Value) -> bool {
+    files.as_object().is_some_and(|files| !files.is_empty() && files.iter().all(|(name, entry)| {
+        let relative = Path::new(name);
+        !relative.is_absolute()
+            && relative.components().all(|c| matches!(c, std::path::Component::Normal(_)))
+            && std::fs::metadata(root.join(relative)).ok()
+                .is_some_and(|m| m.is_file() && Some(m.len()) == entry["size"].as_u64())
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn receipts_reject_missing_files_empty_lists_and_traversal() {
+        let root = std::env::temp_dir();
+        assert!(!receipt_present(&root, &serde_json::json!({})));
+        assert!(!receipt_present(&root, &serde_json::json!({"../missing": {"size": 0}})));
+        assert!(!receipt_present(&root, &serde_json::json!({"nonexistent-skate-setup-test": {"size": 0}})));
+    }
 }

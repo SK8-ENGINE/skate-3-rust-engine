@@ -41,20 +41,18 @@ def main():
     if icon.is_file():window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
     ttk.Label(frame,text='Update game assets' if updating else 'Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
-    ttk.Label(frame,text=('Changed asset groups: '+(', '.join(sorted(changed)) or 'character customiser')+'.\nOnly changed groups will be prepared again.\nYour previous character data remains until preparation succeeds.\nUse Update game assets to reuse your selected Xbox source,\nor choose its new location if it has moved.') if updating else 'Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, customiser, animations and disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
+    ttk.Label(frame,text=('Asset version changes: '+(', '.join(sorted(changed)) or 'checking prepared content')+'.\nOnly changed or incomplete groups will be prepared again.\nYour previous character data remains until preparation succeeds.\nSelect your Skate 3 default.xex (or ISO) to continue.\nKeep the game data beside default.xex.') if updating else 'Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, customiser, animations and disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
               font=('Segoe UI',11),justify='left').pack(anchor='w')
     status=tk.StringVar(value='Choose your game to begin.')
     ttk.Label(frame,textvariable=status,wraplength=600).pack(anchor='w',pady=(18,8))
     progress=ttk.Progressbar(frame,mode='indeterminate');progress.pack(fill='x')
     messages=queue.Queue();running=False;success=False
-    def start(folder=False,reuse=False):
+    def start():
         nonlocal running
-        saved=previous[1].get('source') if previous else None
-        iso=saved if reuse and saved and Path(saved).exists() else (filedialog.askdirectory(parent=window,title='Select the Skate 3 folder containing default.xex') if folder else
-             filedialog.askopenfilename(parent=window,title='Select your Skate 3 Xbox 360 game',
-                 filetypes=[('Xbox 360 game','*.iso *.xex'),('Xbox 360 ISO','*.iso'),('Xbox executable','*.xex')]))
+        iso=filedialog.askopenfilename(parent=window,title='Select your Skate 3 default.xex or Xbox 360 ISO',
+            filetypes=[('Skate 3 game','default.xex *.iso'),('Skate 3 executable','default.xex'),('Xbox 360 ISO','*.iso')])
         if not iso:return
-        button.config(state='disabled');folder_button.config(state='disabled');running=True;progress.start()
+        button.config(state='disabled');running=True;progress.start()
         def work():
             try:
                 install(Path(iso),args.base,args.game_exe,lambda text:messages.put(('progress',text)),refresh=updating)
@@ -69,8 +67,7 @@ def main():
             messagebox.showinfo('Setup running','Wait for the current conversion to finish. Your source game files are not modified.',parent=window)
         else:window.destroy()
     buttons=ttk.Frame(frame);buttons.pack(anchor='e',pady=18)
-    folder_button=ttk.Button(buttons,text='Select extracted folder',command=lambda:start(True));folder_button.pack(side='left',padx=(0,8))
-    button=ttk.Button(buttons,text='Update game assets' if updating else 'Select ISO or default.xex',command=lambda:start(reuse=updating));button.pack(side='left')
+    button=ttk.Button(buttons,text='Select ISO or default.xex',command=start);button.pack(side='left')
     def poll():
         nonlocal running,success
         while not messages.empty():
@@ -78,7 +75,7 @@ def main():
             if kind=='done':
                 running=False;success=True;progress.stop();window.destroy();return
             if kind=='error':
-                running=False;progress.stop();button.config(state='normal');folder_button.config(state='normal')
+                running=False;progress.stop();button.config(state='normal')
                 messagebox.showerror('Setup could not finish',text+'\n\nDetails: '+str(args.base/'setup-error.log'),parent=window)
         window.after(100,poll)
     window.protocol('WM_DELETE_WINDOW',close)

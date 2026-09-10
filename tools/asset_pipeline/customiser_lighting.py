@@ -60,12 +60,12 @@ def prepare(game, assets, directory, library):
                 continue
             lod = next(l for l in model['lods'] if l['index'] == 0)
             raw = cac.read(cac_entries[lod['path'].lower()])
+            authored = material_data(raw, collections, mdl_parser)
             for mid in library['models'][model['id']]['materials']:
                 if mid not in library['materials']:
                     continue
                 textures = {t['channel']: t['id'] for t in catalog['materials'][mid]['textures']}
-                data = material_data(raw, collections, mdl_parser,
-                                     mask(cac, cac_entries, 'createacharacter', textures.get('specular')))
+                data = {**authored, 'specular': mask(cac, cac_entries, 'createacharacter', textures.get('specular'))}
                 material = library['materials'][mid]
                 if 'lighting' in material and material['lighting'] != data:
                     raise ValueError('Shared material has conflicting authored shader parameters: '+mid)
