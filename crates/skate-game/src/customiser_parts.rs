@@ -117,6 +117,9 @@ impl Parts {
         }
         if let Some(colours) = profile["colours"].as_object() {
             for value in colours.values() {
+                // The menu uses null to clear a tint and restore the authored
+                // material colour; profile_material already handles this reset.
+                if value.is_null() { continue; }
                 let rgb=serde_json::from_value::<[f32;3]>(value.clone()).map_err(|_|"Invalid clothing colour")?;
                 if rgb.iter().any(|v|!(0.0..=1.0).contains(v)) {return Err("Invalid clothing colour".into());}
             }

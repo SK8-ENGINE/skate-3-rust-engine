@@ -1371,6 +1371,26 @@ mod tests {
         assert_eq!(option_index(&entry, &p), Some(0));
         merge(&mut p, entry.options[1].patch.as_ref().unwrap());
         assert_eq!(option_index(&entry, &p), Some(1));
+        let material = json!({"name":"original","flags":{},"diffuse":"",
+            "alpha":false,"tint":[0.4,0.5,0.6],"metallic":0.,"roughness":0.7});
+        let library: Library = serde_json::from_value(json!({
+            "models":{
+                "shoe":{"slot":"Feet","name":"shoe","flags":{},"materials":["new"],"scene":""},
+                "head":{"slot":"Rostral","name":"head","flags":{},"materials":["head"],"scene":""}},
+            "materials":{"new":material.clone(),"head":material},"defaults":{},"morphs":[]
+        })).unwrap();
+        let parts = Parts::for_test(library);
+        p["selections"]["Rostral"] = json!({"asset_id":"head","material_id":"head"});
+        assert!(parts.resolve(&p).is_ok());
+        merge(&mut p, entry.options[0].patch.as_ref().unwrap());
+        assert_eq!(option_index(&entry, &p), Some(0));
+        assert!(parts.resolve(&p).is_ok(), "original material tint must be selectable");
+        let restored: Value = serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
+        assert!(parts.resolve(&restored).is_ok(), "saved/online null reset must remain valid");
+        for invalid in [json!([2.,0.,0.]),json!([-0.1,0.,0.]),json!([0.,1.]),json!("red")] {
+            p["colours"]["Feet"] = invalid;
+            assert_eq!(parts.resolve(&p).unwrap_err(), "Invalid clothing colour");
+        }
     }
     #[test]
     fn customiser_owned_menu_presets_tattoos_and_search() {
