@@ -16,10 +16,14 @@ The host forwards available chunks while downloading. A sliding selective-ACK
 window replaces the old 32-chunk request/wait cycle. Each peer receives the current
 model once; completed content is cached for later swaps, and a late join receives
 the current selection. New selections cancel obsolete transfers.
-Movement/collision packets are serviced first. Bulk traffic has its own bounded
-4 MB/s per-link ceiling, grows its window as chunks are acknowledged, backs off
-on loss/relay congestion, and retries missing
-chunks. Datagram queues hold slow render frames' traffic on both direct sockets
+Movement/collision packets are serviced first. Bulk traffic has no fixed
+bytes-per-second cap: its acknowledgement window grows with successful delivery
+and backs off on packet loss. Each service call is bounded to 512 KB per peer
+and 2 MB overall to protect frame time and local IPC queues. Missing chunks retry.
+Steam's configured maximum is the highest representable rate; its minimum is
+unchanged, so this does not force traffic beyond Steam's connection control.
+The relay no longer discards packets based on a once-per-second queue snapshot.
+Movement retains Steam's NoDelay flag. Datagram queues hold slow render frames' traffic on both direct sockets
 and Steam IPC. The Steam send-rate ceiling is raised from its small-message
 default. The HUD shows character transfer progress.
 Each remote keeps its visible character until the new scenes, textures and every

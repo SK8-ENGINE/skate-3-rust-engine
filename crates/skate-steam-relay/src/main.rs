@@ -52,15 +52,15 @@ fn run() -> Result<(), String> {
         return Err("Same Steam identity".into());
     }
     client.networking_utils().init_relay_network_access();
-    // SDK defaults cap model uploads at 256 KB/s. Raise only the ceiling;
-    // retain Steam's congestion control and the lobby's bulk pacing/backoff.
+    // Remove our throughput ceiling without forcing a minimum send rate.
+    // Steam still controls the connection; the game bounds in-flight data.
     // SAFETY: Steam is initialized and owns this interface for `client`'s lifetime.
     unsafe {
         let utils = steamworks::sys::SteamAPI_SteamNetworkingUtils_SteamAPI_v004();
         if utils.is_null() || !steamworks::sys::SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32(
             utils,
             steamworks::sys::ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_SendRateMax,
-            4_500_000,
+            i32::MAX,
         ) {
             return Err("Could not configure Steam model transfer bandwidth".into());
         }
@@ -200,10 +200,10 @@ fn run() -> Result<(), String> {
                     }
                     parent_seen = Instant::now();
                     let state = matches!(kind, skate_net::packed::BODY | skate_net::packed::POSE);
-                    if (state || kind == skate_net::blob::DATA) && peers.get(&target).is_some_and(|(_, queue)| *queue > 50) {
-                        dropped += 1;
-                        continue;
-                    }
+                    // Do not discard packets based on the once-per-second
+                    // queue sample. That creates long artificial loss bursts.
+                    // Steam handles backpressure; state remains NoDelay, and
+                    // bulk retries/ACK windows remain owned by skate-net.
                     let flags = if state {
                         SendFlags::UNRELIABLE_NO_DELAY
                     } else {

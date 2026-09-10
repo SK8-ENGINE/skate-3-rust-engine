@@ -131,10 +131,7 @@ pub struct Blobs {
     cache: BTreeMap<[u8; 32], Blob>,
     sending: BTreeMap<(u64, u64), Sending>,
     acknowledgements: BTreeSet<(u64, u64)>,
-    credits: BTreeMap<u64, f64>,
-    last: u64,
     round: usize,
-    pub congested: bool,
 }
 impl Blobs {
     fn reserve(&mut self, size: usize) -> bool {
@@ -318,8 +315,6 @@ impl Blobs {
         self.sending.retain(|(peer, id), _| {
             members.contains(id) && peers.iter().any(|(p, _, _)| p == peer)
         });
-        self.credits
-            .retain(|peer, _| peers.iter().any(|(p, _, _)| p == peer));
         let mut out = vec![];
         for (peer, origin) in std::mem::take(&mut self.acknowledgements) {
             if !peers.iter().any(|(p, _, _)| *p == peer) {
@@ -341,11 +336,9 @@ impl Blobs {
             data.extend(mask);
             out.push(Outgoing { peer, data });
         }
-        let dt = now.saturating_sub(self.last).min(1000) as f64 / 1000.;
-        self.last = now;
-        // Same rates for direct and Steam. Bursts cover slow render frames; ACKs
-        // bound outstanding data and relay congestion reduces bulk throughput.
-        let rate = if self.congested { 128_000. } else { 4_000_000. };
+        // ACKs and the loss-responsive window control throughput, rather than
+        // a fixed bytes/second cap. Bound each service call so model uploads
+        // cannot monopolize the game thread or overflow the local IPC queues.
         let mut global = 2_000_000usize;
         let mut peers = peers.to_vec();
         if !peers.is_empty() {
@@ -357,8 +350,7 @@ impl Blobs {
             if recipient == 0 {
                 continue;
             }
-            let credit = self.credits.entry(peer).or_default();
-            *credit = (*credit + dt * rate).min(512_000.);
+            let mut budget = 512_000usize;
             let mut origins: Vec<_> = self
                 .actors
                 .iter()
@@ -429,7 +421,7 @@ impl Blobs {
                     if global < size {
                         return out;
                     }
-                    if *credit < size as f64 {
+                    if budget < size {
                         continue 'peers;
                     }
                     let mut data = packed::header(session, *origin, DATA, seq);
@@ -440,7 +432,7 @@ impl Blobs {
                         .unwrap()
                         .sent
                         .insert(i, now);
-                    *credit -= size as f64;
+                    budget -= size;
                     global -= size;
                     out.push(Outgoing { peer, data });
                     sent = true;

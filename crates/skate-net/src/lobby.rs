@@ -231,7 +231,6 @@ impl Session {
         self.is_host() || self.received_roster != 0
     }
     pub fn set_congested(&mut self, congested: bool) {
-        self.blobs.congested = congested;
         self.link_budget = if congested {
             DEFAULT_LINK_BUDGET * 0.5
         } else {
