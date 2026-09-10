@@ -33,6 +33,54 @@ class SetupRecovery(unittest.TestCase):
             finally:
                 alias.rmdir()  # Remove the junction, never its target.
 
+    def test_character_refresh_extracts_over_old_cache_without_touching_live_copy(self):
+        from . import install as engine
+        from tools.owned_game.big import BigArchive, BigEntry
+        for fail in (False, True):
+            with self.subTest(fail=fail), tempfile.TemporaryDirectory() as temp:
+                base, old, source, current, marker = test_versions.AssetVersions().fixture(Path(temp))
+                marker['pipelines'] = dict(current, character='old')
+                (base/'installation.json').write_text(json.dumps(marker))
+                relative = 'data/content/createacharacter/texture/example.rx2'
+                cached = old/'assets/private/stock'/relative
+                cached.parent.mkdir(parents=True);cached.write_bytes(b'old texture')
+                archive = object.__new__(BigArchive)
+                archive.entries = [BigEntry(0,relative,0,3,3,0)]
+                archive.read = lambda _: b'new texture'
+                def character(game, stage, work, report, log, converted):
+                    # Use the real extractor's no-overwrite behavior, not a mock
+                    # that could hide the failure seen in release builds.
+                    engine.extract(game/'data/content/createacharacter.big',stage/'assets/private/stock')
+                    self.assertEqual((stage/'assets/private/stock'/relative).read_bytes(),b'new texture')
+                    self.assertTrue((stage/'assets/private/stock/skater-collections.json').is_file())
+                    if fail:raise RuntimeError('later conversion failed')
+                with patch.object(versions,'fingerprints',return_value=current), \
+                     patch.object(engine,'BigArchive',return_value=archive),patch.object(engine,'run'), \
+                     patch('tools.asset_pipeline.asset_exports.character',side_effect=character):
+                    if fail:
+                        with self.assertRaisesRegex(RuntimeError,'later conversion failed'):
+                            install(source,base,Path('unused.exe'),lambda _:None,refresh=True)
+                        self.assertEqual(json.loads((base/'installation.json').read_text()),marker)
+                    else:
+                        installed=install(source,base,Path('unused.exe'),lambda _:None,refresh=True)
+                        self.assertEqual((installed/'assets/private/stock'/relative).read_bytes(),b'new texture')
+                self.assertEqual(cached.read_bytes(),b'old texture')
+
+    def test_core_refresh_starts_empty_and_failed_rebuild_preserves_live_inputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base,old,source,current,marker=test_versions.AssetVersions().fixture(Path(temp))
+            marker['pipelines']=dict(current,core='old')
+            (base/'installation.json').write_text(json.dumps(marker))
+            def core(game,stage,*args):
+                self.assertFalse((stage/'assets/private/stock').exists())
+                self.assertTrue((old/'assets/private/stock/skater-collections.json').is_file())
+                raise RuntimeError('core extraction failed')
+            with patch.object(versions,'fingerprints',return_value=current), \
+                 patch('tools.asset_pipeline.asset_exports.core',side_effect=core):
+                with self.assertRaisesRegex(RuntimeError,'core extraction failed'):
+                    install(source,base,Path('unused.exe'),lambda _:None,refresh=True)
+            self.assertEqual(json.loads((base/'installation.json').read_text()),marker)
+
     def test_xex_refresh_failure_never_publishes_core_or_edits_user_data(self):
         with tempfile.TemporaryDirectory() as temp:
             base, old, source, current, marker = test_versions.AssetVersions().fixture(Path(temp))

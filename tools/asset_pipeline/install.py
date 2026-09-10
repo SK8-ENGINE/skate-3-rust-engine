@@ -226,8 +226,21 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
                     except OSError:shutil.copy2(src,dst)
                 else:shutil.copy2(src,dst)
                 return dst
+            def ignore_rebuilt_assets(directory, names):
+                # These raw inputs are owned by the converters. A rebuilding
+                # group must extract into an empty cache, not overwrite files
+                # copied from the previous installation. Leave that live copy
+                # and all user settings/custom models untouched.
+                source_directory = Path(directory).resolve()
+                private_source = (previous[0]/'assets/private').resolve()
+                if 'core' in groups and source_directory == private_source:
+                    return {'stock'} & set(names)
+                if 'character' in groups and source_directory == private_source/'stock/data/content':
+                    return {'createacharacter'} & set(names)
+                return set()
             if entry.is_dir():
                 shutil.copytree(entry,stage/entry.name,
+                    ignore=ignore_rebuilt_assets if entry.name=='assets' else None,
                     copy_function=copy_map if entry.name=='maps' and 'maps' not in groups
                     else copy_asset if entry.name=='assets' else shutil.copy2)
             else:shutil.copy2(entry,stage/entry.name)
