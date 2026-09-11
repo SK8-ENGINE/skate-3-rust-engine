@@ -80,10 +80,6 @@ pub(super) fn advance(
         input_available,
     )?;
     skater.ground_settings = skater.ground_profiles.select(skater.player_input.processed.state_variant_index_2528, skater.player_input.processed.surface_mode_2540)?;
-    if physics.trainer != skate_mods::TrainerTuning::default() {
-        skater.ground_settings = std::sync::Arc::new(skater.ground_settings.tuned(physics.trainer));
-    }
-    let mut vehicle_ejected = false;
     if teleported {
         skater.respawn.reset_measurements();
         #[cfg(test)]
@@ -102,7 +98,6 @@ pub(super) fn advance(
             &mut skater.skeleton_collision,
             &mut skater.collision_feedback,
         );
-        vehicle_ejected = player_state::apply_vehicle_ejection(physics, skater)?;
     }
     //World8275EC0C ends board queries before PostInput/state selection.
     physics.riding.finish_wheel_queries()?;
@@ -115,16 +110,7 @@ pub(super) fn advance(
         skater.offboard_grab.execute_queries(&scene)?;
     }
     let state_before_selection = skater.player_state.current();
-    if vehicle_ejected {
-        // Vehicle ejection is a host transition that must retain WipeoutGround,
-        // so it bypasses the native state selector. ProcessInput has already
-        // prepared this tick's grind work, however, and native PostInput is its
-        // mandatory consumer. Skipping both phases leaves a stale request that
-        // aborts the following tick.
-        player_state::complete_post_input(physics, skater)?;
-    } else {
-        player_state::post_input_and_select(physics, skater)?;
-    }
+    player_state::post_input_and_select(physics, skater)?;
     let state_after_selection = skater.player_state.current();
     super::offboard_audit_trace::stage(tick, "selected", physics, skater, controls);
     #[cfg(test)]

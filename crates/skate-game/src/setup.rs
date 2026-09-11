@@ -25,17 +25,91 @@ fn installed(base: &Path) -> Result<Option<(PathBuf, serde_json::Value)>, String
     Ok(Some((assets, marker)))
 }
 
+/// Exact match, or an explicit old→new pair from release pipeline_equivalence.
+fn pipelines_current(
+    marker: &serde_json::Value,
+    expected: &serde_json::Value,
+    equivalence: Option<&serde_json::Value>,
+) -> bool {
+    if marker.get("pipelines") == Some(expected) {
+        return true;
+    }
+    let Some(installed) = marker.get("pipelines").and_then(|v| v.as_object()) else {
+        return false;
+    };
+    let Some(wanted) = expected.as_object() else {
+        return false;
+    };
+    wanted.iter().all(|(group, new_hash)| {
+        let Some(old_hash) = installed.get(group) else {
+            return false;
+        };
+        if old_hash == new_hash {
+            return true;
+        }
+        let (Some(old), Some(new)) = (old_hash.as_str(), new_hash.as_str()) else {
+            return false;
+        };
+        equivalence
+            .and_then(|table| table.get(group))
+            .and_then(|pairs| pairs.as_array())
+            .is_some_and(|pairs| {
+                pairs.iter().any(|pair| {
+                    pair.as_array().is_some_and(|pair| {
+                        pair.len() == 2
+                            && pair[0].as_str() == Some(old)
+                            && pair[1].as_str() == Some(new)
+                    })
+                })
+            })
+    })
+}
+
+fn stamp_pipelines(
+    base: &Path,
+    marker: &serde_json::Value,
+    expected: &serde_json::Value,
+) -> Result<(), String> {
+    let mut updated = marker.clone();
+    updated["pipelines"] = expected.clone();
+    let bytes = serde_json::to_vec_pretty(&updated).map_err(|e| e.to_string())?;
+    let temporary = base.join("installation.json.tmp");
+    std::fs::write(&temporary, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&temporary, base.join("installation.json")).map_err(|e| e.to_string())
+}
+
+fn installation_ready(
+    assets: &Path,
+    marker: &serde_json::Value,
+    expected: Option<&serde_json::Value>,
+    equivalence: Option<&serde_json::Value>,
+    expected_customiser: Option<&str>,
+) -> bool {
+    expected.is_none_or(|versions| pipelines_current(marker, versions, equivalence))
+        && assets.join("private/game.json").is_file()
+        && marker.get("outputs").is_none_or(|groups| {
+            groups.as_object().is_some_and(|groups| {
+                groups
+                    .values()
+                    .all(|files| receipt_present(assets.parent().unwrap(), files))
+            })
+        })
+        && customiser_current(assets, expected_customiser)
+}
+
 pub(crate) fn asset_root() -> Result<PathBuf, String> {
     if std::env::args_os().any(|arg| arg == "--assets") { return Ok(PathBuf::from("assets")); }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let root = exe.parent().ok_or("No executable directory")?;
     let base = root.join("data");
     let mut expected_customiser = None;
+    let mut equivalence = None;
     let expected = match std::fs::read(root.join("release.json")) {
         Ok(bytes) => {
             let text = std::str::from_utf8(&bytes).map_err(|e| e.to_string())?.trim_start_matches('\u{feff}');
             let release: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
             expected_customiser = release["character_customiser"].as_str().map(str::to_owned);
+            equivalence = release.get("pipeline_equivalence").cloned();
             release.get("asset_pipelines").cloned()
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -43,11 +117,20 @@ pub(crate) fn asset_root() -> Result<PathBuf, String> {
     };
     let existing = installed(&base)?;
     if let Some((assets, marker)) = &existing {
-        if expected.as_ref().is_none_or(|versions| marker.get("pipelines") == Some(versions))
-            && assets.join("private/game.json").is_file()
-            && marker.get("outputs").is_none_or(|groups| groups.as_object().is_some_and(|groups|
-                groups.values().all(|files| receipt_present(assets.parent().unwrap(), files))))
-            && customiser_current(assets, expected_customiser.as_deref()) {
+        if installation_ready(
+            assets,
+            marker,
+            expected.as_ref(),
+            equivalence.as_ref(),
+            expected_customiser.as_deref(),
+        ) {
+            // Adopt this release's fingerprints when only an equivalence pair differed,
+            // so later launches do not keep re-evaluating historical hashes.
+            if let Some(versions) = &expected {
+                if marker.get("pipelines") != Some(versions) {
+                    stamp_pipelines(&base, marker, versions)?;
+                }
+            }
             return Ok(assets.clone());
         }
     }
@@ -151,5 +234,20 @@ mod tests {
         assert!(!receipt_present(&root, &serde_json::json!({})));
         assert!(!receipt_present(&root, &serde_json::json!({"../missing": {"size": 0}})));
         assert!(!receipt_present(&root, &serde_json::json!({"nonexistent-skate-setup-test": {"size": 0}})));
+    }
+
+    #[test]
+    fn pipelines_accept_exact_and_listed_equivalence_only() {
+        let expected = serde_json::json!({"core": "new", "hud": "hud"});
+        let marker = serde_json::json!({"pipelines": {"core": "new", "hud": "hud"}});
+        assert!(pipelines_current(&marker, &expected, None));
+        let migrated = serde_json::json!({"pipelines": {"core": "old", "hud": "hud"}});
+        let table = serde_json::json!({"core": [["old", "new"]]});
+        assert!(pipelines_current(&migrated, &expected, Some(&table)));
+        assert!(!pipelines_current(&migrated, &expected, None));
+        let other = serde_json::json!({"core": [["other", "new"]]});
+        assert!(!pipelines_current(&migrated, &expected, Some(&other)));
+        let reverse = serde_json::json!({"core": [["new", "old"]]});
+        assert!(!pipelines_current(&migrated, &expected, Some(&reverse)));
     }
 }

@@ -28,6 +28,14 @@ binding read-only in the late pass. Its counters are plain `u32` in that shader
 variant, preserving the same buffer layout; the early producer retains atomic
 counters and writable storage. No dispatch count or culling decision changes.
 
+Unused depth-pyramid mip slots previously shared one dummy storage texture.
+When the pyramid was short enough that the ReadWrite SPD intermediate (`mips[5]`)
+was also a dummy, wgpu rejected the dispatch: `STORAGE_WRITE_ONLY` and
+`STORAGE_READ_WRITE` on the same texture in one usage scope. Padding now uses one
+dummy texture per binding slot, dummies are 1×1 (not 0×0), zero-sized viewports
+clamp safely, and pyramid side lengths are at least 32 so that intermediate mip
+exists as a real subresource.
+
 `bevy_pbr` is the unmodified crates.io 0.18.1 source except for the changes
 described below. Its original MIT and Apache licenses are included. Cargo selects
 it through the workspace `[patch.crates-io]` entry; the Cargo registry is untouched.

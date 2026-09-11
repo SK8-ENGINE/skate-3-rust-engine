@@ -249,36 +249,7 @@ pub(crate) fn native_matrix(matrix: NativeMatrix) -> Mat4 {
     )
 }
 
-/// Vehicle clips use the same native model-space skeleton matrices as the SDK.
-pub(crate) fn vehicle_pose(world:&mut World, pose:&[Mat4], steering:Option<(&[Mat4],f32)>) {
- let board=world.resource::<crate::physics::SkaterRuntime>().animation.evaluator.frames.bone_names.iter().position(|n|n=="SKATEBOARD_ROOT");
- world.resource_scope(|world,animation:Mut<AnimationStatus>| {
-  let basis=render_basis();
-  for binding in &animation.bindings {
-   let Some(global)=pose.get(binding.bone).map(|m|*m*basis) else {continue;};
-   let local=if let Some(parent)=binding.parent_bone {let Some(parent)=pose.get(parent) else {continue;};(*parent*basis).inverse()*global} else {global};
-   let mut target=Transform::from_matrix(local);
-   if let Some((turn,weight))=steering {
-    if let Some(global)=turn.get(binding.bone).map(|m|*m*basis) {
-     let local=if let Some(parent)=binding.parent_bone {turn.get(parent).map(|p|(*p*basis).inverse()*global).unwrap_or(global)} else {global};
-     target=crate::presentation::blend(target,Transform::from_matrix(local),weight.clamp(0.,1.));
-    }
-   }
-   if let Some(mut transform)=world.get_mut::<Transform>(binding.entity) {*transform=target;if Some(binding.bone)==board {transform.scale=Vec3::splat(0.001);}}
-  }
- });
-}
-
-pub(crate) fn capture_vehicle_visual(world: &mut World) -> Vec<(Entity, Transform)> {
- let mut ids:Vec<_>=world.resource::<AnimationStatus>().bindings.iter().map(|b|b.entity).collect();
- ids.extend(world.query_filtered::<Entity,With<crate::world::PlayerRoot>>().iter(world));
- ids.into_iter().filter_map(|id|world.get::<Transform>(id).copied().map(|t|(id,t))).collect()
-}
-pub(crate) fn blend_vehicle_visual(world:&mut World, from:&[(Entity,Transform)], alpha:f32) {
- for &(id,previous) in from {if let Some(mut current)=world.get_mut::<Transform>(id) {*current=crate::presentation::blend(previous,*current,alpha);}}
-}
-
-/// Read the final displayed hierarchy, including vehicle steering and stance blends.
+/// Read the final displayed hierarchy, including stance blends.
 pub(crate) fn network_visual(world: &mut World) -> skate_net::packed::PoseState {
  let root=world.query_filtered::<&Transform,With<PlayerRoot>>().iter(world).next().copied().unwrap_or_default();
  let status=world.resource::<AnimationStatus>();

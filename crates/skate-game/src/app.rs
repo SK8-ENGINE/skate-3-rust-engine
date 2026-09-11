@@ -40,8 +40,7 @@ pub(crate) fn build(
     let retail_scene = config.map.as_ref().is_some_and(|map| crate::retail_render::RetailScene::for_map(map));
     let mut app = App::new();
     crate::custom_models::register_source(&mut app);
-    app.register_asset_source("mods", bevy::asset::io::AssetSourceBuilder::platform_default(
-        &crate::modding::package_root().to_string_lossy(), None));
+    crate::modding::register_source(&mut app);
     app.add_plugins(
         DefaultPlugins
             .set(AssetPlugin {

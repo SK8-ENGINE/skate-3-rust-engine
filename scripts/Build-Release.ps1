@@ -48,8 +48,6 @@ try {
         pdb_sha256 = (Get-FileHash -LiteralPath "$symbols/skate3rust.pdb" -Algorithm SHA256).Hash
         compiler = (& rustc --version).Trim()
     } | ConvertTo-Json | Set-Content -LiteralPath "$symbols/build.json" -Encoding UTF8
-    New-Item -ItemType Directory -Path "$stage/mods" -Force | Out-Null
-    Copy-Item -LiteralPath mods/native-trainer.zip,mods/mario-kart.zip,mods/README.md -Destination "$stage/mods"
     $sourceStage = Join-Path $stage '../setup-source'
     $toolsRoot = Join-Path $ProjectRoot 'tools'
     foreach ($source in Get-ChildItem -LiteralPath $toolsRoot -File -Recurse) {
@@ -93,6 +91,12 @@ try {
     $assetPipelines = $assetPipelinesJson | ConvertFrom-Json
     $characterCustomiser = (& $packagePython -m tools.asset_pipeline.customiser_setup --fingerprint).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify character customiser resources' }
+    $pipelineEquivalencePath = Join-Path $sourceStage 'tools/asset_pipeline/pipeline-equivalence.json'
+    $pipelineEquivalence = if (Test-Path -LiteralPath $pipelineEquivalencePath) {
+        Get-Content -LiteralPath $pipelineEquivalencePath -Raw -Encoding utf8 | ConvertFrom-Json
+    } else {
+        [pscustomobject]@{}
+    }
     Copy-Item -LiteralPath README.md,docs/THIRD_PARTY_NOTICES.md -Destination $stage
     New-Item -ItemType Directory -Path "$stage/docs/images" -Force | Out-Null
     Copy-Item -LiteralPath docs/images/skating-crab.png -Destination "$stage/docs/images/skating-crab.png"
@@ -115,17 +119,18 @@ try {
         Copy-Item -LiteralPath $license.FullName -Destination "$stage/licenses/$($license.Directory.Name).txt"
     }
     # Own every shipped program component, including future tools and libraries.
-    # Mods are user-editable content and remain outside program replacement.
     $files = @{}
     foreach ($file in Get-ChildItem -LiteralPath $stage -File -Recurse) {
         $name = [IO.Path]::GetRelativePath($stage, $file.FullName).Replace('\', '/')
-        if ($name -eq 'release.json' -or $name.StartsWith('mods/')) { continue }
+        if ($name -eq 'release.json') { continue }
         $files[$name] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLower()
     }
     @{
         schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
-        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files; asset_pipelines = $assetPipelines; character_customiser = $characterCustomiser
-    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
+        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files
+        asset_pipelines = $assetPipelines; character_customiser = $characterCustomiser
+        pipeline_equivalence = $pipelineEquivalence
+    } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
     Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $ProjectRoot 'target/release.json')
     $zip = Join-Path $ProjectRoot 'target/skate3rust-windows-x64.zip'
     Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force

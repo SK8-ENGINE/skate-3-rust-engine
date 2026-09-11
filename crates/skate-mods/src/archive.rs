@@ -1,86 +1,95 @@
-//! Bounded ZIP extraction. A session cache never overwrites another package.
-use std::{collections::{BTreeMap, BTreeSet}, io::{Read, Write}, path::{Path, PathBuf}};
-const LIMIT: u64 = 64 * 1024 * 1024;
+use crate::schema::{valid_id, Manifest};
+use std::collections::HashMap;
+use std::fs;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 #[derive(Default)]
-pub(crate) struct Cache {
+pub struct Cache {
+    entries: HashMap<PathBuf, (u64, PathBuf)>,
     session: Option<PathBuf>,
-    entries: BTreeMap<PathBuf, (blake3::Hash, PathBuf)>,
     next: u64,
-}
-
-fn safe_name(name: &str) -> Result<PathBuf, String> {
-    let name = name.strip_suffix('/').unwrap_or(name);
-    if name.is_empty() || name.len() > 240 || name.contains(['\\', ':', '<', '>', '"', '|', '?', '*'])
-        || name.chars().any(char::is_control) {
-        return Err("Invalid ZIP path".into());
-    }
-    for part in name.split('/') {
-        let stem = part.split('.').next().unwrap_or("").to_ascii_lowercase();
-        if part.is_empty() || part == "." || part == ".." || part.ends_with(['.', ' '])
-            || matches!(stem.as_str(), "con" | "prn" | "aux" | "nul" | "com1" | "com2" | "com3" | "com4" | "com5" | "com6" | "com7" | "com8" | "com9" | "lpt1" | "lpt2" | "lpt3" | "lpt4" | "lpt5" | "lpt6" | "lpt7" | "lpt8" | "lpt9") {
-            return Err("ZIP paths must be ordinary relative paths without traversal or device names".into());
-        }
-    }
-    Ok(PathBuf::from(name))
 }
 
 impl Cache {
     pub fn materialize(&mut self, root: &Path, archive: &Path) -> Result<PathBuf, String> {
-        let mut bytes = Vec::new();
-        std::fs::File::open(archive).map_err(|e| e.to_string())?.take(LIMIT + 1)
-            .read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-        if bytes.len() as u64 > LIMIT { return Err("ZIP exceeds 64 MiB compressed".into()); }
-        let hash = blake3::hash(&bytes);
-        if let Some((old, path)) = self.entries.get(archive) {
-            if old == &hash { return Ok(path.clone()); }
-        }
-        // Validate and decompress into bounded memory before publishing anything.
-        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).map_err(|e| e.to_string())?;
-        if zip.len() > 512 { return Err("ZIP exceeds 512 entries".into()); }
-        let mut names = BTreeSet::new();
-        let mut files = Vec::new();
-        let mut total = 0_u64;
-        for i in 0..zip.len() {
-            let mut file = zip.by_index(i).map_err(|e| e.to_string())?;
-            let path = safe_name(file.name())?;
-            if !names.insert(path.to_string_lossy().to_lowercase()) { return Err("Duplicate/case-colliding ZIP path".into()); }
-            let kind = file.unix_mode().unwrap_or(0) & 0o170000;
-            if kind != 0 && kind != 0o100000 && kind != 0o040000 { return Err("ZIP links and special files are unsupported".into()); }
-            if file.is_dir() { continue; }
-            if file.size() > LIMIT - total { return Err("ZIP exceeds 64 MiB expanded".into()); }
-            let mut contents = Vec::new();
-            file.by_ref().take(LIMIT - total + 1).read_to_end(&mut contents).map_err(|e| e.to_string())?;
-            total += contents.len() as u64;
-            if total > LIMIT { return Err("ZIP exceeds 64 MiB expanded".into()); }
-            files.push((path, contents));
-        }
-        if !files.iter().any(|(p, _)| p == Path::new("mod.json")) {
-            return Err("ZIP must contain mod.json at its root, not inside a wrapper folder".into());
+        let bytes = fs::read(archive).map_err(|e| e.to_string())?;
+        let hash = {
+            let mut h = 0u64;
+            for b in blake3::hash(&bytes).as_bytes() {
+                h = h.wrapping_mul(31).wrapping_add(*b as u64);
+            }
+            h
+        };
+        if let Some((prev, path)) = self.entries.get(archive) {
+            if *prev == hash && path.is_dir() {
+                return Ok(path.clone());
+            }
         }
         if self.session.is_none() {
-            let root = root.canonicalize().map_err(|e| e.to_string())?;
             let cache = root.join(".cache");
-            if cache.exists() && std::fs::symlink_metadata(&cache).map_err(|e|e.to_string())?.file_type().is_symlink() {
+            if cache.exists()
+                && fs::symlink_metadata(&cache)
+                    .map_err(|e| e.to_string())?
+                    .file_type()
+                    .is_symlink()
+            {
                 return Err("ZIP cache must not be a link".into());
             }
-            std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
-            if !cache.canonicalize().map_err(|e|e.to_string())?.starts_with(&root) { return Err("ZIP cache escapes mods folder".into()); }
-            let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
+            fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+            if !cache
+                .canonicalize()
+                .map_err(|e| e.to_string())?
+                .starts_with(root.canonicalize().map_err(|e| e.to_string())?)
+            {
+                return Err("ZIP cache escapes mods folder".into());
+            }
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos();
             let session = cache.join(format!("{}-{nonce}", std::process::id()));
-            std::fs::create_dir(&session).map_err(|e| e.to_string())?;
+            fs::create_dir(&session).map_err(|e| e.to_string())?;
             self.session = Some(session);
         }
         self.next += 1;
-        let destination = self.session.as_ref().unwrap().join(self.next.to_string());
-        std::fs::create_dir(&destination).map_err(|e| e.to_string())?;
-        for (path, contents) in files {
-            let target = destination.join(path);
-            std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-            std::fs::OpenOptions::new().write(true).create_new(true).open(target)
-                .and_then(|mut f| f.write_all(&contents)).map_err(|e| e.to_string())?;
+        let destination = self
+            .session
+            .as_ref()
+            .unwrap()
+            .join(self.next.to_string());
+        fs::create_dir(&destination).map_err(|e| e.to_string())?;
+        let file = fs::File::open(archive).map_err(|e| e.to_string())?;
+        let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+        for i in 0..zip.len() {
+            let mut file = zip.by_index(i).map_err(|e| e.to_string())?;
+            let name = file
+                .enclosed_name()
+                .ok_or_else(|| "zip entry escapes archive".to_string())?
+                .to_path_buf();
+            if name
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return Err("zip path contains ..".into());
+            }
+            let out = destination.join(&name);
+            if file.is_dir() {
+                fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+                continue;
+            }
+            if let Some(parent) = out.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut dest = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&out)
+                .map_err(|e| e.to_string())?;
+            std::io::copy(&mut file, &mut dest).map_err(|e| e.to_string())?;
         }
-        self.entries.insert(archive.to_owned(), (hash, destination.clone()));
+        self.entries
+            .insert(archive.to_owned(), (hash, destination.clone()));
         Ok(destination)
     }
 }
@@ -88,12 +97,113 @@ impl Cache {
 impl Drop for Cache {
     fn drop(&mut self) {
         if let Some(path) = &self.session {
-            // Only this process's uniquely created session, and never a redirected path.
-            if let (Ok(actual), Ok(parent)) = (path.canonicalize(), path.parent().unwrap().canonicalize()) {
-                if actual.parent() == Some(parent.as_path()) && actual.file_name() == path.file_name() {
-                    let _ = std::fs::remove_dir_all(path);
+            if let (Ok(actual), Ok(parent)) = (
+                path.canonicalize(),
+                path.parent().unwrap().canonicalize(),
+            ) {
+                if actual.parent() == Some(parent.as_path())
+                    && actual.file_name() == path.file_name()
+                {
+                    let _ = fs::remove_dir_all(path);
                 }
             }
         }
     }
+}
+
+pub fn validate_package(path: &Path) -> Result<Manifest, String> {
+    let source = path.canonicalize().map_err(|e| e.to_string())?;
+    let mut cache = Cache::default();
+    let root = if source.is_dir() {
+        source.clone()
+    } else {
+        let parent = source.parent().ok_or("Missing package parent")?;
+        cache.materialize(parent, &source)?
+    };
+    let bytes = read_bounded(&root, "mod.json", 64 * 1024)?;
+    let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    manifest.validate()?;
+    let _ = valid_id(&manifest.id);
+    let entry = read_bounded(&root, &manifest.entry, 256 * 1024)?;
+    let source = std::str::from_utf8(&entry).map_err(|e| e.to_string())?;
+    if source.starts_with('\u{1b}') {
+        return Err("Lua bytecode is unsupported".into());
+    }
+    mlua::Lua::new()
+        .load(source)
+        .set_mode(mlua::chunk::ChunkMode::Text)
+        .into_function()
+        .map_err(|e| e.to_string())?;
+    Ok(manifest)
+}
+
+pub fn read_bounded(root: &Path, relative: &str, limit: u64) -> Result<Vec<u8>, String> {
+    let path = Path::new(relative);
+    if path
+        .components()
+        .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        || relative.contains(':')
+    {
+        return Err("Use a relative path without traversal".into());
+    }
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let path = root.join(path).canonicalize().map_err(|e| e.to_string())?;
+    if !path.starts_with(&root) {
+        return Err("Asset escapes mod root".into());
+    }
+    let mut bytes = vec![];
+    fs::File::open(path)
+        .map_err(|e| e.to_string())?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > limit {
+        return Err("Asset too large".into());
+    }
+    Ok(bytes)
+}
+
+pub fn fingerprint(root: &Path) -> Result<u64, String> {
+    let mut paths = Vec::new();
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                walk(&path, out)?;
+            } else {
+                out.push(path);
+            }
+        }
+        Ok(())
+    }
+    walk(root, &mut paths)?;
+    paths.sort();
+    let mut hasher = blake3::Hasher::new();
+    for path in paths {
+        let rel = path
+            .strip_prefix(root)
+            .map_err(|e| e.to_string())?
+            .to_string_lossy();
+        hasher.update(rel.as_bytes());
+        hasher.update(&[0]);
+        hasher.update(&fs::read(&path).map_err(|e| e.to_string())?);
+        hasher.update(&[0]);
+    }
+    let hash = hasher.finalize();
+    let mut out = 0u64;
+    for b in hash.as_bytes() {
+        out = out.wrapping_mul(31).wrapping_add(*b as u64);
+    }
+    Ok(out)
+}
+
+#[allow(dead_code)]
+pub fn write_temp(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut f = fs::File::create(path).map_err(|e| e.to_string())?;
+    f.write_all(bytes).map_err(|e| e.to_string())
 }

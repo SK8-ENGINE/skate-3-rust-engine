@@ -177,8 +177,8 @@ current snapshots and records replay. `animation.rs` interpolates bone transform
 for display. Snapshot copying and hierarchy propagation are candidates if those
 systems dominate, not grounds to reduce bone update rate or interpolation quality.
 Static map transforms are separate from these moving character hierarchies.
-Multiplayer/mod/vehicle systems are additional workload; profiles should state
-whether mods or online play were active rather than attributing all time to University.
+Multiplayer systems are additional workload; profiles should state
+whether online play was active rather than attributing all time to University.
 
 `graphics_menu.rs::pace` sleeps in `Last` when capped; window presentation may add
 another wait. The new frame-interval counter and CPU spans preserve both behaviors.
@@ -191,7 +191,7 @@ Use [the capture workflow](performance-tracing.md). Record 30 seconds after load
 stand briefly, rotate the camera, then skate through a representative University
 area. Repeat the same settings/route with `--trace-gpu`; record a separate startup
 trace if the problem is loading or first-use hitching. Include where the slowdown
-occurred, approximate time in the capture, and whether mods/multiplayer were active.
+occurred, approximate time in the capture, and whether multiplayer was active.
 Do not change quality settings between captures.
 
 Analyse steady-state frame-interval p50/p95/p99, fixed iteration counts, dominant

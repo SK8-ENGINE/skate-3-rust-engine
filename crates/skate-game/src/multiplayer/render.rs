@@ -96,9 +96,7 @@ impl Plugin for RemoteRenderPlugin {
         })
         .add_systems(
             Update,
-            (spawn, bind, present)
-                .chain()
-                .after(crate::modding::vehicles::present),
+            (spawn, bind, present).chain(),
         );
     }
 }
@@ -408,7 +406,6 @@ fn globals(bones: &[skate_net::Bone], skin: &RemoteSkins) -> Vec<Mat4> {
 }
 fn present(
     mut net: ResMut<Multiplayer>,
-    vehicles: Res<crate::modding::vehicles::Vehicles>,
     mut skins: ResMut<RemoteSkins>,
     mut nodes: Query<&mut Transform>,
 ) {
@@ -490,14 +487,6 @@ fn present(
                     if let Ok(mut t) = nodes.get_mut(entity) {
                         *t = crate::presentation::blend(*a, *b, alpha);
                     }
-                }
-            }
-        }
-        if let Some(root) = skin.root {
-            if let Some(attached) = crate::modding::vehicles::network::attached_root(&vehicles, id)
-            {
-                if let Ok(mut t) = nodes.get_mut(root) {
-                    *t = attached;
                 }
             }
         }

@@ -97,18 +97,25 @@ Do not ship a local `data` folder in release ZIPs.
 The release manifest includes fingerprints for core data, HUDs, character,
 environment and maps. They are derived from the packaged extractor sources and
 shared dependencies, not the game build number. An in-place program update keeps
-`data` intact. Next startup offers an asset refresh only when these fingerprints
-change. A HUD extractor edit refreshes HUDs without converting maps; changes to
-core VLT/animation decoding invalidate dependent groups too. Shared map/material
-parsers can invalidate both maps and environment assets. New converter modules
-must be assigned to their consuming groups in `asset_pipeline/versions.py`.
+`data` intact. Next startup compares those fingerprints (and any listed
+`pipeline_equivalence` pairs) with `data/installation.json`. Matching installs
+are reused immediately; equivalent fingerprints are stamped to the current
+release without opening setup. Setup opens only when groups actually need work
+or character preparation is outdated, and a refresh reuses the previously
+recorded Xbox source path when it still exists. A HUD extractor edit refreshes
+HUDs without converting maps; changes to core VLT/animation decoding invalidate
+dependent groups too. Shared map/material parsers can invalidate both maps and
+environment assets. New converter modules must be assigned to their consuming
+groups in `asset_pipeline/versions.py`.
 
-Refresh uses the same `Select ISO or default.xex` file picker as initial setup;
-the player never needs to select an intermediate extraction folder. ISO sources
-must be unpacked again when a refresh needs disc files; unchanged asset groups
-are reused without conversion. The chosen Xbox executable
-must match the original edition. Source paths stay in local installation records
-and are never included in published release metadata.
+Refresh prefers the saved `default.xex` / ISO path from the installation record.
+Only if that path is missing or fails does it show the same
+`Select ISO or default.xex` file picker as initial setup. The player never needs
+to select an intermediate extraction folder. ISO sources must be unpacked again
+when a refresh needs disc files; unchanged asset groups are reused without
+conversion. The chosen Xbox executable must match the original edition. Source
+paths stay in local installation records and are never included in published
+release metadata.
 
 Updates run only affected exports. Core/HUD/character/environment/map recipes
 have separate dependency identities; setup UI and transaction changes do not
@@ -120,7 +127,7 @@ Core refreshes create a new installation before publication. Unchanged prepared
 maps and immutable character generations use hardlinks (copy fallback on filesystems without support); mutable user files and
 outputs being rebuilt have independent storage. Customiser-only refreshes keep
 the current core installation and publish a new character generation. Custom
-models, profiles, settings, selections and mods are retained. Core gameplay inputs and at least one map must pass validation before the
+models, profiles, settings and selections are retained. Core gameplay inputs and at least one map must pass validation before the
 installation record changes. Missing optional content is recorded separately;
 fatal failures preserve the previous record.
 A kernel lock prevents concurrent setup and releases automatically on process

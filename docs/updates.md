@@ -18,13 +18,15 @@ eligible startup, or through the menu.
 The release manifest owns every shipped program file: executables, helper tools,
 DLLs, documentation and licenses. Updates add new components, replace changed
 files and remove components owned by the previous release that are no longer
-shipped. Assets, maps, saves, settings, user mods and character libraries remain
-outside this manifest. Bundled mod archives are user-editable defaults and are
-not overwritten by program updates. The same
+shipped. Assets, maps, saves, settings and character libraries remain
+outside this manifest. The same
 working directory and arguments are used for restart; existing asset selection
 continues to work. Each package owns its `data` installation. On the next normal
-launch, changed extractor fingerprints trigger an update of affected asset groups;
-unchanged groups are retained. Freshly unpacked copies run setup independently.
+launch, matching extractor fingerprints (including explicit equivalence pairs)
+keep the existing assets; only real extractor or character-preparation changes
+trigger an update of affected asset groups, and refreshes reuse the saved Xbox
+source when it is still available. Unchanged groups are retained. Freshly
+unpacked copies run setup independently.
 Explicit `--assets` developer launches bypass this management. Packaged releases are required; developer binaries do not
 silently adopt a downloaded build.
 

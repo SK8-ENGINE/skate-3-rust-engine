@@ -81,7 +81,7 @@ additional worker memory or contention.
 - Owned-output checks verified geometry bounds, finite buffers, skin weights,
   all 22 live morph targets, secondary UVs, hair opacity and referenced textures.
 - Synthetic recovery tests cover default.xex validation, failed finalization,
-  preservation of maps/user profiles/mods, crash-released locking, incomplete
+  preservation of maps/user profiles, crash-released locking, incomplete
   stages, same-size corruption, dependency invalidation, and a crash between
   publishing a generation and deleting its pending record.
 - `cargo check --locked -p skate-game --bin skate3rust --no-default-features`

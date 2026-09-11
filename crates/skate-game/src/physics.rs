@@ -9,7 +9,7 @@ mod air_trajectory;
 mod animated_skeleton;
 pub(crate) mod camera_output;
 mod clock;
-mod colliders;
+pub(crate) mod colliders;
 mod controls;
 mod foot_ik;
 mod footplant;
@@ -26,7 +26,7 @@ mod skateboard_controller;
 mod skater;
 mod skeleton_air;
 mod skeleton_body;
-mod skeleton_colliders;
+pub(crate) mod skeleton_colliders;
 mod skeleton_controller;
 mod skeleton_feedback;
 mod skeleton_input_runtime;
@@ -46,7 +46,6 @@ mod grind_camera;
 mod grind_chromosome;
 mod grind_host;
 mod grind_materials;
-mod grind_names;
 mod ground_animation;
 mod slide_state;
 mod revert_state;
@@ -102,7 +101,7 @@ pub(crate) struct GamePhysics {
     grind_world: std::sync::Arc<crate::grind_world::StaticProvider>,
     grind_materials: grind_materials::GrindMaterials,
     offboard_grab_scene: offboard::grab_scene::Registry,
-    settings: PhysicsSettings,
+    pub(crate) settings: PhysicsSettings,
     animation_profile: animation_phase::AnimationProfile,
     query: WorldContactSettings,
     retention: ContactRetentionSettings,
@@ -115,7 +114,6 @@ pub(crate) struct GamePhysics {
     pub processed_flags_2468: u32,
     /// Toolkit ctor82C0680C clears8384bit7; wipeout entry/exit owns changes.
     pub board_wiping_out: bool,
-    pub trainer: skate_mods::TrainerTuning,
 }
 
 /// Cross-phase records for the current fixed tick. Subsystems retain their
@@ -344,7 +342,6 @@ impl GamePhysics {
             exchange: SimulationExchange::new(0),
             processed_flags_2468,
             board_wiping_out: false,
-            trainer: Default::default(),
         })
     }
 
@@ -409,7 +406,6 @@ impl Plugin for PhysicsPlugin {
 }
 
 fn advance(
-    vehicles: Res<crate::modding::vehicles::Vehicles>,
     mut physics: ResMut<GamePhysics>,
     mut skater: ResMut<SkaterRuntime>,
     mut controls: ResMut<PlayerControls>,
@@ -419,8 +415,15 @@ fn advance(
     mut cadence: ResMut<Time<Fixed>>,
     mut exit: MessageWriter<AppExit>,
     mut performance: Option<ResMut<crate::performance::Performance>>,
+    mods: Option<Res<crate::modding::Mods>>,
 ) {
-    if physics.failed || vehicles.occupied() {
+    if physics.failed {
+        return;
+    }
+    if mods
+        .as_ref()
+        .is_some_and(|m| crate::modding::player_attached(m))
+    {
         return;
     }
     let timer = performance.as_ref().map(|_| std::time::Instant::now());
@@ -598,16 +601,3 @@ mod offboard_jump_playback_tests;
 #[cfg(test)]
 #[path = "tests/offboard_root_trace.rs"]
 mod offboard_root_trace;
-
-impl SkaterRuntime {
-    /// Observe the current grind publication without adding a second grind owner.
-    pub(crate) fn mod_grind(&self) -> (bool, &str, u32, f32) {
-        let out = &self.player_input.physical.grinds;
-        let active = self.grind.active_family().is_some();
-        let name = if active {
-            grind_chromosome::names::lookup(out.animation_chromosome_268)
-                .map(|name| name.attribute).unwrap_or("")
-        } else { "" };
-        (active, name, out.words_136_140[0], self.grind.last_grind_distance())
-    }
-}

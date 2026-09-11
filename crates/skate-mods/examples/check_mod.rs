@@ -1,6 +1,14 @@
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = std::env::args_os().nth(1).ok_or("Usage: check_mod path/to/mod.zip-or-folder")?;
-    let manifest = skate_mods::validate_package(std::path::Path::new(&path))?;
-    println!("Valid package: {} {} (API {})", manifest.id, manifest.version, manifest.api);
-    Ok(())
+fn main() {
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: check_mod <package-folder-or-zip>");
+    match skate_mods::validate_package(std::path::Path::new(&path)) {
+        Ok(m) => {
+            println!("OK {} api={} entry={}", m.id, m.api, m.entry);
+        }
+        Err(e) => {
+            eprintln!("FAIL: {e}");
+            std::process::exit(1);
+        }
+    }
 }

@@ -681,7 +681,7 @@ impl Session {
                 }
             }
         }
-        // Rotate every record, not just actors, so a busy mod cannot starve later keys.
+        // Rotate every record, not just actors, so a busy publisher cannot starve later keys.
         let mut app_peers:Vec<_>=self.links.keys().copied().collect();
         if !app_peers.is_empty() {let offset=self.round%app_peers.len();app_peers.rotate_left(offset);}
         for peer in app_peers {

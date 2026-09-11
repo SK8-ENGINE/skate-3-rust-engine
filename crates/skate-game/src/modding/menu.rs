@@ -94,7 +94,7 @@ pub(super) fn install(app: &mut App) {
 fn setup(mut commands: Commands) {
     commands.spawn((Root,GlobalZIndex(20),Node{display:Display::None,width:percent(100),height:percent(100),position_type:PositionType::Absolute,align_items:AlignItems::Center,justify_content:JustifyContent::Center,..default()},BackgroundColor(Color::srgba(0.015,0.025,0.04,0.98)))).with_children(|root| {
         root.spawn((Node{width:px(760),max_width:percent(95),padding:UiRect::all(px(18)),flex_direction:FlexDirection::Column,row_gap:px(5),..default()},BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
-            panel.spawn((Text::new("MODS — Lua SDK 1"),TextFont{font_size:28.,..default()},TextColor(Color::WHITE)));
+            panel.spawn((Text::new("MODS ??? Lua SDK 1"),TextFont{font_size:28.,..default()},TextColor(Color::WHITE)));
             for i in 0..8 { panel.spawn((Button,Row(i),Node{min_height:px(32),padding:UiRect::all(px(6)),justify_content:JustifyContent::SpaceBetween,..default()},BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {row.spawn((Label(i),Text::new(""),TextFont{font_size:17.,..default()},TextColor(Color::WHITE)));row.spawn((Badge(i),Text::new(""),TextFont{font_size:16.,..default()},TextColor(Color::WHITE)));}); }
             panel.spawn((Detail,Text::new(""),TextFont{font_size:15.,..default()},TextColor(Color::srgb(0.65,0.85,0.85))));
             panel.spawn((Text::new("Arrows / D-pad: select & adjust  |  Enter / A: choose  |  Esc / B: back\nStrings: Enter then type; Enter saves, Esc cancels. More rows scroll automatically."),TextFont{font_size:14.,..default()},TextColor(Color::WHITE)));

@@ -285,7 +285,6 @@ pub(crate) fn interact(
     mut transition: ResMut<crate::map_transition::MapTransition>,
     mut customiser: ResMut<crate::customiser::Customiser>,
     mut custom_models: ResMut<crate::custom_models::CustomModels>,
-    (mut mods, panel): (ResMut<crate::modding::ModMenu>, Res<crate::modding::EnabledPanel>),
     nav: Res<crate::customiser::Navigation>,
     mut physics: ResMut<crate::physics::GamePhysics>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -297,13 +296,16 @@ pub(crate) fn interact(
     mut typing: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut updater: ResMut<crate::updater::Updater>,
     mut travel: ResMut<crate::teleport_menu::Travel>,
+    mut mods: ResMut<crate::modding::ModMenu>,
 ) {
     if transition.busy() {
         menu.open = true;
         time.pause();
         return;
     }
-    if mods.open || travel.open || travel.closed_this_frame || customiser.open || custom_models.open { return; }
+    if travel.open || travel.closed_this_frame || customiser.open || custom_models.open || mods.open {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 {
         menu.open = !menu.open;
     }
@@ -330,7 +332,6 @@ pub(crate) fn interact(
     }
     if menu.open {
         let rows = if menu.daylight { 4 } else if menu.multiplayer { 11 } else { 17 };
-        if !panel.focused {
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
             menu.selected = (menu.selected + rows - 1) % rows;
         }
@@ -343,9 +344,7 @@ pub(crate) fn interact(
         if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::Enter) || nav.pressed & (8 | 0x1000) != 0 {
             action = Some((menu.selected, 1));
         }
-        }
         for (interaction, row) in &buttons {
-            if panel.dragging() { continue; }
             if *interaction == Interaction::Pressed {
                 menu.selected = row.0;
                 action = Some((row.0, 1));
@@ -364,7 +363,7 @@ pub(crate) fn interact(
                     let next = (index + direction).rem_euclid(22);
                     menu.settings.ambient_level = if next == 0 { None } else { Some((next as u32 - 1) * 5) };
                 }
-                _ => { menu.daylight = false; menu.selected = 16; }
+                _ => { menu.daylight = false; menu.selected = 15; }
             }
         } else if menu.browser {
             match row {
@@ -466,8 +465,8 @@ pub(crate) fn interact(
                 12 => custom_models.begin(),
                 13 => menu.status = updater.open(false),
                 14 => travel.open = true,
-                15 => mods.begin(),
-                16 => { menu.daylight = true; menu.selected = 0; menu.status = "Custom maps: change time, cycle speed and ambient light. Retail lighting stays authored.".into(); },
+                15 => { menu.daylight = true; menu.selected = 0; menu.status = "Custom maps: change time, cycle speed and ambient light. Retail lighting stays authored.".into(); },
+                16 => mods.begin(),
                 _ => {}
             }
         }
@@ -561,7 +560,7 @@ fn labels(
     mut status: Single<&mut Text, With<StatusLabel>>,
     mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor, &mut Node), Without<MenuRoot>>,
 ) {
-    root.display = if menu.open && !mods.open && !travel.open && !customiser.open && !custom_models.open {
+    root.display = if menu.open && !travel.open && !customiser.open && !custom_models.open && !mods.open {
         Display::Flex
     } else {
         Display::None
@@ -666,9 +665,9 @@ fn labels(
                 10 => "Character customiser".into(),
                 12 => "Custom models".into(),
                 13 => "Updates".into(),
-                15 => "Mods".into(),
                 14 => "Teleport…".into(),
-                16 => "Day & night…".into(),
+                15 => "Day & night…".into(),
+                16 => "Mods…".into(),
                 _ => "Multiplayer".into(),
             }
         };

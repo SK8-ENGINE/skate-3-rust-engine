@@ -9,6 +9,10 @@ blake3 = "1.8.2"
 mlua = { version = "=0.12.1", features = ["lua54", "vendored", "serde", "send"] }
 serde.workspace = true
 serde_json.workspace = true
-
-skate-vehicles = { path = "../skate-vehicles" }
+skate-dynamics = { path = "../skate-dynamics" }
+gltf = { version = "=1.4.1", default-features = true }
 zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
+
+[[example]]
+name = "check_mod"
+path = "examples/check_mod.rs"

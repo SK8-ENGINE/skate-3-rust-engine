@@ -1,0 +1,158 @@
+{
+  "id": "examples.skyline",
+  "api": 2,
+  "name": "Skyline DRIVE + Audio",
+  "version": "4.2.0",
+  "author": "Skate3clone",
+  "description": "Latest working Skyline with native dynamic chase/hood camera, clean HUD, unchanged sound bank, progressive controls and explicit optional aero. Requires Driving API extension 1.",
+  "entry": "main.lua",
+  "settings": {
+    "tire_friction": {
+      "type": "number",
+      "label": "Tire friction",
+      "description": "Base tire friction coefficient.",
+      "default": 1.25,
+      "min": 0.4,
+      "max": 2,
+      "step": 0.05
+    },
+    "audio_enabled": {
+      "type": "boolean",
+      "label": "Engine audio",
+      "description": "Enable all car sounds. Requires the native audio API update.",
+      "default": true
+    },
+    "engine_volume": {
+      "type": "number",
+      "label": "Engine master volume",
+      "description": "Master gain for engine, turbo and exhaust. Start low.",
+      "default": 0.7,
+      "min": 0,
+      "max": 1,
+      "step": 0.05
+    },
+    "pop_volume": {
+      "type": "number",
+      "label": "Exhaust pop volume",
+      "description": "Additional exhaust pop gain, multiplied by engine master volume.",
+      "default": 0.65,
+      "min": 0,
+      "max": 1,
+      "step": 0.05
+    },
+    "redline_pops": {
+      "type": "boolean",
+      "label": "Redline bangs and pops",
+      "description": "Acoustic limiter chatter near redline; does not alter the soft-cut engine physics.",
+      "default": true
+    },
+    "overrun_pops": {
+      "type": "boolean",
+      "label": "Lift-off crackles",
+      "description": "Short, finite exhaust crackles after lifting at high RPM.",
+      "default": true
+    },
+    "turbo_audio": {
+      "type": "boolean",
+      "label": "Turbo spool and lift",
+      "description": "Procedural turbo whistle and lift-off sound.",
+      "default": true
+    },
+    "show_driving_debug": {
+      "type": "boolean",
+      "label": "Show car diagnostics (H)",
+      "description": "Top-left physics diagnostics and controls. H toggles for this session. Does not hide the engine FPS overlay.",
+      "default": false
+    },
+    "show_speedometer": {
+      "type": "boolean",
+      "label": "Show speedometer",
+      "description": "Speed, selected gear, RPM bar and handbrake indicator while driving.",
+      "default": true
+    },
+    "speed_mph": {
+      "type": "boolean",
+      "label": "Speed in MPH",
+      "description": "Off uses km/h. Speed is chassis road-plane speed, not spinning-wheel speed.",
+      "default": false
+    },
+    "dashboard_scale": {
+      "type": "number",
+      "label": "Dashboard scale",
+      "description": "Scales the lower-right HUD. It also fits the current viewport.",
+      "default": 1,
+      "min": 0.65,
+      "max": 1.5,
+      "step": 0.05
+    },
+    "camera_distance": {
+      "type": "number",
+      "label": "Chase distance (m)",
+      "description": "Base boom length. Dynamic speed framing adds up to 1.8 m.",
+      "default": 5.8,
+      "min": 3.5,
+      "max": 10,
+      "step": 0.1
+    },
+    "camera_spring": {
+      "type": "number",
+      "label": "Chase spring frequency (Hz)",
+      "description": "Higher follows changes more tightly; lower gives more camera lag.",
+      "default": 2.8,
+      "min": 1,
+      "max": 6,
+      "step": 0.1
+    },
+    "camera_fov": {
+      "type": "number",
+      "label": "Chase vertical FOV (degrees)",
+      "description": "Speed framing adds up to 8 degrees. Hood uses 60 degrees.",
+      "default": 55,
+      "min": 40,
+      "max": 80,
+      "step": 1
+    },
+    "hood_height": {
+      "type": "number",
+      "label": "Hood camera height (model m)",
+      "description": "Local camera height. Default is above the uploaded model hood.",
+      "default": 0.48,
+      "min": 0.3,
+      "max": 0.9,
+      "step": 0.01
+    },
+    "steering_precision": {
+      "type": "number",
+      "label": "High-speed stick precision",
+      "description": "0 restores the old stick curve. Gentler centre at speed, but full lock and opposite lock remain available. No automatic steering.",
+      "default": 1,
+      "min": 0,
+      "max": 1.5,
+      "step": 0.1
+    },
+    "aero_enabled": {
+      "type": "boolean",
+      "label": "Aerodynamic surface loads",
+      "description": "Explicit speed-squared fore/rear downforce. Tuned coefficient assumptions, not measured stock R34 data.",
+      "default": true
+    },
+    "aero_front_area": {
+      "type": "number",
+      "label": "Front Cl x area (m2)",
+      "description": "Positive produces downforce; negative produces lift. Independent of tire friction and camera.",
+      "default": 0.08,
+      "min": -0.4,
+      "max": 0.6,
+      "step": 0.01
+    },
+    "aero_rear_area": {
+      "type": "number",
+      "label": "Rear Cl x area (m2)",
+      "description": "Positive produces downforce; negative produces lift. Default 0.12 is a modest tunable assumption.",
+      "default": 0.12,
+      "min": -0.4,
+      "max": 0.6,
+      "step": 0.01
+    }
+  }
+}

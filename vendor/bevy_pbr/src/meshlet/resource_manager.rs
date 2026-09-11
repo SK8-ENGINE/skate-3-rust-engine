@@ -2,7 +2,7 @@ use super::{instance_manager::InstanceManager, meshlet_mesh_manager::MeshletMesh
 use crate::ShadowView;
 use bevy_camera::{visibility::RenderLayers, Camera3d};
 use bevy_core_pipeline::{
-    experimental::mip_generation::{self, ViewDepthPyramid},
+    experimental::mip_generation::{self, ViewDepthPyramid, DEPTH_PYRAMID_MIP_COUNT},
     prepass::{PreviousViewData, PreviousViewUniforms},
 };
 use bevy_ecs::{
@@ -43,8 +43,8 @@ pub struct ResourceManager {
     second_pass_candidates: Option<Buffer>,
     /// Sampler for a depth pyramid
     depth_pyramid_sampler: Sampler,
-    /// Dummy texture view for binding depth pyramids with less than the maximum amount of mips
-    depth_pyramid_dummy_texture: TextureView,
+    /// Dummy texture views for binding depth pyramids with less than the maximum amount of mips
+    depth_pyramid_dummy_textures: [TextureView; DEPTH_PYRAMID_MIP_COUNT],
 
     // TODO
     previous_depth_pyramids: EntityHashMap<TextureView>,
@@ -125,10 +125,9 @@ impl ResourceManager {
                 label: Some("meshlet_depth_pyramid_sampler"),
                 ..SamplerDescriptor::default()
             }),
-            depth_pyramid_dummy_texture: mip_generation::create_depth_pyramid_dummy_texture(
+            depth_pyramid_dummy_textures: mip_generation::create_depth_pyramid_dummy_textures(
                 render_device,
                 "meshlet_depth_pyramid_dummy_texture",
-                "meshlet_depth_pyramid_dummy_texture_view",
             ),
 
             previous_depth_pyramids: EntityHashMap::default(),
@@ -729,7 +728,7 @@ pub fn prepare_meshlet_per_frame_resources(
         let depth_pyramid = ViewDepthPyramid::new(
             &render_device,
             &mut texture_cache,
-            &resource_manager.depth_pyramid_dummy_texture,
+            &resource_manager.depth_pyramid_dummy_textures,
             view.viewport.zw(),
             "meshlet_depth_pyramid",
             "meshlet_depth_pyramid_texture_view",

@@ -5,6 +5,13 @@ import argparse,os,queue,runpy,sys,threading,traceback
 ROOT=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[1]))
 sys.path.insert(0,str(ROOT))
 
+def saved_source(marker):
+    path=marker.get('source')
+    if not isinstance(path,str):return None
+    selected=Path(path)
+    if selected.is_file() or selected.is_dir():return selected
+    return None
+
 def main():
     if len(sys.argv)>1 and sys.argv[1]=='--character-import':
         # Keep the importer inside the already versioned setup payload: even
@@ -31,9 +38,12 @@ def main():
     from tkinter import filedialog,messagebox,ttk
     from tools.asset_pipeline.customiser_setup import install
     from tools.asset_pipeline.versions import installed, fingerprints, changed_groups
+    from tools.asset_pipeline.group_receipts import damaged
     previous=installed(args.base) if args.refresh else None
     changed=changed_groups(previous[1].get('pipelines',{}),fingerprints()) if previous else set()
+    if previous:changed.update(damaged(*previous,exclude=changed))
     updating=previous is not None
+    reuse=saved_source(previous[1]) if previous else None
     window=tk.Tk()
     window.title('Skate 3 Rust Engine setup')
     window.geometry('700x420');window.resizable(False,False)
@@ -41,17 +51,15 @@ def main():
     if icon.is_file():window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
     ttk.Label(frame,text='Update game assets' if updating else 'Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
-    ttk.Label(frame,text=('Asset version changes: '+(', '.join(sorted(changed)) or 'checking prepared content')+'.\nOnly changed or incomplete groups will be prepared again.\nYour previous character data remains until preparation succeeds.\nSelect your Skate 3 default.xex (or ISO) to continue.\nKeep the game data beside default.xex.') if updating else 'Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, customiser, animations and disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
+    ttk.Label(frame,text=('Asset version changes: '+(', '.join(sorted(changed)) or 'none')+'.\nOnly changed or incomplete groups will be prepared again.\nYour previous character data remains until preparation succeeds.\n'
+              +('Reusing the Xbox source from the previous setup when possible.\nKeep the game data beside default.xex.' if reuse else 'Select your Skate 3 default.xex (or ISO) to continue.\nKeep the game data beside default.xex.')) if updating else 'Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, customiser, animations and disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
               font=('Segoe UI',11),justify='left').pack(anchor='w')
-    status=tk.StringVar(value='Choose your game to begin.')
+    status=tk.StringVar(value=('Reusing your previous Xbox source…' if reuse else 'Choose your game to begin.') if updating else 'Choose your game to begin.')
     ttk.Label(frame,textvariable=status,wraplength=600).pack(anchor='w',pady=(18,8))
     progress=ttk.Progressbar(frame,mode='indeterminate');progress.pack(fill='x')
     messages=queue.Queue();running=False;success=False
-    def start():
+    def begin(iso):
         nonlocal running
-        iso=filedialog.askopenfilename(parent=window,title='Select your Skate 3 default.xex or Xbox 360 ISO',
-            filetypes=[('Skate 3 game','default.xex *.iso'),('Skate 3 executable','default.xex'),('Xbox 360 ISO','*.iso')])
-        if not iso:return
         button.config(state='disabled');running=True;progress.start()
         def work():
             try:
@@ -64,6 +72,13 @@ def main():
                 (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
                 messages.put(('error',str(error)))
         threading.Thread(target=work,daemon=True).start()
+    def start():
+        nonlocal running
+        if running:return
+        iso=filedialog.askopenfilename(parent=window,title='Select your Skate 3 default.xex or Xbox 360 ISO',
+            filetypes=[('Skate 3 game','default.xex *.iso'),('Skate 3 executable','default.xex'),('Xbox 360 ISO','*.iso')])
+        if not iso:return
+        begin(iso)
     def close():
         if running:
             messagebox.showinfo('Setup running','Wait for the current conversion to finish. Your source game files are not modified.',parent=window)
@@ -79,10 +94,17 @@ def main():
                 running=False;success=True;progress.stop();window.destroy();return
             if kind=='error':
                 running=False;progress.stop();button.config(state='normal')
+                if reuse and text:
+                    status.set('Could not reuse the previous Xbox source. Select default.xex or an ISO.')
                 messagebox.showerror('Setup could not finish',text+'\n\nDetails: '+str(args.base/'setup-error.log'),parent=window)
         window.after(100,poll)
     window.protocol('WM_DELETE_WINDOW',close)
-    window.after(100,poll);window.mainloop()
+    window.after(100,poll)
+    # Asset refreshes reuse the recorded disc path when it still exists, so
+    # program updates do not force another ISO picker for matching installs.
+    if updating and reuse is not None:
+        window.after(200,lambda:begin(reuse) if not running else None)
+    window.mainloop()
     return 0 if success else 2
 
 if __name__=='__main__':raise SystemExit(main())
