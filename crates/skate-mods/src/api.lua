@@ -1,3 +1,8 @@
+-- These flags come from the compiled Rust VM, NEVER from a Lua version marker.
+-- An older VM loading this wrapper therefore reports an empty capability set.
+sdk.capabilities = sdk._native_capabilities or {}
+sdk._native_capabilities = nil
+
 local submit = sdk._submit
 sdk._submit = nil
 local assets_objects = sdk._assets_objects
@@ -137,7 +142,23 @@ function sdk.physics.touching()
     return (as_table(sdk.snapshot.physics) or {}).touching or {}
 end
 
-sdk.graphics = {}
+sdk.graphics = { version = 2 }
+-- Root is BODY-LOCAL when bound, WORLD when unbound. Values replace rather
+-- than accumulate. Quaternions use {x,y,z,w}; angles/rates are radians.
+function sdk.graphics.set_transform(key, options)
+    submit{kind="graphics_transform",key=key,options=options or {}}
+end
+-- Named nodes are scoped to this mesh instance. Defaults to authored-pose
+-- deltas; relative=false explicitly selects an absolute parent-local pose.
+function sdk.graphics.node_transform(key, node, options)
+    submit{kind="graphics_node",key=key,node=node,options=options or {}}
+end
+function sdk.graphics.reset_node(key, node)
+    submit{kind="graphics_reset_node",key=key,node=node}
+end
+function sdk.physics.debug_colliders(enabled)
+    submit{kind="physics_debug",enabled=enabled == true}
+end
 function sdk.graphics.mesh(key, opts)
     opts = opts or {}
     submit{
@@ -185,7 +206,9 @@ function sdk.audio.stop_all() submit{kind="audio_stop_all"} end
 sdk.player = {}
 function sdk.player.read() return as_table(sdk.snapshot.player) or {} end
 function sdk.player.attach(body, offset) submit{kind="player_attach",body=body,offset=offset or {0,0,0}} end
-function sdk.player.detach() submit{kind="player_detach"} end
+function sdk.player.detach(options) submit{kind="player_detach",options=options or {}} end
+function sdk.player.detach_error() return sdk.snapshot.detach_error end
+function sdk.player.detaching() return sdk.snapshot.detach_pending == true end
 function sdk.player.attached()
     local a = as_table(sdk.snapshot.attach)
     return a and a.body or nil

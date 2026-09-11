@@ -121,6 +121,7 @@ fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContact
         },
     );
     let mut reports = Vec::with_capacity(16);
+    let mut mod_reports = Vec::new();
     for spy in storage[..count as usize * 28].chunks_exact(28) {
         let a = CollisionBody::from_contact_id(spy[24]);
         let b = CollisionBody::from_contact_id(spy[25]);
@@ -137,34 +138,62 @@ fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContact
             let CollisionBody::Attached(part) = own else {
                 continue;
             };
-            if part >= 24 || reports.len() == 16 {
+            if part >= 24 {
                 continue;
             }
             let vector = |offset| std::array::from_fn(|i| f32::from_bits(spy[offset + i]));
-            reports.push(SkeletonContactReport {
+            let point = vector(12);
+            let normal = vector(0).map(|v| v * if side_a { 1.0 } else { -1.0 });
+            let other_group = match other {
+                CollisionBody::StaticWorld => 0,
+                CollisionBody::Board(_) => physics.board.collision_group(),
+                CollisionBody::Attached(index) => physics.network_proxies.groups.get(&index)
+                    .copied().unwrap_or(skater.skeleton_collision.assembly_group),
+            };
+            let destination=if matches!(other,CollisionBody::Attached(index)
+                if physics.network_proxies.solids.iter().any(|(i,_)|*i==index)) { &mut mod_reports } else { &mut reports };
+            let vehicle = other_group == 8;
+            destination.push(SkeletonContactReport {
                 part,
-                normal: vector(0).map(|v| v * if side_a { 1.0 } else { -1.0 }),
-                point: vector(12),
+                normal,
+                point,
                 tag: if side_a {
                     spy[26] & 0xffff
                 } else {
                     spy[26] >> 16
                 },
-                other_group: match other {
-                    CollisionBody::StaticWorld => 0,
-                    CollisionBody::Board(_) => physics.board.collision_group(),
-                    CollisionBody::Attached(_) => skater.skeleton_collision.assembly_group,
-                },
+                other_group,
                 other_entity: None,
-                body_a: contact_body(resolve(spy[24], physics, skater)),
-                body_b: contact_body(resolve(spy[25], physics, skater)),
+                body_a: contact_body(
+                    resolve(spy[24], physics, skater),
+                    point,
+                    vehicle && is_mod_solid_contact(spy[24], physics, skater),
+                ),
+                body_b: contact_body(
+                    resolve(spy[25], physics, skater),
+                    point,
+                    vehicle && is_mod_solid_contact(spy[25], physics, skater),
+                ),
                 side_a,
                 solved_vector: vector(20),
             });
         }
     }
-    reports
+    // A large set of floor contacts must not crowd a moving prop impact out
+    // of the native 16-report observation budget. Preserve order within each
+    // group; the physical solve above still receives EVERY contact.
+    mod_reports.extend(reports);
+    mod_reports.truncate(16);
+    mod_reports
 }
+fn is_mod_solid_contact(id: u32, physics: &GamePhysics, skater: &SkaterRuntime) -> bool {
+    matches!(
+        CollisionBody::from_contact_id(id),
+        CollisionBody::Attached(index)
+            if physics.network_proxies.solids.iter().any(|(i, _)| *i == index)
+    )
+}
+
 fn resolve<'a>(
     id: u32,
     physics: &'a GamePhysics,
@@ -178,14 +207,19 @@ fn resolve<'a>(
             .chain(physics.network_proxies.bodies.iter()).nth(part),
     }
 }
-fn contact_body(body: Option<&BodySnapshot>) -> SkeletonContactBody {
+fn contact_body(body: Option<&BodySnapshot>, point: [f32; 4], vehicle: bool) -> SkeletonContactBody {
     match body {
         Some(body) => {
-            let v = body.rates.linear_velocity;
+            let v = if vehicle {
+                linear_velocity_at_point(body, point)
+            } else {
+                let v = body.rates.linear_velocity;
+                [v.x, v.y, v.z, 0.0]
+            };
             SkeletonContactBody {
                 state_flags: body.state_flags,
                 inverse_mass: body.inertia.inverse_mass,
-                linear_velocity: [v.x, v.y, v.z, 0.0],
+                linear_velocity: v,
             }
         }
         None => SkeletonContactBody {
@@ -196,10 +230,42 @@ fn contact_body(body: Option<&BodySnapshot>) -> SkeletonContactBody {
     }
 }
 
+/// Group-8 contacts use the surface point velocity (v + ω×r), matching the
+/// solver contact row and keeping mVehicleContact low when riding a moving car.
+fn linear_velocity_at_point(body: &BodySnapshot, point: [f32; 4]) -> [f32; 4] {
+    let r = [
+        point[0] - body.rates.position.x,
+        point[1] - body.rates.position.y,
+        point[2] - body.rates.position.z,
+        0.0,
+    ];
+    let w = body.rates.angular_velocity;
+    let v = body.rates.linear_velocity;
+    [
+        v.x + w.y * r[2] - w.z * r[1],
+        v.y + w.z * r[0] - w.x * r[2],
+        v.z + w.x * r[1] - w.y * r[0],
+        0.0,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use skate_core::physics::skeleton_animation_record::IDENTITY;
+
+    #[test]
+    fn vehicle_contact_uses_point_velocity_for_group_eight() {
+        let mut body = skate_core::physics::assembly::BodySnapshot::default();
+        body.rates.position = skate_core::math::Vector3::new(0., 0., 0.);
+        body.rates.linear_velocity = skate_core::math::Vector3::new(1., 0., 0.);
+        body.rates.angular_velocity = skate_core::math::Vector3::new(0., 2., 0.);
+        let point = [0., 0., 1., 0.];
+        let v = linear_velocity_at_point(&body, point);
+        assert!((v[0] - 3.).abs() < 1e-5);
+        assert!(v[1].abs() < 1e-5);
+        assert!(v[2].abs() < 1e-5);
+    }
 
     #[test]
     fn retained_com_is_localized_before_new_physical_com_publication() {

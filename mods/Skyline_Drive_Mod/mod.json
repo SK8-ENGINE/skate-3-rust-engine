@@ -1,10 +1,10 @@
 {
   "id": "examples.skyline",
   "api": 2,
-  "name": "Skyline DRIVE + Audio",
-  "version": "4.2.0",
+  "name": "Skyline DRIVE \u2014 Solid Bridge",
+  "version": "4.3.1",
   "author": "Skate3clone",
-  "description": "Latest working Skyline with native dynamic chase/hood camera, clean HUD, unchanged sound bank, progressive controls and explicit optional aero. Requires Driving API extension 1.",
+  "description": "Collision generated from the existing rendered car model, replicated wheel animation, native impact classification, safe on-foot exits and 5-second re-entry cooldown. Requires matching Model Collision Repair engine update.",
   "entry": "main.lua",
   "settings": {
     "tire_friction": {
@@ -153,6 +153,12 @@
       "min": -0.4,
       "max": 0.6,
       "step": 0.01
+    },
+    "show_collision_hull": {
+      "type": "boolean",
+      "label": "Collision hull debug (J)",
+      "description": "Draw actual local/remote solid colliders and physical centers of mass. J toggles during play.",
+      "default": false
     }
   }
 }

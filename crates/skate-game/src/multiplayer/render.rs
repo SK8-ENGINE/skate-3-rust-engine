@@ -96,7 +96,7 @@ impl Plugin for RemoteRenderPlugin {
         })
         .add_systems(
             Update,
-            (spawn, bind, present).chain(),
+            (spawn, bind, present).chain().after(crate::modding::bridge::sync_network),
         );
     }
 }
@@ -408,6 +408,8 @@ fn present(
     mut net: ResMut<Multiplayer>,
     mut skins: ResMut<RemoteSkins>,
     mut nodes: Query<&mut Transform>,
+    mut visibility: Query<&mut Visibility>,
+    mods:Option<Res<crate::modding::Mods>>,
 ) {
     let basis = Mat4::from_cols(Vec4::X, -Vec4::Z, Vec4::Y, Vec4::W);
     let now = net.started.elapsed().as_secs_f64();
@@ -488,6 +490,13 @@ fn present(
                         *t = crate::presentation::blend(*a, *b, alpha);
                     }
                 }
+            }
+        }
+        let attached=mods.as_ref().and_then(|m|crate::modding::replication::attached_root(m,id));
+        if let Some(root)=skin.root {
+            if let Some((transform,_))=attached { if let Ok(mut t)=nodes.get_mut(root) {*t=transform;} }
+            if let Ok(mut v)=visibility.get_mut(root) {
+                *v=if attached.is_some_and(|(_,hidden)|hidden) {Visibility::Hidden} else {Visibility::Inherited};
             }
         }
         let seated = remote.body.enabled & (1u64 << 62) != 0;

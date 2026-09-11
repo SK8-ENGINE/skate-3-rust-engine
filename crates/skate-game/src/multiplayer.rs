@@ -603,6 +603,8 @@ pub(crate) fn prepare(net: Res<Multiplayer>, mut physics: ResMut<GamePhysics>, s
     let mut proxies = std::mem::take(&mut physics.network_proxies);
     proxies.bodies.clear();
     proxies.volumes.clear();
+    proxies.solids.clear();proxies.groups.clear();
+    proxies.dynamics_before.clear();proxies.dynamics_deltas.clear();
     for remote in net.remotes.values() {
         if remote.body_at.elapsed() < Duration::from_millis(500) {
             proxies.append(
@@ -658,26 +660,31 @@ fn hud(
         String::new()
     };
 }
-fn send(mut net: ResMut<Multiplayer>, physics: Res<GamePhysics>, skater: Res<SkaterRuntime>) {
+fn send(mut net: ResMut<Multiplayer>, physics: Res<GamePhysics>, skater: Res<SkaterRuntime>, mods:Option<Res<crate::modding::Mods>>) {
     if !net.active() || skater.pose_generation == 0 {
         return;
     }
     let now = net.started.elapsed().as_millis() as u64;
     if net.last_body.elapsed() >= Duration::from_millis(49) {
-        let state=network::capture_body(&physics,&skater);
+        let mut state=network::capture_body(&physics,&skater);
+        if let Some(root)=mods.as_ref().and_then(|m|crate::modding::attachment::local_root(m)) {
+            state.root=network::pose(root.to_matrix());
+            state.enabled=if mods.as_ref().is_some_and(|m|crate::modding::player_attached(m)) {1u64<<62} else {0};
+        }
         if let Some(p) = Packed::body(&state) {
             net.lobby.as_mut().unwrap().publish(packed::BODY, p, now);
         }
         net.last_body = Instant::now();
     }
 }
-pub(crate) fn send_pose(mut net: ResMut<Multiplayer>, skater: Res<SkaterRuntime>) {
+pub(crate) fn send_pose(mut net: ResMut<Multiplayer>, skater: Res<SkaterRuntime>, mods:Option<Res<crate::modding::Mods>>) {
     if !net.active() || skater.pose_generation == 0 {
         return;
     }
     let now = net.started.elapsed().as_millis() as u64;
     if net.last_pose.elapsed() >= Duration::from_millis(if net.loopback { 49 } else { 99 }) {
-        let pose=network::capture_pose(&skater,&net.anchors);
+        let mut pose=network::capture_pose(&skater,&net.anchors);
+        if let Some(root)=mods.as_ref().and_then(|m|crate::modding::attachment::local_root(m)) {pose.root=network::pose(root.to_matrix());}
         if let Some(p) = Packed::pose(&pose) {
             net.lobby.as_mut().unwrap().publish(packed::POSE, p, now);
         }

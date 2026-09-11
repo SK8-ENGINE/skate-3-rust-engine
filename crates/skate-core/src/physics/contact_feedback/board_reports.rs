@@ -37,6 +37,7 @@ pub(crate) fn collect(
     output: &mut Vec<BoardContactReport>,
     contacts: &[RetailContactJacobian],
     bodies: &[BodySnapshot; BODY_COUNT],
+    attached: &[&BodySnapshot],
     frequency: f32,
 ) {
     output.clear();
@@ -48,18 +49,15 @@ pub(crate) fn collect(
         if words[11] & 8 == 0 || !(impulse[0] > 0.0) {
             continue;
         }
-        //Other assemblies share this solve. Their own output owners consume
-        //their spies; only board/world records are routed to this collector.
-        if !((words[31] < BODY_COUNT as u32 && words[43] == u32::MAX)
-            || (words[43] < BODY_COUNT as u32 && words[31] == u32::MAX)) {
-            continue;
-        }
-        let a = body_id(words[31]);
-        let b = body_id(words[43]);
+        let a = CollisionBody::from_contact_id(words[31]);
+        let b = CollisionBody::from_contact_id(words[43]);
         let (part, other, is_body_a) = match (a, b) {
             (CollisionBody::Board(part), CollisionBody::StaticWorld) => (part, b, true),
             (CollisionBody::StaticWorld, CollisionBody::Board(part)) => (part, a, false),
-            // 82768418: same board/owner exclusion; no world report subscriber.
+            // Dynamic props/vehicles share the solve; board ground consumes them
+            // through the recovered attached-body owner (827682B0 routing).
+            (CollisionBody::Board(part), CollisionBody::Attached(_)) => (part, b, true),
+            (CollisionBody::Attached(_), CollisionBody::Board(part)) => (part, a, false),
             _ => continue,
         };
         if output.len() == 16 {
@@ -67,8 +65,8 @@ pub(crate) fn collect(
         }
         let normal = vector(words, 28);
         let tangents = [vector(words, 40), vector(words, 52)];
-        let a_position = add(center(a, bodies), vector(words, 0));
-        let b_position = add(center(b, bodies), vector(words, 4));
+        let a_position = add(center(a, bodies, attached), vector(words, 0));
+        let b_position = add(center(b, bodies, attached), vector(words, 4));
         let a_weight = f32::from_bits(words[35]);
         let b_weight = f32::from_bits(words[39]);
         let inverse_weight = 1.0 / (b_weight + a_weight);
@@ -82,7 +80,10 @@ pub(crate) fn collect(
             is_body_a,
             normal: scale(normal, sign),
             position: scale(position, inverse_weight),
-            relative_linear_velocity: subtract(velocity(this, bodies), velocity(other, bodies)),
+            relative_linear_velocity: subtract(
+                velocity(this, bodies, attached),
+                velocity(other, bodies, attached),
+            ),
             other_surface: if is_body_a {
                 words[55] as u16
             } else {
@@ -95,27 +96,25 @@ pub(crate) fn collect(
     }
 }
 
-fn body_id(value: u32) -> CollisionBody {
-    if value == u32::MAX {
-        CollisionBody::StaticWorld
-    } else {
-        CollisionBody::Board(BodyId::ORDER[value as usize])
-    }
-}
-
-fn center(body: CollisionBody, bodies: &[BodySnapshot; BODY_COUNT]) -> Vector3 {
+fn center(body: CollisionBody, bodies: &[BodySnapshot; BODY_COUNT], attached: &[&BodySnapshot]) -> Vector3 {
     match body {
         CollisionBody::Board(id) => bodies[id.index()].rates.position,
         CollisionBody::StaticWorld => Vector3::ZERO,
-        CollisionBody::Attached(_) => unreachable!("collector selects board/world contacts above"),
+        CollisionBody::Attached(index) => attached
+            .get(index)
+            .map(|body| body.rates.position)
+            .unwrap_or(Vector3::ZERO),
     }
 }
 
-fn velocity(body: CollisionBody, bodies: &[BodySnapshot; BODY_COUNT]) -> Vector3 {
+fn velocity(body: CollisionBody, bodies: &[BodySnapshot; BODY_COUNT], attached: &[&BodySnapshot]) -> Vector3 {
     match body {
         CollisionBody::Board(id) => bodies[id.index()].rates.linear_velocity,
         CollisionBody::StaticWorld => Vector3::ZERO,
-        CollisionBody::Attached(_) => unreachable!("collector selects board/world contacts above"),
+        CollisionBody::Attached(index) => attached
+            .get(index)
+            .map(|body| body.rates.linear_velocity)
+            .unwrap_or(Vector3::ZERO),
     }
 }
 

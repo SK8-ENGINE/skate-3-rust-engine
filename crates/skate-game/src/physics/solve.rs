@@ -64,6 +64,10 @@ pub(super) fn advance(
             }
         }
     }
+    super::solid_contacts::append(&mut contacts, &board_volumes,
+        &physics.network_proxies.solids, physics, skater);
+    super::solid_contacts::append(&mut contacts, &skeleton_volumes,
+        &physics.network_proxies.solids, physics, skater);
     physics.network_contacts = contacts.len() - before_remote;
     physics.contact_count = contacts.len();
     let dt = physics.settings.step.simulation.time_step;
@@ -105,6 +109,7 @@ pub(super) fn advance(
             drives: &mut drives.rows,
         },
     );
+    physics.network_proxies.capture_dynamics_reactions(physics.board.solved_reactions(), dt);
     if let Err(error) = diagnostics::validate(
         &diagnostics::snapshot(physics, skater), "after shared solve",
     ) {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::physics::board_step::CollisionBody;
 
 /// Regression for the paired postphysics branch contract, not fidelity proof.
 /// S2 82B372E0 names mAngularDrag; S3 82C08634 stores inertia+36.

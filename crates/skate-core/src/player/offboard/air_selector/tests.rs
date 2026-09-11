@@ -51,6 +51,16 @@ fn close(a: Vector, b: Vector) {
     }
 }
 #[test]
+fn launch_accepts_nonfinite_w_lane_when_xyz_are_finite() {
+    let mut p = packet();
+    p.position_32[3] = f32::NAN;
+    p.secondary_velocity_16 = [1., 0., 0., f32::NAN];
+    Selector::default()
+        .begin_launch(p, [0., -9.8, 0., 0.], settings())
+        .unwrap();
+}
+
+#[test]
 fn constructor_reset_and_exit_have_distinct_native_effects() {
     let mut s = Selector::default();
     assert!(!s.sampling.restart_allowed_8493);

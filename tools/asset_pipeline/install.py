@@ -1,6 +1,6 @@
 """Local owned-disc installation. No game content is downloaded or packaged."""
 from pathlib import Path
-import hashlib,json,os,shutil,subprocess,sys,time,urllib.request,uuid,zipfile
+import hashlib,json,os,re,shutil,subprocess,sys,time,urllib.request,uuid,zipfile
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from tools.owned_game.big import BigArchive
 
@@ -30,6 +30,50 @@ def remove_intermediate(path,root):
     if target==root or not target.is_relative_to(root):
         raise RuntimeError('Refusing to remove a path outside conversion workspace')
     shutil.rmtree(target)
+
+_INSTALLATION_ID=re.compile(r'^[0-9a-f]{32}$')
+
+def active_installation_id(base):
+    marker=base/'installation.json'
+    if not marker.is_file():
+        return None
+    try:
+        directory=json.loads(marker.read_text(encoding='utf-8-sig')).get('directory')
+    except (OSError,ValueError,TypeError):
+        return None
+    if not isinstance(directory,str) or not re.fullmatch(r'installations/[0-9a-f]{32}',directory):
+        return None
+    return directory.split('/',1)[1]
+
+def setup_log_name(name):
+    return (name == 'setup.log'
+            or name.endswith('-conversion.log') or name.endswith('-load.log'))
+
+def remove_setup_logs(stage, report=lambda _:None):
+    for path in stage.iterdir():
+        if path.is_file() and setup_log_name(path.name):
+            report('Removing setup log '+path.name)
+            path.unlink(missing_ok=True)
+
+def remove_stale_installations(base, active_stage, report=lambda _:None):
+    """Drop superseded installation trees after a successful publish."""
+    base=base.resolve()
+    installations=base/'installations'
+    if not installations.is_dir():
+        return
+    active_id=active_installation_id(base)
+    active_root=active_stage.resolve()
+    if active_id is None or active_root!=(installations/active_id).resolve():
+        return
+    if not active_root.is_relative_to(base) or not active_root.is_dir():
+        return
+    for entry in installations.iterdir():
+        if not entry.is_dir() or not _INSTALLATION_ID.fullmatch(entry.name):
+            continue
+        if entry.resolve()==active_root:
+            continue
+        report('Removing previous installation '+entry.name)
+        remove_intermediate(entry,installations)
 
 def download(url,expected,cache,report):
     cache.mkdir(parents=True,exist_ok=True)
@@ -196,6 +240,8 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         summary(previous[0])
         atomic_json(base/'installation.json', {**previous[1], 'pipelines':target_versions,
                     'outputs':outputs(previous[0]), 'source':source})
+        remove_setup_logs(previous[0],report)
+        remove_stale_installations(base,previous[0],report)
         report('Game assets are current')
         return previous[0]
     install_id=uuid.uuid4().hex
@@ -211,7 +257,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         immutable_sets=[p.resolve() for p in sets.glob('*') if p.is_dir()
                         and all((p/(name+'-complete.json')).is_file() for name in character_stages)]
         for entry in previous[0].iterdir():
-            if entry.name in {'conversion','setup.log'} or entry.name.endswith('-conversion.log'):continue
+            if entry.name in {'conversion','setup-report.json'} or setup_log_name(entry.name):continue
             # Unchanged maps and immutable character generations share storage.
             # Mutable user data and rebuilt outputs get independent files.
             def copy_map(src,dst):
@@ -350,9 +396,11 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         if finalize:finalize(stage)
         from .optional_content import summary
         warnings=summary(stage)
-        # Publish after core validation and all optional outcomes have been recorded.
-        marker=base/'installation.json.new'
-        marker.write_text(json.dumps({'version':1,'directory':'installations/'+install_id,'source':source,'source_hash':source_hash,'pipelines':target_versions,'outputs':outputs(stage)}),encoding='utf-8')
-        marker.replace(base/'installation.json')
-        report(f'Setup complete ({len(warnings)} unavailable/retained components; see setup-report.json)' if warnings else 'Setup complete')
-        return stage
+    # Publish after core validation and all optional outcomes have been recorded.
+    marker=base/'installation.json.new'
+    marker.write_text(json.dumps({'version':1,'directory':'installations/'+install_id,'source':source,'source_hash':source_hash,'pipelines':target_versions,'outputs':outputs(stage)}),encoding='utf-8')
+    marker.replace(base/'installation.json')
+    remove_setup_logs(stage,report)
+    remove_stale_installations(base,stage,report)
+    report(f'Setup complete ({len(warnings)} unavailable/retained components; see setup-report.json)' if warnings else 'Setup complete')
+    return stage

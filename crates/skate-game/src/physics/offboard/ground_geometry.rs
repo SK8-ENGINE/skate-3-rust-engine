@@ -36,6 +36,7 @@ impl State {
     pub(crate) fn submit(
         &mut self,
         world: &BoardWorld,
+        vehicles: &[(usize, skate_dynamics::SolidBody)],
         frame: [[f32; 4]; 4],
         velocity: [f32; 4],
         context: QueryContext,
@@ -43,13 +44,14 @@ impl State {
     ) -> Result<(), String> {
         let frame = query_frame(frame);
         let search = query::edge_search(frame, context, xyz(velocity), flags_2488);
-        let candidates = SceneService { world }.edge_candidates(&search)?;
+        let mut service = SceneService { world, vehicles };
+        let candidates = service.edge_candidates(&search)?;
         if let Some(packet) = query::select_edge(search, &candidates)
             .and_then(|edge| query::prepare_packet(frame, context, edge, self.collision_offset))
         {
             //82C20BF0 starts the real batch during Sync. Host execution may be
             //synchronous, but interpretation/publication waits for PreUpdate.
-            let hits = SceneService { world }.query_lines(&packet)?;
+            let hits = service.query_lines(&packet)?;
             self.pending = Some((packet, hits));
         }
         //82D321CC: no selected edge means no submit, not a fabricated query.

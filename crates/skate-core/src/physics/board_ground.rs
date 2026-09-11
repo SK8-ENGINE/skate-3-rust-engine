@@ -9,7 +9,6 @@ use super::{
     board::{BodyId, BODY_COUNT},
     board_motion_output::{add, dot, inverse_length_squared, length, scale, subtract},
     board_runtime::BoardRuntime,
-    board_step::CollisionBody,
     contact_feedback::BoardContactReport,
     native_arithmetic,
 };
@@ -188,8 +187,6 @@ impl BoardGroundState {
         let mut surfaces = [0; BODY_COUNT];
         surfaces[..4].copy_from_slice(&lines.physics_surfaces);
         for report in reports {
-            assert_eq!(report.other, CollisionBody::StaticWorld,
-                "dynamic object contact classification needs its recovered owner");
             let i = report.part.index();
             if report.part == BodyId::Deck {
                 let projection = dot(report.normal, reckoning_up);

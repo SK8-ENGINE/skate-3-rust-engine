@@ -126,37 +126,38 @@ impl GroundQueryScene for Services<'_> {
         &mut self,
         search: &ground_query::EdgeSearch,
     ) -> Result<Vec<ground_query::Edge>, Self::Error> {
-        super::ground_query::with_world_scene(
-            &self.physics.world,
-            super::ground_query::PrimaryEdges::Normal {
-                dynamic: &[],
-                vehicles: &[],
-            },
-            &[],
-            |scene| scene.edge_candidates(search),
-        )
+        let cache = super::mod_solid_ground::VehicleEdgeCache::build(
+            &self.physics.network_proxies.solids,
+        );
+        cache.with_primary_edges(|edges| {
+            super::ground_query::with_world_scene(
+                &self.physics.world,
+                edges,
+                &[],
+                |scene| scene.edge_candidates(search),
+            )
+        })
     }
     fn query_lines(
         &mut self,
         packet: &ground_query::GroundQueryPacket,
     ) -> Result<[Option<ground_query::LineHit>; 7], Self::Error> {
-        super::ground_query::with_world_scene(
-            &self.physics.world,
-            super::ground_query::PrimaryEdges::Normal {
-                dynamic: &[],
-                vehicles: &[],
-            },
-            &[],
-            |scene| scene.query_lines(packet),
-        )
+        let cache = super::mod_solid_ground::VehicleEdgeCache::build(
+            &self.physics.network_proxies.solids,
+        );
+        cache.with_primary_edges(|edges| {
+            super::ground_query::with_world_scene(
+                &self.physics.world,
+                edges,
+                &[],
+                |scene| scene.query_lines(packet),
+            )
+        })
     }
 }
 impl ground_sync::Services for Services<'_> {
     type Launch = Result<skate_core::player::offboard::air_launch::Launch, String>;
-    //The host world currently loads static collision geometry, not native
-    //interactable object instances. Its object-candidate set is empty. Use an
-    //uninhabited candidate so a miss cannot accidentally bind a fabricated key.
-    type Candidate = std::convert::Infallible;
+    type Candidate = super::mod_solid_ground::VehicleCandidate;
     fn processed(&self) -> ground_sync::Processed {
         let p = &self.skater.player_input.processed;
         ground_sync::Processed {
@@ -202,12 +203,11 @@ impl ground_sync::Services for Services<'_> {
     fn board_flags_12836(&self) -> u8 {
         self.skater.ground_lifecycle.trajectory.flags_12836
     }
-    fn probe_board(&mut self, _: Vector) -> Option<Self::Candidate> {
-        //82D4D150 returns false when candidate count12752 is zero.
-        None
+    fn probe_board(&mut self, position: Vector) -> Option<Self::Candidate> {
+        super::mod_solid_ground::probe_vehicle(&self.physics.network_proxies.solids, position)
     }
     fn candidate_key_188(&self, candidate: &Self::Candidate) -> [u32; 2] {
-        match *candidate {}
+        super::mod_solid_ground::candidate_key(candidate)
     }
     fn bone_23_position(&mut self) -> Vector {
         skate_core::physics::skeleton_animation_record::compose_affine(
@@ -218,23 +218,21 @@ impl ground_sync::Services for Services<'_> {
     fn classify_board(
         &mut self,
         candidate: &Self::Candidate,
-        _: Vector,
-        _: ground_sync::Bounds,
-        _: ground_sync::BoardLimits,
+        bone: Vector,
+        bounds: ground_sync::Bounds,
+        limits: ground_sync::BoardLimits,
     ) -> bool {
-        match *candidate {}
+        super::mod_solid_ground::solid_by_id(&self.physics.network_proxies.solids, candidate.id)
+            .is_some_and(|solid| {
+                super::mod_solid_ground::classify_vehicle(solid, bone, bounds, limits)
+            })
     }
     fn query_board(&mut self, _: Vector, _: ground_sync::Bounds, _: ground_sync::BoardLimits) {
-        //An object query over this host's empty object population has no hits.
-        //Static line/edge queries still execute below through GroundQueryScene.
-        //Do not treat terrain triangles or the player's board as grabbed objects.
+        // Mod vehicles are classified directly from live solid poses; there is
+        // no separate native object query record for them yet.
     }
-    fn bind_board(&mut self, _: [u32; 2]) {
-        unreachable!()
-    }
-    fn commit_bound_board(&mut self) {
-        unreachable!()
-    }
+    fn bind_board(&mut self, _: [u32; 2]) {}
+    fn commit_bound_board(&mut self) {}
     fn commit_free_board(&mut self, _: Frame) {
         //No selected object means no object action to commit. Holding GrabWorld
         //still reaches the authored graphs, skeleton, toolkit and edge queries.

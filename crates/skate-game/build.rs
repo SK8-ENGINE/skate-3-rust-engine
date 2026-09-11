@@ -1,5 +1,15 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
+fn program_files_x86() -> PathBuf {
+    if let Some(path) = env::var_os("ProgramFiles(x86)") {
+        let path = PathBuf::from(path);
+        if path.is_dir() {
+            return path;
+        }
+    }
+    PathBuf::from(r"C:\Program Files (x86)")
+}
+
 fn main() {
     // Cargo must refresh provenance after a commit as well as after source edits.
     for name in ["HEAD", "index", "refs"] {
@@ -29,15 +39,20 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
-    let sdk = PathBuf::from(env::var_os("ProgramFiles(x86)").expect("Windows SDK location"))
-        .join("Windows Kits/10/bin");
-    let rc = env::var_os("RC").map(PathBuf::from).or_else(|| {
-        let mut paths: Vec<_> = fs::read_dir(sdk).ok()?.filter_map(Result::ok)
+    let sdk = program_files_x86().join("Windows Kits/10/bin");
+    let rc = env::var_os("RC").map(PathBuf::from).filter(|path| path.is_file()).or_else(|| {
+        let mut paths: Vec<_> = fs::read_dir(&sdk).ok()?.filter_map(Result::ok)
             .map(|entry| entry.path().join("x64/rc.exe"))
             .filter(|path| path.is_file()).collect();
         paths.sort();
         paths.pop()
-    }).expect("Install the Windows SDK resource compiler or set RC to rc.exe");
+    }).unwrap_or_else(|| {
+        panic!(
+            "Windows SDK resource compiler not found under {}. \
+Install the Windows 10 SDK (Desktop C++ workload) or set RC to the full path of rc.exe",
+            sdk.display()
+        )
+    });
     let icon = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("../../docs/images/skating-crab.ico").canonicalize().unwrap();
     let output = PathBuf::from(env::var_os("OUT_DIR").unwrap());

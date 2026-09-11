@@ -696,7 +696,9 @@ impl Session {
                 let (id, key, record) = records[index];
                 if link.app_acks.get(&(id,key.clone())).is_some_and(|&seq|seq==record.seq) {continue;}
                 let previous = link.app_sent.get(&(id, key.clone()));
-                if previous.is_some_and(|&(at, seq)| now.saturating_sub(at) < if seq == record.seq { 110 + ((self.round as u64 + id) * 17) % 130 } else { 50 }) { continue; }
+                if previous.is_some_and(|&(at, seq)| now.saturating_sub(at) < if seq == record.seq {
+                    110 + (self.round as u64).wrapping_add(id).wrapping_mul(17) % 130
+                } else { 50 }) { continue; }
                 let mut data = packed::header(self.session, id, APPLICATION, record.seq);
                 data.push(key.len() as u8); data.extend(key.as_bytes()); data.extend(&record.value);
                 let bytes = data.len() as f64;

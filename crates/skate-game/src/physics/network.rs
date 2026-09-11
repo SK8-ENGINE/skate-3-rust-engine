@@ -246,6 +246,10 @@ pub(crate) fn bounds(p: ContactPrimitive) -> (Vec3, f32) {
 pub(crate) struct Proxies {
     pub bodies: Vec<BodySnapshot>,
     pub volumes: Vec<BoardWorldVolume>,
+    pub solids: Vec<(usize, skate_dynamics::SolidBody)>,
+    pub groups: std::collections::BTreeMap<usize, u32>,
+    pub dynamics_before: Vec<(u64, usize, [f32; 3], [f32; 3])>,
+    pub dynamics_deltas: Vec<(u64, [f32; 3], [f32; 3], [f32; 3], [f32; 3])>,
 }
 impl Proxies {
     pub fn append(
@@ -256,22 +260,9 @@ impl Proxies {
         skater: &SkaterRuntime,
         age: f32,
     ) {
-        // Include detached boards as well as the rider. Distant bodies never enter the solver.
-        let nearby = frame.bodies.iter().any(|b| {
-            physics
-                .board
-                .bodies()
-                .iter()
-                .chain(skater.skeleton.bodies())
-                .any(|local| {
-                    Vec3::from_array(b.pose.p)
-                        .distance_squared(Vec3::from_array(xyz(local.rates.position)))
-                        < 64.
-                })
-        });
-        if !nearby {
-            return;
-        }
+        // The local native skeleton is intentionally paused during a mod
+        // attachment. It is not a valid culling origin for a driven object.
+        // Keep the bounded peer schemas; each solver uses its own broad phase.
         let base = skater.skeleton.bodies().len()
             + skater.skeleton_drives.targets.bodies.len()
             + self.bodies.len();
@@ -320,6 +311,8 @@ impl Proxies {
             b.rates.force_acceleration = Vector3::ZERO;
             b.rates.torque_acceleration = Vector3::ZERO;
             b.state_flags = 4;
+            self.groups.insert(base + i, if i < 7 { physics.board.collision_group() }
+                else { skater.skeleton_collision.assembly_group });
             self.bodies.push(b);
         }
         for &(i, ref template) in &schema.volumes {
@@ -336,182 +329,57 @@ impl Proxies {
         }
     }
 
-    /// Dynamics island bodies join the native contact solver as Attached volumes.
-    pub fn append_dynamics(
-        &mut self,
-        export: &skate_dynamics::ExportedVolume,
-        physics: &GamePhysics,
-        skater: &SkaterRuntime,
+    /// One actual compound rigid body, expressed at its COM in its principal
+    /// inertia frame. Collider poses remain in world space and are not shells.
+    pub fn append_solid(
+        &mut self, solid: skate_dynamics::SolidBody, physics: &GamePhysics,
+        skater: &SkaterRuntime, locally_owned: bool,
     ) {
-        // Never inject nonfinite state into BoardWorld.
-        if !export.position.iter().all(|v| v.is_finite())
-            || !export.linvel.iter().all(|v| v.is_finite())
-            || !export.angvel.iter().all(|v| v.is_finite())
-            || !export.rotation.iter().all(|v| v.is_finite())
-            || !export.mass.is_finite()
-            || export.mass <= 0.
-            || !export.friction.is_finite()
-        {
-            return;
-        }
-        let p = Vec3::from_array(export.position);
-        if !physics
-            .board
-            .bodies()
-            .iter()
-            .chain(skater.skeleton.bodies())
-            .any(|b| Vec3::from_array(xyz(b.rates.position)).distance_squared(p) < 225.)
-        {
-            return;
-        }
-        let q_raw = Quat::from_array(export.rotation);
-        if !q_raw.is_finite() || q_raw.length_squared() < 1e-8 {
-            return;
-        }
-        let q = q_raw.normalize();
-        if !q.is_finite() {
-            return;
-        }
-        let extents = match &export.shape {
-            skate_dynamics::ExportedShape::Box { half_extents, .. } => *half_extents,
-            skate_dynamics::ExportedShape::Sphere { radius } => [*radius; 3],
-            skate_dynamics::ExportedShape::Capsule {
-                half_height,
-                radius,
-            } => [*radius, half_height + radius, *radius],
-            skate_dynamics::ExportedShape::Triangles { tris } => {
-                // Inertia box from the actual local triangle bounds.
-                let mut mn = [f32::MAX; 3];
-                let mut mx = [f32::MIN; 3];
-                for v in tris.iter().flatten() {
-                    for i in 0..3 {
-                        mn[i] = mn[i].min(v[i]);
-                        mx[i] = mx[i].max(v[i]);
-                    }
-                }
-                if !mn.iter().chain(mx.iter()).all(|v| v.is_finite()) {
-                    return;
-                }
-                [
-                    ((mx[0] - mn[0]) * 0.5).clamp(0.05, 8.),
-                    ((mx[1] - mn[1]) * 0.5).clamp(0.05, 8.),
-                    ((mx[2] - mn[2]) * 0.5).clamp(0.05, 8.),
-                ]
-            }
-        };
-        if !extents
-            .iter()
-            .all(|v| v.is_finite() && *v > 0. && *v <= 8.)
-        {
-            return;
-        }
-        let base = skater.skeleton.bodies().len()
-            + skater.skeleton_drives.targets.bodies.len()
-            + self.bodies.len();
+        if !solid.center_of_mass.is_finite() || !solid.linvel.is_finite()
+            || !solid.angvel.is_finite() || !solid.inertia_rotation.is_finite() { return; }
+        let index = skater.skeleton.bodies().len()
+            + skater.skeleton_drives.targets.bodies.len() + self.bodies.len();
         let mut body = physics.board.bodies()[0];
-        body.rates.position = vector(export.position);
-        body.rates.orientation = RetailQuaternion {
-            x: q.x,
-            y: q.y,
-            z: q.z,
-            w: q.w,
-        };
-        body.rates.basis = skate_core::math::Basis3 {
-            columns: Mat3::from_quat(q).to_cols_array_2d(),
-        };
-        let mass = export.mass.max(0.01);
-        body.inertia.inverse_mass = 1. / mass;
-        let [x, y, z] = extents;
-        body.inertia.inverse_tensor = vector([
-            3. / (mass * (y * y + z * z).max(1e-4)),
-            3. / (mass * (x * x + z * z).max(1e-4)),
-            3. / (mass * (x * x + y * y).max(1e-4)),
-        ]);
-        body.rates.world_inverse_inertia =
-            world_inverse_inertia(body.rates.basis, body.inertia.inverse_tensor);
-        body.rates.linear_velocity = vector(export.linvel);
-        body.rates.angular_velocity = vector(export.angvel);
+        let q = solid.inertia_rotation;
+        let q = Quat::from_xyzw(q.x, q.y, q.z, q.w).normalize();
+        body.rates.position = vector(solid.center_of_mass.to_array());
+        body.rates.orientation = RetailQuaternion { x:q.x, y:q.y, z:q.z, w:q.w };
+        body.rates.basis = skate_core::math::Basis3 { columns: Mat3::from_quat(q).to_cols_array_2d() };
+        // Ownership controls feedback, not physical mass. A remote moving body
+        // participates as a finite-mass shadow; only our actor keeps its reaction.
+        body.inertia.inverse_mass = solid.inverse_mass;
+        body.inertia.inverse_tensor = vector(solid.inverse_inertia.to_array());
+        // A host-owned body's drag and caps belong to its original solver.
+        body.inertia.linear_drag = 0.;
+        body.inertia.angular_drag = 0.;
+        body.inertia.maximum_linear_velocity = 100_000.;
+        body.inertia.maximum_angular_velocity = 100_000.;
+        body.rates.world_inverse_inertia = world_inverse_inertia(body.rates.basis, body.inertia.inverse_tensor);
+        body.rates.linear_velocity = vector(solid.linvel.to_array());
+        body.rates.angular_velocity = vector(solid.angvel.to_array());
         body.rates.force_acceleration = Vector3::ZERO;
         body.rates.torque_acceleration = Vector3::ZERO;
         body.state_flags = 4;
+        self.groups.insert(index, solid.contact_group);
+        if locally_owned && solid.inverse_mass > 0. {
+            self.dynamics_before.push((solid.id, index, solid.linvel.to_array(), solid.angvel.to_array()));
+        }
         self.bodies.push(body);
-        let material = skate_core::physics::contact::RetailContactMaterial {
-            static_friction: export.friction.clamp(0., 2.),
-            dynamic_friction: (export.friction * 0.75).clamp(0., 2.),
-            restitution: 0.1,
-        };
-        let linvel = body.rates.linear_velocity;
-        match &export.shape {
-            skate_dynamics::ExportedShape::Box {
-                half_extents,
-                rounding,
-            } => {
-                let rounding = (*rounding).max(0.);
-                self.volumes.push(BoardWorldVolume {
-                    body: CollisionBody::Attached(base),
-                    primitive: ContactPrimitive::RoundedBox {
-                        center: vector(export.position),
-                        basis: body.rates.basis,
-                        half_extents: vector(half_extents.map(|h| (h - rounding).max(0.001))),
-                        radius: rounding,
-                    },
-                    linear_velocity: linvel,
-                    material,
-                });
-            }
-            skate_dynamics::ExportedShape::Sphere { radius } => {
-                self.volumes.push(BoardWorldVolume {
-                    body: CollisionBody::Attached(base),
-                    primitive: ContactPrimitive::Sphere(Sphere {
-                        center: vector(export.position),
-                        radius: *radius,
-                    }),
-                    linear_velocity: linvel,
-                    material,
-                });
-            }
-            skate_dynamics::ExportedShape::Capsule {
-                half_height,
-                radius,
-            } => {
-                let axis = q * Vec3::Y;
-                self.volumes.push(BoardWorldVolume {
-                    body: CollisionBody::Attached(base),
-                    primitive: ContactPrimitive::Capsule {
-                        center: vector(export.position),
-                        axis: vector(axis.to_array()),
-                        half_length: *half_height,
-                        radius: *radius,
-                    },
-                    linear_velocity: linvel,
-                    material,
-                });
-            }
-            skate_dynamics::ExportedShape::Triangles { tris } => {
-                for tri in tris.iter().take(skate_dynamics::MAX_EXPORT_TRIANGLES) {
-                    if tri.iter().flatten().any(|v| !v.is_finite()) {
-                        continue;
-                    }
-                    let local = tri.map(Vec3::from_array);
-                    // Zero-area faces yield NaN contact normals in the native solver.
-                    let area = (local[1] - local[0]).cross(local[2] - local[0]).length() * 0.5;
-                    if !area.is_finite() || area < 1e-6 {
-                        continue;
-                    }
-                    let world = tri.map(|v| vector((p + q * Vec3::from_array(v)).to_array()));
-                    if world.iter().any(|c| ![c.x, c.y, c.z].iter().all(|v| v.is_finite())) {
-                        continue;
-                    }
-                    self.volumes.push(BoardWorldVolume {
-                        body: CollisionBody::Attached(base),
-                        primitive: ContactPrimitive::Triangle(triangle_from_volume(
-                            world, 0.01, [-1.; 3], 0,
-                        )),
-                        linear_velocity: linvel,
-                        material,
-                    });
-                }
-            }
+        self.solids.push((index, solid));
+    }
+
+    pub fn capture_dynamics_reactions(
+        &mut self, reactions: &[skate_core::physics::rigid_body::RetailReactionCorrections], dt: f32,
+    ) {
+        self.dynamics_deltas.clear();
+        if !(dt.is_finite() && dt > 0.) { return; }
+        for &(id, index, _, _) in &self.dynamics_before {
+            let Some(r) = reactions.get(skate_core::physics::board_step::ATTACHED_REACTION_BASE + index) else { continue };
+            self.dynamics_deltas.push((id,
+                xyz(r.linear_displacement).map(|v| v / dt),
+                xyz(r.angular_displacement).map(|v| v / dt),
+                xyz(r.position_displacement), xyz(r.orientation_displacement),
+            ));
         }
     }
 }

@@ -138,6 +138,10 @@ pub enum Command {
         #[serde(default = "true_fn")]
         visible: bool,
     },
+    GraphicsTransform { key:String, options:crate::scene::TransformOptions },
+    GraphicsNode { key:String, node:String, options:crate::scene::TransformOptions },
+    GraphicsResetNode { key:String, node:String },
+    PhysicsDebug { enabled:bool },
     GraphicsRemove {
         key: String,
     },
@@ -150,7 +154,7 @@ pub enum Command {
         #[serde(default)]
         offset: [f32; 3],
     },
-    PlayerDetach {},
+    PlayerDetach { #[serde(default)] options:crate::scene::DetachOptions },
     CameraFollow {
         body: Option<String>,
         #[serde(default = "cam_offset")]
@@ -194,7 +198,7 @@ impl Command {
     pub fn validate(&self) -> bool {
         let point = |p: &[f32; 3]| p.iter().all(|v| v.is_finite() && v.abs() <= 100_000.);
         let vec3 = |p: &[f32; 3]| p.iter().all(|v| v.is_finite());
-        let quat = |q: &[f32; 4]| q.iter().all(|v| v.is_finite());
+        let quat = crate::scene::valid_quaternion;
         match self {
             Self::Log { text } => text.len() <= 2048,
             Self::Overlay { key, text } => crate::schema::valid_id(key) && text.len() <= 1024,
@@ -365,9 +369,7 @@ impl Command {
                 ..
             } => {
                 crate::schema::valid_id(key)
-                    && path.len() <= 256
-                    && !path.contains("..")
-                    && !path.contains('\\')
+                    && crate::scene::valid_asset(path)
                     && body.as_ref().is_none_or(|b| crate::schema::valid_id(b))
                     && position.as_ref().is_none_or(|p| point(p))
                     && rotation.as_ref().is_none_or(|q| quat(q))
@@ -379,7 +381,12 @@ impl Command {
             Self::PlayerAttach { body, offset } => {
                 crate::schema::valid_id(body) && point(offset)
             }
-            Self::PlayerDetach {} => true,
+            Self::GraphicsTransform { key, options } => crate::schema::valid_id(key) && options.validate()
+                && options.relative.is_none() && options.linear_velocity.is_none() && options.angular_velocity.is_none(),
+            Self::GraphicsNode { key, node, options } => crate::schema::valid_id(key) && crate::scene::valid_node(node) && options.validate(),
+            Self::GraphicsResetNode { key, node } => crate::schema::valid_id(key) && crate::scene::valid_node(node),
+            Self::PhysicsDebug { .. } => true,
+            Self::PlayerDetach { options } => options.validate(),
             Self::CameraFollow { body, offset } => {
                 body.as_ref().is_none_or(|b| crate::schema::valid_id(b)) && vec3(offset)
             }
@@ -424,6 +431,10 @@ fn command_kind(command: &Command) -> &'static str {
         Command::PhysicsRemoveJoint { .. } => "physics_remove_joint",
         Command::PhysicsAddCollider { .. } => "physics_add_collider",
         Command::GraphicsMesh { .. } => "graphics_mesh",
+        Command::GraphicsTransform { .. } => "graphics_transform",
+        Command::GraphicsNode { .. } => "graphics_node",
+        Command::GraphicsResetNode { .. } => "graphics_reset_node",
+        Command::PhysicsDebug { .. } => "physics_debug",
         Command::GraphicsRemove { .. } => "graphics_remove",
         Command::GraphicsVisibility { .. } => "graphics_visibility",
         Command::PlayerAttach { .. } => "player_attach",
@@ -512,6 +523,12 @@ impl Vm {
             let out = queue.clone();
             let sdk = lua.create_table()?;
             sdk.set("api_version", 2)?;
+            let capabilities = lua.create_table()?;
+            capabilities.set("solid_bridge", 3)?;
+            capabilities.set("model_collision", 1)?;
+            capabilities.set("physics_debug", 1)?;
+            capabilities.set("scene_transforms", 2)?;
+            sdk.set("_native_capabilities", capabilities)?;
             sdk.set("mod_id", manifest.id.clone())?;
             sdk.set(
                 "_submit",
@@ -740,5 +757,84 @@ mod driving_extension_tests {
         assert!(matches!(out[3],Command::UiRemove{..}));
         assert!(matches!(&out[4],Command::CameraFollow{body:None,..}));
         drop(vm);std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+
+#[cfg(test)]
+mod solid_extension_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn scene_and_safe_detach_commands_cross_the_serde_boundary() {
+        for value in [
+            json!({"kind":"graphics_transform", "key":"scene", "options":{"position":[1,2,3], "rotation":[0,0,0,1]}}),
+            json!({"kind":"graphics_node", "key":"scene", "node":"pivot", "options":{"relative":true,"rotation":[1,0,0,0],"angular_velocity":[3,0,0]}}),
+            json!({"kind":"graphics_reset_node", "key":"scene", "node":"pivot"}),
+            json!({"kind":"physics_debug", "enabled":true}),
+            json!({"kind":"player_detach"}),
+            json!({"kind":"player_detach", "options":{"candidates":[[2,0,0]],"height":1.8,"radius":0.3}}),
+        ] {
+            let command: Command = serde_json::from_value(value).unwrap();
+            assert!(command.validate());
+        }
+        for value in [
+            json!({"kind":"graphics_transform", "key":"scene", "options":{"relative":true}}),
+            json!({"kind":"graphics_transform", "key":"scene", "options":{"rotation":[0,0,0,0]}}),
+            json!({"kind":"graphics_node", "key":"scene", "node":"", "options":{}}),
+            json!({"kind":"player_detach", "options":{"height":0.5,"radius":0.4}}),
+        ] {
+            let command: Command = serde_json::from_value(value).unwrap();
+            assert!(!command.validate());
+        }
+        assert!(serde_json::from_value::<Command>(json!({"kind":"graphics_node", "key":"scene", "node":"pivot", "options":{"unknown":1}})).is_err());
+    }
+}
+
+#[cfg(test)]
+mod model_collision_extension_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn native_capabilities_debug_and_model_spawn_cross_real_lua_serde_boundary() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let root = std::env::temp_dir().join(format!("skate-model-api-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"), r#"
+            return {on_load=function()
+                assert(sdk.capabilities.solid_bridge == 3)
+                assert(sdk.capabilities.model_collision == 1)
+                assert(sdk.capabilities.physics_debug == 1)
+                assert(sdk.capabilities.scene_transforms == 2)
+                assert(sdk._native_capabilities == nil)
+                sdk.physics.debug_colliders(true)
+                sdk.physics.spawn('object', {shape={type='model',path='visual.glb',object='part',
+                    options={max_hulls=32,resolution=96,concavity=.0025}}, body_type='dynamic',mass=100})
+            end}
+        "#).unwrap();
+        let manifest: Manifest = serde_json::from_value(json!({"id":"tests.model", "api":2,
+            "name":"Model API contract", "version":"1.0.0", "author":"test", "description":"test",
+            "entry":"main.lua", "settings":{}})).unwrap();
+        manifest.validate().unwrap();
+        let snapshot = json!({"physics":{"bodies":{}}});
+        let mut vm = Vm::new(&root, &manifest, &BTreeMap::new(), &snapshot).unwrap();
+        let commands = vm.call("on_load", json!({}), &snapshot).unwrap();
+        assert_eq!(commands.len(), 2);
+        assert!(matches!(&commands[0], Command::PhysicsDebug {enabled:true}));
+        match &commands[1] {
+            Command::PhysicsSpawn {body,..} => match &body.shape {
+                Shape::Model {path,object,options} => {
+                    assert_eq!(path, "visual.glb"); assert_eq!(object, "part");
+                    assert_eq!(options.scale, [1.;3]); assert!(options.validate().is_ok());
+                }
+                _ => panic!("model descriptor was not retained"),
+            },
+            _ => panic!("wrong native spawn command"),
+        }
+        drop(vm);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

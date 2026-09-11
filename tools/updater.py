@@ -60,13 +60,15 @@ def read_json(path, default=None):
 def identity(m):
     if not isinstance(m, dict):
         raise ValueError('Invalid release metadata')
+    build = m.get('build')
+    tag = m.get('tag')
     if (m.get('schema') != 1 or m.get('target') != 'windows-x64'
-            or m.get('repository') != REPO or not isinstance(m.get('build'), int)
-            or m['build'] <= 0 or not isinstance(m.get('tag'), str)
+            or m.get('repository') != REPO or not isinstance(build, int)
+            or (build <= 0 and tag != 'development') or not isinstance(tag, str)
             or not isinstance(m.get('revision'), str)
             or not re.fullmatch(r'[0-9a-f]{40}', m['revision'])):
         raise ValueError('Incompatible release metadata')
-    return m['build']
+    return build
 
 
 def program_metadata(m):

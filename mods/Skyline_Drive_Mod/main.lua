@@ -1,3 +1,4 @@
+-- Model collision repair 4.3.1: collision cooked from the SAME render GLB; no sidecar assets.
 -- Driving edition 1: latest working vehicle + unchanged audio; render-rate cameras,
 -- retained dashboard, progressive driver-input mapping, explicit optional aero.
 -- Skyline Physics v4 -- Lua 5.4 / supplied Skate SDK API 2.
@@ -5,7 +6,7 @@
 -- passive clutch/differential/brakes, and a combined-slip brush tire law.
 -- No yaw targets, countersteer assist, slide-recovery state, lateral-velocity
 -- deletion, handbrake grip multiplier, or upright torque. Aero is an explicit load.
--- See README.md and PHYSICS_AND_API.md for changes and declared assumptions.
+-- See README.md for the collision/API contract and validation limits.
 
 local BODY, MODEL = "chassis", "skyline.glb"
 local C = {
@@ -14,7 +15,9 @@ local C = {
     -- This is an explicitly tuned chassis, NOT measured factory Skyline data.
     center = {0, -0.27160, 0.16},
     inertia_half = {0.92, 0.55, 2.10},
-    hull_half = {0.86, 0.30, 2.04},
+    -- Physics uses the existing rendered body node, cooked into multiple
+    -- convex solids by the host. No separate collision GLB/JSON or point list.
+    entry_radius = 1.20, reentry_delay = 5.0,
     radius = 0.341,
     ride_length = 0.20, droop_length = 0.37,
     front_spring = 37000, rear_spring = 32000,
@@ -60,6 +63,8 @@ local state = {
     rpm=C.idle_rpm, engine_omega=C.idle_rpm*math.pi/30, clutch=0,
     steer=0, shift=0, time=0, enter_after=0,
     keys={}, buttons=0, hud_time=0, mass_audit=nil, keyboard_axis=0, aero_load=0,
+    enter_requested=false, exit_requested=false, reenter_on_ready=false,
+    hull_debug=false, interaction_text="",
 }
 
 local function clamp(x,a,b) return math.max(a,math.min(b,x)) end
@@ -353,7 +358,7 @@ local function update_dashboard(event)
     rect("rpm_bg",16,144,312,9,{0.13,0.18,0.23,1})
     rect("rpm_fill",16,144,312*amount,9,accent)
     rect("redline_tick",16+312*0.94,141,2,15,{1,0.31,0.20,1})
-    text("hint",16,161,312,16,"X / C  CAMERA       H  DEBUG",10,muted)
+    text("hint",16,161,312,16,"X / C CAMERA    H DEBUG    J HULL",10,muted)
     sdk.ui.canvas("driving_dashboard",{
         anchor="bottom_right",offset={24,28},size={344,180},
         scale=clamp(number(sdk.settings.dashboard_scale,1),0.65,1.5),visible=true,items=items,
@@ -367,6 +372,7 @@ local function reset_simulation()
     state.engine_omega=C.idle_rpm*math.pi/30; state.clutch=0; state.mass_audit=nil
     for _,w in ipairs(wheels) do
         w.omega=0; w.load=0; w.length=C.ride_length; w.contact=false; w.slip=0
+        w.spin=0; w.previous_omega=0; w.visual_steer=0; w.visual_y=0
         -- Front/rear rates match STATIC MOMENT BALANCE, not an equal-load floor.
         local fraction=w.front and ((C.center[3]+1.34703)/wheelbase)
             or ((1.44360-C.center[3])/wheelbase)
@@ -393,7 +399,11 @@ local function remove_rig()
         sdk.physics.remove("knuckle_"..w.key)
     end
     sdk.physics.remove(BODY)
+    if state.occupied or sdk.player.attached()==BODY then
+        state.enter_after=math.max(state.enter_after,state.time+C.reentry_delay)
+    end
     state.spawned=false; state.occupied=false
+    state.enter_requested=false; state.exit_requested=false; state.reenter_on_ready=false
 end
 local function ground_at(position)
     -- Search locally, not from y=500 (which could choose a roof/upper road).
@@ -415,20 +425,20 @@ local function spawn_rig(request)
         height=math.max(height,y+C.radius-off[2]+0.025)
     end
     sdk.physics.spawn(BODY,{
-        shape={type="box",half_extents=C.hull_half},
+        shape={type="model",path=MODEL,object="skyline_mesh",
+            options={max_hulls=32,resolution=96,concavity=0.0025}},
         body_type="dynamic",mass=C.mass,position={position[1],height,position[3]},
         heading=heading,friction=0.25,ccd=true,
+        -- Native assembly classification; the SDK treats this as metadata.
+        contact_group=8,
         center_of_mass=C.center,inertia_half_extents=C.inertia_half,
         linear_damping=0,angular_damping=0,
     })
     sdk.graphics.mesh("skyline_visual",{path=MODEL,body=BODY})
     reset_simulation()
-    state.spawned=true; state.enter_after=state.time+0.25
+    state.spawned=true; state.enter_after=math.max(state.enter_after,state.time+0.25)
     start_audio()
-    if request.reenter then
-        sdk.player.attach(BODY,{-0.38,0.12,-0.23})
-        state.occupied=true; configure_camera()
-    end
+    state.reenter_on_ready=request.reenter==true
 end
 local function respawn(car,at_car)
     local request={}
@@ -819,6 +829,89 @@ local function apply_aerodynamics(sim,car,dt)
     end
 end
 
+local function quat_mul(a,b)
+    return {
+        a[4]*b[1]+a[1]*b[4]+a[2]*b[3]-a[3]*b[2],
+        a[4]*b[2]-a[1]*b[3]+a[2]*b[4]+a[3]*b[1],
+        a[4]*b[3]+a[1]*b[2]-a[2]*b[1]+a[3]*b[4],
+        a[4]*b[4]-a[1]*b[1]-a[2]*b[2]-a[3]*b[3],
+    }
+end
+local function update_wheel_visuals(angles,dt)
+    for i,w in ipairs(wheels) do
+        -- The solver owns omega and suspension length. These are read-only
+        -- presentation values: no extra rigid body, force or steering assist.
+        w.spin=(w.spin+0.5*(w.previous_omega+w.omega)*dt)%(2*math.pi)
+        local steer=angles[i]
+        local y=C.ride_length-w.length
+        local steer_q=yaw_rotation(steer)
+        local spin_q={math.sin(w.spin/2),0,0,math.cos(w.spin/2)}
+        local axle=rotate(steer_q,{w.omega,0,0})
+        sdk.graphics.node_transform("skyline_visual",w.key,{
+            position={0,y,0}, rotation=quat_mul(steer_q,spin_q), relative=true,
+            linear_velocity={0,(y-w.visual_y)/dt,0},
+            angular_velocity={axle[1],(steer-w.visual_steer)/dt,axle[3]},
+        })
+        w.previous_omega=w.omega; w.visual_y=y; w.visual_steer=steer
+    end
+end
+local function interaction_text(text)
+    if state.interaction_text~=text then
+        state.interaction_text=text; sdk.ui.text("skyline_interaction",text)
+    end
+end
+local function near_door(car)
+    local player=sdk.player.read()
+    if not vec(player.position) then return false end
+    local p=unrotate(car.rotation,sub(player.position,car.position))
+    if p[2]<-1.3 or p[2]>1.5 then return false end
+    for _,side in ipairs({-1,1}) do
+        local dx,dz=p[1]-side*1.65,p[3]+0.20
+        if dx*dx+dz*dz <= C.entry_radius*C.entry_radius then return true end
+    end
+    return false
+end
+local function request_entry()
+    if state.enter_requested or sdk.player.detaching() or state.time<state.enter_after then return end
+    sdk.player.attach(BODY,{-0.38,0.12,-0.23})
+    state.enter_requested=true; state.reenter_on_ready=false
+end
+local function request_exit()
+    if state.exit_requested then return end
+    -- Body-local FOOT candidates. The engine rotates them with the chassis,
+    -- finds map ground, and rejects occupied full-height standing capsules.
+    sdk.player.detach({candidates={
+        {-1.75,-0.52,-0.20},{1.75,-0.52,-0.20},
+        {-1.90,-0.52,1.3},{1.90,-0.52,1.3},
+        {-1.90,-0.52,-1.5},{1.90,-0.52,-1.5},
+        {0,-0.52,3.25},{0,-0.52,-3.15},
+    },height=1.8,radius=0.30,ground_snap=3.0})
+    state.exit_requested=true
+end
+local function sync_occupancy()
+    local attached=sdk.player.attached()==BODY
+    if attached then
+        state.enter_requested=false
+        if not state.occupied then state.occupied=true; configure_camera() end
+        local err=sdk.player.detach_error()
+        if state.exit_requested and type(err)=="string" then
+            state.exit_requested=false; interaction_text(err)
+        end
+    else
+        if state.occupied then
+            state.occupied=false; state.exit_requested=false
+            state.enter_after=math.max(state.enter_after,state.time+C.reentry_delay)
+            clear_presentation()
+            if presentation.debug then set_debug_visible(true) end
+        end
+        state.enter_requested=false
+    end
+end
+local function set_collision_debug(enabled)
+    state.hull_debug=enabled==true
+    sdk.physics.debug_colliders(state.hull_debug)
+end
+
 local function simulate(car,input,dt)
     if not vec(car.linvel) or not vec(car.angvel) or not vec(car.position)
         or type(car.rotation)~="table" or not finite(car.rotation[4]) then return end
@@ -877,18 +970,33 @@ local function simulate(car,input,dt)
     presentation.speed=math.sqrt(body_velocity[1]^2+body_velocity[3]^2)
     presentation.handbrake=input.hand
     publish_hud(car,input,contacts,dt)
+    update_wheel_visuals(angles,dt)
 end
 
 return {
     on_load=function()
+        -- Native capabilities are published by vm.rs, not invented by api.lua.
+        -- Replacing only the Lua wrapper must NOT enable unknown native commands.
+        local native=sdk.capabilities or {}
+        if (native.model_collision or 0)<1 or (native.solid_bridge or 0)<3
+            or (native.physics_debug or 0)<1 or (native.scene_transforms or 0)<2 then
+            error("Skyline 4.3.1: the running executable is missing the native Model Collision Repair API. "..
+                "Install the complete matching crates update and launch a successfully rebuilt game executable. "..
+                "Copying only api.lua is not sufficient.")
+        end
+        if not sdk.graphics or (sdk.graphics.version or 0)<2 or not sdk.player.detaching then
+            error("Skyline 4.3.1: the embedded Lua SDK wrapper does not match the native Model Collision Repair API")
+        end
         reset_simulation(); remove_rig(); prepare_audio(); prepare_presentation()
-        sdk.log("Skyline DRIVE: dynamic chase/hood, clean dashboard; physics preserved except explicit aero and optional input shaping")
+        set_collision_debug(sdk.settings.show_collision_hull==true)
+        sdk.log("Skyline 4.3.1: render-model compound collision, native impacts, animated wheels, safe exits; J toggles actual colliders")
         sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
     end,
     on_update=function(event) update_audio(event); update_dashboard(event) end,
     on_settings=function(event)
         if event.key=="audio_enabled" and event.value==false then stop_audio() end
         if event.key=="show_driving_debug" then set_debug_visible(event.value==true) end
+        if event.key=="show_collision_hull" then set_collision_debug(event.value==true) end
         if event.key=="show_speedometer" and event.value==false and presentation.supported then
             sdk.ui.remove("driving_dashboard");presentation.active_hud=false
         end
@@ -896,7 +1004,7 @@ return {
         if event.key:match("^camera_") or event.key=="hood_height" then configure_camera() end
     end,
     on_unload=function()
-        remove_rig()
+        set_collision_debug(false); interaction_text(""); remove_rig()
         sdk.ui.text("skyline_audio",""); sdk.ui.text("skyline_presentation","")
         sdk.ui.text("skyline_help",""); sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
     end,
@@ -904,6 +1012,7 @@ return {
         local dt=number(event and event.dt,1/120)
         if dt<=0 or dt>0.1 then return end
         state.time=state.time+dt
+        sync_occupancy()
         local p=sdk.input.pad(); local buttons=math.floor(number(p.buttons,0))
         -- Sample edges unconditionally; held keys must not become new presses
         -- merely because another shortcut returned early this tick.
@@ -912,6 +1021,8 @@ return {
         local enter_key=edge("KeyE")
         local camera_key=edge("KeyC")
         local debug_key=edge("KeyH")
+        local hull_key=edge("KeyJ")
+        if hull_key then set_collision_debug(not state.hull_debug) end
         local camera_pressed=camera_key or pressed_button(buttons,0x4000)
         if debug_key then set_debug_visible(not presentation.debug) end
         local enter=enter_key or pressed_button(buttons,0x8000)
@@ -923,17 +1034,21 @@ return {
         elseif car and state.spawned then
             if reset then respawn(car,true)
             else
+                if state.reenter_on_ready and state.time>=state.enter_after and not sdk.player.detaching() then
+                    request_entry()
+                end
                 if enter then
-                    if state.occupied then
-                        sdk.player.detach(); state.occupied=false; clear_presentation()
-                        if presentation.debug then set_debug_visible(true) end
-                    elseif state.time>=state.enter_after then
-                        local player=sdk.player.read()
-                        if vec(player.position) and dot(sub(car.position,player.position),sub(car.position,player.position))<64 then
-                            sdk.player.attach(BODY,{-0.38,0.12,-0.23})
-                            state.occupied=true; configure_camera()
-                        end
-                    end
+                    if state.occupied then request_exit()
+                    elseif state.time>=state.enter_after and near_door(car) then request_entry() end
+                end
+                if not state.occupied then
+                    local remaining=math.max(0,state.enter_after-state.time)
+                    if sdk.player.detaching() then interaction_text("Moving to a clear on-foot exit...")
+                    elseif remaining>0 then interaction_text(string.format("Re-entry: %.1f s | J: collision hull",remaining))
+                    elseif near_door(car) then interaction_text("E / Y: enter | J: collision hull")
+                    else interaction_text("Approach a door to enter | J: collision hull") end
+                elseif not state.exit_requested and type(sdk.player.detach_error())~="string" then
+                    interaction_text("E / Y: exit | J: collision hull")
                 end
                 if camera_pressed and state.occupied then
                     presentation.mode=presentation.mode=="chase" and "hood" or "chase"
@@ -948,6 +1063,9 @@ return {
         if event.name=="world_changed" then
             stop_audio(); clear_presentation(); sound.prepared=false; prepare_audio()
             state.spawned=false; state.occupied=false; state.pending=nil
+            state.enter_requested=false; state.exit_requested=false; state.reenter_on_ready=false
+            state.enter_after=state.time+C.reentry_delay; interaction_text("")
+            set_collision_debug(state.hull_debug)
             state.keys={}; state.buttons=0; reset_simulation()
             sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
         end

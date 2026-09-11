@@ -5,17 +5,33 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 pub use rapier3d;
+pub mod solid;
+pub mod model;
+pub mod definition_codec;
+pub use model::ModelColliderOptions;
+pub use solid::{BodyDefinition, SolidBody, SolidCollider};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Shape {
     Box { half_extents: [f32; 3] },
     Sphere { radius: f32 },
     Capsule { half_height: f32, radius: f32 },
-    /// Convex hull from authoring verts (e.g. resolved GLB object). Max 256 points.
+    /// Convex hull from authoring verts (e.g. resolved GLB object). Max 512 points.
     Convex { points: Vec<[f32; 3]> },
     /// Package-relative GLB named object. Host resolves to Convex before spawn.
     Mesh { path: String, object: String },
+    /// Cook a compound solid from the existing render GLB. No collision asset.
+    /// object selects a node/mesh in Scene0; empty selects the whole scene.
+    Model {
+        path: String,
+        #[serde(default)]
+        object: String,
+        #[serde(default)]
+        options: ModelColliderOptions,
+    },
+    /// Resolved convex parts in the SAME body-local frame. One rigid body/mass.
+    Compound { hulls: Vec<Vec<[f32; 3]>> },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,6 +67,10 @@ pub struct BodyDesc {
     /// Collision filter bits (default 0xFFFF).
     #[serde(default = "default_filter")]
     pub filter: u32,
+    /// Original-engine assembly/contact classification (0..=20). This is
+    /// metadata, NOT a Rapier layer mask. Mods select their own classification.
+    #[serde(default)]
+    pub contact_group: u32,
     /// Local centre of mass offset (body frame). Enables weight transfer under
     /// corner spring loads / longitudinal forces without any vehicle type.
     #[serde(default)]
@@ -103,6 +123,7 @@ impl Default for BodyDesc {
             sensor: false,
             membership: 0x0001,
             filter: 0xFFFF,
+            contact_group: 0,
             center_of_mass: [0., 0., 0.],
             collider_offset: [0., 0., 0.],
             inertia_half_extents: None,
@@ -229,6 +250,7 @@ pub const MAX_EXPORT_TRIANGLES: usize = 512;
 
 #[derive(Clone)]
 struct BodyMeta {
+    definition: BodyDesc,
     shape: Shape,
     mass: f32,
     friction: f32,
@@ -338,6 +360,7 @@ pub struct DynamicsWorld {
     contacts: Vec<ContactEvent>,
     prev_pairs: BTreeMap<(u64, u64), ()>,
     meta: HashMap<u64, BodyMeta>,
+    kinematic_motion: BTreeMap<u64, ([f32; 3], [f32; 3])>,
 }
 
 impl Default for DynamicsWorld {
@@ -363,6 +386,7 @@ impl Default for DynamicsWorld {
             contacts: Vec::new(),
             prev_pairs: BTreeMap::new(),
             meta: HashMap::new(),
+            kinematic_motion: BTreeMap::new(),
         }
     }
 }
@@ -442,9 +466,13 @@ impl DynamicsWorld {
         self.next += 1;
         self.ids.insert(id, handle);
         self.reverse.insert(handle, id);
+        if let Some(body) = self.bodies.get_mut(handle) {
+            body.recompute_mass_properties_from_colliders(&self.colliders);
+        }
         self.meta.insert(
             id,
             BodyMeta {
+                definition: desc.clone(),
                 shape: desc.shape.clone(),
                 mass: desc.mass.max(0.01),
                 friction: desc.friction,
@@ -464,6 +492,7 @@ impl DynamicsWorld {
         };
         self.reverse.remove(&handle);
         self.meta.remove(&id);
+        self.kinematic_motion.remove(&id);
         self.bodies.remove(
             handle,
             &mut self.islands,
@@ -484,6 +513,11 @@ impl DynamicsWorld {
         friction: f32,
     ) -> Result<(), String> {
         let handle = *self.ids.get(&id).ok_or("unknown body")?;
+        if self.meta.get(&id).is_none_or(|m| m.extra_hulls.len() >= 16)
+            || translation.iter().any(|v| !v.is_finite() || v.abs() > 100.)
+            || points.iter().flatten().any(|v| !v.is_finite() || v.abs() > 1000.) {
+            return Err("extra collider exceeds finite geometry/body limits".into());
+        }
         if points.len() < 4 || points.len() > 512 {
             return Err("convex needs 4..=512 points".into());
         }
@@ -499,6 +533,12 @@ impl DynamicsWorld {
             .ok_or_else(|| "convex hull failed (degenerate points)".to_string())?
             .friction(friction)
             .density(0.)
+            .sensor(self.meta[&id].definition.sensor)
+            .collision_groups(InteractionGroups::new(
+                Group::from_bits_truncate(self.meta[&id].definition.membership),
+                Group::from_bits_truncate(self.meta[&id].definition.filter),
+                InteractionTestMode::And,
+            ))
             .translation(Vector::new(translation[0], translation[1], translation[2]));
         self.colliders
             .insert_with_parent(builder.build(), handle, &mut self.bodies);
@@ -524,49 +564,26 @@ impl DynamicsWorld {
         true
     }
 
-    /// Spawn or replace a kinematic collider used as a dual-world skater proxy.
+    /// Update a player mirror without destroying its contact manifold each tick.
     pub fn upsert_kinematic_proxy(
-        &mut self,
-        id: Option<u64>,
-        shape: Shape,
-        position: [f32; 3],
-        rotation_xyzw: [f32; 4],
-        friction: f32,
+        &mut self, id: Option<u64>, shape: Shape, position: [f32; 3],
+        rotation_xyzw: [f32; 4], friction: f32,
     ) -> Result<u64, String> {
         let desc = BodyDesc {
-            shape: shape.clone(),
-            body_type: BodyType::Kinematic,
-            mass: 1.,
-            position,
-            friction,
-            ..Default::default()
+            shape: shape.clone(), body_type: BodyType::Kinematic,
+            mass: 1., position, friction, membership: solid::PLAYER_MEMBERSHIP,
+            filter: u32::MAX, ..Default::default()
         };
         self.validate(&desc)?;
-        let id = if let Some(id) = id.filter(|id| self.ids.contains_key(id)) {
-            let handle = self.ids[&id];
-            // Replace colliders so shape changes take effect.
-            if let Some(body) = self.bodies.get_mut(handle) {
-                let existing: Vec<_> = body.colliders().to_vec();
-                for c in existing {
-                    self.colliders.remove(c, &mut self.islands, &mut self.bodies, false);
-                }
-            }
-            let collider = self.collider(&desc)?;
-            self.colliders
-                .insert_with_parent(collider, handle, &mut self.bodies);
-            if let Some(meta) = self.meta.get_mut(&id) {
-                meta.shape = shape;
-                meta.friction = friction;
-                meta.mesh = None;
-            }
-            id
-        } else {
-            if let Some(old) = id {
-                self.remove(old);
-            }
+        let reusable = id.filter(|id| self.meta.get(id).is_some_and(|m|
+            m.shape == shape && m.friction == friction));
+        let id = if let Some(id) = reusable { id } else {
+            if let Some(id) = id { self.remove(id); }
             self.spawn(desc)?
         };
-        self.set_pose(id, position, rotation_xyzw);
+        if !self.set_pose(id, position, rotation_xyzw) {
+            return Err("invalid kinematic proxy pose".into());
+        }
         Ok(id)
     }
 
@@ -631,10 +648,17 @@ impl DynamicsWorld {
                         }
                         continue;
                     }
-                    Shape::Mesh { .. } => ExportedShape::Box {
-                        half_extents: [0.5, 0.5, 0.5],
-                        rounding: 0.,
-                    },
+                    Shape::Compound { hulls } => {
+                        let mut tris = Vec::new();
+                        for points in hulls {
+                            if let Some(part) = hull_triangles(points, meta.collider_offset, usize::MAX) {
+                                tris.extend(part);
+                            }
+                        }
+                        ExportedShape::Triangles { tris }
+                    }
+                    // Unresolved file references are not physics shapes.
+                    Shape::Mesh { .. } | Shape::Model { .. } => continue,
                 }
             };
             out.push(ExportedVolume {
@@ -733,12 +757,11 @@ impl DynamicsWorld {
         if position.iter().any(|v| !v.is_finite()) || rotation_xyzw.iter().any(|v| !v.is_finite()) {
             return false;
         }
-        let rot = Rotation::from_xyzw(
-            rotation_xyzw[0],
-            rotation_xyzw[1],
-            rotation_xyzw[2],
-            rotation_xyzw[3],
+        let raw = Rotation::from_xyzw(
+            rotation_xyzw[0], rotation_xyzw[1], rotation_xyzw[2], rotation_xyzw[3],
         );
+        if raw.length_squared() < 1e-8 { return false; }
+        let rot = raw.normalize();
         body.set_translation(
             Vector::new(position[0], position[1], position[2]),
             true,
@@ -1334,7 +1357,7 @@ impl DynamicsWorld {
 
     /// Raycast that only returns a hit on the static map trimesh (`GROUND_BODY_ID`).
     pub fn raycast_ground(
-        &mut self,
+        &self,
         origin: [f32; 3],
         direction: [f32; 3],
         max_toi: f32,
@@ -1425,6 +1448,7 @@ impl DynamicsWorld {
         let steps = ((dt / 0.008_334).ceil() as usize).clamp(1, 16);
         integration.dt = dt / steps as f32;
         for _ in 0..steps {
+            self.advance_kinematic_targets(integration.dt);
             self.pipeline.step(
                 self.gravity,
                 &integration,
@@ -1507,6 +1531,9 @@ impl DynamicsWorld {
     }
 
     fn validate(&self, desc: &BodyDesc) -> Result<(), String> {
+        if desc.contact_group > 20 {
+            return Err("contact_group must be in 0..=20".into());
+        }
         if !desc.mass.is_finite() || desc.mass <= 0. {
             return Err("mass must be finite and > 0".into());
         }
@@ -1578,6 +1605,14 @@ impl DynamicsWorld {
                     return Err("convex points invalid".into());
                 }
             }
+            Shape::Compound { hulls } => model::validate_hulls(hulls)?,
+            Shape::Model { path, object, options } => {
+                options.validate()?;
+                if path.is_empty() || path.len() > 256 || path.contains("..")
+                    || path.contains('\\') || path.contains(':') || object.len() > 120 {
+                    return Err("model path/object invalid".into());
+                }
+            }
             Shape::Mesh { path, object } => {
                 if path.is_empty()
                     || path.len() > 256
@@ -1616,12 +1651,13 @@ impl DynamicsWorld {
                 ColliderBuilder::convex_hull(&pts)
                     .ok_or_else(|| "convex hull failed (degenerate points)".to_string())?
             }
-            Shape::Mesh { .. } => {
-                return Err("mesh shape must be resolved to convex by the host".into());
+            Shape::Compound { hulls } => ColliderBuilder::new(model::compound_shape(hulls)?),
+            Shape::Mesh { .. } | Shape::Model { .. } => {
+                return Err("model/mesh shape must be resolved by the host before spawn".into());
             }
         };
-        let membership = Group::from_bits_truncate(desc.membership.max(1));
-        let filter = Group::from_bits_truncate(desc.filter.max(1));
+        let membership = Group::from_bits_truncate(desc.membership);
+        let filter = Group::from_bits_truncate(desc.filter);
         let offset = Vector::new(
             desc.collider_offset[0],
             desc.collider_offset[1],
@@ -1747,7 +1783,18 @@ fn inertia_half_from_shape(shape: &Shape) -> [f32; 3] {
                 ((mx[2] - mn[2]) * 0.5).max(0.05),
             ]
         }
-        Shape::Mesh { .. } => [0.5, 0.5, 0.5],
+        Shape::Compound { hulls } => {
+            let mut min = [f32::MAX; 3];
+            let mut max = [f32::MIN; 3];
+            for p in hulls.iter().flatten() {
+                for axis in 0..3 {
+                    min[axis] = min[axis].min(p[axis]);
+                    max[axis] = max[axis].max(p[axis]);
+                }
+            }
+            std::array::from_fn(|axis| ((max[axis] - min[axis]) * 0.5).max(0.001))
+        }
+        Shape::Mesh { .. } | Shape::Model { .. } => [0.5, 0.5, 0.5],
     }
 }
 

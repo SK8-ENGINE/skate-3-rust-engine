@@ -181,11 +181,9 @@ pub fn validate_request(q: QueryRequest) -> Result<(), &'static str> {
     if [t.duration, q.radius, q.start_error, q.end_error]
         .iter()
         .any(|x| !x.is_finite() || *x <= 0.)
-        || t.position
-            .into_iter()
-            .chain(t.velocity)
-            .chain(t.acceleration)
-            .any(|x| !x.is_finite())
+        || [t.position, t.velocity, t.acceleration]
+            .iter()
+            .any(|v| v[..3].iter().any(|x| !x.is_finite()))
     {
         Err("Invalid native BipedAir trajectory request")
     } else {

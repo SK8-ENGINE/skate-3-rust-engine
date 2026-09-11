@@ -1,80 +1,77 @@
-# Skyline DRIVE + Audio
+# Skyline DRIVE — Model Collision Repair 4.3.1
 
-This package updates the **latest uploaded `skylineworking.zip`**, not an earlier car rebuild. It retains the actual `skyline.glb`, all 16 sound files, the sound-bank metadata, and the existing audio controller. The current engine, gearbox, tire law, clutch, differential, brakes, chassis and suspension parameters are retained.
+## No separate collision assets
 
-**Requires Driving API extension 1 in the rebuilt game executable.** Merely replacing the Lua API file is insufficient. On an older executable this mod falls back to the old fixed follow view and shows a rebuild warning; the new camera and dashboard need the native extension.
+The car now uses `skyline.glb` for BOTH graphics and collision. Its existing
+`skyline_mesh` body node supplies the source triangles. The engine builds multiple
+convex parts at runtime and keeps them in RAM, under one rigid body with the
+existing authored mass, center of mass and inertia. No collision GLB, collision
+JSON, authoring exporter or embedded collision-point list is required or written.
 
-## Install
+The separate `skyline_collision.glb`, `collision_geometry.json`, and
+`COLLISION_ASSET.md` from 4.3.0 have been removed. Replace the previous mod folder
+rather than merging into it to remove those obsolete files as well. Keep only
+one enabled package with id `examples.skyline`.
 
-Close the game. Apply the separate `Skate_Driving_API_Update` source package, rebuild with your normal `BUILD.bat`, and launch the rebuilt game. Back up the old mod OUTSIDE the scanned mods directory, then replace it with this entire folder. Keep only one enabled package with ID `examples.skyline`.
+This is not the old single hull pointed at a different file: `type="model"` uses
+the real triangle geometry, full scene transforms and Parry convex decomposition.
+The legacy `type="mesh"` API remains available for older mods but is NOT used here.
+Model options in Lua are max_hulls=32, resolution=96 and concavity=0.0025. These
+are approximation controls, not a promise of a millimetre-accurate surface. The
+runtime-generated result has not been measured or playtested in this environment.
+The first spawn can pause while cooking; unchanged respawns reuse an in-memory
+cache. Cache entries are invalidated by changed model bytes or options. No disk
+collision cache is made, so a new process cooks the first instance again.
 
-The included original Skyline model is selected directly. There is no fallback-model setting to enable. The unused fallback asset is retained solely to preserve the uploaded package. Existing saved tire/audio settings continue to use the same keys; the new diagnostics setting deliberately defaults to off.
+The selected collision node is the rigid body mesh, not the separately animated
+wheel nodes. Tires retain the existing raycast-suspension/reduced-order tire
+physics, rather than being baked into the chassis or changed into rigid wheel
+bodies. The input scene/model units and geometry are not rescaled or overwritten.
 
-Press F10 for a fresh car and E or controller Y to enter. The Mods menu identifies the package as `Skyline DRIVE + Audio`, version 4.2.0. The clean speedometer appears while occupied.
+## Required engine update
 
-## Controls
+Install the matching Model Collision Repair source update, then successfully
+rebuild BOTH game targets. An old installed executable cannot acquire native
+commands by replacing `api.lua`. This mod checks capabilities originating in the
+native VM BEFORE sending `physics_debug`, scene-node or model-spawn commands.
+The root SDK API remains version 2; named capabilities distinguish this extension.
 
-| Action | Controller | Keyboard |
-|---|---|---|
-| Dynamic chase / hood view | **X** | **C** |
-| Enter / exit | Y | E |
-| Throttle / service brake | RT / LT | W / S |
-| Steer | Left stick | A / D |
-| Handbrake | B | Shift |
-| Shift up / down | RB / LB | **X** / Z |
-| Neutral | — | N |
-| Reset occupied car | Right-stick click | R |
-| Spawn a fresh car | — | F10 |
-| Toggle car diagnostics | — | H |
+Both multiplayer clients need the rebuilt engine and the same enabled mod files.
+The new object protocol transmits the resolved compound geometry, not a path to
+a required collision file. It does not transfer the visual GLB/audio assets or
+execute another player's Lua. Different package bytes are deliberately rejected.
 
-Keyboard X still shifts up; controller X switches views. Camera switching is edge-triggered, so holding X does not flicker between cameras.
+## Preserved features and controls
 
-## Camera
+F10 spawns. E / controller Y enters or requests exit. R / Start resets.
+H toggles driving diagnostics. C / controller X changes camera. J toggles the
+actual solid colliders: green local, amber remote, cyan center of mass. The hull
+view draws the generated convex parts, not an unrelated display/proxy model.
 
-The chase camera is a persistent native render-rate rig, not a fixed Lua offset. A critically damped spring follows relative offsets; heading lag, bounded acceleration lag, velocity look-ahead and modest speed-dependent framing make it dynamic. The camera pulls back up to another 1.8 m and gains up to 8 degrees of vertical FOV. At constant speed, position lag does not grow indefinitely with speed.
+Independent wheel spin, front steering and suspension animation remain enabled.
+Door entry radius remains 1.20 m. Safe exit requests outside, upright on-foot
+placement; blocked exit keeps occupancy. The five-second re-entry cooldown starts
+after confirmed exit. Camera, dashboard, audio, tire solver, engine, gearbox,
+clutch and aero settings are retained. Original visual and audio assets have
+not been changed. The existing hidden-driver presentation remains unchanged.
 
-Camera and owned car visuals use the same interpolated native body sample. This changes rendering only; the physics body is not moved. Hood view is rigidly attached above the uploaded model's hood, inheriting actual chassis pitch and roll without synthetic shake. The hood height is adjustable to account for later visual-model edits.
+## What was and was not tested
 
-Chase collision avoidance uses five map-only rays and a safety margin. It snaps inward when obstructed and eases back outward. **This is not a swept sphere**, does not check movable props or other cars, and has not been verified in the game. Tight corners/thin geometry remain an in-game test case. Switching away, exiting, unloading, or changing worlds releases the camera and restores the near clipping plane; the base game's camera supplies its normal FOV again.
+41 assertions passed using the actual updated Lua API/mod through Lua 5.4 and a
+test host. This includes rejecting partial/old native capabilities before queuing
+new commands, selecting the same render/collision GLB, wheel animation, exits,
+entry cooldown and debug commands. A 120-tick comparison produced the same
+submitted force/torque histories as the prior driving baseline for identical
+inputs. This is NOT proof of identical handling after collision geometry changes.
 
-Settings: Chase distance, Chase spring frequency, Chase vertical FOV, Hood camera height. Lower spring frequency produces more lag; higher is tighter. Camera effects never modify tire forces, steering commands, yaw, or physical body pose.
+All 19 original GLB/audio/sound-bank assets are byte-identical. The render-body
+input has 17,123 source positions (8,489 after exact position welding), 19
+primitives and 16,532 nondegenerate triangles. Those are source-model counts,
+NOT a measured cooked-hull output.
 
-## Dashboard and diagnostics
-
-The lower-right canvas shows road-plane chassis speed, selected R/N/1–6 gear, engine RPM, a rev bar, handbrake status, and the current view. It uses keyed, retained rectangles/text, not dozens of temporary objects each tick. Content refreshes at 20 Hz; the native canvas remains visible between updates and fits the viewport. MPH, HUD scale and visibility are settings.
-
-The speed is the magnitude of chassis velocity in the body's road plane, not driven-wheel speed; a stationary burnout does not read as vehicle speed. Gear and RPM are actual simulation values, not decorative estimates.
-
-**Show car diagnostics (H)** defaults to off. H overrides it for the current session; the menu setting is persistent. The dashboard remains usable with diagnostics off. This controls the car's top-left diagnostic text, not the engine's independent FPS/profiling displays. The native canvas is hidden behind paused/replay/customizer views and removed when leaving the car.
-
-## Steering: a driver-input change, not a stability controller
-
-Small analog stick movements become gentler as speed rises from 54 to 198 km/h. This is a nonlinear mapping between a short-travel thumbstick and the steering actuator. It does not inspect sideslip, target yaw, tire saturation, or drift state. Full stick still requests the original +/-40-degree virtual rack at any speed; Ackermann inner/outer angles and the original rack-rate limit are retained. Opposite lock is not clipped away during a slide.
-
-Set **High-speed stick precision = 0** to restore the old analog curve exactly. A/D ramps the driver's requested input over a finite interval instead of instantly switching from centre to full demand. Releasing the keys requests centre; this is not tire-driven self-aligning steering.
-
-Full steering at high speed can still saturate tires and spin the car. The mapping improves fine input resolution; it does not make an impossible high-speed turn possible or add a hidden corrective force.
-
-## Downforce
-
-The uploaded mod included drag, but no downforce. This version retains that drag and adds optional, explicitly modeled front/rear aerodynamic surface loads:
-
-`F = 0.5 * rho * V_forward^2 * (Cl * A)`
-
-Defaults are air density 1.225 kg/m^3, front downforce coefficient-area 0.08 m^2 and rear 0.12 m^2. These are **modest tuning assumptions, NOT measured R34 coefficients**. At ideal straight, level motion the total is approximately 94.5 N at 100 km/h and 378.1 N at 200 km/h. This is only about 2.75% of the modeled 1400 kg car's weight at 200 km/h, not a huge magnetic force keeping it upright.
-
-Each surface force is perpendicular to its local airflow and acts at a declared front or rear point, so both net force and pitch moment enter the existing chassis/contact solver. Direction follows body orientation rather than always pulling toward world-down. It is not conditioned on wheel contact, and no tire-friction multiplier, automatic countersteering, grip-recovery mode, artificial upright torque, or chassis velocity overwrite is added. Positive coefficient-area means downforce; negative means lift. Turning **Aerodynamic surface loads** off disables these added loads but retains the pre-existing drag.
-
-This remains a reduced model: coefficients have not been fitted to wind-tunnel data, there is no full angle-of-attack/ground-effect map, and existing drag is not a newly calibrated 3D aero model. The implementation is not a claim of stock Skyline fidelity.
-
-## Evidence and limitations
-
-The delivery's actual Lua 5.4 and updated API wrapper passed:
-
-- 94 baseline numerical scenarios with optional precision/aero disabled, including 10,000 randomized passive tire/brake contact checks.
-- The 94-scenario suite with new steering/aero defaults, at 30/60/120 Hz and the explicitly labeled friction values (unqualified cases use 1.3, not the manifest's 1.25 default).
-- 19 focused driving-extension scenarios covering inputs, HUD data and bounds, audio continuity, lifecycle cleanup, steering authority, aerodynamic force/moment equations, and numerical isolation of presentation from physics.
-
-Maximum measured callback usage was 83,000/100,000 Lua instructions and 50/128 queued commands in those suites. The source patch contains reproducible test code and native Rust unit tests.
-
-**Rust compilation and in-game camera/HUD/audio playback have not been performed for this update.** The provided source archive has no workspace-root Cargo.toml/Cargo.lock, and the build environment used for this delivery has no Rust compiler. The numerical host is not Rapier and does not render the GLB/UI or native camera collision rays. Use the native smoke-test checklist in the API update after rebuilding.
+Rust compilation, the actual VHACD cook, Bevy rendering, native BoardWorld contact,
+Windows execution and two-client networking were NOT run here. The source repair
+includes Rust regression tests and `validate_model`, which runs the real cook,
+Rapier spawn and compact replication round trip on your machine without producing
+collision files. Use J and test roof standing/walking and vehicle impacts after
+successful compilation; no unconditional no-penetration claim is made.

@@ -92,6 +92,10 @@ impl Material for CharacterMaterial {
 #[derive(Component)]
 struct ShadowSource;
 
+/// Mod graphics and other dynamic props that should sample map irradiance.
+#[derive(Component)]
+pub(crate) struct ModGraphicsLit;
+
 #[derive(Component)]
 struct OriginalCharacterMaterial {
     material: Handle<StandardMaterial>,
@@ -234,6 +238,12 @@ fn spawn_shadow_sources(commands: &mut Commands, light: Vec3) {
     ));
 }
 
+fn template_material(data: &LightingData) -> Option<&MaterialData> {
+    data.materials
+        .get("character.default_cloth")
+        .or_else(|| data.materials.values().next())
+}
+
 fn bind(
     mut commands: Commands,
     lighting: Option<Res<Lighting>>,
@@ -243,6 +253,7 @@ fn bind(
     entities: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, Option<&RenderLayers>)>,
     parents: Query<&ChildOf>,
     players: Query<(), Or<(With<crate::world::PlayerRoot>, With<crate::multiplayer::appearance::RemoteCharacter>)>>,
+    mod_graphics: Query<(), With<ModGraphicsLit>>,
     parts: Query<(), With<crate::customiser_parts::PartRoot>>,
     native: Query<&crate::custom_models::NativeModelRoot>,
     imports: Query<(), With<crate::custom_models::CustomModelRoot>>,
@@ -250,17 +261,34 @@ fn bind(
     let Some(lighting) = lighting else {
         return;
     };
+    let mod_template = template_material(&lighting.data);
     for (entity, name, handle, layers) in &entities {
-        if !parents.iter_ancestors(entity).any(|e| players.contains(e)) { continue; }
+        let under_player = parents.iter_ancestors(entity).any(|e| players.contains(e));
+        let under_mod = parents.iter_ancestors(entity).any(|e| mod_graphics.contains(e));
+        if !under_player && !under_mod {
+            continue;
+        }
         // Modular CAC pieces own an extended material with tattoos/hair coverage.
         // Giving them a second material races publication and can render twice.
-        if parents.iter_ancestors(entity).any(|e| parts.contains(e)) { continue; }
+        if under_player && parents.iter_ancestors(entity).any(|e| parts.contains(e)) {
+            continue;
+        }
         let native_key = parents.iter_ancestors(entity).find_map(|e| native.get(e).ok().map(|n| &n.0));
-        if native_key.is_none() && parents.iter_ancestors(entity).any(|e|imports.contains(e)) {continue;}
+        if under_player
+            && native_key.is_none()
+            && parents.iter_ancestors(entity).any(|e| imports.contains(e))
+        {
+            continue;
+        }
         let table = if let Some(key) = native_key {
             lighting.data.native.get(key)
-        } else { Some(&lighting.data.materials) };
-        let Some(data) = table.and_then(|m| m.get(&name.0)) else {
+        } else {
+            Some(&lighting.data.materials)
+        };
+        let data = table
+            .and_then(|m| m.get(&name.0))
+            .or_else(|| under_mod.then(|| mod_template).flatten());
+        let Some(data) = data else {
             continue;
         };
         if data.params.len() != 9 {
@@ -329,47 +357,108 @@ fn shadow_views(
 }
 fn update(
     lighting: Option<ResMut<Lighting>>,
-    root: Query<&Transform, With<crate::world::PlayerRoot>>,
+    local_root: Query<(Entity, &Transform), With<crate::world::PlayerRoot>>,
+    remote_roots: Query<(Entity, &Transform), With<crate::multiplayer::appearance::RemoteCharacter>>,
+    mod_roots: Query<(Entity, &Transform), With<ModGraphicsLit>>,
+    character_meshes: Query<(Entity, &MeshMaterial3d<CharacterMaterial>)>,
+    customiser_meshes: Query<(Entity, &MeshMaterial3d<crate::customiser_material::SkaterMaterial>)>,
+    parents: Query<&ChildOf>,
     mut materials: ResMut<Assets<CharacterMaterial>>,
     mut customiser: ResMut<Assets<crate::customiser_material::SkaterMaterial>>,
     mut shadow: ResMut<crate::retail_render::ShadowState>,
     time: Res<Time>,
-    mut changed: Local<Vec<AssetId<CharacterMaterial>>>,
 ) {
-    let (Some(mut lighting), Ok(root)) = (lighting, root.single()) else {
+    let Some(mut lighting) = lighting else {
         return;
     };
     let fallback = lighting
         .data
         .default_sh
         .map(|v| Vec3::from_array(v).extend(0.));
-    let sh = lighting.probes.sample(root.translation, fallback);
-    let displayed = lighting.display_sh.map_or(sh, |old| {
-        let weight = 1. - (-time.delta_secs().clamp(0., 0.05) / 0.35).exp();
-        std::array::from_fn(|i| old[i].lerp(sh[i], weight))
-    });
-    publish_sh(&mut materials, displayed, &mut changed);
-    for (_, material) in customiser.iter_mut() {
-        if material.extension.retail.tint.w == 0. { continue; }
-        material.extension.retail.light = lighting.light;
-        material.extension.retail.sh = displayed;
+    if let Ok((local, root)) = local_root.single() {
+        let sh = lighting.probes.sample(root.translation, fallback);
+        let displayed = lighting.display_sh.map_or(sh, |old| {
+            let weight = 1. - (-time.delta_secs().clamp(0., 0.05) / 0.35).exp();
+            std::array::from_fn(|i| old[i].lerp(sh[i], weight))
+        });
+        apply_sh_to_hierarchy(
+            local,
+            displayed,
+            lighting.light,
+            &character_meshes,
+            &customiser_meshes,
+            &parents,
+            &mut materials,
+            &mut customiser,
+        );
+        lighting.display_sh = Some(displayed);
+        // Adapter floor: the local probe's direction-independent ambient term.
+        shadow.approach(sh[0].truncate(), time.delta_secs());
     }
-    lighting.display_sh = Some(displayed);
-    // Adapter floor: the local probe's direction-independent ambient term.
-    // The native per-frame c8 shadow-colour controller remains unrecovered.
-    shadow.approach(sh[0].truncate(), time.delta_secs());
+    for (remote, root) in &remote_roots {
+        let sh = lighting.probes.sample(root.translation, fallback);
+        apply_sh_to_hierarchy(
+            remote,
+            sh,
+            lighting.light,
+            &character_meshes,
+            &customiser_meshes,
+            &parents,
+            &mut materials,
+            &mut customiser,
+        );
+    }
+    for (graphics, root) in &mod_roots {
+        let sh = lighting.probes.sample(root.translation, fallback);
+        apply_sh_to_hierarchy(
+            graphics,
+            sh,
+            lighting.light,
+            &character_meshes,
+            &customiser_meshes,
+            &parents,
+            &mut materials,
+            &mut customiser,
+        );
+    }
 }
 
-fn publish_sh(materials: &mut Assets<CharacterMaterial>, displayed: [Vec4; 9], changed: &mut Vec<AssetId<CharacterMaterial>>) {
-    // iter_mut emits Modified even for identical assignments, rebuilding GPU
-    // material bindings. Read first and mutate only bitwise-different SH payloads.
-    // Check every material so newly bound pieces still receive the current SH.
-    changed.clear();
-    changed.extend(materials.iter().filter_map(|(id, material)| {
-        (!material.params.sh.iter().zip(&displayed).all(|(a,b)| a.to_array().map(f32::to_bits)==b.to_array().map(f32::to_bits))).then_some(id)
-    }));
-    for &id in changed.iter() {
-        materials.get_mut(id).expect("material enumerated in this call").params.sh = displayed;
+fn apply_sh_to_hierarchy(
+    root: Entity,
+    sh: [Vec4; 9],
+    light: Vec4,
+    character_meshes: &Query<(Entity, &MeshMaterial3d<CharacterMaterial>)>,
+    customiser_meshes: &Query<(Entity, &MeshMaterial3d<crate::customiser_material::SkaterMaterial>)>,
+    parents: &Query<&ChildOf>,
+    materials: &mut Assets<CharacterMaterial>,
+    customiser: &mut Assets<crate::customiser_material::SkaterMaterial>,
+) {
+    for (entity, handle) in character_meshes {
+        if !parents.iter_ancestors(entity).any(|ancestor| ancestor == root) {
+            continue;
+        }
+        if let Some(material) = materials.get_mut(&handle.0) {
+            if material.params.sh.iter().zip(&sh).any(|(a, b)| {
+                a.to_array().map(f32::to_bits) != b.to_array().map(f32::to_bits)
+            }) {
+                material.params.sh = sh;
+            }
+            if material.params.light != light {
+                material.params.light = light;
+            }
+        }
+    }
+    for (entity, handle) in customiser_meshes {
+        if !parents.iter_ancestors(entity).any(|ancestor| ancestor == root) {
+            continue;
+        }
+        if let Some(material) = customiser.get_mut(&handle.0) {
+            if material.extension.retail.tint.w == 0. {
+                continue;
+            }
+            material.extension.retail.light = light;
+            material.extension.retail.sh = sh;
+        }
     }
 }
 
@@ -452,34 +541,33 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_sh_emits_no_asset_modification_but_new_values_and_pieces_do() {
-        let mut app=App::new();
-        app.add_plugins((MinimalPlugins,AssetPlugin::default())).init_asset::<CharacterMaterial>();
-        fn material() -> CharacterMaterial {
-            CharacterMaterial { params:CharacterParams {light:Vec4::ZERO,tint:Vec4::ONE,options:Vec4::ZERO,rows:[Vec4::ZERO;9],sh:[Vec4::ZERO;9]},diffuse:None,normal:None,mask:None,alpha:AlphaMode::Opaque }
-        }
-        let first=app.world_mut().resource_mut::<Assets<CharacterMaterial>>().add(material());
-        app.update();
-        app.world_mut().resource_mut::<Messages<AssetEvent<CharacterMaterial>>>().clear();
-        let mut scratch=Vec::new();
-        let mut displayed=[Vec4::ZERO;9];
-        publish_sh(&mut app.world_mut().resource_mut::<Assets<CharacterMaterial>>(),displayed,&mut scratch);
-        assert!(scratch.is_empty());
-        app.update();
-        assert_eq!(app.world_mut().resource_mut::<Messages<AssetEvent<CharacterMaterial>>>().drain().count(),0);
-        // Signed zero and NaN payloads must retain their bits, without epsilon tests.
-        displayed[0]=Vec4::new(-0.0,f32::from_bits(0x7fc01234),1.0,0.0);
-        publish_sh(&mut app.world_mut().resource_mut::<Assets<CharacterMaterial>>(),displayed,&mut scratch);
-        assert_eq!(scratch,vec![first.id()]);
-        app.update();
-        assert!(app.world_mut().resource_mut::<Messages<AssetEvent<CharacterMaterial>>>().drain().any(|e|matches!(e,AssetEvent::Modified{id} if id==first.id())));
-        publish_sh(&mut app.world_mut().resource_mut::<Assets<CharacterMaterial>>(),displayed,&mut scratch);
-        assert!(scratch.is_empty());
-        let second=app.world_mut().resource_mut::<Assets<CharacterMaterial>>().add(material());
-        publish_sh(&mut app.world_mut().resource_mut::<Assets<CharacterMaterial>>(),displayed,&mut scratch);
-        assert_eq!(scratch,vec![second.id()]);
-        let assets=app.world().resource::<Assets<CharacterMaterial>>();
-        for handle in [&first,&second] { assert_eq!(assets.get(handle).unwrap().params.sh[0].to_array().map(f32::to_bits),displayed[0].to_array().map(f32::to_bits)); }
+    fn mod_graphics_template_prefers_default_cloth() {
+        let data = LightingData {
+            materials: HashMap::from([
+                (
+                    "character.default_skin".into(),
+                    MaterialData {
+                        shader: "character.default_skin".into(),
+                        params: vec![[0.; 4]; 9],
+                        specular: None,
+                    },
+                ),
+                (
+                    "character.default_cloth".into(),
+                    MaterialData {
+                        shader: "character.default_cloth".into(),
+                        params: vec![[1.; 4]; 9],
+                        specular: None,
+                    },
+                ),
+            ]),
+            default_sh: [[0.; 3]; 9],
+            native: HashMap::new(),
+        };
+        assert_eq!(
+            template_material(&data).unwrap().shader,
+            "character.default_cloth"
+        );
     }
 
     #[test]

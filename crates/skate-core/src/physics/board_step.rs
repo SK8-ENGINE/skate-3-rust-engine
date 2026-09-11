@@ -103,12 +103,16 @@ pub struct BoardStep {
     contacts: Vec<RetailContactJacobian>,
     reports: Vec<BoardContactReport>,
     reactions: Vec<RetailReactionCorrections>,
+    solved_reactions: Vec<RetailReactionCorrections>,
     pub diagnostic_capture: bool,
     diagnostic_tick: u64,
     pub diagnostic_snapshot: Option<String>,
 }
 
 impl BoardStep {
+    /// Read-only solver output, before DynamicUpdate consumes/clears it.
+    /// Host-owned bodies use this to transfer reactions across solver worlds.
+    pub fn solved_reactions(&self) -> &[RetailReactionCorrections] { &self.solved_reactions }
     pub fn contact_reports(&self) -> &[BoardContactReport] {
         &self.reports
     }
@@ -170,6 +174,7 @@ impl BoardStep {
         self.reactions.fill(RetailReactionCorrections::default());
         self.contacts.clear();
         self.reports.clear();
+        self.solved_reactions.clear();
         if bodies
             .iter()
             .chain(core::iter::once(&hook.body))
@@ -224,6 +229,7 @@ impl BoardStep {
                     .collect::<Vec<_>>(),
             ));
         }
+        self.solved_reactions.clone_from(&self.reactions);
         // Every solver family finishes before ANY body integrates. The native
         // job tree places BatchIntegrator after all island solver jobs.
         for (body, reaction) in bodies
@@ -242,10 +248,13 @@ impl BoardStep {
         }
         // ContactSpiesJob follows integration (82DC35E0). Step_Solver3 then
         // publishes reports before the physical Adjust/Output phases.
+        let attached_refs: Vec<&BodySnapshot> =
+            attached.bodies.iter().map(|body| &**body).collect();
         board_reports::collect(
             &mut self.reports,
             &self.contacts,
             bodies,
+            &attached_refs,
             simulation.frequency,
         );
         //Physical output/spy consumers observe the rows from the shared solve.

@@ -6,7 +6,7 @@ mod settings;
 mod tests;
 use super::{
     contact_toolkit::StaticScene,
-    ground_query::{PrimaryEdges, with_world_scene},
+    ground_query::with_world_scene,
 };
 pub(crate) use settings::Settings;
 use skate_core::{
@@ -71,6 +71,7 @@ impl AirSelector {
     pub(crate) fn consume_launch(
         &mut self,
         world: &BoardWorld,
+        vehicles: &[(usize, skate_dynamics::SolidBody)],
         context: Context,
         deck_half_wheelbase: f32,
     ) -> Result<Option<usize>, &'static str> {
@@ -85,15 +86,15 @@ impl AirSelector {
         let first = next.candidates[0];
         let prediction = next.predictions[0];
         let adjustment = if let Some(search) = ledge::search(first, prediction, context) {
-            let edges = with_world_scene(
-                world,
-                PrimaryEdges::Normal {
-                    dynamic: &[],
-                    vehicles: &[],
-                },
-                &[],
-                |scene| scene.edge_candidates(&search),
-            )?;
+            let cache = super::mod_solid_ground::VehicleEdgeCache::build(vehicles);
+            let edges = cache.with_primary_edges(|vehicle_edges| {
+                with_world_scene(
+                    world,
+                    vehicle_edges,
+                    &[],
+                    |scene| scene.edge_candidates(&search),
+                )
+            })?;
             let filtered = ledge::filter_edges(&edges, first.trajectory.position);
             if let Some(adjustment) = ledge::choose(
                 first,
@@ -179,12 +180,13 @@ impl AirSelector {
     pub(crate) fn consume(
         &mut self,
         world: &BoardWorld,
+        vehicles: &[(usize, skate_dynamics::SolidBody)],
         context: Context,
         deck_half_wheelbase: f32,
     ) -> Result<Option<usize>, &'static str> {
         self.core.sampling.preinitialized_8494 = false;
         let selected = if self.core.sampling.pending_8492 {
-            self.consume_launch(world, context, deck_half_wheelbase)?
+            self.consume_launch(world, vehicles, context, deck_half_wheelbase)?
         } else {
             None
         };

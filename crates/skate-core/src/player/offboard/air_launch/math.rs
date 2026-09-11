@@ -15,6 +15,19 @@ pub(in crate::player::offboard) fn flatten(mut v: Vector) -> Vector {
     v[1] = 0.0;
     v
 }
+pub(in crate::player::offboard) fn xyz_finite(v: Vector) -> bool {
+    v[..3].iter().all(|x| x.is_finite())
+}
+/// Preserve finite packed lanes; drop non-finite SIMD scratch in lane 3.
+pub(in crate::player::offboard) fn sanitize_w_lane(v: Vector) -> Vector {
+    if v[3].is_finite() {
+        v
+    } else {
+        let mut v = v;
+        v[3] = 0.0;
+        v
+    }
+}
 pub(in crate::player::offboard) fn magnitude(q: f32) -> f32 {
     let value = q * crate::physics::board_motion_output::inverse_length_squared(q, 2);
     if q == 0.0 { 0.0 } else { value }

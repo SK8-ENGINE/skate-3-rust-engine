@@ -32,6 +32,7 @@ mod skeleton_feedback;
 mod skeleton_input_runtime;
 mod skeleton_output;
 mod solve;
+pub(crate) mod solid_contacts;
 pub(crate) mod network;
 pub(crate) use skater::SkaterRuntime;
 mod animation_feedback;
@@ -231,6 +232,9 @@ impl GamePhysics {
 
     pub(crate) fn world_triangles(&self) -> &[skate_core::physics::board_world::WorldTriangle] { self.world.triangles() }
 
+    pub(crate) fn set_external_queries(&mut self, queries: Option<std::sync::Arc<dyn skate_core::physics::board_world::ExternalQueries>>) {
+        self.world.set_external_queries(queries);
+    }
     pub(crate) fn world(&self) -> &BoardWorld {
         &self.world
     }

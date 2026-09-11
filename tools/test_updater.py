@@ -31,6 +31,9 @@ class UpdaterTests(unittest.TestCase):
         self.assertFalse(u.eligible(release, 'Latest'))
         with self.assertRaises(ValueError):
             u.identity({**metadata(), 'target': 'linux'})
+        self.assertEqual(u.identity({**metadata(0), 'tag': 'development'}), 0)
+        with self.assertRaises(ValueError):
+            u.identity({**metadata(0), 'tag': 'v0'})
 
     def test_pagination_order_and_channel(self):
         def release(build, prerelease=False):

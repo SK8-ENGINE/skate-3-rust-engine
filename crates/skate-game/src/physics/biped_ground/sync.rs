@@ -47,6 +47,9 @@ impl Owner {
                 frame[1][i].mul_add(point[1], frame[0][i].mul_add(point[0], frame[3][i])),
             )
         });
+        if !packet.position_32[3].is_finite() {
+            packet.position_32[3] = 0.0;
+        }
         Ok(Some(packet))
     }
 }

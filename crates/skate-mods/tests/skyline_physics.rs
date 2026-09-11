@@ -1,4 +1,5 @@
-//! End-to-end proof for the shipped Skyline Lua package.
+//! Integration tests for the legacy articulated SDK example at sdk/examples/skyline.
+//! This is NOT validation of the newer one-body Skyline DRIVE mod.
 //!
 //! This executes the real Lua callbacks, resolves the actual GLB named-node
 //! hulls, applies every command to DynamicsWorld, and steps a real Rapier
@@ -165,6 +166,8 @@ impl Sim {
             body.shape = Shape::Convex {
                 points: convex_points_file(&self.package.join(path), object)?,
             };
+        } else if let Shape::Model { path, object, options } = &body.shape {
+            body.shape = skate_mods::model_shape_file(&self.package.join(path), object, options)?;
         }
         Ok(body)
     }
@@ -257,7 +260,7 @@ impl Sim {
                 }
             }
             Command::PlayerAttach { .. } => self.attached = true,
-            Command::PlayerDetach {} => self.attached = false,
+            Command::PlayerDetach { .. } => self.attached = false,
             Command::PhysicsForce { .. }
             | Command::PhysicsImpulse { .. }
             | Command::PhysicsTorque { .. }
