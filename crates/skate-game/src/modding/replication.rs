@@ -327,7 +327,8 @@ pub(crate) fn sync(world:&mut World) {
         incoming(world,&mut mods,&mut state,records);
         sample(&mut mods,&state);
         graphics::sync(world,&mut mods);
-        state.status=format!("Solid bridge: {} remote bodies / {} scenes{}",state.bodies.len(),state.graphics.len(),
+        let local_bodies=mods.bodies.iter().filter(|((owner,_),_)|!owner.starts_with('@')).count();
+        state.status=format!("Solid bridge: {} remote / {} scenes / {} local publishing{}",state.bodies.len(),state.graphics.len(),local_bodies,
             if state.last_problem.is_empty() {String::new()} else {format!(" | last issue: {}",state.last_problem)});
         mods.replication=state;
     });

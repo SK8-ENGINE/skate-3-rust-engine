@@ -64,7 +64,7 @@ local state = {
     steer=0, shift=0, time=0, enter_after=0,
     keys={}, buttons=0, hud_time=0, mass_audit=nil, keyboard_axis=0, aero_load=0,
     enter_requested=false, exit_requested=false, reenter_on_ready=false,
-    hull_debug=false, interaction_text="", mp_hint_time=0,
+    hull_debug=false, interaction_text="", mp_hint_time=0, mp_warm=false,
 }
 
 local function clamp(x,a,b) return math.max(a,math.min(b,x)) end
@@ -390,19 +390,36 @@ local function vfx_net_active()
 end
 local function refresh_mp_status(dt)
     if not sdk.net or type(sdk.net.info)~="function" then
+        state.mp_warm=false
         sdk.ui.text("skyline_mp","")
         return
     end
     local info=sdk.net.info()
     if not info or info.active~=true then
+        state.mp_warm=false
         sdk.ui.text("skyline_mp","")
         return
     end
+    if not state.mp_warm then
+        state.mp_warm=true
+        if state.spawned then
+            local car=sdk.physics.read(BODY)
+            state.pending={
+                position=car and car.position,
+                heading=car and yaw(car.rotation),
+                reenter=state.occupied,
+            }
+            remove_rig()
+            sdk.log("Skyline: respawning vehicle for multiplayer replication")
+        end
+    end
+    local car=sdk.physics.read(BODY)
+    if state.spawned and not car then state.spawned=false; state.occupied=false end
     state.mp_hint_time=math.max(0,(state.mp_hint_time or 0)-dt)
     if state.mp_hint_time>0 then return end
     state.mp_hint_time=0.5
     local lines={
-        state.spawned
+        car
             and "Your car is spawned and should replicate to other players."
             or "Press F10 to spawn your car. Other players cannot see your vehicle until you do.",
         "Both players need Skyline enabled with identical mod files and the skyline-driving-update build.",
