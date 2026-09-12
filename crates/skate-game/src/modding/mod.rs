@@ -1,6 +1,7 @@
 //! Main-thread SDK adapter. Lua never receives World, entity IDs, or asset handles.
 mod audio;
 mod canvas;
+mod graphics_dynamic;
 mod vehicle_camera;
 pub(crate) mod bridge;
 pub(crate) mod replication;
@@ -157,6 +158,7 @@ impl Plugin for ModdingPlugin {
         .init_resource::<ModMenu>();
         menu::install(app);
         audio::install(app);
+        graphics_dynamic::install(app);
         app.add_systems(
             PreUpdate,
             maintenance.after(crate::map_transition::MapTransitionSet),
@@ -343,7 +345,8 @@ fn ensure_ground(world: &World, mods: &mut Mods) -> Result<(), String> {
 
 fn maintenance(world: &mut World) {
     world.resource_scope(|world, mut mods: Mut<Mods>| {
-        let snap = snapshot_ro(world, &mods);
+        let camera = camera_position(world);
+        let snap = snapshot_ro(world, &mods, camera);
         mods.manager.snapshot = snap;
         let generation = world
             .resource::<crate::map_transition::CurrentMap>()
@@ -361,7 +364,15 @@ fn maintenance(world: &mut World) {
     });
 }
 
-fn snapshot_ro(world: &World, mods: &Mods) -> serde_json::Value {
+fn camera_position(world: &mut World) -> Option<[f32; 3]> {
+    world
+        .query_filtered::<&Transform, With<crate::camera::GameplayCamera>>()
+        .iter(world)
+        .next()
+        .map(|t| t.translation.to_array())
+}
+
+fn snapshot_ro(world: &World, mods: &Mods, camera: Option<[f32; 3]>) -> serde_json::Value {
     let s = world.resource::<crate::physics::SkaterRuntime>();
     let p = &s.player_input.physical;
     let map = world.resource::<crate::map_transition::CurrentMap>();
@@ -406,6 +417,7 @@ fn snapshot_ro(world: &World, mods: &Mods) -> serde_json::Value {
         },
         "paused": world.resource::<crate::graphics_menu::Menu>().open,
         "replay": world.resource::<crate::replay::Replay>().active,
+        "camera": camera.map(|position| json!({"position": position})),
         "physics": {"bodies": {}, "contacts": []},
         "network": network_snapshot(world, mods),
     })
@@ -418,7 +430,8 @@ fn fixed(world: &mut World) {
     let dt = world.resource::<Time<Fixed>>().delta_secs_f64();
     world.resource_scope(|world, mut mods: Mut<Mods>| {
         bridge::take_reactions(&mut mods, &mut world.resource_mut::<crate::physics::GamePhysics>());
-        mods.manager.snapshot = snapshot_ro(world, &mods);
+        let camera = camera_position(world);
+        mods.manager.snapshot = snapshot_ro(world, &mods, camera);
         if let Err(e) = ensure_ground(world, &mut mods) {
             warn!("dynamics ground: {e}");
         }
@@ -554,9 +567,10 @@ fn fixed(world: &mut World) {
 }
 
 fn update(world: &mut World) {
+    let camera = camera_position(world);
     let snap = {
         let mods = world.resource::<Mods>();
-        snapshot_ro(world, mods)
+        snapshot_ro(world, mods, camera)
     };
     let paused =
         snap["paused"].as_bool().unwrap_or(true) || snap["replay"].as_bool().unwrap_or(false);
@@ -578,6 +592,7 @@ fn update(world: &mut World) {
 fn clear_runtime(world: &mut World, mods: &mut Mods) {
     replication::reset(world,mods);
     audio::clear(world);
+    graphics_dynamic::clear(world);
     canvas::clear_owner(world, &mut mods.canvases, None);
     detach_player(world, mods, true);
     let keys: Vec<_> = mods.graphics.keys().cloned().collect();
@@ -625,6 +640,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
     let retired = std::mem::take(&mut mods.manager.retired);
     for id in &retired {
         audio::stop_owner(world, id, true);
+        graphics_dynamic::clear_owner(world, id);
         canvas::clear_owner(world, &mut mods.canvases, Some(id));
         detach_if_owner(world, mods, id);
         if mods.camera.owner.as_ref() == Some(id) {
@@ -689,6 +705,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
             warn!("Lua mod {id}: {e}");
             mods.manager.fail(&id, e);
             audio::stop_owner(world, &id, true);
+            graphics_dynamic::clear_owner(world, &id);
             continue;
         }
         commands.sort_by_key(|command| match command {
@@ -707,6 +724,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
             warn!("Lua mod {id}: {e}");
             mods.manager.fail(&id, e);
             audio::stop_owner(world, &id, true);
+            graphics_dynamic::clear_owner(world, &id);
         }
     }
     let mut row = 0;
@@ -747,6 +765,16 @@ fn apply_one(
         Command::AudioUpdate { key, options } => audio::update_voice(world, id, &key, options),
         Command::AudioStop { key, fade_out } => audio::stop(world, id, &key, fade_out),
         Command::AudioStopAll {} => audio::stop_owner(world, id, false),
+        Command::GraphicsMeshBuffer { key, options } => {
+            graphics_dynamic::mesh_buffer(world, mods, id, key, options)?;
+        }
+        Command::GraphicsMeshBufferWrite { key, data } => {
+            graphics_dynamic::mesh_buffer_write(world, mods, id, &key, data)?;
+        }
+        Command::GraphicsMeshBufferAppend { key, data } => {
+            graphics_dynamic::mesh_buffer_append(world, mods, id, &key, data)?;
+        }
+        Command::GraphicsLight { key, options } => graphics_dynamic::light(world, mods, id, key, options)?,
         Command::Log { text } => info!("Lua [{id}]: {text}"),
         Command::Overlay { key, text } => {
             let k = (id.to_owned(), key);
@@ -800,6 +828,7 @@ fn apply_one(
             for slot in bound { retire_graphics(world,mods,&slot); }
             if mods.camera.follows(id, &key) { mods.camera.clear(); }
             audio::stop_body(world, id, &key);
+            graphics_dynamic::remove(world, id, &key);
             let k = (id.to_owned(), key);
             if let Some(body) = mods.bodies.remove(&k) {
                 mods.world.remove(body);
@@ -959,7 +988,10 @@ fn apply_one(
             if enabled { mods.debug_owners.insert(id.to_owned()); }
             else { mods.debug_owners.remove(id); }
         }
-        Command::GraphicsRemove { key } => retire_graphics(world,mods,&(id.to_owned(),key)),
+        Command::GraphicsRemove { key } => {
+            graphics_dynamic::remove(world, id, &key);
+            retire_graphics(world, mods, &(id.to_owned(), key));
+        }
         Command::GraphicsVisibility { key,visible } => {
             if let Some(owned)=mods.graphics.get_mut(&(id.to_owned(),key)) { owned.visible=visible; }
         }

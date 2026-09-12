@@ -83,6 +83,7 @@
 ---@field pad PadSnapshot
 ---@field paused boolean
 ---@field replay boolean
+---@field camera? {position:Vec3}
 ---@field attach? {body:string, owner:string}
 ---@field physics {bodies:table<string,BodySnapshot>, contacts:ContactEvent[], touching:TouchingPair[]}
 ---@field network? NetworkInfo
@@ -196,6 +197,46 @@ function sdk.graphics.remove(key) end
 ---@param key string
 ---@param visible boolean
 function sdk.graphics.set_visible(key, visible) end
+---@class MeshBufferOpts
+---@field body? string
+---@field position? Vec3 body-local when bound, world when unbound
+---@field rotation? Quat
+---@field scale? Vec3
+---@field blend? boolean default true
+---@field unlit? boolean default true
+---@field visible? boolean default true
+---@field depth_bias? number decal bias, default 0
+---@field texture? string mod-relative PNG path, e.g. textures/skid_tread.png
+---@field tint? Vec3 material tint, default white
+---@class MeshBufferWrite
+---@field positions Vec3[]
+---@field normals? Vec3[]
+---@field colors? number[][] per-vertex RGBA (packed flat by the runtime)
+---@field uvs? number[][]
+---@field indices integer[] 0-based triangle indices
+---@class LightOpts
+---@field kind? "point"|"spot"
+---@field body? string
+---@field position? Vec3
+---@field offset? Vec3
+---@field direction? Vec3 spot axis
+---@field color? Vec3
+---@field intensity? number
+---@field range? number
+---@field inner_angle? number
+---@field outer_angle? number
+---@param key string
+---@param opts? MeshBufferOpts
+function sdk.graphics.mesh_buffer(key, opts) end
+---@param key string
+---@param data MeshBufferWrite
+function sdk.graphics.mesh_buffer_write(key, data) end
+---@param key string
+---@param data MeshBufferWrite append-only delta; indices are absolute in the combined mesh
+function sdk.graphics.mesh_buffer_append(key, data) end
+---@param key string
+---@param opts? LightOpts
+function sdk.graphics.light(key, opts) end
 ---@return PlayerSnapshot
 function sdk.player.read() end
 ---@param body string

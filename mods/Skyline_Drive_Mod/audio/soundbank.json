@@ -1,182 +1,40 @@
 {
-  "provenance": "Original deterministic procedural synthesis; not real Skyline recordings.",
-  "format": "48000 Hz mono PCM16 WAV",
+  "provenance": "User audio.rar pack; engine code from nissan_silvia mod.",
+  "format": "PCM16 WAV",
   "sounds": [
     {
-      "file": "engine_900_coast.wav",
-      "frames": 192000,
-      "sample_rate": 48000,
-      "duration_s": 4.0,
-      "peak": 0.7346955175724696,
-      "rms": 0.21,
-      "seam_delta": 0.015137847060682809,
+      "file": "engine.wav",
+      "sample_rate": 44100,
+      "channels": 2,
+      "duration_s": 0.683,
       "loop": true,
-      "reference_rpm": 900,
-      "layer": "coast"
-    },
-    {
-      "file": "engine_900_load.wav",
-      "frames": 192000,
-      "sample_rate": 48000,
-      "duration_s": 4.0,
-      "peak": 0.78,
-      "rms": 0.23916455420054836,
-      "seam_delta": 0.013945907996418365,
-      "loop": true,
-      "reference_rpm": 900,
-      "layer": "load"
-    },
-    {
-      "file": "engine_2400_coast.wav",
-      "frames": 192000,
-      "sample_rate": 48000,
-      "duration_s": 4.0,
-      "peak": 0.5218524487603233,
-      "rms": 0.21,
-      "seam_delta": 0.013734124075357831,
-      "loop": true,
-      "reference_rpm": 2400,
-      "layer": "coast"
-    },
-    {
-      "file": "engine_2400_load.wav",
-      "frames": 192000,
-      "sample_rate": 48000,
-      "duration_s": 4.0,
-      "peak": 0.5658261348187595,
-      "rms": 0.245,
-      "seam_delta": 0.009044905067501365,
-      "loop": true,
-      "reference_rpm": 2400,
-      "layer": "load"
-    },
-    {
-      "file": "engine_4200_coast.wav",
-      "frames": 192000,
-      "sample_rate": 48000,
-      "duration_s": 4.0,
-      "peak": 0.42140482916745214,
-      "rms": 0.21000000000000002,
-      "seam_delta": 0.006731717402883447,
-      "loop": true,
-      "reference_rpm": 4200,
-      "layer": "coast"
-    },
-    {
-      "file": "engine_4200_load.wav",
-      "frames": 192000,
-      "sample_rate": 48000,
-      "duration_s": 4.0,
-      "peak": 0.44831861311525095,
-      "rms": 0.245,
-      "seam_delta": 0.0181060641743801,
-      "loop": true,
-      "reference_rpm": 4200,
-      "layer": "load"
-    },
-    {
-      "file": "engine_6600_coast.wav",
-      "frames": 192000,
-      "sample_rate": 48000,
-      "duration_s": 4.0,
-      "peak": 0.37924522860201365,
-      "rms": 0.21000000000000002,
-      "seam_delta": 0.0016755986352230967,
-      "loop": true,
-      "reference_rpm": 6600,
-      "layer": "coast"
-    },
-    {
-      "file": "engine_6600_load.wav",
-      "frames": 192000,
-      "sample_rate": 48000,
-      "duration_s": 4.0,
-      "peak": 0.39273221807676395,
-      "rms": 0.24500000000000002,
-      "seam_delta": 0.001939540030556186,
-      "loop": true,
-      "reference_rpm": 6600,
-      "layer": "load"
+      "base_rpm": 3400
     },
     {
       "file": "turbo_loop.wav",
-      "frames": 192000,
       "sample_rate": 48000,
       "duration_s": 4.0,
-      "peak": 0.24,
-      "rms": 0.06193728371817051,
-      "seam_delta": 0.007172470229932358,
       "loop": true
     },
     {
-      "file": "pop_01.wav",
-      "frames": 12480,
+      "file": "pop.wav",
       "sample_rate": 48000,
       "duration_s": 0.26,
-      "peak": 0.82,
-      "rms": 0.14358567009111342,
-      "seam_delta": 0.0,
-      "loop": false
-    },
-    {
-      "file": "pop_02.wav",
-      "frames": 14160,
-      "sample_rate": 48000,
-      "duration_s": 0.295,
-      "peak": 0.82,
-      "rms": 0.1407133092851892,
-      "seam_delta": 0.0,
-      "loop": false
-    },
-    {
-      "file": "pop_03.wav",
-      "frames": 15840,
-      "sample_rate": 48000,
-      "duration_s": 0.33,
-      "peak": 0.8200000000000001,
-      "rms": 0.13082505344759904,
-      "seam_delta": 0.0,
-      "loop": false
-    },
-    {
-      "file": "pop_04.wav",
-      "frames": 17520,
-      "sample_rate": 48000,
-      "duration_s": 0.365,
-      "peak": 0.8200000000000001,
-      "rms": 0.12399860344111825,
-      "seam_delta": 0.0,
-      "loop": false
-    },
-    {
-      "file": "pop_05.wav",
-      "frames": 19200,
-      "sample_rate": 48000,
-      "duration_s": 0.4,
-      "peak": 0.82,
-      "rms": 0.12385368653719595,
-      "seam_delta": 0.0,
-      "loop": false
-    },
-    {
-      "file": "pop_06.wav",
-      "frames": 20880,
-      "sample_rate": 48000,
-      "duration_s": 0.435,
-      "peak": 0.82,
-      "rms": 0.12936099016300406,
-      "seam_delta": 0.0,
       "loop": false
     },
     {
       "file": "lift.wav",
-      "frames": 23040,
       "sample_rate": 48000,
       "duration_s": 0.48,
-      "peak": 0.45,
-      "rms": 0.04725986928281187,
-      "seam_delta": 0.0,
       "loop": false
+    },
+    {
+      "file": "brake.wav",
+      "sample_rate": 48000,
+      "channels": 2,
+      "duration_s": 8.0,
+      "loop": true,
+      "note": "8s pink-noise scrub + source texture; dual detuned layers in-game"
     }
   ]
 }

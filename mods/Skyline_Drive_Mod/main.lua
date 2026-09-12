@@ -74,11 +74,15 @@ local function vec(x) return type(x)=="table" and finite(x[1]) and finite(x[2]) 
 local function add(a,b) return {a[1]+b[1],a[2]+b[2],a[3]+b[3]} end
 local function sub(a,b) return {a[1]-b[1],a[2]-b[2],a[3]-b[3]} end
 local function mul(a,s) return {a[1]*s,a[2]*s,a[3]*s} end
-local function dot(a,b) return a[1]*b[1]+a[2]*b[2]+a[3]*b[3] end
+local function dot(a,b)
+    if not vec(a) or not vec(b) then return 0 end
+    return a[1]*b[1]+a[2]*b[2]+a[3]*b[3]
+end
 local function cross(a,b) return {a[2]*b[3]-a[3]*b[2],a[3]*b[1]-a[1]*b[3],a[1]*b[2]-a[2]*b[1]} end
 local function norm(a)
+    if not vec(a) then return nil end
     local l=math.sqrt(dot(a,a))
-    return l>1e-8 and mul(a,1/l) or {0,0,0}
+    return l>1e-8 and mul(a,1/l) or nil
 end
 local function rotate(q,v)
     local t=mul(cross({q[1],q[2],q[3]},v),2)
@@ -112,13 +116,27 @@ end
 local function pressed_button(buttons,mask)
     return (buttons & mask)~=0 and (state.buttons & mask)==0
 end
--- AUDIO EXTENSION: presentation only. Never writes RPM, wheel speed, or forces.
+-- AUDIO EXTENSION: single engine sample, pitch-shifted by RPM.
 local sound = {
     running=false, supported=false, prepared=false, clock=0, cooldown=0,
     rpm=900, throttle=0, shift=0, previous_throttle=0,
-    overrun_remaining=0, pop_slot=0, random_state=73641, chop_until=0,
+    overrun_remaining=0, pop_slot=0, random_state=73641,
+    gain=0, shift_gain=1, load=0, log_pitch=nil,
+    turbo_gain=0, turbo_pitch=1, brake=0, brake_volume=0,
+    drift_slip=0, drift_slip_smooth=0, drift_volume=0, brake_pitch=1,
 }
-local sound_anchors={900,2400,4200,6600}
+local DRIFT_SLIP_MIN = 0.28
+local ENGINE_PATH = "audio/engine.wav"
+local ENGINE_BASE_RPM = 3400
+local BRAKE_PATH = "audio/brake.wav"
+local function smooth_toward(current,target,dt,tau)
+    return current+(target-current)*(1-math.exp(-dt/math.max(tau,1e-4)))
+end
+local function smooth_rpm_toward(current,target,dt)
+    local delta=target-current
+    local tau=0.20+0.55*clamp(math.abs(delta)/2800,0,1)
+    return smooth_toward(current,target,dt,tau)
+end
 local function sound_random()
     sound.random_state=(sound.random_state*48271)%2147483647
     return sound.random_state/2147483647
@@ -126,7 +144,12 @@ end
 local function stop_audio()
     if sound.supported then sdk.audio.stop_all() end
     sound.running=false; sound.cooldown=0; sound.overrun_remaining=0
-    sound.previous_throttle=0; sound.chop_until=0
+    sound.previous_throttle=0
+    sound.gain=0; sound.shift_gain=1; sound.load=0; sound.log_pitch=nil
+    sound.turbo_gain=0; sound.turbo_pitch=1
+    sound.brake=0; sound.brake_volume=0
+    sound.drift_slip=0; sound.drift_slip_smooth=0
+    sound.drift_volume=0; sound.brake_pitch=1
 end
 local function prepare_audio()
     sound.supported=type(sdk.audio)=="table" and number(sdk.audio.version,0)>=1
@@ -136,34 +159,43 @@ local function prepare_audio()
         return
     end
     if sound.prepared then return end
-    for _,rpm in ipairs(sound_anchors) do
-        sdk.audio.preload("audio/engine_"..rpm.."_coast.wav")
-        sdk.audio.preload("audio/engine_"..rpm.."_load.wav")
-    end
+    sdk.audio.preload(ENGINE_PATH)
     sdk.audio.preload("audio/turbo_loop.wav")
     sdk.audio.preload("audio/lift.wav")
-    for i=1,6 do sdk.audio.preload(string.format("audio/pop_%02d.wav",i)) end
+    sdk.audio.preload("audio/pop.wav")
+    sdk.audio.preload(BRAKE_PATH)
     sound.prepared=true
     sdk.ui.text("skyline_audio","")
 end
 local function start_audio()
     if not sound.supported or sdk.settings.audio_enabled==false or sound.running then return end
-    sound.clock=0; sound.cooldown=0; sound.rpm=math.max(state.rpm,200)
+    sound.clock=0; sound.cooldown=0
+    sound.rpm=math.max(state.rpm,200)
     sound.throttle=0; sound.previous_throttle=0; sound.overrun_remaining=0
-    sound.chop_until=0
-    for _,rpm in ipairs(sound_anchors) do
-        for _,layer in ipairs({"coast","load"}) do
-            sdk.audio.play("engine_"..rpm.."_"..layer,{
-                path="audio/engine_"..rpm.."_"..layer..".wav",
-                body=BODY,offset={0,-0.1,0.45},loop=true,volume=0,
-                pitch=clamp(sound.rpm/rpm,0.25,4),spatial=true,
-                spatial_scale=0.10,fade_in=0.08,
-            })
-        end
-    end
+    sound.gain=0; sound.shift_gain=1; sound.load=0
+    sound.log_pitch=math.log(math.max(sound.rpm,200)/ENGINE_BASE_RPM)
+    sound.turbo_gain=0; sound.turbo_pitch=1
+    local pitch=clamp(math.exp(sound.log_pitch),0.25,3)
+    local pitch_b=clamp(pitch*1.005,0.25,3)
+    sdk.audio.play("engine_main",{
+        path=ENGINE_PATH,body=BODY,offset={0,-0.1,0.45},loop=true,volume=0,
+        pitch=pitch,spatial=true,spatial_scale=0.10,fade_in=0.08,
+    })
+    sdk.audio.play("engine_main_b",{
+        path=ENGINE_PATH,body=BODY,offset={0,-0.1,0.45},loop=true,volume=0,
+        pitch=pitch_b,spatial=true,spatial_scale=0.10,fade_in=0.08,
+    })
     sdk.audio.play("turbo",{
         path="audio/turbo_loop.wav",body=BODY,offset={0,0,0.8},
         loop=true,volume=0,pitch=1,spatial=true,spatial_scale=0.1,fade_in=0.08,
+    })
+    sdk.audio.play("brake",{
+        path=BRAKE_PATH,body=BODY,offset={0,-0.25,-0.9},
+        loop=true,volume=0,pitch=1,spatial=true,spatial_scale=0.12,fade_in=0.10,
+    })
+    sdk.audio.play("brake_b",{
+        path=BRAKE_PATH,body=BODY,offset={0,-0.25,-0.9},
+        loop=true,volume=0,pitch=1.028,spatial=true,spatial_scale=0.12,fade_in=0.10,
     })
     sound.running=true
 end
@@ -173,9 +205,8 @@ local function exhaust_pop(intensity)
     local volume=clamp(number(sdk.settings.pop_volume,0.65),0,1)
     if master*volume<=0 then return end
     sound.pop_slot=sound.pop_slot%6+1
-    local variant=1+math.floor(sound_random()*6)
     sdk.audio.play("exhaust_pop_"..sound.pop_slot,{
-        path=string.format("audio/pop_%02d.wav",variant),
+        path="audio/pop.wav",
         body=BODY,offset={-0.5,-0.22,-1.95},loop=false,
         volume=clamp(master*volume*intensity,0,1),
         pitch=0.90+0.22*sound_random(),spatial=true,spatial_scale=0.1,fade_in=0,
@@ -188,23 +219,19 @@ local function update_audio(event)
         return
     end
     if not sound.running then start_audio() end
-    -- Native host pauses sinks in menus and replay. This also protects test hosts.
     if sdk.snapshot.paused or sdk.snapshot.replay then return end
-    local dt=clamp(number(event and event.dt,1/60),0,0.10)
+    local dt=clamp(number(event and event.dt,1/60),0,1/30)
     sound.clock=sound.clock+dt
     local actual_rpm=clamp(number(state.rpm,0),0,12000)
-    sound.rpm=sound.rpm+(actual_rpm-sound.rpm)*(1-math.exp(-dt/0.04))
+    sound.rpm=smooth_rpm_toward(sound.rpm,actual_rpm,dt)
     local throttle=clamp(number(sound.throttle,0),0,1)
     local master=clamp(number(sdk.settings.engine_volume,0.70),0,1)
     sound.cooldown=math.max(0,sound.cooldown-dt)
-    -- Existing physics uses a SOFT fuel taper. Detect its near-redline region;
-    -- this acoustic chatter does not impose a new RPM/clutch/ignition model.
     local limiter=actual_rpm>=C.redline_rpm-160 and throttle>0.55 and sound.shift<=0
     if limiter and sdk.settings.redline_pops~=false then
         sound.overrun_remaining=0
         if sound.cooldown<=0 then
             exhaust_pop(0.78+0.20*sound_random())
-            sound.chop_until=sound.clock+0.022+0.012*sound_random()
             sound.cooldown=0.095+0.075*sound_random()
         end
     else
@@ -217,7 +244,7 @@ local function update_audio(event)
             if sdk.settings.turbo_audio~=false and master>0 then
                 sdk.audio.play("turbo_lift",{
                     path="audio/lift.wav",body=BODY,offset={0,0,0.8},
-                    volume=master*0.30,pitch=0.9+0.2*sound_random(),
+                    volume=master*0.55,pitch=0.85+0.2*sound_random(),
                     spatial=true,spatial_scale=0.1,fade_in=0,
                 })
             end
@@ -232,36 +259,61 @@ local function update_audio(event)
         end
     end
     sound.previous_throttle=throttle
+    local brake_in=clamp(number(sound.brake,0),0,1)
+    local speed=clamp(number(state.speed,0),0,200)
+    local speed_factor=clamp((speed-0.5)/12,0,1)
+    local brake_master=clamp(number(sdk.settings.brake_volume,0.55),0,1)
+    sound.drift_slip_smooth=smooth_toward(sound.drift_slip_smooth,number(sound.drift_slip,0),dt,0.14)
+    local slip=sound.drift_slip_smooth
+    local drift_mix=0
+    if slip>DRIFT_SLIP_MIN then
+        local norm=clamp((slip-DRIFT_SLIP_MIN)/2.6,0,1)
+        drift_mix=norm*norm*norm
+    end
+    local pedal_brake=brake_in*speed_factor
+    local drift_target=drift_mix*speed_factor*0.68
+    local drift_tau=drift_target>sound.drift_volume and 0.22 or 0.14
+    sound.drift_volume=smooth_toward(sound.drift_volume,drift_target,dt,drift_tau)
+    local brake_mix=math.max(pedal_brake,sound.drift_volume)
+    local brake_target=(sdk.settings.brake_audio==false) and 0 or brake_master*brake_mix
+    sound.brake_volume=smooth_toward(sound.brake_volume,brake_target,dt,0.16)
+    local norm_pitch=clamp((slip-DRIFT_SLIP_MIN)/3.5,0,1)
+    local wobble=0.012*math.sin(sound.clock*4.3)+0.008*math.sin(sound.clock*7.1)
+    sound.brake_pitch=smooth_toward(sound.brake_pitch,0.98+0.08*norm_pitch+wobble,dt,0.22)
+    local brake_vol=sound.brake_volume
+    sdk.audio.update("brake",{
+        volume=brake_vol*0.72,
+        pitch=clamp(sound.brake_pitch,0.25,4),
+    })
+    sdk.audio.update("brake_b",{
+        volume=brake_vol*0.28,
+        pitch=clamp(sound.brake_pitch*1.028,0.25,4),
+    })
     local rpm=math.max(sound.rpm,200)
-    local low=1
-    for i=1,#sound_anchors-1 do if rpm>=sound_anchors[i] then low=i end end
-    if rpm>=sound_anchors[#sound_anchors] then low=#sound_anchors end
-    local high=math.min(low+1,#sound_anchors)
-    local mix=0
-    if low~=high then
-        mix=clamp(math.log(rpm/sound_anchors[low])/math.log(sound_anchors[high]/sound_anchors[low]),0,1)
-    end
-    local load=throttle^0.70
-    local alive=clamp((actual_rpm-150)/450,0,1)
-    local chop=sound.clock<sound.chop_until and 0.22 or 1.0
-    local shifting=sound.shift>0 and 0.52 or 1.0
-    local gain=master*0.50*alive*(0.65+0.35*load)*chop*shifting
-    for i,anchor in ipairs(sound_anchors) do
-        local weight=0
-        if i==low then weight=low==high and 1 or math.sqrt(1-mix)
-        elseif i==high then weight=math.sqrt(mix) end
-        local pitch=clamp(rpm/anchor,0.25,4)
-        sdk.audio.update("engine_"..anchor.."_coast",{
-            volume=gain*weight*math.sqrt(1-load),pitch=pitch,
-        })
-        sdk.audio.update("engine_"..anchor.."_load",{
-            volume=gain*weight*math.sqrt(load),pitch=pitch,
-        })
-    end
-    local boost=clamp((rpm-2300)/3700,0,1)*load
+    sound.load=smooth_toward(sound.load,throttle^0.70,dt,0.22)
+    local load=sound.load
+    local alive=clamp((rpm-150)/600,0,1)
+    sound.shift_gain=smooth_toward(sound.shift_gain,sound.shift>0 and 0.82 or 1.0,dt,0.18)
+    local drift_gain=1.0+0.07*drift_mix
+    local target=master*0.50*alive*(0.70+0.30*load)*sound.shift_gain*drift_gain
+    sound.gain=smooth_toward(sound.gain,target,dt,0.20)
+    local gain=sound.gain
+    local target_log=math.log(rpm/ENGINE_BASE_RPM)
+    sound.log_pitch=smooth_toward(sound.log_pitch or target_log,target_log,dt,0.26)
+    local pitch=clamp(math.exp(sound.log_pitch),0.25,3)
+    local pitch_b=clamp(pitch*1.005,0.25,3)
+    sdk.audio.update("engine_main",{
+        volume=gain*0.70,pitch=pitch,
+    })
+    sdk.audio.update("engine_main_b",{
+        volume=gain*0.30,pitch=pitch_b,
+    })
+    local boost_target=clamp((rpm-2000)/4500,0,1)*load
+    sound.turbo_gain=smooth_toward(sound.turbo_gain,boost_target,dt,0.24)
+    sound.turbo_pitch=smooth_toward(sound.turbo_pitch,clamp(0.65+rpm/9000,0.25,4),dt,0.22)
     sdk.audio.update("turbo",{
-        volume=sdk.settings.turbo_audio==false and 0 or master*0.16*boost,
-        pitch=clamp(0.65+rpm/9000,0.25,4),
+        volume=sdk.settings.turbo_audio==false and 0 or master*0.16*sound.turbo_gain,
+        pitch=sound.turbo_pitch,
     })
 end
 -- END AUDIO EXTENSION
@@ -309,6 +361,737 @@ local function clear_presentation()
     if presentation.supported then sdk.ui.remove("driving_dashboard") end
     presentation.active_hud=false;presentation.hud_timer=0
     clear_debug_text()
+end
+-- GTA-style VFX: textured camera billboards (smoke) + persistent rubber decals (skids).
+-- Transparent sort is ascending distance: lower bias draws behind, higher draws in front.
+local SKID_BUFFER_OPTS={blend=true,unlit=true,texture="textures/skid_tread.png",depth_bias=-3.5,tint={0.05,0.05,0.055}}
+local SMOKE_BUFFER_OPTS={blend=true,unlit=true,texture="textures/smoke_soft.png",depth_bias=4.5,tint={0.82,0.82,0.85}}
+local SKID_CHUNK_MAX_VERTS=8192
+local SKID_POINTS_PER_UPLOAD=96
+local SKID_PTS_TAIL=40
+-- Host allows 32 mesh buffers/mod; reserve smoke + remote VFX headroom.
+local MAX_LOCAL_SKID_BUFFERS=20
+local MAX_REMOTE_SKID_BUFFERS=8
+local MAX_REMOTE_VFX_PEERS=4
+local SKID_ALPHA_MIN=0.10
+local SKID_ALPHA_MAX=0.72
+local MAX_SMOKE_SPAWN_PER_TICK=2
+local vfx={
+    supported=false,skid_kappa=0.10,skid_alpha=5.0,
+    skid_width=0.32,min_skid_dist=0.03,skid_lift=0.012,
+    smoke_lifetime=2.0,smoke_size={0.47,1.88},smoke_slip_min=0.30,
+    smoke_mesh_live=false,smoke_dirty=false,
+    remote_wheels={},remote_smoke={},remote_smoke_dirty=false,
+    remote_smoke_mesh_live=false,
+}
+local REMOTE_WHEEL_KEYS={rr="wheel_rr",rl="wheel_rl"}
+local function vfx_net_active()
+    return sdk.net and type(sdk.net.info)=="function" and (sdk.net.info().active==true)
+end
+local function clear_mesh(mesh)
+    mesh.positions={};mesh.normals={};mesh.colors={};mesh.uvs={};mesh.indices={}
+end
+local function camera_position()
+    local snap=sdk.snapshot
+    return snap and snap.camera and vec(snap.camera.position) and snap.camera.position
+end
+local function billboard_axes(center,cam)
+    local to=sub(cam,center)
+    local dist=math.sqrt(dot(to,to))
+    if dist<1e-4 then return {1,0,0},{0,1,0},{0,0,-1} end
+    to=mul(to,1/dist)
+    local right=cross({0,1,0},to)
+    local rlen=math.sqrt(dot(right,right))
+    if rlen<1e-4 then right={1,0,0} else right=mul(right,1/rlen) end
+    local up=cross(to,right)
+    return right,up,to
+end
+local function push_rgba(mesh,a)
+    mesh.colors[#mesh.colors+1]={1,1,1,a}
+end
+local function append_smoke_sprite(mesh,center,right,up,fwd,size,alpha)
+    local hs=size*0.5
+    local r=mul(right,hs); local u=mul(up,hs)
+    local base=#mesh.positions
+    local n={-fwd[1],-fwd[2],-fwd[3]}
+    mesh.positions[#mesh.positions+1]=sub(sub(center,r),u)
+    mesh.positions[#mesh.positions+1]=add(sub(center,r),u)
+    mesh.positions[#mesh.positions+1]=add(add(center,r),u)
+    mesh.positions[#mesh.positions+1]=sub(add(center,r),u)
+    mesh.uvs[#mesh.uvs+1]={0,1}; mesh.uvs[#mesh.uvs+1]={1,1}
+    mesh.uvs[#mesh.uvs+1]={1,0}; mesh.uvs[#mesh.uvs+1]={0,0}
+    for _=1,4 do mesh.normals[#mesh.normals+1]=n; push_rgba(mesh,alpha) end
+    mesh.indices[#mesh.indices+1]=base; mesh.indices[#mesh.indices+1]=base+1; mesh.indices[#mesh.indices+1]=base+2
+    mesh.indices[#mesh.indices+1]=base; mesh.indices[#mesh.indices+1]=base+2; mesh.indices[#mesh.indices+1]=base+3
+end
+local function clear_session_skids()
+    for _,w in ipairs(wheels) do
+        if w.skid_chunks then
+            for _,chunk in ipairs(w.skid_chunks) do sdk.graphics.remove(chunk.key) end
+        end
+        w.skid_chunks=nil; w.skid_pts=nil; w.skid_meshed=nil; w.skid_u=nil
+        w.skid_active=nil
+        w.smoke_accum=nil
+    end
+    vfx.skid_dirty=false
+end
+local function clear_smoke()
+    if not vfx.supported then return end
+    sdk.graphics.remove("vfx_smoke")
+    vfx.smoke=nil
+    if vfx.mesh then vfx.mesh.smoke={positions={},normals={},colors={},uvs={},indices={}} end
+end
+local function clear_remote_vfx(peer)
+    if not vfx.supported then return end
+    local wheels_list=vfx.remote_wheels and vfx.remote_wheels[peer]
+    if wheels_list then
+        for _,w in ipairs(wheels_list) do
+            if w.skid_chunks then
+                for _,chunk in ipairs(w.skid_chunks) do sdk.graphics.remove(chunk.key) end
+            end
+        end
+        vfx.remote_wheels[peer]=nil
+    end
+    if vfx.remote_smoke then vfx.remote_smoke[peer]=nil end
+    vfx.remote_smoke_dirty=true
+end
+local function clear_all_remote_vfx()
+    if not vfx.remote_wheels then return end
+    for peer in pairs(vfx.remote_wheels) do clear_remote_vfx(peer) end
+    vfx.remote_wheels={}
+    vfx.remote_smoke={}
+    vfx.remote_smoke_dirty=false
+    if vfx.supported then
+        sdk.graphics.remove("vfx_smoke_remote")
+        vfx.remote_smoke_mesh_live=false
+        if vfx.mesh then vfx.mesh.remote_smoke={positions={},normals={},colors={},uvs={},indices={}} end
+    end
+end
+local function clear_effects()
+    clear_smoke(); clear_all_remote_vfx()
+end
+local function flatten_forward(fwd,normal)
+    if not vec(fwd) or not vec(normal) then return fwd end
+    local flat=sub(fwd,mul(normal,dot(fwd,normal)))
+    return norm(flat) or fwd
+end
+local function segment_forward(pt_a,pt_b)
+    if not pt_a or not pt_b or not vec(pt_a.pos) or not vec(pt_b.pos) then return nil end
+    return flatten_forward(sub(pt_b.pos,pt_a.pos),pt_b.normal or pt_a.normal)
+end
+local function new_skid_delta()
+    return {positions={},uvs={},indices={}}
+end
+local SKID_TEX_REPEAT=1.8
+local function push_skid_vertex_color(delta,alpha)
+    delta.colors=delta.colors or {}
+    local a=clamp(number(alpha,SKID_ALPHA_MIN),SKID_ALPHA_MIN,SKID_ALPHA_MAX)
+    delta.colors[#delta.colors+1]=1
+    delta.colors[#delta.colors+1]=1
+    delta.colors[#delta.colors+1]=1
+    delta.colors[#delta.colors+1]=a
+end
+local function sane_point(p)
+    if not vec(p) then return false end
+    for i=1,3 do
+        local v=p[i]
+        if v~=v or v<-100000 or v>100000 then return false end
+    end
+    return true
+end
+local function skid_uv_u(u)
+    -- Host rejects UVs outside [-1000, 1000]; wrap so long drifts stay valid.
+    local v=number(u,0)%64.0
+    if v<-1000 then v=-1000 elseif v>1000 then v=1000 end
+    return v
+end
+local function push_cross_section(delta,pt,forward,width)
+    local lateral=norm(cross(forward,pt.normal)); if not lateral then return false end
+    if not sane_point(pt.pos) then return false end
+    local half=width*0.5
+    local u=skid_uv_u(pt.u)
+    local a=pt.intensity or SKID_ALPHA_MIN
+    delta.positions[#delta.positions+1]=add(pt.pos,mul(lateral,half))
+    push_skid_vertex_color(delta,a)
+    delta.uvs[#delta.uvs+1]=u; delta.uvs[#delta.uvs+1]=0
+    delta.positions[#delta.positions+1]=sub(pt.pos,mul(lateral,half))
+    push_skid_vertex_color(delta,a)
+    delta.uvs[#delta.uvs+1]=u; delta.uvs[#delta.uvs+1]=1
+    return true
+end
+local function active_skid_chunk(w)
+    local chunks=w.skid_chunks
+    if not chunks then return nil end
+    local chunk=chunks[#chunks]
+    if chunk and not chunk.sealed then return chunk end
+    return nil
+end
+local function reset_skid_pending(w)
+    local chunk=active_skid_chunk(w)
+    if chunk then chunk.pending=new_skid_delta() end
+end
+local function skid_delta_valid(chunk,delta)
+    if not delta or #delta.positions==0 then return true end
+    if #delta.indices<3 then return false end
+    if delta.colors and #delta.colors~=#delta.positions*4 then return false end
+    if delta.uvs and #delta.uvs~=#delta.positions*2 then return false end
+    local total=chunk.verts+#delta.positions
+    for _,idx in ipairs(delta.indices) do
+        if idx<chunk.verts or idx>=total then return false end
+    end
+    return total<=SKID_CHUNK_MAX_VERTS
+end
+local function flush_skid_delta(chunk)
+    local delta=chunk.pending
+    if not delta or #delta.positions==0 then return true end
+    if #delta.indices<3 then
+        chunk.pending=new_skid_delta()
+        return true
+    end
+    if not skid_delta_valid(chunk,delta) then
+        chunk.pending=new_skid_delta()
+        return false
+    end
+    if not chunk.live then
+        sdk.graphics.mesh_buffer(chunk.key,SKID_BUFFER_OPTS)
+        chunk.live=true
+        vfx.smoke_dirty=true
+    end
+    sdk.graphics.mesh_buffer_append(chunk.key,delta)
+    chunk.verts=chunk.verts+#delta.positions
+    chunk.pending=new_skid_delta()
+    return true
+end
+local function iter_skid_wheels(remote)
+    local list={}
+    if remote then
+        for _,wheels_list in pairs(vfx.remote_wheels or {}) do
+            for _,w in ipairs(wheels_list) do list[#list+1]=w end
+        end
+    else
+        for _,w in ipairs(wheels) do list[#list+1]=w end
+    end
+    return list
+end
+local function count_skid_buffers(remote)
+    local n=0
+    for _,w in ipairs(iter_skid_wheels(remote)) do
+        if w.skid_chunks then
+            for _,chunk in ipairs(w.skid_chunks) do
+                if chunk.live then n=n+1 end
+            end
+        end
+    end
+    return n
+end
+local function evict_oldest_sealed_skid(remote)
+    local victim_wheel,victim_idx=nil,nil
+    local oldest=math.huge
+    for _,w in ipairs(iter_skid_wheels(remote)) do
+        local chunks=w.skid_chunks
+        if chunks then
+            for i,chunk in ipairs(chunks) do
+                if chunk.sealed and (chunk.serial or 0)<oldest then
+                    oldest=chunk.serial or 0
+                    victim_wheel=w
+                    victim_idx=i
+                end
+            end
+        end
+    end
+    if not victim_wheel then return false end
+    local chunk=victim_wheel.skid_chunks[victim_idx]
+    sdk.graphics.remove(chunk.key)
+    table.remove(victim_wheel.skid_chunks,victim_idx)
+    return true
+end
+local function recover_skid_chunk(w)
+    local chunk=active_skid_chunk(w)
+    if not chunk then return nil end
+    reset_skid_pending(w)
+    seal_skid_chunk(chunk)
+    return ensure_wheel_skid_chunk(w)
+end
+local function append_skid_segment(chunk,pt_a,pt_b,width)
+    local fwd=segment_forward(pt_a,pt_b); if not fwd then return false end
+    local base=chunk.verts
+    chunk.pending=new_skid_delta()
+    if not push_cross_section(chunk.pending,pt_a,fwd,width) then return false end
+    if not push_cross_section(chunk.pending,pt_b,fwd,width) then return false end
+    chunk.pending.indices={base,base+1,base+2,base+1,base+3,base+2}
+    return flush_skid_delta(chunk)
+end
+local function seal_skid_chunk(chunk)
+    if chunk.sealed then return end
+    chunk.pending=new_skid_delta()
+    chunk.pending=nil
+    chunk.sealed=true
+end
+local function end_skid_stroke(w)
+    w.skid_active=false
+    w.skid_pts={}
+    w.skid_meshed=0
+    w.skid_u=0
+    reset_skid_pending(w)
+end
+local function ensure_wheel_skid_chunk(w)
+    w.skid_chunks=w.skid_chunks or {}
+    local chunk=w.skid_chunks[#w.skid_chunks]
+    if chunk and not chunk.sealed then return chunk end
+    local remote=w.remote_peer~=nil
+    local cap=remote and MAX_REMOTE_SKID_BUFFERS or MAX_LOCAL_SKID_BUFFERS
+    while count_skid_buffers(remote)>=cap do
+        if not evict_oldest_sealed_skid(remote) then return nil end
+    end
+    w.skid_chunk_serial=(w.skid_chunk_serial or 0)+1
+    local serial=w.skid_chunk_serial
+    local key=serial==1 and ("vfx_skid_"..w.key) or ("vfx_skid_"..w.key.."_"..serial)
+    vfx.skid_buffer_serial=(vfx.skid_buffer_serial or 0)+1
+    chunk={
+        key=key,verts=0,pending=new_skid_delta(),sealed=false,live=false,
+        serial=vfx.skid_buffer_serial,
+    }
+    w.skid_chunks[#w.skid_chunks+1]=chunk
+    return chunk
+end
+local function trim_meshed_skid_points(w)
+    local pts=w.skid_pts
+    if not pts then return end
+    local meshed=w.skid_meshed or 0
+    while meshed>2 and #pts>SKID_PTS_TAIL do
+        table.remove(pts,1)
+        meshed=meshed-1
+    end
+    w.skid_meshed=meshed
+end
+local function append_wheel_skids(w)
+    local pts=w.skid_pts
+    if not pts or #pts<2 then return end
+    local meshed=w.skid_meshed or 0
+    if meshed<1 then meshed=1 end
+    local budget=SKID_POINTS_PER_UPLOAD
+    while meshed<#pts and budget>0 do
+        local chunk=ensure_wheel_skid_chunk(w)
+        if not chunk then break end
+        if chunk.verts+4>SKID_CHUNK_MAX_VERTS then
+            reset_skid_pending(w)
+            seal_skid_chunk(chunk)
+            chunk=ensure_wheel_skid_chunk(w)
+            if not chunk then break end
+        end
+        if not append_skid_segment(chunk,pts[meshed],pts[meshed+1],vfx.skid_width) then
+            reset_skid_pending(w)
+            chunk=recover_skid_chunk(w)
+            if not chunk then break end
+            if not append_skid_segment(chunk,pts[meshed],pts[meshed+1],vfx.skid_width) then break end
+        end
+        meshed=meshed+1
+        w.skid_meshed=meshed
+        budget=budget-1
+    end
+    trim_meshed_skid_points(w)
+    if meshed<#pts then vfx.skid_dirty=true end
+end
+local function maybe_upload_skids()
+    if not vfx.skid_dirty or not vfx.supported then return end
+    for _,w in ipairs(wheels) do append_wheel_skids(w) end
+    for _,wheels_list in pairs(vfx.remote_wheels or {}) do
+        for _,w in ipairs(wheels_list) do append_wheel_skids(w) end
+    end
+    local pending=false
+    local function pending_wheel(w)
+        local pts=w.skid_pts
+        return pts and (w.skid_meshed or 0)<#pts
+    end
+    for _,w in ipairs(wheels) do
+        if pending_wheel(w) then pending=true; break end
+    end
+    if not pending then
+        for _,wheels_list in pairs(vfx.remote_wheels or {}) do
+            for _,w in ipairs(wheels_list) do
+                if pending_wheel(w) then pending=true; break end
+            end
+            if pending then break end
+        end
+    end
+    vfx.skid_dirty=pending
+end
+local function fill_smoke_list(mesh,smoke,cam)
+    if not smoke or #smoke==0 then return false end
+    local right,up,fwd=billboard_axes(smoke[#smoke].pos,cam)
+    local count=0
+    for i=1,#smoke do
+        local p=smoke[i]
+        local t=clamp(p.age/p.life,0,1)
+        local fade=(1-t)^2.85
+        local strength=clamp(p.intensity or 0.5,0,1)
+        local birth=0.28+0.72*t
+        local alpha=fade*strength*birth
+        if t>=1 or alpha<=0 then goto next end
+        local s=p.size*(0.60+2.05*(t^0.72))
+        append_smoke_sprite(mesh,p.pos,right,up,fwd,s,clamp(alpha*0.95,0,0.68))
+        count=count+1
+        ::next::
+    end
+    return count>0
+end
+local function fill_smoke_mesh(mesh,cam)
+    clear_mesh(mesh)
+    return fill_smoke_list(mesh,vfx.smoke,cam)
+end
+local function fill_remote_smoke_mesh(mesh,cam)
+    clear_mesh(mesh)
+    local count=0
+    for _,smoke in pairs(vfx.remote_smoke or {}) do
+        if fill_smoke_list(mesh,smoke,cam) then count=count+1 end
+    end
+    return count>0
+end
+local function remote_smoke_intensity(slip)
+    if slip<(vfx.smoke_slip_min or 0.30) then return 0 end
+    local t=clamp((slip-(vfx.smoke_slip_min or 0.30))/(4.0-(vfx.smoke_slip_min or 0.30)),0,1)
+    return clamp(t*t*14,0,14)
+end
+local function remote_skid_intensity(slip)
+    if slip<0.08 then return SKID_ALPHA_MIN end
+    local t=clamp(slip/4.0,0,1)
+    return SKID_ALPHA_MIN+(SKID_ALPHA_MAX-SKID_ALPHA_MIN)*t*t
+end
+local function wheel_slip(kappa,alpha,usage)
+    return math.max(kappa,alpha*0.06,math.max(0,usage-0.62)*1.8)
+end
+local function wheel_skid_intensity(kappa,alpha,usage)
+    local slip=wheel_slip(kappa,alpha,usage)
+    if slip<0.08 then return SKID_ALPHA_MIN end
+    local t=clamp(slip/4.0,0,1)
+    return SKID_ALPHA_MIN+(SKID_ALPHA_MAX-SKID_ALPHA_MIN)*t*t
+end
+local function push_skid_point(w,pos,normal,intensity)
+    if not sane_point(pos) or not vec(normal) then return end
+    local pts=w.skid_pts or {}
+    w.skid_pts=pts
+    local u=w.skid_u or 0
+    local last=pts[#pts]
+    intensity=clamp(number(intensity,SKID_ALPHA_MIN),SKID_ALPHA_MIN,SKID_ALPHA_MAX)
+    if last and vec(last.pos) then
+        local d=sub(pos,last.pos)
+        local dist_sq=dot(d,d)
+        local min=vfx.min_skid_dist
+        if dist_sq<min*min then return end
+        local dist=math.sqrt(dist_sq)
+        local du=dist*SKID_TEX_REPEAT
+        local i0=last.intensity or SKID_ALPHA_MIN
+        if dist>min*2 then
+            local steps=math.min(math.floor(dist/min)-1,6)
+            for s=1,steps do
+                local t=s/(steps+1)
+                pts[#pts+1]={
+                    pos=add(last.pos,mul(d,t)),normal=normal,u=u+du*t,
+                    intensity=i0+(intensity-i0)*t,
+                }
+            end
+        end
+        u=u+du
+    end
+    w.skid_u=u
+    pts[#pts+1]={pos=pos,normal=normal,u=u,intensity=intensity}
+    vfx.skid_dirty=true
+end
+local function wheel_smoke_intensity(kappa,alpha,usage)
+    local slip=wheel_slip(kappa,alpha,usage)
+    local min_slip=vfx.smoke_slip_min or 0.30
+    if slip<min_slip then return 0 end
+    local t=clamp((slip-min_slip)/(4.0-min_slip),0,1)
+    return clamp(t*t*14,0,14)
+end
+local function smoke_bucket(w)
+    if w.remote_peer then
+        vfx.remote_smoke=vfx.remote_smoke or {}
+        local bucket=vfx.remote_smoke[w.remote_peer]
+        if not bucket then
+            bucket={}
+            vfx.remote_smoke[w.remote_peer]=bucket
+        end
+        return bucket
+    end
+    vfx.smoke=vfx.smoke or {}
+    return vfx.smoke
+end
+local function spawn_smoke(w,pos,intensity,dt)
+    if intensity<=0 or not sane_point(pos) then return end
+    w.smoke_accum=(w.smoke_accum or 0)+intensity*dt*10
+    local spawned=0
+    local bucket=smoke_bucket(w)
+    while w.smoke_accum>=0.24 and spawned<MAX_SMOKE_SPAWN_PER_TICK do
+        w.smoke_accum=w.smoke_accum-0.24
+        spawned=spawned+1
+        local t=clamp(intensity/14,0.12,1)
+        local sz=vfx.smoke_size[1]+(vfx.smoke_size[2]-vfx.smoke_size[1])*t
+        local spread=0.02*t
+        bucket[#bucket+1]={
+            pos=add(pos,{
+                (math.random()-0.5)*spread,
+                (math.random()-0.5)*spread*0.25,
+                (math.random()-0.5)*spread,
+            }),
+            vel={0,0.48+0.62*t,0},
+            age=0,life=vfx.smoke_lifetime,
+            size=sz*(0.80+0.20*math.random())*(0.76+0.30*t),
+            intensity=t,
+        }
+        if w.remote_peer then vfx.remote_smoke_dirty=true else vfx.smoke_dirty=true end
+    end
+end
+local function tick_smoke_list(smoke,dt)
+    if not smoke or #smoke==0 then return false end
+    local dirty=false
+    for i=#smoke,1,-1 do
+        local p=smoke[i]
+        p.age=p.age+dt
+        if p.age>=p.life then
+            table.remove(smoke,i)
+            dirty=true
+        else
+            local lift=0.55+(p.intensity or 0.5)*0.85
+            p.vel[2]=p.vel[2]+lift*dt
+            p.pos=add(p.pos,mul(p.vel,dt))
+            dirty=true
+        end
+    end
+    return dirty
+end
+local function tick_all_smoke(dt)
+    if tick_smoke_list(vfx.smoke,dt) then vfx.smoke_dirty=true end
+    for _,smoke in pairs(vfx.remote_smoke or {}) do
+        if tick_smoke_list(smoke,dt) then vfx.remote_smoke_dirty=true end
+    end
+end
+local function hide_smoke_mesh()
+    if not vfx.smoke_mesh_live then
+        vfx.smoke_dirty=false
+        return
+    end
+    sdk.graphics.set_visible("vfx_smoke",false)
+    vfx.smoke_mesh_live=false
+    vfx.smoke_dirty=false
+end
+local function hide_remote_smoke_mesh()
+    if not vfx.remote_smoke_mesh_live then
+        vfx.remote_smoke_dirty=false
+        return
+    end
+    sdk.graphics.set_visible("vfx_smoke_remote",false)
+    vfx.remote_smoke_mesh_live=false
+    vfx.remote_smoke_dirty=false
+end
+local function new_remote_wheel(peer,short)
+    return {
+        key="net_"..peer.."_"..short,remote_peer=peer,front=false,
+        skid_chunks={},skid_pts={},skid_meshed=0,skid_u=0,
+        skid_active=false,skid_off_acc=0,skid_chunk_serial=0,smoke_accum=0,
+    }
+end
+local function ensure_remote_wheels(peer)
+    vfx.remote_wheels=vfx.remote_wheels or {}
+    local list=vfx.remote_wheels[peer]
+    if list then return list end
+    list={new_remote_wheel(peer,"rr"),new_remote_wheel(peer,"rl")}
+    vfx.remote_wheels[peer]=list
+    return list
+end
+local function apply_wheel_vfx(w,kappa,alpha,usage,tread,gn,dt)
+    local skidding=kappa>vfx.skid_kappa or alpha>vfx.skid_alpha or usage>0.68
+    if not skidding or not vec(tread) or not vec(gn) then return end
+    w.skidding_now=true
+    if not w.skid_active then
+        w.skid_active=true
+        w.skid_pts={}
+        w.skid_meshed=0
+        reset_skid_pending(w)
+    end
+    push_skid_point(w,add(tread,mul(gn,vfx.skid_lift)),gn,wheel_skid_intensity(kappa,alpha,usage))
+    if not w.front then
+        spawn_smoke(w,add(tread,mul(gn,0.004)),wheel_smoke_intensity(kappa,alpha,usage),dt)
+    end
+end
+local function apply_remote_wheel_vfx(w,slip,tread,gn,dt)
+    local smoke_i=remote_smoke_intensity(slip)
+    if smoke_i<=0 or not vec(tread) or not vec(gn) then return end
+    w.skidding_now=true
+    if not w.skid_active then
+        w.skid_active=true
+        w.skid_pts={}
+        w.skid_meshed=0
+        reset_skid_pending(w)
+    end
+    push_skid_point(w,add(tread,mul(gn,vfx.skid_lift)),gn,remote_skid_intensity(slip))
+    spawn_smoke(w,add(tread,mul(gn,0.004)),smoke_i,dt)
+end
+local function publish_net_vfx(contacts)
+    if not vfx_net_active() or not state.spawned or not sdk.net.publish then return end
+    local packet={}
+    for _,c in ipairs(contacts) do
+        local w=c.wheel
+        if w and not w.front then
+            local short=w.key=="wheel_rr" and "rr" or (w.key=="wheel_rl" and "rl" or nil)
+            if short then
+                local slip=wheel_slip(math.abs(w.kappa or 0),math.abs(w.alpha or 0),w.usage or 0)
+                if slip>=(vfx.smoke_slip_min or 0.30)*0.85 then
+                    local tread=c.point
+                    local gn=c.ground_n or (c.n and c.n.axis)
+                    if sane_point(tread) and vec(gn) then
+                        packet[short]={slip,tread[1],tread[2],tread[3],gn[1],gn[2],gn[3]}
+                    end
+                end
+            end
+        end
+    end
+    if next(packet) then sdk.net.publish("vfx",packet) else sdk.net.publish("vfx",nil) end
+end
+local function tick_remote_vfx(dt)
+    if not vfx_net_active() or not vfx.supported then
+        if vfx.remote_wheels and next(vfx.remote_wheels) then clear_all_remote_vfx() end
+        return
+    end
+    local info=sdk.net.info()
+    local states=((info.states or {})[sdk.mod_id] or {})
+    local live={}
+    local peer_count=0
+    for peer,peer_states in pairs(states) do
+        if tostring(peer)~=tostring(info.local_id) and type(peer_states)=="table" then
+            local data=peer_states.vfx
+            if type(data)=="table" and next(data) then
+                peer_count=peer_count+1
+                if peer_count>MAX_REMOTE_VFX_PEERS then break end
+                live[peer]=true
+                local wheels_list=ensure_remote_wheels(peer)
+                for _,w in ipairs(wheels_list) do w.skidding_now=false end
+                for short,wheel_key in pairs(REMOTE_WHEEL_KEYS) do
+                    local sample=data[short]
+                    if type(sample)=="table" and #sample>=7 then
+                        local slip=number(sample[1],0)
+                        local tread={sample[2],sample[3],sample[4]}
+                        local gn={sample[5],sample[6],sample[7]}
+                        local w=nil
+                        for _,candidate in ipairs(wheels_list) do
+                            if candidate.key=="net_"..peer.."_"..short then w=candidate; break end
+                        end
+                        if w then apply_remote_wheel_vfx(w,slip,tread,gn,dt) end
+                    end
+                end
+                for _,w in ipairs(wheels_list) do
+                    if w.skidding_now then
+                        w.skid_off_acc=0
+                    elseif w.skid_active then
+                        w.skid_off_acc=(w.skid_off_acc or 0)+dt
+                        if w.skid_off_acc>=0.15 then end_skid_stroke(w) end
+                    end
+                end
+            end
+        end
+    end
+    for peer in pairs(vfx.remote_wheels or {}) do
+        if not live[peer] then clear_remote_vfx(peer) end
+    end
+    maybe_upload_skids()
+end
+local function prepare_effects()
+    vfx.supported=sdk.graphics and (sdk.graphics.version or 0)>=4
+        and type(sdk.graphics.mesh_buffer)=="function"
+        and type(sdk.graphics.mesh_buffer_append)=="function"
+    if not vfx.supported then return end
+    clear_session_skids()
+    vfx.skid_buffer_serial=0
+    vfx.smoke={}; vfx.smoke_mesh_live=false; vfx.smoke_dirty=false
+    vfx.remote_wheels={}; vfx.remote_smoke={}
+    vfx.remote_smoke_dirty=false; vfx.remote_smoke_mesh_live=false
+    vfx.mesh={
+        smoke={positions={},normals={},colors={},uvs={},indices={}},
+        remote_smoke={positions={},normals={},colors={},uvs={},indices={}},
+    }
+    sdk.graphics.mesh_buffer("vfx_smoke",SMOKE_BUFFER_OPTS)
+    sdk.graphics.mesh_buffer("vfx_smoke_remote",SMOKE_BUFFER_OPTS)
+    for _,w in ipairs(wheels) do
+        w.skid_chunks={}
+        w.skid_pts={}
+        w.skid_meshed=0
+        w.skid_u=0; w.skid_active=false; w.skid_off_acc=0
+        w.skid_chunk_serial=0
+        w.smoke_accum=0
+    end
+end
+local function tick_wheel_vfx(contacts,dt)
+    if not vfx.supported then return end
+    dt=clamp(number(dt,1/60),0,0.1)
+    for _,w in ipairs(wheels) do w.skidding_now=false end
+    for _,c in ipairs(contacts) do
+        local w=c.wheel
+        local kappa=math.abs(w.kappa or 0)
+        local alpha=math.abs(w.alpha or 0)
+        local usage=w.usage or 0
+        local tread=c.point
+        local gn=c.ground_n or (c.n and c.n.axis)
+        if not w.front and vec(tread) then
+            sound.drift_slip=math.max(sound.drift_slip,wheel_slip(kappa,alpha,usage))
+        end
+        apply_wheel_vfx(w,kappa,alpha,usage,tread,gn,dt)
+    end
+    for _,w in ipairs(wheels) do
+        if w.skidding_now then
+            w.skid_off_acc=0
+        elseif w.skid_active then
+            w.skid_off_acc=(w.skid_off_acc or 0)+dt
+            if w.skid_off_acc>=0.15 then end_skid_stroke(w) end
+        end
+    end
+    maybe_upload_skids()
+    publish_net_vfx(contacts)
+end
+local function upload_wheel_vfx(event)
+    if not vfx.supported or not vfx.mesh then return end
+    if sdk.snapshot.paused or sdk.snapshot.replay then return end
+    local dt=clamp(number(event and event.dt,1/60),0,0.1)
+    tick_remote_vfx(dt)
+    tick_all_smoke(dt)
+    local cam=camera_position(); if not cam then return end
+    if state.spawned then
+        local smoke=vfx.smoke
+        if not smoke or #smoke==0 then
+            hide_smoke_mesh()
+        elseif vfx.smoke_dirty then
+            if fill_smoke_mesh(vfx.mesh.smoke,cam) then
+                sdk.graphics.mesh_buffer_write("vfx_smoke",vfx.mesh.smoke)
+                sdk.graphics.set_visible("vfx_smoke",true)
+                vfx.smoke_mesh_live=true
+                vfx.smoke_dirty=false
+            elseif vfx.smoke_mesh_live then
+                hide_smoke_mesh()
+            end
+        end
+    else
+        hide_smoke_mesh()
+    end
+    if vfx_net_active() then
+        local has_remote=false
+        for _,smoke in pairs(vfx.remote_smoke or {}) do
+            if smoke and #smoke>0 then has_remote=true; break end
+        end
+        if not has_remote then
+            hide_remote_smoke_mesh()
+        elseif vfx.remote_smoke_dirty then
+            if fill_remote_smoke_mesh(vfx.mesh.remote_smoke,cam) then
+                sdk.graphics.mesh_buffer_write("vfx_smoke_remote",vfx.mesh.remote_smoke)
+                sdk.graphics.set_visible("vfx_smoke_remote",true)
+                vfx.remote_smoke_mesh_live=true
+                vfx.remote_smoke_dirty=false
+            elseif vfx.remote_smoke_mesh_live then
+                hide_remote_smoke_mesh()
+            end
+        end
+    else
+        hide_remote_smoke_mesh()
+        clear_all_remote_vfx()
+    end
 end
 local function prepare_presentation()
     presentation.supported=type(sdk.camera.rig)=="function" and type(sdk.ui.canvas)=="function"
@@ -387,7 +1170,7 @@ end
 
 -- Keep the old keys clean on reload: no orphan wheel/carrier bodies or meshes.
 local function remove_rig()
-    stop_audio(); clear_presentation()
+    stop_audio(); clear_presentation(); clear_effects(); clear_session_skids(); clear_all_remote_vfx()
     if state.occupied or sdk.player.attached()==BODY then
         sdk.player.detach(); sdk.camera.clear_follow()
     end
@@ -435,6 +1218,7 @@ local function spawn_rig(request)
         linear_damping=0,angular_damping=0,
     })
     sdk.graphics.mesh("skyline_visual",{path=MODEL,body=BODY})
+    prepare_effects()
     reset_simulation()
     state.spawned=true; state.enter_after=math.max(state.enter_after,state.time+0.25)
     start_audio()
@@ -607,8 +1391,8 @@ local function collect_contacts(car,angles,dt)
                 local hub=sub(mount,mul(up,length))
                 local point=sub(hub,mul(n,C.radius))
                 local arm=sub(point,center)
-                local c={wheel=w,wheel_index=i,point=point,alignment=alignment,
-                    length=length,compression=w.rest_length-length,
+                local c={wheel=w,wheel_index=i,point=point,ground=hit.point,ground_n=n,
+                    alignment=alignment,length=length,compression=w.rest_length-length,
                     pn=0,px=0,py=0,pb=0,
                     n=constraint_axis(q,arm,n),
                     x=constraint_axis(q,arm,forward),y=constraint_axis(q,arm,lateral)}
@@ -940,6 +1724,7 @@ local function simulate(car,input,dt)
             solve_tire(sim,contacts[index],input,mu,dt)
         end
     end
+    local body_center=add(car.position,rotate(car.rotation,C.center))
     for _,c in ipairs(contacts) do
         c.wheel.load=c.pn/dt
         local vx,vy=velocity_along(sim,c.x),velocity_along(sim,c.y)
@@ -949,6 +1734,8 @@ local function simulate(car,input,dt)
         c.wheel.alpha=math.deg(math.atan(vy,math.max(math.abs(vx),0.1)))
         c.wheel.fx=c.px/dt; c.wheel.fy=c.py/dt
         c.wheel.usage=c.limit and math.sqrt(c.px*c.px+c.py*c.py)/math.max(c.limit,1e-8) or 0
+        local arm=sub(c.ground or c.point,body_center)
+        c.surface_v=add(sim.v,cross(sim.w,arm))
     end
     for _,w in ipairs(wheels) do if not w.contact then
         local fraction=w.front and C.front_brake_fraction or 1-C.front_brake_fraction
@@ -965,11 +1752,14 @@ local function simulate(car,input,dt)
         sdk.physics.torque(BODY,mul(angular,1/dt))
     end
     state.rpm=state.engine_omega*30/math.pi
-    sound.throttle=input.throttle; sound.shift=state.shift
+    sound.throttle=input.throttle; sound.shift=state.shift; sound.brake=input.brake
     local body_velocity=unrotate(car.rotation,car.linvel)
-    presentation.speed=math.sqrt(body_velocity[1]^2+body_velocity[3]^2)
+    state.speed=math.sqrt(body_velocity[1]^2+body_velocity[3]^2)
+    presentation.speed=state.speed
     presentation.handbrake=input.hand
     publish_hud(car,input,contacts,dt)
+    sound.drift_slip=0
+    tick_wheel_vfx(contacts,dt)
     update_wheel_visuals(angles,dt)
 end
 
@@ -992,7 +1782,9 @@ return {
         sdk.log("Skyline 4.3.1: render-model compound collision, native impacts, animated wheels, safe exits; J toggles actual colliders")
         sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
     end,
-    on_update=function(event) update_audio(event); update_dashboard(event) end,
+    on_update=function(event)
+        update_audio(event); update_dashboard(event); upload_wheel_vfx(event)
+    end,
     on_settings=function(event)
         if event.key=="audio_enabled" and event.value==false then stop_audio() end
         if event.key=="show_driving_debug" then set_debug_visible(event.value==true) end
@@ -1005,6 +1797,7 @@ return {
     end,
     on_unload=function()
         set_collision_debug(false); interaction_text(""); remove_rig()
+        clear_session_skids()
         sdk.ui.text("skyline_audio",""); sdk.ui.text("skyline_presentation","")
         sdk.ui.text("skyline_help",""); sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
     end,
@@ -1061,7 +1854,7 @@ return {
     end,
     on_event=function(event)
         if event.name=="world_changed" then
-            stop_audio(); clear_presentation(); sound.prepared=false; prepare_audio()
+            stop_audio(); clear_presentation(); clear_effects(); clear_session_skids(); sound.prepared=false; prepare_audio()
             state.spawned=false; state.occupied=false; state.pending=nil
             state.enter_requested=false; state.exit_requested=false; state.reenter_on_ready=false
             state.enter_after=state.time+C.reentry_delay; interaction_text("")

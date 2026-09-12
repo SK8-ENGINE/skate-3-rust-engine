@@ -1,7 +1,7 @@
 name: Windows release
 on:
   push:
-    branches: [main]
+    branches: ['**']
   release:
     types: [published]
   workflow_dispatch:

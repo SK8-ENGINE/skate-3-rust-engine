@@ -34,6 +34,22 @@ pub enum Command {
         fade_out: f32,
     },
     AudioStopAll {},
+    GraphicsMeshBuffer {
+        key: String,
+        options: crate::graphics_dynamic::MeshBufferOptions,
+    },
+    GraphicsMeshBufferWrite {
+        key: String,
+        data: crate::graphics_dynamic::MeshBufferWrite,
+    },
+    GraphicsMeshBufferAppend {
+        key: String,
+        data: crate::graphics_dynamic::MeshBufferWrite,
+    },
+    GraphicsLight {
+        key: String,
+        options: crate::graphics_dynamic::LightOptions,
+    },
     PhysicsSpawn {
         key: String,
         body: BodyDesc,
@@ -217,6 +233,20 @@ impl Command {
                     && (0.0..=2.0).contains(fade_out)
             }
             Self::AudioStopAll {} => true,
+            Self::GraphicsMeshBuffer { key, options } => {
+                crate::schema::valid_id(key) && options.validate()
+            }
+            Self::GraphicsMeshBufferWrite { key, data } => {
+                crate::schema::valid_id(key) && data.validate()
+            }
+            Self::GraphicsMeshBufferAppend { key, data } => {
+                crate::schema::valid_id(key)
+                    && !data.positions.is_empty()
+                    && data.positions.len() <= crate::graphics_dynamic::MAX_MESH_BUFFER_APPEND_VERTICES
+            }
+            Self::GraphicsLight { key, options } => {
+                crate::schema::valid_id(key) && options.validate()
+            }
             Self::PhysicsSpawn { key, body } => {
                 crate::schema::valid_id(key) && serde_json::to_value(body).is_ok()
             }
@@ -415,6 +445,10 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AudioUpdate { .. } => "audio_update",
         Command::AudioStop { .. } => "audio_stop",
         Command::AudioStopAll {} => "audio_stop_all",
+        Command::GraphicsMeshBuffer { .. } => "graphics_mesh_buffer",
+        Command::GraphicsMeshBufferWrite { .. } => "graphics_mesh_buffer_write",
+        Command::GraphicsMeshBufferAppend { .. } => "graphics_mesh_buffer_append",
+        Command::GraphicsLight { .. } => "graphics_light",
         Command::PhysicsSpawn { .. } => "physics_spawn",
         Command::PhysicsRemove { .. } => "physics_remove",
         Command::PhysicsForce { .. } => "physics_force",
@@ -471,6 +505,11 @@ fn query_value(lua: &Lua, value: Value) -> mlua::Result<mlua::Value> {
     json_to_lua(lua, &value)
 }
 
+/// Lua hook fires every N VM instructions; each hook tick consumes one budget unit.
+pub const LUA_INSTRUCTIONS_PER_BUDGET_UNIT: usize = 1000;
+/// Per-callback instruction budget (each unit ~= 1000 Lua instructions).
+pub const LUA_BUDGET_UNITS: usize = 800;
+
 pub struct Vm {
     lua: Lua,
     callbacks: Table,
@@ -491,7 +530,7 @@ impl Vm {
                 StdLib::TABLE | StdLib::STRING | StdLib::MATH | StdLib::UTF8,
                 LuaOptions::default(),
             )?;
-            lua.set_memory_limit(8 * 1024 * 1024)?;
+            lua.set_memory_limit(16 * 1024 * 1024)?;
             for key in [
                 "pcall",
                 "xpcall",
@@ -503,10 +542,10 @@ impl Vm {
             ] {
                 lua.globals().set(key, mlua::Value::Nil)?;
             }
-            let budget = Arc::new(AtomicUsize::new(100));
+            let budget = Arc::new(AtomicUsize::new(LUA_BUDGET_UNITS));
             let counter = budget.clone();
             lua.set_hook(
-                HookTriggers::new().every_nth_instruction(1000),
+                HookTriggers::new().every_nth_instruction(LUA_INSTRUCTIONS_PER_BUDGET_UNIT as u32),
                 move |_, _| {
                     if counter
                         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
@@ -671,7 +710,7 @@ impl Vm {
         payload: Value,
         snapshot: &Value,
     ) -> Result<Vec<Command>, String> {
-        self.budget.store(100, Ordering::Relaxed);
+        self.budget.store(LUA_BUDGET_UNITS, Ordering::Relaxed);
         let invoke = || -> mlua::Result<()> {
             self.lua
                 .globals()
@@ -687,8 +726,33 @@ impl Vm {
             Ok(())
         };
         let result = invoke();
+        let remaining = self.budget.load(Ordering::Relaxed);
+        let used = LUA_BUDGET_UNITS.saturating_sub(remaining);
+        let approx_instructions = used * LUA_INSTRUCTIONS_PER_BUDGET_UNIT;
         let commands = std::mem::take(&mut *self.queue.lock().unwrap());
-        result.map(|_| commands).map_err(|e| e.to_string())
+        match result {
+            Ok(()) => {
+                if used > LUA_BUDGET_UNITS * 9 / 10 {
+                    eprintln!(
+                        "Lua budget warning [{name}]: used {used}/{LUA_BUDGET_UNITS} units (~{approx_instructions} instructions)"
+                    );
+                }
+                Ok(commands)
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("instruction budget exhausted") {
+                    eprintln!(
+                        "Lua budget exhausted [{name}]: used {used}/{LUA_BUDGET_UNITS} units (~{approx_instructions} instructions)"
+                    );
+                    Err(format!(
+                        "{msg} (used {used}/{LUA_BUDGET_UNITS} budget units, ~{approx_instructions} instructions)"
+                    ))
+                } else {
+                    Err(msg)
+                }
+            }
+        }
     }
 }
 
@@ -836,5 +900,181 @@ mod model_collision_extension_tests {
         }
         drop(vm);
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod graphics_mesh_buffer_tests {
+    use super::*;
+    use mlua::{Lua, LuaOptions, LuaSerdeExt, StdLib};
+    use serde_json::json;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn mesh_buffer_write_rejects_empty_uv_table() {
+        let lua = Lua::new_with(
+            StdLib::TABLE | StdLib::STRING | StdLib::MATH | StdLib::UTF8,
+            LuaOptions::default(),
+        )
+        .unwrap();
+        let value = lua
+            .load(
+                r#"return {kind="graphics_mesh_buffer_write",key="skids",data={
+                    positions={{0,0,0},{1,0,0},{0,1,0}},
+                    indices={0,1,2},
+                    uvs={}
+                }}"#,
+            )
+            .eval::<mlua::Value>()
+            .unwrap();
+        assert!(lua.from_value::<Command>(value).is_err());
+    }
+
+    #[test]
+    fn real_lua_mesh_buffer_write_crosses_serde_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "skate-mesh-write-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("main.lua"),
+            r#"
+            return { on_load=function()
+                sdk.graphics.mesh_buffer_write("skids", {
+                    positions={{0,0,0},{1,0,0},{0,1,0},{1,1,0}},
+                    indices={0,1,2,1,3,2},
+                    uvs={{0,0},{1,0},{0,0.25},{1,0.25}},
+                })
+            end }
+        "#,
+        )
+        .unwrap();
+        let manifest: Manifest = serde_json::from_value(json!({
+            "id":"tests.mesh","api":2,"name":"Mesh write test","version":"1.0.0",
+            "author":"test","description":"test","entry":"main.lua","settings":{}
+        }))
+        .unwrap();
+        manifest.validate().unwrap();
+        let snap = json!({"physics":{"bodies":{}}});
+        let mut vm = Vm::new(&root, &manifest, &BTreeMap::new(), &snap).unwrap();
+        let out = vm.call("on_load", json!({}), &snap).unwrap();
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], Command::GraphicsMeshBufferWrite { .. }));
+        drop(vm);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn real_lua_mesh_buffer_append_crosses_serde_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "skate-mesh-append-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let png = include_bytes!("../tests/fixtures/texture.png");
+        std::fs::create_dir_all(root.join("textures")).unwrap();
+        std::fs::write(root.join("textures/test.png"), png).unwrap();
+        std::fs::write(
+            root.join("main.lua"),
+            r#"
+            return { on_load=function()
+                sdk.graphics.mesh_buffer("skids", {texture="textures/test.png"})
+                sdk.graphics.mesh_buffer_append("skids", {
+                    positions={{0,0,0},{1,0,0}},
+                    uvs={{0,0},{1,0}},
+                })
+                sdk.graphics.mesh_buffer_append("skids", {
+                    positions={{1,1,0},{2,1,0}},
+                    indices={0,1,2,1,3,2},
+                    uvs={{0,0.25},{1,0.25}},
+                })
+            end }
+        "#,
+        )
+        .unwrap();
+        let manifest: Manifest = serde_json::from_value(json!({
+            "id":"tests.mesh","api":2,"name":"Mesh append test","version":"1.0.0",
+            "author":"test","description":"test","entry":"main.lua","settings":{}
+        }))
+        .unwrap();
+        manifest.validate().unwrap();
+        let snap = json!({"physics":{"bodies":{}}});
+        let mut vm = Vm::new(&root, &manifest, &BTreeMap::new(), &snap).unwrap();
+        let out = vm.call("on_load", json!({}), &snap).unwrap();
+        assert_eq!(out.len(), 3);
+        assert!(matches!(out[0], Command::GraphicsMeshBuffer { .. }));
+        assert!(matches!(out[1], Command::GraphicsMeshBufferAppend { .. }));
+        assert!(matches!(out[2], Command::GraphicsMeshBufferAppend { .. }));
+        drop(vm);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Mirrors Skyline skid strip helpers — single-point strips used to crash in norm(dot(nil)).
+    #[test]
+    fn skid_strip_single_point_forward_lua() {
+        let lua = Lua::new_with(
+            StdLib::TABLE | StdLib::STRING | StdLib::MATH | StdLib::UTF8,
+            LuaOptions::default(),
+        )
+        .unwrap();
+        lua.load(
+            r#"
+            local function vec(x)
+                return type(x) == "table"
+                    and type(x[1]) == "number"
+                    and type(x[2]) == "number"
+                    and type(x[3]) == "number"
+            end
+            local function sub(a, b) return { a[1] - b[1], a[2] - b[2], a[3] - b[3] } end
+            local function mul(a, s) return { a[1] * s, a[2] * s, a[3] * s } end
+            local function dot(a, b)
+                if not vec(a) or not vec(b) then return 0 end
+                return a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+            end
+            local function norm(a)
+                if not vec(a) then return nil end
+                local l = math.sqrt(dot(a, a))
+                return l > 1e-8 and mul(a, 1 / l) or nil
+            end
+            local function strip_forward(pts, i)
+                local pt = pts[i]
+                if not pt or not vec(pt.pos) then return { 1, 0, 0 } end
+                if i < #pts and vec(pts[i + 1].pos) then return sub(pts[i + 1].pos, pt.pos) end
+                if i > 1 and vec(pts[i - 1].pos) then return sub(pt.pos, pts[i - 1].pos) end
+                return { 1, 0, 0 }
+            end
+            local function start_chunk_strip(mesh, pts, i, width)
+                local pt = pts[i]
+                if not pt or not vec(pt.pos) then return false end
+                local fwd = norm(strip_forward(pts, i)) or { 1, 0, 0 }
+                mesh.positions[#mesh.positions + 1] = { pt.pos[1], pt.pos[2], pt.pos[3] }
+                mesh.positions[#mesh.positions + 1] = { pt.pos[1] + width, pt.pos[2], pt.pos[3] }
+                return true
+            end
+
+            local pts = { { pos = { 0, 0, 0 }, normal = { 0, 1, 0 } } }
+            local mesh = { positions = {} }
+            assert(start_chunk_strip(mesh, pts, 1, 0.3))
+            assert(#mesh.positions == 2)
+
+            local pts2 = {
+                { pos = { 0, 0, 0 }, normal = { 0, 1, 0 } },
+                { pos = { 2, 0, 0 }, normal = { 0, 1, 0 } },
+            }
+            local fwd = norm(strip_forward(pts2, 1)) or { 1, 0, 0 }
+            assert(math.abs(fwd[1] - 1) < 1e-6)
+        "#,
+        )
+        .exec()
+        .unwrap();
     }
 }

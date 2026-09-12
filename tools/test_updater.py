@@ -149,6 +149,50 @@ class UpdaterTests(unittest.TestCase):
         redirected = u.DownloadRedirect().redirect_request(req, None, 302, 'Found', {}, 'https://release-assets.githubusercontent.com/file')
         self.assertIsNone(redirected.get_header('Authorization'))
 
+    def test_branch_discovery_and_stage(self):
+        meta = {**metadata(9), 'tag': 'experimental', 'revision': 'b' * 40}
+        meta['files'] = {name: hashlib.sha256(b'new').hexdigest() for name in u.FILES[:-1]}
+        package = u.package_name(meta)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, 'w') as inner:
+            for name in [*meta['files'], 'release.json']:
+                inner.writestr(u.PREFIX + name, json.dumps(meta) if name == 'release.json' else b'new')
+        package_bytes = archive.getvalue()
+        digest = hashlib.sha256(package_bytes).hexdigest()
+        artifact = io.BytesIO()
+        with zipfile.ZipFile(artifact, 'w') as outer:
+            outer.writestr(package, package_bytes)
+            outer.writestr(package + '.sha256', f'{digest}  {package}')
+            outer.writestr('release.json', json.dumps(meta))
+        artifact_bytes = artifact.getvalue()
+
+        def fetch(url, *args):
+            if url.startswith(u.BRANCHES_API):
+                return json.dumps([{'name': 'main'}, {'name': 'skyline'}]).encode()
+            if '/workflows/' in url and '/runs?' in url:
+                return json.dumps({'workflow_runs': [
+                    {'id': 77, 'conclusion': 'success', 'head_sha': meta['revision']},
+                ]}).encode()
+            if url.endswith('/artifacts'):
+                return json.dumps({'artifacts': [
+                    {'name': u.ARTIFACT_NAME, 'archive_download_url': 'https://api.github.com/repos/' + u.REPO + '/actions/artifacts/1/zip'},
+                ]}).encode()
+            if url.endswith('/artifacts/1/zip'):
+                return artifact_bytes
+            raise AssertionError(url)
+
+        current = metadata(8)
+        with patch.object(u, 'fetch', fetch):
+            names = u.list_branches(threading.Event())
+            self.assertIn('skyline', names)
+            candidate = u.discover_branch(current, 'skyline', threading.Event())
+            self.assertIsNotNone(candidate)
+            self.assertEqual(candidate[0], 9)
+            with tempfile.TemporaryDirectory() as temp:
+                u.stage(candidate, Path(temp), threading.Event(), lambda _: None)
+                self.assertEqual((Path(temp) / 'new/skate3rust.exe').read_bytes(), b'new')
+            self.assertIsNone(u.discover_branch({**current, 'revision': meta['revision']}, 'skyline', threading.Event()))
+
 
 if __name__ == '__main__':
     unittest.main()

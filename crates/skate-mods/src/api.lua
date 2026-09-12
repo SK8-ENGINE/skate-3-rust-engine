@@ -142,7 +142,7 @@ function sdk.physics.touching()
     return (as_table(sdk.snapshot.physics) or {}).touching or {}
 end
 
-sdk.graphics = { version = 2 }
+sdk.graphics = { version = 4 }
 -- Root is BODY-LOCAL when bound, WORLD when unbound. Values replace rather
 -- than accumulate. Quaternions use {x,y,z,w}; angles/rates are radians.
 function sdk.graphics.set_transform(key, options)
@@ -175,6 +175,85 @@ function sdk.graphics.mesh(key, opts)
 end
 function sdk.graphics.remove(key) submit{kind="graphics_remove",key=key} end
 function sdk.graphics.set_visible(key, visible) submit{kind="graphics_visibility",key=key,visible=visible and true or false} end
+-- Extension 3: procedural mesh buffers and scene lights. No gameplay semantics.
+function sdk.graphics.mesh_buffer(key, opts)
+    opts = opts or {}
+    submit{kind="graphics_mesh_buffer",key=key,options={
+        body=opts.body, position=opts.position, rotation=opts.rotation,
+        scale=opts.scale or {1,1,1},
+        blend=opts.blend ~= false, unlit=opts.unlit ~= false,
+        visible=opts.visible ~= false,
+        depth_bias=opts.depth_bias or 0,
+        texture=opts.texture,
+        tint=opts.tint or {1,1,1},
+    }}
+end
+local function mesh_buffer_payload(data)
+    data = data or {}
+    -- Empty Lua tables are maps, not arrays. Build a clean payload and omit empties.
+    local payload = {}
+    if data.positions and #data.positions > 0 then
+        local positions = {}
+        for _, p in ipairs(data.positions) do
+            positions[#positions+1] = {p[1], p[2], p[3]}
+        end
+        payload.positions = positions
+    end
+    if data.indices and #data.indices > 0 then
+        local indices = {}
+        for _, idx in ipairs(data.indices) do
+            indices[#indices+1] = math.max(0, math.floor(idx))
+        end
+        payload.indices = indices
+    end
+    if data.uvs and #data.uvs > 0 then
+        local uvs = {}
+        if type(data.uvs[1]) == "table" then
+            for _, uv in ipairs(data.uvs) do
+                uvs[#uvs+1] = uv[1]; uvs[#uvs+1] = uv[2]
+            end
+        else
+            for _, v in ipairs(data.uvs) do uvs[#uvs+1] = v end
+        end
+        if #uvs > 0 then payload.uvs = uvs end
+    end
+    if data.colors and #data.colors > 0 then
+        local colors = {}
+        if type(data.colors[1]) == "table" then
+            for _, c in ipairs(data.colors) do
+                colors[#colors+1] = c[1]; colors[#colors+1] = c[2]
+                colors[#colors+1] = c[3]; colors[#colors+1] = c[4]
+            end
+        else
+            for _, v in ipairs(data.colors) do colors[#colors+1] = v end
+        end
+        if #colors > 0 then payload.colors = colors end
+    end
+    if data.normals and #data.normals > 0 then
+        local normals = {}
+        for _, n in ipairs(data.normals) do
+            normals[#normals+1] = {n[1], n[2], n[3]}
+        end
+        payload.normals = normals
+    end
+    return payload
+end
+function sdk.graphics.mesh_buffer_write(key, data)
+    submit{kind="graphics_mesh_buffer_write",key=key,data=mesh_buffer_payload(data)}
+end
+function sdk.graphics.mesh_buffer_append(key, data)
+    submit{kind="graphics_mesh_buffer_append",key=key,data=mesh_buffer_payload(data)}
+end
+function sdk.graphics.light(key, opts)
+    opts = opts or {}
+    submit{kind="graphics_light",key=key,options={
+        kind=opts.kind or "point", body=opts.body, position=opts.position,
+        offset=opts.offset or {0,0,0}, direction=opts.direction,
+        color=opts.color or {1,1,1},
+        intensity=opts.intensity or 1000, range=opts.range or 10,
+        inner_angle=opts.inner_angle or 0.4, outer_angle=opts.outer_angle or 0.7,
+    }}
+end
 
 -- Audio extension 1 (backward-compatible with API 2).
 -- Keys and assets are scoped to the calling mod. WAV: PCM16, mono/stereo.

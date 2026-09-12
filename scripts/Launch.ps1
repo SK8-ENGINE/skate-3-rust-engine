@@ -22,6 +22,21 @@ Dev launch expects converted Skate 3 assets there (often via junction/symlink to
 Release packages run setup from support\skate3setup.exe instead of --assets.
 "@
     }
+    try {
+        $null = [System.IO.Directory]::EnumerateFileSystemEntries($assetsPath)
+    } catch {
+        $item = Get-Item -LiteralPath $assetsPath -Force
+        $target = if ($item.LinkType) { $item.Target } else { $assetsPath }
+        throw @"
+Assets path exists but cannot be opened (broken junction or missing target):
+  $assetsPath
+  -> $target
+
+Re-point assets to a valid installation, for example:
+  rmdir "$assetsPath"
+  mklink /J "$assetsPath" "C:\path\to\skate3rust-windows-x64\data\installations\<id>\assets"
+"@
+    }
     $argumentList = '--assets "' + $assetsPath + '"'
     if ($Map) {
         $mapPath = (Resolve-Path -LiteralPath $Map).Path

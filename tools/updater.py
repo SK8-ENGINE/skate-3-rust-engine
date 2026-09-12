@@ -18,6 +18,10 @@ from update_processes import close_programs
 
 REPO = 'SK8-ENGINE/skate-3-rust-engine'
 API = f'https://api.github.com/repos/{REPO}/releases'
+ACTIONS_API = f'https://api.github.com/repos/{REPO}/actions'
+BRANCHES_API = f'https://api.github.com/repos/{REPO}/branches'
+WORKFLOW_FILE = 'release.yml'
+ARTIFACT_NAME = 'skate3rust-windows-x64'
 PACKAGE = 'skate3rust-windows-x64.zip'
 FILES = ('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe',
          'steam-relay/skate-steam-relay.exe', 'steam-relay/steam_api64.dll', 'release.json')
@@ -88,11 +92,19 @@ def safe_local_paths(root):
             path = path.parent
 
 
+def allowed_fetch_url(url):
+    if url.startswith(API) or url.startswith(f'https://github.com/{REPO}/releases/download/'):
+        return True
+    if url.startswith(ACTIONS_API) or url.startswith(BRANCHES_API):
+        return True
+    return False
+
+
 def fetch(url, cancel, limit, progress=lambda value: None):
     if cancel.is_set():
         raise InterruptedError('Cancelled')
     # URLs originate only from the fixed repository API, never notes/manifest.
-    if not (url.startswith(API) or url.startswith(f'https://github.com/{REPO}/releases/download/')):
+    if not allowed_fetch_url(url):
         raise ValueError('Unexpected download URL')
     headers = {'User-Agent': 'Skate3RustEngine-Updater/1', 'X-GitHub-Api-Version': '2022-11-28'}
     if url.startswith(API):
@@ -147,6 +159,84 @@ def release_candidates(assets, rolling):
     return [(f'release-{n}.json', f'skate3rust-windows-x64-build-{n}.zip') for n in builds]
 
 
+def list_branches(cancel, limit=200):
+    branches = []
+    for page in range(1, 6):
+        batch = json.loads(fetch(f'{BRANCHES_API}?per_page=100&page={page}', cancel, 4 * 1024 * 1024))
+        if not batch:
+            break
+        branches.extend(item['name'] for item in batch if isinstance(item, dict) and item.get('name'))
+        if len(batch) < 100 or len(branches) >= limit:
+            break
+    return branches[:limit]
+
+
+def branch_workflow_runs(branch, cancel):
+    from urllib.parse import quote
+    query = (
+        f'{ACTIONS_API}/workflows/{quote(WORKFLOW_FILE, safe="")}/runs'
+        f'?branch={quote(branch, safe="")}&status=success&per_page=20'
+    )
+    payload = json.loads(fetch(query, cancel, 8 * 1024 * 1024))
+    return payload.get('workflow_runs', [])
+
+
+def download_branch_artifact(run_id, cancel, progress=lambda value: None):
+    artifacts = json.loads(fetch(f'{ACTIONS_API}/runs/{run_id}/artifacts', cancel, 4 * 1024 * 1024))
+    artifact = next((item for item in artifacts.get('artifacts', [])
+                     if item.get('name') == ARTIFACT_NAME and not item.get('expired')), None)
+    if artifact is None:
+        raise ValueError(f'Workflow run {run_id} has no {ARTIFACT_NAME} artifact')
+    return fetch(artifact['archive_download_url'], cancel, 1024 * 1024 * 1024, progress)
+
+
+def package_from_artifact(artifact_zip, package):
+    import io
+    with zipfile.ZipFile(io.BytesIO(artifact_zip)) as archive:
+        checksum_name = package + '.sha256'
+        names = {info.filename for info in archive.infolist()}
+        if package not in names or checksum_name not in names:
+            raise ValueError('Branch artifact is missing the release package')
+        payload = archive.read(package)
+        checksum = archive.read(checksum_name).decode('ascii').split()
+        if len(checksum) != 2 or checksum[1] != package or not re.fullmatch('[0-9a-fA-F]{64}', checksum[0]):
+            raise ValueError('Invalid branch artifact checksum')
+        return payload, checksum
+
+
+def discover_branch(current, branch, cancel, repair=False):
+    branch = (branch or '').strip()
+    if not branch or not re.fullmatch(r'[A-Za-z0-9._/-]{1,120}', branch):
+        raise ValueError('Enter a valid GitHub branch name')
+    current_revision = current.get('revision')
+    for run in branch_workflow_runs(branch, cancel):
+        if run.get('conclusion') != 'success':
+            continue
+        try:
+            artifact_zip = download_branch_artifact(run['id'], cancel)
+            import io
+            with zipfile.ZipFile(io.BytesIO(artifact_zip)) as archive:
+                if 'release.json' not in {info.filename for info in archive.infolist()}:
+                    continue
+                meta = json.loads(archive.read('release.json'))
+            build = identity(meta)
+            program_metadata(meta)
+            if meta['revision'] == current_revision and not repair:
+                continue
+            package = package_name(meta)
+            package_from_artifact(artifact_zip, package)
+            notes = dict(
+                tag_name=meta.get('tag', branch),
+                body=(f'Branch `{branch}`\n'
+                      f'Workflow run {run.get("id")} @ {run.get("head_sha", "")[:12]}\n'
+                      f'Build {build} · revision {meta.get("revision", "")[:12]}'),
+            )
+            return (build, run['id'], notes, None, meta, artifact_zip)
+        except (ValueError, KeyError, zipfile.BadZipFile):
+            continue
+    return None
+
+
 def discover(current, channel, cancel, repair=False):
     current_build = identity(current)
     candidates = []
@@ -183,18 +273,23 @@ def discover(current, channel, cancel, repair=False):
 
 
 def stage(candidate, directory, cancel, progress):
-    _, _, release, assets, meta = candidate
+    _, _, release, assets, meta = candidate[:5]
+    artifact_zip = candidate[5] if len(candidate) > 5 else None
     package = package_name(meta)
-    checksum = fetch(asset_url(assets[package + '.sha256']), cancel, 1024).decode('ascii').split()
-    if len(checksum) != 2 or checksum[1] != package or not re.fullmatch('[0-9a-fA-F]{64}', checksum[0]):
-        raise ValueError('Invalid release checksum')
-    archive = fetch(asset_url(assets[package]), cancel, 1024 * 1024 * 1024, progress)
+    if artifact_zip is not None:
+        archive, checksum = package_from_artifact(artifact_zip, package)
+    else:
+        checksum = fetch(asset_url(assets[package + '.sha256']), cancel, 1024).decode('ascii').split()
+        if len(checksum) != 2 or checksum[1] != package or not re.fullmatch('[0-9a-fA-F]{64}', checksum[0]):
+            raise ValueError('Invalid release checksum')
+        archive = fetch(asset_url(assets[package]), cancel, 1024 * 1024 * 1024, progress)
     digest = hashlib.sha256(archive).hexdigest()
     if digest != checksum[0].lower():
         raise ValueError('Package checksum mismatch')
-    api_digest = assets[package].get('digest')
-    if api_digest and api_digest != 'sha256:' + digest:
-        raise ValueError('GitHub asset digest mismatch')
+    if assets is not None:
+        api_digest = assets[package].get('digest')
+        if api_digest and api_digest != 'sha256:' + digest:
+            raise ValueError('GitHub asset digest mismatch')
     import io
     with zipfile.ZipFile(io.BytesIO(archive)) as z:
         names = set()
@@ -285,12 +380,23 @@ def main(request=None):
         win.withdraw()
     settings_path = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'Skate3RustEngine/settings/updates.json'
     settings = read_json(settings_path, {})
-    channel = tk.StringVar(value=settings.get('channel') if settings.get('channel') in ('Stable', 'Latest') else 'Stable')
+    channel = tk.StringVar(value=settings.get('channel') if settings.get('channel') in ('Stable', 'Latest', 'Branch') else 'Stable')
+    branch = tk.StringVar(value=settings.get('branch') or 'main')
     status = tk.StringVar(value='Ready to check')
     ttk.Label(win, text='Updates — Update downloads, then closes and restarts the game.').pack(pady=8)
-    choice = ttk.Combobox(win, textvariable=channel, values=('Stable', 'Latest'), state='readonly')
+    choice = ttk.Combobox(win, textvariable=channel, values=('Stable', 'Latest', 'Branch'), state='readonly')
     choice.pack()
-    ttk.Label(win, text='Stable: published releases. Latest: rolling Experimental and newer releases.').pack()
+    branch_row = ttk.Frame(win)
+    ttk.Label(branch_row, text='Branch:').pack(side='left', padx=(0, 6))
+    branch_choice = ttk.Combobox(branch_row, textvariable=branch, width=42)
+    branch_choice.pack(side='left', fill='x', expand=True)
+    branch_row.pack(fill='x', padx=12, pady=(0, 4))
+    channel_help = ttk.Label(
+        win,
+        text='Stable: published releases. Latest: rolling Experimental. Branch: latest CI build for a GitHub branch.',
+        wraplength=620,
+    )
+    channel_help.pack()
     notes = tk.Text(win, wrap='word', height=19)
     notes.pack(fill='both', expand=True, padx=12, pady=8)
     notes.configure(state='disabled')
@@ -304,12 +410,19 @@ def main(request=None):
     repair_files = []
     repair_after_update = False
 
+    def branch_ui_enabled():
+        return channel.get() == 'Branch'
+
+    def refresh_branch_ui():
+        branch_choice.configure(state='normal' if branch_ui_enabled() else 'disabled')
+
     def work(kind, operation):
         nonlocal busy
         busy = True
         update.configure(state='disabled')
         check.configure(state='disabled')
         choice.configure(state='disabled')
+        branch_choice.configure(state='disabled')
         token = generation
         def run():
             try:
@@ -327,6 +440,7 @@ def main(request=None):
         notes.configure(state='disabled')
         cancel.clear()
         settings['channel'] = channel.get()
+        settings['branch'] = branch.get().strip()
         settings[channel.get()] = time.time()
         try:
             atomic(settings_path, settings)
@@ -347,7 +461,13 @@ def main(request=None):
             previous = read_json(tx/'old/release.json', {})
             repair_after_update = (bool(repair_files) and isinstance(previous.get('build'), int)
                                    and previous['build'] < current['build'])
-            return discover(current, selected, cancel, repair=bool(repair_files))
+            if selected == 'Branch':
+                names = list_branches(cancel)
+                selected_branch = branch.get().strip()
+                if selected_branch and selected_branch not in names:
+                    names.insert(0, selected_branch)
+                return names, discover_branch(current, selected_branch, cancel, repair=bool(repair_files))
+            return None, discover(current, selected, cancel, repair=bool(repair_files))
         work('checked', perform_check)
 
     def do_update():
@@ -380,7 +500,12 @@ def main(request=None):
     back = ttk.Button(win, text='Cancel', command=close)
     back.pack(side='right', padx=12)
     win.protocol('WM_DELETE_WINDOW', close)
-    choice.bind('<<ComboboxSelected>>', lambda _: check_now())
+    def channel_changed(_=None):
+        refresh_branch_ui()
+        check_now()
+
+    choice.bind('<<ComboboxSelected>>', channel_changed)
+    refresh_branch_ui()
 
     def poll():
         nonlocal candidate, busy, automatic
@@ -398,6 +523,7 @@ def main(request=None):
                     return
                 check.configure(state='normal')
                 choice.configure(state='readonly')
+                refresh_branch_ui()
                 if kind == 'error':
                     atomic(root / '.update-error.json', {'time': time.time(), 'error': value})
                     back.configure(state='normal')
@@ -407,7 +533,12 @@ def main(request=None):
                         win.destroy()
                         return
                 elif kind == 'checked':
-                    candidate = value
+                    branch_names, candidate = value
+                    if branch_names:
+                        values = [name for name in branch_names if isinstance(name, str) and name]
+                        if branch.get().strip() and branch.get().strip() not in values:
+                            values.insert(0, branch.get().strip())
+                        branch_choice.configure(values=values)
                     if candidate:
                         automatic = False
                         win.deiconify()
@@ -416,7 +547,13 @@ def main(request=None):
                         notes.insert('end', candidate[4]['tag'] + '\n\n' + (candidate[2].get('body') or 'No release notes.')[:50000])
                         notes.configure(state='disabled')
                         update.configure(state='normal', text='Repair' if repair_files else 'Update')
-                        status.set(('Repair needed: ' + ', '.join(repair_files) + '. Download will repair the installation.') if repair_files else 'New release available. Cancel keeps your current version.')
+                        if channel.get() == 'Branch':
+                            detail = f'Branch build available for `{branch.get().strip()}`.'
+                        elif repair_files:
+                            detail = 'Repair needed: ' + ', '.join(repair_files) + '. Download will repair the installation.'
+                        else:
+                            detail = 'New release available. Cancel keeps your current version.'
+                        status.set(detail)
                         if repair_after_update and candidate[0] == identity(read_json(root/'release.json', {})):
                             # Finish the update the user already accepted in the old helper.
                             do_update()
@@ -424,7 +561,12 @@ def main(request=None):
                         win.destroy()
                         return
                     else:
-                        status.set('Repair needed, but this build is not available in the selected channel. Select its channel or a newer release.' if repair_files else 'No newer compatible release in this channel.')
+                        if channel.get() == 'Branch':
+                            status.set('No successful CI build found for this branch yet, or you already have that revision.')
+                        elif repair_files:
+                            status.set('Repair needed, but this build is not available in the selected channel. Select its channel or a newer release.')
+                        else:
+                            status.set('No newer compatible release in this channel.')
                 elif kind == 'staged':
                     if cancel.is_set():
                         continue

@@ -31,6 +31,21 @@
       "max": 1,
       "step": 0.05
     },
+    "brake_audio": {
+      "type": "boolean",
+      "label": "Brake audio",
+      "description": "Looping brake disc/pad noise that scales with pedal and speed.",
+      "default": true
+    },
+    "brake_volume": {
+      "type": "number",
+      "label": "Brake volume",
+      "description": "Brake sound gain. Ramps with pedal pressure and road speed.",
+      "default": 0.55,
+      "min": 0,
+      "max": 1,
+      "step": 0.05
+    },
     "pop_volume": {
       "type": "number",
       "label": "Exhaust pop volume",

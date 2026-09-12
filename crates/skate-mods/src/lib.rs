@@ -1,6 +1,7 @@
 //! Lua mod packages (API 2): low-level physics/graphics hooks, no Vehicle class.
 mod archive;
 pub mod audio;
+pub mod graphics_dynamic;
 pub mod presentation;
 pub mod scene;
 mod assets;
