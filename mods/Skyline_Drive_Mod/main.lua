@@ -64,7 +64,7 @@ local state = {
     steer=0, shift=0, time=0, enter_after=0,
     keys={}, buttons=0, hud_time=0, mass_audit=nil, keyboard_axis=0, aero_load=0,
     enter_requested=false, exit_requested=false, reenter_on_ready=false,
-    hull_debug=false, interaction_text="",
+    hull_debug=false, interaction_text="", mp_hint_time=0,
 }
 
 local function clamp(x,a,b) return math.max(a,math.min(b,x)) end
@@ -387,6 +387,35 @@ local vfx={
 local REMOTE_WHEEL_KEYS={rr="wheel_rr",rl="wheel_rl"}
 local function vfx_net_active()
     return sdk.net and type(sdk.net.info)=="function" and (sdk.net.info().active==true)
+end
+local function refresh_mp_status(dt)
+    if not sdk.net or type(sdk.net.info)~="function" then
+        sdk.ui.text("skyline_mp","")
+        return
+    end
+    local info=sdk.net.info()
+    if not info or info.active~=true then
+        sdk.ui.text("skyline_mp","")
+        return
+    end
+    state.mp_hint_time=math.max(0,(state.mp_hint_time or 0)-dt)
+    if state.mp_hint_time>0 then return end
+    state.mp_hint_time=0.5
+    local lines={
+        state.spawned
+            and "Your car is spawned and should replicate to other players."
+            or "Press F10 to spawn your car. Other players cannot see your vehicle until you do.",
+        "Both players need Skyline enabled with identical mod files and the skyline-driving-update build.",
+    }
+    if vfx.supported then
+        lines[#lines+1]=vfx.mesh
+            and "VFX buffers ready (remote smoke/skids work without spawning your own car)."
+            or "VFX supported but buffers not ready yet."
+    else
+        lines[#lines+1]="VFX unsupported: update to a build with mesh_buffer (graphics API 4)."
+    end
+    if info.status and info.status~="" then lines[#lines+1]=info.status end
+    sdk.ui.text("skyline_mp",table.concat(lines,"\n"))
 end
 local function clear_mesh(mesh)
     mesh.positions={};mesh.normals={};mesh.colors={};mesh.uvs={};mesh.indices={}
@@ -995,11 +1024,28 @@ local function tick_remote_vfx(dt)
     end
     maybe_upload_skids()
 end
-local function prepare_effects()
+local function refresh_vfx_support()
     vfx.supported=sdk.graphics and (sdk.graphics.version or 0)>=4
         and type(sdk.graphics.mesh_buffer)=="function"
         and type(sdk.graphics.mesh_buffer_append)=="function"
-    if not vfx.supported then return end
+    return vfx.supported
+end
+local function ensure_vfx_mesh()
+    if not refresh_vfx_support() then return false end
+    if vfx.mesh then return true end
+    vfx.smoke=vfx.smoke or {}
+    vfx.remote_smoke=vfx.remote_smoke or {}
+    vfx.remote_wheels=vfx.remote_wheels or {}
+    vfx.mesh={
+        smoke={positions={},normals={},colors={},uvs={},indices={}},
+        remote_smoke={positions={},normals={},colors={},uvs={},indices={}},
+    }
+    sdk.graphics.mesh_buffer("vfx_smoke",SMOKE_BUFFER_OPTS)
+    sdk.graphics.mesh_buffer("vfx_smoke_remote",SMOKE_BUFFER_OPTS)
+    return true
+end
+local function prepare_effects()
+    if not refresh_vfx_support() then return end
     clear_session_skids()
     vfx.skid_buffer_serial=0
     vfx.smoke={}; vfx.smoke_mesh_live=false; vfx.smoke_dirty=false
@@ -1048,7 +1094,7 @@ local function tick_wheel_vfx(contacts,dt)
     publish_net_vfx(contacts)
 end
 local function upload_wheel_vfx(event)
-    if not vfx.supported or not vfx.mesh then return end
+    if not ensure_vfx_mesh() then return end
     if sdk.snapshot.paused or sdk.snapshot.replay then return end
     local dt=clamp(number(event and event.dt,1/60),0,0.1)
     tick_remote_vfx(dt)
@@ -1777,13 +1823,14 @@ return {
         if not sdk.graphics or (sdk.graphics.version or 0)<2 or not sdk.player.detaching then
             error("Skyline 4.3.1: the embedded Lua SDK wrapper does not match the native Model Collision Repair API")
         end
-        reset_simulation(); remove_rig(); prepare_audio(); prepare_presentation()
+        reset_simulation(); remove_rig(); prepare_audio(); prepare_presentation(); ensure_vfx_mesh()
         set_collision_debug(sdk.settings.show_collision_hull==true)
         sdk.log("Skyline 4.3.1: render-model compound collision, native impacts, animated wheels, safe exits; J toggles actual colliders")
         sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
     end,
     on_update=function(event)
         update_audio(event); update_dashboard(event); upload_wheel_vfx(event)
+        refresh_mp_status(clamp(number(event and event.dt,1/60),0,0.1))
     end,
     on_settings=function(event)
         if event.key=="audio_enabled" and event.value==false then stop_audio() end
@@ -1800,6 +1847,7 @@ return {
         clear_session_skids()
         sdk.ui.text("skyline_audio",""); sdk.ui.text("skyline_presentation","")
         sdk.ui.text("skyline_help",""); sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
+        sdk.ui.text("skyline_mp","")
     end,
     on_fixed_update=function(event)
         local dt=number(event and event.dt,1/120)
@@ -1854,13 +1902,14 @@ return {
     end,
     on_event=function(event)
         if event.name=="world_changed" then
-            stop_audio(); clear_presentation(); clear_effects(); clear_session_skids(); sound.prepared=false; prepare_audio()
-            state.spawned=false; state.occupied=false; state.pending=nil
+            remove_rig(); stop_audio(); clear_presentation(); sound.prepared=false; prepare_audio()
+            state.pending=nil
             state.enter_requested=false; state.exit_requested=false; state.reenter_on_ready=false
             state.enter_after=state.time+C.reentry_delay; interaction_text("")
             set_collision_debug(state.hull_debug)
             state.keys={}; state.buttons=0; reset_simulation()
             sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
+            sdk.ui.text("skyline_mp","")
         end
     end,
 }

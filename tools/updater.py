@@ -27,6 +27,7 @@ FILES = ('skate3rust.exe', 'support/skate3setup.exe', 'support/skate3update.exe'
          'steam-relay/skate-steam-relay.exe', 'steam-relay/steam_api64.dll', 'release.json')
 
 PREFIX = 'skate3rust-windows-x64/'
+DEFAULT_BRANCH_CHOICES = ('skyline-driving-update', 'main')
 
 
 class DownloadRedirect(urllib.request.HTTPRedirectHandler):
@@ -132,6 +133,8 @@ def fetch(url, cancel, limit, progress=lambda value: None):
         if error.code in (403, 429):
             raise ValueError('GitHub rate limit or access restriction; try again later') from error
         if error.code == 404:
+            if '/releases/tags/' in url:
+                raise
             raise ValueError('Releases are not publicly available, or private-release access is missing') from error
         raise
     with response:
@@ -170,6 +173,17 @@ def release_candidates(assets, rolling):
     return [(f'release-{n}.json', f'skate3rust-windows-x64-build-{n}.zip') for n in builds]
 
 
+def merge_branch_names(names, preferred=''):
+    values = [name for name in (names or DEFAULT_BRANCH_CHOICES) if isinstance(name, str) and name]
+    preferred = (preferred or '').strip()
+    if preferred and preferred not in values:
+        values.insert(0, preferred)
+    for fallback in DEFAULT_BRANCH_CHOICES:
+        if fallback not in values:
+            values.append(fallback)
+    return values
+
+
 def list_branches(cancel, limit=200):
     branches = []
     for page in range(1, 6):
@@ -180,6 +194,13 @@ def list_branches(cancel, limit=200):
         if len(batch) < 100 or len(branches) >= limit:
             break
     return branches[:limit]
+
+
+def branch_choices(cancel, preferred=''):
+    try:
+        return merge_branch_names(list_branches(cancel), preferred)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError, OSError):
+        return merge_branch_names([], preferred)
 
 
 def branch_workflow_runs(branch, cancel):
@@ -215,7 +236,7 @@ def package_from_artifact(artifact_zip, package):
         return payload, checksum
 
 
-def discover_branch_release(current, branch, cancel, repair=False):
+def branch_release_meta(branch, cancel):
     from urllib.parse import quote
     branch = (branch or '').strip()
     try:
@@ -230,18 +251,40 @@ def discover_branch_release(current, branch, cancel, repair=False):
         return None
     try:
         meta = json.loads(fetch(asset_url(assets['release.json']), cancel, 65536))
-        build = identity(meta)
+        identity(meta)
         program_metadata(meta)
-    except (ValueError, KeyError):
+    except (ValueError, KeyError, urllib.error.HTTPError):
         return None
+    return release, assets, meta
+
+
+def discover_branch_release(current, branch, cancel, repair=False):
+    loaded = branch_release_meta(branch, cancel)
+    if loaded is None:
+        return None
+    release, assets, meta = loaded
     if meta['revision'] == current.get('revision') and not repair:
         return None
     notes = dict(
         tag_name=branch,
         body=(f'Branch `{branch}`\n'
-              f'Build {build} · revision {meta.get("revision", "")[:12]}'),
+              f'Build {meta["build"]} · revision {meta.get("revision", "")[:12]}'),
     )
-    return (build, release['id'], notes, assets, meta)
+    return (meta['build'], release['id'], notes, assets, meta)
+
+
+def branch_release_status(current, branch, cancel):
+    loaded = branch_release_meta(branch, cancel)
+    if loaded is None:
+        branch = (branch or '').strip()
+        if branch == 'main':
+            return ('Branch `main` has no published installer. Use `skyline-driving-update`.', None)
+        return (f'No published release found for branch `{branch}`.', None)
+    _, _, meta = loaded
+    revision = meta.get('revision', '')
+    if revision and revision == current.get('revision'):
+        return (f'Branch `{branch}` build {meta["build"]} is already installed ({revision[:12]}).', revision)
+    return (None, revision)
 
 
 def discover_branch(current, branch, cancel, repair=False):
@@ -251,32 +294,6 @@ def discover_branch(current, branch, cancel, repair=False):
     candidate = discover_branch_release(current, branch, cancel, repair=repair)
     if candidate is not None:
         return candidate
-    current_revision = current.get('revision')
-    for run in branch_workflow_runs(branch, cancel):
-        if run.get('conclusion') != 'success':
-            continue
-        try:
-            artifact_zip = download_branch_artifact(run['id'], cancel)
-            import io
-            with zipfile.ZipFile(io.BytesIO(artifact_zip)) as archive:
-                if 'release.json' not in {info.filename for info in archive.infolist()}:
-                    continue
-                meta = json.loads(archive.read('release.json'))
-            build = identity(meta)
-            program_metadata(meta)
-            if meta['revision'] == current_revision and not repair:
-                continue
-            package = package_name(meta)
-            package_from_artifact(artifact_zip, package)
-            notes = dict(
-                tag_name=meta.get('tag', branch),
-                body=(f'Branch `{branch}`\n'
-                      f'Workflow run {run.get("id")} @ {run.get("head_sha", "")[:12]}\n'
-                      f'Build {build} · revision {meta.get("revision", "")[:12]}'),
-            )
-            return (build, run['id'], notes, None, meta, artifact_zip)
-        except (ValueError, KeyError, zipfile.BadZipFile):
-            continue
     return None
 
 
@@ -463,8 +480,23 @@ def main(request=None):
     def branch_ui_enabled():
         return channel.get() == 'Branch'
 
+    def apply_branch_choices(names):
+        branch_choice.configure(values=merge_branch_names(names, branch.get().strip()))
+
     def refresh_branch_ui():
-        branch_choice.configure(state='normal' if branch_ui_enabled() else 'disabled')
+        enabled = branch_ui_enabled()
+        branch_choice.configure(state='normal' if enabled else 'disabled')
+        if enabled:
+            apply_branch_choices(branch_choice.cget('values') or DEFAULT_BRANCH_CHOICES)
+
+    def load_branch_list():
+        token = generation
+        def run():
+            try:
+                events.put((token, 'branches', branch_choices(cancel, branch.get().strip())))
+            except Exception:
+                events.put((token, 'branches', merge_branch_names([], branch.get().strip())))
+        threading.Thread(target=run, daemon=True).start()
 
     def work(kind, operation):
         nonlocal busy
@@ -512,12 +544,12 @@ def main(request=None):
             repair_after_update = (bool(repair_files) and isinstance(previous.get('build'), int)
                                    and previous['build'] < current['build'])
             if selected == 'Branch':
-                names = list_branches(cancel)
-                selected_branch = branch.get().strip()
-                if selected_branch and selected_branch not in names:
-                    names.insert(0, selected_branch)
-                return names, discover_branch(current, selected_branch, cancel, repair=bool(repair_files))
-            return None, discover(current, selected, cancel, repair=bool(repair_files))
+                selected_branch = branch.get().strip() or DEFAULT_BRANCH_CHOICES[0]
+                names = branch_choices(cancel, selected_branch)
+                candidate = discover_branch(current, selected_branch, cancel, repair=bool(repair_files))
+                branch_status = branch_release_status(current, selected_branch, cancel) if candidate is None else None
+                return names, candidate, branch_status
+            return None, discover(current, selected, cancel, repair=bool(repair_files)), None
         work('checked', perform_check)
 
     def do_update():
@@ -552,10 +584,14 @@ def main(request=None):
     win.protocol('WM_DELETE_WINDOW', close)
     def channel_changed(_=None):
         refresh_branch_ui()
+        if branch_ui_enabled():
+            load_branch_list()
         check_now()
 
     choice.bind('<<ComboboxSelected>>', channel_changed)
     refresh_branch_ui()
+    if branch_ui_enabled():
+        load_branch_list()
 
     def poll():
         nonlocal candidate, busy, automatic
@@ -566,6 +602,9 @@ def main(request=None):
                     continue
                 if kind == 'progress':
                     status.set(value)
+                    continue
+                if kind == 'branches':
+                    apply_branch_choices(value)
                     continue
                 busy = False
                 if closing:
@@ -583,12 +622,9 @@ def main(request=None):
                         win.destroy()
                         return
                 elif kind == 'checked':
-                    branch_names, candidate = value
+                    branch_names, candidate, branch_status = value
                     if branch_names:
-                        values = [name for name in branch_names if isinstance(name, str) and name]
-                        if branch.get().strip() and branch.get().strip() not in values:
-                            values.insert(0, branch.get().strip())
-                        branch_choice.configure(values=values)
+                        apply_branch_choices(branch_names)
                     if candidate:
                         automatic = False
                         win.deiconify()
@@ -611,8 +647,10 @@ def main(request=None):
                         win.destroy()
                         return
                     else:
-                        if channel.get() == 'Branch':
-                            status.set('No successful CI build found for this branch yet, or you already have that revision.')
+                        if channel.get() == 'Branch' and branch_status and branch_status[0]:
+                            status.set(branch_status[0])
+                        elif channel.get() == 'Branch':
+                            status.set('No published branch release found, or you already have that revision.')
                         elif repair_files:
                             status.set('Repair needed, but this build is not available in the selected channel. Select its channel or a newer release.')
                         else:

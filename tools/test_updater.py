@@ -150,6 +150,13 @@ class UpdaterTests(unittest.TestCase):
         redirected = u.DownloadRedirect().redirect_request(req, None, 302, 'Found', {}, 'https://release-assets.githubusercontent.com/file')
         self.assertIsNone(redirected.get_header('Authorization'))
 
+    def test_branch_choice_fallback(self):
+        with patch.object(u, 'list_branches', side_effect=OSError('offline')):
+            names = u.branch_choices(threading.Event(), 'feature/foo')
+        self.assertEqual(names[0], 'feature/foo')
+        self.assertIn('skyline-driving-update', names)
+        self.assertIn('main', names)
+
     def test_github_api_token_on_actions_requests(self):
         with patch.dict(os.environ, {'SKATE_UPDATE_GITHUB_TOKEN': 'test-token'}, clear=False):
             headers = u.github_request_headers(u.BRANCHES_API)
@@ -198,51 +205,54 @@ class UpdaterTests(unittest.TestCase):
                 u.stage(candidate, Path(temp), threading.Event(), lambda _: None)
                 self.assertEqual((Path(temp) / 'new/skate3rust.exe').read_bytes(), b'new')
 
-    def test_branch_discovery_and_stage(self):
-        meta = {**metadata(9), 'tag': 'experimental', 'revision': 'b' * 40}
-        meta['files'] = {name: hashlib.sha256(b'new').hexdigest() for name in u.FILES[:-1]}
-        package = u.package_name(meta)
-        archive = io.BytesIO()
-        with zipfile.ZipFile(archive, 'w') as inner:
-            for name in [*meta['files'], 'release.json']:
-                inner.writestr(u.PREFIX + name, json.dumps(meta) if name == 'release.json' else b'new')
-        package_bytes = archive.getvalue()
-        digest = hashlib.sha256(package_bytes).hexdigest()
-        artifact = io.BytesIO()
-        with zipfile.ZipFile(artifact, 'w') as outer:
-            outer.writestr(package, package_bytes)
-            outer.writestr(package + '.sha256', f'{digest}  {package}')
-            outer.writestr('release.json', json.dumps(meta))
-        artifact_bytes = artifact.getvalue()
+    def test_branch_release_status_messages(self):
+        meta = {**metadata(12), 'tag': 'skyline-driving-update', 'revision': 'd' * 40}
+        release = dict(
+            id=90,
+            tag_name='skyline-driving-update',
+            draft=False,
+            prerelease=True,
+            assets=[
+                dict(name=u.PACKAGE, state='uploaded', browser_download_url='package'),
+                dict(name=u.PACKAGE + '.sha256', state='uploaded', browser_download_url='checksum'),
+                dict(name='release.json', state='uploaded', browser_download_url='manifest'),
+            ],
+        )
 
+        def fetch(url, *args):
+            if url.endswith('/tags/skyline-driving-update'):
+                return json.dumps(release).encode()
+            if url.endswith('/tags/main'):
+                raise u.urllib.error.HTTPError(url, 404, 'not found', {}, None)
+            if url == 'manifest':
+                return json.dumps(meta).encode()
+            raise AssertionError(url)
+
+        current = {**metadata(12), 'revision': meta['revision']}
+        with patch.object(u, 'fetch', fetch):
+            message, revision = u.branch_release_status(current, 'skyline-driving-update', threading.Event())
+            self.assertIn('already installed', message)
+            self.assertEqual(revision, meta['revision'])
+            message, revision = u.branch_release_status(current, 'main', threading.Event())
+            self.assertIn('no published installer', message.lower())
+            self.assertIsNone(revision)
+
+    def test_branch_discovery_without_published_release(self):
         def fetch(url, *args):
             if '/releases/tags/' in url:
                 raise u.urllib.error.HTTPError(url, 404, 'not found', {}, None)
             if url.startswith(u.BRANCHES_API):
                 return json.dumps([{'name': 'main'}, {'name': 'skyline'}]).encode()
-            if '/workflows/' in url and '/runs?' in url:
-                return json.dumps({'workflow_runs': [
-                    {'id': 77, 'conclusion': 'success', 'head_sha': meta['revision']},
-                ]}).encode()
-            if url.endswith('/artifacts'):
-                return json.dumps({'artifacts': [
-                    {'name': u.ARTIFACT_NAME, 'archive_download_url': 'https://api.github.com/repos/' + u.REPO + '/actions/artifacts/1/zip'},
-                ]}).encode()
-            if url.endswith('/artifacts/1/zip'):
-                return artifact_bytes
             raise AssertionError(url)
 
         current = metadata(8)
         with patch.object(u, 'fetch', fetch):
             names = u.list_branches(threading.Event())
             self.assertIn('skyline', names)
-            candidate = u.discover_branch(current, 'skyline', threading.Event())
-            self.assertIsNotNone(candidate)
-            self.assertEqual(candidate[0], 9)
-            with tempfile.TemporaryDirectory() as temp:
-                u.stage(candidate, Path(temp), threading.Event(), lambda _: None)
-                self.assertEqual((Path(temp) / 'new/skate3rust.exe').read_bytes(), b'new')
-            self.assertIsNone(u.discover_branch({**current, 'revision': meta['revision']}, 'skyline', threading.Event()))
+            self.assertIsNone(u.discover_branch(current, 'skyline', threading.Event()))
+            message, revision = u.branch_release_status(current, 'skyline', threading.Event())
+            self.assertIn('No published release', message)
+            self.assertIsNone(revision)
 
 
 if __name__ == '__main__':
