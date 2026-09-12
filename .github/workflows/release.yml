@@ -60,7 +60,7 @@ jobs:
             target/release.json
   publish:
     needs: windows
-    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/skyline-driving-update'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -74,10 +74,15 @@ jobs:
           name: skate3rust-windows-x64
           path: target
       - name: Publish rolling experimental
-        if: github.event_name != 'release'
+        if: github.event_name != 'release' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: python tools/publish_experimental.py --directory target
+      - name: Publish branch release
+        if: github.event_name != 'release' && github.ref == 'refs/heads/skyline-driving-update'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/publish_branch.py --directory target --branch skyline-driving-update
       - name: Attach numbered release
         if: github.event_name == 'release'
         env:

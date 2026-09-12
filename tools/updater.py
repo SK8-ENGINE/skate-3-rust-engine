@@ -100,24 +100,35 @@ def allowed_fetch_url(url):
     return False
 
 
+def github_request_headers(url):
+    headers = {'User-Agent': 'Skate3RustEngine-Updater/1', 'X-GitHub-Api-Version': '2022-11-28'}
+    if url.startswith(API):
+        headers['Accept'] = 'application/octet-stream' if '/assets/' in url else 'application/vnd.github+json'
+    elif url.startswith('https://api.github.com/'):
+        headers['Accept'] = 'application/vnd.github+json'
+    token = os.environ.get('SKATE_UPDATE_GITHUB_TOKEN')
+    if token and url.startswith('https://api.github.com/'):
+        headers['Authorization'] = 'Bearer ' + token
+    return headers
+
+
 def fetch(url, cancel, limit, progress=lambda value: None):
     if cancel.is_set():
         raise InterruptedError('Cancelled')
     # URLs originate only from the fixed repository API, never notes/manifest.
     if not allowed_fetch_url(url):
         raise ValueError('Unexpected download URL')
-    headers = {'User-Agent': 'Skate3RustEngine-Updater/1', 'X-GitHub-Api-Version': '2022-11-28'}
-    if url.startswith(API):
-        headers['Accept'] = 'application/octet-stream' if '/assets/' in url else 'application/vnd.github+json'
-        token = os.environ.get('SKATE_UPDATE_GITHUB_TOKEN')
-        if token:
-            headers['Authorization'] = 'Bearer ' + token
-    req = urllib.request.Request(url, headers=headers)
+    req = urllib.request.Request(url, headers=github_request_headers(url))
     deadline = time.monotonic() + 300
     result = bytearray()
     try:
         response = urllib.request.build_opener(DownloadRedirect()).open(req, timeout=15)
     except urllib.error.HTTPError as error:
+        if error.code == 401:
+            raise ValueError(
+                'GitHub sign-in is required for CI artifact downloads. '
+                'Use a published branch release, or set SKATE_UPDATE_GITHUB_TOKEN.'
+            ) from error
         if error.code in (403, 429):
             raise ValueError('GitHub rate limit or access restriction; try again later') from error
         if error.code == 404:
@@ -204,10 +215,42 @@ def package_from_artifact(artifact_zip, package):
         return payload, checksum
 
 
+def discover_branch_release(current, branch, cancel, repair=False):
+    from urllib.parse import quote
+    branch = (branch or '').strip()
+    try:
+        release = json.loads(fetch(f'{API}/tags/{quote(branch, safe="")}', cancel, 8 * 1024 * 1024))
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
+    assets = {a['name']: a for a in release.get('assets', []) if a.get('state') == 'uploaded'}
+    required = {PACKAGE, PACKAGE + '.sha256', 'release.json'}
+    if not required <= assets.keys():
+        return None
+    try:
+        meta = json.loads(fetch(asset_url(assets['release.json']), cancel, 65536))
+        build = identity(meta)
+        program_metadata(meta)
+    except (ValueError, KeyError):
+        return None
+    if meta['revision'] == current.get('revision') and not repair:
+        return None
+    notes = dict(
+        tag_name=branch,
+        body=(f'Branch `{branch}`\n'
+              f'Build {build} · revision {meta.get("revision", "")[:12]}'),
+    )
+    return (build, release['id'], notes, assets, meta)
+
+
 def discover_branch(current, branch, cancel, repair=False):
     branch = (branch or '').strip()
     if not branch or not re.fullmatch(r'[A-Za-z0-9._/-]{1,120}', branch):
         raise ValueError('Enter a valid GitHub branch name')
+    candidate = discover_branch_release(current, branch, cancel, repair=repair)
+    if candidate is not None:
+        return candidate
     current_revision = current.get('revision')
     for run in branch_workflow_runs(branch, cancel):
         if run.get('conclusion') != 'success':
@@ -272,10 +315,17 @@ def discover(current, channel, cancel, repair=False):
     return max(candidates, key=lambda item: item[:2]) if candidates else None
 
 
+def release_package_name(assets, meta):
+    package = package_name(meta)
+    if assets and package + '.sha256' not in assets and PACKAGE + '.sha256' in assets:
+        package = PACKAGE
+    return package
+
+
 def stage(candidate, directory, cancel, progress):
     _, _, release, assets, meta = candidate[:5]
     artifact_zip = candidate[5] if len(candidate) > 5 else None
-    package = package_name(meta)
+    package = release_package_name(assets, meta)
     if artifact_zip is not None:
         archive, checksum = package_from_artifact(artifact_zip, package)
     else:
@@ -381,7 +431,7 @@ def main(request=None):
     settings_path = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'Skate3RustEngine/settings/updates.json'
     settings = read_json(settings_path, {})
     channel = tk.StringVar(value=settings.get('channel') if settings.get('channel') in ('Stable', 'Latest', 'Branch') else 'Stable')
-    branch = tk.StringVar(value=settings.get('branch') or 'main')
+    branch = tk.StringVar(value=settings.get('branch') or 'skyline-driving-update')
     status = tk.StringVar(value='Ready to check')
     ttk.Label(win, text='Updates — Update downloads, then closes and restarts the game.').pack(pady=8)
     choice = ttk.Combobox(win, textvariable=channel, values=('Stable', 'Latest', 'Branch'), state='readonly')
@@ -393,7 +443,7 @@ def main(request=None):
     branch_row.pack(fill='x', padx=12, pady=(0, 4))
     channel_help = ttk.Label(
         win,
-        text='Stable: published releases. Latest: rolling Experimental. Branch: latest CI build for a GitHub branch.',
+        text='Stable: published releases. Latest: rolling Experimental. Branch: published build for a GitHub branch (e.g. skyline-driving-update).',
         wraplength=620,
     )
     channel_help.pack()

@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import threading
@@ -149,6 +150,54 @@ class UpdaterTests(unittest.TestCase):
         redirected = u.DownloadRedirect().redirect_request(req, None, 302, 'Found', {}, 'https://release-assets.githubusercontent.com/file')
         self.assertIsNone(redirected.get_header('Authorization'))
 
+    def test_github_api_token_on_actions_requests(self):
+        with patch.dict(os.environ, {'SKATE_UPDATE_GITHUB_TOKEN': 'test-token'}, clear=False):
+            headers = u.github_request_headers(u.BRANCHES_API)
+            self.assertEqual(headers.get('Authorization'), 'Bearer test-token')
+            headers = u.github_request_headers(f'https://github.com/{u.REPO}/releases/download/v1/{u.PACKAGE}')
+            self.assertNotIn('Authorization', headers)
+
+    def test_branch_release_discovery_and_stage(self):
+        meta = {**metadata(11), 'tag': 'experimental', 'revision': 'c' * 40}
+        meta['files'] = {name: hashlib.sha256(b'new').hexdigest() for name in u.FILES[:-1]}
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, 'w') as z:
+            for name in [*meta['files'], 'release.json']:
+                z.writestr(u.PREFIX + name, json.dumps(meta) if name == 'release.json' else b'new')
+        package_bytes = archive.getvalue()
+        digest = hashlib.sha256(package_bytes).hexdigest()
+        release = dict(
+            id=88,
+            tag_name='skyline-driving-update',
+            draft=False,
+            prerelease=True,
+            assets=[
+                dict(name=u.PACKAGE, state='uploaded', browser_download_url='package'),
+                dict(name=u.PACKAGE + '.sha256', state='uploaded', browser_download_url='checksum'),
+                dict(name='release.json', state='uploaded', browser_download_url='manifest'),
+            ],
+        )
+
+        def fetch(url, *args):
+            if url.endswith('/tags/skyline-driving-update'):
+                return json.dumps(release).encode()
+            if url == 'manifest':
+                return json.dumps(meta).encode()
+            if url == 'checksum':
+                return (digest + '  ' + u.PACKAGE).encode()
+            if url == 'package':
+                return package_bytes
+            raise AssertionError(url)
+
+        current = metadata(10)
+        with patch.object(u, 'fetch', fetch):
+            candidate = u.discover_branch_release(current, 'skyline-driving-update', threading.Event())
+            self.assertIsNotNone(candidate)
+            self.assertEqual(candidate[0], 11)
+            with tempfile.TemporaryDirectory() as temp:
+                u.stage(candidate, Path(temp), threading.Event(), lambda _: None)
+                self.assertEqual((Path(temp) / 'new/skate3rust.exe').read_bytes(), b'new')
+
     def test_branch_discovery_and_stage(self):
         meta = {**metadata(9), 'tag': 'experimental', 'revision': 'b' * 40}
         meta['files'] = {name: hashlib.sha256(b'new').hexdigest() for name in u.FILES[:-1]}
@@ -167,6 +216,8 @@ class UpdaterTests(unittest.TestCase):
         artifact_bytes = artifact.getvalue()
 
         def fetch(url, *args):
+            if '/releases/tags/' in url:
+                raise u.urllib.error.HTTPError(url, 404, 'not found', {}, None)
             if url.startswith(u.BRANCHES_API):
                 return json.dumps([{'name': 'main'}, {'name': 'skyline'}]).encode()
             if '/workflows/' in url and '/runs?' in url:
