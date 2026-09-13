@@ -1,6 +1,8 @@
 //! Generic, package-verified body/scene/node replication. No remote Lua runs,
 //! no platform-specific path exists, and keys are scoped by authenticated peer.
-//! The existing APPLICATION transport provides sequencing, ACK/retry and late join.
+//! APPLICATION is a live snapshot: pose, collider fragments, and scenes stay
+//! published until the local object is removed. Sequencing, ACK/retry and late
+//! join are provided by the existing transport.
 mod wire;
 use super::{Mods,graphics};
 use bevy::prelude::*;
@@ -11,6 +13,7 @@ use wire::*;
 
 type Slot=(u64,String,String);
 const RECORD_BUDGET:usize=224; // leave room for ordinary sdk.net state
+const STALE_BODY_GRACE:Duration=Duration::from_millis(300);
 const MAX_REMOTE_BODIES:usize=32;
 const MAX_REMOTE_GRAPHICS:usize=64;
 const MAX_REMOTE_NODES:usize=128;
@@ -32,7 +35,8 @@ impl Default for State {
         let now=Instant::now();
         Self { epoch:(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64).max(1),
             connection:0,started:now,last_send:now-Duration::from_secs(1),definitions:BTreeMap::new(),
-            bodies:BTreeMap::new(),graphics:BTreeMap::new(),node_sequences:BTreeMap::new(),attachments:BTreeMap::new(),
+            bodies:BTreeMap::new(),graphics:BTreeMap::new(),
+            node_sequences:BTreeMap::new(),attachments:BTreeMap::new(),
             warnings:BTreeSet::new(),last_problem:String::new(),status:String::new() }
     }
 }
@@ -143,17 +147,24 @@ fn outgoing(mods:&Mods,state:&mut State) -> BTreeMap<String,Vec<u8>> {
         }
         let Some(definition)=state.definitions.get(&id) else {continue;};
         if definition.chunks.is_empty() {continue;}
+        let definition_hash=definition.hash;
+        let definition_chunks=definition.chunks.clone();
         let Some(body)=mods.world.read(id) else {continue;};
         let pose=BodyPose {p:body.position,q:body.rotation,v:body.linvel,w:body.angvel,
             com:mods.world.local_center(id).unwrap_or([0.;3]),stamp};
         if !pose.valid() {issue(state,format!("{package}/{key}: non-finite or out-of-range body pose"));continue;}
         let mut header=make(BODY,package,key,fp,state.epoch,id,serde_json::to_vec(&pose).unwrap());
-        header.revision=definition.hash;header.count=definition.chunks.len() as u16;
-        let mut packets=vec![header.clone()];
-        for (index,chunk) in definition.chunks.iter().enumerate() {
-            let mut part=header.clone();part.kind=DEFINITION;part.index=index as u16;part.payload=chunk.clone();packets.push(part);
+        header.revision=definition_hash;header.count=definition_chunks.len() as u16;
+        // Pose updates are tiny and must win the record budget every tick.
+        push_group(&mut out,vec![header.clone()],state,&format!("{package}/{key} pose"));
+        // Geometry is durable APPLICATION state, same as pose. Keys omitted from
+        // this map are tombstoned, and remotes assemble only from the live snapshot,
+        // so a one-shot announce cannot survive loss, credit windows, or late join.
+        let mut fragments=Vec::new();
+        for (index,chunk) in definition_chunks.iter().enumerate() {
+            let mut part=header.clone();part.kind=DEFINITION;part.index=index as u16;part.payload=chunk.clone();fragments.push(part);
         }
-        push_group(&mut out,packets,state,&format!("{package}/{key}"));
+        push_group(&mut out,fragments,state,&format!("{package}/{key} definition"));
     }
     for ((package,key),g) in mods.graphics.iter().filter(|((o,_),_)|!o.starts_with('@')) {
         let Some(&fp)=packages.get(package) else {continue;};
@@ -180,8 +191,11 @@ fn outgoing(mods:&Mods,state:&mut State) -> BTreeMap<String,Vec<u8>> {
 fn remove_body(mods:&mut Mods,state:&mut State,slot:&Slot) {
     if let Some(replica)=state.bodies.remove(slot) {
         let key=(owner(slot.0,&slot.1),slot.2.clone());
-        if mods.bodies.get(&key)==Some(&replica.id) {mods.bodies.remove(&key);}
-        mods.world.remove(replica.id);
+        // Never delete a dynamics id that was reused by a different owner/key.
+        if mods.bodies.get(&key)==Some(&replica.id) {
+            mods.bodies.remove(&key);
+            mods.world.remove(replica.id);
+        }
     }
 }
 fn clear_remote(world:&mut World,mods:&mut Mods,state:&mut State) {
@@ -234,15 +248,22 @@ fn incoming(world:&mut World,mods:&mut Mods,state:&mut State,records:Vec<(u64,St
             }
         } else if let Some(replica)=state.bodies.get_mut(&slot) {replica.receive(pose,seq);}
     }
-    let stale:Vec<_>=state.bodies.keys().filter(|slot|!live_bodies.contains(*slot)).cloned().collect();
+    let stale:Vec<_>=state.bodies.keys().filter(|slot| {
+        !live_bodies.contains(*slot)
+            && state.bodies.get(slot).is_some_and(|r| r.received.elapsed()>=STALE_BODY_GRACE)
+    }).cloned().collect();
     for slot in stale {remove_body(mods,state,&slot);}
 
     let mut live_graphics=BTreeSet::new();let mut graphics_count=BTreeMap::<u64,usize>::new();
     for &&(peer,_,ref packet) in &accepted {
         if packet.kind!=GRAPHIC {continue;}
         let count=graphics_count.entry(peer).or_default();if *count>=MAX_REMOTE_GRAPHICS {continue;}*count+=1;
-        let Ok(record)=serde_json::from_slice::<GraphicRecord>(&packet.payload) else {continue;};
-        if !record.definition.validate() || !record.transform.validate() {continue;}
+        let Ok(record)=serde_json::from_slice::<GraphicRecord>(&packet.payload) else {
+            issue(state,format!("peer {peer} scene {}/{}: unreadable graphics record",packet.owner,packet.key));continue;
+        };
+        if !record.definition.validate() || !record.transform.validate() {
+            issue(state,format!("peer {peer} scene {}/{}: invalid graphics descriptor",packet.owner,packet.key));continue;
+        }
         let slot=(peer,packet.owner.clone(),packet.key.clone());
         let o=owner(peer,&packet.owner);let key=(o.clone(),packet.key.clone());
         let bound=record.definition.body.as_ref().is_none_or(|body| {
@@ -313,22 +334,32 @@ pub(crate) fn sync(world:&mut World) {
         if state.connection!=local {
             clear_remote(world,&mut mods,&mut state);state=State::default();state.connection=local;mods.dyn_published.clear();
         }
-        if state.last_send.elapsed()>=Duration::from_millis(49) {
+        let definition_pending=mods.bodies.iter().filter(|((owner,_),_)|!owner.starts_with('@')).any(|(_, &id)| {
+            mods.world.definition_revision(id).is_some_and(|revision| {
+                state.definitions.get(&id).is_none_or(|d|d.revision!=revision)
+            })
+        });
+        if definition_pending || state.last_send.elapsed()>=Duration::from_millis(49) {
             let desired=outgoing(&mods,&mut state);
+            let desired_keys: BTreeSet<String> = desired.keys().cloned().collect();
             let mut net=world.resource_mut::<crate::multiplayer::Multiplayer>();
-            let mut published=BTreeSet::new();
-            for (key,value) in desired {
-                if net.publish_application(&key,value) {published.insert(key);}
-                else {issue(&mut state,format!("transport rejected '{key}': application key/value budget reached"));}
+            for key in mods.dyn_published.difference(&desired_keys) {
+                net.publish_application(key,Vec::new());
             }
-            for key in mods.dyn_published.difference(&published) {net.publish_application(key,Vec::new());}
-            mods.dyn_published=published;state.last_send=Instant::now();
+            for (key,value) in desired {
+                if !net.publish_application(&key,value) {
+                    issue(&mut state,format!("transport rejected '{key}': application key/value budget reached"));
+                }
+            }
+            mods.dyn_published=desired_keys;state.last_send=Instant::now();
         }
         incoming(world,&mut mods,&mut state,records);
         sample(&mut mods,&state);
         graphics::sync(world,&mut mods);
         let local_bodies=mods.bodies.iter().filter(|((owner,_),_)|!owner.starts_with('@')).count();
-        state.status=format!("Solid bridge: {} remote / {} scenes / {} local publishing{}",state.bodies.len(),state.graphics.len(),local_bodies,
+        let collider_records=state.definitions.values().map(|d|d.chunks.len()).sum::<usize>();
+        state.status=format!("Solid bridge: {} remote / {} scenes / {} local publishing / {} collider records{}",
+            state.bodies.len(),state.graphics.len(),local_bodies,collider_records,
             if state.last_problem.is_empty() {String::new()} else {format!(" | last issue: {}",state.last_problem)});
         mods.replication=state;
     });
@@ -363,5 +394,8 @@ mod tests {
         let pose=BodyPose {p:[0.;3],q:[0.,0.,0.,1.],v:[100.,0.,0.],w:[0.;3],com:[0.;3],stamp:0};
         let replica=Replica {id:1,epoch:1,instance:1,revision:0,seq:1,pose,received:Instant::now()-Duration::from_secs(1),error_position:Vec3::ZERO,error_axis:Vec3::ZERO};
         let (t,v,w)=replica.sample();assert!((t.translation.x-10.).abs()<1e-5);assert_eq!(v,Vec3::ZERO);assert_eq!(w,Vec3::ZERO);
+    }
+    #[test] fn one_max_size_body_and_scene_fit_the_record_budget() {
+        assert!(1 + 1 + MAX_CHUNKS + 1 + 4 <= RECORD_BUDGET);
     }
 }

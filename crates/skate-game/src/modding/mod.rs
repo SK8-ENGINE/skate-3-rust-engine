@@ -214,6 +214,21 @@ pub(crate) fn player_attached(mods: &Mods) -> bool {
     mods.attach.is_some()
 }
 
+impl Mods {
+    fn runtime_busy(&self) -> bool {
+        self.manager.packages.values().any(|p| p.running())
+            || !self.manager.commands.is_empty()
+            || !self.manager.retired.is_empty()
+            || !self.bodies.is_empty()
+            || !self.graphics.is_empty()
+            || !self.overlays.is_empty()
+            || !self.joints.is_empty()
+            || self.attach.is_some()
+            || !self.canvases.is_empty()
+            || !self.skater_proxies.is_empty()
+    }
+}
+
 fn body_snapshot_for(mods: &Mods, owner: &str) -> serde_json::Value {
     let mut bodies = serde_json::Map::new();
     let mut reverse = BTreeMap::<u64, String>::new();
@@ -345,9 +360,6 @@ fn ensure_ground(world: &World, mods: &mut Mods) -> Result<(), String> {
 
 fn maintenance(world: &mut World) {
     world.resource_scope(|world, mut mods: Mut<Mods>| {
-        let camera = camera_position(world);
-        let snap = snapshot_ro(world, &mods, camera);
-        mods.manager.snapshot = snap;
         let generation = world
             .resource::<crate::map_transition::CurrentMap>()
             .generation;
@@ -355,11 +367,24 @@ fn maintenance(world: &mut World) {
             clear_runtime(world, &mut mods);
             mods.generation = generation;
             mods.manager.commands.clear();
-            let map = mods.manager.snapshot["map"].clone();
-            mods.manager
-                .dispatch("on_event", json!({"name":"world_changed","map":map}));
+            if mods.runtime_busy() {
+                let camera = camera_position(world);
+                let snap = snapshot_ro(world, &mods, camera);
+                mods.manager.snapshot = snap;
+                let map = mods.manager.snapshot["map"].clone();
+                mods.manager
+                    .dispatch("on_event", json!({"name":"world_changed","map":map}));
+            }
+            mods.manager.scan(false);
+            return;
         }
         mods.manager.scan(false);
+        if !mods.runtime_busy() {
+            return;
+        }
+        let camera = camera_position(world);
+        let snap = snapshot_ro(world, &mods, camera);
+        mods.manager.snapshot = snap;
         apply(world, &mut mods);
     });
 }
@@ -431,7 +456,11 @@ fn fixed(world: &mut World) {
     world.resource_scope(|world, mut mods: Mut<Mods>| {
         bridge::take_reactions(&mut mods, &mut world.resource_mut::<crate::physics::GamePhysics>());
         let camera = camera_position(world);
-        mods.manager.snapshot = snapshot_ro(world, &mods, camera);
+        if mods.runtime_busy()
+            || mods.manager.packages.values().any(|package| package.running())
+        {
+            mods.manager.snapshot = snapshot_ro(world, &mods, camera);
+        }
         if let Err(e) = ensure_ground(world, &mut mods) {
             warn!("dynamics ground: {e}");
         }
@@ -567,15 +596,15 @@ fn fixed(world: &mut World) {
 }
 
 fn update(world: &mut World) {
-    let camera = camera_position(world);
-    let snap = {
-        let mods = world.resource::<Mods>();
-        snapshot_ro(world, mods, camera)
-    };
-    let paused =
-        snap["paused"].as_bool().unwrap_or(true) || snap["replay"].as_bool().unwrap_or(false);
-    let dt = world.resource::<Time<Real>>().delta_secs_f64().min(0.25);
     world.resource_scope(|world, mut mods: Mut<Mods>| {
+        if !mods.runtime_busy() {
+            return;
+        }
+        let camera = camera_position(world);
+        let snap = snapshot_ro(world, &mods, camera);
+        let paused =
+            snap["paused"].as_bool().unwrap_or(true) || snap["replay"].as_bool().unwrap_or(false);
+        let dt = world.resource::<Time<Real>>().delta_secs_f64().min(0.25);
         mods.manager.snapshot = snap;
         if !paused {
             mods.manager.dispatch("on_update", json!({"dt": dt}));
@@ -1255,12 +1284,13 @@ fn present_camera(world: &mut World) {
         .iter(world).next();
     let Some(camera) = camera else { return; };
     let replay = world.resource::<crate::replay::Replay>().active;
+    let debug_cam = crate::debug_cam::DebugCam::active(world.resource::<crate::camera::CameraRuntime>());
     let customizing = world.get_resource::<crate::customiser::Customiser>().is_some_and(|c| c.open);
     let paused = world.resource::<crate::graphics_menu::Menu>().open;
     let dt = if paused {0.0} else {world.resource::<Time<Real>>().delta_secs().clamp(0.0,0.1)};
     let alpha = if paused {1.0} else {world.resource::<Time<Fixed>>().overstep_fraction()};
     world.resource_scope(|world, mut mods: Mut<Mods>| {
-        let suppress = replay || customizing;
+        let suppress = replay || customizing || debug_cam;
         if mods.camera.rig.is_none() || suppress {
             if let Some(near) = mods.camera.saved_near.take() {
                 if let Some(mut projection) = world.get_mut::<Projection>(camera) {

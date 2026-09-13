@@ -1,4 +1,15 @@
-//! GPU-only exposure adaptation. Native evaluator, portable luminance sampling.
+//! GPU-only exposure adaptation and the retail tone curve.
+//!
+//! The world and character shaders emit linear radiance premultiplied by a
+//! baseline exposure of 2.5. Nothing downstream of them is a no-op: the tone
+//! pass divides that baseline back out, applies the retail curve, and inverts
+//! sRGB so Bevy's output attachment does not encode gamma twice. Skipping it
+//! clips every bright surface to white, which reads as chrome rather than as
+//! an exposure fault.
+//!
+//! Metering is a portable 16x16 bilinear sample of the HDR target rather than
+//! the console's resolve surface, evaluated with the native multiplicative
+//! evaluator and centre weighting.
 use bevy::{
     asset::embedded_asset,
     core_pipeline::{
@@ -21,11 +32,14 @@ use bevy::{
 };
 use std::{collections::VecDeque, sync::Mutex};
 
+use crate::retail_render::{RetailScene, RetailTone, world_changed};
+
 #[derive(Resource, Clone, ExtractResource)]
 struct Settings {
     tuning: Vec4,
     timing: Vec4,
 }
+
 impl Default for Settings {
     fn default() -> Self {
         // Missing metadata retains the existing fixed exposure.
@@ -35,6 +49,7 @@ impl Default for Settings {
         }
     }
 }
+
 #[derive(serde::Deserialize)]
 struct Authored {
     target_luminance: f32,
@@ -43,50 +58,73 @@ struct Authored {
     damping: f32,
 }
 
-pub(super) fn install(app: &mut App) {
-    embedded_asset!(app, "retail_exposure.wgsl");
-    app.init_resource::<Settings>()
-        .add_plugins((
-            ExtractResourcePlugin::<Settings>::default(),
-            ExtractComponentPlugin::<super::RetailTone>::default(),
-        ))
-        .add_systems(Startup, load)
-        .add_systems(PreUpdate, load.after(crate::map_transition::MapTransitionSet).run_if(super::world_changed))
-        .add_systems(Update, advance);
-    if let Some(render) = app.get_sub_app_mut(RenderApp) {
-        render
-            .add_systems(RenderStartup, initialize)
-            .add_systems(Render, upload.in_set(RenderSystems::PrepareResources))
-            .add_systems(Render, prune_bindings.in_set(RenderSystems::PrepareBindGroups))
-            .add_render_graph_node::<ViewNodeRunner<ExposureNode>>(Core3d, ExposureLabel)
-            .add_render_graph_edges(
-                Core3d,
-                (
-                    Node3d::Tonemapping,
-                    ExposureLabel,
-                    Node3d::EndMainPassPostProcessing,
-                ),
-            );
+pub(crate) struct RetailExposurePlugin;
+
+impl Plugin for RetailExposurePlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "retail_exposure.wgsl");
+        embedded_asset!(app, "retail_tone.wgsl");
+        app.init_resource::<Settings>()
+            .add_plugins((
+                ExtractResourcePlugin::<Settings>::default(),
+                ExtractComponentPlugin::<RetailTone>::default(),
+            ))
+            .add_systems(Startup, load)
+            .add_systems(
+                PreUpdate,
+                load.after(crate::map_transition::MapTransitionSet)
+                    .run_if(world_changed),
+            )
+            .add_systems(Update, advance);
+        if let Some(render) = app.get_sub_app_mut(RenderApp) {
+            render
+                .add_systems(RenderStartup, initialize)
+                .add_systems(Render, upload.in_set(RenderSystems::PrepareResources))
+                .add_systems(Render, prune_bindings.in_set(RenderSystems::PrepareBindGroups))
+                .add_render_graph_node::<ViewNodeRunner<ExposureNode>>(Core3d, ExposureLabel)
+                .add_render_graph_edges(
+                    Core3d,
+                    (
+                        Node3d::Tonemapping,
+                        ExposureLabel,
+                        Node3d::EndMainPassPostProcessing,
+                    ),
+                );
+        }
     }
 }
 
-fn load(config: Res<crate::config::Config>, retail: Res<super::RetailScene>, mut settings: ResMut<Settings>) {
+fn load(
+    config: Res<crate::config::Config>,
+    retail: Res<RetailScene>,
+    mut settings: ResMut<Settings>,
+) {
     let generation = settings.timing.y + 1.;
     *settings = Settings::default();
     settings.timing.y = generation;
-    if !retail.0 { return; }
+    if !retail.0 {
+        return;
+    }
     if std::env::var_os("SKATE_FIXED_EXPOSURE").is_some_and(|v| v == "1") {
         info!("RETAIL_EXPOSURE: fixed 2.5 comparison mode");
         return;
     }
-    let profile = config.map_path.as_ref().and_then(|p| p.file_stem()).and_then(|name| {
-        let bytes = std::fs::read(config.asset_root.join("private/exposure-profiles.json")).ok()?;
-        let mut profiles: std::collections::BTreeMap<String, Authored> = serde_json::from_slice(&bytes).ok()?;
-        profiles.remove(&name.to_string_lossy().to_lowercase())
-    });
-    let fallback = || std::fs::read(config.asset_root.join("private/exposure.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice::<Authored>(&b).ok());
+    let profile = config
+        .map_path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|name| {
+            let bytes =
+                std::fs::read(config.asset_root.join("private/exposure-profiles.json")).ok()?;
+            let mut profiles: std::collections::BTreeMap<String, Authored> =
+                serde_json::from_slice(&bytes).ok()?;
+            profiles.remove(&name.to_string_lossy().to_lowercase())
+        });
+    let fallback = || {
+        std::fs::read(config.asset_root.join("private/exposure.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Authored>(&b).ok())
+    };
     if let Some(a) = profile.or_else(fallback) {
         if [a.target_luminance, a.min, a.max, a.damping]
             .iter()
@@ -104,6 +142,7 @@ fn load(config: Res<crate::config::Config>, retail: Res<super::RetailScene>, mut
         }
     }
 }
+
 fn advance(time: Res<Time>, mut settings: ResMut<Settings>) {
     settings.timing.x = time.delta_secs().clamp(0., 0.05);
 }
@@ -156,7 +195,10 @@ fn initialize(
     let compute = cache.queue_compute_pipeline(ComputePipelineDescriptor {
         label: Some("retail exposure".into()),
         layout: vec![compute_layout.clone()],
-        shader: assets.load(bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_exposure.wgsl")).with_source("embedded")),
+        shader: assets.load(
+            bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_exposure.wgsl"))
+                .with_source("embedded"),
+        ),
         entry_point: Some("meter".into()),
         ..default()
     });
@@ -165,7 +207,10 @@ fn initialize(
         layout: vec![tone_layout.clone()],
         vertex: fullscreen.to_vertex_state(),
         fragment: Some(FragmentState {
-            shader: assets.load(bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_tone.wgsl")).with_source("embedded")),
+            shader: assets.load(
+                bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_tone.wgsl"))
+                    .with_source("embedded"),
+            ),
             targets: vec![Some(ColorTargetState {
                 format: ViewTarget::TEXTURE_FORMAT_HDR,
                 blend: None,
@@ -201,6 +246,7 @@ fn initialize(
         bindings: default(),
     });
 }
+
 fn bytes<const N: usize>(values: [Vec4; N]) -> Vec<u8> {
     values
         .into_iter()
@@ -208,21 +254,20 @@ fn bytes<const N: usize>(values: [Vec4; N]) -> Vec<u8> {
         .flat_map(f32::to_le_bytes)
         .collect()
 }
+
 fn upload(settings: Res<Settings>, pipeline: Res<Pipeline>, queue: Res<RenderQueue>) {
     let mut data = [0u8; 32];
     for (chunk, value) in data.chunks_exact_mut(4).zip(
-        [settings.tuning, settings.timing].into_iter().flat_map(|v| v.to_array()),
+        [settings.tuning, settings.timing]
+            .into_iter()
+            .flat_map(|v| v.to_array()),
     ) {
         chunk.copy_from_slice(&value.to_le_bytes());
     }
-    queue.write_buffer(
-        &pipeline.settings,
-        0,
-        &data,
-    );
+    queue.write_buffer(&pipeline.settings, 0, &data);
 }
 
-fn prune_bindings(pipeline: Res<Pipeline>, views: Query<&ViewTarget, With<super::RetailTone>>) {
+fn prune_bindings(pipeline: Res<Pipeline>, views: Query<&ViewTarget, With<RetailTone>>) {
     // Bind groups retain their textures. Release retired camera/resize targets
     // before rendering, including when there are no exposure views left.
     pipeline.bindings.lock().unwrap().retain(|(id, _, _)| {
@@ -234,10 +279,13 @@ fn prune_bindings(pipeline: Res<Pipeline>, views: Query<&ViewTarget, With<super:
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
 struct ExposureLabel;
+
 #[derive(Default)]
 struct ExposureNode;
+
 impl ViewNode for ExposureNode {
-    type ViewQuery = (&'static ViewTarget, &'static super::RetailTone);
+    type ViewQuery = (&'static ViewTarget, &'static RetailTone);
+
     fn run<'w>(
         &self,
         _: &mut RenderGraphContext,
@@ -257,7 +305,10 @@ impl ViewNode for ExposureNode {
         use bevy::render::diagnostic::RecordDiagnostics;
         let diagnostics = context.diagnostic_recorder();
         let mut bindings = p.bindings.lock().unwrap();
-        let index = if let Some(index) = bindings.iter().position(|(id, _, _)| *id == post.source.id()) {
+        let index = if let Some(index) = bindings
+            .iter()
+            .position(|(id, _, _)| *id == post.source.id())
+        {
             index
         } else {
             let meter = context.render_device().create_bind_group(
@@ -273,7 +324,11 @@ impl ViewNode for ExposureNode {
             let output = context.render_device().create_bind_group(
                 "retail exposed tone",
                 &cache.get_bind_group_layout(&p.tone_layout),
-                &BindGroupEntries::sequential((post.source, &p.sampler, p.state.as_entire_binding())),
+                &BindGroupEntries::sequential((
+                    post.source,
+                    &p.sampler,
+                    p.state.as_entire_binding(),
+                )),
             );
             if bindings.len() == 8 {
                 bindings.pop_front();

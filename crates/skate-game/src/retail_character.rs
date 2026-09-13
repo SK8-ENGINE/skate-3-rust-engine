@@ -22,7 +22,11 @@ impl Plugin for CharacterLightingPlugin {
         app.add_plugins(MaterialPlugin::<CharacterMaterial>::default())
             .add_systems(Startup, load)
             .add_systems(PreUpdate, load.after(crate::map_transition::MapTransitionSet).run_if(crate::retail_render::world_changed))
-            .add_systems(Update, (bind, shadow_views, update).chain());
+            .add_systems(Update, (bind, shadow_views).chain())
+            .add_systems(
+                Update,
+                update.after(crate::multiplayer::RemoteRenderSet),
+            );
     }
 }
 #[derive(Clone, Debug, Deserialize)]
@@ -48,11 +52,17 @@ struct LightingData {
     native: HashMap<String, HashMap<String, MaterialData>>,
 }
 #[derive(Resource)]
-struct Lighting {
+pub(crate) struct Lighting {
     data: LightingData,
     probes: Irradiance,
-    light: Vec4,
+    pub(crate) light: Vec4,
     display_sh: Option<[Vec4; 9]>,
+}
+
+impl Lighting {
+    pub(crate) fn default_sh(&self) -> [Vec4; 9] {
+        std::array::from_fn(|i| Vec3::from_array(self.data.default_sh[i]).extend(0.))
+    }
 }
 #[derive(Clone, Debug, Default, ShaderType)]
 pub(crate) struct CharacterParams {
@@ -101,7 +111,7 @@ struct OriginalCharacterMaterial {
     material: Handle<StandardMaterial>,
     layers: Option<RenderLayers>,
 }
-fn load(mut commands: Commands, config: Res<crate::config::Config>, sources: Query<Entity, With<ShadowSource>>, mut shadow: ResMut<crate::retail_render::ShadowState>,
+fn load(mut commands: Commands, config: Res<crate::config::Config>, sources: Query<Entity, With<ShadowSource>>, mut shadow: ResMut<crate::retail_render::FrameStateData>,
     retail: Res<crate::retail_render::RetailScene>,
     originals: Query<(Entity, &OriginalCharacterMaterial)>,
     cameras: Query<(Entity, &RenderLayers), With<crate::camera::GameplayCamera>>,
@@ -109,17 +119,22 @@ fn load(mut commands: Commands, config: Res<crate::config::Config>, sources: Que
 ) {
     for (_, material) in customiser.iter_mut() { material.extension.retail.light = Vec4::ZERO; }
     commands.remove_resource::<Lighting>();
-    for e in &sources { commands.entity(e).despawn(); }
-    *shadow = Default::default();
+    for e in &sources { commands.entity(e).try_despawn(); }
+    // Only the floor: the clock and ocean PCA in this resource are rewritten
+    // every frame and are not this system's to reset.
+    shadow.shadow = Vec4::ZERO;
+    // A map change runs this alongside the transition that despawns the skater it
+    // is restoring, and the despawn lands first. Restoring a material on an
+    // entity that is already gone is the expected case, not an error.
     for (entity, original) in &originals {
         let mut entity = commands.entity(entity);
-        entity.remove::<(MeshMaterial3d<CharacterMaterial>, OriginalCharacterMaterial)>()
-            .insert(MeshMaterial3d(original.material.clone()));
-        if let Some(layers) = &original.layers { entity.insert(layers.clone()); }
-        else { entity.remove::<RenderLayers>(); }
+        entity.try_remove::<(MeshMaterial3d<CharacterMaterial>, OriginalCharacterMaterial)>()
+            .try_insert(MeshMaterial3d(original.material.clone()));
+        if let Some(layers) = &original.layers { entity.try_insert(layers.clone()); }
+        else { entity.try_remove::<RenderLayers>(); }
     }
     for (entity, layers) in &cameras {
-        commands.entity(entity).insert(layers.clone().without(28));
+        commands.entity(entity).try_insert(layers.clone().without(28));
     }
     if !retail.0 { return; }
     let Some(map_path) = &config.map_path else {
@@ -330,10 +345,12 @@ fn bind(
             }),
             alpha: m.alpha_mode,
         });
+        // Skater meshes come and go with the outfit and the map, so binding one
+        // that has since been despawned is routine rather than a fault.
         commands
             .entity(entity)
-            .remove::<MeshMaterial3d<StandardMaterial>>()
-            .insert((
+            .try_remove::<MeshMaterial3d<StandardMaterial>>()
+            .try_insert((
                 OriginalCharacterMaterial { material: handle.0.clone(), layers: layers.cloned() },
                 MeshMaterial3d(material),
                 RenderLayers::from_layers(&[0, 28]),
@@ -365,7 +382,7 @@ fn update(
     parents: Query<&ChildOf>,
     mut materials: ResMut<Assets<CharacterMaterial>>,
     mut customiser: ResMut<Assets<crate::customiser_material::SkaterMaterial>>,
-    mut shadow: ResMut<crate::retail_render::ShadowState>,
+    mut shadow: ResMut<crate::retail_render::FrameStateData>,
     time: Res<Time>,
 ) {
     let Some(mut lighting) = lighting else {
@@ -423,6 +440,19 @@ fn update(
     }
 }
 
+fn customiser_retail_enabled(retail: &CharacterParams) -> bool {
+    // Warm stamps options.z = -1 for authored CAC rows; tint.w is also forced on.
+    retail.options.z < 0. || retail.tint.w > 0.
+}
+
+pub(crate) fn seed_customiser_retail(material: &mut crate::customiser_material::SkaterMaterial, light: Vec4, sh: [Vec4; 9]) {
+    if !customiser_retail_enabled(&material.extension.retail) {
+        return;
+    }
+    material.extension.retail.light = light;
+    material.extension.retail.sh = sh;
+}
+
 fn apply_sh_to_hierarchy(
     root: Entity,
     sh: [Vec4; 9],
@@ -453,7 +483,7 @@ fn apply_sh_to_hierarchy(
             continue;
         }
         if let Some(material) = customiser.get_mut(&handle.0) {
-            if material.extension.retail.tint.w == 0. {
+            if !customiser_retail_enabled(&material.extension.retail) {
                 continue;
             }
             material.extension.retail.light = light;
@@ -520,7 +550,9 @@ mod tests {
         });
         world.insert_resource(crate::retail_render::RetailScene(false));
         world.init_resource::<Assets<crate::customiser_material::SkaterMaterial>>();
-        world.insert_resource(crate::retail_render::ShadowState(Vec4::ONE, Vec4::ONE, [Vec4::ONE; 7]));
+        world.insert_resource(crate::retail_render::FrameStateData {
+            shadow: Vec4::ONE, clock: Vec4::ONE, pca: [Vec4::ONE; 7],
+        });
         let material = Handle::<StandardMaterial>::default();
         let player = world.spawn((
             OriginalCharacterMaterial { material: material.clone(), layers: None },
@@ -537,7 +569,7 @@ mod tests {
         assert!(world.get::<RenderLayers>(player).is_none());
         assert_eq!(world.get::<RenderLayers>(camera).unwrap(), &RenderLayers::default());
         assert_eq!(world.get::<RenderLayers>(overlay).unwrap(), &RenderLayers::layer(31));
-        assert_eq!(world.resource::<crate::retail_render::ShadowState>().0, Vec4::ZERO);
+        assert_eq!(world.resource::<crate::retail_render::FrameStateData>().shadow, Vec4::ZERO);
     }
 
     #[test]

@@ -135,6 +135,16 @@ fn installation_ready(
 
 pub(crate) fn asset_root() -> Result<PathBuf, String> {
     if std::env::args_os().any(|arg| arg == "--assets") { return Ok(PathBuf::from("assets")); }
+    if let Some(root) = std::env::var_os("SKATE3_ASSETS") {
+        let path = PathBuf::from(root);
+        if path.is_dir() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "SKATE3_ASSETS points to a missing directory: {}",
+            path.display()
+        ));
+    }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let root = exe.parent().ok_or("No executable directory")?;
     let base = root.join("data");
@@ -175,7 +185,9 @@ pub(crate) fn asset_root() -> Result<PathBuf, String> {
     }
     let setup = root.join("support/skate3setup.exe");
     if !setup.is_file() {
-        return Err("This copy has not been set up. Use the complete Windows package, or --assets DIRECTORY for development.".into());
+        return Err(
+            "This copy has not been set up. Use the complete Windows package, pass --assets DIRECTORY, or set SKATE3_ASSETS for development.".into(),
+        );
     }
     let mut command = Command::new(setup);
     command.arg("--base").arg(&base).arg("--game-exe").arg(&exe);

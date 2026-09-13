@@ -304,10 +304,14 @@ function sdk.camera.clear_follow() submit{kind="camera_follow",body=nil,offset={
 function sdk.camera.set(position, look_at) submit{kind="camera_set",position=position,look_at=look_at} end
 
 sdk.input = {}
-function sdk.input.down(key) return sdk.snapshot.keys[key] == true end
+function sdk.input.down(key)
+    local keys = sdk.snapshot.keys
+    return keys ~= nil and keys[key] == true
+end
 function sdk.input.action(id)
     assert(type(id)=='number' and id%1==0 and id>=64 and id<=81,'action ID must be 64..81')
-    return sdk.snapshot.actions[id-63]
+    local actions = sdk.snapshot.actions
+    return actions and actions[id-63] or 0.0
 end
 function sdk.input.pad()
     return as_table(sdk.snapshot.pad) or {buttons=0,triggers={0,0},left={0,0},right={0,0}}

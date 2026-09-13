@@ -256,7 +256,36 @@ mod tests {
 
     #[test]
     fn vehicle_contact_uses_point_velocity_for_group_eight() {
-        let mut body = skate_core::physics::assembly::BodySnapshot::default();
+        // `BodySnapshot` has no `Default`: every field is a native body value,
+        // so an implicit zero would be a body with no basis. Spell out a resting
+        // unit body the way the other physics tests do.
+        let identity = skate_core::math::Basis3 {
+            columns: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        };
+        let mut body = skate_core::physics::assembly::BodySnapshot {
+            state_flags: 4,
+            rates: skate_core::physics::rigid_body::RetailBodyRates {
+                orientation: skate_core::physics::rigid_body::RetailQuaternion::IDENTITY,
+                basis: identity,
+                world_inverse_inertia: identity,
+                position: skate_core::math::Vector3::ZERO,
+                linear_velocity: skate_core::math::Vector3::ZERO,
+                angular_velocity: skate_core::math::Vector3::ZERO,
+                force_acceleration: skate_core::math::Vector3::ZERO,
+                torque_acceleration: skate_core::math::Vector3::ZERO,
+                kinetic_energy: 0.,
+                cool_down: 0,
+            },
+            inertia: skate_core::physics::rigid_body::RetailInertiaDynamics {
+                inverse_tensor: skate_core::math::Vector3::new(1., 1., 1.),
+                inverse_mass: 1.,
+                spherical: 0.,
+                maximum_linear_velocity: f32::MAX,
+                maximum_angular_velocity: f32::MAX,
+                linear_drag: 0.,
+                angular_drag: 0.,
+            },
+        };
         body.rates.position = skate_core::math::Vector3::new(0., 0., 0.);
         body.rates.linear_velocity = skate_core::math::Vector3::new(1., 0., 0.);
         body.rates.angular_velocity = skate_core::math::Vector3::new(0., 2., 0.);

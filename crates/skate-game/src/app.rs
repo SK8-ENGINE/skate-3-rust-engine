@@ -10,10 +10,29 @@ use bevy::{
     prelude::*,
     render::{
         RenderPlugin,
-        settings::{Backends, InstanceFlags, RenderCreation, WgpuSettings},
+        settings::{Backends, InstanceFlags, RenderCreation, WgpuFeatures, WgpuSettings},
     },
 };
 use skate_data::GameAssets;
+
+/// Bevy's defaults plus, on request, the query features that make
+/// `RenderDiagnosticsPlugin` report per-pass GPU time.
+///
+/// Opt-in: a required feature the adapter lacks aborts device creation, and the
+/// queries are not free. Without them a pass's cost can only be inferred from
+/// invocation counts, which says nothing about how long the pass took. Set
+/// `SKATE_GPU_TIMING=1` to get `render/**/elapsed_gpu`.
+fn wgpu_features() -> WgpuFeatures {
+    let default = WgpuSettings::default().features;
+    if std::env::var_os("SKATE_GPU_TIMING").is_some_and(|v| v != "0") {
+        default
+            | WgpuFeatures::TIMESTAMP_QUERY
+            | WgpuFeatures::TIMESTAMP_QUERY_INSIDE_ENCODERS
+            | WgpuFeatures::PIPELINE_STATISTICS_QUERY
+    } else {
+        default
+    }
+}
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub(crate) enum FrameSet {
@@ -61,6 +80,7 @@ pub(crate) fn build(
                     // Existing machine's validation layer rejects wgpu atomic shaders.
                     // This workaround belongs only to the rendering adapter.
                     instance_flags: InstanceFlags::empty(),
+                    features: wgpu_features(),
                     ..default()
                 }),
                 ..default()
@@ -121,6 +141,7 @@ pub(crate) fn build(
     app.add_plugins(crate::updater::UpdaterPlugin);
     app.add_plugins(crate::multiplayer::MultiplayerPlugin);
     app.add_plugins(crate::scoring_hud::ScoringHudPlugin);
+    app.add_plugins(crate::debug_cam::DebugCamPlugin);
     app.add_systems(Last, crate::crash_context::sample);
     crate::profiling::install(&mut app);
     app

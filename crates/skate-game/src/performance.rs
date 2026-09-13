@@ -1,291 +1,476 @@
-//! Opt-in repeatable frame/physics timing: SKATE_PERF_REPORT=path.json.
+//! Frame timing harness. Active only when `SKATE_PERF_REPORT` names an output
+//! path: warms up, samples a fixed window, writes JSON, then exits.
+//!
+//! The `Performance` resource is absent in normal play, which is why callers
+//! take it as `Option<ResMut<_>>` — instrumentation must never cost anything in
+//! a shipping session.
 use bevy::prelude::*;
-use bevy::render::{Render, RenderApp, RenderSystems};
-use std::sync::{Arc, Mutex};
-use std::{collections::BTreeMap, sync::OnceLock};
-use std::{path::PathBuf, time::Instant};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
-static EPOCH: OnceLock<Instant> = OnceLock::new();
-static SLOW_SECTIONS: Mutex<Vec<(&'static str, f64, f64)>> = Mutex::new(Vec::new());
-fn timestamp(now: Instant) -> f64 {
-    EPOCH.get().map_or(0., |epoch| now.duration_since(*epoch).as_secs_f64() * 1000.)
+/// Seconds discarded before sampling, so shader compilation, asset streaming and
+/// the map publish settle do not pollute the window.
+const WARMUP: f32 = 10.0;
+/// Seconds of samples retained.
+const SAMPLE: f32 = 15.0;
+/// A frame slower than this is counted separately: at 300 FPS the budget is
+/// 3.33 ms, so 8 ms is an unambiguous hitch rather than jitter.
+const HITCH_MS: f32 = 8.0;
+
+/// Draw statistics for one frame, owned by the main world.
+///
+/// Populated from the render world (see `render_stats`), which is a frame behind
+/// by construction; for a 15-second average that skew is irrelevant.
+#[derive(Resource, Default, Clone, Copy)]
+pub(crate) struct DrawStats {
+    pub world_draws: u32,
+    pub world_triangles: u32,
+    pub mod_draws: u32,
+    pub mod_triangles: u32,
+    pub other_draws: u32,
+}
+impl DrawStats {
+    pub(crate) fn total_draws(&self) -> u32 {
+        self.world_draws + self.mod_draws + self.other_draws
+    }
 }
 
-static SECTIONS: Mutex<BTreeMap<&'static str, (f64, u64)>> = Mutex::new(BTreeMap::new());
-pub(crate) struct Scope {
-    name: &'static str,
-    start: Option<Instant>,
+/// CPU cost of the render schedule, split at phase boundaries.
+///
+/// Bevy pipelines the render sub-app against the next frame's main schedule, so
+/// when `frame_ms` exceeds `main_schedule_ms` the render app is the critical
+/// path and this is the only way to see which phase owns it. The main world and
+/// the render world hold clones of the same `Arc`, which is why the counters are
+/// atomics rather than a plain resource: they are written in the render world
+/// and read in the main world with no ordering guarantee between the two.
+#[derive(Resource, Clone, Default)]
+pub(crate) struct RenderPhases(Arc<Phases>);
+
+#[derive(Default)]
+struct Phases {
+    started: AtomicU64,
+    extract_ns: AtomicU64,
+    assets_ns: AtomicU64,
+    views_ns: AtomicU64,
+    queue_ns: AtomicU64,
+    prepare_ns: AtomicU64,
+    total_ns: AtomicU64,
+    frames: AtomicU64,
 }
-impl Scope {
-    pub(crate) fn new(name: &'static str) -> Self {
-        static ENABLED: OnceLock<bool> = OnceLock::new();
-        Self {
-            name,
-            start: ENABLED
-                .get_or_init(|| std::env::var_os("SKATE_PERF_REPORT").is_some())
-                .then(Instant::now),
+
+/// Wall-clock nanoseconds since an arbitrary fixed origin.
+///
+/// `Instant` cannot live in an atomic, and the render world needs to hand a
+/// timestamp to systems that run later in the same schedule.
+fn now_ns() -> u64 {
+    use std::sync::LazyLock;
+    static ORIGIN: LazyLock<Instant> = LazyLock::new(Instant::now);
+    ORIGIN.elapsed().as_nanos() as u64
+}
+
+impl RenderPhases {
+    /// Mean milliseconds per frame for each phase, in report order.
+    fn means(&self) -> [f32; 6] {
+        let frames = self.0.frames.load(Ordering::Relaxed).max(1) as f32;
+        let mean = |counter: &AtomicU64| {
+            counter.load(Ordering::Relaxed) as f32 / frames / 1.0e6
+        };
+        [
+            mean(&self.0.extract_ns),
+            mean(&self.0.assets_ns),
+            mean(&self.0.views_ns),
+            mean(&self.0.queue_ns),
+            mean(&self.0.prepare_ns),
+            mean(&self.0.total_ns),
+        ]
+    }
+
+    fn reset(&self) {
+        for counter in [
+            &self.0.extract_ns,
+            &self.0.assets_ns,
+            &self.0.views_ns,
+            &self.0.queue_ns,
+            &self.0.prepare_ns,
+            &self.0.total_ns,
+            &self.0.frames,
+        ] {
+            counter.store(0, Ordering::Relaxed);
         }
     }
 }
-impl Drop for Scope {
-    fn drop(&mut self) {
-        if let Some(start) = self.start {
-            let elapsed = start.elapsed().as_secs_f64() * 1000.;
-            if elapsed >= 2. {
-                let mut slow = SLOW_SECTIONS.lock().unwrap();
-                if slow.len() < 256 { slow.push((self.name, timestamp(start), elapsed)); }
-            }
-            let mut sections = SECTIONS.lock().unwrap();
-            let entry = sections.entry(self.name).or_default();
-            entry.0 += elapsed;
-            entry.1 += 1;
-        }
-    }
+
+/// Accumulates the span from the recorded phase start to now, then re-arms the
+/// start for the next phase.
+fn mark(phases: &RenderPhases, counter: &AtomicU64) {
+    let now = now_ns();
+    let start = phases.0.started.swap(now, Ordering::Relaxed);
+    counter.fetch_add(now.saturating_sub(start), Ordering::Relaxed);
+}
+
+#[derive(Default, Clone, Copy)]
+struct Frame {
+    total_ms: f32,
+    main_ms: f32,
+    physics_ms: f32,
+    draws: u32,
+    triangles: u32,
 }
 
 #[derive(Resource)]
 pub(crate) struct Performance {
-    path: PathBuf,
-    start: Option<Instant>,
-    frame_start: Instant,
-    previous: Instant,
-    physics_ms: f64,
-    ticks: u32,
-    samples: Vec<[f64; 4]>,
-    sample_times: Vec<f64>,
-    render: Arc<Mutex<Vec<[f64; 7]>>>,
+    output: PathBuf,
+    started: Instant,
+    frame_started: Option<Instant>,
+    main_elapsed: Duration,
+    physics_elapsed: Duration,
+    samples: Vec<Frame>,
+    sampling: bool,
+    finished: bool,
 }
+
 impl Performance {
-    pub(crate) fn physics(&mut self, elapsed: std::time::Duration) {
-        self.physics_ms += elapsed.as_secs_f64() * 1000.;
-        self.ticks += 1;
+    fn new(output: PathBuf) -> Self {
+        Self {
+            output,
+            started: Instant::now(),
+            frame_started: None,
+            main_elapsed: Duration::ZERO,
+            physics_elapsed: Duration::ZERO,
+            // 15 s at an optimistic 600 FPS; growth beyond this is harmless.
+            samples: Vec::with_capacity(9_000),
+            sampling: false,
+            finished: false,
+        }
+    }
+
+    /// Physics tick cost, reported by `physics::advance`. FixedUpdate may run
+    /// zero or several times per frame, so this accumulates until the frame ends.
+    pub(crate) fn physics(&mut self, elapsed: Duration) {
+        self.physics_elapsed += elapsed;
     }
 }
 
 pub(crate) struct PerformancePlugin;
 impl Plugin for PerformancePlugin {
     fn build(&self, app: &mut App) {
-        let Some(path) = std::env::var_os("SKATE_PERF_REPORT") else {
+        let Some(output) = std::env::var_os("SKATE_PERF_REPORT").map(PathBuf::from) else {
             return;
         };
-        let now = Instant::now();
-        let _ = EPOCH.set(now);
-        let render = Arc::new(Mutex::new(Vec::with_capacity(16384)));
-        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .insert_resource(RenderPerformance {
-                    start: None,
-                    frame: now,
-                    prepared: now,
-                    mark: now,
-                    phases: [0.; 3],
-                    samples: render.clone(),
-                })
-                .add_systems(Render, render_begin.before(RenderSystems::ExtractCommands))
-                .add_systems(
-                    Render,
-                    render_assets_done
-                        .after(RenderSystems::PrepareMeshes)
-                        .after(RenderSystems::PrepareAssets)
-                        .before(RenderSystems::ManageViews),
-                )
-                .add_systems(
-                    Render,
-                    render_views_done
-                        .after(RenderSystems::ManageViews)
-                        .before(RenderSystems::Queue),
-                )
-                .add_systems(
-                    Render,
-                    render_queue_done
-                        .after(RenderSystems::Queue)
-                        .before(RenderSystems::PhaseSort),
-                )
-                .add_systems(
-                    Render,
-                    render_prepared
-                        .after(RenderSystems::Prepare)
-                        .before(RenderSystems::Render),
-                )
-                .add_systems(Render, render_finish.after(RenderSystems::PostCleanup));
-            render_app
-                .init_resource::<MeshBindingTimer>()
-                .add_systems(
-                    Render,
-                    mesh_binding_begin
-                        .in_set(RenderSystems::PrepareBindGroups)
-                        .before(bevy::pbr::prepare_mesh_bind_groups),
-                )
-                .add_systems(
-                    Render,
-                    mesh_binding_end
-                        .in_set(RenderSystems::PrepareBindGroups)
-                        .after(bevy::pbr::prepare_mesh_bind_groups),
-                );
-        }
-        // Benchmark measurements must not depend on whether the window has focus.
-        app.insert_resource(bevy::winit::WinitSettings::continuous());
-        app.add_systems(Startup, report_adapter);
-        if std::env::var_os("SKATE_PERF_CAMERA_SWEEP").is_some() {
-            app.add_systems(
-                Update,
-                sweep_camera.after(crate::app::FrameSet::Verification),
-            );
-        }
-        app.insert_resource(Performance {
-            path: path.into(),
-            start: None,
-            frame_start: now,
-            previous: now,
-            physics_ms: 0.,
-            ticks: 0,
-            samples: Vec::with_capacity(16384),
-            sample_times: Vec::with_capacity(16384),
-            render,
-        })
-        .add_systems(First, begin)
-        .add_systems(Last, finish);
+        info!("SKATE_PERF starting: warmup={WARMUP}s sample={SAMPLE}s output={output:?}");
+        let phases = RenderPhases::default();
+        app.insert_resource(Performance::new(output))
+            .init_resource::<DrawStats>()
+            .insert_resource(phases.clone())
+            // Per-pass GPU timings, which is the only way to attribute frame cost
+            // to the GPU rather than to render-schedule CPU work.
+            .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
+            .add_systems(First, frame_begin)
+            .add_systems(Last, frame_end);
+
+        use bevy::render::{Render, RenderApp, RenderSystems};
+        let Some(render) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        render.insert_resource(phases);
+        render.add_systems(
+            Render,
+            (
+                begin_render_frame.before(RenderSystems::ExtractCommands),
+                after_extract
+                    .after(RenderSystems::ExtractCommands)
+                    .before(RenderSystems::PrepareAssets),
+                after_assets
+                    .after(RenderSystems::PrepareMeshes)
+                    .after(RenderSystems::PrepareAssets)
+                    .before(RenderSystems::ManageViews),
+                after_views
+                    .after(RenderSystems::ManageViews)
+                    .before(RenderSystems::Queue),
+                after_queue
+                    .after(RenderSystems::QueueSweep)
+                    .before(RenderSystems::PhaseSort),
+                after_prepare
+                    .after(RenderSystems::PrepareBindGroups)
+                    .before(RenderSystems::Render),
+                end_render_frame.after(RenderSystems::Cleanup),
+            ),
+        );
     }
 }
 
-#[derive(Resource, Default)]
-struct MeshBindingTimer(Option<Scope>);
-fn mesh_binding_begin(mut timer: ResMut<MeshBindingTimer>) {
-    timer.0 = Some(Scope::new("mesh_bind_groups"));
+fn begin_render_frame(phases: Res<RenderPhases>) {
+    phases.0.started.store(now_ns(), Ordering::Relaxed);
 }
-fn mesh_binding_end(mut timer: ResMut<MeshBindingTimer>) {
-    timer.0.take();
+
+fn after_extract(phases: Res<RenderPhases>) {
+    mark(&phases, &phases.0.extract_ns);
 }
-fn report_adapter(
-    device: Res<bevy::render::renderer::RenderDevice>,
-    adapter: Res<bevy::render::renderer::RenderAdapterInfo>,
+
+fn after_assets(phases: Res<RenderPhases>) {
+    mark(&phases, &phases.0.assets_ns);
+}
+
+fn after_views(phases: Res<RenderPhases>) {
+    mark(&phases, &phases.0.views_ns);
+}
+
+fn after_queue(phases: Res<RenderPhases>) {
+    mark(&phases, &phases.0.queue_ns);
+}
+
+fn after_prepare(phases: Res<RenderPhases>) {
+    mark(&phases, &phases.0.prepare_ns);
+}
+
+/// Closes the frame: the residual span is the render graph plus cleanup, and the
+/// frame counter is what turns every accumulator into a per-frame mean.
+fn end_render_frame(phases: Res<RenderPhases>) {
+    mark(&phases, &phases.0.total_ns);
+    phases.0.frames.fetch_add(1, Ordering::Relaxed);
+}
+
+fn frame_begin(mut performance: ResMut<Performance>) {
+    performance.frame_started = Some(Instant::now());
+    performance.main_elapsed = Duration::ZERO;
+    performance.physics_elapsed = Duration::ZERO;
+}
+
+fn frame_end(
+    mut performance: ResMut<Performance>,
+    time: Res<Time<Real>>,
+    draws: Res<DrawStats>,
+    phases: Res<RenderPhases>,
+    diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
+    mut exit: MessageWriter<AppExit>,
 ) {
-    eprintln!(
-        "SKATE_GPU adapter={:?} features={:?} limits={:?}",
-        &**adapter,
-        device.features(),
-        device.limits()
-    );
-}
-
-// Rendering-only benchmark: exercise changing visibility without steering the
-// skater or feeding synthetic inputs into the simulation camera.
-fn sweep_camera(time: Res<Time<Real>>, mut cameras: Query<&mut Transform, With<Camera3d>>) {
-    for mut transform in &mut cameras {
-        transform.rotate_y(time.elapsed_secs() * std::f32::consts::TAU / 12.);
+    if performance.finished {
+        return;
     }
-}
-fn begin(mut p: ResMut<Performance>) {
-    p.frame_start = Instant::now();
-    p.physics_ms = 0.;
-    p.ticks = 0;
-}
-fn finish(mut p: ResMut<Performance>, mut exit: MessageWriter<AppExit>) {
-    let now = Instant::now();
-    let elapsed = now
-        .duration_since(*p.start.get_or_insert(now))
-        .as_secs_f64();
-    let frame = now.duration_since(p.previous).as_secs_f64() * 1000.;
-    p.previous = now;
-    // Exclude initialization and shader warmup. Frame interval includes render
-    // synchronization; CPU schedule time is First..Last of the main world.
-    if elapsed > 10. {
-        let sample = [
-            frame,
-            now.duration_since(p.frame_start).as_secs_f64() * 1000.,
-            p.physics_ms,
-            f64::from(p.ticks),
-        ];
-        p.samples.push(sample);
-        p.sample_times.push(timestamp(now));
-    }
-    if elapsed > 25. && !p.samples.is_empty() {
-        let mean = |column: usize| {
-            p.samples.iter().map(|s| s[column]).sum::<f64>() / p.samples.len() as f64
-        };
-        let mut frames: Vec<_> = p.samples.iter().map(|s| s[0]).collect();
-        frames.sort_by(f64::total_cmp);
-        let render = p.render.lock().unwrap();
-        let render_mean = |column: usize| {
-            render.iter().map(|s| s[column]).sum::<f64>() / render.len().max(1) as f64
-        };
-        let report = serde_json::json!({
-            "frames": frames.len(), "fps": 1000. / mean(0),
-            "frame_ms_mean": mean(0), "frame_ms_median": frames[frames.len()/2],
-            "frame_ms_p95": frames[(frames.len()-1)*95/100],
-            "main_schedule_ms_mean": mean(1), "physics_ms_per_frame": mean(2),
-            "physics_ticks_per_frame": mean(3),
-            "physics_ms_per_tick": mean(2) / mean(3).max(f64::EPSILON),
-            "render_prepare_ms_mean": render_mean(0), "render_submit_ms_mean": render_mean(1),
-            "render_assets_ms_mean": render_mean(2), "render_views_ms_mean": render_mean(3), "render_queue_ms_mean": render_mean(4),
-            "sections_ms_per_call": SECTIONS.lock().unwrap().iter().map(|(&k, &(ms, n))| (k, ms / n as f64)).collect::<BTreeMap<_,_>>(),
-            "samples": p.samples,
-            "sample_elapsed_ms": p.sample_times,
-            "render_samples": &*render,
-            "render_sample_columns": ["prepare_ms", "submit_ms", "assets_ms", "views_ms", "queue_ms", "elapsed_ms", "waiting_pipelines"],
-            "slow_sections": &*SLOW_SECTIONS.lock().unwrap(),
-            "slow_section_columns": ["section", "start_elapsed_ms", "duration_ms"],
-            "frame_ms_max": frames[frames.len()-1],
-            "frame_ms_p99": frames[(frames.len()-1)*99/100],
-            "frames_over_8ms": frames.iter().filter(|&&ms| ms > 8.).count(),
-        });
-        match std::fs::write(&p.path, serde_json::to_vec_pretty(&report).unwrap()) {
-            Ok(()) => {
-                eprintln!("SKATE_PERF_REPORT {}", p.path.display());
-                exit.write(AppExit::Success);
-            }
-            Err(e) => {
-                eprintln!("Performance report: {e}");
-                exit.write(AppExit::error());
-            }
+    let elapsed = performance.started.elapsed().as_secs_f32();
+    if !performance.sampling {
+        if elapsed < WARMUP {
+            return;
         }
+        performance.sampling = true;
+        // Warmup includes shader compilation and asset streaming, whose cost
+        // would otherwise dominate the phase accumulators.
+        phases.reset();
+        info!("SKATE_PERF warmup complete, sampling {SAMPLE}s");
+    }
+
+    // Wall-clock delta rather than the frame_begin instant: it includes the
+    // presentation wait, which is what the player actually experiences.
+    let total_ms = time.delta().as_secs_f32() * 1000.0;
+    let main_ms = performance
+        .frame_started
+        .map_or(0.0, |start| start.elapsed().as_secs_f32() * 1000.0);
+    let physics_ms = performance.physics_elapsed.as_secs_f32() * 1000.0;
+    performance.samples.push(Frame {
+        total_ms,
+        main_ms,
+        physics_ms,
+        draws: draws.total_draws(),
+        triangles: draws.world_triangles + draws.mod_triangles,
+    });
+
+    if elapsed < WARMUP + SAMPLE {
+        return;
+    }
+    performance.finished = true;
+    let mut report = summarise(&performance.samples, &draws);
+    report.render_phase_ms = phases.means();
+    // Every render diagnostic, so GPU pass costs land in the report without
+    // this module needing to know the pass names the render graph happens to use.
+    report.gpu = diagnostics
+        .iter()
+        .filter(|d| d.path().as_str().starts_with("render/"))
+        .filter_map(|d| d.smoothed().map(|v| (d.path().to_string(), v)))
+        .filter(|(_, v)| *v > 0.0)
+        .collect();
+    report.gpu.sort_by(|a, b| b.1.total_cmp(&a.1));
+    match write_report(&performance.output, &report) {
+        Ok(()) => info!("SKATE_PERF_REPORT written to {:?}", performance.output),
+        Err(error) => error!("SKATE_PERF_REPORT could not be written: {error}"),
+    }
+    let [extract, assets, views, queue, prepare, graph] = report.render_phase_ms;
+    eprintln!(
+        "SKATE_PERF fps={:.1} frame_ms_mean={:.3} p99={:.3} main={:.3} draws={} triangles={}",
+        report.fps,
+        report.frame_ms_mean,
+        report.frame_ms_p99,
+        report.main_schedule_ms_mean,
+        report.draw_calls,
+        report.triangles
+    );
+    eprintln!(
+        "SKATE_PERF_RENDER extract={extract:.3} assets={assets:.3} views={views:.3} \
+         queue={queue:.3} prepare={prepare:.3} graph={graph:.3}"
+    );
+    // Times first and in full: sorting the whole set by value buries
+    // sub-millisecond durations under invocation counts in the millions.
+    for (name, value) in report.gpu.iter().filter(|(n, _)| n.ends_with("elapsed_gpu")) {
+        eprintln!("SKATE_PERF_GPU_MS {name} {value:.4}");
+    }
+    for (name, value) in report
+        .gpu
+        .iter()
+        .filter(|(n, _)| n.ends_with("invocations"))
+        .take(8)
+    {
+        eprintln!("SKATE_PERF_GPU {name} {value:.0}");
+    }
+    exit.write(AppExit::Success);
+}
+
+struct Report {
+    frames: usize,
+    fps: f32,
+    frame_ms_mean: f32,
+    frame_ms_median: f32,
+    frame_ms_p95: f32,
+    frame_ms_p99: f32,
+    frame_ms_max: f32,
+    frames_over_hitch: usize,
+    main_schedule_ms_mean: f32,
+    physics_ms_mean: f32,
+    draw_calls: u32,
+    triangles: u32,
+    /// extract, assets, views, queue, prepare, graph — see `RenderPhases`.
+    render_phase_ms: [f32; 6],
+    /// Render diagnostics, highest first. Includes GPU pass timings when the
+    /// adapter supports timestamp queries.
+    gpu: Vec<(String, f64)>,
+    samples: Vec<Frame>,
+}
+
+fn summarise(samples: &[Frame], draws: &DrawStats) -> Report {
+    let frames = samples.len();
+    let mut sorted: Vec<f32> = samples.iter().map(|f| f.total_ms).collect();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let mean = |values: &[f32]| -> f32 {
+        if values.is_empty() { 0.0 } else { values.iter().sum::<f32>() / values.len() as f32 }
+    };
+    // Nearest-rank percentile. Exact interpolation is not worth it here: the
+    // sample count is in the thousands and the budget is stated in whole ms.
+    let percentile = |q: f32| -> f32 {
+        if sorted.is_empty() {
+            return 0.0;
+        }
+        // Nearest-rank: the smallest sample at or below which `q` of the frames
+        // fall, i.e. rank `ceil(q*N)` counting from one. Reporting "95% of frames
+        // were at or under this" only means that under this definition.
+        let rank = (q * sorted.len() as f32).ceil() as usize;
+        sorted[rank.clamp(1, sorted.len()) - 1]
+    };
+    let frame_ms_mean = mean(&sorted);
+    Report {
+        frames,
+        fps: if frame_ms_mean > 0.0 { 1000.0 / frame_ms_mean } else { 0.0 },
+        frame_ms_mean,
+        frame_ms_median: percentile(0.50),
+        frame_ms_p95: percentile(0.95),
+        frame_ms_p99: percentile(0.99),
+        frame_ms_max: sorted.last().copied().unwrap_or(0.0),
+        frames_over_hitch: samples.iter().filter(|f| f.total_ms > HITCH_MS).count(),
+        main_schedule_ms_mean: mean(&samples.iter().map(|f| f.main_ms).collect::<Vec<_>>()),
+        physics_ms_mean: mean(&samples.iter().map(|f| f.physics_ms).collect::<Vec<_>>()),
+        draw_calls: draws.total_draws(),
+        triangles: draws.world_triangles + draws.mod_triangles,
+        render_phase_ms: [0.0; 6],
+        gpu: Vec::new(),
+        samples: samples.to_vec(),
     }
 }
 
-#[derive(Resource)]
-struct RenderPerformance {
-    start: Option<Instant>,
-    frame: Instant,
-    prepared: Instant,
-    mark: Instant,
-    phases: [f64; 3],
-    samples: Arc<Mutex<Vec<[f64; 7]>>>,
+fn write_report(path: &std::path::Path, report: &Report) -> std::io::Result<()> {
+    let json = serde_json::json!({
+        "frames": report.frames,
+        "fps": report.fps,
+        "frame_ms_mean": report.frame_ms_mean,
+        "frame_ms_median": report.frame_ms_median,
+        "frame_ms_p95": report.frame_ms_p95,
+        "frame_ms_p99": report.frame_ms_p99,
+        "frame_ms_max": report.frame_ms_max,
+        "frames_over_8ms": report.frames_over_hitch,
+        "main_schedule_ms_mean": report.main_schedule_ms_mean,
+        "physics_ms_mean": report.physics_ms_mean,
+        "draw_calls": report.draw_calls,
+        "triangles": report.triangles,
+        "render_extract_ms_mean": report.render_phase_ms[0],
+        "render_assets_ms_mean": report.render_phase_ms[1],
+        "render_views_ms_mean": report.render_phase_ms[2],
+        "render_queue_ms_mean": report.render_phase_ms[3],
+        "render_prepare_ms_mean": report.render_phase_ms[4],
+        "render_graph_ms_mean": report.render_phase_ms[5],
+        "render_diagnostics": report.gpu.iter()
+            .map(|(name, value)| serde_json::json!({ "name": name, "ms": value }))
+            .collect::<Vec<_>>(),
+        "warmup_seconds": WARMUP,
+        "sample_seconds": SAMPLE,
+        "samples": report.samples.iter().map(|f| serde_json::json!({
+            "frame_ms": f.total_ms,
+            "main_ms": f.main_ms,
+            "physics_ms": f.physics_ms,
+            "draws": f.draws,
+            "triangles": f.triangles,
+        })).collect::<Vec<_>>(),
+    });
+    std::fs::write(path, serde_json::to_vec_pretty(&json)?)
 }
-fn render_begin(mut p: ResMut<RenderPerformance>) {
-    p.frame = Instant::now();
-    p.mark = p.frame;
-}
-fn render_assets_done(mut p: ResMut<RenderPerformance>) {
-    let now = Instant::now();
-    p.phases[0] = now.duration_since(p.mark).as_secs_f64() * 1000.;
-    p.mark = now;
-}
-fn render_views_done(mut p: ResMut<RenderPerformance>) {
-    let now = Instant::now();
-    p.phases[1] = now.duration_since(p.mark).as_secs_f64() * 1000.;
-    p.mark = now;
-}
-fn render_queue_done(mut p: ResMut<RenderPerformance>) {
-    p.phases[2] = p.mark.elapsed().as_secs_f64() * 1000.;
-}
-fn render_prepared(mut p: ResMut<RenderPerformance>) {
-    p.prepared = Instant::now();
-}
-fn render_finish(mut p: ResMut<RenderPerformance>, pipelines: Res<bevy::render::render_resource::PipelineCache>) {
-    let now = Instant::now();
-    if now
-        .duration_since(*p.start.get_or_insert(now))
-        .as_secs_f64()
-        > 10.
-    {
-        p.samples.lock().unwrap().push([
-            p.prepared.duration_since(p.frame).as_secs_f64() * 1000.,
-            now.duration_since(p.prepared).as_secs_f64() * 1000.,
-            p.phases[0],
-            p.phases[1],
-            p.phases[2],
-            timestamp(now),
-            pipelines.waiting_pipelines().count() as f64,
-        ]);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(total_ms: f32) -> Frame {
+        Frame { total_ms, ..default() }
+    }
+
+    #[test]
+    fn percentiles_follow_sample_order() {
+        // Values 1..=100, so the Nth smallest sample is exactly N ms and every
+        // rank is readable directly.
+        let samples: Vec<Frame> = (1..=100).map(|ms| frame(ms as f32)).collect();
+        let report = summarise(&samples, &DrawStats::default());
+        assert_eq!(report.frames, 100);
+        assert_eq!(report.frame_ms_median, 50.0);
+        assert_eq!(report.frame_ms_p95, 95.0);
+        assert_eq!(report.frame_ms_p99, 99.0);
+        assert_eq!(report.frame_ms_max, 100.0);
+        // A single sample is every percentile of itself.
+        let one = summarise(&[frame(7.0)], &DrawStats::default());
+        assert_eq!(
+            (one.frame_ms_median, one.frame_ms_p95, one.frame_ms_p99),
+            (7.0, 7.0, 7.0)
+        );
+    }
+
+    #[test]
+    fn fps_is_the_reciprocal_of_mean_frame_time() {
+        // 300 FPS is the contract; 3.333 ms per frame must read back as ~300.
+        let samples = vec![frame(10.0 / 3.0); 64];
+        let report = summarise(&samples, &DrawStats::default());
+        assert!((report.fps - 300.0).abs() < 1.0, "fps={}", report.fps);
+    }
+
+    #[test]
+    fn hitches_are_counted_against_the_8ms_threshold() {
+        let samples = vec![frame(3.0), frame(9.0), frame(8.0), frame(20.0)];
+        let report = summarise(&samples, &DrawStats::default());
+        assert_eq!(report.frames_over_hitch, 2);
+    }
+
+    #[test]
+    fn empty_sample_set_does_not_panic() {
+        let report = summarise(&[], &DrawStats::default());
+        assert_eq!(report.frames, 0);
+        assert_eq!(report.fps, 0.0);
     }
 }

@@ -120,6 +120,15 @@ mod tests {
         assert_eq!(assemble(&body,[&b,&a].into_iter()).unwrap(),data);
         b.instance+=1;assert!(assemble(&body,[&a,&b].into_iter()).is_none());
     }
+    #[test] fn a_partial_live_snapshot_does_not_assemble() {
+        let data=vec![7;CHUNK*8+3];
+        let mut body=envelope();body.count=((data.len()+CHUNK-1)/CHUNK) as u16;body.revision=skate_net::hash(&data);
+        let fragments:Vec<_>=data.chunks(CHUNK).enumerate().map(|(index,chunk)| {
+            let mut part=body.clone();part.kind=DEFINITION;part.index=index as u16;part.payload=chunk.to_vec();part
+        }).collect();
+        assert!(assemble(&body,fragments.iter().take(fragments.len()-1)).is_none());
+        assert_eq!(assemble(&body,fragments.iter()).unwrap(),data);
+    }
     #[test] fn limits_are_enforced_before_allocation() {
         let mut e=envelope();e.count=MAX_CHUNKS as u16+1;assert!(e.encode().is_none());
         e.count=1;e.payload=vec![0;1024];assert!(e.encode().is_none());

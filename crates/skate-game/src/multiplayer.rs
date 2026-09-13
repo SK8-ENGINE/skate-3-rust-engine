@@ -264,6 +264,9 @@ impl Multiplayer {
         }
     }
 }
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct RemoteRenderSet;
+
 pub(crate) struct MultiplayerPlugin;
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {

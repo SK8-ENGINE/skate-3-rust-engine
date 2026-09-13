@@ -117,6 +117,7 @@ fn update(
         return;
     }
     let p = &skater.player_input.physical;
+    let processed = &skater.player_input.processed;
     let on_board = p.state.category_12 != 500;
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
     let mut transform = skater.animated_skeleton.roots.animation_to_world;
@@ -130,19 +131,13 @@ fn update(
             deck.translation.z,
             0.,
         ];
-        //82591E30: above .5m/s, project normalized velocity onto world Up.
-        //The cross products are deliberately not normalized a second time.
-        let velocity = Vec3::from_slice(&p.skateboard.vector_80.map(f32::from_bits)[..3]);
-        if velocity.length_squared() > 0.25 {
-            let right = Vec3::Y.cross(velocity.normalize());
-            let forward = right.cross(Vec3::Y);
-            if forward.length_squared() > 0.9 {
-                transform[0] = right.extend(0.).to_array();
-                transform[1] = Vec3::Y.extend(0.).to_array();
-                transform[2] = forward.extend(0.).to_array();
-            }
-        }
     }
+    transform = crate::physics::facing_from_visual(
+        transform,
+        processed.flags_2468,
+        processed.flags_2476,
+        on_board,
+    );
     let state = p.state.state_16;
     let state_allowed = (p.state.category_12 == 100
         && p.collision.wheel_count_0 >= 2

@@ -117,3 +117,17 @@ fn many_application_records_eventually_reach_every_player() {
         }
     }
 }
+#[test]
+fn loopback_bursts_an_unacked_application_snapshot() {
+    let mut h = Session::new(7, info(1), None);
+    h.set_loopback(true);
+    let mut g = vec![Session::new(7, info(2), Some(1))];
+    g[0].set_loopback(true);
+    for k in 0..64 {
+        assert!(g[0].publish_application(&format!("k{k:02}"), vec![k as u8; 900], 0));
+    }
+    for t in (0..80).step_by(16) {
+        pump(&mut h, &mut g, t, false);
+    }
+    assert_eq!(h.actors[&2].application.len(), 64);
+}

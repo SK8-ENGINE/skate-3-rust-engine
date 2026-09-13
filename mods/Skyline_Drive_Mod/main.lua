@@ -59,12 +59,12 @@ local I = {
     C.mass/3 * (C.inertia_half[1]^2 + C.inertia_half[2]^2),
 }
 local state = {
-    spawned=false, occupied=false, pending=nil, gear=1,
+    spawned=false, occupied=false, pending=nil, spawn_confirm=nil, gear=1,
     rpm=C.idle_rpm, engine_omega=C.idle_rpm*math.pi/30, clutch=0,
     steer=0, shift=0, time=0, enter_after=0,
     keys={}, buttons=0, hud_time=0, mass_audit=nil, keyboard_axis=0, aero_load=0,
     enter_requested=false, exit_requested=false, reenter_on_ready=false,
-    hull_debug=false, interaction_text="", mp_hint_time=0, mp_warm=false,
+    hull_debug=false, interaction_text="", mp_hint_time=0,
 }
 
 local function clamp(x,a,b) return math.max(a,math.min(b,x)) end
@@ -367,22 +367,26 @@ end
 local SKID_BUFFER_OPTS={blend=true,unlit=true,texture="textures/skid_tread.png",depth_bias=-3.5,tint={0.05,0.05,0.055}}
 local SMOKE_BUFFER_OPTS={blend=true,unlit=true,texture="textures/smoke_soft.png",depth_bias=4.5,tint={0.82,0.82,0.85}}
 local SKID_CHUNK_MAX_VERTS=8192
-local SKID_POINTS_PER_UPLOAD=96
-local SKID_PTS_TAIL=40
+local SKID_POINTS_PER_UPLOAD=24
+local SKID_PTS_TAIL=32
 -- Host allows 32 mesh buffers/mod; reserve smoke + remote VFX headroom.
-local MAX_LOCAL_SKID_BUFFERS=20
-local MAX_REMOTE_SKID_BUFFERS=8
+local MAX_LOCAL_SKID_BUFFERS=12
+local MAX_REMOTE_SKID_BUFFERS=6
 local MAX_REMOTE_VFX_PEERS=4
 local SKID_ALPHA_MIN=0.10
 local SKID_ALPHA_MAX=0.72
-local MAX_SMOKE_SPAWN_PER_TICK=2
+local MAX_SMOKE_SPAWN_PER_TICK=1
+local MAX_SMOKE_PARTICLES=40
+local SMOKE_UPLOAD_INTERVAL=2
+local REMOTE_VFX_STALE_TICKS=10
 local vfx={
     supported=false,skid_kappa=0.10,skid_alpha=5.0,
-    skid_width=0.32,min_skid_dist=0.03,skid_lift=0.012,
-    smoke_lifetime=2.0,smoke_size={0.47,1.88},smoke_slip_min=0.30,
-    smoke_mesh_live=false,smoke_dirty=false,
+    skid_width=0.32,min_skid_dist=0.05,skid_lift=0.012,
+    smoke_lifetime=1.35,smoke_size={0.40,1.45},smoke_slip_min=0.30,
+    smoke_mesh_live=false,smoke_dirty=false,smoke_buffers_live=false,
+    smoke_buffer_bound={},upload_tick=0,
     remote_wheels={},remote_smoke={},remote_smoke_dirty=false,
-    remote_smoke_mesh_live=false,
+    remote_smoke_mesh_live=false,remote_vfx_cache={},
 }
 local REMOTE_WHEEL_KEYS={rr="wheel_rr",rl="wheel_rl"}
 local function vfx_net_active()
@@ -390,36 +394,19 @@ local function vfx_net_active()
 end
 local function refresh_mp_status(dt)
     if not sdk.net or type(sdk.net.info)~="function" then
-        state.mp_warm=false
         sdk.ui.text("skyline_mp","")
         return
     end
     local info=sdk.net.info()
     if not info or info.active~=true then
-        state.mp_warm=false
         sdk.ui.text("skyline_mp","")
         return
     end
-    if not state.mp_warm then
-        state.mp_warm=true
-        if state.spawned then
-            local car=sdk.physics.read(BODY)
-            state.pending={
-                position=car and car.position,
-                heading=car and yaw(car.rotation),
-                reenter=state.occupied,
-            }
-            remove_rig()
-            sdk.log("Skyline: respawning vehicle for multiplayer replication")
-        end
-    end
-    local car=sdk.physics.read(BODY)
-    if state.spawned and not car then state.spawned=false; state.occupied=false end
     state.mp_hint_time=math.max(0,(state.mp_hint_time or 0)-dt)
     if state.mp_hint_time>0 then return end
     state.mp_hint_time=0.5
     local lines={
-        car
+        state.spawned
             and "Your car is spawned and should replicate to other players."
             or "Press F10 to spawn your car. Other players cannot see your vehicle until you do.",
         "Both players need Skyline enabled with identical mod files and the skyline-driving-update build.",
@@ -470,10 +457,15 @@ local function append_smoke_sprite(mesh,center,right,up,fwd,size,alpha)
     mesh.indices[#mesh.indices+1]=base; mesh.indices[#mesh.indices+1]=base+1; mesh.indices[#mesh.indices+1]=base+2
     mesh.indices[#mesh.indices+1]=base; mesh.indices[#mesh.indices+1]=base+2; mesh.indices[#mesh.indices+1]=base+3
 end
+local function retire_skid_chunk(chunk)
+    if not chunk then return end
+    if chunk.live then sdk.graphics.remove(chunk.key) end
+    chunk.live=false
+end
 local function clear_session_skids()
     for _,w in ipairs(wheels) do
         if w.skid_chunks then
-            for _,chunk in ipairs(w.skid_chunks) do sdk.graphics.remove(chunk.key) end
+            for _,chunk in ipairs(w.skid_chunks) do retire_skid_chunk(chunk) end
         end
         w.skid_chunks=nil; w.skid_pts=nil; w.skid_meshed=nil; w.skid_u=nil
         w.skid_active=nil
@@ -482,10 +474,16 @@ local function clear_session_skids()
     vfx.skid_dirty=false
 end
 local function clear_smoke()
-    if not vfx.supported then return end
-    sdk.graphics.remove("vfx_smoke")
     vfx.smoke=nil
+    vfx.smoke_dirty=false
     if vfx.mesh then vfx.mesh.smoke={positions={},normals={},colors={},uvs={},indices={}} end
+    if vfx.smoke_mesh_live then
+        sdk.graphics.set_visible("vfx_smoke",false)
+        vfx.smoke_mesh_live=false
+    end
+end
+local function clear_remote_vfx_cache(peer)
+    if vfx.remote_vfx_cache then vfx.remote_vfx_cache[peer]=nil end
 end
 local function clear_remote_vfx(peer)
     if not vfx.supported then return end
@@ -493,12 +491,13 @@ local function clear_remote_vfx(peer)
     if wheels_list then
         for _,w in ipairs(wheels_list) do
             if w.skid_chunks then
-                for _,chunk in ipairs(w.skid_chunks) do sdk.graphics.remove(chunk.key) end
+                for _,chunk in ipairs(w.skid_chunks) do retire_skid_chunk(chunk) end
             end
         end
         vfx.remote_wheels[peer]=nil
     end
     if vfx.remote_smoke then vfx.remote_smoke[peer]=nil end
+    clear_remote_vfx_cache(peer)
     vfx.remote_smoke_dirty=true
 end
 local function clear_all_remote_vfx()
@@ -506,12 +505,26 @@ local function clear_all_remote_vfx()
     for peer in pairs(vfx.remote_wheels) do clear_remote_vfx(peer) end
     vfx.remote_wheels={}
     vfx.remote_smoke={}
+    vfx.remote_vfx_cache={}
     vfx.remote_smoke_dirty=false
+    vfx.remote_smoke_mesh_live=false
+    if vfx.mesh then vfx.mesh.remote_smoke={positions={},normals={},colors={},uvs={},indices={}} end
+end
+local function invalidate_smoke_buffers()
+    vfx.smoke_buffer_bound={}
+    vfx.smoke_buffers_live=false
+end
+local function destroy_smoke_buffers()
+    if not vfx.smoke_buffers_live and not vfx.smoke_buffer_bound.vfx_smoke
+        and not vfx.smoke_buffer_bound.vfx_smoke_remote then return end
     if vfx.supported then
+        sdk.graphics.remove("vfx_smoke")
         sdk.graphics.remove("vfx_smoke_remote")
-        vfx.remote_smoke_mesh_live=false
-        if vfx.mesh then vfx.mesh.remote_smoke={positions={},normals={},colors={},uvs={},indices={}} end
     end
+    invalidate_smoke_buffers()
+    vfx.smoke_mesh_live=false
+    vfx.remote_smoke_mesh_live=false
+    vfx.mesh=nil
 end
 local function clear_effects()
     clear_smoke(); clear_all_remote_vfx()
@@ -601,7 +614,7 @@ local function flush_skid_delta(chunk)
     if not chunk.live then
         sdk.graphics.mesh_buffer(chunk.key,SKID_BUFFER_OPTS)
         chunk.live=true
-        vfx.smoke_dirty=true
+        vfx.skid_dirty=true
     end
     sdk.graphics.mesh_buffer_append(chunk.key,delta)
     chunk.verts=chunk.verts+#delta.positions
@@ -647,7 +660,7 @@ local function evict_oldest_sealed_skid(remote)
     end
     if not victim_wheel then return false end
     local chunk=victim_wheel.skid_chunks[victim_idx]
-    sdk.graphics.remove(chunk.key)
+    retire_skid_chunk(chunk)
     table.remove(victim_wheel.skid_chunks,victim_idx)
     return true
 end
@@ -863,12 +876,17 @@ local function smoke_bucket(w)
     vfx.smoke=vfx.smoke or {}
     return vfx.smoke
 end
+local function trim_smoke_bucket(bucket)
+    while bucket and #bucket>MAX_SMOKE_PARTICLES do
+        table.remove(bucket,1)
+    end
+end
 local function spawn_smoke(w,pos,intensity,dt)
     if intensity<=0 or not sane_point(pos) then return end
-    w.smoke_accum=(w.smoke_accum or 0)+intensity*dt*10
+    w.smoke_accum=(w.smoke_accum or 0)+intensity*dt*8
     local spawned=0
     local bucket=smoke_bucket(w)
-    while w.smoke_accum>=0.24 and spawned<MAX_SMOKE_SPAWN_PER_TICK do
+    while w.smoke_accum>=0.32 and spawned<MAX_SMOKE_SPAWN_PER_TICK do
         w.smoke_accum=w.smoke_accum-0.24
         spawned=spawned+1
         local t=clamp(intensity/14,0.12,1)
@@ -887,29 +905,41 @@ local function spawn_smoke(w,pos,intensity,dt)
         }
         if w.remote_peer then vfx.remote_smoke_dirty=true else vfx.smoke_dirty=true end
     end
+    trim_smoke_bucket(bucket)
 end
 local function tick_smoke_list(smoke,dt)
     if not smoke or #smoke==0 then return false end
-    local dirty=false
+    local removed=false
     for i=#smoke,1,-1 do
         local p=smoke[i]
         p.age=p.age+dt
         if p.age>=p.life then
             table.remove(smoke,i)
-            dirty=true
+            removed=true
         else
             local lift=0.55+(p.intensity or 0.5)*0.85
             p.vel[2]=p.vel[2]+lift*dt
             p.pos=add(p.pos,mul(p.vel,dt))
-            dirty=true
         end
     end
-    return dirty
+    return removed
+end
+local function smoke_active()
+    if vfx.smoke and #vfx.smoke>0 then return true end
+    for _,smoke in pairs(vfx.remote_smoke or {}) do
+        if smoke and #smoke>0 then return true end
+    end
+    return false
 end
 local function tick_all_smoke(dt)
     if tick_smoke_list(vfx.smoke,dt) then vfx.smoke_dirty=true end
     for _,smoke in pairs(vfx.remote_smoke or {}) do
         if tick_smoke_list(smoke,dt) then vfx.remote_smoke_dirty=true end
+    end
+    vfx.upload_tick=(vfx.upload_tick or 0)+1
+    if smoke_active() and vfx.upload_tick%SMOKE_UPLOAD_INTERVAL==0 then
+        vfx.smoke_dirty=true
+        vfx.remote_smoke_dirty=true
     end
 end
 local function hide_smoke_mesh()
@@ -973,6 +1003,28 @@ local function apply_remote_wheel_vfx(w,slip,tread,gn,dt)
     push_skid_point(w,add(tread,mul(gn,vfx.skid_lift)),gn,remote_skid_intensity(slip))
     spawn_smoke(w,add(tread,mul(gn,0.004)),smoke_i,dt)
 end
+local function remote_vfx_sample_key(sample)
+    if type(sample)~="table" or #sample<7 then return "" end
+    return string.format("%.2f|%.2f|%.2f",sample[2],sample[3],sample[4])
+end
+local function remote_vfx_data_key(data)
+    local parts={}
+    for short in pairs(REMOTE_WHEEL_KEYS) do
+        parts[#parts+1]=short.."="..remote_vfx_sample_key(data[short])
+    end
+    table.sort(parts)
+    return table.concat(parts,";")
+end
+local function remote_vfx_stale(peer,data)
+    local key=remote_vfx_data_key(data)
+    local cache=vfx.remote_vfx_cache[peer]
+    if not cache or cache.key~=key then
+        vfx.remote_vfx_cache[peer]={key=key,ticks=0}
+        return false
+    end
+    cache.ticks=cache.ticks+1
+    return cache.ticks>REMOTE_VFX_STALE_TICKS
+end
 local function publish_net_vfx(contacts)
     if not vfx_net_active() or not state.spawned or not sdk.net.publish then return end
     local packet={}
@@ -1011,18 +1063,21 @@ local function tick_remote_vfx(dt)
                 if peer_count>MAX_REMOTE_VFX_PEERS then break end
                 live[peer]=true
                 local wheels_list=ensure_remote_wheels(peer)
+                local stale=remote_vfx_stale(peer,data)
                 for _,w in ipairs(wheels_list) do w.skidding_now=false end
-                for short,wheel_key in pairs(REMOTE_WHEEL_KEYS) do
-                    local sample=data[short]
-                    if type(sample)=="table" and #sample>=7 then
-                        local slip=number(sample[1],0)
-                        local tread={sample[2],sample[3],sample[4]}
-                        local gn={sample[5],sample[6],sample[7]}
-                        local w=nil
-                        for _,candidate in ipairs(wheels_list) do
-                            if candidate.key=="net_"..peer.."_"..short then w=candidate; break end
+                if not stale then
+                    for short,wheel_key in pairs(REMOTE_WHEEL_KEYS) do
+                        local sample=data[short]
+                        if type(sample)=="table" and #sample>=7 then
+                            local slip=number(sample[1],0)
+                            local tread={sample[2],sample[3],sample[4]}
+                            local gn={sample[5],sample[6],sample[7]}
+                            local w=nil
+                            for _,candidate in ipairs(wheels_list) do
+                                if candidate.key=="net_"..peer.."_"..short then w=candidate; break end
+                            end
+                            if w then apply_remote_wheel_vfx(w,slip,tread,gn,dt) end
                         end
-                        if w then apply_remote_wheel_vfx(w,slip,tread,gn,dt) end
                     end
                 end
                 for _,w in ipairs(wheels_list) do
@@ -1039,7 +1094,6 @@ local function tick_remote_vfx(dt)
     for peer in pairs(vfx.remote_wheels or {}) do
         if not live[peer] then clear_remote_vfx(peer) end
     end
-    maybe_upload_skids()
 end
 local function refresh_vfx_support()
     vfx.supported=sdk.graphics and (sdk.graphics.version or 0)>=4
@@ -1047,18 +1101,28 @@ local function refresh_vfx_support()
         and type(sdk.graphics.mesh_buffer_append)=="function"
     return vfx.supported
 end
+local function bind_smoke_buffer(key)
+    vfx.smoke_buffer_bound=vfx.smoke_buffer_bound or {}
+    if vfx.smoke_buffer_bound[key] then return end
+    sdk.graphics.mesh_buffer(key,SMOKE_BUFFER_OPTS)
+    vfx.smoke_buffer_bound[key]=true
+    vfx.smoke_buffers_live=true
+end
+local function write_smoke_mesh(key,mesh)
+    bind_smoke_buffer(key)
+    sdk.graphics.mesh_buffer_write(key,mesh)
+end
 local function ensure_vfx_mesh()
     if not refresh_vfx_support() then return false end
-    if vfx.mesh then return true end
     vfx.smoke=vfx.smoke or {}
     vfx.remote_smoke=vfx.remote_smoke or {}
     vfx.remote_wheels=vfx.remote_wheels or {}
-    vfx.mesh={
-        smoke={positions={},normals={},colors={},uvs={},indices={}},
-        remote_smoke={positions={},normals={},colors={},uvs={},indices={}},
-    }
-    sdk.graphics.mesh_buffer("vfx_smoke",SMOKE_BUFFER_OPTS)
-    sdk.graphics.mesh_buffer("vfx_smoke_remote",SMOKE_BUFFER_OPTS)
+    if not vfx.mesh then
+        vfx.mesh={
+            smoke={positions={},normals={},colors={},uvs={},indices={}},
+            remote_smoke={positions={},normals={},colors={},uvs={},indices={}},
+        }
+    end
     return true
 end
 local function prepare_effects()
@@ -1066,14 +1130,13 @@ local function prepare_effects()
     clear_session_skids()
     vfx.skid_buffer_serial=0
     vfx.smoke={}; vfx.smoke_mesh_live=false; vfx.smoke_dirty=false
-    vfx.remote_wheels={}; vfx.remote_smoke={}
-    vfx.remote_smoke_dirty=false; vfx.remote_smoke_mesh_live=false
+    vfx.remote_wheels={}; vfx.remote_smoke={}; vfx.remote_vfx_cache={}
+    vfx.remote_smoke_dirty=false; vfx.remote_smoke_mesh_live=false; vfx.upload_tick=0
+    invalidate_smoke_buffers()
     vfx.mesh={
         smoke={positions={},normals={},colors={},uvs={},indices={}},
         remote_smoke={positions={},normals={},colors={},uvs={},indices={}},
     }
-    sdk.graphics.mesh_buffer("vfx_smoke",SMOKE_BUFFER_OPTS)
-    sdk.graphics.mesh_buffer("vfx_smoke_remote",SMOKE_BUFFER_OPTS)
     for _,w in ipairs(wheels) do
         w.skid_chunks={}
         w.skid_pts={}
@@ -1123,7 +1186,7 @@ local function upload_wheel_vfx(event)
             hide_smoke_mesh()
         elseif vfx.smoke_dirty then
             if fill_smoke_mesh(vfx.mesh.smoke,cam) then
-                sdk.graphics.mesh_buffer_write("vfx_smoke",vfx.mesh.smoke)
+                write_smoke_mesh("vfx_smoke",vfx.mesh.smoke)
                 sdk.graphics.set_visible("vfx_smoke",true)
                 vfx.smoke_mesh_live=true
                 vfx.smoke_dirty=false
@@ -1143,7 +1206,7 @@ local function upload_wheel_vfx(event)
             hide_remote_smoke_mesh()
         elseif vfx.remote_smoke_dirty then
             if fill_remote_smoke_mesh(vfx.mesh.remote_smoke,cam) then
-                sdk.graphics.mesh_buffer_write("vfx_smoke_remote",vfx.mesh.remote_smoke)
+                write_smoke_mesh("vfx_smoke_remote",vfx.mesh.remote_smoke)
                 sdk.graphics.set_visible("vfx_smoke_remote",true)
                 vfx.remote_smoke_mesh_live=true
                 vfx.remote_smoke_dirty=false
@@ -1233,7 +1296,7 @@ end
 
 -- Keep the old keys clean on reload: no orphan wheel/carrier bodies or meshes.
 local function remove_rig()
-    stop_audio(); clear_presentation(); clear_effects(); clear_session_skids(); clear_all_remote_vfx()
+    stop_audio(); clear_presentation(); clear_effects(); clear_session_skids(); clear_all_remote_vfx(); destroy_smoke_buffers()
     if state.occupied or sdk.player.attached()==BODY then
         sdk.player.detach(); sdk.camera.clear_follow()
     end
@@ -1248,7 +1311,7 @@ local function remove_rig()
     if state.occupied or sdk.player.attached()==BODY then
         state.enter_after=math.max(state.enter_after,state.time+C.reentry_delay)
     end
-    state.spawned=false; state.occupied=false
+    state.spawned=false; state.occupied=false; state.spawn_confirm=nil
     state.enter_requested=false; state.exit_requested=false; state.reenter_on_ready=false
 end
 local function ground_at(position)
@@ -1283,9 +1346,26 @@ local function spawn_rig(request)
     sdk.graphics.mesh("skyline_visual",{path=MODEL,body=BODY})
     prepare_effects()
     reset_simulation()
-    state.spawned=true; state.enter_after=math.max(state.enter_after,state.time+0.25)
-    start_audio()
-    state.reenter_on_ready=request.reenter==true
+    state.spawn_confirm={
+        deadline=state.time+0.15,
+        reenter=request.reenter==true,
+    }
+end
+local function confirm_spawn()
+    local pending=state.spawn_confirm
+    if not pending then return end
+    if sdk.physics.read(BODY) then
+        state.spawn_confirm=nil
+        state.spawned=true
+        state.enter_after=math.max(state.enter_after,state.time+0.25)
+        start_audio()
+        state.reenter_on_ready=pending.reenter==true
+        return
+    end
+    if state.time<pending.deadline then return end
+    state.spawn_confirm=nil
+    sdk.log("Skyline: chassis body missing after spawn — stand on flat ground and retry F10")
+    interaction_text("Car spawn failed. Stand on flat ground and press F10 again.")
 end
 local function respawn(car,at_car)
     local request={}
@@ -1861,7 +1941,7 @@ return {
     end,
     on_unload=function()
         set_collision_debug(false); interaction_text(""); remove_rig()
-        clear_session_skids()
+        destroy_smoke_buffers(); clear_session_skids()
         sdk.ui.text("skyline_audio",""); sdk.ui.text("skyline_presentation","")
         sdk.ui.text("skyline_help",""); sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
         sdk.ui.text("skyline_mp","")
@@ -1886,6 +1966,7 @@ return {
         local enter=enter_key or pressed_button(buttons,0x8000)
         local reset=reset_key or pressed_button(buttons,0x0080)
         local car=sdk.physics.read(BODY)
+        confirm_spawn()
         if spawn then respawn(nil,false)
         elseif state.pending then
             local request=state.pending; state.pending=nil; spawn_rig(request)
@@ -1920,7 +2001,7 @@ return {
     on_event=function(event)
         if event.name=="world_changed" then
             remove_rig(); stop_audio(); clear_presentation(); sound.prepared=false; prepare_audio()
-            state.pending=nil
+            state.pending=nil; state.spawn_confirm=nil
             state.enter_requested=false; state.exit_requested=false; state.reenter_on_ready=false
             state.enter_after=state.time+C.reentry_delay; interaction_text("")
             set_collision_debug(state.hull_debug)

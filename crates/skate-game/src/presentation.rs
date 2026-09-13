@@ -43,8 +43,10 @@ impl Presentation {
 fn capture(skater: Res<SkaterRuntime>, camera: Res<CameraRuntime>,
     time: Res<Time<Fixed>>, mut history: ResMut<Presentation>,
     mut replay: ResMut<crate::replay::Replay>) {
-    if skater.pose_generation == history.generation { return; }
-    let Some(frame) = camera.frame else { return; };
+    if skater.pose_generation == history.generation && !camera.manual_cam.manual_cam_active() {
+        return;
+    }
+    let Some(frame) = camera.presentation_frame() else { return; };
     let next = Snapshot {
         root: Transform::from_matrix(crate::animation::native_matrix(
             skater.animated_skeleton.roots.animation_to_world)),

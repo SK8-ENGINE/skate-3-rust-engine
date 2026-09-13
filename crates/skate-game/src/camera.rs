@@ -55,13 +55,22 @@ pub(crate) fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window
     customiser: Option<Res<crate::customiser::Customiser>>,
     mut cameras: Query<(&mut Camera, &mut Transform, &mut Projection), With<GameplayCamera>>) {
     if let Ok(window) = windows.single() {
-        runtime.set_aspect_ratio(window.width() / window.height());
+        // A minimized window reports 0x0, and 0/0 is NaN. That poisons the
+        // projection's field of view and trips the non-finite frame check, so
+        // keep the last good ratio until the window has area again.
+        let ratio = window.width() / window.height();
+        if ratio.is_finite() && ratio > 0. {
+            runtime.set_aspect_ratio(ratio);
+        }
     }
     let Some((previous, current, alpha)) = history.view(&replay, time.overstep_fraction()) else { return; };
+    let manual_pose = crate::debug_cam::DebugCam::pose(&runtime);
     for (mut camera, mut transform, mut projection) in &mut cameras {
         *transform = crate::presentation::blend(previous.camera, current.camera, alpha);
         if replay.active {
             if let Some(free) = replay.free_camera { *transform = free; }
+        } else if let Some(pose) = manual_pose {
+            *transform = pose;
         }
         if let Projection::Perspective(p) = &mut *projection {
             p.fov = previous.fov + (current.fov - previous.fov) * alpha;

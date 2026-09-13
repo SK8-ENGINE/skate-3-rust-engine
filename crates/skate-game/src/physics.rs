@@ -35,6 +35,7 @@ mod solve;
 pub(crate) mod solid_contacts;
 pub(crate) mod network;
 pub(crate) use skater::SkaterRuntime;
+pub(crate) use input_phase::{facing_from_visual, horizontal_spawn};
 mod animation_feedback;
 mod animation_feedback_settings;
 mod animation_input;
@@ -409,7 +410,7 @@ impl Plugin for PhysicsPlugin {
     }
 }
 
-fn advance(
+pub(crate) fn advance(
     mut physics: ResMut<GamePhysics>,
     mut skater: ResMut<SkaterRuntime>,
     mut controls: ResMut<PlayerControls>,

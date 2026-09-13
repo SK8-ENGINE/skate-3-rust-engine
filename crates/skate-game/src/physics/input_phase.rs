@@ -2,6 +2,7 @@
 //! PlayerInput retains the original ordering; callbacks split host ownership.
 #[path = "input_teleport.rs"]
 mod teleport;
+pub(crate) use teleport::{facing_from_visual, horizontal_spawn};
 use super::{
     GamePhysics, SkaterRuntime,
     animated_skeleton::AnimatedSkeleton,

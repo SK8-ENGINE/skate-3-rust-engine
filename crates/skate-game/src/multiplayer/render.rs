@@ -96,7 +96,10 @@ impl Plugin for RemoteRenderPlugin {
         })
         .add_systems(
             Update,
-            (spawn, bind, present).chain().after(crate::modding::bridge::sync_network),
+            (spawn, bind, present)
+                .chain()
+                .in_set(RemoteRenderSet)
+                .after(crate::modding::bridge::sync_network),
         );
     }
 }
@@ -247,7 +250,9 @@ fn bind(
     mut materials: ResMut<Assets<SkaterMaterial>>,
     pieces: Query<&OutfitPiece>,
     mut morphs: Query<(Entity, &mut MorphWeights)>,
+    lighting: Option<Res<crate::retail_character::Lighting>>,
 ) {
+    let default_sh = lighting.as_ref().map(|lighting| lighting.default_sh());
     let initial_poses: BTreeMap<_, _> = skins
         .actors
         .iter()
@@ -321,6 +326,15 @@ fn bind(
                     continue;
                 };
                 let handle = materials.add(material);
+                if let (Some(lighting), Some(sh)) = (lighting.as_ref(), default_sh) {
+                    if let Some(material) = materials.get_mut(&handle) {
+                        crate::retail_character::seed_customiser_retail(
+                            material,
+                            lighting.light,
+                            sh,
+                        );
+                    }
+                }
                 for (e, _) in &meshes {
                     if parents.iter_ancestors(e).any(|p| p == scene) {
                         commands

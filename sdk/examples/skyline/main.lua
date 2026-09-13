@@ -1,4 +1,4 @@
- N-- Propulsion is exclusively axle-joint motors plus Rapier tire friction.
+-- Propulsion is exclusively axle-joint motors plus Rapier tire friction.
 -- Steering is exclusively front revolute motors. Suspension is four
 -- prismatic joints with physical springs. No drive/steering forces or impulses.
 local MODEL = "skyline.glb"

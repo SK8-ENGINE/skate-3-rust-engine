@@ -480,6 +480,62 @@ fn command_kind(command: &Command) -> &'static str {
 }
 
 /// JSON null becomes a truthy null userdata via `lua.to_value`; map it to real nil.
+/// Fills in any snapshot field the API reads, so `sdk.snapshot` accessors are
+/// total.
+///
+/// `on_load`, `on_unload`, `on_settings` and `on_event` can all run before the
+/// host has ever built a snapshot — `Manager::start` passes whatever it has,
+/// which on the first frame is `Value::Null`. A nil `sdk.snapshot` turns every
+/// reader (`sdk.player.attached`, `sdk.input.down`, ...) into a hard Lua error
+/// during startup, which is a host-lifecycle detail no mod can be expected to
+/// defend against. Missing subtables are filled individually so a partial
+/// snapshot cannot throw either.
+fn complete(snapshot: &Value) -> Value {
+    let mut value = snapshot.clone();
+    let Some(object) = value.as_object_mut() else {
+        return default_snapshot();
+    };
+    if let Value::Object(defaults) = default_snapshot() {
+        for (key, default) in defaults {
+            let missing = object.get(&key).is_none_or(Value::is_null);
+            // `attach`, `camera` and `detach_error` are meaningfully null, so a
+            // null default keeps them absent rather than inventing a value.
+            if missing && !default.is_null() {
+                object.insert(key, default);
+            }
+        }
+    }
+    value
+}
+
+fn default_snapshot() -> Value {
+    serde_json::json!({
+        "player": {
+            "position": [0.0, 0.0, 0.0],
+            "velocity": [0.0, 0.0, 0.0],
+            "heading": 0.0,
+            "on_board": false,
+            "state": 0,
+            "category": 0,
+            "bailing": false,
+        },
+        "attach": Value::Null,
+        "detach_error": Value::Null,
+        "detach_pending": false,
+        "map": {"name": "", "generation": 0},
+        "tick": 0,
+        "keys": {},
+        // 18 gameplay actions, IDs 64..=81.
+        "actions": vec![0.0f32; 18],
+        "pad": {"buttons": 0, "triggers": [0.0, 0.0], "left": [0.0, 0.0], "right": [0.0, 0.0]},
+        "paused": false,
+        "replay": false,
+        "camera": Value::Null,
+        "physics": {"bodies": {}, "contacts": []},
+        "network": {},
+    })
+}
+
 fn json_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
     if value.is_null() {
         return Ok(mlua::Value::Nil);
@@ -652,7 +708,7 @@ impl Vm {
                 })?,
             )?;
             sdk.set("settings", lua.to_value(settings)?)?;
-            sdk.set("snapshot", json_to_lua(&lua, snapshot)?)?;
+            sdk.set("snapshot", json_to_lua(&lua, &complete(snapshot))?)?;
             lua.globals().set("sdk", sdk)?;
             lua.load(include_str!("api.lua"))
                 .set_name("@skate-sdk-2")
@@ -715,7 +771,7 @@ impl Vm {
             self.lua
                 .globals()
                 .get::<Table>("sdk")?
-                .set("snapshot", json_to_lua(&self.lua, snapshot)?)?;
+                .set("snapshot", json_to_lua(&self.lua, &complete(snapshot))?)?;
             if let Some(f) = self.callbacks.get::<Option<mlua::Function>>(name)? {
                 f.call::<()>(self.lua.to_value(&payload)?)?;
             }
@@ -900,6 +956,64 @@ mod model_collision_extension_tests {
         }
         drop(vm);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// `Manager::start` runs `on_load` with whatever snapshot it has, which on
+    /// the first frame is `Value::Null`. Every snapshot reader must still work:
+    /// mods legitimately check attachment state during startup cleanup.
+    #[test]
+    fn snapshot_readers_work_before_the_host_has_built_a_snapshot() {
+        let root = std::env::temp_dir().join(format!(
+            "skate-mods-null-snapshot-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("main.lua"),
+            r#"
+            return {on_load=function()
+                assert(sdk.player.attached() == nil, 'attached')
+                assert(sdk.player.detaching() == false, 'detaching')
+                assert(sdk.player.detach_error() == nil, 'detach_error')
+                assert(type(sdk.player.read()) == 'table', 'read')
+                assert(sdk.input.down('KeyW') == false, 'down')
+                assert(sdk.input.action(64) == 0.0, 'action')
+                assert(type(sdk.input.pad()) == 'table', 'pad')
+                assert(type(sdk.net.info()) == 'table', 'net')
+            end}
+        "#,
+        )
+        .unwrap();
+        let manifest: Manifest = serde_json::from_value(json!({"id":"tests.snapshot", "api":2,
+            "name":"Null snapshot", "version":"1.0.0", "author":"test", "description":"test",
+            "entry":"main.lua", "settings":{}}))
+        .unwrap();
+        manifest.validate().unwrap();
+        let mut vm = Vm::new(&root, &manifest, &BTreeMap::new(), &Value::Null).unwrap();
+        vm.call("on_load", Value::Null, &Value::Null)
+            .expect("snapshot readers must not fault on a null snapshot");
+        drop(vm);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A real snapshot must survive completion untouched, so the default cannot
+    /// mask live host state.
+    #[test]
+    fn completion_preserves_host_supplied_fields() {
+        let live = json!({
+            "attach": {"body": "chassis", "owner": "examples.skyline"},
+            "tick": 581,
+            "keys": {"KeyW": true},
+        });
+        let filled = complete(&live);
+        assert_eq!(filled["attach"]["body"], "chassis");
+        assert_eq!(filled["tick"], 581);
+        assert_eq!(filled["keys"]["KeyW"], true);
+        // Absent fields gain defaults; meaningfully-null ones stay null.
+        assert_eq!(filled["detach_pending"], false);
+        assert_eq!(filled["physics"]["bodies"], json!({}));
+        assert!(filled["camera"].is_null());
+        assert_eq!(complete(&Value::Null)["paused"], false);
     }
 }
 

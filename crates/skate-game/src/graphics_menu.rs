@@ -2,15 +2,12 @@
 use crate::difficulty::Difficulty;
 use bevy::{
     camera::RenderTarget,
-    core_pipeline::prepass::DepthPrepass,
     image::ImageSampler,
     prelude::*,
     render::{
-        experimental::occlusion_culling::OcclusionCulling,
         render_resource::{Extent3d, TextureFormat},
-        renderer::RenderAdapter,
     },
-    window::{PresentMode, PrimaryWindow},
+    window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -38,9 +35,7 @@ struct GraphicsSettings {
     width: u32,
     height: u32,
     scale: u32,
-    samples: u32,
     fps: u32,
-    occlusion: bool,
     hour: f32,
     day_speed: u32,
     ambient_level: Option<u32>,
@@ -51,9 +46,7 @@ impl Default for GraphicsSettings {
             width: 1280,
             height: 800,
             scale: 100,
-            samples: 4,
             fps: 0,
-            occlusion: true,
             hour: 12.,
             day_speed: 60,
             ambient_level: None,
@@ -71,9 +64,6 @@ impl GraphicsSettings {
         if !SCALES.contains(&self.scale) {
             self.scale = 100;
         }
-        if ![1, 2, 4, 8].contains(&self.samples) {
-            self.samples = 4;
-        }
         if !LIMITS.contains(&self.fps) {
             self.fps = 0;
         }
@@ -89,7 +79,6 @@ pub(crate) struct Menu {
     selected: usize,
     settings: GraphicsSettings,
     path: PathBuf,
-    supported_msaa: Vec<u32>,
     difficulty: Difficulty,
     status: String,
     maps: Vec<crate::map_library::Entry>,
@@ -145,6 +134,7 @@ impl Plugin for GraphicsMenuPlugin {
         app.insert_resource(FramePacer(Instant::now()))
             .add_systems(PostStartup, setup.in_set(PresentationSetup))
             .add_systems(PreUpdate, interact.in_set(MenuInput).after(bevy::input::InputSystems))
+            .add_systems(PreUpdate, toggle_fullscreen.after(bevy::input::InputSystems))
             .add_systems(Update, (crate::map_render::advance_day, apply, labels).chain())
             .add_systems(PostUpdate, crate::map_render::position_celestial_bodies.before(bevy::transform::TransformSystems::Propagate))
             .add_systems(Last, pace);
@@ -156,7 +146,6 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     cameras: Query<Entity, With<Camera3d>>,
-    adapter: Res<RenderAdapter>,
     mut time: ResMut<Time<Virtual>>,
 ) {
     let path = config
@@ -172,33 +161,6 @@ fn setup(
         Err(_) => GraphicsSettings::default(),
     }
     .validated();
-    let supported_msaa: Vec<_> = [1, 2, 4, 8]
-        .into_iter()
-        .filter(|&samples| {
-            [
-                TextureFormat::Rgba16Float,
-                TextureFormat::Rgba8UnormSrgb,
-                TextureFormat::Depth32Float,
-            ]
-            .into_iter()
-            .all(|format| {
-                adapter
-                    .get_texture_format_features(format)
-                    .flags
-                    .sample_count_supported(samples)
-            })
-        })
-        .collect();
-    let mut settings = settings;
-    // Reproducible A/B override; normal launches use the saved menu setting.
-    match std::env::var("SKATE_OCCLUSION").as_deref() {
-        Ok("0") => settings.occlusion = false,
-        Ok("1") => settings.occlusion = true,
-        _ => {}
-    }
-    if !supported_msaa.contains(&settings.samples) {
-        settings.samples = 1;
-    }
     window
         .resolution
         .set_physical_resolution(settings.width, settings.height);
@@ -210,7 +172,8 @@ fn setup(
     for camera in &cameras {
         commands.entity(camera).insert((
             RenderTarget::Image(target.clone().into()),
-            msaa(settings.samples),
+            // Fixed policy, not a setting: see `render_capacity`.
+            Msaa::Off,
         ));
         // Render the world before the presentation camera consumes its image.
         commands.entity(camera).insert(Camera {
@@ -239,7 +202,7 @@ fn setup(
             BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
             panel.spawn((Text::new("GAME MENU"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
             panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..17 {
+            for i in 0..15 {
                 panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(26),padding:UiRect::all(px(3)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
                     BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
                     row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
@@ -258,7 +221,6 @@ fn setup(
         selected: 0,
         settings,
         path,
-        supported_msaa,
         difficulty: config.difficulty,
         status: String::new(),
         maps,
@@ -267,14 +229,6 @@ fn setup(
         browser: false,
         daylight: false,
     });
-}
-fn msaa(samples: u32) -> Msaa {
-    match samples {
-        2 => Msaa::Sample2,
-        4 => Msaa::Sample4,
-        8 => Msaa::Sample8,
-        _ => Msaa::Off,
-    }
 }
 fn cycle<T: PartialEq + Copy>(values: &[T], value: T, direction: i32) -> T {
     let index = values.iter().position(|x| *x == value).unwrap_or(0) as i32;
@@ -341,7 +295,12 @@ pub(crate) fn interact(
         if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
             action = Some((menu.selected, -1));
         }
-        if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::Enter) || nav.pressed & (8 | 0x1000) != 0 {
+        if keys.just_pressed(KeyCode::ArrowRight)
+            || (keys.just_pressed(KeyCode::Enter)
+                && !keys.pressed(KeyCode::AltLeft)
+                && !keys.pressed(KeyCode::AltRight))
+            || nav.pressed & (8 | 0x1000) != 0
+        {
             action = Some((menu.selected, 1));
         }
         for (interaction, row) in &buttons {
@@ -423,13 +382,8 @@ pub(crate) fn interact(
                     (menu.settings.width, menu.settings.height) = size;
                 }
                 1 => menu.settings.scale = cycle(SCALES, menu.settings.scale, direction),
-                2 => {
-                    menu.settings.samples =
-                        cycle(&menu.supported_msaa, menu.settings.samples, direction)
-                }
-                3 => menu.settings.fps = cycle(LIMITS, menu.settings.fps, direction),
-                4 => menu.settings.occlusion = !menu.settings.occlusion,
-                5 => {
+                2 => menu.settings.fps = cycle(LIMITS, menu.settings.fps, direction),
+                3 => {
                     menu.difficulty = cycle(&Difficulty::ALL, menu.difficulty, direction);
                     physics.set_difficulty(menu.difficulty);
                     config.difficulty = menu.difficulty;
@@ -438,13 +392,13 @@ pub(crate) fn interact(
                         Err(e) => format!("Applied, but could not save: {e}"),
                     };
                 }
-                6 => {
+                4 => {
                     menu.selected_map = (menu.selected_map as i32 + direction)
                         .rem_euclid(menu.maps.len() as i32)
                         as usize;
                     menu.status = "Choose Load map to switch".into();
                 }
-                7 => {
+                5 => {
                     if net.active() {
                         menu.status = "Leave multiplayer before switching maps".into();
                     } else {
@@ -453,24 +407,24 @@ pub(crate) fn interact(
                         menu.status = "Loading map...".into();
                     }
                 }
-                8 => menu.open = false,
-                9 => {
+                6 => menu.open = false,
+                7 => {
                     exit.write(AppExit::Success);
                 }
-                10 => { custom_models.request_stock(); customiser.begin(); },
-                11 => {
+                8 => { custom_models.request_stock(); customiser.begin(); },
+                9 => {
                     menu.multiplayer = true;
                     menu.selected = 0;
                 }
-                12 => custom_models.begin(),
-                13 => menu.status = updater.open(false),
-                14 => travel.open = true,
-                15 => { menu.daylight = true; menu.selected = 0; menu.status = "Custom maps: change time, cycle speed and ambient light. Retail lighting stays authored.".into(); },
-                16 => mods.begin(),
+                10 => custom_models.begin(),
+                11 => menu.status = updater.open(false),
+                12 => travel.open = true,
+                13 => { menu.daylight = true; menu.selected = 0; menu.status = "Custom maps: change time, cycle speed and ambient light. Retail lighting stays authored.".into(); },
+                14 => mods.begin(),
                 _ => {}
             }
         }
-        if (row < 5 && !menu.multiplayer && !menu.daylight && !day_action) || (day_action && row < 3) {
+        if (row < 3 && !menu.multiplayer && !menu.daylight && !day_action) || (day_action && row < 3) {
             let save = (|| -> Result<(), String> {
                 std::fs::create_dir_all(menu.path.parent().unwrap()).map_err(|e| e.to_string())?;
                 std::fs::write(
@@ -491,47 +445,43 @@ pub(crate) fn interact(
         time.unpause();
     }
 }
+fn toggle_fullscreen(
+    keys: Res<ButtonInput<KeyCode>>,
+    menu: Res<Menu>,
+    mut window: Single<&mut Window, With<PrimaryWindow>>,
+) {
+    let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    if !alt || !keys.just_pressed(KeyCode::Enter) {
+        return;
+    }
+    match window.mode {
+        WindowMode::Windowed => {
+            window.mode = WindowMode::BorderlessFullscreen(MonitorSelection::Primary);
+        }
+        WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(_, _) => {
+            window.mode = WindowMode::Windowed;
+            window
+                .resolution
+                .set_physical_resolution(menu.settings.width, menu.settings.height);
+        }
+        _ => {}
+    }
+}
 fn apply(
-    mut commands: Commands,
     menu: Res<Menu>,
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     target: Res<SceneTarget>,
     mut images: ResMut<Assets<Image>>,
-    mut cameras: Query<(Entity, &mut Msaa), With<Camera3d>>,
     mut previous: Local<Option<GraphicsSettings>>,
 ) {
-    if previous
-        .as_ref()
-        .is_none_or(|p| p.width != menu.settings.width || p.height != menu.settings.height)
+    if window.mode == WindowMode::Windowed
+        && previous
+            .as_ref()
+            .is_none_or(|p| p.width != menu.settings.width || p.height != menu.settings.height)
     {
         window
             .resolution
             .set_physical_resolution(menu.settings.width, menu.settings.height);
-    }
-    if previous
-        .as_ref()
-        .is_none_or(|p| p.samples != menu.settings.samples)
-    {
-        for (_, mut samples) in &mut cameras {
-            *samples = msaa(menu.settings.samples);
-        }
-    }
-    if previous
-        .as_ref()
-        .is_none_or(|p| p.occlusion != menu.settings.occlusion)
-    {
-        for (entity, _) in &cameras {
-            if menu.settings.occlusion {
-                commands
-                    .entity(entity)
-                    .insert((DepthPrepass, OcclusionCulling));
-            } else {
-                commands
-                    .entity(entity)
-                    .remove::<(DepthPrepass, OcclusionCulling)>();
-            }
-        }
-        info!("GPU occlusion culling: {}", menu.settings.occlusion);
     }
     let size = menu.settings.internal_size(window.physical_size());
     if let Some(image) = images.get(&target.0) {
@@ -635,14 +585,6 @@ fn labels(
                     s.scale, size.x, size.y
                 ),
                 2 => format!(
-                    "MSAA                {}",
-                    if s.samples == 1 {
-                        "Off".into()
-                    } else {
-                        format!("{}x", s.samples)
-                    }
-                ),
-                3 => format!(
                     "FPS limit             {}",
                     if s.fps == 0 {
                         "Unlimited".into()
@@ -650,24 +592,20 @@ fn labels(
                         s.fps.to_string()
                     }
                 ),
+                3 => format!("Difficulty            {}", menu.difficulty.label()),
                 4 => format!(
-                    "Occlusion culling     {}",
-                    if s.occlusion { "On" } else { "Off" }
-                ),
-                5 => format!("Difficulty            {}", menu.difficulty.label()),
-                6 => format!(
                     "Map                   {}",
                     menu.maps[menu.selected_map].label
                 ),
-                7 => if transition.busy() { "Loading map...".into() } else { "Load map".into() },
-                8 => "Resume".into(),
-                9 => "Quit game".into(),
-                10 => "Character customiser".into(),
-                12 => "Custom models".into(),
-                13 => "Updates".into(),
-                14 => "Teleport…".into(),
-                15 => "Day & night…".into(),
-                16 => "Mods…".into(),
+                5 => if transition.busy() { "Loading map...".into() } else { "Load map".into() },
+                6 => "Resume".into(),
+                7 => "Quit game".into(),
+                8 => "Character customiser".into(),
+                10 => "Custom models".into(),
+                11 => "Updates".into(),
+                12 => "Teleport…".into(),
+                13 => "Day & night…".into(),
+                14 => "Mods…".into(),
                 _ => "Multiplayer".into(),
             }
         };
@@ -728,7 +666,7 @@ mod tests {
             .insert_resource(images)
             .insert_resource(Menu {
                 open: false, selected: 0, settings: GraphicsSettings::default(),
-                difficulty: Difficulty::Easy, path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
+                difficulty: Difficulty::Easy, path: PathBuf::new(), status: String::new(),
                 multiplayer: false, browser: false, daylight: false,
                 maps: vec![crate::map_library::Entry { label: "Test world".into(), path: None }], selected_map: 0,
             })
@@ -747,17 +685,13 @@ mod tests {
         app.world_mut().spawn((Window::default(), PrimaryWindow));
         let camera = app.world_mut().spawn((Camera3d::default(), Msaa::Off)).id();
         app.update();
-        assert!(app.world().entity(camera).contains::<OcclusionCulling>());
-        assert!(app.world().entity(camera).contains::<DepthPrepass>());
+        // MSAA and occlusion culling are no longer settings, so the only thing
+        // `apply` still adapts is the internal render target size.
         {
             let mut menu = app.world_mut().resource_mut::<Menu>();
-            menu.settings.occlusion = false;
-            menu.settings.samples = 1;
             menu.settings.scale = 67;
         }
         app.update();
-        assert!(!app.world().entity(camera).contains::<OcclusionCulling>());
-        assert!(!app.world().entity(camera).contains::<DepthPrepass>());
         assert_eq!(*app.world().get::<Msaa>(camera).unwrap(), Msaa::Off);
         assert_eq!(
             app.world()
@@ -767,20 +701,11 @@ mod tests {
                 .size(),
             UVec2::new(857, 536)
         );
-        {
-            let mut menu = app.world_mut().resource_mut::<Menu>();
-            menu.settings.occlusion = true;
-            menu.settings.samples = 8;
-        }
-        app.update();
-        assert!(app.world().entity(camera).contains::<OcclusionCulling>());
-        assert!(app.world().entity(camera).contains::<DepthPrepass>());
-        assert_eq!(*app.world().get::<Msaa>(camera).unwrap(), Msaa::Sample8);
     }
     #[test]
     fn invalid_saved_values_fall_back() {
         let settings: GraphicsSettings =
-            serde_json::from_str(r#"{"width":0,"height":999999,"scale":0,"samples":3,"fps":1}"#)
+            serde_json::from_str(r#"{"width":0,"height":999999,"scale":0,"fps":1}"#)
                 .unwrap();
         assert_eq!(settings.validated(), GraphicsSettings::default());
     }

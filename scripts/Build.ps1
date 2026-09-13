@@ -1,6 +1,7 @@
 param(
     [switch]$StageOnly,
     [switch]$WithRelay,
+    [switch]$Dev,
     [string]$TargetDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'target')
 )
 # Fast local iteration: Bevy dynamic_linking (default features) + stable target/.
@@ -13,10 +14,13 @@ try {
     if (-not $StageOnly) {
         $packages = @('-p', 'skate-game')
         if ($WithRelay) { $packages += @('-p', 'skate-steam-relay') }
-        & cargo build @packages --bin skate3rust --target-dir $TargetDirectory
+        $buildArgs = @('build') + $packages + @('--bin', 'skate3rust', '--target-dir', $TargetDirectory)
+        if (-not $Dev) { $buildArgs += '--release' }
+        & cargo @buildArgs
         if ($LASTEXITCODE -ne 0) { throw 'Build failed; see the compiler output above.' }
     }
-    $debugDirectory = Join-Path $TargetDirectory 'debug'
+    $profile = if ($Dev) { 'debug' } else { 'release' }
+    $debugDirectory = Join-Path $TargetDirectory $profile
     $executable = Join-Path $debugDirectory 'skate3rust.exe'
     if (-not (Test-Path -LiteralPath $executable)) { throw "Missing executable: $executable" }
     $readobj = Join-Path $env:ProgramFiles 'LLVM/bin/llvm-readobj.exe'
@@ -25,6 +29,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not locate Rust runtime libraries.' }
     $binDirectory = Join-Path $ProjectRoot 'bin'
     New-Item -ItemType Directory -Path $binDirectory -Force | Out-Null
+    # Get-FileHash is missing from the PowerShell BUILD.bat launches, which used
+    # to abort staging before manifest.json was written.
+    function Get-StagedHash([string]$Path) {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $stream = [System.IO.File]::OpenRead($Path)
+            try { ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('X2') }) -join '' }
+            finally { $stream.Dispose() }
+        } finally { $sha.Dispose() }
+    }
     $queue = [System.Collections.Generic.Queue[string]]::new()
     $queue.Enqueue($executable)
     $seen = @{}
@@ -36,13 +50,13 @@ try {
         $seen[$name] = $true
         $destination = Join-Path $binDirectory $name
         Copy-Item -LiteralPath $source -Destination $destination -Force
-        $staged += @{name = $name; sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash}
+        $staged += @{name = $name; sha256 = (Get-StagedHash $destination)}
         # Keep development backtraces useful after staging the EXE and Bevy DLLs.
         $pdb = [IO.Path]::ChangeExtension($source, '.pdb')
         if (Test-Path -LiteralPath $pdb) {
             $symbolDestination = Join-Path $binDirectory (Split-Path -Leaf $pdb)
             Copy-Item -LiteralPath $pdb -Destination $symbolDestination -Force
-            $staged += @{name = (Split-Path -Leaf $pdb); sha256 = (Get-FileHash -LiteralPath $symbolDestination -Algorithm SHA256).Hash}
+            $staged += @{name = (Split-Path -Leaf $pdb); sha256 = (Get-StagedHash $symbolDestination)}
         }
         $imports = & $readobj --coff-imports $source
         if ($LASTEXITCODE -ne 0) { throw "Could not inspect DLL imports: $source" }
@@ -72,10 +86,11 @@ try {
         foreach ($name in @('steam-relay/skate-steam-relay.exe', 'steam-relay/steam_api64.dll')) {
             $path = Join-Path $binDirectory $name
             if (Test-Path -LiteralPath $path) {
-                $staged += @{name = $name; sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}
+                $staged += @{name = $name; sha256 = (Get-StagedHash $path)}
             }
         }
     }
     $staged | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $binDirectory 'manifest.json') -Encoding UTF8
-    Write-Host ("Ready: {0}/skate3rust.exe ({1:n1}s)" -f $binDirectory, $sw.Elapsed.TotalSeconds)
+    $label = if ($Dev) { 'debug (fast rebuild; use BUILD_DEV.bat)' } else { 'release' }
+    Write-Host ("Ready: {0}/skate3rust.exe [{1}] ({2:n1}s)" -f $binDirectory, $label, $sw.Elapsed.TotalSeconds)
 } finally { Pop-Location }

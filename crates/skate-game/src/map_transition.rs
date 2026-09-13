@@ -12,6 +12,21 @@ pub(crate) struct MapTransitionSet;
 #[derive(Message)]
 pub(crate) struct WorldChanged { pub generation: u64 }
 
+/// What the prepared scene actually cost, recorded when geometry is published.
+///
+/// This used to gate MSAA and occlusion culling against a batch count, because
+/// draw count varied with material count and could reach thousands. Draw count
+/// is now a property of the spatial partition we choose, so there is nothing
+/// left to adapt to: the render options are fixed policy (RFC 1 D7) and this is
+/// a plain report for the perf harness and the debug overlay.
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub(crate) struct MapRenderBudget {
+    pub draws: usize,
+    pub triangles: usize,
+    pub leaves: usize,
+    pub slabs: usize,
+}
+
 #[cfg(test)]
 #[path = "tests/map_transition.rs"]
 mod tests;
@@ -80,7 +95,10 @@ impl Plugin for MapTransitionPlugin {
     fn build(&self, app: &mut App) {
         let config = app.world().resource::<Config>();
         let current = CurrentMap::from_package(config.map_path.clone(), config.map.as_ref());
-        app.insert_resource(current).init_resource::<MapTransition>().add_message::<WorldChanged>()
+        app.insert_resource(current)
+            .init_resource::<MapTransition>()
+            .init_resource::<MapRenderBudget>()
+            .add_message::<WorldChanged>()
             .add_systems(PreUpdate, poll.in_set(MapTransitionSet).after(crate::graphics_menu::MenuInput)
                 .before(crate::input::poll_controllers))
             .configure_sets(FixedUpdate, (

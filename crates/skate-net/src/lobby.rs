@@ -19,6 +19,12 @@ pub struct Application { pub seq: u32, pub value: Vec<u8>, pub received: u64 }
 
 pub const DEFAULT_LINK_BUDGET: f64 = 180_000.;
 pub const DEFAULT_HOST_BUDGET: f64 = 1_000_000.;
+const LINK_CREDIT_CAP: f64 = 3_600.;
+const SESSION_CREDIT_CAP: f64 = 12_000.;
+/// Local two-client hosting is not an internet path. Burst a full APPLICATION
+/// snapshot in a couple of service ticks instead of dripping 3.6 KiB behind pose.
+const LOOPBACK_LINK_BUDGET: f64 = 2_000_000.;
+const LOOPBACK_CREDIT_CAP: f64 = 48_000.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Info {
     pub id: u64,
@@ -223,6 +229,11 @@ impl Session {
     }
     pub fn set_loopback(&mut self, enabled: bool) {
         self.loopback = enabled;
+        let link = if enabled { LOOPBACK_LINK_BUDGET } else { DEFAULT_LINK_BUDGET };
+        self.link_budget = link;
+        if self.host.is_some() {
+            self.budget = link;
+        }
     }
     pub fn is_host(&self) -> bool {
         self.host.is_none()
@@ -231,11 +242,14 @@ impl Session {
         self.is_host() || self.received_roster != 0
     }
     pub fn set_congested(&mut self, congested: bool) {
-        self.link_budget = if congested {
-            DEFAULT_LINK_BUDGET * 0.5
-        } else {
-            DEFAULT_LINK_BUDGET
-        };
+        let base = if self.loopback { LOOPBACK_LINK_BUDGET } else { DEFAULT_LINK_BUDGET };
+        self.link_budget = if congested { base * 0.5 } else { base };
+    }
+    fn session_credit_cap(&self) -> f64 {
+        if self.loopback { LOOPBACK_CREDIT_CAP } else { SESSION_CREDIT_CAP }
+    }
+    fn link_credit_cap(&self) -> f64 {
+        if self.loopback { LOOPBACK_CREDIT_CAP } else { LINK_CREDIT_CAP }
     }
     pub fn publish(&mut self, kind: u8, mut state: Packed, now: u64) {
         state.captured = now;
@@ -520,9 +534,10 @@ impl Session {
     pub fn service(&mut self, now: u64) -> Vec<Outgoing> {
         let dt = now.saturating_sub(self.last_service).min(1000) as f64 / 1000.;
         self.last_service = now;
-        self.credits = (self.credits + dt * self.budget).min(12_000.);
+        self.credits = (self.credits + dt * self.budget).min(self.session_credit_cap());
+        let link_cap = self.link_credit_cap();
         for l in self.links.values_mut() {
-            l.credits = (l.credits + dt * self.link_budget).min(3600.);
+            l.credits = (l.credits + dt * self.link_budget).min(link_cap);
         }
         if self.is_host() {
             let expired: Vec<_> = self
@@ -579,7 +594,7 @@ impl Session {
             let offset = self.round % peers.len();
             peers.rotate_left(offset);
         }
-        for peer in peers {
+        for &peer in &peers {
             let link = self.links.get_mut(&peer).unwrap();
             if now.saturating_sub(link.last_ack) >= 100 {
                 let mut b = packed::header(self.session, self.local, ACK, 0);
@@ -598,121 +613,131 @@ impl Session {
                 output.push(Outgoing { peer, data: b });
                 link.last_ping = now;
             }
-            // Essential physics first; optional pose detail consumes only remaining budget.
-            for kind in [BODY, POSE] {
-                for &id in &ids {
-                    if id == link.actor || (self.host.is_some() && id != self.local) {
-                        continue;
-                    }
-                    let actor = &self.actors[&id];
-                    let stream = actor.stream(kind);
-                    let Some(latest) = stream.latest() else {
-                        continue;
-                    };
-                    let distance = if self.host.is_some() {
-                        0.
-                    } else {
-                        self.actors
-                            .get(&link.actor)
-                            .and_then(|a| a.body.latest())
-                            .zip(actor.body.latest())
-                            .map_or(0., |(a, b)| {
-                                // Detached boards also need frequent updates near another player.
-                                let roots = distance(a.interest[0], b.interest[0]);
-                                a.interest
-                                    .iter()
-                                    .map(|&p| distance(p, b.interest[0]))
-                                    .chain(b.interest.iter().map(|&p| distance(p, a.interest[0])))
-                                    .fold(roots, f32::min)
-                            })
-                    };
-                    let mut interval = match (kind, distance) {
-                        (BODY, d) if d < 30. => 50,
-                        (BODY, d) if d < 100. => 100,
-                        (BODY, _) => 500,
-                        (POSE, d) if d < 30. => {
-                            if self.loopback {
-                                50
-                            } else {
-                                100
-                            }
-                        }
-                        (POSE, d) if d < 100. => 250,
-                        _ => 1000,
-                    };
-                    if !self.loopback
-                        && now.saturating_sub(stream.changed) > 250
-                        && (kind == POSE || distance >= 8.)
-                    {
-                        interval = interval.max(200);
-                    }
-                    if let Some(&(sent, seq)) = link.sent.get(&(id, kind)) {
-                        if seq == latest.seq || now.saturating_sub(sent) < interval {
-                            continue;
-                        }
-                    }
-                    let keyframe = link
-                        .keys
-                        .get(&(id, kind))
-                        .is_none_or(|at| now.saturating_sub(*at) >= 2000);
-                    let baseline = link
-                        .acks
-                        .get(&(id, kind))
-                        .and_then(|&seq| stream.at(seq).map(|s| (seq, s)))
-                        .filter(|_| !keyframe);
-                    let data =
-                        packed::delta(self.session, id, kind, latest.seq, &latest.state, baseline);
-                    if data.len() > packed::MTU {
-                        self.stats.invalid += 1;
-                        continue;
-                    }
-                    let bytes = data.len() as f64;
-                    if link.credits < bytes || self.credits < bytes {
-                        self.stats.budget_skips += 1;
-                        continue;
-                    }
-                    link.credits -= bytes;
-                    self.credits -= bytes;
-                    link.sent.insert((id, kind), (now, latest.seq));
-                    if baseline.is_none() {
-                        link.keys.insert((id, kind), now);
-                    }
-                    output.push(Outgoing { peer, data });
+        }
+        // Player rigid bodies first, then the live APPLICATION snapshot (collider
+        // fragments, scenes, net state), then optional pose detail with whatever
+        // budget remains. Snapshot spawn is not leftover traffic.
+        self.write_physics(&mut output, &peers, &ids, BODY, now);
+        self.write_application(&mut output, now);
+        self.write_physics(&mut output, &peers, &ids, POSE, now);
+        let members = self.actors.keys().copied().collect();
+        let peers: Vec<_> = self.links.iter().map(|(&peer, link)| (peer, link.actor, link.rtt)).collect();
+        output.extend(self.blobs.service(self.session, self.local, self.host.is_none(), &members, &peers, now));
+        self.stats.rtt_ms = self.links.values().map(|l| l.rtt).max().unwrap_or(0);
+        output
+    }
+    fn write_physics(&mut self, output: &mut Vec<Outgoing>, peers: &[u64], ids: &[u64], kind: u8, now: u64) {
+        for &peer in peers {
+            let Some(link_actor) = self.links.get(&peer).map(|l| l.actor) else { continue };
+            for &id in ids {
+                if id == link_actor || (self.host.is_some() && id != self.local) {
+                    continue;
                 }
+                let actor = &self.actors[&id];
+                let stream = actor.stream(kind);
+                let Some(latest) = stream.latest() else {
+                    continue;
+                };
+                let distance = if self.host.is_some() {
+                    0.
+                } else {
+                    self.actors
+                        .get(&link_actor)
+                        .and_then(|a| a.body.latest())
+                        .zip(actor.body.latest())
+                        .map_or(0., |(a, b)| {
+                            let roots = distance(a.interest[0], b.interest[0]);
+                            a.interest
+                                .iter()
+                                .map(|&p| distance(p, b.interest[0]))
+                                .chain(b.interest.iter().map(|&p| distance(p, a.interest[0])))
+                                .fold(roots, f32::min)
+                        })
+                };
+                let mut interval = match (kind, distance) {
+                    (BODY, d) if d < 30. => 50,
+                    (BODY, d) if d < 100. => 100,
+                    (BODY, _) => 500,
+                    (POSE, d) if d < 30. => {
+                        if self.loopback { 50 } else { 100 }
+                    }
+                    (POSE, d) if d < 100. => 250,
+                    _ => 1000,
+                };
+                if !self.loopback
+                    && now.saturating_sub(stream.changed) > 250
+                    && (kind == POSE || distance >= 8.)
+                {
+                    interval = interval.max(200);
+                }
+                let link = self.links.get_mut(&peer).unwrap();
+                if let Some(&(sent, seq)) = link.sent.get(&(id, kind)) {
+                    if seq == latest.seq || now.saturating_sub(sent) < interval {
+                        continue;
+                    }
+                }
+                let keyframe = link
+                    .keys
+                    .get(&(id, kind))
+                    .is_none_or(|at| now.saturating_sub(*at) >= 2000);
+                let baseline = link
+                    .acks
+                    .get(&(id, kind))
+                    .and_then(|&seq| stream.at(seq).map(|s| (seq, s)))
+                    .filter(|_| !keyframe);
+                let data =
+                    packed::delta(self.session, id, kind, latest.seq, &latest.state, baseline);
+                if data.len() > packed::MTU {
+                    self.stats.invalid += 1;
+                    continue;
+                }
+                let bytes = data.len() as f64;
+                if link.credits < bytes || self.credits < bytes {
+                    self.stats.budget_skips += 1;
+                    continue;
+                }
+                link.credits -= bytes;
+                self.credits -= bytes;
+                link.sent.insert((id, kind), (now, latest.seq));
+                if baseline.is_none() {
+                    link.keys.insert((id, kind), now);
+                }
+                output.push(Outgoing { peer, data });
             }
         }
-        // Rotate every record, not just actors, so a busy publisher cannot starve later keys.
-        let mut app_peers:Vec<_>=self.links.keys().copied().collect();
-        if !app_peers.is_empty() {let offset=self.round%app_peers.len();app_peers.rotate_left(offset);}
+    }
+    fn write_application(&mut self, output: &mut Vec<Outgoing>, now: u64) {
+        let mut app_peers: Vec<_> = self.links.keys().copied().collect();
+        if !app_peers.is_empty() {
+            let offset = self.round % app_peers.len();
+            app_peers.rotate_left(offset);
+        }
+        let retry = if self.loopback { 16 } else { 110 };
+        let first_wait = if self.loopback { 0 } else { 50 };
         for peer in app_peers {
-            let link=self.links.get_mut(&peer).unwrap();
+            let link = self.links.get_mut(&peer).unwrap();
             link.app_sent.retain(|(id, _), _| self.actors.contains_key(id));
-            link.app_acks.retain(|(id,_),_|self.actors.contains_key(id));
+            link.app_acks.retain(|(id, _), _| self.actors.contains_key(id));
             let records: Vec<_> = self.actors.iter().filter(|(id, _)| **id != link.actor && (self.host.is_none() || **id == self.local))
                 .flat_map(|(&id, a)| a.application.iter().map(move |(key, record)| (id, key, record))).collect();
             let count = records.len();
             for offset in 0..count {
                 let index = (link.app_round + offset) % count;
                 let (id, key, record) = records[index];
-                if link.app_acks.get(&(id,key.clone())).is_some_and(|&seq|seq==record.seq) {continue;}
+                if link.app_acks.get(&(id, key.clone())).is_some_and(|&seq| seq == record.seq) { continue; }
                 let previous = link.app_sent.get(&(id, key.clone()));
                 if previous.is_some_and(|&(at, seq)| now.saturating_sub(at) < if seq == record.seq {
-                    110 + (self.round as u64).wrapping_add(id).wrapping_mul(17) % 130
-                } else { 50 }) { continue; }
+                    if self.loopback { retry } else { retry + (self.round as u64).wrapping_add(id).wrapping_mul(17) % 130 }
+                } else { first_wait }) { continue; }
                 let mut data = packed::header(self.session, id, APPLICATION, record.seq);
                 data.push(key.len() as u8); data.extend(key.as_bytes()); data.extend(&record.value);
                 let bytes = data.len() as f64;
                 if bytes > link.credits || bytes > self.credits { link.app_round = index; break; }
                 link.credits -= bytes; self.credits -= bytes;
                 link.app_sent.insert((id, key.clone()), (now, record.seq));
-                output.push(Outgoing {peer, data});
+                output.push(Outgoing { peer, data });
             }
         }
-        let members = self.actors.keys().copied().collect();
-        let peers: Vec<_> = self.links.iter().map(|(&peer, link)| (peer, link.actor, link.rtt)).collect();
-        output.extend(self.blobs.service(self.session, self.local, self.host.is_none(), &members, &peers, now));
-        self.stats.rtt_ms = self.links.values().map(|l| l.rtt).max().unwrap_or(0);
-        output
     }
 }
 fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {

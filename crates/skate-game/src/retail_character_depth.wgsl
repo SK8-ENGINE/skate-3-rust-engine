@@ -1,3 +1,6 @@
+// Alpha-tested depth for characters. Nothing consumes depth in v1 (no occlusion
+// culling, no shadow maps), so this is only built if a view requests a prepass.
+// It is kept because hair and cloth cutouts need it the moment shadows return.
 #import bevy_pbr::prepass_io::VertexOutput
 #ifdef PREPASS_FRAGMENT
 #import bevy_pbr::prepass_io::FragmentOutput

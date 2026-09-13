@@ -7,6 +7,7 @@ mod avoidance;
 mod direction;
 mod drop_predictor;
 mod look_input;
+mod manual_cam;
 mod manager_subject;
 mod manager;
 mod manager_output;
@@ -50,6 +51,7 @@ pub use avoidance::{AvoidancePath, AvoidanceSettings, AvoidanceSubject, RigAvoid
 pub use direction::direction_to_angles;
 pub use drop_predictor::{DropCollisionProvider, DropPredictor, DropSettings};
 pub use look_input::{LookInput, LookSettings};
+pub use manual_cam::{ManualCam, ManualCamMatrix, ManualCamSettings};
 pub use manager_subject::ManagerSubject;
 pub use manager::{CameraMan, ManagerSettings};
 pub use compass::{Compass, CompassInputs, CompassPoseInputs, CompassSettings};
