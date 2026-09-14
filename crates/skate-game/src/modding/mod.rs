@@ -9,6 +9,11 @@ mod graphics;
 pub(crate) mod attachment;
 mod glb;
 mod menu;
+mod observation;
+mod session;
+mod volumes;
+mod capture;
+pub(crate) mod player_physics;
 
 pub(crate) use menu::ModMenu;
 
@@ -59,6 +64,11 @@ pub(crate) struct Mods {
     net_status: String,
     /// Contacts from the last DynamicsWorld::step (before drain).
     last_contacts: Vec<ContactEvent>,
+    session: session::Runtime,
+    skater_remote: BTreeMap<u64, observation::WireObs>,
+    pending_remote_teleport: Option<skate_mods::TeleportOptions>,
+    volumes: BTreeMap<(String, String), volumes::Volume>,
+    pub(crate) custom_menus: BTreeMap<(String,String), skate_mods::extensions::MenuOptions>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -69,6 +79,12 @@ struct NetWire {
     key: String,
     value: Value,
 }
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ModCameraSet;
+
+#[derive(Component)]
+pub(crate) struct ModGraphicsOpacity(pub f32);
 
 type GraphicsOwned = graphics::Owned;
 
@@ -88,6 +104,7 @@ struct CameraOverride {
     saved_near: Option<f32>,
     follow: Option<(String, String, Vec3)>,
     fixed: Option<(Vec3, Option<Vec3>)>,
+    watch: Option<u64>,
 }
 
 impl CameraOverride {
@@ -154,11 +171,17 @@ impl Plugin for ModdingPlugin {
             net_remote_wire: BTreeMap::new(),
             net_status: String::new(),
             last_contacts: Vec::new(),
+            session: session::Runtime::default(),
+            skater_remote: BTreeMap::new(),
+            pending_remote_teleport: None,
+            volumes: BTreeMap::new(),
+            custom_menus: BTreeMap::new(),
         })
         .init_resource::<ModMenu>();
         menu::install(app);
         audio::install(app);
         graphics_dynamic::install(app);
+        capture::install(app);
         app.add_systems(
             PreUpdate,
             maintenance.after(crate::map_transition::MapTransitionSet),
@@ -184,7 +207,12 @@ impl Plugin for ModdingPlugin {
                 bridge::sync_network.after(crate::multiplayer::send_pose).after(update),
                 sync_net.after(bridge::sync_network),
                 graphics::debug.after(bridge::sync_network).after(update),
-                present_camera.after(crate::camera::present).after(update).after(bridge::sync_network)
+                present_camera
+                    .in_set(ModCameraSet)
+                    .after(crate::camera::present)
+                    .after(update)
+                    .after(bridge::sync_network)
+                    .after(crate::multiplayer::RemoteRenderSet)
                     .before(crate::app::FrameSet::Verification),
             ),
         );
@@ -226,6 +254,7 @@ impl Mods {
             || self.attach.is_some()
             || !self.canvases.is_empty()
             || !self.skater_proxies.is_empty()
+            || !self.volumes.is_empty()
     }
 }
 
@@ -289,9 +318,15 @@ fn body_snapshot_for(mods: &Mods, owner: &str) -> serde_json::Value {
 }
 
 fn network_snapshot(world: &World, mods: &Mods) -> Value {
-    let (active, id, host) = world
-        .get_resource::<crate::multiplayer::Multiplayer>()
-        .map_or((false, 0, true), |n| n.mod_identity());
+    let net = world.get_resource::<crate::multiplayer::Multiplayer>();
+    let (active, id, host) = net.map_or((false, 0, true), |n| n.mod_identity());
+    let host_id = net.map_or(id, |n| n.host_peer());
+    let mut players: Vec<String> = net
+        .map(|n| n.player_ids().into_iter().map(|p| p.to_string()).collect())
+        .unwrap_or_default();
+    if players.is_empty() {
+        players.push(id.to_string());
+    }
     let mut states = serde_json::Map::new();
     let insert = |states: &mut serde_json::Map<String, Value>,
                   mod_id: &str,
@@ -326,6 +361,8 @@ fn network_snapshot(world: &World, mods: &Mods) -> Value {
         "active": active,
         "local_id": local,
         "is_host": host,
+        "host_id": host_id.to_string(),
+        "players": players,
         "states": states,
         "status": mods.net_status,
     })
@@ -398,8 +435,6 @@ fn camera_position(world: &mut World) -> Option<[f32; 3]> {
 }
 
 fn snapshot_ro(world: &World, mods: &Mods, camera: Option<[f32; 3]>) -> serde_json::Value {
-    let s = world.resource::<crate::physics::SkaterRuntime>();
-    let p = &s.player_input.physical;
     let map = world.resource::<crate::map_transition::CurrentMap>();
     let physics = world.resource::<crate::physics::GamePhysics>();
     let keys: BTreeMap<_, _> = world
@@ -413,20 +448,48 @@ fn snapshot_ro(world: &World, mods: &Mods, camera: Option<[f32; 3]>) -> serde_js
         .actions()
         .values();
     let pad = world.resource::<crate::input::ControllerInput>().raw_input();
-    let root = s.animated_skeleton.roots.animation_to_world;
-    let override_root=attachment::local_root(mods);
-    let player_position=override_root.map_or([root[3][0],root[3][1],root[3][2]],|t|t.translation.to_array());
-    let heading=override_root.map_or(root[2][0].atan2(root[2][2]),|t| {let f=t.rotation*Vec3::Z; f.x.atan2(f.z)});
+    let net = network_snapshot(world, mods);
+    let local_id = net
+        .get("local_id")
+        .and_then(Value::as_str)
+        .unwrap_or("0")
+        .to_owned();
+    let (mut player, skaters) = observation::snapshot(world, mods, &local_id);
+    if let Some(root) = attachment::local_root(mods) {
+        if let Some(obj) = player.as_object_mut() {
+            let heading = {
+                let f = root.rotation * Vec3::Z;
+                f.x.atan2(f.z)
+            };
+            obj.insert("position".into(), json!(root.translation.to_array()));
+            obj.insert("heading".into(), json!(heading));
+            obj.insert("rotation".into(), json!(root.rotation.to_array()));
+        }
+    }
+    let host = net.get("is_host").and_then(Value::as_bool).unwrap_or(true);
+    let host_id = net
+        .get("host_id")
+        .and_then(Value::as_str)
+        .unwrap_or(&local_id)
+        .to_owned();
+    let players: Vec<String> = net
+        .get("players")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_else(|| vec![local_id.clone()]);
     json!({
-        "player": {
-            "position": player_position,
-            "velocity": &p.skateboard.vector_80.map(f32::from_bits)[..3],
-            "heading": heading,
-            "on_board": p.state.category_12 != 500,
-            "state": p.state.state_16,
-            "category": p.state.category_12,
-            "bailing": physics.board_wiping_out,
-        },
+        "player": player,
+        "skaters": skaters,
+        "player_physics": player_physics::snapshot(world),
+        "volumes": mods.manager.packages.keys().map(|owner| {
+            (owner.clone(), volumes::snapshot(mods, owner, &local_id, &observation::local(world), &mods.skater_remote))
+        }).collect::<serde_json::Map<String, Value>>(),
+        "session": session::lua(mods, net.get("active").and_then(Value::as_bool).unwrap_or(false), &local_id, host, &host_id, &players),
         "attach": mods.attach.as_ref().map(|a| json!({"body": a.body, "owner": a.owner})),
         "detach_error": mods.detach_error,
         "detach_pending": mods.detach_pending.is_some(),
@@ -444,7 +507,7 @@ fn snapshot_ro(world: &World, mods: &Mods, camera: Option<[f32; 3]>) -> serde_js
         "replay": world.resource::<crate::replay::Replay>().active,
         "camera": camera.map(|position| json!({"position": position})),
         "physics": {"bodies": {}, "contacts": []},
-        "network": network_snapshot(world, mods),
+        "network": net,
     })
 }
 
@@ -606,6 +669,9 @@ fn update(world: &mut World) {
             snap["paused"].as_bool().unwrap_or(true) || snap["replay"].as_bool().unwrap_or(false);
         let dt = world.resource::<Time<Real>>().delta_secs_f64().min(0.25);
         mods.manager.snapshot = snap;
+        // UI state must refresh during pause (including network role changes).
+        // This callback does not advance Lua simulation time or timers.
+        mods.manager.dispatch("on_ui_update", json!({"dt": dt, "paused": paused}));
         if !paused {
             mods.manager.dispatch("on_update", json!({"dt": dt}));
         }
@@ -645,6 +711,13 @@ fn clear_runtime(world: &mut World, mods: &mut Mods) {
     mods.net_status.clear();
     mods.last_contacts.clear();
     mods.debug_owners.clear();
+    player_physics::clear(world,None);
+    mods.custom_menus.clear();
+    mods.session.reset();
+    mods.skater_remote.clear();
+    mods.pending_remote_teleport = None;
+    volumes::clear(world, mods);
+    capture::clear(world);
     world.resource_mut::<crate::physics::GamePhysics>().set_external_queries(None);
     mods.world = DynamicsWorld::default();
     mods.ground_ready = false;
@@ -670,6 +743,10 @@ fn apply(world: &mut World, mods: &mut Mods) {
     for id in &retired {
         audio::stop_owner(world, id, true);
         graphics_dynamic::clear_owner(world, id);
+        volumes::clear_owner(world, mods, id);
+        capture::clear_owner(world, id);
+        player_physics::clear(world,Some(id));
+        mods.custom_menus.retain(|(owner,_),_|owner!=id);
         canvas::clear_owner(world, &mut mods.canvases, Some(id));
         detach_if_owner(world, mods, id);
         if mods.camera.owner.as_ref() == Some(id) {
@@ -735,12 +812,16 @@ fn apply(world: &mut World, mods: &mut Mods) {
             mods.manager.fail(&id, e);
             audio::stop_owner(world, &id, true);
             graphics_dynamic::clear_owner(world, &id);
+            volumes::clear_owner(world, mods, &id);
+            capture::clear_owner(world, &id);
+            player_physics::clear(world,Some(&id));
+            mods.custom_menus.retain(|(owner,_),_|owner!=&id);
             continue;
         }
         commands.sort_by_key(|command| match command {
             Command::PlayerDetach { .. } => 0,
             Command::PhysicsRemove { .. } | Command::PhysicsRemoveJoint { .. } => 1,
-            Command::PhysicsSpawn { .. } => 2,
+            Command::PhysicsSpawn { .. } | Command::CameraCapture { .. } => 2,
             _ => 3,
         });
         let result = (|| {
@@ -754,6 +835,10 @@ fn apply(world: &mut World, mods: &mut Mods) {
             mods.manager.fail(&id, e);
             audio::stop_owner(world, &id, true);
             graphics_dynamic::clear_owner(world, &id);
+            volumes::clear_owner(world, mods, &id);
+            capture::clear_owner(world, &id);
+            player_physics::clear(world,Some(&id));
+            mods.custom_menus.retain(|(owner,_),_|owner!=&id);
         }
     }
     let mut row = 0;
@@ -783,6 +868,7 @@ fn apply_one(
             mods.camera.claim(id)?;
             mods.camera.follow = None;
             mods.camera.fixed = None;
+            mods.camera.watch = None;
             if let Some(rig) = mods.camera.rig.as_mut().filter(|r| r.body == body) {
                 rig.configure(options);
             } else {
@@ -1002,9 +1088,9 @@ fn apply_one(
                 mods.world.remove_joint(j);
             }
         }
-        Command::GraphicsMesh { key,path,body,position,rotation,scale,color,visible } => {
+        Command::GraphicsMesh { key,path,body,position,rotation,scale,color,visible,opacity } => {
             graphics::spawn(world,mods,id,id,key,
-                skate_mods::scene::GraphicsDefinition { path,body,color },
+                skate_mods::scene::GraphicsDefinition { path,body,color,opacity },
                 skate_mods::scene::TransformState { position:position.unwrap_or([0.;3]),rotation:rotation.unwrap_or([0.,0.,0.,1.]),scale },visible,None)?;
         }
         Command::GraphicsTransform { key, options } => {
@@ -1034,6 +1120,7 @@ fn apply_one(
                 mods.camera.claim(id)?;
                 mods.camera.fixed = None;
                 mods.camera.rig = None;
+                mods.camera.watch = None;
                 mods.camera.follow = Some((id.to_owned(), body, Vec3::from_array(offset)));
             } else if mods.camera.owner.as_deref() == Some(id) {
                 mods.camera.clear();
@@ -1043,10 +1130,33 @@ fn apply_one(
             mods.camera.claim(id)?;
             mods.camera.rig = None;
             mods.camera.follow = None;
+            mods.camera.watch = None;
             mods.camera.fixed = Some((
                 Vec3::from_array(position),
                 look_at.map(Vec3::from_array),
             ));
+        }
+        Command::CameraWatch { peer } => {
+            let empty = peer.as_deref().is_none_or(|p| p.is_empty());
+            if empty {
+                if mods.camera.owner.as_deref() == Some(id) {
+                    mods.camera.watch = None;
+                    if mods.camera.follow.is_none()
+                        && mods.camera.fixed.is_none()
+                        && mods.camera.rig.is_none()
+                    {
+                        mods.camera.clear();
+                    }
+                }
+            } else {
+                let peer = peer.unwrap();
+                let pid = peer.parse::<u64>().map_err(|_| "invalid peer")?;
+                mods.camera.claim(id)?;
+                mods.camera.follow = None;
+                mods.camera.fixed = None;
+                mods.camera.rig = None;
+                mods.camera.watch = Some(pid);
+            }
         }
         Command::NetworkState { key, value } => {
             let slot = (id.to_owned(), key);
@@ -1059,6 +1169,29 @@ fn apply_one(
                 mods.net_states.insert(slot, value);
             }
         }
+        Command::UiMenu {key,options} => {
+            let slot=(id.to_owned(),key);
+            if !mods.custom_menus.contains_key(&slot) && mods.custom_menus.keys().filter(|(o,_)|o==id).count()>=8 {return Err("8 menus per mod maximum".into());}
+            if options.section.is_some() {
+                let others: Vec<_> = mods.custom_menus.iter().filter(|(k,v)| **k != slot && v.section.is_some()).collect();
+                let mut sections: BTreeSet<_> = others.iter().filter_map(|(_,v)| v.section.as_deref()).collect();
+                sections.insert(options.section.as_deref().unwrap());
+                if others.len() >= 64 || sections.len() > 8 { return Err("64 section menus and 8 custom sections maximum".into()); }
+            }
+            mods.custom_menus.insert(slot,options);
+        }
+        Command::UiRemoveMenu {key} => {mods.custom_menus.remove(&(id.to_owned(),key));}
+        Command::PlayerJoint {joint,options} => player_physics::set(world,id,joint,Some(options))?,
+        Command::PlayerResetJoint {joint} => player_physics::set(world,id,joint,None)?,
+        Command::PlayerResetJoints {} => player_physics::clear(world,Some(id)),
+        Command::PlayerTeleport { options } => session::apply_local(world, &options)?,
+        Command::SessionClaim {} => session::claim(world, mods)?,
+        Command::SessionTransfer { peer } => session::transfer(world, mods, &peer)?,
+        Command::SessionTeleport { peer, options } => session::teleport(world, mods, &peer, options)?,
+        Command::VolumeBox { key, options } => volumes::set(world, mods, id, key, options)?,
+        Command::VolumeRemove { key } => volumes::remove(world, mods, id, &key),
+        Command::CameraCapture { key, options } => { capture::set(world, id, key, options)?; }
+        Command::CameraClearCapture { key } => capture::remove(world, id, &key),
     }
     Ok(())
 }
@@ -1136,12 +1269,15 @@ fn sync_net(world: &mut World) {
             .collect();
         mods.net_states
             .retain(|(owner, _), _| packages.contains_key(owner));
+        mods.session.connect(world.get_resource::<crate::multiplayer::Multiplayer>().and_then(|n| n.session_identity()));
+        let obs_bytes = observation::encode_local(world);
 
         let Some(mut net) = world.get_resource_mut::<crate::multiplayer::Multiplayer>() else {
             mods.net_published.clear();
             mods.net_remote.clear();
             mods.net_remote_wire.clear();
             mods.net_status.clear();
+            mods.skater_remote.clear();
             return;
         };
         if !net.active() {
@@ -1149,9 +1285,13 @@ fn sync_net(world: &mut World) {
             mods.net_remote.clear();
             mods.net_remote_wire.clear();
             mods.net_status.clear();
+            mods.skater_remote.clear();
             return;
         }
 
+        let (_, local, is_host) = net.mod_identity();
+        let host_peer = net.host_peer().to_string();
+        let local_id = local.to_string();
         let mut published = BTreeSet::new();
         let mut failures = 0u32;
         for ((owner, key), value) in &mods.net_states {
@@ -1176,13 +1316,31 @@ fn sync_net(world: &mut World) {
             }
             published.insert(wire);
         }
+        if let Some(bytes) = obs_bytes {
+            if net.publish_application(observation::OBS_KEY, bytes) {
+                published.insert(observation::OBS_KEY.to_owned());
+            } else {
+                failures += 1;
+            }
+        }
+        for (key, bytes) in session::outgoing(&mods, &local_id, is_host, &host_peer) {
+            if net.publish_application(&key, bytes) {
+                published.insert(key);
+            } else {
+                failures += 1;
+            }
+        }
         for key in mods.net_published.difference(&published).cloned().collect::<Vec<_>>() {
             net.publish_application(&key, vec![]);
         }
         mods.net_published = published;
 
         let records = net.application_records();
+        let players = net.player_ids();
+        let host = net.host_peer();
         drop(net);
+        session::ingest(&mut mods, &records, local, host, &players);
+        session::apply_pending_remote(world, &mut mods);
 
         let mut live_wire = BTreeSet::new();
         let mut mismatches = BTreeSet::new();
@@ -1299,6 +1457,28 @@ fn present_camera(world: &mut World) {
             }
         }
         if suppress { return; }
+        if let Some(peer) = mods.camera.watch {
+            let local_id = world
+                .get_resource::<crate::multiplayer::Multiplayer>()
+                .map(|n| n.mod_identity().1)
+                .unwrap_or(0);
+            if peer != local_id {
+                if let Some((position, rotation)) = watch_pose(world, peer, local_id) {
+                    if let Some(mut t) = world.get_mut::<Transform>(camera) {
+                        *t = spectator_view(position, rotation);
+                    }
+                    return;
+                }
+            } else {
+                mods.camera.watch = None;
+                if mods.camera.follow.is_none()
+                    && mods.camera.fixed.is_none()
+                    && mods.camera.rig.is_none()
+                {
+                    mods.camera.clear();
+                }
+            }
+        }
         if let Some(mut rig) = mods.camera.rig.take() {
             let owner = mods.camera.owner.clone().unwrap_or_default();
             // A rig may be created during on_update, between fixed steps.
@@ -1347,4 +1527,29 @@ fn present_camera(world: &mut World) {
             }
         }
     });
+}
+
+fn spectator_view(position: Vec3, rotation: Quat) -> Transform {
+    let eye = position + rotation * Vec3::new(0.0, 2.4, -7.2);
+    Transform::from_translation(eye).looking_at(position + Vec3::Y * 1.15, Vec3::Y)
+}
+
+fn watch_pose(world: &mut World, peer: u64, local_id: u64) -> Option<(Vec3, Quat)> {
+    if peer == local_id {
+        let obs = observation::local(world);
+        return Some((Vec3::from_array(obs.p), Quat::from_array(obs.r).normalize()));
+    }
+    let from_actor = {
+        let mut actors = world.query::<(&crate::multiplayer::NetworkActor, &Transform)>();
+        actors
+            .iter(world)
+            .find(|(actor, _)| actor.0 == peer)
+            .map(|(_, transform)| (transform.translation, transform.rotation.normalize()))
+    };
+    if from_actor.is_some() {
+        return from_actor;
+    }
+    world
+        .get_resource::<crate::multiplayer::Multiplayer>()
+        .and_then(|net| net.actor_pose(peer))
 }

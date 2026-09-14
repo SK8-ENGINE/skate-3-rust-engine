@@ -21,6 +21,8 @@ sdk._local_ang_accel_impulse = nil
 function sdk.log(text) submit{kind="log",text=text} end
 
 sdk.ui = { version = 1 }
+function sdk.ui.menu(key, options) submit{kind="ui_menu",key=key,options=options} end
+function sdk.ui.remove_menu(key) submit{kind="ui_remove_menu",key=key} end
 function sdk.ui.text(key, text) submit{kind="overlay",key=key,text=text} end
 -- Persistent screen-space rectangles and text; update an existing key in place.
 function sdk.ui.canvas(key, options)
@@ -170,6 +172,7 @@ function sdk.graphics.mesh(key, opts)
         rotation=opts.rotation,
         scale=opts.scale or {1,1,1},
         color=opts.color or {0.85,0.85,0.9},
+        opacity=opts.opacity or 1,
         visible=opts.visible ~= false,
     }
 end
@@ -184,7 +187,7 @@ function sdk.graphics.mesh_buffer(key, opts)
         blend=opts.blend ~= false, unlit=opts.unlit ~= false,
         visible=opts.visible ~= false,
         depth_bias=opts.depth_bias or 0,
-        texture=opts.texture,
+        texture=opts.texture, capture=opts.capture,
         tint=opts.tint or {1,1,1},
     }}
 end
@@ -283,7 +286,20 @@ end
 function sdk.audio.stop_all() submit{kind="audio_stop_all"} end
 
 sdk.player = {}
+function sdk.player.physics() return as_table(sdk.snapshot.player_physics) or {} end
+function sdk.player.contacts() return sdk.player.physics().contacts or {} end
+function sdk.player.joints() return sdk.player.physics().joints or {} end
+function sdk.player.parts() return sdk.player.physics().parts or {} end
+function sdk.player.set_joint(joint, options) submit{kind="player_joint",joint=joint,options=options} end
+function sdk.player.reset_joint(joint) submit{kind="player_reset_joint",joint=joint} end
+function sdk.player.reset_joints() submit{kind="player_reset_joints"} end
+function sdk.player.teleport(options) submit{kind="player_teleport",options=options} end
 function sdk.player.read() return as_table(sdk.snapshot.player) or {} end
+function sdk.player.skaters() return as_table(sdk.snapshot.skaters) or {} end
+function sdk.player.skater(id)
+    local all = sdk.player.skaters()
+    return all[tostring(id)]
+end
 function sdk.player.attach(body, offset) submit{kind="player_attach",body=body,offset=offset or {0,0,0}} end
 function sdk.player.detach(options) submit{kind="player_detach",options=options or {}} end
 function sdk.player.detach_error() return sdk.snapshot.detach_error end
@@ -293,7 +309,7 @@ function sdk.player.attached()
     return a and a.body or nil
 end
 
-sdk.camera = { version = 1 }
+sdk.camera = { version = 2 }
 -- Persistent, render-rate camera. Does not write the body's pose or velocity.
 function sdk.camera.rig(body, options)
     submit{kind="camera_rig",body=body,options=options or {}}
@@ -302,6 +318,24 @@ function sdk.camera.clear() sdk.camera.clear_follow() end
 function sdk.camera.follow(body, offset) submit{kind="camera_follow",body=body,offset=offset or {0,2.5,-6}} end
 function sdk.camera.clear_follow() submit{kind="camera_follow",body=nil,offset={0,2.5,-6}} end
 function sdk.camera.set(position, look_at) submit{kind="camera_set",position=position,look_at=look_at} end
+-- Lock the gameplay camera onto a multiplayer skater. nil restores the native camera.
+function sdk.camera.watch(peer) submit{kind="camera_watch",peer=peer ~= nil and tostring(peer) or nil} end
+function sdk.camera.capture(key, options) submit{kind="camera_capture",key=key,options=options} end
+function sdk.camera.clear_capture(key) submit{kind="camera_clear_capture",key=key} end
+
+sdk.session = {}
+function sdk.session.info() return as_table(sdk.snapshot.session) or {} end
+function sdk.session.claim() submit{kind="session_claim"} end
+function sdk.session.transfer(peer) submit{kind="session_transfer",peer=tostring(peer)} end
+function sdk.session.teleport(peer, options) submit{kind="session_teleport",peer=tostring(peer),options=options} end
+
+sdk.volumes = {}
+function sdk.volumes.box(key, options) submit{kind="volume_box",key=key,options=options} end
+function sdk.volumes.remove(key) submit{kind="volume_remove",key=key} end
+function sdk.volumes.read(key)
+    local owners = as_table(sdk.snapshot.volumes) or {}
+    return (owners[sdk.mod_id] or {})[key]
+end
 
 sdk.input = {}
 function sdk.input.down(key)
@@ -323,11 +357,17 @@ function sdk.assets.objects(path)
 end
 
 sdk.net = {}
-function sdk.net.info() return as_table(sdk.snapshot.network) or {active=false,local_id="0",is_host=true,states={},status=""} end
+function sdk.net.info()
+  return as_table(sdk.snapshot.network) or {active=false,local_id="0",is_host=true,host_id="0",players={"0"},states={},status=""}
+end
 function sdk.net.publish(key,value) submit{kind="network_state",key=key,value=value} end
 function sdk.net.read(peer,key)
   local n = as_table(sdk.snapshot.network) or {}
   return ((((n.states or {})[sdk.mod_id] or {})[tostring(peer)]) or {})[key]
+end
+function sdk.net.players()
+  local n = sdk.net.info()
+  return n.players or {n.local_id or "0"}
 end
 
 sdk.time = { elapsed = 0 }

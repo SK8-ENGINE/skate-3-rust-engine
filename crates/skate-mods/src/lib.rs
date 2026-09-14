@@ -9,13 +9,16 @@ pub mod model;
 mod query;
 mod schema;
 mod vm;
+pub mod extensions;
 
 pub use archive::{read_bounded, validate_package, Cache};
 pub use assets::convex_points_file;
 pub use model::model_shape_file;
 pub use query::{with_host, DynamicsHost, RaycastFilter, RaycastOptions};
 pub use schema::{Manifest, Setting, SettingValue};
-pub use vm::Command;
+pub use vm::{
+    CaptureOptions, Command, TeleportOptions, VolumeOptions,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -425,3 +428,10 @@ impl Manager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path="tests/engine_api.rs"]
+mod engine_api_tests;
+#[cfg(test)]
+#[path="tests/game_of_skate.rs"]
+mod game_of_skate_tests;

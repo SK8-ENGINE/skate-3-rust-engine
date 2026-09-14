@@ -36,6 +36,16 @@ impl Runtime {
     pub fn active_family(&self) -> Option<Family> {
         self.active
     }
+    pub fn active_name(&self) -> Option<&'static str> {
+        Some(match self.active? {
+            Family::FiftyFifty => "50-50",
+            Family::Boardslide => "boardslide",
+            Family::Tipslide => "tipslide",
+            Family::FiveO => "5-0",
+            Family::Backslash => "backslash",
+            Family::Darkslide => "darkslide",
+        })
+    }
     pub(super) fn take_orientation_noise(&mut self) -> [u32; 3] {
         self.orientation_random.take_three()
     }

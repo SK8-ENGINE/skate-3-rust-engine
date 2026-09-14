@@ -105,9 +105,8 @@ pub(super) fn execute(
                             suppress_up: physical.suppress_up,
                             force_brake_bypass: physical.force_brake_bypass,
                         };
-                    if let Some(output) = state.update(&mut host.animation, inputs)? {
-                        host.gesture_publication = Some(output);
-                    }
+                    // An inactive CharacterGesture must retire the previous publication.
+                    host.gesture_publication = state.update(&mut host.animation, inputs)?;
                 }
             }
             (MotionOperation::EndGesture, _) => {
@@ -290,6 +289,22 @@ pub(super) fn execute(
                 // matching conditions; the authored node itself must still
                 // advance that lifecycle instead of aborting graph execution.
                 match operation {
+                    crate::graph_host::motion_stock_gameplay::Operation::AirDismounting => {
+                        let Instance::AirDismounting(state) = instance else {
+                            return Err("AirDismounting operation/instance mismatch".into());
+                        };
+                        if phase == 0 {
+                            state.begin(host.animation.current_length()?, host.animation.current_time()?)?;
+                        } else if phase == 1 {
+                            let requested = state.request(host.animation.tree_attributes());
+                            if let Some(frames) = requested {
+                                // TU3 ISkaterAnim v84/82B971C0: write count and OR request bit20.
+                                *host.animation.skater_animation_flags.as_mut()
+                                    .ok_or("AirDismounting requires SkaterAnim flags")? |= 0x0010_0000;
+                                host.animation.air_dismount_revert_frames = Some(frames);
+                            }
+                        }
+                    }
                     crate::graph_host::motion_stock_gameplay::Operation::FingerFlipOut { grab_intent } => {
                         let Instance::FingerFlipOut(state) = instance else {
                             return Err("FingerFlipOut operation/instance mismatch".into());

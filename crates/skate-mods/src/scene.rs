@@ -91,11 +91,15 @@ impl NodeState {
 #[serde(deny_unknown_fields)]
 pub struct GraphicsDefinition {
     pub path:String, pub body:Option<String>, pub color:[f32;3],
+    #[serde(default = "opaque")]
+    pub opacity:f32,
 }
+fn opaque() -> f32 { 1. }
 impl GraphicsDefinition {
     pub fn validate(&self) -> bool {
         valid_asset(&self.path) && self.body.as_deref().is_none_or(valid_key)
             && self.color.iter().all(|v| v.is_finite() && (0. ..=1.).contains(v))
+            && self.opacity.is_finite() && (0. ..=1.).contains(&self.opacity)
     }
 }
 #[derive(Clone, Debug, Deserialize)]

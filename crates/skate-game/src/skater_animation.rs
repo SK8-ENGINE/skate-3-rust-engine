@@ -245,6 +245,9 @@ impl SkaterAnimation {
             .animation
             .skater_animation_flags
             .ok_or("MotionGraph lost the SkaterAnim flag owner")?;
+        if let Some(frames) = self.motion.animation.air_dismount_revert_frames.take() {
+            self.state.publication.air_dismount_revert_frames = frames;
+        }
         self.state.publication.relative_stance = self.motion.animation.relative_stance as i32;
         if std::mem::take(&mut self.motion.animation.reset_action_intents) {
             self.action.action_intents.clear();

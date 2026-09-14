@@ -49,13 +49,42 @@
 ---@field mass number
 ---@field speed number |linvel|
 ---@class PlayerSnapshot
+---@field id? string
+---@field local? boolean
+---@field name? string display name from the multiplayer menu
 ---@field position Vec3
 ---@field velocity Vec3
+---@field angvel Vec3
+---@field forward Vec3
 ---@field heading number
+---@field rotation Quat
+---@field speed number
 ---@field on_board boolean
 ---@field state integer
 ---@field category integer
+---@field filtered integer
+---@field mode string ground|air|grind|offboard|offboard_air|bail|teleport
+---@field grind string|nil
 ---@field bailing boolean
+---@field trick string HUD trick name; empty when idle
+---@field trick_seq integer increments each newly announced trick; NOT a landing
+---@field landing_seq integer monotonic confirmed, banked on-board sequence counter
+---@field landed_trick string last confirmed landing label; persists until another landing
+---@field bail_seq integer monotonic wipeout-entry counter
+---@field new_trick boolean true for the announce frame
+---@field modified_trick boolean
+---@field close_tricks boolean
+---@field sequence boolean combo/line still live
+---@field score number
+---@field line number
+---@field multiplier number
+---@field line_time number
+---@field clean boolean
+---@field sketchy boolean
+---@field switch boolean
+---@field fakie boolean
+---@field nollie boolean
+---@field intents table<string, number>
 ---@class ContactEvent
 ---@field a string|nil body key or `"ground"` when the other side is owned
 ---@field b string|nil body key or `"ground"`
@@ -72,10 +101,13 @@
 ---@field active boolean
 ---@field local_id string
 ---@field is_host boolean
+---@field host_id string
+---@field players string[]
 ---@field states table<string, table<string, table<string, any>>> mod_id → peer_id → key → value
 ---@field status string
 ---@class SDKSnapshot
 ---@field player PlayerSnapshot
+---@field skaters table<string, PlayerSnapshot>
 ---@field map {name:string, generation:integer}
 ---@field tick integer
 ---@field keys table<string,boolean>
@@ -90,6 +122,7 @@
 ---@class ModCallbacks
 ---@field on_load? fun()
 ---@field on_unload? fun()
+---@field on_ui_update? fun(event:{dt:number,paused:boolean}) runs while paused; does not advance simulation timers (menus >= 2)
 ---@field on_update? fun(event:{dt:number})
 ---@field on_fixed_update? fun(event:{dt:number})
 ---@field on_settings? fun(event:{key:string,value:any})
@@ -190,7 +223,7 @@ function sdk.physics.contacts() end
 ---@return TouchingPair[] pairs in contact after the previous Rapier step (`ground` included)
 function sdk.physics.touching() end
 ---@param key string
----@param opts {path?:string, body?:string, position?:Vec3, rotation?:Quat, scale?:Vec3, color?:Vec3, visible?:boolean}
+---@param opts {path?:string, body?:string, position?:Vec3, rotation?:Quat, scale?:Vec3, color?:Vec3, visible?:boolean, opacity?:number}
 function sdk.graphics.mesh(key, opts) end
 ---@param key string
 function sdk.graphics.remove(key) end
@@ -207,6 +240,7 @@ function sdk.graphics.set_visible(key, visible) end
 ---@field visible? boolean default true
 ---@field depth_bias? number decal bias, default 0
 ---@field texture? string mod-relative PNG path, e.g. textures/skid_tread.png
+---@field capture? string named camera capture; mutually exclusive with texture
 ---@field tint? Vec3 material tint, default white
 ---@class MeshBufferWrite
 ---@field positions Vec3[]
@@ -239,6 +273,11 @@ function sdk.graphics.mesh_buffer_append(key, data) end
 function sdk.graphics.light(key, opts) end
 ---@return PlayerSnapshot
 function sdk.player.read() end
+---@return table<string, PlayerSnapshot>
+function sdk.player.skaters() end
+---@param id string|number
+---@return PlayerSnapshot|nil
+function sdk.player.skater(id) end
 ---@param body string
 ---@param offset? Vec3
 function sdk.player.attach(body, offset) end
@@ -252,6 +291,8 @@ function sdk.camera.clear_follow() end
 ---@param position Vec3
 ---@param look_at? Vec3
 function sdk.camera.set(position, look_at) end
+---@param peer string|number|nil peer id to spectate, or nil to restore the native camera
+function sdk.camera.watch(peer) end
 ---@param key string
 ---@return boolean
 function sdk.input.down(key) end
@@ -265,6 +306,8 @@ function sdk.input.pad() end
 function sdk.ui.text(key, text) end
 ---@return NetworkInfo
 function sdk.net.info() end
+---@return string[]
+function sdk.net.players() end
 ---@param key string
 ---@param value any JSON-compatible; at most 512 encoded bytes; nil clears
 function sdk.net.publish(key, value) end
@@ -272,3 +315,92 @@ function sdk.net.publish(key, value) end
 ---@param key string
 ---@return any|nil
 function sdk.net.read(peer, key) end
+
+
+---@class TeleportOptions
+---@field position Vec3 world position, each coordinate within +/-100000
+---@field heading? number radians, default 0
+---@field velocity? Vec3 world linear velocity, each component within +/-200
+---@param options TeleportOptions moves only the local player through native travel
+function sdk.player.teleport(options) end
+
+sdk.session = {}
+---@return {active:boolean, local_id:string, is_host:boolean, authority:string, players:string[]}
+function sdk.session.info() end
+---The transport host may reclaim authority; the current authority may renew it.
+function sdk.session.claim() end
+---@param peer string|number connected peer; transfer is ratified asynchronously by host
+function sdk.session.transfer(peer) end
+---@param peer string|number connected peer; requires session authority
+---@param options TeleportOptions
+function sdk.session.teleport(peer, options) end
+
+sdk.volumes = {}
+---@param key string mod-owned id; at most 32 boxes per mod
+---@param options {position:Vec3, size:Vec3, rotation?:Quat, visible?:boolean, color?:Vec3, opacity?:number}
+function sdk.volumes.box(key, options) end
+---@param key string
+function sdk.volumes.remove(key) end
+---@param key string
+---@return {position:Vec3,size:Vec3,rotation:Quat,inside:string[]}|nil point overlaps, not physical collisions
+function sdk.volumes.read(key) end
+
+---@param key string mod-owned id; at most 2 per mod, 4 total
+---@param options {position:Vec3,look_at:Vec3,fov?:number,width?:integer,height?:integer} fov radians [0.2,2.5]; sizes [64,512], multiples of 16
+function sdk.camera.capture(key, options) end
+---@param key string releases the named target; bound meshes lose their image
+function sdk.camera.clear_capture(key) end
+
+
+---@class MenuItem
+---@field id string unique within this menu
+---@field label string
+---@field description? string
+---@field enabled? boolean default true
+---@field children? MenuItem[] submenu, up to 4 levels
+---@param key string mod-owned id; up to 8 menus per mod
+---@param options {title:string,section?:string,items:MenuItem[]} up to 64 total items
+---Actions dispatch on_event {name="menu_action",menu=key,item=item.id} to the owner, including while paused.
+function sdk.ui.menu(key, options) end
+---@param key string
+function sdk.ui.remove_menu(key) end
+
+---@class NativeContact
+---@field a {kind:string,index?:integer} board, skater, external, or world
+---@field b {kind:string,index?:integer}
+---@field point Vec3 world contact point
+---@field normal Vec3 native A-side normal
+---@field force Vec3 native solved normal plus friction force
+---@field normal_force Vec3
+---@field friction_force Vec3
+---@field impulse Vec3 force times simulation dt
+---@field static_friction number combined contact coefficient
+---@field dynamic_friction number combined contact coefficient
+---@field material_tags integer[] A and B material tags
+---@class NativeJoint
+---@field index integer zero-based native joint ID (use this, not Lua array index)
+---@field name string native authored joint name
+---@field parent integer native part index
+---@field child integer native part index
+---@field swing_limit number radians
+---@field twist_limit number radians
+---@field free_swing boolean
+---@field free_twist boolean
+---@field drive_enabled boolean false when a mod suppresses the child's animation drives
+---@field override_owner? string
+---@return {tick:integer,dt:number,contacts:NativeContact[],joints:NativeJoint[],parts:table[],ragdoll:boolean,partial_ragdoll:boolean} local player only
+function sdk.player.physics() end
+---@return NativeContact[] most recent solved frame, max 128 reports
+function sdk.player.contacts() end
+---@return NativeJoint[]
+function sdk.player.joints() end
+---@return {index:integer,position:Vec3,velocity:Vec3,angvel:Vec3,inverse_mass:number}[]
+function sdk.player.parts() end
+---@param joint integer zero-based index from sdk.player.joints()
+---@param options {swing_limit?:number,twist_limit?:number,free_swing?:boolean,free_twist?:boolean,drive_enabled?:boolean} angles [0.01,pi], radians
+---Replaces this mod's override; omitted properties follow native state. Another mod cannot take an owned joint.
+function sdk.player.set_joint(joint, options) end
+---@param joint integer restores this mod's joint override
+function sdk.player.reset_joint(joint) end
+---Restores all joint overrides owned by this mod.
+function sdk.player.reset_joints() end

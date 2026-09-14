@@ -132,6 +132,7 @@ pub(super) fn spawn(
             commands
                 .spawn((
                     RemoteCharacter,
+                    NetworkActor(id),
                     Transform::default(),
                     Visibility::Inherited,
                     Name::new("Remote skater"),

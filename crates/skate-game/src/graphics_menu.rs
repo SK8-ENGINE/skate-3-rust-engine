@@ -85,7 +85,14 @@ pub(crate) struct Menu {
     selected_map: usize,
     multiplayer: bool,
     browser: bool,
+    network_page: u8,
+    browser_count: usize,
     daylight: bool,
+    section: usize,
+    custom_sections: Vec<(String, Vec<(String,String,String)>)>,
+    map_detail: bool,
+    destinations: Vec<crate::teleport_menu::Destination>,
+    pending_travel: Option<(Option<PathBuf>, [[f32; 4]; 4])>,
 }
 impl Menu {
     pub(crate) fn ambient_brightness(&self, automatic: f32) -> f32 {
@@ -108,12 +115,64 @@ impl Menu {
 pub(crate) fn gameplay_active(menu: Option<Res<Menu>>) -> bool {
     menu.is_none_or(|m| !m.open)
 }
+
+const SECTIONS: &[(&str, &str)] = &[
+    ("MAPS", "Choose a map, then pick your drop-in spot."),
+    ("SKATER", "Make it yours."),
+    ("GRAPHICS", "Dial in your display and performance."),
+    ("MULTIPLAYER", "A session is better with friends."),
+    ("EXTRAS", "Mods, updates and more."),
+];
+#[derive(Component)] struct MenuTitle;
+#[derive(Component)] struct MenuSubtitle;
+#[derive(Component)] struct MenuScroll;
+impl Menu {
+    fn rows(&self) -> Vec<usize> {
+        if self.daylight { return (0..4).collect(); }
+        if self.multiplayer {
+            return if self.browser { std::iter::once(0).chain(1..=self.browser_count.min(5)).chain([6,7,8,10]).collect() } else { match self.network_page {
+                1 => vec![3,4,10],
+                2 => vec![5,7,10],
+                3 => vec![0,1,10],
+                _ => vec![2,6,13,14],
+            }};
+        }
+        match self.section {
+            0 if self.map_detail => {
+                let mut rows = vec![50, 51];
+                if let Some(path) = self.maps.get(self.selected_map).and_then(|m| m.path.as_deref()) {
+                    rows.extend(self.destinations.iter().enumerate().filter(|(_,d)| d.matrix.is_some() && crate::teleport_menu::same_map(path, &d.map)).map(|(i,_)| 1_000_000 + i));
+                }
+                rows
+            }
+            0 => (1000..1000 + self.maps.len()).collect(),
+            1 => vec![3, 8, 10],
+            2 => vec![0, 1, 2, 13],
+            4 => vec![7, 11, 14],
+            i if i >= SECTIONS.len() => self.custom_sections.get(i-SECTIONS.len()).map_or(Vec::new(), |(_,entries)| (200..200+entries.len()).collect()),
+            _ => Vec::new(),
+        }
+    }
+    fn select_section(&mut self, section: usize) {
+        self.section = section;
+        self.map_detail = false;
+        self.multiplayer = section == 3;
+        self.browser = false;
+        self.network_page = 0;
+        self.daylight = false;
+        self.selected = self.rows().first().copied().unwrap_or(100 + section);
+        self.status.clear();
+    }
+}
+
 #[derive(Resource)]
 struct SceneTarget(Handle<Image>);
 #[derive(Resource)]
 struct FramePacer(Instant);
 #[derive(Component)]
 struct MenuRoot;
+#[derive(Component)]
+pub(crate) struct MenuLayoutRoot;
 #[derive(Component)]
 pub(crate) struct MenuRow(usize);
 #[derive(Component)]
@@ -133,9 +192,11 @@ impl Plugin for GraphicsMenuPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FramePacer(Instant::now()))
             .add_systems(PostStartup, setup.in_set(PresentationSetup))
-            .add_systems(PreUpdate, interact.in_set(MenuInput).after(bevy::input::InputSystems))
+            .add_systems(PreUpdate, (refresh_sections, interact).chain().in_set(MenuInput).after(bevy::input::InputSystems))
+            .add_systems(PreUpdate, finish_menu_travel.after(crate::map_transition::MapTransitionSet).before(crate::input::poll_controllers))
             .add_systems(PreUpdate, toggle_fullscreen.after(bevy::input::InputSystems))
-            .add_systems(Update, (crate::map_render::advance_day, apply, labels).chain())
+            .add_systems(Update, preview_menu.before(labels))
+            .add_systems(Update, (crate::map_render::advance_day, apply, labels, scroll_menu, resize_menu).chain())
             .add_systems(PostUpdate, crate::map_render::position_celestial_bodies.before(bevy::transform::TransformSystems::Propagate))
             .add_systems(Last, pace);
     }
@@ -194,31 +255,45 @@ fn setup(
         ImageNode::new(target.clone()),
         UiTargetCamera(output),
     ));
-    commands.spawn((MenuRoot, UiTargetCamera(output), GlobalZIndex(10), Node {
+    let maps = crate::map_library::discover(&config.asset_root);
+    let destinations = crate::teleport_menu::load(&config.asset_root).unwrap_or_else(|e| { warn!("Map destinations: {e}"); Vec::new() });
+    commands.spawn((MenuRoot, MenuLayoutRoot, UiTargetCamera(output), GlobalZIndex(10), Node {
         display: Display::None, width:percent(100), height:percent(100), align_items:AlignItems::Center,
         justify_content:JustifyContent::Center, position_type:PositionType::Absolute, ..default()
-    }, BackgroundColor(Color::srgba(0.015,0.025,0.04,0.88)))).with_children(|root| {
-        root.spawn((Node { width:px(560),max_width:percent(95),padding:UiRect::all(px(18)),flex_direction:FlexDirection::Column,row_gap:px(4),border_radius:BorderRadius::all(px(12)),..default() },
-            BackgroundColor(Color::srgb(0.035,0.055,0.08)))).with_children(|panel| {
-            panel.spawn((Text::new("GAME MENU"),TextFont {font_size:32.,..default()},TextColor(Color::WHITE)));
-            panel.spawn((Text::new("GAMEPLAY & GRAPHICS"),TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.4,0.85,0.85))));
-            for i in 0..15 {
-                panel.spawn((Button, MenuRow(i), Node {width:percent(100),min_height:px(26),padding:UiRect::all(px(3)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(5)),..default()},
-                    BackgroundColor(Color::srgb(0.08,0.11,0.15)))).with_children(|row| {
-                    row.spawn((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
+    }, BackgroundColor(Color::srgba(0.015,0.02,0.025,0.90)))).with_children(|root| {
+        root.spawn((Node { width:px(1180), height:px(700), flex_shrink:0., padding:UiRect::all(px(24)), column_gap:px(28), ..default() },
+            BackgroundColor(Color::srgb(0.035,0.045,0.05)))).with_children(|panel| {
+            panel.spawn(Node { width:px(210), flex_shrink:0., flex_direction:FlexDirection::Column, row_gap:px(8), overflow:Overflow::scroll_y(), ..default() }).with_children(|rail| {
+                rail.spawn((Text::new("SKATE / 3"),TextFont {font_size:30.,..default()},TextColor(Color::srgb(0.78,0.96,0.3))));
+                rail.spawn((Text::new("OFF THE BOARD"),TextFont {font_size:12.,..default()},TextColor(Color::srgb(0.55,0.62,0.62))));
+                rail.spawn(Node {height:px(24),..default()});
+                for i in 0..SECTIONS.len()+8 {
+                    rail.spawn((Button,MenuRow(100+i),Node {width:percent(100),min_height:px(44),padding:UiRect::all(px(12)),align_items:AlignItems::Center,..default()},BackgroundColor(Color::NONE)))
+                        .with_child((MenuLabel(100+i),Text::new(""),TextFont {font_size:16.,..default()},TextColor(Color::WHITE)));
+                }
+                rail.spawn((Text::new("ESC / START  /  RESUME"),TextFont {font_size:12.,..default()},TextColor(Color::srgb(0.55,0.62,0.62)),Node {margin:UiRect::top(px(20)),..default()}));
+            });
+            panel.spawn(Node {flex_grow:1.,min_width:px(0),flex_direction:FlexDirection::Column,row_gap:px(12),..default()}).with_children(|body| {
+                body.spawn((Text::new("MAPS"),MenuTitle,TextFont {font_size:40.,..default()},TextColor(Color::WHITE)));
+                body.spawn((Text::new(""),MenuSubtitle,TextFont {font_size:16.,..default()},TextColor(Color::srgb(0.65,0.72,0.72))));
+                body.spawn((Node {height:px(3),width:px(64),margin:UiRect::bottom(px(10)),..default()},BackgroundColor(Color::srgb(0.78,0.96,0.3))));
+                body.spawn((MenuScroll,ScrollPosition::default(),Node {flex_grow:1.,min_height:px(0),overflow:Overflow::scroll_y(),flex_direction:FlexDirection::Column,row_gap:px(8),..default()})).with_children(|list| {
+                    for i in (0..15).chain(200..264).chain([50,51]).chain(1000..1000+maps.len()).chain(1_000_000..1_000_000+destinations.len()) {
+                        list.spawn((Button,MenuRow(i),Node {width:percent(100),min_height:px(56),flex_shrink:0.,padding:UiRect::axes(px(18),px(12)),align_items:AlignItems::Center,border_radius:BorderRadius::all(px(4)),..default()},BackgroundColor(Color::srgb(0.075,0.09,0.095))))
+                            .with_child((MenuLabel(i),Text::new(""),TextFont {font_size:18.,..default()},TextColor(Color::WHITE)));
+                    }
                 });
-            }
-            panel.spawn((StatusLabel,Text::new(""),TextFont {font_size:15.,..default()},TextColor(Color::srgb(0.65,0.75,0.8))));
-            panel.spawn((Text::new("Click to cycle | Up/Down select | Left/Right change\nEsc resume | Changes save automatically"),TextFont {font_size:14.,..default()},TextColor(Color::srgb(0.65,0.75,0.8))));
+                body.spawn((StatusLabel,Text::new(""),TextFont {font_size:14.,..default()},TextColor(Color::srgb(0.78,0.96,0.3))));
+                body.spawn((Text::new("Up/Down Navigate    Enter / A Select    Left/Right Adjust    Tab Sections\nSettings save automatically"),TextFont {font_size:13.,..default()},TextColor(Color::srgb(0.55,0.62,0.62))));
+            });
         });
     });
     commands.insert_resource(SceneTarget(target));
-    let maps = crate::map_library::discover(&config.asset_root);
     let selected_map = maps.iter().position(|m| m.path.as_ref() == config.map_path.as_ref()).unwrap_or(0);
     if config.start_paused { time.pause(); }
     commands.insert_resource(Menu {
         open: config.start_paused,
-        selected: 0,
+        selected: 1000,
         settings,
         path,
         difficulty: config.difficulty,
@@ -226,14 +301,28 @@ fn setup(
         maps,
         selected_map,
         multiplayer: false,
-        browser: false,
-        daylight: false,
+        browser: false, network_page: 0, browser_count: 0,
+        daylight: false, section: 0, custom_sections: Vec::new(), map_detail: false, destinations, pending_travel: None,
     });
 }
 fn cycle<T: PartialEq + Copy>(values: &[T], value: T, direction: i32) -> T {
     let index = values.iter().position(|x| *x == value).unwrap_or(0) as i32;
     values[(index + direction).rem_euclid(values.len() as i32) as usize]
 }
+fn refresh_sections(mods: Res<crate::modding::Mods>, mut menu: ResMut<Menu>) {
+    let mut groups = std::collections::BTreeMap::<String,Vec<(String,String,String)>>::new();
+    for ((owner,key),definition) in &mods.custom_menus {
+        if let Some(section)=&definition.section {
+            groups.entry(section.clone()).or_default().push((owner.clone(),key.clone(),definition.title.clone()));
+        }
+    }
+    let selected=menu.custom_sections.get(menu.section.saturating_sub(SECTIONS.len())).filter(|_|menu.section>=SECTIONS.len()).map(|(name,_)|name.clone());
+    menu.custom_sections=groups.into_iter().collect();
+    if let Some(name)=selected {
+        if let Some(i)=menu.custom_sections.iter().position(|(n,_)|n==&name) {menu.section=SECTIONS.len()+i;} else {menu.select_section(0);}
+    }
+}
+
 pub(crate) fn interact(
     mut config: ResMut<crate::config::Config>,
     mut transition: ResMut<crate::map_transition::MapTransition>,
@@ -249,7 +338,7 @@ pub(crate) fn interact(
     mut net: ResMut<crate::multiplayer::Multiplayer>,
     mut typing: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut updater: ResMut<crate::updater::Updater>,
-    mut travel: ResMut<crate::teleport_menu::Travel>,
+    travel: Res<crate::teleport_menu::Travel>,
     mut mods: ResMut<crate::modding::ModMenu>,
 ) {
     if transition.busy() {
@@ -260,17 +349,33 @@ pub(crate) fn interact(
     if travel.open || travel.closed_this_frame || customiser.open || custom_models.open || mods.open {
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 {
-        menu.open = !menu.open;
+    if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 || (menu.open && nav.pressed & 0x2000 != 0) {
+        if menu.open && menu.multiplayer && (menu.browser || menu.network_page != 0) {
+            menu.browser = false; if menu.network_page==1 {menu.browser=true;menu.network_page=0;menu.selected=8;} else {menu.network_page = 0; menu.selected = 2;}
+        } else if menu.open && menu.map_detail {
+            menu.map_detail = false;
+            menu.selected = 1000 + menu.selected_map;
+        } else { menu.open = !menu.open; }
     }
     let mut action = None;
     for event in typing.read() {
         if !menu.open
             || !menu.multiplayer
             || menu.browser
-            || menu.selected != 3
+            || !matches!(menu.selected, 3 | 7)
             || !event.state.is_pressed()
         {
+            continue;
+        }
+        if menu.selected == 7 {
+            let mut name = net.player_name.clone();
+            if event.key_code == KeyCode::Backspace { name.pop(); }
+            if let Some(text) = &event.text {
+                for ch in text.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_')) {
+                    if name.chars().count() < 16 { name.push(ch); }
+                }
+            }
+            if name != net.player_name { net.set_player_name(name); }
             continue;
         }
         if event.key_code == KeyCode::Backspace {
@@ -285,31 +390,79 @@ pub(crate) fn interact(
         }
     }
     if menu.open {
-        let rows = if menu.daylight { 4 } else if menu.multiplayer { 11 } else { 17 };
+        menu.browser_count = net.browser_rows.len();
+        if keys.just_pressed(KeyCode::Tab) {
+            let direction = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) { SECTIONS.len()+menu.custom_sections.len()-1 } else { 1 };
+            let section = (menu.section + direction) % (SECTIONS.len()+menu.custom_sections.len());
+            menu.select_section(section);
+        }
+        let mut visible = menu.rows();
+        visible.extend(100..100 + SECTIONS.len()+menu.custom_sections.len());
+        let index = visible.iter().position(|r| *r == menu.selected).unwrap_or(0);
+        let rows = visible.len();
         if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
-            menu.selected = (menu.selected + rows - 1) % rows;
+            menu.selected = visible[(index + rows - 1) % rows];
         }
         if keys.just_pressed(KeyCode::ArrowDown) || nav.pressed & 2 != 0 {
-            menu.selected = (menu.selected + 1) % rows;
+            menu.selected = visible[(index + 1) % rows];
         }
-        if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
+        let adjustable = (menu.daylight && menu.selected < 3) || (!menu.multiplayer && !menu.daylight && menu.selected < 4);
+        if adjustable && (keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0) {
             action = Some((menu.selected, -1));
         }
-        if keys.just_pressed(KeyCode::ArrowRight)
+        if (adjustable && (keys.just_pressed(KeyCode::ArrowRight) || nav.pressed & 8 != 0))
             || (keys.just_pressed(KeyCode::Enter)
                 && !keys.pressed(KeyCode::AltLeft)
                 && !keys.pressed(KeyCode::AltRight))
-            || nav.pressed & (8 | 0x1000) != 0
+            || nav.pressed & 0x1000 != 0
         {
             action = Some((menu.selected, 1));
         }
         for (interaction, row) in &buttons {
-            if *interaction == Interaction::Pressed {
+            if *interaction == Interaction::Pressed && visible.contains(&row.0) {
                 menu.selected = row.0;
                 action = Some((row.0, 1));
             }
         }
     }
+    if let Some((row, _)) = action {
+        if (100..100 + SECTIONS.len()+menu.custom_sections.len()).contains(&row) {
+            menu.select_section(row - 100);
+            action = None;
+        } else if (200..264).contains(&row) {
+            if let Some((_,entries))=menu.custom_sections.get(menu.section.saturating_sub(SECTIONS.len())) {
+                if let Some((owner,key,_))=entries.get(row-200) {mods.open_registered(owner.clone(),key.clone());}
+            }
+            action=None;
+        } else if row == 50 {
+            menu.map_detail = false;
+            menu.selected = 1000 + menu.selected_map;
+            menu.status.clear();
+            action = None;
+        } else if row == 51 || row >= 1_000_000 {
+            if let Some(entry) = menu.maps.get(menu.selected_map).cloned() {
+                let matrix = row.checked_sub(1_000_000).and_then(|i| menu.destinations.get(i)).and_then(|d| d.matrix);
+                if net.active() && entry.path != config.map_path {
+                    menu.status = "Leave multiplayer before switching maps".into();
+                } else if let Some(matrix) = matrix {
+                    menu.pending_travel = Some((entry.path.clone(), matrix));
+                    if entry.path != config.map_path { transition.request(entry); }
+                    menu.status = "Travelling to your spot...".into();
+                } else if row == 51 {
+                    if net.active() { menu.status = "Leave multiplayer before reloading a map".into(); }
+                    else { transition.request(entry); menu.status = "Loading map...".into(); }
+                }
+            }
+            action = None;
+        } else if row >= 1000 {
+            menu.selected_map = row - 1000;
+            menu.map_detail = true;
+            menu.selected = 51;
+            menu.status.clear();
+            action = None;
+        }
+    }
+
     if let Some((row, direction)) = action {
         let day_action = menu.daylight;
         if menu.daylight {
@@ -322,7 +475,7 @@ pub(crate) fn interact(
                     let next = (index + direction).rem_euclid(22);
                     menu.settings.ambient_level = if next == 0 { None } else { Some((next as u32 - 1) * 5) };
                 }
-                _ => { menu.daylight = false; menu.selected = 15; }
+                _ => { menu.daylight = false; menu.selected = 13; }
             }
         } else if menu.browser {
             match row {
@@ -338,7 +491,7 @@ pub(crate) fn interact(
                         net.browse(page);
                     }
                 }
-                8 => menu.open = false,
+                8 => { menu.browser=false;menu.network_page=1;menu.selected=3; },
                 9 => {
                     exit.write(AppExit::Success);
                 }
@@ -361,14 +514,16 @@ pub(crate) fn interact(
                     menu.browser = true;
                     menu.selected = 0;
                 }
+                12 => { menu.browser=false;menu.network_page=1;menu.selected=3; },
                 8 => menu.open = false,
                 9 => {
                     exit.write(AppExit::Success);
                 }
                 10 => {
-                    menu.multiplayer = false;
-                    menu.selected = 11;
+                    if menu.network_page==1 {menu.browser=true;menu.network_page=0;menu.selected=8;} else {menu.network_page = 0; menu.selected = 2;}
                 }
+                13 => { menu.network_page = 2; menu.selected = 7; }
+                14 => { menu.network_page = 3; menu.selected = 0; }
                 _ => {}
             }
         } else {
@@ -392,21 +547,6 @@ pub(crate) fn interact(
                         Err(e) => format!("Applied, but could not save: {e}"),
                     };
                 }
-                4 => {
-                    menu.selected_map = (menu.selected_map as i32 + direction)
-                        .rem_euclid(menu.maps.len() as i32)
-                        as usize;
-                    menu.status = "Choose Load map to switch".into();
-                }
-                5 => {
-                    if net.active() {
-                        menu.status = "Leave multiplayer before switching maps".into();
-                    } else {
-                        net.leave();
-                        transition.request(menu.maps[menu.selected_map].clone());
-                        menu.status = "Loading map...".into();
-                    }
-                }
                 6 => menu.open = false,
                 7 => {
                     exit.write(AppExit::Success);
@@ -418,7 +558,12 @@ pub(crate) fn interact(
                 }
                 10 => custom_models.begin(),
                 11 => menu.status = updater.open(false),
-                12 => travel.open = true,
+                12 => {
+                    menu.select_section(0);
+                    menu.selected_map = menu.maps.iter().position(|m| m.path == config.map_path).unwrap_or(0);
+                    menu.map_detail = true;
+                    menu.selected = 51;
+                },
                 13 => { menu.daylight = true; menu.selected = 0; menu.status = "Custom maps: change time, cycle speed and ambient light. Retail lighting stays authored.".into(); },
                 14 => mods.begin(),
                 _ => {}
@@ -506,7 +651,8 @@ fn labels(
     net: Res<crate::multiplayer::Multiplayer>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut root: Single<&mut Node, With<MenuRoot>>,
-    mut labels: Query<(&MenuLabel, &mut Text), Without<StatusLabel>>,
+    mut labels: Query<(&MenuLabel, &mut Text), (Without<StatusLabel>, Without<MenuTitle>, Without<MenuSubtitle>)>,
+    mut headings: Query<(&mut Text, Has<MenuTitle>), (Or<(With<MenuTitle>, With<MenuSubtitle>)>, Without<StatusLabel>)>,
     mut status: Single<&mut Text, With<StatusLabel>>,
     mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor, &mut Node), Without<MenuRoot>>,
 ) {
@@ -518,10 +664,39 @@ fn labels(
     if !menu.open {
         return;
     }
+    for (mut text, title) in &mut headings {
+        **text = if menu.map_detail {
+            if title { menu.maps.get(menu.selected_map).map_or("MAP", |m| m.label.as_str()) }
+            else { "Choose a teleport spot, or skate from the default spawn." }
+        } else if menu.daylight {
+            if title { "DAY & NIGHT" } else { "Custom maps: time and ambient light. Retail lighting stays authored." }
+        } else if menu.browser {
+            if title { "FIND A SESSION" } else { "Browse public lobbies and join a crew." }
+        } else if menu.multiplayer && menu.network_page != 0 {
+            match (menu.network_page, title) {
+                (1,true) => "JOIN A FRIEND", (1,false) => "Select the code field, type your friend's code, then choose Join session.",
+                (2,true) => "PLAYER & SESSION", (2,false) => "Select your name to edit it. Leave your current session here.",
+                (3,true) => "LOCAL TESTING", (_,false) => "Advanced: host or join a local test session without Steam.",
+                _ => "MULTIPLAYER",
+            }
+        } else if title { SECTIONS.get(menu.section).map_or_else(||menu.custom_sections.get(menu.section-SECTIONS.len()).map_or("",|(n,_)|n.as_str()),|s|s.0) } else { SECTIONS.get(menu.section).map_or("Choose an activity.",|s|s.1) }.into();
+    }
     let s = &menu.settings;
     let size = s.internal_size(window.physical_size());
     for (label, mut text) in &mut labels {
-        **text = if menu.daylight {
+        **text = if (100..113).contains(&label.0) {
+            let i=label.0-100;
+            let name=SECTIONS.get(i).map(|s|s.0).or_else(||menu.custom_sections.get(i.saturating_sub(SECTIONS.len())).map(|(n,_)|n.as_str())).unwrap_or("");
+            format!("{:02}   {}",i+1,name)
+        } else if (200..264).contains(&label.0) {
+            menu.custom_sections.get(menu.section.saturating_sub(SECTIONS.len())).and_then(|(_,e)|e.get(label.0-200)).map(|(_,_,t)|t.clone()).unwrap_or_default()
+        } else if label.0 >= 1_000_000 {
+            menu.destinations.get(label.0 - 1_000_000).map(|d| d.name.clone()).unwrap_or_default()
+        } else if label.0 == 50 { "<  All maps".into()
+        } else if label.0 == 51 { "Skate from default spawn".into()
+        } else if label.0 >= 1000 {
+            menu.maps.get(label.0 - 1000).map(|entry| format!("{}    /    VIEW SPOTS", entry.label)).unwrap_or_default()
+        } else if menu.daylight {
             match label.0 {
                 0 => { let minutes = (s.hour * 60.).floor() as u32 % 1440; format!("Time of day          {:02}:{:02}", minutes / 60, minutes % 60) },
                 1 => if s.day_speed == 0 { "Cycle speed          Frozen".into() } else { format!("Cycle speed          {}x ({} min/day)", s.day_speed, 1440 / s.day_speed) },
@@ -534,7 +709,7 @@ fn labels(
             }
         } else if menu.browser {
             match label.0 {
-                0 => "Refresh public Steam lobbies".into(),
+                0 => "Refresh sessions".into(),
                 1..=5 => net
                     .browser_rows
                     .get(label.0 - 1)
@@ -548,34 +723,37 @@ fn labels(
                             if r.compatible {
                                 ""
                             } else {
-                                " | incompatible physics/protocol"
+                                " | Update required"
                             }
                         )
                     })
                     .unwrap_or_else(|| "--".into()),
                 6 => "Previous page".into(),
                 7 => "Next page".into(),
-                8 => "Resume".into(),
+                8 => "Join with a code".into(),
                 9 => "Quit game".into(),
                 _ => "Back to multiplayer".into(),
             }
         } else if menu.multiplayer {
             match label.0 {
-                0 => "Host local test (no Steam)".into(),
-                1 => "Join local test (no Steam)".into(),
-                2 => "Host via Steam / Spacewar".into(),
+                0 => "Host local session".into(),
+                1 => "Join local session".into(),
+                2 => "Host a session".into(),
                 3 => format!(
                     "Join code: {}{}",
                     net.join_code,
                     if menu.selected == 3 { "_" } else { "" }
                 ),
-                4 => "Join via Steam / Spacewar".into(),
+                4 => "Join session".into(),
                 5 => "Leave multiplayer".into(),
-                6 => "Browse public Steam lobbies".into(),
-                7 => "Solo / local play does not require Steam".into(),
+                6 => "Find a session".into(),
+                7 => format!("Your name: {}{}", net.player_name, if menu.selected == 7 { "_" } else { "" }),
+                12 => "Join with a code".into(),
                 8 => "Resume".into(),
                 9 => "Quit game".into(),
-                _ => "Back to gameplay & graphics".into(),
+                13 => "Player & session".into(),
+                14 => "Advanced / local testing".into(),
+                _ => "<  Multiplayer".into(),
             }
         } else {
             match label.0 {
@@ -593,19 +771,14 @@ fn labels(
                     }
                 ),
                 3 => format!("Difficulty            {}", menu.difficulty.label()),
-                4 => format!(
-                    "Map                   {}",
-                    menu.maps[menu.selected_map].label
-                ),
-                5 => if transition.busy() { "Loading map...".into() } else { "Load map".into() },
                 6 => "Resume".into(),
                 7 => "Quit game".into(),
                 8 => "Character customiser".into(),
                 10 => "Custom models".into(),
                 11 => "Updates".into(),
-                12 => "Teleport…".into(),
-                13 => "Day & night…".into(),
-                14 => "Mods…".into(),
+                12 => "Teleport".into(),
+                13 => "Day & night".into(),
+                14 => "Mods".into(),
                 _ => "Multiplayer".into(),
             }
         };
@@ -627,14 +800,96 @@ fn labels(
     } else {
         menu.status.clone()
     };
+    let visible = menu.rows();
     for (row, interaction, mut color, mut node) in &mut buttons {
-        node.display = if (menu.daylight && row.0 >= 4) || (menu.multiplayer && row.0 >= 11) { Display::None } else { Display::Flex };
-        color.0 = if row.0 == menu.selected || *interaction == Interaction::Hovered {
-            Color::srgb(0.10, 0.30, 0.34)
+        node.display = if visible.contains(&row.0) || (100..100+SECTIONS.len()+menu.custom_sections.len()).contains(&row.0) { Display::Flex } else { Display::None };
+        color.0 = if row.0 == menu.selected || row.0 == 100 + menu.section || *interaction == Interaction::Hovered {
+            Color::srgb(0.24, 0.33, 0.12)
         } else {
-            Color::srgb(0.08, 0.11, 0.15)
+            Color::srgb(0.075, 0.09, 0.095)
         };
     }
+}
+// Opt-in screenshot coverage for overlays; never changes an ordinary session.
+fn preview_menu(config: Res<crate::config::Config>, mut menu: ResMut<Menu>, mut mods: ResMut<crate::modding::ModMenu>, mut done: Local<bool>) {
+    if *done || config.verification_capture.is_none() { return; }
+    *done = true;
+    match std::env::var("SKATE_VERIFY_MENU").as_deref() {
+        Ok("mods") => { menu.open = true; mods.begin(); }
+        Ok("multiplayer") => { menu.open = true; menu.select_section(3); }
+        _ => {}
+    }
+}
+fn finish_menu_travel(
+    mut menu: ResMut<Menu>, transition: Res<crate::map_transition::MapTransition>,
+    current: Res<crate::map_transition::CurrentMap>, mut skater: ResMut<crate::physics::SkaterRuntime>,
+    mut time: ResMut<Time<Virtual>>,
+) {
+    if transition.busy() { return; }
+    let Some((path, matrix)) = menu.pending_travel.take() else { return; };
+    // A failed map transaction retains the previous world: never apply another map's coordinates there.
+    if current.path != path { return; }
+    match skater.travel_to(matrix) {
+        Ok(()) => { menu.open = false; time.unpause(); }
+        Err(e) => { menu.open = true; menu.status = format!("Could not travel: {e}"); }
+    }
+}
+fn resize_menu(
+    window: Single<&Window, With<PrimaryWindow>>, roots: Query<Entity, With<MenuLayoutRoot>>,
+    children: Query<&Children>, mut nodes: Query<(&mut Node, Option<&mut TextFont>)>,
+    mut previous: Local<Option<f32>>,
+) {
+    let scale = (window.width() / 1280.).min(window.height() / 800.).max(0.25);
+    let factor = scale / previous.unwrap_or(1.);
+    if (factor - 1.).abs() < 0.0001 { return; }
+    fn resize(value: &mut Val, factor: f32) { if let Val::Px(px) = value { *px *= factor; } }
+    for root in &roots {
+        for entity in children.iter_descendants(root) {
+            if let Ok((mut node, font)) = nodes.get_mut(entity) {
+                let node = &mut *node;
+                for value in [&mut node.width, &mut node.height, &mut node.min_width, &mut node.min_height,
+                    &mut node.max_width, &mut node.max_height, &mut node.row_gap, &mut node.column_gap,
+                    &mut node.padding.left, &mut node.padding.right, &mut node.padding.top, &mut node.padding.bottom,
+                    &mut node.margin.left, &mut node.margin.right, &mut node.margin.top, &mut node.margin.bottom] {
+                    resize(value, factor);
+                }
+                if let Some(mut font) = font { font.font_size *= factor; }
+            }
+        }
+    }
+    *previous = Some(scale);
+}
+fn scroll_menu(
+    menu: Res<Menu>,
+    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut scroll: Query<(&mut ScrollPosition, &ComputedNode, &Node), With<MenuScroll>>,
+    rows: Query<(&MenuRow, &ComputedNode)>,
+    mut previous: Local<Option<(usize, bool, bool, usize, bool, u8)>>,
+) {
+    let delta: f32 = wheel.read().map(|e| e.y * if e.unit == bevy::input::mouse::MouseScrollUnit::Line { 40. } else { 1. }).sum();
+    if !menu.open { return; }
+    let state = (menu.section, menu.daylight, menu.browser, menu.selected, menu.map_detail, menu.network_page);
+    let visible = menu.rows();
+    for (mut pos, node, layout) in &mut scroll {
+        let scale = node.inverse_scale_factor();
+        let height = node.size().y * scale;
+        let max = (node.content_size().y * scale - height).max(0.);
+        if previous.as_ref().is_none_or(|p| (p.0,p.1,p.2,p.4,p.5) != (state.0,state.1,state.2,state.4,state.5)) { pos.y = 0.; }
+        else if previous.as_ref() != Some(&state) {
+            let mut top = 0.;
+            for id in &visible {
+                let row_height = rows.iter().find(|(r,_)| r.0 == *id).map_or(56., |(_,n)| n.size().y * scale);
+                if *id == menu.selected {
+                    if top < pos.y { pos.y = top; }
+                    else if top + row_height > pos.y + height { pos.y = top + row_height - height; }
+                    break;
+                }
+                top += row_height + if let Val::Px(gap) = layout.row_gap { gap } else { 0. };
+            }
+        }
+        pos.y = (pos.y - delta).clamp(0., max);
+    }
+    *previous = Some(state);
 }
 fn pace(menu: Option<Res<Menu>>, mut pacer: ResMut<FramePacer>) {
     let Some(menu) = menu else {
@@ -667,7 +922,7 @@ mod tests {
             .insert_resource(Menu {
                 open: false, selected: 0, settings: GraphicsSettings::default(),
                 difficulty: Difficulty::Easy, path: PathBuf::new(), status: String::new(),
-                multiplayer: false, browser: false, daylight: false,
+                multiplayer: false, browser: false, network_page: 0, browser_count: 0, daylight: false, section: 0, custom_sections: Vec::new(), map_detail: false, destinations: Vec::new(), pending_travel: None,
                 maps: vec![crate::map_library::Entry { label: "Test world".into(), path: None }], selected_map: 0,
             })
             .add_systems(Update, apply);
@@ -701,6 +956,56 @@ mod tests {
                 .size(),
             UVec2::new(857, 536)
         );
+    }
+    #[test]
+    fn sections_expose_only_real_rows_and_all_maps() {
+        let mut menu = Menu {
+            open: true, selected: 1000, settings: GraphicsSettings::default(),
+            path: PathBuf::new(), difficulty: Difficulty::Easy, status: String::new(),
+            maps: (0..40).map(|i| crate::map_library::Entry { label: format!("Map {i}"), path: None }).collect(),
+            selected_map: 0, multiplayer: false, browser: false, network_page: 0, browser_count: 0, daylight: false, section: 0, custom_sections: Vec::new(), map_detail: false, destinations: Vec::new(), pending_travel: None,
+        };
+        for section in 0..SECTIONS.len() {
+            menu.select_section(section);
+            let rows = menu.rows();
+            assert!(rows.contains(&menu.selected));
+            assert!(rows.windows(2).all(|pair| pair[0] < pair[1]));
+            assert!(rows.iter().all(|id| *id < 15 || *id >= 1000));
+        }
+        menu.select_section(1);
+        assert_eq!(menu.rows(),vec![3,8,10]);
+        menu.custom_sections=vec![("Challenges".into(),vec![("test.mod".into(),"race".into(),"Race".into())])];
+        menu.select_section(SECTIONS.len());
+        assert_eq!(menu.rows(),vec![200]);
+        menu.select_section(0);
+        assert_eq!(menu.rows(), (1000..1040).collect::<Vec<_>>());
+        menu.maps[0].path = Some(PathBuf::from("University.skate"));
+        menu.destinations = vec![
+            crate::teleport_menu::Destination { id: "uni".into(), name: "Campus".into(), map: "University".into(), matrix: Some([[0.;4];4]), unavailable_reason: None },
+            crate::teleport_menu::Destination { id: "dt".into(), name: "Downtown".into(), map: "DownTown".into(), matrix: Some([[0.;4];4]), unavailable_reason: None },
+        ];
+        menu.map_detail = true;
+        assert_eq!(menu.rows(), vec![50,51,1_000_000]);
+        menu.select_section(0);
+        menu.maps.clear();
+        menu.select_section(0);
+        assert_eq!(menu.selected, 100);
+        assert!(menu.rows().is_empty());
+        menu.select_section(3);
+        assert!(menu.multiplayer);
+        assert_eq!(menu.rows(), vec![2,6,13,14]);
+        menu.network_page = 1;
+        assert_eq!(menu.rows(), vec![3,4,10]);
+        menu.network_page = 3;
+        assert_eq!(menu.rows(), vec![0,1,10]);
+        menu.browser = true;
+        assert!(menu.rows().contains(&8));
+        assert!(!SECTIONS.iter().any(|(name,_)| matches!(*name,"SESSION"|"WORLD")));
+        menu.select_section(2);
+        assert!(!menu.multiplayer && !menu.browser);
+        assert_eq!(menu.rows(), vec![0,1,2,13]);
+        menu.daylight = true;
+        assert_eq!(menu.rows(), vec![0,1,2,3]);
     }
     #[test]
     fn invalid_saved_values_fall_back() {

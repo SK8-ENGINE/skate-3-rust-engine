@@ -25,7 +25,7 @@ mod riding_outputs;
 mod skateboard_controller;
 mod skater;
 mod skeleton_air;
-mod skeleton_body;
+pub(crate) mod skeleton_body;
 pub(crate) mod skeleton_colliders;
 mod skeleton_controller;
 mod skeleton_feedback;
@@ -42,6 +42,8 @@ mod animation_input;
 mod animation_phase;
 mod biped_ground;
 mod frame;
+#[cfg(debug_assertions)]
+mod dev_trace;
 mod grind;
 mod grind_air_settings;
 mod grind_camera;
@@ -209,7 +211,7 @@ mod exchange_tests {
 
 impl GamePhysics {
     pub(crate) fn set_gesture_preferences(&mut self, gestures: Option<[u32; 4]>) {
-        self.animation_profile.gesture_selections = gestures.filter(|g| g.iter().all(|v| *v < 37));
+        self.animation_profile.gesture_selections = Some(gestures.filter(|g| g.iter().all(|v| *v < 37)).unwrap_or([0, 1, 2, 3]));
     }
     pub(crate) fn set_equipment_preferences(&mut self, truck: f32, wheel: f32) {
         if truck.is_finite() && wheel.is_finite() {
@@ -434,6 +436,8 @@ pub(crate) fn advance(
     let timer = performance.as_ref().map(|_| std::time::Instant::now());
     let mut actions = input.0.actions();
     let input_available = input.0.controller_available();
+    #[cfg(debug_assertions)]
+    let _physics_trace = dev_trace::begin(&physics, &skater, *input.0.actions().values());
     if let Err(message) = frame::advance(
         &mut physics,
         &mut skater,
@@ -443,6 +447,8 @@ pub(crate) fn advance(
         input_available,
         &mut camera,
     ) {
+        #[cfg(debug_assertions)]
+        dev_trace::dump(&format!("tick={} physics_error={message}", physics.ticks));
         physics.failed = true;
         error!(
             "{message}; state={:?}; tick={}; mapped_input={:?}; force_mode={}; board_axis_y={}; flags={:08x}/{:08x}/{:08x}/{:08x}/{:08x}",
@@ -606,3 +612,7 @@ mod offboard_jump_playback_tests;
 #[cfg(test)]
 #[path = "tests/offboard_root_trace.rs"]
 mod offboard_root_trace;
+
+#[cfg(test)]
+#[path = "tests/gameplay_gestures.rs"]
+mod gameplay_gesture_tests;

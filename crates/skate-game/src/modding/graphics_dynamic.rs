@@ -32,6 +32,7 @@ struct MeshBuffer {
     entity: Entity,
     mesh: Handle<Mesh>,
     material: Handle<StandardMaterial>,
+    capture: Option<String>,
     body: Option<String>,
     transform: skate_mods::scene::TransformState,
     visible: bool,
@@ -162,7 +163,9 @@ pub(super) fn mesh_buffer(
         }
         remove_buffer(world, &mut state, &slot);
         let mesh = world.resource_mut::<Assets<Mesh>>().add(empty_mesh());
-        let texture = if let Some(path) = options.texture.as_deref() {
+        let texture = if let Some(key) = options.capture.as_deref() {
+            Some(super::capture::texture(world, owner, key).ok_or("Unknown capture key")?)
+        } else if let Some(path) = options.texture.as_deref() {
             Some(world.resource_scope(|world, mut cache: Mut<ModMeshTextures>| {
                 ensure_texture(world, &mut cache, owner, &root, path)
             })?)
@@ -193,12 +196,17 @@ pub(super) fn mesh_buffer(
                 crate::retail_character::ModGraphicsLit,
             ))
             .id();
+        if options.capture.is_some() {
+            world.entity_mut(entity).insert(bevy::camera::visibility::RenderLayers::layer(super::capture::SCREEN_LAYER));
+            super::capture::show_screens(world);
+        }
         state.buffers.insert(
             slot,
             MeshBuffer {
                 entity,
                 mesh,
                 material,
+                capture: options.capture,
                 body: options.body,
                 transform,
                 visible: options.visible,
@@ -528,6 +536,14 @@ fn empty_mesh() -> Mesh {
 }
 
 fn sync(world: &mut World) {
+    let targets: Vec<_> = world.resource::<ModGraphicsDynamic>().buffers.iter()
+        .filter_map(|((owner, _), b)| b.capture.as_ref().map(|key| (b.material.clone(), super::capture::texture(world, owner, key))))
+        .collect();
+    for (material, image) in targets {
+        if let Some(m) = world.resource_mut::<Assets<StandardMaterial>>().get_mut(&material) {
+            if m.base_color_texture != image { m.base_color_texture = image; }
+        }
+    }
     let (origins, buffer_poses, dead_buffers) = {
         let mods = world.resource::<Mods>();
         let state = world.resource::<ModGraphicsDynamic>();

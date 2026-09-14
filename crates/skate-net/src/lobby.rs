@@ -21,10 +21,14 @@ pub const DEFAULT_LINK_BUDGET: f64 = 180_000.;
 pub const DEFAULT_HOST_BUDGET: f64 = 1_000_000.;
 const LINK_CREDIT_CAP: f64 = 3_600.;
 const SESSION_CREDIT_CAP: f64 = 12_000.;
-/// Local two-client hosting is not an internet path. Burst a full APPLICATION
-/// snapshot in a couple of service ticks instead of dripping 3.6 KiB behind pose.
+/// Local two-client hosting is not an internet path. Burst player pose too.
 const LOOPBACK_LINK_BUDGET: f64 = 2_000_000.;
 const LOOPBACK_CREDIT_CAP: f64 = 48_000.;
+/// Snapshot records (collider fragments, scenes, Lua net) are rare and must not
+/// drip behind pose. Steam hosting is not UDP loopback, so this budget is
+/// independent of the physics link cap.
+const APP_BUDGET: f64 = 800_000.;
+const APP_CREDIT_CAP: f64 = 48_000.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Info {
     pub id: u64,
@@ -106,6 +110,7 @@ struct Link {
     sent: BTreeMap<(u64, u8), (u64, u32)>,
     keys: BTreeMap<(u64, u8), u64>,
     credits: f64,
+    app_credits: f64,
     app_sent: BTreeMap<(u64, String), (u64, u32)>,
     app_acks: BTreeMap<(u64,String),u32>,
     app_round: usize,
@@ -122,6 +127,7 @@ impl Link {
             sent: BTreeMap::new(),
             keys: BTreeMap::new(),
             credits: 2400.,
+            app_credits: APP_CREDIT_CAP,
             app_sent: BTreeMap::new(), app_acks: BTreeMap::new(), app_round: 0,
             last_ack: 0,
             last_ping: 0,
@@ -237,6 +243,9 @@ impl Session {
     }
     pub fn is_host(&self) -> bool {
         self.host.is_none()
+    }
+    pub fn host_peer(&self) -> u64 {
+        self.host.unwrap_or(self.local)
     }
     pub fn connected(&self) -> bool {
         self.is_host() || self.received_roster != 0
@@ -538,6 +547,7 @@ impl Session {
         let link_cap = self.link_credit_cap();
         for l in self.links.values_mut() {
             l.credits = (l.credits + dt * self.link_budget).min(link_cap);
+            l.app_credits = (l.app_credits + dt * APP_BUDGET).min(APP_CREDIT_CAP);
         }
         if self.is_host() {
             let expired: Vec<_> = self
@@ -712,8 +722,9 @@ impl Session {
             let offset = self.round % app_peers.len();
             app_peers.rotate_left(offset);
         }
-        let retry = if self.loopback { 16 } else { 110 };
-        let first_wait = if self.loopback { 0 } else { 50 };
+        let retry = if self.loopback || (self.stats.rtt_ms > 0 && self.stats.rtt_ms < 25) { 16 } else { 110 };
+        let first_wait = if self.loopback || (self.stats.rtt_ms > 0 && self.stats.rtt_ms < 25) { 0 } else { 50 };
+        let lan = retry == 16;
         for peer in app_peers {
             let link = self.links.get_mut(&peer).unwrap();
             link.app_sent.retain(|(id, _), _| self.actors.contains_key(id));
@@ -727,13 +738,13 @@ impl Session {
                 if link.app_acks.get(&(id, key.clone())).is_some_and(|&seq| seq == record.seq) { continue; }
                 let previous = link.app_sent.get(&(id, key.clone()));
                 if previous.is_some_and(|&(at, seq)| now.saturating_sub(at) < if seq == record.seq {
-                    if self.loopback { retry } else { retry + (self.round as u64).wrapping_add(id).wrapping_mul(17) % 130 }
+                    if lan { retry } else { retry + (self.round as u64).wrapping_add(id).wrapping_mul(17) % 130 }
                 } else { first_wait }) { continue; }
                 let mut data = packed::header(self.session, id, APPLICATION, record.seq);
                 data.push(key.len() as u8); data.extend(key.as_bytes()); data.extend(&record.value);
                 let bytes = data.len() as f64;
-                if bytes > link.credits || bytes > self.credits { link.app_round = index; break; }
-                link.credits -= bytes; self.credits -= bytes;
+                if bytes > link.app_credits { link.app_round = index; break; }
+                link.app_credits -= bytes;
                 link.app_sent.insert((id, key.clone()), (now, record.seq));
                 output.push(Outgoing { peer, data });
             }

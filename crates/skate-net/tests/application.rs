@@ -131,3 +131,15 @@ fn loopback_bursts_an_unacked_application_snapshot() {
     }
     assert_eq!(h.actors[&2].application.len(), 64);
 }
+#[test]
+fn application_snapshot_bursts_without_loopback() {
+    let mut h = Session::new(7, info(1), None);
+    let mut g = vec![Session::new(7, info(2), Some(1))];
+    for k in 0..64 {
+        assert!(g[0].publish_application(&format!("k{k:02}"), vec![k as u8; 900], 0));
+    }
+    for t in (0..80).step_by(16) {
+        pump(&mut h, &mut g, t, false);
+    }
+    assert_eq!(h.actors[&2].application.len(), 64);
+}

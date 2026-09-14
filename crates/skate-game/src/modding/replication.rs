@@ -24,6 +24,7 @@ pub(super) struct State {
     epoch:u64, connection:u64, started:Instant, last_send:Instant,
     definitions:BTreeMap<u64,CachedDefinition>,
     bodies:BTreeMap<Slot,Replica>,
+    pending_poses:BTreeMap<(String,String),(BodyPose,Instant)>,
     graphics:BTreeMap<Slot,(u64,u64)>,
     node_sequences:BTreeMap<(String,String,String),(u64,u64,u32)>,
     attachments:BTreeMap<u64,Attachment>,
@@ -35,7 +36,7 @@ impl Default for State {
         let now=Instant::now();
         Self { epoch:(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64).max(1),
             connection:0,started:now,last_send:now-Duration::from_secs(1),definitions:BTreeMap::new(),
-            bodies:BTreeMap::new(),graphics:BTreeMap::new(),
+            bodies:BTreeMap::new(),pending_poses:BTreeMap::new(),graphics:BTreeMap::new(),
             node_sequences:BTreeMap::new(),attachments:BTreeMap::new(),
             warnings:BTreeSet::new(),last_problem:String::new(),status:String::new() }
     }
@@ -170,10 +171,14 @@ fn outgoing(mods:&Mods,state:&mut State) -> BTreeMap<String,Vec<u8>> {
         let Some(&fp)=packages.get(package) else {continue;};
         let frame=GraphicRecord {definition:g.definition.clone(),transform:g.transform.clone(),visible:g.visible,
             body_instance:g.body.as_ref().and_then(|body|mods.bodies.get(&(package.clone(),body.clone())).copied())};
-        let Ok(data)=serde_json::to_vec(&frame) else {continue;};
+        let Ok(data)=serde_json::to_vec(&frame) else {
+            issue(state,format!("{package}/{key}: graphics record is not serializable"));continue;
+        };
         let mut packets=vec![make(GRAPHIC,package,key,fp,state.epoch,g.serial,data)];
         for (node,frame) in &g.nodes {
-            let Ok(data)=serde_json::to_vec(&frame.state) else {continue;};
+            let Ok(data)=serde_json::to_vec(&frame.state) else {
+                issue(state,format!("{package}/{key}: node '{node}' is not serializable"));continue;
+            };
             let mut packet=make(NODE,package,key,fp,state.epoch,g.serial,data);packet.node=node.clone();packets.push(packet);
         }
         push_group(&mut out,packets,state,&format!("{package}/{key} graphics"));
@@ -196,12 +201,13 @@ fn remove_body(mods:&mut Mods,state:&mut State,slot:&Slot) {
             mods.bodies.remove(&key);
             mods.world.remove(replica.id);
         }
+        state.pending_poses.remove(&key);
     }
 }
 fn clear_remote(world:&mut World,mods:&mut Mods,state:&mut State) {
     for slot in state.bodies.keys().cloned().collect::<Vec<_>>() {remove_body(mods,state,&slot);}
     for slot in state.graphics.keys() {super::retire_graphics(world,mods,&(owner(slot.0,&slot.1),slot.2.clone()));}
-    state.graphics.clear();state.node_sequences.clear();state.attachments.clear();
+    state.graphics.clear();state.node_sequences.clear();state.attachments.clear();state.pending_poses.clear();
 }
 
 fn incoming(world:&mut World,mods:&mut Mods,state:&mut State,records:Vec<(u64,String,u32,Vec<u8>)>) {
@@ -227,6 +233,7 @@ fn incoming(world:&mut World,mods:&mut Mods,state:&mut State,records:Vec<(u64,St
         let Ok(pose)=serde_json::from_slice::<BodyPose>(&packet.payload) else {continue;};
         if !pose.valid() {continue;}
         let slot=(peer,packet.owner.clone(),packet.key.clone());live_bodies.insert(slot.clone());
+        state.pending_poses.insert((owner(peer,&packet.owner),packet.key.clone()),(pose.clone(),Instant::now()));
         let changed=state.bodies.get(&slot).is_none_or(|r|r.epoch!=packet.epoch || r.instance!=packet.instance || r.revision!=packet.revision);
         if changed {
             remove_body(mods,state,&slot);
@@ -253,6 +260,8 @@ fn incoming(world:&mut World,mods:&mut Mods,state:&mut State,records:Vec<(u64,St
             && state.bodies.get(slot).is_some_and(|r| r.received.elapsed()>=STALE_BODY_GRACE)
     }).cloned().collect();
     for slot in stale {remove_body(mods,state,&slot);}
+    let live_pose:BTreeSet<_>=live_bodies.iter().map(|s|(owner(s.0,&s.1),s.2.clone())).collect();
+    state.pending_poses.retain(|key,(_,at)| live_pose.contains(key) || at.elapsed()<STALE_BODY_GRACE);
 
     let mut live_graphics=BTreeSet::new();let mut graphics_count=BTreeMap::<u64,usize>::new();
     for &&(peer,_,ref packet) in &accepted {
@@ -268,6 +277,7 @@ fn incoming(world:&mut World,mods:&mut Mods,state:&mut State,records:Vec<(u64,St
         let o=owner(peer,&packet.owner);let key=(o.clone(),packet.key.clone());
         let bound=record.definition.body.as_ref().is_none_or(|body| {
             state.bodies.get(&(peer,packet.owner.clone(),body.clone())).is_some_and(|r|r.epoch==packet.epoch && Some(r.instance)==record.body_instance)
+                || state.pending_poses.contains_key(&(o.clone(),body.clone()))
         });
         let visible=record.visible && bound;
         if state.graphics.get(&slot)!=Some(&(packet.epoch,packet.instance))
@@ -371,6 +381,12 @@ pub(super) fn reset(world:&mut World,mods:&mut Mods) {
     }
     let mut old=std::mem::take(&mut mods.replication);clear_remote(world,mods,&mut old);
     mods.dyn_published.clear();
+}
+impl State {
+    pub(super) fn pending_root(&self, owner:&str, body:&str) -> Option<(Vec3,Quat)> {
+        let (pose,_)=self.pending_poses.get(&(owner.to_owned(),body.to_owned()))?;
+        Some((Vec3::from_array(pose.p),Quat::from_array(pose.q).normalize()))
+    }
 }
 pub(crate) fn attached_root(mods:&Mods,peer:u64) -> Option<(Transform,bool)> {
     let attachment=mods.replication.attachments.get(&peer)?;

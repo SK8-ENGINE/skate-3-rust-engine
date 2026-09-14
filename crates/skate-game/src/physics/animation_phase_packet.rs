@@ -56,7 +56,7 @@ impl AnimationProfile {
             ignore_respawn_reset_button: 0,
             force_braking: false,
             suppress_transition: false,
-            gesture_selections: None,
+            gesture_selections: Some([0, 1, 2, 3]),
             //82B988B8 returns false when its optional context is absent.
             suppress_up_gesture: false,
             gesture_force_brake_bypass: false,

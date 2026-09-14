@@ -1,0 +1,26 @@
+{
+  "id": "examples.game-of-skate",
+  "api": 2,
+  "name": "Game of SKATE",
+  "version": "0.2.0",
+  "author": "Skate3clone",
+  "description": "One skater sets a trick. Everyone else has to match it or take a letter. Last player without SKATE wins. Works solo as a set-then-match drill.",
+  "entry": "main.lua",
+  "settings": {
+    "copy_seconds": {
+      "type": "number",
+      "label": "Copy window (seconds)",
+      "description": "How long copiers have to match the set trick before taking a letter.",
+      "default": 45,
+      "min": 15,
+      "max": 120,
+      "step": 5
+    },
+    "allow_ollie": {
+      "type": "boolean",
+      "label": "Allow ollie as a set",
+      "description": "If off, ollies and nollies cannot start a round.",
+      "default": false
+    }
+  }
+}

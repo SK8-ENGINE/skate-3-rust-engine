@@ -181,6 +181,8 @@ impl RidingOutputs {
         let deck = board.part_transforms()[BodyId::Deck.index()];
         //The source takes the previous final frame X for the damping step.
         let previous_right = self.reckoning_frames.system[0];
+        #[cfg(debug_assertions)]
+        super::dev_trace::event("ground_reckoning_inputs", format!("heading={heading:?} pose={pose:?} flags={processed_flags_2468:08x} balance={animation_balance} coffin={coffin} wheels={} speed={} dt={} ground={:?} dynamic_up={:?} board_up={:?} previous_up={:?} previous_up_velocity={:?} previous_right={previous_right:?}", processed.wheel_count_2556,observations.speed,processed.timestep_2604,observations.wheel_normal,observations.dynamic_up,deck.basis.columns[1],self.reckoning.up,self.reckoning.up_velocity));
         self.reckoning_frames.heading = heading;
         body_spin::update_ground(&mut self.body_spin, pose.body_spin);
         let effective = BoardMotionOutput::from_board(
@@ -209,6 +211,8 @@ impl RidingOutputs {
                 prevent_up_behind_board: coffin,
             },
         );
+        #[cfg(debug_assertions)]
+        super::dev_trace::event("before_reckoning_transform", format!("up={:?} heading={:?} target={:?} up_velocity={:?} ground_normal={:?} body_flip={:?}",self.reckoning.up,self.reckoning_frames.heading,self.reckoning.target,self.reckoning.up_velocity,self.reckoning.ground_normal,self.reckoning_frames.body_flip));
         let up = lanes(self.reckoning.up);
         self.reckoning_frames
             .calculate_transform(up, lanes(self.reckoning.ground_normal));

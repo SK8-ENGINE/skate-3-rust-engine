@@ -12,6 +12,11 @@ use skate_core::{
 };
 use skate_data::{collections::Collections, scoring::ScoringData};
 
+#[path = "scoring_runtime/display.rs"]
+mod display;
+#[path = "scoring_runtime/rotation.rs"]
+mod rotation;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Collector {
     None,
@@ -34,8 +39,12 @@ pub(crate) struct Frame {
     pub forward: [f32; 3],
     pub switch: bool,
     pub fakie: bool,
-    pub nollie: bool,
+    pub regular: bool,
+    pub player_basis: rotation::Basis,
+    pub board_basis: rotation::Basis,
+    pub reckoning_up: [f32; 3],
     pub body_flip: bool,
+    pub front_flip: bool,
     pub suspend_air: bool,
     pub landing: skate_core::animation::landing_quality::Output,
     pub teleported: bool,
@@ -52,7 +61,13 @@ pub(crate) struct Runtime {
     metric_started: [bool; 4],
     start: [f32; 3],
     previous: [f32; 3],
-    previous_heading: f32,
+    rotation: rotation::Rotation,
+    spin_turns: i32,
+    body_flip_count: i32,
+    display_id: Option<usize>,
+    air_stance: [bool; 2],
+    air_display_started: bool,
+    line_hold_ticks: u32,
     spin: f32,
     peak: f32,
     air_factor: f32,
@@ -68,6 +83,12 @@ pub(crate) struct Runtime {
     sequence_active: bool,
     sequence_score: f32,
     trick_name: String,
+    trick_seq: u32,
+    pub(crate) landing_seq: u32,
+    pub(crate) landed_trick: String,
+    pub(crate) bail_seq: u32,
+    settled_trick_seq: u32,
+    was_bailing: bool,
     stance: [bool; 4],
     clean: bool,
     sketchy: bool,
@@ -88,7 +109,13 @@ impl Runtime {
             metric_started: [false; 4],
             start: [0.; 3],
             previous: [0.; 3],
-            previous_heading: 0.,
+            rotation: Default::default(),
+            spin_turns: 0,
+            body_flip_count: 0,
+            display_id: None,
+            air_stance: [false; 2],
+            air_display_started: false,
+            line_hold_ticks: 0,
             spin: 0.,
             peak: 0.,
             air_factor: 1.,
@@ -104,6 +131,12 @@ impl Runtime {
             sequence_active: false,
             sequence_score: 0.,
             trick_name: String::new(),
+            trick_seq: 0,
+            landing_seq: 0,
+            landed_trick: String::new(),
+            bail_seq: 0,
+            settled_trick_seq: 0,
+            was_bailing: false,
             stance: [false; 4],
             clean: false,
             sketchy: false,
@@ -111,6 +144,37 @@ impl Runtime {
             modified_trick: false,
             close_tricks: false,
         })
+    }
+    pub(crate) fn trick_name(&self) -> &str {
+        &self.trick_name
+    }
+    pub(crate) fn trick_seq(&self) -> u32 {
+        self.trick_seq
+    }
+    pub(crate) fn sequence_score(&self) -> f32 {
+        self.sequence_score
+    }
+    pub(crate) fn sequence_active(&self) -> bool {
+        self.sequence_active
+    }
+    pub(crate) fn line_score(&self) -> f32 {
+        self.session.holder.snapshot.line
+    }
+    pub(crate) fn multiplier(&self) -> f32 {
+        self.session.combo.multiplier
+    }
+    pub(crate) fn line_time(&self) -> f32 {
+        let drain = self.data.line_drain.max(1e-4);
+        self.session.line.points / drain
+    }
+    pub(crate) fn clean(&self) -> bool {
+        self.clean
+    }
+    pub(crate) fn sketchy(&self) -> bool {
+        self.sketchy
+    }
+    pub(crate) fn stance(&self) -> [bool; 4] {
+        self.stance
     }
     pub fn hud_input(&self) -> hud_runtime::Input {
         hud_runtime::Input {
@@ -126,10 +190,10 @@ impl Runtime {
             trick_name: self.trick_name.clone(),
             trick_metrics: [
                 Value::Text(self.trick_name.clone()),
-                Value::Bool(false),
-                Value::Bool(false),
-                Value::Bool(false),
-                Value::Bool(false),
+                Value::Bool(self.stance[0]),
+                Value::Bool(self.stance[1]),
+                Value::Bool(self.was_bailing),
+                Value::Bool(self.new_trick),
             ],
             context_tricks: Vec::new(),
         }
@@ -189,7 +253,7 @@ impl Runtime {
             let conversion = id.filter(|new| {
                 self.collector == Collector::Air
                     && self.carriers[slot].is_some()
-                    && LINKS[*new].0 >= 0
+                    && LINKS[*new].1 >= 0
             });
             let chained_grab = self.collector == Collector::Air
                 && id
@@ -248,6 +312,7 @@ impl Runtime {
                     self.modified_trick = true;
                 }
                 if conversion.is_some() {
+                    self.display_id = Some(id);
                     self.trick_name = d.label.clone();
                 }
                 self.carriers[slot] = Some(carrier);
@@ -266,8 +331,13 @@ impl Runtime {
                     .by_id(c.scorable.id)
                     .ok_or("Missing announced scorable")?;
                 self.trick_name = d.label.clone();
-                self.stance = [f.switch, f.fakie, f.nollie, false];
+                self.display_id = Some(c.scorable.id);
+                if self.collector == Collector::Air {
+                    self.air_display_started = true;
+                }
+                self.stance = [f.switch, f.fakie, true, display::nollie(d)];
                 self.new_trick = true;
+                self.trick_seq = self.trick_seq.saturating_add(1);
                 if self.collector == Collector::Air && !self.air_repetition_set {
                     self.air_repetition = penalty;
                     self.air_repetition_set = true;
@@ -330,6 +400,11 @@ impl Runtime {
         Ok(())
     }
     pub fn advance(&mut self, f: Frame) -> Result<(), String> {
+        let bailing = f.category == FilteredCategory::Wipeout;
+        if bailing && !self.was_bailing {
+            self.bail_seq = self.bail_seq.saturating_add(1);
+        }
+        self.was_bailing = bailing;
         self.new_trick = false;
         self.modified_trick = false;
         self.close_tricks = false;
@@ -364,6 +439,12 @@ impl Runtime {
             next = Collector::None;
         }
         if next != self.collector {
+            if self.collector == Collector::Air {
+                bevy::log::info!(target: "scoring", "SCORING_AIR_REWARDS tick={} trick={:?} carrier={:?} spin_degrees={} body_flip={} metrics={:?} air_factor={} repetition={}", f.tick, self.trick_name,
+                    self.carriers[0].as_ref().map(|c| (c.scorable.id, c.reward, c.announced)),
+                    self.spin.to_degrees(), self.body_flip_count, self.air_metrics, self.air_factor, self.air_repetition);
+                bevy::log::info!(target: "scoring", "SCORING_AIR_EXIT tick={} state={} preview={} multiplier={} line_points={} combo_points={} landing_valid={} landing_type={} switch={} fakie={}", f.tick, f.state, self.sequence_score, self.session.combo.multiplier, self.session.line.points, self.session.combo.timer.points, f.landing.landing_data_167, f.landing.landing_type_96, f.switch, f.fakie);
+            }
             let complete = next != Collector::None;
             let previous_type = self
                 .carriers
@@ -377,9 +458,15 @@ impl Runtime {
             if self.collector == Collector::Air {
                 if complete {
                     for (i, reward) in self.air_metrics.into_iter().enumerate() {
-                        if let Some(d) = self.data.by_id(129 + i) {
-                            self.session.holder.end_trick(d.metadata, reward);
-                        }
+                        // Skate 3 ExitAir82DA86B4..86F4 credits built-in metric
+                        // IDs directly. These have enum metadata, but no VLT
+                        // scorable record; descriptor lookup would discard them.
+                        let id = 129 + i;
+                        let (_, class, score_type) = skate_core::scoring::catalog::IDENTIFIERS[id];
+                        self.session.holder.end_trick(
+                            skate_core::scoring::Scorable { id, class, score_type },
+                            reward,
+                        );
                     }
                 }
                 self.session.holder.finish_collector();
@@ -389,7 +476,9 @@ impl Runtime {
             self.start = f.position;
             self.peak = f.position[1];
             self.spin = 0.;
-            self.previous_heading = f.forward[0].atan2(f.forward[2]);
+            self.rotation.reset(f.player_basis, f.board_basis);
+            self.spin_turns = 0;
+            self.body_flip_count = 0;
             self.air_metrics = [0.; 5];
             self.air_repetition = 1.;
             self.air_repetition_set = false;
@@ -399,6 +488,9 @@ impl Runtime {
             self.manual_revert_ticks = 0;
             self.revert_id = None;
             if next == Collector::Air {
+                self.air_stance = [f.switch, f.fakie];
+                self.air_display_started = false;
+                self.display_id = None;
                 self.session.holder.reward_sequence(1.);
                 self.landing_countdown = 0;
                 if previous_type == Some(8) {
@@ -407,9 +499,15 @@ impl Runtime {
                 if previous_type == Some(5) {
                     self.air_factor *= self.data.collector.scalar(0x690);
                 }
-                if f.velocity[0] * f.velocity[0] + f.velocity[2] * f.velocity[2]
-                    < self.data.collector.scalar(0x66c).powi(2)
-                {
+                // 82DA81E4..823C measures velocity perpendicular to the
+                // current reckoning up, not world-horizontal speed. A vertical
+                // quarter-pipe launch must not receive the stationary penalty.
+                let up_length_squared = f.reckoning_up.iter().map(|v| v * v).sum::<f32>();
+                let up_speed = f.velocity.iter().zip(f.reckoning_up)
+                    .map(|(v, up)| v * up).sum::<f32>() / up_length_squared;
+                let riding_speed_squared = f.velocity.iter().zip(f.reckoning_up)
+                    .map(|(v, up)| (v - up * up_speed).powi(2)).sum::<f32>();
+                if riding_speed_squared < self.data.collector.scalar(0x66c).powi(2) {
                     self.air_factor *= self.data.collector.scalar(0x688);
                 }
                 if f.switch && !f.fakie {
@@ -477,12 +575,12 @@ impl Runtime {
             if self.collector_ticks > 5 || f.flags & 0x01000000 != 0 {
                 self.sequence_active = true;
             }
-            let heading = f.forward[0].atan2(f.forward[2]);
-            let delta = (heading - self.previous_heading + std::f32::consts::PI)
-                .rem_euclid(std::f32::consts::TAU)
-                - std::f32::consts::PI;
-            self.spin += delta;
-            self.previous_heading = heading;
+            self.spin = self.rotation.update(
+                f.player_basis,
+                f.board_basis,
+                f.reckoning_up,
+                self.carriers[0].is_some(),
+            );
             self.peak = self.peak.max(f.position[1]);
             let dx = f.position[0] - self.start[0];
             let dz = f.position[2] - self.start[2];
@@ -499,15 +597,63 @@ impl Runtime {
             let turns =
                 ((self.spin.to_degrees().abs() + self.data.collector.scalar(0x63c)) / 180.) as i32;
             self.air_metrics[3] = self.data.collector.curve(0x370, (turns * 180) as f32) * scale;
+            let signed_turns = if self.spin < 0. { -turns } else { turns };
+            if signed_turns != self.spin_turns {
+                self.spin_turns = signed_turns;
+                if self.display_id.is_none() && self.spin_turns != 0 && !self.new_trick {
+                    // 82775914 starts a display even when no trick descriptor exists.
+                    if !self.air_display_started {
+                        self.air_display_started = true;
+                        self.new_trick = true;
+                        self.trick_seq = self.trick_seq.saturating_add(1);
+                    } else {
+                        self.modified_trick = true;
+                    }
+                } else {
+                    self.modified_trick = true;
+                }
+            }
             if f.body_flip
                 && self.carriers[0]
                     .as_ref()
                     .is_some_and(|c| c.announced && c.scorable.class == 2)
             {
-                self.air_metrics[4] = self.data.collector.scalar(0x640) * scale;
+                // 82DA8EB8 retains signed +2348 after the grab/flip is released.
+                let count = if f.front_flip { 1 } else { -1 };
+                if count != self.body_flip_count {
+                    self.body_flip_count = count;
+                    self.modified_trick = true;
+                }
             }
+            self.air_metrics[4] =
+                self.body_flip_count.abs() as f32 * self.data.collector.scalar(0x640) * scale;
         }
-        let active = self.carriers.iter().any(Option::is_some) || self.collector == Collector::Air;
+        if self.new_trick || self.modified_trick {
+            let [switch, fakie] = if self.collector == Collector::Air {
+                self.air_stance
+            } else {
+                [f.switch, f.fakie]
+            };
+            let (name, stance) = display::compose(
+                &self.data,
+                self.display_id,
+                self.spin_turns,
+                self.body_flip_count,
+                switch,
+                fakie,
+                f.regular,
+            );
+            self.trick_name = name;
+            self.stance = stance;
+        } else if !self.sequence_active {
+            // Stance remains live when riding, instead of retaining the last trick forever.
+            self.stance = [f.switch, f.fakie, true, false];
+        }
+        // Ground IsSequenceActive82DAB3FC preserves the sequence while
+        // ScoringTrick bit24 is set, including the manual-to-pop animation.
+        let active = self.carriers.iter().any(Option::is_some)
+            || self.collector == Collector::Air
+            || self.collector == Collector::Ground && f.flags & 0x0100_0000 != 0;
         self.idle_ticks = if active {
             0
         } else {
@@ -537,6 +683,7 @@ impl Runtime {
                 if self.sketchy {
                     factor *= self.data.collector.scalar(0x620);
                 }
+                bevy::log::info!(target: "scoring", "SCORING_LANDING_FACTOR tick={} pending={} accumulated={} factor={} clean={} sketchy={}", f.tick, self.session.holder.snapshot.general_pending + self.session.holder.snapshot.fingerflip_pending, self.session.holder.snapshot.accumulated, factor, self.clean, self.sketchy);
                 self.session.holder.reward_sequence(factor);
             } else {
                 self.landing_countdown -= 1;
@@ -558,22 +705,48 @@ impl Runtime {
         } else {
             1.
         };
-        self.session
+        // 82DA3624 holds the active sequence, including ground settlement;
+        // it does not use "a descriptor exists this frame" as the hold flag.
+        let ground_hold_limit = (self.data.collector.scalar(0x5fc) * 60.) as u32;
+        let hold_line = self.sequence_active
+            && (self.collector != Collector::Ground || self.line_hold_ticks < ground_hold_limit);
+        let held = self
+            .session
             .line
-            .advance(f.dt, self.data.line_drain, line_scale, active);
+            .advance(f.dt, self.data.line_drain, line_scale, hold_line);
+        self.line_hold_ticks = if held && self.collector == Collector::Ground {
+            self.line_hold_ticks.saturating_add(1)
+        } else {
+            0
+        };
         self.session
             .combo
             .timer
-            .advance(f.dt, self.data.combo_drain, combo_scale, active);
+            .advance(f.dt, self.data.combo_drain, combo_scale, false);
         let bailout = self.collector == Collector::None && self.sequence_active;
         if self.sequence_active && (bailout || self.idle_ticks >= 3 && self.landing_countdown == 0)
         {
             if bailout {
                 self.session.holder.cancel_pending();
             }
+            let applied_multiplier = self.session.combo.multiplier;
+            let raw_reward = self.session.holder.snapshot.accumulated
+                + self.session.holder.snapshot.general_pending
+                + self.session.holder.snapshot.fingerflip_pending;
             self.sequence_score =
                 self.session
                     .publish_sequence(&self.data.session_rules(), 1., bailout, true);
+            bevy::log::info!(target: "scoring", "SCORING_BANK tick={} state={} raw={} applied_multiplier={} reward={} next_multiplier={} line={} line_expired={} bail={} teleport={}", f.tick, f.state, raw_reward, applied_multiplier, self.sequence_score, self.session.combo.multiplier, self.session.holder.snapshot.line, self.session.line.expired, bailout, f.teleported);
+            if !bailout
+                && !f.teleported
+                && f.category == FilteredCategory::Ground
+                && self.trick_seq > self.settled_trick_seq
+                && !self.trick_name.is_empty()
+            {
+                self.landing_seq = self.landing_seq.saturating_add(1);
+                self.landed_trick = self.trick_name.clone();
+            }
+            self.settled_trick_seq = self.trick_seq;
             self.sequence_active = false;
             // 82775328 -> 82774E88 closes only for ScoreModule reset/bail
             // output 14630 (82DA4010/82DA4238), not a banked landing.
@@ -603,10 +776,16 @@ impl Runtime {
                         })
                     })
                     .sum::<f32>()
-                + self.air_metrics.iter().sum::<f32>())
+                // 82DA8FF8 adds distance and peak height to holder +48,
+                // but defers height gain (ID 131) until ExitAir. Its live
+                // value falls during descent and must not enter the HUD score.
+                + self.air_metrics.iter().enumerate()
+                    .filter(|(i, _)| *i != 2)
+                    .map(|(_, reward)| *reward).sum::<f32>())
                 * self.session.combo.multiplier;
         }
         if self.session.line.expired || f.teleported || bailout {
+            bevy::log::info!(target: "scoring", "SCORING_RESET tick={} score={} multiplier={} line_expired={} bail={} teleport={}", f.tick, self.sequence_score, self.session.combo.multiplier, self.session.line.expired, bailout, f.teleported);
             self.sequence_score = 0.;
         }
         self.session.settle_line(f.teleported || bailout, active);
@@ -614,3 +793,7 @@ impl Runtime {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "scoring_runtime/tests.rs"]
+mod tests;

@@ -3,6 +3,7 @@ mod render;
 pub(crate) mod appearance;
 mod appearance_transfer;
 mod transport;
+mod nametags;
 use crate::{
     app::SimulationSet,
     physics::{GamePhysics, SkaterRuntime, network},
@@ -61,6 +62,12 @@ struct Remote {
     body_seq: u32,
     pose_seq: u32,
 }
+pub const NAME_KEY: &str = "mp:name";
+const MAX_NAME: usize = 16;
+
+#[derive(Component, Clone, Copy)]
+pub(crate) struct NetworkActor(pub u64);
+
 #[derive(Resource)]
 pub(crate) struct Multiplayer {
     transport: Option<Box<dyn transport::Transport>>,
@@ -87,6 +94,9 @@ pub(crate) struct Multiplayer {
     pub browser_page: usize,
     pub browser_total: usize,
     pub browser_status: String,
+    pub player_name: String,
+    name_path: std::path::PathBuf,
+    names: BTreeMap<u64, String>,
 }
 impl Multiplayer {
     pub(crate) fn diagnostic_summary(&self) -> String {
@@ -99,6 +109,45 @@ impl Multiplayer {
         self.lobby
             .as_ref()
             .map_or((false, 0, true), |l| (true, l.local, l.is_host()))
+    }
+    pub(crate) fn player_ids(&self) -> Vec<u64> {
+        let Some(lobby) = &self.lobby else {
+            return Vec::new();
+        };
+        let mut ids = vec![lobby.local];
+        ids.extend(lobby.actors.keys().copied());
+        ids.extend(self.remotes.keys().copied());
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+    pub(crate) fn session_identity(&self) -> Option<(u64, u64, u64)> {
+        self.lobby.as_ref().map(|l| (l.session, l.local, l.host_peer()))
+    }
+    pub(crate) fn host_peer(&self) -> u64 {
+        self.lobby.as_ref().map_or(0, |l| l.host_peer())
+    }
+    pub(crate) fn published_name(&self) -> String {
+        sanitize_name(&self.player_name)
+    }
+    pub(crate) fn skater_name(&self, id: &str, local_id: &str) -> String {
+        if id == local_id {
+            return self.published_name();
+        }
+        id.parse::<u64>()
+            .ok()
+            .and_then(|peer| self.names.get(&peer).cloned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| id.to_owned())
+    }
+    pub(crate) fn actor_pose(&self, id: u64) -> Option<(Vec3, Quat)> {
+        let remote = self.remotes.get(&id)?;
+        let transform = Transform::from_matrix(network::matrix(remote.body.root));
+        Some((transform.translation, transform.rotation.normalize()))
+    }
+    pub fn set_player_name(&mut self, name: String) {
+        self.player_name = name.chars().take(MAX_NAME).collect();
+        persist_player_name(&self.name_path, &self.player_name);
     }
     pub(crate) fn publish_application(&mut self, key: &str, value: Vec<u8>) -> bool {
         let now = self.started.elapsed().as_millis() as u64;
@@ -131,6 +180,7 @@ impl Multiplayer {
         self.transport = None;
         self.lobby = None;
         self.remotes.clear();
+        self.names.clear();
         self.host_code.clear();
         self.room = None;
         self.status = "Offline. Steam is only needed for Steam multiplayer.".into();
@@ -326,6 +376,14 @@ impl Plugin for MultiplayerPlugin {
             browser_page: 0,
             browser_total: 0,
             browser_status: String::new(),
+            name_path: player_name_path(&config.asset_root),
+            player_name: config
+                .multiplayer
+                .title
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| load_player_name(&player_name_path(&config.asset_root))),
+            names: BTreeMap::new(),
         };
         if let Some(bind) = config
             .multiplayer
@@ -342,10 +400,16 @@ impl Plugin for MultiplayerPlugin {
             }
         }
         app.insert_resource(net)
-            .add_systems(PreUpdate, (world_changed, receive).chain().after(crate::map_transition::MapTransitionSet))
+            .add_systems(PreUpdate, (world_changed, receive, sync_names).chain().after(crate::map_transition::MapTransitionSet))
             .add_systems(Startup, setup_hud)
             .add_systems(Update, hud)
             .add_systems(Update, send_pose)
+            .add_systems(
+                Update,
+                nametags::draw
+                    .after(RemoteRenderSet)
+                    .after(crate::modding::ModCameraSet),
+            )
             .add_systems(
                 FixedUpdate,
                 prepare
@@ -692,5 +756,69 @@ pub(crate) fn send_pose(mut net: ResMut<Multiplayer>, skater: Res<SkaterRuntime>
             net.lobby.as_mut().unwrap().publish(packed::POSE, p, now);
         }
         net.last_pose = Instant::now();
+    }
+}
+
+fn player_name_path(asset_root: &std::path::Path) -> std::path::PathBuf {
+    asset_root
+        .parent()
+        .unwrap_or(asset_root)
+        .join("settings/player.json")
+}
+
+fn load_player_name(path: &std::path::Path) -> String {
+    let Ok(bytes) = std::fs::read(path) else {
+        return "Player".into();
+    };
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    sanitize_name(value.get("name").and_then(|v| v.as_str()).unwrap_or("Player"))
+}
+
+fn persist_player_name(path: &std::path::Path, name: &str) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(
+        path,
+        serde_json::to_vec_pretty(&serde_json::json!({ "name": name })).unwrap_or_default(),
+    );
+}
+
+pub(crate) fn sanitize_name(raw: &str) -> String {
+    let mut out = String::new();
+    for ch in raw.chars() {
+        if out.chars().count() >= MAX_NAME {
+            break;
+        }
+        if ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_') {
+            out.push(ch);
+        }
+    }
+    let trimmed = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if trimmed.is_empty() {
+        "Player".into()
+    } else {
+        trimmed
+    }
+}
+
+fn sync_names(mut net: ResMut<Multiplayer>) {
+    let name = net.published_name();
+    if let Some(local) = net.lobby.as_ref().map(|l| l.local) {
+        net.names.insert(local, name.clone());
+    }
+    if net.active() {
+        let _ = net.publish_application(NAME_KEY, name.into_bytes());
+        let records = net.application_records();
+        for (peer, key, _, bytes) in records {
+            if key != NAME_KEY {
+                continue;
+            }
+            if let Ok(raw) = String::from_utf8(bytes) {
+                net.names.insert(peer, sanitize_name(&raw));
+            }
+        }
+        let live: std::collections::BTreeSet<u64> = net.player_ids().into_iter().collect();
+        net.names.retain(|id, _| live.contains(id));
     }
 }

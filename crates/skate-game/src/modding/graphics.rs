@@ -79,13 +79,16 @@ pub(super) fn spawn(
     } else {
         let mesh=world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(1.,1.,1.));
         let c=definition.color;
+        let a=definition.opacity;
         let material=world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
-            base_color:Color::srgb(c[0],c[1],c[2]),..default()
+            base_color:Color::srgba(c[0],c[1],c[2],a),
+            alpha_mode: if a < 1. { AlphaMode::Blend } else { AlphaMode::Opaque },
+            ..default()
         });
         (world.spawn((Mesh3d(mesh.clone()),MeshMaterial3d(material.clone()),t,visibility)).id(),Some(mesh.id()),Some(material.id()))
     };
     mods.graphics_serial=mods.graphics_serial.wrapping_add(1);
-    world.entity_mut(entity).insert(crate::retail_character::ModGraphicsLit);
+    world.entity_mut(entity).insert((crate::retail_character::ModGraphicsLit,super::ModGraphicsOpacity(definition.opacity)));
     mods.graphics.insert(slot,Owned {
         entity,mesh,material,body:definition.body.clone(),definition,transform:state,visible,
         serial:serial.unwrap_or(mods.graphics_serial),nodes:BTreeMap::new(),bindings:BTreeMap::new(),
@@ -134,9 +137,12 @@ pub(super) fn sync(world:&mut World,mods:&mut Mods) {
                 let q=Quat::from_array(snap.rotation).normalize();
                 t.translation=Vec3::from_array(snap.position)+q*t.translation;
                 t.rotation=(q*t.rotation).normalize();
+            } else if let Some((position,rotation))=mods.replication.pending_root(owner,body) {
+                t.translation=position+rotation*t.translation;
+                t.rotation=(rotation*t.rotation).normalize();
             } else {
                 // Out-of-order network spawn: never show a body-bound scene
-                // at the origin while its validated collider is still pending.
+                // at the origin while no validated pose has arrived.
                 visible=false;
             }
         }

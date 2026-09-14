@@ -23,3 +23,5 @@ pub mod body_flip_signal;
 
 pub mod wipeout_intentions;
 pub mod offboard_intentions;
+
+pub mod gameplay_gestures;

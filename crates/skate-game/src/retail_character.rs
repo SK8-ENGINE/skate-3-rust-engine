@@ -269,6 +269,7 @@ fn bind(
     parents: Query<&ChildOf>,
     players: Query<(), Or<(With<crate::world::PlayerRoot>, With<crate::multiplayer::appearance::RemoteCharacter>)>>,
     mod_graphics: Query<(), With<ModGraphicsLit>>,
+    opacity: Query<&crate::modding::ModGraphicsOpacity>,
     parts: Query<(), With<crate::customiser_parts::PartRoot>>,
     native: Query<&crate::custom_models::NativeModelRoot>,
     imports: Query<(), With<crate::custom_models::CustomModelRoot>>,
@@ -317,10 +318,13 @@ fn bind(
         } else {
             -1.
         };
+        let opacity = parents.iter_ancestors(entity).find_map(|e| opacity.get(e).ok()).map_or(1., |o|o.0);
+        let mut tint=Vec4::from_array(m.base_color.to_linear().to_f32_array());
+        tint.w *= opacity;
         let material = materials.add(CharacterMaterial {
             params: CharacterParams {
                 light: lighting.light,
-                tint: Vec4::from_array(m.base_color.to_linear().to_f32_array()),
+                tint,
                 options: Vec4::new(
                     f32::from(m.normal_map_texture.is_some()),
                     f32::from(data.specular.is_some()),
@@ -343,7 +347,7 @@ fn bind(
                     },
                 )
             }),
-            alpha: m.alpha_mode,
+            alpha: if opacity < 0.999 {AlphaMode::Blend} else {m.alpha_mode},
         });
         // Skater meshes come and go with the outfit and the map, so binding one
         // that has since been despawned is routine rather than a fault.

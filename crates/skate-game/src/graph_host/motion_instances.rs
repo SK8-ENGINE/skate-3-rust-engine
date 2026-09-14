@@ -32,6 +32,7 @@ pub(super) enum Instance {
     SetManualAngle(skate_core::animation::manual::State),
     HippyJumpAntic(super::super::motion_hippy_jump::State),
     FingerFlipOut(super::super::motion_finger_flip::State),
+    AirDismounting(super::super::motion_air_dismounting::State),
     ///82BB5930 initializes byte8 once per allocated behavior instance.
     JumpInto { first_update: bool },
 }
@@ -102,6 +103,9 @@ impl Instance {
             MotionOperation::StockGameplay(
                 super::super::motion_stock_gameplay::Operation::JumpInto { .. },
             ) => Self::JumpInto { first_update: true },
+            MotionOperation::StockGameplay(
+                super::super::motion_stock_gameplay::Operation::AirDismounting,
+            ) => Self::AirDismounting(Default::default()),
             MotionOperation::ResetAnimation(_) => Self::Stateless,
             _ => Self::Stateless,
         }

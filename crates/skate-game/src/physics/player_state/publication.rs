@@ -147,6 +147,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             .is_some_and(|s| s.wall_ride),
     );
     physical.air.flag_441 = u8::from(skater.air_reckoning.state.flip_active);
+    physical.air.flag_445 = u8::from(skater.air_reckoning.state.flip_side);
     if state == PhysicalStateId::GroundAnimation {
         skater.ground_animation.fill(p, &mut physical.air);
     }

@@ -7,6 +7,7 @@ use super::{
 };
 use crate::physics::ground_runtime::GroundRuntime;
 use skate_core::{
+    math::Vector3,
     physics::{
         board_runtime::BoardRuntime, board_toolkit::BoardToolkit,
         skeleton_animation_record::AnimationPartTransform,
@@ -75,6 +76,7 @@ pub(super) struct Services<'a, C> {
     pub pending_grind: &'a mut Option<Pending>,
     pub toolkit: &'a mut Option<BoardToolkit>,
     pub pending_teleport: &'a mut Option<AnimationPartTransform>,
+    pub pending_velocity: &'a mut Option<[f32; 3]>,
 }
 impl<C: PlayerInputCallbacks> InputPhaseServices for Services<'_, C> {
     type Error = String;
@@ -136,6 +138,9 @@ impl<C: PlayerInputCallbacks> InputPhaseServices for Services<'_, C> {
             self.callbacks
                 .teleport(self.board, self.ground, target, player, physical, output)?;
             *self.pending_teleport = None;
+            if let Some(v) = self.pending_velocity.take() {
+                apply_board_linvel(self.board, v);
+            }
         }
         Ok(())
     }
@@ -197,5 +202,12 @@ impl<C: PlayerInputCallbacks> InputPhaseServices for Services<'_, C> {
             self.host.air_counter_40,
         )?);
         Ok(())
+    }
+}
+
+fn apply_board_linvel(board: &mut BoardRuntime, v: [f32; 3]) {
+    let vel = Vector3::new(v[0], v[1], v[2]);
+    for body in board.bodies_mut() {
+        body.rates.linear_velocity = vel;
     }
 }

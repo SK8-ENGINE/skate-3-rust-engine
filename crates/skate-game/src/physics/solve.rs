@@ -71,16 +71,15 @@ pub(super) fn advance(
     physics.network_contacts = contacts.len() - before_remote;
     physics.contact_count = contacts.len();
     let dt = physics.settings.step.simulation.time_step;
-    let mut joints =
-        skater
-            .skeleton_joints
-            .build(skater.skeleton.bodies(), ATTACHED_REACTION_BASE, dt);
+    let mut joints = crate::modding::player_physics::joints(skater)
+        .build(skater.skeleton.bodies(), ATTACHED_REACTION_BASE, dt);
     let mut drives = skater.skeleton_drives.build(
         skater.skeleton.bodies(),
         ATTACHED_REACTION_BASE,
         ATTACHED_REACTION_BASE + PART_COUNT,
         dt,
     );
+    crate::modding::player_physics::filter_drives(skater,&mut drives);
     let skeleton_drive_count = drives.rows.len();
     //82D74FD8: persistent hand drives share the deck and skeleton reactions.
     skater.board_possession.append_drives(

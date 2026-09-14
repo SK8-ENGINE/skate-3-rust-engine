@@ -206,6 +206,8 @@ impl AnimatedSkeleton {
             deck.translation.z,
             0.0,
         ];
+        #[cfg(debug_assertions)]
+        super::dev_trace::event("root_inputs", format!("dt={dt} deck={transform:?} velocity={velocity:?} animation_board={:?} reckoning={reckoning:?} initialize_heading={}", self.animation_board,self.roots.initialize_heading));
         self.roots.update(
             transform,
             [velocity.x, velocity.y, velocity.z, 0.0],

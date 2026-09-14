@@ -60,6 +60,7 @@ pub(crate) struct SkaterRuntime {
     pub teleport_state: super::teleport_state::Runtime,
     pub skeleton: SkeletonBody,
     pub skeleton_joints: SkeletonJoints,
+    pub(crate) mod_joint_overrides: std::collections::BTreeMap<usize,(String,skate_mods::extensions::JointOverride)>,
     pub skeleton_drives: SkeletonDrives,
     pub skeleton_collision: SkeletonCollisionMode,
     pub collision_feedback: skate_core::physics::skeleton_body::SkeletonCollisionFeedback,
@@ -99,7 +100,15 @@ pub(crate) struct SkaterRuntime {
 
 impl SkaterRuntime {
     pub(crate) fn travel_to(&mut self, transform: [[f32; 4]; 4]) -> Result<(), String> {
-        self.player_input.request_teleport(transform)?;
+        self.travel(transform, None)
+    }
+
+    pub(crate) fn travel(
+        &mut self,
+        transform: [[f32; 4]; 4],
+        velocity: Option<[f32; 3]>,
+    ) -> Result<(), String> {
+        self.player_input.request_teleport_ex(transform, velocity)?;
         self.teleport_state.request_manual(transform, true);
         Ok(())
     }
@@ -266,6 +275,7 @@ impl SkaterRuntime {
             ),
             skeleton,
             skeleton_joints,
+            mod_joint_overrides: Default::default(),
             skeleton_drives,
             collision_feedback: skeleton_body::load_feedback(&data, skeleton_collision.settings)?,
             skeleton_collision,

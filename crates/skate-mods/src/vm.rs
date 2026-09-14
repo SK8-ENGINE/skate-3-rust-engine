@@ -13,6 +13,103 @@ use std::{
 };
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TeleportOptions {
+    pub position: [f32; 3],
+    #[serde(default)]
+    pub heading: Option<f32>,
+    #[serde(default)]
+    pub velocity: Option<[f32; 3]>,
+}
+
+impl TeleportOptions {
+    pub fn validate(&self) -> bool {
+        let point = |p: &[f32; 3]| p.iter().all(|v| v.is_finite() && v.abs() <= 100_000.);
+        let vel = |p: &[f32; 3]| p.iter().all(|v| v.is_finite() && v.abs() <= 200.);
+        point(&self.position)
+            && self.heading.is_none_or(|h| h.is_finite() && h.abs() <= 1000.)
+            && self.velocity.as_ref().is_none_or(vel)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VolumeOptions {
+    pub position: [f32; 3],
+    pub size: [f32; 3],
+    #[serde(default)]
+    pub rotation: Option<[f32; 4]>,
+    #[serde(default)]
+    pub visible: bool,
+    #[serde(default = "volume_color")]
+    pub color: [f32; 3],
+    #[serde(default = "volume_opacity")]
+    pub opacity: f32,
+}
+
+fn volume_color() -> [f32; 3] {
+    [0.2, 0.85, 1.0]
+}
+fn volume_opacity() -> f32 {
+    0.35
+}
+
+impl VolumeOptions {
+    pub fn validate(&self) -> bool {
+        let point = |p: &[f32; 3]| p.iter().all(|v| v.is_finite() && v.abs() <= 100_000.);
+        point(&self.position)
+            && self.size.iter().all(|v| v.is_finite() && *v > 0.01 && *v <= 500.)
+            && self
+                .rotation
+                .as_ref()
+                .is_none_or(|q| crate::scene::valid_quaternion(q))
+            && self.color.iter().all(|v| v.is_finite() && (0. ..=1.).contains(v))
+            && self.opacity.is_finite()
+            && (0. ..=1.).contains(&self.opacity)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureOptions {
+    pub position: [f32; 3],
+    pub look_at: [f32; 3],
+    #[serde(default = "capture_fov")]
+    pub fov: f32,
+    #[serde(default = "capture_size")]
+    pub width: u32,
+    #[serde(default = "capture_size")]
+    pub height: u32,
+}
+
+fn capture_fov() -> f32 {
+    70.0_f32.to_radians()
+}
+fn capture_size() -> u32 {
+    256
+}
+
+impl CaptureOptions {
+    pub fn validate(&self) -> bool {
+        let point = |p: &[f32; 3]| p.iter().all(|v| v.is_finite() && v.abs() <= 100_000.);
+        point(&self.position)
+            && point(&self.look_at)
+            && self.fov.is_finite()
+            && (0.2..=2.5).contains(&self.fov)
+            && (64..=512).contains(&self.width)
+            && (64..=512).contains(&self.height)
+            && self.width % 16 == 0
+            && self.height % 16 == 0
+    }
+}
+
+fn valid_peer(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 20
+        && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+#[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     Log {
@@ -153,6 +250,8 @@ pub enum Command {
         color: [f32; 3],
         #[serde(default = "true_fn")]
         visible: bool,
+        #[serde(default = "opaque")]
+        opacity: f32,
     },
     GraphicsTransform { key:String, options:crate::scene::TransformOptions },
     GraphicsNode { key:String, node:String, options:crate::scene::TransformOptions },
@@ -181,13 +280,50 @@ pub enum Command {
         #[serde(default)]
         look_at: Option<[f32; 3]>,
     },
+    CameraWatch {
+        #[serde(default)]
+        peer: Option<String>,
+    },
     NetworkState {
         key: String,
         #[serde(default)]
         value: Value,
     },
+    UiMenu { key:String, options:crate::extensions::MenuOptions },
+    UiRemoveMenu { key:String },
+    PlayerJoint { joint:usize, options:crate::extensions::JointOverride },
+    PlayerResetJoint { joint:usize },
+    PlayerResetJoints {},
+    PlayerTeleport {
+        options: TeleportOptions,
+    },
+    SessionClaim {},
+    SessionTransfer {
+        peer: String,
+    },
+    SessionTeleport {
+        peer: String,
+        options: TeleportOptions,
+    },
+    VolumeBox {
+        key: String,
+        options: VolumeOptions,
+    },
+    VolumeRemove {
+        key: String,
+    },
+    CameraCapture {
+        key: String,
+        options: CaptureOptions,
+    },
+    CameraClearCapture {
+        key: String,
+    },
 }
 
+fn opaque() -> f32 {
+    1.0
+}
 fn one_scale() -> [f32; 3] {
     [1., 1., 1.]
 }
@@ -396,6 +532,7 @@ impl Command {
                 rotation,
                 scale,
                 color,
+                opacity,
                 ..
             } => {
                 crate::schema::valid_id(key)
@@ -407,6 +544,8 @@ impl Command {
                     && color
                         .iter()
                         .all(|v| v.is_finite() && (0. ..=1.).contains(v))
+                    && opacity.is_finite()
+                    && (0. ..=1.).contains(opacity)
             }
             Self::PlayerAttach { body, offset } => {
                 crate::schema::valid_id(body) && point(offset)
@@ -423,10 +562,28 @@ impl Command {
             Self::CameraSet { position, look_at } => {
                 point(position) && look_at.as_ref().is_none_or(|p| point(p))
             }
+            Self::CameraWatch { peer } => peer
+                .as_ref()
+                .is_none_or(|p| p.is_empty() || valid_peer(p)),
             Self::NetworkState { key, value } => {
                 crate::schema::valid_id(key)
                     && serde_json::to_vec(value).is_ok_and(|v| v.len() <= 512)
             }
+            Self::UiMenu {key,options} => crate::schema::valid_id(key) && options.validate(),
+            Self::UiRemoveMenu {key} => crate::schema::valid_id(key),
+            Self::PlayerJoint {joint,options} => *joint < 22 && options.validate(),
+            Self::PlayerResetJoint {joint} => *joint < 22,
+            Self::PlayerResetJoints {} => true,
+            Self::PlayerTeleport { options } => options.validate(),
+            Self::SessionClaim {} => true,
+            Self::SessionTransfer { peer } => valid_peer(peer),
+            Self::SessionTeleport { peer, options } => valid_peer(peer) && options.validate(),
+            Self::VolumeBox { key, options } => crate::schema::valid_id(key) && options.validate(),
+            Self::VolumeRemove { key } => crate::schema::valid_id(key),
+            Self::CameraCapture { key, options } => {
+                crate::schema::valid_id(key) && options.validate()
+            }
+            Self::CameraClearCapture { key } => crate::schema::valid_id(key),
         }
     }
 }
@@ -475,7 +632,21 @@ fn command_kind(command: &Command) -> &'static str {
         Command::PlayerDetach { .. } => "player_detach",
         Command::CameraFollow { .. } => "camera_follow",
         Command::CameraSet { .. } => "camera_set",
+        Command::CameraWatch { .. } => "camera_watch",
         Command::NetworkState { .. } => "network_state",
+        Command::UiMenu { .. } => "ui_menu",
+        Command::UiRemoveMenu { .. } => "ui_remove_menu",
+        Command::PlayerJoint { .. } => "player_joint",
+        Command::PlayerResetJoint { .. } => "player_reset_joint",
+        Command::PlayerResetJoints {} => "player_reset_joints",
+        Command::PlayerTeleport { .. } => "player_teleport",
+        Command::SessionClaim { .. } => "session_claim",
+        Command::SessionTransfer { .. } => "session_transfer",
+        Command::SessionTeleport { .. } => "session_teleport",
+        Command::VolumeBox { .. } => "volume_box",
+        Command::VolumeRemove { .. } => "volume_remove",
+        Command::CameraCapture { .. } => "camera_capture",
+        Command::CameraClearCapture { .. } => "camera_clear_capture",
     }
 }
 
@@ -513,12 +684,46 @@ fn default_snapshot() -> Value {
         "player": {
             "position": [0.0, 0.0, 0.0],
             "velocity": [0.0, 0.0, 0.0],
+            "angvel": [0.0, 0.0, 0.0],
+            "forward": [0.0, 0.0, 1.0],
             "heading": 0.0,
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "speed": 0.0,
             "on_board": false,
             "state": 0,
             "category": 0,
+            "filtered": 0,
+            "mode": "ground",
+            "grind": Value::Null,
             "bailing": false,
+            "trick": "",
+            "trick_seq": 0,
+            "landing_seq": 0, "landed_trick": "", "bail_seq": 0,
+            "new_trick": false,
+            "modified_trick": false,
+            "close_tricks": false,
+            "sequence": false,
+            "score": 0,
+            "line": 0,
+            "multiplier": 1.0,
+            "line_time": 0,
+            "clean": false,
+            "sketchy": false,
+            "switch": false,
+            "fakie": false,
+            "nollie": false,
+            "intents": {},
         },
+        "skaters": {},
+        "player_physics": {"contacts":[],"joints":[],"parts":[],"dt":0,"ragdoll":false,"partial_ragdoll":false},
+        "session": {
+            "active": false,
+            "local_id": "0",
+            "is_host": true,
+            "authority": "0",
+            "players": ["0"]
+        },
+        "volumes": {},
         "attach": Value::Null,
         "detach_error": Value::Null,
         "detach_pending": false,
@@ -532,7 +737,15 @@ fn default_snapshot() -> Value {
         "replay": false,
         "camera": Value::Null,
         "physics": {"bodies": {}, "contacts": []},
-        "network": {},
+        "network": {
+            "active": false,
+            "local_id": "0",
+            "is_host": true,
+            "host_id": "0",
+            "players": ["0"],
+            "states": {},
+            "status": "",
+        },
     })
 }
 
@@ -623,6 +836,13 @@ impl Vm {
             capabilities.set("model_collision", 1)?;
             capabilities.set("physics_debug", 1)?;
             capabilities.set("scene_transforms", 2)?;
+            capabilities.set("skater", 4)?;
+            capabilities.set("menus", 3)?;
+            capabilities.set("player_physics", 1)?;
+            capabilities.set("camera", 2)?;
+            capabilities.set("session", 1)?;
+            capabilities.set("volumes", 1)?;
+            capabilities.set("capture", 1)?;
             sdk.set("_native_capabilities", capabilities)?;
             sdk.set("mod_id", manifest.id.clone())?;
             sdk.set(
@@ -730,6 +950,7 @@ impl Vm {
                     "on_unload",
                     "on_update",
                     "on_fixed_update",
+                    "on_ui_update",
                     "on_event",
                     "on_settings",
                 ]
@@ -976,6 +1197,8 @@ mod model_collision_extension_tests {
                 assert(sdk.player.detaching() == false, 'detaching')
                 assert(sdk.player.detach_error() == nil, 'detach_error')
                 assert(type(sdk.player.read()) == 'table', 'read')
+                assert(type(sdk.player.skaters()) == 'table', 'skaters')
+                assert(sdk.player.read().trick == '', 'trick')
                 assert(sdk.input.down('KeyW') == false, 'down')
                 assert(sdk.input.action(64) == 0.0, 'action')
                 assert(type(sdk.input.pad()) == 'table', 'pad')

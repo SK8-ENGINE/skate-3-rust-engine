@@ -62,6 +62,8 @@ pub struct MeshBufferOptions {
     #[serde(default = "true_fn")] pub visible: bool,
     #[serde(default)] pub depth_bias: f32,
     #[serde(default)] pub texture: Option<String>,
+    /// Named `sdk.camera.capture` key; sampled as this mesh's albedo.
+    #[serde(default)] pub capture: Option<String>,
     #[serde(default = "white")] pub tint: [f32; 3],
 }
 
@@ -100,6 +102,8 @@ impl MeshBufferOptions {
             && self.scale.iter().all(|v| v.is_finite() && *v > 0.0 && *v <= 100.0)
             && self.depth_bias.is_finite() && self.depth_bias.abs() <= 10.0
             && self.texture.as_deref().is_none_or(valid_texture)
+            && self.capture.as_deref().is_none_or(crate::schema::valid_id)
+            && !(self.capture.is_some() && self.texture.is_some())
             && color3(&self.tint)
     }
 }
