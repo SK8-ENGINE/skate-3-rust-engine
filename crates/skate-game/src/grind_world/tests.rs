@@ -17,7 +17,7 @@ fn native(id: u64, length: f32) -> Rail {
 
 #[test]
 fn no_map_keeps_current_flat_course_empty() {
-    assert!(primitives(None).unwrap().is_empty());
+    assert!(StaticProvider::new(None).unwrap().primitives().is_empty());
     let provider = StaticProvider::new(None).unwrap();
     assert!(provider.query([-1.; 3], [1.; 3]).unwrap().is_empty());
 }

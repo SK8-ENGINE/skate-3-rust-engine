@@ -20,6 +20,7 @@ fn hit(world: &BoardWorld, a: Vec3, b: Vec3, radius: f32) -> Option<(Vec3, Vec3)
         Vec3::new(h.normal.x, h.normal.y, h.normal.z),
     ))
 }
+#[cfg(test)]
 pub(super) fn find(world: &BoardWorld, feet: Vec3, facing: Vec3) -> Option<Ledge> {
     find_range(world, feet, facing, 1.90, 0.95)
 }

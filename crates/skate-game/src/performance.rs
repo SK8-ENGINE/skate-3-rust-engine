@@ -168,11 +168,19 @@ impl Plugin for PerformancePlugin {
         app.insert_resource(Performance::new(output))
             .init_resource::<DrawStats>()
             .insert_resource(phases.clone())
-            // Per-pass GPU timings, which is the only way to attribute frame cost
-            // to the GPU rather than to render-schedule CPU work.
-            .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
             .add_systems(First, frame_begin)
             .add_systems(Last, frame_end);
+        // GPU timestamp/statistics queries add work of their own. Ordinary CPU
+        // frame comparisons must not enable them implicitly.
+        if std::env::var("SKATE_PERF_GPU").as_deref() == Ok("1") {
+            app.add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
+        }
+
+        // Phase-boundary systems serialize otherwise overlapping render work.
+        // Only enable that detailed attribution when explicitly requested.
+        if std::env::var("SKATE_PERF_RENDER").as_deref() != Ok("1") {
+            return;
+        }
 
         use bevy::render::{Render, RenderApp, RenderSystems};
         let Some(render) = app.get_sub_app_mut(RenderApp) else {
@@ -332,6 +340,8 @@ fn frame_end(
 struct Report {
     frames: usize,
     fps: f32,
+    fps_1_percent_low: f32,
+    slowest_1_percent_ms_mean: f32,
     frame_ms_mean: f32,
     frame_ms_median: f32,
     frame_ms_p95: f32,
@@ -370,9 +380,16 @@ fn summarise(samples: &[Frame], draws: &DrawStats) -> Report {
         sorted[rank.clamp(1, sorted.len()) - 1]
     };
     let frame_ms_mean = mean(&sorted);
+    // A 1% low averages the slowest ceil(N / 100) frame times, then takes
+    // their reciprocal. It is distinct from the reciprocal of the p99 cutoff.
+    let slowest_1_percent_ms_mean = mean(&sorted[frames - frames.div_ceil(100)..]);
     Report {
         frames,
         fps: if frame_ms_mean > 0.0 { 1000.0 / frame_ms_mean } else { 0.0 },
+        fps_1_percent_low: if slowest_1_percent_ms_mean > 0.0 {
+            1000.0 / slowest_1_percent_ms_mean
+        } else { 0.0 },
+        slowest_1_percent_ms_mean,
         frame_ms_mean,
         frame_ms_median: percentile(0.50),
         frame_ms_p95: percentile(0.95),
@@ -392,7 +409,11 @@ fn summarise(samples: &[Frame], draws: &DrawStats) -> Report {
 fn write_report(path: &std::path::Path, report: &Report) -> std::io::Result<()> {
     let json = serde_json::json!({
         "frames": report.frames,
+        "gpu_queries_enabled": std::env::var("SKATE_PERF_GPU").as_deref() == Ok("1"),
+        "render_phase_instrumentation": std::env::var("SKATE_PERF_RENDER").as_deref() == Ok("1"),
         "fps": report.fps,
+        "fps_1_percent_low": report.fps_1_percent_low,
+        "slowest_1_percent_ms_mean": report.slowest_1_percent_ms_mean,
         "frame_ms_mean": report.frame_ms_mean,
         "frame_ms_median": report.frame_ms_median,
         "frame_ms_p95": report.frame_ms_p95,
@@ -472,5 +493,18 @@ mod tests {
         let report = summarise(&[], &DrawStats::default());
         assert_eq!(report.frames, 0);
         assert_eq!(report.fps, 0.0);
+        assert_eq!(report.fps_1_percent_low, 0.0);
+    }
+
+    #[test]
+    fn one_percent_low_averages_the_tail_including_fractional_sample_counts() {
+        let mut samples = vec![frame(2.0); 199];
+        samples.extend([frame(10.0), frame(18.0)]);
+        let report = summarise(&samples, &DrawStats::default());
+        assert_eq!(report.frame_ms_p99, 2.0);
+        assert_eq!(report.slowest_1_percent_ms_mean, 10.0);
+        assert_eq!(report.fps_1_percent_low, 100.0);
+        let one = summarise(&[frame(8.0)], &DrawStats::default());
+        assert_eq!(one.fps_1_percent_low, 125.0);
     }
 }

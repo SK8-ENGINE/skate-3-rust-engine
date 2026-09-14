@@ -35,7 +35,7 @@ mod solve;
 pub(crate) mod solid_contacts;
 pub(crate) mod network;
 pub(crate) use skater::SkaterRuntime;
-pub(crate) use input_phase::{facing_from_visual, horizontal_spawn};
+pub(crate) use input_phase::facing_from_visual;
 mod animation_feedback;
 mod animation_feedback_settings;
 mod animation_input;
@@ -51,6 +51,7 @@ mod grind_chromosome;
 mod grind_host;
 mod grind_materials;
 mod ground_animation;
+mod grind_trick;
 mod slide_state;
 mod revert_state;
 mod ground_exit;
@@ -224,11 +225,6 @@ impl GamePhysics {
         // Keep the board, active trick, equipment preferences and controller history.
         self.animation_profile.physics_mode = difficulty as u32;
     }
-    pub(crate) fn simulation_elapsed_us(&self) -> u64 {
-        (self.ticks as f64 * f64::from(self.settings.step.simulation.time_step) * 1_000_000.0)
-            as u64
-    }
-
     pub(crate) fn period(&self) -> std::time::Duration { self.clock.period() }
 
     pub(crate) fn difficulty_index(&self) -> u32 { self.animation_profile.physics_mode }
@@ -248,6 +244,7 @@ impl GamePhysics {
         Self::load_with_terrain(asset_root, ground::Terrain::Flat)
     }
 
+    #[cfg(test)]
     pub(crate) fn load_with_terrain(
         asset_root: &std::path::Path,
         terrain: ground::Terrain,
@@ -255,16 +252,13 @@ impl GamePhysics {
         Self::load_with_world(asset_root, terrain, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn load_with_world(
         asset_root: &std::path::Path,
         terrain: ground::Terrain,
         map: Option<&skate_data::skate_map::SkateMap>,
     ) -> Result<Self, String> {
         Self::load_world_difficulty(asset_root, terrain, map, crate::difficulty::Difficulty::Easy)
-    }
-
-    pub fn load_with_map(asset_root: &std::path::Path, map: Option<&skate_data::skate_map::SkateMap>) -> Result<Self, String> {
-        Self::load_with_difficulty(asset_root, map, crate::difficulty::Difficulty::Easy)
     }
 
     pub fn load_with_difficulty(asset_root: &std::path::Path, map: Option<&skate_data::skate_map::SkateMap>, difficulty: crate::difficulty::Difficulty) -> Result<Self, String> {
@@ -429,7 +423,7 @@ pub(crate) fn advance(
     }
     if mods
         .as_ref()
-        .is_some_and(|m| crate::modding::player_attached(m))
+        .is_some_and(|m| crate::modding::player_attached(m) || crate::modding::player_suspended(m))
     {
         return;
     }
@@ -512,6 +506,9 @@ impl GamePhysics {
             grind::post(self, skater)?;
         }
         wipeout::check_after_physics(self, skater)?;
+        if skater.player_state.current() == skate_core::player::state::PhysicalStateId::PhysicsAirSecondary {
+            grind_trick::post_velocity(self, skater);
+        }
         offboard::post_physics::advance(self, skater)?;
         let compression = skater.skeleton_output.average_compressions(&self.board);
         render_pose::publish(self, skater, compression)?;

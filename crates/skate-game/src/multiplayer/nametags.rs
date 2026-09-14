@@ -9,6 +9,7 @@ pub(crate) struct NameTag(u64);
 pub(super) fn draw(
     mut commands: Commands,
     net: Res<Multiplayer>,
+    mods: Option<Res<crate::modding::Mods>>,
     cameras: Query<(&Camera, &Transform), With<crate::camera::GameplayCamera>>,
     outputs: Query<(Entity, &Camera), With<IsDefaultUiCamera>>,
     actors: Query<(&NetworkActor, &Transform)>,
@@ -21,6 +22,7 @@ pub(super) fn draw(
             if let (Some(view), Some(screen)) = (camera.logical_viewport_size(), output_camera.logical_viewport_size()) {
                 if view.x > 0. && view.y > 0. {
                     for (actor, actor_pose) in &actors {
+                        if mods.as_ref().is_some_and(|m|crate::modding::peer_suspended(m,actor.0)) {continue;}
                         let point = actor_pose.translation + Vec3::Y * 2.25;
                         if point.distance(pose.translation) > 120. { continue; }
                         if let Ok(pixel) = camera.world_to_viewport(&GlobalTransform::from(*pose), point) {

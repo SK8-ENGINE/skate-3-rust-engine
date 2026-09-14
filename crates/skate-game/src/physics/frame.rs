@@ -172,6 +172,9 @@ pub(super) fn advance(
             super::handplant::ground_update(physics,skater)?;
             input_phase::update_ground(physics, skater)?;
         }
+        skate_core::player::state::PhysicalStateId::PhysicsAirSecondary => {
+            super::grind_trick::advance(physics, skater)?
+        }
         skate_core::player::state::PhysicalStateId::PhysicsAir => {
             super::air_phase::advance(physics, skater)?
         }

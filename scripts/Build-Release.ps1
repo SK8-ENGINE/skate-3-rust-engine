@@ -26,7 +26,7 @@ try {
     $symbols = Join-Path $ProjectRoot "target/release-packages/$stamp/symbols"
     New-Item -ItemType Directory -Path "$stage/support",$symbols -Force | Out-Null
     # Link this invocation directly into private staging; never copy a generic cache EXE.
-    & cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-game --bin skate3rust --no-default-features -- -C extra-filename= -o "$stage/skate3rust.exe" -C "link-arg=/PDB:$symbols/skate3rust.pdb"
+    & cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-game --bin skate3rust --no-default-features -- -C extra-filename= --emit "link=$stage/skate3rust.exe" -C "link-arg=/PDB:$symbols/skate3rust.pdb"
     if ($LASTEXITCODE -ne 0) { throw 'Release compilation failed' }
     & cargo build --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-steam-relay
     if ($LASTEXITCODE -ne 0) { throw 'Steam relay compilation failed' }
@@ -34,9 +34,6 @@ try {
         -TargetDirectory $TargetDirectory `
         -BinDirectory $stage `
         -RelayExecutable (Join-Path $TargetDirectory 'x86_64-pc-windows-msvc/release/skate-steam-relay.exe')
-    # rustc also emits a dep-info file beside -o; it contains local source paths.
-    $depInfo = Join-Path $stage 'skate3rust.d'
-    if (Test-Path -LiteralPath $depInfo) { Remove-Item -LiteralPath $depInfo }
     New-Item -ItemType Directory -Path target/native -Force | Out-Null
     & rustc --edition 2024 --crate-type cdylib -C opt-level=3 -C panic=abort -C target-feature=+crt-static tools/asset_pipeline/refpack_native.rs -o target/native/refpack.dll
     if ($LASTEXITCODE -ne 0) { throw 'Native converter compilation failed' }

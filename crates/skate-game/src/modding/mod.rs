@@ -10,6 +10,10 @@ pub(crate) mod attachment;
 mod glb;
 mod menu;
 mod observation;
+mod engine_access;
+mod participation;
+mod camera_stream;
+pub(crate) use participation::{player_suspended, peer_suspended};
 mod session;
 mod volumes;
 mod capture;
@@ -34,6 +38,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Resource)]
 pub(crate) struct Mods {
     pub manager: Manager,
+    native_snapshot: Option<([u64; 4], skate_mods::SnapshotFields)>,
     world: DynamicsWorld,
     bodies: BTreeMap<(String, String), u64>,
     joints: BTreeMap<(String, String), u64>,
@@ -44,6 +49,9 @@ pub(crate) struct Mods {
     detach_error: Option<String>,
     detach_pending: Option<(Transform,std::time::Instant)>,
     camera: CameraOverride,
+    suspended_by: BTreeSet<String>,
+    hidden_players: BTreeMap<Entity, Visibility>,
+    remote_cameras: BTreeMap<u64, camera_stream::View>,
     generation: u64,
     graphics_serial: u64,
     debug_owners: BTreeSet<String>,
@@ -62,8 +70,12 @@ pub(crate) struct Mods {
     /// Maps (peer, wire_key) → (mod_id, key) for empty-value cleanup.
     net_remote_wire: BTreeMap<(u64, String), (String, String)>,
     net_status: String,
+    multiplayer_debug: BTreeMap<(String, String), String>,
     /// Contacts from the last DynamicsWorld::step (before drain).
     last_contacts: Vec<ContactEvent>,
+    command_results: BTreeMap<(String,String), Value>,
+    graph_gates: BTreeMap<(String,String,usize),(String,bool)>,
+    input_overrides: BTreeMap<usize,(String,f32)>,
     session: session::Runtime,
     skater_remote: BTreeMap<u64, observation::WireObs>,
     pending_remote_teleport: Option<skate_mods::TeleportOptions>,
@@ -83,8 +95,6 @@ struct NetWire {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ModCameraSet;
 
-#[derive(Component)]
-pub(crate) struct ModGraphicsOpacity(pub f32);
 
 type GraphicsOwned = graphics::Owned;
 
@@ -148,6 +158,7 @@ impl Plugin for ModdingPlugin {
             });
         app.insert_resource(Mods {
             manager: Manager::new(root, settings),
+            native_snapshot: None,
             world: DynamicsWorld::default(),
             bodies: BTreeMap::new(),
             joints: BTreeMap::new(),
@@ -170,12 +181,18 @@ impl Plugin for ModdingPlugin {
             net_remote: BTreeMap::new(),
             net_remote_wire: BTreeMap::new(),
             net_status: String::new(),
+            multiplayer_debug: BTreeMap::new(),
             last_contacts: Vec::new(),
+            graph_gates: BTreeMap::new(),
+            command_results: BTreeMap::new(), input_overrides: BTreeMap::new(),
             session: session::Runtime::default(),
             skater_remote: BTreeMap::new(),
             pending_remote_teleport: None,
             volumes: BTreeMap::new(),
             custom_menus: BTreeMap::new(),
+            suspended_by: BTreeSet::new(),
+            hidden_players: BTreeMap::new(),
+            remote_cameras: BTreeMap::new(),
         })
         .init_resource::<ModMenu>();
         menu::install(app);
@@ -205,7 +222,8 @@ impl Plugin for ModdingPlugin {
             (
                 update.after(crate::app::FrameSet::Animation),
                 bridge::sync_network.after(crate::multiplayer::send_pose).after(update),
-                sync_net.after(bridge::sync_network),
+                sync_net.after(bridge::sync_network).after(ModCameraSet),
+                participation::present.after(update).after(crate::app::FrameSet::Animation),
                 graphics::debug.after(bridge::sync_network).after(update),
                 present_camera
                     .in_set(ModCameraSet)
@@ -258,7 +276,7 @@ impl Mods {
     }
 }
 
-fn body_snapshot_for(mods: &Mods, owner: &str) -> serde_json::Value {
+fn body_snapshot_for(mods: &Mods, owner: &str, player_shapes: &[(skate_dynamics::rapier3d::prelude::SharedShape, skate_dynamics::rapier3d::prelude::Pose)]) -> serde_json::Value {
     let mut bodies = serde_json::Map::new();
     let mut reverse = BTreeMap::<u64, String>::new();
     for ((o, key), id) in &mods.bodies {
@@ -270,6 +288,7 @@ fn body_snapshot_for(mods: &Mods, owner: &str) -> serde_json::Value {
             bodies.insert(
                 key.clone(),
                 json!({
+                    "player_overlapping": mods.world.overlaps_shapes(*id, player_shapes),
                     "position": snap.position,
                     "rotation": snap.rotation,
                     "linvel": snap.linvel,
@@ -320,7 +339,7 @@ fn body_snapshot_for(mods: &Mods, owner: &str) -> serde_json::Value {
 fn network_snapshot(world: &World, mods: &Mods) -> Value {
     let net = world.get_resource::<crate::multiplayer::Multiplayer>();
     let (active, id, host) = net.map_or((false, 0, true), |n| n.mod_identity());
-    let host_id = net.map_or(id, |n| n.host_peer());
+    let host_id = net.map_or(id, |n| n.host_actor());
     let mut players: Vec<String> = net
         .map(|n| n.player_ids().into_iter().map(|p| p.to_string()).collect())
         .unwrap_or_default();
@@ -406,8 +425,8 @@ fn maintenance(world: &mut World) {
             mods.manager.commands.clear();
             if mods.runtime_busy() {
                 let camera = camera_position(world);
-                let snap = snapshot_ro(world, &mods, camera);
-                mods.manager.snapshot = snap;
+                let snap = snapshot_ro(world, &mut mods, camera);
+                mods.manager.snapshot = std::sync::Arc::new(snap);
                 let map = mods.manager.snapshot["map"].clone();
                 mods.manager
                     .dispatch("on_event", json!({"name":"world_changed","map":map}));
@@ -419,9 +438,8 @@ fn maintenance(world: &mut World) {
         if !mods.runtime_busy() {
             return;
         }
-        let camera = camera_position(world);
-        let snap = snapshot_ro(world, &mods, camera);
-        mods.manager.snapshot = snap;
+        // The last update already published observations. Maintenance only scans
+        // packages and applies pending lifecycle/menu commands.
         apply(world, &mut mods);
     });
 }
@@ -434,7 +452,25 @@ fn camera_position(world: &mut World) -> Option<[f32; 3]> {
         .map(|t| t.translation.to_array())
 }
 
-fn snapshot_ro(world: &World, mods: &Mods, camera: Option<[f32; 3]>) -> serde_json::Value {
+fn snapshot_ro(world: &World, mods: &mut Mods, camera: Option<[f32; 3]>) -> serde_json::Value {
+    let _span = bevy::log::tracing::info_span!("mods.snapshot").entered();
+    // The native state changes at simulation ticks. Render callbacks can reuse
+    // its serialization until either native resource changes, while inputs,
+    // command receipts, camera and network observations remain frame-current.
+    let key = [
+        world.get_resource_ref::<crate::physics::GamePhysics>().unwrap().last_changed().get() as u64,
+        world.get_resource_ref::<crate::physics::SkaterRuntime>().unwrap().last_changed().get() as u64,
+        mods.bodies.len() as u64,
+        mods.generation,
+    ];
+    if mods.native_snapshot.as_ref().is_none_or(|(previous, _)| *previous != key) {
+        let fields = BTreeMap::from([
+            ("player_physics".into(), std::sync::Arc::new(player_physics::snapshot(world, mods))),
+            ("engine".into(), std::sync::Arc::new(engine_access::snapshot(world))),
+        ]);
+        mods.native_snapshot = Some((key, std::sync::Arc::new(fields)));
+    }
+    mods.manager.snapshot_fields = mods.native_snapshot.as_ref().unwrap().1.clone();
     let map = world.resource::<crate::map_transition::CurrentMap>();
     let physics = world.resource::<crate::physics::GamePhysics>();
     let keys: BTreeMap<_, _> = world
@@ -485,7 +521,9 @@ fn snapshot_ro(world: &World, mods: &Mods, camera: Option<[f32; 3]>) -> serde_js
     json!({
         "player": player,
         "skaters": skaters,
-        "player_physics": player_physics::snapshot(world),
+        "command_results": mods.command_results.iter().fold(serde_json::Map::<String,Value>::new(), |mut out,((owner,key),value)| {
+            out.entry(owner.clone()).or_insert_with(||json!({}))[key]=value.clone();out
+        }),
         "volumes": mods.manager.packages.keys().map(|owner| {
             (owner.clone(), volumes::snapshot(mods, owner, &local_id, &observation::local(world), &mods.skater_remote))
         }).collect::<serde_json::Map<String, Value>>(),
@@ -512,6 +550,7 @@ fn snapshot_ro(world: &World, mods: &Mods, camera: Option<[f32; 3]>) -> serde_js
 }
 
 fn fixed(world: &mut World) {
+    let _span = bevy::log::tracing::info_span!("mods.fixed").entered();
     if world.resource::<crate::replay::Replay>().active {
         return;
     }
@@ -522,7 +561,7 @@ fn fixed(world: &mut World) {
         if mods.runtime_busy()
             || mods.manager.packages.values().any(|package| package.running())
         {
-            mods.manager.snapshot = snapshot_ro(world, &mods, camera);
+            mods.manager.snapshot = std::sync::Arc::new(snapshot_ro(world, &mut mods, camera));
         }
         if let Err(e) = ensure_ground(world, &mut mods) {
             warn!("dynamics ground: {e}");
@@ -534,11 +573,12 @@ fn fixed(world: &mut World) {
             .filter(|(_, p)| p.running())
             .map(|(id, _)| id.clone())
             .collect();
+        let player_shapes = if mods.suspended_by.is_empty() && mods.attach.is_none() {
+            bridge::player_shapes(world)
+        } else { Vec::new() };
         for id in ids {
-            let physics = body_snapshot_for(&mods, &id);
-            if let Some(obj) = mods.manager.snapshot.as_object_mut() {
-                obj.insert("physics".into(), physics);
-            }
+            let _span = bevy::log::tracing::info_span!("mods.fixed_callback", mod_id = %id).entered();
+            let physics = body_snapshot_for(&mods, &id, &player_shapes);
             // Sync dynamics queries for this mod while on_fixed_update runs.
             struct Host<'a> {
                 world: &'a mut DynamicsWorld,
@@ -633,7 +673,7 @@ fn fixed(world: &mut World) {
                 owner: &id,
             };
             with_host(&mut host, || {
-                manager.call(&id, "on_fixed_update", json!({"dt": dt}));
+                manager.call_with_physics(&id, "on_fixed_update", json!({"dt": dt}), physics);
             });
         }
         // New command frame: drop last tick's user forces so they cannot stack in Rapier.
@@ -648,6 +688,7 @@ fn fixed(world: &mut World) {
             bridge::push_skater_into_rapier(&mut mods, physics, skater);
         }
         if !mods.bodies.is_empty() || mods.ground_ready || !mods.skater_proxies.is_empty() {
+            let _span = bevy::log::tracing::info_span!("mods.dynamics_step").entered();
             mods.world.step(dt as f32);
             mods.last_contacts = mods.world.drain_contacts();
         }
@@ -659,21 +700,22 @@ fn fixed(world: &mut World) {
 }
 
 fn update(world: &mut World) {
+    let _span = bevy::log::tracing::info_span!("mods.update").entered();
     world.resource_scope(|world, mut mods: Mut<Mods>| {
         if !mods.runtime_busy() {
             return;
         }
         let camera = camera_position(world);
-        let snap = snapshot_ro(world, &mods, camera);
+        let snap = snapshot_ro(world, &mut mods, camera);
         let paused =
             snap["paused"].as_bool().unwrap_or(true) || snap["replay"].as_bool().unwrap_or(false);
         let dt = world.resource::<Time<Real>>().delta_secs_f64().min(0.25);
-        mods.manager.snapshot = snap;
+        mods.manager.snapshot = std::sync::Arc::new(snap);
         // UI state must refresh during pause (including network role changes).
         // This callback does not advance Lua simulation time or timers.
-        mods.manager.dispatch("on_ui_update", json!({"dt": dt, "paused": paused}));
+        dispatch_profiled(&mut mods.manager, "on_ui_update", json!({"dt": dt, "paused": paused}));
         if !paused {
-            mods.manager.dispatch("on_update", json!({"dt": dt}));
+            dispatch_profiled(&mut mods.manager, "on_update", json!({"dt": dt}));
         }
         apply(world, &mut mods);
         sync_graphics(world, &mut mods);
@@ -700,6 +742,7 @@ fn clear_runtime(world: &mut World, mods: &mut Mods) {
             world.despawn(e);
         }
     }
+    mods.multiplayer_debug.clear();
     mods.bodies.clear();
     mods.joints.clear();
     mods.skater_proxies.clear();
@@ -710,9 +753,13 @@ fn clear_runtime(world: &mut World, mods: &mut Mods) {
     mods.net_remote_wire.clear();
     mods.net_status.clear();
     mods.last_contacts.clear();
+    engine_access::restore_gates(world,mods,None);
+    mods.command_results.clear();mods.input_overrides.clear();
     mods.debug_owners.clear();
     player_physics::clear(world,None);
     mods.custom_menus.clear();
+    participation::clear(world, mods);
+    mods.remote_cameras.clear();
     mods.session.reset();
     mods.skater_remote.clear();
     mods.pending_remote_teleport = None;
@@ -739,8 +786,13 @@ fn retire_graphics(world: &mut World, mods: &mut Mods, key: &(String, String)) {
 }
 
 fn apply(world: &mut World, mods: &mut Mods) {
+    let _span = bevy::log::tracing::info_span!("mods.apply").entered();
     let retired = std::mem::take(&mut mods.manager.retired);
     for id in &retired {
+        mods.suspended_by.remove(id);
+        engine_access::restore_gates(world,mods,Some(id));
+        mods.command_results.retain(|(owner,_),_|owner!=id);
+        mods.input_overrides.retain(|_,(owner,_)|owner!=id);
         audio::stop_owner(world, id, true);
         graphics_dynamic::clear_owner(world, id);
         volumes::clear_owner(world, mods, id);
@@ -761,6 +813,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
         for key in gkeys {
             retire_graphics(world, mods, &key);
         }
+        mods.multiplayer_debug.retain(|(owner, _), _| owner != id);
         let okeys: Vec<_> = mods
             .overlays
             .keys()
@@ -809,7 +862,9 @@ fn apply(world: &mut World, mods: &mut Mods) {
         }
         if let Err(e) = ensure_ground(world, mods) {
             warn!("Lua mod {id}: {e}");
+            engine_access::restore_gates(world,mods,Some(&id));
             mods.manager.fail(&id, e);
+            mods.input_overrides.retain(|_,(owner,_)|owner!=&id);
             audio::stop_owner(world, &id, true);
             graphics_dynamic::clear_owner(world, &id);
             volumes::clear_owner(world, mods, &id);
@@ -832,7 +887,9 @@ fn apply(world: &mut World, mods: &mut Mods) {
         })();
         if let Err(e) = result {
             warn!("Lua mod {id}: {e}");
+            engine_access::restore_gates(world,mods,Some(&id));
             mods.manager.fail(&id, e);
+            mods.input_overrides.retain(|_,(owner,_)|owner!=&id);
             audio::stop_owner(world, &id, true);
             graphics_dynamic::clear_owner(world, &id);
             volumes::clear_owner(world, mods, &id);
@@ -844,7 +901,8 @@ fn apply(world: &mut World, mods: &mut Mods) {
     let mut row = 0;
     for entity in mods.overlays.values() {
         if let Some(mut node) = world.get_mut::<Node>(*entity) {
-            node.top = px(16. + row as f32 * 28.);
+            let top=px(16. + row as f32 * 28.);
+            if node.top!=top {node.top=top;}
             row += 1;
         }
     }
@@ -857,6 +915,28 @@ fn apply_one(
     command: Command,
 ) -> Result<(), String> {
     match command {
+        Command::RigPart {index,options} => player_physics::set_part(world,id,index,options)?,
+        Command::GraphGate {graph,target,index,enabled} => engine_access::gate(world,mods,id,graph,target,index,enabled)?,
+        Command::EngineInspect {..} => return Err("use commands.request for engine inspection results".into()),
+        Command::Request {key,command,token} => {
+            let slot=(id.to_owned(),key);
+            if !mods.command_results.contains_key(&slot) && mods.command_results.keys().filter(|(o,_)|o==id).count()>=64 {
+                return Err("64 command result slots per mod maximum".into());
+            }
+            let (result,value)=if let Command::EngineInspect {system}=*command {
+                (Ok(()),engine_access::inspect(world,&system))
+            } else {(apply_one(world,mods,id,*command),Value::Null)};
+            let tick=world.resource::<crate::physics::GamePhysics>().ticks;
+            mods.command_results.insert(slot,json!({"token":token,"ok":result.is_ok(),"error":result.err(),"value":value,"tick":tick}));
+        }
+        Command::InputOverride {action,value} => {
+            if mods.input_overrides.get(&action).is_some_and(|(o,_)|o!=id) { return Err("input action owned by another mod".into()); }
+            if let Some(value)=value {mods.input_overrides.insert(action,(id.to_owned(),value));} else {mods.input_overrides.remove(&action);}
+        }
+        Command::NativeImpulse {body,impulse,point,angular} => {
+            if mods.attach.is_some() || !mods.suspended_by.is_empty() {return Err("native player is attached or suspended".into());}
+            player_physics::impulse(world,&body,impulse,point,angular)?;
+        }
         Command::UiCanvas { key, options } => canvas::set(world, &mut mods.canvases, id, key, options)?,
         Command::UiRemove { key } => {
             let slot = (id.to_owned(), key);
@@ -891,6 +971,17 @@ fn apply_one(
         }
         Command::GraphicsLight { key, options } => graphics_dynamic::light(world, mods, id, key, options)?,
         Command::Log { text } => info!("Lua [{id}]: {text}"),
+        Command::MultiplayerDebug { key, text } => {
+            let slot = (id.to_owned(), key);
+            if text.is_empty() { mods.multiplayer_debug.remove(&slot); }
+            else {
+                if !mods.multiplayer_debug.contains_key(&slot)
+                    && mods.multiplayer_debug.keys().filter(|(owner,_)| owner == id).count() >= 8 {
+                    return Err("8 multiplayer debug entries per mod maximum".into());
+                }
+                mods.multiplayer_debug.insert(slot, text);
+            }
+        }
         Command::Overlay { key, text } => {
             let k = (id.to_owned(), key);
             // Empty overlay text removes its row rather than leaving a blank slot.
@@ -900,7 +991,7 @@ fn apply_one(
             }
             if let Some(entity) = mods.overlays.get(&k) {
                 if let Some(mut t) = world.get_mut::<Text>(*entity) {
-                    **t = text;
+                    if t.0!=text {**t = text;}
                     return Ok(());
                 }
             }
@@ -926,6 +1017,7 @@ fn apply_one(
             mods.overlays.insert(k, entity);
         }
         Command::PhysicsSpawn { key, body } => {
+            mods.native_snapshot = None;
             let k = (id.to_owned(), key);
             if let Some(old) = mods.bodies.remove(&k) {
                 mods.world.remove(old);
@@ -938,6 +1030,7 @@ fn apply_one(
             mods.bodies.insert(k, body_id);
         }
         Command::PhysicsRemove { key } => {
+            mods.native_snapshot = None;
             if mods.attach.as_ref().is_some_and(|a|a.owner==id && a.body==key) { detach_player(world,mods,true); }
             let bound:Vec<_>=mods.graphics.iter().filter(|((o,_),g)|o==id && g.body.as_deref()==Some(key.as_str())).map(|(k,_)|k.clone()).collect();
             for slot in bound { retire_graphics(world,mods,&slot); }
@@ -1136,6 +1229,10 @@ fn apply_one(
                 look_at.map(Vec3::from_array),
             ));
         }
+        Command::PlayerSuspend { suspended } => {
+            if suspended { mods.suspended_by.insert(id.to_owned()); }
+            else { mods.suspended_by.remove(id); }
+        }
         Command::CameraWatch { peer } => {
             let empty = peer.as_deref().is_none_or(|p| p.is_empty());
             if empty {
@@ -1270,7 +1367,8 @@ fn sync_net(world: &mut World) {
         mods.net_states
             .retain(|(owner, _), _| packages.contains_key(owner));
         mods.session.connect(world.get_resource::<crate::multiplayer::Multiplayer>().and_then(|n| n.session_identity()));
-        let obs_bytes = observation::encode_local(world);
+        let obs_bytes = observation::encode_local(world, player_suspended(&mods));
+        let view_bytes = camera_stream::capture(world);
 
         let Some(mut net) = world.get_resource_mut::<crate::multiplayer::Multiplayer>() else {
             mods.net_published.clear();
@@ -1278,6 +1376,7 @@ fn sync_net(world: &mut World) {
             mods.net_remote_wire.clear();
             mods.net_status.clear();
             mods.skater_remote.clear();
+            mods.remote_cameras.clear();
             return;
         };
         if !net.active() {
@@ -1286,11 +1385,12 @@ fn sync_net(world: &mut World) {
             mods.net_remote_wire.clear();
             mods.net_status.clear();
             mods.skater_remote.clear();
+            mods.remote_cameras.clear();
             return;
         }
 
         let (_, local, is_host) = net.mod_identity();
-        let host_peer = net.host_peer().to_string();
+        let host_peer = net.host_actor().to_string();
         let local_id = local.to_string();
         let mut published = BTreeSet::new();
         let mut failures = 0u32;
@@ -1323,6 +1423,9 @@ fn sync_net(world: &mut World) {
                 failures += 1;
             }
         }
+        if let Some(bytes) = view_bytes {
+            if net.publish_application(camera_stream::KEY, bytes) { published.insert(camera_stream::KEY.into()); }
+        }
         for (key, bytes) in session::outgoing(&mods, &local_id, is_host, &host_peer) {
             if net.publish_application(&key, bytes) {
                 published.insert(key);
@@ -1337,8 +1440,9 @@ fn sync_net(world: &mut World) {
 
         let records = net.application_records();
         let players = net.player_ids();
-        let host = net.host_peer();
+        let host = net.host_actor();
         drop(net);
+        camera_stream::ingest(&mut mods.remote_cameras, &records, &players);
         session::ingest(&mut mods, &records, local, host, &players);
         session::apply_pending_remote(world, &mut mods);
 
@@ -1463,6 +1567,13 @@ fn present_camera(world: &mut World) {
                 .map(|n| n.mod_identity().1)
                 .unwrap_or(0);
             if peer != local_id {
+                if let Some(view) = mods.remote_cameras.get(&peer) {
+                    if let Some(mut t) = world.get_mut::<Transform>(camera) { *t = view.transform(); }
+                    if let Some(mut p) = world.get_mut::<Projection>(camera) {
+                        if let Projection::Perspective(p) = &mut *p { p.fov = view.fov; }
+                    }
+                    return;
+                }
                 if let Some((position, rotation)) = watch_pose(world, peer, local_id) {
                     if let Some(mut t) = world.get_mut::<Transform>(camera) {
                         *t = spectator_view(position, rotation);
@@ -1552,4 +1663,35 @@ fn watch_pose(world: &mut World, peer: u64, local_id: u64) -> Option<(Vec3, Quat
     world
         .get_resource::<crate::multiplayer::Multiplayer>()
         .and_then(|net| net.actor_pose(peer))
+}
+
+impl Mods {
+    pub(crate) fn multiplayer_debug_sections(&self) -> [String; 3] {
+        let sync = format!("MOD REPLICATION\n{}\nLocal network keys: {} | Remote keys: {}\nPublished dynamics: {} | Local bodies: {} | Local scenes: {}",
+            if self.net_status.is_empty() { "No active mod replication" } else { &self.net_status },
+            self.net_states.len(), self.net_remote.len(), self.dyn_published.len(), self.bodies.len(), self.graphics.len());
+        let packages = self.manager.packages.values().map(|p| format!("{} — {}{}",
+            p.manifest.name, if p.running() { "running" } else if p.enabled { "enabled / stopped" } else { "disabled" },
+            p.error.as_ref().map(|e| format!("\n{e}")).unwrap_or_default())).collect::<Vec<_>>().join("\n");
+        let reports = self.multiplayer_debug.iter().map(|((owner,key),text)| {
+            let name = self.manager.packages.get(owner).map_or(owner.as_str(), |p| p.manifest.name.as_str());
+            format!("{name} / {key}\n{text}")
+        }).collect::<Vec<_>>().join("\n\n");
+        [sync, format!("MOD PACKAGES\n{}", if packages.is_empty() { "No packages installed" } else { &packages }),
+            format!("MOD DIAGNOSTICS\n{}", if reports.is_empty() { "No mod multiplayer diagnostics reported" } else { &reports })]
+    }
+}
+
+pub(crate) fn override_actions(mods: Option<&Mods>, values: &mut [f32;18]) {
+    if let Some(mods)=mods { for (&id,(_,value)) in &mods.input_overrides {values[id-64]=*value;} }
+}
+
+/// Retain dispatch ordering while attributing each Lua callback in CPU captures.
+fn dispatch_profiled(manager: &mut skate_mods::Manager, callback: &str, payload: Value) {
+    let ids: Vec<_> = manager.packages.iter().filter(|(_, p)| p.running())
+        .map(|(id, _)| id.clone()).collect();
+    for id in ids {
+        let _span = bevy::log::tracing::info_span!("mods.callback", mod_id = %id, callback).entered();
+        manager.call(&id, callback, payload.clone());
+    }
 }

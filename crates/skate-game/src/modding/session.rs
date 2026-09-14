@@ -63,7 +63,7 @@ pub(super) fn net_identity(world: &World) -> (bool, String, bool, String) {
     match world.get_resource::<crate::multiplayer::Multiplayer>() {
         Some(net) if net.active() => {
             let (active, id, host) = net.mod_identity();
-            (active, id.to_string(), host, net.host_peer().to_string())
+            (active, id.to_string(), host, net.host_actor().to_string())
         }
         _ => (false, "0".into(), true, "0".into()),
     }

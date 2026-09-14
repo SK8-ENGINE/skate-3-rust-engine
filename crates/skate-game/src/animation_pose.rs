@@ -20,6 +20,7 @@ pub(crate) struct PoseEvaluator {
 }
 
 impl PoseEvaluator {
+    #[cfg(test)]
     pub fn load(asset_root: &Path) -> Result<Self, String> {
         let mut evaluator = Self::from_banks(&AnimationBanks::load(asset_root)?)?;
         evaluator.load_authored_clips(asset_root)?;

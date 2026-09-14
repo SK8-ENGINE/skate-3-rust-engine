@@ -38,13 +38,20 @@ pub(crate) fn enabled_volumes(
     skeleton: &SkeletonBody,
     collision: &SkeletonCollisionMode,
 ) -> Result<Vec<BoardWorldVolume>, String> {
+    volumes_with_parts(skeleton, &collision.parts)
+}
+
+pub(crate) fn volumes_with_parts(
+    skeleton: &SkeletonBody,
+    parts: &[skate_core::physics::skeleton_body::SkeletonPartCollision; 26],
+) -> Result<Vec<BoardWorldVolume>, String> {
     let transforms = skeleton.part_transforms();
     let mut volumes = Vec::new();
     for (index, (part, state)) in skeleton
         .definition
         .parts
         .iter()
-        .zip(&collision.parts)
+        .zip(parts)
         .enumerate()
     {
         if !state.enabled {

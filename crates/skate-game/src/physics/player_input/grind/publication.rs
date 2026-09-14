@@ -21,6 +21,8 @@ pub(super) fn observation(
     jumper: &manager::Jumper,
 ) -> Result<ManagerObservation, String> {
     let f = &p.grind;
+    family(f.family_1248)?;
+    family(jumper.family)?;
     Ok(ManagerObservation {
         geometry: GeometryObservation {
             point_1120: float(f.point_1120),
@@ -44,27 +46,13 @@ pub(super) fn observation(
             gravity_relief_1512: f.gravity_relief_1512,
         },
         control: ControlObservation {
-            family: family(f.family_1248)?,
             flags_1516: f.flags_1516,
-            flags_2468: p.flags_2468,
             flags_2488: p.flags_2488,
             translation_2796: c.translation_2796,
             balance_2800: c.stability_nudge_2800,
-            exit_lean: f.exit_lean_1500,
         },
         engagement: EngagementObservation {
-            velocity_1184: float(f.entry_velocity_1184),
             kind_1248: f.family_1248,
-        },
-        jumper: JumperObservation {
-            geometry_kind_16: jumper.geometry.geometry_kind,
-            family_20: family(jumper.family)?,
-            energy_24: jumper.energy,
-            high_side_32: jumper.geometry.high_side,
-            normal_48: jumper.geometry.normal,
-            direction_64: jumper.geometry.direction,
-            upmost_normal_80: jumper.geometry.upmost,
-            point_96: jumper.geometry.point,
         },
     })
 }

@@ -20,25 +20,23 @@ pub(crate) struct Checkpoint {
 
 pub(crate) struct Runtime {
     state: TeleportState,
+    #[cfg(test)]
     checkpoint: Checkpoint,
     pending_reply: Option<Target>,
     manual_on_board: Option<bool>,
 }
 impl Runtime {
     /// Explicit manual return uses the actor-reset publication without replacing
-    /// the automatic recovery checkpoint owned by this runtime.
+    /// the automatic recovery checkpoint owned by the respawn system.
     pub fn request_manual(&mut self, transform: AnimationPartTransform, on_board: bool) {
         self.pending_reply = Some(Target { transform: transform.map(|r| r.map(f32::to_bits)), on_board });
         self.manual_on_board = Some(on_board);
     }
     pub fn take_manual_on_board(&mut self) -> Option<bool> { self.manual_on_board.take() }
-    pub(super) fn set_checkpoint(&mut self, checkpoint: Checkpoint) {
-        self.checkpoint = checkpoint;
-        self.pending_reply = None;
-    }
-    pub fn new(checkpoint: Checkpoint) -> Self {
+    pub fn new(#[cfg(test)] checkpoint: Checkpoint) -> Self {
         Self {
             state: TeleportState::default(),
+            #[cfg(test)]
             checkpoint,
             pending_reply: None,
             manual_on_board: None,
@@ -56,6 +54,7 @@ impl Runtime {
             == Update::RequestCheckpoint
     }
     /// Host response for an independently verified actor-reset request.
+    #[cfg(test)]
     pub fn request_checkpoint(&mut self) {
         self.reply(self.checkpoint);
     }

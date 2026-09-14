@@ -10,22 +10,8 @@ use crate::{config::Config, map_library::Entry, map_render::PreparedScene,
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct MapTransitionSet;
 #[derive(Message)]
-pub(crate) struct WorldChanged { pub generation: u64 }
+pub(crate) struct WorldChanged;
 
-/// What the prepared scene actually cost, recorded when geometry is published.
-///
-/// This used to gate MSAA and occlusion culling against a batch count, because
-/// draw count varied with material count and could reach thousands. Draw count
-/// is now a property of the spatial partition we choose, so there is nothing
-/// left to adapt to: the render options are fixed policy (RFC 1 D7) and this is
-/// a plain report for the perf harness and the debug overlay.
-#[derive(Resource, Default, Clone, Copy, Debug)]
-pub(crate) struct MapRenderBudget {
-    pub draws: usize,
-    pub triangles: usize,
-    pub leaves: usize,
-    pub slabs: usize,
-}
 
 #[cfg(test)]
 #[path = "tests/map_transition.rs"]
@@ -97,7 +83,6 @@ impl Plugin for MapTransitionPlugin {
         let current = CurrentMap::from_package(config.map_path.clone(), config.map.as_ref());
         app.insert_resource(current)
             .init_resource::<MapTransition>()
-            .init_resource::<MapRenderBudget>()
             .add_message::<WorldChanged>()
             .add_systems(PreUpdate, poll.in_set(MapTransitionSet).after(crate::graphics_menu::MenuInput)
                 .before(crate::input::poll_controllers))
@@ -248,7 +233,7 @@ fn commit(world: &mut World, mut prepared: PreparedWorld) -> String {
         prepared.metadata.generation, prepared.metadata.name, prepared.metadata.spawn,
         prepared.metadata.heading, std::process::id());
     if let Some(mut messages) = world.get_resource_mut::<Messages<WorldChanged>>() {
-        messages.write(WorldChanged { generation: prepared.metadata.generation });
+        messages.write(WorldChanged);
     }
     world.insert_resource(prepared.metadata);
     eprintln!("MAP_PUBLISH_TIMING cpu_ms={}", publication_started.elapsed().as_millis());

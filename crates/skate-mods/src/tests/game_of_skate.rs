@@ -1,172 +1,135 @@
-//! The mod is tested through the public Lua VM; no game rules live in the host.
-use serde_json::{json, Value};
+//! Exercise independent Lua VMs exchanging public network snapshots.
 use crate::{vm::Vm, Command, validate_package};
+use serde_json::{json, Value};
 use std::{collections::BTreeMap, path::PathBuf};
-
-struct Game { vm: Vm, snapshot: Value, state: Value, overlays: BTreeMap<String, String> }
-impl Game {
+const MOD: &str = "examples.game-of-skate";
+struct Peer {
+    id: String, vm: Vm, overlays: BTreeMap<String,String>,
+    suspended: bool, camera: Option<String>, teleports: Vec<crate::TeleportOptions>,
+}
+struct Match {
+    peers: Vec<Peer>, wire: Value, skaters: Value, host: String,
+}
+impl Match {
     fn new(ids: &[&str]) -> Self {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/examples/game-of-skate");
-        let manifest = validate_package(&root).unwrap();
-        let mut snapshot = json!({"player":{},"skaters":{},"network":{"active":ids.len()>1,"local_id":ids[0],"host_id":ids[0],"is_host":true,"players":ids,"states":{}}});
-        for id in ids { snapshot["skaters"][*id] = json!({"name":format!("Skater {id}"),"landing_seq":7,"landed_trick":"Old kickflip","trick_seq":100,"trick":"Old kickflip","bail_seq":2,"bailing":false}); }
-        let vm = Vm::new(&root, &manifest, &BTreeMap::from([("copy_seconds".into(),json!(15)),("allow_ollie".into(),json!(false))]), &snapshot).unwrap();
-        let mut g = Self {vm,snapshot,state:Value::Null,overlays:BTreeMap::new()};
-        g.vm.call("on_load",json!({}),&g.snapshot).unwrap();
-        let start=g.vm.call("on_event",json!({"name":"menu_action","menu":"session","item":"start"}),&g.snapshot).unwrap();
-        for c in start {if let Command::NetworkState{value,..}=c {g.state=value;}}
-        g.tick(0.);
+        let mut g=Self {peers:vec![],wire:json!({}),skaters:json!({}),host:ids[0].into()};
+        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/examples/game-of-skate");
+        let manifest=validate_package(&root).unwrap();
+        for (i,id) in ids.iter().enumerate() {
+            g.skaters[*id]=json!({"position":[i as f32*10.,2.,3.],"heading":0.7,"name":format!("Skater {id}"),"landing_seq":7,"landed_trick":"Old kickflip","bail_seq":2,"bailing":false});
+        }
+        for id in ids {
+            let snapshot=json!({"player":g.skaters[*id],"skaters":g.skaters,"network":{"active":ids.len()>1,"local_id":id,"host_id":ids[0],"is_host":*id==ids[0],"players":ids,"states":{}}});
+            let vm=Vm::new(&root,&manifest,&BTreeMap::from([("copy_seconds".into(),json!(15)),("allow_ollie".into(),json!(false))]),&snapshot).unwrap();
+            g.peers.push(Peer{id:(*id).into(),vm,overlays:BTreeMap::new(),suspended:false,camera:None,teleports:vec![]});
+        }
+        for i in 0..g.peers.len() {g.call(i,"on_load",json!({}));}
         g
     }
-    fn tick(&mut self, dt: f64) {
-        self.vm.call("on_update",json!({"dt":dt}),&self.snapshot).unwrap();
-        let commands = self.vm.call("on_fixed_update",json!({"dt":dt}),&self.snapshot).unwrap();
+    fn snapshot(&self,i:usize)->Value {
+        let id=&self.peers[i].id;
+        json!({"player":self.skaters[id],"skaters":self.skaters,"network":{"active":self.peers.len()>1,"local_id":id,"host_id":self.host,"is_host":*id==self.host,"players":self.peers.iter().map(|p|&p.id).collect::<Vec<_>>(),"states":{MOD:self.wire}}})
+    }
+    fn call(&mut self,i:usize,callback:&str,arg:Value) {
+        let snapshot=self.snapshot(i);
+        let commands=self.peers[i].vm.call(callback,arg,&snapshot).unwrap();
         for c in commands {
-            assert!(c.validate());
+            assert!(c.validate(),"{c:?}");
+            let peer=&mut self.peers[i];
             match c {
-                Command::NetworkState {key,value} if key == "skate" => { assert!(serde_json::to_vec(&value).unwrap().len()<=512); self.state=value; }
-                Command::Overlay {key,text} => {self.overlays.insert(key,text);}
-                _ => {}
+                Command::NetworkState{key,value}=> {
+                    let bytes=serde_json::to_vec(&value).unwrap();assert!(bytes.len()<=512,"{} bytes for {key}",bytes.len());
+                    self.wire[&peer.id][&key]=serde_json::from_slice(&bytes).unwrap();
+                }
+                Command::PlayerSuspend{suspended}=>peer.suspended=suspended,
+                Command::CameraWatch{peer:target}=>peer.camera=target,
+                Command::PlayerTeleport{options}=>peer.teleports.push(options),
+                Command::Overlay{key,text}=>{peer.overlays.insert(key,text);}
+                _=>{}
             }
         }
     }
-    fn land(&mut self, id: &str, name: &str) {
-        let s = &mut self.snapshot["skaters"][id];
-        s["landing_seq"] = json!(s["landing_seq"].as_u64().unwrap()+1);
-        s["landed_trick"] = json!(name);
-        s["bailing"] = json!(false);
-        self.tick(0.02);
+    fn event(&mut self,i:usize,item:&str){self.call(i,"on_event",json!({"name":"menu_action","menu":"session","item":item}));}
+    fn step(&mut self) {
+        for i in 0..self.peers.len(){self.call(i,"on_update",json!({"dt":0.05}));self.call(i,"on_ui_update",json!({}));self.call(i,"on_fixed_update",json!({"dt":0.05}));}
     }
-    fn bail(&mut self,id:&str) {
-        let s=&mut self.snapshot["skaters"][id];
-        s["bail_seq"]=json!(s["bail_seq"].as_u64().unwrap()+1);
-        s["bailing"]=json!(true);
-        self.tick(0.02);
+    fn settle(&mut self){for _ in 0..24 {self.step();}}
+    fn start(&mut self){self.event(0,"start");self.settle();}
+    fn state(&self)->&Value {&self.wire[&self.host]["skate"]}
+    fn land(&mut self,id:&str,trick:&str) {
+        let p=&mut self.skaters[id];p["landing_seq"]=json!(p["landing_seq"].as_u64().unwrap()+1);p["landed_trick"]=json!(trick);p["bailing"]=json!(false);self.step();
     }
 }
-
 #[test]
-fn announcements_and_old_landings_do_not_count_and_solo_needs_second_landing() {
-    let mut g = Game::new(&["0"]);
-    g.snapshot["skaters"]["0"]["trick_seq"]=json!(101);
-    g.snapshot["skaters"]["0"]["trick"]=json!("Kickflip");
-    g.tick(1.);
-    assert_eq!(g.state["p"],"s");
-    g.land("0","Kickflip");
-    assert_eq!(g.state["p"],"c");
-    assert_eq!(g.state["d"],"0");
-    g.tick(1.);
-    assert_eq!(g.state["p"],"c");
-    g.land("0","Kickflip");
-    assert_eq!(g.state["p"],"r");
-    assert_eq!(g.state["d"],"1");
-    assert!(g.overlays["skate_status"].starts_with("Matched"));
-    g.tick(3.);
-    assert_eq!(g.state["p"],"s");
-    assert_eq!(g.state["n"],2);
+fn independent_clients_receive_host_first_turn_and_mirror_active_camera() {
+    let mut g=Match::new(&["99","1","2"]);g.start();
+    assert_eq!(g.wire["99"]["origin"]["ids"],json!(["99","1","2"]));
+    assert_eq!(g.state()["p"],"s");assert_eq!(g.state()["c"],1);
+    assert!(!g.peers[0].suspended);assert!(g.peers[1].suspended && g.peers[2].suspended);
+    assert_eq!(g.peers[1].camera.as_deref(),Some("99"));
+    assert!(g.peers[1].overlays["skate_status"].contains("Skater 99: land a trick"));
+    g.land("99","Kickflip");g.settle();
+    assert_eq!(g.state()["p"],"c");assert_eq!(g.state()["c"],2);
+    assert!(g.peers[0].suspended && g.peers[2].suspended);assert!(!g.peers[1].suspended);
+    assert_eq!(g.peers[0].camera.as_deref(),Some("1"));assert_eq!(g.peers[1].camera,None);
+    assert!(g.peers[1].overlays["skate_status"].contains("You: copy Kickflip"));
+    assert_eq!(g.peers[1].teleports.last().unwrap().position,[0.,2.,3.]);
+    assert_eq!(g.peers[1].teleports.last().unwrap().heading,Some(0.7));
+    g.land("1","Kickflip");g.settle();assert_eq!(g.state()["c"],3);
+    assert_eq!(g.state()["d"],"010");assert_eq!(g.peers[0].camera.as_deref(),Some("2"));
+    assert_eq!(g.peers[2].teleports.last().unwrap().position,[0.,2.,3.]);
+    g.land("2","Heelflip");assert_eq!(g.state()["p"],"r");assert_eq!(g.state()["l"],"001");
 }
-
 #[test]
-fn wrong_trick_bail_and_timeout_each_award_only_one_letter() {
-    let mut g = Game::new(&["0"]);
-    g.land("0","Kickflip");
-    g.land("0","Heelflip");
-    assert_eq!(g.state["l"],"1");
-    g.tick(3.);
-    g.land("0","Kickflip");
-    g.bail("0");
-    assert_eq!(g.state["l"],"2");
-    g.tick(1.);
-    assert_eq!(g.state["l"],"2");
-    g.tick(2.);
-    g.land("0","Kickflip");
-    g.tick(16.);
-    assert_eq!(g.state["l"],"3");
+fn pre_turn_results_announcements_and_old_landings_cannot_complete_a_turn() {
+    let mut g=Match::new(&["99","1"]);g.start();
+    g.skaters["99"]["trick"]=json!("Kickflip");g.step();assert_eq!(g.state()["p"],"s");
+    g.land("1","Kickflip");g.land("99","Kickflip");g.settle();assert_eq!(g.state()["p"],"c");assert_eq!(g.state()["d"],"00");
+    g.land("1","Kickflip");assert_eq!(g.state()["p"],"r");assert_eq!(g.state()["d"],"01");
 }
-
 #[test]
-fn remote_pre_turn_results_are_consumed_and_remote_bails_are_not_missed() {
-    let mut g=Game::new(&["1","2","3"]);
-    g.land("2","Kickflip");
-    g.land("1","Kickflip");
-    g.tick(1.);
-    assert_eq!(g.state["d"],"000");
-    g.land("2","Kickflip");
-    assert_eq!(g.state["d"],"010");
-    // A remote can already be standing again when the latest packet arrives.
-    g.snapshot["skaters"]["3"]["bail_seq"]=json!(3);
-    g.tick(0.02);
-    assert_eq!(g.state["p"],"r");
-    assert_eq!(g.state["l"],"001");
-    g.tick(3.);
-    assert_eq!(g.state["a"],"2");
-    assert_eq!(g.state["p"],"s");
+fn solo_resets_between_setting_and_copying_and_needs_a_second_landing() {
+    let mut g=Match::new(&["0"]);g.start();g.land("0","Kickflip");g.settle();
+    assert_eq!(g.state()["p"],"c");assert_eq!(g.state()["d"],"0");assert_eq!(g.peers[0].teleports.len(),2);
+    g.land("0","Kickflip");assert_eq!(g.state()["p"],"r");assert_eq!(g.state()["d"],"1");
 }
-
 #[test]
-fn ten_player_state_fits_lua_network_budget() {
-    let ids: Vec<_>=(0..10).map(|i| format!("1844674407370955160{i}")).collect();
-    let refs: Vec<_>=ids.iter().map(String::as_str).collect();
-    let mut g=Game::new(&refs);
+fn bail_and_timeout_award_one_letter_to_the_active_copier_only() {
+    let mut g=Match::new(&["99","1","2"]);g.start();g.land("99","Kickflip");g.settle();
+    g.skaters["1"]["bail_seq"]=json!(3);g.step();g.settle();
+    assert_eq!(g.state()["l"],"010");assert_eq!(g.state()["c"],3);
+    for _ in 0..310 {g.step();}
+    assert_eq!(g.state()["l"],"011");assert_eq!(g.state()["p"],"r");
+}
+#[test]
+fn stop_unload_and_disconnect_restore_player_and_camera() {
+    let mut g=Match::new(&["99","1"]);g.start();g.event(1,"stop");g.step();assert_eq!(g.state()["p"],"s");
+    g.event(0,"stop");g.step();
+    for p in &g.peers{assert!(!p.suspended);assert!(p.camera.is_none());}
+    g.start();g.call(1,"on_unload",json!({}));assert!(!g.peers[1].suspended);assert!(g.peers[1].camera.is_none());
+}
+#[test]
+fn absent_acknowledgement_blocks_play_and_reports_the_missing_setup() {
+    let mut g=Match::new(&["99","1"]);g.event(0,"start");
+    for _ in 0..320 {g.call(0,"on_update",json!({"dt":0.05}));g.call(0,"on_fixed_update",json!({"dt":0.05}));}
+    assert_eq!(g.state()["p"],"i");assert!(g.state()["error"].as_str().unwrap().contains("acknowledge"));assert!(!g.peers[0].suspended);
+}
+#[test]
+fn ten_large_peer_ids_and_long_tricks_fit_each_network_record() {
+    let ids:Vec<_>=(0..10).map(|i|format!("1844674407370955160{i}")).collect();
+    let refs:Vec<_>=ids.iter().map(String::as_str).collect();let mut g=Match::new(&refs);g.start();
     g.land(refs[0],&"x".repeat(64));
-    for id in &refs[1..] { g.land(id,&"x".repeat(64)); }
-    assert_eq!(g.state["p"],"r");
+    for id in &refs[1..]{g.settle();g.land(id,&"x".repeat(64));}
+    assert_eq!(g.state()["p"],"r");
 }
 
 #[test]
-fn departing_setter_is_replaced_and_new_peer_old_landing_is_ignored() {
-    let mut g=Game::new(&["1","2","3"]);
-    g.snapshot["network"]["players"]=json!(["1","3"]);
-    g.land("1","Kickflip");
-    g.snapshot["network"]["players"]=json!(["1","2","3"]);
-    g.tick(1.);
-    assert_eq!(g.state["d"],"000");
-    g.snapshot["network"]["players"]=json!(["2","3"]);
-    g.snapshot["network"]["local_id"]=json!("2");
-    g.tick(1.);
-    assert_eq!(g.state["p"],"s");
-    assert_eq!(g.state["a"],"2");
-}
-
-#[test]
-fn menu_start_stop_is_explicit_and_clients_cannot_start_the_host_game() {
-    let mut g=Game::new(&["1","2"]);
-    g.vm.call("on_event",json!({"name":"menu_action","menu":"session","item":"stop"}),&g.snapshot).unwrap();
-    g.tick(2.);
-    assert_eq!(g.state["p"],"i");
-    g.land("1","Kickflip");
-    assert_eq!(g.state["p"],"i");
-    g.vm.call("on_event",json!({"name":"menu_action","menu":"session","item":"start"}),&g.snapshot).unwrap();
-    g.tick(1.1);
-    assert_eq!(g.state["p"],"s");
-    g.snapshot["network"]["is_host"]=json!(false);
-    let commands=g.vm.call("on_event",json!({"name":"menu_action","menu":"session","item":"start"}),&g.snapshot).unwrap();
-    assert!(!commands.iter().any(|c|matches!(c,Command::NetworkState{..})));
-}
-
-#[test]
-fn paused_ui_refreshes_client_host_and_solo_actions_without_physics_ticks() {
-    let mut g=Game::new(&["1","2"]);
-    g.snapshot["paused"]=json!(true);
-    g.snapshot["network"]["is_host"]=json!(false);
-    let menu = |commands: Vec<Command>| commands.into_iter().find_map(|c| match c {
-        Command::UiMenu{options,..} => Some(options), _=>None
-    }).expect("menu refreshed");
-    let client=menu(g.vm.call("on_ui_update",json!({"dt":10.,"paused":true}),&g.snapshot).unwrap());
-    assert_eq!(client.section.as_deref(),Some("Gamemodes"));
-    assert_eq!(client.title,"SKATE");
-    assert!(!client.items[0].enabled && !client.items[1].enabled);
-    assert!(client.items[0].description.contains("Only the multiplayer host"));
-    g.snapshot["network"]["is_host"]=json!(true);
-    let host=menu(g.vm.call("on_ui_update",json!({"dt":10.,"paused":true}),&g.snapshot).unwrap());
-    assert!(host.items[0].enabled && !host.items[1].enabled);
-    let started=menu(g.vm.call("on_event",json!({"name":"menu_action","menu":"session","item":"start"}),&g.snapshot).unwrap());
-    assert!(!started.items[0].enabled && started.items[1].enabled);
-    let stopped=menu(g.vm.call("on_event",json!({"name":"menu_action","menu":"session","item":"stop"}),&g.snapshot).unwrap());
-    assert!(stopped.items[0].enabled && !stopped.items[1].enabled);
-    g.snapshot["network"]["is_host"]=json!(false);
-    g.vm.call("on_ui_update",json!({"dt":1.,"paused":true}),&g.snapshot).unwrap();
-    g.snapshot["network"]["active"]=json!(false);
-    let solo=menu(g.vm.call("on_ui_update",json!({"dt":1.,"paused":true}),&g.snapshot).unwrap());
-    assert!(solo.items[0].enabled && !solo.items[1].enabled);
+fn late_joiners_spectate_and_disconnected_copiers_do_not_block_the_round() {
+    let mut g=Match::new(&["99","1","2"]);
+    let late=g.peers.pop().unwrap();g.start();g.peers.push(late);g.settle();
+    assert_eq!(g.wire["99"]["origin"]["ids"],json!(["99","1"]));
+    assert!(g.peers[2].suspended);assert_eq!(g.peers[2].camera.as_deref(),Some("99"));
+    g.land("99","Kickflip");g.settle();g.peers.remove(1);g.step();
+    assert_eq!(g.state()["p"],"r");
+    g.event(0,"stop");g.step();assert!(g.peers.iter().all(|p|!p.suspended));
 }

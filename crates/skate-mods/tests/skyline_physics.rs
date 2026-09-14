@@ -349,7 +349,7 @@ impl Sim {
                 "states": {},
                 "status": "",
             },
-        });
+        }).into();
         manager.commands.clear();
         let mut host = Host {
             world: &mut self.world,
@@ -405,7 +405,7 @@ fn manager() -> Manager {
         "attach": null,
         "physics": {"bodies": {}, "contacts": [], "touching": []},
         "network": null,
-    });
+    }).into();
     manager.scan(true);
     assert!(
         manager.packages.get(MOD).is_some_and(|package| package.running()),

@@ -8,6 +8,7 @@ pub mod socket;
 pub mod directory;
 pub mod packed;
 pub mod interpolation;
+pub mod prediction;
 
 pub const MAGIC: &[u8; 8] = b"SK8NET01";
 pub const MAX_FRAME: usize = 48_000;

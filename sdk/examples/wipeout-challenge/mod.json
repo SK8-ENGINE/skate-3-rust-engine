@@ -1,0 +1,47 @@
+{
+  "id": "project-wipeout-challenge",
+  "api": 2,
+  "name": "Wipeout Challenge",
+  "version": "3.1.0",
+  "author": "opencode",
+  "description": "Floating platform survival with moving solid hazards, water sensors, one forgiven hit, and restart/return controls.",
+  "entry": "main.lua",
+  "settings": {
+    "game_mode": {
+      "type": "choice",
+      "label": "Game Mode",
+      "description": "Timed ends after all waves, survival loops them.",
+      "default": "survival",
+      "choices": [
+        "survival",
+        "timed"
+      ]
+    },
+    "wave_count": {
+      "type": "number",
+      "label": "Wave Count",
+      "description": "Number of hazard waves.",
+      "default": 4,
+      "min": 1,
+      "max": 10,
+      "step": 1
+    },
+    "hazard_intensity": {
+      "type": "choice",
+      "label": "Hazard Intensity",
+      "description": "Obstacle danger level.",
+      "default": "hardcore",
+      "choices": [
+        "easy",
+        "normal",
+        "hardcore"
+      ]
+    },
+    "enable_timer": {
+      "type": "boolean",
+      "label": "Enable Timer",
+      "description": "Show countdown timer.",
+      "default": true
+    }
+  }
+}

@@ -2,7 +2,7 @@
 //! PlayerInput retains the original ordering; callbacks split host ownership.
 #[path = "input_teleport.rs"]
 mod teleport;
-pub(crate) use teleport::{facing_from_visual, horizontal_spawn};
+pub(crate) use teleport::facing_from_visual;
 use super::{
     GamePhysics, SkaterRuntime,
     animated_skeleton::AnimatedSkeleton,
@@ -32,6 +32,17 @@ use skate_core::{
     player::input_phase::{AnimationInputPacket, PhysicalPlayerInput, ProcessedPhysicsInput},
 };
 
+// TU3 82DB4330 calls 825903C8: 82590414 reads action-table +0x104
+// (65 * 4), the signed left-stick Y action. The caller clamps/stores it at
+// Processed+2636. Action 71 is the right grab trigger, not vert-exit lean.
+fn transition_action(actions: &mut dyn ActionMap) -> f32 {
+    actions.value(65)
+}
+
+#[cfg(test)]
+#[path = "input_transition_tests.rs"]
+mod transition_tests;
+
 pub(super) fn advance(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
@@ -50,7 +61,7 @@ pub(super) fn advance(
         actor_query_56: 0,
         actor_query_44: 0,
         input_available,
-        transition_action: actions.value(71),
+        transition_action: transition_action(actions),
         published_board_transform: if skater.player_input.physical.state.flag_61 != 0 {
             skater
                 .player_input
@@ -229,7 +240,9 @@ impl PlayerInputCallbacks for Callbacks<'_, '_> {
             balance_2720: self.animation_input.fields.balance,
             translation_2796: extra.grind_translation,
             stability_nudge_2800: extra.grind_stability_nudge,
+            #[cfg(test)]
             up_down_2804: extra.grind_up_down,
+            #[cfg(test)]
             grab_min_height_2808: extra.grind_grab_min_height,
         };
         let mut host = super::grind_host::LiveHost {

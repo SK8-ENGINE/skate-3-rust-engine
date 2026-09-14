@@ -30,9 +30,6 @@ fn xyz(v: Vector3) -> [f32; 3] {
 fn vector(v: [f32; 3]) -> Vector3 {
     Vector3::new(v[0], v[1], v[2])
 }
-fn add(a: Vector3, b: Vector3) -> Vector3 {
-    Vector3::new(a.x + b.x, a.y + b.y, a.z + b.z)
-}
 fn body_pose(body: &BodySnapshot) -> Pose {
     let q = body.rates.orientation;
     Pose {
@@ -76,7 +73,7 @@ pub(crate) fn capture_body(physics: &GamePhysics, skater: &SkaterRuntime) -> Bod
             }
         }
     }
-    for (i, part) in skater.skeleton_collision.parts.iter().enumerate() {
+    for (i, part) in crate::modding::player_physics::collision_parts(skater).iter().enumerate() {
         if part.enabled && part.volume_group == 0 {
             enabled |= 1 << (7 + i);
         }
@@ -124,6 +121,18 @@ pub(crate) struct Schema {
     pub fingerprint: u64,
 }
 impl Schema {
+    /// Latest physical shape layout placed at the buffered visual root. This is
+    /// only for presentation clearance; the owner's simulation remains final.
+    pub fn visual_colliders(&self, frame: &BodyState, root: Mat4) -> Vec<skate_dynamics::SolidCollider> {
+        let relative = root * matrix(frame.root).inverse();
+        self.volumes.iter().filter_map(|(i, volume)| {
+            if frame.enabled & (1u64 << i) == 0 { return None; }
+            let body = frame.bodies.get(*i)?;
+            let primitive = transform(volume.primitive, relative * matrix(body.pose));
+            let (shape, pose) = super::solid_contacts::shape(primitive)?;
+            Some(skate_dynamics::SolidCollider { shape, pose, friction: 0. })
+        }).collect()
+    }
     pub fn new(physics: &GamePhysics, skater: &SkaterRuntime) -> Result<Self, String> {
         let mut mode = skate_core::physics::skeleton_body::SkeletonCollisionMode::new_normal(
             skater.skeleton_collision.settings,
@@ -248,17 +257,19 @@ pub(crate) struct Proxies {
     pub volumes: Vec<BoardWorldVolume>,
     pub solids: Vec<(usize, skate_dynamics::SolidBody)>,
     pub groups: std::collections::BTreeMap<usize, u32>,
+    pub actors: std::collections::BTreeMap<usize,(u64,usize)>,
     pub dynamics_before: Vec<(u64, usize, [f32; 3], [f32; 3])>,
     pub dynamics_deltas: Vec<(u64, [f32; 3], [f32; 3], [f32; 3], [f32; 3])>,
 }
 impl Proxies {
     pub fn append(
         &mut self,
+        peer: u64,
         frame: &BodyState,
         schema: &Schema,
         physics: &GamePhysics,
         skater: &SkaterRuntime,
-        age: f32,
+        prediction: skate_net::prediction::CollisionPrediction,
     ) {
         // The local native skeleton is intentionally paused during a mod
         // attachment. It is not a valid culling origin for a driven object.
@@ -293,6 +304,7 @@ impl Proxies {
                 };
                 inertia
             };
+            let wire = prediction.body(wire);
             let q = Quat::from_array(wire.pose.q).normalize();
             b.rates.orientation = RetailQuaternion {
                 x: q.x,
@@ -305,7 +317,7 @@ impl Proxies {
             };
             b.rates.world_inverse_inertia =
                 world_inverse_inertia(b.rates.basis, b.inertia.inverse_tensor);
-            b.rates.position = add(vector(wire.pose.p), vector(wire.velocity.map(|v| v * age)));
+            b.rates.position = vector(wire.pose.p);
             b.rates.linear_velocity = vector(wire.velocity);
             b.rates.angular_velocity = vector(wire.angular);
             b.rates.force_acceleration = Vector3::ZERO;
@@ -313,6 +325,7 @@ impl Proxies {
             b.state_flags = 4;
             self.groups.insert(base + i, if i < 7 { physics.board.collision_group() }
                 else { skater.skeleton_collision.assembly_group });
+            self.actors.insert(base+i,(peer,i));
             self.bodies.push(b);
         }
         for &(i, ref template) in &schema.volumes {

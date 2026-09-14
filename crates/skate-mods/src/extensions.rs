@@ -36,6 +36,9 @@ pub struct JointOverride {
     #[serde(default)] pub free_swing: Option<bool>,
     #[serde(default)] pub free_twist: Option<bool>,
     #[serde(default)] pub drive_enabled: Option<bool>,
+    #[serde(default)] pub enabled: Option<bool>,
+    #[serde(default)] pub descendants: bool,
+    #[serde(default)] pub possession_enabled: Option<bool>,
 }
 impl JointOverride {
     pub fn validate(&self) -> bool {
@@ -60,4 +63,21 @@ mod tests {
         o.swing_limit=Some(f32::NAN); assert!(!o.validate());
         o.swing_limit=Some(-1.); assert!(!o.validate());
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeBodyRef { pub kind: String, pub index: usize }
+impl NativeBodyRef {
+    pub fn validate(&self) -> bool { match self.kind.as_str() { "skater"=>self.index<26,"board"=>self.index<7,_=>false } }
+}
+
+#[derive(Clone,Debug,Default,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PartOverride {
+    pub motion:Option<String>, pub collision:Option<bool>, pub friction:Option<f32>,
+    pub animation_drives:Option<bool>, pub possession_drives:Option<bool>,
+}
+impl PartOverride {
+    pub fn validate(&self)->bool {self.motion.as_deref().is_none_or(|m|matches!(m,"dynamic"|"frozen"|"static")) && self.friction.is_none_or(|f|f.is_finite() && (0.0..=10.0).contains(&f))}
 }

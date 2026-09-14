@@ -75,3 +75,6 @@ includes Rust regression tests and `validate_model`, which runs the real cook,
 Rapier spawn and compact replication round trip on your machine without producing
 collision files. Use J and test roof standing/walking and vehicle impacts after
 successful compilation; no unconditional no-penetration claim is made.
+
+## 4.4.0 API migration
+Requires the generalized engine API build. Chassis creation uses command results and waits for successful body creation before graphics and effects are bound. Failed creation reports the host error and can be retried with F10. Driving parameters are unchanged.

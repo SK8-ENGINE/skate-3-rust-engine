@@ -24,6 +24,7 @@ sdk.ui = { version = 1 }
 function sdk.ui.menu(key, options) submit{kind="ui_menu",key=key,options=options} end
 function sdk.ui.remove_menu(key) submit{kind="ui_remove_menu",key=key} end
 function sdk.ui.text(key, text) submit{kind="overlay",key=key,text=text} end
+function sdk.ui.multiplayer_debug(key, text) submit{kind="multiplayer_debug",key=key,text=text} end
 -- Persistent screen-space rectangles and text; update an existing key in place.
 function sdk.ui.canvas(key, options)
     options = options or {}
@@ -286,6 +287,7 @@ end
 function sdk.audio.stop_all() submit{kind="audio_stop_all"} end
 
 sdk.player = {}
+function sdk.player.suspend(suspended) submit{kind="player_suspend",suspended=suspended} end
 function sdk.player.physics() return as_table(sdk.snapshot.player_physics) or {} end
 function sdk.player.contacts() return sdk.player.physics().contacts or {} end
 function sdk.player.joints() return sdk.player.physics().joints or {} end
@@ -381,8 +383,14 @@ function sdk.time.after(key, seconds, callback)
     timers[key]={at=sdk.time.elapsed+seconds,callback=callback}
 end
 function sdk.time.cancel(key) timers[key]=nil end
+function sdk._timers_due(dt)
+    local at=sdk.time.elapsed+dt
+    for _,timer in pairs(timers) do if timer.at<=at then return true end end
+    return false
+end
 function sdk._advance(dt)
     sdk.time.elapsed=sdk.time.elapsed+dt
+    if next(timers)==nil then return end
     local due={}
     for key,timer in pairs(timers) do if timer.at<=sdk.time.elapsed then due[#due+1]=key end end
     table.sort(due)
@@ -391,3 +399,60 @@ function sdk._advance(dt)
         if timer and timer.at<=sdk.time.elapsed then timers[key]=nil; timer.callback() end
     end
 end
+
+-- Unified low-level surface. All native IDs below are zero-based; Lua lists are not.
+sdk.commands = {}
+local command_serial, command_pending = 0, {}
+function sdk.commands.request(key, command)
+    command_serial=command_serial+1;command_pending[key]=command_serial
+    submit{kind="request",key=key,token=command_serial,command=command}
+    return command_serial
+end
+function sdk.commands.result(key)
+    local result=((sdk.snapshot.command_results or {})[sdk.mod_id] or {})[key]
+    if result and result.token==command_pending[key] then return result end
+end
+sdk.engine = {version=1}
+function sdk.engine.systems() return (sdk.snapshot.engine or {}).systems or {} end
+function sdk.engine.inspect(key,system) sdk.commands.request(key,{kind="engine_inspect",system=system}) end
+function sdk.engine.read(system)
+    local s=sdk.snapshot
+    if system=="input" then return {pad=s.pad,actions=s.actions,keys=s.keys} end
+    if system=="commands" then return (s.command_results or {})[sdk.mod_id] end
+    local key=({player="player",rig="player_physics",bodies="physics",world="map",camera="camera",network="network",scoring="player"})[system]
+    if key then return s[key] end
+    return (s.engine or {})[system]
+end
+sdk.rig = {}
+function sdk.rig.read(fields)
+  if fields and sdk._rig_snapshot then return sdk._rig_snapshot(fields) end
+  return sdk.player.physics()
+end
+function sdk.rig.parts() return sdk.rig.read({"parts"}).parts or {} end
+function sdk.rig.joints() return sdk.rig.read({"joints"}).joints or {} end
+function sdk.rig.contacts() return sdk.rig.read({"contacts"}).contacts or {} end
+function sdk.rig.configure_joint(index,options) sdk.player.set_joint(index,options) end
+function sdk.rig.reset_joint(index) sdk.player.reset_joint(index) end
+function sdk.rig.reset() sdk.player.reset_joints() end
+sdk.bodies = {}
+function sdk.bodies.read(ref)
+    if ref.kind=="mod" then return sdk.physics.read(ref.key) end
+    local rig=sdk.rig.read();local list=ref.kind=="skater" and rig.parts or ref.kind=="board" and rig.board
+    for _,b in ipairs(list or {}) do if b.index==ref.index then return b end end
+end
+function sdk.bodies.impulse(ref,value,point)
+    if ref.kind=="mod" then sdk.physics.impulse(ref.key,value,point)
+    else submit{kind="native_impulse",body={kind=ref.kind,index=ref.index},impulse=value,point=point,angular=false} end
+end
+function sdk.bodies.angular_impulse(ref,value)
+    if ref.kind=="mod" then sdk.physics.torque_impulse(ref.key,value)
+    else submit{kind="native_impulse",body={kind=ref.kind,index=ref.index},impulse=value,angular=true} end
+end
+function sdk.input.override_action(id,value) submit{kind="input_override",action=id,value=value} end
+
+sdk.graphs = {}
+function sdk.graphs.read(graph) return (sdk.engine.read("graphs") or {})[graph] end
+function sdk.graphs.set_enabled(graph,target,index,enabled) submit{kind="graph_gate",graph=graph,target=target,index=index,enabled=enabled} end
+
+function sdk.rig.configure_part(index,options) submit{kind="rig_part",index=index,options=options} end
+function sdk.rig.reset_part(index) sdk.rig.configure_part(index,nil) end

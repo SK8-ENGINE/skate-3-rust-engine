@@ -124,3 +124,20 @@ pub(crate) fn dynamics_to_board(
 }
 
 pub(crate) fn sync_network(world: &mut World) { super::replication::sync(world); }
+
+/// Enabled native board/skater volumes, without a duplicate Rapier actor.
+pub(super) fn player_shapes(world: &World) -> Vec<(skate_dynamics::rapier3d::prelude::SharedShape, skate_dynamics::rapier3d::prelude::Pose)> {
+    let physics = world.resource::<crate::physics::GamePhysics>();
+    let skater = world.resource::<crate::physics::SkaterRuntime>();
+    let mut volumes = crate::physics::colliders::world_volumes(&physics.board, &physics.settings);
+    volumes.retain(|v| skater.board_possession_live.volume_enabled(v.body));
+    if let Ok(skeleton) = crate::physics::skeleton_colliders::volumes_with_parts(&skater.skeleton, &super::player_physics::collision_parts(skater)) {
+        volumes.extend(skeleton);
+    }
+    volumes.into_iter().filter_map(|v| crate::physics::solid_contacts::shape(v.primitive)).collect()
+}
+
+/// Current solid geometry for remote-player presentation clearance only.
+pub(crate) fn visual_solids(mods: &Mods) -> Vec<SolidBody> {
+    mods.world.solid_bodies()
+}

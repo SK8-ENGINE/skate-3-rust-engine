@@ -282,8 +282,8 @@ impl Sim {
 
     fn fixed_tick(&mut self, manager: &mut Manager, keys: Value, dt: f32) -> Vec<Command> {
         let physics = self.physics_snapshot();
-        manager.snapshot = self.snapshot(physics);
-        if let Some(obj) = manager.snapshot.as_object_mut() {
+        manager.snapshot = self.snapshot(physics).into();
+        if let Some(obj) = std::sync::Arc::make_mut(&mut manager.snapshot).as_object_mut() {
             obj.insert("keys".into(), keys);
         }
         manager.commands.clear();
@@ -339,7 +339,7 @@ fn manager() -> Manager {
         "attach": null,
         "physics": {"bodies": {}, "contacts": [], "touching": []},
         "network": null,
-    });
+    }).into();
     manager.scan(true);
     manager
 }

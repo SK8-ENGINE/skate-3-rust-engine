@@ -88,7 +88,7 @@ pub(super) fn spawn(
         (world.spawn((Mesh3d(mesh.clone()),MeshMaterial3d(material.clone()),t,visibility)).id(),Some(mesh.id()),Some(material.id()))
     };
     mods.graphics_serial=mods.graphics_serial.wrapping_add(1);
-    world.entity_mut(entity).insert((crate::retail_character::ModGraphicsLit,super::ModGraphicsOpacity(definition.opacity)));
+    world.entity_mut(entity).insert((crate::retail_character::ModGraphicsLit,bevy::camera::visibility::RenderLayers::from_layers(&[0,28])));
     mods.graphics.insert(slot,Owned {
         entity,mesh,material,body:definition.body.clone(),definition,transform:state,visible,
         serial:serial.unwrap_or(mods.graphics_serial),nodes:BTreeMap::new(),bindings:BTreeMap::new(),
@@ -112,13 +112,16 @@ pub(super) fn reset_node(world:&mut World,mods:&mut Mods,owner:&str,key:&str,nod
     }
 }
 
-fn bind(world:&World,owned:&mut Owned) {
+fn bind(world:&mut World,owned:&mut Owned) {
     if owned.ready { return; }
     if owned.definition.path.is_empty() { owned.ready=true; return; }
     let Some(instance)=world.get::<SceneInstance>(owned.entity) else { return };
     let spawner=world.resource::<SceneSpawner>();
     if !spawner.instance_is_ready(**instance) { return; }
-    for entity in spawner.iter_instance_entities(**instance) {
+    let entities:Vec<_>=spawner.iter_instance_entities(**instance).collect();
+    let mut opacity_materials=BTreeMap::new();
+    for entity in entities {
+        prepare_mesh(world,entity,owned.definition.opacity,&mut opacity_materials);
         let (Some(name),Some(t))=(world.get::<Name>(entity),world.get::<Transform>(entity)) else { continue };
         let name=name.as_str().to_owned();
         if owned.bindings.insert(name.clone(),Binding { entity,authored:*t }).is_some() {
@@ -126,6 +129,25 @@ fn bind(world:&World,owned:&mut Owned) {
         }
     }
     owned.ready=true;
+}
+
+fn prepare_mesh(world:&mut World,entity:Entity,opacity:f32,cache:&mut BTreeMap<AssetId<StandardMaterial>,Handle<StandardMaterial>>) {
+    let Some(handle)=world.get::<MeshMaterial3d<StandardMaterial>>(entity).map(|m|m.0.clone()) else {return};
+    // The baked world's dynamic-shadow map includes layer 28. Keep authored
+    // materials (and their alpha-aware shadow shaders) for every GLB primitive.
+    let layers=world.get::<bevy::camera::visibility::RenderLayers>(entity).cloned().unwrap_or_default().with(28);
+    world.entity_mut(entity).insert(layers);
+    if opacity>=0.999 {return;}
+    let replacement=if let Some(existing)=cache.get(&handle.id()) {existing.clone()} else {
+        let mut assets=world.resource_mut::<Assets<StandardMaterial>>();
+        let Some(mut material)=assets.get(&handle).cloned() else {return};
+        material.base_color.set_alpha(material.base_color.alpha()*opacity);
+        material.alpha_mode=AlphaMode::Blend;
+        let replacement=assets.add(material);
+        cache.insert(handle.id(),replacement.clone());
+        replacement
+    };
+    world.entity_mut(entity).insert(MeshMaterial3d(replacement));
 }
 
 pub(super) fn sync(world:&mut World,mods:&mut Mods) {
@@ -146,8 +168,8 @@ pub(super) fn sync(world:&mut World,mods:&mut Mods) {
                 visible=false;
             }
         }
-        if let Some(mut current)=world.get_mut::<Transform>(owned.entity) { *current=t; }
-        if let Some(mut current)=world.get_mut::<Visibility>(owned.entity) { *current=if visible { Visibility::Visible } else { Visibility::Hidden }; }
+        if let Some(mut current)=world.get_mut::<Transform>(owned.entity) { if *current!=t {*current=t;} }
+        if let Some(mut current)=world.get_mut::<Visibility>(owned.entity) { let next=if visible { Visibility::Visible } else { Visibility::Hidden }; if *current!=next {*current=next;} }
         bind(world,owned);
         for (name,node) in &owned.nodes {
             if owned.ambiguous.contains(name) || !owned.bindings.contains_key(name) {
@@ -159,7 +181,8 @@ pub(super) fn sync(world:&mut World,mods:&mut Mods) {
             let binding=owned.bindings[name];
             let age=if owner.starts_with('@') { node.received.elapsed().as_secs_f32() } else { 0. };
             if let Some(mut current)=world.get_mut::<Transform>(binding.entity) {
-                *current=node_transform(binding.authored,&node.state,age);
+                let next=node_transform(binding.authored,&node.state,age);
+                if *current!=next {*current=next;}
             }
         }
     }
@@ -200,6 +223,35 @@ pub(crate) fn debug(mods:Res<Mods>,mut gizmos:Gizmos) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn authored_materials_cast_shadows_and_opacity_is_instance_local() {
+        use bevy::camera::visibility::RenderLayers;
+        let mut world=World::new();
+        world.init_resource::<Assets<StandardMaterial>>();
+        let source=world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
+            metallic:0.8,perceptual_roughness:0.23,double_sided:true,cull_mode:None,
+            base_color:Color::srgba(0.2,0.3,0.4,0.6),alpha_mode:AlphaMode::Mask(0.3),..default()
+        });
+        let original=world.spawn(MeshMaterial3d(source.clone())).id();
+        let faded=world.spawn(MeshMaterial3d(source.clone())).id();
+        let mut cache=BTreeMap::new();
+        prepare_mesh(&mut world,original,1.,&mut cache);
+        prepare_mesh(&mut world,faded,0.5,&mut cache);
+        assert_eq!(world.get::<MeshMaterial3d<StandardMaterial>>(original).unwrap().0,source);
+        for entity in [original,faded] {
+            assert!(world.get::<RenderLayers>(entity).unwrap().intersects(&RenderLayers::layer(28)));
+        }
+        let assets=world.resource::<Assets<StandardMaterial>>();
+        assert_eq!(assets.get(&source).unwrap().base_color.alpha(),0.6);
+        assert_eq!(assets.get(&source).unwrap().alpha_mode,AlphaMode::Mask(0.3));
+        let material=assets.get(&world.get::<MeshMaterial3d<StandardMaterial>>(faded).unwrap().0).unwrap();
+        assert_eq!(material.base_color.alpha(),0.3);
+        assert_eq!(material.metallic,0.8);
+        assert_eq!(material.perceptual_roughness,0.23);
+        assert!(material.double_sided);
+        assert!(material.cull_mode.is_none());
+    }
+
     #[test] fn bind_delta_does_not_accumulate_or_discard_authored_scale() {
         let authored=Transform::from_xyz(2.,3.,4.).with_scale(Vec3::splat(2.));
         let mut state=NodeState::default(); state.transform.position=[0.,0.2,0.];

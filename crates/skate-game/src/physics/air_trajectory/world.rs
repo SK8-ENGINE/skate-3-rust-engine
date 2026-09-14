@@ -2,7 +2,7 @@
 //!82772028, across the host's world-format boundary. BoardWorld stores static
 //!world-space triangles, so their source geometry transform is identity.
 use skate_core::{
-    air::trajectory::{SurfaceHit, WorldWithoutGrindEdges},
+    air::trajectory::SurfaceHit,
     math::Vector3,
     physics::{
         board_world::BoardWorld,
@@ -16,13 +16,6 @@ const IDENTITY: [[f32; 4]; 4] = [
     [0.0, 0.0, 1.0, 0.0],
     [0.0; 4],
 ];
-
-///BoardWorld's authored format contains triangles only; no grind primitive
-///collection is present. Update this adapter together with any world format
-///extension that introduces actual grind edges.
-pub(super) fn topology(_world: &BoardWorld) -> WorldWithoutGrindEdges {
-    WorldWithoutGrindEdges
-}
 
 pub(super) fn line(
     world: &BoardWorld,
@@ -63,6 +56,16 @@ pub(super) fn line(
             }
         }
     }
+    if let Some(external) = world.external_line(start, vec3(end), radius) {
+        let hit = external.hit.geometry;
+        if hit.fraction.clamp(0.0, 1.0) < nearest {
+            result = Some(SurfaceHit {
+                position: lanes(hit.position), normal: lanes(hit.normal),
+                transform: external.frame, surface: external.hit.tag,
+                geometry: external.geometry_id,
+            });
+        }
+    }
     Ok(result)
 }
 pub(super) fn nearby(
@@ -82,6 +85,15 @@ pub(super) fn nearby(
             triangles.push(vertices);
             if triangles.len() == 64 {
                 break;
+            }
+        }
+    }
+    if triangles.len() < 64 {
+        for vertices in world.external_nearby(vec3(center), radius) {
+            let vertices = vertices.map(lanes);
+            if triangle_box(vertices, minimum, maximum) {
+                triangles.push(vertices);
+                if triangles.len() == 64 { break; }
             }
         }
     }

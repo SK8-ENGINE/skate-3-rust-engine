@@ -43,13 +43,13 @@ pub(super) fn set(world: &mut World, canvases: &mut BTreeMap<(String,String),Can
         });
         let color=Color::srgba(item.color[0],item.color[1],item.color[2],item.color[3]);
         match item.kind {
-            CanvasKind::Rect => { world.entity_mut(e).insert(BackgroundColor(color)); }
+            CanvasKind::Rect => { if world.get::<BackgroundColor>(e).is_none_or(|c|c.0!=color){world.entity_mut(e).insert(BackgroundColor(color));} }
             CanvasKind::Text => {
                 // Reuse entities; replace only changed text, avoiding needless reshaping.
                 if world.get::<Text>(e).is_none_or(|t| t.0!=item.text) {
                     world.entity_mut(e).insert(Text::new(item.text.clone()));
                 }
-                world.entity_mut(e).insert(TextColor(color));
+                if world.get::<TextColor>(e).is_none_or(|c|c.0!=color){world.entity_mut(e).insert(TextColor(color));}
             }
         }
     }
@@ -78,18 +78,52 @@ pub(super) fn present(world:&mut World, canvases:&BTreeMap<(String,String),Canva
             CanvasAnchor::BottomLeft => {node.left=px(o.offset[0]*scale);node.bottom=px(o.offset[1]*scale);}
             CanvasAnchor::BottomRight => {node.right=px(o.offset[0]*scale);node.bottom=px(o.offset[1]*scale);}
         }
-        if world.get::<Node>(c.root).is_some(){world.entity_mut(c.root).insert(node);}
+        if world.get::<Node>(c.root).is_some_and(|old|*old!=node){world.entity_mut(c.root).insert(node);}
         for (index,item) in o.items.iter().enumerate() {
             let Some((e,_))=c.nodes.get(&item.key) else {continue};
             if world.get::<Node>(*e).is_none(){continue;}
-            world.entity_mut(*e).insert(ZIndex(index as i32));
-            world.entity_mut(*e).insert(Node{position_type:PositionType::Absolute,
+            if world.get::<ZIndex>(*e).is_none_or(|z|z.0!=index as i32){world.entity_mut(*e).insert(ZIndex(index as i32));}
+            let node=Node{position_type:PositionType::Absolute,
                 left:px(item.position[0]*scale),top:px(item.position[1]*scale),
-                width:px(item.size[0]*scale),height:px(item.size[1]*scale),..default()});
+                width:px(item.size[0]*scale),height:px(item.size[1]*scale),..default()};
+            if world.get::<Node>(*e).is_some_and(|old|*old!=node){world.entity_mut(*e).insert(node);}
             if item.kind==CanvasKind::Text && world.get::<TextFont>(*e)
                 .is_none_or(|font| (font.font_size-item.font_size*scale).abs()>0.01) {
                 world.entity_mut(*e).insert(TextFont{font_size:item.font_size*scale,..default()});
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn unchanged_canvas_does_not_dirty_layout_or_text() {
+        let mut world = World::new();
+        let mut canvases = BTreeMap::new();
+        let mut options = CanvasOptions::default();
+        options.items.push(skate_mods::presentation::CanvasItem {
+            key: "status".into(), text: "No broken bones".into(), ..default()
+        });
+        set(&mut world, &mut canvases, "test", "hud".into(), options.clone()).unwrap();
+        present(&mut world, &canvases, false);
+        let canvas = &canvases[&("test".into(), "hud".into())];
+        let root = canvas.root;
+        let text = canvas.nodes["status"].0;
+        world.clear_trackers();
+        set(&mut world, &mut canvases, "test", "hud".into(), options.clone()).unwrap();
+        present(&mut world, &canvases, false);
+        assert!(!world.entity(root).get_ref::<Node>().unwrap().is_changed());
+        assert!(!world.entity(text).get_ref::<Node>().unwrap().is_changed());
+        assert!(!world.entity(text).get_ref::<Text>().unwrap().is_changed());
+        assert!(!world.entity(text).get_ref::<TextColor>().unwrap().is_changed());
+        assert!(!world.entity(text).get_ref::<TextFont>().unwrap().is_changed());
+        assert!(!world.entity(text).get_ref::<ZIndex>().unwrap().is_changed());
+        options.items[0].text = "Arm broken".into();
+        set(&mut world, &mut canvases, "test", "hud".into(), options).unwrap();
+        assert!(world.entity(text).get_ref::<Text>().unwrap().is_changed());
+        present(&mut world, &canvases, true);
+        assert_eq!(world.get::<Node>(root).unwrap().display, Display::None);
     }
 }

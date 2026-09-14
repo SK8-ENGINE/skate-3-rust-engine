@@ -1,6 +1,5 @@
 //! Required producer inputs. None implements Default: absence of a producer is
 //! not permission to use world-up, metal friction, geometry zero or full energy.
-use super::Family;
 type V = [f32; 4];
 
 /// Snapshot after the manager's geometry, material, assistance, balance,
@@ -11,7 +10,6 @@ pub(crate) struct ManagerObservation {
     pub surface: SurfaceObservation,
     pub control: ControlObservation,
     pub engagement: EngagementObservation,
-    pub jumper: JumperObservation,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -45,34 +43,15 @@ pub(crate) struct SurfaceObservation {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ControlObservation {
-    pub family: Family,
     /// Signed bit31 forces exit; bit29 selects the front end; bit30 delivers
     /// engagement velocity. Keep the source word rather than guessing booleans.
     pub flags_1516: u32,
-    pub flags_2468: u32,
     pub flags_2488: u32,
     pub translation_2796: f32,
     pub balance_2800: f32,
-    /// Original exit-lean producer's result, not derived from deck lean here.
-    pub exit_lean: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EngagementObservation {
-    pub velocity_1184: V,
     pub kind_1248: u32,
-}
-
-/// Jumper cache after82D739D8; invalid investigation retains its previous
-/// geometry/normals. Do not reconstruct these from the current deck frame.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct JumperObservation {
-    pub geometry_kind_16: u32,
-    pub family_20: Family,
-    pub energy_24: f32,
-    pub high_side_32: V,
-    pub normal_48: V,
-    pub direction_64: V,
-    pub upmost_normal_80: V,
-    pub point_96: V,
 }

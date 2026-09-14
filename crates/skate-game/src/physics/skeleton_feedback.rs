@@ -167,12 +167,12 @@ fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContact
                 body_a: contact_body(
                     resolve(spy[24], physics, skater),
                     point,
-                    vehicle && is_mod_solid_contact(spy[24], physics, skater),
+                    vehicle && is_mod_solid_contact(spy[24], physics),
                 ),
                 body_b: contact_body(
                     resolve(spy[25], physics, skater),
                     point,
-                    vehicle && is_mod_solid_contact(spy[25], physics, skater),
+                    vehicle && is_mod_solid_contact(spy[25], physics),
                 ),
                 side_a,
                 solved_vector: vector(20),
@@ -186,7 +186,7 @@ fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContact
     mod_reports.truncate(16);
     mod_reports
 }
-fn is_mod_solid_contact(id: u32, physics: &GamePhysics, skater: &SkaterRuntime) -> bool {
+fn is_mod_solid_contact(id: u32, physics: &GamePhysics) -> bool {
     matches!(
         CollisionBody::from_contact_id(id),
         CollisionBody::Attached(index)

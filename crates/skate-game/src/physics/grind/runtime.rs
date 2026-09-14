@@ -33,9 +33,6 @@ impl Runtime {
             chromosome: grind_chromosome::Chromosome::uninitialized(),
         })
     }
-    pub fn active_family(&self) -> Option<Family> {
-        self.active
-    }
     pub fn active_name(&self) -> Option<&'static str> {
         Some(match self.active? {
             Family::FiftyFifty => "50-50",

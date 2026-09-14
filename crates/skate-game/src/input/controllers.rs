@@ -76,6 +76,7 @@ impl ControllerInput {
         self.pads = std::array::from_fn(|_| Pad::new());
         self.mapped_actions = [[0.0; 18]; DEVICE_SLOTS];
     }
+    #[cfg(test)]
     pub(crate) fn player_actions(&self) -> GameplayActions {
         let device = self.status.iter().position(|status| *status == ControllerStatus::Ready).unwrap_or(0);
         GameplayActions::from_pad(&self.pads[device])

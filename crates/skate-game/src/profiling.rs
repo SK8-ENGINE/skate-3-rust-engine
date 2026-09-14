@@ -85,34 +85,33 @@ struct Capture {
 }
 
 impl Capture {
-    fn write(&self, phase: &str, name: &str, thread: u64) {
-        if !self.recording.load(Ordering::Relaxed) {
-        return;
-        }
-        let micros = self.started.elapsed().as_micros();
-        let mut sink = self.events.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(file) = sink.as_mut() else { return };
-        let first = self.written.fetch_add(1, Ordering::Relaxed) == 0;
-        let separator = if first { "" } else { ",\n" };
-        // Escaping: span names are compile-time literals in this codebase, so a
-        // quote would be a programming error rather than untrusted input.
-        let _ = write!(
-            file,
-            "{separator}{{\"ph\":\"{phase}\",\"name\":\"{name}\",\"cat\":\"skate\",\
-             \"pid\":1,\"tid\":{thread},\"ts\":{micros}}}"
-        );
+    fn write(&self, name:&str, thread:u64, begin:Instant, end:Instant) {
+        if !self.recording.load(Ordering::Relaxed) {return;}
+        let event=serde_json::json!({"ph":"X","name":name,"cat":"skate","pid":1,"tid":thread,
+            "ts":begin.saturating_duration_since(self.started).as_micros() as u64,
+            "dur":end.saturating_duration_since(begin).as_micros() as u64});
+        let mut sink=self.events.lock().unwrap_or_else(|e|e.into_inner());
+        let Some(file)=sink.as_mut() else{return;};
+        if self.written.fetch_add(1,Ordering::Relaxed)!=0 {let _=file.write_all(b",\n");}
+        let _=serde_json::to_writer(file,&event);
     }
 
-    fn metadata(&self, name: &str, value: &str) {
+    fn metadata(&self, name:&str, value:&str) {
+        let mut sink=self.events.lock().unwrap_or_else(|e|e.into_inner());
+        let Some(file)=sink.as_mut() else{return;};
+        if self.written.fetch_add(1,Ordering::Relaxed)!=0 {let _=file.write_all(b",\n");}
+        let _=serde_json::to_writer(file,&serde_json::json!({"ph":"M","name":name,"cat":"skate","pid":1,"tid":0,"ts":0,"args":{"value":value}}));
+    }
+
+    fn frame_interval(&self, milliseconds: f64) {
         let mut sink = self.events.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(file) = sink.as_mut() else { return };
-        let first = self.written.fetch_add(1, Ordering::Relaxed) == 0;
-        let separator = if first { "" } else { ",\n" };
-        let _ = write!(
-            file,
-            "{separator}{{\"ph\":\"M\",\"name\":\"{name}\",\"cat\":\"skate\",\
-             \"pid\":1,\"tid\":0,\"ts\":0,\"args\":{{\"value\":\"{value}\"}}}}"
-        );
+        let Some(file) = sink.as_mut() else { return; };
+        if self.written.fetch_add(1, Ordering::Relaxed) != 0 { let _ = file.write_all(b",\n"); }
+        let _ = serde_json::to_writer(file, &serde_json::json!({
+            "ph":"C", "name":"frame_interval_ms", "cat":"skate", "pid":1,
+            "tid":THREAD_ID.with(|id|*id), "ts":self.started.elapsed().as_micros() as u64,
+            "args":{"value":milliseconds}
+        }));
     }
 
     fn finish(&self) {
@@ -135,6 +134,14 @@ thread_local! {
 }
 static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
 
+thread_local! { static ENTERED:std::cell::RefCell<Vec<(Id,Instant)>>=const {std::cell::RefCell::new(Vec::new())}; }
+struct TraceLabel(String);
+impl bevy::log::tracing::field::Visit for TraceLabel {
+    fn record_debug(&mut self,field:&bevy::log::tracing::field::Field,value:&dyn std::fmt::Debug) {
+        use std::fmt::Write;let _=write!(&mut self.0," {}={value:?}",field.name());
+    }
+}
+
 struct ChromeLayer {
     capture: &'static Capture,
 }
@@ -143,21 +150,24 @@ impl<S> Layer<S> for ChromeLayer
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
-    fn on_new_span(&self, _attrs: &Attributes<'_>, _id: &Id, _ctx: Context<'_, S>) {}
-
-    fn on_enter(&self, id: &Id, ctx: Context<'_, S>) {
-        if let Some(span) = ctx.span(id) {
-            let thread = THREAD_ID.with(|id| *id);
-            self.capture.write("B", span.name(), thread);
+    fn on_new_span(&self, attrs:&Attributes<'_>, id:&Id, ctx:Context<'_,S>) {
+        let mut label=TraceLabel(attrs.metadata().name().to_owned());attrs.record(&mut label);
+        if let Some(span)=ctx.span(id) {span.extensions_mut().insert(label);}
+    }
+    fn on_enter(&self, id:&Id, _ctx:Context<'_,S>) {
+        if self.capture.recording.load(Ordering::Relaxed) {
+            ENTERED.with(|stack|stack.borrow_mut().push((id.clone(),Instant::now())));
+        }
+    }
+    fn on_exit(&self, id:&Id, ctx:Context<'_,S>) {
+        let begin=ENTERED.with(|stack| {let mut stack=stack.borrow_mut();let at=stack.iter().rposition(|(entered,_)|entered==id)?;Some(stack.remove(at).1)});
+        if let (Some(begin),Some(span))=(begin,ctx.span(id)) {
+            let end=Instant::now();let extensions=span.extensions();
+            let label=extensions.get::<TraceLabel>().map_or(span.name(),|n|n.0.as_str());
+            self.capture.write(label,THREAD_ID.with(|id|*id),begin,end);
         }
     }
 
-    fn on_exit(&self, id: &Id, ctx: Context<'_, S>) {
-        if let Some(span) = ctx.span(id) {
-            let thread = THREAD_ID.with(|id| *id);
-            self.capture.write("E", span.name(), thread);
-        }
-    }
 }
 
 /// Held by `main` for the process lifetime; closes the JSON array on drop so a
@@ -270,7 +280,7 @@ pub(crate) fn install(app: &mut App) {
 
 fn controls(keys: Res<ButtonInput<KeyCode>>, time: Res<Time<Real>>, mut started: Local<Option<f32>>) {
     let Some(capture) = CAPTURE.get() else { return };
-    if keys.just_pressed(KeyCode::F9) && !capture.recording.load(Ordering::Relaxed) {
+    if keys.just_pressed(KeyCode::F9) && !capture.closed.load(Ordering::Relaxed) && !capture.recording.load(Ordering::Relaxed) {
         capture.recording.store(true, Ordering::SeqCst);
         *started = Some(time.elapsed_secs());
         info!("SKATE_TRACE capture started");
@@ -280,6 +290,7 @@ fn controls(keys: Res<ButtonInput<KeyCode>>, time: Res<Time<Real>>, mut started:
         info!("SKATE_TRACE capture stopped");
     }
     if capture.recording.load(Ordering::Relaxed) {
+        capture.frame_interval(time.delta_secs_f64() * 1000.0);
         let begin = started.get_or_insert(time.elapsed_secs());
         if let Some(limit) = STOP_AFTER.get().copied().flatten() {
             if time.elapsed_secs() - *begin >= limit {
@@ -287,5 +298,44 @@ fn controls(keys: Res<ButtonInput<KeyCode>>, time: Res<Time<Real>>, mut started:
                 info!("SKATE_TRACE capture stopped after {limit}s");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn trace_has_complete_spans_dynamic_labels_and_escaped_metadata() {
+        let path = std::env::temp_dir().join(format!("skate-trace-{}-{}.json", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let mut file = BufWriter::new(File::create(&path).unwrap());
+        file.write_all(b"[\n").unwrap();
+        let capture: &'static Capture = Box::leak(Box::new(Capture {
+            started: Instant::now(), recording: AtomicBool::new(false), closed: AtomicBool::new(false),
+            events: Mutex::new(Some(file)), written: AtomicU64::new(0),
+        }));
+        let subscriber = bevy::log::tracing_subscriber::registry().with(ChromeLayer { capture });
+        let metadata = "map \"quoted\" \\ assets\nnext";
+        capture.metadata("map", metadata);
+        bevy::log::tracing::subscriber::with_default(subscriber, || {
+            { let _ignored = bevy::log::tracing::info_span!("before_capture").entered(); }
+            capture.recording.store(true, Ordering::SeqCst);
+            let outer = bevy::log::tracing::info_span!("mods.callback", mod_id = "broken-bones", callback = "on_fixed_update");
+            let _outer = outer.enter();
+            { let _inner = bevy::log::tracing::info_span!("nested").entered(); }
+        });
+        capture.finish();
+        capture.finish();
+        let events: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let rows = events.as_array().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0]["args"]["value"], metadata);
+        assert_eq!(rows[1]["name"], "nested");
+        assert!(rows[2]["name"].as_str().unwrap().contains("broken-bones"));
+        assert!(rows[2]["name"].as_str().unwrap().contains("on_fixed_update"));
+        assert_eq!(rows[2]["ph"], "X");
+        assert!(rows[2]["ts"].as_u64().unwrap() <= rows[1]["ts"].as_u64().unwrap());
+        assert!(rows[2]["dur"].as_u64().unwrap() >= rows[1]["dur"].as_u64().unwrap());
     }
 }

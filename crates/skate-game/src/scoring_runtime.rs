@@ -83,9 +83,15 @@ pub(crate) struct Runtime {
     sequence_active: bool,
     sequence_score: f32,
     trick_name: String,
+    display_base: String,
+    display_spin_degrees: i32,
     trick_seq: u32,
     pub(crate) landing_seq: u32,
     pub(crate) landed_trick: String,
+    pub(crate) landed_base: String,
+    pub(crate) landed_spin_degrees: i32,
+    pub(crate) landed_clean: bool,
+    pub(crate) landed_sketchy: bool,
     pub(crate) bail_seq: u32,
     settled_trick_seq: u32,
     was_bailing: bool,
@@ -131,9 +137,12 @@ impl Runtime {
             sequence_active: false,
             sequence_score: 0.,
             trick_name: String::new(),
+            display_base: String::new(), display_spin_degrees: 0,
             trick_seq: 0,
             landing_seq: 0,
             landed_trick: String::new(),
+            landed_base: String::new(), landed_spin_degrees: 0,
+            landed_clean: false, landed_sketchy: false,
             bail_seq: 0,
             settled_trick_seq: 0,
             was_bailing: false,
@@ -643,6 +652,9 @@ impl Runtime {
                 fakie,
                 f.regular,
             );
+            self.display_base = display::compose(&self.data, self.display_id, 0, 0,
+                switch, fakie, f.regular).0;
+            self.display_spin_degrees = self.spin_turns * 180;
             self.trick_name = name;
             self.stance = stance;
         } else if !self.sequence_active {
@@ -745,6 +757,10 @@ impl Runtime {
             {
                 self.landing_seq = self.landing_seq.saturating_add(1);
                 self.landed_trick = self.trick_name.clone();
+                self.landed_base = self.display_base.clone();
+                self.landed_spin_degrees = self.display_spin_degrees;
+                self.landed_clean = self.clean;
+                self.landed_sketchy = self.sketchy;
             }
             self.settled_trick_seq = self.trick_seq;
             self.sequence_active = false;
@@ -797,3 +813,10 @@ impl Runtime {
 #[cfg(test)]
 #[path = "scoring_runtime/tests.rs"]
 mod tests;
+
+impl Runtime {
+    pub(crate) fn mod_catalog(&self)->serde_json::Value {
+        serde_json::json!(self.data.definitions.iter().map(|d|serde_json::json!({"id":d.metadata.id,"identifier":d.identifier,
+            "label":d.label,"points":d.points,"type":d.trick_type,"class":d.metadata.class,"score_type":d.metadata.score_type,"variant":d.variant})).collect::<Vec<_>>())
+    }
+}

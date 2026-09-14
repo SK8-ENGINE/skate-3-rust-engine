@@ -21,10 +21,6 @@ struct Marker {
     generation: u64,
 }
 
-/// Audio owners consume these native GlobalFEPlaySound event IDs.
-#[derive(Message, Clone, Copy, Debug)]
-pub(crate) struct SessionMarkerAudio(pub u64);
-
 #[derive(Resource, Default)]
 pub(crate) struct SessionMarker {
     marker: Option<Marker>,
@@ -53,7 +49,6 @@ impl Plugin for SessionMarkerPlugin {
             }
         }
         app.init_resource::<SessionMarker>()
-            .add_message::<SessionMarkerAudio>()
             .add_systems(
                 PreUpdate,
                 suspend.after(crate::map_transition::MapTransitionSet),
@@ -104,7 +99,6 @@ fn update(
     mut skater: ResMut<SkaterRuntime>,
     validation: Res<validation::Validation>,
     replay: Res<crate::replay::Replay>,
-    mut audio: MessageWriter<SessionMarkerAudio>,
 ) {
     if replay.active {
         return;
@@ -162,9 +156,6 @@ fn update(
                 foot_forward: skater.animation.foot_forward(),
                 generation: map.generation,
             });
-            audio.write(SessionMarkerAudio(0x0d6c_88a3_b91c_828f));
-        } else {
-            audio.write(SessionMarkerAudio(0x66b3_afe3_b602_918c));
         }
     }
     session.last_batch = input.consumed_batches;
@@ -191,7 +182,6 @@ fn update(
                         skater
                             .teleport_state
                             .request_manual(target.transform, target.on_board);
-                        audio.write(SessionMarkerAudio(0x7f13_5f9f_d28f_7f21));
                     }
                     Err(e) => {
                         warn!("Session marker return rejected: {e}");

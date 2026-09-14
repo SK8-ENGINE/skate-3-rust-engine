@@ -7,12 +7,20 @@ use std::path::{Path, PathBuf};
 #[derive(Default)]
 pub struct Cache {
     entries: HashMap<PathBuf, (u64, PathBuf)>,
+    stamps: HashMap<PathBuf,(u64,std::time::SystemTime)>,
     session: Option<PathBuf>,
     next: u64,
 }
 
 impl Cache {
+    pub fn invalidate(&mut self) {self.stamps.clear();}
+
     pub fn materialize(&mut self, root: &Path, archive: &Path) -> Result<PathBuf, String> {
+        let metadata=fs::metadata(archive).map_err(|e|e.to_string())?;
+        let stamp=(metadata.len(),metadata.modified().map_err(|e|e.to_string())?);
+        if self.stamps.get(archive)==Some(&stamp) {
+            if let Some((_,path))=self.entries.get(archive) {if path.is_dir(){return Ok(path.clone());}}
+        }
         let bytes = fs::read(archive).map_err(|e| e.to_string())?;
         let hash = {
             let mut h = 0u64;
@@ -23,6 +31,7 @@ impl Cache {
         };
         if let Some((prev, path)) = self.entries.get(archive) {
             if *prev == hash && path.is_dir() {
+                self.stamps.insert(archive.to_owned(),stamp);
                 return Ok(path.clone());
             }
         }
@@ -90,6 +99,7 @@ impl Cache {
         }
         self.entries
             .insert(archive.to_owned(), (hash, destination.clone()));
+        self.stamps.insert(archive.to_owned(),stamp);
         Ok(destination)
     }
 }
@@ -206,4 +216,64 @@ pub fn fingerprint(root: &Path) -> Result<u64, String> {
 pub fn write_temp(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut f = fs::File::create(path).map_err(|e| e.to_string())?;
     f.write_all(bytes).map_err(|e| e.to_string())
+}
+
+/// Unchanged files are statted, not reread. Explicit rescans force content reads.
+#[derive(Default)]
+pub(crate) struct Fingerprints {entries:HashMap<PathBuf,(Vec<(PathBuf,u64,std::time::SystemTime)>,u64)>}
+impl Fingerprints {
+    pub fn get(&mut self,root:&Path,force:bool)->Result<u64,String> {
+        fn walk(dir:&Path,out:&mut Vec<(PathBuf,u64,std::time::SystemTime)>)->Result<(),String> {
+            for entry in fs::read_dir(dir).map_err(|e|e.to_string())? {
+                let entry=entry.map_err(|e|e.to_string())?;
+                if entry.file_name().to_string_lossy().starts_with('.') {continue;}
+                let m=entry.metadata().map_err(|e|e.to_string())?;
+                if m.is_dir(){walk(&entry.path(),out)?;}else{out.push((entry.path(),m.len(),m.modified().map_err(|e|e.to_string())?));}
+            } Ok(())
+        }
+        let mut stamp=Vec::new();walk(root,&mut stamp)?;stamp.sort_by(|a,b|a.0.cmp(&b.0));
+        if !force {if let Some((old,hash))=self.entries.get(root){if old==&stamp{return Ok(*hash);}}}
+        let hash=fingerprint(root)?;self.entries.insert(root.to_owned(),(stamp,hash));Ok(hash)
+    }
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+ use super::*;
+ #[test]
+ fn failed_changed_archive_is_not_cached_as_the_old_package() {
+  let root=std::env::temp_dir().join(format!("skate-zip-stamp-{}",std::process::id()));
+  fs::create_dir_all(&root).unwrap();let archive=root.join("test.zip");
+  let mut zip=zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+  zip.start_file("main.lua",zip::write::SimpleFileOptions::default()).unwrap();
+  zip.write_all(b"return {}").unwrap();zip.finish().unwrap();
+  let mut cache=Cache::default();let initial=cache.materialize(&root,&archive).unwrap();
+  assert_eq!(cache.materialize(&root,&archive).unwrap(),initial);
+  fs::write(&archive,b"invalid changed zip").unwrap();
+  assert!(cache.materialize(&root,&archive).is_err());
+  assert!(cache.materialize(&root,&archive).is_err());
+  drop(cache);fs::remove_file(&archive).unwrap();fs::remove_dir(root.join(".cache")).unwrap();fs::remove_dir(root).unwrap();
+ }
+
+ #[test]
+ fn metadata_cache_preserves_content_hash_and_detects_add_edit_remove_and_force() {
+  let root=std::env::temp_dir().join(format!("skate-fingerprint-{}",std::process::id()));fs::create_dir_all(&root).unwrap();
+  fs::write(root.join("main.lua"),b"one").unwrap();let mut cache=Fingerprints::default();
+  let one=cache.get(&root,false).unwrap();assert_eq!(one,fingerprint(&root).unwrap());assert_eq!(one,cache.get(&root,false).unwrap());
+  fs::write(root.join("asset"),b"new").unwrap();let two=cache.get(&root,false).unwrap();assert_ne!(one,two);
+  fs::write(root.join("main.lua"),b"longer").unwrap();assert_ne!(two,cache.get(&root,false).unwrap());
+  fs::remove_file(root.join("asset")).unwrap();let current=cache.get(&root,false).unwrap();assert_eq!(current,fingerprint(&root).unwrap());
+  // Force must bypass even a matching metadata stamp.
+  cache.entries.get_mut(&root).unwrap().1=0;assert_eq!(current,cache.get(&root,true).unwrap());
+  fs::remove_file(root.join("main.lua")).unwrap();fs::remove_dir(root).unwrap();
+ }
+ #[test]
+ #[ignore="headless installed-package scan benchmark"]
+ fn compare_unchanged_skyline_scans() {
+  let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../mods/Skyline_Drive_Mod");
+  let mut cache=Fingerprints::default();let expected=cache.get(&root,false).unwrap();let begin=std::time::Instant::now();
+  for _ in 0..20{assert_eq!(fingerprint(&root).unwrap(),expected);}let eager=begin.elapsed();let begin=std::time::Instant::now();
+  for _ in 0..20{assert_eq!(cache.get(&root,false).unwrap(),expected);}let cached=begin.elapsed();
+  eprintln!("SCAN_BENCH eager_ms={:.3} cached_ms={:.3}",eager.as_secs_f64()*50.,cached.as_secs_f64()*50.);
+ }
 }

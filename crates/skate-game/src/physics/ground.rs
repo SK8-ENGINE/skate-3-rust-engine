@@ -18,16 +18,19 @@ pub(crate) const HEIGHT: f32 = -0.035;
 /// One authored terrain selection drives both presentation and live queries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Terrain {
+    #[cfg(test)]
     Flat,
     Course,
 }
 
 impl Terrain {
+    #[cfg(test)]
     pub(crate) fn surfaces(self) -> [Vec<[Vector3; 4]>; 4] {
         match self { Self::Flat => flat_surfaces(), Self::Course => surfaces() }
     }
     pub(crate) fn world(self, material: RetailContactMaterial) -> BoardWorld {
         match self {
+            #[cfg(test)]
             Self::Flat => flat_world(material),
             Self::Course => world(material),
         }
@@ -146,6 +149,7 @@ pub(super) fn world(material: RetailContactMaterial) -> BoardWorld {
 
 /// Deliberately authored flat-ground comparison surface. Both the solver and
 /// all gameplay probes query these real collision triangles.
+#[cfg(test)]
 pub(crate) fn flat_surfaces() -> [Vec<[Vector3; 4]>; 4] {
     let v = Vector3::new;
     [
@@ -160,6 +164,7 @@ pub(crate) fn flat_surfaces() -> [Vec<[Vector3; 4]>; 4] {
         vec![],
     ]
 }
+#[cfg(test)]
 pub(crate) fn flat_world(material: RetailContactMaterial) -> BoardWorld {
     build_world(material, flat_surfaces(), Vec::new())
 }

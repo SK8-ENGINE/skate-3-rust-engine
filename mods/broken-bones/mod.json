@@ -1,0 +1,62 @@
+{
+  "id": "examples.broken-bones",
+  "name": "Broken Bones",
+  "version": "1.0.0",
+  "api": 2,
+  "author": "Skate3clone",
+  "description": "Impact-based limb injuries using native contacts, joint topology and reversible constraint overrides. All damage rules run in Lua.",
+  "entry": "main.lua",
+  "settings": {
+    "impact_impulse": {
+      "type": "number",
+      "label": "Impact impulse threshold",
+      "description": "Gameplay threshold in N s; tune for your preferred injury frequency.",
+      "default": 80,
+      "min": 5,
+      "max": 1000,
+      "step": 5
+    },
+    "closing_speed": {
+      "type": "number",
+      "label": "Minimum impact speed",
+      "description": "Minimum pre-solve closing speed in metres/second; excludes resting support.",
+      "default": 3,
+      "min": 0.5,
+      "max": 20,
+      "step": 0.5
+    },
+    "cooldown": {
+      "type": "number",
+      "label": "Impact cooldown",
+      "description": "Seconds between counted impacts on the same joint.",
+      "default": 0.75,
+      "min": 0.1,
+      "max": 5,
+      "step": 0.05
+    },
+    "enabled": {
+      "type": "boolean",
+      "label": "Enable injuries",
+      "description": "Process native impacts while enabled.",
+      "default": true
+    },
+    "only_bails": {
+      "type": "boolean",
+      "label": "Only injure during bails",
+      "description": "Retain recent impacts briefly to catch the transition into a bail.",
+      "default": false
+    },
+    "show_hud": {
+      "type": "boolean",
+      "label": "Show injuries",
+      "description": "Display local and remote injury summaries.",
+      "default": true
+    },
+    "heal_on_teleport": {
+      "type": "boolean",
+      "label": "Heal on teleport",
+      "description": "Restore joints when a teleport/reset state is observed.",
+      "default": true
+    }
+  }
+}

@@ -197,7 +197,7 @@ fn empty_authored_world_completes_active_grind_without_error_stub() {
     assert_eq!(p.grind.normal_1152, [0; 4]);
     assert_eq!(host.events, ["grind"]);
     assert!(result.wipeout_reasons.is_empty());
-    assert_eq!(result.observation.jumper.family_20 as u32, 3);
+    assert_eq!(s.jumper.family as u32, 3);
 }
 
 #[test]

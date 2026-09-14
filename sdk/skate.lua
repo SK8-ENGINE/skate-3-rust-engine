@@ -40,6 +40,7 @@
 ---@field load number
 ---@field relative_velocity number
 ---@class BodySnapshot
+---@field player_overlapping boolean Enabled native local board/skater volumes touching this body; includes sensors. Solid contact margin 0.025m; sensors require intersection. Updated each fixed callback, false while suspended/attached. Geometric query only; collision masks do not suppress it.
 ---@field position Vec3
 ---@field rotation Quat
 ---@field linvel Vec3
@@ -49,6 +50,11 @@
 ---@field mass number
 ---@field speed number |linvel|
 ---@class PlayerSnapshot
+---@field landed_trick_base string Engine-authored base label identifier (not localized), captured with landing_seq
+---@field landed_spin_degrees integer Signed body rotation from the settled scorer; excludes board shuvit rotation
+---@field landed_clean boolean Quality captured at the confirmed landing
+---@field landed_sketchy boolean Sketchy quality captured at the confirmed landing
+---@field suspended boolean local or remote simulation/visibility suspension
 ---@field id? string
 ---@field local? boolean
 ---@field name? string display name from the multiplayer menu
@@ -273,6 +279,10 @@ function sdk.graphics.mesh_buffer_append(key, data) end
 function sdk.graphics.light(key, opts) end
 ---@return PlayerSnapshot
 function sdk.player.read() end
+---Freeze and hide the local skater and remove their collision participation.
+---False releases only this mod's suspension; unload/world change also releases it.
+---@param suspended boolean
+function sdk.player.suspend(suspended) end
 ---@return table<string, PlayerSnapshot>
 function sdk.player.skaters() end
 ---@param id string|number
@@ -291,7 +301,7 @@ function sdk.camera.clear_follow() end
 ---@param position Vec3
 ---@param look_at? Vec3
 function sdk.camera.set(position, look_at) end
----@param peer string|number|nil peer id to spectate, or nil to restore the native camera
+---@param peer string|number|nil peer whose actual camera transform/FOV to mirror; nil restores native camera
 function sdk.camera.watch(peer) end
 ---@param key string
 ---@return boolean
@@ -304,6 +314,11 @@ function sdk.input.pad() end
 ---@param key string
 ---@param text string
 function sdk.ui.text(key, text) end
+---Local-only text in Pause > Multiplayer > Debug; never draws a gameplay overlay.
+---Up to 8 entries per mod, 1024 UTF-8 bytes each. Empty text removes an entry.
+---@param key string
+---@param text string
+function sdk.ui.multiplayer_debug(key, text) end
 ---@return NetworkInfo
 function sdk.net.info() end
 ---@return string[]
@@ -377,6 +392,10 @@ function sdk.ui.remove_menu(key) end
 ---@field static_friction number combined contact coefficient
 ---@field dynamic_friction number combined contact coefficient
 ---@field material_tags integer[] A and B material tags
+---@field id string stable body pair, shared by manifold points
+---@field phase 'begin'|'stay'|'end'
+---@field relative_velocity_before_solve Vec3 A minus B at contact point, including angular velocity
+---@field closing_speed number m/s; zero on end
 ---@class NativeJoint
 ---@field index integer zero-based native joint ID (use this, not Lua array index)
 ---@field name string native authored joint name
@@ -388,19 +407,148 @@ function sdk.ui.remove_menu(key) end
 ---@field free_twist boolean
 ---@field drive_enabled boolean false when a mod suppresses the child's animation drives
 ---@field override_owner? string
+---@field enabled boolean
+---@field possession_enabled boolean
+---@field load? NativeJointLoad most recent eligible solved row
+---@field parameters integer[] native words, read-only
+---@field frames integer[] native words, read-only
 ---@return {tick:integer,dt:number,contacts:NativeContact[],joints:NativeJoint[],parts:table[],ragdoll:boolean,partial_ragdoll:boolean} local player only
 function sdk.player.physics() end
----@return NativeContact[] most recent solved frame, max 128 reports
+---@return NativeContact[] most recent solved frame, max 128 active plus end reports to reach 256
 function sdk.player.contacts() end
 ---@return NativeJoint[]
 function sdk.player.joints() end
 ---@return {index:integer,position:Vec3,velocity:Vec3,angvel:Vec3,inverse_mass:number}[]
 function sdk.player.parts() end
 ---@param joint integer zero-based index from sdk.player.joints()
----@param options {swing_limit?:number,twist_limit?:number,free_swing?:boolean,free_twist?:boolean,drive_enabled?:boolean} angles [0.01,pi], radians
+---@param options JointOverride angles [0.01,pi], radians
 ---Replaces this mod's override; omitted properties follow native state. Another mod cannot take an owned joint.
 function sdk.player.set_joint(joint, options) end
 ---@param joint integer restores this mod's joint override
 function sdk.player.reset_joint(joint) end
----Restores all joint overrides owned by this mod.
+---Restores all joint AND part overrides owned by this mod.
 function sdk.player.reset_joints() end
+
+-- General engine access: see GENERAL_API.md for units, lifecycle and limitations.
+sdk.commands = {}
+---@class CommandResult
+---@field token integer latest request token for this key
+---@field ok boolean host execution succeeded; not remote acknowledgement
+---@field error? string
+---@field value? any catalog for engine_inspect, otherwise nil
+---@field tick integer
+---@param key string at most 64 result keys per mod
+---@param command table validated native command; no nested request
+---@return integer token
+function sdk.commands.request(key, command) end
+---@param key string
+---@return CommandResult|nil nil until the latest token is observed
+function sdk.commands.result(key) end
+
+sdk.engine = {version=1}
+---@return string[]
+function sdk.engine.systems() end
+---@param system string player, rig, bodies, input, graphs, animation, scoring, world, camera, network, commands
+---@return table|nil latest snapshot
+function sdk.engine.read(system) end
+---@param key string command result key
+---@param system 'graphs'|'scoring'
+function sdk.engine.inspect(key, system) end
+
+---@class BodyReference
+---@field kind 'skater'|'board'|'mod'
+---@field index? integer zero-based native physical body ID
+---@field key? string mod-owned Rapier body key
+---@class NativeBody: BodyReference
+---@field position Vec3 world centre of mass
+---@field rotation Quat XYZW
+---@field velocity Vec3 world m/s
+---@field angvel Vec3 world rad/s
+---@field inverse_mass number
+---@field inverse_inertia Vec3[] world matrix columns
+---@field state_flags integer effective native solve state
+---@field name? string mapped animation bone name
+---@field joint? integer native joint whose child is this body
+---@field collision_enabled? boolean effective enabled flag
+---@field animation_drives? boolean permits native animation drives
+---@field possession_drives? boolean permits native board-holding drives
+---@field material? {static_friction:number,dynamic_friction:number}
+---@field override? {owner:string,options:PartOverride}
+sdk.bodies = {}
+---@param ref BodyReference
+---@return NativeBody|table|nil
+function sdk.bodies.read(ref) end
+---@param ref BodyReference
+---@param value Vec3 world N s
+---@param point? Vec3 world point; omitted means centre of mass
+function sdk.bodies.impulse(ref, value, point) end
+---@param ref BodyReference
+---@param value Vec3 world N m s
+function sdk.bodies.angular_impulse(ref, value) end
+
+---@class JointOverride
+---@field swing_limit? number [0.01,pi] radians
+---@field twist_limit? number [0.01,pi] radians
+---@field free_swing? boolean
+---@field free_twist? boolean
+---@field enabled? boolean false removes entire constraint including linear attachment
+---@field drive_enabled? boolean false suppresses child animation drives
+---@field possession_enabled? boolean false suppresses child board-holding drives
+---@field descendants? boolean extends drive suppressions to child subtree
+---@class PartOverride
+---@field motion? 'dynamic'|'frozen'|'static' solve flags 4/2/1; not a player state change
+---@field collision? boolean
+---@field friction? number [0,10], both material coefficients
+---@field animation_drives? boolean
+---@field possession_drives? boolean
+---@class NativeJointLoad
+---@field linear_impulse Vec3 world N s on child/A
+---@field angular_impulse Vec3 world N m s, direct angular couple
+---@field force Vec3 N
+---@field torque Vec3 N m, excluding linear anchor lever-arm contribution
+---@field solver_words integer[] packed native u32 values
+---@class NativeRig
+---@field tick integer completed solve cursor
+---@field dt number seconds
+---@field parts NativeBody[]
+---@field board NativeBody[]
+---@field joints NativeJoint[]
+---@field contacts NativeContact[] at most 128 active, plus end reports to reach 256
+---@field contacts_truncated boolean observation rows were omitted; pair tracking continues
+---@field ragdoll boolean native mode
+---@field partial_ragdoll boolean native mode
+sdk.rig = {}
+---@return NativeRig
+---@param fields? string[] Optional top-level rig fields; omit for the complete rig.
+function sdk.rig.read(fields) end
+---@return NativeBody[]
+function sdk.rig.parts() end
+---@return NativeJoint[]
+function sdk.rig.joints() end
+---@return NativeContact[]
+function sdk.rig.contacts() end
+---@param index integer native joint ID, not a Lua array index
+---@param options JointOverride replacement override; omitted fields follow native settings
+function sdk.rig.configure_joint(index, options) end
+---@param index integer native joint ID
+function sdk.rig.reset_joint(index) end
+---@param index integer physical skater part ID
+---@param options PartOverride
+function sdk.rig.configure_part(index, options) end
+---@param index integer physical skater part ID
+function sdk.rig.reset_part(index) end
+---Restores all joint AND part overrides owned by this mod.
+function sdk.rig.reset() end
+
+---@param id integer mapped gameplay action 64..81
+---@param value? number [-1,1]; nil restores normal input
+function sdk.input.override_action(id, value) end
+sdk.graphs = {}
+---@param graph 'action'|'motion'
+---@return {current?:integer,previous?:integer,name?:string,dt:number,state_times:table,active_behaviors:integer[]}|nil
+function sdk.graphs.read(graph) end
+---@param graph 'action'|'motion'
+---@param target 'state'|'transition'|'behavior'
+---@param index integer runtime ID from the catalog; zero-based
+---@param enabled? boolean nil restores the original gate
+function sdk.graphs.set_enabled(graph, target, index, enabled) end

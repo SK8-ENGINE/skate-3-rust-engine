@@ -155,7 +155,7 @@ local function prepare_audio()
     sound.supported=type(sdk.audio)=="table" and number(sdk.audio.version,0)>=1
     if not sound.supported then
         sdk.log("Skyline audio unavailable: install the native Audio API update and rebuild the game.")
-        sdk.ui.text("skyline_audio","Sound requires native Audio API extension 1. Physics still works.")
+        sdk.log("Skyline: sound requires Audio API extension 1.")
         return
     end
     if sound.prepared then return end
@@ -392,34 +392,21 @@ local REMOTE_WHEEL_KEYS={rr="wheel_rr",rl="wheel_rl"}
 local function vfx_net_active()
     return sdk.net and type(sdk.net.info)=="function" and (sdk.net.info().active==true)
 end
-local function refresh_mp_status(dt)
-    if not sdk.net or type(sdk.net.info)~="function" then
-        sdk.ui.text("skyline_mp","")
-        return
-    end
-    local info=sdk.net.info()
-    if not info or info.active~=true then
-        sdk.ui.text("skyline_mp","")
-        return
-    end
-    state.mp_hint_time=math.max(0,(state.mp_hint_time or 0)-dt)
-    if state.mp_hint_time>0 then return end
-    state.mp_hint_time=0.5
+local multiplayer_debug_timer=0
+local function refresh_multiplayer_debug(dt)
+    if not sdk.capabilities or (sdk.capabilities.multiplayer_debug or 0)<1 then return end
+    multiplayer_debug_timer=multiplayer_debug_timer-dt
+    if multiplayer_debug_timer>0 then return end
+    multiplayer_debug_timer=0.5
+    local active=vfx_net_active()
     local lines={
-        state.spawned
-            and "Your car is spawned and should replicate to other players."
-            or "Press F10 to spawn your car. Other players cannot see your vehicle until you do.",
-        "Both players need Skyline enabled with identical mod files and the skyline-driving-update build.",
+        active and "Multiplayer active" or "Multiplayer offline",
+        state.spawned and "Local car: spawned" or "Local car: not spawned (F10)",
+        state.occupied and "Driver: in car" or "Driver: on foot",
+        vfx.supported and (vfx.mesh and "VFX: buffers ready" or "VFX: buffers pending") or "VFX: unsupported",
+        "Vehicle replication requires matching enabled Skyline packages on each player.",
     }
-    if vfx.supported then
-        lines[#lines+1]=vfx.mesh
-            and "VFX buffers ready (remote smoke/skids work without spawning your own car)."
-            or "VFX supported but buffers not ready yet."
-    else
-        lines[#lines+1]="VFX unsupported: update to a build with mesh_buffer (graphics API 4)."
-    end
-    if info.status and info.status~="" then lines[#lines+1]=info.status end
-    sdk.ui.text("skyline_mp",table.concat(lines,"\n"))
+    sdk.ui.multiplayer_debug("replication",table.concat(lines,"\n"))
 end
 local function clear_mesh(mesh)
     mesh.positions={};mesh.normals={};mesh.colors={};mesh.uvs={};mesh.indices={}
@@ -1224,7 +1211,7 @@ local function prepare_presentation()
     set_debug_visible(sdk.settings.show_driving_debug==true)
     if not presentation.supported then
         sdk.log("Skyline: camera/canvas extension missing. Rebuild with the supplied Driving API source patch.")
-        sdk.ui.text("skyline_presentation","Dynamic camera + speedometer require the Driving API rebuild.")
+        sdk.ui.text("skyline_presentation", "")
     else sdk.ui.text("skyline_presentation","") end
 end
 local function update_dashboard(event)
@@ -1267,9 +1254,9 @@ local function update_dashboard(event)
     rect("rpm_bg",16,144,312,9,{0.13,0.18,0.23,1})
     rect("rpm_fill",16,144,312*amount,9,accent)
     rect("redline_tick",16+312*0.94,141,2,15,{1,0.31,0.20,1})
-    text("hint",16,161,312,16,"X / C CAMERA    H DEBUG    J HULL",10,muted)
+    text("hint",16,161,312,16,"X / C CAMERA",10,muted)
     sdk.ui.canvas("driving_dashboard",{
-        anchor="bottom_right",offset={24,28},size={344,180},
+        anchor="bottom_left",offset={24,28},size={344,180},
         scale=clamp(number(sdk.settings.dashboard_scale,1),0.65,1.5),visible=true,items=items,
     })
     presentation.active_hud=true
@@ -1333,7 +1320,7 @@ local function spawn_rig(request)
         if not y then sdk.log("Skyline: spawn needs map ground beneath all four wheels"); return end
         height=math.max(height,y+C.radius-off[2]+0.025)
     end
-    sdk.physics.spawn(BODY,{
+    sdk.commands.request("spawn_chassis",{kind="physics_spawn",key=BODY,body={
         shape={type="model",path=MODEL,object="skyline_mesh",
             options={max_hulls=32,resolution=96,concavity=0.0025}},
         body_type="dynamic",mass=C.mass,position={position[1],height,position[3]},
@@ -1342,19 +1329,20 @@ local function spawn_rig(request)
         contact_group=8,
         center_of_mass=C.center,inertia_half_extents=C.inertia_half,
         linear_damping=0,angular_damping=0,
-    })
-    sdk.graphics.mesh("skyline_visual",{path=MODEL,body=BODY})
-    prepare_effects()
+    }})
     reset_simulation()
     state.spawn_confirm={
-        deadline=state.time+0.15,
         reenter=request.reenter==true,
     }
 end
+local interaction_text
 local function confirm_spawn()
     local pending=state.spawn_confirm
     if not pending then return end
-    if sdk.physics.read(BODY) then
+    local result=sdk.commands.result("spawn_chassis")
+    if result and result.ok and sdk.bodies.read({kind="mod",key=BODY}) then
+        sdk.graphics.mesh("skyline_visual",{path=MODEL,body=BODY})
+        prepare_effects()
         state.spawn_confirm=nil
         state.spawned=true
         state.enter_after=math.max(state.enter_after,state.time+0.25)
@@ -1362,10 +1350,10 @@ local function confirm_spawn()
         state.reenter_on_ready=pending.reenter==true
         return
     end
-    if state.time<pending.deadline then return end
+    if not result or result.ok then return end
     state.spawn_confirm=nil
-    sdk.log("Skyline: chassis body missing after spawn — stand on flat ground and retry F10")
-    interaction_text("Car spawn failed. Stand on flat ground and press F10 again.")
+    sdk.log("Skyline: chassis spawn failed: "..tostring(result.error))
+    interaction_text("Car spawn failed: "..tostring(result.error).." | F10: retry")
 end
 local function respawn(car,at_car)
     local request={}
@@ -1782,9 +1770,18 @@ local function update_wheel_visuals(angles,dt)
         w.previous_omega=w.omega; w.visual_y=y; w.visual_steer=steer
     end
 end
-local function interaction_text(text)
+interaction_text=function(text)
     if state.interaction_text~=text then
-        state.interaction_text=text; sdk.ui.text("skyline_interaction",text)
+        state.interaction_text=text
+        sdk.ui.text("skyline_interaction", "")
+        if type(sdk.ui.canvas)=="function" then
+            if text=="" then sdk.ui.remove("skyline_interaction_prompt")
+            else sdk.ui.canvas("skyline_interaction_prompt", {
+                anchor="bottom_left",offset={24,216},size={540,34},visible=true,
+                items={{key="prompt",type="text",position={8,6},size={524,28},
+                    text=text,font_size=18,color={0.96,0.98,1.0,1}}},
+            }) end
+        end
     end
 end
 local function near_door(car)
@@ -1911,23 +1908,26 @@ return {
         -- Native capabilities are published by vm.rs, not invented by api.lua.
         -- Replacing only the Lua wrapper must NOT enable unknown native commands.
         local native=sdk.capabilities or {}
+        if not native.engine_access or not native.command_results then error("Skyline requires the generalized engine API build") end
         if (native.model_collision or 0)<1 or (native.solid_bridge or 0)<3
             or (native.physics_debug or 0)<1 or (native.scene_transforms or 0)<2 then
-            error("Skyline 4.3.1: the running executable is missing the native Model Collision Repair API. "..
+            error("Skyline 4.4.0: the running executable is missing the native Model Collision Repair API. "..
                 "Install the complete matching crates update and launch a successfully rebuilt game executable. "..
                 "Copying only api.lua is not sufficient.")
         end
         if not sdk.graphics or (sdk.graphics.version or 0)<2 or not sdk.player.detaching then
-            error("Skyline 4.3.1: the embedded Lua SDK wrapper does not match the native Model Collision Repair API")
+            error("Skyline 4.4.0: the embedded Lua SDK wrapper does not match the native Model Collision Repair API")
         end
         reset_simulation(); remove_rig(); prepare_audio(); prepare_presentation(); ensure_vfx_mesh()
         set_collision_debug(sdk.settings.show_collision_hull==true)
-        sdk.log("Skyline 4.3.1: render-model compound collision, native impacts, animated wheels, safe exits; J toggles actual colliders")
+        sdk.log("Skyline 4.4.0: render-model compound collision, native impacts, animated wheels, safe exits; J toggles actual colliders")
         sdk.ui.text("skyline_status",""); sdk.ui.text("skyline_handling",""); sdk.ui.text("skyline_wheels","")
     end,
     on_update=function(event)
         update_audio(event); update_dashboard(event); upload_wheel_vfx(event)
-        refresh_mp_status(clamp(number(event and event.dt,1/60),0,0.1))
+    end,
+    on_ui_update=function(event)
+        refresh_multiplayer_debug(clamp(number(event and event.dt,1/60),0,0.1))
     end,
     on_settings=function(event)
         if event.key=="audio_enabled" and event.value==false then stop_audio() end

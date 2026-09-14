@@ -183,9 +183,7 @@ impl FrameStateData {
 /// renders that unmapped signal straight into an 8-bit surface and clips
 /// everything bright to white.
 #[derive(Component, ExtractComponent, Clone, Copy, Default, Debug)]
-pub(crate) struct RetailTone {
-    pub enabled: Vec4,
-}
+pub(crate) struct RetailTone;
 
 // ---------------------------------------------------------------------------
 // Render classes

@@ -321,6 +321,8 @@ fn body_flips_with_grabs_and_spins_keep_names_rewards_and_landing() {
             }
             assert_eq!(r.landing_seq, 1);
             assert_eq!(r.landed_trick, displayed);
+            assert_eq!(r.landed_spin_degrees.abs(), degrees.abs() as i32);
+            assert!(!r.landed_base.is_empty());
             assert!(r.sequence_score > 0.);
         }
     }

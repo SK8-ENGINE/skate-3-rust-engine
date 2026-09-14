@@ -63,12 +63,17 @@ pub(crate) fn publish_actions(
     menu: Option<Res<crate::graphics_menu::Menu>>,
     debug: Res<crate::debug_cam::DebugCam>,
     camera: Res<crate::camera::CameraRuntime>,
+    mods: Option<Res<crate::modding::Mods>>,
 ) {
-    if !crate::graphics_menu::gameplay_active(menu) || debug.suppress_gameplay(&camera) {
+    let blocked = !crate::graphics_menu::gameplay_active(menu) || debug.suppress_gameplay(&camera);
+    if blocked {
         input.discard_gameplay();
     }
     input.publish_actions();
     let tick = input.tick_input();
+    let mut values=*tick.actions().values();
+    if !blocked { crate::modding::override_actions(mods.as_deref(), &mut values); }
+    let tick=TickInput::new(tick.tick(),skate_core::input::gameplay_map::GameplayActions::from_values(values),tick.controller_available());
     published.0 = if debug.suppress_gameplay(&camera) {
         TickInput::new(
             tick.tick(),
@@ -79,6 +84,3 @@ pub(crate) fn publish_actions(
         tick
     };
 }
-
-#[cfg(test)]
-pub(crate) mod manual_replay;

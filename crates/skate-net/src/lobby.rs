@@ -244,6 +244,13 @@ impl Session {
     pub fn is_host(&self) -> bool {
         self.host.is_none()
     }
+    /// Authenticated player identity from the host roster, not its transport endpoint.
+    pub fn host_actor(&self) -> Option<u64> {
+        match self.host {
+            None => Some(self.local),
+            Some(peer) => self.links.get(&peer).map(|link| link.actor).filter(|id| *id != 0),
+        }
+    }
     pub fn host_peer(&self) -> u64 {
         self.host.unwrap_or(self.local)
     }

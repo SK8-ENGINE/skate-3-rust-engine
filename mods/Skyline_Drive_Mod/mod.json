@@ -2,9 +2,9 @@
   "id": "examples.skyline",
   "api": 2,
   "name": "Skyline DRIVE \u2014 Solid Bridge",
-  "version": "4.3.1",
+  "version": "4.4.0",
   "author": "Skate3clone",
-  "description": "Collision generated from the existing rendered car model, replicated wheel animation, native impact classification, safe on-foot exits and 5-second re-entry cooldown. Requires matching Model Collision Repair engine update.",
+  "description": "Generalized engine API integration with acknowledged chassis spawning; model collision, native impacts, animated wheels and safe exits. Driving tuning is unchanged.",
   "entry": "main.lua",
   "settings": {
     "tire_friction": {

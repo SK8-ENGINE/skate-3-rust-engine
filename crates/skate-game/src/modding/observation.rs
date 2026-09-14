@@ -18,6 +18,8 @@ const MAX_GRIND: usize = 16;
 #[serde(deny_unknown_fields)]
 pub(super) struct WireObs {
     #[serde(default)]
+    pub suspended: bool,
+    #[serde(default)]
     pub p: [f32; 3],
     #[serde(default)]
     pub v: [f32; 3],
@@ -49,6 +51,14 @@ pub(super) struct WireObs {
     pub landed: u32,
     #[serde(default)]
     pub landed_name: String,
+    #[serde(default)]
+    pub lb: String,
+    #[serde(default)]
+    pub sd: i32,
+    #[serde(default)]
+    pub lc: bool,
+    #[serde(default)]
+    pub lk: bool,
     #[serde(default)]
     pub bail_seq: u32,
     #[serde(default)]
@@ -98,6 +108,7 @@ impl WireObs {
             && self.ls.is_finite()
             && self.mu.is_finite()
             && self.lt.is_finite()
+            && self.lb.len() <= 128 && self.sd.unsigned_abs() <= 100_000
             && self.landed_name.len() <= MAX_TRICK
             && self.tr.len() <= MAX_TRICK
             && self.md.len() <= MAX_MODE
@@ -110,8 +121,9 @@ impl WireObs {
     }
 }
 
-pub(super) fn encode_local(world: &World) -> Option<Vec<u8>> {
-    let obs = local(world);
+pub(super) fn encode_local(world: &World, suspended: bool) -> Option<Vec<u8>> {
+    let mut obs = local(world);
+    obs.suspended = suspended;
     let mut bytes = serde_json::to_vec(&obs).ok()?;
     if bytes.len() <= skate_net::lobby::MAX_APP_VALUE {
         return Some(bytes);
@@ -173,6 +185,7 @@ pub(super) fn local(world: &World) -> WireObs {
     let mode = mode_name(cat, p.filtered_state_0, !grind.is_empty(), bail).to_owned();
     let trick = crate::scoring_hud::display_trick(world, s.scoring.trick_name());
     WireObs {
+        suspended: false,
         p: [root[3][0], root[3][1], root[3][2]],
         v: vel,
         av,
@@ -188,6 +201,8 @@ pub(super) fn local(world: &World) -> WireObs {
         tr: bounded_label(&trick, MAX_TRICK),
         ts: s.scoring.trick_seq(),
         landed: s.scoring.landing_seq,
+        lb: bounded_label(&s.scoring.landed_base, 128), sd: s.scoring.landed_spin_degrees,
+        lc: s.scoring.landed_clean, lk: s.scoring.landed_sketchy,
         landed_name: bounded_label(&crate::scoring_hud::display_trick(world, &s.scoring.landed_trick), MAX_TRICK),
         bail_seq: s.scoring.bail_seq,
         nt: s.scoring.new_trick,
@@ -241,6 +256,7 @@ fn lua_fields(obs: &WireObs) -> Map<String, Value> {
     let insert = |out: &mut Map<String, Value>, key: &str, value: Value| {
         out.insert(key.to_owned(), value);
     };
+    insert(&mut out, "suspended", json!(obs.suspended));
     insert(&mut out, "position", json!(obs.p));
     insert(&mut out, "velocity", json!(obs.v));
     insert(&mut out, "angvel", json!(obs.av));
@@ -259,6 +275,10 @@ fn lua_fields(obs: &WireObs) -> Map<String, Value> {
     insert(&mut out, "trick_seq", json!(obs.ts));
     insert(&mut out, "landing_seq", json!(obs.landed));
     insert(&mut out, "landed_trick", json!(obs.landed_name));
+    insert(&mut out, "landed_trick_base", json!(obs.lb));
+    insert(&mut out, "landed_spin_degrees", json!(obs.sd));
+    insert(&mut out, "landed_clean", json!(obs.lc));
+    insert(&mut out, "landed_sketchy", json!(obs.lk));
     insert(&mut out, "bail_seq", json!(obs.bail_seq));
     insert(&mut out, "new_trick", json!(obs.nt));
     insert(&mut out, "modified_trick", json!(obs.mt));
@@ -299,7 +319,8 @@ fn name_for(world: &World, id: &str, local_id: &str) -> String {
 }
 
 pub(super) fn snapshot(world: &World, mods: &Mods, local_id: &str) -> (Value, Value) {
-    let local_obs = local(world);
+    let mut local_obs = local(world);
+    local_obs.suspended = super::player_suspended(mods);
     let local_name = name_for(world, local_id, local_id);
     let mut skaters = Map::new();
     skaters.insert(
@@ -338,6 +359,7 @@ mod tests {
             inn.insert(format!("IntentName{i:02}"), 1.0);
         }
         let obs = WireObs {
+            suspended: true,
             p: [12.5, 3.0, -40.25],
             v: [4.0, 0.2, -1.5],
             av: [0.1, 1.2, -0.3],
@@ -354,6 +376,7 @@ mod tests {
             ts: 12,
             landed: 3,
             landed_name: "360Flip".into(),
+            lb: "ID_TRICK_FLIP_360_FLIP".into(), sd: 540, lc: true, lk: false,
             bail_seq: 1,
             nt: true,
             mt: false,
@@ -378,6 +401,9 @@ mod tests {
         let player = lua_player(&obs, "Test");
         assert_eq!(player["trick"], "360Flip");
         assert_eq!(player["trick_seq"], 12);
+        assert_eq!(player["landed_spin_degrees"], 540);
+        assert_eq!(player["landed_trick_base"], "ID_TRICK_FLIP_360_FLIP");
+        assert_eq!(player["landed_clean"], true);
         assert_eq!(player["nollie"], true);
         assert_eq!(player["mode"], "air");
     }

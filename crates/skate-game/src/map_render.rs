@@ -214,12 +214,6 @@ impl PreparedScene {
                 Box::new(std::mem::replace(&mut self.params, StagedAssets::new(world))),
             ],
         });
-        world.insert_resource(crate::map_transition::MapRenderBudget {
-            draws: self.stats.draws,
-            triangles: self.stats.triangles,
-            leaves: self.stats.leaves,
-            slabs: self.stats.slabs,
-        });
     }
 }
 

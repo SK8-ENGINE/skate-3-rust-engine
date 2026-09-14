@@ -8,8 +8,6 @@ pub(crate) struct Destination {
     pub name: String,
     pub map: String,
     pub matrix: Option<[[f32; 4]; 4]>,
-    #[serde(default)]
-    pub unavailable_reason: Option<String>,
 }
 #[derive(Deserialize)]
 struct Catalog { version: u32, destinations: Vec<Destination> }

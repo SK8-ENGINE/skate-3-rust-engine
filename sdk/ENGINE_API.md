@@ -209,3 +209,54 @@ engine imposes no game rules. Omit `section` to use the Mods menu. Menu removal 
 mod unload removes its entry; empty sections disappear. Back returns to the
 section that opened the menu. Limits: 8 custom sections, 64 section menus total,
 32 bytes per section name. `sdk.capabilities.menus >= 3` supports this placement.
+
+## Local actor suspension and peer cameras
+
+`sdk.player.suspend(true)` freezes the local native simulation, hides its skater,
+and removes its multiplayer collision participation. `false` releases only the
+calling mod's suspension. Mod retirement, errors, and world changes release its
+ownership. Multiple mods may suspend independently. Available with
+`sdk.capabilities.player_control >= 1`; skater observations expose `suspended`.
+
+`sdk.camera.watch(peer)` mirrors the connected player's transmitted gameplay
+camera transform and vertical FOV (`sdk.capabilities.camera >= 3`). Network
+latency still applies. Older peers without camera packets use the body-follow
+fallback. `nil` restores the native camera. This does not transfer player input.
+
+`sdk.net.info().host_id` is the authenticated host **player** ID from the roster,
+not a Steam ID or socket endpoint. It is `"0"` until the host roster arrives.
+Use this player ID with `sdk.net.read`, `sdk.player.skater`, and camera watching.
+
+The Game of SKATE example keeps its turn roster and saved position in an `origin`
+record and its compact changing state in `skate`. It waits for every participant
+to acknowledge suspension, then resets the active player using
+`sdk.player.teleport`. Only that player's post-reset landing/bail counters count.
+Late joiners wait for the next match; a missing enabled mod aborts preparation
+with an actionable status. Stop/unload returns participants to their pre-match
+positions and restores their cameras. Enable the same package version everywhere.
+
+### Native player overlap (capability `player_overlap = 1`)
+
+`sdk.physics.read(key).player_overlapping` reports whether the enabled native
+board/skater collision shapes intersect the mod-owned body. Sensors require
+intersection; solids include the native solver's 0.025m contact margin. This is
+an explicit geometric query independent of collision masks, updated before each
+fixed callback. Suspended/attached players report false. No duplicate Rapier
+player is simulated. Detect transitions in Lua to count entries rather than
+counting every frame of sustained contact. It is a sampled query, not a swept
+trigger: use suitably thick sensor volumes for fast-moving actors.
+
+Native foot-support, air-trajectory and camera queries include mod-created
+solids, preserving nearest-hit ordering and native map behavior.
+
+### Settled scoring details (`landed_details = 1`)
+
+Player observations include `landed_trick_base` (engine-authored, unlocalized
+base label), `landed_spin_degrees` (signed body rotation, excluding board
+rotation), `landed_clean` and `landed_sketchy`. These are captured together when
+`landing_seq` advances and replicated with that observation. They describe the
+last settled trick; compare sequence numbers to distinguish it from old results.
+Game rules and label aliases remain in Lua. The existing localized
+`landed_trick` remains available for display.
+
+See [GENERAL_API.md](GENERAL_API.md) for native bodies, joint and part overrides, contact lifecycle, input overrides, graph access and acknowledged commands.

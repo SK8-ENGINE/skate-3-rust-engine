@@ -22,6 +22,8 @@ use skate_net::interpolation::{Buffer, Clock, position};
 pub(super) struct RemoteSkins {
     reported: f64,
     actors: BTreeMap<u64, RemoteSkin>,
+    contact_solids: Vec<skate_dynamics::SolidBody>,
+    contact_at: Option<f64>,
     rest: Vec<Mat4>,
     parents: Vec<i32>,
     board: Option<usize>,
@@ -39,6 +41,8 @@ struct RemoteSkin {
     poses: Buffer<Vec<Transform>>,
     clock: Clock,
     epoch: u64,
+    contact_parts: Vec<skate_dynamics::SolidCollider>,
+    contact_enabled: u64,
 }
 pub(super) struct RemoteRenderPlugin;
 impl Plugin for RemoteRenderPlugin {
@@ -91,6 +95,8 @@ impl Plugin for RemoteRenderPlugin {
             board,
             reported: 0.,
             actors: BTreeMap::new(),
+            contact_solids: Vec::new(),
+            contact_at: None,
             rest,
             parents,
         })
@@ -428,6 +434,8 @@ fn present(
 ) {
     let basis = Mat4::from_cols(Vec4::X, -Vec4::Z, Vec4::Y, Vec4::W);
     let now = net.started.elapsed().as_secs_f64();
+    let solids = mods.as_ref().map_or_else(Vec::new, |m| crate::modding::bridge::visual_solids(m));
+    let continuous = skins.contact_at.is_some_and(|last| now >= last && now - last <= 0.1);
     for (&id, remote) in &net.remotes {
         let Some(mut skin) = skins.actors.remove(&id) else {
             continue;
@@ -438,6 +446,7 @@ fn present(
             skin.poses = Buffer::default();
             skin.clock = Clock::for_connection(net.loopback);
             skin.epoch = remote.epoch;
+            skin.contact_parts.clear();
         }
         for sample in &remote.roots {
             if skin
@@ -493,6 +502,23 @@ fn present(
                 if let Some(p) = position(&skin.positions, time) {
                     transform.translation = Vec3::from_array(p);
                 }
+                let seated = remote.body.enabled & (1u64 << 62) != 0;
+                let attached = mods.as_ref().is_some_and(|m| crate::modding::replication::attached_root(m, id).is_some());
+                let suspended = mods.as_ref().is_some_and(|m| crate::modding::peer_suspended(m, id));
+                if !continuous || skin.contact_enabled != remote.body.enabled {
+                    skin.contact_parts.clear();
+                }
+                skin.contact_enabled = remote.body.enabled;
+                if !seated && !attached && !suspended && !solids.is_empty() {
+                    let mut parts = net.schema.visual_colliders(&remote.body, transform.to_matrix());
+                    let offset = skate_dynamics::visual_contact::resolve(
+                        &parts, &skin.contact_parts, &solids, &skins.contact_solids);
+                    transform.translation += Vec3::from_array(offset.to_array());
+                    for part in &mut parts { part.pose.translation += offset; }
+                    skin.contact_parts = parts;
+                } else {
+                    skin.contact_parts.clear();
+                }
                 if let Ok(mut t) = nodes.get_mut(root) {
                     *t = transform;
                 }
@@ -511,7 +537,7 @@ fn present(
         if let Some(root)=skin.root {
             if let Some((transform,_))=attached { if let Ok(mut t)=nodes.get_mut(root) {*t=transform;} }
             if let Ok(mut v)=visibility.get_mut(root) {
-                *v=if attached.is_some_and(|(_,hidden)|hidden) {Visibility::Hidden} else {Visibility::Inherited};
+                *v=if attached.is_some_and(|(_,hidden)|hidden) || mods.as_ref().is_some_and(|m|crate::modding::peer_suspended(m,id)) {Visibility::Hidden} else {Visibility::Inherited};
             }
         }
         let seated = remote.body.enabled & (1u64 << 62) != 0;
@@ -524,6 +550,8 @@ fn present(
         }
         skins.actors.insert(id, skin);
     }
+    skins.contact_solids = solids;
+    skins.contact_at = Some(now);
     if now < skins.reported || now - skins.reported >= 1. {
         let delay = skins
             .actors

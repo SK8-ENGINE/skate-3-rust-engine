@@ -16,10 +16,6 @@ impl ModMenu {
     pub(crate) fn open_registered(&mut self, owner:String, key:String) {
         self.begin(); self.id=Some(owner); self.custom=Some(key); self.return_to_pause=true;
     }
-    pub fn configure(&mut self, id: String) {
-        self.begin();
-        self.id = Some(id);
-    }
     pub fn begin(&mut self) {
         self.open = true;
         self.return_to_pause = false;

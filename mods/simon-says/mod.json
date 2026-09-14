@@ -1,0 +1,177 @@
+{
+  "id": "simon.says",
+  "api": 2,
+  "name": "Simon Says",
+  "version": "2.0.0",
+  "author": "you",
+  "description": "Race to copy confirmed landed tricks, with host authority, lives, ride-away checks and eliminated-player spectating.",
+  "entry": "main.lua",
+  "settings": {
+    "lives": {
+      "type": "number",
+      "label": "Lives",
+      "description": "Lives before elimination.",
+      "default": 3,
+      "min": 1,
+      "max": 5,
+      "step": 1
+    },
+    "round_time": {
+      "type": "number",
+      "label": "Round time (s)",
+      "description": "Seconds to land the called trick and ride away.",
+      "default": 45,
+      "min": 15,
+      "max": 120,
+      "step": 5
+    },
+    "ride_away": {
+      "type": "number",
+      "label": "Ride-away clean (s)",
+      "description": "Clean landing window for v1: on_board + not bailing.",
+      "default": 2.0,
+      "min": 1.0,
+      "max": 4.0,
+      "step": 0.5
+    },
+    "stance": {
+      "type": "choice",
+      "label": "Your stance",
+      "description": "Match your skater: goofy mirrors left/right flicks and hints.",
+      "default": "regular",
+      "choices": [
+        "regular",
+        "goofy"
+      ]
+    },
+    "show_hud": {
+      "type": "boolean",
+      "label": "Top-left text HUD",
+      "description": "Show additional top-left call and lives text. The call card remains visible.",
+      "default": true
+    },
+    "countdown_secs": {
+      "type": "number",
+      "label": "Countdown (s)",
+      "description": "Get-ready countdown before round 1.",
+      "default": 3,
+      "min": 1,
+      "max": 10,
+      "step": 0.5
+    },
+    "intermission_base": {
+      "type": "number",
+      "label": "Break between rounds (s)",
+      "description": "Round 1 breather. Shrinks as rounds climb.",
+      "default": 4,
+      "min": 1,
+      "max": 8,
+      "step": 0.5
+    },
+    "sudden_on": {
+      "type": "boolean",
+      "label": "Sudden death",
+      "description": "Late rounds hit harder. Off keeps it chill.",
+      "default": false
+    },
+    "sudden_round": {
+      "type": "number",
+      "label": "Sudden death starts round",
+      "description": "Fail costs double from here.",
+      "default": 6,
+      "min": 3,
+      "max": 12,
+      "step": 1
+    },
+    "sudden_cost": {
+      "type": "number",
+      "label": "Sudden death cost",
+      "description": "Lives lost per fail in sudden death.",
+      "default": 2,
+      "min": 1,
+      "max": 3,
+      "step": 1
+    },
+    "esc_dur": {
+      "type": "number",
+      "label": "Timer squeeze / round",
+      "description": "Round time multiplier each round. Lower = meaner.",
+      "default": 0.85,
+      "min": 0.7,
+      "max": 1,
+      "step": 0.01
+    },
+    "esc_ride": {
+      "type": "number",
+      "label": "Ride-out shrink / round (s)",
+      "description": "Ride-away loses this much each round.",
+      "default": 0.2,
+      "min": 0,
+      "max": 0.5,
+      "step": 0.05
+    },
+    "spec_cam": {
+      "type": "boolean",
+      "label": "Spectate camera",
+      "description": "Eliminated riders watch through a surviving player camera.",
+      "default": true
+    },
+    "allow_flips": {
+      "type": "boolean",
+      "label": "Flip tricks",
+      "description": "Kickflips, heelflips, varials, hardflips, lasers, doubles, nollie flips.",
+      "default": true
+    },
+    "allow_shuvits": {
+      "type": "boolean",
+      "label": "Shuv-its",
+      "description": "Pop shuvits, FS and 360 variants.",
+      "default": true
+    },
+    "allow_ollies": {
+      "type": "boolean",
+      "label": "Ollies",
+      "description": "Ollie and nollie calls.",
+      "default": true
+    },
+    "allow_grabs": {
+      "type": "boolean",
+      "label": "Grabs",
+      "description": "Nose, seatbelt, melon, method, mute, stale, crail, tail.",
+      "default": true
+    },
+    "allow_grinds": {
+      "type": "boolean",
+      "label": "Grinds",
+      "description": "50-50, smith, krooked, blunts, feeble, salad, willie.",
+      "default": true
+    },
+    "allow_manuals_plants": {
+      "type": "boolean",
+      "label": "Manuals and plants",
+      "description": "Nose manual, fastplants, handplants.",
+      "default": true
+    },
+    "allow_spins": {
+      "type": "boolean",
+      "label": "Spins and combos",
+      "description": "Pure spins plus flip-plus-spin combos. Off removes both.",
+      "default": true
+    },
+    "card_scale": {
+      "type": "number",
+      "label": "Card size",
+      "description": "Top-right card scale.",
+      "default": 1,
+      "min": 0.65,
+      "max": 1.5,
+      "step": 0.05
+    },
+    "flash": {
+      "type": "boolean",
+      "label": "Call flash",
+      "description": "Card pops big on each new call.",
+      "default": true
+    }
+  }
+}

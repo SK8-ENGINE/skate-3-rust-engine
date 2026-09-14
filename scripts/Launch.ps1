@@ -40,15 +40,6 @@ Re-point assets to a valid installation, for example:
     $argumentList = '--assets "' + $assetsPath + '"'
     if (-not $Map -and $env:SKATE_TRACE_MAP) { $Map = $env:SKATE_TRACE_MAP }
     if (-not $TraceFile -and $env:SKATE_TRACE_FILE) { $TraceFile = $env:SKATE_TRACE_FILE }
-    if (-not $Map -and $Trace) {
-        $installRoot = Split-Path (Resolve-Path -LiteralPath $assetsPath).Path -Parent
-        foreach ($candidate in @(
-            (Join-Path $installRoot 'maps\DownTown.skate'),
-            (Join-Path $assetsPath 'private\native-backdrops\DownTown.skate')
-        )) {
-            if (Test-Path -LiteralPath $candidate) { $Map = $candidate; break }
-        }
-    }
     if ($Map) {
         $mapPath = (Resolve-Path -LiteralPath $Map).Path
         if ([System.IO.Path]::GetExtension($mapPath) -ine '.skate') { throw "Not a .skate map file: $mapPath" }
@@ -62,21 +53,14 @@ Re-point assets to a valid installation, for example:
             Join-Path $ProjectRoot 'trace-downtown-lag.json'
         }
         if (Test-Path -LiteralPath $tracePath) { Remove-Item -LiteralPath $tracePath -Force }
-        $argumentList += ' --trace "' + $tracePath + '" --trace-wait --trace-gpu'
+        $argumentList += ' --trace "' + $tracePath + '" --trace-wait --trace-seconds 10'
         Write-Host "Trace: $tracePath"
-        Write-Host 'F9 = start recording at lag spot, F10 = stop and export (open in https://ui.perfetto.dev)'
+        Write-Host 'F9 starts a 10-second CPU capture; export stops automatically. Open the JSON in Perfetto.'
     }
     # Dev packages live in repo mods/; the exe otherwise only looks beside bin/.
     $env:SKATE3_MODS = Join-Path $ProjectRoot 'mods'
     New-Item -ItemType Directory -Path $env:SKATE3_MODS -Force | Out-Null
     Write-Host "Mods: $env:SKATE3_MODS"
-    if ($Trace) {
-        # Use cmd start so the game gets a real window; PS Start-Process argument quoting is flaky.
-        $cmd = 'start "Skate3 Rust" /D "' + $ProjectRoot + '" "' + $executable + '" ' + $argumentList
-        Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $cmd -WorkingDirectory $ProjectRoot
-        Write-Host 'Game launched in its own window. Close it when you are done.'
-        return
-    }
     $game = Start-Process -FilePath $executable -WorkingDirectory $ProjectRoot `
         -ArgumentList $argumentList -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput $log -RedirectStandardError $errorLog

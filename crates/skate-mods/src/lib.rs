@@ -64,10 +64,15 @@ pub struct Manager {
     pub commands: Vec<(String, Command)>,
     pub retired: Vec<String>,
     last_scan: Instant,
-    pub snapshot: Value,
+    pub snapshot: std::sync::Arc<Value>,
+    /// Immutable sections shared across render frames until their native state changes.
+    pub snapshot_fields: SnapshotFields,
     invalid_since: BTreeMap<String, Instant>,
     archives: archive::Cache,
+    fingerprints: archive::Fingerprints,
 }
+
+pub type SnapshotFields = std::sync::Arc<BTreeMap<String, std::sync::Arc<Value>>>;
 
 impl Manager {
     pub fn root(&self) -> &Path {
@@ -83,9 +88,11 @@ impl Manager {
             commands: vec![],
             retired: vec![],
             last_scan: Instant::now() - Duration::from_secs(2),
-            snapshot: Value::Null,
+            snapshot: std::sync::Arc::new(Value::Null),
+            snapshot_fields: SnapshotFields::default(),
             invalid_since: BTreeMap::new(),
             archives: archive::Cache::default(),
+            fingerprints: archive::Fingerprints::default(),
         }
     }
 
@@ -94,6 +101,7 @@ impl Manager {
             return;
         }
         self.last_scan = Instant::now();
+        if force {self.archives.invalidate();}
         self.diagnostics.clear();
         let mut found = BTreeMap::<String, (PathBuf, Manifest, u64)>::new();
         let mut duplicates = std::collections::BTreeSet::new();
@@ -140,7 +148,7 @@ impl Manager {
                 let manifest: Manifest =
                     serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
                 manifest.validate()?;
-                let hash = archive::fingerprint(&path)?;
+                let hash = self.fingerprints.get(&path,force)?;
                 Ok::<_, String>((manifest, hash))
             })();
             match result {
@@ -320,7 +328,16 @@ impl Manager {
             return;
         };
         p.error = None;
-        match vm::Vm::new(&p.root, &p.manifest, &p.settings, &self.snapshot) {
+        // Top-level Lua initialization is a one-time operation and receives the
+        // same complete snapshot as callbacks, including shared native sections.
+        let mut initial = (*self.snapshot).clone();
+        if !self.snapshot_fields.is_empty() {
+            if !initial.is_object() { initial = serde_json::json!({}); }
+            for (key, value) in self.snapshot_fields.iter() {
+                initial[key] = (**value).clone();
+            }
+        }
+        match vm::Vm::new(&p.root, &p.manifest, &p.settings, &initial) {
             Ok(vm) => {
                 p.vm = Some(vm);
                 self.call_one(id, "on_load", Value::Null);
@@ -336,7 +353,7 @@ impl Manager {
     fn stop(&mut self, id: &str) {
         if let Some(p) = self.packages.get_mut(id) {
             if let Some(mut vm) = p.vm.take() {
-                if let Err(e) = vm.call("on_unload", Value::Null, &self.snapshot) {
+                if let Err(e) = vm.call_shared("on_unload", Value::Null, &self.snapshot, None, &self.snapshot_fields) {
                     p.error = Some(format!("on_unload: {e}"));
                 }
             }
@@ -359,7 +376,7 @@ impl Manager {
             .packages
             .get_mut(id)
             .and_then(|p| p.vm.as_mut())
-            .map(|vm| vm.call(callback, payload, &self.snapshot));
+            .map(|vm| vm.call_shared(callback, payload, &self.snapshot, None, &self.snapshot_fields));
         match result {
             Some(Ok(cmds)) => self
                 .commands
@@ -371,6 +388,15 @@ impl Manager {
 
     pub fn call(&mut self, id: &str, callback: &str, payload: Value) {
         self.call_one(id, callback, payload);
+    }
+
+    pub fn call_with_physics(&mut self,id:&str,callback:&str,payload:Value,physics:Value) {
+        let result=self.packages.get_mut(id).and_then(|p|p.vm.as_mut())
+            .map(|vm|vm.call_shared(callback,payload,&self.snapshot,Some(physics),&self.snapshot_fields));
+        match result {
+            Some(Ok(commands))=>self.commands.extend(commands.into_iter().map(|c|(id.to_owned(),c))),
+            Some(Err(error))=>self.fail(id,format!("{callback}: {error}")),None=>{}
+        }
     }
 
     pub fn dispatch(&mut self, callback: &str, payload: Value) {
@@ -435,3 +461,15 @@ mod engine_api_tests;
 #[cfg(test)]
 #[path="tests/game_of_skate.rs"]
 mod game_of_skate_tests;
+
+#[cfg(test)]
+#[path="tests/challenges.rs"]
+mod challenge_tests;
+
+#[cfg(test)]
+#[path="tests/general_api.rs"]
+mod general_api_tests;
+
+#[cfg(test)]
+#[path="tests/skyline_drive.rs"]
+mod skyline_drive_tests;

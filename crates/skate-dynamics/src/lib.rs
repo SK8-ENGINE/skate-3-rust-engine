@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 
 pub use rapier3d;
 pub mod solid;
+pub mod visual_contact;
 pub mod model;
 pub mod definition_codec;
 pub use model::ModelColliderOptions;
@@ -707,6 +708,27 @@ impl DynamicsWorld {
             mass: meta.mass,
             friction,
             shape: ExportedShape::Triangles { tris },
+        })
+    }
+
+    /// Geometric overlap with externally solved shapes, including sensors.
+    /// This query never creates a second simulation body or applies impulses.
+    pub fn overlaps_shapes(&self, id: u64, shapes: &[(SharedShape, Pose)]) -> bool {
+        let Some(body) = self.ids.get(&id).and_then(|h| self.bodies.get(*h)) else { return false; };
+        body.colliders().iter().filter_map(|h| self.colliders.get(*h)).any(|c| {
+            let collider_pose = c.position_wrt_parent().map_or(*c.position(), |local| *body.position() * *local);
+            let bounds=c.shape().compute_aabb(&collider_pose).loosened(0.025);
+            c.is_enabled() && shapes.iter().any(|(shape, pose)| {
+                use rapier3d::parry::bounding_volume::BoundingVolume;
+                if !bounds.intersects(&shape.compute_aabb(pose)) {return false;}
+                if c.is_sensor() {
+                    rapier3d::parry::query::intersection_test(&collider_pose, c.shape(), pose, &**shape).unwrap_or(false)
+                } else {
+                    // Native BoardStep uses a 2.5cm contact prediction margin.
+                    rapier3d::parry::query::contact(&collider_pose, c.shape(), pose, &**shape, 0.025)
+                        .ok().flatten().is_some()
+                }
+            })
         })
     }
 
@@ -1801,6 +1823,20 @@ fn inertia_half_from_shape(shape: &Shape) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_shapes_detect_sensor_intersection_and_solid_contact_margin() {
+        let mut world=DynamicsWorld::default();
+        let sensor=world.spawn(BodyDesc {sensor:true, ..box_desc(BodyType::Static,[0.,40.,0.],[1.,0.5,1.])}).unwrap();
+        let solid=world.spawn(box_desc(BodyType::Static,[0.,40.,0.],[1.,0.5,1.])).unwrap();
+        let shape=SharedShape::ball(0.1);
+        let near=[(shape.clone(),Pose::from_translation(Vector::new(0.,40.61,0.)))];
+        assert!(!world.overlaps_shapes(sensor,&near));assert!(world.overlaps_shapes(solid,&near));
+        let inside=[(shape,Pose::from_translation(Vector::new(0.,40.55,0.)))];
+        assert!(world.overlaps_shapes(sensor,&inside));assert!(!world.overlaps_shapes(sensor,&[]));
+        assert!(world.set_pose(sensor,[10.,40.,0.],[0.,0.,0.,1.]));
+        assert!(!world.overlaps_shapes(sensor,&inside));
+    }
 
     fn box_desc(body_type: BodyType, position: [f32; 3], half: [f32; 3]) -> BodyDesc {
         BodyDesc {

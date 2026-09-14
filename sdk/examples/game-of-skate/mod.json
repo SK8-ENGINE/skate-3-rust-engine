@@ -2,9 +2,9 @@
   "id": "examples.game-of-skate",
   "api": 2,
   "name": "Game of SKATE",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Skate3clone",
-  "description": "One skater sets a trick. Everyone else has to match it or take a letter. Last player without SKATE wins. Works solo as a set-then-match drill.",
+  "description": "Host-first sequential turns from a shared start. Waiting players are suspended and watch the active player's camera. Match the trick or take a letter; last player without SKATE wins.",
   "entry": "main.lua",
   "settings": {
     "copy_seconds": {

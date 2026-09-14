@@ -1,46 +1,11 @@
 //! Sync package-GLB helpers for named nodes/meshes → convex hull points.
 use std::path::Path;
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ObjectLists {
-    pub nodes: Vec<String>,
-    pub meshes: Vec<String>,
-}
-
-pub fn list_objects(path: &Path) -> Result<ObjectLists, String> {
-    let (doc, _) = open(path)?;
-    let mut nodes: Vec<_> = doc
-        .nodes()
-        .filter_map(|n| n.name().map(str::to_owned))
-        .collect();
-    let mut meshes: Vec<_> = doc
-        .meshes()
-        .filter_map(|m| m.name().map(str::to_owned))
-        .collect();
-    nodes.sort();
-    nodes.dedup();
-    meshes.sort();
-    meshes.dedup();
-    Ok(ObjectLists { nodes, meshes })
-}
 
 /// Collect unique vertex positions for a named node (with descendants) or mesh, in that
 /// node's local space (identity if mesh-only). Suitable for Rapier convex hulls.
 pub fn convex_points(path: &Path, object: &str) -> Result<Vec<[f32; 3]>, String> {
     skate_mods::convex_points_file(path, object)
-}
-
-fn open(path: &Path) -> Result<(gltf::Document, Vec<gltf::buffer::Data>), String> {
-    if !path.is_file() {
-        return Err(format!("GLB not found: {}", path.display()));
-    }
-    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
-    if meta.len() > 64 * 1024 * 1024 {
-        return Err("GLB exceeds 64 MiB".into());
-    }
-    let (doc, buffers, _) =
-        gltf::import(path).map_err(|e| format!("GLB load {}: {e}", path.display()))?;
-    Ok((doc, buffers))
 }
 
 #[cfg(test)]
@@ -49,7 +14,7 @@ mod tests {
 
     #[test]
     fn missing_file_errors() {
-        assert!(list_objects(Path::new("nope.glb")).is_err());
+        assert!(convex_points(Path::new("nope.glb"), "missing").is_err());
     }
 
     #[test]

@@ -143,3 +143,19 @@ fn application_snapshot_bursts_without_loopback() {
     }
     assert_eq!(h.actors[&2].application.len(), 64);
 }
+
+#[test]
+fn host_player_identity_is_resolved_from_roster_not_transport_endpoint() {
+    let mut host = Session::new(7, info(99), None);
+    let mut guests = vec![Session::new(7, info(2), Some(1))];
+    assert_eq!(host.host_actor(), Some(99));
+    assert_eq!(guests[0].host_actor(), None);
+    host.publish_application("net:match:state", b"host turn".to_vec(), 0);
+    for t in (0..2000).step_by(50) { pump(&mut host, &mut guests, t, true); }
+    let guest = &mut guests[0];
+    assert_eq!(guest.host_peer(), 1);
+    assert_eq!(guest.host_actor(), Some(99));
+    assert_eq!(guest.actors[&guest.host_actor().unwrap()].application["net:match:state"].value, b"host turn");
+    guest.migrate(Some(5), 2000);
+    assert_eq!(guest.host_actor(), None);
+}

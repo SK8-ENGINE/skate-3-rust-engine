@@ -4,6 +4,7 @@ pub(crate) mod appearance;
 mod appearance_transfer;
 mod transport;
 mod nametags;
+mod hud;
 use crate::{
     app::SimulationSet,
     physics::{GamePhysics, SkaterRuntime, network},
@@ -124,8 +125,8 @@ impl Multiplayer {
     pub(crate) fn session_identity(&self) -> Option<(u64, u64, u64)> {
         self.lobby.as_ref().map(|l| (l.session, l.local, l.host_peer()))
     }
-    pub(crate) fn host_peer(&self) -> u64 {
-        self.lobby.as_ref().map_or(0, |l| l.host_peer())
+    pub(crate) fn host_actor(&self) -> u64 {
+        self.lobby.as_ref().and_then(|l| l.host_actor()).unwrap_or(0)
     }
     pub(crate) fn published_name(&self) -> String {
         sanitize_name(&self.player_name)
@@ -401,8 +402,8 @@ impl Plugin for MultiplayerPlugin {
         }
         app.insert_resource(net)
             .add_systems(PreUpdate, (world_changed, receive, sync_names).chain().after(crate::map_transition::MapTransitionSet))
-            .add_systems(Startup, setup_hud)
-            .add_systems(Update, hud)
+            .add_systems(Startup, hud::setup)
+            .add_systems(Update, hud::draw)
             .add_systems(Update, send_pose)
             .add_systems(
                 Update,
@@ -581,7 +582,8 @@ fn receive(mut net: ResMut<Multiplayer>) {
                 continue;
             };
             if remote.roots.back().is_some_and(|p| {
-                Vec3::from_array(p.pose.p).distance(Vec3::from_array(state.root.p)) > 10.
+                skate_net::prediction::is_discontinuity(&remote.body, &state,
+                (revision.state.captured as f64 / 1000. - p.captured) as f32)
             }) {
                 remote.roots.clear();
                 remote.poses.clear();
@@ -664,68 +666,27 @@ fn receive(mut net: ResMut<Multiplayer>) {
         net.last_metrics = Instant::now();
     }
 }
-pub(crate) fn prepare(net: Res<Multiplayer>, mut physics: ResMut<GamePhysics>, skater: Res<SkaterRuntime>) {
+pub(crate) fn prepare(net: Res<Multiplayer>, mut physics: ResMut<GamePhysics>, skater: Res<SkaterRuntime>, mods: Option<Res<crate::modding::Mods>>) {
     physics.network_active = net.active();
     physics.network_contacts = 0;
     let mut proxies = std::mem::take(&mut physics.network_proxies);
     proxies.bodies.clear();
     proxies.volumes.clear();
-    proxies.solids.clear();proxies.groups.clear();
+    proxies.solids.clear();proxies.groups.clear();proxies.actors.clear();
     proxies.dynamics_before.clear();proxies.dynamics_deltas.clear();
-    for remote in net.remotes.values() {
-        if remote.body_at.elapsed() < Duration::from_millis(500) {
+    for (peer, remote) in &net.remotes {
+        if mods.as_ref().is_some_and(|m| crate::modding::peer_suspended(m, *peer)) { continue; }
+        if let Some(prediction) = skate_net::prediction::CollisionPrediction::at(remote.body_at.elapsed().as_secs_f32()) {
             proxies.append(
-                &remote.body,
+                *peer, &remote.body,
                 &net.schema,
                 &physics,
                 &skater,
-                remote.body_at.elapsed().as_secs_f32().min(0.05),
+                prediction,
             );
         }
     }
     physics.network_proxies = proxies;
-}
-#[derive(Component)]
-struct NetworkHud;
-fn setup_hud(mut commands: Commands) {
-    commands.spawn((
-        NetworkHud,
-        Text::new(""),
-        TextFont {
-            font_size: 15.,
-            ..default()
-        },
-        TextColor(Color::WHITE),
-        GlobalZIndex(5),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(8),
-            left: px(8),
-            padding: UiRect::all(px(6)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0., 0., 0., 0.6)),
-    ));
-}
-fn hud(
-    net: Res<Multiplayer>,
-    physics: Res<GamePhysics>,
-    mut label: Single<&mut Text, With<NetworkHud>>,
-    appearances: Res<appearance::Appearances>,
-) {
-    ***label = if net.active() {
-        format!(
-            "{}\n{}\n{}\n{}\n{} {}\nPlayer contacts: {} | Esc > Multiplayer",
-            net.status,
-            net.rates,
-            net.provider_metrics,
-            net.visual_status,
-            appearances.progress, appearances.status,
-            physics.network_contacts
-        )
-    } else {
-        String::new()
-    };
 }
 fn send(mut net: ResMut<Multiplayer>, physics: Res<GamePhysics>, skater: Res<SkaterRuntime>, mods:Option<Res<crate::modding::Mods>>) {
     if !net.active() || skater.pose_generation == 0 {
@@ -738,6 +699,7 @@ fn send(mut net: ResMut<Multiplayer>, physics: Res<GamePhysics>, skater: Res<Ska
             state.root=network::pose(root.to_matrix());
             state.enabled=if mods.as_ref().is_some_and(|m|crate::modding::player_attached(m)) {1u64<<62} else {0};
         }
+        if mods.as_ref().is_some_and(|m| crate::modding::player_suspended(m)) { state.enabled = 0; }
         if let Some(p) = Packed::body(&state) {
             net.lobby.as_mut().unwrap().publish(packed::BODY, p, now);
         }
@@ -802,13 +764,23 @@ pub(crate) fn sanitize_name(raw: &str) -> String {
     }
 }
 
-fn sync_names(mut net: ResMut<Multiplayer>) {
+fn sync_names(mut net: ResMut<Multiplayer>, mut ping_sent: Local<Option<Instant>>) {
     let name = net.published_name();
     if let Some(local) = net.lobby.as_ref().map(|l| l.local) {
         net.names.insert(local, name.clone());
     }
     if net.active() {
         let _ = net.publish_application(NAME_KEY, name.into_bytes());
+        // Each player advertises their measured host RTT through the existing
+        // actor-owned metadata stream, so clients can display the whole roster.
+        if ping_sent.is_none_or(|sent| sent.elapsed() >= Duration::from_secs(1)) {
+            let ping = net.lobby.as_ref().and_then(|l| if l.is_host() { Some(0) }
+                else { (l.stats.rtt_ms > 0).then_some(l.stats.rtt_ms) });
+            if let Some(ping) = ping {
+                let _ = net.publish_application(hud::PING_KEY, ping.to_le_bytes().to_vec());
+            }
+            *ping_sent = Some(Instant::now());
+        }
         let records = net.application_records();
         for (peer, key, _, bytes) in records {
             if key != NAME_KEY {
@@ -820,5 +792,14 @@ fn sync_names(mut net: ResMut<Multiplayer>) {
         }
         let live: std::collections::BTreeSet<u64> = net.player_ids().into_iter().collect();
         net.names.retain(|id, _| live.contains(id));
+    }
+}
+
+impl Multiplayer {
+    pub(crate) fn debug_sections(&self) -> [String; 3] {
+        [format!("CONNECTION\n{}\n{}", self.status, self.diagnostic_summary()),
+            format!("TRAFFIC & TRANSPORT\n{}\n{}", if self.rates.is_empty() { "No traffic samples yet" } else { &self.rates },
+                if self.provider_metrics.is_empty() { "No provider metrics" } else { &self.provider_metrics }),
+            format!("INTERPOLATION\n{}", if self.visual_status.is_empty() { "No remote playback samples" } else { &self.visual_status })]
     }
 }

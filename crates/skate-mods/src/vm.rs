@@ -119,6 +119,7 @@ pub enum Command {
         key: String,
         text: String,
     },
+    MultiplayerDebug { key: String, text: String },
     UiCanvas { key: String, options: crate::presentation::CanvasOptions },
     UiRemove { key: String },
     CameraRig { body: String, options: crate::presentation::CameraRigOptions },
@@ -291,9 +292,16 @@ pub enum Command {
     },
     UiMenu { key:String, options:crate::extensions::MenuOptions },
     UiRemoveMenu { key:String },
+    RigPart {index:usize, options:Option<crate::extensions::PartOverride>},
+    GraphGate { graph:String, target:String, index:usize, enabled:Option<bool> },
+    EngineInspect { system:String },
+    Request { key:String, #[serde(default)] token:u64, command:Box<Command> },
+    InputOverride { action:usize, value:Option<f32> },
+    NativeImpulse { body:crate::extensions::NativeBodyRef, impulse:[f32;3], point:Option<[f32;3]>, angular:bool },
     PlayerJoint { joint:usize, options:crate::extensions::JointOverride },
     PlayerResetJoint { joint:usize },
     PlayerResetJoints {},
+    PlayerSuspend { suspended: bool },
     PlayerTeleport {
         options: TeleportOptions,
     },
@@ -352,8 +360,14 @@ impl Command {
         let vec3 = |p: &[f32; 3]| p.iter().all(|v| v.is_finite());
         let quat = crate::scene::valid_quaternion;
         match self {
+            Self::RigPart {index,options} => *index<26 && options.as_ref().is_none_or(|o|o.validate()),
+            Self::GraphGate {graph,target,index,..} => matches!(graph.as_str(),"action"|"motion") && matches!(target.as_str(),"state"|"transition"|"behavior") && *index<65536,
+            Self::EngineInspect {system} => matches!(system.as_str(),"graphs"|"scoring"),
+            Self::Request {key,command,token} => *token<=9_007_199_254_740_991 && crate::schema::valid_id(key) && !matches!(**command,Self::Request{..}) && command.validate(),
+            Self::InputOverride {action,value} => (64..=81).contains(action) && value.is_none_or(|v|v.is_finite() && (-1.0..=1.0).contains(&v)),
+            Self::NativeImpulse {body,impulse,point:p,..} => body.validate() && impulse.iter().all(|v|v.is_finite() && v.abs()<=100_000.) && p.as_ref().is_none_or(point),
             Self::Log { text } => text.len() <= 2048,
-            Self::Overlay { key, text } => crate::schema::valid_id(key) && text.len() <= 1024,
+            Self::Overlay { key, text } | Self::MultiplayerDebug { key, text } => crate::schema::valid_id(key) && text.len() <= 1024,
             Self::UiCanvas { key, options } => crate::schema::valid_id(key) && options.validate(),
             Self::UiRemove { key } => crate::schema::valid_id(key),
             Self::CameraRig { body, options } => crate::schema::valid_id(body) && options.validate(),
@@ -574,6 +588,7 @@ impl Command {
             Self::PlayerJoint {joint,options} => *joint < 22 && options.validate(),
             Self::PlayerResetJoint {joint} => *joint < 22,
             Self::PlayerResetJoints {} => true,
+            Self::PlayerSuspend { .. } => true,
             Self::PlayerTeleport { options } => options.validate(),
             Self::SessionClaim {} => true,
             Self::SessionTransfer { peer } => valid_peer(peer),
@@ -592,8 +607,15 @@ impl Command {
 /// null to a null *userdata*, which is truthy and blows up on indexing.
 fn command_kind(command: &Command) -> &'static str {
     match command {
+        Command::RigPart {..} => "rig_part",
+        Command::GraphGate {..} => "graph_gate",
+        Command::EngineInspect {..} => "engine_inspect",
+        Command::Request {..} => "request",
+        Command::InputOverride {..} => "input_override",
+        Command::NativeImpulse {..} => "native_impulse",
         Command::Log { .. } => "log",
         Command::Overlay { .. } => "overlay",
+        Command::MultiplayerDebug { .. } => "multiplayer_debug",
         Command::UiCanvas { .. } => "ui_canvas",
         Command::UiRemove { .. } => "ui_remove",
         Command::CameraRig { .. } => "camera_rig",
@@ -639,6 +661,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::PlayerJoint { .. } => "player_joint",
         Command::PlayerResetJoint { .. } => "player_reset_joint",
         Command::PlayerResetJoints {} => "player_reset_joints",
+        Command::PlayerSuspend { .. } => "player_suspend",
         Command::PlayerTeleport { .. } => "player_teleport",
         Command::SessionClaim { .. } => "session_claim",
         Command::SessionTransfer { .. } => "session_transfer",
@@ -754,14 +777,14 @@ fn json_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
         return Ok(mlua::Value::Nil);
     }
     if let Some(obj) = value.as_object() {
-        let t = lua.create_table()?;
+        let t = lua.create_table_with_capacity(0, obj.len())?;
         for (k, v) in obj {
             t.set(k.clone(), json_to_lua(lua, v)?)?;
         }
         return Ok(mlua::Value::Table(t));
     }
     if let Some(arr) = value.as_array() {
-        let t = lua.create_table()?;
+        let t = lua.create_table_with_capacity(arr.len(), 0)?;
         for (i, v) in arr.iter().enumerate() {
             t.set(i + 1, json_to_lua(lua, v)?)?;
         }
@@ -769,6 +792,42 @@ fn json_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
     }
     lua.to_value(value)
 }
+
+// Only a root field that Lua reads is converted. Returned field tables are
+// ordinary complete Lua tables, preserving length, pairs and serde behavior.
+#[cfg(test)]
+fn lazy_snapshot(lua:&Lua, snapshot:Arc<Value>, physics:Option<Value>)->mlua::Result<Table> {
+    lazy_snapshot_fields(lua, snapshot, physics, crate::SnapshotFields::default())
+}
+
+fn lazy_snapshot_fields(lua:&Lua, snapshot:Arc<Value>, physics:Option<Value>, fields:crate::SnapshotFields)->mlua::Result<Table> {
+    let defaults=std::sync::LazyLock::force(&SNAPSHOT_DEFAULTS);
+    let table=lua.create_table()?;
+    if let Some(physics)=physics {table.raw_set("physics",json_to_lua(lua,&physics)?)?;}
+    let meta=lua.create_table()?;
+    let index_snapshot=snapshot.clone();
+    let index_fields=fields.clone();
+    meta.set("__index",lua.create_function(move |lua,(table,key):(Table,String)| {
+        let value=index_fields.get(&key).map(|v|v.as_ref()).or_else(||index_snapshot.get(&key)).filter(|v|!v.is_null()).or_else(||SNAPSHOT_DEFAULTS.get(&key));
+        let value=value.map_or(Ok(mlua::Value::Nil),|v|json_to_lua(lua,v))?;
+        table.raw_set(key,value.clone())?;
+        Ok(value)
+    })?)?;
+    // pairs(snapshot) explicitly requests every root field.
+    let next:mlua::Function=lua.globals().get("next")?;
+    meta.set("__pairs",lua.create_function(move |_,table:Table| {
+        // Most callbacks read a few named fields. Build the root-key union
+        // only when iteration actually requests the complete snapshot.
+        let keys=snapshot.as_object().into_iter().flat_map(|o|o.keys())
+            .chain(fields.keys()).chain(defaults.as_object().unwrap().keys())
+            .collect::<std::collections::BTreeSet<_>>();
+        for key in keys {let _:mlua::Value=table.get(key.as_str())?;}
+        Ok((next.clone(),table,mlua::Value::Nil))
+    })?)?;
+    table.set_metatable(Some(meta))?;
+    Ok(table)
+}
+static SNAPSHOT_DEFAULTS:std::sync::LazyLock<Value>=std::sync::LazyLock::new(default_snapshot);
 
 fn query_value(lua: &Lua, value: Value) -> mlua::Result<mlua::Value> {
     json_to_lua(lua, &value)
@@ -783,6 +842,7 @@ pub struct Vm {
     lua: Lua,
     callbacks: Table,
     advance: mlua::Function,
+    timers_due: mlua::Function,
     budget: Arc<AtomicUsize>,
     queue: Arc<Mutex<Vec<Command>>>,
 }
@@ -800,6 +860,12 @@ impl Vm {
                 LuaOptions::default(),
             )?;
             lua.set_memory_limit(16 * 1024 * 1024)?;
+            // Snapshot closures own native allocations which Lua's heap counter
+            // cannot see. Keep finalization batches small and advance collection
+            // after dispatch, instead of retaining hundreds of old native frames.
+            lua.gc_set_mode(mlua::state::GcMode::Incremental(
+                mlua::state::GcIncParams::default().step_size(10),
+            ));
             for key in [
                 "pcall",
                 "xpcall",
@@ -838,11 +904,19 @@ impl Vm {
             capabilities.set("scene_transforms", 2)?;
             capabilities.set("skater", 4)?;
             capabilities.set("menus", 3)?;
-            capabilities.set("player_physics", 1)?;
-            capabilities.set("camera", 2)?;
+            capabilities.set("player_physics", 2)?;
+            capabilities.set("engine_access", 1)?;
+            capabilities.set("command_results", 1)?;
+            capabilities.set("native_bodies", 1)?;
+            capabilities.set("input_override", 1)?;
+            capabilities.set("player_overlap", 1)?;
+            capabilities.set("landed_details", 1)?;
+            capabilities.set("camera", 3)?;
+            capabilities.set("player_control", 1)?;
             capabilities.set("session", 1)?;
             capabilities.set("volumes", 1)?;
             capabilities.set("capture", 1)?;
+            capabilities.set("multiplayer_debug", 1)?;
             sdk.set("_native_capabilities", capabilities)?;
             sdk.set("mod_id", manifest.id.clone())?;
             sdk.set(
@@ -936,6 +1010,8 @@ impl Vm {
             let sdk: Table = lua.globals().get("sdk")?;
             let advance = sdk.get("_advance")?;
             sdk.set("_advance", mlua::Value::Nil)?;
+            let timers_due = sdk.get("_timers_due")?;
+            sdk.set("_timers_due", mlua::Value::Nil)?;
             let code = read_bounded(root, &manifest.entry, 256 * 1024)
                 .map_err(mlua::Error::RuntimeError)?;
             let source = std::str::from_utf8(&code).map_err(mlua::Error::external)?;
@@ -966,6 +1042,7 @@ impl Vm {
                 lua,
                 callbacks,
                 advance,
+                timers_due,
                 budget,
                 queue,
             })
@@ -981,28 +1058,58 @@ impl Vm {
             .set("settings", self.lua.to_value(settings)?)
     }
 
+    #[cfg(test)]
     pub fn call(
         &mut self,
         name: &str,
         payload: Value,
         snapshot: &Value,
     ) -> Result<Vec<Command>, String> {
+        self.call_shared(name,payload,&Arc::new(snapshot.clone()),None,&crate::SnapshotFields::default())
+    }
+
+    pub fn call_shared(&mut self,name:&str,payload:Value,snapshot:&Arc<Value>,physics:Option<Value>,fields:&crate::SnapshotFields)->Result<Vec<Command>,String> {
         self.budget.store(LUA_BUDGET_UNITS, Ordering::Relaxed);
-        let invoke = || -> mlua::Result<()> {
-            self.lua
-                .globals()
-                .get::<Table>("sdk")?
-                .set("snapshot", json_to_lua(&self.lua, &complete(snapshot))?)?;
-            if let Some(f) = self.callbacks.get::<Option<mlua::Function>>(name)? {
+        let invoke = || -> mlua::Result<bool> {
+            let callback=self.callbacks.get::<Option<mlua::Function>>(name)?;
+            if callback.is_none() {
+                if name != "on_update" { return Ok(false); }
+                let dt = payload["dt"].as_f64().unwrap_or(0.);
+                // Advance the clock even for mods with no update callback. Only
+                // a due timer can observe this frame, so otherwise no snapshot
+                // or native closures need to be allocated at render frequency.
+                if !self.timers_due.call::<bool>(dt)? {
+                    self.advance.call::<()>(dt)?;
+                    return Ok(true);
+                }
+            }
+            let sdk = self.lua.globals().get::<Table>("sdk")?;
+            let rig_source = snapshot.clone();
+            let rig_fields = fields.clone();
+            sdk.set("_rig_snapshot", self.lua.create_function(move |lua, fields: Vec<String>| {
+                let result = lua.create_table_with_capacity(0, fields.len())?;
+                let rig = rig_fields.get("player_physics").map(|v|v.as_ref()).or_else(||rig_source.get("player_physics")).filter(|v| !v.is_null())
+                    .unwrap_or(&SNAPSHOT_DEFAULTS["player_physics"]);
+                for field in fields {
+                    if let Some(value) = rig.get(&field) {
+                        result.raw_set(field, json_to_lua(lua, value)?)?;
+                    }
+                }
+                Ok(result)
+            })?)?;
+            sdk.set("snapshot", lazy_snapshot_fields(&self.lua,snapshot.clone(),physics,fields.clone())?)?;
+            if let Some(f) = callback {
                 f.call::<()>(self.lua.to_value(&payload)?)?;
             }
             if name == "on_update" {
                 self.advance
                     .call::<()>(payload["dt"].as_f64().unwrap_or(0.))?;
             }
-            Ok(())
+            Ok(true)
         };
-        let result = invoke();
+        let result = invoke().and_then(|ran| {
+            if ran { self.lua.gc_step().map(|_| ()) } else { Ok(()) }
+        });
         let remaining = self.budget.load(Ordering::Relaxed);
         let used = LUA_BUDGET_UNITS.saturating_sub(remaining);
         let approx_instructions = used * LUA_INSTRUCTIONS_PER_BUDGET_UNIT;
@@ -1073,6 +1180,8 @@ mod driving_extension_tests {
                 }})
                 sdk.ui.remove('dash')
                 sdk.camera.clear()
+                sdk.ui.multiplayer_debug("replication", "Ready")
+                sdk.ui.multiplayer_debug("replication", "")
             end }
         "#).unwrap();
         let manifest:Manifest=serde_json::from_value(json!({
@@ -1083,7 +1192,7 @@ mod driving_extension_tests {
         let snap=json!({"physics":{"bodies":{}}});
         let mut vm=Vm::new(&root,&manifest,&BTreeMap::new(),&snap).unwrap();
         let out=vm.call("on_load",json!({}),&snap).unwrap();
-        assert_eq!(out.len(),5);
+        assert_eq!(out.len(),7);
         match &out[0] { Command::CameraRig{options,..}=>{
             assert_eq!(options.mode,crate::presentation::CameraMode::Hood);
             assert!(!options.collision);assert_eq!(options.fov_gain,0.0);
@@ -1097,6 +1206,8 @@ mod driving_extension_tests {
         }, _=>panic!("wrong canvas command") }
         assert!(matches!(out[3],Command::UiRemove{..}));
         assert!(matches!(&out[4],Command::CameraFollow{body:None,..}));
+        assert!(matches!(&out[5],Command::MultiplayerDebug{key,text} if key=="replication" && text=="Ready"));
+        assert!(matches!(&out[6],Command::MultiplayerDebug{text,..} if text.is_empty()));
         drop(vm);std::fs::remove_dir_all(root).unwrap();
     }
 }
@@ -1413,5 +1524,165 @@ mod graphics_mesh_buffer_tests {
         )
         .exec()
         .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod multiplayer_debug_tests {
+    use super::Command;
+    #[test]
+    fn multiplayer_debug_reports_are_bounded_and_clearable() {
+        for text in [String::new(), "Ready".into(), "x".repeat(1024)] {
+            assert!(Command::MultiplayerDebug { key: "replication".into(), text }.validate());
+        }
+        assert!(!Command::MultiplayerDebug { key: "replication".into(), text: "x".repeat(1025) }.validate());
+        assert!(!Command::MultiplayerDebug { key: "../bad".into(), text: "Ready".into() }.validate());
+    }
+}
+
+#[cfg(test)]
+mod snapshot_performance_tests {
+    use super::*;
+    #[test]
+    fn timer_only_mods_observe_fresh_snapshots_and_keep_callback_order() {
+        let root=std::env::temp_dir().join(format!("skate-timer-snapshot-{}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"),r#"
+            return {on_load=function()
+                sdk.time.after('first',0.02,function()
+                    assert(sdk.snapshot.tick==2 and sdk.time.elapsed==0.02)
+                    sdk.ui.text('timer','first')
+                    sdk.time.after('next',0,function()
+                        assert(sdk.snapshot.tick==3)
+                        sdk.ui.text('timer','next')
+                    end)
+                end)
+            end}
+        "#).unwrap();
+        let manifest:Manifest=serde_json::from_value(serde_json::json!({
+            "id":"tests.timer-snapshot","api":2,"name":"Timer snapshots","version":"1.0.0",
+            "author":"test","description":"test","entry":"main.lua","settings":{}
+        })).unwrap();
+        let mut vm=Vm::new(&root,&manifest,&BTreeMap::new(),&Value::Null).unwrap();
+        vm.call("on_load",serde_json::json!({}),&Value::Null).unwrap();
+        for (tick,expected) in [(1,None),(2,Some("first")),(3,Some("next")),(4,None)] {
+            let commands=vm.call("on_update",serde_json::json!({"dt":0.01}),
+                &serde_json::json!({"tick":tick})).unwrap();
+            if let Some(expected)=expected {
+                assert!(matches!(&commands[..], [Command::Overlay{text,..}] if text==expected));
+            } else { assert!(commands.is_empty()); }
+        }
+        drop(vm);
+        std::fs::remove_file(root.join("main.lua")).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+    #[test]
+    fn incremental_collection_releases_native_frames_but_preserves_retained_snapshots() {
+        let root=std::env::temp_dir().join(format!("skate-snapshot-gc-{}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"),r#"
+            local first
+            return {on_fixed_update=function(e)
+                if not first then first=sdk.snapshot end
+                if e.tick==1024 then
+                    -- Read a field for the first time after many collections.
+                    assert(first.tick==1 and #first.player_physics.joints==22)
+                end
+            end}
+        "#).unwrap();
+        let manifest:Manifest=serde_json::from_value(serde_json::json!({
+            "id":"tests.snapshot-gc","api":2,"name":"Snapshot collection","version":"1.0.0",
+            "author":"test","description":"test","entry":"main.lua","settings":{}
+        })).unwrap();
+        let mut vm=Vm::new(&root,&manifest,&BTreeMap::new(),&Value::Null).unwrap();
+        let mut frames=Vec::new();
+        for tick in 1..=1024 {
+            let mut snapshot=fixture();
+            Arc::make_mut(&mut snapshot)["tick"]=serde_json::json!(tick);
+            frames.push(Arc::downgrade(&snapshot));
+            vm.call_shared("on_fixed_update",serde_json::json!({"tick":tick}),
+                &snapshot,None,&crate::SnapshotFields::default()).unwrap();
+        }
+        assert!(frames[0].upgrade().is_some(),"Lua retained the first snapshot");
+        assert!(frames[1..512].iter().all(|f| f.upgrade().is_none()),
+            "discarded native snapshots must be reclaimed during dispatch");
+        drop(vm);
+        assert!(frames.iter().all(|f|f.upgrade().is_none()));
+        std::fs::remove_file(root.join("main.lua")).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+    #[test]
+    fn shared_native_fields_support_projected_full_and_retained_reads() {
+        let root=std::env::temp_dir().join(format!("skate-shared-fields-{}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"),r#"
+            local old
+            return {on_update=function()
+                local current=sdk.rig.read({'tick'})
+                assert(current.tick==sdk.snapshot.tick and current.joints==nil)
+                assert(rawget(sdk.snapshot,'player_physics')==nil)
+                if old then assert(old.tick<current.tick) end
+                old=current
+                local full=sdk.rig.read()
+                assert(#full.joints==22 and #full.joints[1].load.solver_words==96)
+                assert(full.joints[1].name=='JOINT_LEFT_ARM')
+                full.joints[1].name='mod-local mutation'
+            end}
+        "#).unwrap();
+        let manifest:Manifest=serde_json::from_value(serde_json::json!({
+            "id":"tests.shared-fields","api":2,"name":"Shared fields","version":"1.0.0",
+            "author":"test","description":"test","entry":"main.lua","settings":{}
+        })).unwrap();
+        let mut vm=Vm::new(&root,&manifest,&BTreeMap::new(),&Value::Null).unwrap();
+        for tick in [1,2] {
+            let mut rig=fixture()["player_physics"].clone();rig["tick"]=serde_json::json!(tick);
+            let fields=Arc::new(BTreeMap::from([("player_physics".into(),Arc::new(rig))]));
+            vm.call_shared("on_update",serde_json::json!({"dt":0.01}),
+                &Arc::new(serde_json::json!({"tick":tick})),None,&fields).unwrap();
+            assert_eq!(fields["player_physics"]["joints"][0]["name"],"JOINT_LEFT_ARM");
+        }
+        drop(vm);std::fs::remove_file(root.join("main.lua")).unwrap();std::fs::remove_dir(root).unwrap();
+    }
+    fn fixture()->Arc<Value> {
+        let joints=(0..22).map(|i|serde_json::json!({"index":i,"name":"JOINT_LEFT_ARM","parameters":vec![0;16],"frames":vec![0;20],"load":{"solver_words":vec![0;96],"force":[1,2,3]}})).collect::<Vec<_>>();
+        Arc::new(serde_json::json!({"tick":1,"player":{"score":123,"position":[1,2,3]},"player_physics":{"joints":joints,"contacts":(0..64).map(|i|serde_json::json!({"id":i,"point":[1,2,3],"force":[1,2,3],"impulse":[1,2,3],"normal":[0,1,0],"a":{"kind":"skater","index":1},"b":{"kind":"world"}})).collect::<Vec<_>>()},"engine":{"graphs":{"states":vec![0;1500]}}}))
+    }
+    #[test]
+    fn lazy_fields_are_complete_isolated_and_retained_across_callbacks() {
+        let lua=Lua::new();let snapshot=fixture();
+        let a=lazy_snapshot(&lua,snapshot.clone(),Some(serde_json::json!({"bodies":{"owned":{}}}))).unwrap();
+        lua.globals().set("a",a.clone()).unwrap();
+        lua.load("assert(rawget(a,'player_physics')==nil); assert(a.player.score==123); a.player.score=5; assert(rawget(a,'player_physics')==nil); assert(a.physics.bodies.owned)").exec().unwrap();
+        let b=lazy_snapshot(&lua,snapshot,None).unwrap();lua.globals().set("b",b).unwrap();
+        lua.load("assert(b.player.score==123); assert(a.player.score==5); local n=0;for k,v in pairs(a) do n=n+1 end;assert(n>10);assert(#a.player_physics.joints==22);assert(#a.player_physics.joints[1].load.solver_words==96)").exec().unwrap();
+    }
+    #[test]
+    #[ignore="headless marshaling benchmark; not an FPS claim"]
+    fn compare_eager_and_demand_driven_snapshot_cost() {
+        let snapshot=fixture();let lua=Lua::new();let reads:mlua::Function=lua.load("return function(s) return s.player.score end").eval().unwrap();
+        let iterations=120;let mods=6;
+        let begin=std::time::Instant::now();
+        for _ in 0..iterations {for _ in 0..mods {for _ in 0..3 {
+            let full=json_to_lua(&lua,&complete(&snapshot)).unwrap();std::hint::black_box(reads.call::<i64>(full).unwrap());
+        }}}
+        let eager=begin.elapsed();lua.gc_collect().unwrap();
+        let begin=std::time::Instant::now();
+        for _ in 0..iterations {for _ in 0..mods {
+            // Missing UI callback does no conversion; update/fixed read only player.
+            for _ in 0..2 {let lazy=lazy_snapshot(&lua,snapshot.clone(),None).unwrap();std::hint::black_box(reads.call::<i64>(lazy).unwrap());}
+        }}
+        let lazy=begin.elapsed();
+        lua.gc_collect().unwrap();
+        let rig_reads:mlua::Function=lua.load("return function(s) local rig=s.player_physics; local n=#rig.contacts; for _,j in ipairs(rig.joints) do n=n+j.index end; return n end").eval().unwrap();
+        let begin=std::time::Instant::now();
+        for _ in 0..iterations {for mod_index in 0..mods {
+            for callback in 0..2 {
+                let lazy=lazy_snapshot(&lua,snapshot.clone(),None).unwrap();
+                std::hint::black_box(reads.call::<i64>(lazy.clone()).unwrap());
+                if mod_index==0 && callback==1 {std::hint::black_box(rig_reads.call::<i64>(lazy).unwrap());}
+            }
+        }}
+        eprintln!("SNAPSHOT_RIG_BENCH six_mods_one_full_rig_reader_ms_per_frame={:.3}",begin.elapsed().as_secs_f64()*1000./iterations as f64);
+        eprintln!("SNAPSHOT_BENCH bytes={} mods={mods} iterations={iterations} eager_ms_per_frame={:.3} lazy_ms_per_frame={:.3} ratio={:.1}",serde_json::to_vec(&*snapshot).unwrap().len(),eager.as_secs_f64()*1000./iterations as f64,lazy.as_secs_f64()*1000./iterations as f64,eager.as_secs_f64()/lazy.as_secs_f64());
     }
 }
