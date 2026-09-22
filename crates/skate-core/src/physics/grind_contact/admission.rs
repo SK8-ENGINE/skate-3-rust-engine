@@ -1,6 +1,6 @@
 //! S3 82D886B8, paired with S2 IsEntryAngleAcuteEnough 82DDA748.
 //! Test each family/contact before arbitration, retaining its entry kind.
-use super::{arithmetic, dot3, scale, sub, within_approach_angle, V};
+use super::{V, arithmetic, dot3, scale, sub, within_approach_angle};
 use crate::point_graph::PointGraph;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

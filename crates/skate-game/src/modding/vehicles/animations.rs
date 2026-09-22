@@ -72,6 +72,7 @@ impl Clips {
         ]
         .into_iter()
         .flatten()
+        .chain(a.tricks.iter())
         {
             if !file.clips.contains_key(name) {
                 return Err(format!("Missing vehicle animation {name}"));

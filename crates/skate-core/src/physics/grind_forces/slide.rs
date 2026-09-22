@@ -2,7 +2,10 @@
 use super::{V, dot3, scale, sub};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Slide { Boardslide, Darkslide }
+pub enum Slide {
+    Boardslide,
+    Darkslide,
+}
 
 /// All vectors are the physical-state/processed observations. Preparing-jump
 /// is the retained state byte241, not a newly sampled analog input.
@@ -24,13 +27,26 @@ pub struct Input {
 /// Forces at the processed deck position, in original application order.
 /// The caller applies these directly, not through the21-entry tagged queue.
 pub fn control(slide: Slide, input: Input) -> Vec<V> {
-    let Input { position, point, direction, across, velocity,
-        translation_2796: translation, total_mass_2660: mass,
-        update_frequency, preparing_jump, geometry_kind } = input;
+    let Input {
+        position,
+        point,
+        direction,
+        across,
+        velocity,
+        translation_2796: translation,
+        total_mass_2660: mass,
+        update_frequency,
+        preparing_jump,
+        geometry_kind,
+    } = input;
     let offset = dot3(sub(position, point), across);
     let inward = scale(across, if offset > 0.0 { -1.0 } else { 1.0 });
     if preparing_jump {
-        return if offset.abs() > 0.12 { vec![scale(inward, 201.0)] } else { Vec::new() };
+        return if offset.abs() > 0.12 {
+            vec![scale(inward, 201.0)]
+        } else {
+            Vec::new()
+        };
     }
     let translation_strength = match slide {
         Slide::Boardslide => 25.0,

@@ -1,6 +1,6 @@
 //! Window-free, versioned Lua package runtime. Host commands commit only after callbacks succeed.
-mod schema;
 mod archive;
+mod schema;
 mod vm;
 pub use schema::*;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,9 @@ pub use vm::Command;
 pub fn validate_package(source: &Path) -> Result<Manifest, String> {
     let source = source.canonicalize().map_err(|e| e.to_string())?;
     let mut cache = archive::Cache::default();
-    let root = if source.is_dir() { source.clone() } else {
+    let root = if source.is_dir() {
+        source.clone()
+    } else {
         cache.materialize(source.parent().ok_or("Missing package parent")?, &source)?
     };
     let manifest: Manifest = serde_json::from_slice(&read_bounded(&root, "mod.json", 64 * 1024)?)
@@ -25,8 +27,14 @@ pub fn validate_package(source: &Path) -> Result<Manifest, String> {
     fingerprint(&root)?;
     let source = read_bounded(&root, &manifest.entry, 256 * 1024)?;
     let source = std::str::from_utf8(&source).map_err(|e| e.to_string())?;
-    if source.starts_with('\u{1b}') { return Err("Lua bytecode is unsupported".into()); }
-    mlua::Lua::new().load(source).set_mode(mlua::chunk::ChunkMode::Text).into_function().map_err(|e|e.to_string())?;
+    if source.starts_with('\u{1b}') {
+        return Err("Lua bytecode is unsupported".into());
+    }
+    mlua::Lua::new()
+        .load(source)
+        .set_mode(mlua::chunk::ChunkMode::Text)
+        .into_function()
+        .map_err(|e| e.to_string())?;
     Ok(manifest)
 }
 
@@ -49,7 +57,9 @@ pub struct Package {
     pending: Option<(u64, Instant)>,
 }
 impl Package {
-    pub fn content_fingerprint(&self) -> u64 { self.fingerprint }
+    pub fn content_fingerprint(&self) -> u64 {
+        self.fingerprint
+    }
     pub fn running(&self) -> bool {
         self.vm.is_some()
     }
@@ -111,23 +121,29 @@ impl Manager {
         let mut paths: Vec<_> = dirs
             .filter_map(Result::ok)
             .map(|d| d.path())
-            .filter(|p| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'))
-                && (p.is_dir() || p.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"))))
+            .filter(|p| {
+                !p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+                    && (p.is_dir() || p.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")))
+            })
             .collect();
         paths.sort();
         if paths.len() > 128 {
-            self.diagnostics.push(
-                "Only the first 128 packages are supported; remove excess packages"
-                    .into(),
-            );
+            self.diagnostics
+                .push("Only the first 128 packages are supported; remove excess packages".into());
         }
         for source in paths.into_iter().take(128) {
             let path = if source.is_file() {
                 match self.archives.materialize(&self.root, &source) {
                     Ok(path) => path,
-                    Err(e) => { self.diagnostics.push(format!("{}: {e}", source.display())); continue; }
+                    Err(e) => {
+                        self.diagnostics.push(format!("{}: {e}", source.display()));
+                        continue;
+                    }
                 }
-            } else { source.clone() };
+            } else {
+                source.clone()
+            };
             // Invalid edits retire the old package: never silently retain outdated gameplay.
             let result = (|| {
                 let bytes = read_bounded(&path, "mod.json", 64 * 1024)?;
@@ -434,7 +450,11 @@ fn fingerprint(root: &Path) -> Result<u64, String> {
                 if *bytes > 64 * 1024 * 1024 {
                     return Err("Package exceeds 64 MiB".into());
                 }
-                p.strip_prefix(root).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/").hash(h);
+                p.strip_prefix(root)
+                    .map_err(|e| e.to_string())?
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .hash(h);
                 std::fs::read(&p).map_err(|e| e.to_string())?.hash(h);
             }
         }

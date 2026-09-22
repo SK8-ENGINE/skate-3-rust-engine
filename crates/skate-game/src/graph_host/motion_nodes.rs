@@ -16,7 +16,10 @@ use skate_data::state_graph::{
 pub enum MotionOperation {
     Grind(super::motion_grind::Operation),
     Trick(super::motion_tricks::Operation),
-    SetDeckPitchAndYaw { yaw: AttributeName, pitch: AttributeName },
+    SetDeckPitchAndYaw {
+        yaw: AttributeName,
+        pitch: AttributeName,
+    },
     Play(PlayAnimation),
     ///TU3 vtable82309664: Begin/Update/End all point to the empty82B61BB8.
     PrintText2D,
@@ -46,7 +49,10 @@ pub enum MotionOperation {
     AirLeg(super::motion_air_leg::Operation),
     ClearTrickAttr,
     ScoringTrick(super::motion_scoring_trick::Operation),
-    SetBumpCoefficients { x: AttributeName, y: AttributeName },
+    SetBumpCoefficients {
+        x: AttributeName,
+        y: AttributeName,
+    },
     Landing(super::motion_landing::Operation),
     Wipeout(super::motion_wipeout::Operation),
     TwistLean(super::motion_twist_lean::Operation),
@@ -120,9 +126,12 @@ impl OperationFactory for MotionFactory {
                         yaw: encode(a.text("skateyaw").unwrap_or("skateyaw").as_bytes()),
                         pitch: encode(a.text("skatepitch").unwrap_or("skatepitch").as_bytes()),
                     }),
-                    "ResetSkaterAnimation" | "ResetToGivenStance" => Some(MotionOperation::ResetAnimation(
-                        super::motion_reset::Operation::parse(a).ok_or("Invalid reset operation")?,
-                    )),
+                    "ResetSkaterAnimation" | "ResetToGivenStance" => {
+                        Some(MotionOperation::ResetAnimation(
+                            super::motion_reset::Operation::parse(a)
+                                .ok_or("Invalid reset operation")?,
+                        ))
+                    }
                     "MatchTwistAndLean" => Some(MotionOperation::TwistLean(
                         super::motion_twist_lean::Operation::parse(a),
                     )),
@@ -136,8 +145,9 @@ impl OperationFactory for MotionFactory {
                         super::motion_intent_filter::Operation::parse(a),
                     )),
                     "ToggleBoard" => Some(MotionOperation::ToggleBoard),
-                    "AddRunoutAttribs" => super::motion_runout::Operation::parse(a)
-                        .map(MotionOperation::Runout),
+                    "AddRunoutAttribs" => {
+                        super::motion_runout::Operation::parse(a).map(MotionOperation::Runout)
+                    }
                     "PlayAnimation" => Some(MotionOperation::Play(play(a))),
                     "PrintText2D" => Some(MotionOperation::PrintText2D),
                     "ApplyingBodyTilt" => Some(MotionOperation::ApplyingBodyTilt),
@@ -197,11 +207,11 @@ impl OperationFactory for MotionFactory {
                             ),
                         },
                     )),
-                    name if super::motion_stock_gameplay::Operation::recognizes(name) => Some(
-                        MotionOperation::StockGameplay(
+                    name if super::motion_stock_gameplay::Operation::recognizes(name) => {
+                        Some(MotionOperation::StockGameplay(
                             super::motion_stock_gameplay::Operation::parse(a),
-                        ),
-                    ),
+                        ))
+                    }
                     // Factory82BC6D40 defaults both identifiers to the string0.
                     "AttachIntent" => Some(MotionOperation::AttachIntent {
                         intent: a.text("intent").unwrap_or("0").into(),

@@ -111,21 +111,34 @@ pub(super) fn check_after_physics(
                 wipeout::check_plant(&mut skater.wipeout.state, &skater.wipeout.settings, &frame);
             }
             if skater.wipeout.state.count != 0 {
-                let reasons: Vec<_> = skater.wipeout.state.reasons.iter().enumerate()
-                    .filter_map(|(i, &active)| active.then_some(i)).collect();
-                bevy::log::info!("PLANT_BAIL tick={} state={:?} reasons={reasons:?} pose_error={:?} max_pose_error={} regions={:?} closing={:?} board_contact={} world_to_animation={:?}",
-                    physics.ticks, skater.player_state.current(), frame.pose_error,
-                    frame.maximum_pose_error, frame.regions_force, frame.closing_velocity,
-                    frame.board_contact, frame.world_to_animation);
+                let reasons: Vec<_> = skater
+                    .wipeout
+                    .state
+                    .reasons
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &active)| active.then_some(i))
+                    .collect();
+                bevy::log::info!(
+                    "PLANT_BAIL tick={} state={:?} reasons={reasons:?} pose_error={:?} max_pose_error={} regions={:?} closing={:?} board_contact={} world_to_animation={:?}",
+                    physics.ticks,
+                    skater.player_state.current(),
+                    frame.pose_error,
+                    frame.maximum_pose_error,
+                    frame.regions_force,
+                    frame.closing_velocity,
+                    frame.board_contact,
+                    frame.world_to_animation
+                );
             }
             if skater.player_state.current() == PhysicalStateId::FootPlant {
                 super::footplant::ground::post_physics(skater);
             }
             Ok(())
         }
-        PhysicalStateId::PhysicsGround | PhysicalStateId::SlideGround | PhysicalStateId::RevertGround => {
-            skater.wipeout.check_ground(&observations)
-        }
+        PhysicalStateId::PhysicsGround
+        | PhysicalStateId::SlideGround
+        | PhysicalStateId::RevertGround => skater.wipeout.check_ground(&observations),
         PhysicalStateId::GroundAnimation => {
             skater.wipeout.check_ground_animation(&observations, 1.0)
         }

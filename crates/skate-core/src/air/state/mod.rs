@@ -19,8 +19,8 @@ pub use data::{
     PhysicsAirSettings, PhysicsAirState,
 };
 pub use jump_velocity::{PhysicsAirMath, calculate_velocity_from_jump};
-pub use math::{AirMath, angle_between_vectors, clamp_jump_velocity};
 pub use lifecycle::{enter, exit, fill_physics_output};
+pub use math::{AirMath, angle_between_vectors, clamp_jump_velocity};
 pub use post_physics::update_post_physics;
 pub use runtime::{PhysicsAirLaunchInfo, PhysicsAirRuntime};
 pub use update::{integrate_trajectory_fixed_step, update, wrap_signed_angle};

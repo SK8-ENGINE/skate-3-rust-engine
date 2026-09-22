@@ -30,12 +30,17 @@ fn failed_construction_keeps_request_for_fallback() {
     let mut state = PendingPosture::default();
     state.set_profile(2);
     state.set_requested(true);
-    assert_eq!(state.apply((), |_, _| Err("missing pose")), Err("missing pose"));
+    assert_eq!(
+        state.apply((), |_, _| Err("missing pose")),
+        Err("missing pose")
+    );
     assert!(state.is_pending());
-    let tree = state.apply::<_, ()>(Vec::new(), |mut tree, pose| {
-        tree.push(pose);
-        Ok(tree)
-    }).unwrap();
+    let tree = state
+        .apply::<_, ()>(Vec::new(), |mut tree, pose| {
+            tree.push(pose);
+            Ok(tree)
+        })
+        .unwrap();
     assert_eq!(tree, [PosturePose::Slouch]);
     assert!(!state.is_pending());
 }
@@ -47,9 +52,16 @@ fn synchronous_begins_each_wrap_without_changing_previous_tree() {
     let mut trees = Vec::new();
     for requested in [true, true, false] {
         state.set_requested(requested);
-        trees.push(state.apply::<_, ()>(None, |_, pose| Ok(Some(pose))).unwrap());
+        trees.push(
+            state
+                .apply::<_, ()>(None, |_, pose| Ok(Some(pose)))
+                .unwrap(),
+        );
     }
-    assert_eq!(trees, [Some(PosturePose::Stiff), Some(PosturePose::Stiff), None]);
+    assert_eq!(
+        trees,
+        [Some(PosturePose::Stiff), Some(PosturePose::Stiff), None]
+    );
     assert!(!state.is_pending());
 }
 

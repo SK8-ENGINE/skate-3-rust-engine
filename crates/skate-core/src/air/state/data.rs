@@ -42,12 +42,19 @@ impl Default for PhysicsAirState {
     fn default() -> Self {
         Self {
             centre_of_mass_trajectory: AirTrajectory {
-                position: [0.0; 4], velocity: [0.0; 4], acceleration: [0.0; 4], scalar_48: -1.0,
+                position: [0.0; 4],
+                velocity: [0.0; 4],
+                acceleration: [0.0; 4],
+                scalar_48: -1.0,
             },
             landing_normal: [0.0, 1.0, 0.0, 0.0],
-            time_in_state: 0.0, start_y: 0.0, max_y: 0.0,
-            reached_apex: false, use_centre_of_mass_velocity: false,
-            selector_latch_174: false, trajectory_query_countdown: 0,
+            time_in_state: 0.0,
+            start_y: 0.0,
+            max_y: 0.0,
+            reached_apex: false,
+            use_centre_of_mass_velocity: false,
+            selector_latch_174: false,
+            trajectory_query_countdown: 0,
         }
     }
 }

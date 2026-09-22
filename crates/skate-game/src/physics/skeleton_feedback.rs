@@ -127,9 +127,12 @@ fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContact
         //82768418 rejects the same logical Body and equal nonnull Body+32
         //owners. Board82C067F4 and Skeleton82BE4620 both store this actor.
         //Their eligible cross contacts still participate in the shared solve.
-        let remote_base = skater.skeleton.bodies().len() + skater.skeleton_drives.targets.bodies.len();
-        let external = |body| matches!(body, CollisionBody::StaticWorld)
-            || matches!(body, CollisionBody::Attached(index) if index >= remote_base);
+        let remote_base =
+            skater.skeleton.bodies().len() + skater.skeleton_drives.targets.bodies.len();
+        let external = |body| {
+            matches!(body, CollisionBody::StaticWorld)
+                || matches!(body, CollisionBody::Attached(index) if index >= remote_base)
+        };
         if !external(a) && !external(b) {
             continue;
         }
@@ -173,9 +176,13 @@ fn resolve<'a>(
     match CollisionBody::from_contact_id(id) {
         CollisionBody::StaticWorld => None,
         CollisionBody::Board(id) => Some(&physics.board.bodies()[id.index()]),
-        CollisionBody::Attached(part) => skater.skeleton.bodies().iter()
+        CollisionBody::Attached(part) => skater
+            .skeleton
+            .bodies()
+            .iter()
             .chain(skater.skeleton_drives.targets.bodies.iter())
-            .chain(physics.network_proxies.bodies.iter()).nth(part),
+            .chain(physics.network_proxies.bodies.iter())
+            .nth(part),
     }
 }
 fn contact_body(body: Option<&BodySnapshot>) -> SkeletonContactBody {

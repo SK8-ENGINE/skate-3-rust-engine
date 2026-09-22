@@ -63,8 +63,14 @@ impl Default for GraphicsSettings {
 impl GraphicsSettings {
     fn validated(mut self) -> Self {
         self.ambient_level = self.ambient_level.map(|level| level.min(100));
-        self.hour = if self.hour.is_finite() { self.hour.rem_euclid(24.) } else { 12. };
-        if !DAY_SPEEDS.contains(&self.day_speed) { self.day_speed = 60; }
+        self.hour = if self.hour.is_finite() {
+            self.hour.rem_euclid(24.)
+        } else {
+            12.
+        };
+        if !DAY_SPEEDS.contains(&self.day_speed) {
+            self.day_speed = 60;
+        }
         if !RESOLUTIONS.contains(&(self.width, self.height)) {
             (self.width, self.height) = (1280, 800);
         }
@@ -100,11 +106,15 @@ pub(crate) struct Menu {
 }
 impl Menu {
     pub(crate) fn ambient_brightness(&self, automatic: f32) -> f32 {
-        self.settings.ambient_level.map_or(automatic, |level| level as f32 * 10.)
+        self.settings
+            .ambient_level
+            .map_or(automatic, |level| level as f32 * 10.)
     }
     pub(crate) fn advance_day(&mut self, seconds: f32) -> f32 {
         if !self.open && self.settings.day_speed > 0 {
-            self.settings.hour = (self.settings.hour + seconds * self.settings.day_speed as f32 / 3600.).rem_euclid(24.);
+            self.settings.hour = (self.settings.hour
+                + seconds * self.settings.day_speed as f32 / 3600.)
+                .rem_euclid(24.);
         }
         self.settings.hour
     }
@@ -144,9 +154,19 @@ impl Plugin for GraphicsMenuPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FramePacer(Instant::now()))
             .add_systems(PostStartup, setup.in_set(PresentationSetup))
-            .add_systems(PreUpdate, interact.in_set(MenuInput).after(bevy::input::InputSystems))
-            .add_systems(Update, (crate::map_render::advance_day, apply, labels).chain())
-            .add_systems(PostUpdate, crate::map_render::position_celestial_bodies.before(bevy::transform::TransformSystems::Propagate))
+            .add_systems(
+                PreUpdate,
+                interact.in_set(MenuInput).after(bevy::input::InputSystems),
+            )
+            .add_systems(
+                Update,
+                (crate::map_render::advance_day, apply, labels).chain(),
+            )
+            .add_systems(
+                PostUpdate,
+                crate::map_render::position_celestial_bodies
+                    .before(bevy::transform::TransformSystems::Propagate),
+            )
             .add_systems(Last, pace);
     }
 }
@@ -251,8 +271,13 @@ fn setup(
     });
     commands.insert_resource(SceneTarget(target));
     let maps = crate::map_library::discover(&config.asset_root);
-    let selected_map = maps.iter().position(|m| m.path.as_ref() == config.map_path.as_ref()).unwrap_or(0);
-    if config.start_paused { time.pause(); }
+    let selected_map = maps
+        .iter()
+        .position(|m| m.path.as_ref() == config.map_path.as_ref())
+        .unwrap_or(0);
+    if config.start_paused {
+        time.pause();
+    }
     commands.insert_resource(Menu {
         open: config.start_paused,
         selected: 0,
@@ -285,7 +310,10 @@ pub(crate) fn interact(
     mut transition: ResMut<crate::map_transition::MapTransition>,
     mut customiser: ResMut<crate::customiser::Customiser>,
     mut custom_models: ResMut<crate::custom_models::CustomModels>,
-    (mut mods, panel): (ResMut<crate::modding::ModMenu>, Res<crate::modding::EnabledPanel>),
+    (mut mods, panel): (
+        ResMut<crate::modding::ModMenu>,
+        Res<crate::modding::EnabledPanel>,
+    ),
     nav: Res<crate::customiser::Navigation>,
     mut physics: ResMut<crate::physics::GamePhysics>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -303,7 +331,10 @@ pub(crate) fn interact(
         time.pause();
         return;
     }
-    if mods.open || travel.open || travel.closed_this_frame || customiser.open || custom_models.open { return; }
+    if mods.open || travel.open || travel.closed_this_frame || customiser.open || custom_models.open
+    {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) || nav.pressed & 0x10 != 0 {
         menu.open = !menu.open;
     }
@@ -329,23 +360,34 @@ pub(crate) fn interact(
         }
     }
     if menu.open {
-        let rows = if menu.daylight { 4 } else if menu.multiplayer { 11 } else { 17 };
+        let rows = if menu.daylight {
+            4
+        } else if menu.multiplayer {
+            11
+        } else {
+            17
+        };
         if !panel.focused {
-        if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
-            menu.selected = (menu.selected + rows - 1) % rows;
-        }
-        if keys.just_pressed(KeyCode::ArrowDown) || nav.pressed & 2 != 0 {
-            menu.selected = (menu.selected + 1) % rows;
-        }
-        if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
-            action = Some((menu.selected, -1));
-        }
-        if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::Enter) || nav.pressed & (8 | 0x1000) != 0 {
-            action = Some((menu.selected, 1));
-        }
+            if keys.just_pressed(KeyCode::ArrowUp) || nav.pressed & 1 != 0 {
+                menu.selected = (menu.selected + rows - 1) % rows;
+            }
+            if keys.just_pressed(KeyCode::ArrowDown) || nav.pressed & 2 != 0 {
+                menu.selected = (menu.selected + 1) % rows;
+            }
+            if keys.just_pressed(KeyCode::ArrowLeft) || nav.pressed & 4 != 0 {
+                action = Some((menu.selected, -1));
+            }
+            if keys.just_pressed(KeyCode::ArrowRight)
+                || keys.just_pressed(KeyCode::Enter)
+                || nav.pressed & (8 | 0x1000) != 0
+            {
+                action = Some((menu.selected, 1));
+            }
         }
         for (interaction, row) in &buttons {
-            if panel.dragging() { continue; }
+            if panel.dragging() {
+                continue;
+            }
             if *interaction == Interaction::Pressed {
                 menu.selected = row.0;
                 action = Some((row.0, 1));
@@ -356,15 +398,30 @@ pub(crate) fn interact(
         let day_action = menu.daylight;
         if menu.daylight {
             match row {
-                0 => menu.settings.hour = ((menu.settings.hour * 4.).round() + direction as f32).rem_euclid(96.) / 4.,
-                1 => menu.settings.day_speed = cycle(DAY_SPEEDS, menu.settings.day_speed, direction),
+                0 => {
+                    menu.settings.hour =
+                        ((menu.settings.hour * 4.).round() + direction as f32).rem_euclid(96.) / 4.
+                }
+                1 => {
+                    menu.settings.day_speed = cycle(DAY_SPEEDS, menu.settings.day_speed, direction)
+                }
                 2 => {
                     // Auto, 0%, 5%, ... 100%, then Auto again.
-                    let index = menu.settings.ambient_level.map_or(0, |level| level as i32 / 5 + 1);
+                    let index = menu
+                        .settings
+                        .ambient_level
+                        .map_or(0, |level| level as i32 / 5 + 1);
                     let next = (index + direction).rem_euclid(22);
-                    menu.settings.ambient_level = if next == 0 { None } else { Some((next as u32 - 1) * 5) };
+                    menu.settings.ambient_level = if next == 0 {
+                        None
+                    } else {
+                        Some((next as u32 - 1) * 5)
+                    };
                 }
-                _ => { menu.daylight = false; menu.selected = 16; }
+                _ => {
+                    menu.daylight = false;
+                    menu.selected = 16;
+                }
             }
         } else if menu.browser {
             match row {
@@ -458,7 +515,10 @@ pub(crate) fn interact(
                 9 => {
                     exit.write(AppExit::Success);
                 }
-                10 => { custom_models.request_stock(); customiser.begin(); },
+                10 => {
+                    custom_models.request_stock();
+                    customiser.begin();
+                }
                 11 => {
                     menu.multiplayer = true;
                     menu.selected = 0;
@@ -467,11 +527,17 @@ pub(crate) fn interact(
                 13 => menu.status = updater.open(false),
                 14 => travel.open = true,
                 15 => mods.begin(),
-                16 => { menu.daylight = true; menu.selected = 0; menu.status = "Custom maps: change time, cycle speed and ambient light. Retail lighting stays authored.".into(); },
+                16 => {
+                    menu.daylight = true;
+                    menu.selected = 0;
+                    menu.status = "Custom maps: change time, cycle speed and ambient light. Retail lighting stays authored.".into();
+                }
                 _ => {}
             }
         }
-        if (row < 5 && !menu.multiplayer && !menu.daylight && !day_action) || (day_action && row < 3) {
+        if (row < 5 && !menu.multiplayer && !menu.daylight && !day_action)
+            || (day_action && row < 3)
+        {
             let save = (|| -> Result<(), String> {
                 std::fs::create_dir_all(menu.path.parent().unwrap()).map_err(|e| e.to_string())?;
                 std::fs::write(
@@ -559,13 +625,17 @@ fn labels(
     mut root: Single<&mut Node, With<MenuRoot>>,
     mut labels: Query<(&MenuLabel, &mut Text), Without<StatusLabel>>,
     mut status: Single<&mut Text, With<StatusLabel>>,
-    mut buttons: Query<(&MenuRow, &Interaction, &mut BackgroundColor, &mut Node), Without<MenuRoot>>,
+    mut buttons: Query<
+        (&MenuRow, &Interaction, &mut BackgroundColor, &mut Node),
+        Without<MenuRoot>,
+    >,
 ) {
-    root.display = if menu.open && !mods.open && !travel.open && !customiser.open && !custom_models.open {
-        Display::Flex
-    } else {
-        Display::None
-    };
+    root.display =
+        if menu.open && !mods.open && !travel.open && !customiser.open && !custom_models.open {
+            Display::Flex
+        } else {
+            Display::None
+        };
     if !menu.open {
         return;
     }
@@ -574,8 +644,25 @@ fn labels(
     for (label, mut text) in &mut labels {
         **text = if menu.daylight {
             match label.0 {
-                0 => { let minutes = (s.hour * 60.).floor() as u32 % 1440; format!("Time of day          {:02}:{:02}", minutes / 60, minutes % 60) },
-                1 => if s.day_speed == 0 { "Cycle speed          Frozen".into() } else { format!("Cycle speed          {}x ({} min/day)", s.day_speed, 1440 / s.day_speed) },
+                0 => {
+                    let minutes = (s.hour * 60.).floor() as u32 % 1440;
+                    format!(
+                        "Time of day          {:02}:{:02}",
+                        minutes / 60,
+                        minutes % 60
+                    )
+                }
+                1 => {
+                    if s.day_speed == 0 {
+                        "Cycle speed          Frozen".into()
+                    } else {
+                        format!(
+                            "Cycle speed          {}x ({} min/day)",
+                            s.day_speed,
+                            1440 / s.day_speed
+                        )
+                    }
+                }
                 2 => match s.ambient_level {
                     Some(level) => format!("Ambient light        {level}%"),
                     None => "Ambient light        Auto (day/night)".into(),
@@ -660,7 +747,13 @@ fn labels(
                     "Map                   {}",
                     menu.maps[menu.selected_map].label
                 ),
-                7 => if transition.busy() { "Loading map...".into() } else { "Load map".into() },
+                7 => {
+                    if transition.busy() {
+                        "Loading map...".into()
+                    } else {
+                        "Load map".into()
+                    }
+                }
                 8 => "Resume".into(),
                 9 => "Quit game".into(),
                 10 => "Character customiser".into(),
@@ -674,7 +767,11 @@ fn labels(
         };
     }
     ***status = if transition.busy() {
-        format!("{} {}\nGameplay is paused. Please wait.", ["|", "/", "-", "\\"][(time.elapsed_secs() * 4.) as usize % 4], transition.label())
+        format!(
+            "{} {}\nGameplay is paused. Please wait.",
+            ["|", "/", "-", "\\"][(time.elapsed_secs() * 4.) as usize % 4],
+            transition.label()
+        )
     } else if menu.browser {
         net.browser_status.clone()
     } else if menu.multiplayer {
@@ -691,7 +788,11 @@ fn labels(
         menu.status.clone()
     };
     for (row, interaction, mut color, mut node) in &mut buttons {
-        node.display = if (menu.daylight && row.0 >= 4) || (menu.multiplayer && row.0 >= 11) { Display::None } else { Display::Flex };
+        node.display = if (menu.daylight && row.0 >= 4) || (menu.multiplayer && row.0 >= 11) {
+            Display::None
+        } else {
+            Display::Flex
+        };
         color.0 = if row.0 == menu.selected || *interaction == Interaction::Hovered {
             Color::srgb(0.10, 0.30, 0.34)
         } else {
@@ -728,10 +829,21 @@ mod tests {
         app.insert_resource(SceneTarget(target.clone()))
             .insert_resource(images)
             .insert_resource(Menu {
-                open: false, selected: 0, settings: GraphicsSettings::default(),
-                difficulty: Difficulty::Easy, path: PathBuf::new(), supported_msaa: vec![1, 2, 4, 8], status: String::new(),
-                multiplayer: false, browser: false, daylight: false,
-                maps: vec![crate::map_library::Entry { label: "Test world".into(), path: None }], selected_map: 0,
+                open: false,
+                selected: 0,
+                settings: GraphicsSettings::default(),
+                difficulty: Difficulty::Easy,
+                path: PathBuf::new(),
+                supported_msaa: vec![1, 2, 4, 8],
+                status: String::new(),
+                multiplayer: false,
+                browser: false,
+                daylight: false,
+                maps: vec![crate::map_library::Entry {
+                    label: "Test world".into(),
+                    path: None,
+                }],
+                selected_map: 0,
             })
             .add_systems(Update, apply);
         {

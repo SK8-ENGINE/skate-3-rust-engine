@@ -14,6 +14,10 @@ pub(crate) struct Car {
     pub occupied: bool,
     pub rider: Option<([f32; 3], [f32; 4])>,
     pub wheels: Vec<[f32; 3]>,
+    /// Handling lean of a remote bike. Defaulted, so a peer on an older build
+    /// replicates an upright bike rather than failing to parse.
+    #[serde(default)]
+    pub lean: f32,
 }
 pub(super) struct Target {
     state: Car,
@@ -61,6 +65,7 @@ pub(crate) fn capture(world: &World) -> Vec<(String, String, Car)> {
                             );
                             (t.translation.to_array(), t.rotation.to_array())
                         }),
+                    lean: v.simulation.bike_state(i.id).map_or(0., |b| b.lean),
                     occupied: v
                         .driver
                         .as_ref()
@@ -108,6 +113,8 @@ pub(crate) fn receive(
             .iter()
             .chain(&state.angular)
             .any(|x| !x.is_finite() || x.abs() > 200.)
+        || !state.lean.is_finite()
+        || state.lean.abs() > 2.
         || state.wheels.len() > 16
         || state
             .wheels
@@ -232,7 +239,10 @@ pub(crate) fn attached_root(v: &Vehicles, peer: u64) -> Option<Transform> {
                 return None;
             }
             let (p, q) = target.state.rider?;
-            let body = v.rendered_motion.get(&i.id)?.body;
+            // The leaned frame, like the local rider: a remote bike's lean is
+            // handling state its body never took, so the rider has to ride the
+            // same frame the model is drawn in or they come apart in a corner.
+            let body = v.rendered_motion.get(&i.id)?.leaned();
             Some(Transform::from_matrix(
                 body.to_matrix()
                     * Mat4::from_rotation_translation(Quat::from_array(q), Vec3::from_array(p)),
@@ -346,6 +356,9 @@ pub(super) fn motion(v: &Vehicles, id: u64) -> Option<interpolation::Motion> {
         for (wheel, values) in m.wheels.iter_mut().zip(&target.state.wheels) {
             wheel.translation.y = (d.suspension_length - values[2]) / d.model_scale;
         }
+        // A remote bike is a kinematic body, so its own `bike` state never
+        // runs. Its lean comes over the wire with the rest of its pose.
+        m.lean = target.state.lean;
     }
     Some(m)
 }

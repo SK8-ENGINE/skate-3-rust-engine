@@ -2,6 +2,7 @@
 //! Missing publications are explicit inputs, never inferred from render pose.
 use super::{graph_subject::CameraGraphSubject, subject::CameraSubjectSnapshot};
 use crate::physics::{GamePhysics, SkaterRuntime};
+use bevy::log::debug;
 use skate_core::{
     camera::{
         AnchorInputs, Anchors, CompassPoseInputs, ManagerSubject, ReferencePointInputs, Subject,
@@ -9,7 +10,6 @@ use skate_core::{
     },
     physics::{board::BodyId, skeleton_animation_record::AnimationPartTransform as Transform},
 };
-use bevy::log::debug;
 
 /// State record fields absent from the input phase's smaller CurrentStateFields.
 /// The same output/reset owner must publish these; there is no camera default.
@@ -177,8 +177,7 @@ pub(crate) fn snapshot(
         } else {
             Err(format!(
                 "Camera subject owner published non-finite {name}: {values:?}; state={:?}; category={:?}",
-                processed.state_2508,
-                processed.category_2512,
+                processed.state_2508, processed.category_2512,
             ))
         }
     };
@@ -189,14 +188,28 @@ pub(crate) fn snapshot(
     for column in &skeleton_root {
         finite("skeleton_root", column)?;
     }
-    for (index, pose) in [1usize, 15, 19, 23].into_iter().map(|index| (index, record.pose[index][3])) {
-        finite(match index { 1 => "head", 15 => "left_foot", 19 => "right_foot", _ => "hips" }, &pose)?;
+    for (index, pose) in [1usize, 15, 19, 23]
+        .into_iter()
+        .map(|index| (index, record.pose[index][3]))
+    {
+        finite(
+            match index {
+                1 => "head",
+                15 => "left_foot",
+                19 => "right_foot",
+                _ => "hips",
+            },
+            &pose,
+        )?;
     }
-    if velocity[..3].iter().chain(acceleration[..3].iter()).any(|v| !v.is_finite()) {
+    if velocity[..3]
+        .iter()
+        .chain(acceleration[..3].iter())
+        .any(|v| !v.is_finite())
+    {
         return Err(format!(
             "Camera received non-finite board motion publication: velocity={velocity:?}; acceleration={acceleration:?}; raw_velocity={:?}; raw_acceleration={:?}",
-            p.skateboard.vector_80,
-            p.skateboard.vector_64,
+            p.skateboard.vector_80, p.skateboard.vector_64,
         ));
     }
     debug!(state = p.state.state_16, category = p.state.category_12,
@@ -267,7 +280,11 @@ pub(crate) fn snapshot(
             grinding,
             // KnownAir Fill publishes validity at437. Byte441 is the body-flip
             // flag; using it hides ordinary ollie trajectories from the camera.
-            trajectory_valid: if alternate { 1 } else { p.air.known_air_valid_437 },
+            trajectory_valid: if alternate {
+                1
+            } else {
+                p.air.known_air_valid_437
+            },
             wiping_out: input.state.wiping_out_59,
             physically_pushing: input.state.physically_pushing_55,
             at_pushable_speed: u8::from(ground.skateboard_motion_4.is_at_pushable_speed),

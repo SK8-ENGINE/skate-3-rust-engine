@@ -155,7 +155,8 @@ mod identity_tests {
                         "source": "fixture", "sha256": "", "fields": {}},
                         {"class": "unrelated", "key": "other", "parent": "",
                         "source": "fixture", "sha256": "", "fields": {}}]
-                })).unwrap();
+                }))
+                .unwrap();
                 assert_eq!(scorable_keys(&data), [numeric_key.clone()].into());
             }
         }

@@ -19,7 +19,10 @@ impl PhysicalStateCalls for Calls {
                     PhysicalStateId::Sleeping
                         | PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
-                        | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                        | PhysicalStateId::FootPlant
+                        | PhysicalStateId::Boneless
+                        | PhysicalStateId::HandPlant
+                        | PhysicalStateId::RevertGround
                         | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
                         | PhysicalStateId::BipedGround
@@ -40,7 +43,10 @@ impl PhysicalStateCalls for Calls {
                     call.state.state,
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
-                        | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                        | PhysicalStateId::FootPlant
+                        | PhysicalStateId::Boneless
+                        | PhysicalStateId::HandPlant
+                        | PhysicalStateId::RevertGround
                         | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
                         | PhysicalStateId::BipedGround
@@ -156,10 +162,10 @@ pub(super) fn set(
         PhysicalStateId::RevertGround => {
             // Native Exit is empty; this is diagnostic-only host reporting.
             info!(tick = physics.ticks, requested = ?requested, "REVERT_EXIT");
-        },
+        }
         PhysicalStateId::HandPlant => skater.handplant.reset(),
         PhysicalStateId::FootPlant => skater.footplant.reset(), //Exit82D4C5A8
-        PhysicalStateId::Boneless => {}, //empty82D4C9B4
+        PhysicalStateId::Boneless => {}                         //empty82D4C9B4
         PhysicalStateId::PhysicsGround => super::super::ground_exit::exit(physics, skater),
         PhysicalStateId::PhysicsAir => super::super::air_phase::exit(skater),
         PhysicalStateId::KnownAir => {

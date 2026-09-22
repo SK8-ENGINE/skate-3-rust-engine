@@ -1,4 +1,5 @@
 //! TU3 actor checkpoint manager, bound to the single-player static scene.
+use super::offboard::contact_queries::Probe;
 use super::{GamePhysics, SkaterRuntime, offboard::contact_queries, teleport_state::Checkpoint};
 use skate_core::{
     math::Vector3,
@@ -6,12 +7,9 @@ use skate_core::{
         board_world::{BoardWorld, query_metadata::Bounds},
         skeleton_animation_record::AnimationPartTransform as Matrix,
     },
-    player::{
-        respawn::{Candidate, Ground, History, Observation, Validation, surface_allowed},
-    },
+    player::respawn::{Candidate, Ground, History, Observation, Validation, surface_allowed},
 };
 use skate_data::collections::Collections;
-use super::offboard::contact_queries::Probe;
 
 pub(super) struct Runtime {
     history: History,
@@ -157,11 +155,7 @@ impl Validation for Scene<'_> {
         start[1] += 0.1;
         let mut end = start;
         end[1] -= 10.;
-        let probe = |start, end, radius| Probe {
-            start,
-            end,
-            radius,
-        };
+        let probe = |start, end, radius| Probe { start, end, radius };
         //The only actor has matching identity0; canonical map groups remain active.
         let Some(hit) = contact_queries::query(self.world, probe(start, end, 0.), 0)? else {
             return Ok(None);

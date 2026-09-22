@@ -1,14 +1,20 @@
 //! Native vehicle host: isolated Rapier world, mod ownership and driver lifecycle.
 mod animations;
-pub(crate) mod network;
 mod audio;
 mod engine_sound;
 mod interpolation;
+pub(crate) mod network;
 use bevy::prelude::*;
 use serde_json::{Value, json};
 use skate_mods::Command;
 use skate_vehicles::{Controls, Simulation, VehicleDefinition};
 use std::collections::BTreeMap;
+/// A model node that is only correct while the bike is parked -- the side
+/// stand. Tagged once on the way past, like `WheelVisual`, so the per-frame
+/// work is a visibility write rather than a name search.
+#[derive(Component)]
+struct ParkedOnly(u64);
+
 #[derive(Component, Clone)]
 struct WheelVisual {
     vehicle: u64,
@@ -35,7 +41,7 @@ struct Driver {
 pub(crate) struct Vehicles {
     simulation: Simulation,
     remote: BTreeMap<u64, network::Target>,
-    skaters: BTreeMap<(u64,usize),skate_vehicles::rapier3d::prelude::RigidBodyHandle>,
+    skaters: BTreeMap<(u64, usize), skate_vehicles::rapier3d::prelude::RigidBodyHandle>,
     owned: BTreeMap<(String, String), Instance>,
     driver: Option<Driver>,
     pub(super) events: Vec<Value>,
@@ -51,6 +57,37 @@ pub(crate) struct Vehicles {
     crash_handoff: bool,
     previous_motion: BTreeMap<u64, interpolation::Motion>,
     rendered_motion: BTreeMap<u64, interpolation::Motion>,
+    posture: Posture,
+}
+
+/// How much of each rider posture the ride is currently asking for, 0..1 each.
+/// Smoothed, because these follow physics state that steps at the fixed rate
+/// and a rider who snapped between stances would read as a glitch rather than
+/// as a rider.
+#[derive(Default)]
+struct Posture {
+    stand: f32,
+    crouch: f32,
+    back: f32,
+    forward: f32,
+    lean: f32,
+}
+
+impl Posture {
+    /// Ease every weight toward its target with a frame-rate independent
+    /// filter. Standing up is quicker than sitting back down, the way a rider
+    /// pops up for a jump and settles afterwards.
+    fn approach(&mut self, target: &Posture, dt: f32) {
+        let ease = |current: &mut f32, want: f32, rate: f32| {
+            *current += (want - *current) * (1. - (-rate * dt).exp());
+        };
+        let popping = target.stand > self.stand;
+        ease(&mut self.stand, target.stand, if popping { 14. } else { 7. });
+        ease(&mut self.crouch, target.crouch, 16.);
+        ease(&mut self.back, target.back, 10.);
+        ease(&mut self.forward, target.forward, 10.);
+        ease(&mut self.lean, target.lean, 8.);
+    }
 }
 impl Vehicles {
     pub(crate) fn occupied(&self) -> bool {
@@ -75,7 +112,28 @@ impl Vehicles {
         let q = pose.rotation;
         let def = &self.simulation.vehicles[&i.id].definition;
         let center = pose.translation + Vec3::Y * 0.5;
-        let forward = (q * Vec3::Z).with_y(0.).normalize_or_zero();
+        let nose = (q * Vec3::Z).with_y(0.).normalize_or_zero();
+        // Follow where the bike is going rather than where it is pointing. A
+        // whip yaws the bike most of a quarter turn and lands it straight; a
+        // camera bolted to the nose would swing through all of that and read
+        // as the world spinning instead of the bike going sideways.
+        let travel = self
+            .simulation
+            .telemetry(i.id)
+            .map(|(v, _, _)| Vec3::from_array(v).with_y(0.))
+            .unwrap_or(Vec3::ZERO);
+        let forward = if travel.length() > 3. {
+            let travel = travel.normalize();
+            // Never look at the back of the bike: a reversing or backwards
+            // sliding bike keeps the nose-led camera.
+            if travel.dot(nose) > 0. {
+                nose.lerp(travel, 0.75).normalize_or(nose)
+            } else {
+                nose
+            }
+        } else {
+            nose
+        };
         Some(
             Transform::from_translation(
                 center - forward * def.camera_distance + Vec3::Y * def.camera_height,
@@ -89,8 +147,7 @@ pub(super) fn install(app: &mut App) {
     app.init_resource::<Vehicles>()
         .add_systems(
             FixedUpdate,
-            tick.after(super::fixed)
-                .run_if(network::simulation_active),
+            tick.after(super::fixed).run_if(network::simulation_active),
         )
         .add_systems(
             Update,
@@ -112,7 +169,14 @@ pub(super) fn snapshot(world: &World) -> Value {
             .as_ref()
             .filter(|d| d.owner == *owner && d.key == *key)
             .map_or("parked", |d| d.phase);
-        out.entry(owner.clone()).or_insert(json!({})).as_object_mut().unwrap().insert(key.clone(),json!({"position":p,"rotation":q,"heading":({let f=Quat::from_array(q)*Vec3::Z;f.x.atan2(f.z)}),"speed":car.controller.current_vehicle_speed,"phase":phase,"occupied":phase!="parked","ready":world.resource::<AssetServer>().is_loaded_with_dependencies(instance.scene.id())}));
+        // Velocity, spin and wheel contacts are what a freestyle scorer needs:
+        // rotation accumulates from the angular velocity, and the contact count
+        // is what separates an air from a landing.
+        let (linear, angular, contacts) = v
+            .simulation
+            .telemetry(instance.id)
+            .unwrap_or(([0.; 3], [0.; 3], 0));
+        out.entry(owner.clone()).or_insert(json!({})).as_object_mut().unwrap().insert(key.clone(),json!({"position":p,"rotation":q,"heading":({let f=Quat::from_array(q)*Vec3::Z;f.x.atan2(f.z)}),"speed":car.controller.current_vehicle_speed,"velocity":linear,"angular_velocity":angular,"wheel_contacts":contacts,"airborne":contacts==0,"wheel_speed":v.simulation.wheel_speed(instance.id),"phase":phase,"occupied":phase!="parked","ready":world.resource::<AssetServer>().is_loaded_with_dependencies(instance.scene.id())}));
     }
     Value::Object(out)
 }
@@ -139,7 +203,9 @@ fn exit_now(world: &mut World, v: &mut Vehicles, forced: bool) -> Result<(), Str
             }
         }
     }
-    if let Some(i)=v.owned.get(&(driver.owner.clone(),driver.key.clone())) {v.simulation.set_occupied(i.id,false);}
+    if let Some(i) = v.owned.get(&(driver.owner.clone(), driver.key.clone())) {
+        v.simulation.set_occupied(i.id, false);
+    }
     v.pose = None;
     for (entity, visibility) in v.hidden.drain(..) {
         if let Some(mut current) = world.get_mut::<Visibility>(entity) {
@@ -164,30 +230,57 @@ fn exit_now(world: &mut World, v: &mut Vehicles, forced: bool) -> Result<(), Str
     event(v, &driver.owner, &driver.key, "vehicle_exited");
     Ok(())
 }
-fn eject_now(world: &mut World, v: &mut Vehicles, ejection: skate_vehicles::Ejection) -> Result<(), String> {
-    let Some(driver) = v.driver.as_ref() else {return Ok(());};
-    let owner=driver.owner.clone(); let key=driver.key.clone();
-    let id=v.owned[&(owner.clone(),key.clone())].id;
-    let (_,rotation)=v.simulation.pose(id).ok_or("Missing crash vehicle")?;
-    let forward=Quat::from_array(rotation)*Vec3::Z;
-    let heading=forward.x.atan2(forward.z);
-    let (sin,cos)=heading.sin_cos();
+fn eject_now(
+    world: &mut World,
+    v: &mut Vehicles,
+    ejection: skate_vehicles::Ejection,
+) -> Result<(), String> {
+    let Some(driver) = v.driver.as_ref() else {
+        return Ok(());
+    };
+    let owner = driver.owner.clone();
+    let key = driver.key.clone();
+    let id = v.owned[&(owner.clone(), key.clone())].id;
+    let (_, rotation) = v.simulation.pose(id).ok_or("Missing crash vehicle")?;
+    let forward = Quat::from_array(rotation) * Vec3::Z;
+    let heading = forward.x.atan2(forward.z);
+    let (sin, cos) = heading.sin_cos();
     // The native reset initializes a full upright body. Start clear of the seat,
     // then its ordinary ragdoll/contact solver takes over immediately.
-    let p=Vec3::from_array(ejection.position)+Vec3::Y*0.25;
-    let matrix=[[cos,0.,-sin,0.],[0.,1.,0.,0.],[sin,0.,cos,0.],[p.x,p.y,p.z,0.]];
+    let p = Vec3::from_array(ejection.position) + Vec3::Y * 0.25;
+    let matrix = [
+        [cos, 0., -sin, 0.],
+        [0., 1., 0., 0.],
+        [sin, 0., cos, 0.],
+        [p.x, p.y, p.z, 0.],
+    ];
     {
-        let mut skater=world.resource_mut::<crate::physics::SkaterRuntime>();
-        skater.player_input.request_teleport(matrix).map_err(|e|e.to_string())?;
-        skater.teleport_state.request_vehicle_ejection(matrix,ejection.velocity,ejection.angular_velocity);
+        let mut skater = world.resource_mut::<crate::physics::SkaterRuntime>();
+        skater
+            .player_input
+            .request_teleport(matrix)
+            .map_err(|e| e.to_string())?;
+        skater.teleport_state.request_vehicle_ejection(
+            matrix,
+            ejection.velocity,
+            ejection.angular_velocity,
+        );
     }
-    v.simulation.set_occupied(id,false);
-    v.simulation.vehicles.get_mut(&id).unwrap().controls=Controls{brake:0.2,..Default::default()};
-    v.driver=None;v.pose=None;v.crash_handoff=true;
-    for (entity,visibility) in v.hidden.drain(..) {
-        if let Some(mut current)=world.get_mut::<Visibility>(entity) {*current=visibility;}
+    v.simulation.set_occupied(id, false);
+    v.simulation.vehicles.get_mut(&id).unwrap().controls = Controls {
+        brake: 0.2,
+        ..Default::default()
+    };
+    v.driver = None;
+    v.pose = None;
+    v.crash_handoff = true;
+    for (entity, visibility) in v.hidden.drain(..) {
+        if let Some(mut current) = world.get_mut::<Visibility>(entity) {
+            *current = visibility;
+        }
     }
-    v.events.push(json!({"name":"vehicle_bailed","owner":owner,"key":key,
+    v.events
+        .push(json!({"name":"vehicle_bailed","owner":owner,"key":key,
         "reason":ejection.reason,"position":ejection.position,"velocity":ejection.velocity,
         "angular_velocity":ejection.angular_velocity}));
     Ok(())
@@ -227,13 +320,17 @@ pub(super) fn clear(world: &mut World) {
         }
         v.driver = None;
         v.pose = None;
-        v.last_visual.clear();v.blend_from.clear();v.visual_phase.clear();v.steering_visual=0.;
-        v.crash_handoff=false;
+        v.last_visual.clear();
+        v.blend_from.clear();
+        v.visual_phase.clear();
+        v.steering_visual = 0.;
+        v.crash_handoff = false;
+        v.posture = Posture::default();
         v.previous_motion.clear();
         v.rendered_motion.clear();
         v.remote.clear();
         v.skaters.clear();
-        v.network_pose=None;
+        v.network_pose = None;
         v.simulation = Simulation::default();
         v.events.clear();
     });
@@ -283,7 +380,13 @@ pub(super) fn command(
                 if v.owned.contains_key(&owned_key) {
                     return Err("Vehicle key already spawned; remove it before respawning".into());
                 }
-                if v.owned.keys().filter(|(o, _)| o == owner).count() >= 8 || v.owned.keys().filter(|(o,_)|o.starts_with('@')==owner.starts_with('@')).count() >= if owner.starts_with('@') {288} else {32} {
+                if v.owned.keys().filter(|(o, _)| o == owner).count() >= 8
+                    || v.owned
+                        .keys()
+                        .filter(|(o, _)| o.starts_with('@') == owner.starts_with('@'))
+                        .count()
+                        >= if owner.starts_with('@') { 288 } else { 32 }
+                {
                     return Err("Vehicle limit: 8 per mod, 32 total".into());
                 }
                 let bytes = skate_mods::read_bounded(root, &definition, 128 * 1024)?;
@@ -356,9 +459,9 @@ pub(super) fn command(
                 }
                 if let Some(i) = v.owned.remove(&owned_key) {
                     v.simulation.remove(i.id);
-                v.previous_motion.remove(&i.id);
-                v.rendered_motion.remove(&i.id);
-                v.remote.remove(&i.id);
+                    v.previous_motion.remove(&i.id);
+                    v.rendered_motion.remove(&i.id);
+                    v.remote.remove(&i.id);
                     world.despawn(i.entity);
                     event(&mut v, owner, &key, "vehicle_removed");
                 }
@@ -417,7 +520,9 @@ pub(super) fn command(
                     if d.owner != owner || d.key != key {
                         return Ok(());
                     }
-                    if d.phase != "driving" { return Ok(()); }
+                    if d.phase != "driving" {
+                        return Ok(());
+                    }
                 }
                 if let Some(i) = v.owned.get(&owned_key) {
                     if v.simulation.vehicles[&i.id]
@@ -483,7 +588,7 @@ fn tick(world: &mut World) {
     let dt = world.resource::<Time<Fixed>>().delta_secs();
     world.resource_scope(|world, mut v: Mut<Vehicles>| {
         v.clock += dt;
-        network::skater_proxies(world,&mut v);
+        network::skater_proxies(world, &mut v);
         network::advance(&mut v, dt);
         let clock = v.clock;
         let parked: Vec<_> = v
@@ -513,17 +618,31 @@ fn tick(world: &mut World) {
                 }
             }
         }
-        let occupied_id=v.driver.as_ref().and_then(|d|v.owned.get(&(d.owner.clone(),d.key.clone()))).map(|i|i.id);
-        let ids:Vec<_>=v.simulation.vehicles.keys().copied().collect();
-        for id in ids { if !v.remote.contains_key(&id) { v.simulation.set_occupied(id,Some(id)==occupied_id); }}
+        let occupied_id = v
+            .driver
+            .as_ref()
+            .and_then(|d| v.owned.get(&(d.owner.clone(), d.key.clone())))
+            .map(|i| i.id);
+        let ids: Vec<_> = v.simulation.vehicles.keys().copied().collect();
+        for id in ids {
+            if !v.remote.contains_key(&id) {
+                v.simulation.set_occupied(id, Some(id) == occupied_id);
+            }
+        }
         if !v.owned.is_empty() {
-            v.previous_motion = v.simulation.vehicles.keys().filter_map(|&id|
-                network::motion(&v, id).map(|m| (id, m))).collect();
+            v.previous_motion = v
+                .simulation
+                .vehicles
+                .keys()
+                .filter_map(|&id| network::motion(&v, id).map(|m| (id, m)))
+                .collect();
             v.simulation.step(dt);
         }
-        if let Some(id)=occupied_id {
-            if let Some(ejection)=v.simulation.take_ejection(id) {
-                if let Err(error)=eject_now(world,&mut v,ejection) {warn!("Vehicle ejection: {error}");}
+        if let Some(id) = occupied_id {
+            if let Some(ejection) = v.simulation.take_ejection(id) {
+                if let Err(error) = eject_now(world, &mut v, ejection) {
+                    warn!("Vehicle ejection: {error}");
+                }
                 return;
             }
         }
@@ -555,17 +674,27 @@ fn tick(world: &mut World) {
     });
 }
 pub(crate) fn present(world: &mut World) {
-    let dt=world.resource::<Time<Virtual>>().delta_secs();
-    let alpha=world.resource::<Time<Fixed>>().overstep_fraction();
-    let phase=world.resource::<Vehicles>().driver.as_ref().map_or("vanilla",|d|d.phase).to_owned();
-    let current=crate::animation::capture_vehicle_visual(world);
+    let dt = world.resource::<Time<Virtual>>().delta_secs();
+    let alpha = world.resource::<Time<Fixed>>().overstep_fraction();
+    let phase = world
+        .resource::<Vehicles>()
+        .driver
+        .as_ref()
+        .map_or("vanilla", |d| d.phase)
+        .to_owned();
+    let current = crate::animation::capture_vehicle_visual(world);
     {
-        let mut v=world.resource_mut::<Vehicles>();
-        if phase!=v.visual_phase {
-            v.blend_from=if v.last_visual.is_empty() {current} else {v.last_visual.clone()};
-            v.visual_phase=phase;v.blend_time=0.;
+        let mut v = world.resource_mut::<Vehicles>();
+        if phase != v.visual_phase {
+            v.blend_from = if v.last_visual.is_empty() {
+                current
+            } else {
+                v.last_visual.clone()
+            };
+            v.visual_phase = phase;
+            v.blend_time = 0.;
         }
-        v.blend_time+=dt;
+        v.blend_time += dt;
     }
     world.resource_scope(|world, mut v: Mut<Vehicles>| {
         let failures: Vec<_> = v
@@ -591,17 +720,76 @@ pub(crate) fn present(world: &mut World) {
                 .fail(&owner, error);
         }
         // Chassis, wheels, rider and camera share one fixed-step render sample.
-        v.rendered_motion = v.simulation.vehicles.keys().filter_map(|&id| {
-            let current = network::motion(&v, id)?;
-            let sample = v.previous_motion.get(&id).map_or_else(|| current.clone(),
-                |previous| previous.sample(&current, alpha));
-            Some((id, sample))
-        }).collect();
+        v.rendered_motion = v
+            .simulation
+            .vehicles
+            .keys()
+            .filter_map(|&id| {
+                let current = network::motion(&v, id)?;
+                let sample = v.previous_motion.get(&id).map_or_else(
+                    || current.clone(),
+                    |previous| previous.sample(&current, alpha),
+                );
+                Some((id, sample))
+            })
+            .collect();
         for i in v.owned.values() {
             if let Some(sample) = v.rendered_motion.get(&i.id) {
                 if let Some(mut t) = world.get_mut::<Transform>(i.entity) {
-                    *t = sample.body;
+                    // Wheels and bodywork are children of this entity, so the
+                    // whole bike leans with it while the collider and the
+                    // suspension raycasts stay upright underneath.
+                    *t = sample.leaned();
                 }
+            }
+        }
+        // Tag the parked-only nodes, using the same ancestry walk the wheels
+        // use so a node of the same name under another vehicle is not caught.
+        let mut parked = Vec::new();
+        for instance in v.owned.values() {
+            for name in &v.simulation.vehicles[&instance.id].definition.parked_nodes {
+                let matches: Vec<_> = world
+                    .query_filtered::<(Entity, &Name), Without<ParkedOnly>>()
+                    .iter(world)
+                    .filter(|(_, n)| n.as_str() == name)
+                    .map(|(e, _)| e)
+                    .collect();
+                for entity in matches {
+                    let mut ancestor = entity;
+                    for _ in 0..128 {
+                        let Some(parent) = world.get::<ChildOf>(ancestor) else {
+                            break;
+                        };
+                        ancestor = parent.parent();
+                        if ancestor == instance.entity {
+                            parked.push((entity, ParkedOnly(instance.id)));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        for (entity, marker) in parked {
+            world.entity_mut(entity).insert(marker);
+        }
+        let ridden: std::collections::BTreeSet<u64> = v
+            .simulation
+            .vehicles
+            .keys()
+            .copied()
+            .filter(|&id| network::occupied(&v, id))
+            .collect();
+        for (marker, mut visibility) in world
+            .query::<(&ParkedOnly, &mut Visibility)>()
+            .iter_mut(world)
+        {
+            let want = if ridden.contains(&marker.0) {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            };
+            if *visibility != want {
+                *visibility = want;
             }
         }
         let mut wheels = Vec::new();
@@ -687,14 +875,100 @@ pub(crate) fn present(world: &mut World) {
             }
         }
         .or(a.drive.as_ref());
-        let target_steering=car.controls.steering;
-        let steering=v.steering_visual+(target_steering-v.steering_visual)*(1.-(-12.*dt).exp());
+        let target_steering = car.controls.steering;
+        let steering =
+            v.steering_visual + (target_steering - v.steering_visual) * (1. - (-12. * dt).exp());
+        // What the ride is asking the rider's body to do. Each of these is
+        // one authored held pose; the stack below eases the seated pose
+        // towards all of them at once, so a rider standing on the pegs with
+        // his weight back through a lean is all three at their own weights
+        // rather than a separate authored pose for every combination.
+        let bike = v.simulation.bike_state(i.id).unwrap_or_default();
+        let riding = d.phase == "driving";
+        let wants = if riding {
+            let sag = 0.35;
+            Posture {
+                // Up off the seat in the air, under the brakes, and rising
+                // with the throttle: an attack stance, not a commuter.
+                stand: (bike.airborne as u8 as f32)
+                    .max(car.controls.brake * 0.8)
+                    .max((-car.controls.weight).max(0.) * 0.7)
+                    .max(car.controls.throttle.max(0.) * 0.3)
+                    .clamp(0., 1.),
+                // Absorb: whatever the suspension is doing past its static
+                // sag, plus the crouch that loads it in the first place.
+                crouch: (((bike.compression - sag) / (1. - sag)).clamp(0., 1.) * 1.2
+                    + bike.preload * 0.5
+                    + bike.landing * 1.5)
+                    .clamp(0., 1.),
+                back: car.controls.weight.max(0.),
+                forward: (-car.controls.weight).max(0.),
+                lean: (bike.lean / car.definition.bike.lean_max.max(0.05)).clamp(-1., 1.),
+            }
+        } else {
+            Posture::default()
+        };
+        // `v.driver` and `v.owned` are borrowed for the rest of this block, so
+        // the posture is advanced on a detached copy and stored back at the end.
+        let mut posture = Posture {
+            stand: v.posture.stand,
+            crouch: v.posture.crouch,
+            back: v.posture.back,
+            forward: v.posture.forward,
+            lean: v.posture.lean,
+        };
+        posture.approach(&wants, dt);
+        let layer = |name: &Option<String>, weight: f32| {
+            (weight > 0.002)
+                .then(|| i.clips.pose(name.as_ref(), d.time, true).map(|p| (p, weight)))
+                .flatten()
+        };
+        // Negative lean is toward driver-left, matching `bike`'s sign table.
+        let postures: Vec<_> = [
+            layer(&a.lean_left, (-posture.lean).max(0.)),
+            layer(&a.lean_right, posture.lean.max(0.)),
+            layer(&a.weight_back, posture.back),
+            layer(&a.weight_forward, posture.forward),
+            layer(&a.stand, posture.stand),
+            layer(&a.crouch, posture.crouch),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let pose = i.clips.pose(name, d.time, d.phase == "driving");
-        let turn=if d.phase=="driving" {i.clips.pose(if steering>=0. {a.steer_left.as_ref()} else {a.steer_right.as_ref()},d.time,true)} else {None};
-        let body = v.rendered_motion[&i.id].body;
+        let turn = if d.phase == "driving" {
+            i.clips.pose(
+                if steering >= 0. {
+                    a.steer_left.as_ref()
+                } else {
+                    a.steer_right.as_ref()
+                },
+                d.time,
+                true,
+            )
+        } else {
+            None
+        };
+        // An air trick is one held pose blended in by how far the rider has
+        // thrown it, so `trick_extend` drives the weight directly.
+        let trick = (|| {
+            if d.phase != "driving" {
+                return None;
+            }
+            let id = car.controls.trick.checked_sub(1)? as usize;
+            let clip = a.tricks.get(id)?;
+            let extend = car.controls.trick_extend.clamp(0., 1.);
+            if extend <= 0.001 {
+                return None;
+            }
+            Some((i.clips.pose(Some(clip), d.time, true)?, extend))
+        })();
+        // The physics body never rolls: the bike's lean lives in `Motion`, and
+        // the rider rides the leaned frame, not the upright chassis.
+        let body = v.rendered_motion[&i.id].leaned();
         let q = body.rotation;
-        let seat = body.translation + q * Vec3::from_array(car.definition.seat);
-        v.steering_visual=steering;
+        let seat = body.transform_point(Vec3::from_array(car.definition.seat));
+        v.steering_visual = steering;
         let roots: Vec<_> = world
             .query_filtered::<Entity, With<crate::world::PlayerRoot>>()
             .iter(world)
@@ -717,18 +991,40 @@ pub(crate) fn present(world: &mut World) {
             }
         }
         if let Some(pose) = &pose {
-            crate::animation::vehicle_pose(world, pose, turn.as_deref().map(|p|(p,steering.abs())));
+            let mut layers: Vec<(&[Mat4], f32)> = Vec::new();
+            if let Some(turn) = turn.as_deref() {
+                layers.push((turn, steering.abs()));
+            }
+            // Posture before the trick: a thrown trick is the rider leaving
+            // whatever stance he was in, so it has to blend in last.
+            layers.extend(postures.iter().map(|(p, w)| (p.as_slice(), *w)));
+            if let Some((frames, extend)) = &trick {
+                layers.push((frames.as_slice(), *extend));
+            }
+            crate::animation::vehicle_pose(world, pose, &layers);
         }
+        v.posture = posture;
         v.pose = pose;
     });
-    world.resource_scope(|world,mut v:Mut<Vehicles>| {
-        let duration=if v.visual_phase=="vanilla" {if v.crash_handoff {0.12} else {0.5}} else {0.4};
-        if v.blend_time<duration {
-            let t=(v.blend_time/duration).clamp(0.,1.);
-            crate::animation::blend_vehicle_visual(world,&v.blend_from,t*t*(3.-2.*t));
-        } else {v.blend_from.clear();v.crash_handoff=false;}
-        v.last_visual=crate::animation::capture_vehicle_visual(world);
-        v.network_pose=if v.driver.is_some() || !v.blend_from.is_empty() {Some(crate::animation::network_visual(world))} else {None};
+    world.resource_scope(|world, mut v: Mut<Vehicles>| {
+        let duration = if v.visual_phase == "vanilla" {
+            if v.crash_handoff { 0.12 } else { 0.5 }
+        } else {
+            0.4
+        };
+        if v.blend_time < duration {
+            let t = (v.blend_time / duration).clamp(0., 1.);
+            crate::animation::blend_vehicle_visual(world, &v.blend_from, t * t * (3. - 2. * t));
+        } else {
+            v.blend_from.clear();
+            v.crash_handoff = false;
+        }
+        v.last_visual = crate::animation::capture_vehicle_visual(world);
+        v.network_pose = if v.driver.is_some() || !v.blend_from.is_empty() {
+            Some(crate::animation::network_visual(world))
+        } else {
+            None
+        };
     });
 }
 
@@ -738,7 +1034,42 @@ pub(super) fn input(world: &World) -> Value {
         .resource::<crate::input::ControllerInput>()
         .raw_input();
     let pressed = |key| if keys.pressed(key) { 1. } else { 0. };
-    let pitch = (pressed(KeyCode::ArrowUp) - pressed(KeyCode::ArrowDown)
-        + if pad.left[1].abs() > 0.15 { pad.left[1] } else { 0. }).clamp(-1., 1.);
-    json!({"pitch":pitch,"throttle":(pressed(KeyCode::KeyW)-pressed(KeyCode::KeyS)+pad.triggers[1]-pad.triggers[0]).clamp(-1.,1.),"steering":(pressed(KeyCode::KeyA)-pressed(KeyCode::KeyD)-if pad.left[0].abs()>0.15 {pad.left[0]} else {0.}).clamp(-1.,1.),"brake":if pad.buttons & 0x1000 != 0 {1.} else {pressed(KeyCode::Space)},"handbrake":keys.pressed(KeyCode::ShiftLeft) || pad.buttons & 0x2000 != 0,"interact":keys.pressed(KeyCode::KeyE) || pad.buttons & 0x8000 != 0,"pad_buttons":pad.buttons})
+    let stick = |v: f32| if v.abs() > 0.15 { v } else { 0. };
+    // Left stick is the bike, right stick is the rider: the two-stick split the
+    // freestyle motocross games use. The kart's original names (`pitch`,
+    // `throttle`, `steering`, `brake`) keep their exact meanings, so nothing
+    // here changes how an existing vehicle mod drives.
+    let bike_y = (pressed(KeyCode::ArrowUp) - pressed(KeyCode::ArrowDown) + stick(pad.left[1]))
+        .clamp(-1., 1.);
+    let bike_x =
+        (pressed(KeyCode::KeyA) - pressed(KeyCode::KeyD) - stick(pad.left[0])).clamp(-1., 1.);
+    let rider_x =
+        (pressed(KeyCode::KeyJ) - pressed(KeyCode::KeyL) - stick(pad.right[0])).clamp(-1., 1.);
+    let rider_y =
+        (pressed(KeyCode::KeyI) - pressed(KeyCode::KeyK) + stick(pad.right[1])).clamp(-1., 1.);
+    json!({
+        // Kart vocabulary, unchanged.
+        "pitch": bike_y,
+        "throttle": (pressed(KeyCode::KeyW) - pressed(KeyCode::KeyS) + pad.triggers[1] - pad.triggers[0]).clamp(-1., 1.),
+        "steering": bike_x,
+        "brake": if pad.buttons & 0x1000 != 0 { 1. } else { pressed(KeyCode::Space) },
+        "handbrake": keys.pressed(KeyCode::ShiftLeft) || pad.buttons & 0x2000 != 0,
+        "interact": keys.pressed(KeyCode::KeyE) || pad.buttons & 0x8000 != 0,
+        "pad_buttons": pad.buttons,
+        // Bike vocabulary. `weight` is the bike axis renamed for its sign: stick
+        // back builds preload and lifts the nose. `whip` shares the bars axis,
+        // which is safe because steering only acts in contact and whip only in
+        // the air.
+        "weight": -bike_y,
+        "whip": bike_x,
+        "lean": rider_x,
+        "rider_y": rider_y,
+        // Raw triggers, so a mod can split them: a bike wants RT throttle and LT
+        // front brake rather than the kart's combined forward/reverse pedal.
+        "trigger_l": pad.triggers[0],
+        "trigger_r": pad.triggers[1],
+        "trick_a": pad.buttons & 0x0100 != 0 || keys.pressed(KeyCode::KeyZ),
+        "trick_b": pad.buttons & 0x0200 != 0 || keys.pressed(KeyCode::KeyX),
+        "clutch": pad.buttons & 0x1000 != 0 || keys.pressed(KeyCode::KeyC),
+    })
 }

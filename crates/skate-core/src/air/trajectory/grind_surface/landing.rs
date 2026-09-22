@@ -46,7 +46,11 @@ pub fn update_landing_orientation(
         return;
     }
 
-    *up = orientation::tilted_normal(surface.direction, surface.upmost_normal, surface.normal_limits);
+    *up = orientation::tilted_normal(
+        surface.direction,
+        surface.upmost_normal,
+        surface.normal_limits,
+    );
     out.kind = surface.kind;
     out.garbage = false;
     out.high_side = surface.high_side;
@@ -57,26 +61,40 @@ pub fn update_landing_orientation(
         out.boardslide_dir = side;
         let oriented = if dot(side, sub(takeoff_position, grind_position)) > 0. {
             side
-        } else { negate(side) };
+        } else {
+            negate(side)
+        };
         let axis = cross(oriented, surface.upmost_normal);
         out.tipslide_dir = orientation::rotate(axis, oriented, tipslide_angle);
-        out.backslash_dir = orientation::rotate(axis, oriented,
-            f32::from_bits(0x401a_25c2)); // 822F93B8, stored pi-minus-backslash
+        out.backslash_dir = orientation::rotate(axis, oriented, f32::from_bits(0x401a_25c2)); // 822F93B8, stored pi-minus-backslash
     } else {
         let axis = cross(side, surface.upmost_normal);
         out.boardslide_dir = if surface.kind == GeometryType::FatRail {
             side
-        } else { cross(*up, surface.direction) };
-        let sign = if dot(side, surface.high_side) > 0. { 1. } else { -1. };
+        } else {
+            cross(*up, surface.direction)
+        };
+        let sign = if dot(side, surface.high_side) > 0. {
+            1.
+        } else {
+            -1.
+        };
         // Original sign vectors broadcast across all four lanes. These are
         // multiplies, unlike the XOR sign inversion in the thin-rail branch.
         out.backslash_dir = orientation::rotate(
-            axis.map(|v| v * sign), side.map(|v| v * sign),
-            f32::from_bits(0x3f3b_a866)); // 822F8614
+            axis.map(|v| v * sign),
+            side.map(|v| v * sign),
+            f32::from_bits(0x3f3b_a866),
+        ); // 822F8614
         out.tipslide_dir = orientation::rotate(
-            axis.map(|v| v * -sign), side.map(|v| v * -sign), tipslide_angle);
+            axis.map(|v| v * -sign),
+            side.map(|v| v * -sign),
+            tipslide_angle,
+        );
     }
 }
 
 /// Native XOR toggles every sign bit, including W and signed zero.
-fn negate(v: V) -> V { v.map(|v| f32::from_bits(v.to_bits() ^ 0x8000_0000)) }
+fn negate(v: V) -> V {
+    v.map(|v| f32::from_bits(v.to_bits() ^ 0x8000_0000))
+}

@@ -1,5 +1,8 @@
 //! TU3 Fill825999F0 -> manual producer8259BA28, after Derived input.
-use super::{controller::{DerivedControllerInput, magnitude}, riding_intentions::RidingIntent};
+use super::{
+    controller::{DerivedControllerInput, magnitude},
+    riding_intentions::RidingIntent,
+};
 
 /// Continuous Manual/ManualBrake belong to the input listener. The authored
 /// graphs own engagement time, allowed states, balance and animation selection.
@@ -14,7 +17,10 @@ pub fn produce(controller: &DerivedControllerInput, actor_flags: u32) -> Vec<Rid
     let length = magnitude(x.mul_add(x, y * y));
     if y != 0.0 {
         let value = if y > 0.0 { length } else { -length };
-        intents.push(RidingIntent { name: "Manual", value });
+        intents.push(RidingIntent {
+            name: "Manual",
+            value,
+        });
     }
     // Original constants820997B8/822F9274; strictly greater, independent
     // of the Manual presence gate. A horizontal stick can emit ManualBrake.

@@ -3,9 +3,9 @@
 //! and record order and rejects malformed or ambiguous source data.
 use serde::Deserialize;
 use std::{collections::BTreeMap, fs, path::Path};
-mod native;
 mod blend_space;
-pub use blend_space::{BlendSpaceMetadata, BlendSimplexMetadata};
+mod native;
+pub use blend_space::{BlendSimplexMetadata, BlendSpaceMetadata};
 mod selection_space;
 pub use selection_space::{
     SelectionCandidateMetadata, SelectionParameterMetadata, SelectionSpaceMetadata,
@@ -200,7 +200,10 @@ impl AnimationMetadata {
         let mut blend_spaces: BTreeMap<String, Vec<BlendSpaceMetadata>> = BTreeMap::new();
         for tree in file.blend_spaces {
             tree.validate(file.source_bytes)?;
-            blend_spaces.entry(tree.name.clone()).or_default().push(tree);
+            blend_spaces
+                .entry(tree.name.clone())
+                .or_default()
+                .push(tree);
         }
         let mut selectors: BTreeMap<String, Vec<SelectorMetadata>> = BTreeMap::new();
         for tree in file.selectors {
@@ -242,7 +245,8 @@ impl AnimationMetadata {
         }
         let origins = clips
             .keys()
-            .chain(phase_blends.keys()).chain(blend_spaces.keys())
+            .chain(phase_blends.keys())
+            .chain(blend_spaces.keys())
             .chain(selectors.keys())
             .chain(selection_spaces.keys())
             .chain(unsupported.keys())
@@ -332,7 +336,11 @@ impl AnimationMetadata {
             .get(&name)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        let blend_spaces = self.blend_spaces.get(&name).map(Vec::as_slice).unwrap_or(&[]);
+        let blend_spaces = self
+            .blend_spaces
+            .get(&name)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let selectors = self.selectors.get(&name).map(Vec::as_slice).unwrap_or(&[]);
         let selection_spaces = self
             .selection_spaces
@@ -344,7 +352,8 @@ impl AnimationMetadata {
         let last = clips
             .iter()
             .map(|c| c.source_offset)
-            .chain(phase_blends.iter().map(|t| t.source_offset)).chain(blend_spaces.iter().map(|t| t.source_offset))
+            .chain(phase_blends.iter().map(|t| t.source_offset))
+            .chain(blend_spaces.iter().map(|t| t.source_offset))
             .chain(selectors.iter().map(|t| t.source_offset))
             .chain(selection_spaces.iter().map(|t| t.source_offset))
             .chain(trees.iter().map(|t| t.0))

@@ -117,7 +117,21 @@ function sdk.trainer.apply(tuning) end
 ---@field steering? number -1..1, right to left
 ---@field brake? number 0..1
 ---@field handbrake? boolean
+---@field lean? number -1..1 rider weight, positive driver-left; lean grounded, roll airborne
+---@field weight? number -1..1 rider weight fore/aft, positive back; preload grounded, pitch airborne
+---@field whip? number -1..1 airborne yaw, positive driver-left
+---@field trick? integer Selected trick, 0 for none; needs a matching authored rider pose
+---@field trick_extend? number 0..1 how far into the selected trick
+---@field clutch? boolean
 ---@class VehicleTuning
+---@field lean_max? number 0.05..1.4 radians, maximum commanded lean (bike profile)
+---@field lean_rate? number 0..60 rad/s^2 roll authority (bike profile)
+---@field counter_steer? number 0..2 steering to lean coupling (bike profile)
+---@field preload_release? number 0..20000 N.s pop from releasing preload (bike profile)
+---@field air_yaw? number 0..20 rad/s^2 airborne yaw authority (bike profile)
+---@field lean_yaw? number 0..40 1/s how hard the bike follows the arc its lean dictates (bike profile)
+---@field whip_rate? number 0..12 rad/s yaw rate at full bars in the air (bike profile)
+---@field flip_rate? number 0..12 rad/s pitch rate on a held stick in the air (bike profile)
 ---@field engine_volume? number 0..1; requires engine_audio.enabled in definition
 ---@field engine_force? number 0..100000 N
 ---@field max_speed? number 1..100 m/s, engine limit
@@ -128,7 +142,12 @@ function sdk.trainer.apply(tuning) end
 ---@field position number[] metres
 ---@field rotation number[] quaternion xyzw
 ---@field heading number radians
----@field speed number signed m/s
+---@field speed number signed m/s, post-solve longitudinal
+---@field velocity number[] world linear velocity, m/s
+---@field angular_velocity number[] world angular velocity, rad/s
+---@field wheel_contacts integer how many wheels are touching
+---@field airborne boolean wheel_contacts == 0
+---@field wheel_speed number driven-wheel angular speed, rad/s
 ---@field phase 'parked'|'entering'|'driving'|'exiting'
 ---@field occupied boolean
 ---@field ready boolean
@@ -164,7 +183,7 @@ function sdk.vehicle.input() end
 ---@field name 'vehicle_bailed'
 ---@field owner string
 ---@field key string
----@field reason 'crash'|'rider_impact'|'inverted'
+---@field reason 'crash'|'rider_impact'|'inverted'|'landing'
 ---@field position number[] World seat position at detection, metres
 ---@field velocity number[] Carried world velocity plus launch lift, m/s
 ---@field angular_velocity number[] World angular velocity, rad/s

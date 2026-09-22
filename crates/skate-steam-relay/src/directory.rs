@@ -5,7 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 use steamworks::{
-    Client, DistanceFilter, LobbyId, LobbyKey, LobbyType, Matchmaking, StringFilter, StringFilterKind,
+    Client, DistanceFilter, LobbyId, LobbyKey, LobbyType, Matchmaking, StringFilter,
+    StringFilterKind,
 };
 enum ResultEvent {
     List(u64, usize, u64, u64, Result<Vec<LobbyId>, String>),
@@ -75,11 +76,13 @@ impl Directory {
                 // Keep unrelated Spacewar lobbies out of Steam's bounded result set,
                 // while accepting every version of our namespace.
                 mm.add_request_lobby_list_string_filter(StringFilter(
-                    LobbyKey::new("sk8game"), "skate3rust-free-skate-v",
+                    LobbyKey::new("sk8game"),
+                    "skate3rust-free-skate-v",
                     StringFilterKind::EqualToOrGreaterThan,
                 ));
                 mm.add_request_lobby_list_string_filter(StringFilter(
-                    LobbyKey::new("sk8game"), "skate3rust-free-skate-w",
+                    LobbyKey::new("sk8game"),
+                    "skate3rust-free-skate-w",
                     StringFilterKind::LessThan,
                 ));
                 mm.set_request_lobby_list_distance_filter(DistanceFilter::Worldwide);
@@ -166,7 +169,8 @@ impl Directory {
                     Err(e) => Event::Error(e),
                     Ok(mut list) => {
                         list.retain(|&l| {
-                            mm.lobby_data(l, "sk8game").is_some_and(|name| directory::is_game_lobby(&name))
+                            mm.lobby_data(l, "sk8game")
+                                .is_some_and(|name| directory::is_game_lobby(&name))
                         });
                         list.sort_by_key(LobbyId::raw);
                         let total = list.len();

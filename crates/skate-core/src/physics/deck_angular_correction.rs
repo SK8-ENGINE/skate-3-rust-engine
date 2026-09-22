@@ -16,11 +16,20 @@ const NORMAL_MINIMUM: f32 = f32::from_bits(0x3586_37bd); //82F826F8 ->830BD350.
 pub fn apply_axis_displacement(body: &mut RetailBodyRates, requested: Vector3) {
     let squared = dot(requested, requested);
     let inverse = inverse_length_squared(squared, 2);
-    let length = if squared == 0.0 { 0.0 } else { squared * inverse };
+    let length = if squared == 0.0 {
+        0.0
+    } else {
+        squared * inverse
+    };
     let direction = if length > NORMAL_MINIMUM {
         scale(requested, inverse)
-    } else { Vector3::ZERO };
-    let existing = scale(direction, dot(direction, scale(body.angular_velocity, STEP)));
+    } else {
+        Vector3::ZERO
+    };
+    let existing = scale(
+        direction,
+        dot(direction, scale(body.angular_velocity, STEP)),
+    );
     apply_angular_displacement(body, subtract(requested, existing));
 }
 
@@ -181,7 +190,9 @@ mod tests {
         apply_limited_displacement(&mut against, Vector3::new(0.0, 0.02, 0.0));
         assert!((against.torque_acceleration.y - 72.0).abs() < 0.0001);
         let mut ground = body();
-        ground.basis = Basis3 { columns: [[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]] };
+        ground.basis = Basis3 {
+            columns: [[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]],
+        };
         apply_ground_body_torque(&mut ground);
         assert!((ground.torque_acceleration.x + 1.815).abs() < 0.00001);
         assert!((ground.torque_acceleration.y + 0.121).abs() < 0.00001);
@@ -244,4 +255,3 @@ fn ground_torque_scalar() -> f32 {
     let power_of_two = f32::from_bits(((127 + integral as i32) as u32) << 23);
     (power_of_two * reciprocal_refined(polynomial)) * f32::from_bits(0xc0c1_999a)
 }
-

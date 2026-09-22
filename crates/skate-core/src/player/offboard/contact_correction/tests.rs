@@ -1,10 +1,18 @@
 use super::*;
 fn state() -> ContactCorrection {
     //Explicit synthetic prior state; constructor/reset ownership is separate.
-    ContactCorrection { active: true, direction: [0.0, 0.0, 1.0, 0.0], displacement: [1.0; 4] }
+    ContactCorrection {
+        active: true,
+        direction: [0.0, 0.0, 1.0, 0.0],
+        displacement: [1.0; 4],
+    }
 }
 fn input(a: Vector, b: Vector) -> Input {
-    Input { collision_displacements: [a, b], projection_axis_416: [0.0; 4], up_axis_16: [0.0, 1.0, 0.0, 0.0] }
+    Input {
+        collision_displacements: [a, b],
+        projection_axis_416: [0.0; 4],
+        up_axis_16: [0.0, 1.0, 0.0, 0.0],
+    }
 }
 fn close(actual: f32, expected: f32) {
     assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");

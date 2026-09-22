@@ -108,10 +108,22 @@ pub fn produce_analog(
         dot(forward, stick)
     };
     [
-        OffboardIntent { name: "OB_Mag", value: magnitude },
-        OffboardIntent { name: "OB_BipedWorldZ", value: stick[2] },
-        OffboardIntent { name: "OB_BipedWorldX", value: stick[0] },
-        OffboardIntent { name: "OB_BipedStickMag", value: super::controller::magnitude(dot(stick, stick)) },
+        OffboardIntent {
+            name: "OB_Mag",
+            value: magnitude,
+        },
+        OffboardIntent {
+            name: "OB_BipedWorldZ",
+            value: stick[2],
+        },
+        OffboardIntent {
+            name: "OB_BipedWorldX",
+            value: stick[0],
+        },
+        OffboardIntent {
+            name: "OB_BipedStickMag",
+            value: super::controller::magnitude(dot(stick, stick)),
+        },
     ]
 }
 
@@ -126,7 +138,11 @@ fn safe_unit(vector: [f32; 4]) -> [f32; 4] {
         let correction = (-squared).mul_add(inverse * inverse, 1.0);
         inverse = (inverse * 0.5).mul_add(correction, inverse);
     }
-    let length = if squared == 0.0 { 0.0 } else { squared * inverse };
+    let length = if squared == 0.0 {
+        0.0
+    } else {
+        squared * inverse
+    };
     //Initializer82F826F8 supplies830BD350 from82181A88: LENGTH threshold1e-6.
     if length > f32::from_bits(0x3586_37bd) {
         vector.map(|value| value * inverse)

@@ -20,9 +20,15 @@ pub struct SkeletonPhysicalRecord {
 impl Default for SkeletonPhysicalRecord {
     fn default() -> Self {
         // Constructor82BEB8C8 initializes all26 physical transforms and history.
-        Self { pose: [IDENTITY; PART_COUNT], positions: [[0.0; 4]; PART_COUNT],
-            velocities: [[0.0; 4]; PART_COUNT], velocity_changes: [[0.0; 4]; PART_COUNT],
-            centre_of_mass: [0.0; 4], centre_of_mass_velocity: [0.0; 4], timestep: 0.0 }
+        Self {
+            pose: [IDENTITY; PART_COUNT],
+            positions: [[0.0; 4]; PART_COUNT],
+            velocities: [[0.0; 4]; PART_COUNT],
+            velocity_changes: [[0.0; 4]; PART_COUNT],
+            centre_of_mass: [0.0; 4],
+            centre_of_mass_velocity: [0.0; 4],
+            timestep: 0.0,
+        }
     }
 }
 impl SkeletonPhysicalRecord {
@@ -40,15 +46,19 @@ impl SkeletonPhysicalRecord {
     /// The caller supplies the actual GetPartTransform results. Native part0
     /// uses the explicit board-frame argument; all other parts come from the
     /// skeleton assembly. Keep this distinction when the board drives a proxy.
-    pub fn update(&mut self, parts: &[AnimationPartTransform; PART_COUNT],
-        board_frame: AnimationPartTransform, fractional: &[f32; ANIMATION_PART_COUNT]) {
+    pub fn update(
+        &mut self,
+        parts: &[AnimationPartTransform; PART_COUNT],
+        board_frame: AnimationPartTransform,
+        fractional: &[f32; ANIMATION_PART_COUNT],
+    ) {
         self.timestep = f32::from_bits(0x3C88_8889);
         for (i, part) in parts.iter().enumerate() {
             let transform = if i == 0 { board_frame } else { *part };
             self.pose[i] = transform;
             for lane in 0..4 {
-                let velocity = (transform[3][lane] - self.positions[i][lane])
-                    * f32::from_bits(0x426F_FFFF);
+                let velocity =
+                    (transform[3][lane] - self.positions[i][lane]) * f32::from_bits(0x426F_FFFF);
                 self.velocity_changes[i][lane] = velocity - self.velocities[i][lane];
                 self.velocities[i][lane] = velocity;
             }

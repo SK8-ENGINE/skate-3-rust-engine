@@ -33,11 +33,15 @@ pub struct GrindState {
 impl Default for GrindState {
     fn default() -> Self {
         Self {
-            kind: -1, scorable_id: -1,
+            kind: -1,
+            scorable_id: -1,
             // Initializer82F8AF08 encodes NUL text82060799 to830C0D60.
-            name: encode(b""), scoring_name: encode(b""),
-            on_front: false, crouch: 0.0,
-            pathed_guid: u64::MAX, local_guid: u64::MAX,
+            name: encode(b""),
+            scoring_name: encode(b""),
+            on_front: false,
+            crouch: 0.0,
+            pathed_guid: u64::MAX,
+            local_guid: u64::MAX,
         }
     }
 }
@@ -91,32 +95,50 @@ impl Default for FilteredState {
             category: FilteredCategory::Invalid,
             previous_category: FilteredCategory::Invalid,
             previous_physics_state: 0,
-            air_count: 0, nonspecific_count: 0,
-            nonspecific_collision_free_count: 0, nonspecific_collision_count: 0,
-            frames_since_ground_stairs: 0, must_change: true,
+            air_count: 0,
+            nonspecific_count: 0,
+            nonspecific_collision_free_count: 0,
+            nonspecific_collision_count: 0,
+            frames_since_ground_stairs: 0,
+            must_change: true,
             cached_grind: GrindState::default(),
         }
     }
 }
 impl FilteredState {
-    pub fn reset(&mut self) { *self = Self::default(); }
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 
     pub fn update(&mut self, input: FilteredStateInput) -> FilteredStateOutput {
         use FilteredCategory::*;
         let old = self.category;
         self.previous_category = old;
-        self.must_change = old == Wipeout || old == Invalid
+        self.must_change = old == Wipeout
+            || old == Invalid
             || self.previous_physics_state == 702 && input.physics_state != 702;
         self.air_count = count(self.air_count, input.physics_category == 200);
         self.nonspecific_count = count(self.nonspecific_count, input.physics_state == 701);
-        self.nonspecific_collision_free_count = count(self.nonspecific_collision_free_count,
-            input.physics_state == 701 && !input.anything_in_contact);
-        self.nonspecific_collision_count = count(self.nonspecific_collision_count,
-            input.physics_state == 701 && input.anything_in_contact);
-        self.frames_since_ground_stairs = count(self.frames_since_ground_stairs,
-            !(input.physics_category == 100 && input.physics_surface_type == 8));
+        self.nonspecific_collision_free_count = count(
+            self.nonspecific_collision_free_count,
+            input.physics_state == 701 && !input.anything_in_contact,
+        );
+        self.nonspecific_collision_count = count(
+            self.nonspecific_collision_count,
+            input.physics_state == 701 && input.anything_in_contact,
+        );
+        self.frames_since_ground_stairs = count(
+            self.frames_since_ground_stairs,
+            !(input.physics_category == 100 && input.physics_surface_type == 8),
+        );
         self.category = match input.physics_state {
-            100 => if input.wall_ride_exit { Air } else { Ground },
+            100 => {
+                if input.wall_ride_exit {
+                    Air
+                } else {
+                    Ground
+                }
+            }
             101..=105 | 602 => Ground,
             200 => {
                 let air_delay_passed = self.air_count > 3;
@@ -124,22 +146,47 @@ impl FilteredState {
                     // TU3 adds contact return to ground, absent in the named S2 body.
                     if air_delay_passed && input.anything_in_contact || self.must_change {
                         Ground
-                    } else { Air }
+                    } else {
+                        Air
+                    }
                 } else {
-                    let may_enter_air = air_delay_passed
-                        && (old != Ground || self.frames_since_ground_stairs > 9);
-                    if may_enter_air || self.must_change { Air } else { old }
+                    let may_enter_air =
+                        air_delay_passed && (old != Ground || self.frames_since_ground_stairs > 9);
+                    if may_enter_air || self.must_change {
+                        Air
+                    } else {
+                        old
+                    }
                 }
             }
-            201 => if input.anything_in_contact && !input.targeting_grind && self.air_count > 5 {
-                Ground
-            } else { Air },
+            201 => {
+                if input.anything_in_contact && !input.targeting_grind && self.air_count > 5 {
+                    Ground
+                } else {
+                    Air
+                }
+            }
             202 | 600 | 601 => Air,
             300 => Wipeout,
-            400..=405 => { self.cached_grind = input.grind; Grind }
+            400..=405 => {
+                self.cached_grind = input.grind;
+                Grind
+            }
             500 | 502 => Offboard,
-            501 => if input.offboard_has_landed { Offboard } else { OffboardAir },
-            503 => if input.offboard_on_deck { Ground } else { Offboard },
+            501 => {
+                if input.offboard_has_landed {
+                    Offboard
+                } else {
+                    OffboardAir
+                }
+            }
+            503 => {
+                if input.offboard_on_deck {
+                    Ground
+                } else {
+                    Offboard
+                }
+            }
             702 => Teleport,
             // Native701 and unrecognized states retain the prior category.
             _ => old,
@@ -150,7 +197,11 @@ impl FilteredState {
             category: self.category,
             previous_category: self.previous_category,
             grinding,
-            grind: if grinding { self.cached_grind } else { GrindState::default() },
+            grind: if grinding {
+                self.cached_grind
+            } else {
+                GrindState::default()
+            },
             last_grind_distance: input.last_grind_distance,
         }
     }

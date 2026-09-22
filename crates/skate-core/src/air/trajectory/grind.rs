@@ -5,7 +5,9 @@ use super::grind_surface::LandingOrientation;
 use super::{Prediction, Trajectory, math::*};
 use crate::{physics::grind_contact::Primitive, point_graph::PointGraph};
 pub use admission::{admitted_displacement, apply_admitted_target};
-pub use candidate::{descending_plane_time, consider_grind_primitive, take_best_grind, trajectory_box_filter};
+pub use candidate::{
+    consider_grind_primitive, descending_plane_time, take_best_grind, trajectory_box_filter,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct GrindTrajectoryCandidate {

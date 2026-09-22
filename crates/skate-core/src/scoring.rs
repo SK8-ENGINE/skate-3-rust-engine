@@ -15,8 +15,19 @@ pub mod timer;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Scorable {
     pub id: usize,
-    /// Fixed metadata table +12. Distinct from the display type at +16.
+    /// Fixed metadata table **+12**, which retail treats as the score/display type.
+    ///
+    /// The two names here are the wrong way round against retail's own vocabulary, and
+    /// renaming them now would touch every collector, so the offsets are what to trust:
+    /// this is +12, read by CalcPointPenalty 82DA5D18 (`addi r7,r11,12`), the flip metric
+    /// 82DA8EB8 and the class-3 bonus 82DA93D8.
     pub class: u32,
+    /// Fixed metadata table **+16**, which is retail's *class* -- an index into the
+    /// `*_CLASS` list at 82084A40: `None, Air, Flip, FingerFlip, Grab, Grind, Handplant,
+    /// NoComply, Manual, Slide, HippyJump, Revert, Boneless, Footplant`.
+    ///
+    /// Read by the Grind collector 82DA9D68 (`== 5`) and the Handplant collector 82DABA10
+    /// (`== 6`), both via `addi r9,r27,16`.
     pub score_type: usize,
 }
 
@@ -24,9 +35,22 @@ impl Scorable {
     pub fn valid(self) -> bool {
         self.id < SCORABLE_COUNT && self.score_type < SCORE_TYPE_COUNT
     }
-    /// CalcPointPenalty82DA5D18 excludes metric class5 and class6.
+    /// CalcPointPenalty82DA5D18 excludes metric class 5, and only class 5.
+    ///
+    /// The test is written as an `addic`/`subfe` carry trick rather than a compare:
+    ///
+    /// ```text
+    /// lwzx  r11,r8,r7   ; class = table820862A8[id].class
+    /// addi  r11,r11,-5  ; x = class - 5
+    /// addic r6,r11,-1   ; r6 = x - 1, carry = (x != 0)
+    /// subfe r11,r6,r11  ; r11 = ~r6 + x + carry = carry = (class != 5)
+    /// ```
+    ///
+    /// which is 1 for every class but 5, and a 0 returns the unpenalised 1.0. Class 6,
+    /// the 23 handplants, was excluded here too, so a handplant repeated within a line
+    /// kept its full value instead of decaying down the authored curve.
     pub fn repetition_applies(self) -> bool {
-        self.valid() && self.class != 5 && self.class != 6
+        self.valid() && self.class != 5
     }
 }
 
@@ -231,5 +255,37 @@ mod tests {
         h.set_suppressed(true);
         h.end_trick(FLIP, 20.0);
         assert_eq!(h.repetition_count(FLIP), Some(1));
+    }
+}
+
+#[cfg(test)]
+mod repetition_class_tests {
+    use super::*;
+
+    /// 82DA5D18 exempts class 5 and nothing else. Handplants are class 6 and must take
+    /// the repetition penalty like any other trick.
+    #[test]
+    fn only_the_metric_class_escapes_the_repetition_penalty() {
+        let scorable = |class| Scorable {
+            id: 139,
+            class,
+            score_type: 6,
+        };
+        assert!(!scorable(5).repetition_applies(), "class 5 is the exemption");
+        for class in [0, 1, 2, 3, 4, 6, 7, 11, 12] {
+            assert!(
+                scorable(class).repetition_applies(),
+                "class {class} must be penalised"
+            );
+        }
+        // An id outside the table is not scorable at all.
+        assert!(
+            !Scorable {
+                id: SCORABLE_COUNT,
+                class: 6,
+                score_type: 6,
+            }
+            .repetition_applies()
+        );
     }
 }

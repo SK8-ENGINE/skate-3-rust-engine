@@ -253,8 +253,8 @@ fn bind(
     let initial_poses: BTreeMap<_, _> = skins
         .actors
         .iter()
-        .filter(|(_,skin)|skin.pending.is_some())
-        .map(|(&id,_)| {
+        .filter(|(_, skin)| skin.pending.is_some())
+        .map(|(&id, _)| {
             let bones = net
                 .remotes
                 .get(&id)
@@ -373,8 +373,15 @@ fn bind(
             commands.entity(old).despawn();
         }
         commands.entity(p.root).insert(Visibility::Inherited);
-        info!("ONLINE_CHARACTER_VISIBLE peer={id} joints={} kind={}", bindings.len(),
-            if matches!(p.look, Look::Imported(_)) { "import" } else { "retail" });
+        info!(
+            "ONLINE_CHARACTER_VISIBLE peer={id} joints={} kind={}",
+            bindings.len(),
+            if matches!(p.look, Look::Imported(_)) {
+                "import"
+            } else {
+                "retail"
+            }
+        );
         skin.bindings = bindings;
         skin.poses = Buffer::default();
         skin.pending = None;
@@ -612,22 +619,29 @@ mod online_owned_tests {
             )> = SystemState::new(app.world_mut());
             let (meshes, nodes, parents) = queries.get(app.world());
             let animation = crate::animation::AnimationStatus::for_scene(
-                root, &names, &meshes, &nodes, &parents
-            ).unwrap();
-            let joints=animation.online_bindings();
+                root, &names, &meshes, &nodes, &parents,
+            )
+            .unwrap();
+            let joints = animation.online_bindings();
             assert!(!joints.is_empty());
             // A received model must accept poses before display, then keep moving.
-            let first:Vec<_>=(0..names.len()).map(|i|Mat4::from_translation(Vec3::new(i as f32*0.01,1.,0.))).collect();
-            for (joint,pose) in animation.pose_transforms(&first) {
+            let first: Vec<_> = (0..names.len())
+                .map(|i| Mat4::from_translation(Vec3::new(i as f32 * 0.01, 1., 0.)))
+                .collect();
+            for (joint, pose) in animation.pose_transforms(&first) {
                 assert!(pose.to_matrix().is_finite());
-                *app.world_mut().get_mut::<Transform>(joint).unwrap()=pose;
+                *app.world_mut().get_mut::<Transform>(joint).unwrap() = pose;
             }
-            *app.world_mut().get_mut::<Visibility>(root).unwrap()=Visibility::Inherited;
-            let second:Vec<_>=first.iter().enumerate().map(|(i,m)|*m*Mat4::from_rotation_z(0.01*(i+1) as f32)).collect();
-            for (joint,pose) in animation.pose_transforms(&second) {
+            *app.world_mut().get_mut::<Visibility>(root).unwrap() = Visibility::Inherited;
+            let second: Vec<_> = first
+                .iter()
+                .enumerate()
+                .map(|(i, m)| *m * Mat4::from_rotation_z(0.01 * (i + 1) as f32))
+                .collect();
+            for (joint, pose) in animation.pose_transforms(&second) {
                 assert!(pose.to_matrix().is_finite());
-                assert_ne!(*app.world().get::<Transform>(joint).unwrap(),pose);
-                *app.world_mut().get_mut::<Transform>(joint).unwrap()=pose;
+                assert_ne!(*app.world().get::<Transform>(joint).unwrap(), pose);
+                *app.world_mut().get_mut::<Transform>(joint).unwrap() = pose;
             }
             app.world_mut().entity_mut(root).despawn();
             app.update();

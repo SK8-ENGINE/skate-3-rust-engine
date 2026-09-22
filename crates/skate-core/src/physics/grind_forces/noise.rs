@@ -33,8 +33,10 @@ pub fn apply(frame: [V; 4], speed: f32, amount: f32, samples: [u32; 3]) -> [V; 4
     for column in 0..3 {
         let v = columns[column];
         result[column] = core::array::from_fn(|lane| {
-            v[2].mul_add(frame[2][lane],
-                v[1].mul_add(frame[1][lane], v[0] * frame[0][lane]))
+            v[2].mul_add(
+                frame[2][lane],
+                v[1].mul_add(frame[1][lane], v[0] * frame[0][lane]),
+            )
         });
     }
     //82D407EC/40810/40828 multiply the three basis vectors by zero

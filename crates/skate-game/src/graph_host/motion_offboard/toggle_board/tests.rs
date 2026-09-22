@@ -33,10 +33,16 @@ fn dropping_terminal_tick_publishes_physical_attribute_and_animation_parameter()
     )
     .unwrap();
     assert_eq!(animation.motion_attributes.len(), 1);
-    assert_eq!(animation.motion_attributes[0].name, encode(b"OB_DroppingBoard"));
+    assert_eq!(
+        animation.motion_attributes[0].name,
+        encode(b"OB_DroppingBoard")
+    );
     assert_eq!(animation.motion_attributes[0].value, 1.0);
     assert!(!animation.motion_intents.contains_key("OB_DroppingBoard"));
-    assert_eq!(animation.pending_parameter(encode(b"OB_DroppingBoard")), Some(1.0));
+    assert_eq!(
+        animation.pending_parameter(encode(b"OB_DroppingBoard")),
+        Some(1.0)
+    );
     assert_eq!(state.phase, Phase::Idle);
 }
 
@@ -48,7 +54,10 @@ fn all_toggle_publications_reach_physics_attributes_and_animation_parameters() {
         let packet = animation.motion_attributes.last().unwrap();
         assert_eq!(packet.name, encode(name.as_bytes()));
         assert_eq!(packet.value, 1.0);
-        assert_eq!(animation.pending_parameter(encode(name.as_bytes())), Some(1.0));
+        assert_eq!(
+            animation.pending_parameter(encode(name.as_bytes())),
+            Some(1.0)
+        );
         assert!(!animation.motion_intents.contains_key(name));
     }
     //Yaw/pitch parameterize the real retrieval tree; native does not append
@@ -59,7 +68,10 @@ fn all_toggle_publications_reach_physics_attributes_and_animation_parameters() {
     assert_eq!(animation.pending_parameter(encode(b"yaw")), Some(45.0));
     assert_eq!(animation.pending_parameter(encode(b"pitch")), Some(-5.0));
     animation.begin_graph_update();
-    assert!(animation.motion_attributes.is_empty(), "Recall pulse leaked to next frame");
+    assert!(
+        animation.motion_attributes.is_empty(),
+        "Recall pulse leaked to next frame"
+    );
 }
 #[test]
 fn lifecycle_end_leaves_persistent_channel_and_begin_resets_state() {
@@ -87,9 +99,25 @@ fn lifecycle_end_leaves_persistent_channel_and_begin_resets_state() {
     assert_eq!(animation.channels.elapsed("missing"), 0.0);
     let mut state = State::default();
     state.phase = Phase::DropPlaying;
-    execute(&mut state, &mut animation, BoardControls::default(), None, None, 2).unwrap();
+    execute(
+        &mut state,
+        &mut animation,
+        BoardControls::default(),
+        None,
+        None,
+        2,
+    )
+    .unwrap();
     assert_eq!(state.phase, Phase::DropPlaying);
-    execute(&mut state, &mut animation, BoardControls::default(), None, None, 0).unwrap();
+    execute(
+        &mut state,
+        &mut animation,
+        BoardControls::default(),
+        None,
+        None,
+        0,
+    )
+    .unwrap();
     assert_eq!(state.phase, Phase::Idle);
     animation.channels.advance(1.0, 0.0);
     animation.channels.retire();

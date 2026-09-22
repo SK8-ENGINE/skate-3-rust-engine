@@ -7,19 +7,20 @@ mod air_phase;
 mod air_reckoning;
 mod air_trajectory;
 mod animated_skeleton;
+mod boneless;
 pub(crate) mod camera_output;
+mod climbing;
 mod clock;
 mod colliders;
 mod controls;
 mod foot_ik;
-mod footplant;
-mod climbing;
-mod plant_skeleton;
-mod boneless;
-mod handplant;
 mod foot_ik_queries;
 mod foot_physical_output;
+mod footplant;
 pub(crate) mod ground;
+mod handplant;
+pub(crate) mod network;
+mod plant_skeleton;
 mod render_pose;
 mod riding_outputs;
 mod skateboard_controller;
@@ -32,7 +33,6 @@ mod skeleton_feedback;
 mod skeleton_input_runtime;
 mod skeleton_output;
 mod solve;
-pub(crate) mod network;
 pub(crate) use skater::SkaterRuntime;
 mod animation_feedback;
 mod animation_feedback_settings;
@@ -48,8 +48,6 @@ mod grind_host;
 mod grind_materials;
 mod grind_names;
 mod ground_animation;
-mod slide_state;
-mod revert_state;
 mod ground_exit;
 mod ground_phase;
 mod ground_runtime;
@@ -58,13 +56,17 @@ mod landing_quality;
 mod offboard;
 mod player_input;
 mod player_state;
+mod respawn;
+mod revert_state;
 mod settings;
 mod skeleton_grind_air;
+mod slide_state;
 mod teleport_state;
 mod wipeout;
 mod wipeout_states;
-mod respawn;
-//TEMPORARY opt-in observations for the bottom-up source audit.
+// Immutable transport from a completed physics tick into the player-audio runtime. It carries
+// evidence only; sound selection remains in the recovered audio program.
+mod audio_observation;
 mod biped_air;
 mod known_air;
 mod landing_on_deck;
@@ -227,11 +229,17 @@ impl GamePhysics {
             as u64
     }
 
-    pub(crate) fn period(&self) -> std::time::Duration { self.clock.period() }
+    pub(crate) fn period(&self) -> std::time::Duration {
+        self.clock.period()
+    }
 
-    pub(crate) fn difficulty_index(&self) -> u32 { self.animation_profile.physics_mode }
+    pub(crate) fn difficulty_index(&self) -> u32 {
+        self.animation_profile.physics_mode
+    }
 
-    pub(crate) fn world_triangles(&self) -> &[skate_core::physics::board_world::WorldTriangle] { self.world.triangles() }
+    pub(crate) fn world_triangles(&self) -> &[skate_core::physics::board_world::WorldTriangle] {
+        self.world.triangles()
+    }
 
     pub(crate) fn world(&self) -> &BoardWorld {
         &self.world
@@ -255,24 +263,42 @@ impl GamePhysics {
         terrain: ground::Terrain,
         map: Option<&skate_data::skate_map::SkateMap>,
     ) -> Result<Self, String> {
-        Self::load_world_difficulty(asset_root, terrain, map, crate::difficulty::Difficulty::Easy)
+        Self::load_world_difficulty(
+            asset_root,
+            terrain,
+            map,
+            crate::difficulty::Difficulty::Easy,
+        )
     }
 
-    pub fn load_with_map(asset_root: &std::path::Path, map: Option<&skate_data::skate_map::SkateMap>) -> Result<Self, String> {
+    pub fn load_with_map(
+        asset_root: &std::path::Path,
+        map: Option<&skate_data::skate_map::SkateMap>,
+    ) -> Result<Self, String> {
         Self::load_with_difficulty(asset_root, map, crate::difficulty::Difficulty::Easy)
     }
 
-    pub fn load_with_difficulty(asset_root: &std::path::Path, map: Option<&skate_data::skate_map::SkateMap>, difficulty: crate::difficulty::Difficulty) -> Result<Self, String> {
+    pub fn load_with_difficulty(
+        asset_root: &std::path::Path,
+        map: Option<&skate_data::skate_map::SkateMap>,
+        difficulty: crate::difficulty::Difficulty,
+    ) -> Result<Self, String> {
         Self::load_world_difficulty(asset_root, ground::Terrain::Course, map, difficulty)
     }
 
-    fn load_world_difficulty(asset_root: &std::path::Path, terrain: ground::Terrain, map: Option<&skate_data::skate_map::SkateMap>, difficulty: crate::difficulty::Difficulty) -> Result<Self, String> {
+    fn load_world_difficulty(
+        asset_root: &std::path::Path,
+        terrain: ground::Terrain,
+        map: Option<&skate_data::skate_map::SkateMap>,
+        difficulty: crate::difficulty::Difficulty,
+    ) -> Result<Self, String> {
         let data = Collections::load(asset_root)?;
         let settings = PhysicsSettings::load(&data)?;
         let animation_profile = animation_phase::AnimationProfile::load(&data, difficulty.key())?;
         eprintln!(
             "SKATE_PHYSICS_MODE {} index={}",
-            difficulty.key(), animation_profile.physics_mode
+            difficulty.key(),
+            animation_profile.physics_mode
         );
         let mut spawn = RetailAffineTransform {
             translation: Vector3::new(
@@ -304,9 +330,12 @@ impl GamePhysics {
             Some(map) => crate::skate_world::collision_world(map, settings.floor_material)?,
             None => terrain.world(settings.floor_material),
         };
-        let grind_world = std::sync::Arc::new(if map.is_none() && terrain == ground::Terrain::Course {
-            crate::grind_world::StaticProvider::authored(&crate::grind_world::test_rails())?
-        } else { crate::grind_world::StaticProvider::new(map)? });
+        let grind_world =
+            std::sync::Arc::new(if map.is_none() && terrain == ground::Terrain::Course {
+                crate::grind_world::StaticProvider::authored(&crate::grind_world::test_rails())?
+            } else {
+                crate::grind_world::StaticProvider::new(map)?
+            });
         if let Some(map) = map {
             eprintln!(
                 "SKATE_GRIND_READY splines={} primitives={}",
@@ -404,6 +433,11 @@ impl Plugin for PhysicsPlugin {
                 controls::sample.in_set(SimulationSet::Controls),
             )
             .add_systems(FixedUpdate, advance.in_set(SimulationSet::Physics))
+            .init_resource::<audio_observation::AudioObservationCursor>()
+            .add_systems(
+                FixedUpdate,
+                audio_observation::publish.after(SimulationSet::Physics),
+            )
             .add_systems(Update, present.in_set(FrameSet::Physics));
     }
 }
@@ -546,6 +580,10 @@ mod air_tests;
 #[path = "tests/wipeout_playback.rs"]
 mod wipeout_tests;
 
+#[cfg(test)]
+#[path = "tests/flip_playback.rs"]
+mod flip_tests;
+
 fn present(
     physics: Res<GamePhysics>,
     history: Res<crate::presentation::Presentation>,
@@ -556,10 +594,11 @@ fn present(
     if physics.failed {
         return;
     }
-    let Some((previous, current, alpha)) = history.view(&replay, time.overstep_fraction()) else { return; };
+    let Some((previous, current, alpha)) = history.view(&replay, time.overstep_fraction()) else {
+        return;
+    };
     for mut root in &mut roots {
-        *root = crate::presentation::blend(previous.root, current.root,
-            alpha);
+        *root = crate::presentation::blend(previous.root, current.root, alpha);
     }
 }
 
@@ -606,8 +645,16 @@ impl SkaterRuntime {
         let active = self.grind.active_family().is_some();
         let name = if active {
             grind_chromosome::names::lookup(out.animation_chromosome_268)
-                .map(|name| name.attribute).unwrap_or("")
-        } else { "" };
-        (active, name, out.words_136_140[0], self.grind.last_grind_distance())
+                .map(|name| name.attribute)
+                .unwrap_or("")
+        } else {
+            ""
+        };
+        (
+            active,
+            name,
+            out.words_136_140[0],
+            self.grind.last_grind_distance(),
+        )
     }
 }

@@ -81,7 +81,7 @@ pub fn wall_ride_response(
     }
     response.animated_board_2708 = true;
     let into_normal = dot(xyz(physical.board_normal), xyz(physical.velocity));
-    let mut tangent: [f32;4] =
+    let mut tangent: [f32; 4] =
         std::array::from_fn(|i| physical.velocity[i] - (physical.board_normal[i] * into_normal));
     if tangent[1] < 0.0 && tangent[1] > -6.0 {
         tangent[1] *= settings.auto_jump_y_down_scalar;
@@ -101,7 +101,10 @@ mod tests {
     #[test]
     fn contact_force_and_auto_jump_have_distinct_gates_and_keep_old_velocity() {
         let settings = WallRideSettings {
-            anti_gravity_vs_time: PointGraph { x: [0., 1., 2., 3., 4., 5., 6., 7.], y: [0.1; 8] },
+            anti_gravity_vs_time: PointGraph {
+                x: [0., 1., 2., 3., 4., 5., 6., 7.],
+                y: [0.1; 8],
+            },
             max_dot_floor_wall: 0.5,
             foot_force_time: 0.09,
             auto_jump_height: 0.6,

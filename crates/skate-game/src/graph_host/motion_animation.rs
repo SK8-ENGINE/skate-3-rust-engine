@@ -1,7 +1,8 @@
 //! Stock tree ownership and persistent playback used directly by MotionHost.
 mod selection_space_host;
-mod tree_builder;
 mod stock_clip_query;
+mod tree_builder;
+use super::outputs::ActionGraphOutput;
 use skate_core::animation::posture::{PendingPosture, PosturePose};
 use skate_core::animation::{
     clip_clock::AdvanceResult,
@@ -17,7 +18,6 @@ use skate_core::animation::{
 use skate_core::graph::intents::IntentMap;
 use skate_data::animation_metadata::{AnimationMetadata, TreeMetadata};
 use tree_builder::build;
-use super::outputs::ActionGraphOutput;
 
 pub struct MotionAnimation {
     metadata: AnimationMetadata,
@@ -47,7 +47,9 @@ pub struct MotionAnimation {
 impl MotionAnimation {
     #[cfg(test)]
     pub fn seek_current_fraction(&mut self, fraction: f32) {
-        if let Some(tree) = &mut self.current { tree.set_time(tree.length() * fraction); }
+        if let Some(tree) = &mut self.current {
+            tree.set_time(tree.length() * fraction);
+        }
     }
 
     pub(crate) fn metadata(&self) -> &AnimationMetadata {
@@ -56,7 +58,11 @@ impl MotionAnimation {
 
     #[cfg(test)]
     pub(super) fn pending_parameter(&self, name: AttributeName) -> Option<f32> {
-        self.settable.entries().iter().find(|a| a.name == name).map(|a| a.value)
+        self.settable
+            .entries()
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| a.value)
     }
     pub fn accept_action_graph(&mut self, output: ActionGraphOutput) {
         output.motion_effects.apply_to(&mut self.motion_intents);
@@ -76,13 +82,23 @@ impl MotionAnimation {
         self.skater_animation_flags = self.skater_animation_flags.map(|f| f & 0x0ff7_ffff);
         self.relative_stance = 0;
         self.reset_action_intents = true;
-        self.property = AdvanceResult { crossed_end: false, overshoot: -1.0, remaining_before_wrap: -1.0 };
+        self.property = AdvanceResult {
+            crossed_end: false,
+            overshoot: -1.0,
+            remaining_before_wrap: -1.0,
+        };
     }
     pub fn reset_to_given_stance(&mut self) -> Result<(), String> {
-        let flags = self.skater_animation_flags.as_mut().ok_or("Stance reset requires SkaterAnim flags")?;
+        let flags = self
+            .skater_animation_flags
+            .as_mut()
+            .ok_or("Stance reset requires SkaterAnim flags")?;
         let mut relative = self.relative_stance != 0;
         skate_core::player::offboard::reset_animation::given_stance(
-            self.natural_stance, &mut self.requested_stance, flags, &mut relative,
+            self.natural_stance,
+            &mut self.requested_stance,
+            flags,
+            &mut relative,
         );
         self.relative_stance = u32::from(relative);
         Ok(())
@@ -173,7 +189,10 @@ impl MotionAnimation {
     ///The caller owns the one-shot instance latch; a missing marker is a miss.
     pub(super) fn jump_into(&mut self, name: AttributeName) -> Result<(), String> {
         self.apply_parameters()?;
-        let tree = self.current.as_mut().ok_or("JumpInto requires a current animation tree")?;
+        let tree = self
+            .current
+            .as_mut()
+            .ok_or("JumpInto requires a current animation tree")?;
         let mut attribute = MotionGraphAttribute { name, value: 0.0 }.to_animation();
         if tree.query_attribute(name, 31, &mut attribute)? {
             tree.set_time(attribute.begin_time);
@@ -373,7 +392,10 @@ fn prune(tree: PlaybackTree) -> PlaybackTree {
                 PlaybackTree::Transition(transition)
             }
         }
-        PlaybackTree::BlendSpace(mut tree) => {tree.children=tree.children.into_iter().map(prune).collect();PlaybackTree::BlendSpace(tree)}
+        PlaybackTree::BlendSpace(mut tree) => {
+            tree.children = tree.children.into_iter().map(prune).collect();
+            PlaybackTree::BlendSpace(tree)
+        }
         PlaybackTree::PhaseBlend(mut tree) => {
             tree.children = tree.children.into_iter().map(prune).collect();
             PlaybackTree::PhaseBlend(tree)
@@ -510,8 +532,8 @@ impl PlaybackService for MotionAnimation {
     }
 }
 
+#[path = "motion_grind/animation_owner.rs"]
+mod grind_owner;
 #[cfg(test)]
 #[path = "tests/animation_jump_into.rs"]
 mod jump_into_tests;
-#[path = "motion_grind/animation_owner.rs"]
-mod grind_owner;

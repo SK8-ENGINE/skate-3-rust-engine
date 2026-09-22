@@ -97,8 +97,12 @@ pub fn prepare<E>(
     });
     let job = GroundJob {
         contact_position: copied.position,
-        contact_normal: [geometry.input_up_416.x, geometry.input_up_416.y,
-            geometry.input_up_416.z, copied.normal[3]],
+        contact_normal: [
+            geometry.input_up_416.x,
+            geometry.input_up_416.y,
+            geometry.input_up_416.z,
+            copied.normal[3],
+        ],
         support_frame: copied.support_frame,
         target_position: copied.target_position,
         target_normal: copied.target_normal,
@@ -158,9 +162,15 @@ pub fn sync_frames(
         let angle = (-state.angular_velocity_176).mul_add(state.duration_180, state.angle_172);
         let (sin, cos) = crate::trigonometry::sin_cos(angle);
         // Geometric host frame: do not publish Rodrigues permutation scratch W.
-        let forward = madd([sin, 0., cos, 0.], animation[2][2],
-            madd([0., 1., 0., 0.], animation[2][1],
-                [cos, 0., -sin, 0.].map(|v| v * animation[2][0])));
+        let forward = madd(
+            [sin, 0., cos, 0.],
+            animation[2][2],
+            madd(
+                [0., 1., 0., 0.],
+                animation[2][1],
+                [cos, 0., -sin, 0.].map(|v| v * animation[2][0]),
+            ),
+        );
         // Original has no zero-length replacement on these two normalizations.
         let right = normalize(cross(animation[1], forward));
         animation[0] = right;
@@ -174,22 +184,31 @@ fn madd(v: Vector, scale: f32, offset: Vector) -> Vector {
     std::array::from_fn(|i| v[i].mul_add(scale, offset[i]))
 }
 fn cross(a: Vector, b: Vector) -> Vector {
-    [(-a[2]).mul_add(b[1], a[1]*b[2]), (-a[0]).mul_add(b[2], a[2]*b[0]),
-        (-a[1]).mul_add(b[0], a[0]*b[1]), (-a[3]).mul_add(b[3], a[3]*b[3])]
+    [
+        (-a[2]).mul_add(b[1], a[1] * b[2]),
+        (-a[0]).mul_add(b[2], a[2] * b[0]),
+        (-a[1]).mul_add(b[0], a[0] * b[1]),
+        (-a[3]).mul_add(b[3], a[3] * b[3]),
+    ]
 }
 fn normalize(v: Vector) -> Vector {
     let square = crate::physics::native_arithmetic::dot3(v, v);
     let mut inverse = crate::physics::reciprocal_sqrt::estimate(square);
     for _ in 0..2 {
-        inverse = (inverse*0.5).mul_add((-square).mul_add(inverse*inverse, 1.), inverse);
+        inverse = (inverse * 0.5).mul_add((-square).mul_add(inverse * inverse, 1.), inverse);
     }
-    v.map(|lane| lane*inverse)
+    v.map(|lane| lane * inverse)
 }
 
-fn xyz(v: Vector) -> Vector3 { Vector3::new(v[0], v[1], v[2]) }
+fn xyz(v: Vector) -> Vector3 {
+    Vector3::new(v[0], v[1], v[2])
+}
 fn query_frame(f: Frame) -> super::ground_query::Frame {
     super::ground_query::Frame {
-        right: xyz(f[0]), up: xyz(f[1]), forward: xyz(f[2]), position: xyz(f[3]),
+        right: xyz(f[0]),
+        up: xyz(f[1]),
+        forward: xyz(f[2]),
+        position: xyz(f[3]),
     }
 }
 fn native_frame(f: super::ground_query::Frame) -> Frame {

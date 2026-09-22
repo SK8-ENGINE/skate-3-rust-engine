@@ -1,5 +1,8 @@
 //! Stock FilterMotionGraphIntent constructor and map lifecycle adapter.
-use skate_core::{animation::intent_filter::{Settings, State}, graph::intents::IntentMap};
+use skate_core::{
+    animation::intent_filter::{Settings, State},
+    graph::intents::IntentMap,
+};
 use skate_data::state_graph::attributes::Attributes;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -65,8 +68,16 @@ fn filter(value: Option<&str>) -> u32 {
     // 82BA0A48 and original initializers 82F847C0..4850.
     use skate_core::animation::playback_parameters::intent_key;
     let key = intent_key(value.unwrap_or("none"));
-    ["negate", "abs", "oneMinus", "clamp", "angleFlip", "angleRot90", "angleRotN90"]
-        .iter()
-        .position(|name| intent_key(name) == key)
-        .map_or(0, |index| index as u32 + 1)
+    [
+        "negate",
+        "abs",
+        "oneMinus",
+        "clamp",
+        "angleFlip",
+        "angleRot90",
+        "angleRotN90",
+    ]
+    .iter()
+    .position(|name| intent_key(name) == key)
+    .map_or(0, |index| index as u32 + 1)
 }

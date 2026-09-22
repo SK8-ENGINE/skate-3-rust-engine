@@ -285,6 +285,15 @@ pub struct PlayerInputState {
     pub hips_line_test_1488: LineTestFields,
     pub left_line_test_1536: LineTestFields,
     pub right_line_test_1584: LineTestFields,
+    /// 1632: the hips test's ray *origin*, the hips part's world translation.
+    ///
+    /// StartSkeletonLineTests82DB63C0 keeps the three origins at 1632/1648/1664 beside the
+    /// three results, and `82DB6EC0` publishes this one as PhysOut.Ground +192. The score
+    /// collectors need it as a point in its own right, not only as the start of a ray:
+    /// 82DAC780's flip bonus tests it against the hit, and 82DA7A38's ground query reports
+    /// its height above the hit. The two foot origins are kept by retail too and are not
+    /// read by anything ported here.
+    pub hips_line_origin_1632: RawVector,
     /// Number at player +1304 used to gate the ground-history filter.
     pub ground_history_frames_1304: i32,
 }
@@ -323,6 +332,7 @@ impl Default for PlayerInputState {
             ground_delta_1232: [0; 4],
             damped_ground_delta_1248: [0; 4],
             state_variants_1408: [StateVariantFields::default(); 5],
+            hips_line_origin_1632: [0; 4],
             hips_line_test_1488: LineTestFields::default(),
             left_line_test_1536: LineTestFields::default(),
             right_line_test_1584: LineTestFields::default(),

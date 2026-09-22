@@ -156,13 +156,13 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
     return entry
 
 
-def install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None):
+def install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None,audio_image=None):
     from .setup_state import setup_lock
     with setup_lock(base):
-        return _install(iso,base,game_exe,report,game_root,refresh,finalize)
+        return _install(iso,base,game_exe,report,game_root,refresh,finalize,audio_image)
 
 
-def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None):
+def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None,audio_image=None):
     from .versions import fingerprints, changed_groups, installed, GROUPS
     from .group_receipts import damaged, record
     from .setup_state import atomic_json
@@ -266,7 +266,12 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
             raise RuntimeError('Select the same Xbox game edition used to set up this copy')
         stock=private/'stock'
         if 'core' in groups:
-            converted=exports.core(game_root,stage,work,report,log)
+            # Keep the established exporter call shape when no private runtime image was supplied;
+            # setup tests and third-party exporters can continue to implement the original contract.
+            if audio_image is None:
+                converted=exports.core(game_root,stage,work,report,log)
+            else:
+                converted=exports.core(game_root,stage,work,report,log,audio_image=audio_image)
         else:
             converted=json.loads((stock/'skater-collections.json').read_text(encoding='utf-8'))
         if 'hud' in groups:

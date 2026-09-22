@@ -16,7 +16,7 @@ mod services;
 mod settings;
 pub(crate) use launch::{GroundLaunchInfo, GroundLaunchPhysical};
 pub(crate) use services::{GroundControllers, GroundPhysicalFrame};
-pub(crate) use settings::{GroundSettings, GroundProfiles};
+pub(crate) use settings::{GroundProfiles, GroundSettings};
 use skate_core::{
     math::Vector3,
     physics::{
@@ -159,4 +159,4 @@ fn xyz(v: [f32; 4]) -> Vector3 {
 }
 
 mod surface;
-pub(crate) use surface::{active_surface, surface_key};
+pub(crate) use surface::{active_audio_surface, active_surface, surface_key};

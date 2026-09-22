@@ -142,10 +142,14 @@ impl GameplayCondition {
             "IsFootPlanting" => Self::FootPlanting,
             "ShouldPrepareOneFootAirForFootplant" => Self::PrepareFootplant,
             "HasNewHandPlantPos" => Self::NewHandplantPosition,
-            "ShouldPlayHandPlantAnim" => Self::PlayHandplant { phase: match a.text("anim") {
-                Some("antic") => 2, Some("into") => 1, Some("out") => 0,
-                value => return Err(format!("Unauthored handplant animation phase {value:?}")),
-            } },
+            "ShouldPlayHandPlantAnim" => Self::PlayHandplant {
+                phase: match a.text("anim") {
+                    Some("antic") => 2,
+                    Some("into") => 1,
+                    Some("out") => 0,
+                    value => return Err(format!("Unauthored handplant animation phase {value:?}")),
+                },
+            },
             "IsMovingObject" => Self::IsMovingObject,
             "IsHandPlanting" => Self::HandPlanting {
                 //82BA54A0 compares these authored strings in this order.
@@ -202,12 +206,15 @@ impl GameplayCondition {
             // Both graphs read Air448 and Air212, including the entry frame.
             Self::FootPlanting => p.footplant_active && p.footplant_duration >= 0.0,
             //82BBD7F0, literals820641A8 and8209975C.
-            Self::PrepareFootplant => p.footplant_contact_time >= 0.1 && p.footplant_contact_time <= 0.5,
+            Self::PrepareFootplant => {
+                p.footplant_contact_time >= 0.1 && p.footplant_contact_time <= 0.5
+            }
             Self::NewHandplantPosition => p.handplant_flags & 0x4000_0000 != 0, //82BBDB98
             Self::PlayHandplant { phase } => {
                 //82BBDA98 subtracts one simulation tick before the comparison.
                 let threshold = p.handplant_thresholds[*phase];
-                p.handplant_time - f32::from_bits(0x3c888889) < if *phase == 0 { -threshold } else { threshold }
+                p.handplant_time - f32::from_bits(0x3c888889)
+                    < if *phase == 0 { -threshold } else { threshold }
             }
             Self::DroppingBoard
             | Self::Dark

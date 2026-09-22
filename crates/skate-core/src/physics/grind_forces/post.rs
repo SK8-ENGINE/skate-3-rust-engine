@@ -23,22 +23,33 @@ pub fn check(state: &mut Requests, settings: Settings, frame: &Frame) {
         > settings.max_displacement_208 * settings.max_displacement_208
     {
         state.request(1, 0.0);
-    } else if regional_force(frame, settings.max_body_contact_168, settings.max_arm_contact_164) {
+    } else if regional_force(
+        frame,
+        settings.max_body_contact_168,
+        settings.max_arm_contact_164,
+    ) {
         state.request(0, 0.0);
     }
     //82D90AB8. Closing-velocity checks still run after displacement/contact.
     if frame.board_contact {
         let v = frame.closing_velocity;
         let m = frame.world_to_animation;
-        let local: [f32; 4] = core::array::from_fn(|i| {
-            m[2][i].mul_add(v[2], m[1][i].mul_add(v[1], m[0][i] * v[0]))
-        });
-        let square = dot3([local[0], 0.0, local[2], local[3]],
-            [local[0], 0.0, local[2], local[3]]);
-        let length = if square == 0.0 { 0.0 } else { square * inverse_length_squared(square, 2) };
+        let local: [f32; 4] =
+            core::array::from_fn(|i| m[2][i].mul_add(v[2], m[1][i].mul_add(v[1], m[0][i] * v[0])));
+        let square = dot3(
+            [local[0], 0.0, local[2], local[3]],
+            [local[0], 0.0, local[2], local[3]],
+        );
+        let length = if square == 0.0 {
+            0.0
+        } else {
+            square * inverse_length_squared(square, 2)
+        };
         if length > settings.xz_acceleration_204 || local[1].abs() > 100.0 {
             state.request(2, 0.0);
-            if regional_force(frame, 1.0, 20.0) { state.request(0, 0.0); }
+            if regional_force(frame, 1.0, 20.0) {
+                state.request(0, 0.0);
+            }
         }
     }
     //82D909B0 always checks all three corresponding deck/Input axes.

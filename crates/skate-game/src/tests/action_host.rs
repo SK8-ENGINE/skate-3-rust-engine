@@ -35,10 +35,20 @@ fn gesture_behavior_publishes_and_releases_the_stock_tre_flip_intent() {
         config,
         parameters: Vec::new(),
     };
-    let mut host = ActionHost::new(ActionInstances::new(vec![instance]), OperationRemap {
-        behaviors: vec![0], conditions: Vec::new(), hooks: Vec::new(),
-    });
-    let frame = Frame { dt: 1.0 / 60.0, current: None, last: None, state_times: Vec::new() };
+    let mut host = ActionHost::new(
+        ActionInstances::new(vec![instance]),
+        OperationRemap {
+            behaviors: vec![0],
+            conditions: Vec::new(),
+            hooks: Vec::new(),
+        },
+    );
+    let frame = Frame {
+        dt: 1.0 / 60.0,
+        current: None,
+        last: None,
+        state_times: Vec::new(),
+    };
     for (mirrored, expected) in [(false, "360Flip"), (true, "Laserflip")] {
         host.stance = Some((false, mirrored));
         host.action_intents.insert("360Flip", 1.0);
@@ -59,10 +69,24 @@ fn board_adjust_native_wrap_lifecycle_and_release() {
     config.mg_intent_mag = Some("RightBoardAdjustMag".into());
     config.mg_intent_angle = Some("RightBoardAdjustAngle".into());
     config.negate_on_mirror = true;
-    let mut host = ActionHost::new(ActionInstances::new(vec![ActionInstance {
-        operation: ActionOperation::BoardAdjust, config, parameters: vec![],
-    }]), OperationRemap { behaviors: vec![0, 0], conditions: vec![], hooks: vec![] });
-    let frame = Frame { dt: 1.0 / 60.0, current: None, last: None, state_times: vec![] };
+    let mut host = ActionHost::new(
+        ActionInstances::new(vec![ActionInstance {
+            operation: ActionOperation::BoardAdjust,
+            config,
+            parameters: vec![],
+        }]),
+        OperationRemap {
+            behaviors: vec![0, 0],
+            conditions: vec![],
+            hooks: vec![],
+        },
+    );
+    let frame = Frame {
+        dt: 1.0 / 60.0,
+        current: None,
+        last: None,
+        state_times: vec![],
+    };
     let pi = f32::from_bits(0x40490fdb);
     for mirrored in [false, true] {
         host.stance = Some((false, mirrored));
@@ -71,19 +95,32 @@ fn board_adjust_native_wrap_lifecycle_and_release() {
         host.action_intents.insert("BoardAdjustMag", 0.9);
         // Expected outputs from82BA2D70..2E80: latch at seam, hold,
         // unlatch crossing back; then exercise the opposite seam direction.
-        for (raw, expected) in [(3.0, 3.0), (-3.0, pi), (-2.0, pi),
-            (2.0, 2.0), (0.0, 0.0), (-3.0, -3.0), (3.0, -pi),
-            (2.0, -pi), (-2.0, -2.0)] {
+        for (raw, expected) in [
+            (3.0, 3.0),
+            (-3.0, pi),
+            (-2.0, pi),
+            (2.0, 2.0),
+            (0.0, 0.0),
+            (-3.0, -3.0),
+            (3.0, -pi),
+            (2.0, -pi),
+            (-2.0, -2.0),
+        ] {
             host.action_intents.insert("BoardAdjustAngle", raw);
             Host::update(&mut host, 0, [0; 6], &frame);
-            assert_eq!(host.motion_intents.get("RightBoardAdjustAngle"),
-                Some(&(if mirrored { -expected } else { expected })));
+            assert_eq!(
+                host.motion_intents.get("RightBoardAdjustAngle"),
+                Some(&(if mirrored { -expected } else { expected }))
+            );
         }
         // Another instance has its own seam state, even for the same config.
         Host::begin(&mut host, 1, [0; 6], &frame);
         host.action_intents.insert("BoardAdjustAngle", 3.0);
         Host::update(&mut host, 1, [0; 6], &frame);
-        assert_eq!(host.motion_intents.get("RightBoardAdjustAngle"), Some(&(if mirrored { -3.0 } else { 3.0 })));
+        assert_eq!(
+            host.motion_intents.get("RightBoardAdjustAngle"),
+            Some(&(if mirrored { -3.0 } else { 3.0 }))
+        );
         // One missing member removes the PAIR and resets the latch.
         host.action_intents.remove("BoardAdjustMag");
         Host::update(&mut host, 0, [0; 6], &frame);
@@ -91,7 +128,10 @@ fn board_adjust_native_wrap_lifecycle_and_release() {
         assert!(!host.motion_intents.contains_key("RightBoardAdjustAngle"));
         host.action_intents.insert("BoardAdjustMag", 0.0); // present zero is valid
         Host::update(&mut host, 0, [0; 6], &frame);
-        assert_eq!(host.motion_intents.get("RightBoardAdjustAngle"), Some(&(if mirrored { -3.0 } else { 3.0 })));
+        assert_eq!(
+            host.motion_intents.get("RightBoardAdjustAngle"),
+            Some(&(if mirrored { -3.0 } else { 3.0 }))
+        );
         host.motion_intents.insert("Unrelated", 0.75);
         Host::end(&mut host, 0, [0; 6], &frame);
         assert!(!host.motion_intents.contains_key("RightBoardAdjustMag"));
@@ -106,21 +146,41 @@ fn board_adjust_stock_constructor_defaults_and_overrides() {
     use crate::graph_runtime::{CompiledGraph, LoadedGraph};
     use skate_data::state_graph::{StateGraph, binding::Binding};
     let root = std::path::PathBuf::from(std::env::var_os("SKATE3_ASSET_ROOT").unwrap());
-    let source = StateGraph::load(&root.join("private/stock/data/state/ActionGraph_OnBoard.stategraph")).unwrap();
+    let source =
+        StateGraph::load(&root.join("private/stock/data/state/ActionGraph_OnBoard.stategraph"))
+            .unwrap();
     let binding = Binding::from_graph(&source).unwrap();
     let runtime = CompiledGraph::from_binding(&binding).unwrap();
-    let graph = LoadedGraph { source, binding, runtime };
-    let host = ActionHost::from_graph(&graph, &skate_data::collections::Collections::load(&root).unwrap()).unwrap();
-    let nodes: Vec<_> = host.instances.operations.iter().filter(|op| matches!(op.operation, ActionOperation::BoardAdjust)).collect();
+    let graph = LoadedGraph {
+        source,
+        binding,
+        runtime,
+    };
+    let host = ActionHost::from_graph(
+        &graph,
+        &skate_data::collections::Collections::load(&root).unwrap(),
+    )
+    .unwrap();
+    let nodes: Vec<_> = host
+        .instances
+        .operations
+        .iter()
+        .filter(|op| matches!(op.operation, ActionOperation::BoardAdjust))
+        .collect();
     assert!(!nodes.is_empty());
     for direction in ["Left", "Right", "Up", "Down"] {
-        assert!(nodes.iter().any(|op| op.config.mg_intent_mag.as_deref() == Some(format!("{direction}BoardAdjustMag").as_str())));
+        assert!(nodes.iter().any(|op| op.config.mg_intent_mag.as_deref()
+            == Some(format!("{direction}BoardAdjustMag").as_str())));
     }
     assert!(nodes.iter().any(|op| op.config.negate_on_mirror));
     assert!(nodes.iter().any(|op| !op.config.negate_on_mirror));
     // Right.Regular omits negateOnMirror; Right.Switch explicitly disables it.
-    assert!(nodes.iter().any(|op| op.config.angle_filter == 6 && op.config.mg_intent_mag.as_deref() == Some("RightBoardAdjustMag") && op.config.negate_on_mirror));
-    assert!(nodes.iter().any(|op| op.config.angle_filter == 6 && op.config.mg_intent_mag.as_deref() == Some("LeftBoardAdjustMag") && !op.config.negate_on_mirror));
+    assert!(nodes.iter().any(|op| op.config.angle_filter == 6
+        && op.config.mg_intent_mag.as_deref() == Some("RightBoardAdjustMag")
+        && op.config.negate_on_mirror));
+    assert!(nodes.iter().any(|op| op.config.angle_filter == 6
+        && op.config.mg_intent_mag.as_deref() == Some("LeftBoardAdjustMag")
+        && !op.config.negate_on_mirror));
 }
 
 #[test]
@@ -188,12 +248,17 @@ fn released_grab_source_cannot_retain_its_motion_intent() {
         },
     );
     host.motion_intents.insert("WantsLeftAirGrab", 1.0);
-    Host::update(&mut host, 0, [0; 6], &Frame {
-        dt: 1.0 / 60.0,
-        current: None,
-        last: None,
-        state_times: Vec::new(),
-    });
+    Host::update(
+        &mut host,
+        0,
+        [0; 6],
+        &Frame {
+            dt: 1.0 / 60.0,
+            current: None,
+            last: None,
+            state_times: Vec::new(),
+        },
+    );
     assert!(!host.motion_intents.contains_key("WantsLeftAirGrab"));
 }
 

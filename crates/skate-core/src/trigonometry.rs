@@ -74,11 +74,19 @@ pub fn cos(angle: f32) -> f32 {
     let x20 = x10 * x10;
     let mut value = (-0.5_f32).mul_add(x2, 1.0);
     for (power, coefficient) in [
-        (x4, 0x3d2a_aaab), (x6, 0xbab6_0b61), (x8, 0x37d0_0d01),
-        (x10, 0xb493_f27e), (x12, 0x310f_76c8), (x14, 0xad49_cba5),
-        (x16, 0x2957_3f9f), (x18, 0xa534_13c3), (x20, 0x20f2_a15d),
+        (x4, 0x3d2a_aaab),
+        (x6, 0xbab6_0b61),
+        (x8, 0x37d0_0d01),
+        (x10, 0xb493_f27e),
+        (x12, 0x310f_76c8),
+        (x14, 0xad49_cba5),
+        (x16, 0x2957_3f9f),
+        (x18, 0xa534_13c3),
+        (x20, 0x20f2_a15d),
         (x22, 0x9c86_71cb),
-    ] { value = f32::from_bits(coefficient).mul_add(power, value); }
+    ] {
+        value = f32::from_bits(coefficient).mul_add(power, value);
+    }
     value
 }
 

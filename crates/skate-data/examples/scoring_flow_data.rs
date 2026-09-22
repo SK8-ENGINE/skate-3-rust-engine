@@ -32,10 +32,16 @@ fn frame(
         position: [0., 0., 0.],
         velocity: [0., 0., 5.],
         forward: [0., 0., 1.],
+        rider_up: [0., 1., 0.],
+        rider_forward: [0., 0., 1.],
         switch: false,
         fakie: false,
         nollie: false,
         body_flip: false,
+        body_flip_side: false,
+        hips_position: [0., 1., 0.],
+        hips_ground: None,
+        hips_surface: 0,
         suspend_air: false,
         landing: Default::default(),
         teleported: false,
@@ -147,8 +153,110 @@ fn main() -> Result<(), String> {
     if suspended.hud_input().sequence_score != held_score {
         return Err("Air452 suspension accrued distance/height reward".into());
     }
+    // 82DA8550 banks the five air metrics by bare id. They have no authored record, so a
+    // lookup that demanded one dropped every one of them and an air scored its base trick and
+    // nothing else. A moving, spinning air must bank far more than its authored 100.
+    let mut moving = scoring_runtime::Runtime::load(&data)?;
+    moving.advance(frame(0, FilteredCategory::Ground, None))?;
+    let airborne = 60;
+    for tick in 1..=airborne {
+        let t = tick as f32 / airborne as f32;
+        let turn = t * std::f32::consts::TAU;
+        let mut f = frame(tick, FilteredCategory::Air, Some(kickflip));
+        // 10 m along Z, a 3 m arc of height, and one full rotation.
+        f.position = [0., 3. * (t * std::f32::consts::PI).sin(), 10. * t];
+        // The rider turns, not the deck: retail's spin accumulator measures the skeleton
+        // root, so rotating the board alone must not register as a spin.
+        f.rider_forward = [turn.sin(), 0., turn.cos()];
+        moving.advance(f)?;
+    }
+    for tick in airborne + 1..airborne + 10 {
+        moving.advance(frame(tick, FilteredCategory::Ground, None))?;
+    }
+    let banked = moving.session.holder.snapshot.last_reward;
+    if banked <= 100. {
+        return Err(format!(
+            "A 10 m, 3 m-high, 360-degree air banked {banked}, which is no more than the \
+             authored kickflip alone: the air metric rewards are being discarded again"
+        ));
+    }
+    println!("Moving 360 air over 10 m and 3 m of height banked {banked:.0} (authored base 100)");
+
+    // 82DA93D8's one-shot class-3 bonus, worth 0x600 = 4.0 times the trick's own points.
+    // 82DAC780 admits it only while the hips' ground contact lies between the deck and the
+    // hips, with neither vector degenerate.
+    let flipped = |contact: Option<[f32; 3]>| -> Result<f32, String> {
+        let mut run = scoring_runtime::Runtime::load(&data)?;
+        run.advance(frame(0, FilteredCategory::Ground, None))?;
+        for tick in 1..61 {
+            let mut f = frame(tick, FilteredCategory::Air, Some(kickflip));
+            f.position = [0., 1., 0.];
+            f.hips_position = [0., 2., 0.];
+            f.hips_ground = contact;
+            run.advance(f)?;
+        }
+        for tick in 61..70 {
+            run.advance(frame(tick, FilteredCategory::Ground, None))?;
+        }
+        Ok(run.session.holder.snapshot.last_reward)
+    };
+    // Contact between deck (y=1) and hips (y=2): the two vectors oppose, so it pays.
+    let with_bonus = flipped(Some([0., 1.5, 0.]))?;
+    // Contact below both: the vectors agree, so it must not pay.
+    let without = flipped(Some([0., 0.5, 0.]))?;
+    let no_contact = flipped(None)?;
+    if without != 100. || no_contact != 100. {
+        return Err(format!(
+            "The class-3 bonus paid without its geometric gate: {without} / {no_contact}"
+        ));
+    }
+    if with_bonus != 500. {
+        return Err(format!(
+            "Expected the authored 100 plus four times it, got {with_bonus}"
+        ));
+    }
+    println!("Class-3 one-shot bonus: kickflip banks {with_bonus:.0} through the gate, {without:.0} outside it");
+
+    // The gap/context collector: four runs of horizontal distance, two of them gated on
+    // being more than 3 m and 6 m above the ground under the hips. 20 m spent above 6 m
+    // tops out both of those curves, at 900 and 1800.
+    let gap = |clearance: f32| -> Result<f32, String> {
+        let mut run = scoring_runtime::Runtime::load(&data)?;
+        // The deck is held still and above the contact: that zeroes the air distance and
+        // height metrics and keeps 82DAC780's flip bonus out of the measurement, so what
+        // is left is the gap runs alone.
+        let mut entry = frame(0, FilteredCategory::Ground, None);
+        entry.position = [0., 10., 0.];
+        entry.hips_position = [0., 10., 0.];
+        run.advance(entry)?;
+        for tick in 1..=60 {
+            // The run starts on its first active frame, so travel must begin at zero for
+            // the distance to come out at exactly 20 m.
+            let travelled = 20. * (tick - 1) as f32 / 59.;
+            let mut f = frame(tick, FilteredCategory::Air, Some(kickflip));
+            f.position = [0., 10., 0.];
+            f.hips_position = [0., 10., travelled];
+            f.hips_ground = Some([0., 10. - clearance, travelled]);
+            run.advance(f)?;
+        }
+        for tick in 61..70 {
+            run.advance(frame(tick, FilteredCategory::Ground, None))?;
+        }
+        Ok(run.session.holder.snapshot.last_reward)
+    };
+    let over_a_gap = gap(7.)?;
+    let low = gap(1.)?;
+    if low != 100. {
+        return Err(format!("A 1 m clearance must clear no gap, got {low}"));
+    }
+    if (over_a_gap - 2800.).abs() > 0.5 {
+        return Err(format!(
+            "20 m spent 7 m up should bank 100 + 900 + 1800, got {over_a_gap}"
+        ));
+    }
+    println!("Gap collector: 20 m cleared 7 m up banks {over_a_gap:.0}, the same air 1 m up banks {low:.0}");
     println!(
-        "Scoring data audit: authored kickflip credited once; landing display persists; timer uses seconds; line expiry clears score; teleport cancels pending rewards and multiplier; Air452 freezes continuous metrics"
+        "Scoring data audit: authored kickflip credited once; landing display persists; timer uses seconds; line expiry clears score; teleport cancels pending rewards and multiplier; Air452 freezes continuous metrics; air metrics reach the bank"
     );
     Ok(())
 }

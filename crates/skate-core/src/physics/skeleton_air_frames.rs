@@ -52,7 +52,20 @@ pub fn update_known_air_roots(
         roots.heading_alignment[3] = [0.0; 4];
         roots.initialize_heading = false;
     }
-    if revert.requested {
+    // A zero frame count cannot express "pi spread over N frames", and dividing
+    // by it produces +inf, which `sin_cos` turns into NaN (its range reduction
+    // computes `fma(-2pi, inf, inf)`). That NaN reaches every row of
+    // `animation_to_world`, because `world[3]` below is rebuilt from
+    // `world[0..2]`, and from there the deck's torque -- the crash reported as
+    // "Non-finite torque_acceleration before shared solve".
+    //
+    // Retail's animation supplies a real frame count alongside the request bit.
+    // This engine's does not: `air_dismount_revert_frames` is written only as 0
+    // (`skater_animation.rs`, `skater_animation/state.rs`), while the graph does
+    // raise the request bit, so the division was guaranteed to be by zero. Until
+    // the producer is ported, a revert with no frames is treated as no revert --
+    // skipping a rotation is recoverable, poisoning the skeleton root is not.
+    if revert.requested && revert.frames > 0 {
         let mut angle = f32::from_bits(0x4049_0fdb) / revert.frames as f32;
         if !revert.goofy {
             angle = -angle;
@@ -120,4 +133,45 @@ pub fn update_plant_roots(
     });
     roots.animation_to_world = orthonormalize(world);
     roots.world_to_animation = inverse_rigid(&roots.animation_to_world);
+}
+
+#[cfg(test)]
+mod revert_guard_tests {
+    use super::*;
+
+    fn finite(m: &Transform) -> bool {
+        m.iter().flatten().all(|v| v.is_finite())
+    }
+
+    /// The animation graph raises the dismount-revert request bit while this
+    /// engine's `air_dismount_revert_frames` is still always 0, which used to
+    /// divide pi by zero and poison every row of the skeleton root with NaN --
+    /// the "Non-finite torque_acceleration before shared solve" landing crash.
+    #[test]
+    fn zero_frame_dismount_revert_cannot_poison_the_air_root() {
+        for frames in [0, 1, 12] {
+            let mut roots = SkeletonRootFrames::default();
+            roots.initialize_heading = false;
+            update_known_air_roots(
+                &mut roots,
+                &IDENTITY,
+                [1.0, 2.0, 3.0, 1.0],
+                [0.0, 0.5, 0.0, 1.0],
+                AirDismountRevert {
+                    requested: true,
+                    frames,
+                    goofy: false,
+                },
+            );
+            assert!(
+                finite(&roots.animation_to_world),
+                "frames={frames} left a non-finite animation_to_world: {:?}",
+                roots.animation_to_world
+            );
+            assert!(
+                finite(&roots.heading_alignment) && finite(&roots.world_to_animation),
+                "frames={frames} left a non-finite derived frame"
+            );
+        }
+    }
 }

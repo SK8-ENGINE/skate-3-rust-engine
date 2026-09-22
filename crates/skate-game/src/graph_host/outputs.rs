@@ -15,7 +15,9 @@ struct AuthoredSignals {
 
 impl AuthoredSignals {
     fn from_values(values: &IntentMap) -> Self {
-        Self { values: values.clone() }
+        Self {
+            values: values.clone(),
+        }
     }
 
     fn into_values(self) -> IntentMap {
@@ -73,7 +75,9 @@ pub struct MotionEffects {
 
 impl MotionEffects {
     pub fn from_values(values: &IntentMap) -> Self {
-        Self { values: AuthoredSignals::from_values(values) }
+        Self {
+            values: AuthoredSignals::from_values(values),
+        }
     }
 
     pub fn apply_to(&self, destination: &mut IntentMap) {
@@ -88,7 +92,9 @@ pub struct ActionInput {
 
 impl ActionInput {
     pub fn from_values(values: &IntentMap) -> Self {
-        Self { values: AuthoredSignals::from_values(values) }
+        Self {
+            values: AuthoredSignals::from_values(values),
+        }
     }
 
     pub(crate) fn into_values(self) -> IntentMap {
@@ -103,7 +109,9 @@ pub struct PriorMotionState {
 
 impl PriorMotionState {
     pub fn from_values(values: &IntentMap) -> Self {
-        Self { values: AuthoredSignals::from_values(values) }
+        Self {
+            values: AuthoredSignals::from_values(values),
+        }
     }
 
     pub(crate) fn into_values(self) -> IntentMap {
@@ -172,9 +180,7 @@ impl GraphCapabilityReport {
         }
         Err(format!(
             "{graph} contains unsupported authored features: operations={:?}, conditions={:?}, hooks={:?}",
-            self.unsupported_operations,
-            self.unsupported_conditions,
-            self.unsupported_hooks,
+            self.unsupported_operations, self.unsupported_conditions, self.unsupported_hooks,
         ))
     }
 }
@@ -223,8 +229,14 @@ impl ActionGraphOutput {
                 wipeout: WipeoutControls {
                     request: action_intents.contains_key("WipeOutRequest"),
                     air_body_tweak: [
-                        action_intents.get("OB_AirBodyTweakX").copied().unwrap_or(0.0),
-                        action_intents.get("OB_AirBodyTweakY").copied().unwrap_or(0.0),
+                        action_intents
+                            .get("OB_AirBodyTweakX")
+                            .copied()
+                            .unwrap_or(0.0),
+                        action_intents
+                            .get("OB_AirBodyTweakY")
+                            .copied()
+                            .unwrap_or(0.0),
                     ],
                     gesture: match (
                         action_intents.get("WipeoutGestureX"),

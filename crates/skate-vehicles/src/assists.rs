@@ -1,7 +1,7 @@
 //! Optional arcade assists, not recovered Burnout constants. Apply angular
 //! impulses through the rigid body; never overwrite its transform or add lift.
-use crate::{Vehicle, rapier3d::prelude::*};
 use crate::rapier3d::utils::AngularInertiaOps;
+use crate::{Vehicle, rapier3d::prelude::*};
 
 pub(crate) fn apply(v: &Vehicle, bodies: &mut RigidBodySet, dt: f32) {
     let mut contacts = 0;
@@ -23,8 +23,7 @@ pub(crate) fn apply(v: &Vehicle, bodies: &mut RigidBodySet, dt: f32) {
             // Follow banked support, not global up. Stabilize roll without steering
             // the car or fighting the pitch needed to climb a ramp.
             let error = rotation.inverse() * up.cross(normal);
-            acceleration.z = (error.z * 24. - local_omega.z * 8.)
-                * v.definition.ground_stability;
+            acceleration.z = (error.z * 24. - local_omega.z * 8.) * v.definition.ground_stability;
         }
     } else if contacts == 0 && v.occupied && v.definition.air_control > 0. {
         // Rate target keeps repeated input controllable. Neutral stick damps only

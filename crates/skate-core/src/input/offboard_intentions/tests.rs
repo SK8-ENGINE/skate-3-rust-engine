@@ -74,7 +74,11 @@ fn full_trigger_edges_publish_board_actions_together_and_do_not_repeat() {
     words[11] = 1.0f32.to_bits();
     words[12] = 1.0f32.to_bits();
     let output = values(words, u32::MAX, true);
-    let board: Vec<_> = output.iter().filter(|i| i.name.ends_with("Board")).map(|i| i.name).collect();
+    let board: Vec<_> = output
+        .iter()
+        .filter(|i| i.name.ends_with("Board"))
+        .map(|i| i.name)
+        .collect();
     assert_eq!(board, ["OB_DropBoard", "OB_ThrowBoard", "OB_RetrieveBoard"]);
     words[4] = words[11];
     words[5] = words[12];
@@ -102,17 +106,35 @@ fn sprint_uses_competing_held_timers_and_axes_preserve_zero_presence() {
     words[13] = 1 << 30;
     let output = values(words, 0, false);
     assert!(has(&output, "OB_DoAirBodyTweak"));
-    assert_eq!(output.iter().find(|i| i.name == "OB_LookAtX").unwrap().value, -0.5);
-    assert_eq!(output.iter().find(|i| i.name == "OB_AirBodyTweakX").unwrap().value, -0.5);
+    assert_eq!(
+        output
+            .iter()
+            .find(|i| i.name == "OB_LookAtX")
+            .unwrap()
+            .value,
+        -0.5
+    );
+    assert_eq!(
+        output
+            .iter()
+            .find(|i| i.name == "OB_AirBodyTweakX")
+            .unwrap()
+            .value,
+        -0.5
+    );
 }
 
 fn analog(x: f32, z: f32, forward: [f32; 4], correction: Option<[f32; 4]>) -> [OffboardIntent; 4] {
     let mut words = [0; 26];
     words[7] = x.to_bits();
     words[8] = z.to_bits();
-    produce_analog(&DerivedControllerInput::from_words(words), AnalogObservation {
-        effective_skeleton_z: forward, biped_correction: correction,
-    })
+    produce_analog(
+        &DerivedControllerInput::from_words(words),
+        AnalogObservation {
+            effective_skeleton_z: forward,
+            biped_correction: correction,
+        },
+    )
 }
 
 #[test]
@@ -141,7 +163,10 @@ fn obstacle_correction_stops_direct_approach_but_preserves_tangent_motion() {
 #[test]
 fn zero_and_tiny_headings_use_original_length_threshold() {
     assert_eq!(analog(0.0, 1.0, [0.0; 4], None)[0].value, 0.0);
-    assert_eq!(analog(0.0, 1.0, [0.0, 0.0, 0.5e-6, 0.0], None)[0].value, 0.0);
+    assert_eq!(
+        analog(0.0, 1.0, [0.0, 0.0, 0.5e-6, 0.0], None)[0].value,
+        0.0
+    );
     assert!((analog(0.0, 1.0, [0.0, 0.0, 2.0e-6, 0.0], None)[0].value - 1.0).abs() < 1e-6);
     let zero = analog(0.0, 0.0, [0.0, 0.0, 1.0, 0.0], None);
     assert!(zero.iter().all(|intent| intent.value == 0.0));

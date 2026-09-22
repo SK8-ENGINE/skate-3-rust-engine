@@ -47,7 +47,10 @@ impl IntentMap {
     }
 
     pub fn get(&self, name: IntentName) -> Option<f32> {
-        let hash = name.0.iter().fold(0u32, |sum, word| sum.wrapping_add(*word));
+        let hash = name
+            .0
+            .iter()
+            .fold(0u32, |sum, word| sum.wrapping_add(*word));
         self.buckets[hash as usize % BUCKET_COUNT]
             .iter()
             .find(|entry| entry.name == name)

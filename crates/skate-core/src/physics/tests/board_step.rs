@@ -11,10 +11,10 @@ use crate::physics::{
 use crate::riding::braking::{BrakeInput, BrakeSettings, calculate_braking};
 use crate::riding::push::{PushInput, PushLimits, enqueue_push};
 
-#[path = "hook_step.rs"]
-mod hook_step;
 #[path = "contact_reports.rs"]
 mod contact_reports;
+#[path = "hook_step.rs"]
+mod hook_step;
 
 fn bodies() -> [BodySnapshot; BODY_COUNT] {
     let poses = default_live_body_transforms();

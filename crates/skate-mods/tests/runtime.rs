@@ -152,7 +152,14 @@ fn examples_load_and_run() {
     m.scan(true);
     assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
     let ids: Vec<_> = m.packages.keys().cloned().collect();
-    assert_eq!(ids, vec!["community.mario-kart", "community.native-trainer"]);
+    assert_eq!(
+        ids,
+        vec![
+            "community.freestyle-mx",
+            "community.mario-kart",
+            "community.native-trainer"
+        ]
+    );
     for id in ids {
         m.enable(&id, true).unwrap();
         for _ in 0..5 {
@@ -394,10 +401,14 @@ fn showcase_hold_fakie_is_optional_live_and_reversible() {
     for enabled in [true, false] {
         m.commands.clear();
         m.setting(id, "hold_fakie", json!(enabled)).unwrap();
-        let tuning = m.commands.iter().find_map(|(_, command)| match command {
-            Command::Trainer { tuning } => Some(tuning),
-            _ => None,
-        }).expect("setting update must emit native trainer tuning");
+        let tuning = m
+            .commands
+            .iter()
+            .find_map(|(_, command)| match command {
+                Command::Trainer { tuning } => Some(tuning),
+                _ => None,
+            })
+            .expect("setting update must emit native trainer tuning");
         assert_eq!(tuning.hold_fakie, enabled);
         assert_eq!(tuning.pop, 1.);
         assert!(tuning.valid());
@@ -409,72 +420,135 @@ fn showcase_hold_fakie_is_optional_live_and_reversible() {
 
 #[test]
 fn vehicle_api_validates_and_queues_owner_scoped_commands() {
- let f=Fixture::new(r#"return {on_load=function()
+    let f = Fixture::new(
+        r#"return {on_load=function()
  sdk.vehicle.spawn('kart','vehicle.json',{0,2,0},0)
  sdk.vehicle.tune('kart',{max_speed=20})
  sdk.vehicle.control('kart',{throttle=1,steering=0.2})
  sdk.vehicle.enter('kart');sdk.vehicle.exit('kart');sdk.vehicle.reset('kart',{0,2,0},0);sdk.vehicle.remove('kart')
- end}"#);
- let mut m=f.manager();m.enable("example",true).unwrap();assert_eq!(m.commands.len(),7);
- assert!(m.commands.iter().all(|(owner,_)|owner=="example"));
- assert!(matches!(&m.commands[0].1,Command::VehicleSpawn{definition,..} if definition=="vehicle.json"));
- assert!(matches!(&m.commands[2].1,Command::VehicleControl{controls,..} if controls.throttle==1.));
- m.enable("example",false).unwrap();assert!(m.commands.is_empty());
+ end}"#,
+    );
+    let mut m = f.manager();
+    m.enable("example", true).unwrap();
+    assert_eq!(m.commands.len(), 7);
+    assert!(m.commands.iter().all(|(owner, _)| owner == "example"));
+    assert!(
+        matches!(&m.commands[0].1,Command::VehicleSpawn{definition,..} if definition=="vehicle.json")
+    );
+    assert!(
+        matches!(&m.commands[2].1,Command::VehicleControl{controls,..} if controls.throttle==1.)
+    );
+    m.enable("example", false).unwrap();
+    assert!(m.commands.is_empty());
 }
 #[test]
 fn vehicle_api_rejects_traversal_and_invalid_controls() {
- for script in ["sdk.vehicle.spawn('kart','../vehicle.json',{0,0,0},0)","sdk.vehicle.control('kart',{throttle=2})","sdk.vehicle.tune('kart',{max_speed=-1})"] {
- let f=Fixture::new(&format!("return {{on_load=function() {script} end}}"));let mut m=f.manager();m.enable("example",true).unwrap();assert!(!m.packages["example"].running());assert!(m.commands.is_empty());
- }
+    for script in [
+        "sdk.vehicle.spawn('kart','../vehicle.json',{0,0,0},0)",
+        "sdk.vehicle.control('kart',{throttle=2})",
+        "sdk.vehicle.tune('kart',{max_speed=-1})",
+    ] {
+        let f = Fixture::new(&format!("return {{on_load=function() {script} end}}"));
+        let mut m = f.manager();
+        m.enable("example", true).unwrap();
+        assert!(!m.packages["example"].running());
+        assert!(m.commands.is_empty());
+    }
 }
 
 #[test]
 fn kart_controller_reset_is_edge_triggered_and_rebindable() {
- let f=Fixture::new("return {}");let mut m=Manager::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/examples"),f.0.join("kart-settings"));
- m.snapshot=json!({"player":{"position":[0,0,0],"heading":0},"keys":{},"vehicles":{"community.mario-kart":{"kart":{"position":[2,1,3],"heading":0.5,"occupied":true,"phase":"driving","speed":0,"ready":true}}},"vehicle_input":{"throttle":0,"steering":0,"brake":0,"handbrake":false,"interact":false,"pad_buttons":0}});
- m.scan(true);m.enable("community.mario-kart",true).unwrap();m.commands.clear();
- for buttons in [128,128,128,0,128] {m.snapshot["vehicle_input"]["pad_buttons"]=json!(buttons);m.dispatch("on_fixed_update",json!({"dt":0.016}));}
- assert_eq!(m.commands.iter().filter(|(_,c)|matches!(c,Command::VehicleReset{..})).count(),2);
- m.setting("community.mario-kart","reset_button",json!("Left stick")).unwrap();m.commands.clear();
- for buttons in [0,128,0,64,64] {m.snapshot["vehicle_input"]["pad_buttons"]=json!(buttons);m.dispatch("on_fixed_update",json!({"dt":0.016}));}
- assert_eq!(m.commands.iter().filter(|(_,c)|matches!(c,Command::VehicleReset{..})).count(),1);
- assert!(m.packages["community.mario-kart"].running());
- m.commands.clear();
- m.snapshot["vehicle_input"]["pitch"]=json!(0.75);
- m.dispatch("on_fixed_update",json!({"dt":0.016}));
- assert!(m.commands.iter().any(|(_,c)|matches!(c,Command::VehicleControl{controls,..} if controls.pitch==0.75)));
+    let f = Fixture::new("return {}");
+    let mut m = Manager::new(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/examples"),
+        f.0.join("kart-settings"),
+    );
+    m.snapshot = json!({"player":{"position":[0,0,0],"heading":0},"keys":{},"vehicles":{"community.mario-kart":{"kart":{"position":[2,1,3],"heading":0.5,"occupied":true,"phase":"driving","speed":0,"ready":true}}},"vehicle_input":{"throttle":0,"steering":0,"brake":0,"handbrake":false,"interact":false,"pad_buttons":0}});
+    m.scan(true);
+    m.enable("community.mario-kart", true).unwrap();
+    m.commands.clear();
+    for buttons in [128, 128, 128, 0, 128] {
+        m.snapshot["vehicle_input"]["pad_buttons"] = json!(buttons);
+        m.dispatch("on_fixed_update", json!({"dt":0.016}));
+    }
+    assert_eq!(
+        m.commands
+            .iter()
+            .filter(|(_, c)| matches!(c, Command::VehicleReset { .. }))
+            .count(),
+        2
+    );
+    m.setting("community.mario-kart", "reset_button", json!("Left stick"))
+        .unwrap();
+    m.commands.clear();
+    for buttons in [0, 128, 0, 64, 64] {
+        m.snapshot["vehicle_input"]["pad_buttons"] = json!(buttons);
+        m.dispatch("on_fixed_update", json!({"dt":0.016}));
+    }
+    assert_eq!(
+        m.commands
+            .iter()
+            .filter(|(_, c)| matches!(c, Command::VehicleReset { .. }))
+            .count(),
+        1
+    );
+    assert!(m.packages["community.mario-kart"].running());
+    m.commands.clear();
+    m.snapshot["vehicle_input"]["pitch"] = json!(0.75);
+    m.dispatch("on_fixed_update", json!({"dt":0.016}));
+    assert!(
+        m.commands
+            .iter()
+            .any(|(_, c)| matches!(c,Command::VehicleControl{controls,..} if controls.pitch==0.75))
+    );
 }
 
 #[test]
 fn fingerprints_are_portable_and_include_assets() {
-    let a=Fixture::new("return {}");let b=Fixture::new("return {}");
-    std::fs::write(a.0.join("mods/example/asset.txt"),"same").unwrap();
-    std::fs::write(b.0.join("mods/example/asset.txt"),"same").unwrap();
-    let first=a.manager().packages["example"].content_fingerprint();
-    assert_eq!(first,b.manager().packages["example"].content_fingerprint());
-    std::fs::write(b.0.join("mods/example/asset.txt"),"changed").unwrap();
-    assert_ne!(first,b.manager().packages["example"].content_fingerprint());
+    let a = Fixture::new("return {}");
+    let b = Fixture::new("return {}");
+    std::fs::write(a.0.join("mods/example/asset.txt"), "same").unwrap();
+    std::fs::write(b.0.join("mods/example/asset.txt"), "same").unwrap();
+    let first = a.manager().packages["example"].content_fingerprint();
+    assert_eq!(first, b.manager().packages["example"].content_fingerprint());
+    std::fs::write(b.0.join("mods/example/asset.txt"), "changed").unwrap();
+    assert_ne!(first, b.manager().packages["example"].content_fingerprint());
 }
 #[test]
 fn shared_state_api_is_owner_scoped_and_transactional() {
-    let f=Fixture::new(r#"return {on_update=function()
+    let f = Fixture::new(
+        r#"return {on_update=function()
         assert(sdk.net.info().active)
         assert(sdk.net.read("2","score")==7)
         sdk.net.publish("score",8)
-    end}"#);
-    let mut m=f.manager();m.snapshot=json!({"network":{"active":true,"states":{"example":{"2":{"score":7}}}}});
-    m.enable("example",true).unwrap();m.dispatch("on_update",json!({"dt":0.1}));
-    assert!(matches!(&m.commands[0].1,Command::NetworkState{key,value} if key=="score" && value==8));
-    let f=Fixture::new(r#"return {on_update=function() sdk.net.publish("a",1); error("abort") end}"#);
-    let mut m=f.manager();m.enable("example",true).unwrap();m.dispatch("on_update",json!({"dt":0.1}));
+    end}"#,
+    );
+    let mut m = f.manager();
+    m.snapshot = json!({"network":{"active":true,"states":{"example":{"2":{"score":7}}}}});
+    m.enable("example", true).unwrap();
+    m.dispatch("on_update", json!({"dt":0.1}));
+    assert!(
+        matches!(&m.commands[0].1,Command::NetworkState{key,value} if key=="score" && value==8)
+    );
+    let f =
+        Fixture::new(r#"return {on_update=function() sdk.net.publish("a",1); error("abort") end}"#);
+    let mut m = f.manager();
+    m.enable("example", true).unwrap();
+    m.dispatch("on_update", json!({"dt":0.1}));
     assert!(m.commands.is_empty());
 }
 
 #[test]
 fn network_nil_clears_and_oversized_values_fail() {
-    let f=Fixture::new(r#"return {on_load=function() sdk.net.publish("score",nil) end}"#);
-    let mut m=f.manager();m.enable("example",true).unwrap();
+    let f = Fixture::new(r#"return {on_load=function() sdk.net.publish("score",nil) end}"#);
+    let mut m = f.manager();
+    m.enable("example", true).unwrap();
     assert!(matches!(&m.commands[0].1,Command::NetworkState{value,..} if value.is_null()));
-    let f=Fixture::new(r#"return {on_load=function() sdk.net.publish("score",string.rep("x",513)) end}"#);
-    let mut m=f.manager();m.enable("example",true).unwrap();assert!(m.packages["example"].error.is_some());assert!(m.commands.is_empty());
+    let f = Fixture::new(
+        r#"return {on_load=function() sdk.net.publish("score",string.rep("x",513)) end}"#,
+    );
+    let mut m = f.manager();
+    m.enable("example", true).unwrap();
+    assert!(m.packages["example"].error.is_some());
+    assert!(m.commands.is_empty());
 }

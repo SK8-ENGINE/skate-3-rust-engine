@@ -34,7 +34,11 @@ fn tiny_velocity_refinement_boundaries_preserve_limits_and_invalid_inputs() {
 
 #[test]
 fn tiny_velocity_correction_does_not_poison_walking_state() {
-    let mut state = State { velocity: [0.0, 1.0e-21, 5.0, 0.0], speed: 5.0, ..State::default() };
+    let mut state = State {
+        velocity: [0.0, 1.0e-21, 5.0, 0.0],
+        speed: 5.0,
+        ..State::default()
+    };
     let mut input = input();
     input.steering = 0.0;
     for _ in 0..120 {
@@ -44,15 +48,34 @@ fn tiny_velocity_correction_does_not_poison_walking_state() {
         assert!(state.forward_delta.is_finite() && state.right_delta.is_finite());
     }
 }
-fn curve(value: f32) -> PointGraph<8> { PointGraph { x: std::array::from_fn(|i| i as f32), y: [value; 8] } }
+fn curve(value: f32) -> PointGraph<8> {
+    PointGraph {
+        x: std::array::from_fn(|i| i as f32),
+        y: [value; 8],
+    }
+}
 fn settings() -> Settings {
-    Settings { slope_speed_scalar: curve(1.0), slope_mode_speed: curve(3.0), turn_vs_speed: curve(90.0), turn_delta_vs_speed: curve(15.0) }
+    Settings {
+        slope_speed_scalar: curve(1.0),
+        slope_mode_speed: curve(3.0),
+        turn_vs_speed: curve(90.0),
+        turn_delta_vs_speed: curve(15.0),
+    }
 }
 fn input() -> Input {
     Input {
-        forward: [0.0, 0.0, 1.0, 0.0], right: [1.0, 0.0, 0.0, 0.0], plane_normal: [0.0, 1.0, 0.0, 0.0], desired_speed: 5.0, steering: 1.0,
-        slope_mode: false, obstacle: false, obstacle_normal: [0.0, 0.0, -1.0, 0.0], override_gate: -1.0, override_duration: 1.0,
-        override_velocity: [0.0; 4], flags: 0,
+        forward: [0.0, 0.0, 1.0, 0.0],
+        right: [1.0, 0.0, 0.0, 0.0],
+        plane_normal: [0.0, 1.0, 0.0, 0.0],
+        desired_speed: 5.0,
+        steering: 1.0,
+        slope_mode: false,
+        obstacle: false,
+        obstacle_normal: [0.0, 0.0, -1.0, 0.0],
+        override_gate: -1.0,
+        override_duration: 1.0,
+        override_velocity: [0.0; 4],
+        flags: 0,
     }
 }
 #[test]
@@ -109,15 +132,28 @@ fn obstacle_projects_desired_and_limited_velocity_independently() {
 }
 #[test]
 fn nonunit_projection_subtracts_original_direction_and_zero_is_safe() {
-    assert_eq!(remove_positive([2.0, 0.0, 0.0, 0.0], [2.0, 0.0, 0.0, 0.0]), [-2.0, 0.0, 0.0, 0.0]);
-    assert_eq!(remove_positive([-2.0, 0.0, 0.0, 0.0], [2.0, 0.0, 0.0, 0.0]), [-2.0, 0.0, 0.0, 0.0]);
-    assert_eq!(remove_positive([2.0, 0.0, 0.0, 0.0], [0.0; 4]), [2.0, 0.0, 0.0, 0.0]);
+    assert_eq!(
+        remove_positive([2.0, 0.0, 0.0, 0.0], [2.0, 0.0, 0.0, 0.0]),
+        [-2.0, 0.0, 0.0, 0.0]
+    );
+    assert_eq!(
+        remove_positive([-2.0, 0.0, 0.0, 0.0], [2.0, 0.0, 0.0, 0.0]),
+        [-2.0, 0.0, 0.0, 0.0]
+    );
+    assert_eq!(
+        remove_positive([2.0, 0.0, 0.0, 0.0], [0.0; 4]),
+        [2.0, 0.0, 0.0, 0.0]
+    );
     assert_eq!(limit_delta([0.0; 4], [0.0; 4], 0.2), [0.0; 4]);
 }
 
 #[test]
 fn upward_slowdown_retains_gravity_even_beyond_two_per_second_bound() {
-    let mut state = State { velocity: [0.0, 6.0, 8.0, 0.0], speed: 10.0, ..State::default() };
+    let mut state = State {
+        velocity: [0.0, 6.0, 8.0, 0.0],
+        speed: 10.0,
+        ..State::default()
+    };
     let mut input = input();
     input.forward = [0.0, 0.6, 0.8, 0.0];
     input.plane_normal = [1.0, 0.0, 0.0, 0.0];
@@ -136,5 +172,8 @@ fn vector_delta_limits_xyz_and_preserves_scaled_w() {
     state.update(&settings(), &input);
     assert!((state.speed - 0.2).abs() < 0.000001);
     assert!((state.velocity[3] - 0.4).abs() < 0.000001);
-    assert_eq!(remove_positive([2.0, 0.0, 0.0, 7.0], [2.0, 0.0, 0.0, 3.0]), [-2.0, 0.0, 0.0, 1.0]);
+    assert_eq!(
+        remove_positive([2.0, 0.0, 0.0, 7.0], [2.0, 0.0, 0.0, 3.0]),
+        [-2.0, 0.0, 0.0, 1.0]
+    );
 }

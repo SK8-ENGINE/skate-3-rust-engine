@@ -35,10 +35,14 @@ pub(crate) struct SkinStamp {
 }
 impl MaterialExtension for SkinStamp {
     fn fragment_shader() -> ShaderRef {
-        AssetPath::from(embedded_path!("customiser_stamp.wgsl")).with_source("embedded").into()
+        AssetPath::from(embedded_path!("customiser_stamp.wgsl"))
+            .with_source("embedded")
+            .into()
     }
     fn prepass_fragment_shader() -> ShaderRef {
-        AssetPath::from(embedded_path!("customiser_prepass.wgsl")).with_source("embedded").into()
+        AssetPath::from(embedded_path!("customiser_prepass.wgsl"))
+            .with_source("embedded")
+            .into()
     }
     fn deferred_fragment_shader() -> ShaderRef {
         Self::fragment_shader()
@@ -72,10 +76,18 @@ mod tests {
     #[test]
     fn embedded_shader_paths_match_this_binary() {
         for (shader, registered) in [
-            (SkinStamp::fragment_shader(), embedded_path!("customiser_stamp.wgsl")),
-            (SkinStamp::prepass_fragment_shader(), embedded_path!("customiser_prepass.wgsl")),
+            (
+                SkinStamp::fragment_shader(),
+                embedded_path!("customiser_stamp.wgsl"),
+            ),
+            (
+                SkinStamp::prepass_fragment_shader(),
+                embedded_path!("customiser_prepass.wgsl"),
+            ),
         ] {
-            let ShaderRef::Path(path) = shader else { panic!("Expected embedded shader path") };
+            let ShaderRef::Path(path) = shader else {
+                panic!("Expected embedded shader path")
+            };
             assert_eq!(path, AssetPath::from(registered).with_source("embedded"));
         }
     }
@@ -86,7 +98,10 @@ mod tests {
         assert!((Vec2::new(r.z, r.w) * t.xy() + t.zw()).abs_diff_eq(Vec2::new(0.8, 0.9), 1e-6));
         assert_eq!(
             bevy::asset::embedded_path!("customiser_stamp.wgsl"),
-            std::path::PathBuf::from(format!("{}/customiser_stamp.wgsl", module_path!().split("::").next().unwrap()))
+            std::path::PathBuf::from(format!(
+                "{}/customiser_stamp.wgsl",
+                module_path!().split("::").next().unwrap()
+            ))
         );
     }
     #[test]

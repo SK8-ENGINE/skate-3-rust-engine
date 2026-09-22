@@ -22,10 +22,22 @@ pub(crate) struct Settings {
 impl Settings {
     pub fn parse(a: &Attributes<'_>) -> Self {
         Self {
-            nb_cycle: a.text("NbCycAnim").unwrap_or("B_OBAIR_BODYTWEAK_NB_CYC").into(),
-            nb_into: a.text("NbIntoAnim").unwrap_or("B_OBAIR_BODYTWEAK_NB_INTO").into(),
-            br_cycle: a.text("BrCycAnim").unwrap_or("B_OBAIR_BODYTWEAK_BR_CYC").into(),
-            br_into: a.text("BrIntoAnim").unwrap_or("B_OBAIR_BODYTWEAK_BR_INTO").into(),
+            nb_cycle: a
+                .text("NbCycAnim")
+                .unwrap_or("B_OBAIR_BODYTWEAK_NB_CYC")
+                .into(),
+            nb_into: a
+                .text("NbIntoAnim")
+                .unwrap_or("B_OBAIR_BODYTWEAK_NB_INTO")
+                .into(),
+            br_cycle: a
+                .text("BrCycAnim")
+                .unwrap_or("B_OBAIR_BODYTWEAK_BR_CYC")
+                .into(),
+            br_into: a
+                .text("BrIntoAnim")
+                .unwrap_or("B_OBAIR_BODYTWEAK_BR_INTO")
+                .into(),
         }
     }
 }
@@ -81,7 +93,10 @@ impl State {
             self.filter(x.unwrap_or(0.0), y.unwrap_or(0.0), centered);
             for (name, value) in [b"bodytweakx", b"bodytweaky"].into_iter().zip(self.axes) {
                 animation.set_attribute(SettableAttribute {
-                    name: encode(name), value, normalized: false, sequence_id: -1,
+                    name: encode(name),
+                    value,
+                    normalized: false,
+                    sequence_id: -1,
                 });
             }
             //82BBB328 ->MGv200/8258FBF0;82BBB33C ->ISkaterAnimv116/82B97228.
@@ -104,13 +119,18 @@ impl State {
         Ok(())
     }
 
-    fn gates(&mut self, x: Option<f32>, y: Option<f32>, request: bool, scalar_92: f32) -> (bool, bool) {
+    fn gates(
+        &mut self,
+        x: Option<f32>,
+        y: Option<f32>,
+        request: bool,
+        scalar_92: f32,
+    ) -> (bool, bool) {
         if (self.ticks as i32) > 80 {
             self.released = true;
         }
         //82BBAED8..EE8 uses signed comparisons, not abs(axis).
-        if !self.released && x.is_some_and(|x| !(x >= 0.1))
-            && y.is_some_and(|y| !(y >= 0.1)) {
+        if !self.released && x.is_some_and(|x| !(x >= 0.1)) && y.is_some_and(|y| !(y >= 0.1)) {
             self.released = true;
         }
         let x = x.unwrap_or(0.0);
@@ -123,7 +143,11 @@ impl State {
             let correction = (-squared).mul_add(inverse * inverse, 1.0);
             inverse = (inverse * 0.5).mul_add(correction, inverse);
         }
-        let magnitude = if squared == 0.0 { 0.0 } else { squared * inverse };
+        let magnitude = if squared == 0.0 {
+            0.0
+        } else {
+            squared * inverse
+        };
         let directed = self.released && magnitude >= 0.1;
         //82BBAFD4 is ble. This preserves its unordered path as well.
         (directed, request || (!(scalar_92 <= 4.0) && !directed))
@@ -134,7 +158,10 @@ impl State {
         self.axes = if centered {
             self.axes.map(|value| value * 0.85)
         } else {
-            [x.mul_add(0.15, self.axes[0] * 0.85), self.axes[1].mul_add(0.85, y * 0.15)]
+            [
+                x.mul_add(0.15, self.axes[0] * 0.85),
+                self.axes[1].mul_add(0.85, y * 0.15),
+            ]
         };
     }
 
@@ -147,13 +174,20 @@ impl State {
 }
 
 fn set_flag(animation: &mut MotionAnimation, bit: u32, value: bool) -> Result<(), String> {
-    let flags = animation.skater_animation_flags.as_mut()
+    let flags = animation
+        .skater_animation_flags
+        .as_mut()
         .ok_or("OffboardBodyTweakBlend requires SkaterAnim flag owner")?;
     *flags = (*flags & !bit) | if value { bit } else { 0 };
     Ok(())
 }
 
-fn transition(animation: &mut MotionAnimation, settings: &Settings, held: bool, cycle: bool) -> Result<(), String> {
+fn transition(
+    animation: &mut MotionAnimation,
+    settings: &Settings,
+    held: bool,
+    cycle: bool,
+) -> Result<(), String> {
     let name = match (held, cycle) {
         (false, false) => &settings.nb_into,
         (false, true) => &settings.nb_cycle,
@@ -162,15 +196,30 @@ fn transition(animation: &mut MotionAnimation, settings: &Settings, held: bool, 
     };
     //82BBB164/270 call IChannelAnimatablev16=82D1D090. Stack57=false
     //resurrection,5F=true create-if-missing,67=true use animation attributes.
-    animation.transition_channel(CHANNEL, name, ChannelSettings {
-        priority: 0, keep_alive: cycle, mirrored: false, speed: 1.0,
-        blend_in: if cycle { 0.5 } else { 0.15 }, hold_during_blend_in: false,
-        blend_out: if cycle { 0.3 } else { 0.0 }, hold_during_blend_out: false,
-        use_attributes: true,
-    }, TransitionSettings {
-        kind: 1, seconds: if cycle { 0.1 } else { 0.15 }, under: 0,
-        matching: 0, use_channels_from_weights: false,
-    }, false, true)?;
+    animation.transition_channel(
+        CHANNEL,
+        name,
+        ChannelSettings {
+            priority: 0,
+            keep_alive: cycle,
+            mirrored: false,
+            speed: 1.0,
+            blend_in: if cycle { 0.5 } else { 0.15 },
+            hold_during_blend_in: false,
+            blend_out: if cycle { 0.3 } else { 0.0 },
+            hold_during_blend_out: false,
+            use_attributes: true,
+        },
+        TransitionSettings {
+            kind: 1,
+            seconds: if cycle { 0.1 } else { 0.15 },
+            under: 0,
+            matching: 0,
+            use_channels_from_weights: false,
+        },
+        false,
+        true,
+    )?;
     Ok(())
 }
 

@@ -5,9 +5,17 @@ pub(super) fn tilted_normal(direction: V, up: V, limits: [f32; 2]) -> V {
     let [lo, hi] = limits;
     let pi = f32::from_bits(0x4049_0fdb);
     let angle = if lo < hi {
-        if lo < pi && hi > pi { return up; }
-        if (pi - lo).abs() < (pi - hi).abs() { lo } else { hi }
-    } else { (hi + lo) * 0.5 };
+        if lo < pi && hi > pi {
+            return up;
+        }
+        if (pi - lo).abs() < (pi - hi).abs() {
+            lo
+        } else {
+            hi
+        }
+    } else {
+        (hi + lo) * 0.5
+    };
     rotate(direction, scale(up, -1.), angle)
 }
 

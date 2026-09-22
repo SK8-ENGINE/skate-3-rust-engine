@@ -3,7 +3,10 @@ use crate::physics::{reciprocal_sqrt::estimate, world_contact::prism_math::*};
 /// TU3 82ACF950. Triangle normal first, then box Z/Y/X and all nine edge
 /// crosses. Cross axes receive exactly one reciprocal-square-root refinement;
 /// there is no small-cross rejection or normalization fallback in this entry.
-pub(in super::super) fn triangle_box(triangle: &[u32; 48], box_shape: &[u32; 48]) -> ([u32; 4], [u32; 4]) {
+pub(in super::super) fn triangle_box(
+    triangle: &[u32; 48],
+    box_shape: &[u32; 48],
+) -> ([u32; 4], [u32; 4]) {
     let mut axes = [[0.0; 4]; 13];
     axes[0] = load(triangle, 4);
     for i in 0..3 {

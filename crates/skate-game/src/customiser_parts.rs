@@ -74,15 +74,19 @@ pub(crate) struct Parts {
 pub(crate) struct PartRoot(pub String);
 pub(crate) fn asset_directory(assets: &std::path::Path) -> std::path::PathBuf {
     let base = assets.join("private/customisation");
-    if std::fs::read(base.join("customiser-availability.json")).ok()
-        .and_then(|bytes|serde_json::from_slice::<Value>(&bytes).ok())
-        .is_some_and(|v|v["version"]==1 && v["status"]=="unavailable") {
+    if std::fs::read(base.join("customiser-availability.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .is_some_and(|v| v["version"] == 1 && v["status"] == "unavailable")
+    {
         return base.join("unavailable");
     }
-    if let Some(set) = std::fs::read(base.join("current.json")).ok()
+    if let Some(set) = std::fs::read(base.join("current.json"))
+        .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
         .and_then(|v| v["set"].as_str().map(str::to_owned))
-        .filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit())) {
+        .filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
         return base.join("sets").join(set);
     }
     base
@@ -119,9 +123,14 @@ impl Parts {
             for value in colours.values() {
                 // The menu uses null to clear a tint and restore the authored
                 // material colour; profile_material already handles this reset.
-                if value.is_null() { continue; }
-                let rgb=serde_json::from_value::<[f32;3]>(value.clone()).map_err(|_|"Invalid clothing colour")?;
-                if rgb.iter().any(|v|!(0.0..=1.0).contains(v)) {return Err("Invalid clothing colour".into());}
+                if value.is_null() {
+                    continue;
+                }
+                let rgb = serde_json::from_value::<[f32; 3]>(value.clone())
+                    .map_err(|_| "Invalid clothing colour")?;
+                if rgb.iter().any(|v| !(0.0..=1.0).contains(v)) {
+                    return Err("Invalid clothing colour".into());
+                }
             }
         }
         for key in ["skin_tint", "hair_tint"] {
@@ -421,43 +430,94 @@ impl Parts {
         Ok(result)
     }
     /// Clone per outfit: remote colours and tattoos must never mutate another player.
-    pub(crate) fn profile_material(&self, id: &str, mid: &str, profile: &Value,
-        materials: &Assets<SkaterMaterial>) -> Option<SkaterMaterial> {
+    pub(crate) fn profile_material(
+        &self,
+        id: &str,
+        mid: &str,
+        profile: &Value,
+        materials: &Assets<SkaterMaterial>,
+    ) -> Option<SkaterMaterial> {
         let part = self.library.models.get(id)?;
         let source = self.library.materials.get(mid)?;
         let mut material = materials.get(&self.materials.get(mid)?.0)?.clone();
-        let tint = if !source.flag("SkinTone").is_empty() { profile.get("skin_tint") }
-            else if part.slot == "Hair" { profile.get("hair_tint") }
-            else { profile["colours"].get(&part.slot) };
-        let rgb = tint.and_then(|v| serde_json::from_value::<[f32;3]>(v.clone()).ok()).unwrap_or(source.tint);
-        material.base.base_color = Color::srgb(rgb[0],rgb[1],rgb[2]);
-        let slot = if part.slot == "OuterTorso" && part.flag("TopType").is_empty() { "Arm" } else { &part.slot };
+        let tint = if !source.flag("SkinTone").is_empty() {
+            profile.get("skin_tint")
+        } else if part.slot == "Hair" {
+            profile.get("hair_tint")
+        } else {
+            profile["colours"].get(&part.slot)
+        };
+        let rgb = tint
+            .and_then(|v| serde_json::from_value::<[f32; 3]>(v.clone()).ok())
+            .unwrap_or(source.tint);
+        material.base.base_color = Color::srgb(rgb[0], rgb[1], rgb[2]);
+        let slot = if part.slot == "OuterTorso" && part.flag("TopType").is_empty() {
+            "Arm"
+        } else {
+            &part.slot
+        };
         let stamp = &profile["tattoos"][slot];
         let mut extension = SkinStamp {
             hair_opacity: material.extension.hair_opacity.clone(),
-            retail: material.extension.retail.clone(), retail_mask: material.extension.retail_mask.clone(),
-            enabled: if source.opacity.is_some() {Vec4::Y} else {Vec4::ZERO}, ..default()
+            retail: material.extension.retail.clone(),
+            retail_mask: material.extension.retail_mask.clone(),
+            enabled: if source.opacity.is_some() {
+                Vec4::Y
+            } else {
+                Vec4::ZERO
+            },
+            ..default()
         };
         if extension.retail.tint.w > 0. {
-            extension.retail.tint = Vec4::from_array(material.base.base_color.to_linear().to_f32_array());
+            extension.retail.tint =
+                Vec4::from_array(material.base.base_color.to_linear().to_f32_array());
         }
-        if let Some((tid,t)) = stamp["id"].as_str().and_then(|id| self.library.tattoos.get(id).map(|t|(id,t))) {
-            let key=match stamp["side"].as_u64().unwrap_or(0) {1=>"StampUVConstraintQ4",2=>"StampUVConstraintQ1",3=>"StampUVConstraintQ2",_=>"StampUVConstraintQ3"};
-            let bounds:Vec<f32>=part.flag(key).split(',').filter_map(|n|n.parse().ok()).collect();
-            if let Ok(bounds)=<[f32;4]>::try_from(bounds) {
-                let (transform,rectangle)=crate::customiser_material::placement(bounds,t.bounds);
-                extension.texture=self.tattoos.get(tid).cloned(); extension.transform=transform;
-                extension.rectangle=rectangle; extension.enabled.x=1.;
+        if let Some((tid, t)) = stamp["id"]
+            .as_str()
+            .and_then(|id| self.library.tattoos.get(id).map(|t| (id, t)))
+        {
+            let key = match stamp["side"].as_u64().unwrap_or(0) {
+                1 => "StampUVConstraintQ4",
+                2 => "StampUVConstraintQ1",
+                3 => "StampUVConstraintQ2",
+                _ => "StampUVConstraintQ3",
+            };
+            let bounds: Vec<f32> = part
+                .flag(key)
+                .split(',')
+                .filter_map(|n| n.parse().ok())
+                .collect();
+            if let Ok(bounds) = <[f32; 4]>::try_from(bounds) {
+                let (transform, rectangle) =
+                    crate::customiser_material::placement(bounds, t.bounds);
+                extension.texture = self.tattoos.get(tid).cloned();
+                extension.transform = transform;
+                extension.rectangle = rectangle;
+                extension.enabled.x = 1.;
             }
         }
-        material.extension=extension; Some(material)
+        material.extension = extension;
+        Some(material)
     }
     pub(crate) fn material_ready(&self, mid: &str, server: &AssetServer) -> bool {
-        self.materials.get(mid).is_some_and(|(_,images)|images.iter().all(|h|server.is_loaded_with_dependencies(h.id())))
+        self.materials.get(mid).is_some_and(|(_, images)| {
+            images
+                .iter()
+                .all(|h| server.is_loaded_with_dependencies(h.id()))
+        })
     }
     pub(crate) fn tattoos_ready(&self, profile: &Value, server: &AssetServer) -> bool {
-        profile["tattoos"].as_object().into_iter().flat_map(|v|v.values()).all(|v|
-            v["id"].as_str().is_none_or(|id|self.tattoos.get(id).is_some_and(|h|server.is_loaded_with_dependencies(h.id()))))
+        profile["tattoos"]
+            .as_object()
+            .into_iter()
+            .flat_map(|v| v.values())
+            .all(|v| {
+                v["id"].as_str().is_none_or(|id| {
+                    self.tattoos
+                        .get(id)
+                        .is_some_and(|h| server.is_loaded_with_dependencies(h.id()))
+                })
+            })
     }
     pub fn warm(&mut self, id: &str, server: &AssetServer, materials: &mut Assets<SkaterMaterial>) {
         if self.materials.contains_key(id) {
@@ -481,13 +541,31 @@ impl Parts {
         let normal = m.normal.as_ref().map(|p| load(p, true));
         let rough = m.rough.as_ref().map(|p| load(p, true));
         let opacity = m.opacity.as_ref().map(|p| load(p, true));
-        let retail_mask = m.lighting.as_ref().and_then(|l| l.specular.as_ref()).map(|p| load(p, true));
-        let retail = m.lighting.as_ref().filter(|l| l.params.len() == 9).map(|l| crate::retail_character::CharacterParams {
-            tint: Vec4::from_array(Color::srgb(m.tint[0],m.tint[1],m.tint[2]).to_linear().to_f32_array()),
-            options: Vec4::new(f32::from(normal.is_some()), f32::from(retail_mask.is_some()), -1., f32::from(l.is_hair())),
-            rows: std::array::from_fn(|i| Vec4::from_array(l.params[i])),
-            ..default()
-        }).unwrap_or_default();
+        let retail_mask = m
+            .lighting
+            .as_ref()
+            .and_then(|l| l.specular.as_ref())
+            .map(|p| load(p, true));
+        let retail = m
+            .lighting
+            .as_ref()
+            .filter(|l| l.params.len() == 9)
+            .map(|l| crate::retail_character::CharacterParams {
+                tint: Vec4::from_array(
+                    Color::srgb(m.tint[0], m.tint[1], m.tint[2])
+                        .to_linear()
+                        .to_f32_array(),
+                ),
+                options: Vec4::new(
+                    f32::from(normal.is_some()),
+                    f32::from(retail_mask.is_some()),
+                    -1.,
+                    f32::from(l.is_hair()),
+                ),
+                rows: std::array::from_fn(|i| Vec4::from_array(l.params[i])),
+                ..default()
+            })
+            .unwrap_or_default();
         let material = materials.add(SkaterMaterial {
             base: StandardMaterial {
                 base_color: Color::srgb(m.tint[0], m.tint[1], m.tint[2]),
@@ -531,10 +609,10 @@ pub(crate) fn setup(
 ) {
     let directory = asset_directory(&config.asset_root);
     let library = std::fs::read(directory.join("library-v3.json"))
-    .or_else(|_| std::fs::read(directory.join("library.json")))
-    .ok()
-    .and_then(|b| serde_json::from_slice::<Library>(&b).ok())
-    .unwrap_or_default();
+        .or_else(|_| std::fs::read(directory.join("library.json")))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Library>(&b).ok())
+        .unwrap_or_default();
     let geometry = library
         .models
         .iter()
@@ -570,7 +648,13 @@ pub(crate) fn update(
     mut materials: ResMut<Assets<SkaterMaterial>>,
     root: Query<Entity, With<crate::world::PlayerRoot>>,
     parents: Query<&ChildOf>,
-    mut scenes: Query<(Entity, Option<&PartRoot>, &mut Visibility), (With<SceneRoot>, Without<crate::custom_models::CustomModelRoot>)>,
+    mut scenes: Query<
+        (Entity, Option<&PartRoot>, &mut Visibility),
+        (
+            With<SceneRoot>,
+            Without<crate::custom_models::CustomModelRoot>,
+        ),
+    >,
     mut mesh_materials: Query<(Entity, Option<&mut MeshMaterial3d<SkaterMaterial>>), With<Mesh3d>>,
     mut morphs: Query<(Entity, &mut MorphWeights)>,
     mut animation: ResMut<crate::animation::AnimationStatus>,
@@ -713,13 +797,19 @@ pub(crate) fn update(
         let entity = parts.instances[id];
         let handle = parts.materials[mid].0.clone();
         if let Some(updated) = parts.profile_material(id, mid, &state.draft, &materials) {
-            if let Some(material) = materials.get_mut(&handle) { *material = updated; }
+            if let Some(material) = materials.get_mut(&handle) {
+                *material = updated;
+            }
         }
         for (e, material) in &mut mesh_materials {
             if !parents.iter_ancestors(e).any(|p| p == entity) {
                 continue;
             }
-            commands.entity(e).insert(bevy::camera::visibility::RenderLayers::from_layers(&[0, 28]));
+            commands
+                .entity(e)
+                .insert(bevy::camera::visibility::RenderLayers::from_layers(&[
+                    0, 28,
+                ]));
             if let Some(mut material) = material {
                 if material.0 != handle {
                     material.0 = handle.clone();
@@ -819,29 +909,101 @@ mod online_tests {
     use super::*;
     #[test]
     fn online_appearance_materials_keep_players_colours_and_tattoos_independent() {
-        let mut parts=Parts::default();
-        parts.library.models.insert("body".into(),Part{slot:"Arm".into(),name:"body".into(),flags:HashMap::from([("StampUVConstraintQ3".into(),"0,0,1,1".into())]),materials:vec!["skin".into()],scene:String::new()});
-        parts.library.materials.insert("skin".into(),Material{name:"skin".into(),flags:HashMap::from([("SkinTone".into(),"fair".into())]),diffuse:String::new(),normal:None,rough:None,alpha:false,opacity:None,tint:[1.;3],metallic:0.,roughness:0.5,lighting:None});
-        parts.library.tattoos.insert("ink".into(),Tattoo{name:"ink".into(),texture:String::new(),bounds:[0.,0.,1.,1.]});
-        let mut images=Assets::<Image>::default();let image=images.add(Image::default());parts.tattoos.insert("ink".into(),image.clone());
-        let mut materials=Assets::<SkaterMaterial>::default();
-        let handle=materials.add(SkaterMaterial{base:StandardMaterial{normal_map_texture:Some(image.clone()),base_color_texture:Some(image.clone()),..default()},extension:SkinStamp {
-            retail_mask:Some(image.clone()),
-            retail:crate::retail_character::CharacterParams{tint:Vec4::ONE,options:Vec4::new(1.,1.,-1.,0.),..default()},..default()
-        }});
-        parts.materials.insert("skin".into(),(handle.clone(),vec![]));
-        let red=parts.profile_material("body","skin",&serde_json::json!({"skin_tint":[1,0,0],"tattoos":{"Arm":{"id":"ink","side":0}}}),&materials).unwrap();
-        let blue=parts.profile_material("body","skin",&serde_json::json!({"skin_tint":[0,0,1]}),&materials).unwrap();
-        assert_eq!(red.base.base_color,Color::srgb(1.,0.,0.));assert_eq!(blue.base.base_color,Color::srgb(0.,0.,1.));
-        for material in [&red,&blue] {
-            assert_eq!(material.base.normal_map_texture,Some(image.clone()));
-            assert_eq!(material.base.base_color_texture,Some(image.clone()));
-            assert_eq!(material.extension.retail_mask,Some(image.clone()));
-            assert_eq!(material.extension.retail.options,Vec4::new(1.,1.,-1.,0.));
-            assert_eq!(material.extension.retail.tint,Vec4::from_array(material.base.base_color.to_linear().to_f32_array()));
+        let mut parts = Parts::default();
+        parts.library.models.insert(
+            "body".into(),
+            Part {
+                slot: "Arm".into(),
+                name: "body".into(),
+                flags: HashMap::from([("StampUVConstraintQ3".into(), "0,0,1,1".into())]),
+                materials: vec!["skin".into()],
+                scene: String::new(),
+            },
+        );
+        parts.library.materials.insert(
+            "skin".into(),
+            Material {
+                name: "skin".into(),
+                flags: HashMap::from([("SkinTone".into(), "fair".into())]),
+                diffuse: String::new(),
+                normal: None,
+                rough: None,
+                alpha: false,
+                opacity: None,
+                tint: [1.; 3],
+                metallic: 0.,
+                roughness: 0.5,
+                lighting: None,
+            },
+        );
+        parts.library.tattoos.insert(
+            "ink".into(),
+            Tattoo {
+                name: "ink".into(),
+                texture: String::new(),
+                bounds: [0., 0., 1., 1.],
+            },
+        );
+        let mut images = Assets::<Image>::default();
+        let image = images.add(Image::default());
+        parts.tattoos.insert("ink".into(), image.clone());
+        let mut materials = Assets::<SkaterMaterial>::default();
+        let handle = materials.add(SkaterMaterial {
+            base: StandardMaterial {
+                normal_map_texture: Some(image.clone()),
+                base_color_texture: Some(image.clone()),
+                ..default()
+            },
+            extension: SkinStamp {
+                retail_mask: Some(image.clone()),
+                retail: crate::retail_character::CharacterParams {
+                    tint: Vec4::ONE,
+                    options: Vec4::new(1., 1., -1., 0.),
+                    ..default()
+                },
+                ..default()
+            },
+        });
+        parts
+            .materials
+            .insert("skin".into(), (handle.clone(), vec![]));
+        let red = parts
+            .profile_material(
+                "body",
+                "skin",
+                &serde_json::json!({"skin_tint":[1,0,0],"tattoos":{"Arm":{"id":"ink","side":0}}}),
+                &materials,
+            )
+            .unwrap();
+        let blue = parts
+            .profile_material(
+                "body",
+                "skin",
+                &serde_json::json!({"skin_tint":[0,0,1]}),
+                &materials,
+            )
+            .unwrap();
+        assert_eq!(red.base.base_color, Color::srgb(1., 0., 0.));
+        assert_eq!(blue.base.base_color, Color::srgb(0., 0., 1.));
+        for material in [&red, &blue] {
+            assert_eq!(material.base.normal_map_texture, Some(image.clone()));
+            assert_eq!(material.base.base_color_texture, Some(image.clone()));
+            assert_eq!(material.extension.retail_mask, Some(image.clone()));
+            assert_eq!(
+                material.extension.retail.options,
+                Vec4::new(1., 1., -1., 0.)
+            );
+            assert_eq!(
+                material.extension.retail.tint,
+                Vec4::from_array(material.base.base_color.to_linear().to_f32_array())
+            );
         }
-        assert_eq!(red.extension.texture,Some(image));assert!(blue.extension.texture.is_none());
-        assert_eq!(materials.get(&handle).unwrap().base.base_color,Color::WHITE);
+        assert_eq!(red.extension.texture, Some(image));
+        assert!(blue.extension.texture.is_none());
+        assert_eq!(
+            materials.get(&handle).unwrap().base.base_color,
+            Color::WHITE
+        );
         assert!(materials.get(&handle).unwrap().extension.texture.is_none());
     }
 }
@@ -852,37 +1014,80 @@ mod stock_hair_audit {
     #[test]
     #[ignore = "requires prepared owned SKATE_CAC_TEST_LIBRARY"]
     fn stock_hair_keeps_authored_shading_and_textures_after_colour_restore() {
-        let path=std::env::var("SKATE_CAC_TEST_LIBRARY").unwrap();
-        let library:Library=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-        let pairs:Vec<_>=library.models.iter().filter(|(_,p)|p.slot=="Hair")
-            .flat_map(|(id,p)|p.materials.iter().map(move |mid|(id.clone(),mid.clone()))).collect();
+        let path = std::env::var("SKATE_CAC_TEST_LIBRARY").unwrap();
+        let library: Library = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let pairs: Vec<_> = library
+            .models
+            .iter()
+            .filter(|(_, p)| p.slot == "Hair")
+            .flat_map(|(id, p)| p.materials.iter().map(move |mid| (id.clone(), mid.clone())))
+            .collect();
         assert!(!pairs.is_empty());
-        let mut app=App::new();
-        app.add_plugins((MinimalPlugins,AssetPlugin::default()));
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()));
         app.init_asset::<Image>();
-        let server=app.world().resource::<AssetServer>();
-        let mut parts=Parts{library,..default()};
-        let mut materials=Assets::<SkaterMaterial>::default();
-        let mut checked=HashSet::new();
-        for (id,mid) in pairs {
-            parts.warm(&mid,server,&mut materials);
-            let handle=parts.materials[&mid].0.clone();
-            let original=materials.get(&handle).unwrap().clone();
-            assert_eq!(original.extension.retail.options.w,1.,"{mid} must use hair lighting");
-            let dyed=parts.profile_material(&id,&mid,&serde_json::json!({"hair_tint":[1,0,0]}),&materials).unwrap();
-            *materials.get_mut(&handle).unwrap()=dyed;
-            let restored=parts.profile_material(&id,&mid,&serde_json::json!({}),&materials).unwrap();
-            assert_eq!(restored.base.base_color,original.base.base_color);
-            assert_eq!(restored.extension.retail.tint,original.extension.retail.tint);
-            assert_eq!(restored.extension.retail.options,original.extension.retail.options);
-            assert_eq!(restored.base.base_color_texture,original.base.base_color_texture);
-            assert_eq!(restored.base.normal_map_texture,original.base.normal_map_texture);
-            assert_eq!(restored.extension.hair_opacity,original.extension.hair_opacity);
-            assert_eq!(restored.extension.retail_mask,original.extension.retail_mask);
-            assert_eq!(restored.base.perceptual_roughness,original.base.perceptual_roughness);
-            *materials.get_mut(&handle).unwrap()=restored;
+        let server = app.world().resource::<AssetServer>();
+        let mut parts = Parts {
+            library,
+            ..default()
+        };
+        let mut materials = Assets::<SkaterMaterial>::default();
+        let mut checked = HashSet::new();
+        for (id, mid) in pairs {
+            parts.warm(&mid, server, &mut materials);
+            let handle = parts.materials[&mid].0.clone();
+            let original = materials.get(&handle).unwrap().clone();
+            assert_eq!(
+                original.extension.retail.options.w, 1.,
+                "{mid} must use hair lighting"
+            );
+            let dyed = parts
+                .profile_material(
+                    &id,
+                    &mid,
+                    &serde_json::json!({"hair_tint":[1,0,0]}),
+                    &materials,
+                )
+                .unwrap();
+            *materials.get_mut(&handle).unwrap() = dyed;
+            let restored = parts
+                .profile_material(&id, &mid, &serde_json::json!({}), &materials)
+                .unwrap();
+            assert_eq!(restored.base.base_color, original.base.base_color);
+            assert_eq!(
+                restored.extension.retail.tint,
+                original.extension.retail.tint
+            );
+            assert_eq!(
+                restored.extension.retail.options,
+                original.extension.retail.options
+            );
+            assert_eq!(
+                restored.base.base_color_texture,
+                original.base.base_color_texture
+            );
+            assert_eq!(
+                restored.base.normal_map_texture,
+                original.base.normal_map_texture
+            );
+            assert_eq!(
+                restored.extension.hair_opacity,
+                original.extension.hair_opacity
+            );
+            assert_eq!(
+                restored.extension.retail_mask,
+                original.extension.retail_mask
+            );
+            assert_eq!(
+                restored.base.perceptual_roughness,
+                original.base.perceptual_roughness
+            );
+            *materials.get_mut(&handle).unwrap() = restored;
             checked.insert(mid);
         }
-        eprintln!("STOCK_HAIR_AUDIT verified {} authored materials",checked.len());
+        eprintln!(
+            "STOCK_HAIR_AUDIT verified {} authored materials",
+            checked.len()
+        );
     }
 }

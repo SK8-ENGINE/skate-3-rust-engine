@@ -163,7 +163,9 @@ fn controls(
     net: Option<Res<crate::multiplayer::Multiplayer>>,
 ) {
     if net.is_some_and(|n| n.active()) {
-        if replay.active {replay.exit();}
+        if replay.active {
+            replay.exit();
+        }
         return;
     }
     let pad = input.raw_input();

@@ -14,32 +14,36 @@ struct FrameSample {
 
 impl Plugin for FpsOverlayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn)
-            .add_systems(Update, update);
+        app.add_systems(Startup, spawn).add_systems(Update, update);
     }
 }
 
 fn spawn(mut commands: Commands) {
     // Use the existing gameplay camera; no independent overlay render loop.
-    commands.spawn((
-        Name::new("FPS overlay"),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(12),
-            right: px(12),
-            padding: UiRect::axes(px(10), px(6)),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
-        GlobalZIndex(100),
-    )).with_children(|parent| {
-        parent.spawn((
-            FpsText,
-            Text::new("FPS: --"),
-            TextFont { font_size: 20.0, ..default() },
-            TextColor(Color::WHITE),
-        ));
-    });
+    commands
+        .spawn((
+            Name::new("FPS overlay"),
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(12),
+                right: px(12),
+                padding: UiRect::axes(px(10), px(6)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+            GlobalZIndex(100),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                FpsText,
+                Text::new("FPS: --"),
+                TextFont {
+                    font_size: 20.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
 }
 
 fn update(

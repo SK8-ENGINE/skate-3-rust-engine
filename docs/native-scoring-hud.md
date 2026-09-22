@@ -225,11 +225,76 @@ These are implementation gaps, not merely missing gameplay validation:
   bonuses and off-board height rewards are not wired.
 - Revert recognition depends on an unpublished physical state flag in the
   current host. Full native revert scoring is not yet available.
-- Trick-name spin/direction modifiers and the HUD manager's stance transitions
-  are incomplete. The bindings expose five metric slots but currently only
-  supply the base trick label and default modifier flags.
+- The trick name is now composed as retail composes it (`sub_825E51A0`): one `#`,
+  then space-separated localisation ids and a bare degree count, resolved token by
+  token by `apt_text::localize`. The five metric slots are *not* a label plus four
+  modifier flags -- `sub_825C27C0` returns `[name, switch, fakie, clear, new-trick]`
+  -- and the modifiers are tokens inside the name string. Spin degrees and the
+  front/back flip suffix are supplied; still missing are the Cab/Half-Cab tokens,
+  the nollie record swap through the metadata link column, and the Miracle Whip
+  case. The FS/BS parity needs a skater stance (`M+187`, the negation of
+  `PlayerStance_IsRegular`), which this engine does not publish, so it assumes
+  regular.
+- The HUD manager's stance transitions are incomplete: `sub_825C2700` returns
+  `[switch, fakie, idle latch (M+168), is-nollie-variant && display active]`, and
+  the port's fourth slot is a placeholder.
 - The compact VM supports the exercised movie paths, not arbitrary APT programs.
   Superclass/native constructor behavior is limited, and Math.random uses a
   local presentation RNG rather than the original engine RNG stream.
 
 Do not describe this build as fully finished or an exact native recreation.
+
+## Why every score was far below retail (fixed 2026-09-21)
+
+`scoring_runtime` computed all five air metrics every frame and then discarded
+them at the landing that was supposed to bank them. The landing resolved each
+metric with `ScoringData::by_id`, which only returns scorables the vault holds a
+`Hash_6918469984A8C596` record for. Of the executable's 332 scorables exactly 300
+are authored, and the 32 that are not include **129..=133** (`air_horizontal_distance`,
+`air_height_to_peak`, `air_total_height_gain`, `air_player_spin`, `air_player_flip`),
+**237** (`air_metric`) and **253** (`generic_metric`).
+
+Retail never needs a record for these: `82DA6260` indexes the fixed metadata table
+at `820862A8` by bare id, and `82DA8550` credits them the same way (`li r4,129` /
+`bl 0x82da6260`). Their reward is a curve value, not authored points, which is
+precisely why they carry no authored record. `catalog::metadata` now resolves them
+from that table. A 10 m, 3 m-high 360 air banks **508** where it banked **100**;
+a stationary kickflip still banks exactly its authored 100, because the curves are
+zero at zero input.
+
+### Authored magnitudes, for judging what is still missing
+
+| curve | input | peak |
+|---|---|---|
+| `0x3C0` | horizontal distance | 500 at 34.45 m |
+| `0x410` | height to peak | 500 at 12 m |
+| `0x320` | total height gain | 500 at +12 m, **and 500 at -12 m** |
+| `0x370` | spin | exactly 1 point per degree, to 1260 |
+| `0x640` | body flip | 300, flat |
+| `0x4B0` | gap run above 6 m | 1800 at 20 m |
+| `0x500`/`0x550`/`0x5A0` | the other three gap runs | 900 each |
+| `0x190` | off-board peak height | 700 at 10 m |
+
+### Still missing, with the evidence already gathered
+
+- **The gap/context collector** (`82DA89A0`, run accumulators `82DA7B50`, sum
+  `82DA88E8`). Four runs of horizontal distance, gated on a surface byte, a second
+  surface byte, height > `0x680` = 3.0 m and height > `0x67C` = 6.0 m; banked as
+  scorable 237. Blocked on the ground query `82DA7A38`, whose reference point is
+  the unidentified **player+1632**.
+- **The landing-context multiplier and four flat bonuses** in `82DA8550`
+  (`0x644`=1.5, `0x654`=1.15, `0x64C`=1.5, `0x65C`=1.15 multiplying all five
+  metrics; `0x648`=500, `0x658`=200, `0x650`=300, `0x660`=100 paid as id 237),
+  gated on four flags in a 10x68-byte context block filled by `82DA14A0`.
+- **The class-3 one-shot** in `82DA93D8`: `carrier.reward += 0x600 (=4.0) * points *
+  factor`, one-shot per air, gated on `82DAC780`'s geometric test -- which also
+  needs player+1632.
+- **Off-board height**: `82DAB7D0` tracks a peak height and banks `curve(0x190)` as
+  id 253 at exit. The port's off-board collector instead accrues `curve(0x140)`,
+  whose authored y array is **all zeros**, so it earns nothing. Same missing input.
+- **The spin accumulator**: `82DA8BE0` sums **two** rotation accumulators (`this+816`
+  over `[[owner+20]+368]`, `this+896` over the root transform `[owner+0]`), each a
+  `82DAC880` measuring a signed angle about the object's *own* up axis and wrapping
+  to (-pi, pi]. The port accumulates a single world-yaw heading delta, which
+  degenerates when the board pitches toward vertical. The threshold arithmetic
+  itself, `floor((|deg| + 0x63C=80) / 180)` signed by the rotation, is retail-exact.

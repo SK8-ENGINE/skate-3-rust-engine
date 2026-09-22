@@ -42,26 +42,49 @@ pub struct ExtendedAttributes {
 impl ExtendedAttributes {
     /// Reset82BF9EF0 zeros every represented ProcessedPhysIn field here.
     /// AnimOut24 belongs to another owner and survives this reset.
-    pub fn reset(footstep_strength:f32) -> Self {
+    pub fn reset(footstep_strength: f32) -> Self {
         Self {
-            flags2480:0,grind_translation:0.0,grind_stability_nudge:0.0,
-            grind_up_down:0.0,grind_grab_min_height:0.0,physical_body_spin:0.0,
-            world_grab_y:0.0,world_grab_z:0.0,offboard_turn:0.0,
-            offboard_magnitude:0.0,biped_world_x:0.0,biped_world_z:0.0,
-            look_x:0.0,look_y:0.0,object_move_z:0.0,object_move_x:0.0,
-            object_move_rotation:0.0,wipeout_control:[0.0;2],offboard_jump:[0.0;2],
-            wipeout_gesture:[0.0;2],body_adjust:[0.0;2],biped_start_angle:0.0,
-            biped_spin_angle:0.0,biped_animation_time:0.0,footstep_strength,
-            jump_strength:0.0,jump_controls:[0.0;2],revert_direction:0.0,
+            flags2480: 0,
+            grind_translation: 0.0,
+            grind_stability_nudge: 0.0,
+            grind_up_down: 0.0,
+            grind_grab_min_height: 0.0,
+            physical_body_spin: 0.0,
+            world_grab_y: 0.0,
+            world_grab_z: 0.0,
+            offboard_turn: 0.0,
+            offboard_magnitude: 0.0,
+            biped_world_x: 0.0,
+            biped_world_z: 0.0,
+            look_x: 0.0,
+            look_y: 0.0,
+            object_move_z: 0.0,
+            object_move_x: 0.0,
+            object_move_rotation: 0.0,
+            wipeout_control: [0.0; 2],
+            offboard_jump: [0.0; 2],
+            wipeout_gesture: [0.0; 2],
+            body_adjust: [0.0; 2],
+            biped_start_angle: 0.0,
+            biped_spin_angle: 0.0,
+            biped_animation_time: 0.0,
+            footstep_strength,
+            jump_strength: 0.0,
+            jump_controls: [0.0; 2],
+            revert_direction: 0.0,
         }
     }
 }
 
 /// Special jump/revert handlers and finalization are in attribute_finalization.
 /// Return false only for a name outside this contiguous scalar region.
-pub fn dispatch(name: &str, scalar: impl Fn() -> Result<f32, String>,
-    input: &mut ScalarAttributeInputs, extra: &mut ExtendedAttributes,
-    output: &mut AnimationControlOutput) -> Result<bool, String> {
+pub fn dispatch(
+    name: &str,
+    scalar: impl Fn() -> Result<f32, String>,
+    input: &mut ScalarAttributeInputs,
+    extra: &mut ExtendedAttributes,
+    output: &mut AnimationControlOutput,
+) -> Result<bool, String> {
     match name {
         "Wipeout" => input.flags2468 |= 0x40000,
         "jump" => input.flags2468 |= 0x400000,
@@ -124,7 +147,10 @@ pub fn dispatch(name: &str, scalar: impl Fn() -> Result<f32, String>,
         "GrindTrick" => input.flags2484 |= 0x100000,
         "Shoving" => input.flags2484 |= 0x80000,
         "ShoveDirection" => input.flags2484 |= 0x40000,
-        "BipedStartAngle" => { input.flags2484 |= 0x4000; extra.biped_start_angle = scalar()?; }
+        "BipedStartAngle" => {
+            input.flags2484 |= 0x4000;
+            extra.biped_start_angle = scalar()?;
+        }
         "BipedSpinAngle" => extra.biped_spin_angle = scalar()?,
         "BipedAnimTime" => extra.biped_animation_time = scalar()?,
         "InManualZone" => input.flags2484 |= 0x2000,
@@ -139,7 +165,10 @@ pub fn dispatch(name: &str, scalar: impl Fn() -> Result<f32, String>,
         "IsTakeDownByBoard" => output.flags |= 0x02000000,
         "DropInLock" => output.flags |= 0x01000000,
         "DropInRelease" => output.flags |= 0x00800000,
-        "OB_DropIn" => { output.flags |= 0x00400000; input.flags2488 |= 0x10000000; }
+        "OB_DropIn" => {
+            output.flags |= 0x00400000;
+            input.flags2488 |= 0x10000000;
+        }
         "BodyAdjustZ" => extra.body_adjust[1] = scalar()?,
         "BodyAdjustX" => extra.body_adjust[0] = scalar()?,
         "OneFootIntent" => input.flags2488 |= 0x02000000,

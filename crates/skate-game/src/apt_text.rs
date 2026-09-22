@@ -109,14 +109,33 @@ impl TextAssets {
         }
         Ok(out)
     }
+    /// A leading `#` means *resolve every token*, not "leave this alone".
+    ///
+    /// The trick display's name is composed by `sub_825E51A0`, which formats with the
+    /// literals `"#%s %d "` (8220E43C) and `"#%s "` (8220E444) and then `strcat`s further
+    /// localisation ids onto the result. So a displayed name is one `#` followed by
+    /// space-separated ids and bare numbers -- `#ID_TRICK_FLIP_KICKFLIP 360
+    /// ID_TRICK_AIR_METRICS_FRONTFLIP` -- and each token is resolved separately. Treating
+    /// `#` as "literal" is the inverse of that, and left every composed name unreadable.
+    ///
+    /// A token with no entry, such as a spin's `360`, is kept exactly as written.
     pub fn localize(&self, text: &str) -> String {
-        if let Some(literal) = text.strip_prefix('#') {
-            return literal.into();
-        }
-        self.language
-            .get(text)
-            .cloned()
-            .unwrap_or_else(|| text.into())
+        let Some(composed) = text.strip_prefix('#') else {
+            return self
+                .language
+                .get(text)
+                .cloned()
+                .unwrap_or_else(|| text.into());
+        };
+        composed
+            .split_ascii_whitespace()
+            .map(|token| {
+                self.language
+                    .get(token)
+                    .map_or(token, String::as_str)
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 impl Font {

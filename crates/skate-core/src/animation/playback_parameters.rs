@@ -29,7 +29,8 @@ pub struct SettableAttribute {
 pub trait ParameterInputs {
     fn motion_intent(&self, name: &str) -> Option<f32>;
     fn filtered_intent(&self, name: &str) -> Option<f32>;
-    fn last_attribute(&mut self, name: AttributeName) -> Result<Option<AnimationAttribute>, String>;
+    fn last_attribute(&mut self, name: AttributeName)
+    -> Result<Option<AnimationAttribute>, String>;
 }
 
 pub trait AttributeSink {
@@ -90,10 +91,10 @@ impl PlaybackParameter {
                     return Ok(());
                 }
                 let value = match inputs.last_attribute(*source)? {
-                    Some(attribute) if matches!(attribute.kind, 0 | 2) => Some(
-                        f32::from_bits(attribute.payload.0[0]
-                            .ok_or("Last animation scalar payload is uninitialized")?),
-                    ),
+                    Some(attribute) if matches!(attribute.kind, 0 | 2) => Some(f32::from_bits(
+                        attribute.payload.0[0]
+                            .ok_or("Last animation scalar payload is uninitialized")?,
+                    )),
                     Some(_) => return Ok(()),
                     None => self.default_value,
                 };
@@ -102,7 +103,10 @@ impl PlaybackParameter {
         };
         if let Some(value) = value {
             output.set_attribute(SettableAttribute {
-                name, value, normalized, sequence_id: -1,
+                name,
+                value,
+                normalized,
+                sequence_id: -1,
             });
         }
         Ok(())
@@ -116,6 +120,8 @@ pub fn intent_key(text: &str) -> [u32; 6] {
     let first = super::skeleton_input::name::encode(bytes).0;
     let tail = if bytes.len() > 30 && !bytes[..30].contains(&0) {
         super::skeleton_input::name::encode(&bytes[30..]).0[0]
-    } else { 0 };
+    } else {
+        0
+    };
     [first[0], first[1], first[2], first[3], first[4], tail]
 }

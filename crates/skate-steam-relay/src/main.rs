@@ -57,11 +57,13 @@ fn run() -> Result<(), String> {
     // SAFETY: Steam is initialized and owns this interface for `client`'s lifetime.
     unsafe {
         let utils = steamworks::sys::SteamAPI_SteamNetworkingUtils_SteamAPI_v004();
-        if utils.is_null() || !steamworks::sys::SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32(
-            utils,
-            steamworks::sys::ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_SendRateMax,
-            i32::MAX,
-        ) {
+        if utils.is_null()
+            || !steamworks::sys::SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32(
+                utils,
+                steamworks::sys::ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_SendRateMax,
+                i32::MAX,
+            )
+        {
             return Err("Could not configure Steam model transfer bandwidth".into());
         }
     }

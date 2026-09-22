@@ -1,5 +1,6 @@
 //! Original ToggleBoard lifecycle adapter, TU3 82BA8FD8/8FE8 and 82B61BB8.
 use super::motion::MotionAnimation;
+use crate::graph_host::outputs::BoardControls;
 use skate_core::{
     animation::{
         channel_playback::ChannelSettings,
@@ -9,7 +10,6 @@ use skate_core::{
     },
     player::offboard::toggle_board::{Channel, Clip, Command, Input, State},
 };
-use crate::graph_host::outputs::BoardControls;
 
 /// Completed native output, supplied by the board-possession/physical owner.
 #[derive(Clone, Copy, Debug)]

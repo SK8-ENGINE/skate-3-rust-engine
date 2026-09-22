@@ -21,13 +21,26 @@ pub struct Input {
 /// None means no AddForce call, including no accumulator wakeup.
 pub fn force(input: Input) -> Option<V> {
     let outward = if input.force_across || input.geometry_kind == 0 {
-        scale(input.across, if dot3(input.across, sub(input.position, input.point)) > 0.0 {
-            1.0
-        } else { -1.0 })
-    } else { scale(input.high_side, -1.0) };
-    if !(dot3(input.velocity, outward) < input.speed_limit) { return None; }
+        scale(
+            input.across,
+            if dot3(input.across, sub(input.position, input.point)) > 0.0 {
+                1.0
+            } else {
+                -1.0
+            },
+        )
+    } else {
+        scale(input.high_side, -1.0)
+    };
+    if !(dot3(input.velocity, outward) < input.speed_limit) {
+        return None;
+    }
     let lateral = scale(outward, input.strength);
-    if !input.enable_lift { return Some(lateral); }
+    if !input.enable_lift {
+        return Some(lateral);
+    }
     let upward = input.normal[1].max(0.0) * input.lift;
-    Some(core::array::from_fn(|i| input.normal[i].mul_add(upward, lateral[i])))
+    Some(core::array::from_fn(|i| {
+        input.normal[i].mul_add(upward, lateral[i])
+    }))
 }

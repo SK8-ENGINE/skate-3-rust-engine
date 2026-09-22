@@ -181,10 +181,12 @@ pub fn validate_request(q: QueryRequest) -> Result<(), &'static str> {
     if [t.duration, q.radius, q.start_error, q.end_error]
         .iter()
         .any(|x| !x.is_finite() || *x <= 0.)
-        || t.position
+        // x/y/z only, for the same reason as the launch packet's guard: the fourth lane of these
+        // guest `vector4`s is a homogeneous slot the trajectory never reads, and the board pose
+        // can carry a NaN there while every meaningful component is finite.
+        || [t.position, t.velocity, t.acceleration]
             .into_iter()
-            .chain(t.velocity)
-            .chain(t.acceleration)
+            .flat_map(|v| [v[0], v[1], v[2]])
             .any(|x| !x.is_finite())
     {
         Err("Invalid native BipedAir trajectory request")

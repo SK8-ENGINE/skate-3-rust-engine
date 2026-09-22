@@ -1,7 +1,12 @@
 //! ACS immediate Mirror828CDAF8. Pairing comes from the stock hierarchy.
 use super::{output::Sqt, pose_trajectory::multiply};
 
-pub fn mirror(pose: &mut [Sqt], parents: &[i32], partners: &[i32], trajectory_mode: u32) -> Result<(), String> {
+pub fn mirror(
+    pose: &mut [Sqt],
+    parents: &[i32],
+    partners: &[i32],
+    trajectory_mode: u32,
+) -> Result<(), String> {
     if pose.len() != parents.len() || pose.len() != partners.len() {
         return Err("Mirror pose and hierarchy dimensions differ".into());
     }
@@ -10,7 +15,9 @@ pub fn mirror(pose: &mut [Sqt], parents: &[i32], partners: &[i32], trajectory_mo
             return Err(format!("Invalid mirror partner for bone{i}"));
         }
         // -1 excludes a bone; the smaller index processes both sides of a pair.
-        if partner < i as i32 { continue; }
+        if partner < i as i32 {
+            continue;
+        }
         if trajectory_mode == 1 && (i == 0 || parents[i] == 0) {
             if i != 0 {
                 // Literal quaternion8232F740, before the alternate reflection.

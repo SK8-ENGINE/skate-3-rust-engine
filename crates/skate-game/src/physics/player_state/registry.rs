@@ -31,7 +31,10 @@ impl StateRegistry {
                 PhysicalStateId::Sleeping
                     | PhysicalStateId::PhysicsGround
                     | PhysicalStateId::PhysicsAir
-                    | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                    | PhysicalStateId::FootPlant
+                    | PhysicalStateId::Boneless
+                    | PhysicalStateId::HandPlant
+                    | PhysicalStateId::RevertGround
                     | PhysicalStateId::KnownAir
                     | PhysicalStateId::BipedAir
                     | PhysicalStateId::BipedGround
@@ -72,8 +75,11 @@ impl StateRegistry {
                 | (
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
-                        | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
-                    | PhysicalStateId::KnownAir
+                        | PhysicalStateId::FootPlant
+                        | PhysicalStateId::Boneless
+                        | PhysicalStateId::HandPlant
+                        | PhysicalStateId::RevertGround
+                        | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
                         | PhysicalStateId::BipedGround
                         | PhysicalStateId::OffBoardPushing
@@ -84,8 +90,11 @@ impl StateRegistry {
                         | PhysicalStateId::LandingOnDeck,
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
-                        | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
-                    | PhysicalStateId::KnownAir
+                        | PhysicalStateId::FootPlant
+                        | PhysicalStateId::Boneless
+                        | PhysicalStateId::HandPlant
+                        | PhysicalStateId::RevertGround
+                        | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
                         | PhysicalStateId::BipedGround
                         | PhysicalStateId::OffBoardPushing

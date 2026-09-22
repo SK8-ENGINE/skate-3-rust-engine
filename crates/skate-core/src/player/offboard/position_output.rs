@@ -1,6 +1,8 @@
 //! Biped frame/position output stages82D80360 and82D80548.
 //! The retained state is part of the actual Biped owner; no inferred initialization.
-use crate::physics::{native_arithmetic::dot3, reciprocal_sqrt::estimate, skeleton_root::orthonormalize};
+use crate::physics::{
+    native_arithmetic::dot3, reciprocal_sqrt::estimate, skeleton_root::orthonormalize,
+};
 type Vector = [f32; 4];
 type Matrix = [Vector; 4];
 const DT: f32 = f32::from_bits(0x3c88_8889);
@@ -25,7 +27,8 @@ impl FrameOutput {
         let right = normalize(cross(frame_up_448, forward_32));
         let forward = normalize(cross(right, projection_axis_416));
         self.frame = orthonormalize([right, frame_up_448, forward, self.frame[3]]);
-        let mut change: Vector = std::array::from_fn(|i| (position_48[i] - self.frame[3][i]) * 60.0 - self.velocity[i]);
+        let mut change: Vector =
+            std::array::from_fn(|i| (position_48[i] - self.frame[3][i]) * 60.0 - self.velocity[i]);
         change[1] = select(change[1] - -1.0, change[1], -1.0);
         self.velocity = std::array::from_fn(|i| self.velocity[i] + change[i]);
         self.frame[3] = std::array::from_fn(|i| self.velocity[i].mul_add(DT, self.frame[3][i]));
@@ -75,9 +78,7 @@ pub fn update_position(position_368: &mut Vector, input: PositionInput) {
     let lower = select(-0.1 - height, -0.1, height);
     let bounded = select(0.1 - lower, lower, 0.1);
     let correction = bounded - height;
-    *position_368 = std::array::from_fn(|i| {
-        position_368[i] + up[i].mul_add(correction, delta[i])
-    });
+    *position_368 = std::array::from_fn(|i| position_368[i] + up[i].mul_add(correction, delta[i]));
 }
 
 fn subtract(a: Vector, b: Vector) -> Vector {
@@ -106,4 +107,3 @@ fn normalize(vector: Vector) -> Vector {
 #[cfg(test)]
 #[path = "position_output/tests.rs"]
 mod tests;
-

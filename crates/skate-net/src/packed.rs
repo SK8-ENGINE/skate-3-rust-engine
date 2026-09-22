@@ -167,7 +167,10 @@ impl Packed {
         self.root == other.root && self.enabled == other.enabled && self.rows == other.rows
     }
     pub fn body(s: &BodyState) -> Option<Self> {
-        if !s.root.valid() || s.bodies.len() != 33 || (s.enabled & !((1 << 63) | (1 << 62))) >> 33 != 0 {
+        if !s.root.valid()
+            || s.bodies.len() != 33
+            || (s.enabled & !((1 << 63) | (1 << 62))) >> 33 != 0
+        {
             return None;
         }
         let mut rows = Vec::with_capacity(33);

@@ -31,7 +31,11 @@ impl SkeletonOutputFields {
     /// Packet10368 flips that vector; pitch is its dot with world up, not asin.
     pub fn publish_deck_angles(&mut self, forward: [f32; 4], board_flipped: bool) {
         use crate::physics::native_arithmetic::{dot3, reciprocal_estimate};
-        let forward = if board_flipped { forward.map(|v| -v) } else { forward };
+        let forward = if board_flipped {
+            forward.map(|v| -v)
+        } else {
+            forward
+        };
         let [x, _, z, _] = forward;
         let reciprocal = reciprocal_estimate(z);
         let refined = reciprocal.mul_add((-reciprocal).mul_add(z, 1.0), reciprocal);
@@ -54,24 +58,37 @@ impl SkeletonOutputFields {
         processed_forward_352: [f32; 4],
         reckoning_up_1152: [f32; 4],
     ) {
-        use crate::physics::{board_motion_output::inverse_length_squared, native_arithmetic::dot3};
+        use crate::physics::{
+            board_motion_output::inverse_length_squared, native_arithmetic::dot3,
+        };
         // SkeletonState at6464, physical pose at+1552: translations of
         // parts10/6 are Skeleton8704/8448, respectively.
-        let across: [f32; 4] = std::array::from_fn(|i| record.pose[10][3][i] - record.pose[6][3][i]);
+        let across: [f32; 4] =
+            std::array::from_fn(|i| record.pose[10][3][i] - record.pose[6][3][i]);
         let squared = dot3(across, across);
         let inverse = inverse_length_squared(squared, 2);
-        let length = if squared == 0.0 { 0.0 } else { squared * inverse };
+        let length = if squared == 0.0 {
+            0.0
+        } else {
+            squared * inverse
+        };
         // Original830BD350 is a zero vector. Preserve the ordered comparison,
         // including the zero/NaN path selecting the zero direction.
-        let direction = if length > 0.0 { across.map(|v| v * inverse) } else { [0.0; 4] };
+        let direction = if length > 0.0 {
+            across.map(|v| v * inverse)
+        } else {
+            [0.0; 4]
+        };
         let angle = crate::player::wipeout_state::orientation::projected_angle(
-            processed_forward_352, direction, reckoning_up_1152,
+            processed_forward_352,
+            direction,
+            reckoning_up_1152,
         );
         // Original82139A60/50; wrap via fractional turns, not angle modulo pi.
         let turns = angle * f32::from_bits(0x3E22_F983);
         let fraction = turns - turns.floor();
-        self.twist_504 = (fraction - if fraction > 0.5 { 1.0 } else { 0.0 })
-            * f32::from_bits(0x40C9_0FDB);
+        self.twist_504 =
+            (fraction - if fraction > 0.5 { 1.0 } else { 0.0 }) * f32::from_bits(0x40C9_0FDB);
     }
 }
 
@@ -86,7 +103,12 @@ pub struct AnimationOutputFields {
 impl Default for AnimationOutputFields {
     fn default() -> Self {
         // Animation82DE3F38 stores FLT_MAX at144 and zero at148.
-        Self { collision_time_144: f32::MAX, profile_148: 0, tricks_blocked_on_stairs_166: 0, manual_opposition_168: 0 }
+        Self {
+            collision_time_144: f32::MAX,
+            profile_148: 0,
+            tricks_blocked_on_stairs_166: 0,
+            manual_opposition_168: 0,
+        }
     }
 }
 

@@ -4,9 +4,9 @@ use bevy::prelude::*;
 
 mod controllers;
 pub(crate) mod gesture_catalog;
-mod gesture_mapping_data;
-pub(crate) mod gesture_mapping;
 pub(crate) mod gesture_input;
+pub(crate) mod gesture_mapping;
+mod gesture_mapping_data;
 pub(crate) mod platform;
 pub(crate) use controllers::{ControllerInput, ControllerStatus};
 use skate_core::input::tick::TickInput;
@@ -29,20 +29,37 @@ impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ControllerInput>()
             .init_resource::<PublishedTickInput>()
-            .add_systems(PreUpdate, poll_controllers.run_if(crate::graphics_menu::gameplay_active))
+            .add_systems(
+                PreUpdate,
+                poll_controllers.run_if(crate::graphics_menu::gameplay_active),
+            )
             .add_systems(FixedUpdate, publish_actions.in_set(SimulationSet::Input));
     }
 }
 
-pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<crate::config::Config>,net:Option<Res<crate::multiplayer::Multiplayer>>,windows:Query<&Window>,mut capabilities:Local<[platform::CapabilityCache;4]>) {
+pub(crate) fn poll_controllers(
+    mut input: ResMut<ControllerInput>,
+    config: Res<crate::config::Config>,
+    net: Option<Res<crate::multiplayer::Multiplayer>>,
+    windows: Query<&Window>,
+    mut capabilities: Local<[platform::CapabilityCache; 4]>,
+) {
     let previous = input.status;
-    let focused=windows.iter().any(|w|w.focused);
-    let active=net.is_some_and(|n|n.active());
+    let focused = windows.iter().any(|w| w.focused);
+    let active = net.is_some_and(|n| n.active());
     input.collect(std::array::from_fn(|slot| {
-        if active && ((!focused && config.multiplayer.controller.is_none()) || config.multiplayer.controller.is_some_and(|selected|selected as usize!=slot)) {
+        if active
+            && ((!focused && config.multiplayer.controller.is_none())
+                || config
+                    .multiplayer
+                    .controller
+                    .is_some_and(|selected| selected as usize != slot))
+        {
             capabilities[slot].invalidate();
             Err(platform::DeviceError::Disconnected)
-        } else {platform::poll_cached(slot, &mut capabilities[slot])}
+        } else {
+            platform::poll_cached(slot, &mut capabilities[slot])
+        }
     }));
     for (index, (&before, &after)) in previous.iter().zip(&input.status).enumerate() {
         if before != after {
@@ -60,9 +77,11 @@ pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<cra
 fn publish_actions(
     mut input: ResMut<ControllerInput>,
     mut published: ResMut<PublishedTickInput>,
-    menu:Option<Res<crate::graphics_menu::Menu>>,
+    menu: Option<Res<crate::graphics_menu::Menu>>,
 ) {
-    if !crate::graphics_menu::gameplay_active(menu) {input.discard_gameplay();}
+    if !crate::graphics_menu::gameplay_active(menu) {
+        input.discard_gameplay();
+    }
     input.publish_actions();
     published.0 = input.tick_input();
 }

@@ -23,8 +23,11 @@ fn spawn(world: &mut World) {
         let manifest = world.resource::<AssetManifest>();
         server.load(GltfAssetLabel::Scene(0).from_asset(manifest.0.character_scene.clone()))
     };
-    world.spawn((PlayerRoot, Transform::default(), Visibility::default()))
-        .with_children(|parent| { parent.spawn(SceneRoot(scene)); });
+    world
+        .spawn((PlayerRoot, Transform::default(), Visibility::default()))
+        .with_children(|parent| {
+            parent.spawn(SceneRoot(scene));
+        });
     let mut prepared = crate::map_render::PreparedScene::new(world);
     let (map, root) = {
         let mut config = world.resource_mut::<crate::config::Config>();
@@ -46,16 +49,20 @@ pub(crate) fn spawn_test_world(
         Color::srgb(0.24, 0.48, 0.31),
     ];
     for (quads, color) in crate::physics::ground::surfaces().into_iter().zip(colors) {
-        let positions: Vec<[f32; 3]> = quads.into_iter().flat_map(|vertices| {
-            [0, 2, 1, 0, 3, 2].map(|i| {
-                let v = vertices[i];
-                [v.x, v.y, v.z]
+        let positions: Vec<[f32; 3]> = quads
+            .into_iter()
+            .flat_map(|vertices| {
+                [0, 2, 1, 0, 3, 2].map(|i| {
+                    let v = vertices[i];
+                    [v.x, v.y, v.z]
+                })
             })
-        }).collect();
+            .collect();
         let mut mesh = Mesh::new(
             bevy::mesh::PrimitiveTopology::TriangleList,
             bevy::asset::RenderAssetUsages::default(),
-        ).with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.compute_flat_normals();
         commands.spawn((
             Mesh3d(meshes.add(mesh)),

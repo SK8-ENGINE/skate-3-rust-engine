@@ -180,7 +180,10 @@ fn segment_face_keeps_clipped_two_point_manifold_in_both_orders() {
         } else {
             (&mut polygon, &mut line)
         };
-        assert_eq!(find_feature_intersection_prism(&mut output, a, b, direction), 1);
+        assert_eq!(
+            find_feature_intersection_prism(&mut output, a, b, direction),
+            1
+        );
         assert_eq!(output[132], 2);
         for (index, x) in [-1.0, 1.0].into_iter().enumerate() {
             assert_point(&output, usize::from(reverse), index, [x, 0.0, 0.0]);
@@ -348,4 +351,3 @@ fn specialized_containment_handles_each_face_as_the_enclosed_feature() {
         }
     }
 }
-

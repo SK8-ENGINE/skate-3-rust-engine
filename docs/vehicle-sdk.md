@@ -356,3 +356,310 @@ hit_impulse 10..10000 N·s, inverted_up_y -1..0.5, inverted_seconds 0.05..3 s,
 eject_up_speed 0..10 m/s. Nonfinite values are rejected. Headless tests cover wall
 momentum retention, overhang rider hits and sustained inversion versus empty vehicles.
 Native rendering/recovery and unusual map geometry still need manual playtesting.
+
+## Single-track (two wheel) vehicles
+
+Optional `bike` section, absent and disabled on every existing definition, so
+nothing here changes how a four-wheel vehicle drives. It requires exactly two
+wheels, one of them steering.
+
+```json
+"bike": {
+  "enabled": true,
+  "lean_max": 0.95, "lean_rate": 9, "counter_steer": 1, "upright_gain": 60,
+  "steer_falloff": 0.06, "cornering_scale": 2, "lean_yaw": 8,
+  "preload_force": 1100, "preload_release": 500,
+  "air_yaw": 9, "air_pitch_down": 11, "air_pitch_up": 11, "air_roll": 9,
+  "flip_rate": 5.5, "whip_rate": 3.5, "air_level": 3,
+  "wheelie_limit": 0.85, "stoppie_limit": 0.5, "clutch_boost": 1.6,
+  "landing_roll": 0.75, "landing_pitch": 0.95, "landing_yaw": 0.9
+}
+```
+
+`ground_stability` and `air_control` are not the right tools for a bike:
+`ground_stability` needs two contacts (a bike rides on one wheel often enough
+that this alone disqualifies it) and stabilizes roll **toward the road normal**.
+With `bike.enabled`, the `assists` module is replaced by `bike`.
+
+### Lean is handling state, not body roll
+
+**The chassis body never rolls.** While a wheel is down it is held upright over
+the contact line, and `lean` is a separate scalar the handling owns. This is the
+single most important thing to know about the module, and it is not a stylistic
+choice — a physically leaning chassis cannot work here:
+
+Rapier casts each wheel's suspension ray along `direction_cs` **rotated by the
+chassis**. A body rolled 50 degrees therefore casts its rays sideways-down, reads
+its suspension as extended, sinks, and grinds its collider along the floor. That
+is what a leaning bike actually did: it rode badly, wedged itself on flat ground
+and could not be ridden out of. The arcade motocross games all separate the two
+for the same reason.
+
+So `lean` does three jobs:
+
+* **It steers the bike.** A leaned bike carves the radius its lean dictates:
+  steady cornering balances gravity against centripetal acceleration, so
+  `v²/R = g·tan(lean)` and the turn rate is `g·tan(lean)/v`. `lean_yaw` is the
+  authority toward that rate. Faster is wider for the same lean, exactly as on
+  a real bike, and it falls out of the physics rather than a tuned curve.
+* **It rolls the model and the rider**, about the contact line rather than the
+  chassis origin, so the bike visibly hangs its mass over the inside. The host
+  reads it through `Simulation::bike_state` and applies it in `present`.
+* **It drives the rider's posture**, through the `lean_left`/`lean_right` layer.
+
+Tyre forces still go through the friction circle in `handling::tires`, so too
+much lean on the throttle still steps the back end out. Lean is what the bike is
+asking for; grip decides whether it gets it.
+
+Roll damping is derived from `upright_gain` rather than authored, so raising the
+gain cannot tune the bike into an oscillation. The controller also **cancels the
+moment the ground reaction makes about the mass centre**, measured live, so the
+angle it is asked to hold is the angle it settles at. Two things about that are
+worth stating, because both were wrong at some point and only one of them was
+visible on flat ground:
+
+* Without any cancellation the controller is fighting a load that grows with the
+  roll, and below about 84 rad/s² on this geometry it loses and the bike slowly
+  lies down. That is not a number anyone should have to find by eye.
+* The reaction acts along the **contact normal**, not along world up. A bike
+  already square to a cambered slope has its contact patch directly beneath its
+  mass centre *along that normal*, so the real moment there is zero — while a
+  feed-forward written against world up computes `m·g·h·sin(camber)` and injects
+  a torque that drags the bike back toward world-vertical. The symptom was a
+  bike that took up only about half of a side-slope, and almost none of one that
+  also climbed: ride onto an off-camber face and the tilt fought you. On the
+  flat the normal *is* world up, which is exactly why it read as correct.
+  `tests/bike.rs` pins this with a cambered ground plane.
+
+### Pitch is asked for, never stumbled into
+
+Drive and brake torque act at the contact patch, and on a bike with real grip
+they are several times gravity's restoring moment: full throttle alone stood the
+bike vertical at 84 degrees and balanced it there. So `bike` **answers the tyres'
+own pitch moment in full** every tick, and the only thing that pitches the bike
+is the rider.
+
+`weight` back on the throttle wheelies to `wheelie_limit`; `weight` forward on
+the front brake stoppies to `stoppie_limit`. Both are a PD on the pitch angle
+with gravity's moment through the support wheel fed forward, so the balance
+point is the angle asked for. Backstops past each limit stop a loop-out or an
+endo whatever the rider does. Pitch is measured **against the contact normal**,
+not the world, so a ramp does not read as a wheelie and none of this fights one.
+
+### Preload, and the clutch
+
+`weight` (rider fore/aft) compresses the suspension while in contact, and a
+release edge while still in contact converts the stored travel into a launch
+impulse scaled by how much was stored. One pop per compression: the latch arms
+above 35% travel and fires below 15% remaining rider weight. This is what makes
+jump height a skill rather than a function of approach speed.
+
+`clutch` disconnects the drive and spins the engine up against it; releasing it
+hands that stored speed straight to the rear wheel and lofts the front. A launch
+from rest is grip limited, so a clutch dump cannot make the bike travel further
+— what it buys is the front wheel, which is what the clutch is for over a log or
+the face of a jump.
+
+### In the air
+
+The body is free, so whips, flips and tabletops are real rotation. Rate targets
+keep repeated input controllable: `whip` yaws at up to `whip_rate` and lays the
+back end over with it, a held `weight` pitches at `flip_rate` (a backflip is
+`2π / flip_rate` seconds), and `lean` rolls for a tabletop.
+
+A **neutral stick does more than damp**. It levels roll toward world up and
+swings the nose back toward the direction of travel at `air_level`. That is the
+assist that makes a whip landable: send it, let go, and the bike comes back
+square. Holding the bars out all the way down is the rider refusing to bring it
+back, and it lands as a case.
+
+### Landing
+
+Freestyle landings are the point, so the envelope is deliberately generous:
+`landing_roll` 1.05, `landing_pitch` 1.35 and `landing_yaw` 1.1 radians, a
+`crash_delta_v` of 24 (a 16 m drop peaks at 15.6), and 0.40 m of suspension
+travel to absorb the rest. For `LANDING_ASSIST` seconds after a real air the
+roll controller's gain is tripled and the bike is yawed toward its direction of
+travel, which plants it rather than letting a few degrees become a slide. What
+still bails you is a landing you have actively held wrong — the assists only run
+on a neutral stick.
+
+On the airborne-to-contact edge, after `0.25 s` of air, the landing is judged
+**against the surface it lands on**, not against world up — landing on a steep
+face is fine when the bike matches the face. Roll, pitch and (above walking
+pace) the angle between the bike and its direction of travel are checked against
+`landing_roll`, `landing_pitch` and `landing_yaw`; past any of them the rider is
+handed off through the same `safety` path as a collision, with
+`reason: "landing"`. Hard hits keep `crash_delta_v`.
+
+### Controls
+
+`Controls` gains `lean`, `weight`, `whip`, `trick`, `trick_extend` and `clutch`,
+all defaulted, so existing Lua `control` tables keep working unchanged. The host
+publishes the matching axes from `sdk.vehicle.input()`: left stick is the bike
+(`steering`, `weight`, and `whip` sharing the bars axis), right stick is the
+rider (`lean`, `rider_y`), plus raw `trigger_l`/`trigger_r` so a mod can split
+them into throttle and front brake instead of the kart's combined pedal, and
+`trick_a`/`trick_b`/`clutch` buttons. `brake` is the front lever: on a bike it
+takes the steered wheel at full and the rear at 0.3, while `handbrake` locks the
+rear for a slide. Trick **selection** stays in Lua: the host publishes axes and
+buttons, the mod decides what they mean.
+
+`sdk.vehicle.read()` additionally returns `velocity`, `angular_velocity`,
+`wheel_contacts`, `airborne` and `wheel_speed` — what a freestyle scorer needs to
+measure rotation and tell an air from a landing.
+
+### Geometry a bike needs, that a kart does not
+
+The chassis collider must never reach the ground. A kart's box sits low by
+design; a bike on the same numbers rides belly-down on the floor. Size
+`half_extents` and `collider_offset` so the underside clears the ground at the
+compressed ride height — the headless tests assert 0.25 m of clearance at static
+sag — and put `center_of_mass` **high**, around 0.3 m above the chassis origin
+for a 250.
+
+Suspension wants about a third of its travel used at rest. Rapier's spring force
+is `stiffness × Δlength × chassis_mass`, so static sag is `g / (2 · stiffness)`
+and nothing else: at `suspension_stiffness` 25 that is 0.20 m, which on 0.3 m of
+travel is two thirds gone before the rider has done anything, and `preload_force`
+then bottoms it permanently. 46 over 0.32 m of travel gives 35% sag.
+
+### Engine sound
+
+`engine_audio.profile` selects `generic` (the original harmonic stack) or
+`four_stroke_single`. A single cylinder fires once every two crank revolutions,
+so the thumper is one hard asymmetric event per cycle with a long decay, not a
+harmonic stack. Its attack is fast but finite: decaying straight off a vertical
+edge leaves a step at the phase wrap, which clicks and aliases when pitched up.
+
+For a bike, revs come from the **driven wheel**, not chassis speed — the whole
+point of a clutch and a rev in the air is that the bike is not moving. Against
+the clutch `wheel_speed` reports the engine rather than the stationary wheel.
+
+### Squaring up a bought model
+
+Bike models are usually sold posed rather than neutral, and the pose is almost
+always a little steering lock. `prepare_bike.py` cannot see it: it squares the
+chassis using the two axle centres, and turning the bars barely moves the front
+axle, so the wheelbase it aligns to is already straight while the bars, clamps,
+forks, fender, plate and front wheel are all 20-odd degrees off. In game that
+reads as a bike permanently trying to turn.
+
+```powershell
+python tools/align_bike.py sdk/examples/freestyle-mx/bike.glb --report
+python tools/align_bike.py sdk/examples/freestyle-mx/bike.glb --apply --cut 0.15
+```
+
+The angle is measured, not eyeballed: the fork legs are the only pair of long
+thin parallel tubes on a bike, they are rigidly part of the front end, and on a
+straight bike they are mirror images. Turning the bars swings one forward and
+the other back, so the angle of the line joining them, seen from above, **is**
+the steering angle, and their shared long axis is the steering axis, rake
+included. Run it until it converges -- 21 degrees came down to 3.6, then 0.7,
+then 0.14 -- and **look at the render**, because the measurement only knows
+about the fork legs.
+
+Three things there are worth knowing before pointing it at another model:
+
+* **The rotation origin must stay on the steering axis.** Sliding it sideways
+  to move the cut turns the rotation into a rotation plus a translation, and
+  the front end comes off the frame.
+* **Classify whole connected islands, not vertices.** A plane cannot separate
+  swept-back handlebars from a forward-leaning fuel tank, because the bar ends
+  reach back past the tank's front edge. Per-vertex, it sheared a third of the
+  radiators and a tenth of the tank off while leaving most of the bars behind.
+* **Bar-mounted hardware needs its own rule.** Levers, perches, switchgear and
+  grip ends sit behind the steering axis, so no cut catches them without also
+  taking the tank. Height separates them cleanly instead: on this bike the tank
+  tops out at 0.54 and the seat at 0.52, while the lowest bar fitting is 0.58.
+
+`tools/split_kickstand.py` splits the side stand into its own named node, which
+`parked_nodes` in the vehicle definition then hides while the bike is ridden --
+otherwise it trails along the ground through every corner and jump. It finds the
+stand without being told where it is: it is the only part that is on one side of
+the centre plane, long and thin, and reaching down to the wheels' own contact
+height. The geometry is not duplicated; glTF lets the new node's primitive share
+the original attribute accessors and carry only its own index buffer.
+
+Both tools keep a copy of the model **beside** the package rather than inside
+it: `package_mod.py` ships every file in the mod folder, and a spare copy of a
+5.8 MB model trebled the archive.
+
+### Rider posture
+
+Six optional animation slots — `stand`, `crouch`, `weight_back`,
+`weight_forward`, `lean_left`, `lean_right` — are held poses the host blends the
+riding pose towards by how much of each the ride is asking for: standing in the
+air and under the brakes, crouching through suspension travel past static sag,
+weight from `Controls::weight`, and lean from the handling lean. They stack, so
+a rider standing on the pegs with his weight back through a lean is all three at
+their own weights rather than an authored pose per combination.
+
+### Verification
+
+`crates/skate-vehicles/tests/bike.rs` covers static sag and collider clearance,
+upright recovery, lean and carve in both directions, turn radius widening with
+speed, preload raising the jump apex and firing exactly once, a wheelie that
+lifts the front without looping out, a stoppie, a whip that straightens itself
+to land, a backflip on a held stick, a clean landing keeping the rider, sideways
+and on-its-side landings bailing, hops off bumps never being judged, no air
+authority on a parked bike, cornering without false ejection, the clutch, 7200
+ticks of mixed input staying finite, and 60/120 Hz agreement. Sign conventions
+are unit-tested directly in `bike.rs`.
+
+As everywhere else in this SDK, none of this establishes handling **feel**. The
+values are authored arcade constants, exposed as live mod settings because the
+only way to find them is to ride.
+
+### Rider trick poses
+
+`animations.tricks` is a list of clip names indexed by `Controls::trick` minus
+one, capped at 32 and requiring `animations.file`. Each entry is a **single held
+pose**, not an animation: `vehicle_pose` now takes an ordered layer stack rather
+than one optional steering target, so the riding pose is eased towards the trick
+by `trick_extend`. That is what makes a half-thrown trick read as half-thrown,
+and it means a trick costs one authored frame instead of a clip.
+
+`tools/author_bike_poses.py` generates them against the native rig with no Mixamo
+and no calibration profile: the seated stance is fitted onto the vehicle's own
+measured grips and pegs by coordinate descent, and each trick sets named limbs to
+absolute angles. Limbs a trick does not take over are re-fitted afterwards, which
+is what keeps both hands on the bars through a spine twist.
+
+Several things there were measured and contradict the obvious guess.
+
+**The export is a world-space delta, not a bone matrix.** Writing Blender's pose
+bone matrices out directly is what produced a rider whose limbs did not join up:
+they carry Blender's own bone convention, and the host wants the glTF one. What
+transfers is `posed @ rest.inverted()` -- a pure rigid motion -- applied to the
+*reference GLB's* rest node, which is what the working kart rider does. Both
+sides of the delta carry the same convention, so it cancels. The tool asserts
+this by exporting an unposed rig and requiring it to reproduce the reference rest
+pose exactly; a silent basis error here looks perfectly fine in the data.
+
+**Poses are written about the seat, not the hips.** The host puts the rider root
+at `definition.seat`. Recentring each frame on HIPS instead pins the pelvis
+there forever, which makes standing, crouching and weight shifts impossible to
+author at all -- and those are most of what a motocross rider does.
+
+**Mesh nodes carry their own transform.** This bike's are scaled 0.989 and
+dropped 0.16 m, so raw vertex coordinates are not chassis local. Reading them
+directly put the seat 0.24 m too high and left the rider floating above the bike
+with his legs through the engine. Measure in the scene, after the import has
+composed the transforms; with that done the contacts come out as real motocross
+numbers -- seat 0.97 m, pegs 0.41 m, grips 1.11 m above the ground.
+
+**Knees and elbows are hinges.** Given a lateral axis, the solver will happily
+reach a peg with the knee swung 48 degrees out to the side: the target is met
+and the rider looks broken. Each limb gets three knobs -- the proximal joint
+aims, the hinge sets the distance -- which is exactly determined for a point in
+space, plus a tiny cost on splay to settle the remaining sign the anatomical way.
+
+**Blender's IK is unusable here** without pole targets -- it put a foot 0.71 m
+off the centreline, and it points a limb at an unreachable target rather than
+failing, so a wrong pose still looks solved. Coordinate descent is used instead,
+seeded from the limb's current angles so a refit after the hips move only has to
+correct a good solution, and the residual at each hand and foot is printed.
+
+**Trick angles must be absolute**: the stance is a fitted solution, so a delta on
+top of it partly cancels the fit.

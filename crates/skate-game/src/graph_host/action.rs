@@ -14,8 +14,10 @@ use skate_core::input::body_flip_signal;
 use skate_core::input::graph_intents::{CreateMgIntent, IntentMutation};
 #[path = "action_board_adjust.rs"]
 mod board_adjust;
+use super::outputs::{
+    ActionGraphInput, ActionGraphOutput, GraphCapabilityReport, GraphDiagnostics,
+};
 use skate_data::collections::Collections;
-use super::outputs::{ActionGraphInput, ActionGraphOutput, GraphCapabilityReport, GraphDiagnostics};
 
 /// Original State output consumed by82BA1680/82BA16F0.
 #[derive(Clone, Copy, Debug)]
@@ -78,20 +80,18 @@ impl ActionHost {
         for &operation in &graph.runtime.operations.conditions {
             if let Some(instance) = instances.get(operation) {
                 if let Some(unsupported) = instance.unsupported() {
-                    capabilities.unsupported_conditions.push(format!(
-                        "{:?} `{}`",
-                        unsupported.kind, unsupported.name
-                    ));
+                    capabilities
+                        .unsupported_conditions
+                        .push(format!("{:?} `{}`", unsupported.kind, unsupported.name));
                 }
             }
         }
         for &operation in &graph.runtime.operations.hooks {
             if let Some(instance) = instances.get(operation) {
                 if let Some(unsupported) = instance.unsupported() {
-                    capabilities.unsupported_hooks.push(format!(
-                        "{:?} `{}`",
-                        unsupported.kind, unsupported.name
-                    ));
+                    capabilities
+                        .unsupported_hooks
+                        .push(format!("{:?} `{}`", unsupported.kind, unsupported.name));
                 }
             }
         }
@@ -215,7 +215,8 @@ impl ActionHost {
         if let Some((magnitude, angle)) = self.board_adjust[behavior].update(
             self.action_intents.get("BoardAdjustMag").copied(),
             self.action_intents.get("BoardAdjustAngle").copied(),
-            instance.config.angle_filter, instance.config.negate_on_mirror,
+            instance.config.angle_filter,
+            instance.config.negate_on_mirror,
             self.stance.is_some_and(|(_, mirrored)| mirrored),
         ) {
             self.motion_intents.insert(magnitude_name, magnitude);
@@ -225,7 +226,6 @@ impl ActionHost {
             self.motion_intents.remove(angle_name);
         }
     }
-
 }
 
 impl ConditionHost for ActionHost {
@@ -289,11 +289,22 @@ impl Host for ActionHost {
         let Some(instance) = self.operation(behavior).cloned() else {
             return;
         };
-        if let ActionOperation::CreateTrickIntentFromGesture { group, override_name } = &instance.operation {
+        if let ActionOperation::CreateTrickIntentFromGesture {
+            group,
+            override_name,
+        } = &instance.operation
+        {
             if let Some((_, mirrored)) = self.stance {
-                self.trick_handlers[behavior].begin(*group, override_name.as_deref(), &self.action_intents, &mut self.motion_intents, mirrored);
+                self.trick_handlers[behavior].begin(
+                    *group,
+                    override_name.as_deref(),
+                    &self.action_intents,
+                    &mut self.motion_intents,
+                    mirrored,
+                );
             } else {
-                self.errors.push("CreateTrickIntentFromGesture requires published skater stance");
+                self.errors
+                    .push("CreateTrickIntentFromGesture requires published skater stance");
             }
             return;
         }
@@ -349,7 +360,10 @@ impl Host for ActionHost {
         let Some(instance) = self.operation(behavior).cloned() else {
             return;
         };
-        if matches!(instance.operation, ActionOperation::CreateTrickIntentFromGesture { .. }) {
+        if matches!(
+            instance.operation,
+            ActionOperation::CreateTrickIntentFromGesture { .. }
+        ) {
             self.trick_handlers[behavior].update(&mut self.motion_intents);
             return;
         }
@@ -429,13 +443,21 @@ impl Host for ActionHost {
         };
         if matches!(instance.operation, ActionOperation::BoardAdjust) {
             //82BA2EB8: remove both authored names; End does not reset state.
-            for name in [instance.config.mg_intent_mag.as_deref(),
-                         instance.config.mg_intent_angle.as_deref()].into_iter().flatten() {
+            for name in [
+                instance.config.mg_intent_mag.as_deref(),
+                instance.config.mg_intent_angle.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
                 self.motion_intents.remove(name);
             }
             return;
         }
-        if matches!(instance.operation, ActionOperation::CreateTrickIntentFromGesture { .. }) {
+        if matches!(
+            instance.operation,
+            ActionOperation::CreateTrickIntentFromGesture { .. }
+        ) {
             self.trick_handlers[behavior].end(&mut self.motion_intents);
             return;
         }

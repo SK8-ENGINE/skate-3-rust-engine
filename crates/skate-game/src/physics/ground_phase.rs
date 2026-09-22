@@ -167,7 +167,7 @@ pub(crate) fn advance(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
 ) -> Result<GroundBoardOutcome, String> {
-    super::handplant::ground_query(physics,skater);
+    super::handplant::ground_query(physics, skater);
     let selector_input = super::air_phase::selector_input(physics, skater)?;
     let p = &skater.player_input.processed;
     let toolkit = skater
@@ -200,12 +200,19 @@ pub(crate) fn advance(
         predicted[2] += delta.z;
         Ok(())
     };
-    let grind_context = super::air_trajectory::GrindContext::from_processed(&skater.player_input.processed, super::solve::deck_frame(&physics.board)[3]);
+    let grind_context = super::air_trajectory::GrindContext::from_processed(
+        &skater.player_input.processed,
+        super::solve::deck_frame(&physics.board)[3],
+    );
     let mut launch = |info: &GroundLaunchInfo| {
         let mut input = selector_input;
         input.board_vertical_velocity = info.velocity[1];
-        skater.trajectory.launch(info.selector_launch(), input, &physics.world)?;
-        skater.trajectory.update(input, &physics.world, grind_context)?;
+        skater
+            .trajectory
+            .launch(info.selector_launch(), input, &physics.world)?;
+        skater
+            .trajectory
+            .update(input, &physics.world, grind_context)?;
         Ok(())
     };
     let physical = GroundPhysicalFrame {

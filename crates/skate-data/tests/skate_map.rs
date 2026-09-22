@@ -5,16 +5,31 @@ fn presentation_loading_does_not_relax_playable_map_validation() {
     let mut data = fixture(1);
     let counts = 8 + 4 + 4 + "Fixture".len() + (4 + 12) * 4;
     data[counts + 16..counts + 24].fill(0); // No collision or rails.
-    let needle: Vec<u8> = [0u32, 1, 2].into_iter().flat_map(u32::to_le_bytes).collect();
+    let needle: Vec<u8> = [0u32, 1, 2]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
     let indices = data.windows(12).position(|w| w == needle).unwrap();
     data.truncate(indices + 12);
-    assert!(SkateMap::parse(&data).unwrap_err().contains("requires triangle collision"));
+    assert!(
+        SkateMap::parse(&data)
+            .unwrap_err()
+            .contains("requires triangle collision")
+    );
     let render = SkateMap::parse_render_only(&data).unwrap();
     assert_eq!(render.geometry.indices, [0, 1, 2]);
     assert!(render.geometry.collision.is_empty());
-    data[indices..indices+4].copy_from_slice(&99u32.to_le_bytes());
-    assert!(SkateMap::parse_render_only(&data).unwrap_err().contains("indices"));
-    assert!(SkateMap::parse_render_only(&fixture(1)).unwrap_err().contains("non-presentation"));
+    data[indices..indices + 4].copy_from_slice(&99u32.to_le_bytes());
+    assert!(
+        SkateMap::parse_render_only(&data)
+            .unwrap_err()
+            .contains("indices")
+    );
+    assert!(
+        SkateMap::parse_render_only(&fixture(1))
+            .unwrap_err()
+            .contains("non-presentation")
+    );
 }
 
 fn u(b: &mut Vec<u8>, value: u32) {
@@ -208,7 +223,10 @@ fn v15_texture_references_preserve_order_and_reject_forward_or_wrong_size() {
     data[header_counts + 4..header_counts + 8].copy_from_slice(&3u32.to_le_bytes());
     let mut needle = Vec::new();
     s(&mut needle, "Pixel");
-    let start = data.windows(needle.len()).position(|w| w == needle).unwrap();
+    let start = data
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .unwrap();
     let metadata_end = start + needle.len() + 12;
     let texture_end = metadata_end + 8 + 4; // fixture v15 uses raw RGBA
     let mut references = Vec::new();
@@ -224,11 +242,19 @@ fn v15_texture_references_preserve_order_and_reject_forward_or_wrong_size() {
     assert!(map.textures.iter().all(|t| t.rgba == [255, 128, 64, 255]));
     let reference = texture_end + (metadata_end - start) + 8;
     data[reference..reference + 4].copy_from_slice(&1u32.to_le_bytes());
-    assert!(SkateMap::parse(&data).unwrap_err().contains("forward texture reference"));
+    assert!(
+        SkateMap::parse(&data)
+            .unwrap_err()
+            .contains("forward texture reference")
+    );
     data[reference..reference + 4].copy_from_slice(&0u32.to_le_bytes());
     let width = texture_end + needle.len();
     data[width..width + 4].copy_from_slice(&2u32.to_le_bytes());
-    assert!(SkateMap::parse(&data).unwrap_err().contains("reference size mismatch"));
+    assert!(
+        SkateMap::parse(&data)
+            .unwrap_err()
+            .contains("reference size mismatch")
+    );
 }
 #[test]
 fn rejects_every_truncated_prefix_and_trailing_data() {

@@ -6,7 +6,7 @@ from . import install as engine
 from .vlt import convert as convert_vlt
 from .physics_skeleton import convert as convert_skeleton
 
-def core(game_root, stage, work, report, log, converted=None):
+def core(game_root, stage, work, report, log, converted=None, audio_image=None):
     private=stage/"assets/private"
     stock=private/"stock"
     report('Extracting animation banks, graphs and gameplay inputs')
@@ -15,6 +15,30 @@ def core(game_root, stage, work, report, log, converted=None):
     # Some disc banks are loose files rather than members of miscload.
     loose=game_root/'data/anim'
     if loose.is_dir():shutil.copytree(loose,stock/'data/anim',dirs_exist_ok=True)
+    # Player/board sound banks are owned-disc inputs. Keep them inside the private prepared
+    # installation so a normal launch does not depend on a developer-specific extraction path.
+    # They remain ignored local assets and are never included in source control or release media.
+    # MixMapSK8.mxb is the authored mixer every player-sound gain, pitch and pan word comes from.
+    audio=game_root/'data/audio'
+    for name in ('audiofiles.big','wheels.big','grains.big','MixMapSK8.mxb'):
+        source=audio/name
+        if source.is_file():
+            target=stock/'data/audio'/name
+            target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(source,target)
+    # The evaluator also needs the owner's TU3 runtime image. It is decrypted code, not a
+    # distributable game asset, so accept it only as an explicit local setup input and keep it
+    # alongside the owned audio archives. Missing images leave ordinary setup usable; the sound
+    # runtime will report that exact capability as unavailable rather than substitute raw samples.
+    if audio_image is not None:
+        image_root=Path(audio_image).resolve()
+        regions=sorted(image_root.glob('g_*.bin')) if image_root.is_dir() else []
+        if not regions:
+            raise RuntimeError('Audio runtime image has no g_*.bin regions: '+str(image_root))
+        target_root=stock/'audio-runtime-image'
+        target_root.mkdir(parents=True,exist_ok=True)
+        for source in regions:
+            shutil.copy2(source,target_root/source.name)
     report('Converting physics and difficulty settings')
     database=work/'database'
     engine.extract(game_root/'data/big/db.big',database,lambda e:Path(e.path).name.lower() in {

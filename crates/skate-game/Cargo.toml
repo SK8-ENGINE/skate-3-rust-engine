@@ -9,6 +9,11 @@ name = "skate3rust"
 path = "src/main.rs"
 
 [[bin]]
+name = "skate3-audio-check"
+path = "src/audio_check_main.rs"
+test = false
+
+[[bin]]
 name = "skate3-multiplayer"
 path = "src/multiplayer_main.rs"
 test = false
@@ -27,6 +32,8 @@ bevy = { workspace = true, features = ["jpeg", "trace", "debug"] }
 tracing-log = "0.2"
 skate-core.workspace = true
 skate-data.workspace = true
+skate-audio-formats.workspace = true
+skate-audio-core.workspace = true
 half = "=2.7.1"
 serde_json.workspace = true
 serde.workspace = true

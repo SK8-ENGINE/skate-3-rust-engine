@@ -1,13 +1,13 @@
 //! Transport-neutral, bounded snapshot protocol. No platform identity or SDK types.
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
-mod codec;
-pub mod lobby;
 pub mod blob;
-pub mod socket;
+mod codec;
 pub mod directory;
-pub mod packed;
 pub mod interpolation;
+pub mod lobby;
+pub mod packed;
+pub mod socket;
 
 pub const MAGIC: &[u8; 8] = b"SK8NET01";
 pub const MAX_FRAME: usize = 48_000;

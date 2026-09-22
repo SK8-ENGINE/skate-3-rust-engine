@@ -8,11 +8,16 @@ fn right_bumper_publishes_held_grab_world_without_actor_gate() {
         (0, 1 << 29, false),
     ] {
         for actor_flags in [0, u32::MAX] {
-            let output = produce(&snapshot(previous, current, 0.5), actor_flags,
-                PushPreferences::default());
+            let output = produce(
+                &snapshot(previous, current, 0.5),
+                actor_flags,
+                PushPreferences::default(),
+            );
             let values: Vec<_> = output.iter().filter(|i| i.name == "GrabWorld").collect();
             assert_eq!(values.len(), usize::from(expected));
-            if expected { assert_eq!(values[0].value, 1.0); }
+            if expected {
+                assert_eq!(values[0].value, 1.0);
+            }
         }
     }
 }
@@ -111,7 +116,11 @@ fn powerslide_queries_are_separate_from_signed_continuous_values() {
         let mut words = [0; 26];
         words[7] = x.to_bits();
         words[8] = y.to_bits();
-        produce(&DerivedControllerInput::from_words(words), flags, PushPreferences::default())
+        produce(
+            &DerivedControllerInput::from_words(words),
+            flags,
+            PushPreferences::default(),
+        )
     };
     //8259A430..A50C: lateral steering is outside both start windows.
     for x in [-1.0, 1.0] {
@@ -123,17 +132,33 @@ fn powerslide_queries_are_separate_from_signed_continuous_values() {
     for (x, start) in [(0.6, "RightSlideStart"), (-0.6, "LeftSlideStart")] {
         let values = intents(x, -0.8, 0);
         assert!(values.iter().any(|i| i.name == start && i.value == 1.0));
-        assert!(values.iter().any(|i| i.name == "LeftSlide" && i.value < 0.0));
-        assert!(values.iter().any(|i| i.name == "RightSlide" && i.value > 0.0));
+        assert!(
+            values
+                .iter()
+                .any(|i| i.name == "LeftSlide" && i.value < 0.0)
+        );
+        assert!(
+            values
+                .iter()
+                .any(|i| i.name == "RightSlide" && i.value > 0.0)
+        );
         let inhibited_push = intents(x, -0.8, 1 << 11);
         for value in values.iter().filter(|i| i.name.contains("Slide")) {
             assert!(inhibited_push.contains(value));
         }
-        assert!(!intents(x, -0.8, 1 << 8).iter().any(|i| i.name.contains("Slide")));
+        assert!(
+            !intents(x, -0.8, 1 << 8)
+                .iter()
+                .any(|i| i.name.contains("Slide"))
+        );
     }
     for (x, y) in [(0.0, 0.0), (0.0, 1.0), (0.0, -1.0), (0.3, -0.4)] {
         let values = intents(x, y, 0);
         assert!(!values.iter().any(|i| i.name.ends_with("SlideStart")));
     }
-    assert!(!intents(0.3, -0.4, 0).iter().any(|i| i.name.contains("Slide")));
+    assert!(
+        !intents(0.3, -0.4, 0)
+            .iter()
+            .any(|i| i.name.contains("Slide"))
+    );
 }

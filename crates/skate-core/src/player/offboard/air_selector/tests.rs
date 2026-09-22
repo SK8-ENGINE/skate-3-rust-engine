@@ -16,6 +16,37 @@ fn packet() -> Packet {
     p.scalar_100 = 0.2;
     p
 }
+/// A NaN in the homogeneous fourth lane must not abort the launch. The board pose can carry one
+/// there — `orthonormalize` rewrites rows 0..2 and leaves row 3's w alone, and the COM lift's
+/// four-lane FMA then spreads it into the extra part errors — and a real playtest crashed on
+/// `position_32: [227.85, 75.24, -612.02, NaN]` with every meaningful component finite.
+#[test]
+fn a_nan_in_the_unused_fourth_lane_does_not_reject_the_packet() {
+    let mut p = packet();
+    p.position_32[3] = f32::NAN;
+    p.secondary_velocity_16[3] = f32::NAN;
+    let outcome = super::candidates::prepare(p, [0., -9.8, 0., f32::NAN], settings());
+    assert!(
+        outcome.is_ok(),
+        "a NaN in w rejected a packet whose x/y/z are all finite: {:?}",
+        outcome.err()
+    );
+}
+
+/// The guard must still catch a NaN that actually matters.
+#[test]
+fn a_nan_in_a_meaningful_lane_still_rejects_the_packet() {
+    for lane in 0..3 {
+        let mut p = packet();
+        p.position_32[lane] = f32::NAN;
+        assert_eq!(
+            super::candidates::prepare(p, [0., -9.8, 0., 0.], settings()).err(),
+            Some("Nonfinite BipedAir launch packet"),
+            "a NaN in lane {lane} of position_32 was accepted"
+        );
+    }
+}
+
 fn context() -> Context {
     Context {
         selection_flags_2948: 0,
@@ -190,8 +221,12 @@ fn animation_correction_retains_native_fused_up_plus_forward_operation() {
     let mut s = selected();
     //Finite orthogonal axes deliberately exercise cancellation. This is an
     //arithmetic regression for82D6DF40, not a stock gameplay tuning fixture.
-    let axes = [[0., 0., 1., 0.], [0.8, 0.6, 0., 0.],
-        [0.6, -0.8, 0., 0.], [0.; 4]];
+    let axes = [
+        [0., 0., 1., 0.],
+        [0.8, 0.6, 0., 0.],
+        [0.6, -0.8, 0., 0.],
+        [0.; 4],
+    ];
     s.adjust_animation(10, [0., 0.6, -0.8, 0.], axes, 0.);
     let forward = 0.6_f32 * -0.8;
     let expected = -0.8_f32.mul_add(0.6, forward);

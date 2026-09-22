@@ -226,41 +226,59 @@ impl Plugin for CustomiserPlugin {
         crate::customiser_material::register(app);
         app.init_resource::<Navigation>()
             .add_systems(Startup, crate::customiser_parts::setup)
-            .add_systems(PreUpdate, navigation.before(crate::graphics_menu::MenuInput))
-            .add_systems(PreUpdate, preferences.after(crate::map_transition::MapTransitionSet)
-                .before(crate::input::poll_controllers))
+            .add_systems(
+                PreUpdate,
+                navigation.before(crate::graphics_menu::MenuInput),
+            )
+            .add_systems(
+                PreUpdate,
+                preferences
+                    .after(crate::map_transition::MapTransitionSet)
+                    .before(crate::input::poll_controllers),
+            )
             .add_systems(PostStartup, setup)
             .add_systems(
                 Update,
-                (interact, rotate_preview, crate::customiser_parts::update, draw)
+                (
+                    interact,
+                    rotate_preview,
+                    crate::customiser_parts::update,
+                    draw,
+                )
                     .chain()
                     .after(crate::graphics_menu::interact)
                     .before(crate::app::FrameSet::Animation),
             );
     }
 }
-pub(crate) fn navigation(mut nav: ResMut<Navigation>, time: Res<Time<Real>>, keys: Res<ButtonInput<KeyCode>>) {
+pub(crate) fn navigation(
+    mut nav: ResMut<Navigation>,
+    time: Res<Time<Real>>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
     let pad = (0..4).find_map(|i| crate::input::platform::poll(i).ok());
     // Remap outside the dead zone so a resting stick cannot drift the preview.
-    let axis = pad.as_ref().map_or(0., |p| (p.state.right[0] as f32 / 32767.).clamp(-1., 1.));
+    let axis = pad
+        .as_ref()
+        .map_or(0., |p| (p.state.right[0] as f32 / 32767.).clamp(-1., 1.));
     nav.preview_turn = axis.signum() * ((axis.abs() - 0.24) / 0.76).max(0.);
     let mut current = pad.map_or(0, |p| {
-            p.state.buttons
-                | if p.state.left[1] > 16000 {
-                    1
-                } else if p.state.left[1] < -16000 {
-                    2
-                } else {
-                    0
-                }
-                | if p.state.left[0] > 16000 {
-                    8
-                } else if p.state.left[0] < -16000 {
-                    4
-                } else {
-                    0
-                }
-        });
+        p.state.buttons
+            | if p.state.left[1] > 16000 {
+                1
+            } else if p.state.left[1] < -16000 {
+                2
+            } else {
+                0
+            }
+            | if p.state.left[0] > 16000 {
+                8
+            } else if p.state.left[0] < -16000 {
+                4
+            } else {
+                0
+            }
+    });
     for (key, bit) in [
         (KeyCode::ArrowUp, 1),
         (KeyCode::ArrowDown, 2),
@@ -287,8 +305,9 @@ pub(crate) fn navigation(mut nav: ResMut<Navigation>, time: Res<Time<Real>>, key
 fn rotate_preview(mut state: ResMut<Customiser>, nav: Res<Navigation>, time: Res<Time<Real>>) {
     if state.open && nav.preview_turn != 0. {
         // Real time keeps inspection responsive while gameplay is paused.
-        state.preview_yaw = (state.preview_yaw + nav.preview_turn * 2.0 * time.delta_secs().min(0.1))
-            .rem_euclid(std::f32::consts::TAU);
+        state.preview_yaw = (state.preview_yaw
+            + nav.preview_turn * 2.0 * time.delta_secs().min(0.1))
+        .rem_euclid(std::f32::consts::TAU);
     }
 }
 
@@ -994,7 +1013,8 @@ fn preferences(
 ) {
     apply_preferences(&state.draft, &mut physics, &mut skater.animation);
     if let Some(style) = models.native_style() {
-        skater.animation.motion.playback_context.pro_skater = skate_core::animation::skeleton_input::name::encode(style.as_bytes());
+        skater.animation.motion.playback_context.pro_skater =
+            skate_core::animation::skeleton_input::name::encode(style.as_bytes());
         skater.animation.motion.animation.posture.set_profile(0);
         physics.set_gesture_preferences(None);
     }
@@ -1146,8 +1166,10 @@ fn draw(
                     e.label,
                     if !e.children.is_empty() { "  ›" } else { "" }
                 );
-                let label_size = (width / (label.chars().count().max(1) as f32 * 0.64)).clamp(16., 18.);
-                let detail_size = (width / (detail.chars().count().max(1) as f32 * 0.64)).clamp(10., 12.);
+                let label_size =
+                    (width / (label.chars().count().max(1) as f32 * 0.64)).clamp(16., 18.);
+                let detail_size =
+                    (width / (detail.chars().count().max(1) as f32 * 0.64)).clamp(10., 12.);
                 list.spawn((
                     Node {
                         width: percent(100),
@@ -1340,16 +1362,37 @@ mod tests {
             .init_resource::<Assets<crate::customiser_material::SkaterMaterial>>();
         let world = app.world_mut();
         world.insert_resource(Customiser {
-            open: true, enabled: true, just_opened: false, preview_yaw: 0.,
-            index: Entry::default(), path: vec![], selected: 0, page_size: 6,
-            search: String::new(), draft: json!({"selections":{},"morphs":{}}),
-            settings: PathBuf::new(), status: String::new(), redraw: false,
+            open: true,
+            enabled: true,
+            just_opened: false,
+            preview_yaw: 0.,
+            index: Entry::default(),
+            path: vec![],
+            selected: 0,
+            page_size: 6,
+            search: String::new(),
+            draft: json!({"selections":{},"morphs":{}}),
+            settings: PathBuf::new(),
+            status: String::new(),
+            redraw: false,
         });
         let player = world.spawn(crate::world::PlayerRoot).id();
-        let stock = world.spawn((SceneRoot(default()), Visibility::Inherited, ChildOf(player))).id();
-        world.run_system_once(crate::customiser_parts::update).unwrap();
-        assert_eq!(*world.get::<Visibility>(stock).unwrap(), Visibility::Inherited);
-        assert!(world.resource::<Customiser>().status.contains("unavailable"));
+        let stock = world
+            .spawn((SceneRoot(default()), Visibility::Inherited, ChildOf(player)))
+            .id();
+        world
+            .run_system_once(crate::customiser_parts::update)
+            .unwrap();
+        assert_eq!(
+            *world.get::<Visibility>(stock).unwrap(),
+            Visibility::Inherited
+        );
+        assert!(
+            world
+                .resource::<Customiser>()
+                .status
+                .contains("unavailable")
+        );
         assert!(world.resource::<Parts>().applied.is_null());
     }
     #[test]
@@ -1378,16 +1421,28 @@ mod tests {
                 "shoe":{"slot":"Feet","name":"shoe","flags":{},"materials":["new"],"scene":""},
                 "head":{"slot":"Rostral","name":"head","flags":{},"materials":["head"],"scene":""}},
             "materials":{"new":material.clone(),"head":material},"defaults":{},"morphs":[]
-        })).unwrap();
+        }))
+        .unwrap();
         let parts = Parts::for_test(library);
         p["selections"]["Rostral"] = json!({"asset_id":"head","material_id":"head"});
         assert!(parts.resolve(&p).is_ok());
         merge(&mut p, entry.options[0].patch.as_ref().unwrap());
         assert_eq!(option_index(&entry, &p), Some(0));
-        assert!(parts.resolve(&p).is_ok(), "original material tint must be selectable");
+        assert!(
+            parts.resolve(&p).is_ok(),
+            "original material tint must be selectable"
+        );
         let restored: Value = serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
-        assert!(parts.resolve(&restored).is_ok(), "saved/online null reset must remain valid");
-        for invalid in [json!([2.,0.,0.]),json!([-0.1,0.,0.]),json!([0.,1.]),json!("red")] {
+        assert!(
+            parts.resolve(&restored).is_ok(),
+            "saved/online null reset must remain valid"
+        );
+        for invalid in [
+            json!([2., 0., 0.]),
+            json!([-0.1, 0., 0.]),
+            json!([0., 1.]),
+            json!("red"),
+        ] {
             p["colours"]["Feet"] = invalid;
             assert_eq!(parts.resolve(&p).unwrap_err(), "Invalid clothing colour");
         }

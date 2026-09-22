@@ -24,7 +24,10 @@ pub(crate) enum Terrain {
 
 impl Terrain {
     pub(crate) fn surfaces(self) -> [Vec<[Vector3; 4]>; 4] {
-        match self { Self::Flat => flat_surfaces(), Self::Course => surfaces() }
+        match self {
+            Self::Flat => flat_surfaces(),
+            Self::Course => surfaces(),
+        }
     }
     pub(crate) fn world(self, material: RetailContactMaterial) -> BoardWorld {
         match self {
@@ -175,7 +178,11 @@ fn build_world(
         for vertices in quads {
             let rail_face = rail_faces.contains(&vertices);
             for (half, indices) in [[0, 2, 1], [0, 3, 2]].into_iter().enumerate() {
-                let convex = if rail_face { if half == 0 { 0x60 } else { 0xc0 } } else { 0 };
+                let convex = if rail_face {
+                    if half == 0 { 0x60 } else { 0xc0 }
+                } else {
+                    0
+                };
                 triangles.push(WorldTriangle {
                     triangle: triangle_from_volume(
                         indices.map(|i| vertices[i]),

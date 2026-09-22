@@ -8,5 +8,7 @@ publish.workspace = true
 flate2 = "=1.1.10"
 zstd = "=0.13.3"
 skate-core = { path = "../skate-core" }
+skate-audio-formats.workspace = true
+skate-audio-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

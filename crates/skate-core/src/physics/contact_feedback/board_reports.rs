@@ -51,7 +51,8 @@ pub(crate) fn collect(
         //Other assemblies share this solve. Their own output owners consume
         //their spies; only board/world records are routed to this collector.
         if !((words[31] < BODY_COUNT as u32 && words[43] == u32::MAX)
-            || (words[43] < BODY_COUNT as u32 && words[31] == u32::MAX)) {
+            || (words[43] < BODY_COUNT as u32 && words[31] == u32::MAX))
+        {
             continue;
         }
         let a = body_id(words[31]);

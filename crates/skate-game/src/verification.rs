@@ -44,8 +44,11 @@ fn verify(
     };
     state.elapsed += time.delta_secs();
     // Opt-in visual smoke check of the replay HUD and presentation endpoints.
-    if animation.ready && state.elapsed > 2.0 && !replay.active
-        && std::env::var("SKATE_VERIFY_REPLAY").as_deref() == Ok("1") {
+    if animation.ready
+        && state.elapsed > 2.0
+        && !replay.active
+        && std::env::var("SKATE_VERIFY_REPLAY").as_deref() == Ok("1")
+    {
         replay.enter();
     }
     if animation.ready && state.elapsed > 4. && !state.requested {

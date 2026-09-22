@@ -141,7 +141,7 @@ pub(super) fn ground_update(
         return Ok(());
     }
     if let Some((candidate, com, velocity, normal, heading)) = skater.handplant.pending.take() {
-        use skate_core::air::trajectory::grind_surface::{self, InvestigationInput, GeometryType};
+        use skate_core::air::trajectory::grind_surface::{self, GeometryType, InvestigationInput};
         let query = InvestigationInput {
             start: candidate.edge.start,
             end: candidate.edge.end,
@@ -150,11 +150,19 @@ pub(super) fn ground_update(
             deck_center_to_truck: skater.handplant.settings.truck_distance,
         };
         let surface = grind_surface::investigate(query, |index, probe| {
-            super::player_input::grind::world::surface_probe(&physics.world,
-                [p.actor_query_2948, p.actor_query_2952], index, probe)
+            super::player_input::grind::world::surface_probe(
+                &physics.world,
+                [p.actor_query_2948, p.actor_query_2952],
+                index,
+                probe,
+            )
         })?;
-        bevy::log::info!("HANDPLANT_SURFACE tick={} kind={:?} point={:?}",
-            physics.ticks, surface.kind, candidate.point);
+        bevy::log::info!(
+            "HANDPLANT_SURFACE tick={} kind={:?} point={:?}",
+            physics.ticks,
+            surface.kind,
+            candidate.point
+        );
         if grind_surface::prepare(query).is_some() && surface.kind != GeometryType::Impossible {
             skater.handplant.launch(
                 candidate,
@@ -184,13 +192,22 @@ pub(super) fn trace_solved(physics: &GamePhysics, skater: &SkaterRuntime) {
     let authored = parts.map(|i| point(root, skater.animated_skeleton.record.pose[i][3]));
     let targets = parts.map(|i| point(root, skater.skeleton_input.drive_frames[i][3]));
     let solved = parts.map(|i| actual[i][3]);
-    let strengths = parts.map(|i| skater.skeleton_drives.bones[i].as_ref()
-        .map(|bone| (bone.active, bone.dynamics.strengths)));
+    let strengths = parts.map(|i| {
+        skater.skeleton_drives.bones[i]
+            .as_ref()
+            .map(|bone| (bone.active, bone.dynamics.strengths))
+    });
     let ik = &skater.foot_ik.state.limbs;
     let feedback = &skater.collision_feedback;
-    bevy::log::info!("HANDPLANT_SOLVED tick={} phase={} parts={parts:?} authored={authored:?} targets={targets:?} solved={solved:?} strengths={strengths:?} ik={ik:?} partial={} collision_weight={} pose_errors={:?} anchor={:?}",
-        physics.ticks, skater.handplant.phase, skater.skeleton_collision.partial_ragdoll,
-        feedback.drive_weight, skater.pose_errors.parts, skater.handplant.anchor);
+    bevy::log::info!(
+        "HANDPLANT_SOLVED tick={} phase={} parts={parts:?} authored={authored:?} targets={targets:?} solved={solved:?} strengths={strengths:?} ik={ik:?} partial={} collision_weight={} pose_errors={:?} anchor={:?}",
+        physics.ticks,
+        skater.handplant.phase,
+        skater.skeleton_collision.partial_ragdoll,
+        feedback.drive_weight,
+        skater.pose_errors.parts,
+        skater.handplant.anchor
+    );
 }
 ///Ground82D38430 submits the candidate before82D37F38 consumes its investigation.
 pub(super) fn ground_query(physics: &GamePhysics, skater: &mut SkaterRuntime) {
@@ -237,10 +254,21 @@ pub(super) fn ground_query(physics: &GamePhysics, skater: &mut SkaterRuntime) {
         physics.grind_world.primitives(),
     );
     if candidate.is_some() || physics.ticks % 30 == 0 {
-        bevy::log::info!("HANDPLANT_QUERY tick={} speed={} vy={} normal={:?} minimum_speed={} minimum_slope={} edges={} candidate={:?} prior_flags={:08x} phase={} processed={:08x}/{:08x}",
-            physics.ticks, length(velocity), velocity[1], normal, h.settings.minimum_speed,
-            h.settings.minimum_slope, physics.grind_world.primitives().len(), candidate.map(|c| c.point),
-            h.flags, h.phase, p.flags_2476, p.flags_2480);
+        bevy::log::info!(
+            "HANDPLANT_QUERY tick={} speed={} vy={} normal={:?} minimum_speed={} minimum_slope={} edges={} candidate={:?} prior_flags={:08x} phase={} processed={:08x}/{:08x}",
+            physics.ticks,
+            length(velocity),
+            velocity[1],
+            normal,
+            h.settings.minimum_speed,
+            h.settings.minimum_slope,
+            physics.grind_world.primitives().len(),
+            candidate.map(|c| c.point),
+            h.flags,
+            h.phase,
+            p.flags_2476,
+            p.flags_2480
+        );
     }
     //82D61268 clears the active output when submission begins.
     let old_point = h.candidate.map_or([0.0; 4], |c| c.point);
@@ -304,12 +332,22 @@ pub(super) fn update(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> R
         let targets = parts.map(|i| point(root, skater.skeleton_input.drive_frames[i][3]));
         let actual = skater.skeleton.part_transforms();
         let actual = parts.map(|i| actual[i][3]);
-        let hands = [2, 3].map(|i| (skater.foot_ik.state.external_targets[i].world_position,
-            skater.foot_ik.state.limbs[i].target_blend));
-        bevy::log::info!("HANDPLANT_POSE tick={} elapsed={} phase={} com={com:?} up={up:?} heading={heading:?} root={root:?} targets={targets:?} actual={actual:?} hands={hands:?} force_mode={} flags={:08x}/{:08x}/{:08x}",
-            physics.ticks, skater.handplant.elapsed, skater.handplant.phase,
-            skater.skeleton_input.force_mode, skater.player_input.processed.flags_2468,
-            skater.player_input.processed.flags_2472, skater.player_input.processed.flags_2476);
+        let hands = [2, 3].map(|i| {
+            (
+                skater.foot_ik.state.external_targets[i].world_position,
+                skater.foot_ik.state.limbs[i].target_blend,
+            )
+        });
+        bevy::log::info!(
+            "HANDPLANT_POSE tick={} elapsed={} phase={} com={com:?} up={up:?} heading={heading:?} root={root:?} targets={targets:?} actual={actual:?} hands={hands:?} force_mode={} flags={:08x}/{:08x}/{:08x}",
+            physics.ticks,
+            skater.handplant.elapsed,
+            skater.handplant.phase,
+            skater.skeleton_input.force_mode,
+            skater.player_input.processed.flags_2468,
+            skater.player_input.processed.flags_2472,
+            skater.player_input.processed.flags_2476
+        );
     }
     Ok(())
 }

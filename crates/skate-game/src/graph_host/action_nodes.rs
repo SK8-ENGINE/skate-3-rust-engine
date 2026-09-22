@@ -82,7 +82,10 @@ pub enum ActionOperation {
     CreateMgTimeIntent,
     CreateConstMgIntent,
     BoardAdjust,
-    CreateTrickIntentFromGesture { group: crate::input::gesture_catalog::Group, override_name: Option<String> },
+    CreateTrickIntentFromGesture {
+        group: crate::input::gesture_catalog::Group,
+        override_name: Option<String>,
+    },
     JuiceHook,
     BodyFlippingSignal,
     /// Diagnostic presentation is owned by this host and has no intent effect.
@@ -168,7 +171,10 @@ impl OperationFactory for ActionFactory {
             } else {
                 if kind == OperationKind::Behavior && name == "CreateTrickIntentFromGesture" {
                     ActionOperation::CreateTrickIntentFromGesture {
-                        group: crate::input::gesture_catalog::Group::parse(attributes.text("group").unwrap_or("Square")).map_err(ActionFactoryError)?,
+                        group: crate::input::gesture_catalog::Group::parse(
+                            attributes.text("group").unwrap_or("Square"),
+                        )
+                        .map_err(ActionFactoryError)?,
                         override_name: attributes.text("override").map(str::to_owned),
                     }
                 } else if kind == OperationKind::Behavior && name == "PrintText2D" {

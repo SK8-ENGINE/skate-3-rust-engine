@@ -175,7 +175,10 @@ fn apply_correction(
 ) {
     let frame = input.velocity_frame_z;
     let velocity = input.angular_velocity_world;
-    let local_z = frame[2].mul_add(velocity[2], frame[1].mul_add(velocity[1], frame[0] * velocity[0]));
+    let local_z = frame[2].mul_add(
+        velocity[2],
+        frame[1].mul_add(velocity[1], frame[0] * velocity[0]),
+    );
     if !input.braking || !(0.0 > local_z * input.balance) {
         return;
     }

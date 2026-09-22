@@ -187,12 +187,26 @@ fn retail_collision_world(
             )
             .ok_or("Invalid RWCM cluster bounds")?;
             meshes.push(QueryMesh {
-                geometry: 0, rejection_flags: 0,
+                geometry: 0,
+                rejection_flags: 0,
                 triangle_range: range,
                 local_to_world: RetailAffineTransform::IDENTITY,
                 world_to_local: RetailAffineTransform::IDENTITY,
                 local_bounds: bounds,
-                matching_group: i32::from(group),
+                // Static registration `sub_82776B58` hands the mesh-record ctor
+                // `sub_8276CB18` a hardcoded `li r8,-1` for matchingID (+180),
+                // alongside the `li r7,0` / `li r6,0` for the rejection mask and
+                // support identity that the two fields above already reproduce.
+                // Every call site of that ctor passes a constant -1 except one,
+                // and that one reads its id from a registered actor/unit object
+                // (+40) -- never from cluster data. The cluster's packed unit
+                // group is a *per-triangle* attribute in retail: `sub_82AC8A68`
+                // stores it at triangle+84, right next to the surface code at
+                // +88 that `packed_surfaces` above carries. Filing it on the
+                // mesh made `matches()` reject every actor whose id was not the
+                // cluster's, silently hiding static geometry from offboard
+                // ground and line queries.
+                matching_group: -1,
                 pool: QueryPool::Ground,
             });
         }
@@ -334,10 +348,15 @@ pub(crate) fn collision_world(
     let mut meshes = Vec::new();
     for start in (0..triangles.len()).step_by(64) {
         let end = (start + 64).min(triangles.len());
-        let bounds = Bounds::from_points(triangles[start..end].iter().flat_map(|t| t.triangle.vertices))
-            .ok_or("SKATE collision bounds empty")?;
+        let bounds = Bounds::from_points(
+            triangles[start..end]
+                .iter()
+                .flat_map(|t| t.triangle.vertices),
+        )
+        .ok_or("SKATE collision bounds empty")?;
         meshes.push(QueryMesh {
-            geometry: 0, rejection_flags: 0,
+            geometry: 0,
+            rejection_flags: 0,
             triangle_range: start..end,
             local_to_world: RetailAffineTransform::IDENTITY,
             world_to_local: RetailAffineTransform::IDENTITY,
@@ -411,7 +430,10 @@ fn material_ids(
                 m.alpha_mode,
                 m.alpha_cutoff.to_bits(),
             ];
-            let retail = m.retail_definition.as_deref().and_then(crate::retail_render::Definition::parse);
+            let retail = m
+                .retail_definition
+                .as_deref()
+                .and_then(crate::retail_render::Definition::parse);
             *unique.entry((key, retail)).or_insert(i)
         })
         .collect()
@@ -452,22 +474,41 @@ fn consolidated_groups(
     let mut groups: Vec<RenderGroup> = Vec::new();
     for (material, indices) in render_groups(&map.geometry, &ids) {
         let m = &map.materials[material];
-        let retail = m.retail_definition.as_deref()
+        let retail = m
+            .retail_definition
+            .as_deref()
             .and_then(crate::retail_render::Definition::parse)
-            .filter(|d| d.supported(tuning)).map(|d| d.build(m, tuning, texture));
+            .filter(|d| d.supported(tuning))
+            .map(|d| d.build(m, tuning, texture));
         // Tangent construction must not switch paths when batches are combined.
-        let explicit = indices.iter().all(|&i| map.geometry.vertices[i as usize].tangent_frame.is_some());
-        let tangent_mode = if explicit { 0 } else if m.textures[2] != 0 { 1 } else { 2 };
+        let explicit = indices
+            .iter()
+            .all(|&i| map.geometry.vertices[i as usize].tangent_frame.is_some());
+        let tangent_mode = if explicit {
+            0
+        } else if m.textures[2] != 0 {
+            1
+        } else {
+            2
+        };
         // Tangent generation can average shared vertices across old boundaries.
         // Keep those batches separate rather than changing their shading.
-        if let Some(key) = retail.as_ref().and_then(|m| m.batch_key()).filter(|_| tangent_mode != 1) {
+        if let Some(key) = retail
+            .as_ref()
+            .and_then(|m| m.batch_key())
+            .filter(|_| tangent_mode != 1)
+        {
             let destination = *lookup.entry((key, tangent_mode)).or_insert(groups.len());
             if destination < groups.len() {
                 groups[destination].indices.extend(indices);
                 continue;
             }
         }
-        groups.push(RenderGroup { material, indices, retail });
+        groups.push(RenderGroup {
+            material,
+            indices,
+            retail,
+        });
     }
     groups
 }
@@ -478,20 +519,50 @@ mod performance_inventory {
     #[test]
     #[ignore = "requires SKATE_MAP_INVENTORY, SKATE_ASSET_ROOT and SKATE_MAP_INVENTORY_OUT"]
     fn consolidated_batches() {
-        let map = SkateMap::load(std::path::Path::new(&std::env::var_os("SKATE_MAP_INVENTORY").unwrap())).unwrap();
-        let tuning = crate::retail_render::MaterialTuning::load(std::path::Path::new(&std::env::var_os("SKATE_ASSET_ROOT").unwrap()));
+        let map = SkateMap::load(std::path::Path::new(
+            &std::env::var_os("SKATE_MAP_INVENTORY").unwrap(),
+        ))
+        .unwrap();
+        let tuning = crate::retail_render::MaterialTuning::load(std::path::Path::new(
+            &std::env::var_os("SKATE_ASSET_ROOT").unwrap(),
+        ));
         let textures = render_texture_ids(&map.textures);
-        let baseline = render_groups(&map.geometry, &render_material_ids(&map.materials, &textures));
+        let baseline = render_groups(
+            &map.geometry,
+            &render_material_ids(&map.materials, &textures),
+        );
         let mut texture = |id: u32, role: u8| {
             let id = textures[id as usize];
-            if id == 0 || (role == 5 && map.textures[id as usize - 1].height != map.textures[id as usize - 1].width * 6) { return None; }
-            Some(Handle::Uuid(bevy::asset::uuid::Uuid::from_u128((u128::from(id) << 8) | u128::from(role)), default()))
+            if id == 0
+                || (role == 5
+                    && map.textures[id as usize - 1].height
+                        != map.textures[id as usize - 1].width * 6)
+            {
+                return None;
+            }
+            Some(Handle::Uuid(
+                bevy::asset::uuid::Uuid::from_u128((u128::from(id) << 8) | u128::from(role)),
+                default(),
+            ))
         };
         let groups = consolidated_groups(&map, &textures, &tuning, &mut texture);
-        let mut before: Vec<[u32; 3]> = map.geometry.indices.chunks_exact(3).map(|t| t.try_into().unwrap()).collect();
-        let mut after: Vec<[u32; 3]> = groups.iter().flat_map(|g| g.indices.chunks_exact(3).map(|t| t.try_into().unwrap())).collect();
-        before.sort_unstable(); after.sort_unstable(); assert_eq!(before, after);
-        let mut opaque = 0; let mut masked = 0; let mut blended = 0; let mut fallback = 0;
+        let mut before: Vec<[u32; 3]> = map
+            .geometry
+            .indices
+            .chunks_exact(3)
+            .map(|t| t.try_into().unwrap())
+            .collect();
+        let mut after: Vec<[u32; 3]> = groups
+            .iter()
+            .flat_map(|g| g.indices.chunks_exact(3).map(|t| t.try_into().unwrap()))
+            .collect();
+        before.sort_unstable();
+        after.sort_unstable();
+        assert_eq!(before, after);
+        let mut opaque = 0;
+        let mut masked = 0;
+        let mut blended = 0;
+        let mut fallback = 0;
         for group in &groups {
             match group.retail.as_ref().map(|m| m.alpha) {
                 Some(AlphaMode::Opaque) => opaque += 1,
@@ -504,52 +575,105 @@ mod performance_inventory {
         let mut source_shadow_triangles: Vec<[u32; 3]> = Vec::new();
         let mut replaced_casters = 0;
         for group in &groups {
-            if let Some(material) = group.retail.as_ref().filter(|m| shadow_geometry::eligible(m)) {
+            if let Some(material) = group
+                .retail
+                .as_ref()
+                .filter(|m| shadow_geometry::eligible(m))
+            {
                 shadows.add(&map.geometry, &group.indices, material.two_sided);
-                source_shadow_triangles.extend(group.indices.chunks_exact(3).map(|t| [t[0], t[1], t[2]]));
+                source_shadow_triangles
+                    .extend(group.indices.chunks_exact(3).map(|t| [t[0], t[1], t[2]]));
                 replaced_casters += 1;
             }
         }
-        let mut batched_shadow_triangles: Vec<[u32; 3]> = shadows.batches.iter().flat_map(|(_, indices)| indices.chunks_exact(3).map(|t| t.try_into().unwrap())).collect();
-        source_shadow_triangles.sort_unstable(); batched_shadow_triangles.sort_unstable();
+        let mut batched_shadow_triangles: Vec<[u32; 3]> = shadows
+            .batches
+            .iter()
+            .flat_map(|(_, indices)| indices.chunks_exact(3).map(|t| t.try_into().unwrap()))
+            .collect();
+        source_shadow_triangles.sort_unstable();
+        batched_shadow_triangles.sort_unstable();
         assert_eq!(source_shadow_triangles, batched_shadow_triangles);
-        let proxy_vertices: usize = shadows.batches.iter().map(|(_, indices)| indices.iter().collect::<std::collections::HashSet<_>>().len()).sum();
-        let bounds=groups.iter().filter(|g|g.retail.is_some()).map(|g| {
-            let mut min=Vec3::splat(f32::INFINITY);let mut max=-min;
-            for &i in &g.indices {let p=Vec3::from_array(map.geometry.vertices[i as usize].position);min=min.min(p);max=max.max(p);}
-            bevy::camera::primitives::Aabb::from_min_max(min,max)
-        }).collect();
-        let shadow_index=crate::retail_render::shadow_visibility::benchmark_bounds(bounds);
+        let proxy_vertices: usize = shadows
+            .batches
+            .iter()
+            .map(|(_, indices)| {
+                indices
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+            })
+            .sum();
+        let bounds = groups
+            .iter()
+            .filter(|g| g.retail.is_some())
+            .map(|g| {
+                let mut min = Vec3::splat(f32::INFINITY);
+                let mut max = -min;
+                for &i in &g.indices {
+                    let p = Vec3::from_array(map.geometry.vertices[i as usize].position);
+                    min = min.min(p);
+                    max = max.max(p);
+                }
+                bevy::camera::primitives::Aabb::from_min_max(min, max)
+            })
+            .collect();
+        let shadow_index = crate::retail_render::shadow_visibility::benchmark_bounds(bounds);
         let result = serde_json::json!({"shadow_index":shadow_index,"baseline_batches":baseline.len(),"consolidated_batches":groups.len(),"opaque":opaque,"masked":masked,"blended":blended,"fallback":fallback,"triangles":after.len(),"map_lights":map.lights.len(),"triangle_multiset_preserved":true,"replaced_opaque_shadow_casters":replaced_casters,"opaque_shadow_batches":shadows.batches.len(),"shadow_triangle_multiset_preserved":true,"opaque_shadow_triangles":source_shadow_triangles.len(),"proxy_vertices":proxy_vertices,"proxy_vertex_index_bytes":proxy_vertices*24+source_shadow_triangles.len()*12});
-        std::fs::write(std::env::var_os("SKATE_MAP_INVENTORY_OUT").unwrap(),serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+        std::fs::write(
+            std::env::var_os("SKATE_MAP_INVENTORY_OUT").unwrap(),
+            serde_json::to_vec_pretty(&result).unwrap(),
+        )
+        .unwrap();
     }
     /// Explicit read-only inventory, never initializes Bevy or a GPU. Asset path
     /// stays in the environment; output contains counts/bounds only.
     #[test]
     #[ignore = "requires SKATE_MAP_INVENTORY and SKATE_MAP_INVENTORY_OUT"]
     fn runtime_batches() {
-        let map = SkateMap::load(std::path::Path::new(&std::env::var_os("SKATE_MAP_INVENTORY").unwrap())).unwrap();
+        let map = SkateMap::load(std::path::Path::new(
+            &std::env::var_os("SKATE_MAP_INVENTORY").unwrap(),
+        ))
+        .unwrap();
         let textures = render_texture_ids(&map.textures);
         let materials = render_material_ids(&map.materials, &textures);
         let groups = render_groups(&map.geometry, &materials);
-        let mut spans = [0usize;4];
-        let mut triangles = [0usize;4];
+        let mut spans = [0usize; 4];
+        let mut triangles = [0usize; 4];
         let mut cells = std::collections::HashSet::new();
         for (material, indices) in &groups {
             let mut min = Vec3::splat(f32::INFINITY);
             let mut max = Vec3::splat(f32::NEG_INFINITY);
-            for &i in indices { let p=Vec3::from_array(map.geometry.vertices[i as usize].position); min=min.min(p); max=max.max(p); }
-            let extent=(max.x-min.x).max(max.z-min.z);
-            for (i,threshold) in [50.,100.,250.,500.].iter().enumerate() {
-                if extent>*threshold {spans[i]+=1;triangles[i]+=indices.len()/3;}
+            for &i in indices {
+                let p = Vec3::from_array(map.geometry.vertices[i as usize].position);
+                min = min.min(p);
+                max = max.max(p);
+            }
+            let extent = (max.x - min.x).max(max.z - min.z);
+            for (i, threshold) in [50., 100., 250., 500.].iter().enumerate() {
+                if extent > *threshold {
+                    spans[i] += 1;
+                    triangles[i] += indices.len() / 3;
+                }
             }
             for tri in indices.chunks_exact(3) {
-                let p=tri.iter().map(|&i|Vec3::from_array(map.geometry.vertices[i as usize].position)/3.).sum::<Vec3>();
-                cells.insert((*material,(p.x/32.).floor() as i32,(p.z/32.).floor() as i32));
+                let p = tri
+                    .iter()
+                    .map(|&i| Vec3::from_array(map.geometry.vertices[i as usize].position) / 3.)
+                    .sum::<Vec3>();
+                cells.insert((
+                    *material,
+                    (p.x / 32.).floor() as i32,
+                    (p.z / 32.).floor() as i32,
+                ));
             }
         }
-        let result=serde_json::json!({"schema":1,"runtime_material_batches":groups.len(),"extent_threshold_metres":[50,100,250,500],"batches_over_threshold":spans,"triangles_in_batches_over_threshold":triangles,"centroid_32m_cells":cells.len(),"note":"Exact current material canonicalization and grouping; no frustum, occlusion or runtime frame measurement"});
-        std::fs::write(std::env::var_os("SKATE_MAP_INVENTORY_OUT").unwrap(),serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+        let result = serde_json::json!({"schema":1,"runtime_material_batches":groups.len(),"extent_threshold_metres":[50,100,250,500],"batches_over_threshold":spans,"triangles_in_batches_over_threshold":triangles,"centroid_32m_cells":cells.len(),"note":"Exact current material canonicalization and grouping; no frustum, occlusion or runtime frame measurement"});
+        std::fs::write(
+            std::env::var_os("SKATE_MAP_INVENTORY_OUT").unwrap(),
+            serde_json::to_vec_pretty(&result).unwrap(),
+        )
+        .unwrap();
     }
 }
 
@@ -571,7 +695,9 @@ pub(crate) fn spawn(
         if id == 0 {
             return None;
         }
-        if role == 5 && map.textures[id as usize - 1].height != map.textures[id as usize - 1].width * 6 {
+        if role == 5
+            && map.textures[id as usize - 1].height != map.textures[id as usize - 1].width * 6
+        {
             // Older .skate exports contain only face zero. Never treat it as a cube.
             return None;
         }
@@ -603,7 +729,11 @@ pub(crate) fn spawn(
                         )
                     };
                     let cube = role == 5;
-                    let height = if cube { source.height / 6 } else { source.height };
+                    let height = if cube {
+                        source.height / 6
+                    } else {
+                        source.height
+                    };
                     let layers = if cube { 6 } else { 1 };
                     let mut image = Image::new(
                         Extent3d {
@@ -617,14 +747,23 @@ pub(crate) fn spawn(
                         RenderAssetUsages::RENDER_WORLD,
                     );
                     if role == 3 || role == 6 || cube {
-                        let (bytes, levels) = crate::retail_render::mip_chain(&source.rgba, source.width, height, layers);
+                        let (bytes, levels) = crate::retail_render::mip_chain(
+                            &source.rgba,
+                            source.width,
+                            height,
+                            layers,
+                        );
                         image.data = Some(bytes);
                         image.texture_descriptor.mip_level_count = levels;
                     }
                     if cube {
-                        image.texture_view_descriptor = Some(bevy::render::render_resource::TextureViewDescriptor {
-                            dimension: Some(bevy::render::render_resource::TextureViewDimension::Cube), ..default()
-                        });
+                        image.texture_view_descriptor =
+                            Some(bevy::render::render_resource::TextureViewDescriptor {
+                                dimension: Some(
+                                    bevy::render::render_resource::TextureViewDimension::Cube,
+                                ),
+                                ..default()
+                            });
                     }
                     let mut sampler = bevy::image::ImageSamplerDescriptor::linear();
                     if role != 1 && role != 4 && role != 6 && !cube {
@@ -648,7 +787,12 @@ pub(crate) fn spawn(
     );
     let mut material_handles: Vec<Option<Handle<StandardMaterial>>> =
         vec![None; map.materials.len()];
-    for RenderGroup { material: material_index, indices, retail } in groups {
+    for RenderGroup {
+        material: material_index,
+        indices,
+        retail,
+    } in groups
+    {
         let m = &map.materials[material_index];
         // Reindex each batch, preserving authored normals and both UV sets.
         let mut remap = HashMap::new();
@@ -685,7 +829,13 @@ pub(crate) fn spawn(
         )
         .with_inserted_attribute(
             Mesh::ATTRIBUTE_COLOR,
-            vertices.iter().map(|v| { let uv = v.decal_uv.unwrap_or(v.uv); [uv[0], uv[1], 0., 1.] }).collect::<Vec<_>>(),
+            vertices
+                .iter()
+                .map(|v| {
+                    let uv = v.decal_uv.unwrap_or(v.uv);
+                    [uv[0], uv[1], 0., 1.]
+                })
+                .collect::<Vec<_>>(),
         )
         .with_inserted_indices(bevy::mesh::Indices::U32(local));
         if vertices.iter().all(|v| v.tangent_frame.is_some()) {
@@ -709,7 +859,12 @@ pub(crate) fn spawn(
         }
         if let Some(material) = retail {
             let material = retail_materials.add(material);
-            commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
+            commands.spawn((
+                Name::new(m.name.clone()),
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(material),
+                Transform::default(),
+            ));
             continue;
         }
         // Vertex colours above carry retail decal coordinates, never PBR tint.
@@ -810,28 +965,52 @@ mod tests {
         let mut metadata = world.query_metadata().unwrap().clone();
         let mut single = metadata.meshes[0].clone();
         single.triangle_range = 0..world.triangles().len();
-        single.local_bounds = Bounds::from_points(world.triangles().iter().flat_map(|t| t.triangle.vertices)).unwrap();
+        single.local_bounds =
+            Bounds::from_points(world.triangles().iter().flat_map(|t| t.triangle.vertices))
+                .unwrap();
         metadata.meshes = vec![single];
-        let baseline = BoardWorld::with_query_metadata(world.triangles().to_vec(), metadata).unwrap();
+        let baseline =
+            BoardWorld::with_query_metadata(world.triangles().to_vec(), metadata).unwrap();
         let mut visited = [0usize; 2];
         let mut times = [std::time::Duration::ZERO; 2];
-        for triangle in world.triangles().iter().step_by((world.triangles().len() / 256).max(1)) {
+        for triangle in world
+            .triangles()
+            .iter()
+            .step_by((world.triangles().len() / 256).max(1))
+        {
             let p = triangle.triangle.vertices[0];
             let start = Vector3::new(p.x, p.y + 1., p.z);
             let end = Vector3::new(p.x, p.y - 1., p.z);
             let mut candidates = Vec::new();
             for (i, scene) in [&baseline, world].into_iter().enumerate() {
                 let bounds = scene.line_candidate_bounds(start, end, 0.1);
-                visited[i] += scene.candidate_ranges(bounds).iter().map(|r| r.len()).sum::<usize>();
+                visited[i] += scene
+                    .candidate_ranges(bounds)
+                    .iter()
+                    .map(|r| r.len())
+                    .sum::<usize>();
                 let now = std::time::Instant::now();
-                candidates.push(scene.line_candidates(start, end, 0.1).map(|(id, _)| id).collect::<Vec<_>>());
+                candidates.push(
+                    scene
+                        .line_candidates(start, end, 0.1)
+                        .map(|(id, _)| id)
+                        .collect::<Vec<_>>(),
+                );
                 times[i] += now.elapsed();
             }
-            assert_eq!(candidates[0], candidates[1], "candidate identity/order changed");
+            assert_eq!(
+                candidates[0], candidates[1],
+                "candidate identity/order changed"
+            );
         }
-        eprintln!("CUSTOM_QUERY_BENCH baseline_triangles={} clustered_triangles={} baseline_ms={} clustered_ms={} clusters={}",
-            visited[0], visited[1], times[0].as_secs_f64()*1000., times[1].as_secs_f64()*1000.,
-            world.query_metadata().unwrap().meshes.len());
+        eprintln!(
+            "CUSTOM_QUERY_BENCH baseline_triangles={} clustered_triangles={} baseline_ms={} clustered_ms={} clusters={}",
+            visited[0],
+            visited[1],
+            times[0].as_secs_f64() * 1000.,
+            times[1].as_secs_f64() * 1000.,
+            world.query_metadata().unwrap().meshes.len()
+        );
         (visited[0], visited[1])
     }
 
@@ -841,10 +1020,14 @@ mod tests {
         let source = map.geometry.collision.remove(0);
         map.geometry.collision.clear();
         for i in 0..256 {
-            map.geometry.collision.push(skate_data::skate_map::Collision {
-                points: source.points.map(|p| [p[0] + i as f32 * 100., p[1], p[2]]),
-                surface: source.surface, material: source.material, native_edges: source.native_edges,
-            });
+            map.geometry
+                .collision
+                .push(skate_data::skate_map::Collision {
+                    points: source.points.map(|p| [p[0] + i as f32 * 100., p[1], p[2]]),
+                    surface: source.surface,
+                    material: source.material,
+                    native_edges: source.native_edges,
+                });
         }
         let world = collision_world(&map, material()).unwrap();
         assert_eq!(world.query_metadata().unwrap().meshes.len(), 4);
@@ -866,7 +1049,10 @@ mod tests {
     }
     fn retail_demo() -> SkateMap {
         fn definition(unused: &str) -> Vec<u8> {
-            fn text(bytes: &mut Vec<u8>, value: &str) { bytes.extend_from_slice(&(value.len() as u32).to_le_bytes()); bytes.extend_from_slice(value.as_bytes()); }
+            fn text(bytes: &mut Vec<u8>, value: &str) {
+                bytes.extend_from_slice(&(value.len() as u32).to_le_bytes());
+                bytes.extend_from_slice(value.as_bytes());
+            }
             let mut bytes = vec![0; 16];
             text(&mut bytes, "world.default");
             bytes.extend_from_slice(&1u32.to_le_bytes()); // supported family
@@ -874,8 +1060,10 @@ mod tests {
             bytes.extend_from_slice(&0u32.to_le_bytes()); // no explicit bindings
             bytes.extend_from_slice(&1u32.to_le_bytes());
             text(&mut bytes, "unused_source_property");
-            bytes.extend_from_slice(&1u32.to_le_bytes()); text(&mut bytes, unused);
-            text(&mut bytes, ""); bytes
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+            text(&mut bytes, unused);
+            text(&mut bytes, "");
+            bytes
         }
         let mut map = demo();
         map.materials[0].retail_definition = Some(definition("a"));
@@ -886,10 +1074,28 @@ mod tests {
         second.roughness = 0.12345; // ignored by the retail shader
         map.materials.push(second);
         let original_vertices = map.geometry.vertices.len() as u32;
-        let duplicates: Vec<_> = map.geometry.vertices.iter().map(|v| { let mut v = v.clone(); v.material = 2; v.position[0] += 3.; v }).collect();
+        let duplicates: Vec<_> = map
+            .geometry
+            .vertices
+            .iter()
+            .map(|v| {
+                let mut v = v.clone();
+                v.material = 2;
+                v.position[0] += 3.;
+                v
+            })
+            .collect();
         map.geometry.vertices.extend(duplicates);
-        map.geometry.indices.extend(map.geometry.indices.clone().into_iter().map(|i| i + original_vertices));
-        for v in &mut map.geometry.vertices { v.tangent_frame = Some([0, 127, 0, 127]); }
+        map.geometry.indices.extend(
+            map.geometry
+                .indices
+                .clone()
+                .into_iter()
+                .map(|i| i + original_vertices),
+        );
+        for v in &mut map.geometry.vertices {
+            v.tangent_frame = Some([0, 127, 0, 127]);
+        }
         map
     }
 
@@ -898,19 +1104,48 @@ mod tests {
         let mut map = retail_demo();
         let textures = render_texture_ids(&map.textures);
         let tuning = crate::retail_render::MaterialTuning::default();
-        let mut texture = |id: u32, role: u8| (id != 0).then(|| Handle::Uuid(bevy::asset::uuid::Uuid::from_u128((u128::from(textures[id as usize]) << 8) | u128::from(role)), default()));
-        assert_eq!(render_groups(&map.geometry, &render_material_ids(&map.materials, &textures)).len(), 2);
+        let mut texture = |id: u32, role: u8| {
+            (id != 0).then(|| {
+                Handle::Uuid(
+                    bevy::asset::uuid::Uuid::from_u128(
+                        (u128::from(textures[id as usize]) << 8) | u128::from(role),
+                    ),
+                    default(),
+                )
+            })
+        };
+        assert_eq!(
+            render_groups(
+                &map.geometry,
+                &render_material_ids(&map.materials, &textures)
+            )
+            .len(),
+            2
+        );
         let groups = consolidated_groups(&map, &textures, &tuning, &mut texture);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].indices.len(), map.geometry.indices.len());
         let original_lightmap = map.materials[1].textures[1];
-        map.materials[1].textures[1] = if original_lightmap == 0 { map.materials[0].textures[0] } else { 0 };
-        assert_eq!(consolidated_groups(&map, &textures, &tuning, &mut texture).len(), 2);
+        map.materials[1].textures[1] = if original_lightmap == 0 {
+            map.materials[0].textures[0]
+        } else {
+            0
+        };
+        assert_eq!(
+            consolidated_groups(&map, &textures, &tuning, &mut texture).len(),
+            2
+        );
         map.materials[1].textures[1] = original_lightmap;
-        for m in &mut map.materials { m.alpha_mode = 2; }
+        for m in &mut map.materials {
+            m.alpha_mode = 2;
+        }
         let groups = consolidated_groups(&map, &textures, &tuning, &mut texture);
         assert_eq!(groups.len(), 2);
-        assert!(groups.iter().all(|g| !shadow_geometry::eligible(g.retail.as_ref().unwrap())));
+        assert!(
+            groups
+                .iter()
+                .all(|g| !shadow_geometry::eligible(g.retail.as_ref().unwrap()))
+        );
     }
 
     #[test]
@@ -925,12 +1160,29 @@ mod tests {
         let mut scene = crate::map_render::PreparedScene::new(&world);
         scene.prepare(Some(&map), std::path::Path::new("unused"));
         scene.publish(&mut world);
-        assert_eq!(world.query_filtered::<Entity, With<bevy::light::NotShadowCaster>>().iter(&world).count(), 0);
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<bevy::light::NotShadowCaster>>()
+                .iter(&world)
+                .count(),
+            0
+        );
         crate::map_render::MapAssets::retire(&mut world);
-        assert_eq!(world.query_filtered::<Entity, With<crate::map_render::MapEntity>>().iter(&world).count(), 0);
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<crate::map_render::MapEntity>>()
+                .iter(&world)
+                .count(),
+            0
+        );
         assert_eq!(world.resource::<Assets<Mesh>>().len(), 0);
         assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 0);
-        assert_eq!(world.resource::<Assets<crate::retail_render::RetailWorldMaterial>>().len(), 0);
+        assert_eq!(
+            world
+                .resource::<Assets<crate::retail_render::RetailWorldMaterial>>()
+                .len(),
+            0
+        );
     }
     #[test]
     fn render_batches_preserve_complete_triangles_and_materials() {
@@ -1034,7 +1286,12 @@ mod tests {
         assert_eq!(world.triangles().len(), 3);
         let metadata = world.query_metadata().unwrap();
         assert_eq!(metadata.meshes.len(), 3);
-        assert_eq!(metadata.meshes[1].matching_group, 0x1234);
+        // The cluster group still partitions the clusters into meshes (three
+        // here), but it must not land on the mesh's matchingID: retail's static
+        // registration writes -1 there. See the comment at the construction
+        // site. This is what `embedded_static_rwcm_hits_distinct_actor_query_ids`
+        // depends on, and the two tests disagreed until 2026-09-20.
+        assert!(metadata.meshes.iter().all(|m| m.matching_group == -1));
         assert_eq!(metadata.packed_surfaces, vec![0x4321; 3]);
         assert_eq!(world.triangles()[1].triangle.vertices[0].x, 10.);
     }
@@ -1113,15 +1370,23 @@ mod tests {
         let mut scene = crate::map_render::PreparedScene::new(&world);
         scene.prepare(Some(&map), std::path::Path::new("unused"));
         scene.publish(&mut world);
-        assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
-        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);
-        assert_eq!(world.resource::<Assets<Image>>().len(), 2);
-        assert_eq!(world.query::<&Mesh3d>().iter(&world).count(), 1);
+        // A custom (non-stock) map takes the `celestial_bodies` branch, which adds
+        // one shared disc mesh and spawns the sun and the moon from it. So: the
+        // world mesh plus the disc; the world material plus one per body; the
+        // lightmap and the world texture plus one texture per body; and three
+        // drawn entities -- the world and the two discs.
+        assert_eq!(world.resource::<Assets<Mesh>>().len(), 2);
+        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 3);
+        assert_eq!(world.resource::<Assets<Image>>().len(), 4);
+        assert_eq!(world.query::<&Mesh3d>().iter(&world).count(), 3);
         let lightmap = world
             .query::<&bevy::pbr::Lightmap>()
             .single(&world)
             .unwrap();
-        let image = world.resource::<Assets<Image>>().get(&lightmap.image).unwrap();
+        let image = world
+            .resource::<Assets<Image>>()
+            .get(&lightmap.image)
+            .unwrap();
         assert_eq!(image.texture_descriptor.format, TextureFormat::Rgba16Float);
         let data = image.data.as_ref().unwrap();
         let value = half::f16::from_le_bytes([data[0], data[1]]).to_f32();

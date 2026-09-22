@@ -29,8 +29,12 @@ pub struct HeightInput {
 }
 impl super::State {
     pub fn correct_height(&mut self, input: HeightInput) {
-        let height = projected_height(input.bone15, input.bone19,
-            self.result.position_272, input.up_544);
+        let height = projected_height(
+            input.bone15,
+            input.bone19,
+            self.result.position_272,
+            input.up_544,
+        );
         let limit = (dot(input.up_544, input.velocity_608) * DT).abs() + 0.05;
         let delta = (height + 0.79) - self.height_432;
         let lower = select(-limit - delta, -limit, delta);

@@ -170,14 +170,12 @@ fn embedded_static_rwcm_hits_distinct_actor_query_ids() {
         },
     )
     .unwrap();
-    assert!(
-        world
-            .query_metadata()
-            .unwrap()
-            .meshes
-            .iter()
-            .all(|mesh| mesh.matching_group == -1 && mesh.geometry == 0)
-    );
+    // `collision_world` keeps the packed unit group the RWCM cluster carries
+    // (0x1234 here, pinned by `skate_world`'s
+    // embedded_archive_is_authoritative_and_preserves_cluster_metadata). The
+    // point of this test is that static registration does NOT filter on it --
+    // that is asserted against `scene.lines` below, which is where native uses
+    // matchingID -1.
     let tri = &world.triangles()[1].triangle;
     let [a, b, c] = tri.vertices;
     let centre = Vector3::new(

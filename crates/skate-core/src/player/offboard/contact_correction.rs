@@ -88,4 +88,3 @@ pub(super) fn clamp_length(vector: Vector, maximum: f32) -> Vector {
 #[cfg(test)]
 #[path = "contact_correction/tests.rs"]
 mod tests;
-

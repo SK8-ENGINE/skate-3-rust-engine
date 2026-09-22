@@ -2,8 +2,8 @@
 //! SK8R15/Source/tools/blender_owned_map/SKATE_FORMAT.md and
 //! owned/world/src/owned_map_package.cpp. No geometry or physics is inferred.
 use std::{io::Read, path::Path, time::Instant};
-mod texture_decode;
 mod storage_v15;
+mod texture_decode;
 
 #[derive(Debug, PartialEq)]
 pub struct SkateMap {
@@ -131,13 +131,20 @@ struct Reader<'a> {
 /// Physics-disabled objects can use those unchanged static arrays. Explicit
 /// body types still require a runtime adapter and must not be flattened.
 pub fn validate_static_objects(map: &SkateMap, extension: &Extension) -> Result<(), String> {
-    if extension.schema != 3 { return Err("Unsupported MOBJ schema".into()); }
-    let mut r = Reader { bytes: &extension.payload, at: 0 };
+    if extension.schema != 3 {
+        return Err("Unsupported MOBJ schema".into());
+    }
+    let mut r = Reader {
+        bytes: &extension.payload,
+        at: 0,
+    };
     let count = r.u()?;
     r.check_count(count, 80)?;
     let mut ids = std::collections::HashSet::new();
     for _ in 0..count {
-        if !ids.insert(r.u()?) { return Err("Duplicate MOBJ identity".into()); }
+        if !ids.insert(r.u()?) {
+            return Err("Duplicate MOBJ identity".into());
+        }
         let name = r.string()?;
         r.floats::<3>()?;
         for limit in [map.geometry.indices.len(), map.geometry.collision.len()] {
@@ -150,18 +157,28 @@ pub fn validate_static_objects(map: &SkateMap, extension: &Extension) -> Result<
         let rails = r.u()?;
         r.check_count(rails, 4)?;
         for _ in 0..rails {
-            if r.u()? as usize >= map.rails.len() { return Err(format!("MOBJ {name} rail index is invalid")); }
+            if r.u()? as usize >= map.rails.len() {
+                return Err(format!("MOBJ {name} rail index is invalid"));
+            }
         }
         if r.u()? != 0 {
-            return Err(format!("MOBJ {name} requests object physics, which requires a body adapter"));
+            return Err(format!(
+                "MOBJ {name} requests object physics, which requires a body adapter"
+            ));
         }
-        if r.u()? > 2 { return Err(format!("MOBJ {name} collision shape is invalid")); }
+        if r.u()? > 2 {
+            return Err(format!("MOBJ {name} collision shape is invalid"));
+        }
         r.floats::<6>()?;
         for _ in 0..2 {
-            if r.u()? > 1 { return Err(format!("MOBJ {name} has an invalid boolean")); }
+            if r.u()? > 1 {
+                return Err(format!("MOBJ {name} has an invalid boolean"));
+            }
         }
     }
-    if r.at != r.bytes.len() { return Err("MOBJ has trailing data".into()); }
+    if r.at != r.bytes.len() {
+        return Err("MOBJ has trailing data".into());
+    }
     Ok(())
 }
 impl<'a> Reader<'a> {
@@ -213,7 +230,11 @@ impl<'a> Reader<'a> {
         let method = self.u()?;
         let n = self.u()? as usize;
         let bytes = self.take(n)?;
-        Ok(StoredBlock { expected, method, bytes })
+        Ok(StoredBlock {
+            expected,
+            method,
+            bytes,
+        })
     }
     fn stored(&mut self, expected: usize) -> Result<Vec<u8>, String> {
         self.stored_block(expected)?.decode()
@@ -316,10 +337,18 @@ impl<'a> Reader<'a> {
 /// Borrow compressed payloads while scanning; decompression does not mutate
 /// the package or depend on any other texture.
 #[derive(Clone, Copy)]
-struct StoredBlock<'a> { expected: usize, method: u32, bytes: &'a [u8] }
+struct StoredBlock<'a> {
+    expected: usize,
+    method: u32,
+    bytes: &'a [u8],
+}
 impl StoredBlock<'_> {
     fn decode(&self) -> Result<Vec<u8>, String> {
-        let Self { expected, method, bytes } = *self;
+        let Self {
+            expected,
+            method,
+            bytes,
+        } = *self;
         let decoded = match method {
             0 => bytes.to_vec(),
             1 => {
@@ -360,8 +389,13 @@ impl SkateMap {
         let disk = started.elapsed();
         let parse_started = Instant::now();
         let map = Self::parse(&data).map_err(|e| format!("{}: {e}", path.display()))?;
-        eprintln!("MAP_READ_TIMING name={:?} disk_ms={} parse_ms={} file_bytes={}",
-            map.name, disk.as_millis(), parse_started.elapsed().as_millis(), data.len());
+        eprintln!(
+            "MAP_READ_TIMING name={:?} disk_ms={} parse_ms={} file_bytes={}",
+            map.name,
+            disk.as_millis(),
+            parse_started.elapsed().as_millis(),
+            data.len()
+        );
         Ok(map)
     }
     pub fn parse(data: &[u8]) -> Result<Self, String> {
@@ -378,8 +412,11 @@ impl SkateMap {
     /// Playable map loading continues to use `parse`/`load`.
     pub fn parse_render_only(data: &[u8]) -> Result<Self, String> {
         let map = Self::parse_inner(data, 4, false)?;
-        if !map.geometry.collision.is_empty() || !map.rails.is_empty()
-            || !map.doors.is_empty() || !map.lights.is_empty() || !map.routes.is_empty()
+        if !map.geometry.collision.is_empty()
+            || !map.rails.is_empty()
+            || !map.doors.is_empty()
+            || !map.lights.is_empty()
+            || !map.routes.is_empty()
             || map.extensions.iter().any(|e| e.tag != *b"WMET")
         {
             return Err("SKATE render-only package contains non-presentation data".into());
@@ -434,7 +471,9 @@ impl SkateMap {
         let material_bytes = if version >= 15 {
             let size = r.u()? as usize;
             Some(r.stored(size)?)
-        } else { None };
+        } else {
+            None
+        };
         let mut package_reader = None;
         if let Some(bytes) = &material_bytes {
             package_reader = Some(r);
@@ -525,7 +564,9 @@ impl SkateMap {
             materials.push(m);
         }
         if let Some(package) = package_reader {
-            if r.at != r.bytes.len() { return Err("SKATE material block has trailing bytes".into()); }
+            if r.at != r.bytes.len() {
+                return Err("SKATE material block has trailing bytes".into());
+            }
             r = package;
         }
         let texture_started = Instant::now();
@@ -548,15 +589,29 @@ impl SkateMap {
                 if bytes != expected {
                     return Err("Invalid SKATE embedded texture size".into());
                 }
-                StoredBlock { expected, method: 0, bytes: r.take(bytes)? }
+                StoredBlock {
+                    expected,
+                    method: 0,
+                    bytes: r.take(bytes)?,
+                }
             };
             let block = if version >= 15 && block.method == 11 {
-                let index = u32::from_le_bytes(block.bytes.try_into()
-                    .map_err(|_| "Invalid SKATE texture reference size")?) as usize;
-                let source = *texture_blocks.get(index).ok_or("Invalid SKATE forward texture reference")?;
-                if source.expected != expected { return Err("SKATE texture reference size mismatch".into()); }
+                let index = u32::from_le_bytes(
+                    block
+                        .bytes
+                        .try_into()
+                        .map_err(|_| "Invalid SKATE texture reference size")?,
+                ) as usize;
+                let source = *texture_blocks
+                    .get(index)
+                    .ok_or("Invalid SKATE forward texture reference")?;
+                if source.expected != expected {
+                    return Err("SKATE texture reference size mismatch".into());
+                }
                 source
-            } else { block };
+            } else {
+                block
+            };
             texture_blocks.push(block);
             textures.push(Texture {
                 name,
@@ -583,10 +638,7 @@ impl SkateMap {
             r.geometry(geometry_counts, materials.len(), version)?
         };
         let geometry_time = geometry_started.elapsed();
-        if materials.is_empty()
-            || geometry.vertices.is_empty()
-            || geometry.indices.is_empty()
-        {
+        if materials.is_empty() || geometry.vertices.is_empty() || geometry.indices.is_empty() {
             return Err("SKATE requires materials and render geometry".into());
         }
         r.check_count(counts[5], 12)?;
@@ -710,7 +762,12 @@ impl SkateMap {
                 });
             }
         }
-        if require_collision && geometry.collision.is_empty() && !extensions.iter().any(|e| e.tag == *b"RWCM" && e.schema == 1 && !e.payload.is_empty()) {
+        if require_collision
+            && geometry.collision.is_empty()
+            && !extensions
+                .iter()
+                .any(|e| e.tag == *b"RWCM" && e.schema == 1 && !e.payload.is_empty())
+        {
             return Err("SKATE requires triangle collision or an embedded RWCM archive".into());
         }
         if r.at != data.len() {
@@ -719,9 +776,15 @@ impl SkateMap {
                 data.len() - r.at
             ));
         }
-        eprintln!("MAP_DECODE_TIMING name={:?} textures_ms={} texture_workers={} geometry_ms={} extensions_ms={} total_ms={}",
-            name, texture_time.as_millis(), texture_workers, geometry_time.as_millis(),
-            extension_started.elapsed().as_millis(), parse_started.elapsed().as_millis());
+        eprintln!(
+            "MAP_DECODE_TIMING name={:?} textures_ms={} texture_workers={} geometry_ms={} extensions_ms={} total_ms={}",
+            name,
+            texture_time.as_millis(),
+            texture_workers,
+            geometry_time.as_millis(),
+            extension_started.elapsed().as_millis(),
+            parse_started.elapsed().as_millis()
+        );
         Ok(Self {
             version,
             name,

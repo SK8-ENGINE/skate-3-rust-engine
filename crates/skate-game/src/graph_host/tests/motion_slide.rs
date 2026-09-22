@@ -255,8 +255,12 @@ fn slide_direction_preserves_native_unordered_threshold_branch() {
 fn bail_reset_restores_saved_stance_in_the_real_graph_dispatch() {
     use crate::graph_host::motion_reset::Operation as Reset;
     let mut host = host();
-    let reset = behavior(&host, |op| matches!(op, MotionOperation::ResetAnimation(Reset::SkaterAnimation)));
-    let stance = behavior(&host, |op| matches!(op, MotionOperation::ResetAnimation(Reset::GivenStance)));
+    let reset = behavior(&host, |op| {
+        matches!(op, MotionOperation::ResetAnimation(Reset::SkaterAnimation))
+    });
+    let stance = behavior(&host, |op| {
+        matches!(op, MotionOperation::ResetAnimation(Reset::GivenStance))
+    });
     for natural in [0, 1] {
         for requested in [0, 1] {
             host.animation.skater_animation_flags = Some(0xf80a_0000);

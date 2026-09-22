@@ -28,15 +28,24 @@ use std::sync::Arc;
 pub(crate) struct GroundProfiles(Vec<Vec<Arc<GroundSettings>>>);
 impl GroundProfiles {
     pub fn load(data: &Collections) -> Result<Self, String> {
-        crate::difficulty::NATIVE_MODES.into_iter().map(|mode| {
-            (1..=5).map(|surface| {
-                GroundSettings::load(data, mode, super::surface_key(surface)?).map(Arc::new)
-            }).collect::<Result<Vec<_>, String>>()
-        }).collect::<Result<Vec<_>, String>>().map(Self)
+        crate::difficulty::NATIVE_MODES
+            .into_iter()
+            .map(|mode| {
+                (1..=5)
+                    .map(|surface| {
+                        GroundSettings::load(data, mode, super::surface_key(surface)?).map(Arc::new)
+                    })
+                    .collect::<Result<Vec<_>, String>>()
+            })
+            .collect::<Result<Vec<_>, String>>()
+            .map(Self)
     }
     pub fn select(&self, mode: u32, surface: u32) -> Result<Arc<GroundSettings>, String> {
-        surface.checked_sub(1).and_then(|s| self.0.get(mode as usize)?.get(s as usize))
-            .cloned().ok_or_else(|| format!("Invalid processed physics mode/surface {mode}/{surface}"))
+        surface
+            .checked_sub(1)
+            .and_then(|s| self.0.get(mode as usize)?.get(s as usize))
+            .cloned()
+            .ok_or_else(|| format!("Invalid processed physics mode/surface {mode}/{surface}"))
     }
 }
 
@@ -199,8 +208,8 @@ impl GroundSettings {
             collision_scale: f("physics_collision", "CollisionTorqueFadeoff")?,
             contact_force_time: f("physics_feet", "MaxTimeWallRidingForFootForce")?,
             wheel_material: RetailContactMaterial {
-                static_friction: s("WheelStaticFriction")?,
-                dynamic_friction: s("WheelDynamicFriction")?,
+                static_friction: s("WheelStaticFriction")? * wheel_grip_scale(),
+                dynamic_friction: s("WheelDynamicFriction")? * wheel_grip_scale(),
                 restitution: f("physicswheels", "WheelRestitution")?,
             },
             wobble_activation: m("Hash_77AFCE78FE1206CA")?,
@@ -208,10 +217,12 @@ impl GroundSettings {
         })
     }
     pub fn tuned(&self, tuning: skate_mods::TrainerTuning) -> Self {
-        let mut result=self.clone();
+        let mut result = self.clone();
         result.push_target_multiplier = tuning.push_speed;
         result.propulsion.maximum_pushable_speed *= tuning.push_speed;
-        for dv in &mut result.propulsion.mode_speed_changes { *dv *= tuning.push_power; }
+        for dv in &mut result.propulsion.mode_speed_changes {
+            *dv *= tuning.push_power;
+        }
         result.propulsion.braking.input_force *= tuning.braking;
         result.propulsion.braking.override_force *= tuning.braking;
         result.steering.general_scalar *= tuning.steering;
@@ -289,6 +300,35 @@ pub(super) fn curve8(d: &Collections, c: &str, k: &str, f: &str) -> Result<Point
         _ => Err(format!("Invalid native eight-point graph {c}/{k}/{f}")),
     }
 }
+/// `SKATE_WHEEL_GRIP` scales the wheel contact's Coulomb friction, for one experiment only.
+///
+/// The board scrubs sideways an order of magnitude less than retail: lateral wheel speed passes
+/// 0.75 m/s in 0.4% of held frames here against retail's 2-8.7%, measured by
+/// `tools/audio/skid_scrub_levels.py` off the skid family's own intensity word. Powerslides, which
+/// swap this material out for a low-friction one, slip correctly -- so the grip that ordinary
+/// riding has and a powerslide lacks is the suspect, and this scales exactly that and nothing
+/// else.
+///
+/// **A measurement knob, not a fix.** The vault's own values (0.7-1.0 per surface) are what retail
+/// reads, so anything other than 1.0 here is a deliberate deviation. If lowering it moves the
+/// histogram toward retail, the contact solve is over-gripping and the real fix is in the solver;
+/// if it barely moves, the riding-layer forces are responsible instead. Either way this goes away.
+fn wheel_grip_scale() -> f32 {
+    static SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *SCALE.get_or_init(|| {
+        let scale = std::env::var("SKATE_WHEEL_GRIP")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(1.0);
+        // Say so once: a run whose grip was scaled must never be mistaken for a stock measurement.
+        if scale != 1.0 {
+            eprintln!("SKATE_PLAYER_AUDIO wheel_grip_scale {scale} (NOT stock -- experiment only)");
+        }
+        scale
+    })
+}
+
 fn curve16(d: &Collections, c: &str, k: &str, f: &str) -> Result<PointGraph<16>, String> {
     let w = d.words::<32>(c, k, f)?;
     Ok(PointGraph {
@@ -322,12 +362,27 @@ fn customiser_truck_tightness_changes_authored_steering() {
     let root = std::path::PathBuf::from(std::env::var_os("SKATE3_ASSET_ROOT").unwrap());
     let data = Collections::load(&root).unwrap();
     let settings = GroundSettings::load(&data, "default", "default").unwrap();
-    let samples: Vec<_> = [0.0, 0.7, 1.0].into_iter().map(|tightness| calculate_tilt(
-        &settings.steering,
-        SteeringInput { turn: 0.6, absolute_body_speed: 5.0, flipped_controls_scalar: 1.0,
-            truck_tightness: tightness, ..Default::default() }, None, None,
-    )).collect();
+    let samples: Vec<_> = [0.0, 0.7, 1.0]
+        .into_iter()
+        .map(|tightness| {
+            calculate_tilt(
+                &settings.steering,
+                SteeringInput {
+                    turn: 0.6,
+                    absolute_body_speed: 5.0,
+                    flipped_controls_scalar: 1.0,
+                    truck_tightness: tightness,
+                    ..Default::default()
+                },
+                None,
+                None,
+            )
+        })
+        .collect();
     assert!(samples[0].abs() > samples[2].abs());
     assert!((samples[2] / samples[0] - settings.steering.tight_trucks_scalar).abs() < 0.00001);
-    eprintln!("Authored truck tightness tilt samples: {samples:?}; tight scalar {}", settings.steering.tight_trucks_scalar);
+    eprintln!(
+        "Authored truck tightness tilt samples: {samples:?}; tight scalar {}",
+        settings.steering.tight_trucks_scalar
+    );
 }

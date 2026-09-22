@@ -1,5 +1,5 @@
 //! Contact arms and inverse-inertia response, `82AE11BC..82AE1588`.
-use super::{input::ContactInput, ContactPreparation};
+use super::{ContactPreparation, input::ContactInput};
 use crate::math::Vector3;
 
 fn components(v: Vector3) -> [f32; 3] {

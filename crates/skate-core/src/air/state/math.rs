@@ -19,8 +19,14 @@ impl PhysicsAirMath for AirMath {
     fn clamp_vector_within_max_length(&mut self, value: [f32; 4], maximum: f32) -> [f32; 4] {
         //82BD3D90..3E74, including the original short-vector bge and fsel.
         let length = self.length_vmsum3fp_vrsqrte(value);
-        if !(length >= f32::from_bits(0x3780_0000)) { return value; }
-        let bound = if maximum - length >= -0.0 { length } else { maximum };
+        if !(length >= f32::from_bits(0x3780_0000)) {
+            return value;
+        }
+        let bound = if maximum - length >= -0.0 {
+            length
+        } else {
+            maximum
+        };
         let mut inverse = native_arithmetic::reciprocal_estimate(length);
         for _ in 0..2 {
             inverse = inverse.mul_add((-inverse).mul_add(length, 1.0), inverse);
@@ -41,6 +47,10 @@ pub fn clamp_jump_velocity(reference: [f32; 4], current: [f32; 4]) -> [f32; 4] {
     let reference_speed = AirMath.length_vmsum3fp_vrsqrte(reference);
     let speed = AirMath.length_vmsum3fp_vrsqrte(current);
     let denominator = if speed - 1.0 >= -0.0 { speed } else { 1.0 };
-    let scale = if denominator > reference_speed { reference_speed / denominator } else { 1.0 };
+    let scale = if denominator > reference_speed {
+        reference_speed / denominator
+    } else {
+        1.0
+    };
     current.map(|v| v * scale)
 }

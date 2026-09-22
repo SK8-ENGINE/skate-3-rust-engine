@@ -40,9 +40,12 @@ impl AnimationInput {
             .position(|n| n.eq_ignore_ascii_case("RightToeBase"))
             .ok_or("Stock skeleton is missing RightToeBase")?;
         Ok(Self {
-            height_overrides: crate::difficulty::NATIVE_MODES.map(|key|
-                data.boolean("physics_mode", key, "JumpHeightOverrideEnabled"))
-                .into_iter().collect::<Result<Vec<_>, _>>()?.try_into().unwrap(),
+            height_overrides: crate::difficulty::NATIVE_MODES
+                .map(|key| data.boolean("physics_mode", key, "JumpHeightOverrideEnabled"))
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?
+                .try_into()
+                .unwrap(),
             fields: ScalarAttributeInputs::reset(0, 0),
             extra: ExtendedAttributes::reset(0.0),
             contacts: ContactEventState {
@@ -89,7 +92,9 @@ impl AnimationInput {
     }
 
     pub fn select_physics_mode(&mut self, mode: u32) -> Result<(), String> {
-        self.settings.allow_height_override = *self.height_overrides.get(mode as usize)
+        self.settings.allow_height_override = *self
+            .height_overrides
+            .get(mode as usize)
             .ok_or_else(|| format!("Invalid animation physics mode {mode}"))?;
         Ok(())
     }

@@ -200,8 +200,10 @@ impl ShotManager {
 
     /// CameraMan reset follows child0 pointers to the authored leaf.
     pub fn first_leaf(&self) -> Shot {
-        let mut node=&self.current;
-        while let Some(child)=node.children.first() {node=child;}
+        let mut node = &self.current;
+        while let Some(child) = node.children.first() {
+            node = child;
+        }
         node.definition.shot
     }
 
@@ -282,11 +284,14 @@ impl ShotManager {
     /// CameraMan82DFF964..82DFFA08 uses a separate sine-eased framing blend.
     pub fn framing_fraction(&self) -> f32 {
         let duration = self.duration(true);
-        if duration <= 0.0 { return 1.0; }
+        if duration <= 0.0 {
+            return 1.0;
+        }
         let fraction = super::manager_state::clamp(self.elapsed / duration, 0.0, 1.0);
-        crate::trigonometry::sin(fraction.mul_add(
-            f32::from_bits(0x40490fdb), -f32::from_bits(0x3fc90fdb)))
-            .mul_add(0.5, 0.5)
+        crate::trigonometry::sin(
+            fraction.mul_add(f32::from_bits(0x40490fdb), -f32::from_bits(0x3fc90fdb)),
+        )
+        .mul_add(0.5, 0.5)
     }
 
     fn duration(&self, camera_man: bool) -> f32 {

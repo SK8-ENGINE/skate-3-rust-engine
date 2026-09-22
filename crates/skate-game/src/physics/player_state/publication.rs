@@ -23,7 +23,10 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             state,
             PhysicalStateId::PhysicsGround
                 | PhysicalStateId::PhysicsAir
-                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                | PhysicalStateId::FootPlant
+                | PhysicalStateId::Boneless
+                | PhysicalStateId::HandPlant
+                | PhysicalStateId::RevertGround
                 | PhysicalStateId::KnownAir
                 | PhysicalStateId::BipedAir
                 | PhysicalStateId::BipedGround
@@ -95,12 +98,18 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     // State63 is set only by LandingOnDeckManager::Fill82D4E0E8..E0F4
     // when byte246 && time240<.02. Ordinary Ground never invokes that Fill,
     // so it retains the template zero here; State65 carries Ground requests.
-    set(66, state == PhysicalStateId::RevertGround && skater.revert_state.active);
+    set(
+        66,
+        state == PhysicalStateId::RevertGround && skater.revert_state.active,
+    );
     set(65, skater.wipeout.requests_wipeout(p));
     set(78, skater.wipeout.requests_runout(p));
     set(71, player.flags_1296 & (1 << 24) != 0);
     set(73, p.flags_2476 & (1 << 24) != 0);
-    set(74, state == PhysicalStateId::HandPlant && skater.handplant.continuation);
+    set(
+        74,
+        state == PhysicalStateId::HandPlant && skater.handplant.continuation,
+    );
     set(75, state.category() == 500);
     set(76, state as u32 == 500);
     //82DB78A8..78DC: the processed off-board request refreshes three
@@ -131,10 +140,10 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         set(84, skater.slide_state.state.wall_riding);
     }
     let physical = &mut skater.player_input.physical;
-    physical.component_1832_word_1876=skater.handplant.flags;
-    physical.air.handplant_position_304=skater.handplant.anchor.map(f32::to_bits);
-    physical.air.handplant_time_320=skater.handplant.phase;
-    physical.air.flag_446=u8::from(skater.handplant.flags&0x8000_0000!=0);
+    physical.component_1832_word_1876 = skater.handplant.flags;
+    physical.air.handplant_position_304 = skater.handplant.anchor.map(f32::to_bits);
+    physical.air.handplant_time_320 = skater.handplant.phase;
+    physical.air.flag_446 = u8::from(skater.handplant.flags & 0x8000_0000 != 0);
     skater.footplant.publish(&mut physical.air);
     //82DB76E0..76F4 publishes this independently of selected-state304/311.
     physical.off_board.flag_308 = u8::from(p.flags_2480 & (1 << 19) != 0);
@@ -146,7 +155,9 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             .selection()
             .is_some_and(|s| s.wall_ride),
     );
+    // 82DB6EC0 publishes 1596 and 1597 together as air 441 and 445.
     physical.air.flag_441 = u8::from(skater.air_reckoning.state.flip_active);
+    physical.air.flag_445 = u8::from(skater.air_reckoning.state.flip_side);
     if state == PhysicalStateId::GroundAnimation {
         skater.ground_animation.fill(p, &mut physical.air);
     }
@@ -154,7 +165,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         category_12: state.category(),
         state_16: state as u32,
         flag_66: u8::from(state == PhysicalStateId::RevertGround && skater.revert_state.active),
-        flag_74: u8::from(state==PhysicalStateId::HandPlant && skater.handplant.continuation),
+        flag_74: u8::from(state == PhysicalStateId::HandPlant && skater.handplant.continuation),
         //ProcessOutput82DB7104..7128: selector57 requests State69 here.
         //The next input/selection enters702; never reset inside selection.
         flag_69: u8::from(skater.player_state.selector.request_teleport),

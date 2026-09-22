@@ -151,7 +151,8 @@ pub(crate) fn advance(
             time_to_land_valid: physical.air.known_air_valid_437 != 0,
             offboard_trajectory_time: physical.off_board.trajectory_time_120,
             offboard_trajectory_valid: physical.off_board.trajectory_valid_331 != 0,
-            trucks_or_deck_contact: physical.collision.flag_3472 != 0 || physical.collision.flag_3475 != 0,
+            trucks_or_deck_contact: physical.collision.flag_3472 != 0
+                || physical.collision.flag_3475 != 0,
             offboard_time_to_land: physical.off_board.scalar_32,
             offboard_air_scalar_92: physical.off_board.scalar_92,
             offboard_air_translation: physical.off_board.vector_96.map(f32::from_bits),

@@ -11,8 +11,12 @@ pub struct Operation {
 
 impl Operation {
     pub fn parse(attributes: &Attributes<'_>) -> Result<Self, String> {
-        let trick = attributes.text("trick").ok_or("ScoringTrick requires authored trick")?;
-        Ok(Self { trick: encode(trick.as_bytes()) })
+        let trick = attributes
+            .text("trick")
+            .ok_or("ScoringTrick requires authored trick")?;
+        Ok(Self {
+            trick: encode(trick.as_bytes()),
+        })
     }
 
     /// Vtable823214D0: Update at+52, while Begin+48 and End+56 are blr.

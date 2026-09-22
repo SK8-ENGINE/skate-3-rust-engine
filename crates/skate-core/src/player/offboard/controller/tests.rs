@@ -95,9 +95,28 @@ fn tiny_velocity_delta_keeps_ground_publication_finite() {
     let result = controller.step_ground(&job());
     assert!(result.position.into_iter().all(f32::is_finite));
     assert!(result.velocity.into_iter().all(f32::is_finite));
-    assert!(result.physical_frame.into_iter().flatten().all(f32::is_finite));
-    assert!(result.animation_frame.into_iter().flatten().all(f32::is_finite));
-    assert!(controller.state.surface.lean.into_iter().all(f32::is_finite));
+    assert!(
+        result
+            .physical_frame
+            .into_iter()
+            .flatten()
+            .all(f32::is_finite)
+    );
+    assert!(
+        result
+            .animation_frame
+            .into_iter()
+            .flatten()
+            .all(f32::is_finite)
+    );
+    assert!(
+        controller
+            .state
+            .surface
+            .lean
+            .into_iter()
+            .all(f32::is_finite)
+    );
     assert!(controller.state.cadence.phase.phase.is_finite());
 }
 #[test]

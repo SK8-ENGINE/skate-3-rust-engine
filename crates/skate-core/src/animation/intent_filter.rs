@@ -42,7 +42,11 @@ impl State {
     ) -> f32 {
         self.elapsed += dt;
         let mut target = settings.scale * input.unwrap_or(settings.default_value);
-        for (kind, enabled) in settings.filters.into_iter().zip([true, true, stance.0, stance.1]) {
+        for (kind, enabled) in settings
+            .filters
+            .into_iter()
+            .zip([true, true, stance.0, stance.1])
+        {
             if enabled && kind <= 7 {
                 target = apply_filter(target, kind);
             }
@@ -64,7 +68,11 @@ impl State {
         let candidate = (1.0 - blend).mul_add(self.value, weighted_target);
         let mut delta = candidate - self.value;
         if let Some(limit) = settings.clamp_acceleration {
-            delta = limit_delta(delta, self.previous_delta - limit, self.previous_delta + limit);
+            delta = limit_delta(
+                delta,
+                self.previous_delta - limit,
+                self.previous_delta + limit,
+            );
         }
         if let Some(limit) = settings.clamp_velocity {
             delta = limit_delta(delta, -limit, limit);
@@ -78,7 +86,11 @@ impl State {
 fn limit_delta(value: f32, lower: f32, upper: f32) -> f32 {
     // Preserve the original subtract/select ordering, including unordered input.
     let selected = if lower - value >= 0.0 { lower } else { value };
-    if upper - selected >= 0.0 { selected } else { upper }
+    if upper - selected >= 0.0 {
+        selected
+    } else {
+        upper
+    }
 }
 
 fn ramp(elapsed: f32, time: f32) -> f32 {

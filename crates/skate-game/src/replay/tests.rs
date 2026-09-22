@@ -119,6 +119,9 @@ fn controller_replay_scrub_camera_and_exit_do_not_leak_gameplay_input() {
         .init_resource::<ButtonInput<MouseButton>>()
         .init_resource::<bevy::input::mouse::AccumulatedMouseMotion>()
         .init_resource::<Time<Real>>()
+        // `controls` reads it to keep replay input out of a vehicle; the real
+        // app always has it from `modding::vehicles::install`.
+        .init_resource::<crate::modding::vehicles::Vehicles>()
         .add_systems(Update, controls);
     for i in 0..121 {
         app.world_mut()

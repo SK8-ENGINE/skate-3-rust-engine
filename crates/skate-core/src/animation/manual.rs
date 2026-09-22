@@ -28,7 +28,10 @@ impl State {
         let target = settings.balance.evaluate(manual.abs());
         let target = if manual >= -0.0 { target } else { -target };
         let desired_velocity = clamp(target - self.angle, settings.velocity_limit);
-        let acceleration = clamp(desired_velocity - self.velocity, settings.acceleration_limit);
+        let acceleration = clamp(
+            desired_velocity - self.velocity,
+            settings.acceleration_limit,
+        );
         self.velocity += acceleration;
         self.angle += self.velocity;
         self.angle
@@ -37,6 +40,10 @@ impl State {
 
 fn clamp(value: f32, limit: f32) -> f32 {
     // Preserve the source fsubs/fsel selection, including signed zero.
-    let lower = if -limit - value >= -0.0 { -limit } else { value };
+    let lower = if -limit - value >= -0.0 {
+        -limit
+    } else {
+        value
+    };
     if limit - lower >= -0.0 { lower } else { limit }
 }

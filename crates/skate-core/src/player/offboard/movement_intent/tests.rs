@@ -1,18 +1,40 @@
 use super::*;
 
 fn constant<const N: usize>(value: f32) -> PointGraph<N> {
-    PointGraph { x: std::array::from_fn(|i| i as f32), y: [value; N] }
+    PointGraph {
+        x: std::array::from_fn(|i| i as f32),
+        y: [value; N],
+    }
 }
 fn settings() -> Settings {
-    Settings { sprint_speed: constant(8.0), normal_speed: constant(4.0), sprint_blend: constant(1.0), sprint_time_cap: 2.0, slide_steering: constant(0.0) }
+    Settings {
+        sprint_speed: constant(8.0),
+        normal_speed: constant(4.0),
+        sprint_blend: constant(1.0),
+        sprint_time_cap: 2.0,
+        slide_steering: constant(0.0),
+    }
 }
 fn input() -> Input {
     Input {
-        flags: 0, suppress_minimum: false, magnitude: 1.0, steering: 0.0,
-        sprint_pressed: false, edge_active: false, ignore_obstacle: false,
-        direction: [0.0, 0.0, 1.0, 0.0], edge_tangent: [0.0, 0.0, 1.0, 0.0], edge_point: [0.0; 4],
-        right: [1.0, 0.0, 0.0, 0.0], up: [0.0, 1.0, 0.0, 0.0], forward: [0.0, 0.0, 1.0, 0.0], position: [0.0; 4],
-        obstacle: false, obstacle_normal: [0.0, 0.0, -1.0, 0.0], sliding: false, slide_velocity: [0.0; 4],
+        flags: 0,
+        suppress_minimum: false,
+        magnitude: 1.0,
+        steering: 0.0,
+        sprint_pressed: false,
+        edge_active: false,
+        ignore_obstacle: false,
+        direction: [0.0, 0.0, 1.0, 0.0],
+        edge_tangent: [0.0, 0.0, 1.0, 0.0],
+        edge_point: [0.0; 4],
+        right: [1.0, 0.0, 0.0, 0.0],
+        up: [0.0, 1.0, 0.0, 0.0],
+        forward: [0.0, 0.0, 1.0, 0.0],
+        position: [0.0; 4],
+        obstacle: false,
+        obstacle_normal: [0.0, 0.0, -1.0, 0.0],
+        sliding: false,
+        slide_velocity: [0.0; 4],
     }
 }
 #[test]
@@ -75,8 +97,14 @@ fn edge_tangent_flips_before_target_and_flag_resets_next_tick() {
 }
 #[test]
 fn angle_degeneracy_and_half_turn_boundary_are_retained() {
-    assert_eq!(signed_angle([0.0; 4], [1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]), 0.0);
-    assert_eq!(normalize_or([0.0; 4], [0.0, 0.0, 1.0, 0.0]), [0.0, 0.0, 1.0, 0.0]);
+    assert_eq!(
+        signed_angle([0.0; 4], [1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]),
+        0.0
+    );
+    assert_eq!(
+        normalize_or([0.0; 4], [0.0, 0.0, 1.0, 0.0]),
+        [0.0, 0.0, 1.0, 0.0]
+    );
     let pi = f32::from_bits(0x4049_0fdb);
     assert!((wrap_angle(pi) - pi).abs() < 0.000001);
     assert!(wrap_angle(pi + 0.1) < 0.0);
