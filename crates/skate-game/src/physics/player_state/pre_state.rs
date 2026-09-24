@@ -14,7 +14,11 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             skater.player_state.current(),
             PhysicalStateId::PhysicsGround
                 | PhysicalStateId::PhysicsAir
-                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                | PhysicalStateId::PhysicsAirSecondary
+                | PhysicalStateId::FootPlant
+                | PhysicalStateId::Boneless
+                | PhysicalStateId::HandPlant
+                | PhysicalStateId::RevertGround
                 | PhysicalStateId::KnownAir
                 | PhysicalStateId::BipedAir
                 | PhysicalStateId::BipedGround

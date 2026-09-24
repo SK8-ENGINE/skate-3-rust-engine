@@ -9,9 +9,9 @@ mod face_clip;
 mod face_edge;
 mod feature;
 mod point_feature;
-mod prism_math;
-mod primitive_query;
 mod primitive_pair;
+mod primitive_query;
+mod prism_math;
 pub use primitive_pair::{PrimitivePairSettings, primitive_pair_contacts};
 mod projection;
 mod reduction;
@@ -23,14 +23,14 @@ pub use axes::separating_axis_candidates;
 pub use box_feature::box_maximum_feature;
 pub use buffer::ContactBuffer;
 pub use dispatch::find_feature_intersection_prism;
-pub use primitive_query::{
-    ContactPrimitive, PrimitiveContactManifold, primitive_triangle_world_contacts,
-    transform_triangle_volume, triangle_from_volume,
-};
 pub use face_clip::{clamp_point_to_feature, clip_segment_to_feature};
 pub use face_edge::intersect_feature_corner_edge;
 pub use feature::{capsule_maximum_feature, initialize_feature_segment};
 pub use point_feature::{closest_feature_segment, intersect_point_face};
+pub use primitive_query::{
+    ContactPrimitive, PrimitiveContactManifold, primitive_triangle_world_contacts,
+    transform_triangle_volume, triangle_from_volume,
+};
 pub use projection::{
     PrimitiveKind, best_separating_direction, project_direction, project_directions,
 };

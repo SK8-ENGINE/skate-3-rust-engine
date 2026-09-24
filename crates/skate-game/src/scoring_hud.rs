@@ -89,7 +89,7 @@ impl Plugin for ScoringHudPlugin {
         )
         .add_systems(
             FixedUpdate,
-            advance
+            (advance, multiplier_sounds)
                 .after(crate::app::SimulationSet::Physics)
                 .run_if(crate::graphics_menu::gameplay_active),
         )
@@ -213,7 +213,10 @@ fn setup(
             commands.insert_resource(hud);
             info!("Original scoring HUD loaded from {}", root.display());
         }
-        Err(error) => error!("Original scoring HUD could not load from {}: {error}. See docs/hud-installation.md", root.display()),
+        Err(error) => error!(
+            "Original scoring HUD could not load from {}: {error}. See docs/hud-installation.md",
+            root.display()
+        ),
     }
 }
 // Rasterize at output pixel resolution; retain the original 1280x720 APT
@@ -475,5 +478,25 @@ fn render(
     }
     for slot in &hud.slots[draws.len()..] {
         commands.entity(slot.entity).insert(Visibility::Hidden);
+    }
+}
+
+/// Retail plays the score multiplier's sounds from this module, not from the ScoreModule:
+/// `sub_82666BC0` polls the published sequence multiplier against its own cached copy and, on
+/// any change, picks a sound by exact float equality. The scoring runtime keeps the cache and
+/// reports the change edge; the selection lives with the sounds.
+///
+/// This runs with the simulation rather than with the frame so a change cannot be missed when
+/// several fixed ticks fall inside one rendered frame. It deliberately does not depend on the
+/// HUD resource: the sound is retail's whether or not the display itself loaded.
+fn multiplier_sounds(
+    skater: Res<SkaterRuntime>,
+    mut sounds: MessageWriter<crate::skate_audio::FrontEndSoundRequest>,
+) {
+    let Some(multiplier) = skater.scoring.multiplier_changed else {
+        return;
+    };
+    if let Some(id) = crate::skate_audio::player::multiplier_sound_id(multiplier) {
+        sounds.write(crate::skate_audio::FrontEndSoundRequest(id));
     }
 }

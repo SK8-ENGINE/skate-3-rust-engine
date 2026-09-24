@@ -457,4 +457,3 @@ fn physical_vector_publication_uses_the_restored_native_offsets() {
     publish_physical_outputs(&physical, &packet, &mut output);
     assert_eq!(output.vectors_544_560_592_608[3], [160; 4]);
 }
-

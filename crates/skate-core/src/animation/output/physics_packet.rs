@@ -94,8 +94,12 @@ pub fn publish_evaluated(
     timestep: f64,
     signal_name: &[u8],
 ) -> Result<i32, BufferError> {
-    let count=packet.bone_count as usize;
-    if hierarchy.len()<count || local.len()<count || packet.hierarchy.len()<count || packet.local.len()<count {
+    let count = packet.bone_count as usize;
+    if hierarchy.len() < count
+        || local.len() < count
+        || packet.hierarchy.len() < count
+        || packet.local.len() < count
+    {
         return Err(BufferError::RangeOutsideAllocation);
     }
 

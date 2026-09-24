@@ -1,16 +1,30 @@
 //! Transactional world replacement: prepare without mutating the live session,
 //! then commit at a schedule boundary with gameplay suspended.
+use crate::{
+    config::Config,
+    map_library::Entry,
+    map_render::PreparedScene,
+    physics::{GamePhysics, PlayerControls, SkaterRuntime},
+};
 use bevy::prelude::*;
-use std::{path::PathBuf, sync::{Arc, atomic::{AtomicU8, Ordering}}, thread::JoinHandle, time::Instant};
-use crate::{config::Config, map_library::Entry, map_render::PreparedScene,
-    physics::{GamePhysics, PlayerControls, SkaterRuntime}};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+    thread::JoinHandle,
+    time::Instant,
+};
 
 /// Persistent character customisation can reapply after this set, while the
 /// transition still holds the loading overlay and gameplay remains suspended.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct MapTransitionSet;
 #[derive(Message)]
-pub(crate) struct WorldChanged { pub generation: u64 }
+pub(crate) struct WorldChanged {
+    pub generation: u64,
+}
 
 #[cfg(test)]
 #[path = "tests/map_transition.rs"]
@@ -26,9 +40,13 @@ pub(crate) struct CurrentMap {
 }
 impl CurrentMap {
     fn from_package(path: Option<PathBuf>, map: Option<&skate_data::skate_map::SkateMap>) -> Self {
-        Self { path, name: map.map_or_else(|| "Test world".into(), |m| m.name.clone()),
+        Self {
+            path,
+            name: map.map_or_else(|| "Test world".into(), |m| m.name.clone()),
             spawn: map.map_or([0., crate::physics::ground::HEIGHT, 0.], |m| m.spawn),
-            heading: map.map_or(0., |m| m.heading), generation: 0 }
+            heading: map.map_or(0., |m| m.heading),
+            generation: 0,
+        }
     }
 }
 
@@ -47,29 +65,51 @@ struct PreparedWorld {
 enum Phase {
     Idle,
     Requested(Entry),
-    Loading { entry: Entry, progress: Arc<AtomicU8>, job: JoinHandle<Result<PreparedWorld, String>> },
+    Loading {
+        entry: Entry,
+        progress: Arc<AtomicU8>,
+        job: JoinHandle<Result<PreparedWorld, String>>,
+    },
     // Let extraction see the committed scene before releasing the pause menu.
-    Publishing { frames: u8, notice: String },
+    Publishing {
+        frames: u8,
+        notice: String,
+    },
 }
 #[derive(Resource)]
-pub(crate) struct MapTransition { phase: Phase }
+pub(crate) struct MapTransition {
+    phase: Phase,
+}
 impl Default for MapTransition {
-    fn default() -> Self { Self { phase: Phase::Idle } }
+    fn default() -> Self {
+        Self { phase: Phase::Idle }
+    }
 }
 impl MapTransition {
-    pub fn busy(&self) -> bool { !matches!(self.phase, Phase::Idle) }
+    pub fn busy(&self) -> bool {
+        !matches!(self.phase, Phase::Idle)
+    }
     pub fn request(&mut self, entry: Entry) {
-        if !self.busy() { self.phase = Phase::Requested(entry); }
+        if !self.busy() {
+            self.phase = Phase::Requested(entry);
+        }
     }
     pub fn label(&self) -> String {
         match &self.phase {
             Phase::Idle => String::new(),
             Phase::Requested(entry) => format!("Loading {} — preparing…", entry.label),
-            Phase::Loading { entry, progress, .. } => format!("Loading {} — {}…", entry.label,
+            Phase::Loading {
+                entry, progress, ..
+            } => format!(
+                "Loading {} — {}…",
+                entry.label,
                 match progress.load(Ordering::Relaxed) {
-                    0 => "reading and validating map", 1 => "building collision and rendering",
-                    2 => "initializing skater, camera and rendering", _ => "finishing meshes, textures and sky",
-                }),
+                    0 => "reading and validating map",
+                    1 => "building collision and rendering",
+                    2 => "initializing skater, camera and rendering",
+                    _ => "finishing meshes, textures and sky",
+                }
+            ),
             Phase::Publishing { .. } => "Loading — publishing the new world…".into(),
         }
     }
@@ -80,13 +120,24 @@ impl Plugin for MapTransitionPlugin {
     fn build(&self, app: &mut App) {
         let config = app.world().resource::<Config>();
         let current = CurrentMap::from_package(config.map_path.clone(), config.map.as_ref());
-        app.insert_resource(current).init_resource::<MapTransition>().add_message::<WorldChanged>()
-            .add_systems(PreUpdate, poll.in_set(MapTransitionSet).after(crate::graphics_menu::MenuInput)
-                .before(crate::input::poll_controllers))
-            .configure_sets(FixedUpdate, (
-                crate::app::SimulationSet::Input, crate::app::SimulationSet::Controls,
-                crate::app::SimulationSet::Physics,
-            ).run_if(crate::graphics_menu::gameplay_active));
+        app.insert_resource(current)
+            .init_resource::<MapTransition>()
+            .add_message::<WorldChanged>()
+            .add_systems(
+                PreUpdate,
+                poll.in_set(MapTransitionSet)
+                    .after(crate::graphics_menu::MenuInput)
+                    .before(crate::input::poll_controllers),
+            )
+            .configure_sets(
+                FixedUpdate,
+                (
+                    crate::app::SimulationSet::Input,
+                    crate::app::SimulationSet::Controls,
+                    crate::app::SimulationSet::Physics,
+                )
+                    .run_if(crate::graphics_menu::gameplay_active),
+            );
     }
 }
 
@@ -94,7 +145,9 @@ fn start(world: &World, entry: Entry) -> Result<Phase, String> {
     let config = world.resource::<Config>();
     let root = config.asset_root.clone();
     let difficulty = config.difficulty;
-    let graphs = world.resource::<crate::graph_runtime::StockGraphs>().clone();
+    let graphs = world
+        .resource::<crate::graph_runtime::StockGraphs>()
+        .clone();
     let source = world.resource::<SkaterRuntime>().animation.source.clone();
     let preferences = world.resource::<PlayerControls>().preferences;
     let mut scene = PreparedScene::new(world);
@@ -150,7 +203,11 @@ fn start(world: &World, entry: Entry) -> Result<Phase, String> {
         // own their data; retaining it would double large-city CPU memory.
         Ok(PreparedWorld { map_fingerprint, scene, physics, skater, controls, camera, metadata, retail, difficulty })
     }).map_err(|e| format!("Could not start map loader: {e}"))?;
-    Ok(Phase::Loading { entry, progress, job })
+    Ok(Phase::Loading {
+        entry,
+        progress,
+        job,
+    })
 }
 
 fn poll(world: &mut World) {
@@ -159,28 +216,50 @@ fn poll(world: &mut World) {
         Phase::Loading { job, .. } => job.is_finished(),
         _ => true,
     };
-    if !ready { return; }
-    let phase = std::mem::replace(&mut world.resource_mut::<MapTransition>().phase, Phase::Idle);
+    if !ready {
+        return;
+    }
+    let phase = std::mem::replace(
+        &mut world.resource_mut::<MapTransition>().phase,
+        Phase::Idle,
+    );
     let next = match phase {
         Phase::Requested(entry) => match start(world, entry) {
             Ok(phase) => phase,
-            Err(error) => { failed(world, error); Phase::Idle }
+            Err(error) => {
+                failed(world, error);
+                Phase::Idle
+            }
         },
-        Phase::Loading { job, .. } => match job.join().unwrap_or_else(|_| Err("Map loader failed unexpectedly".into())) {
+        Phase::Loading { job, .. } => match job
+            .join()
+            .unwrap_or_else(|_| Err("Map loader failed unexpectedly".into()))
+        {
             Ok(prepared) => {
                 let mut notice = commit(world, prepared);
                 let config = world.resource::<Config>();
-                match crate::map_library::save_default(&config.asset_root, config.map_path.as_deref()) {
+                match crate::map_library::save_default(
+                    &config.asset_root,
+                    config.map_path.as_deref(),
+                ) {
                     Ok(()) => notice.push_str(" Default map saved."),
                     Err(error) => notice.push_str(&format!(" Could not save default: {error}")),
                 }
                 Phase::Publishing { frames: 3, notice }
             }
-            Err(error) => { failed(world, error); Phase::Idle }
+            Err(error) => {
+                failed(world, error);
+                Phase::Idle
+            }
         },
-        Phase::Publishing { frames, notice } if frames > 0 => Phase::Publishing { frames: frames - 1, notice },
+        Phase::Publishing { frames, notice } if frames > 0 => Phase::Publishing {
+            frames: frames - 1,
+            notice,
+        },
         Phase::Publishing { notice, .. } => {
-            world.resource_mut::<crate::graphics_menu::Menu>().transition_finished(notice, true);
+            world
+                .resource_mut::<crate::graphics_menu::Menu>()
+                .transition_finished(notice, true);
             world.resource_mut::<Time<Virtual>>().unpause();
             Phase::Idle
         }
@@ -204,11 +283,17 @@ fn commit(world: &mut World, mut prepared: PreparedWorld) -> String {
     prepared.scene.publish(world);
     crate::camera::set_world_environment(world, prepared.retail);
     world.insert_resource(crate::retail_render::RetailScene(prepared.retail));
-    world.insert_resource(crate::grind_world::GrindGeometry::for_world(prepared.metadata.path.is_none()));
+    world.insert_resource(crate::grind_world::GrindGeometry::for_world(
+        prepared.metadata.path.is_none(),
+    ));
     world.insert_resource(Time::<Fixed>::from_duration(prepared.physics.period()));
     let root_transform = Transform::from_matrix(crate::animation::native_matrix(
-        prepared.skater.animated_skeleton.roots.animation_to_world));
-    for mut transform in world.query_filtered::<&mut Transform, With<crate::world::PlayerRoot>>().iter_mut(world) {
+        prepared.skater.animated_skeleton.roots.animation_to_world,
+    ));
+    for mut transform in world
+        .query_filtered::<&mut Transform, With<crate::world::PlayerRoot>>()
+        .iter_mut(world)
+    {
         *transform = root_transform;
     }
     world.insert_resource(prepared.physics);
@@ -226,13 +311,23 @@ fn commit(world: &mut World, mut prepared: PreparedWorld) -> String {
     config.map_fingerprint = prepared.map_fingerprint;
     config.difficulty = prepared.difficulty;
     let notice = format!("Loaded {}.", prepared.metadata.name);
-    info!("MAP_TRANSITION_COMMITTED generation={} name={:?} spawn={:?} heading={} pid={}",
-        prepared.metadata.generation, prepared.metadata.name, prepared.metadata.spawn,
-        prepared.metadata.heading, std::process::id());
+    info!(
+        "MAP_TRANSITION_COMMITTED generation={} name={:?} spawn={:?} heading={} pid={}",
+        prepared.metadata.generation,
+        prepared.metadata.name,
+        prepared.metadata.spawn,
+        prepared.metadata.heading,
+        std::process::id()
+    );
     if let Some(mut messages) = world.get_resource_mut::<Messages<WorldChanged>>() {
-        messages.write(WorldChanged { generation: prepared.metadata.generation });
+        messages.write(WorldChanged {
+            generation: prepared.metadata.generation,
+        });
     }
     world.insert_resource(prepared.metadata);
-    eprintln!("MAP_PUBLISH_TIMING cpu_ms={}", publication_started.elapsed().as_millis());
+    eprintln!(
+        "MAP_PUBLISH_TIMING cpu_ms={}",
+        publication_started.elapsed().as_millis()
+    );
     notice
 }

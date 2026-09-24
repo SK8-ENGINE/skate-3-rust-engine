@@ -2,22 +2,22 @@
 //! triangle query: exact parallel rejection and closed segment/barycentric bounds.
 use super::native_arithmetic::dot3;
 type V = [f32; 4];
-#[path = "grind_contact/families.rs"]
-pub mod families;
-#[path = "grind_contact/entry.rs"]
-pub mod entry;
-#[path = "grind_contact/control.rs"]
-pub mod control;
 #[path = "grind_contact/admission.rs"]
 pub mod admission;
 #[path = "grind_contact/arithmetic.rs"]
 mod arithmetic;
+#[path = "grind_contact/balance.rs"]
+pub mod balance;
+#[path = "grind_contact/control.rs"]
+pub mod control;
+#[path = "grind_contact/entry.rs"]
+pub mod entry;
+#[path = "grind_contact/families.rs"]
+pub mod families;
 #[path = "grind_contact/investigator.rs"]
 pub mod investigator;
 #[path = "grind_contact/manager.rs"]
 pub mod manager;
-#[path = "grind_contact/balance.rs"]
-pub mod balance;
 
 /// Native query entry: endpoints plus a spline owner, not three vectors.
 #[derive(Clone, Copy, Debug)]
@@ -100,11 +100,16 @@ pub fn boardslide_candidate(
         return None;
     }
     let delta = sub(edge.end, edge.start);
-    let direction = scale(delta, arithmetic::reciprocal(arithmetic::square_root(dot3(delta, delta))));
+    let direction = scale(
+        delta,
+        arithmetic::reciprocal(arithmetic::square_root(dot3(delta, delta))),
+    );
     if dot3(upright_normal(direction), board[1]) <= 0.65 {
         return None;
     }
-    if !admission.test(400, direction, false).allowed { return None; }
+    if !admission.test(400, direction, false).allowed {
+        return None;
+    }
     let depth = dot3(sub(board[3], contact.position), board[1]);
     let projected = scale(board[1], depth);
     if dot3(projected, projected) >= f32::from_bits(0x3b6b_edfa) {
@@ -182,7 +187,10 @@ pub fn fifty_fifty_candidate_on_splines(
     }
     let difference = sub(front.position, rear.position);
     Some(FiftyFiftyCandidate {
-        direction: scale(difference, arithmetic::inverse_square_root(dot3(difference, difference))),
+        direction: scale(
+            difference,
+            arithmetic::inverse_square_root(dot3(difference, difference)),
+        ),
         centre: scale(add(front.position, rear.position), 0.5),
         front: front.position,
         rear: rear.position,

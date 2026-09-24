@@ -68,48 +68,71 @@ impl PlayAnimationInstance {
         self.first_update = true;
         refresh_parameters(&operation.parameters, true, service)?;
         service.set_construction_value(
-            super::skeleton_input::name::encode(b"ProSkater"), context.pro_skater,
+            super::skeleton_input::name::encode(b"ProSkater"),
+            context.pro_skater,
         );
         // The graph override is consumed/reset before variant choice or play.
-        let transition = context.transition_override.take()
+        let transition = context
+            .transition_override
+            .take()
             .filter(|settings| settings.kind != 0)
             .unwrap_or(operation.transition);
         let mut animation = &operation.animation;
         if let Some(switch) = &operation.switch_animation {
-            if context.is_switch.ok_or("PlayAnimation needs skater switch state")? {
+            if context
+                .is_switch
+                .ok_or("PlayAnimation needs skater switch state")?
+            {
                 animation = switch;
             }
         }
         if let Some(mirror) = &operation.mirror_animation {
-            if context.is_mirrored.ok_or("PlayAnimation needs skater mirror state")? {
+            if context
+                .is_mirrored
+                .ok_or("PlayAnimation needs skater mirror state")?
+            {
                 animation = mirror;
             }
         }
         if let Some(no_board) = &operation.no_board_animation {
-            if !context.board_available.ok_or("PlayAnimation needs PhysOut board availability")? {
+            if !context
+                .board_available
+                .ok_or("PlayAnimation needs PhysOut board availability")?
+            {
                 animation = no_board;
             }
         }
         service.set_posture_enabled(operation.apply_posture);
         let played = if (1..=4).contains(&transition.kind) {
             service.play(PlaybackRequest {
-                animation: animation.clone(), speed: operation.playback_speed,
-                start_time: 0.0, transition,
+                animation: animation.clone(),
+                speed: operation.playback_speed,
+                start_time: 0.0,
+                transition,
             })?
-        } else { false };
+        } else {
+            false
+        };
         if !played {
             // This fallback is present in native Begin82BB5630..5660. The
             // service must not use it to conceal missing tree implementations.
             service.play(PlaybackRequest {
-                animation: "KeepDefaultAnim".into(), speed: 1.0, start_time: 0.0,
-                transition: TransitionSettings { kind: 1, ..operation.transition },
+                animation: "KeepDefaultAnim".into(),
+                speed: 1.0,
+                start_time: 0.0,
+                transition: TransitionSettings {
+                    kind: 1,
+                    ..operation.transition
+                },
             })?;
         }
         Ok(())
     }
 
     pub fn update(
-        &mut self, operation: &PlayAnimation, service: &mut impl PlaybackService,
+        &mut self,
+        operation: &PlayAnimation,
+        service: &mut impl PlaybackService,
     ) -> Result<(), String> {
         if !self.first_update {
             refresh_parameters(&operation.parameters, false, service)?;
@@ -121,7 +144,9 @@ impl PlayAnimationInstance {
 }
 
 fn refresh_parameters(
-    parameters: &[PlaybackParameter], beginning: bool, service: &mut impl PlaybackService,
+    parameters: &[PlaybackParameter],
+    beginning: bool,
+    service: &mut impl PlaybackService,
 ) -> Result<(), String> {
     // Keep read/write effects interleaved across parameters while avoiding two
     // mutable borrows of the same concrete animation service.
@@ -134,7 +159,9 @@ fn refresh_parameters(
     for parameter in parameters {
         let mut output = One(None);
         parameter.update(beginning, service, &mut output)?;
-        if let Some(attribute) = output.0 { service.set_attribute(attribute); }
+        if let Some(attribute) = output.0 {
+            service.set_attribute(attribute);
+        }
     }
     Ok(())
 }

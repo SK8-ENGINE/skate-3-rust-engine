@@ -19,8 +19,7 @@ pub fn update_roots(
 ) {
     let inverse_hips = inverse_rigid(animation_hips);
     let mut predicted_hips = *physical_hips;
-    predicted_hips[3] = std::array::from_fn(|i|
-        hips_velocity[i].mul_add(DT, physical_hips[3][i]));
+    predicted_hips[3] = std::array::from_fn(|i| hips_velocity[i].mul_add(DT, physical_hips[3][i]));
     let mut root = compose_affine(&predicted_hips, &inverse_hips);
     let weight = state_time + DT;
     let weight = if -weight >= 0.0 { 0.0 } else { weight };

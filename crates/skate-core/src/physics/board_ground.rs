@@ -4,15 +4,15 @@
 //! publication82C079E0, and world-contact normal selection82C07D20. The
 //! postphysics stage consumes actual solver reports, never speculative query
 //! contacts. Dynamic-object classification is outside the host's static world.
-use crate::{math::Vector3, trigonometry};
 use super::{
-    board::{BodyId, BODY_COUNT},
+    board::{BODY_COUNT, BodyId},
     board_motion_output::{add, dot, inverse_length_squared, length, scale, subtract},
     board_runtime::BoardRuntime,
     board_step::CollisionBody,
     contact_feedback::BoardContactReport,
     native_arithmetic,
 };
+use crate::{math::Vector3, trigonometry};
 
 const UP: Vector3 = Vector3::new(0.0, 1.0, 0.0);
 pub const WHEEL_LINE_LENGTH: f32 = f32::from_bits(0x3E4C_CCCD);
@@ -46,7 +46,14 @@ pub struct WheelLineHit {
 pub struct WheelLineState {
     pub normals: [Vector3; 4],
     pub distances: [f32; 4],
+    /// Low seven bits of the packed map material tag. This is the authored audio material and is
+    /// deliberately distinct from the five-bit friction/physics surface below.
+    pub audio_surfaces: [u32; 4],
     pub physics_surfaces: [u32; 4],
+    /// Seam pattern of the same tag, `(tag >> 12) & 0xF`: `82C079E0` stores it at
+    /// CollisionInfo+812+4i (FillPhysOut `82C02A80` copies it to Collision+3456+4i, audio state
+    /// +636..+648). Cleared to 0 on a miss together with both surfaces.
+    pub seam_patterns: [u32; 4],
     pub minimum_distance: f32,
 }
 impl Default for WheelLineState {
@@ -55,7 +62,9 @@ impl Default for WheelLineState {
         Self {
             normals: [UP; 4],
             distances: [0.0; 4],
+            audio_surfaces: [0; 4],
             physics_surfaces: [0; 4],
+            seam_patterns: [0; 4],
             minimum_distance: 0.0,
         }
     }
@@ -66,7 +75,9 @@ impl WheelLineState {
     pub fn publish(&mut self, hits: [Option<WheelLineHit>; 4]) {
         self.minimum_distance = WHEEL_LINE_LENGTH;
         for (i, hit) in hits.into_iter().enumerate() {
+            self.audio_surfaces[i] = 0;
             self.physics_surfaces[i] = 0;
+            self.seam_patterns[i] = 0;
             if let Some(hit) = hit {
                 let distance = hit.fraction * WHEEL_LINE_LENGTH;
                 self.minimum_distance = if distance - self.minimum_distance >= -0.0 {
@@ -76,7 +87,9 @@ impl WheelLineState {
                 };
                 self.normals[i] = hit.normal;
                 self.distances[i] = distance;
+                self.audio_surfaces[i] = hit.surface_tag & 0x7f;
                 self.physics_surfaces[i] = (hit.surface_tag >> 7) & 31;
+                self.seam_patterns[i] = (hit.surface_tag >> 12) & 0xf;
             }
         }
     }
@@ -90,7 +103,10 @@ pub struct PartGroundContact {
     pub relative_velocity: Vector3,
 }
 const EMPTY_PART: PartGroundContact = PartGroundContact {
-    in_contact: false, normal: UP, point: Vector3::ZERO, relative_velocity: Vector3::ZERO,
+    in_contact: false,
+    normal: UP,
+    point: Vector3::ZERO,
+    relative_velocity: Vector3::ZERO,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -110,6 +126,13 @@ pub struct BoardGroundState {
     ///Other-assembly group flags require actual dynamic-object reports.
     pub surface_twelve_height: f32,
     pub collision_flags: u32,
+    /// CollisionInfo+800/+804/+808: audio material (`tag & 0x7F`) of the front truck, back truck
+    /// and deck. Reset `82C00CA0` clears them each frame; `82C07D20` (82C081B4..81E0) stores the
+    /// tag of every report for parts 4..6, the last report winning. FillPhysOut `82C02A80` copies
+    /// them to Collision+4/+8/+12 (audio state +652/+656/+660).
+    pub part_audio_surfaces: [u32; 3],
+    /// CollisionInfo+828/+832/+836: the same reports' seam patterns, `(tag >> 12) & 0xF`.
+    pub part_seam_patterns: [u32; 3],
     /// CollisionInfo+0. Can use truck/deck normals when the wheel sum fails.
     pub overall_normal: Vector3,
     /// CollisionInfo+16. Retained until a valid contacting-wheel sum replaces it.
@@ -127,7 +150,9 @@ pub struct BoardGroundState {
 impl Default for BoardGroundState {
     fn default() -> Self {
         Self {
-            parts: [EMPTY_PART; BODY_COUNT], overall_normal: UP, wheel_normal: UP,
+            parts: [EMPTY_PART; BODY_COUNT],
+            overall_normal: UP,
+            wheel_normal: UP,
             // CollisionInfo ctor82C00DC8/CC zeros both arrays. Board reset
             //82C0D758 calls that constructor again; per-frame reset retains velocities.
             previous_velocities: [Vector3::ZERO; BODY_COUNT],
@@ -137,8 +162,13 @@ impl Default for BoardGroundState {
             opposing_contact: 0.0,
             surface_twelve_height: 0.0,
             collision_flags: 0,
-            valid_wheel_normals: [false; 4], part_contact_count: 0,
-            wheel_contact_count: 0, time_without_wheel_contact: 0.0, wheel_angular_drag: [0.0; 4],
+            part_audio_surfaces: [0; 3],
+            part_seam_patterns: [0; 3],
+            valid_wheel_normals: [false; 4],
+            part_contact_count: 0,
+            wheel_contact_count: 0,
+            time_without_wheel_contact: 0.0,
+            wheel_angular_drag: [0.0; 4],
         }
     }
 }
@@ -148,7 +178,8 @@ impl BoardGroundState {
     pub fn sample_accelerations(&mut self, velocities: [Vector3; BODY_COUNT], time_step: f32) {
         let inverse_dt = 1.0 / time_step;
         for (i, current) in velocities.into_iter().enumerate() {
-            self.accelerations[i] = scale(subtract(current, self.previous_velocities[i]), inverse_dt);
+            self.accelerations[i] =
+                scale(subtract(current, self.previous_velocities[i]), inverse_dt);
             self.previous_velocities[i] = current;
         }
     }
@@ -158,7 +189,9 @@ impl BoardGroundState {
     pub fn advance_contact_time(&mut self, time_step: f32) {
         self.time_without_wheel_contact = if self.wheel_contact_count == 0 {
             self.time_without_wheel_contact + time_step
-        } else { 0.0 };
+        } else {
+            0.0
+        };
     }
     /// Complete contact-normal/count/drag subpipeline of82C07D20 for the
     /// static world. Reports must already satisfy82AE1608/827682B0 eligibility.
@@ -178,6 +211,8 @@ impl BoardGroundState {
         self.maximum_closing_speed = 0.0;
         self.surface_twelve_height = 0.0;
         self.collision_flags &= 0x01ff_ffff;
+        self.part_audio_surfaces = [0; 3];
+        self.part_seam_patterns = [0; 3];
         self.overall_normal = UP;
         self.valid_wheel_normals.fill(true);
         let mut highest_y = -2.0;
@@ -188,17 +223,24 @@ impl BoardGroundState {
         let mut surfaces = [0; BODY_COUNT];
         surfaces[..4].copy_from_slice(&lines.physics_surfaces);
         for report in reports {
-            assert_eq!(report.other, CollisionBody::StaticWorld,
-                "dynamic object contact classification needs its recovered owner");
+            assert_eq!(
+                report.other,
+                CollisionBody::StaticWorld,
+                "dynamic object contact classification needs its recovered owner"
+            );
             let i = report.part.index();
             if report.part == BodyId::Deck {
                 let projection = dot(report.normal, reckoning_up);
                 minimum_projection = if minimum_projection - projection >= 0.0 {
                     projection
-                } else { minimum_projection };
+                } else {
+                    minimum_projection
+                };
                 maximum_projection = if maximum_projection - projection >= 0.0 {
                     maximum_projection
-                } else { projection };
+                } else {
+                    projection
+                };
             }
             //82C07ED0..7F2C: this is the OLD part velocity, not the report's
             //post-solve relative velocity or the finite-difference acceleration.
@@ -214,6 +256,10 @@ impl BoardGroundState {
             }
             if i >= 4 {
                 surfaces[i] = surface; //82C081B4..81E0, last report wins.
+                // The same stores keep the audio material and seam bits of the tag.
+                let tag = u32::from(report.other_surface);
+                self.part_audio_surfaces[i - 4] = tag & 0x7f;
+                self.part_seam_patterns[i - 4] = (tag >> 12) & 0xf;
             }
             let contact = &mut self.parts[i];
             if !contact.in_contact || report.normal.y > contact.normal.y {
@@ -250,7 +296,10 @@ impl BoardGroundState {
             }
         }
         self.part_contact_count = self.parts.iter().filter(|part| part.in_contact).count() as u8;
-        self.wheel_contact_count = self.parts[..4].iter().filter(|part| part.in_contact).count() as u8;
+        self.wheel_contact_count = self.parts[..4]
+            .iter()
+            .filter(|part| part.in_contact)
+            .count() as u8;
         let angle_radians = maximum_ground_angle_degrees * f32::from_bits(0x3C8E_FA35);
         let minimum_up_dot = trigonometry::cos(angle_radians);
         let mut sum = Vector3::ZERO;
@@ -263,7 +312,11 @@ impl BoardGroundState {
                 sum = add(sum, contact.normal);
             }
             let drag = if contact.in_contact {
-                if board_wiping_out { f32::from_bits(0x3D23_D70A) } else { 0.0 }
+                if board_wiping_out {
+                    f32::from_bits(0x3D23_D70A)
+                } else {
+                    0.0
+                }
             } else {
                 f32::from_bits(0x3BC4_9BA6)
             };
@@ -276,8 +329,14 @@ impl BoardGroundState {
         } else {
             let mut support = Vector3::ZERO;
             // Native sum order: deck, front truck, back truck.
-            for i in [BodyId::Deck.index(), BodyId::FrontTruck.index(), BodyId::BackTruck.index()] {
-                if self.parts[i].in_contact { support = add(support, self.parts[i].normal); }
+            for i in [
+                BodyId::Deck.index(),
+                BodyId::FrontTruck.index(),
+                BodyId::BackTruck.index(),
+            ] {
+                if self.parts[i].in_contact {
+                    support = add(support, self.parts[i].normal);
+                }
             }
             let magnitude = length(support);
             if magnitude > f32::from_bits(0x3C23_D70A) {
@@ -298,15 +357,14 @@ pub fn angle_between(a: Vector3, b: Vector3) -> f32 {
     let a_squared = dot(a, a);
     let b_squared = dot(b, b);
     let epsilon = f32::from_bits(0x38D1_B717);
-    if !(a_squared > epsilon && b_squared > epsilon) { return 0.0; }
+    if !(a_squared > epsilon && b_squared > epsilon) {
+        return 0.0;
+    }
     let a = scale(a, inverse_length_squared(a_squared, 1));
     let b = scale(b, inverse_length_squared(b_squared, 1));
-    let cosine = native_arithmetic::vector_min(
-        native_arithmetic::vector_max(dot(a, b), -1.0), 1.0,
-    );
+    let cosine = native_arithmetic::vector_min(native_arithmetic::vector_max(dot(a, b), -1.0), 1.0);
     trigonometry::acos(cosine)
 }
-
 
 #[cfg(test)]
 #[path = "tests/board_ground.rs"]

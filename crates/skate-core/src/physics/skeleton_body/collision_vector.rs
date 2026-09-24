@@ -23,10 +23,19 @@ pub(super) fn inverse_length(square: f32) -> f32 {
     }
     inverse
 }
+/// The same guard, and the same widening, as [`board_motion_output::length`].
+///
+/// This is the other half of the native `82BD3D90` pair, and it feeds the `clamp_length` below,
+/// whose `size < ...` early return is likewise false against NaN. A ragdoll limb settling against
+/// a surface reaches denormal squared speeds exactly as the up vector does.
+///
+/// [`board_motion_output::length`]: crate::physics::board_motion_output::length
 pub(super) fn length(v: V) -> f32 {
     let square = dot(v, v);
-    let result = square * inverse_length(square);
-    if square == 0.0 { 0.0 } else { result }
+    if square < f32::MIN_POSITIVE {
+        return 0.0;
+    }
+    square * inverse_length(square)
 }
 pub(super) fn normalize(v: V) -> V {
     let square = dot(v, v);

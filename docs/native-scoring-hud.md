@@ -212,24 +212,250 @@ and changing alpha values, and reaches 40 authored draw batches. The scoring
 flow audit still passes landing persistence, line expiry and cancellation.
 No game or GPU capture was launched.
 
+## The combo's lifetime: the two timer holds (fixed 2026-09-23)
+
+Two owner-reported defects, both in the lifetime of a line: the score reset when a
+combo was linked into a manual, and the score and trick name stayed on screen long
+after they should have cleared. Both came from one line of this port handing the same
+"a collector is active" flag to both point timers.
+
+`sub_82DA33E0`, the ScoreModule's per-frame update, calls `82DA4C28` twice and the two
+calls do not share a hold flag:
+
+```text
+r29 = ([module+4] == [module+16])    ; cntlzw/rlwinm 27,31,31 -- equality, not difference
+r5  = bit30 of [holder+1832]         ; set by 82DA48B8, cleared by every 82DA37B0
+if (!r5)       r30 = 0               ; no hold at all
+else if (!r29) r30 = 1               ; every other collector holds without a bound
+else           r30 = [module+112] < (int)([module+64]+1532 * 60.0)
+bl 0x82da4c28  ; r3 = module+40, the line timer, r5 = r30
+[module+112] = (returned hold && r29) ? [module+112] + 1 : 0
+li r5,0
+bl 0x82da4c28  ; r3 = module+44, the combo timer -- never held
+```
+
+* The collector at `module+16` is the **ground** one: `82DA3C68` writes its `byte+945`
+  every frame, and `82DAA8E0`, a method of the class that reads that byte, is what
+  tests the nose/tail manual bits `0x08000000`/`0x04000000`.
+* `module+64` is the collector tuning class `546C36B656038E04`, so `+1532` is authored
+  key `0x5fc` = **5.0**, and the constant at `0x8303745C` is **60.0**: a 300-frame bound.
+* The multiplier timer is never held. This port held it, so a lingering ground carrier
+  kept the multiplier's fuel from draining at all.
+* `module+112` counts only the frames the hold actually took effect, which is why
+  `82DA4C28` returns that as a bool. This port discarded it, so a manual, a powerslide
+  or a revert pinned the line just above one point **for ever** and the HUD never
+  cleared. Releasing the hold can take more than one full 300-frame window: the frame
+  that ends a hold subtracts a single drain, and the hold re-arms unless that leaves
+  `previous` under `82DA4C28`'s 1.000001.
+
+The hold's `bit30` gate is not reproduced. It means "82DA48B8 has republished the line
+to the display", and this host has no display-live bit; the hold is a no-op at zero
+points either way, because `82DA4C28` returns before touching an empty timer.
+
+### The manual gate is State+70, not State+66
+
+`82DAA8E0`, the ground collector's manual slot, gates the manual on
+`[[[collector+4]+28]+70]` -- PhysOut, then State, byte **70** -- and counts suppressed
+frames at `collector+932`, admitting the manual again only while that count is `<= 6`:
+
+```text
+r4 = bit4([this+104]) || bit5([this+104])       ; nose or tail manual
+if (r4 && r10) { [this+932]++ ; r4 = 0 }
+else if (!bit30([holder+1832])) [this+932] = 0
+if (r4) r4 &= ([this+932] <= 6)                ; the subfic/subfe pair
+```
+
+This port read State+**66** instead, which is the byte `82D43B10` -- `RevertGround`'s
+Fill -- sets for the revert's whole active lifetime. Every frame of every revert
+therefore dropped the manual carrier; with no carrier the sequence went idle,
+published itself, and the line then drained the multiplier back to x1. That is the
+reported "the score resets if you connect in a manual". `82DB6EC0` fills State+70 from
+`[base+1888]+56`, which this host does not publish, so `Frame::manual_block_70` stays
+clear -- which is also what retail does whenever that byte is clear. Identifying that
+source is open work. The counter's reset condition is the one deliberate deviation:
+retail resets on `bit30([holder+1832]) == 0` and this port uses an empty line, the
+nearest state it does publish.
+
+### The publication gate: the collectors' own answer (2026-09-23)
+
+The owner then reported three more things: popping out of a manual reset the combo,
+grinds did not combo, and spins were missing from trick names. A captured session
+(`SKATE_SCORING_TRACE`, 38,714 frames) showed the first two exactly:
+
+```text
+tick=844 col=Ground flags=04400000 active=true  idle=0   <- the manual
+tick=845 col=Ground flags=00400000 active=false idle=1   <- the manual bit drops
+tick=846 col=Ground flags=01000000 active=false idle=2   <- the flip is announced
+tick=847 SCORE_PUBLISH reward=303 mult=1.50 line=303     <- the sequence is cut
+tick=851 col=Air     flags=01000000 active=true  idle=0  <- the pop, too late
+```
+
+`idle_ticks >= 3` was never retail. `82DA37B0` asks the **active collector**, through
+its `vtable+20`, whether the sequence continues, and publishes only on a no. The six
+collectors are named in `.rdata` at `0x823280F4` ("Air", "Grind", "Ground",
+"Handplant", "Offboard", "Other") and their vtables run from `0x8232812C` in 40-byte
+strides with `GetName` at slot 6; the Air table at `0x823281A4` is confirmed twice over,
+by slot 3 being its Enter `82DA8078` and slot 9 its publisher `82DA9A18`.
+
+| collector | slot 5 | answer |
+|---|---|---|
+| Other | `8274CA90` | `li r3,0` -- never |
+| Grind | `8281DD70` | `li r3,1` -- **always** |
+| Handplant | `8281DD70` | `li r3,1` -- always |
+| Air | `82DA98C8` | `r4 \|\| [this+2352] > 5 \|\| ([this+104] & 0x01000000)` |
+| Offboard | `82DAC1F8` | a live scorable id in `(-1,332)` and byte `[this+316]` |
+| Ground | `82DAB2A8` | a long OR, below |
+
+`82DAB2A8`'s terms: `[this+116] > 0`, byte `[this+944]`, a revert bit
+`0x20000000`/`0x10000000` while `r4`, the published scoring-trick bit `0x01000000`,
+either carrier slot (`[this+652]`/`[this+540]` with `[this+716]`, and
+`[this+252]`/`[this+140]`), the manual grace `[this+932] <= 6`, and -- again only while
+`r4` -- a speed test on `[[PhysOut+32]+268]` and a VMX compare on `[[PhysOut+0]+80]`.
+
+The grind answering *always* is why a rail links with no idle window at all, and the
+`0x01000000` term is what carries a sequence across the pop above. That bit is a pulse,
+not a latch: over the captured session it was set on 4.8% of frames and never for more
+than 13 consecutive grounded frames.
+
+Not ported: `r4` is the display-live bit (below), so the terms it gates are taken
+unconditionally, and `[this+116]`, `[this+944]` and the two speed tests are unidentified
+fields. Every one of those is a *keep going* term, so leaving them out can only end a
+sequence earlier than retail, never later.
+
+### The score fades because bit30 goes clear
+
+The line timer's hold gate, `bit30 of [holder+1832]`, is not a constant. `82DA48B8` sets
+it when it republishes the line to the display; `82DA37B0` clears it every frame and only
+calls `82DA48B8` while a line is open. So once a sequence has been banked and nothing
+further is happening, the bit stays clear and the line gets **no hold at all**: it drains
+out and the authored Clear/outro runs. That is why a retail score fades when you stop.
+
+This host publishes no display-live bit, so `sequence_active` stands in for it -- the hold
+exists to stop a line expiring underneath a trick in progress, which is exactly when a
+sequence is open. Taking the bit as always set, as the first pass here did, re-armed the
+hold long after the last trick and the score sat on screen. With the substitution a
+143-point line left alone fades in 172 frames.
+
+### Spins never reached a trick name
+
+`825E51A0` decides whether a name may carry a spin from the TrickType of the **named**
+scorable's record (`desc+120`, its `r23`). This port set `base_trick_label` on the
+announcement but `base_trick_type` only on the flip-ladder *conversion* path, so every
+ordinary trick composed its name with type 0, which `decorates_spin` refuses. The spin was
+measured and scored the whole time -- `SCORE_AIR spin_deg=-349 turns=-2` -- and simply
+never appeared. Both are now set together, and both are cleared together when the display
+closes.
+
+### What was checked and deliberately not changed
+
+`landing_countdown = 2` is set **only** by `82DA8550`, the air collector's landing
+bank, so a grind that lands gets no such grace in retail either; this port already
+matches. `82DA3310` is a faithful port of the landing-quality latch and that countdown.
+
+`[module+128]`, `[module+129]` and output byte 14657, which `82DA37B0` uses around the
+collector's answer to select its banking paths, are still not ported.
+
+Validation: `crates/skate-data/examples/scoring_flow_data.rs` gained five scenarios --
+a rail -> manual -> flip line that must keep its multiplier with and without a revert;
+the captured rail -> manual -> pop -> air frame pattern, which must stay a *single*
+sequence and must still end when the trick does; a banked line left alone, which must
+fade inside one ground hold (143 points fades in 172 frames); a parked manual, which
+must still let the line expire and clear the line score; and a full rotation, whose
+name must carry a degree count. All pass against the owned data together with every
+earlier assertion. The spin and gate scenarios were both confirmed to fail with their
+fixes reverted. `scoring::timer` gained a test for what a denied hold does.
+`SKATE_SCORING_TRACE` gained a per-tick `SCORE_TICK` line, because every other trace is
+edge-triggered and a pinned timer looks identical to a healthy one unless it is sampled
+every frame -- that line is what found all of this.
+
 ## Remaining native parity gaps
 
 These are implementation gaps, not merely missing gameplay validation:
 
-- Collector activation gates and exact publication timing need further porting;
-  the current runtime uses conditioned categories and an idle countdown.
+- Collector activation gates still use conditioned categories. Publication now uses
+  the collectors' own `vtable+20` answers, but four of `82DAB2A8`'s keep-going terms
+  are unidentified fields and `82DA37B0`'s banking paths are not ported.
 - Air spin uses accumulated board heading rather than the complete native
   transform accumulator. Body-flip direction and some landing modifiers remain
   incomplete.
 - Gap/context collectors and their native ground-query inputs, contextual
   bonuses and off-board height rewards are not wired.
 - Revert recognition depends on an unpublished physical state flag in the
-  current host. Full native revert scoring is not yet available.
-- Trick-name spin/direction modifiers and the HUD manager's stance transitions
-  are incomplete. The bindings expose five metric slots but currently only
-  supply the base trick label and default modifier flags.
+  current host. Full native revert scoring is not yet available. The ground
+  collector's manual gate needs State+70, which 82DB6EC0 fills from
+  `[base+1888]+56`; until that is published the gate stays clear.
+- The line timer's hold gate substitutes `sequence_active` for `bit30 of
+  [holder+1832]`, the display-live bit this host does not publish.
+- The trick name is now composed as retail composes it (`sub_825E51A0`): one `#`,
+  then space-separated localisation ids and a bare degree count, resolved token by
+  token by `apt_text::localize`. The five metric slots are *not* a label plus four
+  modifier flags -- `sub_825C27C0` returns `[name, switch, fakie, clear, new-trick]`
+  -- and the modifiers are tokens inside the name string. Spin degrees and the
+  front/back flip suffix are supplied; still missing are the Cab/Half-Cab tokens,
+  the nollie record swap through the metadata link column, and the Miracle Whip
+  case. The FS/BS parity needs a skater stance (`M+187`, the negation of
+  `PlayerStance_IsRegular`), which this engine does not publish, so it assumes
+  regular.
+- The HUD manager's stance transitions are incomplete: `sub_825C2700` returns
+  `[switch, fakie, idle latch (M+168), is-nollie-variant && display active]`, and
+  the port's fourth slot is a placeholder.
 - The compact VM supports the exercised movie paths, not arbitrary APT programs.
   Superclass/native constructor behavior is limited, and Math.random uses a
   local presentation RNG rather than the original engine RNG stream.
 
 Do not describe this build as fully finished or an exact native recreation.
+
+## Why every score was far below retail (fixed 2026-09-21)
+
+`scoring_runtime` computed all five air metrics every frame and then discarded
+them at the landing that was supposed to bank them. The landing resolved each
+metric with `ScoringData::by_id`, which only returns scorables the vault holds a
+`Hash_6918469984A8C596` record for. Of the executable's 332 scorables exactly 300
+are authored, and the 32 that are not include **129..=133** (`air_horizontal_distance`,
+`air_height_to_peak`, `air_total_height_gain`, `air_player_spin`, `air_player_flip`),
+**237** (`air_metric`) and **253** (`generic_metric`).
+
+Retail never needs a record for these: `82DA6260` indexes the fixed metadata table
+at `820862A8` by bare id, and `82DA8550` credits them the same way (`li r4,129` /
+`bl 0x82da6260`). Their reward is a curve value, not authored points, which is
+precisely why they carry no authored record. `catalog::metadata` now resolves them
+from that table. A 10 m, 3 m-high 360 air banks **508** where it banked **100**;
+a stationary kickflip still banks exactly its authored 100, because the curves are
+zero at zero input.
+
+### Authored magnitudes, for judging what is still missing
+
+| curve | input | peak |
+|---|---|---|
+| `0x3C0` | horizontal distance | 500 at 34.45 m |
+| `0x410` | height to peak | 500 at 12 m |
+| `0x320` | total height gain | 500 at +12 m, **and 500 at -12 m** |
+| `0x370` | spin | exactly 1 point per degree, to 1260 |
+| `0x640` | body flip | 300, flat |
+| `0x4B0` | gap run above 6 m | 1800 at 20 m |
+| `0x500`/`0x550`/`0x5A0` | the other three gap runs | 900 each |
+| `0x190` | off-board peak height | 700 at 10 m |
+
+### Still missing, with the evidence already gathered
+
+- **The gap/context collector** (`82DA89A0`, run accumulators `82DA7B50`, sum
+  `82DA88E8`). Four runs of horizontal distance, gated on a surface byte, a second
+  surface byte, height > `0x680` = 3.0 m and height > `0x67C` = 6.0 m; banked as
+  scorable 237. Blocked on the ground query `82DA7A38`, whose reference point is
+  the unidentified **player+1632**.
+- **The landing-context multiplier and four flat bonuses** in `82DA8550`
+  (`0x644`=1.5, `0x654`=1.15, `0x64C`=1.5, `0x65C`=1.15 multiplying all five
+  metrics; `0x648`=500, `0x658`=200, `0x650`=300, `0x660`=100 paid as id 237),
+  gated on four flags in a 10x68-byte context block filled by `82DA14A0`.
+- **The class-3 one-shot** in `82DA93D8`: `carrier.reward += 0x600 (=4.0) * points *
+  factor`, one-shot per air, gated on `82DAC780`'s geometric test -- which also
+  needs player+1632.
+- **Off-board height**: `82DAB7D0` tracks a peak height and banks `curve(0x190)` as
+  id 253 at exit. The port's off-board collector instead accrues `curve(0x140)`,
+  whose authored y array is **all zeros**, so it earns nothing. Same missing input.
+- **The spin accumulator**: `82DA8BE0` sums **two** rotation accumulators (`this+816`
+  over `[[owner+20]+368]`, `this+896` over the root transform `[owner+0]`), each a
+  `82DAC880` measuring a signed angle about the object's *own* up axis and wrapping
+  to (-pi, pi]. The port accumulates a single world-yaw heading delta, which
+  degenerates when the board pitches toward vertical. The threshold arithmetic
+  itself, `floor((|deg| + 0x63C=80) / 180)` signed by the rotation, is retail-exact.

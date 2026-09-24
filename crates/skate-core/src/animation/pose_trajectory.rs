@@ -16,7 +16,9 @@ pub fn delta(current: Sqt, previous: Sqt, loop_transform: Option<LoopTransform>)
         translation: [0.0; 3],
     });
     let inverse_previous = [
-        -previous.rotation[0], -previous.rotation[1], -previous.rotation[2],
+        -previous.rotation[0],
+        -previous.rotation[1],
+        -previous.rotation[2],
         previous.rotation[3],
     ];
     let loop_displacement = rotate(current.rotation, loop_transform.translation);
@@ -24,12 +26,20 @@ pub fn delta(current: Sqt, previous: Sqt, loop_transform: Option<LoopTransform>)
         (loop_displacement[i] + current.translation[i]) - previous.translation[i]
     });
     let translation = rotate(inverse_previous, displacement);
-    let rotation = multiply(multiply(loop_transform.rotation, current.rotation), inverse_previous);
+    let rotation = multiply(
+        multiply(loop_transform.rotation, current.rotation),
+        inverse_previous,
+    );
     Sqt {
         scale: current.scale,
         rotation,
         // The extractor restores the channel weight separately for channel clips.
-        translation: [translation[0], translation[1], translation[2], current.translation[3]],
+        translation: [
+            translation[0],
+            translation[1],
+            translation[2],
+            current.translation[3],
+        ],
     }
 }
 
@@ -45,7 +55,13 @@ fn cross(a: [f32; 4], b: [f32; 4]) -> [f32; 3] {
 pub(super) fn rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
     let vector = [v[0], v[1], v[2], 0.0];
     let first = cross(q, vector);
-    let intermediate = core::array::from_fn(|i| if i < 3 { q[3].mul_add(v[i], first[i]) } else { 0.0 });
+    let intermediate = core::array::from_fn(|i| {
+        if i < 3 {
+            q[3].mul_add(v[i], first[i])
+        } else {
+            0.0
+        }
+    });
     let second = cross(q, intermediate);
     core::array::from_fn(|i| 2.0f32.mul_add(second[i], v[i]))
 }

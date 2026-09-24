@@ -49,7 +49,23 @@ pub(super) fn advance(
         actor_query_56: 0,
         actor_query_44: 0,
         input_available,
-        transition_action: actions.value(71),
+        // Gameplay action **65**, left stick Y -- not 71, the right trigger.
+        //
+        // This is the "press up to fly out" input. Retail's store to Processed `+2636`
+        // (`sub_82DB4048`, the clamp at `0x82DB4330`) is fed by `bl 0x825903C8`, and
+        // `82590358`/`825903C8` are the stock cInputMap pair 64 and 65 -- so the transition input
+        // is 65. `GameplayActions::value` indexes `values[action - 64]`, where `values[1]` is
+        // `value(18) - value(19)` = left stick up minus down, and `values[7]` is the right
+        // trigger.
+        //
+        // It reaches `+2636`, then the air trajectory selector as `directional_input`, where it
+        // both tilts the launch (`launch.rs` `lean = clamp(input - 0.25, -1, 1)`) and casts the
+        // fly-out vote (`scoring.rs`, `input >= 0.5` scores surfaces past the lip, below it
+        // scores the transition face you came up). Reading the trigger instead left that vote
+        // permanently at 0, so every quarter pipe launched the skater out over the coping instead
+        // of arcing back into the ramp. Both the clamp to [-1, 1] and the `- 0.25` lean only make
+        // sense for a bipolar stick axis, never for a 0..1 trigger.
+        transition_action: actions.value(65),
         published_board_transform: if skater.player_input.physical.state.flag_61 != 0 {
             skater
                 .player_input
@@ -138,10 +154,51 @@ pub(super) fn advance(
     Ok(teleported)
 }
 
+/// Name the first non-finite reckoning input, once per run.
+///
+/// The landing abort ("Non-finite linear_velocity before shared solve") is reported from the
+/// solver, long after the fact: by then `animation_to_world`, `com_frame` and the lifted-COM
+/// target velocity are all NaN and the origin is gone. Two of these are *persistent* -- `heading`
+/// falls back to itself, and `body_flip` is composed into `system` every frame -- so one
+/// degenerate tick poisons the rest of the session. The Gram-Schmidt guards keep this from
+/// reaching the solver; this says which input went bad, so the cause can be fixed rather than
+/// contained.
+fn report_non_finite_reckoning(physics: &GamePhysics, skater: &SkaterRuntime) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+    if REPORTED.load(Ordering::Relaxed) {
+        return;
+    }
+    let frames = &physics.riding.reckoning_frames;
+    let rows = |m: &[[f32; 4]; 4]| m.iter().flatten().all(|v| v.is_finite());
+    let bad = [
+        ("reckoning.system", rows(&frames.system)),
+        ("reckoning.body_flip", rows(&frames.body_flip)),
+        (
+            "reckoning.heading",
+            frames.heading.iter().all(|v| v.is_finite()),
+        ),
+        (
+            "animated_skeleton.board_pose",
+            rows(&skater.animated_skeleton.record.pose[0]),
+        ),
+    ];
+    if let Some((name, _)) = bad.iter().find(|(_, ok)| !ok) {
+        REPORTED.store(true, Ordering::Relaxed);
+        bevy::log::error!(
+            "first non-finite reckoning input: {name} (system={:?} body_flip={:?} heading={:?})",
+            frames.system,
+            frames.body_flip,
+            frames.heading
+        );
+    }
+}
+
 pub(super) fn update_ground(
     physics: &GamePhysics,
     skater: &mut SkaterRuntime,
 ) -> Result<(), String> {
+    report_non_finite_reckoning(physics, skater);
     let collision = collision(skater);
     let mut owners = SkeletonOwners {
         animated: &mut skater.animated_skeleton,
@@ -246,7 +303,8 @@ impl PlayerInputCallbacks for Callbacks<'_, '_> {
         physical: &mut PhysicalPlayerInput,
         processed: &mut ProcessedPhysicsInput,
     ) -> Result<(), String> {
-        self.animation_input.select_physics_mode(processed.state_variant_index_2528)?;
+        self.animation_input
+            .select_physics_mode(processed.state_variant_index_2528)?;
         self.skeleton_input.process_data(
             board,
             toolkit,

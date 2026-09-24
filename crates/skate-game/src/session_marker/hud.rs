@@ -123,7 +123,10 @@ fn load(
         error!("Invalid marker HUD geometry");
         return;
     }
-    info!("Original session-marker HUD loaded from {}", folder.display());
+    info!(
+        "Original session-marker HUD loaded from {}",
+        folder.display()
+    );
     commands
         .spawn((MarkerHudRoot, Transform::default(), Visibility::Hidden))
         .with_children(|parent| {

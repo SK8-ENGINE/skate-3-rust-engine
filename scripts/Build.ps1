@@ -1,4 +1,4 @@
-param([switch]$StageOnly, [string]$TargetDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'target'))
+param([switch]$StageOnly, [string]$TargetDirectory = (Join-Path $env:LOCALAPPDATA 'Skate3RustEngine/target'))
 $ProjectRoot = Split-Path $PSScriptRoot -Parent
 $ErrorActionPreference = 'Stop'
 Push-Location $ProjectRoot
@@ -10,8 +10,12 @@ try {
     $debugDirectory = Join-Path $TargetDirectory 'debug'
     $executable = Join-Path $debugDirectory 'skate3rust.exe'
     if (-not (Test-Path -LiteralPath $executable)) { throw "Missing executable: $executable" }
-    $readobj = Join-Path $env:ProgramFiles 'LLVM/bin/llvm-readobj.exe'
-    if (-not (Test-Path -LiteralPath $readobj)) { throw 'LLVM llvm-readobj is required to stage exact runtime DLL dependencies.' }
+    $readobj = @(
+        (Join-Path $env:ProgramFiles 'LLVM/bin/llvm-readobj.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/2022/BuildTools/VC/Tools/Llvm/x64/bin/llvm-readobj.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/2022/BuildTools/VC/Tools/Llvm/bin/llvm-readobj.exe')
+    ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if (-not $readobj) { throw 'LLVM llvm-readobj is required to stage exact runtime DLL dependencies.' }
     $rustLibraries = (& rustc --print target-libdir).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Could not locate Rust runtime libraries.' }
     $binDirectory = Join-Path $ProjectRoot 'bin'

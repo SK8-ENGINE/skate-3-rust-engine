@@ -186,4 +186,3 @@ mod tests {
         assert!(collision_response(&settings, input).is_none());
     }
 }
-

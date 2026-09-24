@@ -46,8 +46,11 @@ pub fn calculate(
             s.absolute_minimum_height,
         );
         let high = s.maximum_height_vs_speed.evaluate(speed_fraction).mul_add(
-            if hippy { s.hippy_maximum_height } else { mode.maximum_height }
-                - s.absolute_minimum_height,
+            if hippy {
+                s.hippy_maximum_height
+            } else {
+                mode.maximum_height
+            } - s.absolute_minimum_height,
             s.absolute_minimum_height,
         );
         let height = low.mul_add(1.0 - input.jump_strength, high * input.jump_strength);

@@ -13,7 +13,8 @@ impl Condition {
     ///Uses the same published Ground80.Y and Skeleton598 as DisablePushBrake.
     ///The native leaf requires the physical component; absence is an error.
     pub fn evaluate(self, physical: Option<&PushBrakeInputs>) -> Result<bool, &'static str> {
-        let physical = physical.ok_or("DisableDismount requires actual Ground80 and Skeleton598")?;
+        let physical =
+            physical.ok_or("DisableDismount requires actual Ground80 and Skeleton598")?;
         //822F8C9C; strict SIMD comparison is false for an unordered normal.
         Ok(f32::from_bits(0x3F23_D70A) > physical.ground_axis_y
             || physical.skeleton_disables_push_brake)

@@ -252,12 +252,16 @@ fn repeated_host_migration_preserves_local_state_and_rebuilds_ten_player_lobby()
 
 #[test]
 fn occupied_driver_flag_preserves_root_without_native_collision_parts() {
-    let mut frame=body();frame.enabled=1u64<<62;frame.root=pose([10.,4.,20.],0.4);
-    let packed=Packed::body(&frame).unwrap();
-    let bytes=packed::delta(1,2,packed::BODY,1,&packed,None);
-    let decoded=packed::apply(&bytes,None).unwrap().unpack_body().unwrap();
-    assert_eq!(decoded.enabled,1u64<<62);assert_eq!(decoded.root.p,frame.root.p);
-    frame.enabled=1u64<<61;assert!(Packed::body(&frame).is_none());
+    let mut frame = body();
+    frame.enabled = 1u64 << 62;
+    frame.root = pose([10., 4., 20.], 0.4);
+    let packed = Packed::body(&frame).unwrap();
+    let bytes = packed::delta(1, 2, packed::BODY, 1, &packed, None);
+    let decoded = packed::apply(&bytes, None).unwrap().unpack_body().unwrap();
+    assert_eq!(decoded.enabled, 1u64 << 62);
+    assert_eq!(decoded.root.p, frame.root.p);
+    frame.enabled = 1u64 << 61;
+    assert!(Packed::body(&frame).is_none());
 }
 
 #[test]
@@ -280,7 +284,11 @@ fn different_maps_physics_and_rigs_can_join_and_exchange_body_updates() {
 
 #[test]
 fn discovery_accepts_other_game_versions_but_not_unrelated_spacewar_lobbies() {
-    assert!(skate_net::directory::is_game_lobby("skate3rust-free-skate-v4"));
-    assert!(skate_net::directory::is_game_lobby("skate3rust-free-skate-v5"));
+    assert!(skate_net::directory::is_game_lobby(
+        "skate3rust-free-skate-v4"
+    ));
+    assert!(skate_net::directory::is_game_lobby(
+        "skate3rust-free-skate-v5"
+    ));
     assert!(!skate_net::directory::is_game_lobby("another-game"));
 }

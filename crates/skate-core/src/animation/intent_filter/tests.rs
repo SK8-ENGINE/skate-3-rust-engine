@@ -2,15 +2,26 @@ use super::*;
 
 fn settings() -> Settings {
     Settings {
-        starting_value: 0.0, default_value: 0.0, scale: 1.0, filters: [0; 4],
-        ramp_time: None, blend_rising: 0.5, blend_falling: 0.25,
-        blend_out: Some(0.125), clamp_velocity: None, clamp_acceleration: None,
+        starting_value: 0.0,
+        default_value: 0.0,
+        scale: 1.0,
+        filters: [0; 4],
+        ramp_time: None,
+        blend_rising: 0.5,
+        blend_falling: 0.25,
+        blend_out: Some(0.125),
+        clamp_velocity: None,
+        clamp_acceleration: None,
     }
 }
 
 #[test]
 fn starting_value_bypasses_scale_and_filters_and_reentry_resets_history() {
-    let mut s = State { elapsed: 4.0, previous_delta: 9.0, value: 7.0 };
+    let mut s = State {
+        elapsed: 4.0,
+        previous_delta: 9.0,
+        value: 7.0,
+    };
     let mut p = settings();
     p.starting_value = 2.0;
     p.scale = 3.0;
@@ -24,9 +35,15 @@ fn starting_value_bypasses_scale_and_filters_and_reentry_resets_history() {
 fn missing_input_uses_blend_out_without_ramp_and_zero_is_present() {
     let mut p = settings();
     p.ramp_time = Some(8.0);
-    let mut s = State { value: 1.0, ..State::default() };
+    let mut s = State {
+        value: 1.0,
+        ..State::default()
+    };
     assert_eq!(s.update(&p, None, 1.0, (false, false)), 0.875);
-    s = State { value: 1.0, ..State::default() };
+    s = State {
+        value: 1.0,
+        ..State::default()
+    };
     assert_eq!(s.update(&p, Some(0.0), 1.0, (false, false)), 0.96875);
 }
 

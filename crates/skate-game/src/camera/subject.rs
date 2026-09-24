@@ -1,8 +1,8 @@
 //! Typed physics/animation publication boundary for normal subject82DF69C0.
 //! The simulation supplies current physical outputs; camera history stays here.
 use skate_core::camera::{
-    AnchorInputs, Anchors, CameraMan, Compass, CompassPoseInputs, CompassSettings,
-    ManagerSubject, ReferencePointInputs, SubjectPoseInputs, SubjectPosePublisher,
+    AnchorInputs, Anchors, CameraMan, Compass, CompassPoseInputs, CompassSettings, ManagerSubject,
+    ReferencePointInputs, SubjectPoseInputs, SubjectPosePublisher,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -38,9 +38,15 @@ impl SubjectPublisher {
         }
     }
 
-    pub fn publish(&mut self, mut input: CameraSubjectSnapshot, manager: &CameraMan,
-        settings: CompassSettings) -> Result<ManagerSubject, String> {
-        if let Some(last_tick) = self.last_tick && input.tick <= last_tick {
+    pub fn publish(
+        &mut self,
+        mut input: CameraSubjectSnapshot,
+        manager: &CameraMan,
+        settings: CompassSettings,
+    ) -> Result<ManagerSubject, String> {
+        if let Some(last_tick) = self.last_tick
+            && input.tick <= last_tick
+        {
             return Err(format!(
                 "Camera subject publication is not monotonic: previous={}, current={}",
                 last_tick, input.tick,
@@ -57,12 +63,23 @@ impl SubjectPublisher {
         input.reference_points.tracked_anchor = manager.rig.anchor.position;
         input.reference_points.incline_normal = manager.state.incline_normal;
         input.subject.rig.reference_positions = input.reference_points.positions();
-        let selected = if manager.shots.current().name.is_empty() { 5 }
-            else { manager.shots.current().shot.compass_north };
-        let compass_input = input.compass.bind(&input.subject, manager.frame.position, selected);
+        let selected = if manager.shots.current().name.is_empty() {
+            5
+        } else {
+            manager.shots.current().shot.compass_north
+        };
+        let compass_input = input
+            .compass
+            .bind(&input.subject, manager.frame.position, selected);
         input.subject.compass = self.compass.update(
-            if input.subject.reset != 0 { 0.0 } else { f32::from_bits(0x3c88_8889) },
-            compass_input, settings);
+            if input.subject.reset != 0 {
+                0.0
+            } else {
+                f32::from_bits(0x3c88_8889)
+            },
+            compass_input,
+            settings,
+        );
         Ok(input.subject)
     }
 }

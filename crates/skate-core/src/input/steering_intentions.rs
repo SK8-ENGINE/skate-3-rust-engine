@@ -66,10 +66,13 @@ mod tests {
     #[test]
     fn steering_gate_suppresses_all_three_emissions_without_changing_input() {
         let gated = produce([-0.75, 0.0], 1);
-        assert_eq!(gated, SteeringIntentions {
-            turn: None,
-            hard_turn: None,
-            hard_turn_crouch: None,
-        });
+        assert_eq!(
+            gated,
+            SteeringIntentions {
+                turn: None,
+                hard_turn: None,
+                hard_turn_crouch: None,
+            }
+        );
     }
 }

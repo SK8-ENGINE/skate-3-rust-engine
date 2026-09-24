@@ -103,9 +103,13 @@ impl BoardRuntime {
         }
     }
 
-    pub fn collision_group(&self) -> u32 { self.collision_group }
+    pub fn collision_group(&self) -> u32 {
+        self.collision_group
+    }
     ///All seven native board parts share the current assembly group.
-    pub fn set_collision_group(&mut self, group: u32) { self.collision_group = group }
+    pub fn set_collision_group(&mut self, group: u32) {
+        self.collision_group = group
+    }
 
     pub fn bodies(&self) -> &[BodySnapshot; BODY_COUNT] {
         &self.bodies
@@ -148,9 +152,8 @@ impl BoardRuntime {
             body.rates.angular_velocity = Vector3::ZERO;
             body.rates.force_acceleration = gravity;
             body.rates.torque_acceleration = Vector3::ZERO;
-            body.rates.world_inverse_inertia = world_inverse_inertia(
-                body.rates.basis, body.inertia.inverse_tensor,
-            );
+            body.rates.world_inverse_inertia =
+                world_inverse_inertia(body.rates.basis, body.inertia.inverse_tensor);
         }
         copy_pose(&hook, &mut self.hook.body.rates);
         self.forces.clear();

@@ -1,10 +1,12 @@
 //! Common force leaves82D40080/82D3FFC0/82D40130/82D401F8.
 //! These consume manager output; they do not duplicate its assistance update.
-use super::{scale, V};
+use super::{V, scale};
 use crate::{physics::native_arithmetic::dot3, point_graph::PointGraph};
 
 pub fn pin(normal: V, gravity_relief: f32) -> Option<V> {
-    if !(gravity_relief > 0.) { return None; }
+    if !(gravity_relief > 0.) {
+        return None;
+    }
     let mut force = scale(normal, -40.);
     force[1] = 0.;
     Some(force)

@@ -15,7 +15,9 @@ pub struct Operation {
 impl Operation {
     ///82BCC490 compares exact bytes through strcmp82AE89B0.
     pub fn parse(attributes: &Attributes<'_>) -> Self {
-        Self { always: attributes.text("update") == Some("always") }
+        Self {
+            always: attributes.text("update") == Some("always"),
+        }
     }
 
     ///Supply Some only for available original physical/animation components.

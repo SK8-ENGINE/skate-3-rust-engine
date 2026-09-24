@@ -33,7 +33,9 @@ pub(super) enum Instance {
     HippyJumpAntic(super::super::motion_hippy_jump::State),
     FingerFlipOut(super::super::motion_finger_flip::State),
     ///82BB5930 initializes byte8 once per allocated behavior instance.
-    JumpInto { first_update: bool },
+    JumpInto {
+        first_update: bool,
+    },
 }
 impl Instance {
     pub(super) fn new(operation: &MotionOperation) -> Self {
@@ -66,9 +68,12 @@ impl Instance {
             }
             MotionOperation::BipedCadence => Self::Stateless,
             MotionOperation::MatchCadence => Self::MatchCadence(Default::default()),
-            MotionOperation::OffboardBodyTweakBlend(_) => Self::OffboardBodyTweak(Default::default()),
-            MotionOperation::StockGameplay(super::super::motion_stock_gameplay::Operation::MatchAirTime) =>
-                Self::MatchAirTime(Default::default()),
+            MotionOperation::OffboardBodyTweakBlend(_) => {
+                Self::OffboardBodyTweak(Default::default())
+            }
+            MotionOperation::StockGameplay(
+                super::super::motion_stock_gameplay::Operation::MatchAirTime,
+            ) => Self::MatchAirTime(Default::default()),
             MotionOperation::FakieHeadChannel => {
                 Self::FakieHead(super::super::motion_channels::FakieHead::default())
             }
@@ -84,11 +89,13 @@ impl Instance {
             MotionOperation::KickTurn(super::super::motion_kickturn::Operation::Steering(_)) => {
                 Self::KickTurn(skate_core::animation::kickturn::State::new())
             }
-            MotionOperation::BodySpin => Self::BodySpin(super::super::motion_spin::State::default()),
-            MotionOperation::AirLeg(_) => Self::AirLeg(Default::default()),
-            MotionOperation::CharacterGesture => {
-                Self::CharacterGesture(super::super::motion_character_gesture::CharacterGesture::new())
+            MotionOperation::BodySpin => {
+                Self::BodySpin(super::super::motion_spin::State::default())
             }
+            MotionOperation::AirLeg(_) => Self::AirLeg(Default::default()),
+            MotionOperation::CharacterGesture => Self::CharacterGesture(
+                super::super::motion_character_gesture::CharacterGesture::new(),
+            ),
             MotionOperation::Shove(_) => Self::Shove(super::super::motion_shove::ShoveState::new()),
             MotionOperation::StockGameplay(
                 super::super::motion_stock_gameplay::Operation::SetManualAngle { .. },

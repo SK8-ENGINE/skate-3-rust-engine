@@ -3,18 +3,10 @@ use crate::physics::{board_motion_output::inverse_length_squared, native_arithme
 pub(super) fn length(v: [f32; 4]) -> f32 {
     let sq = dot3(v, v);
     let inv = inverse_length_squared(sq, 2);
-    if sq == 0.0 {
-        0.0
-    } else {
-        sq * inv
-    }
+    if sq == 0.0 { 0.0 } else { sq * inv }
 }
 fn selected_max(a: f32, b: f32) -> f32 {
-    if a - b >= 0.0 {
-        a
-    } else {
-        b
-    }
+    if a - b >= 0.0 { a } else { b }
 }
 ///82BD88A0 reads unweighted regional forces in this exact pair order.
 pub(crate) fn force(frame: &Frame, body: f32, arms: f32) -> bool {

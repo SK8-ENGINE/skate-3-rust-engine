@@ -25,7 +25,11 @@ pub(in crate::player::offboard) fn reject(v: Vector, axis: Vector) -> Vector {
     sub(v, scale(axis, dot(v, axis)))
 }
 ///82BD3E78, including its strict angle comparison and raw quaternion W insert.
-pub(in crate::player::offboard) fn limit_angle(target: Vector, from: Vector, maximum: f32) -> Vector {
+pub(in crate::player::offboard) fn limit_angle(
+    target: Vector,
+    from: Vector,
+    maximum: f32,
+) -> Vector {
     let a = normalize_or(target, ZERO);
     let b = normalize_or(from, ZERO);
     let axis = cross(a, b);

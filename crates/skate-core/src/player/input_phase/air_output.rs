@@ -41,6 +41,11 @@ pub struct AirOutputFields {
     pub footplant_right_450: u8,
     pub reached_apex_436: u8,
     pub flag_441: u8,
+    /// 445, the body flip's side, published beside 441 by 82DB6EC0 from the air
+    /// reckoning's 1596/1597 pair. The score collector's flip metric 82DA8EB8 turns it
+    /// into the sign of its +2348 -- `+1` when this is zero, `-1` otherwise -- which is
+    /// what separates a front flip from a back flip.
+    pub flag_445: u8,
     pub flag_446: u8,
     pub flag_447: u8,
     pub flag_448: u8,

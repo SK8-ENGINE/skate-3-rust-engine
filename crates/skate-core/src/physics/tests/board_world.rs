@@ -241,7 +241,11 @@ fn attached_volume_contact_reaches_its_actual_solver_body() {
     let mut world = BoardWorld::new(vec![triangle(), triangle()]);
     let config = config();
     let contacts = world.query_primitives(&[volume], config.query, config.retention);
-    assert_eq!(contacts.len(), 1, "retention must preserve attached body identity");
+    assert_eq!(
+        contacts.len(),
+        1,
+        "retention must preserve attached body identity"
+    );
     assert_eq!(contacts[0].body_a, CollisionBody::Attached(0));
     let settings = BoardStepSettings {
         simulation: RetailSimulationStep::fixed_60_hz(30, 0.001, Vector3::ZERO),
@@ -250,12 +254,20 @@ fn attached_volume_contact_reaches_its_actual_solver_body() {
         truck_dynamics: retail_truck_drive_dynamics(RetailTruckDriveSettings::STOCK),
         force_point_y_offset: 0.0,
     };
-    board.advance_attached(contacts, [0.0; 2], settings, AttachedStep {
-        bodies: vec![&mut attached],
-        contacts: &mut [],
-        joints: &mut [],
-        drives: &mut [],
-    });
+    board.advance_attached(
+        contacts,
+        [0.0; 2],
+        settings,
+        AttachedStep {
+            bodies: vec![&mut attached],
+            contacts: &mut [],
+            joints: &mut [],
+            drives: &mut [],
+        },
+    );
     assert!(attached.rates.linear_velocity.y > before + 0.5);
-    assert!(board.contact_reports().is_empty(), "skater contacts are not board observations");
+    assert!(
+        board.contact_reports().is_empty(),
+        "skater contacts are not board observations"
+    );
 }

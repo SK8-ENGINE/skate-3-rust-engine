@@ -38,6 +38,9 @@ impl SkeletonLineHit {
 pub(crate) struct SkeletonLineTests {
     pub hips: SkeletonLineHit,
     pub feet: [SkeletonLineHit; 2],
+    /// The hips ray's origin, retained at 1632 beside its result. See
+    /// [`PlayerInputState::hips_line_origin_1632`].
+    pub hips_origin: [f32; 4],
 }
 impl SkeletonLineTests {
     /// EndSkeletonLineTests82DB6580 publishes the completed tests in the
@@ -51,6 +54,7 @@ impl SkeletonLineTests {
             valid: u8::from(hit.collision_time >= 0.0),
         };
         player.hips_line_test_1488 = fields(self.hips);
+        player.hips_line_origin_1632 = self.hips_origin.map(f32::to_bits);
         player.left_line_test_1536 = fields(self.feet[0]);
         player.right_line_test_1584 = fields(self.feet[1]);
     }
@@ -60,7 +64,8 @@ pub(crate) fn query(world: &BoardWorld, body: &SkeletonBody) -> Result<SkeletonL
     let parts = body.part_transforms();
     //82DB63EC..647C selects hips23,lefttoe15,righttoe19 from the
     //physical pose. Body COM and the reparented animated targets are different.
-    let hips = query_trajectory(world, parts[23][3], [0.0, -100.0, 0.0, 0.0])?;
+    let hips_origin = parts[23][3];
+    let hips = query_trajectory(world, hips_origin, [0.0, -100.0, 0.0, 0.0])?;
     let raised = [0.0, f32::from_bits(0x3EA8_F5C3), 0.0, 0.0];
     let lowered = [0.0, -1.5, 0.0, 0.0];
     //Keep the subtraction and subsequent FMA evaluation separate: do not
@@ -71,7 +76,11 @@ pub(crate) fn query(world: &BoardWorld, body: &SkeletonBody) -> Result<SkeletonL
         let start = std::array::from_fn(|lane| parts[part][3][lane] + raised[lane]);
         feet[foot] = query_trajectory(world, start, velocity)?;
     }
-    Ok(SkeletonLineTests { hips, feet })
+    Ok(SkeletonLineTests {
+        hips,
+        feet,
+        hips_origin,
+    })
 }
 
 fn query_trajectory(

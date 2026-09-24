@@ -5,7 +5,9 @@ fn nested_hand_lifetimes_preserve_other_owners() {
     let mut state = HandServices::default();
     let bs = Operation::HandBusy(Hand::Backside);
     let fs = Operation::HandBusy(Hand::Frontside);
-    for operation in [bs, fs, bs] { state.apply(operation, 0); }
+    for operation in [bs, fs, bs] {
+        state.apply(operation, 0);
+    }
     state.apply(bs, 1);
     assert_eq!(state.busy_hands, [2, 1]);
     state.apply(bs, 2);
@@ -33,7 +35,9 @@ fn maintain_shove_is_an_update_latch_not_a_reference_count() {
     assert!(!state.keep_shove_channels);
     assert!(!state.apply(operation, 0));
     assert!(!state.keep_shove_channels);
-    for _ in 0..2 { assert!(!state.apply(operation, 1)); }
+    for _ in 0..2 {
+        assert!(!state.apply(operation, 1));
+    }
     assert!(state.keep_shove_channels);
     assert!(state.apply(operation, 2));
     assert!(!state.keep_shove_channels);
@@ -53,23 +57,32 @@ fn hand_selection_uses_exact_stock_comparison() {
 fn maintain_end_fades_only_antic_through_existing_animation_runtime() {
     use crate::graph_host::motion_animation::MotionAnimation;
     use skate_core::animation::{
-        channel_playback::ChannelSettings, playback_clip::PlaybackClip,
-        playback_tree::PlaybackTree,
+        channel_playback::ChannelSettings, playback_clip::PlaybackClip, playback_tree::PlaybackTree,
     };
     let metadata = skate_data::animation_metadata::AnimationMetadata::parse(
         r#"{"version":1,"source_bank":"test-only","source_sha256":"0000000000000000000000000000000000000000000000000000000000000000","source_bytes":48,"clips":[],"unsupported_trees":[]}"#,
     ).unwrap();
     let mut animation = MotionAnimation::from_metadata(metadata);
     let settings = ChannelSettings {
-        priority: 0, keep_alive: true, mirrored: false, speed: 1.0,
-        blend_in: 0.0, hold_during_blend_in: false, blend_out: 0.5,
-        hold_during_blend_out: false, use_attributes: false,
+        priority: 0,
+        keep_alive: true,
+        mirrored: false,
+        speed: 1.0,
+        blend_in: 0.0,
+        hold_during_blend_in: false,
+        blend_out: 0.5,
+        hold_during_blend_out: false,
+        use_attributes: false,
     };
     for name in ["SkitchAntic", "Shove"] {
-        animation.channels.insert(name.into(), PlaybackTree::Clip {
-            name: name.into(),
-            clip: PlaybackClip::new(301.0, 30.0, 1.0, 0, Vec::new()),
-        }, settings);
+        animation.channels.insert(
+            name.into(),
+            PlaybackTree::Clip {
+                name: name.into(),
+                clip: PlaybackClip::new(301.0, 30.0, 1.0, 0, Vec::new()),
+            },
+            settings,
+        );
     }
     let mut state = HandServices::default();
     state.execute(Operation::MaintainShove, 1, &mut animation);

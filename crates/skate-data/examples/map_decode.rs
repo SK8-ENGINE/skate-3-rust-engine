@@ -9,10 +9,18 @@ fn main() {
             let read = start.elapsed();
             let start = Instant::now();
             let map = skate_data::skate_map::SkateMap::parse(&bytes).expect("decode map");
-            println!("DATA_DECODE name={:?} pass={} read_ms={} parse_ms={} textures={} vertices={}",
-                map.name, pass, read.as_millis(), start.elapsed().as_millis(), map.textures.len(), map.geometry.vertices.len());
+            println!(
+                "DATA_DECODE name={:?} pass={} read_ms={} parse_ms={} textures={} vertices={}",
+                map.name,
+                pass,
+                read.as_millis(),
+                start.elapsed().as_millis(),
+                map.textures.len(),
+                map.geometry.vertices.len()
+            );
             if compare {
-                let serial = skate_data::skate_map::SkateMap::parse_with_decode_workers(&bytes, 1).expect("serial decode");
+                let serial = skate_data::skate_map::SkateMap::parse_with_decode_workers(&bytes, 1)
+                    .expect("serial decode");
                 assert!(map == serial, "parallel decoding changed package contents");
                 println!("DATA_EQUAL name={:?} all_fields=true", map.name);
             }

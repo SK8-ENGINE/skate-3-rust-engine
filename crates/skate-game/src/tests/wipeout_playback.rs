@@ -219,7 +219,11 @@ fn checkpoint_reply(on_foot: bool) {
     let mut input = crate::input::ControllerInput::default();
     let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
     let mut checkpoint = physics.board.bodies()[6].rates.position;
-    let destination = if on_foot { PhysicalStateId::BipedGround } else { PhysicalStateId::PhysicsGround };
+    let destination = if on_foot {
+        PhysicalStateId::BipedGround
+    } else {
+        PhysicalStateId::PhysicsGround
+    };
     let mut saw_ready = false;
     let mut restored_ticks = 0;
     for tick in 0..160 {
@@ -227,10 +231,16 @@ fn checkpoint_reply(on_foot: bool) {
             assert!((physics.board.bodies()[6].rates.position.z - checkpoint.z).abs() > 0.1);
             if on_foot {
                 let transform = skater.animated_skeleton.roots.animation_to_world;
-                checkpoint = skate_core::math::Vector3::new(transform[3][0], transform[3][1], transform[3][2]);
+                checkpoint = skate_core::math::Vector3::new(
+                    transform[3][0],
+                    transform[3][1],
+                    transform[3][2],
+                );
                 skater.teleport_state.request_manual(transform, false);
             }
-            if !on_foot { skater.teleport_state.request_checkpoint(); }
+            if !on_foot {
+                skater.teleport_state.request_checkpoint();
+            }
         }
         input.sample_raw_for_test(XboxState {
             buttons: if (12..60).contains(&tick) { 0x1000 } else { 0 },

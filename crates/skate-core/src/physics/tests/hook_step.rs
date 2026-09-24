@@ -10,24 +10,49 @@ fn an_attached_body_exchanges_reactions_with_the_board_before_both_integrate() {
     target.drive.enable_animation_soft(&mut 0);
     let mut attached_body = target.body;
     let config = settings(25);
-    let frames = prepare_drive_frames(config.base_truck_transforms, [0.;2], &mut target);
-    let mut rows = BoardConstraints::build(&actual, &target, frames,
-        config.truck_dynamics, config.simulation.time_step).drives;
+    let frames = prepare_drive_frames(config.base_truck_transforms, [0.; 2], &mut target);
+    let mut rows = BoardConstraints::build(
+        &actual,
+        &target,
+        frames,
+        config.truck_dynamics,
+        config.simulation.time_step,
+    )
+    .drives;
     let mut row = rows.pop().unwrap();
     row.frame_a_body.reaction_index = ATTACHED_REACTION_BASE;
     let mut attached_drives = [row];
     let queue = BoardForceQueue::default();
-    BoardStep::default().advance(&mut expected, &mut target, &queue, &[], [0.;2], config);
-    BoardStep::default().advance_attached(&mut actual, &mut inactive_hook(), &queue,
-        &[], [0.;2], config, AttachedStep { bodies: vec![&mut attached_body],
-            contacts: &mut [], joints: &mut [], drives: &mut attached_drives });
-    for (a,b) in actual.iter().zip(expected.iter()) {
+    BoardStep::default().advance(&mut expected, &mut target, &queue, &[], [0.; 2], config);
+    BoardStep::default().advance_attached(
+        &mut actual,
+        &mut inactive_hook(),
+        &queue,
+        &[],
+        [0.; 2],
+        config,
+        AttachedStep {
+            bodies: vec![&mut attached_body],
+            contacts: &mut [],
+            joints: &mut [],
+            drives: &mut attached_drives,
+        },
+    );
+    for (a, b) in actual.iter().zip(expected.iter()) {
         assert_eq!(a.rates.position, b.rates.position);
         assert_eq!(a.rates.linear_velocity, b.rates.linear_velocity);
     }
     assert_eq!(attached_body.rates.position, target.body.rates.position);
-    assert_eq!(attached_body.rates.linear_velocity, target.body.rates.linear_velocity);
-    assert!(attached_drives[0].accumulated_linear_impulse.iter().any(|v| *v != 0.));
+    assert_eq!(
+        attached_body.rates.linear_velocity,
+        target.body.rates.linear_velocity
+    );
+    assert!(
+        attached_drives[0]
+            .accumulated_linear_impulse
+            .iter()
+            .any(|v| *v != 0.)
+    );
 }
 
 #[test]

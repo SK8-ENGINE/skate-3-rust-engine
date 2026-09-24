@@ -1,6 +1,6 @@
 //! Owned animation tree evaluation; stock data constructs this topology.
-pub mod selection_space;
 pub mod blend_space;
+pub mod selection_space;
 use super::{
     clip_clock::AdvanceResult,
     output::attributes::{AnimationAttribute, AttributeName},
@@ -41,7 +41,9 @@ pub enum PoseCommand {
     Blend {
         weight: f32,
     },
-    WeightedBlend { weights: Vec<f32> },
+    WeightedBlend {
+        weights: Vec<f32>,
+    },
     ChannelBlend {
         weight: f32,
         use_channels_from_weights: bool,

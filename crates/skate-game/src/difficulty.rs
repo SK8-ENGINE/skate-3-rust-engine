@@ -15,20 +15,31 @@ pub(crate) enum Difficulty {
 }
 impl Difficulty {
     pub const ALL: [Self; 3] = [Self::Easy, Self::Normal, Self::Hardcore];
-    pub fn key(self) -> &'static str { NATIVE_MODES[self as usize] }
+    pub fn key(self) -> &'static str {
+        NATIVE_MODES[self as usize]
+    }
     pub fn label(self) -> &'static str {
-        match self { Self::Easy => "Easy", Self::Normal => "Normal", Self::Hardcore => "Hardcore" }
+        match self {
+            Self::Easy => "Easy",
+            Self::Normal => "Normal",
+            Self::Hardcore => "Hardcore",
+        }
     }
     pub fn parse(value: &str) -> Result<Self, String> {
-        Self::ALL.into_iter().find(|d| d.key().eq_ignore_ascii_case(value))
-            .ok_or_else(|| format!("Unknown difficulty {value:?}; expected easy, normal or hardcore"))
+        Self::ALL
+            .into_iter()
+            .find(|d| d.key().eq_ignore_ascii_case(value))
+            .ok_or_else(|| {
+                format!("Unknown difficulty {value:?}; expected easy, normal or hardcore")
+            })
     }
     pub fn path(root: &Path) -> PathBuf {
         root.parent().unwrap_or(root).join("settings/gameplay.json")
     }
     pub fn load(root: &Path) -> Result<Self, String> {
         match std::fs::read(Self::path(root)) {
-            Ok(bytes) => serde_json::from_slice::<Saved>(&bytes).map(|s| s.difficulty)
+            Ok(bytes) => serde_json::from_slice::<Saved>(&bytes)
+                .map(|s| s.difficulty)
                 .map_err(|e| format!("Invalid saved gameplay settings: {e}")),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(format!("Cannot read gameplay settings: {e}")),
@@ -37,12 +48,17 @@ impl Difficulty {
     pub fn save(self, root: &Path) -> Result<(), String> {
         let path = Self::path(root);
         std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-        std::fs::write(path, serde_json::to_vec_pretty(&Saved { difficulty: self }).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())
+        std::fs::write(
+            path,
+            serde_json::to_vec_pretty(&Saved { difficulty: self }).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())
     }
 }
 #[derive(Serialize, Deserialize)]
-struct Saved { difficulty: Difficulty }
+struct Saved {
+    difficulty: Difficulty,
+}
 
 #[cfg(test)]
 mod tests {
@@ -53,7 +69,10 @@ mod tests {
             assert_eq!(d as usize, index);
             assert_eq!(Difficulty::parse(d.label()).unwrap(), d);
             let bytes = serde_json::to_vec(&Saved { difficulty: d }).unwrap();
-            assert_eq!(serde_json::from_slice::<Saved>(&bytes).unwrap().difficulty, d);
+            assert_eq!(
+                serde_json::from_slice::<Saved>(&bytes).unwrap().difficulty,
+                d
+            );
         }
         assert!(Difficulty::parse("motorized").is_err());
         assert!(serde_json::from_str::<Saved>(r#"{"difficulty":"made-up"}"#).is_err());

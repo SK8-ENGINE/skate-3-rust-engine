@@ -52,10 +52,23 @@ impl ReckoningFrames {
     ///82D8D688. Cross products use the unnormalized intermediate axis;
     ///normalization has two refinements and no epsilon fallback in this leaf.
     pub fn calculate_transform(&mut self, up: [f32; 4], ground_normal: [f32; 4]) {
+        // `up` parallel to `heading` -- a vertical board, which University's
+        // walls produce readily -- collapses `right` and then `forward` to zero.
+        // `normalize` has no epsilon fallback in this leaf, and
+        // `inverse_length_squared(0, 2)` is NaN rather than infinity (the first
+        // Newton step computes `fma(-0, inf, 1)`). `heading` is *persistent*, so
+        // one degenerate frame poisons it for the rest of the session: that NaN
+        // reaches `animation_to_world`, then the deck's straighten/heading
+        // displacements, and lands as "Non-finite torque_acceleration before
+        // shared solve" on some later touchdown -- the crash the owner sees.
+        //
+        // Retaining the previous axis is the standard degenerate handling and is
+        // what the off-board frames already do (`surface_frame::math::normalize_or`).
+        // Every non-degenerate input keeps its exact former value.
         let right = cross(up, self.heading);
         let forward = cross(right, up);
-        self.heading = normalize(forward);
-        self.system[0] = normalize(right);
+        self.heading = normalize_or(forward, self.heading);
+        self.system[0] = normalize_or(right, self.system[0]);
         self.system[1] = up;
         self.system[2] = self.heading;
         self.unflipped = self.system;
@@ -64,9 +77,9 @@ impl ReckoningFrames {
 
         let ground_right = cross(ground_normal, self.heading);
         let ground_forward = cross(ground_right, ground_normal);
-        self.ground[0] = normalize(ground_right);
+        self.ground[0] = normalize_or(ground_right, self.ground[0]);
         self.ground[1] = ground_normal;
-        self.ground[2] = normalize(ground_forward);
+        self.ground[2] = normalize_or(ground_forward, self.ground[2]);
     }
 
     ///82D8D930. Signed angle is wrapped by fraction/floor, not scalar atan2.
@@ -134,6 +147,22 @@ fn normalize(value: [f32; 4]) -> [f32; 4] {
     let reciprocal = inverse_length_squared(dot3(value, value), 2);
     value.map(|v| v * reciprocal)
 }
+
+/// [`normalize`], but a degenerate vector keeps `fallback` instead of becoming
+/// NaN. The squared length is tested against zero *after* the f32 multiply, so
+/// this also catches a vector whose components are small enough that `dot3`
+/// underflows to exact zero while the vector itself is not zero.
+fn normalize_or(value: [f32; 4], fallback: [f32; 4]) -> [f32; 4] {
+    let squared = dot3(value, value);
+    if squared > 0.0 && squared.is_finite() {
+        let reciprocal = inverse_length_squared(squared, 2);
+        let scaled = value.map(|v| v * reciprocal);
+        if scaled.iter().all(|v| v.is_finite()) {
+            return scaled;
+        }
+    }
+    fallback
+}
 fn cross(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     [
         (-a[2]).mul_add(b[1], a[1] * b[2]),
@@ -192,5 +221,47 @@ mod tests {
         };
         state.calculate_tilt(false, &curve, &curve);
         assert_eq!(state.lateral_tilt, [0.3, 0., 0., 0.]);
+    }
+}
+
+#[cfg(test)]
+mod degenerate_tests {
+    use super::*;
+
+    /// A vertical board makes `up` parallel to `heading`, which collapses the
+    /// cross products to zero. `inverse_length_squared(0, 2)` is NaN, and
+    /// `heading` persists, so this used to poison the reckoning frame for the
+    /// rest of the session and surface later as a NaN deck torque on a landing.
+    #[test]
+    fn a_vertical_board_cannot_poison_the_persistent_heading() {
+        let mut frames = ReckoningFrames::new();
+        frames.heading = [0.0, 1.0, 0.0, 0.0];
+        let up = [0.0, 1.0, 0.0, 0.0];
+        let before = frames.heading;
+        frames.calculate_transform(up, [0.0, 1.0, 0.0, 0.0]);
+        assert!(
+            frames.heading.iter().all(|v| v.is_finite()),
+            "heading went non-finite: {:?}",
+            frames.heading
+        );
+        assert_eq!(
+            frames.heading, before,
+            "a degenerate frame should retain the last heading"
+        );
+        assert!(
+            frames.system.iter().flatten().all(|v| v.is_finite())
+                && frames.ground.iter().flatten().all(|v| v.is_finite()),
+            "a derived frame went non-finite"
+        );
+        // And the frame still works normally afterwards.
+        frames.calculate_transform([0.0, 1.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]);
+        assert!(frames.heading.iter().all(|v| v.is_finite()));
+    }
+
+    /// An ordinary frame must be bit-identical to the unguarded leaf.
+    #[test]
+    fn a_healthy_frame_is_unchanged_by_the_guard() {
+        let v = [0.3, 0.0, 0.9, 0.0];
+        assert_eq!(normalize_or(v, [9.0; 4]), normalize(v));
     }
 }

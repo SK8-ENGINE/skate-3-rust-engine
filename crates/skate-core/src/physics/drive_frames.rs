@@ -321,7 +321,9 @@ fn raw_frame(frame: RetailDriveFrame) -> RetailDriveFrameRaw {
     }
 }
 
-pub fn calculate_truck_transforms(inputs: RetailTruckTransformInputs) -> [RetailAffineTransform; 2] {
+pub fn calculate_truck_transforms(
+    inputs: RetailTruckTransformInputs,
+) -> [RetailAffineTransform; 2] {
     const DEGREES_TO_RADIANS: f32 = f32::from_bits(0x3C8E_FA35);
     const HALF: f32 = f32::from_bits(0x3F00_0000);
     const NEGATIVE_HALF_PI: f32 = f32::from_bits(0xBFC9_0FDB);

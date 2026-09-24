@@ -111,11 +111,11 @@ impl MotionCondition {
             .trim_matches(|c: char| c.is_whitespace() || c == '\0');
         Ok(Some(match name {
             "HasTweak" => Self::HasTweak(numeric()),
-            "CurrentGrabType" => Self::CurrentGrabType(
-                super::motion_stock_gameplay::GrabType::parse(
+            "CurrentGrabType" => {
+                Self::CurrentGrabType(super::motion_stock_gameplay::GrabType::parse(
                     a.text("grab").ok_or("CurrentGrabType requires grab")?,
-                )?,
-            ),
+                )?)
+            }
             "ManualOutTimerIsActive" => Self::ManualOutTimerIsActive,
             "HasGestureIntent" => Self::Gesture(crate::input::gesture_catalog::Group::parse(
                 a.text("group").unwrap_or(""),
@@ -181,7 +181,9 @@ impl MotionCondition {
             "OBTimeToLand" => Self::ObTimeToLand(numeric()),
             "OBTrajTime" => Self::ObTrajTime(numeric()),
             "LocoState" => Self::LocoState(super::motion_offboard_cadence::LocoState::parse(a)?),
-            "GroundSlopeType" => Self::GroundSlopeType(super::motion_ground_slope::GroundSlopeType::parse(a)?),
+            "GroundSlopeType" => {
+                Self::GroundSlopeType(super::motion_ground_slope::GroundSlopeType::parse(a)?)
+            }
             "IsBipedGroundThin" => Self::IsBipedGroundThin,
             "IsHoldingSkateboard" => Self::IsHoldingSkateboard,
             "IsStandingOnMovingObject" => Self::IsStandingOnMovingObject,
@@ -196,8 +198,9 @@ impl MotionCondition {
         use skate_core::animation::playback_parameters::ParameterInputs;
         Ok(match self {
             Self::Grind(condition) => condition.evaluate(
-                host.grind_conditions.as_ref()
-                    .ok_or("Grind condition requires completed physical output")?
+                host.grind_conditions
+                    .as_ref()
+                    .ok_or("Grind condition requires completed physical output")?,
             ),
             // 82BA7760/82BA7848 compares the authored type through
             // ISkaterAnim; SetGrabType Begin/End writes that same owner.
@@ -209,14 +212,16 @@ impl MotionCondition {
                 let y = host.animation.filtered_intent("TweakY");
                 (x.is_some() || y.is_some())
                     && (numeric.comparison == Comparison::None
-                        || numeric.matches((x.unwrap_or(0.0).powi(2)
-                            + y.unwrap_or(0.0).powi(2)).sqrt()))
+                        || numeric
+                            .matches((x.unwrap_or(0.0).powi(2) + y.unwrap_or(0.0).powi(2)).sqrt()))
             }
             // Native 82BA78B0: strictly positive retained manual-out timer.
             Self::ManualOutTimerIsActive => host.riding.manual_out_timer > 0.0,
             Self::ShouldLeaveSlide { right } => host.slide_latch.should_leave(*right),
             Self::Gesture(group) => group.has_intent(|name| host.action_controls.has(name)),
-            Self::DisableDismount(condition) => condition.evaluate(host.condition_inputs.push_brake.as_ref())?,
+            Self::DisableDismount(condition) => {
+                condition.evaluate(host.condition_inputs.push_brake.as_ref())?
+            }
             Self::Shared(condition) => condition
                 .evaluate(
                     &host.condition_inputs,
@@ -228,17 +233,22 @@ impl MotionCondition {
             Self::Gameplay(condition) => condition.evaluate(host)?,
             Self::Riding(condition) => condition.evaluate(host)?,
             Self::TimeToLand(n) => {
-                let p = host.gameplay_conditions.as_ref()
+                let p = host
+                    .gameplay_conditions
+                    .as_ref()
                     .ok_or("TimeToLand requires physical condition publication")?;
                 p.time_to_land_valid && n.matches(p.time_to_land)
             }
             Self::ObTimeToLand(n) => n.matches(
-                host.gameplay_conditions.as_ref()
+                host.gameplay_conditions
+                    .as_ref()
                     .ok_or("OBTimeToLand requires physical condition publication")?
                     .offboard_time_to_land,
             ),
             Self::ObTrajTime(n) => {
-                let p = host.gameplay_conditions.as_ref()
+                let p = host
+                    .gameplay_conditions
+                    .as_ref()
                     .ok_or("OBTrajTime requires physical condition publication")?;
                 p.offboard_trajectory_valid && n.matches(p.offboard_trajectory_time)
             }
@@ -254,12 +264,14 @@ impl MotionCondition {
             Self::IsBipedGroundThin => host
                 .biped_ground_thin
                 .ok_or("IsBipedGroundThin requires the native ground geometry publication")?,
-            Self::IsHoldingSkateboard => host.toggle_board_physical
-                .is_some_and(|p| p.holding_board),
-            Self::IsStandingOnMovingObject => host
-                .gameplay_conditions
-                .ok_or("IsStandingOnMovingObject requires the physical state publication")?
-                .moving_object,
+            Self::IsHoldingSkateboard => {
+                host.toggle_board_physical.is_some_and(|p| p.holding_board)
+            }
+            Self::IsStandingOnMovingObject => {
+                host.gameplay_conditions
+                    .ok_or("IsStandingOnMovingObject requires the physical state publication")?
+                    .moving_object
+            }
             Self::StockGameplay(condition) => condition.evaluate(host)?,
             Self::PushOff(condition) => condition.evaluate(),
             Self::Wipeout(condition) => condition.evaluate(host.wipeout_physical)?,

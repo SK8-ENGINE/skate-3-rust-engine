@@ -64,8 +64,10 @@ pub fn update(state: &mut BodyFlipState, settings: &BodyFlipSettings, input: &Bo
     }
     state.speed = speed;
     state.spin_transform = rotation(input.normal, input.spin_angle * spin_scale);
-    // Native zero-angle branch leaves the +1008 matrix untouched.
-    if state.angle != 0.0 {
+    // Native zero-angle branch leaves the +1008 matrix untouched. `!= 0.0` is also true for a
+    // NaN angle, and this matrix is *persistent*: committing one would poison every later frame's
+    // reckoning system, which is how a single degenerate tick became a landing crash.
+    if state.angle != 0.0 && state.angle.is_finite() {
         let flip = rotation(input.flip_axis, state.angle);
         let spin = state.spin_transform;
         for col in 0..4 {

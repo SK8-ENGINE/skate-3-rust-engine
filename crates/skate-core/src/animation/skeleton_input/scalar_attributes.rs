@@ -45,15 +45,29 @@ pub struct ScalarAttributeInputs {
 impl ScalarAttributeInputs {
     /// Represented ProcessedPhysIn fields written by Reset82BF9EF0.
     /// This is the reset stage, not an implicit reset in attribute dispatch.
-    pub fn reset(previous_flags2468:u32, previous_flags2488:u32) -> Self {
+    pub fn reset(previous_flags2468: u32, previous_flags2488: u32) -> Self {
         Self {
-            flags2468:(previous_flags2468&8)|0x2000,flags2472:0,flags2476:0,
-            flags2484:0,flags2488:previous_flags2488&0x1fffff,board_adjust:0,
-            balance:0.0,spin:0.0,body_spin:0.0,brake:0.0,turn:0.0,
-            turn_scale:1.0,magnitude_scale:1.0,animation_end_com:[0.0;4],
-            animation_translation:[0.0;4],animation_time:0.0,
-            animation_physics_blend_seconds:0.0,cadence_end_percent:-1.0,
-            raw_turn:0.0,hard_turn:0.0,slide:0.0,
+            flags2468: (previous_flags2468 & 8) | 0x2000,
+            flags2472: 0,
+            flags2476: 0,
+            flags2484: 0,
+            flags2488: previous_flags2488 & 0x1fffff,
+            board_adjust: 0,
+            balance: 0.0,
+            spin: 0.0,
+            body_spin: 0.0,
+            brake: 0.0,
+            turn: 0.0,
+            turn_scale: 1.0,
+            magnitude_scale: 1.0,
+            animation_end_com: [0.0; 4],
+            animation_translation: [0.0; 4],
+            animation_time: 0.0,
+            animation_physics_blend_seconds: 0.0,
+            cadence_end_percent: -1.0,
+            raw_turn: 0.0,
+            hard_turn: 0.0,
+            slide: 0.0,
         }
     }
 }

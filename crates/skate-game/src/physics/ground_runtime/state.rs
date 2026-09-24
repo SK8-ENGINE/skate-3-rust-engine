@@ -63,9 +63,12 @@ impl GroundState {
                 mode_speed_threshold_0: push("Hash_501D5581043D7D3C")?,
             },
             entry_settings: super::entry::EntrySettings::load(data)?,
-            auto_push_enabled: crate::difficulty::NATIVE_MODES.map(|mode|
-                data.boolean("physics_mode", mode, "AutoPushEnabled"))
-                .into_iter().collect::<Result<Vec<_>, _>>()?.try_into().unwrap(),
+            auto_push_enabled: crate::difficulty::NATIVE_MODES
+                .map(|mode| data.boolean("physics_mode", mode, "AutoPushEnabled"))
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?
+                .try_into()
+                .unwrap(),
             entered: false,
         })
     }

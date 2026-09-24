@@ -45,11 +45,7 @@ const TWO_PI: f32 = f32::from_bits(0x40c9_0fdb);
 // The native fsubs/fsel chooses the right operand for an unordered difference.
 // Keep this ordered comparison, including its signed-zero operand selection.
 fn greater_extent(left: f32, right: f32) -> f32 {
-    if left - right >= 0.0 {
-        left
-    } else {
-        right
-    }
+    if left - right >= 0.0 { left } else { right }
 }
 
 /// Complete shape dispatch in 82AE7228. Unsupported shapes return no result,

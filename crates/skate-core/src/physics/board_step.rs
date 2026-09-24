@@ -79,7 +79,10 @@ impl CollisionBody {
         } else if id < BODY_COUNT as u32 {
             Self::Board(BodyId::ORDER[id as usize])
         } else {
-            assert!(id >= ATTACHED_REACTION_BASE as u32, "board target has no collision volume");
+            assert!(
+                id >= ATTACHED_REACTION_BASE as u32,
+                "board target has no collision volume"
+            );
             Self::Attached(id as usize - ATTACHED_REACTION_BASE)
         }
     }
@@ -214,13 +217,28 @@ impl BoardStep {
             let deck = BodyId::Deck.index();
             self.diagnostic_snapshot = Some(format!(
                 "tick={} body={:?} hook={:?} reaction={:?} joints={:?} drives={:?}",
-                self.diagnostic_tick, bodies[deck], hook, self.reactions[deck],
-                constraints.joints.iter().enumerate()
+                self.diagnostic_tick,
+                bodies[deck],
+                hook,
+                self.reactions[deck],
+                constraints
+                    .joints
+                    .iter()
+                    .enumerate()
                     .filter(|(_, j)| j.reaction_a == deck || j.reaction_b == deck)
-                    .map(|(i, j)| (i, j.reaction_a, j.reaction_b, j.jacobian.words.map(f32::from_bits)))
+                    .map(|(i, j)| (
+                        i,
+                        j.reaction_a,
+                        j.reaction_b,
+                        j.jacobian.words.map(f32::from_bits)
+                    ))
                     .collect::<Vec<_>>(),
-                constraints.drives.iter().enumerate()
-                    .filter(|(_, d)| d.frame_a_body.reaction_index == deck || d.frame_b_body.reaction_index == deck)
+                constraints
+                    .drives
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, d)| d.frame_a_body.reaction_index == deck
+                        || d.frame_b_body.reaction_index == deck)
                     .collect::<Vec<_>>(),
             ));
         }

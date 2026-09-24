@@ -102,9 +102,12 @@ shared HUD extraction/setup owner: emit `hud.json` schema1 and its referenced
 RGBA files there. This task does not install another whole frontend pipeline.
 The launcher uses `.local/session-marker/assets.path`, or `SKATE3_ASSETS`.
 
-Audio integration emits `SessionMarkerAudio(u64)` with original GlobalFEPlaySound
+Audio integration emits `FrontEndSoundRequest(u64)` with the original GlobalFEPlaySound
 IDs: place `0D6C88A3B91C828F`, rejected place `66B3AFE3B602918C`, return
-`7F135F9FD28F7F21`. There is currently no audio consumer in this implementation.
+`7F135F9FD28F7F21`. The player-audio worker consumes them: each id resolves through the vault's
+`fe` class (`cellphone_place_marker` / `cellphone_marker_error` / `cellphone_goto_marker`) to a
+sample and gain, and plays out of `sk8_menu.bnk` on the Splice one-shot path
+(`player_audio/frontend.rs`).
 
 ## Verification and limits
 

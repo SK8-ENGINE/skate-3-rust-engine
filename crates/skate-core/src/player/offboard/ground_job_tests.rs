@@ -3,14 +3,21 @@ use crate::player::offboard::{contact_toolkit::IDENTITY, ground_query};
 
 fn input() -> Input {
     Input {
-        contact: ContactSnapshot { readiness: 30, prefix: ContactPrefix::reset() },
+        contact: ContactSnapshot {
+            readiness: 30,
+            prefix: ContactPrefix::reset(),
+        },
         frame: IDENTITY,
         previous_state: 500,
         third_line_position: None,
         frames_since_teleport: 20,
         processed_position: [2.; 4],
         processed_velocity: [60.; 4],
-        controls: GroundInputOutput { state_708: 0.7, state_712: -0.2, state_656: [1., 0., 2., 0.] },
+        controls: GroundInputOutput {
+            state_708: 0.7,
+            state_712: -0.2,
+            state_656: [1., 0., 2., 0.],
+        },
         collision_displacements: [[3.; 4], [4.; 4]],
         animation_motion: [5.; 4],
         animation_velocity: [6.; 4],
@@ -27,18 +34,27 @@ fn input() -> Input {
 fn run(contact: &mut ContactPrefix, timer: &mut f32, input: Input) -> Prepared {
     prepare(contact, timer, input, |i| {
         Ok::<_, ()>(ground_query::consume_geometry(i, None))
-    }).unwrap()
+    })
+    .unwrap()
 }
 
 #[test]
 fn ready_copies_whole_prefix_not_processed_flags_or_wheel_support() {
     let mut i = input();
     i.contact.prefix = ContactPrefix {
-        position: [1., 2., 3., 0.], normal: [0.6, 0.8, 0., 0.],
-        support_frame: [[7.; 4]; 4], target_position: [8.; 4], target_normal: [9.; 4],
-        edge_position: [10.; 4], edge_normal: [11.; 4], scalar_160: 12.,
-        kind_164: 13, distance_168: 14., distance_172: 15.,
-        flags_176: 0x31, support_180: 16,
+        position: [1., 2., 3., 0.],
+        normal: [0.6, 0.8, 0., 0.],
+        support_frame: [[7.; 4]; 4],
+        target_position: [8.; 4],
+        target_normal: [9.; 4],
+        edge_position: [10.; 4],
+        edge_normal: [11.; 4],
+        scalar_160: 12.,
+        kind_164: 13,
+        distance_168: 14.,
+        distance_172: 15.,
+        flags_176: 0x31,
+        support_180: 16,
     };
     let mut retained = ContactPrefix::reset();
     let mut timer = 0.;
@@ -67,9 +83,15 @@ fn unready_native_third_line_changes_only_three_fields_and_keeps_timer() {
     i.third_line_position = Some([0., -2., 0., 0.]);
     let mut timer = 0.;
     run(&mut retained, &mut timer, i);
-    assert_eq!(retained, ContactPrefix {
-        flags_176: 1, position: [0., -2., 0., 0.], normal: i.frame[1], ..old
-    });
+    assert_eq!(
+        retained,
+        ContactPrefix {
+            flags_176: 1,
+            position: [0., -2., 0., 0.],
+            normal: i.frame[1],
+            ..old
+        }
+    );
     assert_eq!(timer, STEP); //r27 remains1 on the unready branch.
 }
 
@@ -133,11 +155,18 @@ fn geometry_changes_job_normal_without_overwriting_retained_prefix() {
     let out = prepare(&mut retained, &mut 0., i, |input| {
         count += 1;
         assert_eq!(input.reach_364, 1.0e10);
-        Ok::<_, ()>(ground_query::consume_geometry(input, Some(ground_query::GroundGeometry {
-            frame: ground_query::Frame::IDENTITY,
-            kind: 2, flag26: true, flag27: false, flag28: false,
-        })))
-    }).unwrap();
+        Ok::<_, ()>(ground_query::consume_geometry(
+            input,
+            Some(ground_query::GroundGeometry {
+                frame: ground_query::Frame::IDENTITY,
+                kind: 2,
+                flag26: true,
+                flag27: false,
+                flag28: false,
+            }),
+        ))
+    })
+    .unwrap();
     assert_eq!(count, 1);
     assert_eq!(retained.normal, [0.6, 0.8, 0., 0.]);
     assert_eq!(out.job.contact_normal, [0., 1., 0., 0.]);
@@ -148,16 +177,24 @@ fn geometry_changes_job_normal_without_overwriting_retained_prefix() {
 
 #[test]
 fn geometry_failure_is_not_converted_to_a_ground_job() {
-    assert!(prepare(&mut ContactPrefix::reset(), &mut 0., input(), |_| {
-        Err::<GroundAdjustment, _>("real query failed")
-    }).is_err());
+    assert!(
+        prepare(&mut ContactPrefix::reset(), &mut 0., input(), |_| {
+            Err::<GroundAdjustment, _>("real query failed")
+        })
+        .is_err()
+    );
 }
 
 fn motion() -> super::super::controller::GroundResult {
     super::super::controller::GroundResult {
-        physical_frame: IDENTITY, animation_frame: IDENTITY, surface_frame: IDENTITY,
-        velocity: [0.; 4], position: [0.; 4], angular_velocity: 0.,
-        alternate: false, sliding: false,
+        physical_frame: IDENTITY,
+        animation_frame: IDENTITY,
+        surface_frame: IDENTITY,
+        velocity: [0.; 4],
+        position: [0.; 4],
+        angular_velocity: 0.,
+        alternate: false,
+        sliding: false,
     }
 }
 

@@ -8,8 +8,8 @@
 use super::{
     board::BodyId,
     drive_frames::{
-        default_truck_drive_frames, retail_quaternion_from_basis, AuthoredTransformInputs,
-        RetailDriveFrame, RetailDriveFrames,
+        AuthoredTransformInputs, RetailDriveFrame, RetailDriveFrames, default_truck_drive_frames,
+        retail_quaternion_from_basis,
     },
     rigid_body::RetailQuaternion,
 };

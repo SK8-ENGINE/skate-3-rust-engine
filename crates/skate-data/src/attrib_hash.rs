@@ -8,7 +8,9 @@ fn mix(mut a: u64, mut b: u64, mut c: u64) -> (u64, u64, u64) {
     (a, b, c)
 }
 pub fn hash(text: &str) -> u64 {
-    if text.is_empty() { return 0; }
+    if text.is_empty() {
+        return 0;
+    }
     let mut a = 0xabcdef0011223344u64;
     let mut b = a;
     let mut c = 0x9e3779b97f4a7c13u64;
@@ -17,20 +19,23 @@ pub fn hash(text: &str) -> u64 {
         let x = u64::from_le_bytes(chunk[..8].try_into().unwrap());
         let y = u64::from_le_bytes(chunk[8..16].try_into().unwrap());
         let z = u64::from_le_bytes(chunk[16..].try_into().unwrap());
-        (a,b,c) = mix(a.wrapping_add(x),b.wrapping_add(y),c.wrapping_add(z));
+        (a, b, c) = mix(a.wrapping_add(x), b.wrapping_add(y), c.wrapping_add(z));
     }
     c = c.wrapping_add(text.len() as u64);
     for (i, byte) in chunks.remainder().iter().enumerate() {
         match i {
-            0..=7 => a = a.wrapping_add(u64::from(*byte) << (i*8)),
-            8..=15 => b = b.wrapping_add(u64::from(*byte) << ((i-8)*8)),
-            _ => c = c.wrapping_add(u64::from(*byte) << ((i-15)*8)),
+            0..=7 => a = a.wrapping_add(u64::from(*byte) << (i * 8)),
+            8..=15 => b = b.wrapping_add(u64::from(*byte) << ((i - 8) * 8)),
+            _ => c = c.wrapping_add(u64::from(*byte) << ((i - 15) * 8)),
         }
     }
-    mix(a,b,c).2
+    mix(a, b, c).2
 }
 pub fn numeric_name(text: &str) -> String {
-    let key = text.strip_prefix("Hash_").or_else(|| text.strip_prefix("0x"))
-        .and_then(|hex| u64::from_str_radix(hex,16).ok()).unwrap_or_else(|| hash(text));
+    let key = text
+        .strip_prefix("Hash_")
+        .or_else(|| text.strip_prefix("0x"))
+        .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+        .unwrap_or_else(|| hash(text));
     format!("Hash_{key:016X}")
 }

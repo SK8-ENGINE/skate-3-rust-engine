@@ -24,7 +24,9 @@ pub struct State {
     was_enabled: bool,
 }
 impl State {
-    pub fn disable(&mut self) {self.was_enabled=false;}
+    pub fn disable(&mut self) {
+        self.was_enabled = false;
+    }
     pub fn update(
         &mut self,
         enabled: bool,

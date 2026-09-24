@@ -2,9 +2,10 @@
 //! Runtime offsets in camera kernels are relative to settings-object +16.
 use skate_core::{
     camera::{
-        AnchorTrackingSettings, AngleTrackingSettings, AvoidanceSettings, DistanceTrackingSettings,
-        DropSettings, FrameSettings, LookSettings, OrientationSettings, OrientationTrackerSettings,
-        RigPositioningSettings, RigSettings, ShakeSettings, ManagerSettings, CompassSettings,
+        AnchorTrackingSettings, AngleTrackingSettings, AvoidanceSettings, CompassSettings,
+        DistanceTrackingSettings, DropSettings, FrameSettings, LookSettings, ManagerSettings,
+        OrientationSettings, OrientationTrackerSettings, RigPositioningSettings, RigSettings,
+        ShakeSettings,
     },
     point_graph::PointGraph,
 };
@@ -22,8 +23,11 @@ pub(crate) struct RigSettingsSource {
 
 pub(crate) fn manager_settings(data: &Collections) -> Result<ManagerSettings, String> {
     Ok(ManagerSettings {
-        rig: RigSettingsSource::load(data)?.bind(), orientation: orientation_settings(data)?,
-        framing: frame_settings(data)?, drop: drop_settings(data)?, look: look_settings(data)?,
+        rig: RigSettingsSource::load(data)?.bind(),
+        orientation: orientation_settings(data)?,
+        framing: frame_settings(data)?,
+        drop: drop_settings(data)?,
+        look: look_settings(data)?,
         shake: shake_settings(data)?,
         steering_threshold: data.float("camera", "dynamics", "TurningCentredDeadzone")?,
     })
@@ -33,9 +37,12 @@ pub(crate) fn compass_settings(data: &Collections) -> Result<CompassSettings, St
     let f = |field| data.float("camera_compass", "default", field);
     Ok(CompassSettings {
         heading_response: data.float("camera", "dynamics", "HeadingChangeResponseSpeed")?,
-        time_before_lineup: f("TimeBeforeAutoLineup")?, lineup_speed: f("AutoLineupSpeed")?,
-        minimum_deadzone_speed: f("MinDeadzoneSpeed")?, maximum_deadzone_speed: f("MaxDeadzoneSpeed")?,
-        maximum_deadzone_size: f("MaxDeadzoneSize")?, deadzone_smoothing: f("DeadzoneSizeSmoothing")?,
+        time_before_lineup: f("TimeBeforeAutoLineup")?,
+        lineup_speed: f("AutoLineupSpeed")?,
+        minimum_deadzone_speed: f("MinDeadzoneSpeed")?,
+        maximum_deadzone_speed: f("MaxDeadzoneSpeed")?,
+        maximum_deadzone_size: f("MaxDeadzoneSize")?,
+        deadzone_smoothing: f("DeadzoneSizeSmoothing")?,
     })
 }
 
@@ -64,22 +71,32 @@ pub(crate) fn look_settings(data: &Collections) -> Result<LookSettings, String> 
     })
 }
 
-pub(crate) fn shake_settings(data:&Collections)->Result<ShakeSettings,String> {
-    let f=|field|data.float("camera_shake","default",field);
-    let matrix=|field|->Result<[[f32;4];4],String> {
-        let words=data.words::<16>("camera_shake","default",field)?;
-        Ok(core::array::from_fn(|row|core::array::from_fn(|i|f32::from_bits(words[row*4+i]))))
+pub(crate) fn shake_settings(data: &Collections) -> Result<ShakeSettings, String> {
+    let f = |field| data.float("camera_shake", "default", field);
+    let matrix = |field| -> Result<[[f32; 4]; 4], String> {
+        let words = data.words::<16>("camera_shake", "default", field)?;
+        Ok(core::array::from_fn(|row| {
+            core::array::from_fn(|i| f32::from_bits(words[row * 4 + i]))
+        }))
     };
     Ok(ShakeSettings {
-        amplitude_curve:matrix("AmplitudeCurve")?,frequency_curve:matrix("FrequencyCurve")?,
-        impulse_magnitude:f("OneShotMagnitude")?,impulse_minimum_velocity:f("OneShotMinVelocity")?,
-        impulse_maximum_velocity:f("OneShotMaxVelocity")?,impulse_frequency:f("OneShotFrequency")?,
-        impulse_decay:f("OneShotDecay")?,amplitude_minimum:f("AmplitudeMin")?,
-        amplitude_maximum:f("AmplitudeMax")?,amplitude_top_speed:f("AmplitudeTopSkaterSpeed")?,
-        frequency_minimum:f("FrequencyMin")?,frequency_maximum:f("FrequencyMax")?,
-        frequency_top_speed:f("FrequencyTopSkaterSpeed")?,data_frames_per_second:f("DataFPS")?,
-        translation_multiplier:f("TranslationMultiplier")?,rotation_multiplier:f("RotationMultiplier")?,
-        dutch_multiplier:f("DutchMultiplier")?,
+        amplitude_curve: matrix("AmplitudeCurve")?,
+        frequency_curve: matrix("FrequencyCurve")?,
+        impulse_magnitude: f("OneShotMagnitude")?,
+        impulse_minimum_velocity: f("OneShotMinVelocity")?,
+        impulse_maximum_velocity: f("OneShotMaxVelocity")?,
+        impulse_frequency: f("OneShotFrequency")?,
+        impulse_decay: f("OneShotDecay")?,
+        amplitude_minimum: f("AmplitudeMin")?,
+        amplitude_maximum: f("AmplitudeMax")?,
+        amplitude_top_speed: f("AmplitudeTopSkaterSpeed")?,
+        frequency_minimum: f("FrequencyMin")?,
+        frequency_maximum: f("FrequencyMax")?,
+        frequency_top_speed: f("FrequencyTopSkaterSpeed")?,
+        data_frames_per_second: f("DataFPS")?,
+        translation_multiplier: f("TranslationMultiplier")?,
+        rotation_multiplier: f("RotationMultiplier")?,
+        dutch_multiplier: f("DutchMultiplier")?,
     })
 }
 

@@ -32,7 +32,11 @@ impl Hand {
     fn from_name(name: &str) -> Self {
         // Factory compares against bs with strcmp82AE89B0. Every unequal
         // spelling selects index1; there is no validation or stance swap.
-        if name == "bs" { Self::Backside } else { Self::Frontside }
+        if name == "bs" {
+            Self::Backside
+        } else {
+            Self::Frontside
+        }
     }
 
     fn index(self) -> usize {

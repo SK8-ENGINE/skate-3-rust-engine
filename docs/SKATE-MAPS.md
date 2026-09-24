@@ -136,3 +136,60 @@ oversized counts, wrong byte order and unknown versions. Adapter tests check
 separate collision ownership, packed surfaces, flat seam handling and embedded
 lightmap decoding without creating a window. Gameplay and visual checks belong
 to the user.
+
+## Rebuilding a retail district from the owned disc (2026-09-24)
+
+`worldDIST_<district>.big` is an ordinary **EB v3** archive — the same container the audio archives
+use (`crates/skate-audio-formats/src/eb.rs`), so no external unpacker is needed. University holds
+647 members: 231 `cSim_*.xsf` (simulation/collision), 232 `cPres_*.xsf`, 172 `cTex_*.xsf` and the
+stream tables.
+
+Working sequence, all in-repo (UTT is vendored at `tools/vendor/utt`, which
+`prepare_university.py` wants as `--utt-root`):
+
+1. Extract the `.big` to `<stream-dir>/DIST_University/`.
+2. `prepare_university.py --stream-dir … --output … --utt-root tools/vendor/utt`
+   → 1,133,649 collision triangles, 4,201 grind rails, zero unmatched textures.
+3. `blender --background --python blender/import_university.py -- MANIFEST OUT.blend`
+   → 8,546 objects, 1,645,617 render triangles, 2,046 textures.
+4. `blender --background OUT.blend --python blender/prepare_university_owned.py -- OWNED.blend`
+   → groups, and the `OW_SPAWN` marker the exporter turns into the map's spawn.
+5. `SKATE_EXPORT_COMPAT14=1 blender --background OWNED.blend --python …/exporter.py -- OUT.skate --force`
+6. `embed_retail_collision_archive.py OUT.skate ARCHIVE.rwcmset maps/<District>.skate`
+
+**Collision only, without the visual half.** If all that is wanted is exact collision,
+`tools/build_university_collision_manifest.py` writes the `simulation_assets` records
+`build_retail_collision_archive.py` consumes, using only `skate3_streams.py` and
+`retail_collision_mesh.py`. That path needs no UTT, no Blender and no textures.
+
+### Three defects this hits
+
+**The exporter defaults to SKATE15; the runtime wants v14.** `exporter.py:38` picks the magic from
+`SKATE_EXPORT_COMPAT14`, and its own comment says "The Rust runtime requests the existing v14
+storage contract". Export without that variable and the collision embedder refuses the package
+("not a SKATE v12-v14"), which is the first sign the version is wrong.
+
+**Rail names do not match what the runtime validates.** `import_hawaiian_dream.py:395` names each
+curve `GRIND_{asset_id_without_0x}_{rail_index:04d}`, while
+`crates/skate-game/src/grind_world/provider.rs:110` requires
+`{asset_id}_{section_index}_{rail_index}` and otherwise refuses the map with "Stock rail
+provenance/name mismatch". `tools/rename_university_grinds.py` renames the curves in a prepared
+scene (4,201 renamed, 0 missing on University).
+
+**The rail list and its provenance are ordered differently — still open.** The runtime pairs them
+positionally (`records.iter().zip(&map.rails)`), but the exporter builds `map.rails` from
+`_objects_from_collections`, and Blender's `collection.all_objects` is **name-sorted**, while the
+`WMET` payload is `bpy.data.texts["SKATE3_RETAIL_MANIFEST"]` written out verbatim in the
+*extraction manifest's* order. On University those differ: manifest record 0 is
+`0xB43DB3E887200D32` while rails[0] is the `011DA…` rail, which sorts first. Every rail is then
+checked against another rail's provenance and the map is refused. Renaming the curves does not fix
+this; it predates the rename.
+
+Reordering the manifest inside Blender (`tools/align_university_grind_manifest.py`) is the obvious
+fix but is **not viable as written**: the manifest is 45 MB in a single-line text datablock, and
+`Text.as_string()` / `Text.write()` on that did not complete in 40 minutes. The practical fix is
+to reorder the `WMET` `grind_splines` array **inside the exported package**, to the package's own
+rail order — `export_skate2_skybox._find_extension_offset` already walks and reads every rail name,
+and `embed_retail_collision_archive.py` already shows how to rewrite an extension payload. Until
+that is done, a rebuilt district loads its visuals and collision but is refused at rail
+validation.

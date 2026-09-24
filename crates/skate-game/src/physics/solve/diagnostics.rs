@@ -3,11 +3,15 @@ use super::{GamePhysics, SkaterRuntime};
 use skate_core::physics::assembly::BodySnapshot;
 
 pub(super) fn snapshot(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<BodySnapshot> {
-    physics.board.bodies().iter()
+    physics
+        .board
+        .bodies()
+        .iter()
         .chain(std::iter::once(&physics.board.hook().body))
         .chain(skater.skeleton.bodies())
         .chain(skater.skeleton_drives.targets.bodies.iter())
-        .copied().collect()
+        .copied()
+        .collect()
 }
 
 pub(super) fn validate(bodies: &[BodySnapshot], stage: &str) -> Result<(), String> {
@@ -21,14 +25,24 @@ pub(super) fn validate(bodies: &[BodySnapshot], stage: &str) -> Result<(), Strin
             ("torque_acceleration", r.torque_acceleration),
         ] {
             if ![v.x, v.y, v.z].into_iter().all(f32::is_finite) {
-                return Err(format!("Non-finite {name} {stage}; reaction_body={index}; body={body:?}"));
+                return Err(format!(
+                    "Non-finite {name} {stage}; reaction_body={index}; body={body:?}"
+                ));
             }
         }
         let q = r.orientation;
         if ![q.x, q.y, q.z, q.w].into_iter().all(f32::is_finite)
             || !r.basis.columns.iter().flatten().all(|v| v.is_finite())
-            || !r.world_inverse_inertia.columns.iter().flatten().all(|v| v.is_finite()) {
-            return Err(format!("Non-finite orientation/inertia {stage}; reaction_body={index}; body={body:?}"));
+            || !r
+                .world_inverse_inertia
+                .columns
+                .iter()
+                .flatten()
+                .all(|v| v.is_finite())
+        {
+            return Err(format!(
+                "Non-finite orientation/inertia {stage}; reaction_body={index}; body={body:?}"
+            ));
         }
     }
     Ok(())

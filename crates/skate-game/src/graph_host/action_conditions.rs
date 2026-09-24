@@ -75,7 +75,9 @@ impl ActionCondition {
                 )
                 .ok_or("Condition is not a physical-only original leaf")?,
             //82BA56B8 uses specific MotionGraph virtual100=8258F8D8 bit27.
-            Self::DroppingIn => host.dropping_in.ok_or("IsDroppingIn requires completed grind output")?,
+            Self::DroppingIn => host
+                .dropping_in
+                .ok_or("IsDroppingIn requires completed grind output")?,
             Self::Tricking => host
                 .is_tricking
                 .ok_or("IsTricking requires actual MotionGraph flag27")?,
@@ -84,7 +86,9 @@ impl ActionCondition {
             Self::DisableDismount => super::motion_dismount::Condition
                 .evaluate(host.condition_inputs.push_brake.as_ref())?,
             Self::TimeToLand(numeric) => {
-                let p = host.gameplay_conditions.as_ref()
+                let p = host
+                    .gameplay_conditions
+                    .as_ref()
                     .ok_or("ActionGraph TimeToLand requires actual physical condition outputs")?;
                 p.time_to_land_valid && numeric.matches(p.time_to_land)
             }

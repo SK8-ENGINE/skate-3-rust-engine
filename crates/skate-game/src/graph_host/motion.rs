@@ -1,27 +1,31 @@
-#[path = "motion_toggle_execute.rs"]
-mod toggle_execution;
-#[path = "motion_fakie_hold.rs"]
-mod fakie_hold;
 #[path = "motion_air_execute.rs"]
 mod air_execution;
-#[path = "motion_execute.rs"]
-mod execution;
-#[path = "motion_execute_leaf.rs"]
-mod leaf_execution;
-#[path = "motion_score_execute.rs"]
-mod score_execution;
-#[path = "motion_filter_execute.rs"]
-mod filter_execution;
-#[path = "motion_sliding_execute.rs"]
-mod slide_execution;
-#[path = "motion_wipeout_execute.rs"]
-mod wipeout_execution;
 #[path = "motion_offboard/body_tweak.rs"]
 pub(crate) mod body_tweak;
+#[path = "motion_execute.rs"]
+mod execution;
+#[path = "motion_fakie_hold.rs"]
+mod fakie_hold;
+#[path = "motion_filter_execute.rs"]
+mod filter_execution;
+#[path = "motion_execute_leaf.rs"]
+mod leaf_execution;
 #[path = "motion_offboard/match_air_time.rs"]
 pub(crate) mod match_air_time;
+#[path = "motion_score_execute.rs"]
+mod score_execution;
+#[path = "motion_sliding_execute.rs"]
+mod slide_execution;
+#[path = "motion_toggle_execute.rs"]
+mod toggle_execution;
+#[path = "motion_wipeout_execute.rs"]
+mod wipeout_execution;
 // Persistent host called by the production stock MotionGraph controller.
 pub use super::motion_animation::MotionAnimation;
+use super::outputs::{
+    ActionControls, GraphCapabilityReport, GraphDiagnostics, GraphEffects, MotionGraphInput,
+    TurningOutput,
+};
 use super::{
     motion_nodes::{MotionFactory, MotionOperation},
     pushing::{PushContext, PushInstance},
@@ -45,7 +49,6 @@ use skate_core::{
 };
 use skate_data::collections::Collections;
 use std::collections::BTreeMap;
-use super::outputs::{ActionControls, GraphCapabilityReport, GraphDiagnostics, GraphEffects, MotionGraphInput, TurningOutput};
 
 #[derive(Clone, Copy, Debug)]
 pub struct MotionPhysical {
@@ -199,7 +202,9 @@ impl MotionHost {
         }
         for &operation in &graph.runtime.operations.hooks {
             if let Some(MotionOperation::Unsupported { kind, name }) = operations.get(operation) {
-                capabilities.unsupported_hooks.push(format!("{kind:?} `{name}`"));
+                capabilities
+                    .unsupported_hooks
+                    .push(format!("{kind:?} `{name}`"));
             }
         }
         // Preserve lazy diagnostics for optional unsupported graph branches.
@@ -319,8 +324,9 @@ impl ConditionHost for MotionHost {
     fn condition_activation(&mut self, condition: usize, frame: &Frame) -> u32 {
         // Gate only the authored automatic switch transitions. Other fakie
         // conditions (tricks, pushes, dismounts) still see the real stance.
-        if self.remap.conditions.get(condition).is_some_and(|&id|
-            fakie_hold::blocked(self.hold_fakie, &self.automatic_fakie_conditions, id)) {
+        if self.remap.conditions.get(condition).is_some_and(|&id| {
+            fakie_hold::blocked(self.hold_fakie, &self.automatic_fakie_conditions, id)
+        }) {
             return 0;
         }
         let result = self
@@ -372,7 +378,6 @@ impl Host for MotionHost {
             .cloned()
         {
             match operation {
-
                 super::motion_hooks::MotionHook::GrabSlide { right } => {
                     self.slide_latch.grab(right)
                 }

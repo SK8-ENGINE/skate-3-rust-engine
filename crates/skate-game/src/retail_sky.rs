@@ -32,7 +32,9 @@ impl Material for RetailSkyMaterial {
         false
     }
     fn vertex_shader() -> ShaderRef {
-        bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_sky.wgsl")).with_source("embedded").into()
+        bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_sky.wgsl"))
+            .with_source("embedded")
+            .into()
     }
     fn fragment_shader() -> ShaderRef {
         Self::vertex_shader()
@@ -125,9 +127,15 @@ fn load(root: &std::path::Path, name: &str) -> Result<(Sky, Vec<u8>, Option<Vec<
             return Err("Invalid authored sky environment".into());
         }
         if let Some(fog) = &env.fog_frame {
-            if !fog.ramp.iter().chain(fog.colour.iter()).all(|v| v.is_finite())
-                || fog.ramp[0] < 0. || fog.ramp[2] <= 0.
-                || !(-1. ..=0.).contains(&fog.colour[3]) {
+            if !fog
+                .ramp
+                .iter()
+                .chain(fog.colour.iter())
+                .all(|v| v.is_finite())
+                || fog.ramp[0] < 0.
+                || fog.ramp[2] <= 0.
+                || !(-1. ..=0.).contains(&fog.colour[3])
+            {
                 return Err("Invalid authored fog frame".into());
             }
         }

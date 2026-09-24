@@ -62,42 +62,42 @@ pub fn sqt_to_local(
 /// Per-bone numerical result828D3800. The game owns its vector allocations;
 /// cache-line padding and speculative DMA loads are not gameplay behavior.
 pub fn sqt_to_matrix(input: Sqt) -> NativeMatrix {
-        let [x, y, z, w] = input.rotation;
-        let [sx, sy, sz, _] = input.scale;
-        // Separate products and sums reflect the native VMX instruction order.
-        let xx = x * x;
-        let yy = y * y;
-        let zz = z * z;
-        let xy = x * y;
-        let wz = w * z;
-        let xz = x * z;
-        let wy = w * y;
-        let yz = y * z;
-        let wx = w * x;
+    let [x, y, z, w] = input.rotation;
+    let [sx, sy, sz, _] = input.scale;
+    // Separate products and sums reflect the native VMX instruction order.
+    let xx = x * x;
+    let yy = y * y;
+    let zz = z * z;
+    let xy = x * y;
+    let wz = w * z;
+    let xz = x * z;
+    let wy = w * y;
+    let yz = y * z;
+    let wx = w * x;
+    [
         [
-            [
-                (-(yy + zz)).mul_add(2.0, 1.0) * sx,
-                ((xy + wz) * 2.0) * sx,
-                ((xz - wy) * 2.0) * sx,
-                0.0,
-            ],
-            [
-                ((xy - wz) * 2.0) * sy,
-                (-(xx + zz)).mul_add(2.0, 1.0) * sy,
-                ((yz + wx) * 2.0) * sy,
-                0.0,
-            ],
-            [
-                ((xz + wy) * 2.0) * sz,
-                ((yz - wx) * 2.0) * sz,
-                (-(xx + yy)).mul_add(2.0, 1.0) * sz,
-                0.0,
-            ],
-            [
-                input.translation[0],
-                input.translation[1],
-                input.translation[2],
-                1.0,
-            ],
-        ]
+            (-(yy + zz)).mul_add(2.0, 1.0) * sx,
+            ((xy + wz) * 2.0) * sx,
+            ((xz - wy) * 2.0) * sx,
+            0.0,
+        ],
+        [
+            ((xy - wz) * 2.0) * sy,
+            (-(xx + zz)).mul_add(2.0, 1.0) * sy,
+            ((yz + wx) * 2.0) * sy,
+            0.0,
+        ],
+        [
+            ((xz + wy) * 2.0) * sz,
+            ((yz - wx) * 2.0) * sz,
+            (-(xx + yy)).mul_add(2.0, 1.0) * sz,
+            0.0,
+        ],
+        [
+            input.translation[0],
+            input.translation[1],
+            input.translation[2],
+            1.0,
+        ],
+    ]
 }

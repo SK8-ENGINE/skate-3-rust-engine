@@ -1,6 +1,9 @@
 use super::*;
 fn hit(primitive: usize) -> Option<TruckContact> {
-    Some(TruckContact { position: [0.; 4], primitive })
+    Some(TruckContact {
+        position: [0.; 4],
+        primitive,
+    })
 }
 #[test]
 fn fallback_keeps_native_contact_order_and_classifies_only_ordinary_deck() {

@@ -36,7 +36,9 @@ impl AnimationMetadata {
                     .push(read_clip(r, h, clip).map_err(|e| e.to_string())?),
                 RecordData::Pose(_) | RecordData::Hierarchy(_) | RecordData::PhysicsPose(_) => {}
                 RecordData::Opaque => match h.type_id {
-                    6 => file.blend_spaces.push(super::blend_space::read(r, h).map_err(|e| e.to_string())?),
+                    6 => file
+                        .blend_spaces
+                        .push(super::blend_space::read(r, h).map_err(|e| e.to_string())?),
                     7 => file
                         .phase_blends
                         .push(read_phase_blend(r, h).map_err(|e| e.to_string())?),

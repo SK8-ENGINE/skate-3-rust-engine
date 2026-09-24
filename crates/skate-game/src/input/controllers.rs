@@ -7,8 +7,8 @@ use skate_core::input::{
     gameplay_map::GameplayActions,
     history::{DEVICE_SLOTS, HistoryRecord, PadHistory},
     pad::Pad,
-    xbox,
     tick::TickInput,
+    xbox,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,18 +55,29 @@ impl ControllerInput {
     /// Original input.cfg: LB.held && DPadD.pressed / LB.held && DPadU.held.
     /// Use the same debounced native Pad publication as ordinary gameplay.
     pub(crate) fn session_marker_actions(&self) -> (bool, bool, bool) {
-        let Some(device) = self.status.iter().position(|s| *s == ControllerStatus::Ready) else {
+        let Some(device) = self
+            .status
+            .iter()
+            .position(|s| *s == ControllerStatus::Ready)
+        else {
             return (false, false, false);
         };
         let pad = &self.pads[device];
-        if pad.count() == 0 { return (false, false, false); }
+        if pad.count() == 0 {
+            return (false, false, false);
+        }
         let flags = |i: usize| pad.records().get(i).map_or(0, |r| r[1]);
         let modifier = flags(8) & 0xff00 != 0;
-        (modifier, modifier && flags(1) & 0xff00_0000 != 0,
-            modifier && flags(0) & 0xff00 != 0)
+        (
+            modifier,
+            modifier && flags(1) & 0xff00_0000 != 0,
+            modifier && flags(0) & 0xff00 != 0,
+        )
     }
     pub(crate) fn raw_input(&self) -> RawInput {
-        self.status.iter().position(|s| *s == ControllerStatus::Ready)
+        self.status
+            .iter()
+            .position(|s| *s == ControllerStatus::Ready)
             .map_or(RawInput::default(), |i| self.raw[i])
     }
 
@@ -77,7 +88,11 @@ impl ControllerInput {
         self.mapped_actions = [[0.0; 18]; DEVICE_SLOTS];
     }
     pub(crate) fn player_actions(&self) -> GameplayActions {
-        let device = self.status.iter().position(|status| *status == ControllerStatus::Ready).unwrap_or(0);
+        let device = self
+            .status
+            .iter()
+            .position(|status| *status == ControllerStatus::Ready)
+            .unwrap_or(0);
         GameplayActions::from_pad(&self.pads[device])
     }
 
@@ -90,11 +105,7 @@ impl ControllerInput {
         let actions = device
             .map(|device| GameplayActions::from_pad(&self.pads[device]))
             .unwrap_or_else(|| GameplayActions::from_values([0.0; 18]));
-        TickInput::new(
-            self.tick,
-            actions,
-            controller_available,
-        )
+        TickInput::new(self.tick, actions, controller_available)
     }
     /// TU3 8296D288/8296D0D0: write the inactive cache, publish one four-device
     /// batch. Even an unchanged platform packet is sampled; packet-number

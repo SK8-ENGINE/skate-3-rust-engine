@@ -31,7 +31,11 @@ impl StateRegistry {
                 PhysicalStateId::Sleeping
                     | PhysicalStateId::PhysicsGround
                     | PhysicalStateId::PhysicsAir
-                    | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                    | PhysicalStateId::PhysicsAirSecondary
+                    | PhysicalStateId::FootPlant
+                    | PhysicalStateId::Boneless
+                    | PhysicalStateId::HandPlant
+                    | PhysicalStateId::RevertGround
                     | PhysicalStateId::KnownAir
                     | PhysicalStateId::BipedAir
                     | PhysicalStateId::BipedGround
@@ -72,8 +76,12 @@ impl StateRegistry {
                 | (
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
-                        | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
-                    | PhysicalStateId::KnownAir
+                        | PhysicalStateId::PhysicsAirSecondary
+                        | PhysicalStateId::FootPlant
+                        | PhysicalStateId::Boneless
+                        | PhysicalStateId::HandPlant
+                        | PhysicalStateId::RevertGround
+                        | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
                         | PhysicalStateId::BipedGround
                         | PhysicalStateId::OffBoardPushing
@@ -84,8 +92,12 @@ impl StateRegistry {
                         | PhysicalStateId::LandingOnDeck,
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
-                        | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
-                    | PhysicalStateId::KnownAir
+                        | PhysicalStateId::PhysicsAirSecondary
+                        | PhysicalStateId::FootPlant
+                        | PhysicalStateId::Boneless
+                        | PhysicalStateId::HandPlant
+                        | PhysicalStateId::RevertGround
+                        | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
                         | PhysicalStateId::BipedGround
                         | PhysicalStateId::OffBoardPushing
@@ -116,5 +128,28 @@ mod tests {
         );
         assert!(!registry.can_transition(PhysicalStateId::Sleeping, PhysicalStateId::PhysicsAir));
         assert!(registry.capability(PhysicalStateId::BipedAir).supported);
+    }
+
+    /// The states whose native adapters are still missing, and what each one costs.
+    ///
+    /// This list is deliberately exhaustive rather than a `!supported` filter: an unported
+    /// state is only discovered when the selector asks for it mid-play, and `transition::set`
+    /// turns that into a fatal error. Pinning the set here makes adding or removing one a
+    /// reviewed edit instead of a crash somebody hits in a playtest.
+    ///
+    /// * `Skitching` (104) -- holding onto a vehicle.
+    /// * `FollowPath` (105) -- scripted/living-world movement.
+    #[test]
+    fn the_unported_states_are_exactly_the_documented_two() {
+        let registry = StateRegistry::new();
+        let unported: Vec<PhysicalStateId> = PhysicalStateId::ALL
+            .into_iter()
+            .filter(|id| !registry.capability(*id).supported)
+            .collect();
+        assert_eq!(
+            unported,
+            vec![PhysicalStateId::Skitching, PhysicalStateId::FollowPath],
+            "unported state set changed; update this list and docs/engine-defects.md"
+        );
     }
 }

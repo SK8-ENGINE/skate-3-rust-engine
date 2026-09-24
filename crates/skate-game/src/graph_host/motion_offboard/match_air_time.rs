@@ -21,8 +21,13 @@ impl State {
         self.translation = translation;
     }
 
-    pub fn update(&mut self, animation: &mut MotionAnimation,
-        remaining: f32, duration: f32, translation: [f32; 4]) {
+    pub fn update(
+        &mut self,
+        animation: &mut MotionAnimation,
+        remaining: f32,
+        duration: f32,
+        translation: [f32; 4],
+    ) {
         if let Some(fraction) = self.seek_fraction(remaining, duration) {
             animation.synchronize_air_time(fraction);
         }
@@ -37,7 +42,10 @@ impl State {
         ] {
             //82BBA2C0..378: r6=0, r7=-1 for each v80 SetAttribute.
             animation.set_attribute(SettableAttribute {
-                name: encode(name.as_bytes()), value, normalized: false, sequence_id: -1,
+                name: encode(name.as_bytes()),
+                value,
+                normalized: false,
+                sequence_id: -1,
             });
         }
         self.first_update = false;
@@ -45,7 +53,9 @@ impl State {
 
     fn seek_fraction(&self, remaining: f32, duration: f32) -> Option<f32> {
         //82BBA16C skips the first update;184 is ble (unordered falls through).
-        if self.first_update || duration <= 0.0 { return None; }
+        if self.first_update || duration <= 0.0 {
+            return None;
+        }
         let progress = 1.0 - remaining / duration;
         let lower = if -progress >= 0.0 { 0.0 } else { progress };
         Some(if 1.0 - lower >= 0.0 { lower } else { 1.0 })
@@ -61,12 +71,18 @@ fn bounded_translation(vector: [f32; 4]) -> [f32; 4] {
         let correction = (-squared).mul_add(inverse * inverse, 1.0);
         inverse = (inverse * 0.5).mul_add(correction, inverse);
     }
-    let length = if squared == 0.0 { 0.0 } else { squared * inverse };
+    let length = if squared == 0.0 {
+        0.0
+    } else {
+        squared * inverse
+    };
     if length > 0.01 {
         let bounded = if length - 2.0 >= 0.0 { 2.0 } else { length };
         //82BBA2A0 scales all four lanes. Published scalar parameters are XYZ.
         vector.map(|v| v * (bounded / length))
-    } else { vector }
+    } else {
+        vector
+    }
 }
 
 #[cfg(test)]

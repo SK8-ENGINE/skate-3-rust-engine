@@ -25,6 +25,21 @@ fn face(x: f32, tag: u32, fatness: f32) -> WorldTriangle {
     )
     .unwrap()
 }
+fn face_at(x: f32, y: f32, tag: u32, fatness: f32) -> WorldTriangle {
+    WorldTriangle::from_vertices(
+        [
+            Vector3::new(x - 2., y, -2.),
+            Vector3::new(x - 2., y, 2.),
+            Vector3::new(x + 2., y, -2.),
+        ],
+        material(),
+        tag,
+        0xe0,
+        [1.; 3],
+        fatness,
+    )
+    .unwrap()
+}
 fn annotated(triangles: Vec<WorldTriangle>) -> BoardWorld {
     let meshes = triangles
         .iter()
@@ -159,7 +174,25 @@ fn thin_endpoint_and_barycentric_tolerances_survive_broadphase() {
 
 #[test]
 fn predictive_contacts_and_retention_match_full_scan_for_every_primitive() {
-    let mut triangles = tiled();
+    // The distant tiles are staggered in Y on purpose. `tiled()` puts all 1024
+    // faces in the plane y=0, and the recovered candidate producer82ACEA30
+    // offers only the triangle's own face normal for point/segment/triangle
+    // volumes, so a coplanar tile 10km away still projects to a near-zero
+    // separation and survives82ACE968's `separation > fat + limit` gate. That
+    // is native behaviour: the native narrow phase is only ever reached through
+    // the broadphase, which rejects laterally. Feeding it an unculled full scan
+    // therefore measures the narrow phase outside its contract, not the
+    // hierarchy. Separating the tiles along the one axis the SAT does test
+    // makes the linear scan a valid oracle for the accelerated traversal.
+    let mut triangles: Vec<_> = tiled()
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let x = t.triangle.vertices[0].x + 2.;
+            let y = if x == 0. { 0. } else { 5. + i as f32 };
+            face_at(x, y, t.tag, 0.)
+        })
+        .collect();
     triangles.insert(0, face(0., 9000, 0.02));
     triangles.insert(0, face(0., 9001, 0.02));
     let mut linear = BoardWorld::new(triangles.clone());
@@ -229,9 +262,10 @@ fn predictive_contacts_and_retention_match_full_scan_for_every_primitive() {
                     };
                     let expected = snapshot(linear.query_primitives(&volumes, query, retention));
                     observed |= !expected.is_empty();
+                    let actual = snapshot(world.query_primitives(&volumes, query, retention));
                     assert_eq!(
-                        snapshot(world.query_primitives(&volumes, query, retention)),
-                        expected
+                        actual, expected,
+                        "vel={velocity} pad={padding} max={maximum} cap={capacity} defer={deferred_reduction}"
                     );
                     assert_eq!(world.dropped_contacts(), linear.dropped_contacts());
                 }

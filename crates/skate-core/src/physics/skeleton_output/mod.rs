@@ -1,8 +1,8 @@
 //! Original TU3 physical pose worker82DB95E8, submitted by82DB6698.
 //! Updates the existing animation buffers after the physical solve.
 pub mod board;
-pub mod wobble;
 pub mod correction;
+pub mod wobble;
 
 use super::skeleton_animation_record::{AnimationPartTransform as Transform, compose_affine};
 use crate::animation::foot_ik::{drive::Geometry, transforms::inverse_rigid};

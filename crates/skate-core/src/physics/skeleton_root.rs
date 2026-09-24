@@ -2,7 +2,7 @@
 //! retained animation-to-board/world frames. Full Reckoning is an input owner.
 use super::{
     board_ground::angle_between,
-    board_motion_output::inverse_length_squared,
+    board_motion_output::{inverse_length_squared, normalize_row_or},
     native_arithmetic::dot3,
     skeleton_animation_record::{AnimationPartTransform, IDENTITY, compose_affine},
 };
@@ -123,8 +123,7 @@ pub(crate) fn orthonormalize(source: AnimationPartTransform) -> AnimationPartTra
                 *value -= result[prior][lane] * projection;
             }
         }
-        let reciprocal = inverse_length_squared(dot3(vector, vector), 2);
-        result[axis] = vector.map(|v| v * reciprocal);
+        result[axis] = normalize_row_or(vector, IDENTITY[axis]);
     }
     result
 }

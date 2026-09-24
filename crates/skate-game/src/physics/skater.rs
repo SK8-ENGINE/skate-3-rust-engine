@@ -113,7 +113,10 @@ impl SkaterRuntime {
     }
 
     pub(crate) fn load_for_world(
-        asset_root: &Path, graphs: &StockGraphs, physics: &GamePhysics, mode: &str,
+        asset_root: &Path,
+        graphs: &StockGraphs,
+        physics: &GamePhysics,
+        mode: &str,
         source: Option<std::sync::Arc<crate::skater_animation::AnimationSource>>,
     ) -> Result<Self, String> {
         let data = Collections::load(asset_root)?;
@@ -224,7 +227,10 @@ impl SkaterRuntime {
         Ok(Self {
             respawn,
             scoring: crate::scoring_runtime::Runtime::load(&data)?,
-            climbing: super::climbing::Runtime::load(asset_root, &animation.evaluator.frames.bone_names)?,
+            climbing: super::climbing::Runtime::load(
+                asset_root,
+                &animation.evaluator.frames.bone_names,
+            )?,
             render_pose: initial_hierarchy,
             pose_generation: 0,
             centre_of_mass_filter: Default::default(),
@@ -247,7 +253,9 @@ impl SkaterRuntime {
             landing_on_deck: super::landing_on_deck::Runtime::load(&data)?,
             landing_deck: super::offboard::landing_deck::Owner::load(&data)?,
             ground_animation: Default::default(),
-            ground_animation_settings: super::ground_animation::GroundAnimationSettings::load(&data)?,
+            ground_animation_settings: super::ground_animation::GroundAnimationSettings::load(
+                &data,
+            )?,
             revert_state: super::revert_state::RevertState::load(&data)?,
             slide_state: super::slide_state::SlideState::load(&data)?,
             trajectory,

@@ -159,8 +159,18 @@ impl RidingOutputs {
         let deck = board.part_transforms()[BodyId::Deck.index()];
         // Ordinary ground riding follows the physical deck (82D4E250).
         self.update_ground_reckoning_with_heading(
-            board, pose, processed_flags_2468, animation_balance, coffin, processed,
-            [deck.basis.columns[2][0], deck.basis.columns[2][1], deck.basis.columns[2][2], 0.0],
+            board,
+            pose,
+            processed_flags_2468,
+            animation_balance,
+            coffin,
+            processed,
+            [
+                deck.basis.columns[2][0],
+                deck.basis.columns[2][1],
+                deck.basis.columns[2][2],
+                0.0,
+            ],
         );
     }
 

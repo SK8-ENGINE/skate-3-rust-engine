@@ -21,6 +21,12 @@ pub(super) fn prepare(
     if [p.scalar_96, p.scalar_100, p.scalar_104]
         .iter()
         .any(|x| !x.is_finite())
+        // Only x/y/z are checked. These are guest `vector4`s whose fourth lane is a homogeneous
+        // slot nothing downstream reads: the board pose can carry a NaN there through
+        // `orthonormalize` (which rewrites rows 0..2 and leaves row 3's w alone) and on through
+        // the COM lift's four-lane FMA into the extra part errors. Treating that lane as fatal
+        // aborted a launch whose position and velocity were entirely finite — observed as
+        // `position_32: [227.85, 75.24, -612.02, NaN]` with every meaningful component good.
         || [
             p.velocity_0,
             p.secondary_velocity_16,
@@ -31,7 +37,7 @@ pub(super) fn prepare(
             gravity,
         ]
         .into_iter()
-        .flatten()
+        .flat_map(|v| [v[0], v[1], v[2]])
         .any(|x| !x.is_finite())
     {
         return Err("Nonfinite BipedAir launch packet");

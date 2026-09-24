@@ -1,5 +1,5 @@
 //! Complete Air checks82D90358 including bad landing82D90D08.
-use super::{common, Frame, Mode, Requests, Settings};
+use super::{Frame, Mode, Requests, Settings, common};
 use crate::physics::native_arithmetic::dot3;
 ///82D8FEE8, shared off-board air collision check; no on-board cooldown/landing tests.
 pub fn check_collision(state: &mut Requests, s: &Settings, mode: &Mode, f: &Frame) {

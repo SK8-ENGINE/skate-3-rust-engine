@@ -22,7 +22,7 @@ pub(super) fn spawn(area: &mut ChildSpawnerCommands, id: &str) {
     .with_children(|track| {
         track.spawn((
             Thumb(id.into()),
-                bevy::ui::FocusPolicy::Pass,
+            bevy::ui::FocusPolicy::Pass,
             Node {
                 position_type: PositionType::Absolute,
                 left: px(2.),

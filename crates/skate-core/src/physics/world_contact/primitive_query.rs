@@ -163,7 +163,12 @@ fn contact_points(
     })
 }
 
-pub(super) fn maximum(gp: &[u32; 48], kind: PrimitiveKind, mode: u32, direction: [u32; 4]) -> MaximumFeature {
+pub(super) fn maximum(
+    gp: &[u32; 48],
+    kind: PrimitiveKind,
+    mode: u32,
+    direction: [u32; 4],
+) -> MaximumFeature {
     let mut feature = [0; 144];
     match kind {
         PrimitiveKind::Sphere => {

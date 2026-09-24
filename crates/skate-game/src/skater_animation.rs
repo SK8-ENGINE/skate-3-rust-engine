@@ -42,7 +42,10 @@ impl AnimationSource {
         let banks = skate_data::animation_banks::AnimationBanks::load(root)?;
         let mut evaluator = PoseEvaluator::from_banks(&banks)?;
         evaluator.load_authored_clips(root)?;
-        Ok(Arc::new(Self { banks, evaluator: Arc::new(evaluator) }))
+        Ok(Arc::new(Self {
+            banks,
+            evaluator: Arc::new(evaluator),
+        }))
     }
 }
 
@@ -80,13 +83,20 @@ impl SkaterAnimation {
     ///82592B68: physical leading foot, including the fakie inversion.
     pub fn checkpoint_stance(&self) -> u32 {
         let p = &self.state.publication;
-        u32::from(((p.natural_stance == 0 && p.relative_stance == 0)
-            || (p.natural_stance == 1 && p.relative_stance == 1)) ^ self.state.fakie())
+        u32::from(
+            ((p.natural_stance == 0 && p.relative_stance == 0)
+                || (p.natural_stance == 1 && p.relative_stance == 1))
+                ^ self.state.fakie(),
+        )
     }
     ///82592C08/82B97350: save15200; ResetToGivenStance consumes it later.
     pub fn request_checkpoint_stance(&mut self, foot: u32) {
         let natural = self.state.publication.natural_stance;
-        self.motion.animation.requested_stance = u32::from(if foot == 0 { natural != 1 } else { natural == 1 });
+        self.motion.animation.requested_stance = u32::from(if foot == 0 {
+            natural != 1
+        } else {
+            natural == 1
+        });
     }
     /// Manual markers use the same native leading-foot query as bail checkpoints.
     pub fn foot_forward(&self) -> bool {
@@ -95,7 +105,6 @@ impl SkaterAnimation {
     /// Queue the native stance request; the teleport graph applies it after reset.
     pub fn restore_foot_forward(&mut self, forward: bool) {
         self.request_checkpoint_stance(u32::from(forward));
-
     }
     /// Native Initialize82B97E38 selects both orientation/mirror bits for
     /// regular stance. A profile edit changes the natural basis while retaining
@@ -106,7 +115,12 @@ impl SkaterAnimation {
             self.state.flags ^= 0xC000_0000;
         }
         // GetCACSettings82590D20..D84: 0=null,1=Loose,2=Gonzo,3=Aggressive.
-        let name: &[u8] = match style { 1 => b"Loose", 2 => b"Gonzo", 3 => b"Aggressive", _ => b"" };
+        let name: &[u8] = match style {
+            1 => b"Loose",
+            2 => b"Gonzo",
+            3 => b"Aggressive",
+            _ => b"",
+        };
         self.motion.playback_context.pro_skater = encode(name);
     }
     pub fn stance(&self) -> (bool, bool) {
@@ -133,7 +147,10 @@ impl SkaterAnimation {
     }
 
     pub fn from_source(
-        data: &Collections, graphs: &StockGraphs, pro_skater: &[u8], source: Arc<AnimationSource>,
+        data: &Collections,
+        graphs: &StockGraphs,
+        pro_skater: &[u8],
+        source: Arc<AnimationSource>,
     ) -> Result<Self, String> {
         let evaluator = source.evaluator.clone();
         let state = state::AnimationState::new(true);

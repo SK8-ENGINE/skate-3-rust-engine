@@ -1,9 +1,12 @@
 //! Native foot placement82D773F8/82D77558/82D77AE8. The persistent storage is
 //! shared with the original state56 manager; all contacts come from Processed.
-use super::{Frame, Vector as V, math::{dot, length, limit_angle, madd, scale, sub}};
+use super::{
+    Frame, Vector as V,
+    math::{dot, length, limit_angle, madd, scale, sub},
+};
+use crate::physics::skeleton_animation_record::transform_point;
 use crate::player::offboard::board_possession::manager::State;
 use crate::player::wipeout_state::math::{normalize_or as unit, reciprocal};
-use crate::physics::skeleton_animation_record::transform_point;
 pub struct Line {
     pub position: V,
     pub normal: V,
@@ -169,7 +172,10 @@ fn clamp_normal(mut normal: V) -> V {
     normal[1] = 0.;
     //82D78260 does NOT safe-normalize this flattened normal.
     //Verified image822F8BD8 =3E428F5F; retain the unguarded reciprocal.
-    normal = scale(normal, reciprocal(length(normal)) * f32::from_bits(0x3e428f5f).sqrt());
+    normal = scale(
+        normal,
+        reciprocal(length(normal)) * f32::from_bits(0x3e428f5f).sqrt(),
+    );
     normal[1] = 0.9;
     normal
 }

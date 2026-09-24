@@ -1,7 +1,7 @@
 //! Render-only snapshots of completed fixed ticks. Camera, root and skin use
 //! the same interval; interpolated values never feed back into simulation.
-use bevy::prelude::*;
 use crate::{app::SimulationSet, camera::CameraRuntime, physics::SkaterRuntime};
+use bevy::prelude::*;
 use skate_core::camera::CameraFrame;
 
 pub(crate) struct PresentationPlugin;
@@ -27,8 +27,11 @@ pub(crate) struct Presentation {
     period: std::time::Duration,
 }
 impl Presentation {
-    pub fn view<'a>(&'a self, replay: &'a crate::replay::Replay, alpha: f32)
-        -> Option<(&'a Snapshot, &'a Snapshot, f32)> {
+    pub fn view<'a>(
+        &'a self,
+        replay: &'a crate::replay::Replay,
+        alpha: f32,
+    ) -> Option<(&'a Snapshot, &'a Snapshot, f32)> {
         if replay.active {
             replay.sample()
         } else {
@@ -40,16 +43,29 @@ impl Presentation {
     }
 }
 
-fn capture(skater: Res<SkaterRuntime>, camera: Res<CameraRuntime>,
-    time: Res<Time<Fixed>>, mut history: ResMut<Presentation>,
-    mut replay: ResMut<crate::replay::Replay>) {
-    if skater.pose_generation == history.generation { return; }
-    let Some(frame) = camera.frame else { return; };
+fn capture(
+    skater: Res<SkaterRuntime>,
+    camera: Res<CameraRuntime>,
+    time: Res<Time<Fixed>>,
+    mut history: ResMut<Presentation>,
+    mut replay: ResMut<crate::replay::Replay>,
+) {
+    if skater.pose_generation == history.generation {
+        return;
+    }
+    let Some(frame) = camera.frame else {
+        return;
+    };
     let next = Snapshot {
         root: Transform::from_matrix(crate::animation::native_matrix(
-            skater.animated_skeleton.roots.animation_to_world)),
-        bones: skater.render_pose.iter().copied()
-            .map(crate::animation::native_matrix).collect(),
+            skater.animated_skeleton.roots.animation_to_world,
+        )),
+        bones: skater
+            .render_pose
+            .iter()
+            .copied()
+            .map(crate::animation::native_matrix)
+            .collect(),
         camera: camera_transform(frame),
         fov: frame.field_of_view_degrees.to_radians(),
     };

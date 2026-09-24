@@ -19,7 +19,11 @@ impl PhysicalStateCalls for Calls {
                     PhysicalStateId::Sleeping
                         | PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
-                        | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                        | PhysicalStateId::PhysicsAirSecondary
+                        | PhysicalStateId::FootPlant
+                        | PhysicalStateId::Boneless
+                        | PhysicalStateId::HandPlant
+                        | PhysicalStateId::RevertGround
                         | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
                         | PhysicalStateId::BipedGround
@@ -40,7 +44,11 @@ impl PhysicalStateCalls for Calls {
                     call.state.state,
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
-                        | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                        | PhysicalStateId::PhysicsAirSecondary
+                        | PhysicalStateId::FootPlant
+                        | PhysicalStateId::Boneless
+                        | PhysicalStateId::HandPlant
+                        | PhysicalStateId::RevertGround
                         | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
                         | PhysicalStateId::BipedGround
@@ -156,12 +164,14 @@ pub(super) fn set(
         PhysicalStateId::RevertGround => {
             // Native Exit is empty; this is diagnostic-only host reporting.
             info!(tick = physics.ticks, requested = ?requested, "REVERT_EXIT");
-        },
+        }
         PhysicalStateId::HandPlant => skater.handplant.reset(),
         PhysicalStateId::FootPlant => skater.footplant.reset(), //Exit82D4C5A8
-        PhysicalStateId::Boneless => {}, //empty82D4C9B4
+        PhysicalStateId::Boneless => {}                         //empty82D4C9B4
         PhysicalStateId::PhysicsGround => super::super::ground_exit::exit(physics, skater),
-        PhysicalStateId::PhysicsAir => super::super::air_phase::exit(skater),
+        PhysicalStateId::PhysicsAir | PhysicalStateId::PhysicsAirSecondary => {
+            super::super::air_phase::exit(skater)
+        }
         PhysicalStateId::KnownAir => {
             super::super::known_air::exit(physics, skater, requested as u32)?
         }
@@ -184,7 +194,32 @@ pub(super) fn set(
         PhysicalStateId::FootPlant => super::super::footplant::ground::enter(physics, skater),
         PhysicalStateId::Boneless => super::super::boneless::enter(physics, skater),
         PhysicalStateId::PhysicsGround => super::super::ground_phase::enter(physics, skater),
-        PhysicalStateId::PhysicsAir => super::super::air_phase::enter(physics, skater),
+        // PhysicsAirSecondary 202 runs the recovered PhysicsAir200 lifecycle.
+        //
+        // INFERRED, not recovered: no vtable or method address for the object at
+        // PhysicalPlayer offset 1716 appears anywhere in this port, because the S2 debug
+        // build that named the rest has no counterpart for it -- 202 is an S3 addition, like
+        // the sixth (darkslide) grind family grind_chromosome.rs records. Five checks support
+        // sharing 200's lifecycle rather than inventing one:
+        //
+        // 1. Owner offsets are adjacent, 1712 and 1716 (state.rs native_owner_offset), which
+        //    is how a second instance of one class appears, not a different class.
+        // 2. air_phase::enter already branches on previous_physics_category_2516 == 400, the
+        //    grind family, so entry to air out of a grind is an already-recovered path.
+        // 3. Both 200 and GroundAnimation103 enter through enable_angular_only, so this
+        //    lifecycle does not fight the FORCE_ANIM_SKATEBOARD the authored DarkSlideTrick
+        //    state sets -- the crash that motivated this recorded force_mode=2, that mode.
+        // 4. selector/mod.rs treats 202 as transient: it leaves for 200 the moment
+        //    flags_2484 bit 20 clears, and for WipeoutGround on a wipeout. Same family.
+        // 5. 202 is only ever entered while the board is animation-driven, so the solver
+        //    difference between the two objects, if any, has nothing to act on.
+        //
+        // What would disprove it: 202's native Update or Fill writing different PhysOut
+        // fields than 200's. That shows up as wrong air metrics or scoring on darkslide
+        // exits, never as a crash. See docs/engine-defects.md #10.
+        PhysicalStateId::PhysicsAir | PhysicalStateId::PhysicsAirSecondary => {
+            super::super::air_phase::enter(physics, skater)
+        }
         PhysicalStateId::KnownAir => super::super::known_air::enter(physics, skater),
         PhysicalStateId::BipedAir => super::super::biped_air::enter(physics, skater),
         PhysicalStateId::BipedGround => super::super::biped_ground::enter(physics, skater),

@@ -1,7 +1,7 @@
 //! Complete Skeleton::UpdateSkateboardOffsetTransform82BDD630 and
 //! SkeletonIK::AddOffsetTransform82BF1C68. Counters are animation updates.
 use super::{
-    board_motion_output::inverse_length_squared,
+    board_motion_output::normalize_row_or,
     native_arithmetic::dot3,
     skeleton_animation_record::{AnimationPartTransform, IDENTITY, compose_affine},
 };
@@ -77,8 +77,7 @@ impl SkateboardOffset {
                             *value -= self.transform[prior][lane] * projection;
                         }
                     }
-                    let reciprocal = inverse_length_squared(dot3(vector, vector), 2);
-                    self.transform[axis] = vector.map(|v| v * reciprocal);
+                    self.transform[axis] = normalize_row_or(vector, IDENTITY[axis]);
                 }
                 self.orientation_frames -= 1.0;
             }

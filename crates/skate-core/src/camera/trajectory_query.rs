@@ -29,8 +29,7 @@ impl TrajectoryQuery {
             start_step = self.step_size(self.start_error * self.radius);
             end_step = self.step_size(self.end_error * self.radius);
         }
-        let minimum_square =
-            ((self.start_error * self.radius) * self.start_error) * self.radius;
+        let minimum_square = ((self.start_error * self.radius) * self.start_error) * self.radius;
         let mut time = 0.0;
         let mut start = self.evaluate(time);
         let mut end = self.evaluate(time + start_step);
@@ -72,8 +71,7 @@ impl TrajectoryQuery {
         let square = refined_reciprocal(self.gravity[1]) * (-8.0 * error_radius);
         let mut inverse = crate::physics::reciprocal_sqrt::estimate(square);
         for _ in 0..2 {
-            inverse = (inverse * 0.5)
-                .mul_add((-square).mul_add(inverse * inverse, 1.0), inverse);
+            inverse = (inverse * 0.5).mul_add((-square).mul_add(inverse * inverse, 1.0), inverse);
         }
         if square == 0.0 { 0.0 } else { square * inverse }
     }
@@ -83,9 +81,13 @@ impl TrajectoryQuery {
         const EPSILON: f32 = f32::from_bits(0x38d1_b717);
         if EPSILON >= (refined_reciprocal(2.0) * self.gravity[1]).abs() {
             let distance = length(core::array::from_fn(|i| position[i] - self.position[i]));
-            if !(distance.abs() > EPSILON) { return 0.0; }
+            if !(distance.abs() > EPSILON) {
+                return 0.0;
+            }
             let speed = length(self.velocity);
-            if !(speed.abs() > EPSILON) { return 0.0; }
+            if !(speed.abs() > EPSILON) {
+                return 0.0;
+            }
             // Preserve8276C794/7B4, including its frame factor. This branch
             // does not use the segment's fractional intersection parameter.
             return (refined_reciprocal(speed) * distance) * FRAME;

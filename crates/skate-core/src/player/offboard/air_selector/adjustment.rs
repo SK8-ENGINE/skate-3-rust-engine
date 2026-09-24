@@ -6,7 +6,8 @@ impl Selector {
         self.correction_8304 = scale(
             //82D6DF40 is one vmaddfp after the separate forward multiply.
             madd(
-                axes[1], animation[1] - radius,
+                axes[1],
+                animation[1] - radius,
                 self.sampling.adjustment_8336,
             ),
             -1.,

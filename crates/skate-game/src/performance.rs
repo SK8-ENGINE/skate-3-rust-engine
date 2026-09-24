@@ -8,7 +8,9 @@ use std::{path::PathBuf, time::Instant};
 static EPOCH: OnceLock<Instant> = OnceLock::new();
 static SLOW_SECTIONS: Mutex<Vec<(&'static str, f64, f64)>> = Mutex::new(Vec::new());
 fn timestamp(now: Instant) -> f64 {
-    EPOCH.get().map_or(0., |epoch| now.duration_since(*epoch).as_secs_f64() * 1000.)
+    EPOCH
+        .get()
+        .map_or(0., |epoch| now.duration_since(*epoch).as_secs_f64() * 1000.)
 }
 
 static SECTIONS: Mutex<BTreeMap<&'static str, (f64, u64)>> = Mutex::new(BTreeMap::new());
@@ -33,7 +35,9 @@ impl Drop for Scope {
             let elapsed = start.elapsed().as_secs_f64() * 1000.;
             if elapsed >= 2. {
                 let mut slow = SLOW_SECTIONS.lock().unwrap();
-                if slow.len() < 256 { slow.push((self.name, timestamp(start), elapsed)); }
+                if slow.len() < 256 {
+                    slow.push((self.name, timestamp(start), elapsed));
+                }
             }
             let mut sections = SECTIONS.lock().unwrap();
             let entry = sections.entry(self.name).or_default();
@@ -271,7 +275,10 @@ fn render_queue_done(mut p: ResMut<RenderPerformance>) {
 fn render_prepared(mut p: ResMut<RenderPerformance>) {
     p.prepared = Instant::now();
 }
-fn render_finish(mut p: ResMut<RenderPerformance>, pipelines: Res<bevy::render::render_resource::PipelineCache>) {
+fn render_finish(
+    mut p: ResMut<RenderPerformance>,
+    pipelines: Res<bevy::render::render_resource::PipelineCache>,
+) {
     let now = Instant::now();
     if now
         .duration_since(*p.start.get_or_insert(now))

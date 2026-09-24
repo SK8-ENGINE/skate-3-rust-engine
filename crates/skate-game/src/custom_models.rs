@@ -32,7 +32,11 @@ pub(crate) struct Entry {
 }
 impl Entry {
     fn asset_path(&self, file: &str) -> String {
-        let prefix = if self.asset_prefix.is_empty() { "characters://" } else { &self.asset_prefix };
+        let prefix = if self.asset_prefix.is_empty() {
+            "characters://"
+        } else {
+            &self.asset_prefix
+        };
         format!("{prefix}entries/{}/{file}", self.id)
     }
 }
@@ -102,12 +106,25 @@ pub(crate) struct CustomModels {
 }
 impl CustomModels {
     pub(crate) fn online_selection(&self) -> Option<(Option<String>, PathBuf)> {
-        let e = self.entries.iter().find(|e| Some(&e.id)==self.active.as_ref())?;
-        let directory = if e.asset_prefix.is_empty() { &self.directory } else { &self.native_directory };
-        Some((e.native.as_ref().map(|n|n.key.clone()),directory.join("entries").join(&e.id).join("character.glb")))
+        let e = self
+            .entries
+            .iter()
+            .find(|e| Some(&e.id) == self.active.as_ref())?;
+        let directory = if e.asset_prefix.is_empty() {
+            &self.directory
+        } else {
+            &self.native_directory
+        };
+        Some((
+            e.native.as_ref().map(|n| n.key.clone()),
+            directory.join("entries").join(&e.id).join("character.glb"),
+        ))
     }
     pub(crate) fn online_native_path(&self, key: &str) -> Option<String> {
-        self.entries.iter().find(|e|e.native.as_ref().is_some_and(|n|n.key==key)).map(|e|e.asset_path("character.glb"))
+        self.entries
+            .iter()
+            .find(|e| e.native.as_ref().is_some_and(|n| n.key == key))
+            .map(|e| e.asset_path("character.glb"))
     }
     pub(crate) fn native_style(&self) -> Option<&'static str> {
         self.active
@@ -144,7 +161,10 @@ pub(crate) fn library_path() -> PathBuf {
 }
 pub(crate) fn register_source(app: &mut App) {
     let cache = crate::multiplayer::appearance::cache_directory().to_owned();
-    app.register_asset_source("online-characters", AssetSourceBuilder::new(move || Box::new(FileAssetReader::new(cache.clone()))));
+    app.register_asset_source(
+        "online-characters",
+        AssetSourceBuilder::new(move || Box::new(FileAssetReader::new(cache.clone()))),
+    );
     let directory = library_path();
     app.register_asset_source(
         "characters",
@@ -199,7 +219,10 @@ fn discover(directory: &Path) -> Vec<Entry> {
 }
 fn discover_all(directory: &Path, native_directory: &Path, native_prefix: &str) -> Vec<Entry> {
     let mut entries = discover(directory);
-    for mut native in discover(native_directory).into_iter().filter(|e| e.native.is_some()) {
+    for mut native in discover(native_directory)
+        .into_iter()
+        .filter(|e| e.native.is_some())
+    {
         entries.retain(|entry| entry.id != native.id);
         native.asset_prefix = native_prefix.to_owned();
         entries.push(native);
@@ -226,8 +249,16 @@ impl Plugin for CustomModelsPlugin {
     fn build(&self, app: &mut App) {
         let directory = library_path();
         let assets = &app.world().resource::<crate::config::Config>().asset_root;
-        let native_directory = crate::customiser_parts::asset_directory(assets).join("native-roster");
-        let native_prefix = format!("{}/", native_directory.strip_prefix(assets).unwrap().to_string_lossy().replace('\\', "/"));
+        let native_directory =
+            crate::customiser_parts::asset_directory(assets).join("native-roster");
+        let native_prefix = format!(
+            "{}/",
+            native_directory
+                .strip_prefix(assets)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        );
         let entries = discover_all(&directory, &native_directory, &native_prefix);
         let saved = std::fs::read(directory.join("selection.json"))
             .ok()
@@ -398,7 +429,10 @@ fn start_import(directory: &Path, reference: &Path) -> Result<Import, String> {
     let result = jobs.join(format!("{}-{nonce}.json", std::process::id()));
     let mut command = Command::new(&executable);
     // Preserve optional calibration from earlier local Custom Models builds.
-    let profile = executable.parent().unwrap().join("custom-models/calibration.json");
+    let profile = executable
+        .parent()
+        .unwrap()
+        .join("custom-models/calibration.json");
     command.arg("--character-import");
     if profile.is_file() {
         command.arg("--profile").arg(profile);
@@ -447,7 +481,11 @@ fn poll_import(mut state: ResMut<CustomModels>) {
         .ok()
         .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
     let _ = std::fs::remove_file(&job.result);
-    state.entries = discover_all(&state.directory, &state.native_directory, &state.native_prefix);
+    state.entries = discover_all(
+        &state.directory,
+        &state.native_directory,
+        &state.native_prefix,
+    );
     state.status = match reply.as_ref().and_then(|r| r["status"].as_str()) {
         Some("cancelled") => "Import cancelled. Your character is unchanged.".into(),
         Some("ready") => {
@@ -480,7 +518,9 @@ fn restore_stock(
     scenes: &mut Query<(Entity, &ChildOf, &mut Visibility), With<SceneRoot>>,
 ) {
     for (e, visibility) in state.stock_visibility.drain(..) {
-        if let Ok((_, _, mut v)) = scenes.get_mut(e) { *v = visibility; }
+        if let Ok((_, _, mut v)) = scenes.get_mut(e) {
+            *v = visibility;
+        }
     }
     state.active = None;
     parts.applied = serde_json::Value::Null;
@@ -525,7 +565,12 @@ fn publish(
                 if state.active.as_ref() != Some(&id)
                     && state.entries.iter().any(|e| e.id == id) =>
             {
-                let path = state.entries.iter().find(|e| e.id == id).unwrap().asset_path("character.glb");
+                let path = state
+                    .entries
+                    .iter()
+                    .find(|e| e.id == id)
+                    .unwrap()
+                    .asset_path("character.glb");
                 let asset = server.load(path.clone());
                 let root = commands
                     .spawn((
@@ -536,8 +581,15 @@ fn publish(
                     ))
                     .id();
                 commands.entity(player).add_child(root);
-                if let Some(native) = state.entries.iter().find(|e| e.id == id).and_then(|e| e.native.as_ref()) {
-                    commands.entity(root).insert(NativeModelRoot(native.key.clone()));
+                if let Some(native) = state
+                    .entries
+                    .iter()
+                    .find(|e| e.id == id)
+                    .and_then(|e| e.native.as_ref())
+                {
+                    commands
+                        .entity(root)
+                        .insert(NativeModelRoot(native.key.clone()));
                 }
                 state.pending = Some(Pending {
                     id,
@@ -601,8 +653,15 @@ fn publish(
                 *visibility = Visibility::Inherited;
             }
             // Seed the new rig before publishing visibility, even when paused.
-            let pose:Vec<_>=skater.render_pose.iter().copied().map(crate::animation::native_matrix).collect();
-            for (joint,transform) in bindings.pose_transforms(&pose) {commands.entity(joint).insert(transform);}
+            let pose: Vec<_> = skater
+                .render_pose
+                .iter()
+                .copied()
+                .map(crate::animation::native_matrix)
+                .collect();
+            for (joint, transform) in bindings.pose_transforms(&pose) {
+                commands.entity(joint).insert(transform);
+            }
             *animation = bindings;
             state.active = Some(pending.id.clone());
             state.status = match save_selection(&state.directory, Some(pending.id)) {
@@ -709,13 +768,17 @@ mod tests {
     use super::*;
     #[test]
     fn customiser_fresh_roster_combines_with_personal_imports_without_duplicates() {
-        let root = std::env::temp_dir().join(format!("skate-roster-sources-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("skate-roster-sources-{}", std::process::id()));
         let personal = root.join("personal");
         let native = root.join("native");
         let pro_id = "a".repeat(64);
         let import_id = "b".repeat(64);
-        for (library, id, name, pro) in [(&personal, &pro_id, "Legacy pro", true),
-            (&personal, &import_id, "My import", false), (&native, &pro_id, "Current pro", true)] {
+        for (library, id, name, pro) in [
+            (&personal, &pro_id, "Legacy pro", true),
+            (&personal, &import_id, "My import", false),
+            (&native, &pro_id, "Current pro", true),
+        ] {
             let entry = library.join("entries").join(id);
             std::fs::create_dir_all(&entry).unwrap();
             std::fs::write(entry.join("manifest.json"), serde_json::to_vec(&serde_json::json!({
@@ -728,9 +791,15 @@ mod tests {
         assert_eq!(entries.len(), 2);
         let pro = entries.iter().find(|e| e.id == pro_id).unwrap();
         assert_eq!(pro.name, "Current pro");
-        assert_eq!(pro.asset_path("character.glb"), format!("private/roster/entries/{pro_id}/character.glb"));
+        assert_eq!(
+            pro.asset_path("character.glb"),
+            format!("private/roster/entries/{pro_id}/character.glb")
+        );
         let imported = entries.iter().find(|e| e.id == import_id).unwrap();
-        assert_eq!(imported.asset_path("preview.png"), format!("characters://entries/{import_id}/preview.png"));
+        assert_eq!(
+            imported.asset_path("preview.png"),
+            format!("characters://entries/{import_id}/preview.png")
+        );
         assert_eq!(discover(&personal).len(), 2); // No legacy entry was removed.
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -739,15 +808,30 @@ mod tests {
         use bevy::ecs::system::SystemState;
         let mut world = World::new();
         let player = world.spawn_empty().id();
-        let scene = world.spawn((SceneRoot(default()), Visibility::Hidden, ChildOf(player))).id();
-        let mut state = CustomModels { active: Some("native".into()), stock_visibility: vec![(scene, Visibility::Inherited)], ..default() };
+        let scene = world
+            .spawn((SceneRoot(default()), Visibility::Hidden, ChildOf(player)))
+            .id();
+        let mut state = CustomModels {
+            active: Some("native".into()),
+            stock_visibility: vec![(scene, Visibility::Inherited)],
+            ..default()
+        };
         let mut parts = crate::customiser_parts::Parts::default();
         parts.applied = serde_json::json!({"selections":{"body":"previous"}});
         let mut animation = crate::animation::AnimationStatus::default();
         animation.ready = true;
-        let mut queries: SystemState<Query<(Entity, &ChildOf, &mut Visibility), With<SceneRoot>>> = SystemState::new(&mut world);
-        restore_stock(&mut state, &mut parts, &mut animation, &mut queries.get_mut(&mut world));
-        assert_eq!(*world.get::<Visibility>(scene).unwrap(), Visibility::Inherited);
+        let mut queries: SystemState<Query<(Entity, &ChildOf, &mut Visibility), With<SceneRoot>>> =
+            SystemState::new(&mut world);
+        restore_stock(
+            &mut state,
+            &mut parts,
+            &mut animation,
+            &mut queries.get_mut(&mut world),
+        );
+        assert_eq!(
+            *world.get::<Visibility>(scene).unwrap(),
+            Visibility::Inherited
+        );
         assert!(state.active.is_none() && state.stock_visibility.is_empty());
         assert!(parts.applied.is_null());
         assert!(!animation.ready);

@@ -2,11 +2,11 @@
 //! Query results are retained separately from pending query ownership.
 use skate_core::air::trajectory::{QueryResult, Trajectory};
 use skate_data::collections::Collections;
+pub(super) mod ground;
 pub(super) mod math;
 mod pose;
 mod settings;
 mod update;
-pub(super) mod ground;
 use settings::Settings;
 pub(crate) use update::FootplantFrame;
 pub(crate) type V = [f32; 4];
@@ -37,12 +37,12 @@ pub(crate) struct Footplant {
     pub(super) selected_record: V, //272
     pub(super) leg_direction: V,   //336
     pub(super) vectors_352_368: [V; 2],
-    pub(super) curve: [V; 4], //448/464/480/496
-    pub(super) physical_com: V,     //384
-    pub(super) animation_com: V,    //400
-    pub(super) launch_direction: V, //416
-    pub(super) locked_target: V,    //432
-    pub(super) request: Trajectory, //528..591
+    pub(super) curve: [V; 4],                    //448/464/480/496
+    pub(super) physical_com: V,                  //384
+    pub(super) animation_com: V,                 //400
+    pub(super) launch_direction: V,              //416
+    pub(super) locked_target: V,                 //432
+    pub(super) request: Trajectory,              //528..591
     pub(super) completed_trajectory: Trajectory, //query144, retained with result
 }
 impl Footplant {
@@ -87,7 +87,12 @@ impl Footplant {
                 acceleration: [0.0; 4],
                 duration: -1.0,
             },
-            completed_trajectory: Trajectory { position: [0.0;4], velocity: [0.0;4], acceleration: [0.0;4], duration: -1.0 },
+            completed_trajectory: Trajectory {
+                position: [0.0; 4],
+                velocity: [0.0; 4],
+                acceleration: [0.0; 4],
+                duration: -1.0,
+            },
         };
         state.reset();
         Ok(state)

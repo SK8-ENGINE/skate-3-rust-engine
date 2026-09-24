@@ -1,6 +1,28 @@
 //! TU3 EScorableID enum metadata, table820862A8 (332 x24 bytes).
 //! Numeric class/type relationships and native identifier spellings only.
 //! Points, localization, timers and UI assets are loaded from owned data.
+
+/// A scorable's class and score type as the fixed table holds them.
+///
+/// EndAirTrick82DA6260 indexes table820862A8 by bare id (`rlwinm r11,r4,1,0,30` /
+/// `addi r11,r10,25256` / `lwzx`) and never consults authored data, so a collector can
+/// credit a scorable the vault has no record for. The metric scorables are exactly
+/// that case: 129..=133 (`air_horizontal_distance`, `air_height_to_peak`,
+/// `air_total_height_gain`, `air_player_spin`, `air_player_flip`), 237 (`air_metric`)
+/// and 253 (`generic_metric`) carry no `Hash_6918469984A8C596` record in the owner's
+/// vault, because their reward is a curve value rather than authored points.
+/// Resolving them through [`crate::scoring::catalog`] instead of the authored table is
+/// what keeps 82DA8550's landing credit from being dropped.
+pub fn metadata(id: usize) -> Option<super::Scorable> {
+    IDENTIFIERS
+        .get(id)
+        .map(|&(_, class, score_type)| super::Scorable {
+            id,
+            class,
+            score_type,
+        })
+}
+
 pub const IDENTIFIERS: [(&str, u32, usize); 332] = [
     ("fspowerslide", 0, 9),                  // 0
     ("bspowerslide", 0, 9),                  // 1
@@ -335,3 +357,35 @@ pub const IDENTIFIERS: [(&str, u32, usize); 332] = [
     ("darkslideout_fsright", 3, 2),          // 330
     ("lateflip_darkcatch", 3, 2),            // 331
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The five air metrics, the gap/context total and the off-board total are credited
+    /// by bare id at 82DA8550 and 82DAB6A8. None of them has an authored record, so a
+    /// lookup that requires one drops every one of their rewards -- which is precisely
+    /// what made air scores a fraction of retail's. They must resolve here.
+    #[test]
+    fn the_metric_scorables_resolve_without_an_authored_record() {
+        for (id, name) in [
+            (129, "air_horizontal_distance"),
+            (130, "air_height_to_peak"),
+            (131, "air_total_height_gain"),
+            (132, "air_player_spin"),
+            (133, "air_player_flip"),
+            (237, "air_metric"),
+            (253, "generic_metric"),
+        ] {
+            let metric = metadata(id).unwrap_or_else(|| panic!("{name} ({id}) has no metadata"));
+            assert_eq!(IDENTIFIERS[id].0, name, "catalog order moved under {id}");
+            // Class 5 keeps them out of the repetition penalty and out of the flip
+            // bucket, and score type 0 keeps them out of the sequence histories.
+            assert_eq!(metric.class, 5, "{name}");
+            assert_eq!(metric.score_type, 0, "{name}");
+            assert!(metric.valid(), "{name}");
+            assert!(!metric.repetition_applies(), "{name}");
+        }
+        assert_eq!(metadata(IDENTIFIERS.len()), None);
+    }
+}

@@ -17,7 +17,9 @@ mod shader_tests;
 // Use the same path derivation as embedded_asset!: alternate binary targets
 // have a different crate namespace even though they share these source files.
 fn retail_shader(path: &str) -> ShaderRef {
-    AssetPath::from(embedded_path!(path)).with_source("embedded").into()
+    AssetPath::from(embedded_path!(path))
+        .with_source("embedded")
+        .into()
 }
 impl Plugin for RetailRenderPlugin {
     fn build(&self, app: &mut App) {
@@ -28,7 +30,9 @@ impl Plugin for RetailRenderPlugin {
         }
         app.add_plugins(crate::retail_character::CharacterLightingPlugin);
         if std::env::var_os("SKATE_DEBUG_FOLIAGE").is_some_and(|v| v == "1") {
-            eprintln!("SKATE_FOLIAGE_DEBUG: solid cyan tree-wall cards, magenta other foliage; alpha rejection disabled for foliage only");
+            eprintln!(
+                "SKATE_FOLIAGE_DEBUG: solid cyan tree-wall cards, magenta other foliage; alpha rejection disabled for foliage only"
+            );
         }
         embedded_asset!(app, "retail_world.wgsl");
         bevy::shader::load_shader_library!(app, "retail_material_bindings.wgsl");
@@ -55,7 +59,9 @@ fn compare_weathering(
     mut materials: ResMut<Assets<RetailWorldMaterial>>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
 ) {
-    if !keys.just_pressed(KeyCode::F8) { return; }
+    if !keys.just_pressed(KeyCode::F8) {
+        return;
+    }
     *mode = (*mode + 1) % 4;
     let label = match *mode {
         1 => "Repeating grime OFF; decals ON",
@@ -65,7 +71,9 @@ fn compare_weathering(
     };
     for (_, material) in materials.iter_mut() {
         let family = material.params.mode.x as u32;
-        if !(1..=8).contains(&family) { continue; }
+        if !(1..=8).contains(&family) {
+            continue;
+        }
         let flags = material.params.mode.y as u32;
         material.params.mode.y = ((flags & !768) | (*mode << 8)) as f32;
     }
@@ -90,15 +98,22 @@ impl RetailScene {
     /// can retain native provenance/sky/collision without material definitions.
     pub(crate) fn for_map(map: &skate_data::skate_map::SkateMap) -> bool {
         map.materials.iter().any(|m| m.retail_definition.is_some())
-            || map.extensions.iter().any(|e| matches!(&e.tag, b"WMET" | b"RWCM" | b"SKYB"))
-            || map.geometry.collision.iter().any(|c| c.native_edges.is_some())
+            || map
+                .extensions
+                .iter()
+                .any(|e| matches!(&e.tag, b"WMET" | b"RWCM" | b"SKYB"))
+            || map
+                .geometry
+                .collision
+                .iter()
+                .any(|c| c.native_edges.is_some())
             || map.rails.iter().any(|r| r.native.is_some())
     }
 }
 
 #[path = "retail_sky.rs"]
 mod sky;
-pub(crate) use sky::{spawn_sky, RetailSkyMaterial};
+pub(crate) use sky::{RetailSkyMaterial, spawn_sky};
 
 #[path = "retail_backdrop.rs"]
 mod backdrop;
@@ -163,7 +178,9 @@ pub(crate) struct RetailWorldMaterial {
     pub two_sided: bool,
 }
 impl From<&RetailWorldMaterial> for WorldParams {
-    fn from(material: &RetailWorldMaterial) -> Self { material.params.clone() }
+    fn from(material: &RetailWorldMaterial) -> Self {
+        material.params.clone()
+    }
 }
 /// Identity of the actual GPU inputs, independent of unused source metadata.
 #[derive(PartialEq, Eq, Hash)]
@@ -184,14 +201,36 @@ impl RetailWorldMaterial {
         };
         let p = &self.params;
         Some(WorldMaterialKey {
-            params: [p.mode, p.foliage_debug, p.surface, p.family, p.fog_ramp,
-                p.fog_color, p.shadow_color, p.sun_direction, p.decal,
-                p.water[0], p.water[1], p.water[2], p.water[3]]
-                .map(|v| v.to_array().map(f32::to_bits)),
-            images: [&self.diffuse, &self.lightmap, &self.normal, &self.detail,
-                &self.macro_map, &self.decal, &self.specular, &self.environment]
-                .map(|h| h.as_ref().map(Handle::id)),
-            shadow: self.shadow_state.id(), alpha, two_sided: self.two_sided,
+            params: [
+                p.mode,
+                p.foliage_debug,
+                p.surface,
+                p.family,
+                p.fog_ramp,
+                p.fog_color,
+                p.shadow_color,
+                p.sun_direction,
+                p.decal,
+                p.water[0],
+                p.water[1],
+                p.water[2],
+                p.water[3],
+            ]
+            .map(|v| v.to_array().map(f32::to_bits)),
+            images: [
+                &self.diffuse,
+                &self.lightmap,
+                &self.normal,
+                &self.detail,
+                &self.macro_map,
+                &self.decal,
+                &self.specular,
+                &self.environment,
+            ]
+            .map(|h| h.as_ref().map(Handle::id)),
+            shadow: self.shadow_state.id(),
+            alpha,
+            two_sided: self.two_sided,
         })
     }
 }
@@ -270,7 +309,14 @@ impl Definition {
         let stored_family = r.u32()?;
         // Older map packages retained the complete bindings but classified
         // non-flowing water as unknown. Upgrade without re-exporting geometry.
-        let family = if matches!(shader.as_str(), "water.default" | "water.alpha" | "water.skatepark") { 33 } else { stored_family };
+        let family = if matches!(
+            shader.as_str(),
+            "water.default" | "water.alpha" | "water.skatepark"
+        ) {
+            33
+        } else {
+            stored_family
+        };
         let flags = r.u32()?;
         let mut bindings = BTreeMap::new();
         for _ in 0..r.u32()? {
@@ -316,13 +362,22 @@ impl Definition {
             .filter(|v| v.is_finite())
     }
     pub fn supported(&self, tuning: &MaterialTuning) -> bool {
-        (1..=13).contains(&self.family) || match self.family {
-            14 | 32 => tuning.rows.get(&self.shader).is_some_and(|r| !r.is_empty()),
-            31 => tuning.pca_available && tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 3),
-            30 => tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 4),
-            33 => tuning.pca_available && self.bindings.contains_key("normal") && self.bindings.contains_key("normal2") && tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 4),
-            _ => false,
-        }
+        (1..=13).contains(&self.family)
+            || match self.family {
+                14 | 32 => tuning.rows.get(&self.shader).is_some_and(|r| !r.is_empty()),
+                31 => {
+                    tuning.pca_available
+                        && tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 3)
+                }
+                30 => tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 4),
+                33 => {
+                    tuning.pca_available
+                        && self.bindings.contains_key("normal")
+                        && self.bindings.contains_key("normal2")
+                        && tuning.rows.get(&self.shader).is_some_and(|r| r.len() == 4)
+                }
+                _ => false,
+            }
     }
     pub fn build(
         &self,
@@ -344,7 +399,15 @@ impl Definition {
         let diffuse = fetch("diffuse", m.textures[0], false);
         let lightmap = fetch("lightmap", m.textures[1], true);
         let normal = fetch("normal", m.textures[2], false);
-        let detail = fetch(if matches!(self.family, 31 | 33) { "normal2" } else { "detail" }, 0, false);
+        let detail = fetch(
+            if matches!(self.family, 31 | 33) {
+                "normal2"
+            } else {
+                "detail"
+            },
+            0,
+            false,
+        );
         let macro_map = fetch("macrooverlay", 0, false);
         let decal = fetch("decal", 0, self.family == 3);
         let specular = fetch("specular", 0, false);
@@ -354,7 +417,11 @@ impl Definition {
         let detail_scale = self.scalar("detailNormalUVScale").unwrap_or(0.);
         let flags = u32::from(normal.is_some())
             | (u32::from(detail.is_some() && detail_scale > 0.) << 1)
-            | (u32::from(macro_map.is_some() && macro_scale > 0. && (macro_opacity > 0. || self.family == 31)) << 2)
+            | (u32::from(
+                macro_map.is_some()
+                    && macro_scale > 0.
+                    && (macro_opacity > 0. || self.family == 31),
+            ) << 2)
             | (u32::from(decal.is_some()) << 3)
             | (u32::from(specular.is_some()) << 4)
             | (u32::from(lightmap.is_some()) << 5)
@@ -364,31 +431,47 @@ impl Definition {
         let cutoff = 30. / 255.;
         let debug_foliage = matches!(self.family, 9 | 10)
             && std::env::var_os("SKATE_DEBUG_FOLIAGE").is_some_and(|v| v == "1");
-        let tree_wall = m.retail_definition.as_deref().is_some_and(|bytes| {
-            bytes.windows(b"TreeWall".len()).any(|s| s == b"TreeWall")
-        });
+        let tree_wall = m
+            .retail_definition
+            .as_deref()
+            .is_some_and(|bytes| bytes.windows(b"TreeWall".len()).any(|s| s == b"TreeWall"));
         let alpha = match (debug_foliage, m.alpha_mode) {
             (true, _) => AlphaMode::Opaque,
             (_, 1) => AlphaMode::Mask(cutoff),
             (_, 2) => AlphaMode::Blend,
             _ => AlphaMode::Opaque,
         };
-        let alpha = if self.family == 32 || (matches!(self.family, 30 | 33) && self.shader.ends_with("alpha")) {
+        let alpha = if self.family == 32
+            || (matches!(self.family, 30 | 33) && self.shader.ends_with("alpha"))
+        {
             AlphaMode::Blend
-        } else { alpha };
+        } else {
+            alpha
+        };
         let mut water = [Vec4::ZERO; 4];
         if let Some(rows) = tuning.rows.get(&self.shader) {
-            for (to, from) in water.iter_mut().zip(rows) { *to = Vec4::from_array(*from); }
+            for (to, from) in water.iter_mut().zip(rows) {
+                *to = Vec4::from_array(*from);
+            }
         }
         if self.family == 14 {
-            water[1] = Vec4::new(self.scalar("uAnimationSpeed").unwrap_or(0.), self.scalar("vAnimationSpeed").unwrap_or(0.), 0., 0.);
+            water[1] = Vec4::new(
+                self.scalar("uAnimationSpeed").unwrap_or(0.),
+                self.scalar("vAnimationSpeed").unwrap_or(0.),
+                0.,
+                0.,
+            );
         }
         RetailWorldMaterial {
             params: WorldParams {
                 mode: Vec4::new(
                     self.family as f32,
                     flags as f32,
-                    if m.alpha_mode == 1 && !debug_foliage { cutoff } else { -1. },
+                    if m.alpha_mode == 1 && !debug_foliage {
+                        cutoff
+                    } else {
+                        -1.
+                    },
                     2.5,
                 ),
                 foliage_debug: if !debug_foliage {
@@ -404,7 +487,18 @@ impl Definition {
                 fog_color: Vec4::ZERO,
                 shadow_color: Vec4::ZERO,
                 sun_direction: Vec3::new(4., 7., 4.).normalize().extend(0.),
-                decal: Vec4::new(stain_opacity(self.parameters.get("decal").and_then(|v| v.first()).map(String::as_str).unwrap_or("")), 0., 0., 0.),
+                decal: Vec4::new(
+                    stain_opacity(
+                        self.parameters
+                            .get("decal")
+                            .and_then(|v| v.first())
+                            .map(String::as_str)
+                            .unwrap_or(""),
+                    ),
+                    0.,
+                    0.,
+                    0.,
+                ),
                 water,
             },
             diffuse,
@@ -427,8 +521,21 @@ impl Definition {
 // logos, paint, scratches and edge wear at their authored alpha.
 fn stain_opacity(texture_label: &str) -> f32 {
     let label = texture_label.to_ascii_lowercase();
-    if ["grime", "grunge", "stain", "oildirt", "drainage", "ground_decals"]
-        .iter().any(|word| label.contains(word)) { 0.35 } else { 1. }
+    if [
+        "grime",
+        "grunge",
+        "stain",
+        "oildirt",
+        "drainage",
+        "ground_decals",
+    ]
+    .iter()
+    .any(|word| label.contains(word))
+    {
+        0.35
+    } else {
+        1.
+    }
 }
 
 #[cfg(test)]
@@ -436,10 +543,22 @@ mod stain_tests {
     use super::stain_opacity;
     #[test]
     fn weathering_tuning_preserves_artwork() {
-        for name in ["decal_WEAR_WaterStain_01", "subway_grunge03", "decal_GrimePuddle", "OT_Ground_decals"] {
+        for name in [
+            "decal_WEAR_WaterStain_01",
+            "subway_grunge03",
+            "decal_GrimePuddle",
+            "OT_Ground_decals",
+        ] {
             assert_eq!(stain_opacity(name), 0.35);
         }
-        for name in ["decal_Graphic_SP_UN_Shark_01", "decal_other_sp_arrowramps_01", "decal_Graphic_SP_UN_MegaRmp_01", "decal_Wear_GL_UN_MPedge_01", "decal_skateboardscratcheswood01", ""] {
+        for name in [
+            "decal_Graphic_SP_UN_Shark_01",
+            "decal_other_sp_arrowramps_01",
+            "decal_Graphic_SP_UN_MegaRmp_01",
+            "decal_Wear_GL_UN_MPedge_01",
+            "decal_skateboardscratcheswood01",
+            "",
+        ] {
             assert_eq!(stain_opacity(name), 1.);
         }
     }
@@ -485,7 +604,6 @@ pub(crate) fn mip_chain(rgba: &[u8], width: u32, height: u32, layers: u32) -> (V
     (bytes, count)
 }
 
-
 #[derive(Default)]
 pub(crate) struct MaterialTuning {
     rows: BTreeMap<String, Vec<[f32; 4]>>,
@@ -494,11 +612,24 @@ pub(crate) struct MaterialTuning {
 impl MaterialTuning {
     pub(crate) fn load(root: &std::path::Path) -> Self {
         let path = root.join("private/render-parameters.json");
-        match std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<BTreeMap<String, Vec<[f32; 4]>>>(&b).ok()) {
-            Some(rows) if rows.values().flatten().flatten().all(|x| x.is_finite()) => Self { rows, pca_available: shadow::pca_available(root) },
-            _ => { warn!("Retail water/scroll tuning unavailable: {}", path.display()); Self::default() }
+        match std::fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<BTreeMap<String, Vec<[f32; 4]>>>(&b).ok())
+        {
+            Some(rows) if rows.values().flatten().flatten().all(|x| x.is_finite()) => Self {
+                rows,
+                pca_available: shadow::pca_available(root),
+            },
+            _ => {
+                warn!("Retail water/scroll tuning unavailable: {}", path.display());
+                Self::default()
+            }
         }
     }
 }
 
-pub(crate) fn world_changed(mut messages: MessageReader<crate::map_transition::WorldChanged>) -> bool { messages.read().count() != 0 }
+pub(crate) fn world_changed(
+    mut messages: MessageReader<crate::map_transition::WorldChanged>,
+) -> bool {
+    messages.read().count() != 0
+}

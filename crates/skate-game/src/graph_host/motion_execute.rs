@@ -1,30 +1,64 @@
 use super::*;
 impl MotionHost {
-    pub(super) fn execute(&mut self, behavior: BehaviorId, frame: &Frame, phase: u8) -> Result<(), String> {
-        let id = *self.remap.behaviors.get(behavior).ok_or("Unbound MotionGraph behavior")?;
+    pub(super) fn execute(
+        &mut self,
+        behavior: BehaviorId,
+        frame: &Frame,
+        phase: u8,
+    ) -> Result<(), String> {
+        let id = *self
+            .remap
+            .behaviors
+            .get(behavior)
+            .ok_or("Unbound MotionGraph behavior")?;
         let operation = self.operations[id].clone();
         if let MotionOperation::Grind(operation) = operation {
-            if phase == 2 || (phase == 0 && matches!(operation,
-                crate::graph_host::motion_grind::Operation::Attributes)) {
+            if phase == 2
+                || (phase == 0
+                    && matches!(
+                        operation,
+                        crate::graph_host::motion_grind::Operation::Attributes
+                    ))
+            {
                 return Ok(());
             }
-            let mut physical = self.grind_physical
+            let mut physical = self
+                .grind_physical
                 .ok_or("Grind graph requires completed physical grind observations")?;
-            if (phase == 0 && matches!(operation,
-                crate::graph_host::motion_grind::Operation::Fade { .. }))
-                || (phase == 1 && physical.grinding && matches!(operation,
-                    crate::graph_host::motion_grind::Operation::Attributes)) {
-                physical.animation_mirrored = self.animation.skater_animation_flags
+            if (phase == 0
+                && matches!(
+                    operation,
+                    crate::graph_host::motion_grind::Operation::Fade { .. }
+                ))
+                || (phase == 1
+                    && physical.grinding
+                    && matches!(
+                        operation,
+                        crate::graph_host::motion_grind::Operation::Attributes
+                    ))
+            {
+                physical.animation_mirrored = self
+                    .animation
+                    .skater_animation_flags
                     .ok_or("Grind graph requires live animation stance")?
-                    & 0x4000_0000 != 0;
+                    & 0x4000_0000
+                    != 0;
             }
-            let Instance::Grind(state) = self.instances.get_mut(behavior)
-                .ok_or("Unallocated grind behavior")? else {
+            let Instance::Grind(state) = self
+                .instances
+                .get_mut(behavior)
+                .ok_or("Unallocated grind behavior")?
+            else {
                 return Err("Grind operation/instance mismatch".into());
             };
             return crate::graph_host::motion_grind::execute(
-                state, &operation, phase, frame.dt, &self.grind_settings,
-                &physical, &mut self.animation,
+                state,
+                &operation,
+                phase,
+                frame.dt,
+                &self.grind_settings,
+                &physical,
+                &mut self.animation,
             );
         }
         if let MotionOperation::Trick(operation) = operation {
@@ -32,7 +66,8 @@ impl MotionHost {
             let Instance::Trick(mut updates) = instance else {
                 return Err("Trick operation/instance mismatch".into());
             };
-            let result = crate::graph_host::motion_tricks::execute(self, operation, &mut updates, phase);
+            let result =
+                crate::graph_host::motion_tricks::execute(self, operation, &mut updates, phase);
             self.instances[behavior] = Instance::Trick(updates);
             return result;
         }
@@ -43,15 +78,20 @@ impl MotionHost {
             // The native producer samples a physical runout bundle at Begin.
             // This host does not yet publish that bundle, so retain the
             // source-backed state without inventing angle/speed values.
-            let Instance::Runout(state) = self.instances.get_mut(behavior)
-                .ok_or("Unallocated runout behavior")? else {
+            let Instance::Runout(state) = self
+                .instances
+                .get_mut(behavior)
+                .ok_or("Unallocated runout behavior")?
+            else {
                 return Err("Runout operation/instance mismatch".into());
             };
             if phase == 0 {
                 state.begin(self.runout_physical);
                 return Ok(());
             }
-            return state.update(Some(&mut self.animation)).map_err(str::to_owned);
+            return state
+                .update(Some(&mut self.animation))
+                .map_err(str::to_owned);
         }
         if self.execute_score_or_bump(&operation, phase)? {
             return Ok(());
@@ -98,7 +138,10 @@ impl MotionHost {
                     }
                 }
                 //Later PlayAnimation nodes in this same traversal see the reset.
-                self.playback_context.is_mirrored = self.animation.skater_animation_flags.map(|f| f & 0x4000_0000 != 0);
+                self.playback_context.is_mirrored = self
+                    .animation
+                    .skater_animation_flags
+                    .map(|f| f & 0x4000_0000 != 0);
                 self.playback_context.is_switch = Some(self.animation.relative_stance == 1);
             }
             return Ok(());

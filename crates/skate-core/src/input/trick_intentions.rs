@@ -94,7 +94,11 @@ pub fn produce(controller: &DerivedControllerInput) -> Vec<TrickIntent> {
     if right_y != 0.0 {
         emit("HandPlantTweakY", right_y);
     }
-    for (bit, name) in [(20, "HandPlantDismount"), (21, "HandPlantOneFootRight"), (23, "HandPlantOneFootLeft")] {
+    for (bit, name) in [
+        (20, "HandPlantDismount"),
+        (21, "HandPlantOneFootRight"),
+        (23, "HandPlantOneFootLeft"),
+    ] {
         if current_flags & (1 << bit) != 0 {
             emit(name, 1.0);
         }
@@ -106,7 +110,12 @@ pub fn produce(controller: &DerivedControllerInput) -> Vec<TrickIntent> {
 mod tests {
     use super::*;
 
-    fn controller(previous_left: f32, previous_right: f32, left: f32, right: f32) -> DerivedControllerInput {
+    fn controller(
+        previous_left: f32,
+        previous_right: f32,
+        left: f32,
+        right: f32,
+    ) -> DerivedControllerInput {
         let mut words = [0; 26];
         words[4] = previous_left.to_bits();
         words[5] = previous_right.to_bits();
@@ -123,10 +132,24 @@ mod tests {
         assert!(output.iter().any(|i| i.name == "LeftAirGrab"));
         assert!(!output.iter().any(|i| i.name == "NewLeftAirGrab"));
         assert!(!output.iter().any(|i| i.name == "NewRightAirGrab"));
-        assert_eq!(output.iter().find(|i| i.name == "TweakX").unwrap().value, 0.25);
-        assert_eq!(output.iter().find(|i| i.name == "TweakY").unwrap().value, -0.5);
-        let angle = output.iter().find(|i| i.name == "BoardAdjustAngle").unwrap().value;
-        let magnitude = output.iter().find(|i| i.name == "BoardAdjustMag").unwrap().value;
+        assert_eq!(
+            output.iter().find(|i| i.name == "TweakX").unwrap().value,
+            0.25
+        );
+        assert_eq!(
+            output.iter().find(|i| i.name == "TweakY").unwrap().value,
+            -0.5
+        );
+        let angle = output
+            .iter()
+            .find(|i| i.name == "BoardAdjustAngle")
+            .unwrap()
+            .value;
+        let magnitude = output
+            .iter()
+            .find(|i| i.name == "BoardAdjustMag")
+            .unwrap()
+            .value;
         assert!((angle - 0.4636476).abs() < 0.00001);
         assert!((magnitude - 0.559017).abs() < 0.00001);
     }
@@ -144,8 +167,15 @@ mod tests {
             words[9] = x.to_bits();
             words[10] = y.to_bits();
             let output = produce(&DerivedControllerInput::from_words(words));
-            let angle = output.iter().find(|i| i.name == "BoardAdjustAngle").unwrap().value;
-            assert!((angle - expected).abs() < 0.00001, "x={x}, y={y}, angle={angle}");
+            let angle = output
+                .iter()
+                .find(|i| i.name == "BoardAdjustAngle")
+                .unwrap()
+                .value;
+            assert!(
+                (angle - expected).abs() < 0.00001,
+                "x={x}, y={y}, angle={angle}"
+            );
         }
     }
 }

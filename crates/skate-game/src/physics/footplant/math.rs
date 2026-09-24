@@ -6,7 +6,12 @@ pub(in crate::physics) fn dot(a: V, b: V) -> f32 {
     (a[0] * b[0] + a[1] * b[1]) + a[2] * b[2]
 }
 pub(in crate::physics) fn cross(a: V, b: V) -> V {
-    [a[1].mul_add(b[2], -a[2]*b[1]), a[2].mul_add(b[0], -a[0]*b[2]), a[0].mul_add(b[1], -a[1]*b[0]), 0.0]
+    [
+        a[1].mul_add(b[2], -a[2] * b[1]),
+        a[2].mul_add(b[0], -a[0] * b[2]),
+        a[0].mul_add(b[1], -a[1] * b[0]),
+        0.0,
+    ]
 }
 pub(in crate::physics) fn add(a: V, b: V) -> V {
     std::array::from_fn(|i| a[i] + b[i])

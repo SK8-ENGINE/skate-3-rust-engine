@@ -14,7 +14,9 @@ impl Settings {
         // anim_motion schema places this PointNegGraphData8 field at190.
         // Preserve numeric identities because the retail vault omits names.
         let words = data.words::<20>(
-            "anim_motion", "Hash_41DB0C4F82003A15", "Hash_E0C1407B688858AD",
+            "anim_motion",
+            "Hash_41DB0C4F82003A15",
+            "Hash_E0C1407B688858AD",
         )?;
         let minimum = f32::from_bits(words[0]);
         let maximum = f32::from_bits(words[2]);
@@ -45,7 +47,11 @@ impl State {
     pub(super) fn update(&mut self, grab_present: bool, dt: f32, settings: &Settings) -> f32 {
         //82454FD8 tests membership, including a zero-valued intent. The time
         //service supplies dt; this is not the magnitude of the grab input.
-        self.elapsed = if grab_present { self.elapsed - dt } else { self.elapsed + dt };
+        self.elapsed = if grab_present {
+            self.elapsed - dt
+        } else {
+            self.elapsed + dt
+        };
         self.elapsed = self.elapsed.clamp(settings.minimum, settings.maximum);
         settings.curve.evaluate(self.elapsed)
     }

@@ -7,6 +7,18 @@ pub struct Field {
     #[serde(rename = "type")]
     pub type_name: String,
     pub data: String,
+    /// Array attributes (`vlt.py` `array_items`): `data` holds only the header lanes, the
+    /// elements are here, one hex string per item.
+    #[serde(default)]
+    pub array: Option<FieldArray>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FieldArray {
+    pub capacity: u32,
+    pub element_size: u32,
+    pub alignment: u32,
+    pub items: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,7 +55,10 @@ impl Collections {
         }
         let mut identities = std::collections::BTreeSet::new();
         for item in &data.collections {
-            if !identities.insert((crate::attrib_hash::numeric_name(&item.class_name), crate::attrib_hash::numeric_name(&item.key))) {
+            if !identities.insert((
+                crate::attrib_hash::numeric_name(&item.class_name),
+                crate::attrib_hash::numeric_name(&item.key),
+            )) {
                 return Err(format!(
                     "Duplicate collection {}/{}",
                     item.class_name, item.key
@@ -65,12 +80,16 @@ impl Collections {
                 .collections
                 .iter()
                 .find(|c| {
-                    (c.class_name == class || crate::attrib_hash::numeric_name(&c.class_name) == class_id)
-                        && (c.key == current || crate::attrib_hash::numeric_name(&c.key) == current_id)
+                    (c.class_name == class
+                        || crate::attrib_hash::numeric_name(&c.class_name) == class_id)
+                        && (c.key == current
+                            || crate::attrib_hash::numeric_name(&c.key) == current_id)
                 })
                 .ok_or_else(|| format!("Missing stock collection {class}/{current}"))?;
             if let Some(field) = item.fields.get(name).or_else(|| {
-                item.fields.iter().find(|(key, _)| crate::attrib_hash::numeric_name(key) == field_id)
+                item.fields
+                    .iter()
+                    .find(|(key, _)| crate::attrib_hash::numeric_name(key) == field_id)
                     .map(|(_, field)| field)
             }) {
                 return Ok(field);
@@ -121,6 +140,31 @@ impl Collections {
         }
     }
 
+    /// Every element of a float array attribute, in order (the index AttribSys
+    /// `sub_82B72420` takes as its third argument).
+    pub fn float_items(&self, class: &str, key: &str, name: &str) -> Result<Vec<f32>, String> {
+        let field = self.field(class, key, name)?;
+        if field.type_name != "EA::Reflection::Float" {
+            return Err(format!("Expected float array at {class}/{key}/{name}"));
+        }
+        let array = field
+            .array
+            .as_ref()
+            .ok_or_else(|| format!("Expected array payload at {class}/{key}/{name}"))?;
+        array
+            .items
+            .iter()
+            .map(|item| {
+                let value = f32::from_bits(decode_words::<1>(item)?[0]);
+                if value.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(format!("Non-finite stock float {class}/{key}/{name}"))
+                }
+            })
+            .collect()
+    }
+
     pub fn words<const N: usize>(
         &self,
         class: &str,
@@ -161,7 +205,12 @@ mod tests {
                 "fields": { "Hash_A353CE1670D3AA40": { "type": "EA::Reflection::Float", "data": "3D23D70A" } }
             }]
         })).unwrap();
-        assert_eq!(data.float("anim_motion", "manual", "manual_clamp_vel").unwrap().to_bits(), 0x3d23d70a);
+        assert_eq!(
+            data.float("anim_motion", "manual", "manual_clamp_vel")
+                .unwrap()
+                .to_bits(),
+            0x3d23d70a
+        );
         assert!(data.field("anim_motion", "manual", "missing").is_err());
     }
 
@@ -175,7 +224,33 @@ mod tests {
                  "fields":{"value":{"type":"EA::Reflection::Float", "data":"3F800000"}}}
             ]
         })).unwrap();
-        assert_eq!(data.float(&crate::attrib_hash::numeric_name("example"),
-            &crate::attrib_hash::numeric_name("child"), &crate::attrib_hash::numeric_name("value")).unwrap(), 1.0);
+        assert_eq!(
+            data.float(
+                &crate::attrib_hash::numeric_name("example"),
+                &crate::attrib_hash::numeric_name("child"),
+                &crate::attrib_hash::numeric_name("value")
+            )
+            .unwrap(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn float_arrays_read_their_items_not_the_header_lanes() {
+        let data: Collections = serde_json::from_value(serde_json::json!({
+            "version": 1, "collections": [{
+                "class": "example", "key": "default", "parent": "", "source": "fixture",
+                "sha256": "", "fields": { "thresholds": {
+                    "type": "EA::Reflection::Float", "data": "00030003",
+                    "array": {"capacity": 3, "element_size": 4, "alignment": 4,
+                              "items": ["3FC00000", "40266666", "405CCCCD"]}
+                }}
+            }]
+        }))
+        .unwrap();
+        let items = data.float_items("example", "default", "thresholds").unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], 1.5);
+        assert_eq!(items[2].to_bits(), 0x405C_CCCD);
     }
 }

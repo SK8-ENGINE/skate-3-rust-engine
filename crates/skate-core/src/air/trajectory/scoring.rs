@@ -69,7 +69,8 @@ pub(super) fn score(
         } else if evaluation.score != 0.0 {
             evaluation.score
         } else if input.grind_lock_distance > 0.5 || !middle {
-            s.grind_penalty_vs_distance.evaluate(evaluation.penalty_input())
+            s.grind_penalty_vs_distance
+                .evaluate(evaluation.penalty_input())
         } else {
             0.0
         };
