@@ -74,6 +74,47 @@ in
       export ${var}="$(rustc --print target-libdir):${"$" + var}"
     '';
 
+  # `skate-setup <game.iso|default.xex>`: preflight, build, then headless asset setup.
+  scripts.skate-setup.exec = ''
+    set -euo pipefail
+    if [ $# -ne 1 ]; then echo "usage: skate-setup <Skate 3 Xbox 360 ISO | default.xex>" >&2; exit 64; fi
+    source="$(realpath "$1")"
+    cd "$DEVENV_ROOT"
+    echo "==> Preflight: $source"
+    case "$source" in
+      *.iso|*.ISO)
+        # Lists only the directory tables, so rejecting a PS3/non-XDVDFS image is fast.
+        listing="$(extract-xiso -l "$source" 2>&1)" || listing=""
+        grep -qi 'default\.xex' <<<"$listing" \
+          || { echo "Not an Xbox 360 Skate 3 ISO (no XDVDFS default.xex)" >&2; exit 1; } ;;
+      */default.xex) ;;
+      *) echo "Expected an .iso or default.xex" >&2; exit 1 ;;
+    esac
+    echo "==> Building workspace"
+    cargo build --workspace --locked
+    refresh=()
+    if [ -f data/installation.json ]; then refresh=(--refresh); fi
+    echo "==> Asset setup"
+    python tools/setup.py --base data --game-exe target/debug/skate3rust --source "$source" "''${refresh[@]}"
+    echo "==> Installed: $(skate-assets)"
+  '';
+
+  # Prints the published asset directory from data/installation.json.
+  scripts.skate-assets.exec = ''
+    set -euo pipefail
+    cd "$DEVENV_ROOT"
+    [ -f data/installation.json ] || { echo "No installation; run skate-setup <iso> first" >&2; exit 1; }
+    python -c 'import json;print("data/"+json.load(open("data/installation.json"))["directory"]+"/assets")'
+  '';
+
+  # `skate-run [game args...]`, e.g. `skate-run --map path/to/map.skate`.
+  scripts.skate-run.exec = ''
+    set -euo pipefail
+    cd "$DEVENV_ROOT"
+    assets="$(skate-assets)"
+    exec cargo run --bin skate3rust -- --assets "$assets" "$@"
+  '';
+
   # Pre-commit: installed into .git/hooks when the shell starts. rustfmt is not
   # enforced yet: most existing sources predate rustfmt and would be rewritten.
   git-hooks.hooks = {

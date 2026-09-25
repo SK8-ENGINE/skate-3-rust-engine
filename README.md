@@ -55,6 +55,17 @@ installs pre-commit hooks that run `cargo check --workspace --locked` for Rust
 changes and `nixfmt` for Nix files.
 
 ```sh
+skate-setup path/to/Skate3.iso   # or .../default.xex; preflight, build, asset setup
+skate-run                        # extra args go to the game, e.g. --map path/to/map.skate
+```
+
+`skate-setup` rejects images without an XDVDFS `default.xex` (PS3 discs, for
+example), builds the workspace, then converts assets without the setup window
+(`tools/setup.py --source`), passing `--refresh` when an installation exists.
+`skate-run` launches with the installation recorded in `data/installation.json`
+(`skate-assets` prints its path). The manual equivalent:
+
+```sh
 cargo build --workspace --locked
 # One-time asset setup: pick your Skate 3 ISO or default.xex in the window.
 python tools/setup.py --base data --game-exe target/debug/skate3rust
