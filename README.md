@@ -85,7 +85,10 @@ so it runs only where those are available (for example inside the shell).
 Any gamepad that gilrs recognizes as a standard gamepad works. Its buttons and
 sticks map to the XInput layout without deadzones, and devices keep their slot
 until they disconnect. On macOS the renderer runs Vulkan through MoltenVK, and
-materials use the non-bindless path. The launch scripts (`*.bat`, `scripts/*.ps1`)
+materials use the non-bindless path. The shell sets `MVK_CONFIG_FAST_MATH_ENABLED=0`:
+with fast-math, the depth prepass and the main pass disagree on skinned, morphed
+customiser skaters, which then render as black-and-white patches. Launching outside
+the shell brings that back. The launch scripts (`*.bat`, `scripts/*.ps1`)
 and release packaging are Windows-only.
 
 Run the explicit GPU shader probes on macOS with

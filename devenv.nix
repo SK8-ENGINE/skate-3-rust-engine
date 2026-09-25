@@ -61,6 +61,11 @@ in
         lib.makeLibraryPath [ pkgs.vulkan-loader ]
       }:/usr/local/lib:/usr/lib";
       VK_DRIVER_FILES = "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+      # MoltenVK's default fast-math lets Metal compile the depth-prepass and
+      # main-pass vertex shaders to slightly different positions. Skinned,
+      # morphed customiser skaters then fail the main-pass depth test in patches
+      # whenever the prepass is on (graphics "occlusion" setting).
+      MVK_CONFIG_FAST_MATH_ENABLED = "0";
     };
 
   # dev-dynamic builds load libstd via @rpath with no rpath set, and libbevy_dylib
