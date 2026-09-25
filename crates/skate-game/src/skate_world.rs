@@ -1115,10 +1115,18 @@ mod tests {
         let mut scene = crate::map_render::PreparedScene::new(&world);
         scene.prepare(Some(&map), std::path::Path::new("unused"));
         scene.publish(&mut world);
-        assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
-        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);
-        assert_eq!(world.resource::<Assets<Image>>().len(), 2);
-        assert_eq!(world.query::<&Mesh3d>().iter(&world).count(), 1);
+        // Portable maps also get the sun/moon discs (map_render::celestial_bodies):
+        // one shared disc mesh plus an unlit material and texture per body.
+        assert_eq!(world.resource::<Assets<Mesh>>().len(), 1 + 1);
+        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1 + 2);
+        assert_eq!(world.resource::<Assets<Image>>().len(), 2 + 2);
+        assert_eq!(
+            world
+                .query_filtered::<&Mesh3d, Without<crate::map_render::CelestialBody>>()
+                .iter(&world)
+                .count(),
+            1
+        );
         let lightmap = world
             .query::<&bevy::pbr::Lightmap>()
             .single(&world)
