@@ -306,7 +306,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
             extractor=dependency(base/'tools','extract-xiso',XISO_URL,XISO_SHA,report)
             game_root=work/'disc'
             report('Extracting your ISO')
-            run([extractor,'-x',iso,'-d',game_root],log,report)
+            run([extractor,'-d',game_root,'-x',iso],log,report)
         else:game_root=game_root.resolve()
         required_files=['default.xex']
         if 'core' in groups:required_files += ['data/big/miscload.big','data/big/miscboot.big','data/big/db.big']

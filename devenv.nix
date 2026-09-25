@@ -63,15 +63,16 @@ in
       VK_DRIVER_FILES = "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
     };
 
-  # dev-dynamic builds load libstd via @rpath with no rpath set. Exposing the
-  # toolchain's target libdir lets tools/setup.py run target/debug/skate3rust
-  # directly (cargo run sets this itself).
+  # dev-dynamic builds load libstd via @rpath with no rpath set, and libbevy_dylib
+  # via the absolute path it was linked at (stale once the checkout moves). Exposing
+  # the toolchain's target libdir and target/debug/deps lets tools/setup.py run
+  # target/debug/skate3rust directly (cargo run sets these itself).
   enterShell =
     let
       var = if pkgs.stdenv.isDarwin then "DYLD_FALLBACK_LIBRARY_PATH" else "LD_LIBRARY_PATH";
     in
     ''
-      export ${var}="$(rustc --print target-libdir):${"$" + var}"
+      export ${var}="$(rustc --print target-libdir):$DEVENV_ROOT/target/debug/deps:${"$" + var}"
     '';
 
   # `skate-setup <game.iso|default.xex>`: preflight, build, then headless asset setup.
