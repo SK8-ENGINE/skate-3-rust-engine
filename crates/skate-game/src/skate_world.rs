@@ -192,7 +192,9 @@ fn retail_collision_world(
                 local_to_world: RetailAffineTransform::IDENTITY,
                 world_to_local: RetailAffineTransform::IDENTITY,
                 local_bounds: bounds,
-                matching_group: i32::from(group),
+                // Native static registration uses matchingID -1; the unit group
+                // only splits clusters and must not filter actor queries.
+                matching_group: -1,
                 pool: QueryPool::Ground,
             });
         }
@@ -1034,7 +1036,7 @@ mod tests {
         assert_eq!(world.triangles().len(), 3);
         let metadata = world.query_metadata().unwrap();
         assert_eq!(metadata.meshes.len(), 3);
-        assert_eq!(metadata.meshes[1].matching_group, 0x1234);
+        assert!(metadata.meshes.iter().all(|m| m.matching_group == -1));
         assert_eq!(metadata.packed_surfaces, vec![0x4321; 3]);
         assert_eq!(world.triangles()[1].triangle.vertices[0].x, 10.);
     }
