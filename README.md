@@ -62,8 +62,14 @@ cargo run --bin skate3rust -- --assets data/installations/<id>/assets
 ```
 
 `<id>` is the directory recorded in `data/installation.json`. Run all of these
-inside the shell. Setup uses the `extract-xiso` on `PATH`, and the game needs
-the shell's Vulkan environment.
+inside the shell, including `git commit`: the hooks build with the shell's
+toolchain. Setup uses the `extract-xiso` on `PATH`, and the game needs the
+shell's Vulkan environment.
+
+`cargo build --release --locked --no-default-features --bin skate3rust` builds a
+single optimized binary without Bevy's dynamic linking. On macOS it still loads
+the Vulkan loader and MoltenVK at runtime and links libiconv from the Nix store,
+so it runs only where those are available (for example inside the shell).
 
 Any gamepad that gilrs recognizes as a standard gamepad works. Its buttons and
 sticks map to the XInput layout without deadzones, and devices keep their slot
