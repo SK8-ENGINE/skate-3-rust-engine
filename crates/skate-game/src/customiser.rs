@@ -226,7 +226,7 @@ impl Plugin for CustomiserPlugin {
         crate::customiser_material::register(app);
         app.init_resource::<Navigation>()
             .add_systems(Startup, crate::customiser_parts::setup)
-            .add_systems(PreUpdate, navigation.before(crate::graphics_menu::MenuInput))
+            .add_systems(PreUpdate, navigation.after(crate::input::platform::DeviceSet).before(crate::graphics_menu::MenuInput))
             .add_systems(PreUpdate, preferences.after(crate::map_transition::MapTransitionSet)
                 .before(crate::input::poll_controllers))
             .add_systems(PostStartup, setup)
@@ -239,8 +239,8 @@ impl Plugin for CustomiserPlugin {
             );
     }
 }
-pub(crate) fn navigation(mut nav: ResMut<Navigation>, time: Res<Time<Real>>, keys: Res<ButtonInput<KeyCode>>) {
-    let pad = (0..4).find_map(|i| crate::input::platform::poll(i).ok());
+pub(crate) fn navigation(mut nav: ResMut<Navigation>, time: Res<Time<Real>>, keys: Res<ButtonInput<KeyCode>>, devices: crate::input::platform::Devices) {
+    let pad = (0..4).find_map(|i| devices.poll(i).ok());
     // Remap outside the dead zone so a resting stick cannot drift the preview.
     let axis = pad.as_ref().map_or(0., |p| (p.state.right[0] as f32 / 32767.).clamp(-1., 1.));
     nav.preview_turn = axis.signum() * ((axis.abs() - 0.24) / 0.76).max(0.);

@@ -60,8 +60,7 @@ pub(crate) fn build(
     let mut app = App::new();
     crate::custom_models::register_source(&mut app);
     crate::modding::register_source(&mut app);
-    app.add_plugins(
-        DefaultPlugins
+    let plugins = DefaultPlugins
             .set(AssetPlugin {
                 file_path: config.asset_root.to_string_lossy().into_owned(),
                 ..default()
@@ -84,12 +83,14 @@ pub(crate) fn build(
                     ..default()
                 }),
                 ..default()
-            }).build().disable::<bevy::log::LogPlugin>()
-            // Gameplay and menu navigation both use raw XInput. No game system
-            // consumes Bevy gamepad events/rumble; its second device backend can
-            // stall PreUpdate (70.68 ms in the University capture).
-            .disable::<bevy::gilrs::GilrsPlugin>(),
-    )
+            }).build().disable::<bevy::log::LogPlugin>();
+    // Windows gameplay and menu navigation use raw XInput. No game system
+    // consumes Bevy gamepad events/rumble there; its second device backend can
+    // stall PreUpdate (70.68 ms in the University capture). Elsewhere gilrs
+    // is the device backend behind input::platform.
+    #[cfg(windows)]
+    let plugins = plugins.disable::<bevy::gilrs::GilrsPlugin>();
+    app.add_plugins(plugins)
     .insert_resource(bevy::winit::WinitSettings {focused_mode:bevy::winit::UpdateMode::Continuous,unfocused_mode:bevy::winit::UpdateMode::Continuous})
     .insert_resource(config)
     .insert_resource(crate::retail_render::RetailScene(retail_scene))
