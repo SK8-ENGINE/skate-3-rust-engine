@@ -34,9 +34,17 @@ in
       # ISO extraction; the pipeline downloads a Win64 build of this on Windows.
       pkgs.extract-xiso
     ]
-    ++ lib.optionals pkgs.stdenv.isLinux linuxRuntimeLibs;
+    ++ lib.optionals pkgs.stdenv.isLinux linuxRuntimeLibs
+    ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs.vulkan-loader pkgs.moltenvk ];
 
-  env = lib.optionalAttrs pkgs.stdenv.isLinux {
-    LD_LIBRARY_PATH = lib.makeLibraryPath linuxRuntimeLibs;
-  };
+  env =
+    lib.optionalAttrs pkgs.stdenv.isLinux {
+      LD_LIBRARY_PATH = lib.makeLibraryPath linuxRuntimeLibs;
+    }
+    # The renderer is Vulkan-only (app.rs); on macOS wgpu reaches Metal through
+    # the Vulkan loader + MoltenVK driver, which wgpu dlopens at runtime.
+    // lib.optionalAttrs pkgs.stdenv.isDarwin {
+      DYLD_FALLBACK_LIBRARY_PATH = "${lib.makeLibraryPath [ pkgs.vulkan-loader ]}:/usr/local/lib:/usr/lib";
+      VK_DRIVER_FILES = "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+    };
 }
