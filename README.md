@@ -67,8 +67,8 @@ example), builds the workspace, then converts assets without the setup window
 
 ```sh
 cargo build --workspace --locked
-# One-time asset setup: pick your Skate 3 ISO or default.xex in the window.
-python tools/setup.py --base data --game-exe target/debug/skate3rust
+# One-time headless asset setup: supply your Skate 3 ISO or default.xex.
+python tools/setup.py --base data --game-exe target/debug/skate3rust --source path/to/Skate3.iso
 cargo run --bin skate3rust -- --assets data/installations/<id>/assets
 ```
 
