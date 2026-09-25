@@ -11,11 +11,14 @@ fn material() -> RetailContactMaterial {
     }
 }
 fn face(x: f32, tag: u32, fatness: f32) -> WorldTriangle {
+    face_at(x, 0., tag, fatness)
+}
+fn face_at(x: f32, y: f32, tag: u32, fatness: f32) -> WorldTriangle {
     WorldTriangle::from_vertices(
         [
-            Vector3::new(x - 2., 0., -2.),
-            Vector3::new(x - 2., 0., 2.),
-            Vector3::new(x + 2., 0., -2.),
+            Vector3::new(x - 2., y, -2.),
+            Vector3::new(x - 2., y, 2.),
+            Vector3::new(x + 2., y, -2.),
         ],
         material(),
         tag,
@@ -159,7 +162,16 @@ fn thin_endpoint_and_barycentric_tolerances_survive_broadphase() {
 
 #[test]
 fn predictive_contacts_and_retention_match_full_scan_for_every_primitive() {
-    let mut triangles = tiled();
+    // The recovered narrow phase gates on plane distance and leaves lateral
+    // rejection to the broadphase, so a full scan would report predictive
+    // contacts on coplanar tiles hundreds of metres away. Lower the far tiles
+    // out of predictive reach; the hierarchy still spans all 1024 meshes.
+    let mut triangles: Vec<_> = (0..1024)
+        .map(|i| {
+            let x = ((i * 37) % 1024) as f32 * 10.;
+            face_at(x, if x == 0. { 0. } else { -10. }, i, 0.)
+        })
+        .collect();
     triangles.insert(0, face(0., 9000, 0.02));
     triangles.insert(0, face(0., 9001, 0.02));
     let mut linear = BoardWorld::new(triangles.clone());
