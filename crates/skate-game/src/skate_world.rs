@@ -223,13 +223,24 @@ pub(crate) fn collision_world(
     if let Some(archive) = retail_archive(map)? {
         return retail_collision_world(archive, material);
     }
+    portable_world(&map.geometry.collision, &map.materials, material)
+}
+
+/// Portable triangle world: 1 mm vertex welding, reconstructed adjacency and
+/// contiguous-range broadphase metadata. Shared by the playable map and by
+/// static prop instances, which supply already-placed world-space triangles.
+fn portable_world(
+    collision: &[skate_data::skate_map::Collision],
+    materials: &[skate_data::skate_map::Material],
+    material: RetailContactMaterial,
+) -> Result<BoardWorld, String> {
     // Match the reference RW mesh compiler's 1 mm vertex welding and reversed
     // edge pairing. Triangle diagonals are adjacency, never authored ledges.
     let mut welded = HashMap::<[i64; 3], usize>::new();
     let mut positions = Vec::<Vec3>::new();
     let mut vertices = Vec::new();
     let mut normals = Vec::new();
-    for tri in &map.geometry.collision {
+    for tri in collision {
         let ids = tri.points.map(|p| {
             let inverse = 1.0 / f64::from(0.001_f32);
             let key = p.map(|v| (f64::from(v) * inverse).round() as i64);
@@ -252,9 +263,7 @@ pub(crate) fn collision_world(
         vec![TriangleFeature::ONE_SIDED | TriangleFeature::USE_EDGE_COSINES | 0xe0; vertices.len()];
     // Fully native maps need no reconstructed adjacency. Mixed maps still
     // include every face when finding neighbors for their authored geometry.
-    if map
-        .geometry
-        .collision
+    if collision
         .iter()
         .any(|t| t.native_edges.is_none())
     {
@@ -303,11 +312,11 @@ pub(crate) fn collision_world(
     }
     let mut triangles = Vec::with_capacity(vertices.len());
     let mut packed_surfaces = Vec::with_capacity(vertices.len());
-    for (i, source) in map.geometry.collision.iter().enumerate() {
+    for (i, source) in collision.iter().enumerate() {
         if let Some(edges) = source.native_edges {
             (flags[i], cosines[i]) = decode_native_edges(edges)?;
         }
-        let m = &map.materials[source.material as usize - 1];
+        let m = &materials[source.material as usize - 1];
         // Exact EncodeRwSurfaceId mapping from the reference native adapter.
         packed_surfaces.push((m.audio | (m.physics << 7) | (m.pattern << 12)) as u16);
         let points = vertices[i].map(|id| {
@@ -355,6 +364,116 @@ pub(crate) fn collision_world(
         island_flags: 0,
     };
     BoardWorld::with_query_metadata(triangles, metadata).map_err(str::to_owned)
+}
+
+/// Static collision for spawned DMO prop instances. No authored DMO collision
+/// mesh is recovered, so each instance reuses its template's render triangles,
+/// baked into world space with the instance transform at load. Reflections
+/// flip winding to keep outward normals; degenerate render triangles are
+/// skipped rather than rejecting the whole layer. Props stay out of the map
+/// collision world so Phase 2 can rebuild moved instances independently.
+pub(crate) fn prop_collision_world(
+    map: &SkateMap,
+    objects: &[skate_data::skate_map::StaticObject],
+    material: RetailContactMaterial,
+) -> Result<Option<BoardWorld>, String> {
+    let mut collision = Vec::new();
+    for object in objects {
+        let t = &object.transform;
+        // Row-vector affine (v @ basis + translation), as in spawn_instances.
+        let transform = |p: [f32; 3]| -> [f32; 3] {
+            [
+                p[0] * t[0] + p[1] * t[3] + p[2] * t[6] + t[9],
+                p[0] * t[1] + p[1] * t[4] + p[2] * t[7] + t[10],
+                p[0] * t[2] + p[1] * t[5] + p[2] * t[8] + t[11],
+            ]
+        };
+        let determinant = t[0] * (t[4] * t[8] - t[5] * t[7])
+            - t[1] * (t[3] * t[8] - t[5] * t[6])
+            + t[2] * (t[3] * t[7] - t[4] * t[6]);
+        let range =
+            object.first_index as usize..(object.first_index + object.index_count) as usize;
+        for tri in map.geometry.indices[range].chunks_exact(3) {
+            let mut points =
+                [tri[0], tri[1], tri[2]].map(|i| transform(map.geometry.vertices[i as usize].position));
+            if determinant < 0. {
+                points.swap(1, 2);
+            }
+            let [a, b, c] = points.map(Vec3::from_array);
+            let cross = (b - a).cross(c - a);
+            if cross.length_squared() <= 0. {
+                continue;
+            }
+            let source = &map.materials
+                [map.geometry.vertices[tri[0] as usize].material as usize - 1];
+            // Wheels read the packed surface nibble from the triangle tag; use
+            // the same EncodeRwSurfaceId mapping as static map collision.
+            let surface = source.audio | (source.physics << 7) | (source.pattern << 12);
+            collision.push(skate_data::skate_map::Collision {
+                points,
+                surface,
+                material: map.geometry.vertices[tri[0] as usize].material,
+                native_edges: None,
+            });
+        }
+    }
+    if collision.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(portable_world(&collision, &map.materials, material)?))
+}
+
+/// Load the district's prop package and build its static collision layer.
+/// The package is a presentation supplement: missing or invalid files leave
+/// props uncollidable rather than failing the map, matching the render path.
+pub(crate) fn load_prop_collision(
+    asset_root: &std::path::Path,
+    map_name: &str,
+    material: RetailContactMaterial,
+) -> Option<BoardWorld> {
+    let path = asset_root
+        .join("private")
+        .join("native-props")
+        .join(format!("{map_name}.skate"));
+    if !path.is_file() {
+        return None;
+    }
+    let loaded = std::fs::read(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|data| SkateMap::parse_render_only(&data));
+    let map = match loaded {
+        Ok(map) => map,
+        Err(error) => {
+            warn!("SKATE_PROP_COLLISION: {}: {error}", path.display());
+            return None;
+        }
+    };
+    let mut objects = Vec::new();
+    for extension in map.extensions.iter().filter(|e| e.tag == *b"MOBJ") {
+        match skate_data::skate_map::parse_static_objects(&map, extension) {
+            Ok(parsed) => objects.extend(parsed),
+            Err(error) => {
+                warn!("SKATE_PROP_COLLISION: {}: {error}", path.display());
+                return None;
+            }
+        }
+    }
+    match prop_collision_world(&map, &objects, material) {
+        Ok(world) => {
+            if let Some(world) = &world {
+                info!(
+                    "SKATE_PROP_COLLISION: {map_name} instances={} triangles={}",
+                    objects.len(),
+                    world.triangles().len()
+                );
+            }
+            world
+        }
+        Err(error) => {
+            warn!("SKATE_PROP_COLLISION: {}: {error}", path.display());
+            None
+        }
+    }
 }
 
 /// Reuse identical render resources without changing authored triangles.
@@ -1153,6 +1272,130 @@ mod tests {
             restitution: 1.,
         }
     }
+
+    /// A 4x1x1 slab template (x ±2, y 0..1, z ±0.5) with two placed instances:
+    /// one translated, one rotated 90° about Y and translated.
+    fn prop_fixture() -> (SkateMap, Vec<skate_data::skate_map::StaticObject>) {
+        let corners = [
+            [-2., 0., -0.5], [2., 0., -0.5], [2., 0., 0.5], [-2., 0., 0.5],
+            [-2., 1., -0.5], [2., 1., -0.5], [2., 1., 0.5], [-2., 1., 0.5],
+        ];
+        let faces = [
+            [4, 7, 6], [4, 6, 5], // +Y top
+            [0, 1, 2], [0, 2, 3], // -Y bottom
+            [1, 5, 6], [1, 6, 2], // +X
+            [0, 7, 4], [0, 3, 7], // -X
+            [3, 2, 6], [3, 6, 7], // +Z
+            [0, 5, 1], [0, 4, 5], // -Z
+        ];
+        let vertex = |position| skate_data::skate_map::Vertex {
+            position,
+            normal: [0., 1., 0.],
+            uv: [0.; 2],
+            lightmap_uv: [0.; 2],
+            material: 1,
+            decal_uv: None,
+            tangent_frame: None,
+        };
+        let map = SkateMap {
+            version: 14,
+            name: "props".into(),
+            spawn: [0.; 3],
+            heading: 0.,
+            environment: vec![0.; 45],
+            materials: vec![skate_data::skate_map::Material {
+                name: "prop".into(),
+                flags: 0,
+                friction: 0.5,
+                restitution: 0.1,
+                color: [1.; 3],
+                roughness: 0.5,
+                emissive: 0.,
+                textures: [0; 5],
+                indirect_strength: 0.,
+                alpha_mode: 0,
+                alpha_cutoff: 0.5,
+                audio: 3,
+                physics: 1,
+                pattern: 0,
+                depth_layer: None,
+                retail_definition: None,
+            }],
+            textures: vec![],
+            geometry: skate_data::skate_map::Geometry {
+                vertices: corners.into_iter().map(vertex).collect(),
+                indices: faces.into_iter().flatten().collect(),
+                collision: vec![],
+            },
+            rails: vec![],
+            doors: vec![],
+            lights: vec![],
+            routes: vec![],
+            extensions: vec![],
+        };
+        let object = |id, transform| skate_data::skate_map::StaticObject {
+            id,
+            name: format!("template/prop{id}"),
+            transform,
+            first_index: 0,
+            index_count: 36,
+            first_collision: 0,
+            collision_count: 0,
+            rails: vec![],
+        };
+        let objects = vec![
+            object(7, [1., 0., 0., 0., 1., 0., 0., 0., 1., 10., 5., 0.]),
+            // 90° about Y (row-vector): x' = -z, z' = x; then z -= 10.
+            object(8, [0., 0., 1., 0., 1., 0., -1., 0., 0., 0., 0., -10.]),
+        ];
+        (map, objects)
+    }
+
+    #[test]
+    fn prop_instances_collide_as_placed_static_triangles() {
+        let (map, objects) = prop_fixture();
+        let mut world = prop_collision_world(&map, &objects, material()).unwrap().unwrap();
+        assert_eq!(world.triangles().len(), 24);
+        // Translated instance: top face at y=6 between x 8..12.
+        let hit = world
+            .query_thin_line(Vector3::new(10., 10., 0.), Vector3::new(10., 0., 0.))
+            .unwrap()
+            .unwrap();
+        assert!((hit.geometry.position.y - 6.).abs() < 1e-4);
+        assert!(hit.geometry.normal.y > 0.99);
+        // The packed surface tag follows the EncodeRwSurfaceId mapping.
+        assert_eq!(hit.tag, 3 | (1 << 7));
+        // Rotated instance: slab now spans z -12..-8, x ±0.5.
+        let hit = world
+            .query_thin_line(Vector3::new(0., 5., -10.), Vector3::new(0., -1., -10.))
+            .unwrap()
+            .unwrap();
+        assert!((hit.geometry.position.y - 1.).abs() < 1e-4);
+        // Outside the rotated footprint: unrotated, this line would hit.
+        assert!(world
+            .query_thin_line(Vector3::new(1.5, 5., -10.), Vector3::new(1.5, -1., -10.))
+            .unwrap()
+            .is_none());
+        // A wheel sphere resting on the translated instance reports a contact.
+        let (query, retention) = crate::physics::ground::query_settings();
+        let volumes = [skate_core::physics::board_world::BoardWorldVolume {
+            body: skate_core::physics::board_step::CollisionBody::Board(
+                skate_core::physics::board::BodyId::Deck,
+            ),
+            primitive: skate_core::physics::world_contact::ContactPrimitive::Sphere(
+                skate_core::physics::collision::Sphere {
+                    center: Vector3::new(10., 6.05, 0.),
+                    radius: 0.1,
+                },
+            ),
+            linear_velocity: Vector3::ZERO,
+            material: material(),
+        }];
+        let contacts = world.query_primitives(&volumes, query, retention);
+        assert!(!contacts.is_empty());
+        assert!(contacts.iter().all(|c| c.contact.normal.y > 0.9));
+    }
+
     #[test]
     fn native_edges_override_generated_adjacency() {
         let mut map = demo();

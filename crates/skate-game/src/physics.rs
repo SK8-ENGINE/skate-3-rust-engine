@@ -99,6 +99,8 @@ pub(crate) struct GamePhysics {
     pub board: BoardRuntime,
     pub riding: RidingOutputs,
     world: BoardWorld,
+    /// Static DMO prop instances; a separate layer so Phase 2 can move them.
+    prop_world: Option<BoardWorld>,
     grind_world: std::sync::Arc<crate::grind_world::StaticProvider>,
     grind_materials: grind_materials::GrindMaterials,
     offboard_grab_scene: offboard::grab_scene::Registry,
@@ -237,6 +239,14 @@ impl GamePhysics {
         &self.world
     }
 
+    pub(crate) fn prop_world(&self) -> Option<&BoardWorld> {
+        self.prop_world.as_ref()
+    }
+
+    pub(crate) fn prop_world_mut(&mut self) -> Option<&mut BoardWorld> {
+        self.prop_world.as_mut()
+    }
+
     /// Flat-world convenience used by private-asset integration tests.
     #[cfg(test)]
     pub fn load(asset_root: &std::path::Path) -> Result<Self, String> {
@@ -304,6 +314,9 @@ impl GamePhysics {
             Some(map) => crate::skate_world::collision_world(map, settings.floor_material)?,
             None => terrain.world(settings.floor_material),
         };
+        let prop_world = map.and_then(|map| {
+            crate::skate_world::load_prop_collision(asset_root, &map.name, settings.floor_material)
+        });
         let grind_world = std::sync::Arc::new(if map.is_none() && terrain == ground::Terrain::Course {
             crate::grind_world::StaticProvider::authored(&crate::grind_world::test_rails())?
         } else { crate::grind_world::StaticProvider::new(map)? });
@@ -331,6 +344,7 @@ impl GamePhysics {
             board,
             riding,
             world,
+            prop_world,
             grind_world,
             grind_materials,
             offboard_grab_scene,
@@ -351,7 +365,7 @@ impl GamePhysics {
     #[cfg(test)]
     fn advance_board(&mut self) -> Result<(), String> {
         self.board.clear_forces();
-        self.riding.start_wheel_queries(&self.board, &self.world)?;
+        self.riding.start_wheel_queries(&self.board, &self.world, self.prop_world.as_ref())?;
         self.riding.finish_wheel_queries()?;
         let volumes = colliders::world_volumes(&self.board, &self.settings);
         let contacts = self

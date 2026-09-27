@@ -265,7 +265,7 @@ impl Runtime {
             physics.board.clear_forces();
             physics
                 .riding
-                .start_wheel_queries(&physics.board, &physics.world)?;
+                .start_wheel_queries(&physics.board, &physics.world, physics.prop_world.as_ref())?;
             physics.riding.finish_wheel_queries()?;
             let volumes = super::colliders::world_volumes(&physics.board, &physics.settings);
             let collisions = physics

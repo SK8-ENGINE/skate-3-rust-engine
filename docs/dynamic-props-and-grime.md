@@ -142,6 +142,37 @@ material is duplicated. Packages without MOBJ records keep the old batched
 path, so existing baked packages still load; re-export regenerates them in
 the instance format.
 
+### Phase 1: static prop collision
+
+No authored DMO collision mesh is recovered from `worlddmo.big` (the district
+sim RX2s carry clustered-mesh collision, but the template cache has none
+verified), so each instance reuses its template's render triangles as its
+collision volume, baked into world space with the instance transform at load
+(`skate_world::prop_collision_world`). Reflections flip winding to keep
+outward normals; degenerate render triangles are skipped. The authored locator
+bounds are not needed: broadphase bounds come from the placed triangles.
+
+Props stay out of the map `collision_world`. They live in a second
+`BoardWorld` (`GamePhysics::prop_world`, built by the shared portable
+triangle pipeline: 1 mm welding, reconstructed adjacency, contiguous-range
+broadphase metadata) so Phase 2 can rebuild moved instances without touching
+static map geometry. The solve phase queries board and skeleton volumes
+against both worlds; wheel line queries keep the nearer hit of the two
+worlds. Triangle tags carry the packed surface ID of the prop's render
+material (same `audio | physics<<7 | pattern<<12` mapping as static
+collision), so wheel surface classification keeps working.
+
+Deck probes, camera, grind, offboard and climbing queries still see only the
+static map world. Prop contacts report `CollisionBody::StaticWorld`; nothing
+moves or pushes back yet. The props package is parsed twice at load (render
+spawn and collision layer), matching its presentation-supplement status: a
+missing or invalid package leaves props uncollidable instead of failing the
+map.
+
+Validation: unit test with a slab template and two instances (translated and
+rotated) covering line queries, rotation of the footprint, packed surface
+tags, and a wheel-sphere contact manifold. In-game verification remains.
+
 Validation: synthetic record, rotation/scale/normal and invalid-reference tests;
 original-data template resolution and placement-bound comparison; offline map
 readers and shader composition. Game/recomp was not launched. GPU execution,

@@ -51,7 +51,7 @@ pub(super) fn advance(
     //results stay pending while PlayerInput consumes the preceding records.
     physics
         .riding
-        .start_wheel_queries(&physics.board, &physics.world)?;
+        .start_wheel_queries(&physics.board, &physics.world, physics.prop_world.as_ref())?;
     let skeleton_queries = super::foot_ik_queries::query(&physics.world, &skater.skeleton)?;
     let animation = bevy::log::info_span!("fixed_animation_graphs").in_scope(|| animation_phase::advance(
         physics,

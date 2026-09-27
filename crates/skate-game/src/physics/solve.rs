@@ -45,6 +45,18 @@ pub(super) fn advance(
         skeleton_query,
         physics.retention,
     ));
+    // Static prop instances live in their own world; query the same volumes
+    // against it without disturbing the two native query records above.
+    let query = physics.query;
+    let retention = physics.retention;
+    if let Some(props) = physics.prop_world_mut() {
+        contacts.extend_from_slice(props.query_primitives(&board_volumes, query, retention));
+        contacts.extend_from_slice(props.query_primitives(
+            &skeleton_world_volumes,
+            skeleton_query,
+            retention,
+        ));
+    }
     assembly_contacts::append(
         &mut contacts,
         &board_volumes,
