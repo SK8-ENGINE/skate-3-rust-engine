@@ -49,3 +49,12 @@ fn projection_axis_removes_response_without_disabling_contact_observation() {
     close(state.direction[2], 1.0);
     assert_eq!(state.displacement, [0.0; 4]);
 }
+
+#[test]
+fn garbage_w_lanes_in_collision_input_do_not_leak_into_correction() {
+    let mut state = state();
+    state.update(input([0.2, 0.0, 0.0, 9.0], [0.0, 0.1, 0.0, f32::NAN]));
+    assert!(state.active);
+    assert_eq!(state.direction[3], 0.0);
+    assert_eq!(state.displacement[3], 0.0);
+}
