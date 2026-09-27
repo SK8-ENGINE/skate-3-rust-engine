@@ -67,6 +67,23 @@ fn button_bits(gamepad: &gilrs::Gamepad) -> u16 {
             bits |= bit;
         }
     }
+    // Hats arrive as DPad axes, and the axis_dpad_to_button filter that would
+    // turn them into button presses is a default filter — disabled above so
+    // stick values stay raw. Derive the dpad bits from the axes directly.
+    let dpad_x = gamepad.axis_data(Axis::DPadX).map_or(0.0, |data| data.value());
+    let dpad_y = gamepad.axis_data(Axis::DPadY).map_or(0.0, |data| data.value());
+    if dpad_y > 0.5 {
+        bits |= 0x0001;
+    }
+    if dpad_y < -0.5 {
+        bits |= 0x0002;
+    }
+    if dpad_x < -0.5 {
+        bits |= 0x0004;
+    }
+    if dpad_x > 0.5 {
+        bits |= 0x0008;
+    }
     bits
 }
 
