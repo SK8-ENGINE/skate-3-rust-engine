@@ -215,6 +215,16 @@ fn gpu_probe(prepass: bool) {
             })
             .await
             .unwrap();
+        // The game clamps MSAA to adapter support (graphics_menu); Apple GPUs stop at 4x.
+        let msaa_samples = [8, 4, 2]
+            .into_iter()
+            .find(|&samples| {
+                adapter
+                    .get_texture_format_features(wgpu::TextureFormat::Rgba8Unorm)
+                    .flags
+                    .sample_count_supported(samples)
+            })
+            .unwrap_or(1);
         allocation_reuses_resident_textures(&device);
         let module = validate(
             std::env::var_os("SKATE_SHADER_PROBE_FALLBACK").is_none(),
@@ -310,7 +320,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
                 bias: Default::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: if prepass { 1 } else { 8 },
+                count: if prepass { 1 } else { msaa_samples },
                 ..Default::default()
             },
             fragment: Some(wgpu::FragmentState {
@@ -502,7 +512,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
                 view_formats: &[],
             })
         };
-        let msaa = target(8);
+        let msaa = target(msaa_samples);
         let output = target(1);
         let msaa_view = msaa.create_view(&Default::default());
         let output_view = output.create_view(&Default::default());

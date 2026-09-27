@@ -287,7 +287,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
             extractor=xiso_extractor(base,report)
             game_root=work/'disc'
             report('Extracting your ISO')
-            run([extractor,'-x',iso,'-d',game_root],log,report)
+            run([extractor,'-d',game_root,'-x',iso],log,report)  # options first: BSD getopt stops at the first operand
         else:game_root=game_root.resolve()
         required_files=['default.xex']
         if 'core' in groups:required_files += ['data/big/miscload.big','data/big/miscboot.big','data/big/db.big']
