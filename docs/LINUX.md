@@ -47,3 +47,12 @@ Non-Windows input uses gilrs with its default filters disabled (raw axes,
 matching what the TU3 input converter expects). Controller layouts come from
 an embedded copy of SDL_GameControllerDB, and users can override or extend
 mappings via the standard `SDL_GAMECONTROLLERCONFIG` environment variable.
+
+## macOS (Apple Silicon, untested by us)
+
+Contributed from #7, tested by its author on an M3: on macOS wgpu's Vulkan
+backend compiles behind `vulkan-portability` (MoltenVK), and materials use
+the non-bindless path (`BUFFER_BINDING_ARRAY` disabled, because MoltenVK
+lacks robustBufferAccess2). Launch with `MVK_CONFIG_FAST_MATH_ENABLED=0` —
+with fast-math on, the depth prepass and the main pass disagree on skinned,
+morphed customiser skaters and render them as black-and-white patches.

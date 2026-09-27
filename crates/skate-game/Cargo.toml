@@ -41,6 +41,11 @@ skate-platform = { path = "../skate-platform" }
 blake3 = "=1.8.7"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 
+# The renderer requests Backends::VULKAN only; on macOS wgpu compiles Vulkan
+# solely behind `vulkan-portability` (MoltenVK, provided by the devenv shell).
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "=27.0.1", default-features = false, features = ["vulkan-portability"] }
+
 [dev-dependencies]
 naga = { version = "=27.0.3", features = ["wgsl-in"] }
 naga_oil = { version = "=0.20.0", default-features = false }
