@@ -38,7 +38,7 @@ def main():
     window.title('Skate 3 Rust Engine setup')
     window.geometry('700x420');window.resizable(False,False)
     icon=ROOT/'docs/images/skating-crab.ico'
-    if icon.is_file():window.iconbitmap(str(icon))
+    if icon.is_file() and os.name=='nt':window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
     ttk.Label(frame,text='Update game assets' if updating else 'Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
     ttk.Label(frame,text=('Asset version changes: '+(', '.join(sorted(changed)) or 'checking prepared content')+'.\nOnly changed or incomplete groups will be prepared again.\nYour previous character data remains until preparation succeeds.\nSelect your Skate 3 default.xex (or ISO) to continue.\nKeep the game data beside default.xex.') if updating else 'Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, customiser, animations and disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',

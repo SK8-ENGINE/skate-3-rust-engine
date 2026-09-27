@@ -19,8 +19,37 @@ def map_workers():
             # briefly hold several copies of geometry and textures.
             count=min(count,max(1,(memory.available-2*1024**3)//(3*1024**3)))
     return count
-XISO_URL='https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso-Win64_Release.zip'
-XISO_SHA='fec88d03c7efd6205ab09be4abba70c0afd0eb27a5709f0a6235b828ba5ac11e'
+XISO_TAG='build-202505152050'
+if sys.platform=='win32':
+    XISO_URL=f'https://github.com/XboxDev/extract-xiso/releases/download/{XISO_TAG}/extract-xiso-Win64_Release.zip'
+    XISO_SHA='fec88d03c7efd6205ab09be4abba70c0afd0eb27a5709f0a6235b828ba5ac11e'
+elif sys.platform.startswith('linux'):
+    XISO_URL=f'https://github.com/XboxDev/extract-xiso/releases/download/{XISO_TAG}/extract-xiso_Linux.zip'
+    # TODO(PORTING): pin the sha256 of extract-xiso_Linux.zip from a real
+    # download before enabling this fallback on Linux (see PORTING.md).
+    XISO_SHA=None
+else:
+    XISO_URL=None;XISO_SHA=None
+
+def _musl():
+    import platform
+    libc=platform.libc_ver()[0]
+    return bool(libc) and libc!='glibc'
+
+def xiso_extractor(base,report):
+    """Native skate-xiso binary when available; the pinned extract-xiso
+    download remains the fallback for the packaged Windows setup."""
+    suffix='.exe' if os.name=='nt' else ''
+    override=os.environ.get('SKATE_XISO')
+    candidates=[Path(override)] if override else []
+    repo=TOOLS.parent
+    candidates+=[repo/'target'/'release'/('skate-xiso'+suffix),repo/'target'/'debug'/('skate-xiso'+suffix)]
+    for candidate in candidates:
+        if candidate.is_file():return candidate
+    if _musl():
+        raise RuntimeError('musl libc: the prebuilt extract-xiso (glibc) is not supported. '
+                           'Build the native extractor: cargo build --release -p skate-xiso')
+    return dependency(base/'tools','extract-xiso',XISO_URL,XISO_SHA,report)
 
 def digest(path):
     with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
@@ -54,13 +83,17 @@ def unpack_zip(archive,destination):
         z.extractall(destination)
 
 def dependency(cache,name,url,sha,report):
+    if url is None or sha is None:
+        raise RuntimeError('No pinned '+name+' build for this platform yet (see PORTING.md)')
     folder=cache/name
     marker=folder/'.complete'
     if not marker.is_file():
         unpack_zip(download(url,sha,cache,report),folder)
         marker.write_text(sha)
-    executable=next(folder.rglob(name+'.exe'),None)
+    suffix='.exe' if os.name=='nt' else ''
+    executable=next(folder.rglob(name+suffix),None)
     if executable is None:raise RuntimeError('Missing downloaded tool: '+name)
+    if os.name!='nt':executable.chmod(0o755)
     return executable
 
 def run(args,log,report):
@@ -251,7 +284,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         if game_root is None:
             iso=iso.resolve()
             if not iso.is_file() or iso.suffix.lower()!='.iso':raise RuntimeError('Select an Xbox 360 Skate 3 ISO')
-            extractor=dependency(base/'tools','extract-xiso',XISO_URL,XISO_SHA,report)
+            extractor=xiso_extractor(base,report)
             game_root=work/'disc'
             report('Extracting your ISO')
             run([extractor,'-x',iso,'-d',game_root],log,report)

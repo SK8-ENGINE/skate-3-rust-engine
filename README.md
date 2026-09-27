@@ -38,7 +38,7 @@ only changed asset groups.
 
 ## Build
 
-Requires Windows, Rust with the MSVC toolchain, and LLVM installed in its default
+Windows builds require Rust with the MSVC toolchain, and LLVM installed in its default
 location. Run `BUILD.bat` to build, then `PLAY.bat` to launch the test world.
 `PLAY.bat` opens your saved map (University by default); use the in-game menu to switch maps, or drag a `.skate` file onto `PLAY.bat`. An XInput controller is required for gameplay;
 Escape opens difficulty and graphics settings.
@@ -50,6 +50,15 @@ numbered releases are published separately.
 
 Custom animations and climbing support remain available, but no custom clips
 are shipped. The included format-demo map is original procedural content.
+
+## Linux
+
+Experimental Linux support. Install the system dependencies (wayland,
+libxcb, libxkbcommon, alsa-lib, libudev/eudev, clang) and run `BUILD.sh`,
+then `PLAY.sh`. On musl systems BUILD.sh links dynamically
+(`-C target-feature=-crt-static`); use `--no-default-features` to skip the
+glibc-only Steam helper and Bevy dynamic linking. See
+[docs/LINUX.md](docs/LINUX.md) for details.
 
 Implementation notes are in [`docs/`](docs/). Patched Bevy dependencies and
 their licenses are in [`vendor/`](vendor/). This is an unofficial project,
