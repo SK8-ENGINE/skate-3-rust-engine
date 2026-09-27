@@ -239,3 +239,42 @@ Validation: unit tests cover fall + settle + sleep with re-baked triangle
 queries, a skater sphere pushing a resting prop awake, and long-idle
 stability (no sinking, no divergence); the full `skate-game` suite is green.
 In-game verification remains.
+
+### Phase 3: grabbing and carrying props
+
+Offboard gameplay glue (`physics::prop_carry`). **Button: A** (XUSB bit 12,
+controller word bit 21), rising edge toggles grab/drop. Stock offboard
+graphs give A no action of its own — X jumps, B sprints, Y mounts the board,
+RB is `GrabWorld` for climbing, LT/RT drop/throw the board — so the tap only
+briefly suppresses sprint. Toggle rather than hold: carrying is
+locomotion-compatible, and a deliberate drop command reads better than
+release-on-release for a feature about moving props. The edge is computed in
+`frame::advance` from `DerivedControllerInput` (words 13 vs 6) and passed to
+`solve::advance`.
+
+Detection: while `BipedGround` (on foot only — not on the board, airborne or
+wiping out), the nearest body centre within 1.8 m of the skater root
+(`animation_to_world` row 3) is grabbable if it lies roughly ahead
+(horizontal facing dot ≥ 0.25) or is closer than 0.5 m. One prop at a time.
+
+Carry: the prop kinematic-follows a point 0.7 m ahead and 0.9 m above the
+root by *velocity* — `carry_to` sets the body's linear velocity toward the
+target (capped at 6 m/s) and zeroes angular velocity each tick, never
+teleporting, so the narrowphase, skater pushes and the rebaked triangle
+layer keep working. Gravity is not suspended explicitly: overwriting the
+velocity every tick leaves only a g·dt² sag (~3 mm), corrected by the next
+tick. Wake is permanent while held (`wake()` resets cool-down each tick).
+
+Drop: a second press, leaving `BipedGround`, or the prop ending more than
+3 m from the carrier (stuck against geometry) releases it. The current
+velocity is kept — releasing while moving throws gently — and re-sleep is
+the natural cool-down from Phase 2.
+
+Multiplayer: prop bodies are host-local today. skate-net would need to
+replicate the held id plus each body's pose/velocity (or full dynamic state)
+to proxies and arbitrate concurrent grabs. Not implemented.
+
+Validation: unit tests cover grab + follow while the carrier moves, drop →
+fall → re-sleep, and the state gate (no grab on board / in the air / in
+wipeout; auto-drop on mount). Full `skate-game` suite green. In-game
+verification remains.

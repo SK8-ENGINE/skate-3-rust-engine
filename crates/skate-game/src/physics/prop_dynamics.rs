@@ -328,6 +328,54 @@ impl PropDynamics {
         Some((body.origin(), body.rates.basis))
     }
 
+    /// World position of one body's box centre.
+    pub(crate) fn position_of(&self, id: u32) -> Option<Vector3> {
+        Some(self.bodies.get(*self.by_id.get(&id)?)?.rates.position)
+    }
+
+    /// Nearest body centre within `radius` of `point`, as `(id, position)`.
+    pub(crate) fn nearest_body(&self, point: Vector3, radius: f32) -> Option<(u32, Vector3)> {
+        let mut best: Option<(u32, Vector3, f32)> = None;
+        for body in &self.bodies {
+            let d = sub(body.rates.position, point);
+            let distance_squared = dot(d, d);
+            if distance_squared > radius * radius {
+                continue;
+            }
+            if best.map_or(true, |(_, _, b)| distance_squared < b) {
+                best = Some((body.id, body.rates.position, distance_squared));
+            }
+        }
+        best.map(|(id, position, _)| (id, position))
+    }
+
+    /// Kinematic follow while carried: wake and steer the body toward
+    /// `target` by velocity (never teleport), capped at `max_speed`, with
+    /// rotation frozen. Returns false if the id is unknown.
+    pub(crate) fn carry_to(
+        &mut self,
+        id: u32,
+        target: Vector3,
+        max_speed: f32,
+        time_step: f32,
+    ) -> bool {
+        let Some(&index) = self.by_id.get(&id) else {
+            return false;
+        };
+        let body = &mut self.bodies[index];
+        body.wake();
+        let delta = sub(target, body.rates.position);
+        let distance = dot(delta, delta).sqrt();
+        let speed = (distance / time_step).min(max_speed);
+        body.rates.linear_velocity = if distance > 1e-6 {
+            scale(delta, speed / distance)
+        } else {
+            Vector3::ZERO
+        };
+        body.rates.angular_velocity = Vector3::ZERO;
+        true
+    }
+
     /// Advance awake bodies one tick; wake bodies the skater touches. Moved
     /// instances re-bake their triangles in the collision layer afterwards.
     pub(crate) fn step(
@@ -843,5 +891,82 @@ mod tests {
         assert!(p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
         assert!(p.y > REST_Y - 0.1, "sank to {}", p.y);
         assert!((p.y - settled.y).abs() < 0.02, "drifted {} -> {}", settled.y, p.y);
+    }
+
+    // Phase 3: offboard carry glue (`crate::physics::prop_carry`).
+
+    fn carrier(state: skate_core::player::state::PhysicalStateId, z: f32) -> crate::physics::prop_carry::Carrier {
+        crate::physics::prop_carry::Carrier {
+            state,
+            position: Vector3::new(0., super::super::ground::HEIGHT + 0.9, z),
+            forward: Vector3::new(0., 0., 1.),
+            time_step: simulation().time_step,
+        }
+    }
+
+    /// Grabbing the prop ahead picks it up; it follows as the carrier moves.
+    #[test]
+    fn grabbed_prop_follows_carrier() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let state = skate_core::player::state::PhysicalStateId::BipedGround;
+        carry.update(&mut dynamics, true, carrier(state, 0.));
+        assert_eq!(carry.held(), Some(7));
+        for i in 0..60 {
+            carry.update(&mut dynamics, false, carrier(state, 0.05 * i as f32));
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let p = dynamics.position_of(7).unwrap();
+        assert!(p.z > 2.0, "prop followed to z={}", p.z);
+        assert!(p.y > super::super::ground::HEIGHT, "carried prop underground: {p:?}");
+    }
+
+    /// Dropping releases the prop; it falls, keeps no NaN, and sleeps again.
+    #[test]
+    fn dropped_carry_falls_and_sleeps() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let state = skate_core::player::state::PhysicalStateId::BipedGround;
+        carry.update(&mut dynamics, true, carrier(state, 0.));
+        for _ in 0..30 {
+            carry.update(&mut dynamics, false, carrier(state, 0.));
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        carry.update(&mut dynamics, true, carrier(state, 0.));
+        assert_eq!(carry.held(), None);
+        for _ in 0..300 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let p = dynamics.position_of(7).unwrap();
+        assert!((p.y - REST_Y).abs() < 0.1, "resting height {}", p.y);
+        assert!(dynamics.bodies[0].asleep, "dropped prop never slept");
+    }
+
+    /// The grab is ignored unless the skater is on foot.
+    #[test]
+    fn grab_requires_biped_ground() {
+        let (_world, _layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        for state in [
+            skate_core::player::state::PhysicalStateId::PhysicsGround,
+            skate_core::player::state::PhysicalStateId::BipedAir,
+            skate_core::player::state::PhysicalStateId::WipeoutGround,
+        ] {
+            carry.update(&mut dynamics, true, carrier(state, 0.));
+            assert_eq!(carry.held(), None, "{state:?} must not grab");
+        }
+        // Grabbing, then mounting the board, drops the prop automatically.
+        carry.update(
+            &mut dynamics,
+            true,
+            carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.),
+        );
+        assert_eq!(carry.held(), Some(7));
+        carry.update(
+            &mut dynamics,
+            false,
+            carrier(skate_core::player::state::PhysicalStateId::PhysicsGround, 0.),
+        );
+        assert_eq!(carry.held(), None);
     }
 }

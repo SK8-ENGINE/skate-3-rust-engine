@@ -14,6 +14,7 @@ pub(super) fn advance(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
     truck_targets: [f32; 2],
+    grab_rising: bool,
 ) -> Result<(), String> {
     let before = diagnostics::snapshot(physics, skater);
     diagnostics::validate(&before, "before shared solve").map_err(|error| format!(
@@ -40,6 +41,27 @@ pub(super) fn advance(
     skeleton_query.edge_cos_bend_normal_threshold = -1.0;
     let mut skeleton_world_volumes = skeleton_volumes.clone();
     skeleton_colliders::retain_world_volumes(&mut skeleton_world_volumes, &skater.skeleton_collision);
+    // Prop carry (Phase 3) steers the held body before pushes/integration so
+    // the follow velocity participates in this tick's contacts and rebake.
+    {
+        let root = skater.animated_skeleton.roots.animation_to_world;
+        let flat = skate_core::math::Vector3::new(root[2][0], 0.0, root[2][2]);
+        let length = (flat.x * flat.x + flat.z * flat.z).sqrt();
+        let forward = if length > 1e-3 {
+            skate_core::math::Vector3::new(flat.x / length, 0.0, flat.z / length)
+        } else {
+            skate_core::math::Vector3::new(0.0, 0.0, 1.0)
+        };
+        physics.update_prop_carry(
+            grab_rising,
+            super::prop_carry::Carrier {
+                state: skater.player_state.current(),
+                position: skate_core::math::Vector3::new(root[3][0], root[3][1], root[3][2]),
+                forward,
+                time_step: physics.settings.step.simulation.time_step,
+            },
+        );
+    }
     // Dynamic props push back on the skater's live volumes before the queries
     // below see the freshly re-baked prop triangles.
     let push_volumes: Vec<_> = board_volumes

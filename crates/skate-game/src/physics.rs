@@ -58,6 +58,7 @@ mod landing_quality;
 mod offboard;
 mod player_input;
 mod player_state;
+pub(crate) mod prop_carry;
 pub(crate) mod prop_dynamics;
 mod settings;
 mod skeleton_grind_air;
@@ -104,6 +105,8 @@ pub(crate) struct GamePhysics {
     /// re-bake their triangle ranges (Phase 2).
     prop_layer: Option<crate::skate_world::PropCollisionLayer>,
     prop_dynamics: Option<prop_dynamics::PropDynamics>,
+    /// Offboard prop carry state (Phase 3); one held prop at a time.
+    pub(crate) prop_carry: prop_carry::PropCarry,
     grind_world: std::sync::Arc<crate::grind_world::StaticProvider>,
     grind_materials: grind_materials::GrindMaterials,
     offboard_grab_scene: offboard::grab_scene::Registry,
@@ -264,6 +267,13 @@ impl GamePhysics {
         dynamics.step(&self.world, layer, volumes);
     }
 
+    /// Offboard grab/carry/drop of dynamic props (Phase 3).
+    pub(crate) fn update_prop_carry(&mut self, grab_rising: bool, carrier: prop_carry::Carrier) {
+        if let Some(dynamics) = self.prop_dynamics.as_mut() {
+            self.prop_carry.update(dynamics, grab_rising, carrier);
+        }
+    }
+
     /// Flat-world convenience used by private-asset integration tests.
     #[cfg(test)]
     pub fn load(asset_root: &std::path::Path) -> Result<Self, String> {
@@ -372,6 +382,7 @@ impl GamePhysics {
             world,
             prop_layer,
             prop_dynamics,
+            prop_carry: prop_carry::PropCarry::default(),
             grind_world,
             grind_materials,
             offboard_grab_scene,
