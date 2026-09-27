@@ -127,30 +127,57 @@ struct Reader<'a> {
     at: usize,
 }
 
+/// A decoded MOBJ static-object record: identity plus a geometry range shared
+/// with other instances of the same template.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticObject {
+    pub id: u32,
+    pub name: String,
+    /// Row-vector affine placement (v @ basis + translation): the three basis
+    /// rows, then the translation. Schema 3 records carry an origin only, so
+    /// their basis is the identity.
+    pub transform: [f32; 12],
+    pub first_index: u32,
+    pub index_count: u32,
+    pub first_collision: u32,
+    pub collision_count: u32,
+    pub rails: Vec<u32>,
+}
+
 /// MOBJ schema 3 stores editor ownership of ranges in the base geometry.
 /// Physics-disabled objects can use those unchanged static arrays. Explicit
 /// body types still require a runtime adapter and must not be flattened.
-pub fn validate_static_objects(map: &SkateMap, extension: &Extension) -> Result<(), String> {
-    if extension.schema != 3 { return Err("Unsupported MOBJ schema".into()); }
+/// Schema 4 appends a 12-float row-vector affine transform per record so
+/// instances can share one template geometry range with distinct placements.
+pub fn parse_static_objects(map: &SkateMap, extension: &Extension) -> Result<Vec<StaticObject>, String> {
+    if extension.schema != 3 && extension.schema != 4 { return Err("Unsupported MOBJ schema".into()); }
     let mut r = Reader { bytes: &extension.payload, at: 0 };
     let count = r.u()?;
     r.check_count(count, 80)?;
     let mut ids = std::collections::HashSet::new();
+    let mut objects = Vec::with_capacity(count as usize);
     for _ in 0..count {
-        if !ids.insert(r.u()?) { return Err("Duplicate MOBJ identity".into()); }
+        let id = r.u()?;
+        if !ids.insert(id) { return Err("Duplicate MOBJ identity".into()); }
         let name = r.string()?;
-        r.floats::<3>()?;
-        for limit in [map.geometry.indices.len(), map.geometry.collision.len()] {
+        let origin = r.floats::<3>()?;
+        let mut ranges = [0; 4];
+        for (limit, slot) in [(map.geometry.indices.len(), 0), (map.geometry.collision.len(), 2)] {
             let first = r.u()? as usize;
             let length = r.u()? as usize;
             if first.checked_add(length).is_none_or(|end| end > limit) {
                 return Err(format!("MOBJ {name} geometry range is invalid"));
             }
+            ranges[slot] = first as u32;
+            ranges[slot + 1] = length as u32;
         }
         let rails = r.u()?;
         r.check_count(rails, 4)?;
+        let mut rail_ids = Vec::with_capacity(rails as usize);
         for _ in 0..rails {
-            if r.u()? as usize >= map.rails.len() { return Err(format!("MOBJ {name} rail index is invalid")); }
+            let rail = r.u()?;
+            if rail as usize >= map.rails.len() { return Err(format!("MOBJ {name} rail index is invalid")); }
+            rail_ids.push(rail);
         }
         if r.u()? != 0 {
             return Err(format!("MOBJ {name} requests object physics, which requires a body adapter"));
@@ -160,9 +187,28 @@ pub fn validate_static_objects(map: &SkateMap, extension: &Extension) -> Result<
         for _ in 0..2 {
             if r.u()? > 1 { return Err(format!("MOBJ {name} has an invalid boolean")); }
         }
+        let transform = if extension.schema >= 4 {
+            r.floats::<12>()?
+        } else {
+            [1., 0., 0., 0., 1., 0., 0., 0., 1., origin[0], origin[1], origin[2]]
+        };
+        objects.push(StaticObject {
+            id,
+            name,
+            transform,
+            first_index: ranges[0],
+            index_count: ranges[1],
+            first_collision: ranges[2],
+            collision_count: ranges[3],
+            rails: rail_ids,
+        });
     }
     if r.at != r.bytes.len() { return Err("MOBJ has trailing data".into()); }
-    Ok(())
+    Ok(objects)
+}
+
+pub fn validate_static_objects(map: &SkateMap, extension: &Extension) -> Result<(), String> {
+    parse_static_objects(map, extension).map(|_| ())
 }
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
@@ -375,14 +421,19 @@ impl SkateMap {
     }
 
     /// Decode a supplemental presentation package without requiring collision.
-    /// Playable map loading continues to use `parse`/`load`.
+    /// Playable map loading continues to use `parse`/`load`. Static MOBJ
+    /// instance records are presentation data here: they carry no collision
+    /// until a physics adapter exists.
     pub fn parse_render_only(data: &[u8]) -> Result<Self, String> {
         let map = Self::parse_inner(data, 4, false)?;
         if !map.geometry.collision.is_empty() || !map.rails.is_empty()
             || !map.doors.is_empty() || !map.lights.is_empty() || !map.routes.is_empty()
-            || map.extensions.iter().any(|e| e.tag != *b"WMET")
+            || map.extensions.iter().any(|e| e.tag != *b"WMET" && e.tag != *b"MOBJ")
         {
             return Err("SKATE render-only package contains non-presentation data".into());
+        }
+        for extension in map.extensions.iter().filter(|e| e.tag == *b"MOBJ") {
+            validate_static_objects(&map, extension)?;
         }
         Ok(map)
     }
@@ -737,5 +788,109 @@ impl SkateMap {
             routes,
             extensions,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn map(indices: u32) -> SkateMap {
+        SkateMap {
+            version: 14,
+            name: "props".into(),
+            spawn: [0.; 3],
+            heading: 0.,
+            environment: vec![0.; 45],
+            materials: vec![],
+            textures: vec![],
+            geometry: Geometry {
+                vertices: vec![],
+                indices: vec![0; indices as usize],
+                collision: vec![],
+            },
+            rails: vec![],
+            doors: vec![],
+            lights: vec![],
+            routes: vec![],
+            extensions: vec![],
+        }
+    }
+
+    fn u32s(payload: &mut Vec<u8>, values: &[u32]) {
+        for v in values {
+            payload.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+
+    fn floats(payload: &mut Vec<u8>, values: &[f32]) {
+        for v in values {
+            payload.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+
+    fn record(payload: &mut Vec<u8>, id: u32, name: &str, range: [u32; 2], affine: Option<[f32; 12]>) {
+        u32s(payload, &[id, name.len() as u32]);
+        payload.extend_from_slice(name.as_bytes());
+        floats(payload, &[10., 20., 30.]); // origin
+        u32s(payload, &[range[0], range[1], 0, 0, 0]); // render range, collision range, no rails
+        u32s(payload, &[0, 0]); // no physics, collision shape
+        floats(payload, &[100., 0.55, 0.05, 0.05, 0.15, 1.]);
+        u32s(payload, &[1, 0]);
+        if let Some(affine) = affine {
+            floats(payload, &affine);
+        }
+    }
+
+    #[test]
+    fn mobj_schema4_instances_share_geometry_ranges() {
+        let mut payload = Vec::new();
+        u32s(&mut payload, &[2]);
+        let affine = [0., 0., -1., 0., 1., 0., 1., 0., 0., 10., 20., 30.];
+        record(&mut payload, 7, "0000000000000042/ramp_a", [12, 36], Some(affine));
+        record(&mut payload, 8, "0000000000000042/ramp_b", [12, 36], Some(affine));
+        let extension = Extension { tag: *b"MOBJ", schema: 4, payload };
+        let objects = parse_static_objects(&map(48), &extension).unwrap();
+        assert_eq!(objects.len(), 2);
+        assert_eq!(objects[0].id, 7);
+        assert_eq!(objects[0].name, "0000000000000042/ramp_a");
+        assert_eq!(objects[0].transform, affine);
+        assert_eq!((objects[0].first_index, objects[0].index_count), (12, 36));
+        assert_eq!(objects[1].first_index, objects[0].first_index);
+    }
+
+    #[test]
+    fn mobj_schema3_transform_is_origin_only() {
+        let mut payload = Vec::new();
+        u32s(&mut payload, &[1]);
+        record(&mut payload, 3, "bench", [0, 12], None);
+        let extension = Extension { tag: *b"MOBJ", schema: 3, payload };
+        let objects = parse_static_objects(&map(12), &extension).unwrap();
+        assert_eq!(objects[0].transform, [1., 0., 0., 0., 1., 0., 0., 0., 1., 10., 20., 30.]);
+    }
+
+    #[test]
+    fn mobj_rejects_out_of_range_and_physics() {
+        let mut payload = Vec::new();
+        u32s(&mut payload, &[1]);
+        record(&mut payload, 1, "bad", [40, 12], None);
+        let extension = Extension { tag: *b"MOBJ", schema: 3, payload };
+        assert!(parse_static_objects(&map(48), &extension)
+            .unwrap_err()
+            .contains("geometry range"));
+
+        let mut payload = Vec::new();
+        u32s(&mut payload, &[1]);
+        u32s(&mut payload, &[1, 4]);
+        payload.extend_from_slice(b"door");
+        floats(&mut payload, &[0.; 3]);
+        u32s(&mut payload, &[0, 12, 0, 0, 0]);
+        u32s(&mut payload, &[1, 0]); // physics body requested
+        floats(&mut payload, &[100., 0.55, 0.05, 0.05, 0.15, 1.]);
+        u32s(&mut payload, &[1, 0]);
+        let extension = Extension { tag: *b"MOBJ", schema: 3, payload };
+        assert!(parse_static_objects(&map(48), &extension)
+            .unwrap_err()
+            .contains("body adapter"));
     }
 }

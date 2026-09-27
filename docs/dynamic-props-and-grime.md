@@ -120,6 +120,28 @@ objects are not yet pushable, droppable or collidable. Their current materials
 use the existing PBR fallback, not the native dynamicobject lighting shader.
 No static district collision, gameplay or animation logic was changed.
 
+### Phase 0: live instances
+
+The exporter no longer bakes every locator into world-space triangles.
+Template geometry is written once per DMO template in model space, and each
+placement becomes a MOBJ schema 4 record (schema 3 fields plus a 12-float
+row-vector affine per object; schema 3 remains supported with an identity
+basis and origin-only placement). Instance transforms are the composed
+`model_matrix @ template matrix @ locator matrix`. The MOBJ name carries
+`template_id/locator_name` so the runtime can group instances by template.
+The JSON sidecar with full 64-bit IDs, matrices and source hashes is kept.
+
+`parse_render_only` accepts and validates static MOBJ extensions (physics
+flags are still rejected). At spawn, packages with MOBJ records take a new
+`spawn_instances` path: one root entity per instance with a `PropInstance
+{ id, template, name }` marker and its own `Transform`, mesh/material entities
+as children. Geometry meshes and PBR/retail materials are built once per
+(template range, material) and shared through cached handles — per-material
+batching is intentionally broken per instance, but no mesh, texture or
+material is duplicated. Packages without MOBJ records keep the old batched
+path, so existing baked packages still load; re-export regenerates them in
+the instance format.
+
 Validation: synthetic record, rotation/scale/normal and invalid-reference tests;
 original-data template resolution and placement-bound comparison; offline map
 readers and shader composition. Game/recomp was not launched. GPU execution,

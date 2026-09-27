@@ -555,20 +555,14 @@ mod performance_inventory {
     }
 }
 
-pub(crate) fn spawn(
-    map: &SkateMap,
-    commands: &mut crate::map_render::SceneCommands,
-    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
-    materials: &mut impl crate::map_render::AssetSink<StandardMaterial>,
-    retail_materials: &mut impl crate::map_render::AssetSink<crate::retail_render::RetailWorldMaterial>,
-    images: &mut impl crate::map_render::AssetSink<Image>,
-    tuning: &crate::retail_render::MaterialTuning,
-) {
-    // Texture roles have different transfer functions even when sharing a record.
-    let _span = info_span!("prepare_map_geometry_and_textures").entered();
+/// Texture roles have different transfer functions even when sharing a record.
+fn texture_loader<'a>(
+    map: &'a SkateMap,
+    images: &'a mut impl crate::map_render::AssetSink<Image>,
+) -> impl FnMut(u32, u8) -> Option<Handle<Image>> + 'a {
     let texture_ids = render_texture_ids(&map.textures);
     let mut cache = HashMap::<(u32, u8), Handle<Image>>::new();
-    let mut texture = |id: u32, role: u8| -> Option<Handle<Image>> {
+    move |id: u32, role: u8| -> Option<Handle<Image>> {
         let id = texture_ids[id as usize];
         if id == 0 {
             return None;
@@ -638,7 +632,112 @@ pub(crate) fn spawn(
                 })
                 .clone(),
         )
-    };
+    }
+}
+
+/// Reindex one triangle batch, preserving authored normals and both UV sets.
+fn build_mesh(map: &SkateMap, material_index: usize, indices: Vec<u32>) -> Mesh {
+    let m = &map.materials[material_index];
+    let mut remap = HashMap::new();
+    let mut vertices = Vec::new();
+    let local: Vec<u32> = indices
+        .into_iter()
+        .map(|index| {
+            *remap.entry(index).or_insert_with(|| {
+                let id = vertices.len() as u32;
+                vertices.push(&map.geometry.vertices[index as usize]);
+                id
+            })
+        })
+        .collect();
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vertices.iter().map(|v| v.position).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_NORMAL,
+        vertices.iter().map(|v| v.normal).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_UV_0,
+        vertices.iter().map(|v| v.uv).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_UV_1,
+        vertices.iter().map(|v| v.lightmap_uv).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_COLOR,
+        vertices.iter().map(|v| { let uv = v.decal_uv.unwrap_or(v.uv); [uv[0], uv[1], 0., 1.] }).collect::<Vec<_>>(),
+    )
+    .with_inserted_indices(bevy::mesh::Indices::U32(local));
+    if vertices.iter().all(|v| v.tangent_frame.is_some()) {
+        let tangents: Vec<[f32; 4]> = vertices
+            .iter()
+            .map(|v| {
+                let frame = v
+                    .tangent_frame
+                    .unwrap()
+                    .map(|b| (b as i8 as f32 / 127.).max(-1.));
+                let binormal = Vec3::new(frame[0], frame[1], frame[2]);
+                let tangent = binormal.cross(Vec3::from_array(v.normal)) * frame[3];
+                [tangent.x, tangent.y, tangent.z, frame[3]]
+            })
+            .collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+    } else if m.textures[2] != 0 {
+        if let Err(error) = mesh.generate_tangents() {
+            warn!("SKATE material {} tangent generation: {error}", m.name);
+        }
+    }
+    mesh
+}
+
+fn standard_material(
+    m: &skate_data::skate_map::Material,
+    texture: &mut impl FnMut(u32, u8) -> Option<Handle<Image>>,
+) -> StandardMaterial {
+    let orm = texture(m.textures[3], 2);
+    StandardMaterial {
+        base_color: Color::linear_rgb(m.color[0], m.color[1], m.color[2]),
+        base_color_texture: texture(m.textures[0], 0),
+        normal_map_texture: texture(m.textures[2], 2),
+        metallic_roughness_texture: orm.clone(),
+        occlusion_texture: orm,
+        metallic: if m.textures[3] != 0 { 1. } else { 0. },
+        perceptual_roughness: m.roughness,
+        emissive: LinearRgba::rgb(
+            m.color[0] * m.emissive,
+            m.color[1] * m.emissive,
+            m.color[2] * m.emissive,
+        ),
+        emissive_texture: texture(m.textures[4], 0),
+        alpha_mode: match m.alpha_mode {
+            1 => AlphaMode::Mask(m.alpha_cutoff),
+            2 => AlphaMode::Blend,
+            _ => AlphaMode::Opaque,
+        },
+        lightmap_exposure: m.indirect_strength,
+        ..default()
+    }
+}
+
+pub(crate) fn spawn(
+    map: &SkateMap,
+    commands: &mut crate::map_render::SceneCommands,
+    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
+    materials: &mut impl crate::map_render::AssetSink<StandardMaterial>,
+    retail_materials: &mut impl crate::map_render::AssetSink<crate::retail_render::RetailWorldMaterial>,
+    images: &mut impl crate::map_render::AssetSink<Image>,
+    tuning: &crate::retail_render::MaterialTuning,
+) {
+    let _span = info_span!("prepare_map_geometry_and_textures").entered();
+    let texture_ids = render_texture_ids(&map.textures);
+    let mut texture = texture_loader(map, images);
     // Lightmaps belong to mesh entities, not StandardMaterial. Distinct baked
     // lighting still needs separate geometry batches but can share a PBR material.
     let pbr_ids = self::material_ids(&map.materials, &texture_ids, false);
@@ -652,63 +751,7 @@ pub(crate) fn spawn(
         vec![None; map.materials.len()];
     for RenderGroup { material: material_index, indices, retail } in groups {
         let m = &map.materials[material_index];
-        // Reindex each batch, preserving authored normals and both UV sets.
-        let mut remap = HashMap::new();
-        let mut vertices = Vec::new();
-        let local: Vec<u32> = indices
-            .into_iter()
-            .map(|index| {
-                *remap.entry(index).or_insert_with(|| {
-                    let id = vertices.len() as u32;
-                    vertices.push(&map.geometry.vertices[index as usize]);
-                    id
-                })
-            })
-            .collect();
-        let mut mesh = Mesh::new(
-            bevy::mesh::PrimitiveTopology::TriangleList,
-            RenderAssetUsages::RENDER_WORLD,
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_POSITION,
-            vertices.iter().map(|v| v.position).collect::<Vec<_>>(),
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_NORMAL,
-            vertices.iter().map(|v| v.normal).collect::<Vec<_>>(),
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_UV_0,
-            vertices.iter().map(|v| v.uv).collect::<Vec<_>>(),
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_UV_1,
-            vertices.iter().map(|v| v.lightmap_uv).collect::<Vec<_>>(),
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_COLOR,
-            vertices.iter().map(|v| { let uv = v.decal_uv.unwrap_or(v.uv); [uv[0], uv[1], 0., 1.] }).collect::<Vec<_>>(),
-        )
-        .with_inserted_indices(bevy::mesh::Indices::U32(local));
-        if vertices.iter().all(|v| v.tangent_frame.is_some()) {
-            let tangents: Vec<[f32; 4]> = vertices
-                .iter()
-                .map(|v| {
-                    let frame = v
-                        .tangent_frame
-                        .unwrap()
-                        .map(|b| (b as i8 as f32 / 127.).max(-1.));
-                    let binormal = Vec3::new(frame[0], frame[1], frame[2]);
-                    let tangent = binormal.cross(Vec3::from_array(v.normal)) * frame[3];
-                    [tangent.x, tangent.y, tangent.z, frame[3]]
-                })
-                .collect();
-            mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
-        } else if m.textures[2] != 0 {
-            if let Err(error) = mesh.generate_tangents() {
-                warn!("SKATE material {} tangent generation: {error}", m.name);
-            }
-        }
+        let mut mesh = build_mesh(map, material_index, indices);
         if let Some(material) = retail {
             let material = retail_materials.add(material);
             commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
@@ -717,31 +760,7 @@ pub(crate) fn spawn(
         // Vertex colours above carry retail decal coordinates, never PBR tint.
         mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
         let material = material_handles[pbr_ids[material_index]]
-            .get_or_insert_with(|| {
-                let orm = texture(m.textures[3], 2);
-                materials.add(StandardMaterial {
-                    base_color: Color::linear_rgb(m.color[0], m.color[1], m.color[2]),
-                    base_color_texture: texture(m.textures[0], 0),
-                    normal_map_texture: texture(m.textures[2], 2),
-                    metallic_roughness_texture: orm.clone(),
-                    occlusion_texture: orm,
-                    metallic: if m.textures[3] != 0 { 1. } else { 0. },
-                    perceptual_roughness: m.roughness,
-                    emissive: LinearRgba::rgb(
-                        m.color[0] * m.emissive,
-                        m.color[1] * m.emissive,
-                        m.color[2] * m.emissive,
-                    ),
-                    emissive_texture: texture(m.textures[4], 0),
-                    alpha_mode: match m.alpha_mode {
-                        1 => AlphaMode::Mask(m.alpha_cutoff),
-                        2 => AlphaMode::Blend,
-                        _ => AlphaMode::Opaque,
-                    },
-                    lightmap_exposure: m.indirect_strength,
-                    ..default()
-                })
-            })
+            .get_or_insert_with(|| materials.add(standard_material(m, &mut texture)))
             .clone();
         let mut entity = commands.spawn((
             Name::new(m.name.clone()),
@@ -802,6 +821,138 @@ pub(crate) fn spawn(
         map.name,
         map.geometry.indices.len() / 3,
         map.geometry.collision.len()
+    );
+}
+
+/// Marker on the root entity of one spawned dynamic-prop (DMO) instance.
+/// Later phases move these entities; static batches never contain them.
+#[derive(Component)]
+pub(crate) struct PropInstance {
+    pub id: u32,
+    pub template: String,
+    pub name: String,
+}
+
+/// Spawn one root entity per MOBJ static object with its own transform.
+/// Geometry is built once per (template range, material) and shared through
+/// cached handles; materials reuse the same caches as the batched path. The
+/// per-material material batching used for static geometry is intentionally
+/// broken here so each instance keeps its placement.
+pub(crate) fn spawn_instances(
+    map: &SkateMap,
+    objects: &[skate_data::skate_map::StaticObject],
+    commands: &mut crate::map_render::SceneCommands,
+    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
+    materials: &mut impl crate::map_render::AssetSink<StandardMaterial>,
+    retail_materials: &mut impl crate::map_render::AssetSink<crate::retail_render::RetailWorldMaterial>,
+    images: &mut impl crate::map_render::AssetSink<Image>,
+    tuning: &crate::retail_render::MaterialTuning,
+) {
+    let _span = info_span!("spawn_prop_instances").entered();
+    let texture_ids = render_texture_ids(&map.textures);
+    let pbr_ids = self::material_ids(&map.materials, &texture_ids, false);
+    let mut texture = texture_loader(map, images);
+    let mut material_handles: Vec<Option<Handle<StandardMaterial>>> =
+        vec![None; map.materials.len()];
+    let mut retail_handles: HashMap<usize, Handle<crate::retail_render::RetailWorldMaterial>> =
+        HashMap::new();
+    let mut mesh_handles: HashMap<(u32, u32, usize), Handle<Mesh>> = HashMap::new();
+    let mut templates = std::collections::HashSet::new();
+    for object in objects {
+        let t = &object.transform;
+        // Row-vector affine (v @ basis + translation): basis rows become the
+        // columns of the equivalent column-vector Mat4.
+        let affine = Mat4::from_cols(
+            Vec4::new(t[0], t[1], t[2], 0.),
+            Vec4::new(t[3], t[4], t[5], 0.),
+            Vec4::new(t[6], t[7], t[8], 0.),
+            Vec4::new(t[9], t[10], t[11], 1.),
+        );
+        // The exporter prefixes the template ID to the authored locator name.
+        let (template, name) = object
+            .name
+            .split_once('/')
+            .map_or(("", object.name.as_str()), |(template, name)| (template, name));
+        templates.insert(template.to_string());
+        let mut root = commands.spawn((
+            Name::new(object.name.clone()),
+            PropInstance {
+                id: object.id,
+                template: template.to_string(),
+                name: name.to_string(),
+            },
+            Transform::from_matrix(affine),
+            Visibility::default(),
+        ));
+        // Group the instance range by material, preserving first-seen order.
+        let range = object.first_index as usize
+            ..(object.first_index + object.index_count) as usize;
+        let mut lookup = HashMap::new();
+        let mut groups: Vec<(usize, Vec<u32>)> = Vec::new();
+        for tri in map.geometry.indices[range].chunks_exact(3) {
+            let material = map.geometry.vertices[tri[0] as usize].material as usize - 1;
+            let group = *lookup.entry(material).or_insert_with(|| {
+                groups.push((material, Vec::new()));
+                groups.len() - 1
+            });
+            groups[group].1.extend_from_slice(tri);
+        }
+        for (material_index, indices) in groups {
+            let m = &map.materials[material_index];
+            let retail = m
+                .retail_definition
+                .as_deref()
+                .and_then(crate::retail_render::Definition::parse)
+                .filter(|d| d.supported(tuning));
+            let key = (object.first_index, object.index_count, material_index);
+            if let Some(definition) = retail {
+                let mesh = mesh_handles
+                    .entry(key)
+                    .or_insert_with(|| meshes.add(build_mesh(map, material_index, indices)))
+                    .clone();
+                let material = retail_handles
+                    .entry(material_index)
+                    .or_insert_with(|| retail_materials.add(definition.build(m, tuning, &mut texture)))
+                    .clone();
+                root.spawn_child((
+                    Name::new(format!("{}#{material_index}", object.name)),
+                    Mesh3d(mesh),
+                    MeshMaterial3d(material),
+                    Transform::default(),
+                ));
+                continue;
+            }
+            let mesh = mesh_handles
+                .entry(key)
+                .or_insert_with(|| {
+                    let mut mesh = build_mesh(map, material_index, indices);
+                    // Vertex colours carry retail decal coordinates, never PBR tint.
+                    mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
+                    meshes.add(mesh)
+                })
+                .clone();
+            let material = material_handles[pbr_ids[material_index]]
+                .get_or_insert_with(|| materials.add(standard_material(m, &mut texture)))
+                .clone();
+            let mut child = root.spawn_child((
+                Name::new(format!("{}#{material_index}", object.name)),
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::default(),
+            ));
+            if let Some(image) = texture(m.textures[1], 1) {
+                child.insert(bevy::pbr::Lightmap {
+                    image,
+                    uv_rect: Rect::new(0., 0., 1., 1.),
+                    bicubic_sampling: false,
+                });
+            }
+        }
+    }
+    eprintln!(
+        "SKATE_PROP_INSTANCES count={} templates={}",
+        objects.len(),
+        templates.len()
     );
 }
 
