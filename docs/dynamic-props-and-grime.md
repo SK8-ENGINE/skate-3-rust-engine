@@ -148,7 +148,7 @@ No authored DMO collision mesh is recovered from `worlddmo.big` (the district
 sim RX2s carry clustered-mesh collision, but the template cache has none
 verified), so each instance reuses its template's render triangles as its
 collision volume, baked into world space with the instance transform at load
-(`skate_world::prop_collision_world`). Reflections flip winding to keep
+(`skate_world::build_prop_layer`). Reflections flip winding to keep
 outward normals; degenerate render triangles are skipped. The authored locator
 bounds are not needed: broadphase bounds come from the placed triangles.
 
@@ -156,9 +156,9 @@ Props stay out of the map `collision_world`. They live in a second
 `BoardWorld` (`GamePhysics::prop_world`, built by the shared portable
 triangle pipeline: 1 mm welding, reconstructed adjacency, contiguous-range
 broadphase metadata) so Phase 2 can rebuild moved instances without touching
-static map geometry. The solve phase queries board and skeleton volumes
-against both worlds; wheel line queries keep the nearer hit of the two
-worlds. Triangle tags carry the packed surface ID of the prop's render
+static map geometry.
+The solve phase queries board and skeleton volumes against both worlds; wheel
+line queries keep the nearer hit of the two worlds. Triangle tags carry the packed surface ID of the prop's render
 material (same `audio | physics<<7 | pattern<<12` mapping as static
 collision), so wheel surface classification keeps working.
 
@@ -177,3 +177,65 @@ Validation: synthetic record, rotation/scale/normal and invalid-reference tests;
 original-data template resolution and placement-bound comparison; offline map
 readers and shader composition. Game/recomp was not launched. GPU execution,
 appearance, performance and gameplay interaction are not validated here.
+
+### Phase 2: dynamic bodies
+
+Every prop instance gets a dynamic rigid body (`physics::prop_dynamics`),
+built on the recovered TU3 integrator (`integrate_body_rates`): gravity and
+cool-down/sleep come from the retail simulation step, and mass properties use
+the retail rounded-box finalize path (`primitive_mass_properties`) with the
+instance's scaled template AABB. Density defaults to 100 kg/m³, the MOBJ
+schema 3 authored default; damping is the authored 0.05 linear / 0.15 angular.
+All props are dynamic by default — the exported packages carry no physics
+flag, and enabling that flag was rejected.
+
+Bodies start asleep at their authored pose, so a resting district costs one
+AABB test per skater volume per tick. The narrowphase reuses the recovered GP
+pair query (`primitive_pair_contacts`): box vs static-world triangles, box vs
+box for other props, and box vs the skater's board/skeleton volumes for
+pushes. Contact response is a compact custom impulse pass producing
+`RetailReactionCorrections`; the retail compiled-row contact solver
+(`build_contact_jacobian`) documents itself as not gameplay-ready, so it is
+not used. Restitution only applies above a 1 m/s closing speed so resting
+contacts settle instead of jittering.
+
+A skater volume overlapping a prop transfers a fraction (0.5) of the closing
+speed as an impulse at the contact point and wakes the body; the skater's own
+response still comes from the exact re-baked triangle layer. Awake props treat
+asleep props (and the static world) as immovable; a hard hit (closing speed
+above 1 m/s) wakes the supporting prop. Prop-vs-prop impulses are split by
+inverse mass.
+
+After each awake body's integration, its instance's triangle range is re-baked
+in the prop collision layer (`PropCollisionLayer::rebake` +
+`BoardWorld::replace_triangles`): adjacency flags and edge cosines are
+invariant under rigid motion, so only vertex positions are recomputed and the
+broadphase bounds/query index rebuilt. `sync_prop_transforms` then publishes
+each body's template-origin pose to the spawned Bevy entity (rotation and
+translation only; authored scale stays on the entity).
+
+Phase 2a limitations: box-approximated bodies mean stacking is approximate;
+a skater standing on an asleep prop does not wake it (no weight transfer);
+deck probes, camera, grind, offboard and climbing queries still see only the
+static map world plus the re-baked prop triangles. Phase 3 (grabbing) needs
+identification of the prop by `PropInstance.id` (`PropDynamics::by_id`), a
+constraint or kinematic-follow toward the hand, wake on grab and re-sleep on
+drop.
+
+Props use their own simulation step (`prop_simulation`): the board's step has
+`cool_down = 0`, which would put props to sleep instantly, and the retail
+freezing-energy threshold is tuned for the board's mass, so props use
+`cool_down = 30` and `minimum_energy = 0.5`. Resting bodies snap their
+velocities to zero below the energy threshold — gated on actually having
+contacts, otherwise the snap zeroes the first ticks of a fall (g·dt is far
+below the threshold) and the prop descends at g·dt² per tick forever — and
+count those snapped ticks toward cool-down directly, because the integrator's
+own counter compares against the previous energy, which the snap just zeroed.
+The reaction-vector convention is per-tick displacement
+(`linear = (force·dt + v)·dt + reactions[0]`, stored velocity rescaled by
+`frequency − drag`), so impulse deltas enter `linear_displacement` as Δv·dt.
+
+Validation: unit tests cover fall + settle + sleep with re-baked triangle
+queries, a skater sphere pushing a resting prop awake, and long-idle
+stability (no sinking, no divergence); the full `skate-game` suite is green.
+In-game verification remains.

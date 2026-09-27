@@ -366,19 +366,95 @@ fn portable_world(
     BoardWorld::with_query_metadata(triangles, metadata).map_err(str::to_owned)
 }
 
+/// One prop instance's share of the prop collision world: its world triangle
+/// range plus the winding-fixed template-space source triangles. Rigid-motion
+/// invariance of adjacency flags and edge cosines lets `rebake` skip welding.
+pub(crate) struct PropCollisionInstance {
+    pub id: u32,
+    /// Index of the originating MOBJ record.
+    pub object: usize,
+    pub range: std::ops::Range<usize>,
+    local: Vec<[Vector3; 3]>,
+}
+
+impl PropCollisionInstance {
+    /// Winding-fixed template-space triangles with per-axis scale folded in.
+    pub fn local_points(&self) -> &[[Vector3; 3]] {
+        &self.local
+    }
+}
+
+/// Static collision for spawned DMO prop instances, kept out of the map
+/// collision world so dynamic instances can be rebaked independently.
+pub(crate) struct PropCollisionLayer {
+    world: BoardWorld,
+    instances: Vec<PropCollisionInstance>,
+    contact_material: RetailContactMaterial,
+}
+
+impl PropCollisionLayer {
+    pub fn world(&self) -> &BoardWorld {
+        &self.world
+    }
+    pub fn world_mut(&mut self) -> &mut BoardWorld {
+        &mut self.world
+    }
+    pub fn instances(&self) -> &[PropCollisionInstance] {
+        &self.instances
+    }
+
+    /// Re-bake one instance at a new rigid pose (rotation basis columns plus
+    /// translation of the template origin). Scale, if any, is baked into the
+    /// local triangles at load and is not reapplied here.
+    pub fn rebake(
+        &mut self,
+        instance: usize,
+        basis: [[f32; 3]; 3],
+        translation: Vector3,
+    ) -> Result<(), String> {
+        let entry = &self.instances[instance];
+        let transform = |p: Vector3| {
+            Vector3::new(
+                p.x * basis[0][0] + p.y * basis[1][0] + p.z * basis[2][0] + translation.x,
+                p.x * basis[0][1] + p.y * basis[1][1] + p.z * basis[2][1] + translation.y,
+                p.x * basis[0][2] + p.y * basis[1][2] + p.z * basis[2][2] + translation.z,
+            )
+        };
+        let mut triangles = Vec::with_capacity(entry.local.len());
+        for (i, &local) in entry.local.iter().enumerate() {
+            let source = self.world.triangles()[entry.range.start + i];
+            let points = local.map(transform);
+            triangles.push(
+                WorldTriangle::from_vertices(
+                    points,
+                    self.contact_material,
+                    source.tag,
+                    source.triangle.feature.flags,
+                    source.triangle.feature.edge_cosines,
+                    0.,
+                )
+                .ok_or("Rebaked prop collision triangle is invalid")?,
+            );
+        }
+        self.world
+            .replace_triangles(entry.range.clone(), &triangles)
+            .map_err(str::to_owned)
+    }
+}
+
 /// Static collision for spawned DMO prop instances. No authored DMO collision
 /// mesh is recovered, so each instance reuses its template's render triangles,
 /// baked into world space with the instance transform at load. Reflections
 /// flip winding to keep outward normals; degenerate render triangles are
-/// skipped rather than rejecting the whole layer. Props stay out of the map
-/// collision world so Phase 2 can rebuild moved instances independently.
-pub(crate) fn prop_collision_world(
+/// skipped rather than rejecting the whole layer.
+pub(crate) fn build_prop_layer(
     map: &SkateMap,
     objects: &[skate_data::skate_map::StaticObject],
     material: RetailContactMaterial,
-) -> Result<Option<BoardWorld>, String> {
+) -> Result<Option<PropCollisionLayer>, String> {
     let mut collision = Vec::new();
-    for object in objects {
+    let mut instances = Vec::new();
+    for (object_index, object) in objects.iter().enumerate() {
         let t = &object.transform;
         // Row-vector affine (v @ basis + translation), as in spawn_instances.
         let transform = |p: [f32; 3]| -> [f32; 3] {
@@ -391,11 +467,21 @@ pub(crate) fn prop_collision_world(
         let determinant = t[0] * (t[4] * t[8] - t[5] * t[7])
             - t[1] * (t[3] * t[8] - t[5] * t[6])
             + t[2] * (t[3] * t[7] - t[4] * t[6]);
+        // Row-vector rows are the world images of the local axes. Their lengths
+        // are the per-axis scale; rebake applies rotation only, so local source
+        // triangles carry the scale and stay exact for diagonal-scale placements.
+        let scale = [
+            (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt(),
+            (t[3] * t[3] + t[4] * t[4] + t[5] * t[5]).sqrt(),
+            (t[6] * t[6] + t[7] * t[7] + t[8] * t[8]).sqrt(),
+        ];
         let range =
             object.first_index as usize..(object.first_index + object.index_count) as usize;
+        let start = collision.len();
+        let mut local = Vec::new();
         for tri in map.geometry.indices[range].chunks_exact(3) {
             let mut points =
-                [tri[0], tri[1], tri[2]].map(|i| transform(map.geometry.vertices[i as usize].position));
+                [tri[0], tri[1], tri[2]].map(|i| map.geometry.vertices[i as usize].position);
             if determinant < 0. {
                 points.swap(1, 2);
             }
@@ -404,33 +490,50 @@ pub(crate) fn prop_collision_world(
             if cross.length_squared() <= 0. {
                 continue;
             }
+            local.push(points.map(|p| {
+                Vector3::new(p[0] * scale[0], p[1] * scale[1], p[2] * scale[2])
+            }));
             let source = &map.materials
                 [map.geometry.vertices[tri[0] as usize].material as usize - 1];
             // Wheels read the packed surface nibble from the triangle tag; use
             // the same EncodeRwSurfaceId mapping as static map collision.
             let surface = source.audio | (source.physics << 7) | (source.pattern << 12);
             collision.push(skate_data::skate_map::Collision {
-                points,
+                points: points.map(transform),
                 surface,
                 material: map.geometry.vertices[tri[0] as usize].material,
                 native_edges: None,
+            });
+        }
+        if collision.len() > start {
+            instances.push(PropCollisionInstance {
+                id: object.id,
+                object: object_index,
+                range: start..collision.len(),
+                local,
             });
         }
     }
     if collision.is_empty() {
         return Ok(None);
     }
-    Ok(Some(portable_world(&collision, &map.materials, material)?))
+    Ok(Some(PropCollisionLayer {
+        world: portable_world(&collision, &map.materials, material)?,
+        instances,
+        contact_material: material,
+    }))
 }
 
-/// Load the district's prop package and build its static collision layer.
-/// The package is a presentation supplement: missing or invalid files leave
-/// props uncollidable rather than failing the map, matching the render path.
-pub(crate) fn load_prop_collision(
+/// Load the district's prop package and build its collision layer plus the
+/// dynamic bodies for every instance. The package is a presentation
+/// supplement: missing or invalid files leave props uncollidable rather than
+/// failing the map, matching the render path.
+pub(crate) fn load_prop_layer(
     asset_root: &std::path::Path,
     map_name: &str,
     material: RetailContactMaterial,
-) -> Option<BoardWorld> {
+    simulation: skate_core::physics::rigid_body::RetailSimulationStep,
+) -> Option<(PropCollisionLayer, crate::physics::prop_dynamics::PropDynamics)> {
     let path = asset_root
         .join("private")
         .join("native-props")
@@ -458,17 +561,22 @@ pub(crate) fn load_prop_collision(
             }
         }
     }
-    match prop_collision_world(&map, &objects, material) {
-        Ok(world) => {
-            if let Some(world) = &world {
-                info!(
-                    "SKATE_PROP_COLLISION: {map_name} instances={} triangles={}",
-                    objects.len(),
-                    world.triangles().len()
-                );
-            }
-            world
+    match build_prop_layer(&map, &objects, material) {
+        Ok(Some(layer)) => {
+            info!(
+                "SKATE_PROP_COLLISION: {map_name} instances={} triangles={}",
+                objects.len(),
+                layer.world().triangles().len()
+            );
+            let dynamics = crate::physics::prop_dynamics::PropDynamics::new(
+                &objects,
+                layer.instances(),
+                simulation,
+                material,
+            );
+            Some((layer, dynamics))
         }
+        Ok(None) => None,
         Err(error) => {
             warn!("SKATE_PROP_COLLISION: {}: {error}", path.display());
             None
@@ -1354,7 +1462,8 @@ mod tests {
     #[test]
     fn prop_instances_collide_as_placed_static_triangles() {
         let (map, objects) = prop_fixture();
-        let mut world = prop_collision_world(&map, &objects, material()).unwrap().unwrap();
+        let layer = build_prop_layer(&map, &objects, material()).unwrap().unwrap();
+        let mut world = layer.world;
         assert_eq!(world.triangles().len(), 24);
         // Translated instance: top face at y=6 between x 8..12.
         let hit = world

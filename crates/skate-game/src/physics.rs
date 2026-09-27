@@ -58,6 +58,7 @@ mod landing_quality;
 mod offboard;
 mod player_input;
 mod player_state;
+pub(crate) mod prop_dynamics;
 mod settings;
 mod skeleton_grind_air;
 mod teleport_state;
@@ -83,7 +84,7 @@ use skate_core::{
     math::Vector3,
     physics::{
         board_runtime::{BoardMotion, BoardRuntime},
-        board_world::{BoardWorld, ContactRetentionSettings},
+        board_world::{BoardWorld, BoardWorldVolume, ContactRetentionSettings},
         collision::WorldContactSettings,
         drive_frames::RetailAffineTransform,
     },
@@ -99,8 +100,10 @@ pub(crate) struct GamePhysics {
     pub board: BoardRuntime,
     pub riding: RidingOutputs,
     world: BoardWorld,
-    /// Static DMO prop instances; a separate layer so Phase 2 can move them.
-    prop_world: Option<BoardWorld>,
+    /// DMO prop instances as a separate collision layer so dynamic bodies can
+    /// re-bake their triangle ranges (Phase 2).
+    prop_layer: Option<crate::skate_world::PropCollisionLayer>,
+    prop_dynamics: Option<prop_dynamics::PropDynamics>,
     grind_world: std::sync::Arc<crate::grind_world::StaticProvider>,
     grind_materials: grind_materials::GrindMaterials,
     offboard_grab_scene: offboard::grab_scene::Registry,
@@ -240,11 +243,25 @@ impl GamePhysics {
     }
 
     pub(crate) fn prop_world(&self) -> Option<&BoardWorld> {
-        self.prop_world.as_ref()
+        self.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world)
     }
 
     pub(crate) fn prop_world_mut(&mut self) -> Option<&mut BoardWorld> {
-        self.prop_world.as_mut()
+        self.prop_layer.as_mut().map(crate::skate_world::PropCollisionLayer::world_mut)
+    }
+
+    pub(crate) fn prop_dynamics(&self) -> Option<&prop_dynamics::PropDynamics> {
+        self.prop_dynamics.as_ref()
+    }
+
+    /// Push, integrate and re-bake dynamic props against the static world.
+    /// `volumes` are the skater's board and skeleton world volumes.
+    pub(crate) fn step_props(&mut self, volumes: &[BoardWorldVolume]) {
+        let (Some(layer), Some(dynamics)) = (self.prop_layer.as_mut(), self.prop_dynamics.as_mut())
+        else {
+            return;
+        };
+        dynamics.step(&self.world, layer, volumes);
     }
 
     /// Flat-world convenience used by private-asset integration tests.
@@ -314,9 +331,18 @@ impl GamePhysics {
             Some(map) => crate::skate_world::collision_world(map, settings.floor_material)?,
             None => terrain.world(settings.floor_material),
         };
-        let prop_world = map.and_then(|map| {
-            crate::skate_world::load_prop_collision(asset_root, &map.name, settings.floor_material)
+        let prop_layer = map.and_then(|map| {
+            crate::skate_world::load_prop_layer(
+                asset_root,
+                &map.name,
+                settings.floor_material,
+                prop_dynamics::prop_simulation(settings.step.simulation),
+            )
         });
+        let (prop_layer, prop_dynamics) = match prop_layer {
+            Some((layer, dynamics)) => (Some(layer), Some(dynamics)),
+            None => (None, None),
+        };
         let grind_world = std::sync::Arc::new(if map.is_none() && terrain == ground::Terrain::Course {
             crate::grind_world::StaticProvider::authored(&crate::grind_world::test_rails())?
         } else { crate::grind_world::StaticProvider::new(map)? });
@@ -344,7 +370,8 @@ impl GamePhysics {
             board,
             riding,
             world,
-            prop_world,
+            prop_layer,
+            prop_dynamics,
             grind_world,
             grind_materials,
             offboard_grab_scene,
@@ -365,9 +392,10 @@ impl GamePhysics {
     #[cfg(test)]
     fn advance_board(&mut self) -> Result<(), String> {
         self.board.clear_forces();
-        self.riding.start_wheel_queries(&self.board, &self.world, self.prop_world.as_ref())?;
+        self.riding.start_wheel_queries(&self.board, &self.world, self.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world))?;
         self.riding.finish_wheel_queries()?;
         let volumes = colliders::world_volumes(&self.board, &self.settings);
+        self.step_props(&volumes);
         let contacts = self
             .world
             .query_primitives(&volumes, self.query, self.retention);
@@ -418,7 +446,8 @@ impl Plugin for PhysicsPlugin {
                 controls::sample.in_set(SimulationSet::Controls),
             )
             .add_systems(FixedUpdate, advance.in_set(SimulationSet::Physics))
-            .add_systems(Update, present.in_set(FrameSet::Physics));
+            .add_systems(Update, present.in_set(FrameSet::Physics))
+            .add_systems(Update, prop_dynamics::sync_prop_transforms.after(FrameSet::Physics));
     }
 }
 

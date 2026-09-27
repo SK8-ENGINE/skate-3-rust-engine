@@ -353,6 +353,40 @@ impl BoardWorld {
         &self.contacts
     }
 
+    /// Replace a contiguous run of triangles in place (same count, same order).
+    /// Used by prop instances rebaked at a new rigid pose: adjacency flags and
+    /// edge cosines are rigid-motion invariant, so callers reuse them. Per-triangle
+    /// and per-mesh bounds plus the broadphase index are refreshed.
+    pub fn replace_triangles(
+        &mut self,
+        range: std::ops::Range<usize>,
+        triangles: &[WorldTriangle],
+    ) -> Result<(), &'static str> {
+        if range.len() != triangles.len() || range.end > self.triangles.len() {
+            return Err("replacement triangles must match the existing range");
+        }
+        self.triangles[range.clone()].copy_from_slice(triangles);
+        for (i, entry) in triangles.iter().enumerate() {
+            self.triangle_bounds[range.start + i] =
+                Bounds::from_points(entry.triangle.vertices).ok_or("invalid triangle bounds")?;
+        }
+        if let Some(metadata) = &mut self.query_metadata {
+            for mesh in &mut metadata.meshes {
+                if mesh.triangle_range.start < range.end && range.start < mesh.triangle_range.end {
+                    mesh.local_bounds = Bounds::from_points(
+                        self.triangles[mesh.triangle_range.clone()]
+                            .iter()
+                            .flat_map(|t| t.triangle.vertices),
+                    )
+                    .ok_or("invalid query mesh bounds")?;
+                }
+            }
+            let meshes = metadata.meshes.clone();
+            self.query_index = query_index::QueryIndex::new(&meshes);
+        }
+        Ok(())
+    }
+
     pub fn dropped_contacts(&self) -> u32 {
         self.buffer.dropped
     }
