@@ -278,3 +278,53 @@ Validation: unit tests cover grab + follow while the carrier moves, drop →
 fall → re-sleep, and the state gate (no grab on board / in the air / in
 wipeout; auto-drop on mount). Full `skate-game` suite green. In-game
 verification remains.
+
+### Phase 4: placement mode and layout persistence
+
+Placement mode (`physics::prop_carry`, `Mode::Placement`): while carrying,
+**B** (XUSB bit 13, controller bit 20) enters placement on its rising edge —
+a tap is free because stock sprint is hold-gated. The prop keeps following a
+ghost pose relative to the carrier (still velocity-driven, frozen mid-air by
+the per-tick velocity overwrite): right stick Y adjusts distance
+(0.3–4.0 m, 2 m/s), right stick X adjusts yaw (2.5 rad/s, applied as a
+direct orientation snap via `carry_to_pose`), DPad up/down adjusts height
+(0–2.5 m, 1.5 m/s). Note the right stick keeps orbiting the camera while
+placing — the stock `OB_LookAtX/Y` intents are not gated. **A confirms**:
+the prop is set down gently (`release_still` zeroes the follow velocity so
+the leftover tracking speed does not throw it), falls, sleeps, and the pose
+is recorded. **B again cancels** back to plain carry; auto-drop (distance or
+leaving `BipedGround`) never records.
+
+Solver fix uncovered by placement drops: manifold points now share the
+normal impulse (divided by point count, matching the existing positional
+split). Without sharing, a face landing flat on four points summed 4× the
+needed impulse and bounced the box off the floor.
+
+Persistence (`physics::prop_layout`): versioned JSON sidecar at
+`settings/prop-layouts/<map>.json` beside the asset root (same convention as
+`settings/gameplay.json`), written on every confirmed placement:
+`{"schema": 1, "map": "<name>", "props": [{"id", "origin": [f32;3],
+"basis": [[f32;3];3]}]}` — origin/basis are exactly what
+`PropDynamics::pose`/`teleport` consume. On map load, saved poses teleport
+the fresh bodies (asleep) and rebake their triangle ranges before the first
+sync; the carry session is seeded with the saved entries so re-saving never
+drops earlier placements. Missing, corrupt, wrong-schema or foreign-map
+files warn and are ignored; unknown prop ids warn and are skipped. The map
+package itself is never modified.
+
+HUD (`physics::prop_carry_hud`): one procedural 2D diamond at bottom-centre
+(no authored assets, own `Camera2d` on render layer 30) — white when a
+grabbable prop is in reach on foot (same `PropCarry::candidate` query as the
+grab path), cyan while carrying, yellow in placement mode.
+
+With this, issue #13's loop is complete: props spawn as instances (Phase 0),
+collide (Phase 1), are dynamic and pushable (Phase 2), can be grabbed,
+carried and dropped (Phase 3), and placed deliberately with persistent
+layouts (Phase 4).
+
+Validation: unit tests for placement adjust + confirm (ghost pushed out and
+yawed, prop set down at the ghost pose, recorded, falls and sleeps), cancel
+returning to carry without recording, layout JSON round-trip, corrupt /
+foreign / missing sidecars ignored, and teleport of a fresh body with
+rebaked triangle probe. Full `skate-game` suite green (272 tests). In-game
+verification remains.

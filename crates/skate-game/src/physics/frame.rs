@@ -237,12 +237,22 @@ pub(super) fn advance(
     //World8275ECA4 ends skeleton tests after state/forces and before solving.
     //Teleport resets previous observations, but preserves this pending batch.
     skeleton_queries.publish(&mut skater.player_input.player);
-    // Prop grab/drop (Phase 3): rising edge of A (controller bit 21). Stock
-    // offboard graphs give A no action of its own; see prop_carry.
+    // Prop grab/place (Phases 3-4): rising edges of A (bit 21) and B (bit
+    // 20) from the derived controller; right stick and DPad levels from the
+    // sampled gameplay actions. Stock offboard graphs give A/B taps no action
+    // of their own; see prop_carry.
     let controller_words = controls.controller.words();
-    let grab_rising = controller_words[13] & (1 << 21) != 0
-        && controller_words[6] & (1 << 21) == 0;
-    bevy::log::info_span!("fixed_collision_and_solve").in_scope(|| solve::advance(physics, skater, skater.ground.steering.targets, grab_rising))?;
+    let rising = |bit: u32| {
+        controller_words[13] & (1 << bit) != 0 && controller_words[6] & (1 << bit) == 0
+    };
+    let carry_tick = super::prop_carry::Tick {
+        grab: rising(21),
+        placement: rising(20),
+        yaw_axis: actions.value(67),
+        distance_axis: actions.value(68),
+        height_axis: actions.value(74) - actions.value(75),
+    };
+    bevy::log::info_span!("fixed_collision_and_solve").in_scope(|| solve::advance(physics, skater, skater.ground.steering.targets, carry_tick))?;
     super::offboard_audit_trace::stage(tick, "solve", physics, skater, controls);
     #[cfg(test)]
     super::offboard_root_trace::trace(tick, "solve", skater);

@@ -376,6 +376,54 @@ impl PropDynamics {
         true
     }
 
+    /// Placement follow: like `carry_to`, but also snaps the orientation to
+    /// `basis` (ghost yaw edit). Position still moves by velocity only.
+    pub(crate) fn carry_to_pose(
+        &mut self,
+        id: u32,
+        target: Vector3,
+        basis: Basis3,
+        max_speed: f32,
+        time_step: f32,
+    ) -> bool {
+        if !self.carry_to(id, target, max_speed, time_step) {
+            return false;
+        }
+        let body = &mut self.bodies[self.by_id[&id]];
+        body.rates.basis = basis;
+        body.rates.orientation = quaternion_from_basis(basis);
+        body.rates.world_inverse_inertia =
+            world_inverse_inertia(basis, body.inertia.inverse_tensor);
+        true
+    }
+
+    /// Confirming a placement sets the prop down gently: velocity zeroed so
+    /// the leftover follow velocity does not throw it.
+    pub(crate) fn release_still(&mut self, id: u32) {
+        if let Some(&index) = self.by_id.get(&id) {
+            self.bodies[index].rates.linear_velocity = Vector3::ZERO;
+            self.bodies[index].rates.angular_velocity = Vector3::ZERO;
+        }
+    }
+
+    /// Teleport a body to a saved layout pose, asleep. Returns the collision
+    /// instance index so the caller can rebake its triangles.
+    pub(crate) fn teleport(&mut self, id: u32, origin: Vector3, basis: Basis3) -> Option<usize> {
+        let cool_down = self.simulation.cool_down;
+        let body = self.bodies.get_mut(*self.by_id.get(&id)?)?;
+        body.rates.basis = basis;
+        body.rates.orientation = quaternion_from_basis(basis);
+        body.rates.world_inverse_inertia =
+            world_inverse_inertia(basis, body.inertia.inverse_tensor);
+        body.rates.position = add(origin, mul_basis(basis, body.local_center));
+        body.rates.linear_velocity = Vector3::ZERO;
+        body.rates.angular_velocity = Vector3::ZERO;
+        body.rates.kinetic_energy = 0.0;
+        body.rates.cool_down = cool_down;
+        body.asleep = true;
+        Some(body.instance)
+    }
+
     /// Advance awake bodies one tick; wake bodies the skater touches. Moved
     /// instances re-bake their triangles in the collision layer afterwards.
     pub(crate) fn step(
@@ -564,7 +612,11 @@ impl PropDynamics {
                 } else {
                     0.0
                 };
-                let impulse = -(1.0 + restitution) * vn / denominator;
+                // Each manifold point applies its share of the impulse: with
+                // N simultaneous points at the same closing speed (a face
+                // landing flat), the unshared impulses would sum to N× the
+                // needed correction and bounce the body off the surface.
+                let impulse = -(1.0 + restitution) * vn / (denominator * count);
                 let mut delta = scale(normal, impulse * inverse_mass);
                 let mut spin = mul_basis(
                     body.rates.world_inverse_inertia,
@@ -612,6 +664,7 @@ impl PropDynamics {
     ) {
         let dt = self.simulation.time_step;
         let normal = manifold.normal;
+        let count = manifold.count.max(1) as f32;
         for pair in &manifold.points[..manifold.count] {
             let gap = dot(sub(pair.a, pair.b), normal);
             if gap > PROP_CONTACT_PADDING {
@@ -635,7 +688,8 @@ impl PropDynamics {
             } else {
                 0.0
             };
-            let impulse = -(1.0 + restitution) * vn / inverse_mass;
+            // Same per-point sharing as the static contact above.
+            let impulse = -(1.0 + restitution) * vn / (inverse_mass * count);
             let share = impulse * body.inertia.inverse_mass;
             corrections.linear_displacement = add(
                 corrections.linear_displacement,
@@ -904,16 +958,20 @@ mod tests {
         }
     }
 
+    fn tick() -> crate::physics::prop_carry::Tick {
+        crate::physics::prop_carry::Tick::default()
+    }
+
     /// Grabbing the prop ahead picks it up; it follows as the carrier moves.
     #[test]
     fn grabbed_prop_follows_carrier() {
         let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
         let mut carry = crate::physics::prop_carry::PropCarry::default();
         let state = skate_core::player::state::PhysicalStateId::BipedGround;
-        carry.update(&mut dynamics, true, carrier(state, 0.));
+        carry.update(&mut dynamics, crate::physics::prop_carry::Tick { grab: true, ..tick() }, carrier(state, 0.));
         assert_eq!(carry.held(), Some(7));
         for i in 0..60 {
-            carry.update(&mut dynamics, false, carrier(state, 0.05 * i as f32));
+            carry.update(&mut dynamics, tick(), carrier(state, 0.05 * i as f32));
             dynamics.step(&world, &mut layer, &[]);
         }
         let p = dynamics.position_of(7).unwrap();
@@ -927,12 +985,12 @@ mod tests {
         let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
         let mut carry = crate::physics::prop_carry::PropCarry::default();
         let state = skate_core::player::state::PhysicalStateId::BipedGround;
-        carry.update(&mut dynamics, true, carrier(state, 0.));
+        carry.update(&mut dynamics, crate::physics::prop_carry::Tick { grab: true, ..tick() }, carrier(state, 0.));
         for _ in 0..30 {
-            carry.update(&mut dynamics, false, carrier(state, 0.));
+            carry.update(&mut dynamics, tick(), carrier(state, 0.));
             dynamics.step(&world, &mut layer, &[]);
         }
-        carry.update(&mut dynamics, true, carrier(state, 0.));
+        carry.update(&mut dynamics, crate::physics::prop_carry::Tick { grab: true, ..tick() }, carrier(state, 0.));
         assert_eq!(carry.held(), None);
         for _ in 0..300 {
             dynamics.step(&world, &mut layer, &[]);
@@ -952,21 +1010,127 @@ mod tests {
             skate_core::player::state::PhysicalStateId::BipedAir,
             skate_core::player::state::PhysicalStateId::WipeoutGround,
         ] {
-            carry.update(&mut dynamics, true, carrier(state, 0.));
+            carry.update(&mut dynamics, crate::physics::prop_carry::Tick { grab: true, ..tick() }, carrier(state, 0.));
             assert_eq!(carry.held(), None, "{state:?} must not grab");
         }
         // Grabbing, then mounting the board, drops the prop automatically.
         carry.update(
             &mut dynamics,
-            true,
+            crate::physics::prop_carry::Tick { grab: true, ..tick() },
             carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.),
         );
         assert_eq!(carry.held(), Some(7));
         carry.update(
             &mut dynamics,
-            false,
+            tick(),
             carrier(skate_core::player::state::PhysicalStateId::PhysicsGround, 0.),
         );
         assert_eq!(carry.held(), None);
+    }
+
+    // Phase 4: placement mode and layout persistence.
+
+    /// Placement adjusts the ghost pose; confirming drops the prop there,
+    /// records the layout pose, and the prop falls and sleeps in place.
+    #[test]
+    fn placement_adjust_confirm_and_sleep() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let state = skate_core::player::state::PhysicalStateId::BipedGround;
+        let grab = crate::physics::prop_carry::Tick { grab: true, ..tick() };
+        carry.update(&mut dynamics, grab, carrier(state, 0.));
+        assert_eq!(carry.held(), Some(7));
+        // Enter placement; push the ghost far (distance axis) and yaw it.
+        carry.update(
+            &mut dynamics,
+            crate::physics::prop_carry::Tick { placement: true, ..tick() },
+            carrier(state, 0.),
+        );
+        assert!(carry.placing());
+        for _ in 0..60 {
+            carry.update(
+                &mut dynamics,
+                crate::physics::prop_carry::Tick {
+                    distance_axis: 1.0,
+                    yaw_axis: 0.25,
+                    ..tick()
+                },
+                carrier(state, 0.),
+            );
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let held_pose = dynamics.position_of(7).unwrap();
+        let horizontal = (held_pose.x * held_pose.x + held_pose.z * held_pose.z).sqrt();
+        assert!(horizontal > 2.0, "ghost pushed out to r={horizontal}");
+        let recorded_basis = dynamics.pose(7).unwrap().1;
+        assert!(
+            recorded_basis.columns[2][0] > 0.3,
+            "ghost yaw never applied: {:?}",
+            recorded_basis.columns
+        );
+        // Confirm: drop at the ghost pose; the prop stays there and sleeps.
+        carry.update(&mut dynamics, grab, carrier(state, 0.));
+        assert_eq!(carry.held(), None);
+        assert!(!carry.placing());
+        let recorded = carry.layout().get(&7).copied();
+        assert!(recorded.is_some(), "confirmed placement was not recorded");
+        for _ in 0..300 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let p = dynamics.position_of(7).unwrap();
+        assert!((p.y - REST_Y).abs() < 0.1, "placed prop rests at {}", p.y);
+        let placed_horizontal = (p.x * p.x + p.z * p.z).sqrt();
+        assert!(placed_horizontal > 1.5, "placed prop kept its distance: {placed_horizontal}");
+        assert!(dynamics.bodies[0].asleep, "placed prop never slept");
+    }
+
+    /// Cancelling placement returns to plain carry with the prop still held.
+    #[test]
+    fn placement_cancel_returns_to_carry() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let state = skate_core::player::state::PhysicalStateId::BipedGround;
+        let grab = crate::physics::prop_carry::Tick { grab: true, ..tick() };
+        let place = crate::physics::prop_carry::Tick { placement: true, ..tick() };
+        carry.update(&mut dynamics, grab, carrier(state, 0.));
+        carry.update(&mut dynamics, place, carrier(state, 0.));
+        assert!(carry.placing());
+        carry.update(&mut dynamics, place, carrier(state, 0.));
+        assert!(!carry.placing());
+        assert_eq!(carry.held(), Some(7), "cancel must keep the carry");
+        assert!(carry.layout().is_empty(), "cancel must not record a pose");
+        // Carry follow still works after the cancel.
+        carry.update(&mut dynamics, tick(), carrier(state, 1.0));
+        dynamics.step(&world, &mut layer, &[]);
+        assert!(dynamics.position_of(7).unwrap().z > 1.2);
+    }
+
+    /// A saved layout teleports a fresh body to the stored pose, asleep, and
+    /// the rebaked triangles follow.
+    #[test]
+    fn layout_teleports_fresh_body() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let basis = skate_core::math::Basis3 {
+            columns: [[0., 0., -1.], [0., 1., 0.], [1., 0., 0.]],
+        };
+        let origin = Vector3::new(4., REST_Y + 0.5, -3.);
+        let instance = dynamics.teleport(7, origin, basis).unwrap();
+        layer.rebake(instance, basis.columns, origin).unwrap();
+        let (pose_origin, pose_basis) = dynamics.pose(7).unwrap();
+        assert_eq!(pose_origin, origin);
+        assert_eq!(pose_basis.columns[2], [1., 0., 0.]);
+        assert!(dynamics.bodies[0].asleep);
+        // Rotated 90° about Y: the cube is symmetric, but the rebaked probe
+        // confirms the range moved to the new origin.
+        let hit = layer
+            .world()
+            .query_thin_line(
+                Vector3::new(4., REST_Y + 2., -3.),
+                Vector3::new(4., REST_Y - 1., -3.),
+            )
+            .unwrap()
+            .unwrap();
+        assert!((hit.geometry.position.y - (REST_Y + 1.)).abs() < 0.05);
+        let _ = world;
     }
 }

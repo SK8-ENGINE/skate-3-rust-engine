@@ -59,7 +59,9 @@ mod offboard;
 mod player_input;
 mod player_state;
 pub(crate) mod prop_carry;
+pub(crate) mod prop_carry_hud;
 pub(crate) mod prop_dynamics;
+pub(crate) mod prop_layout;
 mod settings;
 mod skeleton_grind_air;
 mod teleport_state;
@@ -267,10 +269,10 @@ impl GamePhysics {
         dynamics.step(&self.world, layer, volumes);
     }
 
-    /// Offboard grab/carry/drop of dynamic props (Phase 3).
-    pub(crate) fn update_prop_carry(&mut self, grab_rising: bool, carrier: prop_carry::Carrier) {
+    /// Offboard grab/carry/place of dynamic props (Phases 3-4).
+    pub(crate) fn update_prop_carry(&mut self, tick: prop_carry::Tick, carrier: prop_carry::Carrier) {
         if let Some(dynamics) = self.prop_dynamics.as_mut() {
-            self.prop_carry.update(dynamics, grab_rising, carrier);
+            self.prop_carry.update(dynamics, tick, carrier);
         }
     }
 
@@ -349,10 +351,29 @@ impl GamePhysics {
                 prop_dynamics::prop_simulation(settings.step.simulation),
             )
         });
-        let (prop_layer, prop_dynamics) = match prop_layer {
+        let (mut prop_layer, mut prop_dynamics) = match prop_layer {
             Some((layer, dynamics)) => (Some(layer), Some(dynamics)),
             None => (None, None),
         };
+        // Phase 4: apply the saved layout sidecar over the authored poses.
+        let mut prop_carry = prop_carry::PropCarry::default();
+        if let (Some(map), Some(layer), Some(dynamics)) = (map, prop_layer.as_mut(), prop_dynamics.as_mut()) {
+            let path = prop_layout::path(asset_root, &map.name);
+            if let Some(layout) = prop_layout::load(&path, &map.name) {
+                for pose in layout.values() {
+                    let origin = Vector3::new(pose.origin[0], pose.origin[1], pose.origin[2]);
+                    let basis = skate_core::math::Basis3 { columns: pose.basis };
+                    if let Some(instance) = dynamics.teleport(pose.id, origin, basis) {
+                        if let Err(error) = layer.rebake(instance, basis.columns, origin) {
+                            warn!("SKATE_PROP_LAYOUT: rebake {}: {error}", pose.id);
+                        }
+                    } else {
+                        warn!("SKATE_PROP_LAYOUT: unknown prop id {}", pose.id);
+                    }
+                }
+                prop_carry = prop_carry::PropCarry::with_layout(layout, Some(path));
+            }
+        }
         let grind_world = std::sync::Arc::new(if map.is_none() && terrain == ground::Terrain::Course {
             crate::grind_world::StaticProvider::authored(&crate::grind_world::test_rails())?
         } else { crate::grind_world::StaticProvider::new(map)? });
@@ -382,7 +403,7 @@ impl GamePhysics {
             world,
             prop_layer,
             prop_dynamics,
-            prop_carry: prop_carry::PropCarry::default(),
+            prop_carry,
             grind_world,
             grind_materials,
             offboard_grab_scene,
@@ -459,6 +480,7 @@ impl Plugin for PhysicsPlugin {
             .add_systems(FixedUpdate, advance.in_set(SimulationSet::Physics))
             .add_systems(Update, present.in_set(FrameSet::Physics))
             .add_systems(Update, prop_dynamics::sync_prop_transforms.after(FrameSet::Physics));
+        prop_carry_hud::install(app);
     }
 }
 

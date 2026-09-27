@@ -14,7 +14,7 @@ pub(super) fn advance(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
     truck_targets: [f32; 2],
-    grab_rising: bool,
+    carry_tick: super::prop_carry::Tick,
 ) -> Result<(), String> {
     let before = diagnostics::snapshot(physics, skater);
     diagnostics::validate(&before, "before shared solve").map_err(|error| format!(
@@ -53,7 +53,7 @@ pub(super) fn advance(
             skate_core::math::Vector3::new(0.0, 0.0, 1.0)
         };
         physics.update_prop_carry(
-            grab_rising,
+            carry_tick,
             super::prop_carry::Carrier {
                 state: skater.player_state.current(),
                 position: skate_core::math::Vector3::new(root[3][0], root[3][1], root[3][2]),
