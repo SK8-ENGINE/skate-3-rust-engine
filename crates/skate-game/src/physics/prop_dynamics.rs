@@ -45,6 +45,8 @@ const PROP_PENETRATION_CORRECTION: f32 = 0.4;
 /// Restitution applies only above this closing speed; below it contacts are
 /// inelastic so resting stacks settle instead of jittering.
 const PROP_RESTITUTION_THRESHOLD: f32 = 1.0;
+/// Effective skater mass (kg) for prop pushes.
+const SKATER_PUSH_MASS: f32 = 75.0;
 /// Fraction of the closing speed transferred to a prop by a skater push.
 const PROP_PUSH_TRANSFER: f32 = 0.5;
 /// Where the held prop's collision triangles are parked so skater queries
@@ -351,12 +353,28 @@ impl PropDynamics {
         Some(self.bodies.get(*self.by_id.get(&id)?)?.rates.position)
     }
 
-    /// Nearest body centre within `radius` of `point`, as `(id, position)`.
+    /// Nearest body within `radius` of `point`, measured to the box SURFACE
+    /// (not the centre, so big ramps are grabbable by their edge), as
+    /// `(id, centre)`.
     pub(crate) fn nearest_body(&self, point: Vector3, radius: f32) -> Option<(u32, Vector3)> {
         let mut best: Option<(u32, Vector3, f32)> = None;
         for body in &self.bodies {
-            let d = sub(body.rates.position, point);
-            let distance_squared = dot(d, d);
+            // Local-space point clamped into the box: the gap vector to it is
+            // the surface distance (zero when the point is inside).
+            let d = sub(point, body.rates.position);
+            let b = body.rates.basis.columns;
+            let local = [
+                d.x * b[0][0] + d.y * b[0][1] + d.z * b[0][2],
+                d.x * b[1][0] + d.y * b[1][1] + d.z * b[1][2],
+                d.x * b[2][0] + d.y * b[2][1] + d.z * b[2][2],
+            ];
+            let he = body.half_extents;
+            let gap = Vector3::new(
+                (local[0].abs() - he.x).max(0.0),
+                (local[1].abs() - he.y).max(0.0),
+                (local[2].abs() - he.z).max(0.0),
+            );
+            let distance_squared = dot(gap, gap);
             if distance_squared > radius * radius {
                 continue;
             }
@@ -565,8 +583,9 @@ impl PropDynamics {
     }
 
     /// Skater volumes treat the prop as a pushable weight: the prop receives a
-    /// fraction of the closing speed as an impulse at the contact point. The
-    /// skater's own response still comes from the exact triangle layer.
+    /// fraction of the closing speed through the reduced mass of the pair, as
+    /// an impulse at the contact point. The skater's own response still comes
+    /// from the exact triangle layer.
     fn push_from_skater(
         &mut self,
         index: usize,
@@ -589,8 +608,12 @@ impl PropDynamics {
         if strongest <= 0.0 {
             return;
         }
+        // Momentum-style transfer: the skater shares its closing speed through
+        // the reduced mass of the pair, so a 20 kg box skips away while a
+        // 500 kg ramp barely budges. Δv = strongest × transfer × M/(M+m).
         let mass = 1.0 / self.bodies[index].inertia.inverse_mass;
-        let impulse = scale(push, strongest * mass * PROP_PUSH_TRANSFER);
+        let reduced = mass * SKATER_PUSH_MASS / (SKATER_PUSH_MASS + mass);
+        let impulse = scale(push, strongest * reduced * PROP_PUSH_TRANSFER);
         self.bodies[index].apply_impulse(impulse, point);
     }
 
