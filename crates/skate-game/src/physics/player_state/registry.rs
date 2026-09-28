@@ -3,7 +3,10 @@
 //! TU3 has one lifecycle object per PhysicalPlayer state. Keeping the
 //! support table here makes selection, transition, and diagnostics agree on
 //! which owners are actually connected. Task-B-owned states remain explicit
-//! unsupported entries until their native adapters are integrated.
+//! unsupported entries until their native adapters are integrated; one of
+//! them, `PhysicsAirSecondary` (202, the GrindTrick-animation air variant),
+//! is remapped to `PhysicsAir` at the transition point (see
+//! `transition.rs::set`) so a grind-out can no longer abort the tick.
 
 use skate_core::player::state::PhysicalStateId;
 
