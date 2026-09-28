@@ -95,11 +95,29 @@ impl Plugin for ScoringHudPlugin {
         )
         .add_systems(
             Update,
-            (resize_target, reset, render)
+            (resize_target, reset, render, fit_composite)
                 .chain()
                 .after(crate::app::FrameSet::Physics),
         );
     }
+}
+
+/// Marker on the full-window composite node so `fit_composite` can resize it.
+#[derive(Component)]
+struct CompositeNode;
+
+/// Scale the 1280x720 APT frame to fit inside the window undistorted:
+/// tall or narrow windows letterbox the HUD instead of squishing it.
+fn fit_composite(
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut nodes: Query<&mut Node, With<CompositeNode>>,
+) {
+    let Ok(mut node) = nodes.single_mut() else {
+        return;
+    };
+    let scale = (window.width() / 1280.).min(window.height() / 720.);
+    node.width = Val::Px((1280. * scale).floor());
+    node.height = Val::Px((720. * scale).floor());
 }
 fn setup(
     mut commands: Commands,
@@ -200,13 +218,16 @@ fn setup(
             hud.composite = composites.add(HudComposite { image: target });
             commands.spawn((
                 MaterialNode(hud.composite.clone()),
+                CompositeNode,
                 UiTargetCamera(output),
                 GlobalZIndex(1),
                 Pickable::IGNORE,
                 Node {
                     position_type: PositionType::Absolute,
-                    width: percent(100),
-                    height: percent(100),
+                    // Sized by `fit_composite` every frame: the 1280x720 APT
+                    // frame is scaled to fit inside the window undistorted
+                    // (letterboxed), so squares stay square on tall windows.
+                    margin: UiRect::AUTO,
                     ..default()
                 },
             ));
