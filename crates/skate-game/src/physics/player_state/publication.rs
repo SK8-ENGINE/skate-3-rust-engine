@@ -63,6 +63,13 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     } else {
         None
     };
+    // Host prop carry presents as the retail grab-object byte: the next input
+    // publication maps OffBoard304 onto Processed2476 bit21, which enters
+    // OffBoardPushing502, and IsGrabbingObject enters MovingObjectNew. Held is
+    // cleared on every drop path, so the byte always follows the actual carry.
+    if physics.prop_carry.held().is_some() {
+        skater.player_input.physical.off_board.flag_304 = 1;
+    }
     let p = &skater.player_input.processed;
     let toolkit = skater
         .player_input

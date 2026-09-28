@@ -1139,6 +1139,31 @@ mod tests {
         assert_eq!(carry.held(), None);
     }
 
+    /// Retail grab-object publication moves the selector to OffBoardPushing
+    /// while held; the carry must not treat state 502 as leaving the ground.
+    #[test]
+    fn carry_survives_offboard_pushing_and_drops_afterwards() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let ground = skate_core::player::state::PhysicalStateId::BipedGround;
+        let pushing = skate_core::player::state::PhysicalStateId::OffBoardPushing;
+        carry.update(&mut dynamics, crate::physics::prop_carry::Tick { grab: true, ..tick() }, carrier(ground, 0.));
+        assert_eq!(carry.held(), Some(7));
+        for i in 0..30 {
+            carry.update(&mut dynamics, tick(), carrier(pushing, 0.05 * i as f32));
+            dynamics.step(&world, &mut layer, &[]);
+            assert_eq!(carry.held(), Some(7), "state 502 dropped the carry");
+        }
+        assert!(dynamics.position_of(7).unwrap().z > 1.5, "prop did not follow in 502");
+        // Leaving the on-foot states still auto-drops.
+        carry.update(
+            &mut dynamics,
+            tick(),
+            carrier(skate_core::player::state::PhysicalStateId::BipedAir, 0.),
+        );
+        assert_eq!(carry.held(), None);
+    }
+
     // Phase 4: placement mode and layout persistence.
 
     /// Placement adjusts the ghost pose; confirming drops the prop there,

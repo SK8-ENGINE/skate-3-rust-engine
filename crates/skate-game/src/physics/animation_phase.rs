@@ -319,6 +319,15 @@ pub(crate) fn advance(
     ) {
         action_intents.insert(intent.name, intent.value);
     }
+    // Move Object mode: the stock AG forwards these to MovingObjectNew's
+    // AttachIntents; only produce them while the host carry owns a prop.
+    if physics.prop_carry.held().is_some() {
+        for intent in skate_core::input::offboard_intentions::produce_object_move(
+            &controls.controller,
+        ) {
+            action_intents.insert(intent.name, intent.value);
+        }
+    }
     let mut output = AnimationPhaseOutput::new();
     skater.animation.advance(
         graphs,

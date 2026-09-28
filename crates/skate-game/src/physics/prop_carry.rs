@@ -29,8 +29,11 @@
 //! a map teleports saved bodies to their stored poses before the first sync.
 //!
 //! Restrictions: grabbing requires `BipedGround`; a single prop at a time;
-//! auto-drop beyond `MAX_HOLD_DISTANCE` or when leaving `BipedGround` (never
-//! saves). Drop keeps the current velocity, so releasing while moving throws
+//! auto-drop beyond `MAX_HOLD_DISTANCE` or when leaving the on-foot states
+//! (`BipedGround`/`OffBoardPushing`; never saves). While held, the retail
+//! grab-object byte (`OffBoard304`, published in `player_state/publication.rs`)
+//! keeps the selector in `OffBoardPushing` and the MotionGraph in
+//! MovingObjectNew, so carrying must not treat state 502 as leaving the ground. Drop keeps the current velocity, so releasing while moving throws
 //! gently; re-sleep is the natural cool-down.
 //!
 //! Multiplayer: prop bodies and layouts are host-local; skate-net would need
@@ -154,7 +157,10 @@ impl PropCarry {
     }
 
     pub(crate) fn update(&mut self, dynamics: &mut PropDynamics, tick: Tick, carrier: Carrier) {
-        let on_foot = carrier.state == PhysicalStateId::BipedGround;
+        let on_foot = matches!(
+            carrier.state,
+            PhysicalStateId::BipedGround | PhysicalStateId::OffBoardPushing
+        );
         let Some(id) = self.held else {
             if tick.grab {
                 if let Some(id) = self.candidate(dynamics, carrier) {
