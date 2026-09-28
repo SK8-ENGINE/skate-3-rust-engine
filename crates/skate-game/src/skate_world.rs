@@ -572,7 +572,6 @@ pub(crate) fn load_prop_layer(
                 &objects,
                 layer.instances(),
                 simulation,
-                material,
             );
             Some((layer, dynamics))
         }
@@ -1450,6 +1449,7 @@ mod tests {
             first_collision: 0,
             collision_count: 0,
             rails: vec![],
+            physics: Default::default(),
         };
         let objects = vec![
             object(7, [1., 0., 0., 0., 1., 0., 0., 0., 1., 10., 5., 0.]),

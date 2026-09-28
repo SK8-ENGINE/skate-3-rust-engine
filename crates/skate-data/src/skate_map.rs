@@ -129,6 +129,36 @@ struct Reader<'a> {
 
 /// A decoded MOBJ static-object record: identity plus a geometry range shared
 /// with other instances of the same template.
+/// MOBJ authored rigid-body parameters (schema 3+): the six-float physics
+/// block plus the two sleep flags. `physics_type` and `collision_shape` stay
+/// validated-only; dynamic bodies are built by the runtime, not authored.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjectPhysics {
+    pub density: f32,
+    pub friction: f32,
+    pub restitution: f32,
+    pub linear_damping: f32,
+    pub angular_damping: f32,
+    pub gravity_scale: f32,
+    pub enable_sleep: bool,
+    pub initially_awake: bool,
+}
+
+impl Default for ObjectPhysics {
+    fn default() -> Self {
+        Self {
+            density: 100.0,
+            friction: 0.55,
+            restitution: 0.05,
+            linear_damping: 0.05,
+            angular_damping: 0.15,
+            gravity_scale: 1.0,
+            enable_sleep: true,
+            initially_awake: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StaticObject {
     pub id: u32,
@@ -142,6 +172,7 @@ pub struct StaticObject {
     pub first_collision: u32,
     pub collision_count: u32,
     pub rails: Vec<u32>,
+    pub physics: ObjectPhysics,
 }
 
 /// MOBJ schema 3 stores editor ownership of ranges in the base geometry.
@@ -183,10 +214,23 @@ pub fn parse_static_objects(map: &SkateMap, extension: &Extension) -> Result<Vec
             return Err(format!("MOBJ {name} requests object physics, which requires a body adapter"));
         }
         if r.u()? > 2 { return Err(format!("MOBJ {name} collision shape is invalid")); }
-        r.floats::<6>()?;
-        for _ in 0..2 {
-            if r.u()? > 1 { return Err(format!("MOBJ {name} has an invalid boolean")); }
+        let values = r.floats::<6>()?;
+        let mut flags = [false; 2];
+        for slot in &mut flags {
+            let value = r.u()?;
+            if value > 1 { return Err(format!("MOBJ {name} has an invalid boolean")); }
+            *slot = value != 0;
         }
+        let physics = ObjectPhysics {
+            density: values[0],
+            friction: values[1],
+            restitution: values[2],
+            linear_damping: values[3],
+            angular_damping: values[4],
+            gravity_scale: values[5],
+            enable_sleep: flags[0],
+            initially_awake: flags[1],
+        };
         let transform = if extension.schema >= 4 {
             r.floats::<12>()?
         } else {
@@ -201,6 +245,7 @@ pub fn parse_static_objects(map: &SkateMap, extension: &Extension) -> Result<Vec
             first_collision: ranges[2],
             collision_count: ranges[3],
             rails: rail_ids,
+            physics,
         });
     }
     if r.at != r.bytes.len() { return Err("MOBJ has trailing data".into()); }

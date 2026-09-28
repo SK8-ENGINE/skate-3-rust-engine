@@ -271,8 +271,43 @@ impl GamePhysics {
 
     /// Offboard grab/carry/place of dynamic props (Phases 3-4).
     pub(crate) fn update_prop_carry(&mut self, tick: prop_carry::Tick, carrier: prop_carry::Carrier) {
+        let previous = self.prop_carry.held();
         if let Some(dynamics) = self.prop_dynamics.as_mut() {
             self.prop_carry.update(dynamics, tick, carrier);
+        }
+        let current = self.prop_carry.held();
+        if previous == current {
+            return;
+        }
+        if let Some(dynamics) = self.prop_dynamics.as_mut() {
+            dynamics.set_held(current);
+        }
+        // Park the newly held prop's triangles far below the world so skater
+        // queries cannot be pushed by it; restore a dropped prop's triangles
+        // at its final pose.
+        let (Some(layer), Some(dynamics)) =
+            (self.prop_layer.as_mut(), self.prop_dynamics.as_mut())
+        else {
+            return;
+        };
+        if let Some(id) = current {
+            if let (Some(instance), Some((_, basis))) =
+                (dynamics.instance_of(id), dynamics.pose(id))
+            {
+                if let Err(error) =
+                    layer.rebake(instance, basis.columns, prop_dynamics::HELD_PARK)
+                {
+                    warn!("SKATE_PROP_CARRY: park {id}: {error}");
+                }
+            }
+        } else if let Some(id) = previous {
+            if let (Some(instance), Some((origin, basis))) =
+                (dynamics.instance_of(id), dynamics.pose(id))
+            {
+                if let Err(error) = layer.rebake(instance, basis.columns, origin) {
+                    warn!("SKATE_PROP_CARRY: unpark {id}: {error}");
+                }
+            }
         }
     }
 

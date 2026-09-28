@@ -6,6 +6,14 @@
 //! RB grabs the world), so taps are free. Toggle rather than hold: carrying
 //! is locomotion-compatible and placing is a deliberate edit.
 //!
+//! Carry is a Skate 3 style drag, not a floating hold: the prop stays on the
+//! ground and is pulled horizontally toward a point just ahead of the carrier
+//! (`PropDynamics::drag_to`), so it slides with its authored friction, bumps
+//! over curbs and never lifts off by itself. The held prop neither receives
+//! skater pushes nor pushes the skater back: `PropDynamics::set_held` exempts
+//! it from volume pushes and its collision-layer triangles stay parked at
+//! `HELD_PARK` until the drop rebakes them.
+//!
 //! Placement mode (Phase 4): the prop keeps following a target pose relative
 //! to the carrier — frozen mid-air by the per-tick velocity overwrite — while
 //! the right stick adjusts distance (Y) and yaw (X) and DPad up/down adjusts
@@ -37,13 +45,15 @@ use super::prop_dynamics::PropDynamics;
 const GRAB_RADIUS: f32 = 1.8;
 /// Minimum forward alignment for a pickup, unless the prop is very close.
 const FRONT_DOT: f32 = 0.25;
-/// Carry point: this far ahead of the root and this high above it.
-const CARRY_FORWARD: f32 = 0.7;
-const CARRY_UP: f32 = 0.9;
-/// Follow velocity cap; above this the prop lags instead of snapping.
+/// Drag anchor: this far ahead of the root, at the prop's own height.
+const DRAG_FORWARD: f32 = 0.8;
+/// Drag speed cap; above this the prop lags behind instead of snapping.
+/// Roughly a fast walk, so sprinting leaves a heavy prop trailing.
+const MAX_DRAG_SPEED: f32 = 4.0;
+/// Placement follow cap; above this the prop lags instead of snapping.
 const MAX_CARRY_SPEED: f32 = 6.0;
 /// Auto-drop distance: the prop is stuck or was left behind.
-const MAX_HOLD_DISTANCE: f32 = 3.0;
+const MAX_HOLD_DISTANCE: f32 = 3.5;
 /// Placement adjust rates and clamps.
 const PLACE_YAW_RATE: f32 = 2.5;
 const PLACE_DISTANCE_RATE: f32 = 2.0;
@@ -180,9 +190,16 @@ impl PropCarry {
                     return;
                 }
                 if tick.placement {
+                    // Enter placement at the prop's current relative pose so
+                    // the ghost starts where the drag left it.
+                    let position = dynamics.position_of(id).unwrap_or(carrier.position);
+                    let offset = sub(position, carrier.position);
+                    let flat = Vector3::new(offset.x, 0.0, offset.z);
                     self.mode = Mode::Placement {
-                        distance: CARRY_FORWARD,
-                        height: CARRY_UP,
+                        distance: dot(flat, flat)
+                            .sqrt()
+                            .clamp(PLACE_DISTANCE.start, PLACE_DISTANCE.end),
+                        height: offset.y.clamp(PLACE_HEIGHT.start, PLACE_HEIGHT.end),
                         yaw: 0.0,
                     };
                     return;
@@ -221,13 +238,18 @@ impl PropCarry {
         }
     }
 
-    /// Plain carry follow: ahead of and above the root, orientation frozen.
+    /// Plain carry: drag the prop along the ground toward an anchor just
+    /// ahead of the carrier. Height and vertical velocity stay physical.
     fn follow(&self, dynamics: &mut PropDynamics, id: u32, carrier: Carrier) {
-        let target = add(
-            add(carrier.position, scale(carrier.forward, CARRY_FORWARD)),
-            Vector3::new(0.0, CARRY_UP, 0.0),
+        let Some(position) = dynamics.position_of(id) else {
+            return;
+        };
+        let target = Vector3::new(
+            carrier.position.x + carrier.forward.x * DRAG_FORWARD,
+            position.y,
+            carrier.position.z + carrier.forward.z * DRAG_FORWARD,
         );
-        dynamics.carry_to(id, target, MAX_CARRY_SPEED, carrier.time_step);
+        dynamics.drag_to(id, target, MAX_DRAG_SPEED, carrier.time_step);
     }
 
     /// Record the confirmed pose and rewrite the layout sidecar.

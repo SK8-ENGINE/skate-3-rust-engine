@@ -4,7 +4,9 @@
 //! (`integrate_body_rates`): gravity and cool-down/sleep come from the retail
 //! simulation step; the mass properties are the retail rounded-box finalize
 //! path (`primitive_mass_properties`) with the instance's scaled template AABB.
-//! Density defaults to 100 kg/m³, the MOBJ schema 3 authored default.
+//! Density, friction, restitution and damping are the authored MOBJ per-object
+//! values (`ObjectPhysics`, schema 3+); the project defaults are density
+//! 100 kg/m³, friction 0.55, restitution 0.05 and damping 0.05/0.15.
 //!
 //! Narrowphase uses the recovered GP pair query (`primitive_pair_contacts`):
 //! box vs static-world triangles, box vs box for other props, and box vs the
@@ -15,6 +17,9 @@
 //! Props start asleep and cost one AABB test per skater volume per tick. A
 //! skater contact or a moving prop wakes them. Moved instances re-bake their
 //! triangle range in the prop collision layer so skater queries stay exact.
+//! The held (carried) prop is exempt from both skater pushes and the rebake:
+//! while carried it is velocity-driven and its layer triangles are parked far
+//! below the world so they cannot push the carrier.
 use bevy::prelude::*;
 use skate_core::{
     math::{Basis3, Vector3},
@@ -33,11 +38,6 @@ use skate_core::{
     },
 };
 
-/// MOBJ schema 3 authored default density (kg/m³) for movable objects.
-const PROP_DENSITY: f32 = 100.0;
-/// MOBJ schema 3 authored default damping values.
-const PROP_LINEAR_DRAG: f32 = 0.05;
-const PROP_ANGULAR_DRAG: f32 = 0.15;
 /// Contact band and Baumgarte constants for the prop impulse pass.
 const PROP_CONTACT_PADDING: f32 = 0.02;
 const PROP_PENETRATION_SLOP: f32 = 0.005;
@@ -47,6 +47,9 @@ const PROP_PENETRATION_CORRECTION: f32 = 0.4;
 const PROP_RESTITUTION_THRESHOLD: f32 = 1.0;
 /// Fraction of the closing speed transferred to a prop by a skater push.
 const PROP_PUSH_TRANSFER: f32 = 0.5;
+/// Where the held prop's collision triangles are parked so skater queries
+/// cannot see them while it is carried.
+pub(crate) const HELD_PARK: Vector3 = Vector3::new(0.0, -10000.0, 0.0);
 
 /// Props get their own simulation step: the board's simulation carries
 /// cool_down = 0 (the host never sleeps it), which would freeze props after a
@@ -72,6 +75,9 @@ pub(crate) struct PropBody {
     half_extents: Vector3,
     rates: RetailBodyRates,
     inertia: RetailInertiaDynamics,
+    /// Authored MOBJ contact material (friction/restitution).
+    material: RetailContactMaterial,
+    enable_sleep: bool,
     asleep: bool,
 }
 
@@ -80,7 +86,8 @@ pub(crate) struct PropDynamics {
     by_id: std::collections::HashMap<u32, usize>,
     simulation: RetailSimulationStep,
     pair: PrimitivePairSettings,
-    contact_material: RetailContactMaterial,
+    /// Prop currently carried: exempt from skater pushes and rebake.
+    held: Option<u32>,
 }
 
 fn mul_basis(basis: Basis3, v: Vector3) -> Vector3 {
@@ -233,17 +240,19 @@ impl PropBody {
 impl PropDynamics {
     /// One box body per collision-layer instance, asleep at its authored pose.
     /// Placement rows are the world images of the local axes; their lengths
-    /// are the constant per-axis scale folded into the box extents.
+    /// are the constant per-axis scale folded into the box extents. Density,
+    /// damping, friction, restitution and sleep flags come from the authored
+    /// MOBJ physics block (`ObjectPhysics`).
     pub(crate) fn new(
         objects: &[skate_data::skate_map::StaticObject],
         instances: &[crate::skate_world::PropCollisionInstance],
         simulation: RetailSimulationStep,
-        contact_material: RetailContactMaterial,
     ) -> Self {
         let mut bodies = Vec::new();
         let mut by_id = std::collections::HashMap::new();
         for (index, entry) in instances.iter().enumerate() {
             let object = &objects[entry.object];
+            let authored = object.physics;
             let t = &object.transform;
             let axis_scale = [
                 (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt(),
@@ -273,15 +282,15 @@ impl PropDynamics {
                         half_extents,
                         radius: 0.0,
                     },
-                    requested_mass: volume * PROP_DENSITY,
+                    requested_mass: volume * authored.density.max(0.001),
                 },
                 RETAIL_UNBOUNDED_VELOCITY,
-                PROP_ANGULAR_DRAG,
+                authored.angular_damping,
             ) else {
                 continue;
             };
             let mut inertia = properties.dynamics;
-            inertia.linear_drag = PROP_LINEAR_DRAG;
+            inertia.linear_drag = authored.linear_damping;
             inertia.maximum_linear_velocity = RETAIL_UNBOUNDED_VELOCITY;
             let origin = Vector3::new(t[9], t[10], t[11]);
             let center = add(origin, mul_basis(basis, local_center));
@@ -297,13 +306,22 @@ impl PropDynamics {
                     position: center,
                     linear_velocity: Vector3::ZERO,
                     angular_velocity: Vector3::ZERO,
-                    force_acceleration: simulation.gravity_acceleration,
+                    force_acceleration: scale(
+                        simulation.gravity_acceleration,
+                        authored.gravity_scale,
+                    ),
                     torque_acceleration: Vector3::ZERO,
                     kinetic_energy: 0.0,
                     cool_down: simulation.cool_down,
                 },
                 inertia,
-                asleep: true,
+                material: RetailContactMaterial {
+                    static_friction: authored.friction,
+                    dynamic_friction: authored.friction,
+                    restitution: authored.restitution,
+                },
+                enable_sleep: authored.enable_sleep,
+                asleep: !authored.initially_awake,
             });
             by_id.insert(entry.id, bodies.len() - 1);
         }
@@ -318,7 +336,7 @@ impl PropDynamics {
                 edge_cos_bend_normal_threshold: 0.999,
                 convexity_epsilon: 0.01,
             },
-            contact_material,
+            held: None,
         }
     }
 
@@ -347,6 +365,51 @@ impl PropDynamics {
             }
         }
         best.map(|(id, position, _)| (id, position))
+    }
+
+    /// Collision-layer instance index for one body (rebake target).
+    pub(crate) fn instance_of(&self, id: u32) -> Option<usize> {
+        Some(self.bodies.get(*self.by_id.get(&id)?)?.instance)
+    }
+
+    /// Mark the carried prop: it stops receiving skater pushes and its layer
+    /// triangles stay parked until the drop rebakes them.
+    pub(crate) fn set_held(&mut self, held: Option<u32>) {
+        self.held = held;
+    }
+
+    fn is_held(&self, index: usize) -> bool {
+        self.held == Some(self.bodies[index].id)
+    }
+
+    /// Skate 3 style drag: the prop stays on the ground and is pulled
+    /// horizontally toward `target` (its Y is untouched, so gravity and
+    /// ground contacts keep working). Rotation stays frozen. Returns false if
+    /// the id is unknown.
+    pub(crate) fn drag_to(
+        &mut self,
+        id: u32,
+        target: Vector3,
+        max_speed: f32,
+        time_step: f32,
+    ) -> bool {
+        let Some(&index) = self.by_id.get(&id) else {
+            return false;
+        };
+        let body = &mut self.bodies[index];
+        body.wake();
+        let delta = sub(target, body.rates.position);
+        let flat = Vector3::new(delta.x, 0.0, delta.z);
+        let distance = dot(flat, flat).sqrt();
+        let speed = (distance / time_step).min(max_speed);
+        body.rates.linear_velocity = if distance > 1e-6 {
+            let pulled = scale(flat, speed / distance);
+            Vector3::new(pulled.x, body.rates.linear_velocity.y, pulled.z)
+        } else {
+            Vector3::new(0.0, body.rates.linear_velocity.y, 0.0)
+        };
+        body.rates.angular_velocity = Vector3::ZERO;
+        true
     }
 
     /// Kinematic follow while carried: wake and steer the body toward
@@ -433,37 +496,44 @@ impl PropDynamics {
         skater_volumes: &[BoardWorldVolume],
     ) {
         for index in 0..self.bodies.len() {
+            let held = self.is_held(index);
             // Skater push: cheap bounds reject, then the retail pair query.
-            let body_bounds = self.bodies[index].bounds();
-            for volume in skater_volumes {
-                let Some(volume_bounds) = volume_bounds(volume.primitive) else {
-                    continue;
-                };
-                if !body_bounds.overlaps(volume_bounds) {
-                    continue;
+            // The carried prop is velocity-driven by the carrier; letting the
+            // skater push it (or be pushed by it) fights the drag.
+            if !held {
+                let body_bounds = self.bodies[index].bounds();
+                for volume in skater_volumes {
+                    let Some(volume_bounds) = volume_bounds(volume.primitive) else {
+                        continue;
+                    };
+                    if !body_bounds.overlaps(volume_bounds) {
+                        continue;
+                    }
+                    let box_primitive = self.bodies[index].box_primitive();
+                    let Some(manifold) =
+                        primitive_pair_contacts(volume.primitive, box_primitive, self.pair)
+                    else {
+                        continue;
+                    };
+                    self.push_from_skater(index, volume, &manifold);
                 }
-                let box_primitive = self.bodies[index].box_primitive();
-                let Some(manifold) =
-                    primitive_pair_contacts(volume.primitive, box_primitive, self.pair)
-                else {
-                    continue;
-                };
-                self.push_from_skater(index, volume, &manifold);
             }
             if self.bodies[index].asleep {
                 continue;
             }
             let corrections = self.contact_corrections(index, world);
+            let body_sleep_capable = self.bodies[index].enable_sleep;
             // Snap to rest below the sleep threshold, but only while something
             // is actually touching the body: without the contact gate the snap
             // zeroes the first ticks of a fall (g·dt is far below the sleep
             // threshold) and the prop descends at g·dt² per tick forever.
-            let resting = dot(corrections.linear_displacement, corrections.linear_displacement)
-                > 0.0
-                || dot(corrections.position_displacement, corrections.position_displacement)
+            let resting = body_sleep_capable
+                && (dot(corrections.linear_displacement, corrections.linear_displacement)
                     > 0.0
-                || dot(corrections.angular_displacement, corrections.angular_displacement)
-                    > 0.0;
+                    || dot(corrections.position_displacement, corrections.position_displacement)
+                        > 0.0
+                    || dot(corrections.angular_displacement, corrections.angular_displacement)
+                        > 0.0);
             let body = &mut self.bodies[index];
             let step = integrate_body_rates(body.rates, body.inertia, self.simulation, corrections);
             body.rates = step.state;
@@ -478,8 +548,13 @@ impl PropDynamics {
                 body.rates.cool_down =
                     (body.rates.cool_down + 1).min(self.simulation.cool_down);
             }
-            if body.rates.cool_down >= self.simulation.cool_down {
+            if body_sleep_capable && body.rates.cool_down >= self.simulation.cool_down {
                 body.asleep = true;
+            }
+            // The held prop's triangles stay parked (set_held/HELD_PARK) so
+            // skater queries never see them while carrying.
+            if held {
+                continue;
             }
             let body = &self.bodies[index];
             if let Err(error) = layer.rebake(body.instance, body.rates.basis.columns, body.origin())
@@ -534,7 +609,8 @@ impl PropDynamics {
                 ) else {
                     continue;
                 };
-                let material = combine_contact_materials(self.contact_material, triangle.material);
+                let material =
+                    combine_contact_materials(self.bodies[index].material, triangle.material);
                 self.resolve_static(index, &manifold, material, &mut corrections);
             }
         }
@@ -553,7 +629,10 @@ impl PropDynamics {
             ) else {
                 continue;
             };
-            let material = combine_contact_materials(self.contact_material, self.contact_material);
+            let material = combine_contact_materials(
+                self.bodies[index].material,
+                self.bodies[other].material,
+            );
             if self.bodies[other].asleep {
                 // An asleep prop is an immovable support; a hard hit wakes it.
                 let closing = manifold.points[..manifold.count]
@@ -868,9 +947,10 @@ mod tests {
             first_collision: 0,
             collision_count: 0,
             rails: vec![],
+            physics: Default::default(),
         }];
         let layer = build_prop_layer(&map, &objects, material()).unwrap().unwrap();
-        let dynamics = PropDynamics::new(&objects, layer.instances(), simulation(), material());
+        let dynamics = PropDynamics::new(&objects, layer.instances(), simulation());
         let world = super::super::ground::Terrain::Flat.world(material());
         (world, layer, dynamics)
     }
