@@ -106,8 +106,9 @@ impl Plugin for ScoringHudPlugin {
 #[derive(Component)]
 struct CompositeNode;
 
-/// Scale the 1280x720 APT frame to fit inside the window undistorted:
-/// tall or narrow windows letterbox the HUD instead of squishing it.
+/// Scale the 1280x720 APT frame undistorted, anchored to the bottom-left
+/// corner like the stretched full-window layout: fill the width (or the
+/// height on very wide windows) and keep squares square on tall windows.
 fn fit_composite(
     window: Single<&Window, With<PrimaryWindow>>,
     mut nodes: Query<&mut Node, With<CompositeNode>>,
@@ -118,6 +119,8 @@ fn fit_composite(
     let scale = (window.width() / 1280.).min(window.height() / 720.);
     node.width = Val::Px((1280. * scale).floor());
     node.height = Val::Px((720. * scale).floor());
+    node.left = Val::Px(0.0);
+    node.bottom = Val::Px(0.0);
 }
 fn setup(
     mut commands: Commands,
@@ -224,10 +227,11 @@ fn setup(
                 Pickable::IGNORE,
                 Node {
                     position_type: PositionType::Absolute,
-                    // Sized by `fit_composite` every frame: the 1280x720 APT
-                    // frame is scaled to fit inside the window undistorted
-                    // (letterboxed), so squares stay square on tall windows.
-                    margin: UiRect::AUTO,
+                    // Sized and anchored bottom-left by `fit_composite` every
+                    // frame: the 1280x720 APT frame fills the window width
+                    // undistorted, so squares stay square on tall windows.
+                    left: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
                     ..default()
                 },
             ));
