@@ -7,12 +7,13 @@
 //! is locomotion-compatible and placing is a deliberate edit.
 //!
 //! Carry is a Skate 3 style drag, not a floating hold: the prop stays on the
-//! ground and is pulled horizontally toward a point just ahead of the carrier
-//! (`PropDynamics::drag_to`), so it slides with its authored friction, bumps
-//! over curbs and never lifts off by itself. The held prop neither receives
-//! skater pushes nor pushes the skater back: `PropDynamics::set_held` exempts
-//! it from volume pushes and its collision-layer triangles stay parked at
-//! `HELD_PARK` until the drop rebakes them.
+//! ground and keeps the side it was grabbed from, pulled along at walking
+//! pace (`PropDynamics::drag_to`), so it slides with its authored friction,
+//! bumps over curbs and never lifts off or swings through the carrier by
+//! itself. The held prop neither receives skater pushes nor pushes the
+//! skater back: `PropDynamics::set_held` exempts it from volume pushes and
+//! its collision-layer triangles stay parked at `HELD_PARK` until the drop
+//! rebakes them.
 //!
 //! Placement mode (Phase 4): the prop keeps following a target pose relative
 //! to the carrier — frozen mid-air by the per-tick velocity overwrite — while
@@ -41,12 +42,12 @@ use std::collections::BTreeMap;
 
 use super::prop_dynamics::PropDynamics;
 
-/// Pickup reach from the carrier's root.
-const GRAB_RADIUS: f32 = 1.8;
-/// Minimum forward alignment for a pickup, unless the prop is very close.
-const FRONT_DOT: f32 = 0.25;
-/// Drag anchor: this far ahead of the root, at the prop's own height.
-const DRAG_FORWARD: f32 = 0.8;
+/// Pickup reach from the carrier's root, measured to the prop's surface.
+/// Omnidirectional: retail grabbing does not require facing the prop.
+const GRAB_RADIUS: f32 = 2.0;
+/// Drag hold distance: the prop keeps the side it was grabbed from, this far
+/// from the carrier.
+const DRAG_HOLD: f32 = 0.9;
 /// Drag speed cap; above this the prop lags behind instead of snapping.
 /// Roughly a fast walk, so sprinting leaves a heavy prop trailing.
 const MAX_DRAG_SPEED: f32 = 4.0;
@@ -143,21 +144,13 @@ impl PropCarry {
     }
 
     /// The prop currently grabbable by this carrier, if any. Shared by the
-    /// grab path and the HUD indicator.
+    /// grab path and the HUD indicator. Reach is measured to the prop's
+    /// surface and works in any direction.
     pub(crate) fn candidate(&self, dynamics: &PropDynamics, carrier: Carrier) -> Option<u32> {
         if self.held.is_some() || carrier.state != PhysicalStateId::BipedGround {
             return None;
         }
-        let (id, position) = dynamics.nearest_body(carrier.position, GRAB_RADIUS)?;
-        let offset = sub(position, carrier.position);
-        let flat = Vector3::new(offset.x, 0.0, offset.z);
-        let distance = dot(flat, flat).sqrt();
-        let facing = if distance > 1e-3 {
-            dot(scale(flat, 1.0 / distance), carrier.forward)
-        } else {
-            1.0
-        };
-        (distance <= 0.5 || facing >= FRONT_DOT).then_some(id)
+        dynamics.nearest_body(carrier.position, GRAB_RADIUS).map(|(id, _)| id)
     }
 
     pub(crate) fn update(&mut self, dynamics: &mut PropDynamics, tick: Tick, carrier: Carrier) {
@@ -238,16 +231,28 @@ impl PropCarry {
         }
     }
 
-    /// Plain carry: drag the prop along the ground toward an anchor just
-    /// ahead of the carrier. Height and vertical velocity stay physical.
+    /// Plain carry: drag the prop along the ground, keeping the side it was
+    /// grabbed from — the anchor sits at `DRAG_HOLD` from the carrier along
+    /// the current carrier→prop bearing, so turning does not swing the prop
+    /// through the player and walking pulls it along. Height and vertical
+    /// velocity stay physical.
     fn follow(&self, dynamics: &mut PropDynamics, id: u32, carrier: Carrier) {
         let Some(position) = dynamics.position_of(id) else {
             return;
         };
+        let offset = sub(position, carrier.position);
+        let flat = Vector3::new(offset.x, 0.0, offset.z);
+        let distance = dot(flat, flat).sqrt();
+        let bearing = if distance > 1e-3 {
+            scale(flat, 1.0 / distance)
+        } else {
+            carrier.forward
+        };
+        let hold = distance.clamp(0.5, DRAG_HOLD);
         let target = Vector3::new(
-            carrier.position.x + carrier.forward.x * DRAG_FORWARD,
+            carrier.position.x + bearing.x * hold,
             position.y,
-            carrier.position.z + carrier.forward.z * DRAG_FORWARD,
+            carrier.position.z + bearing.z * hold,
         );
         dynamics.drag_to(id, target, MAX_DRAG_SPEED, carrier.time_step);
     }

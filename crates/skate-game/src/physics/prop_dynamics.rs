@@ -47,8 +47,11 @@ const PROP_PENETRATION_CORRECTION: f32 = 0.4;
 const PROP_RESTITUTION_THRESHOLD: f32 = 1.0;
 /// Effective skater mass (kg) for prop pushes.
 const SKATER_PUSH_MASS: f32 = 75.0;
-/// Fraction of the closing speed transferred to a prop by a skater push.
+/// Fraction of the closing speed transferred to a prop by a board hit.
 const PROP_PUSH_TRANSFER: f32 = 0.5;
+/// Body bumps (skeleton volumes, on foot) transfer far less: running into a
+/// prop nudges it, it does not shove it.
+const PROP_BODY_PUSH_TRANSFER: f32 = 0.15;
 /// Where the held prop's collision triangles are parked so skater queries
 /// cannot see them while it is carried.
 pub(crate) const HELD_PARK: Vector3 = Vector3::new(0.0, -10000.0, 0.0);
@@ -611,9 +614,14 @@ impl PropDynamics {
         // Momentum-style transfer: the skater shares its closing speed through
         // the reduced mass of the pair, so a 20 kg box skips away while a
         // 500 kg ramp barely budges. Δv = strongest × transfer × M/(M+m).
+        // Board hits carry the full transfer; body bumps much less.
+        let transfer = match volume.body {
+            skate_core::physics::board_step::CollisionBody::Board(_) => PROP_PUSH_TRANSFER,
+            _ => PROP_BODY_PUSH_TRANSFER,
+        };
         let mass = 1.0 / self.bodies[index].inertia.inverse_mass;
         let reduced = mass * SKATER_PUSH_MASS / (SKATER_PUSH_MASS + mass);
-        let impulse = scale(push, strongest * reduced * PROP_PUSH_TRANSFER);
+        let impulse = scale(push, strongest * reduced * transfer);
         self.bodies[index].apply_impulse(impulse, point);
     }
 
