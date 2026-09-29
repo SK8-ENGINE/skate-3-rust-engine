@@ -106,15 +106,17 @@ pub(crate) fn launch(
                 },
                 narrow_forward: false,
             };
-            let edges = super::ground_query::with_world_scene(
-                &physics.world,
-                super::ground_query::PrimaryEdges::Normal {
-                    dynamic: &[],
-                    vehicles: &[],
-                },
-                &[],
-                |scene| scene.edge_candidates(&search),
-            )?;
+            let cache = super::mod_solid_ground::VehicleEdgeCache::build(
+                &physics.network_proxies.solids,
+            );
+            let edges = cache.with_primary_edges(|vehicle_edges| {
+                super::ground_query::with_world_scene(
+                    &physics.world,
+                    vehicle_edges,
+                    &[],
+                    |scene| scene.edge_candidates(&search),
+                )
+            })?;
             let mut selected = None;
             for edge in skate_core::player::offboard::air_ledge::visible_edges(
                 &edges,
@@ -151,15 +153,29 @@ pub(crate) fn launch(
             ) else {
                 return Ok(false);
             };
-            let hits = super::ground_query::with_world_scene(
-                &physics.world,
-                super::ground_query::PrimaryEdges::Normal {
-                    dynamic: &[],
-                    vehicles: &[],
-                },
-                &[],
-                |scene| scene.query_lines(&packet),
-            )?;
+            let cache = super::mod_solid_ground::VehicleEdgeCache::build(
+                &physics.network_proxies.solids,
+            );
+            let mut hits = cache.with_primary_edges(|vehicle_edges| {
+                super::ground_query::with_world_scene(
+                    &physics.world,
+                    vehicle_edges,
+                    &[],
+                    |scene| scene.query_lines(&packet),
+                )
+            })?;
+            for (line, destination) in packet.lines.iter().zip(&mut hits) {
+                if let Some(hit) = physics.world.external_line(line.start, line.end, line.radius) {
+                    if destination.as_ref().is_none_or(|old| hit.hit.geometry.fraction < old.fraction) {
+                        *destination = Some(ground_query::LineHit {
+                            position: hit.hit.geometry.position,
+                            face_normal: hit.hit.geometry.normal,
+                            fraction: hit.hit.geometry.fraction,
+                            packed_surface: hit.surface,
+                        });
+                    }
+                }
+            }
             if ground_query::interpret_hits(&packet, hits).kind == 0 {
                 return Ok(false);
             }

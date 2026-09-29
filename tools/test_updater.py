@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import threading
@@ -31,6 +32,9 @@ class UpdaterTests(unittest.TestCase):
         self.assertFalse(u.eligible(release, 'Latest'))
         with self.assertRaises(ValueError):
             u.identity({**metadata(), 'target': 'linux'})
+        self.assertEqual(u.identity({**metadata(0), 'tag': 'development'}), 0)
+        with self.assertRaises(ValueError):
+            u.identity({**metadata(0), 'tag': 'v0'})
 
     def test_pagination_order_and_channel(self):
         def release(build, prerelease=False):
@@ -145,6 +149,110 @@ class UpdaterTests(unittest.TestCase):
         req = u.urllib.request.Request(u.API + '/assets/1', headers={'Authorization': 'Bearer test-only'})
         redirected = u.DownloadRedirect().redirect_request(req, None, 302, 'Found', {}, 'https://release-assets.githubusercontent.com/file')
         self.assertIsNone(redirected.get_header('Authorization'))
+
+    def test_branch_choice_fallback(self):
+        with patch.object(u, 'list_branches', side_effect=OSError('offline')):
+            names = u.branch_choices(threading.Event(), 'feature/foo')
+        self.assertEqual(names[0], 'feature/foo')
+        self.assertIn('skyline-driving-update', names)
+        self.assertIn('main', names)
+
+    def test_github_api_token_on_actions_requests(self):
+        with patch.dict(os.environ, {'SKATE_UPDATE_GITHUB_TOKEN': 'test-token'}, clear=False):
+            headers = u.github_request_headers(u.BRANCHES_API)
+            self.assertEqual(headers.get('Authorization'), 'Bearer test-token')
+            headers = u.github_request_headers(f'https://github.com/{u.REPO}/releases/download/v1/{u.PACKAGE}')
+            self.assertNotIn('Authorization', headers)
+
+    def test_branch_release_discovery_and_stage(self):
+        meta = {**metadata(11), 'tag': 'experimental', 'revision': 'c' * 40}
+        meta['files'] = {name: hashlib.sha256(b'new').hexdigest() for name in u.FILES[:-1]}
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, 'w') as z:
+            for name in [*meta['files'], 'release.json']:
+                z.writestr(u.PREFIX + name, json.dumps(meta) if name == 'release.json' else b'new')
+        package_bytes = archive.getvalue()
+        digest = hashlib.sha256(package_bytes).hexdigest()
+        release = dict(
+            id=88,
+            tag_name='skyline-driving-update',
+            draft=False,
+            prerelease=True,
+            assets=[
+                dict(name=u.PACKAGE, state='uploaded', browser_download_url='package'),
+                dict(name=u.PACKAGE + '.sha256', state='uploaded', browser_download_url='checksum'),
+                dict(name='release.json', state='uploaded', browser_download_url='manifest'),
+            ],
+        )
+
+        def fetch(url, *args):
+            if url.endswith('/tags/skyline-driving-update'):
+                return json.dumps(release).encode()
+            if url == 'manifest':
+                return json.dumps(meta).encode()
+            if url == 'checksum':
+                return (digest + '  ' + u.PACKAGE).encode()
+            if url == 'package':
+                return package_bytes
+            raise AssertionError(url)
+
+        current = metadata(10)
+        with patch.object(u, 'fetch', fetch):
+            candidate = u.discover_branch_release(current, 'skyline-driving-update', threading.Event())
+            self.assertIsNotNone(candidate)
+            self.assertEqual(candidate[0], 11)
+            with tempfile.TemporaryDirectory() as temp:
+                u.stage(candidate, Path(temp), threading.Event(), lambda _: None)
+                self.assertEqual((Path(temp) / 'new/skate3rust.exe').read_bytes(), b'new')
+
+    def test_branch_release_status_messages(self):
+        meta = {**metadata(12), 'tag': 'skyline-driving-update', 'revision': 'd' * 40}
+        release = dict(
+            id=90,
+            tag_name='skyline-driving-update',
+            draft=False,
+            prerelease=True,
+            assets=[
+                dict(name=u.PACKAGE, state='uploaded', browser_download_url='package'),
+                dict(name=u.PACKAGE + '.sha256', state='uploaded', browser_download_url='checksum'),
+                dict(name='release.json', state='uploaded', browser_download_url='manifest'),
+            ],
+        )
+
+        def fetch(url, *args):
+            if url.endswith('/tags/skyline-driving-update'):
+                return json.dumps(release).encode()
+            if url.endswith('/tags/main'):
+                raise u.urllib.error.HTTPError(url, 404, 'not found', {}, None)
+            if url == 'manifest':
+                return json.dumps(meta).encode()
+            raise AssertionError(url)
+
+        current = {**metadata(12), 'revision': meta['revision']}
+        with patch.object(u, 'fetch', fetch):
+            message, revision = u.branch_release_status(current, 'skyline-driving-update', threading.Event())
+            self.assertIn('already installed', message)
+            self.assertEqual(revision, meta['revision'])
+            message, revision = u.branch_release_status(current, 'main', threading.Event())
+            self.assertIn('no published installer', message.lower())
+            self.assertIsNone(revision)
+
+    def test_branch_discovery_without_published_release(self):
+        def fetch(url, *args):
+            if '/releases/tags/' in url:
+                raise u.urllib.error.HTTPError(url, 404, 'not found', {}, None)
+            if url.startswith(u.BRANCHES_API):
+                return json.dumps([{'name': 'main'}, {'name': 'skyline'}]).encode()
+            raise AssertionError(url)
+
+        current = metadata(8)
+        with patch.object(u, 'fetch', fetch):
+            names = u.list_branches(threading.Event())
+            self.assertIn('skyline', names)
+            self.assertIsNone(u.discover_branch(current, 'skyline', threading.Event()))
+            message, revision = u.branch_release_status(current, 'skyline', threading.Event())
+            self.assertIn('No published release', message)
+            self.assertIsNone(revision)
 
 
 if __name__ == '__main__':

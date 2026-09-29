@@ -32,9 +32,13 @@ def analyse(path):
     count = 0
     decoder = json.JSONDecoder()
     with open(path, encoding="utf-8") as stream:
-        if stream.readline().strip() != '{"traceEvents":[':
+        header = stream.readline().strip()
+        if header not in ('{"traceEvents":[', '['):
             raise ValueError("Expected a native engine recorder file (one event per line)")
         for line in stream:
+            stripped = line.strip()
+            if stripped in (']', ']}'):
+                continue
             event, _ = decoder.raw_decode(line.lstrip())
             count += 1
             name = event.get("name", "")

@@ -209,6 +209,9 @@ impl BoardRuntime {
     }
 
     /// Original post-solver observers consume these completed shared rows.
+    pub fn solved_reactions(&self) -> &[super::rigid_body::RetailReactionCorrections] {
+        self.step.solved_reactions()
+    }
     pub fn solved_contacts(&self) -> &[super::contact_solver::RetailContactJacobian] {
         self.step.solved_contacts()
     }

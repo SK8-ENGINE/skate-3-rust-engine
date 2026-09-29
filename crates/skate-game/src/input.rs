@@ -7,8 +7,9 @@ pub(crate) mod gesture_catalog;
 mod gesture_mapping_data;
 pub(crate) mod gesture_mapping;
 pub(crate) mod gesture_input;
+mod keyboard;
 pub(crate) mod platform;
-pub(crate) use controllers::{ControllerInput, ControllerStatus};
+pub(crate) use controllers::{ControllerInput, ControllerStatus, RawInput};
 use skate_core::input::tick::TickInput;
 
 #[derive(Resource, Clone, Copy, Debug)]
@@ -34,20 +35,29 @@ impl Plugin for InputPlugin {
     }
 }
 
-pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<crate::config::Config>,net:Option<Res<crate::multiplayer::Multiplayer>>,windows:Query<&Window>,mut capabilities:Local<[platform::CapabilityCache;4]>) {
+pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<crate::config::Config>,net:Option<Res<crate::multiplayer::Multiplayer>>,windows:Query<&Window>,keys:Res<ButtonInput<KeyCode>>,mut capabilities:Local<[platform::CapabilityCache;4]>,mut keyboard:Local<keyboard::KeyboardState>) {
     let previous = input.status;
     let focused=windows.iter().any(|w|w.focused);
     let active=net.is_some_and(|n|n.active());
-    input.collect(std::array::from_fn(|slot| {
-        if active && ((!focused && config.multiplayer.controller.is_none()) || config.multiplayer.controller.is_some_and(|selected|selected as usize!=slot)) {
+    let owned = |slot: usize| !active || !((!focused && config.multiplayer.controller.is_none()) || config.multiplayer.controller.is_some_and(|selected|selected as usize!=slot));
+    let mut samples = std::array::from_fn(|slot| {
+        if !owned(slot) {
             capabilities[slot].invalidate();
             Err(platform::DeviceError::Disconnected)
         } else {platform::poll_cached(slot, &mut capabilities[slot])}
-    }));
+    });
+    // Padless fallback: synthesize slot 0 from the keyboard when the slot is
+    // locally owned but has no usable platform pad (disconnected, failed
+    // backend, or poisoned state). Real pads always win; remote
+    // net-filtered slots are untouched.
+    if samples[0].is_err() && owned(0) {
+        if let Some(packet) = keyboard::sample(&keys, &mut keyboard) { samples[0] = Ok(packet); }
+    }
+    input.collect(samples);
     for (index, (&before, &after)) in previous.iter().zip(&input.status).enumerate() {
         if before != after {
             match after {
-                ControllerStatus::Ready => info!("Controller {index}: raw XInput ready"),
+                ControllerStatus::Ready => info!("Controller {index}: raw platform pad ready"),
                 ControllerStatus::Unavailable(platform::DeviceError::Disconnected) => {
                     info!("Controller {index}: disconnected");
                 }
@@ -57,15 +67,30 @@ pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<cra
     }
 }
 
-fn publish_actions(
+pub(crate) fn publish_actions(
     mut input: ResMut<ControllerInput>,
     mut published: ResMut<PublishedTickInput>,
-    menu:Option<Res<crate::graphics_menu::Menu>>,
+    menu: Option<Res<crate::graphics_menu::Menu>>,
+    debug: Res<crate::debug_cam::DebugCam>,
+    camera: Res<crate::camera::CameraRuntime>,
+    mods: Option<Res<crate::modding::Mods>>,
 ) {
-    if !crate::graphics_menu::gameplay_active(menu) {input.discard_gameplay();}
+    let blocked = !crate::graphics_menu::gameplay_active(menu) || debug.suppress_gameplay(&camera);
+    if blocked {
+        input.discard_gameplay();
+    }
     input.publish_actions();
-    published.0 = input.tick_input();
+    let tick = input.tick_input();
+    let mut values=*tick.actions().values();
+    if !blocked { crate::modding::override_actions(mods.as_deref(), &mut values); }
+    let tick=TickInput::new(tick.tick(),skate_core::input::gameplay_map::GameplayActions::from_values(values),tick.controller_available());
+    published.0 = if debug.suppress_gameplay(&camera) {
+        TickInput::new(
+            tick.tick(),
+            skate_core::input::gameplay_map::GameplayActions::from_values([0.0; 18]),
+            tick.controller_available(),
+        )
+    } else {
+        tick
+    };
 }
-
-#[cfg(test)]
-pub(crate) mod manual_replay;

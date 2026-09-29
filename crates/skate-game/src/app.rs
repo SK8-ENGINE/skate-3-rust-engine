@@ -10,10 +10,29 @@ use bevy::{
     prelude::*,
     render::{
         RenderPlugin,
-        settings::{Backends, InstanceFlags, RenderCreation, WgpuSettings},
+        settings::{Backends, InstanceFlags, RenderCreation, WgpuFeatures, WgpuSettings},
     },
 };
 use skate_data::GameAssets;
+
+/// Bevy's defaults plus, on request, the query features that make
+/// `RenderDiagnosticsPlugin` report per-pass GPU time.
+///
+/// Opt-in: a required feature the adapter lacks aborts device creation, and the
+/// queries are not free. Without them a pass's cost can only be inferred from
+/// invocation counts, which says nothing about how long the pass took. Set
+/// `SKATE_GPU_TIMING=1` to get `render/**/elapsed_gpu`.
+fn wgpu_features() -> WgpuFeatures {
+    let default = WgpuSettings::default().features;
+    if std::env::var_os("SKATE_GPU_TIMING").is_some_and(|v| v != "0") {
+        default
+            | WgpuFeatures::TIMESTAMP_QUERY
+            | WgpuFeatures::TIMESTAMP_QUERY_INSIDE_ENCODERS
+            | WgpuFeatures::PIPELINE_STATISTICS_QUERY
+    } else {
+        default
+    }
+}
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub(crate) enum FrameSet {
@@ -40,8 +59,7 @@ pub(crate) fn build(
     let retail_scene = config.map.as_ref().is_some_and(|map| crate::retail_render::RetailScene::for_map(map));
     let mut app = App::new();
     crate::custom_models::register_source(&mut app);
-    app.register_asset_source("mods", bevy::asset::io::AssetSourceBuilder::platform_default(
-        &crate::modding::package_root().to_string_lossy(), None));
+    crate::modding::register_source(&mut app);
     app.add_plugins(
         DefaultPlugins
             .set(AssetPlugin {
@@ -58,15 +76,23 @@ pub(crate) fn build(
             })
             .set(RenderPlugin {
                 render_creation: RenderCreation::Automatic(WgpuSettings {
+                    // Windows builds pin Vulkan for the retail renderer probe.
+                    // macOS has no native Vulkan; Metal is the only production
+                    // backend on Apple Silicon MacBooks (MoltenVK is not used).
+                    #[cfg(target_os = "macos")]
+                    backends: Some(Backends::METAL),
+                    #[cfg(not(target_os = "macos"))]
                     backends: Some(Backends::VULKAN),
                     // Existing machine's validation layer rejects wgpu atomic shaders.
                     // This workaround belongs only to the rendering adapter.
                     instance_flags: InstanceFlags::empty(),
+                    features: wgpu_features(),
                     ..default()
                 }),
                 ..default()
             }).build().disable::<bevy::log::LogPlugin>()
-            // Gameplay and menu navigation both use raw XInput. No game system
+            // Gameplay and menu navigation both use raw platform input (XInput
+            // on Windows, gilrs in input::platform elsewhere). No game system
             // consumes Bevy gamepad events/rumble; its second device backend can
             // stall PreUpdate (70.68 ms in the University capture).
             .disable::<bevy::gilrs::GilrsPlugin>(),
@@ -122,6 +148,7 @@ pub(crate) fn build(
     app.add_plugins(crate::updater::UpdaterPlugin);
     app.add_plugins(crate::multiplayer::MultiplayerPlugin);
     app.add_plugins(crate::scoring_hud::ScoringHudPlugin);
+    app.add_plugins(crate::debug_cam::DebugCamPlugin);
     app.add_systems(Last, crate::crash_context::sample);
     crate::profiling::install(&mut app);
     app

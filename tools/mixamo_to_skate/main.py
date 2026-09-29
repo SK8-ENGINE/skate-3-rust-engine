@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from converter import convert_file, create_profile, sha
+from fbx_tool import bundled_path
 from glb import ConversionError, require
 
 
@@ -13,7 +14,7 @@ def app_root():
     # Release setup carries source + native resources under its extraction root.
     # A standalone frozen converter retains its legacy adjacent resource layout.
     bundled = Path(__file__).resolve().parent
-    if (bundled/'tools/FBX2glTF.exe').is_file():
+    if bundled_path(bundled).is_file():
         return bundled
     return Path(sys.executable).parent if getattr(sys,'frozen',False) else bundled
 
@@ -77,7 +78,7 @@ def main(argv=None):
             profile_path.write_text(json.dumps(create_profile(args.files[0],reference),indent=2),encoding='utf-8')
             print('Calibration saved:',profile_path)
             return 0
-        tool = args.fbx_tool or app_root()/'tools/FBX2glTF.exe'
+        tool = args.fbx_tool or bundled_path(app_root())
         outputs = []
         for source in args.files:
             destination = args.output

@@ -1,6 +1,6 @@
 """Local owned-disc installation. No game content is downloaded or packaged."""
 from pathlib import Path
-import hashlib,json,os,shutil,subprocess,sys,time,urllib.request,uuid,zipfile
+import hashlib,json,os,re,shutil,subprocess,sys,time,urllib.request,uuid,zipfile
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from tools.owned_game.big import BigArchive
 
@@ -19,8 +19,20 @@ def map_workers():
             # briefly hold several copies of geometry and textures.
             count=min(count,max(1,(memory.available-2*1024**3)//(3*1024**3)))
     return count
-XISO_URL='https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso-Win64_Release.zip'
-XISO_SHA='fec88d03c7efd6205ab09be4abba70c0afd0eb27a5709f0a6235b828ba5ac11e'
+XISO_URLS = {
+    # Pinned XboxDev release; per-OS archives from the same build.
+    # macOS/Linux players with an already-extracted folder (default.xex)
+    # skip this download entirely.
+    'win32': ('https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso-Win64_Release.zip',
+              'fec88d03c7efd6205ab09be4abba70c0afd0eb27a5709f0a6235b828ba5ac11e'),
+    'darwin': ('https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso_macOS.zip',
+               '371e4a800086e875257ddafc037970789fb942b69dbf8ab0ba8301ff7799fef0'),
+    'linux': ('https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso_Linux.zip',
+              '982bbfefc9255d51f5348a477d7135d68abf81c0af9600e5728edb1246cfa200'),
+}
+XISO_URL, XISO_SHA = XISO_URLS.get(sys.platform, XISO_URLS['win32'])
+# Toolchain note: on macOS/Linux the extractor binary inside the ZIP is
+# extension-less (`extract-xiso`); on Windows it is `extract-xiso.exe`.
 
 def digest(path):
     with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
@@ -30,6 +42,50 @@ def remove_intermediate(path,root):
     if target==root or not target.is_relative_to(root):
         raise RuntimeError('Refusing to remove a path outside conversion workspace')
     shutil.rmtree(target)
+
+_INSTALLATION_ID=re.compile(r'^[0-9a-f]{32}$')
+
+def active_installation_id(base):
+    marker=base/'installation.json'
+    if not marker.is_file():
+        return None
+    try:
+        directory=json.loads(marker.read_text(encoding='utf-8-sig')).get('directory')
+    except (OSError,ValueError,TypeError):
+        return None
+    if not isinstance(directory,str) or not re.fullmatch(r'installations/[0-9a-f]{32}',directory):
+        return None
+    return directory.split('/',1)[1]
+
+def setup_log_name(name):
+    return (name == 'setup.log'
+            or name.endswith('-conversion.log') or name.endswith('-load.log'))
+
+def remove_setup_logs(stage, report=lambda _:None):
+    for path in stage.iterdir():
+        if path.is_file() and setup_log_name(path.name):
+            report('Removing setup log '+path.name)
+            path.unlink(missing_ok=True)
+
+def remove_stale_installations(base, active_stage, report=lambda _:None):
+    """Drop superseded installation trees after a successful publish."""
+    base=base.resolve()
+    installations=base/'installations'
+    if not installations.is_dir():
+        return
+    active_id=active_installation_id(base)
+    active_root=active_stage.resolve()
+    if active_id is None or active_root!=(installations/active_id).resolve():
+        return
+    if not active_root.is_relative_to(base) or not active_root.is_dir():
+        return
+    for entry in installations.iterdir():
+        if not entry.is_dir() or not _INSTALLATION_ID.fullmatch(entry.name):
+            continue
+        if entry.resolve()==active_root:
+            continue
+        report('Removing previous installation '+entry.name)
+        remove_intermediate(entry,installations)
 
 def download(url,expected,cache,report):
     cache.mkdir(parents=True,exist_ok=True)
@@ -58,9 +114,15 @@ def dependency(cache,name,url,sha,report):
     marker=folder/'.complete'
     if not marker.is_file():
         unpack_zip(download(url,sha,cache,report),folder)
-        marker.write_text(sha)
-    executable=next(folder.rglob(name+'.exe'),None)
+    # Windows ships `name.exe`; macOS/Linux ship extension-less `name`.
+    # Match files only, then record the marker so a layout change cannot
+    # poison the cache with an unverified marker.
+    executable=(next((p for p in folder.rglob(name+'.exe') if p.is_file()),None)
+                or next((p for p in folder.rglob(name) if p.is_file()),None))
     if executable is None:raise RuntimeError('Missing downloaded tool: '+name)
+    marker.write_text(sha)
+    if os.name != 'nt':
+        executable.chmod(executable.stat().st_mode | 0o111)
     return executable
 
 def run(args,log,report):
@@ -196,6 +258,8 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         summary(previous[0])
         atomic_json(base/'installation.json', {**previous[1], 'pipelines':target_versions,
                     'outputs':outputs(previous[0]), 'source':source})
+        remove_setup_logs(previous[0],report)
+        remove_stale_installations(base,previous[0],report)
         report('Game assets are current')
         return previous[0]
     install_id=uuid.uuid4().hex
@@ -211,7 +275,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         immutable_sets=[p.resolve() for p in sets.glob('*') if p.is_dir()
                         and all((p/(name+'-complete.json')).is_file() for name in character_stages)]
         for entry in previous[0].iterdir():
-            if entry.name in {'conversion','setup.log'} or entry.name.endswith('-conversion.log'):continue
+            if entry.name in {'conversion','setup-report.json'} or setup_log_name(entry.name):continue
             # Unchanged maps and immutable character generations share storage.
             # Mutable user data and rebuilt outputs get independent files.
             def copy_map(src,dst):
@@ -253,8 +317,13 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
             if not iso.is_file() or iso.suffix.lower()!='.iso':raise RuntimeError('Select an Xbox 360 Skate 3 ISO')
             extractor=dependency(base/'tools','extract-xiso',XISO_URL,XISO_SHA,report)
             game_root=work/'disc'
+            game_root.mkdir(parents=True, exist_ok=True)
             report('Extracting your ISO')
-            run([extractor,'-x',iso,'-d',game_root],log,report)
+            # This extract-xiso generation only honours -d before the image
+            # path, otherwise it treats -d as an input file and expands into
+            # the working directory (verified on Windows and macOS against
+            # the pinned build).
+            run([extractor,'-x','-d',game_root,iso],log,report)
         else:game_root=game_root.resolve()
         required_files=['default.xex']
         if 'core' in groups:required_files += ['data/big/miscload.big','data/big/miscboot.big','data/big/db.big']
@@ -350,9 +419,11 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         if finalize:finalize(stage)
         from .optional_content import summary
         warnings=summary(stage)
-        # Publish after core validation and all optional outcomes have been recorded.
-        marker=base/'installation.json.new'
-        marker.write_text(json.dumps({'version':1,'directory':'installations/'+install_id,'source':source,'source_hash':source_hash,'pipelines':target_versions,'outputs':outputs(stage)}),encoding='utf-8')
-        marker.replace(base/'installation.json')
-        report(f'Setup complete ({len(warnings)} unavailable/retained components; see setup-report.json)' if warnings else 'Setup complete')
-        return stage
+    # Publish after core validation and all optional outcomes have been recorded.
+    marker=base/'installation.json.new'
+    marker.write_text(json.dumps({'version':1,'directory':'installations/'+install_id,'source':source,'source_hash':source_hash,'pipelines':target_versions,'outputs':outputs(stage)}),encoding='utf-8')
+    marker.replace(base/'installation.json')
+    remove_setup_logs(stage,report)
+    remove_stale_installations(base,stage,report)
+    report(f'Setup complete ({len(warnings)} unavailable/retained components; see setup-report.json)' if warnings else 'Setup complete')
+    return stage

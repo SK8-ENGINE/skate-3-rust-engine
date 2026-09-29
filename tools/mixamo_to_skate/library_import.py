@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image
 
 from converter import convert_file, sha, validate_output
+from fbx_tool import bundled_path
 from glb import Document, require
 
 
@@ -126,7 +127,7 @@ def run(args,app):
             profile=json.loads(profile_path.read_text(encoding='utf-8')) if profile_path.is_file() else None
             if profile and profile['reference_sha256']!=sha(args.reference):profile=None
             identity=import_model(source,args.reference,args.library_import,
-                                  args.fbx_tool or app/'tools/FBX2glTF.exe',profile)
+                                  args.fbx_tool or bundled_path(app), profile)
             result={'status':'ready','id':identity}
     except Exception as error:
         result={'status':'error','message':str(error)}

@@ -1,0 +1,20 @@
+{
+  "id": "examples.physics-sandbox",
+  "api": 2,
+  "name": "Physics Sandbox",
+  "version": "0.1.1",
+  "author": "Skate3clone",
+  "description": "Demonstrates the physics/graphics layer: spawn a dynamic box, push it with WASD, attach with E.",
+  "entry": "main.lua",
+  "settings": {
+    "push_newtons": {
+      "type": "number",
+      "label": "Push force (N)",
+      "description": "Horizontal force while holding WASD. Must exceed friction≈μmg (about 60–100N for this crate) or the box will not slide.",
+      "default": 350,
+      "min": 50,
+      "max": 1200,
+      "step": 10
+    }
+  }
+}

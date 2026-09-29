@@ -23,7 +23,6 @@ pub struct Shape {
 pub type Shapes = BTreeMap<i32, Vec<Shape>>;
 pub struct Draw {
     pub texture: String,
-    pub size: [u32; 2],
     pub vertices: Vec<Vertex>,
     pub multiply: [f32; 4],
     pub add: [f32; 4],
@@ -109,7 +108,6 @@ fn visit(
         {
             out.push(Draw {
                 texture: shape.texture.rgba.clone(),
-                size: [shape.texture.width, shape.texture.height],
                 vertices: shape
                     .triangles
                     .iter()
@@ -194,7 +192,6 @@ fn visit(
             if !vertices.is_empty() {
                 out.push(Draw {
                     texture: font.texture.clone(),
-                    size: font.size,
                     vertices,
                     multiply: std::array::from_fn(|i| {
                         if shadow && i < 3 {

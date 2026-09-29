@@ -240,21 +240,6 @@ impl Vm {
     pub fn begin_update(&mut self) {
         self.remaining = 100_000;
     }
-    pub fn construct(
-        &mut self,
-        class: usize,
-        args: Vec<Value>,
-        host: &mut impl Host,
-    ) -> Result<usize, String> {
-        let id = self.object(ObjectKind::Plain);
-        if let Value::Object(proto) = self.get(class, "prototype") {
-            self.objects[id].prototype = Some(proto);
-        }
-        if let ObjectKind::Function(f) = self.objects[class].kind.clone() {
-            self.invoke(f, id, args, host)?;
-        }
-        Ok(id)
-    }
     pub fn run(&mut self, code: &[Instruction], host: &mut impl Host) -> Result<Value, String> {
         self.begin_update();
         self.run_on(self.global, code, host)

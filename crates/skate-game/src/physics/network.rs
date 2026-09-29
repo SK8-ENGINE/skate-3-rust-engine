@@ -30,9 +30,6 @@ fn xyz(v: Vector3) -> [f32; 3] {
 fn vector(v: [f32; 3]) -> Vector3 {
     Vector3::new(v[0], v[1], v[2])
 }
-fn add(a: Vector3, b: Vector3) -> Vector3 {
-    Vector3::new(a.x + b.x, a.y + b.y, a.z + b.z)
-}
 fn body_pose(body: &BodySnapshot) -> Pose {
     let q = body.rates.orientation;
     Pose {
@@ -76,7 +73,7 @@ pub(crate) fn capture_body(physics: &GamePhysics, skater: &SkaterRuntime) -> Bod
             }
         }
     }
-    for (i, part) in skater.skeleton_collision.parts.iter().enumerate() {
+    for (i, part) in crate::modding::player_physics::collision_parts(skater).iter().enumerate() {
         if part.enabled && part.volume_group == 0 {
             enabled |= 1 << (7 + i);
         }
@@ -124,6 +121,18 @@ pub(crate) struct Schema {
     pub fingerprint: u64,
 }
 impl Schema {
+    /// Latest physical shape layout placed at the buffered visual root. This is
+    /// only for presentation clearance; the owner's simulation remains final.
+    pub fn visual_colliders(&self, frame: &BodyState, root: Mat4) -> Vec<skate_dynamics::SolidCollider> {
+        let relative = root * matrix(frame.root).inverse();
+        self.volumes.iter().filter_map(|(i, volume)| {
+            if frame.enabled & (1u64 << i) == 0 { return None; }
+            let body = frame.bodies.get(*i)?;
+            let primitive = transform(volume.primitive, relative * matrix(body.pose));
+            let (shape, pose) = super::solid_contacts::shape(primitive)?;
+            Some(skate_dynamics::SolidCollider { shape, pose, friction: 0. })
+        }).collect()
+    }
     pub fn new(physics: &GamePhysics, skater: &SkaterRuntime) -> Result<Self, String> {
         let mut mode = skate_core::physics::skeleton_body::SkeletonCollisionMode::new_normal(
             skater.skeleton_collision.settings,
@@ -246,32 +255,25 @@ pub(crate) fn bounds(p: ContactPrimitive) -> (Vec3, f32) {
 pub(crate) struct Proxies {
     pub bodies: Vec<BodySnapshot>,
     pub volumes: Vec<BoardWorldVolume>,
+    pub solids: Vec<(usize, skate_dynamics::SolidBody)>,
+    pub groups: std::collections::BTreeMap<usize, u32>,
+    pub actors: std::collections::BTreeMap<usize,(u64,usize)>,
+    pub dynamics_before: Vec<(u64, usize, [f32; 3], [f32; 3])>,
+    pub dynamics_deltas: Vec<(u64, [f32; 3], [f32; 3], [f32; 3], [f32; 3])>,
 }
 impl Proxies {
     pub fn append(
         &mut self,
+        peer: u64,
         frame: &BodyState,
         schema: &Schema,
         physics: &GamePhysics,
         skater: &SkaterRuntime,
-        age: f32,
+        prediction: skate_net::prediction::CollisionPrediction,
     ) {
-        // Include detached boards as well as the rider. Distant bodies never enter the solver.
-        let nearby = frame.bodies.iter().any(|b| {
-            physics
-                .board
-                .bodies()
-                .iter()
-                .chain(skater.skeleton.bodies())
-                .any(|local| {
-                    Vec3::from_array(b.pose.p)
-                        .distance_squared(Vec3::from_array(xyz(local.rates.position)))
-                        < 64.
-                })
-        });
-        if !nearby {
-            return;
-        }
+        // The local native skeleton is intentionally paused during a mod
+        // attachment. It is not a valid culling origin for a driven object.
+        // Keep the bounded peer schemas; each solver uses its own broad phase.
         let base = skater.skeleton.bodies().len()
             + skater.skeleton_drives.targets.bodies.len()
             + self.bodies.len();
@@ -302,6 +304,7 @@ impl Proxies {
                 };
                 inertia
             };
+            let wire = prediction.body(wire);
             let q = Quat::from_array(wire.pose.q).normalize();
             b.rates.orientation = RetailQuaternion {
                 x: q.x,
@@ -314,12 +317,15 @@ impl Proxies {
             };
             b.rates.world_inverse_inertia =
                 world_inverse_inertia(b.rates.basis, b.inertia.inverse_tensor);
-            b.rates.position = add(vector(wire.pose.p), vector(wire.velocity.map(|v| v * age)));
+            b.rates.position = vector(wire.pose.p);
             b.rates.linear_velocity = vector(wire.velocity);
             b.rates.angular_velocity = vector(wire.angular);
             b.rates.force_acceleration = Vector3::ZERO;
             b.rates.torque_acceleration = Vector3::ZERO;
             b.state_flags = 4;
+            self.groups.insert(base + i, if i < 7 { physics.board.collision_group() }
+                else { skater.skeleton_collision.assembly_group });
+            self.actors.insert(base+i,(peer,i));
             self.bodies.push(b);
         }
         for &(i, ref template) in &schema.volumes {
@@ -335,27 +341,58 @@ impl Proxies {
             });
         }
     }
-}
 
-impl Proxies {
-    /// Vehicle chassis join the existing native contact solver; reactions remain local.
-    pub fn append_vehicle(&mut self,shape:&crate::modding::vehicles::network::CollisionShape,physics:&GamePhysics,skater:&SkaterRuntime) {
-        let p=Vec3::from_array(shape.position);
-        if !physics.board.bodies().iter().chain(skater.skeleton.bodies()).any(|b|Vec3::from_array(xyz(b.rates.position)).distance_squared(p)<100.) {return;}
-        let base=skater.skeleton.bodies().len()+skater.skeleton_drives.targets.bodies.len()+self.bodies.len();
-        let mut body=physics.board.bodies()[0];
-        let q=Quat::from_array(shape.rotation).normalize();
-        body.rates.position=vector(shape.position);
-        body.rates.orientation=RetailQuaternion{x:q.x,y:q.y,z:q.z,w:q.w};
-        body.rates.basis=skate_core::math::Basis3{columns:Mat3::from_quat(q).to_cols_array_2d()};
-        body.inertia.inverse_mass=1./shape.mass;
-        let [x,y,z]=shape.half; body.inertia.inverse_tensor=vector([3./(shape.mass*(y*y+z*z)),3./(shape.mass*(x*x+z*z)),3./(shape.mass*(x*x+y*y))]);
-        body.rates.world_inverse_inertia=world_inverse_inertia(body.rates.basis,body.inertia.inverse_tensor);
-        body.rates.linear_velocity=vector(shape.velocity);body.rates.angular_velocity=vector(shape.angular);
-        body.rates.force_acceleration=Vector3::ZERO;body.rates.torque_acceleration=Vector3::ZERO;body.state_flags=4;
+    /// One actual compound rigid body, expressed at its COM in its principal
+    /// inertia frame. Collider poses remain in world space and are not shells.
+    pub fn append_solid(
+        &mut self, solid: skate_dynamics::SolidBody, physics: &GamePhysics,
+        skater: &SkaterRuntime, locally_owned: bool,
+    ) {
+        if !solid.center_of_mass.is_finite() || !solid.linvel.is_finite()
+            || !solid.angvel.is_finite() || !solid.inertia_rotation.is_finite() { return; }
+        let index = skater.skeleton.bodies().len()
+            + skater.skeleton_drives.targets.bodies.len() + self.bodies.len();
+        let mut body = physics.board.bodies()[0];
+        let q = solid.inertia_rotation;
+        let q = Quat::from_xyzw(q.x, q.y, q.z, q.w).normalize();
+        body.rates.position = vector(solid.center_of_mass.to_array());
+        body.rates.orientation = RetailQuaternion { x:q.x, y:q.y, z:q.z, w:q.w };
+        body.rates.basis = skate_core::math::Basis3 { columns: Mat3::from_quat(q).to_cols_array_2d() };
+        // Ownership controls feedback, not physical mass. A remote moving body
+        // participates as a finite-mass shadow; only our actor keeps its reaction.
+        body.inertia.inverse_mass = solid.inverse_mass;
+        body.inertia.inverse_tensor = vector(solid.inverse_inertia.to_array());
+        // A host-owned body's drag and caps belong to its original solver.
+        body.inertia.linear_drag = 0.;
+        body.inertia.angular_drag = 0.;
+        body.inertia.maximum_linear_velocity = 100_000.;
+        body.inertia.maximum_angular_velocity = 100_000.;
+        body.rates.world_inverse_inertia = world_inverse_inertia(body.rates.basis, body.inertia.inverse_tensor);
+        body.rates.linear_velocity = vector(solid.linvel.to_array());
+        body.rates.angular_velocity = vector(solid.angvel.to_array());
+        body.rates.force_acceleration = Vector3::ZERO;
+        body.rates.torque_acceleration = Vector3::ZERO;
+        body.state_flags = 4;
+        self.groups.insert(index, solid.contact_group);
+        if locally_owned && solid.inverse_mass > 0. {
+            self.dynamics_before.push((solid.id, index, solid.linvel.to_array(), solid.angvel.to_array()));
+        }
         self.bodies.push(body);
-        self.volumes.push(BoardWorldVolume{body:CollisionBody::Attached(base),primitive:ContactPrimitive::RoundedBox{
-            center:vector((p+q*Vec3::from_array(shape.offset)).to_array()),basis:body.rates.basis,
-            half_extents:vector(shape.half.map(|x|x-shape.rounding)),radius:shape.rounding},linear_velocity:body.rates.linear_velocity,material:skate_core::physics::contact::RetailContactMaterial{static_friction:0.4,dynamic_friction:0.3,restitution:0.1}});
+        self.solids.push((index, solid));
+    }
+
+    pub fn capture_dynamics_reactions(
+        &mut self, reactions: &[skate_core::physics::rigid_body::RetailReactionCorrections], dt: f32,
+    ) {
+        self.dynamics_deltas.clear();
+        if !(dt.is_finite() && dt > 0.) { return; }
+        for &(id, index, _, _) in &self.dynamics_before {
+            let Some(r) = reactions.get(skate_core::physics::board_step::ATTACHED_REACTION_BASE + index) else { continue };
+            self.dynamics_deltas.push((id,
+                xyz(r.linear_displacement).map(|v| v / dt),
+                xyz(r.angular_displacement).map(|v| v / dt),
+                xyz(r.position_displacement), xyz(r.orientation_displacement),
+            ));
+        }
     }
 }

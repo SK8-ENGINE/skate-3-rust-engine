@@ -1,5 +1,6 @@
 param([Parameter(Mandatory)][string]$Destination)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'PowerShellCompat.ps1')
 $root = Split-Path $PSScriptRoot -Parent
 $cache = Join-Path $root 'target/importer-deps'
 New-Item -ItemType Directory -Path $cache,$Destination -Force | Out-Null
@@ -8,7 +9,7 @@ $sha = '8d90fb5e0a8d186a3d9a7ff8c75eaee541c3975ce4df0d80351f20092ae0877f'
 if (-not (Test-Path -LiteralPath $exe)) {
     Invoke-WebRequest 'https://github.com/facebookincubator/FBX2glTF/releases/download/v0.9.7/FBX2glTF-windows-x64.exe' -OutFile $exe
 }
-if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLower() -ne $sha) {
+if ((Get-Sha256Hex $exe) -ne $sha) {
     throw 'FBX2glTF checksum mismatch; remove target/importer-deps/FBX2glTF.exe and retry.'
 }
 Copy-Item -LiteralPath $exe -Destination $Destination

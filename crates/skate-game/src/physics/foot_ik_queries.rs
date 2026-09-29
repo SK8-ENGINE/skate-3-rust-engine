@@ -132,6 +132,16 @@ fn query_trajectory(
                 }
             }
         }
+        if let Some(external) = world.external_line(origin, vector(end), radius) {
+            let hit = external.hit.geometry;
+            if hit.fraction.clamp(0.0, 1.0) < nearest {
+                let point = lanes(hit.position);
+                result.position = point;
+                result.normal = lanes(hit.normal);
+                result.surface = external.hit.tag;
+                position = Some(point);
+            }
+        }
         Ok::<_, String>(position)
     })?;
     result.hit = result.collision_time >= 0.0;
@@ -142,4 +152,30 @@ fn vector(v: [f32; 4]) -> Vector3 {
 }
 fn lanes(v: Vector3) -> [f32; 4] {
     [v.x, v.y, v.z, 0.0]
+}
+
+#[cfg(test)]
+mod mod_platform_tests {
+    use super::*;
+    use std::sync::Arc;
+    use skate_dynamics::{DynamicsWorld, BodyDesc, BodyType, Shape};
+    #[test]
+    fn toes_and_hips_find_rapier_platform_and_follow_its_pose() {
+        let mut dynamics = DynamicsWorld::default();
+        let id = dynamics.spawn(BodyDesc { body_type: BodyType::Kinematic,
+            shape: Shape::Box { half_extents: [3.,0.5,3.] }, position:[0.,40.,0.],
+            ..Default::default() }).unwrap();
+        let mut world = BoardWorld::new(vec![]);
+        world.set_external_queries(Some(Arc::new(crate::modding::bridge::MovingQueries(dynamics.solid_bodies()))));
+        for velocity in [[0.,-1.83,0.,0.],[0.,-100.,0.,0.]] {
+            let hit=query_trajectory(&world,[0.,41.,0.,0.],velocity).unwrap();
+            assert!(hit.hit); assert!((hit.position[1]-40.5).abs()<0.001);
+            assert!(hit.normal[1]>0.99);
+        }
+        assert!(!query_trajectory(&world,[8.,41.,0.,0.],[0.,-1.83,0.,0.]).unwrap().hit);
+        assert!(dynamics.set_pose(id,[10.,40.,0.],[0.,0.,0.,1.]));
+        world.set_external_queries(Some(Arc::new(crate::modding::bridge::MovingQueries(dynamics.solid_bodies()))));
+        assert!(!query_trajectory(&world,[0.,41.,0.,0.],[0.,-1.83,0.,0.]).unwrap().hit);
+        assert!(query_trajectory(&world,[10.,41.,0.,0.],[0.,-1.83,0.,0.]).unwrap().hit);
+    }
 }

@@ -8,13 +8,6 @@ A Rust and Bevy skating project built from Skate 3 reverse-engineering research.
 Includes skating, tricks, grinds, offboard movement, difficulty settings and
 `.skate` map support. Gameplay parity is still a work in progress.
 
-## Mods and agent authoring
-
-Drop mod ZIPs into top-level `mods/` and enable them in the Mods menu. **Point your coding agent at [sdk/AGENTS.md](sdk/AGENTS.md)**
-to make a mod. See [package structure](docs/mod-packages.md), [Lua API](docs/lua-modding.md),
-[vehicle API](docs/vehicle-sdk.md), [multiplayer mod SDK](docs/multiplayer-mods.md) and [Mixamo workflow](docs/mixamo-vehicle-workflow.md).
-Editable examples live in `sdk/examples/`; `tools/package_mod.py` validates and packages them.
-
 ## Play
 
 [Download Experimental](https://github.com/SK8-ENGINE/skate-3-rust-engine/releases/tag/experimental).

@@ -18,6 +18,8 @@ mod native;
 #[derive(Default)]
 struct Capture {
     logs: VecDeque<String>,
+    #[cfg(debug_assertions)]
+    physics: VecDeque<String>,
     transitions: VecDeque<String>,
     metadata: std::collections::BTreeMap<String, String>,
     panic: VecDeque<String>,
@@ -42,6 +44,11 @@ impl Capture {
         }
         if line.starts_with("REPORT_PANIC ") || line.starts_with("REPORT_NATIVE ") {
             push(&mut self.panic, entry.clone(), 128);
+        }
+        #[cfg(debug_assertions)]
+        if line.starts_with("REPORT_PHYSICS ") {
+            push(&mut self.physics, entry, 160);
+            return;
         }
         push(&mut self.logs, entry, LOG_LIMIT);
     }
@@ -293,6 +300,8 @@ fn report(capture: &Capture, outcome: &str, elapsed: f64) -> String {
             "Panic, native exception and stack",
             capture.panic.iter().collect(),
         ),
+        #[cfg(debug_assertions)]
+        ("Development physics flight recorder (120 input ticks + 32 recent probes)", capture.physics.iter().collect()),
         ("Recent logs", capture.logs.iter().collect()),
     ] {
         text.push_str(&format!("\n{name}\n"));
@@ -393,6 +402,25 @@ fn popup(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn release_has_no_development_physics_section() {
+        assert!(!report(&Capture::default(), "exit=1", 0.).contains("Development physics"));
+    }
+    #[test]
+    #[cfg(debug_assertions)]
+    fn physics_evidence_survives_unrelated_logs() {
+        let mut capture=Capture::default();
+        capture.line("stderr",b"REPORT_PHYSICS FIRST_FAILURE tick=3631 stage=ground_reckoning",1.);
+        capture.line("stderr",b"REPORT_PHYSICS TICK input64_81=[0, 0.6]",1.);
+        for _ in 0..1000 { capture.line("stderr",b"mod chatter",2.); }
+        let text=report(&capture,"exit=1",3.);
+        assert!(text.contains("FIRST_FAILURE tick=3631"));
+        assert!(text.contains("input64_81"));
+        assert_eq!(capture.physics.len(),2);
+        for _ in 0..1000 { capture.line("stderr",b"REPORT_PHYSICS bounded",3.); }
+        assert_eq!(capture.physics.len(),160);
+    }
     #[test]
     fn bounded_and_private() {
         let mut c = Capture::default();

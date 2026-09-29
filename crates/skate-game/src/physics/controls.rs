@@ -8,12 +8,15 @@ use skate_core::input::{
     riding_intentions::{self, PushPreferences, RidingIntent},
     wipeout_intentions,
 };
+use std::collections::BTreeMap;
 
 #[derive(Resource)]
 pub(crate) struct PlayerControls {
     pub controller: DerivedControllerInput,
     pub offboard_direction: Option<[f32; 4]>,
     pub intents: Vec<RidingIntent>,
+    /// Named ActionGraph/gesture intents for the current tick (SDK / observation).
+    pub named_intents: BTreeMap<String, f32>,
     pub action_intents: IntentMap,
     pub ticks: u64,
     pub actor_flags: u32,
@@ -33,6 +36,7 @@ impl Default for PlayerControls {
             controller,
             offboard_direction: None,
             intents: Vec::new(),
+            named_intents: BTreeMap::new(),
             action_intents: IntentMap::new(),
             ticks: 0,
             actor_flags: 0,
@@ -124,13 +128,17 @@ impl PlayerControls {
         if let Some(gestures) = &mut self.gestures {
             let words = self.controller.words();
             let axes = [[words[7], words[8]], [words[9], words[10]]].map(|p| p.map(f32::from_bits));
-            gestures.publish(
+            for (name, value) in gestures.publish(
                 axes,
                 difficulty,
                 self.actor_flags,
                 physical_state,
                 &mut self.action_intents,
-            );
+            ) {
+                if value.abs() > 0.01 {
+                    self.named_intents.insert(name, value);
+                }
+            }
         }
     }
 
@@ -160,11 +168,20 @@ impl PlayerControls {
                 &self.controller,
                 self.actor_flags,
             ));
+        self.intents.extend(skate_core::input::gameplay_gestures::produce(&self.controller));
         self.intents.extend(wipeout_intentions::produce(
             &self.controller,
             self.actor_flags,
             physical_capabilities,
-        ));
+        ).into_iter().map(|mut intent| {
+            // PC bail steering convention: reverse horizontal control at the
+            // intent boundary, before both the graph and SDK publication.
+            // The recovered Skate 3 producer/torque kernels retain their signs.
+            if intent.name == "WipeoutControlX" {
+                intent.value = -intent.value;
+            }
+            intent
+        }));
         self.intents
             .extend(skate_core::input::anticipation_intentions::produce(
                 &self.controller,
@@ -180,8 +197,13 @@ impl PlayerControls {
         //GenerateActionGraphIntents82594310 clears the AG map through82BC1B68
         //before Listener::Fill. MG lifecycle intents use a different persistent map.
         self.action_intents.clear();
+        self.named_intents.clear();
         for intent in &self.intents {
             self.action_intents.insert(intent.name, intent.value);
+            if intent.value.abs() > 0.01 {
+                self.named_intents
+                    .insert(intent.name.to_string(), intent.value);
+            }
         }
         self.ticks += 1;
     }
@@ -262,3 +284,7 @@ fn normalize_camera_axis(v: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 #[path = "controls/offboard_tests.rs"]
 mod offboard_tests;
+
+#[cfg(test)]
+#[path = "controls/bail_tests.rs"]
+mod bail_tests;

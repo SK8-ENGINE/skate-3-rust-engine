@@ -129,6 +129,7 @@ pub(super) fn check_after_physics(
         PhysicalStateId::GroundAnimation => {
             skater.wipeout.check_ground_animation(&observations, 1.0)
         }
+        PhysicalStateId::PhysicsAirSecondary => skater.wipeout.check_ground_animation(&observations, skater.grind_trick.wipeout_scale()),
         PhysicalStateId::PhysicsAir => skater.wipeout.check_air(&observations, false),
         _ => Ok(()), //Other concrete states dispatch their own postphysics check.
     }

@@ -438,8 +438,10 @@ impl Parts {
             retail: material.extension.retail.clone(), retail_mask: material.extension.retail_mask.clone(),
             enabled: if source.opacity.is_some() {Vec4::Y} else {Vec4::ZERO}, ..default()
         };
-        if extension.retail.tint.w > 0. {
-            extension.retail.tint = Vec4::from_array(material.base.base_color.to_linear().to_f32_array());
+        if extension.retail.options.z < 0. || extension.retail.tint.w > 0. {
+            let mut tint = Vec4::from_array(material.base.base_color.to_linear().to_f32_array());
+            tint.w = 1.;
+            extension.retail.tint = tint;
         }
         if let Some((tid,t)) = stamp["id"].as_str().and_then(|id| self.library.tattoos.get(id).map(|t|(id,t))) {
             let key=match stamp["side"].as_u64().unwrap_or(0) {1=>"StampUVConstraintQ4",2=>"StampUVConstraintQ1",3=>"StampUVConstraintQ2",_=>"StampUVConstraintQ3"};
@@ -482,11 +484,20 @@ impl Parts {
         let rough = m.rough.as_ref().map(|p| load(p, true));
         let opacity = m.opacity.as_ref().map(|p| load(p, true));
         let retail_mask = m.lighting.as_ref().and_then(|l| l.specular.as_ref()).map(|p| load(p, true));
-        let retail = m.lighting.as_ref().filter(|l| l.params.len() == 9).map(|l| crate::retail_character::CharacterParams {
-            tint: Vec4::from_array(Color::srgb(m.tint[0],m.tint[1],m.tint[2]).to_linear().to_f32_array()),
-            options: Vec4::new(f32::from(normal.is_some()), f32::from(retail_mask.is_some()), -1., f32::from(l.is_hair())),
-            rows: std::array::from_fn(|i| Vec4::from_array(l.params[i])),
-            ..default()
+        let retail = m.lighting.as_ref().filter(|l| l.params.len() == 9).map(|l| {
+            let mut tint = Vec4::from_array(Color::srgb(m.tint[0], m.tint[1], m.tint[2]).to_linear().to_f32_array());
+            tint.w = 1.;
+            crate::retail_character::CharacterParams {
+                tint,
+                options: Vec4::new(
+                    f32::from(normal.is_some()),
+                    f32::from(retail_mask.is_some()),
+                    -1.,
+                    f32::from(l.is_hair()),
+                ),
+                rows: std::array::from_fn(|i| Vec4::from_array(l.params[i])),
+                ..default()
+            }
         }).unwrap_or_default();
         let material = materials.add(SkaterMaterial {
             base: StandardMaterial {

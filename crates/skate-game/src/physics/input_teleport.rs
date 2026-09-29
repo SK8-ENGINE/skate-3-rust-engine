@@ -19,15 +19,22 @@ impl Callbacks<'_, '_> {
         self.life
             .skeleton_controller
             .request_ground(self.collision_mode)?;
-        let target = horizontal_spawn(requested);
+        // The requested matrix is world facing. reset_physical still applies the
+        // live switch flip (Processed2468 bit20), so pre-flip here to cancel it.
+        let target = match_board_stance(horizontal_spawn(requested), p.flags_2468);
         bevy::log::info!(
             on_board = p.byte_1600 & 1 != 0,
             requested_x = requested[3][0],
             requested_y = requested[3][1],
             requested_z = requested[3][2],
+            requested_at_x = requested[2][0],
+            requested_at_z = requested[2][2],
             applied_x = target[3][0],
             applied_y = target[3][1],
             applied_z = target[3][2],
+            applied_at_x = target[2][0],
+            applied_at_z = target[2][2],
+            switch = p.flags_2468 & 0x0010_0000 != 0,
             "player teleport spawn"
         );
         player.flags_1296 = ((player.flags_1296 & 0xffef_ffff) & 0x81ff_ffff) | 0x6000_0000;
@@ -144,18 +151,108 @@ fn affine(m: NativeMatrix) -> RetailAffineTransform {
         translation: Vector3::new(m[3][0], m[3][1], m[3][2]),
     }
 }
+const SWITCH: u32 = 0x0010_0000;
+const MIN_HEADING: f32 = f32::from_bits(0x3a83_126f); // native .001 reject
+
 ///82DB8A10..8BB4 flattens At before normalization, rejects length<=.001,
-///then adds the original .1m world-Y teleport clearance.
-fn horizontal_spawn(requested: NativeMatrix) -> NativeMatrix {
+///then adds the original .1m world-Y teleport clearance. If At is nearly
+///vertical, recover yaw from Ri so a downward look still has a heading.
+pub(crate) fn horizontal_spawn(requested: NativeMatrix) -> NativeMatrix {
     let mut result = IDENTITY;
-    let x = requested[2][0];
-    let z = requested[2][2];
-    let length = (x * x + z * z).sqrt();
-    if length > f32::from_bits(0x3a83_126f) {
+    let mut x = requested[2][0];
+    let mut z = requested[2][2];
+    let mut length = (x * x + z * z).sqrt();
+    if length <= MIN_HEADING {
+        // At = flatten(Ri) × Up => (-Ri.z, 0, Ri.x)
+        x = -requested[0][2];
+        z = requested[0][0];
+        length = (x * x + z * z).sqrt();
+    }
+    if length > MIN_HEADING {
         result[2] = [x / length, 0.0, z / length, 0.0];
         result[0] = [result[2][2], 0.0, -result[2][0], 0.0];
+        result[1] = [0.0, 1.0, 0.0, 0.0];
     }
     result[3] = requested[3];
     result[3][1] += 0.1;
     result
+}
+
+/// Processed2468 bit20 flips Ri/At on SetTransform. Invert first so a world
+/// facing survives reset, whether the player is regular or switch.
+pub(crate) fn match_board_stance(mut transform: NativeMatrix, flags_2468: u32) -> NativeMatrix {
+    if flags_2468 & SWITCH != 0 {
+        flip_heading(&mut transform);
+    }
+    transform
+}
+
+pub(crate) fn flip_heading(transform: &mut NativeMatrix) {
+    for i in [0, 2] {
+        transform[i] = transform[i].map(|v| -v);
+    }
+}
+
+/// World-space skater facing for a teleport. Switch/mirror bits unflip the
+/// live visual axes so the stored At is the direction they were facing.
+pub(crate) fn facing_from_visual(
+    mut transform: NativeMatrix,
+    flags_2468: u32,
+    flags_2476: u32,
+    on_board: bool,
+) -> NativeMatrix {
+    if on_board && flags_2468 & SWITCH != 0 || !on_board && flags_2476 & 4 != 0 {
+        flip_heading(&mut transform);
+    }
+    transform
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flattens_horizontal_at_and_builds_right() {
+        let mut requested = IDENTITY;
+        requested[2] = [3.0, 1.0, 4.0, 0.0];
+        requested[3] = [10.0, 2.0, 30.0, 1.0];
+        let spawn = horizontal_spawn(requested);
+        assert!((spawn[2][0] - 0.6).abs() < 1e-5);
+        assert_eq!(spawn[2][1], 0.0);
+        assert!((spawn[2][2] - 0.8).abs() < 1e-5);
+        assert_eq!(spawn[0], [0.8, 0.0, -0.6, 0.0]);
+        assert_eq!(spawn[3][1], 2.1);
+    }
+
+    #[test]
+    fn recovers_yaw_from_right_when_looking_down() {
+        let mut requested = IDENTITY;
+        requested[0] = [0.0, 0.0, -1.0, 0.0];
+        requested[1] = [-1.0, 0.0, 0.0, 0.0];
+        requested[2] = [0.0, -1.0, 0.0, 0.0];
+        let spawn = horizontal_spawn(requested);
+        assert!((spawn[2][0] - 1.0).abs() < 1e-5);
+        assert!(spawn[2][2].abs() < 1e-5);
+    }
+
+    #[test]
+    fn switch_stance_cancels_across_reset() {
+        let mut facing = IDENTITY;
+        facing[0] = [0.0, 0.0, -1.0, 0.0];
+        facing[2] = [1.0, 0.0, 0.0, 0.0];
+        let prepared = match_board_stance(facing, SWITCH);
+        let applied = match_board_stance(prepared, SWITCH);
+        assert_eq!(applied[2], facing[2]);
+        assert_eq!(applied[0], facing[0]);
+        assert_eq!(match_board_stance(facing, 0)[2], facing[2]);
+    }
+
+    #[test]
+    fn visual_switch_unflips_to_facing() {
+        let mut visual = IDENTITY;
+        visual[2] = [-1.0, 0.0, 0.0, 0.0];
+        visual[0] = [0.0, 0.0, 1.0, 0.0];
+        let facing = facing_from_visual(visual, SWITCH, 0, true);
+        assert_eq!(facing[2], [1.0, 0.0, 0.0, 0.0]);
+    }
 }

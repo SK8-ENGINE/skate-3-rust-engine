@@ -64,7 +64,9 @@ class SetupRecovery(unittest.TestCase):
                     else:
                         installed=install(source,base,Path('unused.exe'),lambda _:None,refresh=True)
                         self.assertEqual((installed/'assets/private/stock'/relative).read_bytes(),b'new texture')
-                self.assertEqual(cached.read_bytes(),b'old texture')
+                        self.assertFalse(old.exists())
+                if fail:
+                    self.assertEqual(cached.read_bytes(),b'old texture')
 
     def test_core_refresh_starts_empty_and_failed_rebuild_preserves_live_inputs(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -55,7 +55,7 @@ impl GestureInput {
         flags: u32,
         physical_state: u32,
         ag: &mut IntentMap,
-    ) {
+    ) -> Vec<(String, f32)> {
         // Native manager negates mapped Y. Component deadzone0.1 is initialized
         // by82F75F60 from820641A8, separately from cInputMap's own deadzones.
         let samples = axes.map(|[x, y]| [x, -y].map(|v| if v.abs() < 0.1 { 0.0 } else { v }));
@@ -90,16 +90,22 @@ impl GestureInput {
                 }
             }
         }
+        let mut published = Vec::new();
         if held {
             ag.insert("HoldPattern", 1.0);
+            published.push(("HoldPattern".into(), 1.0));
         }
         for (name, strength) in events {
             if permitted(&name, flags, physical_state, ag) {
                 ag.insert("Trick", 1.0);
                 ag.insert(&name, 1.0);
                 ag.insert("GestureSpeed", strength);
+                published.push(("Trick".into(), 1.0));
+                published.push((name, 1.0));
+                published.push(("GestureSpeed".into(), strength));
             }
         }
+        published
     }
 }
 

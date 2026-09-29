@@ -13,7 +13,7 @@ use skate_core::{
     },
 };
 
-pub(super) fn world_volumes(
+pub(crate) fn world_volumes(
     skeleton: &SkeletonBody,
     collision: &SkeletonCollisionMode,
 ) -> Result<Vec<BoardWorldVolume>, String> {
@@ -24,7 +24,7 @@ pub(super) fn world_volumes(
 
 /// Volume+84 group4 disables world contacts only. Keep these shapes available
 /// to the separate SkaterSkaterCollisionPipeline and its own pair filters.
-pub(super) fn retain_world_volumes(
+pub(crate) fn retain_world_volumes(
     volumes: &mut Vec<BoardWorldVolume>,
     collision: &SkeletonCollisionMode,
 ) {
@@ -34,9 +34,16 @@ pub(super) fn retain_world_volumes(
     });
 }
 
-pub(super) fn enabled_volumes(
+pub(crate) fn enabled_volumes(
     skeleton: &SkeletonBody,
     collision: &SkeletonCollisionMode,
+) -> Result<Vec<BoardWorldVolume>, String> {
+    volumes_with_parts(skeleton, &collision.parts)
+}
+
+pub(crate) fn volumes_with_parts(
+    skeleton: &SkeletonBody,
+    parts: &[skate_core::physics::skeleton_body::SkeletonPartCollision; 26],
 ) -> Result<Vec<BoardWorldVolume>, String> {
     let transforms = skeleton.part_transforms();
     let mut volumes = Vec::new();
@@ -44,7 +51,7 @@ pub(super) fn enabled_volumes(
         .definition
         .parts
         .iter()
-        .zip(&collision.parts)
+        .zip(parts)
         .enumerate()
     {
         if !state.enabled {

@@ -15,7 +15,7 @@ use skate_core::{
     },
 };
 
-pub(super) fn world_volumes(
+pub(crate) fn world_volumes(
     board: &BoardRuntime,
     settings: &PhysicsSettings,
 ) -> Vec<BoardWorldVolume> {

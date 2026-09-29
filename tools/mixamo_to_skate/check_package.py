@@ -62,13 +62,16 @@ def main():
         import tkinter
         from PIL import Image
         from main import app_root
-        tool = app_root()/'tools/FBX2glTF.exe'
-        assert hashlib.sha256(tool.read_bytes()).hexdigest() == '8d90fb5e0a8d186a3d9a7ff8c75eaee541c3975ce4df0d80351f20092ae0877f'
-        for name in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'):
-            assert tool.with_name(name).is_file(), name
+        from fbx_tool import SHA, VERSION, bundled_name, bundled_path
+        tool = bundled_path(app_root())
+        expected = SHA.get(sys.platform, SHA['win32'])
+        assert hashlib.sha256(tool.read_bytes()).hexdigest() == expected, bundled_name()
+        if sys.platform == 'win32':
+            for name in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'):
+                assert tool.with_name(name).is_file(), name
         result = subprocess.run([str(tool), '--version'], capture_output=True, timeout=30)
         assert result.returncode == 0, result.stderr
-        assert b'0.9.7' in result.stdout + result.stderr
+        assert VERSION.encode() in result.stdout + result.stderr
         assert len(customiser_setup.fingerprint()) == 64
         menu = customisation_profiles.generate({'morphs': [], 'collections': []})
         assert len(menu[-1]['children'][0]['children'][0]['children']) == 37

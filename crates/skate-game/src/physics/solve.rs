@@ -10,11 +10,18 @@ use skate_core::physics::{
     skeleton_body::PART_COUNT,
 };
 
-pub(super) fn advance(
+pub(super) fn advance(physics:&mut GamePhysics, skater:&mut SkaterRuntime,truck_targets:[f32;2])->Result<(),String> {
+    let restore=crate::modding::player_physics::apply_parts(skater);
+    let result=advance_inner(physics,skater,truck_targets);
+    restore.restore(skater);
+    result
+}
+fn advance_inner(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
     truck_targets: [f32; 2],
 ) -> Result<(), String> {
+    let mod_before = crate::modding::player_physics::before_solve(physics,skater);
     let before = diagnostics::snapshot(physics, skater);
     diagnostics::validate(&before, "before shared solve").map_err(|error| format!(
         "{error}; com_frame={:?}; lifted_com_frame={:?}; animation_root={:?}; biped_position={:?}; biped_surface={:?}",
@@ -64,19 +71,23 @@ pub(super) fn advance(
             }
         }
     }
+    super::solid_contacts::append(&mut contacts, &board_volumes,
+        &physics.network_proxies.solids, physics, skater);
+    super::solid_contacts::append(&mut contacts, &skeleton_volumes,
+        &physics.network_proxies.solids, physics, skater);
     physics.network_contacts = contacts.len() - before_remote;
     physics.contact_count = contacts.len();
     let dt = physics.settings.step.simulation.time_step;
-    let mut joints =
-        skater
-            .skeleton_joints
-            .build(skater.skeleton.bodies(), ATTACHED_REACTION_BASE, dt);
+    let mut joints = crate::modding::player_physics::joints(skater)
+        .build(skater.skeleton.bodies(), ATTACHED_REACTION_BASE, dt);
+    crate::modding::player_physics::filter_joints(skater, &mut joints);
     let mut drives = skater.skeleton_drives.build(
         skater.skeleton.bodies(),
         ATTACHED_REACTION_BASE,
         ATTACHED_REACTION_BASE + PART_COUNT,
         dt,
     );
+    crate::modding::player_physics::filter_drives(skater,&mut drives);
     let skeleton_drive_count = drives.rows.len();
     //82D74FD8: persistent hand drives share the deck and skeleton reactions.
     skater.board_possession.append_drives(
@@ -87,6 +98,7 @@ pub(super) fn advance(
         dt,
         &mut drives.rows,
     );
+    crate::modding::player_physics::filter_possession(skater, &mut drives.rows, skeleton_drive_count);
     let bodies = skater
         .skeleton
         .bodies_mut()
@@ -105,6 +117,9 @@ pub(super) fn advance(
             drives: &mut drives.rows,
         },
     );
+    skater.mod_contact_frame = crate::modding::player_physics::after_solve(physics,skater,&mod_before);
+    skater.mod_contact_frame.joint_loads=crate::modding::player_physics::joint_loads(skater,&joints,dt);
+    physics.network_proxies.capture_dynamics_reactions(physics.board.solved_reactions(), dt);
     if let Err(error) = diagnostics::validate(
         &diagnostics::snapshot(physics, skater), "after shared solve",
     ) {

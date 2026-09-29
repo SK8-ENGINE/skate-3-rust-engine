@@ -1,6 +1,8 @@
 param([string]$TargetDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'target'))
 $ProjectRoot = Split-Path $PSScriptRoot -Parent
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Ensure-WindowsSdk.ps1')
+. (Join-Path $PSScriptRoot 'PowerShellCompat.ps1')
 Push-Location $ProjectRoot
 try {
     # Cargo cache restoration can prune Python package files under target.
@@ -24,7 +26,7 @@ try {
     $symbols = Join-Path $ProjectRoot "target/release-packages/$stamp/symbols"
     New-Item -ItemType Directory -Path "$stage/support",$symbols -Force | Out-Null
     # Link this invocation directly into private staging; never copy a generic cache EXE.
-    & cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-game --bin skate3rust --no-default-features -- -C extra-filename= -o "$stage/skate3rust.exe" -C "link-arg=/PDB:$symbols/skate3rust.pdb"
+    & cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-game --bin skate3rust --no-default-features -- -C extra-filename= --emit "link=$stage/skate3rust.exe" -C "link-arg=/PDB:$symbols/skate3rust.pdb"
     if ($LASTEXITCODE -ne 0) { throw 'Release compilation failed' }
     & cargo build --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-steam-relay
     if ($LASTEXITCODE -ne 0) { throw 'Steam relay compilation failed' }
@@ -32,9 +34,6 @@ try {
         -TargetDirectory $TargetDirectory `
         -BinDirectory $stage `
         -RelayExecutable (Join-Path $TargetDirectory 'x86_64-pc-windows-msvc/release/skate-steam-relay.exe')
-    # rustc also emits a dep-info file beside -o; it contains local source paths.
-    $depInfo = Join-Path $stage 'skate3rust.d'
-    if (Test-Path -LiteralPath $depInfo) { Remove-Item -LiteralPath $depInfo }
     New-Item -ItemType Directory -Path target/native -Force | Out-Null
     & rustc --edition 2024 --crate-type cdylib -C opt-level=3 -C panic=abort -C target-feature=+crt-static tools/asset_pipeline/refpack_native.rs -o target/native/refpack.dll
     if ($LASTEXITCODE -ne 0) { throw 'Native converter compilation failed' }
@@ -44,18 +43,16 @@ try {
     @{
         revision = (& git rev-parse HEAD).Trim()
         source_status = @(& git status --porcelain)
-        executable_sha256 = (Get-FileHash -LiteralPath "$stage/skate3rust.exe" -Algorithm SHA256).Hash
-        pdb_sha256 = (Get-FileHash -LiteralPath "$symbols/skate3rust.pdb" -Algorithm SHA256).Hash
+        executable_sha256 = Get-Sha256Hex "$stage/skate3rust.exe"
+        pdb_sha256 = Get-Sha256Hex "$symbols/skate3rust.pdb"
         compiler = (& rustc --version).Trim()
     } | ConvertTo-Json | Set-Content -LiteralPath "$symbols/build.json" -Encoding UTF8
-    New-Item -ItemType Directory -Path "$stage/mods" -Force | Out-Null
-    Copy-Item -LiteralPath mods/native-trainer.zip,mods/mario-kart.zip,mods/README.md -Destination "$stage/mods"
     $sourceStage = Join-Path $stage '../setup-source'
     $toolsRoot = Join-Path $ProjectRoot 'tools'
     foreach ($source in Get-ChildItem -LiteralPath $toolsRoot -File -Recurse) {
         if ($source.FullName -match '[\\/]__pycache__[\\/]') { continue }
         if ($source.Extension -notin '.py','.json','.txt','.md','.toml','.rs' -and $source.Name -ne 'LICENSE') { continue }
-        $relative = [IO.Path]::GetRelativePath($toolsRoot, $source.FullName)
+        $relative = Get-RelativePath $toolsRoot $source.FullName
         $portableName = $relative.Replace('\','/')
         # Calibration is derived from private models, never a release resource.
         if ($portableName -like 'mixamo_to_skate/*.json') { continue }
@@ -93,16 +90,20 @@ try {
     $assetPipelines = $assetPipelinesJson | ConvertFrom-Json
     $characterCustomiser = (& $packagePython -m tools.asset_pipeline.customiser_setup --fingerprint).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify character customiser resources' }
-    Copy-Item -LiteralPath README.md,docs/THIRD_PARTY_NOTICES.md -Destination $stage
+    $pipelineEquivalencePath = Join-Path $sourceStage 'tools/asset_pipeline/pipeline-equivalence.json'
+    $pipelineEquivalence = if (Test-Path -LiteralPath $pipelineEquivalencePath) {
+        Get-Content -LiteralPath $pipelineEquivalencePath -Raw -Encoding utf8 | ConvertFrom-Json
+    } else {
+        [pscustomobject]@{}
+    }
+    Copy-IfExists @('README.md', 'docs/THIRD_PARTY_NOTICES.md') $stage
     New-Item -ItemType Directory -Path "$stage/docs/images" -Force | Out-Null
-    Copy-Item -LiteralPath docs/images/skating-crab.png -Destination "$stage/docs/images/skating-crab.png"
-    Copy-Item -LiteralPath docs/installation.md -Destination "$stage/docs/installation.md"
-    Copy-Item -LiteralPath docs/retail-renderer.md -Destination "$stage/docs/retail-renderer.md"
-    Copy-Item -LiteralPath docs/crash-reports.md -Destination "$stage/docs/crash-reports.md"
-    Copy-Item -LiteralPath docs/performance-tracing.md -Destination "$stage/docs/performance-tracing.md"
-    Copy-Item -LiteralPath docs/updates.md -Destination "$stage/docs/updates.md"
-    Copy-Item -LiteralPath docs/custom-models.md,docs/mixamo-to-skate.md -Destination "$stage/docs"
-    Copy-Item -LiteralPath docs/character-customisation.md -Destination "$stage/docs"
+    Copy-IfExists @(
+        'docs/installation.md', 'docs/retail-renderer.md', 'docs/crash-reports.md',
+        'docs/performance-tracing.md', 'docs/updates.md', 'docs/custom-models.md',
+        'docs/mixamo-to-skate.md', 'docs/character-customisation.md'
+    ) "$stage/docs"
+    Copy-IfExists @('docs/images/skating-crab.png') "$stage/docs/images"
     New-Item -ItemType Directory -Path "$stage/licenses" -Force | Out-Null
     Copy-Item -LiteralPath tools/mixamo_to_skate/licenses/FBX2glTF.txt -Destination "$stage/licenses/FBX2glTF.txt"
     Copy-Item -LiteralPath tools/vendor/utt/LICENSE -Destination "$stage/licenses/UTT.txt"
@@ -115,21 +116,22 @@ try {
         Copy-Item -LiteralPath $license.FullName -Destination "$stage/licenses/$($license.Directory.Name).txt"
     }
     # Own every shipped program component, including future tools and libraries.
-    # Mods are user-editable content and remain outside program replacement.
     $files = @{}
     foreach ($file in Get-ChildItem -LiteralPath $stage -File -Recurse) {
-        $name = [IO.Path]::GetRelativePath($stage, $file.FullName).Replace('\', '/')
-        if ($name -eq 'release.json' -or $name.StartsWith('mods/')) { continue }
-        $files[$name] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLower()
+        $name = (Get-RelativePath $stage $file.FullName).Replace('\', '/')
+        if ($name -eq 'release.json') { continue }
+        $files[$name] = Get-Sha256Hex $file.FullName
     }
     @{
         schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
-        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files; asset_pipelines = $assetPipelines; character_customiser = $characterCustomiser
-    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
+        build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files
+        asset_pipelines = $assetPipelines; character_customiser = $characterCustomiser
+        pipeline_equivalence = $pipelineEquivalence
+    } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
     Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $ProjectRoot 'target/release.json')
     $zip = Join-Path $ProjectRoot 'target/skate3rust-windows-x64.zip'
     Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
-    (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower() + '  skate3rust-windows-x64.zip' |
+    (Get-Sha256Hex $zip) + '  skate3rust-windows-x64.zip' |
         Set-Content -LiteralPath "$zip.sha256" -Encoding ascii
     Write-Host "Release package: $zip"
 } finally { Pop-Location }

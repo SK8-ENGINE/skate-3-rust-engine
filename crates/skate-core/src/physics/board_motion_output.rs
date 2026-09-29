@@ -64,15 +64,66 @@ pub(crate) fn subtract(a: Vector3, b: Vector3) -> Vector3 {
     Vector3::new(a.x - b.x, a.y - b.y, a.z - b.z)
 }
 pub(crate) fn inverse_length_squared(squared: f32, refinements: usize) -> f32 {
+    // The PC rsqrt seed preserves subnormals. Squaring its finite inverse
+    // can overflow during refinement (landing residuals around 1e-22).
+    // Rescale the exponent before refinement, then undo that scale:
+    // rsqrt(x * 2^24) * 2^12 = rsqrt(x). Normal inputs keep the same path.
+    let (squared, rescale) = if squared > 0.0 && squared.is_subnormal() {
+        (squared * 16_777_216.0, 4096.0)
+    } else {
+        (squared, 1.0)
+    };
     let mut inverse = native_arithmetic::reciprocal_square_root_estimate(squared);
     for _ in 0..refinements {
         let correction = (-squared).mul_add(inverse * inverse, 1.0);
         inverse = (inverse * 0.5).mul_add(correction, inverse);
     }
-    inverse
+    inverse * rescale
 }
 pub fn length(v: Vector3) -> f32 {
     let squared = dot(v, v);
     let value = squared * inverse_length_squared(squared, 2);
     if squared == 0.0 { 0.0 } else { value }
+}
+
+#[cfg(test)]
+mod normalization_tests {
+    use super::*;
+    #[test]
+    fn tiny_finite_vector_has_finite_nonzero_length() {
+        let v = Vector3::new(1.6165965e-22, 0.0, 4.2145673e-22);
+        let actual = length(v);
+        let expected = ((v.x as f64).powi(2) + (v.z as f64).powi(2)).sqrt() as f32;
+        assert!(actual.is_finite() && actual > 0.0, "length={actual}");
+        assert!((actual / expected - 1.0).abs() < 0.01);
+    }
+}
+
+#[cfg(test)]
+mod inverse_range_tests {
+    use super::*;
+    #[test]
+    fn inverse_root_covers_subnormal_range_without_changing_normal_arithmetic() {
+        let mut samples = vec![f32::from_bits(1), f32::from_bits(0x007f_ffff), f32::MIN_POSITIVE, f32::MAX];
+        samples.extend((-149..=127).map(|e| 2.0_f64.powi(e) as f32));
+        for x in samples {
+            for steps in 0..=2 {
+                let actual = inverse_length_squared(x, steps);
+                let expected = (1.0 / (x as f64).sqrt()) as f32;
+                assert!(actual.is_finite() && actual > 0.0, "x={x} steps={steps}");
+                assert!((actual / expected - 1.0).abs() < 3e-7, "x={x} steps={steps}");
+                if x.is_normal() {
+                    let mut old = native_arithmetic::reciprocal_square_root_estimate(x);
+                    for _ in 0..steps {
+                        let correction = (-x).mul_add(old * old, 1.0);
+                        old = (old * 0.5).mul_add(correction, old);
+                    }
+                    assert_eq!(actual.to_bits(), old.to_bits());
+                }
+            }
+        }
+        for x in [0.0, -1.0, f32::INFINITY, f32::NAN] {
+            assert!(inverse_length_squared(x, 2).is_nan());
+        }
+    }
 }

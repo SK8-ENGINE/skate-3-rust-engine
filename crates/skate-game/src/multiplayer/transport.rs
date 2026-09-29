@@ -105,13 +105,23 @@ impl Steam {
             .parent()
             .unwrap()
             .to_path_buf();
-        let helper = dir.join("steam-relay/skate-steam-relay.exe");
-        if !helper.is_file() || !dir.join("steam-relay/steam_api64.dll").is_file() {
+        let helper = crate::platform_bins::relay_bin(&dir);
+        if !helper.is_file() || !crate::platform_bins::steam_api_lib(&dir).is_file() {
             return Err(
                 "Steam relay files missing; solo and direct multiplayer remain available".into(),
             );
         }
         let cookie = format!("{:016x}", super::unique());
+        #[cfg(not(windows))]
+        {
+            // Packaged helpers must stay executable through zips and copies.
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(metadata) = std::fs::metadata(&helper) {
+                let mut permissions = metadata.permissions();
+                permissions.set_mode(permissions.mode() | 0o111);
+                let _ = std::fs::set_permissions(&helper, permissions);
+            }
+        }
         let mut command = Command::new(helper);
         command
             .args([

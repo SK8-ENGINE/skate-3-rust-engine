@@ -19,6 +19,7 @@ impl PhysicalStateCalls for Calls {
                     PhysicalStateId::Sleeping
                         | PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
+                    | PhysicalStateId::PhysicsAirSecondary
                         | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
                         | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
@@ -40,6 +41,7 @@ impl PhysicalStateCalls for Calls {
                     call.state.state,
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
+                    | PhysicalStateId::PhysicsAirSecondary
                         | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
                         | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
@@ -161,6 +163,7 @@ pub(super) fn set(
         PhysicalStateId::FootPlant => skater.footplant.reset(), //Exit82D4C5A8
         PhysicalStateId::Boneless => {}, //empty82D4C9B4
         PhysicalStateId::PhysicsGround => super::super::ground_exit::exit(physics, skater),
+        PhysicalStateId::PhysicsAirSecondary => super::super::grind_trick::exit(physics),
         PhysicalStateId::PhysicsAir => super::super::air_phase::exit(skater),
         PhysicalStateId::KnownAir => {
             super::super::known_air::exit(physics, skater, requested as u32)?
@@ -184,6 +187,7 @@ pub(super) fn set(
         PhysicalStateId::FootPlant => super::super::footplant::ground::enter(physics, skater),
         PhysicalStateId::Boneless => super::super::boneless::enter(physics, skater),
         PhysicalStateId::PhysicsGround => super::super::ground_phase::enter(physics, skater),
+        PhysicalStateId::PhysicsAirSecondary => super::super::grind_trick::enter(physics, skater),
         PhysicalStateId::PhysicsAir => super::super::air_phase::enter(physics, skater),
         PhysicalStateId::KnownAir => super::super::known_air::enter(physics, skater),
         PhysicalStateId::BipedAir => super::super::biped_air::enter(physics, skater),
@@ -207,4 +211,44 @@ pub(super) fn set(
     // this record is the coordinator-facing audit/consumer boundary.
     physics.exchange.request_state(requested)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod grind_trick_tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires converted stock assets; headless lifecycle regression"]
+    fn grind_trick_darkslide_exit_runs_native_adapters() {
+        let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
+        let root = std::path::Path::new(&root);
+        let assets = skate_data::GameAssets::load(root).unwrap();
+        let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
+        let mut physics = GamePhysics::load(root).unwrap();
+        let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
+        let mut controls = crate::physics::PlayerControls::default();
+        let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
+        let input = crate::input::ControllerInput::default();
+        for _ in 0..5 {
+            crate::physics::frame::advance(&mut physics, &mut skater, &mut controls, &graphs,
+                &mut input.player_actions(), false, &mut camera).unwrap();
+        }
+        set(&mut physics, &mut skater, PhysicalStateId::GrindDarkslide).unwrap();
+        assert_eq!(skater.player_state.current(), PhysicalStateId::GrindDarkslide);
+        set(&mut physics, &mut skater, PhysicalStateId::PhysicsAirSecondary).unwrap();
+        assert_eq!(skater.player_state.current(), PhysicalStateId::PhysicsAirSecondary);
+        assert_eq!(skater.player_input.processed.state_2504, 405);
+        assert_eq!(skater.player_input.processed.state_2508, 202);
+        for _ in 0..4 {
+            crate::physics::player_state::pre_state(&mut physics, &mut skater).unwrap();
+            crate::physics::grind_trick::advance(&mut physics, &mut skater).unwrap();
+            crate::physics::wipeout::check_after_physics(&physics, &mut skater).unwrap();
+            crate::physics::grind_trick::post_velocity(&mut physics, &skater);
+            crate::physics::player_state::publish(&mut physics, &mut skater).unwrap();
+        }
+        set(&mut physics, &mut skater, PhysicalStateId::PhysicsAir).unwrap();
+        assert_eq!(skater.player_input.processed.state_2504, 202);
+        assert_eq!(skater.player_state.current(), PhysicalStateId::PhysicsAir);
+        assert_eq!(physics.settings.wheel_material, physics.settings.standard_wheel_material);
+        assert!(physics.board.bodies().iter().all(|b| b.inertia.linear_drag == 0.0));
+    }
 }

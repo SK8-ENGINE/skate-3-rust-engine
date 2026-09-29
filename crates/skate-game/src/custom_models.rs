@@ -381,13 +381,20 @@ fn interact(
     }
 }
 fn start_import(directory: &Path, reference: &Path) -> Result<Import, String> {
-    let executable = std::env::current_exe()
+    let game_dir = std::env::current_exe()
         .map_err(|e| e.to_string())?
         .parent()
         .ok_or("Missing game directory")?
-        .join("support/skate3setup.exe");
+        .to_path_buf();
+    let executable = crate::platform_bins::setup_helper(&game_dir);
     if !executable.is_file() {
-        return Err("Character importer is missing. Restore support/skate3setup.exe from the complete Windows package.".into());
+        if cfg!(windows) {
+            return Err("Character importer is missing. Restore support/skate3setup.exe from the complete Windows package.".into());
+        } else if cfg!(target_os = "macos") {
+            return Err("Character importer is missing. Restore support/skate3setup from the complete macOS package.".into());
+        } else {
+            return Err("Character importer is missing. Restore support/skate3setup from the complete Linux package.".into());
+        }
     }
     let jobs = directory.join("jobs");
     std::fs::create_dir_all(&jobs).map_err(|e| e.to_string())?;

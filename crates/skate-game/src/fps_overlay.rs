@@ -57,6 +57,11 @@ fn update(
     sample.seconds += seconds;
     if sample.seconds >= 0.5 {
         let fps = f64::from(sample.frames) / sample.seconds;
+        // Opt-in measurement of the existing display counter: no extra render
+        // systems, GPU queries or schedule barriers in ordinary gameplay.
+        if std::env::var_os("SKATE_FPS_LOG").is_some() {
+            eprintln!("SKATE_FPS_SAMPLE frames={} seconds={:.9} fps={fps:.3}", sample.frames, sample.seconds);
+        }
         for mut text in &mut labels {
             text.0 = format!("FPS: {fps:.0}");
         }

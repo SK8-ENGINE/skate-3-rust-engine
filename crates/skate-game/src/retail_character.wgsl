@@ -1,3 +1,6 @@
+// Characters are per-entity draws, not merged geometry, so unlike the world
+// shader this one keeps a plain per-draw uniform and implicit-derivative
+// sampling: every branch here is uniform across the draw.
 #import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings as frame}
 #import skate_character_lighting::{CharacterParams, shade_character, character_normal, character_albedo}
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: CharacterParams;
@@ -12,8 +15,13 @@
 fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     let albedo = textureSample(diffuse,diffuse_sampler,i.uv);
     let d=character_albedo(albedo.rgb)*p.tint.rgb;
-    let mapped=character_normal(i.world_position,i.world_normal,i.uv,textureSample(normal_map,normal_sampler,i.uv).xy);
-    let vn=select(normalize(i.world_normal),mapped,p.options.x>0.0);
+    // The normal fetch and derivative basis are dead when no normal map is
+    // bound; select() would still evaluate both sides, so branch instead.
+    // Draw-uniform condition: no intra-draw divergence.
+    var vn=normalize(i.world_normal);
+    if p.options.x>0.0 {
+        vn=character_normal(i.world_position,i.world_normal,i.uv,textureSample(normal_map,normal_sampler,i.uv).xy);
+    }
     var smask=albedo.a;
     if p.options.y>0.0 { smask=textureSample(mask_map,mask_sampler,i.uv).r; }
     return shade_character(p, vn, i.world_position, d, smask, albedo.a);

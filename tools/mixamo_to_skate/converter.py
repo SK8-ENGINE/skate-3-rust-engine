@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from glb import ConversionError, Document, Writer, require, clean_node_transform
+from fbx_tool import missing_message
 
 VERSION = 1
 MAP = {'hips':'HIPS', 'spine':'SPINE', 'spine1':'SPINE1', 'spine2':'SPINE3',
@@ -398,7 +399,7 @@ def convert_file(source, reference, destination, fbx_tool, profile=None, include
         normalized = source
         log = ''
         if source.suffix.lower()=='.fbx':
-            require(Path(fbx_tool).is_file(),'FBX2glTF.exe is missing; run the converter setup')
+            require(Path(fbx_tool).is_file(), missing_message())
             normalized = temp/'source.glb'
             proc = subprocess.run([str(fbx_tool),'--binary','--input',str(source),'--output',str(temp/'source'),
                                    '--fbx-temp-dir',str(temp),'--compute-normals','missing','--pbr-metallic-roughness'],

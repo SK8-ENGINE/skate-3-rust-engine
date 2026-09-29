@@ -101,10 +101,25 @@ pub struct BoardWorldVolume {
     pub material: RetailContactMaterial,
 }
 
+/// Host-supplied moving geometry. The core remains independent of Rapier and
+/// queries the same solid shapes as the host's rigid-body contact bridge.
+#[derive(Clone, Copy, Debug)]
+pub struct ExternalLineHit {
+    pub hit: WorldLineHit,
+    pub surface: u16,
+    pub geometry_id: u32,
+    pub frame: [[f32; 4]; 4],
+}
+pub trait ExternalQueries: Send + Sync {
+    fn line(&self, start: Vector3, end: Vector3, radius: f32) -> Option<ExternalLineHit>;
+    fn nearby(&self, center: Vector3, radius: f32) -> Vec<[Vector3; 3]>;
+}
+
 /// World geometry remains in supplied order. Each query reuses output storage;
 /// the returned contacts are valid until the next mutable call.
 pub struct BoardWorld {
     triangles: Vec<WorldTriangle>,
+    external: Option<std::sync::Arc<dyn ExternalQueries>>,
     triangle_bounds: Vec<Bounds>,
     query_metadata: Option<QueryMetadata>,
     query_index: query_index::QueryIndex,
@@ -148,6 +163,7 @@ impl BoardWorld {
             .fold(0., f32::max);
         Self {
             triangles,
+            external: None,
             triangle_bounds,
             query_metadata: None,
             query_index: query_index::QueryIndex::default(),
@@ -185,6 +201,16 @@ impl BoardWorld {
             .ok_or("Canonical world has no authored query metadata")
     }
 
+    pub fn set_external_queries(&mut self, queries: Option<std::sync::Arc<dyn ExternalQueries>>) {
+        self.external = queries;
+    }
+    pub fn external_line(&self, start: Vector3, end: Vector3, radius: f32) -> Option<ExternalLineHit> {
+        self.external.as_ref()?.line(start, end, radius)
+    }
+    pub fn external_nearby(&self, center: Vector3, radius: f32) -> Vec<[Vector3; 3]> {
+        self.external.as_ref().map_or_else(Vec::new, |q| q.nearby(center, radius))
+    }
+
     pub fn triangles(&self) -> &[WorldTriangle] {
         &self.triangles
     }
@@ -211,7 +237,7 @@ impl BoardWorld {
             return Err("line query radius must be finite and nonnegative");
         }
         let direction = Vector3::new(end.x - start.x, end.y - start.y, end.z - start.z);
-        let mut nearest: Option<WorldLineHit> = None;
+        let mut nearest: Option<WorldLineHit> = self.external_line(start, end, radius).map(|h| h.hit);
         for (_, entry) in self.line_candidates(start, end, radius) {
             let mut geometry = TriangleLineHit {
                 position: Vector3::ZERO,

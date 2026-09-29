@@ -18,8 +18,16 @@ fn helper_command(recover: bool, automatic: bool) -> Result<(Command, PathBuf, P
     let unique = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
     let temp = std::env::temp_dir().join(format!("skate-update-{}-{unique}", std::process::id()));
     std::fs::create_dir(&temp).map_err(|e| e.to_string())?;
-    let helper = temp.join("skate3update.exe");
-    std::fs::copy(root.join("support/skate3update.exe"), &helper).map_err(|e| e.to_string())?;
+    let helper_name = if cfg!(windows) { "skate3update.exe" } else { "skate3update" };
+    let helper = temp.join(helper_name);
+    std::fs::copy(crate::platform_bins::update_helper(root), &helper).map_err(|e| e.to_string())?;
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&helper).map_err(|e| e.to_string())?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&helper, perms).map_err(|e| e.to_string())?;
+    }
     let signal = temp.join("ready");
     let request = temp.join("request.json");
     let data = serde_json::json!({

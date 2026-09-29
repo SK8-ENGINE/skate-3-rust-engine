@@ -1,59 +1,24 @@
-//! Shader composition tests plus opt-in, headless Vulkan regression probes.
-//! Bevy vertex interfaces are real; unrelated lighting functions/resources use
-//! interface fixtures. These probes do not launch gameplay or the game app.
+//! Naga validation for the retail shaders, with no GPU and no game app.
+//!
+//! Worth having because the interesting failure modes here are static: a slot
+//! record read under non-uniform control flow, a binding number that drifted out
+//! of step with `AsBindGroup`, or a struct whose WGSL layout stopped matching the
+//! bytes Rust encodes. All of those are compile errors that Naga will name, and
+//! none of them need a window.
+//!
+//! Bevy's own vertex interfaces are used for real, from the vendored sources.
+//! Lighting resources and functions the retail shaders only *call* are interface
+//! fixtures — the point is to type-check our code, not re-validate Bevy's.
 use naga_oil::compose::{
     ComposableModuleDescriptor, Composer, NagaModuleDescriptor, ShaderDefValue,
 };
 use std::collections::HashMap;
 
-#[test]
-fn material_index_table_matches_shader_resources() {
-    use bevy::render::render_resource::{AsBindGroup, BindlessResourceType as R};
-    let descriptor = super::RetailWorldMaterial::bindless_descriptor().unwrap();
-    assert_eq!(
-        descriptor.resources.as_ref(),
-        &[
-            R::DataBuffer,
-            R::Texture2d,
-            R::SamplerFiltering,
-            R::Texture2d,
-            R::SamplerFiltering,
-            R::Texture2d,
-            R::SamplerFiltering,
-            R::Texture2d,
-            R::SamplerFiltering,
-            R::Texture2d,
-            R::SamplerFiltering,
-            R::Texture2d,
-            R::SamplerFiltering,
-            R::Texture2d,
-            R::SamplerFiltering,
-            R::TextureCube,
-            R::Buffer,
-        ]
-    );
-    assert_eq!(descriptor.index_tables.len(), 1);
-    let table = &descriptor.index_tables[0];
-    assert_eq!(
-        (
-            table.binding_number.0,
-            table.indices.start.0,
-            table.indices.end.0
-        ),
-        (0, 0, 17)
-    );
-    let mut buffers: Vec<_> = descriptor
-        .buffers
-        .iter()
-        .map(|b| (b.bindless_index.0, b.binding_number.0))
-        .collect();
-    buffers.sort_unstable();
-    assert_eq!(buffers, [(0, 17), (16, 18)]);
-}
-
-fn validate(bindless: bool, prepass: bool, extras: &[&str]) -> naga::Module {
+/// Composes one of our shaders against the Bevy interface and validates it.
+fn validate(source: &str, extras: &[&str]) -> naga::Module {
     let mut defs = HashMap::from([("MATERIAL_BIND_GROUP".into(), ShaderDefValue::UInt(3))]);
     for &name in [
+        "VERTEX_POSITIONS",
         "VERTEX_UVS_A",
         "VERTEX_UVS_B",
         "VERTEX_TANGENTS",
@@ -66,39 +31,72 @@ fn validate(bindless: bool, prepass: bool, extras: &[&str]) -> naga::Module {
     {
         defs.insert(name.into(), ShaderDefValue::Bool(true));
     }
-    if bindless {
-        defs.insert("BINDLESS".into(), ShaderDefValue::Bool(true));
-    }
     let mut composer = Composer::default().with_capabilities(naga::valid::Capabilities::all());
     let fixtures = [
         (
             "forward",
-            include_str!("../../../vendor/bevy_pbr/src/render/forward_io.wgsl"),
+            include_str!("../../../vendor/bevy_pbr/src/render/forward_io.wgsl").to_string(),
         ),
         (
             "prepass",
-            include_str!("../../../vendor/bevy_pbr/src/prepass/prepass_io.wgsl"),
+            include_str!("../../../vendor/bevy_pbr/src/prepass/prepass_io.wgsl").to_string(),
         ),
         (
             "mesh",
-            "#define_import_path bevy_pbr::mesh_bindings\nstruct Mesh { material_and_lightmap_bind_group_slot: u32 }\n@group(2) @binding(0) var<storage> mesh: array<Mesh>;",
+            "#define_import_path bevy_pbr::mesh_bindings\n\
+             struct Mesh { material_and_lightmap_bind_group_slot: u32 }\n\
+             @group(2) @binding(0) var<storage> mesh: array<Mesh>;"
+                .to_string(),
         ),
         (
             "frame",
-            "#define_import_path bevy_pbr::mesh_view_bindings\nstruct View {view_from_world:mat4x4<f32>,viewport:vec4<f32>,world_position:vec3<f32>,padding:f32}\nstruct Light {flags:u32}\nstruct Lights {n_directional_lights:u32,directional_lights:array<Light,10>}\n@group(0) @binding(0) var<uniform> view:View;\n@group(0) @binding(1) var<storage> lights:Lights;",
+            "#define_import_path bevy_pbr::mesh_view_bindings\n\
+             struct View {view_from_world:mat4x4<f32>,clip_from_world:mat4x4<f32>,viewport:vec4<f32>,world_position:vec3<f32>,padding:f32}\n\
+             struct Light {flags:u32}\n\
+             struct Lights {n_directional_lights:u32,directional_lights:array<Light,10>}\n\
+             @group(0) @binding(0) var<uniform> view:View;\n\
+             @group(0) @binding(1) var<storage> lights:Lights;"
+                .to_string(),
         ),
         (
             "shadows",
-            "#define_import_path bevy_pbr::shadows\nfn fetch_directional_shadow(id:u32,p:vec4<f32>,n:vec3<f32>,z:f32)->f32 {return 1.0;}",
+            "#define_import_path bevy_pbr::shadows\n\
+             fn fetch_directional_shadow(id:u32,p:vec4<f32>,n:vec3<f32>,z:f32)->f32 {return 1.0;}"
+                .to_string(),
         ),
         (
             "motion",
-            "#define_import_path bevy_pbr::pbr_prepass_functions\nfn calculate_motion_vector(p:vec4<f32>,q:vec4<f32>)->vec2<f32> {return vec2<f32>(0.0);}",
+            "#define_import_path bevy_pbr::pbr_prepass_functions\n\
+             fn calculate_motion_vector(p:vec4<f32>,q:vec4<f32>)->vec2<f32> {return vec2<f32>(0.0);}"
+                .to_string(),
+        ),
+        (
+            "transformations",
+            "#define_import_path bevy_pbr::view_transformations\n\
+             fn position_world_to_clip(p:vec3<f32>)->vec4<f32> {return vec4<f32>(p,1.0);}"
+                .to_string(),
+        ),
+        (
+            "mesh_functions",
+            "#define_import_path bevy_pbr::mesh_functions\n\
+             fn get_world_from_local(i:u32)->mat4x4<f32> {return mat4x4<f32>();}\n\
+             fn mesh_position_local_to_world(m:mat4x4<f32>,p:vec4<f32>)->vec4<f32> {return m*p;}\n\
+             fn mesh_normal_local_to_world(n:vec3<f32>,i:u32)->vec3<f32> {return n;}\n\
+             fn mesh_tangent_local_to_world(m:mat4x4<f32>,t:vec4<f32>,i:u32)->vec4<f32> {return t;}"
+                .to_string(),
+        ),
+        (
+            "bindings",
+            include_str!("retail_material_bindings.wgsl").to_string(),
+        ),
+        (
+            "character_common",
+            include_str!("retail_character_common.wgsl").to_string(),
         ),
     ];
     for (path, source) in fixtures {
         if let Err(error) = composer.add_composable_module(ComposableModuleDescriptor {
-            source,
+            source: &source,
             file_path: path,
             shader_defs: defs.clone(),
             ..Default::default()
@@ -106,45 +104,6 @@ fn validate(bindless: bool, prepass: bool, extras: &[&str]) -> naga::Module {
             panic!("{}", error.emit_to_string(&composer));
         }
     }
-    let experiment = std::env::var("SKATE_SHADER_PROBE_SOURCE").ok();
-    let probe_source;
-    if let Some(ref directory) = experiment {
-        let binding_source =
-            std::fs::read_to_string(format!("{directory}/v6-retail_material_bindings.wgsl"))
-                .unwrap();
-        composer
-            .add_composable_module(ComposableModuleDescriptor {
-                source: &binding_source,
-                file_path: "bindings",
-                shader_defs: defs.clone(),
-                ..Default::default()
-            })
-            .unwrap();
-        probe_source =
-            std::fs::read_to_string(format!("{directory}/v6-retail_world.wgsl")).unwrap();
-    } else {
-        probe_source = String::new();
-    }
-    if experiment.is_none() {
-        composer
-            .add_composable_module(ComposableModuleDescriptor {
-                source: include_str!("retail_material_bindings.wgsl"),
-                file_path: "bindings",
-                shader_defs: defs.clone(),
-                ..Default::default()
-            })
-            .unwrap();
-    }
-    let source = if prepass {
-        include_str!("retail_depth.wgsl")
-    } else {
-        include_str!("retail_world.wgsl")
-    };
-    let source = if experiment.is_some() {
-        &probe_source
-    } else {
-        source
-    };
     let module = composer
         .make_naga_module(NagaModuleDescriptor {
             source,
@@ -162,21 +121,116 @@ fn validate(bindless: bool, prepass: bool, extras: &[&str]) -> naga::Module {
     module
 }
 
+/// The world shader is the one at risk: `slot` is a per-vertex attribute, so
+/// every family branch is non-uniform control flow and implicit-derivative
+/// sampling inside one is invalid WGSL. If this passes, the explicit gradients
+/// are complete.
 #[test]
-fn material_shaders_validate() {
-    for bindless in [false, true] {
-        validate(bindless, false, &[]);
-        validate(bindless, true, &[]);
-        validate(
-            bindless,
-            true,
-            &[
-                "PREPASS_FRAGMENT",
-                "NORMAL_PREPASS",
-                "NORMAL_PREPASS_OR_DEFERRED_PREPASS",
-                "MOTION_VECTOR_PREPASS",
-                "UNCLIPPED_DEPTH_ORTHO_EMULATION",
-            ],
+fn world_shader_validates_under_non_uniform_material_slots() {
+    validate(include_str!("retail_world.wgsl"), &[]);
+}
+
+/// The dome is one draw with no material table, so what is worth checking is the
+/// binding numbers: they are written out by hand here and have to stay in step
+/// with `SkyMaterial`'s `AsBindGroup` derive.
+#[test]
+fn sky_shader_validates() {
+    validate(include_str!("retail_sky.wgsl"), &[]);
+}
+
+/// The shadow pass is the only place a second vertex layout is in play, and a
+/// mismatch there aborts pipeline creation rather than degrading. Cover each
+/// combination Bevy can ask for: cutting classes sample a page, and directional
+/// cascades emulate unclipped depth on adapters without depth clip control.
+#[test]
+fn depth_shader_validates_in_every_shadow_configuration() {
+    for extras in [
+        &[][..],
+        &["WORLD_ALPHA_CUTOFF"],
+        &["UNCLIPPED_DEPTH_ORTHO_EMULATION"],
+        &["WORLD_ALPHA_CUTOFF", "UNCLIPPED_DEPTH_ORTHO_EMULATION"],
+    ] {
+        validate(include_str!("retail_depth.wgsl"), extras);
+    }
+}
+
+/// Metal translation regression test: WGSL that validates can still fail
+/// Naga's MSL backend (cube-array explicit gradients have no `gradient2d`
+/// translation, which broke macOS pipeline creation while Windows Vulkan
+/// stayed green). Every shipped fragment shader must survive translation on
+/// the backend Macs actually run; this runs on all CI hosts (pure CPU).
+#[test]
+fn shipped_shaders_translate_to_metal() {
+    for (name, source, extras) in [
+        ("world", include_str!("retail_world.wgsl"), &[][..]),
+        ("character", include_str!("retail_character.wgsl"), &[][..]),
+        ("sky", include_str!("retail_sky.wgsl"), &[][..]),
+        ("depth", include_str!("retail_depth.wgsl"), &[][..]),
+        (
+            "depth-cutoff",
+            include_str!("retail_depth.wgsl"),
+            &["WORLD_ALPHA_CUTOFF"][..],
+        ),
+        // retail_tone.wgsl omitted: it needs the fullscreen-vertex import
+        // fixture and contains no gradient/binding constructs at risk.
+    ] {
+        let module = validate(source, extras);
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|e| panic!("{name}: revalidate failed: {e:?}"));
+        // Match what wgpu requests from modern Metal devices; the default
+        // 1.0 rejects even builtin instance indexing.
+        let options = naga::back::msl::Options { lang_version: (2, 4), ..Default::default() };
+        if let Err(error) = naga::back::msl::write_string(
+            &module,
+            &info,
+            &options,
+            &naga::back::msl::PipelineOptions::default(),
+        ) {
+            panic!("{name}: Metal translation failed: {error:?}");
+        }
+    }
+}
+
+/// Each vertex input location of a shader's `vertex` entry point, against a
+/// description of the type it expects to receive there.
+fn vertex_locations(module: &naga::Module) -> HashMap<u32, String> {
+    let entry = module
+        .entry_points
+        .iter()
+        .find(|e| e.name == "vertex")
+        .expect("shader must own its vertex entry point");
+    let mut found = HashMap::new();
+    for argument in &entry.function.arguments {
+        if let Some(naga::Binding::Location { location, .. }) = argument.binding {
+            found.insert(location, format!("{:?}", module.types[argument.ty].inner));
+        } else if let naga::TypeInner::Struct { members, .. } = &module.types[argument.ty].inner {
+            for member in members {
+                if let Some(naga::Binding::Location { location, .. }) = member.binding {
+                    found.insert(location, format!("{:?}", module.types[member.ty].inner));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The shadow pass reads the same vertex buffer as the main pass, so the two
+/// shaders have to agree with `WorldMaterial::specialize` about which attribute
+/// each location carries. Disagreeing is what made `prepass_pipeline` fail to
+/// build: Bevy's own prepass shaders put `COLOR` on location 7.
+#[test]
+fn depth_shader_vertex_locations_match_the_world_shader() {
+    let world = vertex_locations(&validate(include_str!("retail_world.wgsl"), &[]));
+    let depth = vertex_locations(&validate(include_str!("retail_depth.wgsl"), &[]));
+    for (location, ty) in &depth {
+        assert_eq!(
+            world.get(location),
+            Some(ty),
+            "location {location} differs from the world shader's vertex layout"
         );
     }
 }
@@ -196,6 +250,9 @@ fn vulkan_shadow_pipeline_probe() {
 fn gpu_probe(prepass: bool) {
     bevy::tasks::block_on(async {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            #[cfg(target_os = "macos")]
+            backends: wgpu::Backends::METAL,
+            #[cfg(not(target_os = "macos"))]
             backends: wgpu::Backends::VULKAN,
             ..Default::default()
         });
@@ -216,11 +273,13 @@ fn gpu_probe(prepass: bool) {
             .await
             .unwrap();
         allocation_reuses_resident_textures(&device);
-        let module = validate(
-            std::env::var_os("SKATE_SHADER_PROBE_FALLBACK").is_none(),
-            prepass,
-            &[],
-        );
+        // Probe the same shader the runtime compiles: the depth prepass or
+        // the full world material pipeline.
+        let module = if prepass {
+            validate(include_str!("retail_depth.wgsl"), &[])
+        } else {
+            validate(include_str!("retail_world.wgsl"), &[])
+        };
         let mut groups: Vec<Vec<wgpu::BindGroupLayoutEntry>> = vec![vec![]; 4];
         for (_, variable) in module.global_variables.iter() {
             let Some(binding) = variable.binding else {
@@ -652,4 +711,55 @@ fn allocation_reuses_resident_textures(device: &wgpu::Device) {
     let fresh = allocator.allocate_unprepared(group(0, 3), &layout);
     assert_eq!(fresh.group, first.group);
     eprintln!("PROBE allocator resource reuse and retirement passed");
+}
+#[test]
+fn character_shaders_validate() {
+    validate(include_str!("retail_character.wgsl"), &[]);
+    validate(include_str!("retail_character_depth.wgsl"), &[]);
+    validate(
+        include_str!("retail_character_depth.wgsl"),
+        &[
+            "PREPASS_FRAGMENT",
+            "NORMAL_PREPASS",
+            "NORMAL_PREPASS_OR_DEFERRED_PREPASS",
+            "MOTION_VECTOR_PREPASS",
+            "UNCLIPPED_DEPTH_ORTHO_EMULATION",
+        ],
+    );
+}
+
+/// The vertex entry point declares locations 0..5, and `specialize` pins the
+/// mesh attributes to those same locations. A mismatch is silent corruption
+/// rather than an error, so assert the shader's own view of its inputs.
+#[test]
+fn world_vertex_inputs_match_the_pinned_attribute_locations() {
+    let module = validate(include_str!("retail_world.wgsl"), &[]);
+    let entry = module
+        .entry_points
+        .iter()
+        .find(|e| e.name == "vertex")
+        .expect("world shader must own its vertex entry point");
+    let mut locations: Vec<u32> = entry
+        .function
+        .arguments
+        .iter()
+        .filter_map(|argument| match argument.binding {
+            Some(naga::Binding::Location { location, .. }) => Some(location),
+            _ => None,
+        })
+        .collect();
+    // A single struct argument carries the locations on its members instead.
+    if locations.is_empty() {
+        for argument in &entry.function.arguments {
+            if let naga::TypeInner::Struct { members, .. } = &module.types[argument.ty].inner {
+                for member in members {
+                    if let Some(naga::Binding::Location { location, .. }) = member.binding {
+                        locations.push(location);
+                    }
+                }
+            }
+        }
+    }
+    locations.sort_unstable();
+    assert_eq!(locations, [0, 1, 2, 3, 4, 5, 6]);
 }

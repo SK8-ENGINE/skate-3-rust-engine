@@ -27,6 +27,7 @@ mod graph_runtime;
 mod input;
 mod session_marker;
 mod physics;
+mod platform_bins;
 mod skater_animation;
 mod verification;
 mod performance;
@@ -41,8 +42,11 @@ mod teleport_menu;
 mod render_capacity;
 mod retail_render;
 mod retail_character;
+mod retail_exposure;
 mod retail_irradiance;
+mod retail_sky;
 mod presentation;
+mod debug_cam;
 mod replay;
 mod world;
 mod grind_world;
@@ -69,7 +73,7 @@ fn main() -> bevy::app::AppExit {
         }
     };
     profiling::map_metadata(&config);
-    eprintln!("REPORT_META startup=map_fingerprint:{:016x} difficulty:{} multiplayer_requested:{} custom_appearance:{} renderer:Vulkan", config.map_fingerprint, config.difficulty.key(), config.multiplayer.host.is_some() || config.multiplayer.direct.is_some(), config.multiplayer.appearance.is_some());
+    eprintln!("REPORT_META startup=map_fingerprint:{:016x} difficulty:{} multiplayer_requested:{} custom_appearance:{} renderer:{}", config.map_fingerprint, config.difficulty.key(), config.multiplayer.host.is_some() || config.multiplayer.direct.is_some(), config.multiplayer.appearance.is_some(), if cfg!(target_os = "macos") { "Metal" } else { "Vulkan" });
     eprintln!("REPORT_META stage=gameplay_configuration");
     if let Err(error) = skate_data::input_config::StockGameplayConfig::load(&config.asset_root) {
         eprintln!("{error}");

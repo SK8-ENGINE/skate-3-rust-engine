@@ -21,11 +21,11 @@ pub(super) enum Look {
 #[derive(Component)]
 pub(crate) struct RemoteCharacter;
 #[derive(Resource, Default)]
-pub(super) struct Appearances {
+pub(crate) struct Appearances {
     exchange: Exchange,
     connection: Option<(u64, u64)>,
     local: String,
-    pub looks: BTreeMap<u64, ([u8; 32], Look)>,
+    pub(super) looks: BTreeMap<u64, ([u8; 32], Look)>,
     seen: BTreeMap<u64, [u8; 32]>,
     cached: BTreeMap<[u8; 32], Look>,
     pub status: String,

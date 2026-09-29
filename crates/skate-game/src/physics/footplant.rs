@@ -13,7 +13,7 @@ pub(crate) type V = [f32; 4];
 pub(crate) struct Footplant {
     pub enabled: bool, //240; FullReset and Air Enter clear this separately.
     pub(super) result: QueryResult,
-    pub(super) settings: Settings,
+    settings: Settings,
     pub selected_toe: Option<usize>, //616 signed -1
     pub candidate: bool,             //624
     pub hit: bool,                   //625

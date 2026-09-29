@@ -8,9 +8,9 @@ $build = Join-Path $output 'build'
 New-Item -ItemType Directory -Path $relay,$build -Force | Out-Null
 $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static'
 # Share dependency artifacts, but link directly into this checkout's staging folder.
-& cargo rustc --release --target x86_64-pc-windows-msvc --target-dir (Join-Path $workspace 'target') -p skate-game --bin skate3-multiplayer --no-default-features --locked -- -C extra-filename=-multiplayer-test -o (Join-Path $build 'skate3.exe')
+& cargo rustc --release --target x86_64-pc-windows-msvc --target-dir (Join-Path $workspace 'target') -p skate-game --bin skate3-multiplayer --no-default-features --locked -- -C extra-filename=-multiplayer-test --emit "link=$build/skate3-multiplayer-test.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Multiplayer build failed.' }
-& cargo rustc --release --target x86_64-pc-windows-msvc --target-dir (Join-Path $workspace 'target') -p skate-steam-relay --bin skate-steam-relay --locked -- -C extra-filename=-multiplayer-test -o (Join-Path $build 'relay.exe')
+& cargo rustc --release --target x86_64-pc-windows-msvc --target-dir (Join-Path $workspace 'target') -p skate-steam-relay --bin skate-steam-relay --locked -- -C extra-filename=-multiplayer-test --emit "link=$build/relay-multiplayer-test.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Steam relay build failed.' }
 Copy-Item -LiteralPath (Join-Path $build 'skate3-multiplayer-test.exe') -Destination (Join-Path $output 'skate3-multiplayer.exe') -Force
 Copy-Item -LiteralPath (Join-Path $build 'relay-multiplayer-test.exe') -Destination (Join-Path $relay 'skate-steam-relay.exe') -Force
