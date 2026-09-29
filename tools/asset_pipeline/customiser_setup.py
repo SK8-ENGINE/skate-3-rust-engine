@@ -173,9 +173,9 @@ def install(iso, base, game_exe, report, refresh=False):
         if selected.suffix.lower() == '.iso':
             if not selected.is_file():raise RuntimeError('Select an existing Skate 3 Xbox 360 ISO')
             source = Path(temp)/'disc'
-            extractor = core.dependency(base/'tools', 'extract-xiso', core.XISO_URL, core.XISO_SHA, report)
+            extractor = core.xiso_extractor(base, report)
             with (Path(temp)/'extract.log').open('w') as log:
-                core.run([extractor, '-x', selected, '-d', source], log, report)
+                core.run([extractor, '-d', source, '-x', selected], log, report)  # options first: BSD getopt stops at the first operand
         else:
             source = source_directory(selected, require_core=not refresh)
         stage = core._install(iso, base, game_exe, report, game_root=source, refresh=refresh,

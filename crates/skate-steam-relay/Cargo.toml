@@ -8,6 +8,12 @@ publish.workspace = true
 name = "skate-steam-relay"
 path = "src/main.rs"
 
+[features]
+# Default keeps the Windows package behavior. Steam-less targets (e.g. musl)
+# build this crate with --no-default-features and get an error stub binary.
+default = ["steam"]
+steam = ["dep:steamworks"]
+
 [dependencies]
-steamworks = { version = "=0.13.1", features = ["raw-bindings"] }
+steamworks = { version = "=0.13.1", features = ["raw-bindings"], optional = true }
 skate-net = { path = "../skate-net" }

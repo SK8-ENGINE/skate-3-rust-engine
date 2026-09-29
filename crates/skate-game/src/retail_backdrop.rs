@@ -46,6 +46,25 @@ fn spawn_package(
         error!("SKATE_BACKDROP: invalid render-only package {}", path.display());
         return;
     }
+    let tuning = super::MaterialTuning::load(asset_root);
+    let instances: Vec<_> = map.extensions.iter().filter(|e| e.tag == *b"MOBJ").collect();
+    if !instances.is_empty() {
+        // Dynamic-prop packages keep one live entity per MOBJ instance so
+        // later phases can move them; static packages stay material-batched.
+        let mut objects = Vec::new();
+        for extension in instances {
+            match skate_data::skate_map::parse_static_objects(&map, extension) {
+                Ok(parsed) => objects.extend(parsed),
+                Err(error) => {
+                    error!("SKATE_BACKDROP: {}: {error}", path.display());
+                    return;
+                }
+            }
+        }
+        info!("SKATE_BACKDROP: {name} {folder} prop_instances={} triangles={}", objects.len(), map.geometry.indices.len() / 3);
+        crate::skate_world::spawn_instances(&map, &objects, commands, meshes, materials, retail_materials, images, &tuning);
+        return;
+    }
     info!("SKATE_BACKDROP: {name} {folder} triangles={}", map.geometry.indices.len() / 3);
-    crate::skate_world::spawn(&map, commands, meshes, materials, retail_materials, images, &super::MaterialTuning::load(asset_root));
+    crate::skate_world::spawn(&map, commands, meshes, materials, retail_materials, images, &tuning);
 }

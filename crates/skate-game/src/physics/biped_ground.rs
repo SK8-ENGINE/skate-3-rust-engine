@@ -130,6 +130,14 @@ impl Owner {
     }
 }
 
+/// Object-move stick rotated from the character frame into the world: Z is
+/// push/pull along the ground-frame forward, X is perpendicular strafe.
+fn object_move_stick(frame: &[[f32; 4]; 4], x: f32, z: f32) -> (f32, f32) {
+    let right = frame[0];
+    let forward = frame[2];
+    (right[0] * x + forward[0] * z, right[2] * x + forward[2] * z)
+}
+
 pub(crate) fn enter(_physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
     let p = &skater.player_input.processed;
     //82D30848 calls GetEffectiveRoot82BE3650 BEFORE Ground placement.
@@ -225,12 +233,25 @@ pub(crate) fn update(
         );
     }
     let frame = skater.biped_ground.ground.frame_80;
+    // Move Object (502): the stock graph swaps OBGround's locomotion
+    // AttachIntents for MovingObjectNew's OB_ObjectMv set, so ob_Mag and the
+    // BipedWorld extras stall and the biped would freeze with the prop held.
+    // Retail moves skater and object as one pair from the ObjectMv axes in
+    // the character frame; reproduce that by rotating the carried stick into
+    // the ground frame. ground_input::calculate then recovers the same local
+    // magnitude/angle, the root walks, and PropCarry::follow drags the prop
+    // behind the moving anchor (push forward, pull back, X strafes).
+    let (stick_x, stick_z) = if p.state_2508 == 502 && physics.prop_carry.held().is_some() {
+        object_move_stick(&frame, extra.object_move_x, extra.object_move_z)
+    } else {
+        (extra.biped_world_x, extra.biped_world_z)
+    };
     let input = skate_core::player::offboard::ground_input::GroundInput {
         processed_flags_2472: p.flags_2472,
         processed_direct_2684: extra.offboard_magnitude,
         processed_direct_2680: extra.offboard_turn,
-        processed_stick_2692: extra.biped_world_x,
-        processed_stick_2688: extra.biped_world_z,
+        processed_stick_2692: stick_x,
+        processed_stick_2688: stick_z,
         processed_scale_2912: fields.magnitude_scale,
         processed_scale_2908: fields.turn_scale,
         frame_forward_112: [frame[2][0], frame[2][1], frame[2][2]],
@@ -391,4 +412,34 @@ pub(crate) fn submit_geometry(
         },
         p.flags_2488,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::object_move_stick;
+
+    #[test]
+    fn object_move_stick_recovers_character_axes_in_any_yaw() {
+        // Identity frame: push is +Z world, strafe is +X world.
+        let identity = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0; 4],
+        ];
+        assert_eq!(object_move_stick(&identity, 0.0, 1.0), (0.0, 1.0));
+        assert_eq!(object_move_stick(&identity, 1.0, 0.0), (1.0, 0.0));
+        // Facing +X (yaw 90°): push becomes +X world, strafe becomes -Z world.
+        let facing_x = [
+            [0.0, 0.0, -1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 4],
+        ];
+        assert_eq!(object_move_stick(&facing_x, 0.0, 1.0), (1.0, 0.0));
+        assert_eq!(object_move_stick(&facing_x, 1.0, 0.0), (0.0, -1.0));
+        // Pull is the exact opposite of push.
+        let (x, z) = object_move_stick(&facing_x, 0.0, -1.0);
+        assert_eq!((x, z), (-1.0, 0.0));
+    }
 }

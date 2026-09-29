@@ -103,15 +103,19 @@ def spawn_point(manifest,root):
         selector.consider(decode_rx2_clustered_meshes((root/entry['rx2']).read_bytes()))
     return selector.result(manifest['map_name'])
 
-def write(manifest_path,output,collision,report=lambda _:None, *, render_only=False, prepared_spawn=None):
+def write(manifest_path,output,collision,report=lambda _:None, *, render_only=False, prepared_spawn=None, extensions=None):
     root=manifest_path.parent;m=json.loads(manifest_path.read_text());textures=m['textures']
     ids={name:i+1 for i,name in enumerate(sorted(textures))}
     excluded=set(m['normal_texture_policy']['excluded_texture_ids'])
     mats=io.BytesIO();vertices=io.BytesIO();indices=io.BytesIO();nv=ni=nm=0
+    # Per-model index ranges in the final buffer let callers reference shared
+    # geometry (MOBJ instances point at these without duplicating triangles).
+    ranges=[]
     dtype=np.dtype([('p','<f4',(3,)),('n','<f4',(3,)),('uv','<f4',(2,)),('lm','<f4',(2,)),
                     ('mat','<u4'),('decal','<f4',(2,)),('frame','i1',(4,))])
     for number,model in enumerate(m['models']):
         if number%100==0:report(f"Writing {m['map_name']}: model {number+1}/{len(m['models'])}")
+        first_index=ni
         with np.load(root/model['npz'],allow_pickle=False) as archive:
             for mesh in model['meshes']:
                 i=mesh['index']
@@ -163,6 +167,7 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
                     record['frame'][:,:3]=np.rint(np.clip(binormal,-1,1)*127).astype('i1');record['frame'][:,3]=np.rint(sign*127).astype('i1')
                 if not np.isfinite(pos).all():raise ValueError('Non-finite map geometry')
                 vertices.write(record.tobytes());indices.write((faces+nv).astype('<u4').tobytes());nv+=len(pos);ni+=faces.size;nm+=1
+        ranges.append((first_index,ni-first_index))
     report('Selecting starting position: '+m['map_name']);spawn=(0.,0.,0.) if render_only else (prepared_spawn if prepared_spawn is not None else spawn_point(m,root))
     # Match the supplied exporter's environment defaults. Native sky shaders
     # remain a separate runtime feature; no geometry is synthesized here.
@@ -183,11 +188,15 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
                 raw=bytes.fromhex(segment)
                 if len(raw)!=120:raise ValueError('Invalid native spline segment')
                 f.write(np.frombuffer(raw,dtype='>u4').astype('<u4').tobytes())
-        extensions=[(b'WMET',json.dumps(m,separators=(',',':')).encode())]
-        if not render_only:extensions.insert(0,(b'RWCM',collision.read_bytes()))
-        u(f,len(extensions))
-        for tag,data in extensions:
-            f.write(tag);u(f,1,len(data));stored(f,data)
+        # `extensions` is a list of (tag, schema, payload) triples, or a
+        # callable invoked with the per-model index ranges once geometry is
+        # final (MOBJ records reference those ranges).
+        extra=[e if len(e)==3 else (e[0],1,e[1]) for e in (extensions(ranges) if callable(extensions) else extensions or [])]
+        records=[(b'WMET',1,json.dumps(m,separators=(',',':')).encode())]+extra
+        if not render_only:records.insert(0,(b'RWCM',1,collision.read_bytes()))
+        u(f,len(records))
+        for tag,schema,data in records:
+            f.write(tag);u(f,schema,len(data));stored(f,data)
     report('Map written: '+m['map_name'])
     if not render_only:
         from tools.asset_pipeline.irradiance import write as write_irradiance

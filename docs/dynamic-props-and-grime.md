@@ -120,7 +120,211 @@ objects are not yet pushable, droppable or collidable. Their current materials
 use the existing PBR fallback, not the native dynamicobject lighting shader.
 No static district collision, gameplay or animation logic was changed.
 
+### Phase 0: live instances
+
+The exporter no longer bakes every locator into world-space triangles.
+Template geometry is written once per DMO template in model space, and each
+placement becomes a MOBJ schema 4 record (schema 3 fields plus a 12-float
+row-vector affine per object; schema 3 remains supported with an identity
+basis and origin-only placement). Instance transforms are the composed
+`model_matrix @ template matrix @ locator matrix`. The MOBJ name carries
+`template_id/locator_name` so the runtime can group instances by template.
+The JSON sidecar with full 64-bit IDs, matrices and source hashes is kept.
+
+`parse_render_only` accepts and validates static MOBJ extensions (physics
+flags are still rejected). At spawn, packages with MOBJ records take a new
+`spawn_instances` path: one root entity per instance with a `PropInstance
+{ id, template, name }` marker and its own `Transform`, mesh/material entities
+as children. Geometry meshes and PBR/retail materials are built once per
+(template range, material) and shared through cached handles — per-material
+batching is intentionally broken per instance, but no mesh, texture or
+material is duplicated. Packages without MOBJ records keep the old batched
+path, so existing baked packages still load; re-export regenerates them in
+the instance format.
+
+### Phase 1: static prop collision
+
+No authored DMO collision mesh is recovered from `worlddmo.big` (the district
+sim RX2s carry clustered-mesh collision, but the template cache has none
+verified), so each instance reuses its template's render triangles as its
+collision volume, baked into world space with the instance transform at load
+(`skate_world::build_prop_layer`). Reflections flip winding to keep
+outward normals; degenerate render triangles are skipped. The authored locator
+bounds are not needed: broadphase bounds come from the placed triangles.
+
+Props stay out of the map `collision_world`. They live in a second
+`BoardWorld` (`GamePhysics::prop_world`, built by the shared portable
+triangle pipeline: 1 mm welding, reconstructed adjacency, contiguous-range
+broadphase metadata) so Phase 2 can rebuild moved instances without touching
+static map geometry.
+The solve phase queries board and skeleton volumes against both worlds; wheel
+line queries keep the nearer hit of the two worlds. Triangle tags carry the packed surface ID of the prop's render
+material (same `audio | physics<<7 | pattern<<12` mapping as static
+collision), so wheel surface classification keeps working.
+
+Deck probes, camera, grind, offboard and climbing queries still see only the
+static map world. Prop contacts report `CollisionBody::StaticWorld`; nothing
+moves or pushes back yet. The props package is parsed twice at load (render
+spawn and collision layer), matching its presentation-supplement status: a
+missing or invalid package leaves props uncollidable instead of failing the
+map.
+
+Validation: unit test with a slab template and two instances (translated and
+rotated) covering line queries, rotation of the footprint, packed surface
+tags, and a wheel-sphere contact manifold. In-game verification remains.
+
 Validation: synthetic record, rotation/scale/normal and invalid-reference tests;
 original-data template resolution and placement-bound comparison; offline map
 readers and shader composition. Game/recomp was not launched. GPU execution,
 appearance, performance and gameplay interaction are not validated here.
+
+### Phase 2: dynamic bodies
+
+Every prop instance gets a dynamic rigid body (`physics::prop_dynamics`),
+built on the recovered TU3 integrator (`integrate_body_rates`): gravity and
+cool-down/sleep come from the retail simulation step, and mass properties use
+the retail rounded-box finalize path (`primitive_mass_properties`) with the
+instance's scaled template AABB. Density defaults to 100 kg/m³, the MOBJ
+schema 3 authored default; damping is the authored 0.05 linear / 0.15 angular.
+All props are dynamic by default — the exported packages carry no physics
+flag, and enabling that flag was rejected.
+
+Bodies start asleep at their authored pose, so a resting district costs one
+AABB test per skater volume per tick. The narrowphase reuses the recovered GP
+pair query (`primitive_pair_contacts`): box vs static-world triangles, box vs
+box for other props, and box vs the skater's board/skeleton volumes for
+pushes. Contact response is a compact custom impulse pass producing
+`RetailReactionCorrections`; the retail compiled-row contact solver
+(`build_contact_jacobian`) documents itself as not gameplay-ready, so it is
+not used. Restitution only applies above a 1 m/s closing speed so resting
+contacts settle instead of jittering.
+
+A skater volume overlapping a prop transfers a fraction (0.5) of the closing
+speed as an impulse at the contact point and wakes the body; the skater's own
+response still comes from the exact re-baked triangle layer. Awake props treat
+asleep props (and the static world) as immovable; a hard hit (closing speed
+above 1 m/s) wakes the supporting prop. Prop-vs-prop impulses are split by
+inverse mass.
+
+After each awake body's integration, its instance's triangle range is re-baked
+in the prop collision layer (`PropCollisionLayer::rebake` +
+`BoardWorld::replace_triangles`): adjacency flags and edge cosines are
+invariant under rigid motion, so only vertex positions are recomputed and the
+broadphase bounds/query index rebuilt. `sync_prop_transforms` then publishes
+each body's template-origin pose to the spawned Bevy entity (rotation and
+translation only; authored scale stays on the entity).
+
+Phase 2a limitations: box-approximated bodies mean stacking is approximate;
+a skater standing on an asleep prop does not wake it (no weight transfer);
+deck probes, camera, grind, offboard and climbing queries still see only the
+static map world plus the re-baked prop triangles. Phase 3 (grabbing) needs
+identification of the prop by `PropInstance.id` (`PropDynamics::by_id`), a
+constraint or kinematic-follow toward the hand, wake on grab and re-sleep on
+drop.
+
+Props use their own simulation step (`prop_simulation`): the board's step has
+`cool_down = 0`, which would put props to sleep instantly, and the retail
+freezing-energy threshold is tuned for the board's mass, so props use
+`cool_down = 30` and `minimum_energy = 0.5`. Resting bodies snap their
+velocities to zero below the energy threshold — gated on actually having
+contacts, otherwise the snap zeroes the first ticks of a fall (g·dt is far
+below the threshold) and the prop descends at g·dt² per tick forever — and
+count those snapped ticks toward cool-down directly, because the integrator's
+own counter compares against the previous energy, which the snap just zeroed.
+The reaction-vector convention is per-tick displacement
+(`linear = (force·dt + v)·dt + reactions[0]`, stored velocity rescaled by
+`frequency − drag`), so impulse deltas enter `linear_displacement` as Δv·dt.
+
+Validation: unit tests cover fall + settle + sleep with re-baked triangle
+queries, a skater sphere pushing a resting prop awake, and long-idle
+stability (no sinking, no divergence); the full `skate-game` suite is green.
+In-game verification remains.
+
+### Phase 3: grabbing and carrying props
+
+Offboard gameplay glue (`physics::prop_carry`). **Button: A** (XUSB bit 12,
+controller word bit 21), rising edge toggles grab/drop. Stock offboard
+graphs give A no action of its own — X jumps, B sprints, Y mounts the board,
+RB is `GrabWorld` for climbing, LT/RT drop/throw the board — so the tap only
+briefly suppresses sprint. Toggle rather than hold: carrying is
+locomotion-compatible, and a deliberate drop command reads better than
+release-on-release for a feature about moving props. The edge is computed in
+`frame::advance` from `DerivedControllerInput` (words 13 vs 6) and passed to
+`solve::advance`.
+
+Detection: while `BipedGround` (on foot only — not on the board, airborne or
+wiping out), the nearest body centre within 1.8 m of the skater root
+(`animation_to_world` row 3) is grabbable if it lies roughly ahead
+(horizontal facing dot ≥ 0.25) or is closer than 0.5 m. One prop at a time.
+
+Carry: the prop kinematic-follows a point 0.7 m ahead and 0.9 m above the
+root by *velocity* — `carry_to` sets the body's linear velocity toward the
+target (capped at 6 m/s) and zeroes angular velocity each tick, never
+teleporting, so the narrowphase, skater pushes and the rebaked triangle
+layer keep working. Gravity is not suspended explicitly: overwriting the
+velocity every tick leaves only a g·dt² sag (~3 mm), corrected by the next
+tick. Wake is permanent while held (`wake()` resets cool-down each tick).
+
+Drop: a second press, leaving `BipedGround`, or the prop ending more than
+3 m from the carrier (stuck against geometry) releases it. The current
+velocity is kept — releasing while moving throws gently — and re-sleep is
+the natural cool-down from Phase 2.
+
+Multiplayer: prop bodies are host-local today. skate-net would need to
+replicate the held id plus each body's pose/velocity (or full dynamic state)
+to proxies and arbitrate concurrent grabs. Not implemented.
+
+Validation: unit tests cover grab + follow while the carrier moves, drop →
+fall → re-sleep, and the state gate (no grab on board / in the air / in
+wipeout; auto-drop on mount). Full `skate-game` suite green. In-game
+verification remains.
+
+### Phase 4: placement mode and layout persistence
+
+Placement mode (`physics::prop_carry`, `Mode::Placement`): while carrying,
+**B** (XUSB bit 13, controller bit 20) enters placement on its rising edge —
+a tap is free because stock sprint is hold-gated. The prop keeps following a
+ghost pose relative to the carrier (still velocity-driven, frozen mid-air by
+the per-tick velocity overwrite): right stick Y adjusts distance
+(0.3–4.0 m, 2 m/s), right stick X adjusts yaw (2.5 rad/s, applied as a
+direct orientation snap via `carry_to_pose`), DPad up/down adjusts height
+(0–2.5 m, 1.5 m/s). Note the right stick keeps orbiting the camera while
+placing — the stock `OB_LookAtX/Y` intents are not gated. **A confirms**:
+the prop is set down gently (`release_still` zeroes the follow velocity so
+the leftover tracking speed does not throw it), falls, sleeps, and the pose
+is recorded. **B again cancels** back to plain carry; auto-drop (distance or
+leaving `BipedGround`) never records.
+
+Solver fix uncovered by placement drops: manifold points now share the
+normal impulse (divided by point count, matching the existing positional
+split). Without sharing, a face landing flat on four points summed 4× the
+needed impulse and bounced the box off the floor.
+
+Persistence (`physics::prop_layout`): versioned JSON sidecar at
+`settings/prop-layouts/<map>.json` beside the asset root (same convention as
+`settings/gameplay.json`), written on every confirmed placement:
+`{"schema": 1, "map": "<name>", "props": [{"id", "origin": [f32;3],
+"basis": [[f32;3];3]}]}` — origin/basis are exactly what
+`PropDynamics::pose`/`teleport` consume. On map load, saved poses teleport
+the fresh bodies (asleep) and rebake their triangle ranges before the first
+sync; the carry session is seeded with the saved entries so re-saving never
+drops earlier placements. Missing, corrupt, wrong-schema or foreign-map
+files warn and are ignored; unknown prop ids warn and are skipped. The map
+package itself is never modified.
+
+HUD (`physics::prop_carry_hud`): one procedural 2D diamond at bottom-centre
+(no authored assets, own `Camera2d` on render layer 30) — white when a
+grabbable prop is in reach on foot (same `PropCarry::candidate` query as the
+grab path), cyan while carrying, yellow in placement mode.
+
+With this, issue #13's loop is complete: props spawn as instances (Phase 0),
+collide (Phase 1), are dynamic and pushable (Phase 2), can be grabbed,
+carried and dropped (Phase 3), and placed deliberately with persistent
+layouts (Phase 4).
+
+Validation: unit tests for placement adjust + confirm (ghost pushed out and
+yawed, prop set down at the ghost pose, recorded, falls and sleeps), cancel
+returning to carry without recording, layout JSON round-trip, corrupt /
+foreign / missing sidecars ignored, and teleport of a fresh body with
+rebaked triangle probe. Full `skate-game` suite green (272 tests). In-game
+verification remains.

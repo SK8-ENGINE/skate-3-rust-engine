@@ -62,6 +62,12 @@ pub(crate) fn build(
                     // Existing machine's validation layer rejects wgpu atomic shaders.
                     // This workaround belongs only to the rendering adapter.
                     instance_flags: InstanceFlags::empty(),
+                    // MoltenVK lacks robustBufferAccess2, so wgpu requests naga buffer
+                    // bounds checks, which naga 27 cannot emit for runtime arrays inside
+                    // binding arrays. Without BUFFER_BINDING_ARRAY, materials take the
+                    // non-bindless path.
+                    #[cfg(target_os = "macos")]
+                    disabled_features: Some(bevy::render::settings::WgpuFeatures::BUFFER_BINDING_ARRAY),
                     ..default()
                 }),
                 ..default()

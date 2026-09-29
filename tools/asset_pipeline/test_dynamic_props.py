@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import numpy as np
 
-from .dynamic_props import locators, transform_mesh, template_meshes, save_catalog, load_catalog
+from .dynamic_props import locators, transform_mesh, template_meshes, save_catalog, load_catalog, mobj_extension
 
 
 def resource(kind, payload):
@@ -69,6 +69,33 @@ class DynamicPropsTests(unittest.TestCase):
         np.testing.assert_allclose(transformed['vertices_0'], [[22, 26, 28]])
         np.testing.assert_allclose(transformed['normals_0'], [[1, 0, 0]])
         np.testing.assert_array_equal(arrays['vertices_0'], [[1, 2, 3]])
+
+    def test_mobj_extension_encodes_shared_ranges_and_affines(self):
+        rotation = np.array([[0, 0, -1, 0], [0, 1, 0, 0], [1, 0, 0, 0], [10, 20, 30, 1]], dtype=float)
+        items = [dict(instance_id='0000000100000007', template_id='0000000000000042', name='ramp_a'),
+                 dict(instance_id='0000000100000008', template_id='0000000000000042', name='ramp_b')]
+        payload = mobj_extension([(items[0], 0, rotation), (items[1], 0, rotation)], [(12, 36)])
+        self.assertEqual(struct.unpack_from('<I', payload, 0)[0], 2)
+        at = 4
+        for i, item in enumerate(items):
+            identity, length = struct.unpack_from('<2I', payload, at); at += 8
+            self.assertEqual(identity, 7+i)
+            name = payload[at:at+length].decode(); at += length
+            self.assertEqual(name, '0000000000000042/'+item['name'])
+            origin = struct.unpack_from('<3f', payload, at); at += 12
+            self.assertEqual(origin, (10., 20., 30.))
+            first, count = struct.unpack_from('<2I', payload, at); at += 8
+            self.assertEqual((first, count), (12, 36))
+            at += 8+4  # collision range, no rails
+            physics, shape = struct.unpack_from('<2I', payload, at); at += 8
+            self.assertEqual((physics, shape), (0, 0))
+            at += 24+8  # physics float defaults, boolean flags
+            affine = struct.unpack_from('<12f', payload, at); at += 48
+            np.testing.assert_allclose(affine, list(rotation[:3, :3].ravel())+[10, 20, 30])
+        self.assertEqual(at, len(payload))
+        duplicate = dict(items[1], instance_id=items[0]['instance_id'])
+        with self.assertRaisesRegex(ValueError, 'identity'):
+            mobj_extension([(items[0], 0, rotation), (duplicate, 0, rotation)], [(12, 36)])
 
     def test_missing_template_reference_is_rejected(self):
         payload = bytearray(192)

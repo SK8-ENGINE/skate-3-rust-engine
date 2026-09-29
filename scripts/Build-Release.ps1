@@ -24,7 +24,7 @@ try {
     $symbols = Join-Path $ProjectRoot "target/release-packages/$stamp/symbols"
     New-Item -ItemType Directory -Path "$stage/support",$symbols -Force | Out-Null
     # Link this invocation directly into private staging; never copy a generic cache EXE.
-    & cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-game --bin skate3rust --no-default-features -- -C extra-filename= -o "$stage/skate3rust.exe" -C "link-arg=/PDB:$symbols/skate3rust.pdb"
+    & cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-game --bin skate3rust --no-default-features --features steam -- -C extra-filename= -o "$stage/skate3rust.exe" -C "link-arg=/PDB:$symbols/skate3rust.pdb"
     if ($LASTEXITCODE -ne 0) { throw 'Release compilation failed' }
     & cargo build --release --locked --target x86_64-pc-windows-msvc --target-dir $TargetDirectory -p skate-steam-relay
     if ($LASTEXITCODE -ne 0) { throw 'Steam relay compilation failed' }

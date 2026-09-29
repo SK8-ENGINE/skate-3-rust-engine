@@ -70,6 +70,18 @@ impl SceneEntity<'_> {
             world.entity_mut(*id.get().expect("scene spawn precedes insert")).insert(bundle);
         });
     }
+    /// Deferred child spawn: the parent identity resolves when the scene
+    /// commits, and commands run in push order, so the parent exists first.
+    pub fn spawn_child<B: Bundle>(&mut self, bundle: B) -> SceneEntity<'_> {
+        let parent = self.id.clone();
+        let id = std::sync::Arc::new(std::sync::OnceLock::new());
+        let spawned = id.clone();
+        self.commands.push(move |world: &mut World| {
+            let parent = *parent.get().expect("scene spawn precedes child");
+            spawned.set(world.spawn((MapEntity, ChildOf(parent), bundle)).id()).unwrap();
+        });
+        SceneEntity { commands: self.commands, id }
+    }
 }
 
 pub(crate) struct PreparedScene {

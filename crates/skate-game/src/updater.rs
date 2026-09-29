@@ -18,8 +18,8 @@ fn helper_command(recover: bool, automatic: bool) -> Result<(Command, PathBuf, P
     let unique = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
     let temp = std::env::temp_dir().join(format!("skate-update-{}-{unique}", std::process::id()));
     std::fs::create_dir(&temp).map_err(|e| e.to_string())?;
-    let helper = temp.join("skate3update.exe");
-    std::fs::copy(root.join("support/skate3update.exe"), &helper).map_err(|e| e.to_string())?;
+    let helper = temp.join(skate_platform::exe::exe_name("skate3update"));
+    std::fs::copy(root.join("support").join(skate_platform::exe::exe_name("skate3update")), &helper).map_err(|e| e.to_string())?;
     let signal = temp.join("ready");
     let request = temp.join("request.json");
     let data = serde_json::json!({
@@ -31,10 +31,7 @@ fn helper_command(recover: bool, automatic: bool) -> Result<(Command, PathBuf, P
     std::fs::write(&request, serde_json::to_vec(&data).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let mut command = Command::new(helper);
     command.arg("--request").arg(request);
-    #[cfg(windows)] {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
+    skate_platform::process::detached(&mut command);
     Ok((command, signal, temp))
 }
 

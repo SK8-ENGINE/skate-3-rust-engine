@@ -51,17 +51,14 @@ pub(crate) fn asset_root() -> Result<PathBuf, String> {
             return Ok(assets.clone());
         }
     }
-    let setup = root.join("support/skate3setup.exe");
+    let setup = root.join("support").join(skate_platform::exe::exe_name("skate3setup"));
     if !setup.is_file() {
-        return Err("This copy has not been set up. Use the complete Windows package, or --assets DIRECTORY for development.".into());
+        return Err("This copy has not been set up. Use the complete package, or --assets DIRECTORY for development.".into());
     }
     let mut command = Command::new(setup);
     command.arg("--base").arg(&base).arg("--game-exe").arg(&exe);
     if existing.is_some() { command.arg("--refresh"); }
-    #[cfg(windows)] {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
+    skate_platform::process::detached(&mut command);
     let status = command.status().map_err(|e| format!("Could not start setup: {e}"))?;
     if !status.success() { return Err("Setup was cancelled or did not complete".into()); }
     let (assets, marker) = installed(&base)?.ok_or("Setup did not publish a complete installation")?;

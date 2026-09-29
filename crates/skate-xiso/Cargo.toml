@@ -1,0 +1,14 @@
+[package]
+name = "skate-xiso"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "skate-xiso"
+path = "src/main.rs"
+
+[dependencies]
+# Sync API: maybe-async is disabled by the "sync" feature, so read_volume,
+# file_tree and BlockDeviceRead are plain blocking calls.
+xdvdfs = { version = "0.8", default-features = false, features = ["std", "read", "sync"] }

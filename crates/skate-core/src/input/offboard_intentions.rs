@@ -119,6 +119,21 @@ fn dot(a: [f32; 4], b: [f32; 4]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
+/// Object-move inputs while carrying a prop (retail Move Object mode). The
+/// stock OffBoard AG forwards all three to the MG, where MovingObjectNew
+/// attaches them to the same-named skeleton-input channels. Retail produces
+/// them from the left stick in the object's frame; with the carry drag keeping
+/// the prop on the grabbed side, raw stick axes are that frame. Rotation has
+/// no stock producer observable here, so it stays zero.
+pub fn produce_object_move(controller: &DerivedControllerInput) -> [OffboardIntent; 3] {
+    let words = controller.words();
+    [
+        OffboardIntent { name: "OB_ObjectMvZ", value: f32::from_bits(words[8]) },
+        OffboardIntent { name: "OB_ObjectMvX", value: f32::from_bits(words[7]) },
+        OffboardIntent { name: "OB_ObjectMvRot", value: 0.0 },
+    ]
+}
+
 fn safe_unit(vector: [f32; 4]) -> [f32; 4] {
     let squared = dot(vector, vector);
     let mut inverse = crate::physics::reciprocal_sqrt::estimate(squared);

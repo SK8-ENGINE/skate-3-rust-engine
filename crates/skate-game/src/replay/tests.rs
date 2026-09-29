@@ -115,6 +115,7 @@ fn controller_replay_scrub_camera_and_exit_do_not_leak_gameplay_input() {
     let mut app = App::new();
     app.init_resource::<Replay>()
         .init_resource::<ControllerInput>()
+        .init_resource::<crate::modding::vehicles::Vehicles>()
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()
         .init_resource::<bevy::input::mouse::AccumulatedMouseMotion>()

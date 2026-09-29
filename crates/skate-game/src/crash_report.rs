@@ -268,7 +268,7 @@ fn report(capture: &Capture, outcome: &str, elapsed: f64) -> String {
     #[cfg(windows)]
     let os_version = native::os_version();
     #[cfg(not(windows))]
-    let os_version = "OS version unavailable";
+    let os_version = skate_platform::crash::os_version();
     let mut text = format!(
         "Skate 3 Rust Engine diagnostic report v1\nBuild: {}\nPlatform: {} / {}\nUTC Unix seconds: {}\nRuntime seconds: {elapsed:.3}\n{outcome}\n\nNo automatic upload. Review before sharing. Paths and sensitive-context log lines are omitted.\nNative fault stack/registers: unavailable (no memory dump collected).\nGPU/driver, map and settings: available only if initialized and recorded below.\nMods: no authoritative mod inventory; modified asset contents are not collected.\nLogs: last 256 bounded lines; transitions: last 64; panic: last 128 lines.\nState is sampled every second; brief transitions can be missed. Abrupt exits can lose pending pipe data.\n",
         env!("SKATE_BUILD_ID"),
@@ -363,31 +363,7 @@ fn present(text: &str) {
     }
 }
 fn popup(path: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let status = Command::new("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-STA",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                include_str!("crash_report_ui.ps1"),
-            ])
-            .env("SKATE_REPORT_PATH", path)
-            .creation_flags(0x08000000)
-            .status()?;
-        if !status.success() {
-            return Err(std::io::Error::other("PowerShell UI failed"));
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = path;
-    }
-    Ok(())
+    skate_platform::crash::report_popup(path, include_str!("crash_report_ui.ps1"))
 }
 
 #[cfg(test)]

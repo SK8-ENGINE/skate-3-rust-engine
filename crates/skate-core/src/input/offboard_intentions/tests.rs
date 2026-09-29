@@ -139,6 +139,20 @@ fn obstacle_correction_stops_direct_approach_but_preserves_tangent_motion() {
 }
 
 #[test]
+fn object_move_maps_left_stick_and_keeps_rotation_zero() {
+    let mut words = [0; 26];
+    words[7] = 0.75f32.to_bits();
+    words[8] = (-0.5f32).to_bits();
+    let output = produce_object_move(&DerivedControllerInput::from_words(words));
+    assert_eq!(output[0].name, "OB_ObjectMvZ");
+    assert_eq!(output[0].value, -0.5);
+    assert_eq!(output[1].name, "OB_ObjectMvX");
+    assert_eq!(output[1].value, 0.75);
+    assert_eq!(output[2].name, "OB_ObjectMvRot");
+    assert_eq!(output[2].value, 0.0);
+}
+
+#[test]
 fn zero_and_tiny_headings_use_original_length_threshold() {
     assert_eq!(analog(0.0, 1.0, [0.0; 4], None)[0].value, 0.0);
     assert_eq!(analog(0.0, 1.0, [0.0, 0.0, 0.5e-6, 0.0], None)[0].value, 0.0);

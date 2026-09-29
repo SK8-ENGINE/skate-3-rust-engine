@@ -192,7 +192,9 @@ fn retail_collision_world(
                 local_to_world: RetailAffineTransform::IDENTITY,
                 world_to_local: RetailAffineTransform::IDENTITY,
                 local_bounds: bounds,
-                matching_group: i32::from(group),
+                // Native static registration uses matchingID -1; the unit group
+                // only splits clusters and must not filter actor queries.
+                matching_group: -1,
                 pool: QueryPool::Ground,
             });
         }
@@ -221,13 +223,24 @@ pub(crate) fn collision_world(
     if let Some(archive) = retail_archive(map)? {
         return retail_collision_world(archive, material);
     }
+    portable_world(&map.geometry.collision, &map.materials, material)
+}
+
+/// Portable triangle world: 1 mm vertex welding, reconstructed adjacency and
+/// contiguous-range broadphase metadata. Shared by the playable map and by
+/// static prop instances, which supply already-placed world-space triangles.
+fn portable_world(
+    collision: &[skate_data::skate_map::Collision],
+    materials: &[skate_data::skate_map::Material],
+    material: RetailContactMaterial,
+) -> Result<BoardWorld, String> {
     // Match the reference RW mesh compiler's 1 mm vertex welding and reversed
     // edge pairing. Triangle diagonals are adjacency, never authored ledges.
     let mut welded = HashMap::<[i64; 3], usize>::new();
     let mut positions = Vec::<Vec3>::new();
     let mut vertices = Vec::new();
     let mut normals = Vec::new();
-    for tri in &map.geometry.collision {
+    for tri in collision {
         let ids = tri.points.map(|p| {
             let inverse = 1.0 / f64::from(0.001_f32);
             let key = p.map(|v| (f64::from(v) * inverse).round() as i64);
@@ -250,9 +263,7 @@ pub(crate) fn collision_world(
         vec![TriangleFeature::ONE_SIDED | TriangleFeature::USE_EDGE_COSINES | 0xe0; vertices.len()];
     // Fully native maps need no reconstructed adjacency. Mixed maps still
     // include every face when finding neighbors for their authored geometry.
-    if map
-        .geometry
-        .collision
+    if collision
         .iter()
         .any(|t| t.native_edges.is_none())
     {
@@ -301,11 +312,11 @@ pub(crate) fn collision_world(
     }
     let mut triangles = Vec::with_capacity(vertices.len());
     let mut packed_surfaces = Vec::with_capacity(vertices.len());
-    for (i, source) in map.geometry.collision.iter().enumerate() {
+    for (i, source) in collision.iter().enumerate() {
         if let Some(edges) = source.native_edges {
             (flags[i], cosines[i]) = decode_native_edges(edges)?;
         }
-        let m = &map.materials[source.material as usize - 1];
+        let m = &materials[source.material as usize - 1];
         // Exact EncodeRwSurfaceId mapping from the reference native adapter.
         packed_surfaces.push((m.audio | (m.physics << 7) | (m.pattern << 12)) as u16);
         let points = vertices[i].map(|id| {
@@ -353,6 +364,223 @@ pub(crate) fn collision_world(
         island_flags: 0,
     };
     BoardWorld::with_query_metadata(triangles, metadata).map_err(str::to_owned)
+}
+
+/// One prop instance's share of the prop collision world: its world triangle
+/// range plus the winding-fixed template-space source triangles. Rigid-motion
+/// invariance of adjacency flags and edge cosines lets `rebake` skip welding.
+pub(crate) struct PropCollisionInstance {
+    pub id: u32,
+    /// Index of the originating MOBJ record.
+    pub object: usize,
+    pub range: std::ops::Range<usize>,
+    local: Vec<[Vector3; 3]>,
+}
+
+impl PropCollisionInstance {
+    /// Winding-fixed template-space triangles with per-axis scale folded in.
+    pub fn local_points(&self) -> &[[Vector3; 3]] {
+        &self.local
+    }
+}
+
+/// Static collision for spawned DMO prop instances, kept out of the map
+/// collision world so dynamic instances can be rebaked independently.
+pub(crate) struct PropCollisionLayer {
+    world: BoardWorld,
+    instances: Vec<PropCollisionInstance>,
+    contact_material: RetailContactMaterial,
+}
+
+impl PropCollisionLayer {
+    pub fn world(&self) -> &BoardWorld {
+        &self.world
+    }
+    pub fn world_mut(&mut self) -> &mut BoardWorld {
+        &mut self.world
+    }
+    pub fn instances(&self) -> &[PropCollisionInstance] {
+        &self.instances
+    }
+
+    /// Re-bake one instance at a new rigid pose (rotation basis columns plus
+    /// translation of the template origin). Scale, if any, is baked into the
+    /// local triangles at load and is not reapplied here.
+    pub fn rebake(
+        &mut self,
+        instance: usize,
+        basis: [[f32; 3]; 3],
+        translation: Vector3,
+    ) -> Result<(), String> {
+        let entry = &self.instances[instance];
+        let transform = |p: Vector3| {
+            Vector3::new(
+                p.x * basis[0][0] + p.y * basis[1][0] + p.z * basis[2][0] + translation.x,
+                p.x * basis[0][1] + p.y * basis[1][1] + p.z * basis[2][1] + translation.y,
+                p.x * basis[0][2] + p.y * basis[1][2] + p.z * basis[2][2] + translation.z,
+            )
+        };
+        let mut triangles = Vec::with_capacity(entry.local.len());
+        for (i, &local) in entry.local.iter().enumerate() {
+            let source = self.world.triangles()[entry.range.start + i];
+            let points = local.map(transform);
+            triangles.push(
+                WorldTriangle::from_vertices(
+                    points,
+                    self.contact_material,
+                    source.tag,
+                    source.triangle.feature.flags,
+                    source.triangle.feature.edge_cosines,
+                    0.,
+                )
+                .ok_or("Rebaked prop collision triangle is invalid")?,
+            );
+        }
+        self.world
+            .replace_triangles(entry.range.clone(), &triangles)
+            .map_err(str::to_owned)
+    }
+}
+
+/// Static collision for spawned DMO prop instances. No authored DMO collision
+/// mesh is recovered, so each instance reuses its template's render triangles,
+/// baked into world space with the instance transform at load. Reflections
+/// flip winding to keep outward normals; degenerate render triangles are
+/// skipped rather than rejecting the whole layer.
+pub(crate) fn build_prop_layer(
+    map: &SkateMap,
+    objects: &[skate_data::skate_map::StaticObject],
+    material: RetailContactMaterial,
+) -> Result<Option<PropCollisionLayer>, String> {
+    let mut collision = Vec::new();
+    let mut instances = Vec::new();
+    for (object_index, object) in objects.iter().enumerate() {
+        let t = &object.transform;
+        // Row-vector affine (v @ basis + translation), as in spawn_instances.
+        let transform = |p: [f32; 3]| -> [f32; 3] {
+            [
+                p[0] * t[0] + p[1] * t[3] + p[2] * t[6] + t[9],
+                p[0] * t[1] + p[1] * t[4] + p[2] * t[7] + t[10],
+                p[0] * t[2] + p[1] * t[5] + p[2] * t[8] + t[11],
+            ]
+        };
+        let determinant = t[0] * (t[4] * t[8] - t[5] * t[7])
+            - t[1] * (t[3] * t[8] - t[5] * t[6])
+            + t[2] * (t[3] * t[7] - t[4] * t[6]);
+        // Row-vector rows are the world images of the local axes. Their lengths
+        // are the per-axis scale; rebake applies rotation only, so local source
+        // triangles carry the scale and stay exact for diagonal-scale placements.
+        let scale = [
+            (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt(),
+            (t[3] * t[3] + t[4] * t[4] + t[5] * t[5]).sqrt(),
+            (t[6] * t[6] + t[7] * t[7] + t[8] * t[8]).sqrt(),
+        ];
+        let range =
+            object.first_index as usize..(object.first_index + object.index_count) as usize;
+        let start = collision.len();
+        let mut local = Vec::new();
+        for tri in map.geometry.indices[range].chunks_exact(3) {
+            let mut points =
+                [tri[0], tri[1], tri[2]].map(|i| map.geometry.vertices[i as usize].position);
+            if determinant < 0. {
+                points.swap(1, 2);
+            }
+            let [a, b, c] = points.map(Vec3::from_array);
+            let cross = (b - a).cross(c - a);
+            if cross.length_squared() <= 0. {
+                continue;
+            }
+            local.push(points.map(|p| {
+                Vector3::new(p[0] * scale[0], p[1] * scale[1], p[2] * scale[2])
+            }));
+            let source = &map.materials
+                [map.geometry.vertices[tri[0] as usize].material as usize - 1];
+            // Wheels read the packed surface nibble from the triangle tag; use
+            // the same EncodeRwSurfaceId mapping as static map collision.
+            let surface = source.audio | (source.physics << 7) | (source.pattern << 12);
+            collision.push(skate_data::skate_map::Collision {
+                points: points.map(transform),
+                surface,
+                material: map.geometry.vertices[tri[0] as usize].material,
+                native_edges: None,
+            });
+        }
+        if collision.len() > start {
+            instances.push(PropCollisionInstance {
+                id: object.id,
+                object: object_index,
+                range: start..collision.len(),
+                local,
+            });
+        }
+    }
+    if collision.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PropCollisionLayer {
+        world: portable_world(&collision, &map.materials, material)?,
+        instances,
+        contact_material: material,
+    }))
+}
+
+/// Load the district's prop package and build its collision layer plus the
+/// dynamic bodies for every instance. The package is a presentation
+/// supplement: missing or invalid files leave props uncollidable rather than
+/// failing the map, matching the render path.
+pub(crate) fn load_prop_layer(
+    asset_root: &std::path::Path,
+    map_name: &str,
+    material: RetailContactMaterial,
+    simulation: skate_core::physics::rigid_body::RetailSimulationStep,
+) -> Option<(PropCollisionLayer, crate::physics::prop_dynamics::PropDynamics)> {
+    let path = asset_root
+        .join("private")
+        .join("native-props")
+        .join(format!("{map_name}.skate"));
+    if !path.is_file() {
+        return None;
+    }
+    let loaded = std::fs::read(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|data| SkateMap::parse_render_only(&data));
+    let map = match loaded {
+        Ok(map) => map,
+        Err(error) => {
+            warn!("SKATE_PROP_COLLISION: {}: {error}", path.display());
+            return None;
+        }
+    };
+    let mut objects = Vec::new();
+    for extension in map.extensions.iter().filter(|e| e.tag == *b"MOBJ") {
+        match skate_data::skate_map::parse_static_objects(&map, extension) {
+            Ok(parsed) => objects.extend(parsed),
+            Err(error) => {
+                warn!("SKATE_PROP_COLLISION: {}: {error}", path.display());
+                return None;
+            }
+        }
+    }
+    match build_prop_layer(&map, &objects, material) {
+        Ok(Some(layer)) => {
+            info!(
+                "SKATE_PROP_COLLISION: {map_name} instances={} triangles={}",
+                objects.len(),
+                layer.world().triangles().len()
+            );
+            let dynamics = crate::physics::prop_dynamics::PropDynamics::new(
+                &objects,
+                layer.instances(),
+                simulation,
+            );
+            Some((layer, dynamics))
+        }
+        Ok(None) => None,
+        Err(error) => {
+            warn!("SKATE_PROP_COLLISION: {}: {error}", path.display());
+            None
+        }
+    }
 }
 
 /// Reuse identical render resources without changing authored triangles.
@@ -553,20 +781,14 @@ mod performance_inventory {
     }
 }
 
-pub(crate) fn spawn(
-    map: &SkateMap,
-    commands: &mut crate::map_render::SceneCommands,
-    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
-    materials: &mut impl crate::map_render::AssetSink<StandardMaterial>,
-    retail_materials: &mut impl crate::map_render::AssetSink<crate::retail_render::RetailWorldMaterial>,
-    images: &mut impl crate::map_render::AssetSink<Image>,
-    tuning: &crate::retail_render::MaterialTuning,
-) {
-    // Texture roles have different transfer functions even when sharing a record.
-    let _span = info_span!("prepare_map_geometry_and_textures").entered();
+/// Texture roles have different transfer functions even when sharing a record.
+fn texture_loader<'a>(
+    map: &'a SkateMap,
+    images: &'a mut impl crate::map_render::AssetSink<Image>,
+) -> impl FnMut(u32, u8) -> Option<Handle<Image>> + 'a {
     let texture_ids = render_texture_ids(&map.textures);
     let mut cache = HashMap::<(u32, u8), Handle<Image>>::new();
-    let mut texture = |id: u32, role: u8| -> Option<Handle<Image>> {
+    move |id: u32, role: u8| -> Option<Handle<Image>> {
         let id = texture_ids[id as usize];
         if id == 0 {
             return None;
@@ -636,7 +858,112 @@ pub(crate) fn spawn(
                 })
                 .clone(),
         )
-    };
+    }
+}
+
+/// Reindex one triangle batch, preserving authored normals and both UV sets.
+fn build_mesh(map: &SkateMap, material_index: usize, indices: Vec<u32>) -> Mesh {
+    let m = &map.materials[material_index];
+    let mut remap = HashMap::new();
+    let mut vertices = Vec::new();
+    let local: Vec<u32> = indices
+        .into_iter()
+        .map(|index| {
+            *remap.entry(index).or_insert_with(|| {
+                let id = vertices.len() as u32;
+                vertices.push(&map.geometry.vertices[index as usize]);
+                id
+            })
+        })
+        .collect();
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vertices.iter().map(|v| v.position).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_NORMAL,
+        vertices.iter().map(|v| v.normal).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_UV_0,
+        vertices.iter().map(|v| v.uv).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_UV_1,
+        vertices.iter().map(|v| v.lightmap_uv).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_COLOR,
+        vertices.iter().map(|v| { let uv = v.decal_uv.unwrap_or(v.uv); [uv[0], uv[1], 0., 1.] }).collect::<Vec<_>>(),
+    )
+    .with_inserted_indices(bevy::mesh::Indices::U32(local));
+    if vertices.iter().all(|v| v.tangent_frame.is_some()) {
+        let tangents: Vec<[f32; 4]> = vertices
+            .iter()
+            .map(|v| {
+                let frame = v
+                    .tangent_frame
+                    .unwrap()
+                    .map(|b| (b as i8 as f32 / 127.).max(-1.));
+                let binormal = Vec3::new(frame[0], frame[1], frame[2]);
+                let tangent = binormal.cross(Vec3::from_array(v.normal)) * frame[3];
+                [tangent.x, tangent.y, tangent.z, frame[3]]
+            })
+            .collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+    } else if m.textures[2] != 0 {
+        if let Err(error) = mesh.generate_tangents() {
+            warn!("SKATE material {} tangent generation: {error}", m.name);
+        }
+    }
+    mesh
+}
+
+fn standard_material(
+    m: &skate_data::skate_map::Material,
+    texture: &mut impl FnMut(u32, u8) -> Option<Handle<Image>>,
+) -> StandardMaterial {
+    let orm = texture(m.textures[3], 2);
+    StandardMaterial {
+        base_color: Color::linear_rgb(m.color[0], m.color[1], m.color[2]),
+        base_color_texture: texture(m.textures[0], 0),
+        normal_map_texture: texture(m.textures[2], 2),
+        metallic_roughness_texture: orm.clone(),
+        occlusion_texture: orm,
+        metallic: if m.textures[3] != 0 { 1. } else { 0. },
+        perceptual_roughness: m.roughness,
+        emissive: LinearRgba::rgb(
+            m.color[0] * m.emissive,
+            m.color[1] * m.emissive,
+            m.color[2] * m.emissive,
+        ),
+        emissive_texture: texture(m.textures[4], 0),
+        alpha_mode: match m.alpha_mode {
+            1 => AlphaMode::Mask(m.alpha_cutoff),
+            2 => AlphaMode::Blend,
+            _ => AlphaMode::Opaque,
+        },
+        lightmap_exposure: m.indirect_strength,
+        ..default()
+    }
+}
+
+pub(crate) fn spawn(
+    map: &SkateMap,
+    commands: &mut crate::map_render::SceneCommands,
+    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
+    materials: &mut impl crate::map_render::AssetSink<StandardMaterial>,
+    retail_materials: &mut impl crate::map_render::AssetSink<crate::retail_render::RetailWorldMaterial>,
+    images: &mut impl crate::map_render::AssetSink<Image>,
+    tuning: &crate::retail_render::MaterialTuning,
+) {
+    let _span = info_span!("prepare_map_geometry_and_textures").entered();
+    let texture_ids = render_texture_ids(&map.textures);
+    let mut texture = texture_loader(map, images);
     // Lightmaps belong to mesh entities, not StandardMaterial. Distinct baked
     // lighting still needs separate geometry batches but can share a PBR material.
     let pbr_ids = self::material_ids(&map.materials, &texture_ids, false);
@@ -650,63 +977,7 @@ pub(crate) fn spawn(
         vec![None; map.materials.len()];
     for RenderGroup { material: material_index, indices, retail } in groups {
         let m = &map.materials[material_index];
-        // Reindex each batch, preserving authored normals and both UV sets.
-        let mut remap = HashMap::new();
-        let mut vertices = Vec::new();
-        let local: Vec<u32> = indices
-            .into_iter()
-            .map(|index| {
-                *remap.entry(index).or_insert_with(|| {
-                    let id = vertices.len() as u32;
-                    vertices.push(&map.geometry.vertices[index as usize]);
-                    id
-                })
-            })
-            .collect();
-        let mut mesh = Mesh::new(
-            bevy::mesh::PrimitiveTopology::TriangleList,
-            RenderAssetUsages::RENDER_WORLD,
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_POSITION,
-            vertices.iter().map(|v| v.position).collect::<Vec<_>>(),
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_NORMAL,
-            vertices.iter().map(|v| v.normal).collect::<Vec<_>>(),
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_UV_0,
-            vertices.iter().map(|v| v.uv).collect::<Vec<_>>(),
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_UV_1,
-            vertices.iter().map(|v| v.lightmap_uv).collect::<Vec<_>>(),
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_COLOR,
-            vertices.iter().map(|v| { let uv = v.decal_uv.unwrap_or(v.uv); [uv[0], uv[1], 0., 1.] }).collect::<Vec<_>>(),
-        )
-        .with_inserted_indices(bevy::mesh::Indices::U32(local));
-        if vertices.iter().all(|v| v.tangent_frame.is_some()) {
-            let tangents: Vec<[f32; 4]> = vertices
-                .iter()
-                .map(|v| {
-                    let frame = v
-                        .tangent_frame
-                        .unwrap()
-                        .map(|b| (b as i8 as f32 / 127.).max(-1.));
-                    let binormal = Vec3::new(frame[0], frame[1], frame[2]);
-                    let tangent = binormal.cross(Vec3::from_array(v.normal)) * frame[3];
-                    [tangent.x, tangent.y, tangent.z, frame[3]]
-                })
-                .collect();
-            mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
-        } else if m.textures[2] != 0 {
-            if let Err(error) = mesh.generate_tangents() {
-                warn!("SKATE material {} tangent generation: {error}", m.name);
-            }
-        }
+        let mut mesh = build_mesh(map, material_index, indices);
         if let Some(material) = retail {
             let material = retail_materials.add(material);
             commands.spawn((Name::new(m.name.clone()), Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
@@ -715,31 +986,7 @@ pub(crate) fn spawn(
         // Vertex colours above carry retail decal coordinates, never PBR tint.
         mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
         let material = material_handles[pbr_ids[material_index]]
-            .get_or_insert_with(|| {
-                let orm = texture(m.textures[3], 2);
-                materials.add(StandardMaterial {
-                    base_color: Color::linear_rgb(m.color[0], m.color[1], m.color[2]),
-                    base_color_texture: texture(m.textures[0], 0),
-                    normal_map_texture: texture(m.textures[2], 2),
-                    metallic_roughness_texture: orm.clone(),
-                    occlusion_texture: orm,
-                    metallic: if m.textures[3] != 0 { 1. } else { 0. },
-                    perceptual_roughness: m.roughness,
-                    emissive: LinearRgba::rgb(
-                        m.color[0] * m.emissive,
-                        m.color[1] * m.emissive,
-                        m.color[2] * m.emissive,
-                    ),
-                    emissive_texture: texture(m.textures[4], 0),
-                    alpha_mode: match m.alpha_mode {
-                        1 => AlphaMode::Mask(m.alpha_cutoff),
-                        2 => AlphaMode::Blend,
-                        _ => AlphaMode::Opaque,
-                    },
-                    lightmap_exposure: m.indirect_strength,
-                    ..default()
-                })
-            })
+            .get_or_insert_with(|| materials.add(standard_material(m, &mut texture)))
             .clone();
         let mut entity = commands.spawn((
             Name::new(m.name.clone()),
@@ -800,6 +1047,138 @@ pub(crate) fn spawn(
         map.name,
         map.geometry.indices.len() / 3,
         map.geometry.collision.len()
+    );
+}
+
+/// Marker on the root entity of one spawned dynamic-prop (DMO) instance.
+/// Later phases move these entities; static batches never contain them.
+#[derive(Component)]
+pub(crate) struct PropInstance {
+    pub id: u32,
+    pub template: String,
+    pub name: String,
+}
+
+/// Spawn one root entity per MOBJ static object with its own transform.
+/// Geometry is built once per (template range, material) and shared through
+/// cached handles; materials reuse the same caches as the batched path. The
+/// per-material material batching used for static geometry is intentionally
+/// broken here so each instance keeps its placement.
+pub(crate) fn spawn_instances(
+    map: &SkateMap,
+    objects: &[skate_data::skate_map::StaticObject],
+    commands: &mut crate::map_render::SceneCommands,
+    meshes: &mut impl crate::map_render::AssetSink<Mesh>,
+    materials: &mut impl crate::map_render::AssetSink<StandardMaterial>,
+    retail_materials: &mut impl crate::map_render::AssetSink<crate::retail_render::RetailWorldMaterial>,
+    images: &mut impl crate::map_render::AssetSink<Image>,
+    tuning: &crate::retail_render::MaterialTuning,
+) {
+    let _span = info_span!("spawn_prop_instances").entered();
+    let texture_ids = render_texture_ids(&map.textures);
+    let pbr_ids = self::material_ids(&map.materials, &texture_ids, false);
+    let mut texture = texture_loader(map, images);
+    let mut material_handles: Vec<Option<Handle<StandardMaterial>>> =
+        vec![None; map.materials.len()];
+    let mut retail_handles: HashMap<usize, Handle<crate::retail_render::RetailWorldMaterial>> =
+        HashMap::new();
+    let mut mesh_handles: HashMap<(u32, u32, usize), Handle<Mesh>> = HashMap::new();
+    let mut templates = std::collections::HashSet::new();
+    for object in objects {
+        let t = &object.transform;
+        // Row-vector affine (v @ basis + translation): basis rows become the
+        // columns of the equivalent column-vector Mat4.
+        let affine = Mat4::from_cols(
+            Vec4::new(t[0], t[1], t[2], 0.),
+            Vec4::new(t[3], t[4], t[5], 0.),
+            Vec4::new(t[6], t[7], t[8], 0.),
+            Vec4::new(t[9], t[10], t[11], 1.),
+        );
+        // The exporter prefixes the template ID to the authored locator name.
+        let (template, name) = object
+            .name
+            .split_once('/')
+            .map_or(("", object.name.as_str()), |(template, name)| (template, name));
+        templates.insert(template.to_string());
+        let mut root = commands.spawn((
+            Name::new(object.name.clone()),
+            PropInstance {
+                id: object.id,
+                template: template.to_string(),
+                name: name.to_string(),
+            },
+            Transform::from_matrix(affine),
+            Visibility::default(),
+        ));
+        // Group the instance range by material, preserving first-seen order.
+        let range = object.first_index as usize
+            ..(object.first_index + object.index_count) as usize;
+        let mut lookup = HashMap::new();
+        let mut groups: Vec<(usize, Vec<u32>)> = Vec::new();
+        for tri in map.geometry.indices[range].chunks_exact(3) {
+            let material = map.geometry.vertices[tri[0] as usize].material as usize - 1;
+            let group = *lookup.entry(material).or_insert_with(|| {
+                groups.push((material, Vec::new()));
+                groups.len() - 1
+            });
+            groups[group].1.extend_from_slice(tri);
+        }
+        for (material_index, indices) in groups {
+            let m = &map.materials[material_index];
+            let retail = m
+                .retail_definition
+                .as_deref()
+                .and_then(crate::retail_render::Definition::parse)
+                .filter(|d| d.supported(tuning));
+            let key = (object.first_index, object.index_count, material_index);
+            if let Some(definition) = retail {
+                let mesh = mesh_handles
+                    .entry(key)
+                    .or_insert_with(|| meshes.add(build_mesh(map, material_index, indices)))
+                    .clone();
+                let material = retail_handles
+                    .entry(material_index)
+                    .or_insert_with(|| retail_materials.add(definition.build(m, tuning, &mut texture)))
+                    .clone();
+                root.spawn_child((
+                    Name::new(format!("{}#{material_index}", object.name)),
+                    Mesh3d(mesh),
+                    MeshMaterial3d(material),
+                    Transform::default(),
+                ));
+                continue;
+            }
+            let mesh = mesh_handles
+                .entry(key)
+                .or_insert_with(|| {
+                    let mut mesh = build_mesh(map, material_index, indices);
+                    // Vertex colours carry retail decal coordinates, never PBR tint.
+                    mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
+                    meshes.add(mesh)
+                })
+                .clone();
+            let material = material_handles[pbr_ids[material_index]]
+                .get_or_insert_with(|| materials.add(standard_material(m, &mut texture)))
+                .clone();
+            let mut child = root.spawn_child((
+                Name::new(format!("{}#{material_index}", object.name)),
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::default(),
+            ));
+            if let Some(image) = texture(m.textures[1], 1) {
+                child.insert(bevy::pbr::Lightmap {
+                    image,
+                    uv_rect: Rect::new(0., 0., 1., 1.),
+                    bicubic_sampling: false,
+                });
+            }
+        }
+    }
+    eprintln!(
+        "SKATE_PROP_INSTANCES count={} templates={}",
+        objects.len(),
+        templates.len()
     );
 }
 
@@ -1000,6 +1379,132 @@ mod tests {
             restitution: 1.,
         }
     }
+
+    /// A 4x1x1 slab template (x ±2, y 0..1, z ±0.5) with two placed instances:
+    /// one translated, one rotated 90° about Y and translated.
+    fn prop_fixture() -> (SkateMap, Vec<skate_data::skate_map::StaticObject>) {
+        let corners = [
+            [-2., 0., -0.5], [2., 0., -0.5], [2., 0., 0.5], [-2., 0., 0.5],
+            [-2., 1., -0.5], [2., 1., -0.5], [2., 1., 0.5], [-2., 1., 0.5],
+        ];
+        let faces = [
+            [4, 7, 6], [4, 6, 5], // +Y top
+            [0, 1, 2], [0, 2, 3], // -Y bottom
+            [1, 5, 6], [1, 6, 2], // +X
+            [0, 7, 4], [0, 3, 7], // -X
+            [3, 2, 6], [3, 6, 7], // +Z
+            [0, 5, 1], [0, 4, 5], // -Z
+        ];
+        let vertex = |position| skate_data::skate_map::Vertex {
+            position,
+            normal: [0., 1., 0.],
+            uv: [0.; 2],
+            lightmap_uv: [0.; 2],
+            material: 1,
+            decal_uv: None,
+            tangent_frame: None,
+        };
+        let map = SkateMap {
+            version: 14,
+            name: "props".into(),
+            spawn: [0.; 3],
+            heading: 0.,
+            environment: vec![0.; 45],
+            materials: vec![skate_data::skate_map::Material {
+                name: "prop".into(),
+                flags: 0,
+                friction: 0.5,
+                restitution: 0.1,
+                color: [1.; 3],
+                roughness: 0.5,
+                emissive: 0.,
+                textures: [0; 5],
+                indirect_strength: 0.,
+                alpha_mode: 0,
+                alpha_cutoff: 0.5,
+                audio: 3,
+                physics: 1,
+                pattern: 0,
+                depth_layer: None,
+                retail_definition: None,
+            }],
+            textures: vec![],
+            geometry: skate_data::skate_map::Geometry {
+                vertices: corners.into_iter().map(vertex).collect(),
+                indices: faces.into_iter().flatten().collect(),
+                collision: vec![],
+            },
+            rails: vec![],
+            doors: vec![],
+            lights: vec![],
+            routes: vec![],
+            extensions: vec![],
+        };
+        let object = |id, transform| skate_data::skate_map::StaticObject {
+            id,
+            name: format!("template/prop{id}"),
+            transform,
+            first_index: 0,
+            index_count: 36,
+            first_collision: 0,
+            collision_count: 0,
+            rails: vec![],
+            physics: Default::default(),
+        };
+        let objects = vec![
+            object(7, [1., 0., 0., 0., 1., 0., 0., 0., 1., 10., 5., 0.]),
+            // 90° about Y (row-vector): x' = -z, z' = x; then z -= 10.
+            object(8, [0., 0., 1., 0., 1., 0., -1., 0., 0., 0., 0., -10.]),
+        ];
+        (map, objects)
+    }
+
+    #[test]
+    fn prop_instances_collide_as_placed_static_triangles() {
+        let (map, objects) = prop_fixture();
+        let layer = build_prop_layer(&map, &objects, material()).unwrap().unwrap();
+        let mut world = layer.world;
+        assert_eq!(world.triangles().len(), 24);
+        // Translated instance: top face at y=6 between x 8..12.
+        let hit = world
+            .query_thin_line(Vector3::new(10., 10., 0.), Vector3::new(10., 0., 0.))
+            .unwrap()
+            .unwrap();
+        assert!((hit.geometry.position.y - 6.).abs() < 1e-4);
+        assert!(hit.geometry.normal.y > 0.99);
+        // The packed surface tag follows the EncodeRwSurfaceId mapping.
+        assert_eq!(hit.tag, 3 | (1 << 7));
+        // Rotated instance: slab now spans z -12..-8, x ±0.5.
+        let hit = world
+            .query_thin_line(Vector3::new(0., 5., -10.), Vector3::new(0., -1., -10.))
+            .unwrap()
+            .unwrap();
+        assert!((hit.geometry.position.y - 1.).abs() < 1e-4);
+        // Outside the rotated footprint: unrotated, this line would hit.
+        assert!(world
+            .query_thin_line(Vector3::new(1.5, 5., -10.), Vector3::new(1.5, -1., -10.))
+            .unwrap()
+            .is_none());
+        // A wheel sphere resting on the translated instance reports a contact.
+        let (query, retention) = crate::physics::ground::query_settings();
+        let volumes = [skate_core::physics::board_world::BoardWorldVolume {
+            body: skate_core::physics::board_step::CollisionBody::Board(
+                skate_core::physics::board::BodyId::Deck,
+            ),
+            primitive: skate_core::physics::world_contact::ContactPrimitive::Sphere(
+                skate_core::physics::collision::Sphere {
+                    center: Vector3::new(10., 6.05, 0.),
+                    radius: 0.1,
+                },
+            ),
+            linear_velocity: Vector3::ZERO,
+            material: material(),
+        }];
+        let contacts = world.query_primitives(&volumes, query, retention);
+        assert!(!contacts.is_empty());
+        assert!(contacts.iter().all(|c| c.contact.normal.y > 0.9));
+    }
+
     #[test]
     fn native_edges_override_generated_adjacency() {
         let mut map = demo();
@@ -1034,7 +1539,7 @@ mod tests {
         assert_eq!(world.triangles().len(), 3);
         let metadata = world.query_metadata().unwrap();
         assert_eq!(metadata.meshes.len(), 3);
-        assert_eq!(metadata.meshes[1].matching_group, 0x1234);
+        assert!(metadata.meshes.iter().all(|m| m.matching_group == -1));
         assert_eq!(metadata.packed_surfaces, vec![0x4321; 3]);
         assert_eq!(world.triangles()[1].triangle.vertices[0].x, 10.);
     }
@@ -1113,10 +1618,18 @@ mod tests {
         let mut scene = crate::map_render::PreparedScene::new(&world);
         scene.prepare(Some(&map), std::path::Path::new("unused"));
         scene.publish(&mut world);
-        assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
-        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);
-        assert_eq!(world.resource::<Assets<Image>>().len(), 2);
-        assert_eq!(world.query::<&Mesh3d>().iter(&world).count(), 1);
+        // Portable maps also get the sun/moon discs (map_render::celestial_bodies):
+        // one shared disc mesh plus an unlit material and texture per body.
+        assert_eq!(world.resource::<Assets<Mesh>>().len(), 1 + 1);
+        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1 + 2);
+        assert_eq!(world.resource::<Assets<Image>>().len(), 2 + 2);
+        assert_eq!(
+            world
+                .query_filtered::<&Mesh3d, Without<crate::map_render::CelestialBody>>()
+                .iter(&world)
+                .count(),
+            1
+        );
         let lightmap = world
             .query::<&bevy::pbr::Lightmap>()
             .single(&world)

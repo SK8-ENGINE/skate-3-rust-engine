@@ -87,7 +87,29 @@ pub enum GameplayCondition {
     PlayHandplant { phase: usize },
     EnteringSkitch,
     Skitching,
-    IsMovingObject,
+    IsMovingObject {
+        angle_start: f32,
+        angle_end: f32,
+    },
+}
+/// Object-move stick magnitude below this resolves the authored MVOBJ_Still
+/// branch; the retail dead zone is not recovered, so reuse a quarter stick.
+const OBJECT_MOVE_THRESHOLD: f32 = 0.25;
+
+/// IsMovingObject window test: moved when the OB_ObjectMv stick leaves the
+/// dead zone; the authored degree window then selects the push/pull quadrant.
+/// Wrap windows (anglestart 180, angleend -110) follow the same end<start
+/// convention as `select_grab_score`.
+fn object_move_window(angle_start: f32, angle_end: f32, z: f32, x: f32) -> bool {
+    if (x * x + z * z).sqrt() < OBJECT_MOVE_THRESHOLD {
+        return false;
+    }
+    let angle = x.atan2(z).to_degrees();
+    if angle_end < angle_start {
+        angle >= angle_start || angle <= angle_end
+    } else {
+        angle >= angle_start && angle <= angle_end
+    }
 }
 impl GameplayCondition {
     pub fn recognizes(name: &str) -> bool {
@@ -146,7 +168,10 @@ impl GameplayCondition {
                 Some("antic") => 2, Some("into") => 1, Some("out") => 0,
                 value => return Err(format!("Unauthored handplant animation phase {value:?}")),
             } },
-            "IsMovingObject" => Self::IsMovingObject,
+            "IsMovingObject" => Self::IsMovingObject {
+                angle_start: f32::from_bits(a.float_bits("anglestart", (-180.0f32).to_bits())),
+                angle_end: f32::from_bits(a.float_bits("angleend", (180.0f32).to_bits())),
+            },
             "IsHandPlanting" => Self::HandPlanting {
                 //82BA54A0 compares these authored strings in this order.
                 state: match a.text("state").unwrap_or("") {
@@ -178,7 +203,6 @@ impl GameplayCondition {
             Self::Bumped => p.bumped, //82BA7310: published acceleration and anim_motion/bumps
             Self::GrabbingObject => p.grabbing_object, //82BA5700:Offboard304
             Self::Skitching => p.state == 104, //82BBBC88:State16
-            Self::IsMovingObject => p.moving_object,
             Self::EnteringSkitch => {
                 //82BBBDE0:Ground276,Globals400/layout96
                 !(p.time_to_skitch < 0.0) && p.time_to_skitch <= p.skitch_transition_time
@@ -213,11 +237,13 @@ impl GameplayCondition {
             | Self::Dark
             | Self::UnderflipRequested
             | Self::DarkCatchRequested
+            | Self::IsMovingObject { .. }
             | Self::CanEnterSlide { .. } => return None,
         })
     }
 
     pub fn evaluate(&self, host: &MotionHost) -> Result<bool, String> {
+        use skate_core::animation::playback_parameters::ParameterInputs;
         let p = host
             .gameplay_conditions
             .as_ref()
@@ -228,6 +254,17 @@ impl GameplayCondition {
         Ok(match self {
             //82BA5F60: Offboard322 or the actual RetrieveBoard channel.
             Self::DroppingBoard => p.dropping_board || host.animation.channels.has("RetrieveBoard"),
+            // MovingObjectNew quadrants: the physical byte gates the mode, the
+            // OB_ObjectMv stick angle selects the authored push/pull window.
+            Self::IsMovingObject { angle_start, angle_end } => {
+                p.moving_object
+                    && object_move_window(
+                        *angle_start,
+                        *angle_end,
+                        host.animation.motion_intent("OB_ObjectMvZ").unwrap_or(0.0),
+                        host.animation.motion_intent("OB_ObjectMvX").unwrap_or(0.0),
+                    )
+            }
             //82BA79A0 calls the specific MotionGraph getter8258FB68.
             Self::Dark => host.riding.dark,
             Self::UnderflipRequested => host.trick_requests.underflip,
@@ -254,5 +291,69 @@ impl GameplayCondition {
             }
             _ => unreachable!("Physical condition handled above"),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use skate_data::state_graph::GraphAttribute;
+
+    fn attributes(pairs: &[(&str, &str)]) -> Vec<GraphAttribute> {
+        pairs
+            .iter()
+            .map(|(name, text)| GraphAttribute {
+                name: (*name).into(),
+                text: (*text).into(),
+                float_bits: 0,
+                boolean_byte: 0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn is_moving_object_parses_authored_angle_window() {
+        let a = attributes(&[("name", "IsMovingObject")]);
+        assert_eq!(
+            GameplayCondition::parse(&Attributes::new(&a)).unwrap(),
+            GameplayCondition::IsMovingObject { angle_start: -180.0, angle_end: 180.0 }
+        );
+        let mut a = attributes(&[("name", "IsMovingObject")]);
+        a.push(GraphAttribute {
+            name: "anglestart".into(),
+            text: "".into(),
+            float_bits: (-110.0f32).to_bits(),
+            boolean_byte: 0,
+        });
+        a.push(GraphAttribute {
+            name: "angleend".into(),
+            text: "".into(),
+            float_bits: 0.0f32.to_bits(),
+            boolean_byte: 0,
+        });
+        assert_eq!(
+            GameplayCondition::parse(&Attributes::new(&a)).unwrap(),
+            GameplayCondition::IsMovingObject { angle_start: -110.0, angle_end: 0.0 }
+        );
+    }
+
+    #[test]
+    fn object_move_window_covers_stock_quadrants_and_dead_zone() {
+        // Dead zone: MVOBJ_Still's `not IsMovingObject(-180,180)` must resolve.
+        assert!(!object_move_window(-180.0, 180.0, 0.1, 0.1));
+        assert!(object_move_window(-180.0, 180.0, 1.0, 0.0));
+        // Push quadrants: forward stick splits left/right at zero degrees.
+        assert!(object_move_window(-110.0, 0.0, 0.8, -0.4));
+        assert!(!object_move_window(-110.0, 0.0, 0.8, 0.4));
+        assert!(object_move_window(0.0, 110.0, 0.8, 0.4));
+        assert!(!object_move_window(0.0, 110.0, 0.8, -0.4));
+        // Pull quadrants: the 180..-110 window wraps through -180.
+        assert!(object_move_window(110.0, 180.0, -0.8, 0.4));
+        assert!(!object_move_window(110.0, 180.0, -0.8, -0.4));
+        assert!(object_move_window(180.0, -110.0, -0.8, -0.4));
+        assert!(!object_move_window(180.0, -110.0, -0.8, 0.4));
+        // Forward motion is outside both pull windows.
+        assert!(!object_move_window(110.0, 180.0, 0.8, 0.4));
+        assert!(!object_move_window(180.0, -110.0, 0.8, -0.4));
     }
 }
