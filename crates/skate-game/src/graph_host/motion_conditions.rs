@@ -7,6 +7,11 @@ use skate_core::{
 };
 use skate_data::state_graph::attributes::Attributes;
 
+/// Air budget for one more Endless Tricks rung, in multiples of the running cycle clip: the next
+/// cycle, plus an out clip of comparable length. Measured against the authored clips rather than
+/// picked, and deliberately conservative -- undershooting turns a landing into a wipeout.
+const CYCLE_PLUS_OUT: f32 = 2.0;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum MotionCondition {
     Grind(super::motion_grind::conditions::Condition),
@@ -62,6 +67,20 @@ pub enum MotionCondition {
     },
     Gameplay(super::motion_gameplay_conditions::GameplayCondition),
     Riding(super::motion_riding_conditions::MotionRidingCondition),
+    /// Endless Tricks. **Not retail** -- synthesised by `endless_flip::install`, never authored.
+    /// Guards the loop back into a flip cycle state: false unless a mod turned the feature on,
+    /// the hold intent is still published, and the pop has the air left to finish another cycle.
+    EndlessFlip {
+        /// The hold intent to require, e.g. `KickflipHold`.
+        hold: String,
+        /// Single-clip families have no authored `<Trick>Hold` intent -- retail scopes holding to
+        /// the kickflip and heelflip -- so they gate on the ActionGraph's `HoldPattern` instead,
+        /// which Endless Tricks widens to cover their gestures.
+        via_pattern: bool,
+        /// Mirrors the authored exit's `WillExpire` window so the loop fires at the same point
+        /// in the clip the authored transition would have.
+        in_time: f32,
+    },
     /// TimeToLand82BA7250: valid Air trajectory remaining time.
     TimeToLand(NumericCondition),
     /// Native off-board trajectory time (PhysOutOffBoard+32).
@@ -177,6 +196,12 @@ impl MotionCondition {
             name if super::motion_riding_conditions::MotionRidingCondition::recognizes(name) => {
                 Self::Riding(super::motion_riding_conditions::MotionRidingCondition::parse(a)?)
             }
+            //Endless Tricks, synthesised rather than authored; see graph_host::endless_flip.
+            "EndlessFlipLoop" => Self::EndlessFlip {
+                hold: format!("{}Hold", a.text("trick").unwrap_or("")),
+                via_pattern: a.text("baseRung").is_some_and(|v| v != "4"),
+                in_time: f32::from_bits(a.float_bits("InTime", 0)),
+            },
             "TimeToLand" => Self::TimeToLand(numeric()),
             "OBTimeToLand" => Self::ObTimeToLand(numeric()),
             "OBTrajTime" => Self::ObTrajTime(numeric()),
@@ -232,6 +257,65 @@ impl MotionCondition {
                 .map_err(str::to_owned)?,
             Self::Gameplay(condition) => condition.evaluate(host)?,
             Self::Riding(condition) => condition.evaluate(host)?,
+            Self::EndlessFlip {
+                hold,
+                via_pattern,
+                in_time,
+            } => {
+                // Off by default: the retail path leaves here on the first line.
+                if !host.endless.enabled || host.endless.loops >= host.endless.max_loops {
+                    false
+                } else {
+                    let p = host
+                        .gameplay_conditions
+                        .as_ref()
+                        .ok_or("EndlessFlipLoop requires physical condition publication")?;
+                    // The authored ladder gates every rung on the hold intent and on not body
+                    // flipping; the extra rungs are gated the same way rather than differently.
+                    //
+                    // The air-time term is measured off the authored clip rather than guessed: a
+                    // further rung costs one more cycle plus the out clip, and this fires at the
+                    // end of a cycle, so the running clip's own length is the cycle cost and
+                    // `CYCLE_PLUS_OUT` budgets the out beside it. Deriving it this way scales per
+                    // trick -- the heelflip's clips are longer than the kickflip's, which is
+                    // exactly why a fixed threshold let the heelflip start a cycle it could not
+                    // land out of. This is what stops the loop wedging a non-interruptable state
+                    // through a landing.
+                    // The cross-fade at the junction is part of the cost of another rung, so
+                    // it is part of the budget too. Leaving it out is what made a boost that used
+                    // to land cleanly wipe out once the blend was added.
+                    // Two rules, and the default is the permissive one. A rung costs a cycle
+                    // plus an out clip, and demanding that up front turns the feature into a
+                    // height bar -- badly so for the single-clip families, whose "cycle" is the
+                    // whole trick animation and therefore wants roughly twice the air a kickflip
+                    // does. Off, the only requirement is that the skater is still in the air with
+                    // room to cross-fade; the landing ends the ladder, which is what holding a
+                    // trick should feel like. The cost is a rung that sometimes cannot be landed.
+                    let needed = if host.endless.air_check {
+                        host.animation.current_length().unwrap_or(f32::MAX) * CYCLE_PLUS_OUT
+                            + super::endless_flip::LOOP_BLEND_SECONDS
+                    } else {
+                        super::endless_flip::LOOP_BLEND_SECONDS
+                    };
+                    let airborne = p.time_to_land_valid && p.time_to_land >= needed;
+                    let held = if *via_pattern {
+                        host.action_intents.contains_key("HoldPattern")
+                    } else {
+                        host.animation.motion_intent(hold).is_some()
+                    };
+                    let a = host.animation.property();
+                    // `in_time` is load-bearing and must stay: the loop has to fire at the moment the
+                    // authored bare `WillExpire` would, because it is racing that exit for the state.
+                    // Waiting for `crossed_end` instead was measured to lose the race outright -- the
+                    // kickflip ladder stopped at the authored quad and ran no extension rung at all.
+                    // Which `in_time` is supplied is therefore where rung length is decided, and that
+                    // is chosen in `endless_flip::install`.
+                    airborne
+                        && held
+                        && !p.body_flipping
+                        && (a.crossed_end || !(a.remaining_before_wrap > *in_time))
+                }
+            }
             Self::TimeToLand(n) => {
                 let p = host
                     .gameplay_conditions

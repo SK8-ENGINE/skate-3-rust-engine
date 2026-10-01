@@ -13,10 +13,29 @@ pub enum MotionHook {
     GrabSlide {
         right: bool,
     },
+    /// Endless Tricks. **Not retail** -- fires on the synthesised loop transition to count the
+    /// rung the skater has just started. See `graph_host::endless_flip`.
+    EndlessFlipAdvance {
+        trick: String,
+        base_rung: u32,
+        /// The authored rungs a cycle ladder replays, in order. Empty for a single-clip family.
+        cycle_clips: Vec<String>,
+    },
 }
 impl MotionHook {
     pub fn parse(a: &Attributes<'_>) -> Option<Self> {
         match a.text("name")? {
+            "EndlessFlipAdvance" => Some(Self::EndlessFlipAdvance {
+                trick: a.text("trick").unwrap_or("").into(),
+                base_rung: a.text("baseRung").and_then(|v| v.parse().ok()).unwrap_or(4),
+                cycle_clips: a
+                    .text("cycleClips")
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|c| !c.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            }),
             "GrabSlide" => Some(Self::GrabSlide {
                 right: a.boolean_byte("right", 1) != 0,
             }),

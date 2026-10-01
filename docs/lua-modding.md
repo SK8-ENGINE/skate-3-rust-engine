@@ -231,12 +231,18 @@ can own it at a time. Numeric fields default to 1 on each call; `hold_fakie` def
 Supported multipliers are pop, grind_pop, push_speed, push_power, braking, steering,
 offboard_jump, grip, turn_power and manual_drag (0.25..4), and wobble (0..2).
 `hold_fakie=true` suppresses the automatic stance switch. Unknown/nonfinite values fail.
+`endless_flips=true` (default false) is **not retail**: it lets a held kickflip or heelflip keep
+cycling past Skate 3's authored quad while the pop has the air for another rung, and
+`endless_flip_max` (1..12, default 12) caps the extra rungs, so 12 reaches a 16x. Flat ground
+still stops at a double -- the authored air-time gates are untouched. See docs/endless-tricks.md.
 Disable/reload/fault restores defaults; native contact/state conditions still apply.
 These are parameter multipliers, not guarantees of measured speed or height.
 
 `sdk/examples/native-trainer` demonstrates tuning, HUD text, checkpoints, timers,
 breadcrumbs, beacons and configurable shortcuts. Defaults: F5 save checkpoint, F6 return,
 F7 stopwatch, F8 clear transient data, F9 beacon. Its text data stays in the package.
+`sdk/examples/endless-tricks` is the smallest tuning example: it owns nothing but the two
+endless-flip fields and a status line.
 `sdk/examples/mario-kart` demonstrates vehicles, controller binds, driving HUD, fitted
 rider animations, steering, ramp collision tuning and engine audio. Both complete
 example ZIPs are committed in top-level mods/, including the prepared kart model and rider clips.

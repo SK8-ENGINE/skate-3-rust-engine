@@ -257,6 +257,50 @@ pub(crate) fn advance(
         },
     );
     skater.animation.motion.hold_fakie = physics.trainer.hold_fakie;
+    // Endless Tricks: a deliberate non-retail extension, off unless a mod asks for it. The rung
+    // counter clears on the ground because landing is the only way out of a flip ladder, which
+    // saves finding and patching the authored transition that enters the cycle.
+    skater.animation.motion.endless.enabled = physics.trainer.endless_flips;
+    skater.animation.motion.endless.max_loops = physics.trainer.endless_flip_max;
+    skater.animation.motion.endless.air_check = physics.trainer.endless_air_check;
+    if skater.player_state.current().category() == 200 {
+        skater.animation.motion.endless.airborne();
+    } else {
+        skater.animation.motion.endless.land();
+    }
+    // A repeated rotation of a single-clip family -- 360 flip, laserflip -- keeps playing the air
+    // clip so the board turns, and parks the body in the authored hold pose. The cycle ladders
+    // replay authored rungs instead and need no hold.
+    //
+    // Gated on being airborne, which the rung deliberately is not: the scoring rung survives its
+    // own landing so the trick can bank the name it was flown under, and reusing that lifetime here
+    // left the skater riding away still holding the pose.
+    //
+    // It also ends the moment the stick comes back in. The catch is the authored end of the trick
+    // and it begins while the skater is still airborne, so releasing only at touchdown left the feet
+    // parked in the hold pose, hovering over the deck instead of landing on it. `HoldPattern` is the
+    // same intent the loop condition gates each extra rung on, so the hold and the ladder start and
+    // stop together by construction.
+    let held_now = skater
+        .animation
+        .motion
+        .action_intents
+        .contains_key("HoldPattern");
+    let endless = &skater.animation.motion.endless;
+    let holding = endless.enabled
+        && endless.loops > 0
+        && endless.base_rung < 4
+        && held_now
+        && skater.player_state.current().category() == 200;
+    let rung = endless.rung();
+    let hold = holding
+        .then(|| endless.trick.as_deref())
+        .flatten()
+        .map(|trick| (crate::graph_host::endless_flip::hold_clip(trick), trick.to_owned()));
+    skater.animation.evaluator.set_endless_hold(
+        hold.as_ref()
+            .map(|(clip, trick)| (clip.as_str(), trick.as_str(), rung)),
+    );
     let observations = AnimationPhysical {
         conditions,
         feedback,

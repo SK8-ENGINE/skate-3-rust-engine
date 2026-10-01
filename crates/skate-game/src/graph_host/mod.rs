@@ -10,6 +10,8 @@ pub mod motion_manual;
 pub(crate) mod outputs;
 pub(crate) use condition_nodes::numeric as parse_numeric_condition;
 mod crouching_settings;
+/// Deliberate non-retail extension; inert unless a mod enables it.
+pub(crate) mod endless_flip;
 pub mod motion;
 mod motion_air_leg;
 mod motion_animation;

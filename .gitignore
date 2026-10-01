@@ -51,6 +51,7 @@ __pycache__/
 # Bundled mods requested for source checkout and distribution.
 !/mods/native-trainer.zip
 !/mods/mario-kart.zip
+!/mods/endless-tricks.zip
 !/sdk/examples/mario-kart/kart.glb
 !/sdk/examples/mario-kart/rider.json
 

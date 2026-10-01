@@ -14,6 +14,8 @@ Drop mod ZIPs into top-level `mods/` and enable them in the Mods menu. **Point y
 to make a mod. See [package structure](docs/mod-packages.md), [Lua API](docs/lua-modding.md),
 [vehicle API](docs/vehicle-sdk.md), [multiplayer mod SDK](docs/multiplayer-mods.md) and [Mixamo workflow](docs/mixamo-vehicle-workflow.md).
 Editable examples live in `sdk/examples/`; `tools/package_mod.py` validates and packages them.
+[Endless Tricks](docs/endless-tricks.md) is a bundled mod that extends the flip ladder past
+retail's quad; run it with `PLAY-ENDLESS-TRICKS.bat`.
 
 ## Play
 

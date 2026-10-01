@@ -13,6 +13,22 @@ impl MotionHost {
                     &mut self.score_packet.flags,
                     phase,
                 );
+                // Endless Tricks: an extra rung re-enters the authored cycle state, so it
+                // republishes the authored `<Trick>3`/`<Trick>4`. Rewrite those to the rung
+                // actually being flown. `published_name` returns None on every retail path --
+                // and for every other trick even while a ladder is running -- so this changes
+                // nothing unless a mod turned the feature on.
+                if phase == 1 {
+                    if let Some(name) = self
+                        .score_packet
+                        .trick_names
+                        .first
+                        .and_then(|published| self.endless.published_name(published))
+                    {
+                        self.score_packet.trick_names.first = Some(name);
+                        self.score_packet.trick_names.second = Some(name);
+                    }
+                }
             }
             MotionOperation::SetBumpCoefficients { x, y } => {
                 if phase == 0 {

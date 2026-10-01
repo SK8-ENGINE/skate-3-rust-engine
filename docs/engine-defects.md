@@ -1178,3 +1178,107 @@ for a missing 7 dB. **But note the call structure does not obviously support it*
 `sub_824BA630`, `sub_824B8D48` and `sub_82486EF0` each appear exactly once, so any extra voices are
 not started by a loop there. Read the function properly before acting; do not infer voice counts
 from call counts.
+
+
+## 12. The flip ladder stops at four — **working as authored; extended on purpose by a mod**
+
+**Symptom.** A held kickflip or heelflip never reaches a fifth flip, however much air the pop has.
+
+**Evidence.** Not a defect. The ladder is authored, not computed: there is no flip-count variable
+and no clamp to 4 anywhere in the Rust. `T_Kickflip.xml` authors `Cyc1`/`Cyc2`/`Cyc3` and no
+`Cyc4`, `Cyc3`'s only exit is a bare `WillExpire InTime="0.05"` to `End.Out.Out4`, and `Out4`
+carries no precondition at all — unlike `Out1`/`Out2`/`Out3` and their hold / `TimeToLand` /
+`IsBodyFlipping` gates. Confirmed by suppressing `WillExpire` on `_CYC3` behind a throwaway env
+var: `B_KICKFLIP_OUT4`, `B_AIR_CYC` and `BLEND_LAND` all vanished and the reward went to zero.
+
+### Extended by the Endless Tricks mod — a deliberate deviation
+
+Since 2026-09-24 an opt-in mod appends a self-transition to each of the six authored flip cycle
+states, adding rungs 5..16. It is **off by default** and the retail path is unchanged: the four
+pre-existing flip tests pass with identical rewards while the new transitions are compiled into the
+graph. `crates/skate-core/src/scoring/{catalog,conversions}.rs` and `SCORABLE_COUNT` are untouched —
+the extra rungs borrow the retail quad's ledger identity and override only name, label and points.
+
+Full account, including the measured flip counts and the air budget: `docs/endless-tricks.md`.
+
+**Do not** read this as licence to extend other authored ladders. The late flips were asked about
+and settled separately (`docs/flip-ladder.md`), and retail-exactness still governs everything that
+claims to *be* the port.
+
+**What would disprove the extension being inert:** any of the four stock flip tests changing
+reward, trick sequence or landed name while `endless_flips` is false.
+
+### Open, mod-only: a held rung steps the skeleton where the authored trick does not
+
+Measured on the flat course at a 14 m/s boost, with `SKATE3_ASSET_ROOT` set, by
+`probe_what_a_held_rung_animates` in `crates/skate-game/src/tests/flip_playback.rs`:
+
+| run | worst single-tick skeleton step | part |
+|---|---|---|
+| stock 360 flip, mod off | 0.227 m | 25 (`SKATEBOARD_ROOT`, at the pop — authored) |
+| held 360 flip, 7 rungs | **0.606 m** | 3 (a body bone) |
+| held laserflip, 8 rungs | **0.474 m** | 3 |
+
+**It is not the synthesised deck spin.** The figure is identical with `SKATE_ENDLESS_RIGID_SPIN=0`
+(0.665 against 0.665 before the hold ease landed), and the probe reports the part index, which is
+below the board subtree at 25..31 every time. Turning the spin on moves board movement per tick from
+0.283 to 0.544 and leaves the step where it was.
+
+Two mechanisms, from the tick pattern:
+
+* **The hold arriving.** One larger step as the body goes from mid-flick into the held pose on the
+  first held rung. Easing it over 0.08 s of clip time in `animation_pose::sample_endless_hold` took
+  0.665 to 0.606 on the 360 flip and 0.664 to 0.474 on the laserflip.
+* **The air clip restarting from frame 0 on every rung**, which shows as a 0.27-0.43 m step recurring
+  on the clip's own 28-tick period (ticks 237, 265, 293 and so on). The single-clip families have no
+  cycle clip to loop, so a rung re-enters the whole air clip; the authored cross-fade
+  `endless_flip::install` adds covers it imperfectly.
+
+**The fix for the second is known and not done.** The loop condition fires at
+`crossed_end || remaining_before_wrap <= in_time`, so a rung is cut `in_time` before its last frame,
+while `hold_body` bakes the rung as though every frame plays. Plumbing that `InTime` — already read at
+`endless_flip.rs`'s `authored_exit` — through `Site` to `set_endless_hold` would let a rung be baked
+knowing where it will actually be cut, which closes the gap rather than fading over it.
+
+**What would disprove this being pre-existing:** the step changing when
+`SKATE_ENDLESS_RIGID_SPIN=0`, or the worst part index landing in 25..35.
+
+### Open, mod-only: a cycle-ladder rung past the quad is 13% shorter than an authored one
+
+Reported from play as "in kickflip endless the board speeds up once it goes past quad". It does, and it
+is the **cycle** ladder, which never touches the synthesised spin. Measured by
+`probe_rung_spacing_across_the_quad`, with `SKATE_ENDLESS_TRACE=1` for the install values:
+
+```
+rung ticks: 112, 132, 154, 179, 195, 218, 241, 264, 287
+gaps:         20,  22,  25,  16,  23,  23,  23,  23        <- 16 at the quad, then 23
+authored  B_KICKFLIP_CYC2 25 ticks, 0.2664 board/tick   CYC3 26 ticks, 0.2562
+extension B_KICKFLIP_CYC2 23 ticks, 0.2876              CYC3 23 ticks, 0.2879
+clock_length for both      = 0.433 s = 26.0 ticks
+SKATE_ENDLESS_SITE Kickflip state=Cyc3 base=4 chosen=0.0500s own_exit=Some(0.05) sibling_exit=None
+```
+
+**The cause is arithmetic, not mysterious.** The loop fires on the lead-in of the bare `WillExpire` it
+sits ahead of, which on the kickflip's `Cyc3` is 0.05 s -- 3 ticks of a 26-tick clip. So an extension
+rung runs 23 ticks where an authored one runs 25 or 26, the cycle repeats 13% more often, and the deck
+completes a revolution faster. The 8% rise in mean board movement per tick is the same fact measured
+differently: the frames being cut are the clip's slowest.
+
+**Two fixes were tried and both failed, with the measurement to show it:**
+
+* Waiting for `crossed_end` instead of the lead-in: the ladder **stopped at the authored quad** and ran
+  no extension rung at all. The loop is racing that exit for the state and must fire on its lead-in or
+  lose it.
+* Taking the authored *inter-cycle* lead-in instead of the anchor's own: a **no-op**. The `Cyc3`
+  anchor's sibling `Cyc2` has no bare `WillExpire` as its last transition (`sibling_exit=None`), and
+  the one site where a sibling is readable (`TrickCyc3`) carries the same 0.02 s.
+
+**What would actually close it, and why it is not done here.** The rung has to be allowed to run its
+clip out, which means holding off the authored `Out4` exit while the ladder is live -- appending a
+gating condition to an authored transition rather than appending a transition of our own. `Out4` is the
+path a *stock* quad lands through, so getting that guard wrong breaks retail behaviour, and
+retail-exactness governs everything that claims to be the port. It wants its own change, gated so the
+condition is inert with the mod off, and the four stock flip tests as the falsifier.
+
+**What would disprove this diagnosis:** extension rungs measuring the same tick count as authored ones
+while the lead-in is still 0.05 s on a 26-tick clip.

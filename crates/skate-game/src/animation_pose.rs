@@ -18,6 +18,38 @@ pub(crate) struct PoseEvaluator {
     pub frames: AnimationFrames,
     authored: authored_clips::Replacements,
     mod_clips: std::sync::RwLock<std::collections::BTreeMap<String, authored_clips::Replacements>>,
+    body_bones: std::sync::OnceLock<Vec<usize>>,
+    /// Endless Tricks: the body-hold clip a repeated rotation should park the legs in, and the
+    /// compositions already built for it, keyed by the air clip they were built against.
+    ///
+    /// Composed on demand rather than from a table, because which air clip is playing -- the high
+    /// or the low variant -- is chosen by an authored selector. Asking the clip that is actually
+    /// playing is exact; a hardcoded list of air-clip names would be a guess, and guessing clip
+    /// names is what put a hold pose on a repeat in the first place.
+    endless_hold: std::sync::RwLock<Option<EndlessHold>>,
+}
+
+/// The first rung that carries a held body. `rung` is 1-based and the hold needs `loops > 0`.
+const FIRST_HELD_RUNG: u32 = 2;
+
+/// How long the held body takes to arrive, in seconds of clip time.
+///
+/// Matched to `endless_flip::LOOP_BLEND_SECONDS`, which was swept against the same jolt measurement
+/// and found to be the shortest window that hides a junction without costing air time.
+const HOLD_EASE_SECONDS: f32 = 0.08;
+
+#[derive(Default)]
+struct EndlessHold {
+    hold_clip: String,
+    /// The rung being flown, so the hold can advance across rungs rather than within one.
+    rung: u32,
+    /// The trick stem whose own clips the hold applies to, e.g. `360FLIP`.
+    ///
+    /// Without it the hold reached every clip that played while a rung was live -- the catch, the
+    /// out clip, `BLEND_LAND`, the ride-away -- so the skater rode off still holding the pose. The
+    /// hold belongs to the rotation, not to the rung.
+    trick: String,
+    composed: std::collections::BTreeMap<String, ClipFrames>,
 }
 
 impl PoseEvaluator {
@@ -31,12 +63,112 @@ impl PoseEvaluator {
             frames: AnimationFrames::from_banks(banks)?,
             authored: Default::default(),
             mod_clips: Default::default(),
+            body_bones: Default::default(),
+            endless_hold: Default::default(),
         })
     }
 
     pub fn load_authored_clips(&mut self, root: &Path) -> Result<(), String> {
         self.authored = authored_clips::Replacements::load(root, &self.frames)?;
         Ok(())
+    }
+
+    /// Sample the composed body hold for `stock`, composing it on first use.
+    ///
+    /// A composition that cannot be built drops the hold rather than failing the frame: the result
+    /// is the stock performance, which is the behaviour this replaces, and the game keeps running.
+    /// It says so once, because a hold that silently does nothing is the bug being fixed here.
+    fn sample_endless_hold(
+        &self,
+        stock: &ClipFrames,
+        time: f32,
+        previous_time: f32,
+    ) -> Option<(Vec<Sqt>, Option<Sqt>)> {
+        let mut held = self.endless_hold.write().ok()?;
+        let state = held.as_mut()?;
+        // Only the trick's own rotation is held. Its catch, its out clip and the landing are stock,
+        // which is what lets the skater ride away in the ordinary animations.
+        if !stock.name.contains(&state.trick) {
+            return None;
+        }
+        if !state.composed.contains_key(&stock.name) {
+            match authored_clips::hold_body(&self.frames, &stock.name, &state.hold_clip, state.rung) {
+                Ok(composed) => {
+                    state.composed.insert(stock.name.clone(), composed);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "SKATE LIMITATION: no endless body hold for {} over {}: {error}",
+                        stock.name, state.hold_clip
+                    );
+                    *held = None;
+                    return None;
+                }
+            }
+        }
+        let clip = state.composed.get(&stock.name)?;
+        let mut pose = sample_clip(clip, time).ok()?;
+        // **Ease the hold in**, over the first held rung only.
+        //
+        // Measured, and worth stating precisely because the obvious reading is wrong. The worst
+        // single-tick skeleton jump through a held 360 flip is 0.665 m against the authored trick's
+        // own 0.227, and it is **not the deck**: the jolt probe reports the part index, and it is bone
+        // 3. It is also identical with `SKATE_ENDLESS_RIGID_SPIN=0`, so the synthesised spin neither
+        // causes it nor makes it worse.
+        //
+        // There are two mechanisms, not one. The larger is here -- the body arriving from mid-flick
+        // into a held pose in a single tick, on the first held rung -- and easing it over `time`
+        // measured 0.665 to 0.606 on the 360 flip and 0.664 to 0.474 on the laserflip. The remainder
+        // is the air clip **restarting from frame 0** on every rung, which shows as a 0.27-0.43 m
+        // step recurring on the clip's own 28-tick period and is covered, imperfectly, by the
+        // authored cross-fade `endless_flip` installs. That one needs the rung's `InTime` plumbed
+        // through so a rung can be baked knowing it will be cut early; it is recorded in
+        // `docs/engine-defects.md` rather than half-fixed here.
+        //
+        // `time` is the ramp rather than a tick counter because a clip can be sampled more than once
+        // inside a blend tree, which would double-count. Later rungs need no ease: the compositions
+        // are continuous across rungs by construction.
+        if state.rung <= FIRST_HELD_RUNG && time < HOLD_EASE_SECONDS {
+            let weight = (time / HOLD_EASE_SECONDS).clamp(0.0, 1.0);
+            if let Ok(from) = sample_clip(stock, time) {
+                if from.len() == pose.len() {
+                    let mut eased = pose.clone();
+                    if pose_blend::blend(&from, &pose, weight, &mut eased).is_ok() {
+                        pose = eased;
+                    }
+                }
+            }
+        }
+        let previous = self
+            .frames
+            .has_trajectory
+            .then(|| sample_bone(clip, previous_time, 0).ok())
+            .flatten();
+        Some((pose, previous))
+    }
+
+    /// Endless Tricks: park the body in `hold` while any clip plays, or clear the hold.
+    ///
+    /// Called every tick from the animation phase, so it must stay cheap when nothing changes: the
+    /// compositions are kept across ticks and only dropped when the hold clip itself changes.
+    pub(crate) fn set_endless_hold(&self, hold: Option<(&str, &str, u32)>) {
+        let Ok(mut current) = self.endless_hold.write() else {
+            return;
+        };
+        match (hold, current.as_ref()) {
+            // The rung is part of the identity: each one carries the body loop a little further, so
+            // a new rung needs its own composition rather than the previous rung's.
+            (Some((name, _, rung)), Some(live)) if live.hold_clip == name && live.rung == rung => {}
+            (Some((name, trick, rung)), _) => {
+                *current = Some(EndlessHold {
+                    hold_clip: name.to_owned(),
+                    rung,
+                    trick: trick.to_owned(),
+                    composed: Default::default(),
+                })
+            }
+            (None, _) => *current = None,
+        }
     }
 
     /// Reuses the existing constrained body-clip parser; never replaces board/trajectory data.
@@ -63,6 +195,26 @@ impl PoseEvaluator {
         if let Ok(mut all) = self.mod_clips.write() {
             all.clear();
         }
+    }
+
+    /// The rig's body bones: everything from the hips down to the board root, plus the
+    /// reparented hand and toe helpers. This is the same split `authored_clips` uses to replace a
+    /// body animation while leaving the board's trajectory alone, which is what makes it possible
+    /// to hold a pose while the board keeps moving underneath it.
+    pub(crate) fn body_bones(&self) -> &[usize] {
+        self.body_bones.get_or_init(|| {
+            let index = |name: &str| self.frames.bone_names.iter().position(|n| n == name);
+            let (Some(hips), Some(board)) = (index("HIPS"), index("SKATEBOARD_ROOT")) else {
+                return Vec::new();
+            };
+            let helpers = [
+                "RIGHTTOEBASE_REPARENTED",
+                "LEFTTOEBASE_REPARENTED",
+                "RIGHTHAND_REPARENTED",
+                "LEFTHAND_REPARENTED",
+            ];
+            (hips..board).chain(helpers.iter().filter_map(|n| index(n))).collect()
+        })
     }
 
     /// Executes the ordered stock tree. This uses the native immediate ACS
@@ -123,20 +275,37 @@ impl PoseEvaluator {
                     loops,
                 } => {
                     let stock = self.frames.clip(name)?;
-                    let clip = mod_clips
-                        .values()
-                        .find_map(|c| c.clip(&stock.name))
-                        .or_else(|| self.authored.clip(&stock.name))
-                        .unwrap_or(stock);
-                    let mut pose = sample_clip(clip, *time)?;
-                    if self.frames.has_trajectory {
-                        let previous = sample_bone(clip, *previous_time, 0)?;
+                    trace_clip(&stock.name);
+                    // Every substitution path copies the stock clip's loop transform, so the
+                    // trajectory terms are read from the stock clip whichever one is sampled.
+                    let (mut pose, previous) = match self.sample_endless_hold(
+                        stock,
+                        *time,
+                        *previous_time,
+                    ) {
+                        Some(sampled) => sampled,
+                        None => {
+                            let clip = mod_clips
+                                .values()
+                                .find_map(|c| c.clip(&stock.name))
+                                .or_else(|| self.authored.clip(&stock.name))
+                                .unwrap_or(stock);
+                            let pose = sample_clip(clip, *time)?;
+                            let previous = self
+                                .frames
+                                .has_trajectory
+                                .then(|| sample_bone(clip, *previous_time, 0))
+                                .transpose()?;
+                            (pose, previous)
+                        }
+                    };
+                    if let Some(previous) = previous {
                         pose[0] = pose_trajectory::delta(
                             pose[0],
                             previous,
                             (*loops != 0).then_some(LoopTransform {
-                                rotation: clip.loop_rotation_bits.map(f32::from_bits),
-                                translation: clip.loop_translation_bits.map(f32::from_bits),
+                                rotation: stock.loop_rotation_bits.map(f32::from_bits),
+                                translation: stock.loop_translation_bits.map(f32::from_bits),
                             }),
                         );
                     }
@@ -199,6 +368,24 @@ impl PoseEvaluator {
         )
         .map_err(|e| format!("Invalid stock animation hierarchy: {e:?}"))?;
         Ok(globals)
+    }
+}
+
+/// Names every distinct bank clip sampled, once each, under `SKATE_CLIP_TRACE`.
+///
+/// The graph names trees -- `B_360FLIP_A`, `B_KICKFLIP_CYC2` -- while the bank holds the clips a
+/// selector resolves those to. Guessing across that gap is what put a hold pose on a repeat, so the
+/// gap is instrumented rather than inferred.
+fn trace_clip(name: &str) {
+    static SEEN: std::sync::OnceLock<Option<std::sync::Mutex<std::collections::BTreeSet<String>>>> =
+        std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(|| std::env::var_os("SKATE_CLIP_TRACE").map(|_| Default::default()));
+    if let Some(seen) = seen {
+        if let Ok(mut seen) = seen.lock() {
+            if seen.insert(name.to_owned()) {
+                eprintln!("SKATE_CLIP {name}");
+            }
+        }
     }
 }
 

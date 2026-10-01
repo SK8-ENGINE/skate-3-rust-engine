@@ -107,6 +107,9 @@ function sdk.animation.replace(path) end
 ---@field turn_power? number 0.25..4, native heading turn strength.
 ---@field hold_fakie? boolean Defaults false; suppress automatic fakie stance switching.
 ---@field manual_drag? number 0.25..4, manual balance linear drag.
+---@field endless_flips? boolean Defaults false. Not retail: a held kickflip or heelflip keeps cycling past the authored quad while the pop has air for another rung. Needs real height; a flat pop still stops at a double.
+---@field endless_flip_max? integer 1..12, default 12; extra flips allowed past the quad, so 12 reaches a 16x.
+---@field endless_air_check? boolean Defaults false: keep flipping while held and airborne, with no height requirement. True only starts a rung it has the air to finish.
 sdk.trainer = {}
 ---@param tuning TrainerTuning Owned, reversible native tuning. Conflicting owner is rejected.
 function sdk.trainer.apply(tuning) end

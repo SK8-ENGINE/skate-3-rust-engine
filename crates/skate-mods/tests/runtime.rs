@@ -155,6 +155,7 @@ fn examples_load_and_run() {
     assert_eq!(
         ids,
         vec![
+            "community.endless-tricks",
             "community.freestyle-mx",
             "community.mario-kart",
             "community.native-trainer"

@@ -9,6 +9,9 @@ pub const SCORE_TYPE_COUNT: usize = 14;
 pub mod carrier;
 pub mod catalog;
 pub mod conversions;
+/// Endless Tricks. A deliberate non-retail extension; the retail tables above are
+/// untouched and this is consulted only for names the stock graph never publishes.
+pub mod extension;
 pub mod session;
 pub mod timer;
 

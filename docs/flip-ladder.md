@@ -115,3 +115,17 @@ authors exactly six patterns, `L_F_Kickflip`, `L_B_Kickflip`, `L_F_Heelflip`, `L
 
 Adding a late ladder is therefore not a port fix; it would be inventing a trick Skate 3 does not
 have, and it would need scorable ids beyond the retail 332, new `LINKS` rows and new clips.
+
+
+## And the ordinary ladder has no fifth rung either -- but a mod now adds one
+
+Everything above still describes the port. Retail stops at the quad, and that has not changed.
+
+What is new, as of 2026-09-24, is an **opt-in mod** that extends the ordinary flip ladder past it:
+`docs/endless-tricks.md`. Keep the two claims apart. "Retail has no fifth rung" is still true and
+still what this engine does by default; the Endless Tricks mod adds rungs 5..16 on top, off unless
+enabled, and the four flip tests above pass unchanged with its transitions compiled into the graph.
+
+One correction to the measured table above, from re-running it: the kickflip quad now banks 451.67
+at the 8 m/s boost rather than the 497 recorded here on 2026-09-21. The heelflip's 564 still holds.
+That drift predates the mod work and has not been chased down.

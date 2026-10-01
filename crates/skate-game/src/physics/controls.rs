@@ -24,6 +24,8 @@ pub(crate) struct PlayerControls {
     //None means the native offboard remap gate did not run, not missing camera.
     offboard_axes: Option<[f32; 2]>,
     gestures: Option<crate::input::gesture_input::GestureInput>,
+    /// Endless Tricks: widens which gestures may be held. False on every stock path.
+    pub endless_families: bool,
 }
 impl Default for PlayerControls {
     fn default() -> Self {
@@ -41,6 +43,7 @@ impl Default for PlayerControls {
             preferences: PushPreferences::default(),
             offboard_axes: None,
             gestures: None,
+            endless_families: false,
         }
     }
 }
@@ -56,6 +59,8 @@ pub(super) fn sample(
     player
         .update_for_physics(&mut map, &physics, &skater, &camera)
         .unwrap_or_else(|error| panic!("Offboard controller publication: {error}"));
+    // Endless Tricks extends which gestures may be held; off, this is the stock set.
+    player.endless_families = physics.trainer.endless_flips;
     player.publish_gestures(
         physics.animation_profile.physics_mode,
         skater.player_input.physical.state.state_16,
@@ -129,6 +134,7 @@ impl PlayerControls {
                 difficulty,
                 self.actor_flags,
                 physical_state,
+                self.endless_families,
                 &mut self.action_intents,
             );
         }

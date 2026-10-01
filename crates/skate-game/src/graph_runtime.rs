@@ -305,16 +305,27 @@ pub(crate) struct StockGraphs {
 impl StockGraphs {
     pub fn load(root: &Path, manifest: &GameAssets) -> Result<Self, String> {
         Ok(Self {
-            action: load_graph(root, &manifest.action_graph)?,
-            motion: load_graph(root, &manifest.motion_graph)?,
+            action: load_graph(root, &manifest.action_graph, false)?,
+            motion: load_graph(root, &manifest.motion_graph, true)?,
         })
     }
 }
 
-fn load_graph(root: &Path, relative: &str) -> Result<LoadedGraph, String> {
+fn load_graph(root: &Path, relative: &str, endless_flips: bool) -> Result<LoadedGraph, String> {
     let path = root.join(relative);
-    let source = StateGraph::load(&path).map_err(|error| error.to_string())?;
-    let binding = Binding::from_graph(&source).map_err(|error| error.to_string())?;
+    let mut source = StateGraph::load(&path).map_err(|error| error.to_string())?;
+    // Endless Tricks: a deliberate non-retail extension. The loop transitions are installed
+    // unconditionally so the compiled graph is one shape, and their condition is false unless a
+    // mod turns the feature on. Only the MotionGraph authors flip cycle states.
+    let sites = if endless_flips {
+        crate::graph_host::endless_flip::install(&mut source)
+            .map_err(|error| format!("Invalid endless flip install {}: {error}", path.display()))?
+    } else {
+        Vec::new()
+    };
+    let mut binding = Binding::from_graph(&source).map_err(|error| error.to_string())?;
+    crate::graph_host::endless_flip::reorder(&mut binding, &sites)
+        .map_err(|error| format!("Invalid endless flip reorder {}: {error}", path.display()))?;
     let runtime = CompiledGraph::from_binding(&binding)
         .map_err(|error| format!("Invalid runtime graph {}: {error}", path.display()))?;
     Ok(LoadedGraph {

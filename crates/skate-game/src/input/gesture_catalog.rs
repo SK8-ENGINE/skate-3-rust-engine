@@ -42,6 +42,21 @@ impl Group {
     }
 }
 
+/// Every gesture name the catalog knows, unrotated keys first then each rotated map's own.
+///
+/// Read-only and for tests: it lets a check pair the catalog against another table -- such as the
+/// Endless Tricks rung table -- using the real names rather than retyped ones.
+#[cfg(test)]
+pub(crate) fn all_names() -> impl Iterator<Item = &'static str> {
+    COMMON
+        .iter()
+        .chain(&TAIL_90)
+        .chain(&TAIL_N90)
+        .chain(&NOSE_90)
+        .chain(&NOSE_N90)
+        .copied()
+}
+
 // Square82B99060..99DAC; Tail82B99E20..9AAD0; Nose82B9AB40..9B7F0.
 const COMMON: [&str; 30] = [
     "Ollie",

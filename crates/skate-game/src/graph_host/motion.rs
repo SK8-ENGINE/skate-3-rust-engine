@@ -63,6 +63,8 @@ pub struct MotionPhysical {
 mod instances;
 use instances::Instance;
 pub struct MotionHost {
+    /// Endless Tricks. Deliberate non-retail extension; disabled unless a mod turns it on.
+    pub endless: super::endless_flip::EndlessFlip,
     pub animation: MotionAnimation,
     pub playback_context: PlaybackContext,
     pub condition_inputs: ConditionInputs,
@@ -224,6 +226,8 @@ impl MotionHost {
         });
         let pushing = PushingSettings::load(data, &mut metadata)?;
         Ok(Self {
+            // Off until a mod turns it on; see physics::animation_phase for the trainer wiring.
+            endless: super::endless_flip::EndlessFlip::default(),
             animation: MotionAnimation::from_metadata(metadata),
             playback_context,
             condition_inputs: ConditionInputs::default(),
@@ -380,6 +384,27 @@ impl Host for MotionHost {
             match operation {
                 super::motion_hooks::MotionHook::GrabSlide { right } => {
                     self.slide_latch.grab(right)
+                }
+                super::motion_hooks::MotionHook::EndlessFlipAdvance {
+                    trick,
+                    base_rung,
+                    cycle_clips,
+                } => {
+                    let trick_name = trick.clone();
+                    self.endless.advance(trick, base_rung);
+                    // A cycle ladder replays the authored pair in authored order, so each extra
+                    // rung reads the way the first four do. Re-entering `Cyc3` alone replayed one
+                    // clip whose end pose runs into `_OUT4` rather than into its own first frame,
+                    // which is the twitch reported from the fifth rung on.
+                    self.animation.next_animation = if cycle_clips.is_empty() {
+                        // A single-clip family replays its own air clip, so the board keeps
+                        // turning; the body is parked by the hold composed in `animation_pose`.
+                        let _ = &trick_name;
+                        None
+                    } else {
+                        let taken = self.endless.loops.saturating_sub(1) as usize;
+                        Some(cycle_clips[taken % cycle_clips.len()].clone())
+                    };
                 }
                 super::motion_hooks::MotionHook::Override(settings) => {
                     self.playback_context.transition_override = Some(settings)

@@ -298,6 +298,10 @@ pub(crate) struct Runtime {
     pub session: Session,
     collector: Collector,
     carriers: [Option<Carrier>; 4],
+    /// Endless Tricks rung per slot, 0 on every retail path. Carried beside the scorable so
+    /// a fifth flip is a different carrier from the quad it borrows its ledger identity from,
+    /// which `carrier`'s id-equality test alone could not tell apart.
+    extension: [u32; 4],
     held: [f32; 4],
     distance: [f32; 4],
     metric_rewards: [f32; 4],
@@ -392,6 +396,7 @@ impl Runtime {
             session: Session::default(),
             collector: Collector::None,
             carriers: std::array::from_fn(|_| None),
+            extension: [0; 4],
             held: [0.; 4],
             distance: [0.; 4],
             metric_rewards: [0.; 4],
@@ -492,6 +497,7 @@ impl Runtime {
         }
     }
     fn finish(&mut self, slot: usize, complete: bool, keep_metric: bool) {
+        self.extension[slot] = 0;
         if let Some(mut carrier) = self.carriers[slot].take() {
             if complete {
                 carrier.complete(self.data.unannounced_factor);
@@ -559,8 +565,17 @@ impl Runtime {
             self.metric_rewards[slot] = 0.;
         }
     }
-    fn carrier(&mut self, slot: usize, id: Option<usize>, f: &Frame) -> Result<(), String> {
-        if self.carriers[slot].as_ref().map(|c| c.scorable.id) != id {
+    fn carrier(
+        &mut self,
+        slot: usize,
+        id: Option<usize>,
+        rung: u32,
+        f: &Frame,
+    ) -> Result<(), String> {
+        // The rung disjunct is the only change on the retail path, and it is permanently false
+        // there: nothing publishes an extension name, so `rung` and `self.extension` stay 0.
+        if self.carriers[slot].as_ref().map(|c| c.scorable.id) != id || self.extension[slot] != rung
+        {
             let conversion = id.filter(|new| {
                 self.collector == Collector::Air
                     && self.carriers[slot].is_some()
@@ -591,6 +606,13 @@ impl Runtime {
                     .data
                     .by_id(id)
                     .ok_or_else(|| format!("Missing native scorable {id}"))?;
+                // Endless Tricks overrides only what has to differ. `None` on the retail path,
+                // where these reduce to `d.points` and `d.label.clone()`.
+                let ext = skate_core::scoring::extension::by_rung(rung, id);
+                let points = ext.map_or(d.points, |r| {
+                    skate_core::scoring::extension::points_over(d.points, r)
+                });
+                let label = ext.map_or_else(|| d.label.clone(), |r| r.label.to_owned());
                 let factor = self.penalty(id)
                     * if self.collector == Collector::Air {
                         self.air_factor
@@ -599,9 +621,9 @@ impl Runtime {
                     };
                 let mut carrier = Carrier::new(
                     d.metadata,
-                    d.points,
+                    points,
                     factor,
-                    self.data.announcement.evaluate(d.points as f32),
+                    self.data.announcement.evaluate(points as f32),
                     if chained_grab {
                         previous_tick.unwrap_or(f.tick)
                     } else {
@@ -623,9 +645,10 @@ impl Runtime {
                     self.modified_trick = true;
                 }
                 if conversion.is_some() {
-                    self.base_trick_label = Some(d.label.clone());
+                    self.base_trick_label = Some(label.clone());
                     self.base_trick_type = d.trick_type;
                 }
+                self.extension[slot] = rung;
                 self.carriers[slot] = Some(carrier);
                 self.sequence_active = true;
                 self.idle_ticks = 0;
@@ -641,7 +664,10 @@ impl Runtime {
                     .data
                     .by_id(c.scorable.id)
                     .ok_or("Missing announced scorable")?;
-                self.base_trick_label = Some(d.label.clone());
+                self.base_trick_label = Some(
+                    skate_core::scoring::extension::by_rung(self.extension[slot], c.scorable.id)
+                        .map_or_else(|| d.label.clone(), |r| r.label.to_owned()),
+                );
                 // 825E51A0 resolves the *named* scorable's record and reads its TrickType
                 // from desc+120 to decide whether the name may carry a spin. Setting the
                 // label here without the type left the type at whatever a previous flip
@@ -884,9 +910,11 @@ impl Runtime {
         self.new_trick = false;
         self.modified_trick = false;
         self.close_tricks = false;
+        let rung = f.descriptor.and_then(skate_core::scoring::extension::by_name);
         let descriptor = f
             .descriptor
             .and_then(|name| self.data.by_name(name))
+            .or_else(|| rung.and_then(|r| self.data.by_id(r.base_id)))
             .filter(|d| !(f.flags & 0x02000000 != 0 && [67, 68, 69].contains(&d.metadata.id)))
             .map(|d| (d.metadata.id, d.metadata.class, d.metadata.score_type));
         let mut next = match f.category {
@@ -1109,8 +1137,10 @@ impl Runtime {
             }
             Collector::None => {}
         }
+        let rung = rung.map_or(0, |r| r.rung);
         for (slot, id) in ids.into_iter().enumerate() {
-            self.carrier(slot, id, &f)?;
+            // Only the trick slot can carry an extension rung; the metric slots never do.
+            self.carrier(slot, id, if slot == 0 { rung } else { 0 }, &f)?;
         }
         if self.collector == Collector::Air && !f.suspend_air {
             if self.collector_ticks > 5 || f.flags & 0x01000000 != 0 {

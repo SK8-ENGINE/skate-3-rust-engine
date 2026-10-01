@@ -149,6 +149,17 @@ pub struct TrainerTuning {
     pub turn_power: f32,
     pub manual_drag: f32,
     pub hold_fakie: bool,
+    /// Endless Tricks. **Not retail**: lets a held flip keep cycling past the authored quad
+    /// while the pop has the air for it. False leaves the shipped four-rung ladder alone.
+    pub endless_flips: bool,
+    /// Upper bound on the extra rungs past the authored quad, so a stuck stick cannot run the
+    /// counter away. 12 reaches rung 16, which is the last one the extension table names.
+    pub endless_flip_max: u32,
+    /// Require enough air for another whole rung before starting one. False -- the default --
+    /// keeps flipping for as long as the input is held and the skater is off the ground, which is
+    /// what makes this feel like holding a trick rather than clearing a height bar. True restores
+    /// the conservative budget, which will not begin a rung it cannot finish.
+    pub endless_air_check: bool,
 }
 impl Default for TrainerTuning {
     fn default() -> Self {
@@ -165,6 +176,9 @@ impl Default for TrainerTuning {
             turn_power: 1.,
             manual_drag: 1.,
             hold_fakie: false,
+            endless_flips: false,
+            endless_flip_max: 12,
+            endless_air_check: false,
         }
     }
 }
@@ -186,5 +200,6 @@ impl TrainerTuning {
         .all(|v| v.is_finite() && (0.25..=4.).contains(&v))
             && self.wobble.is_finite()
             && (0. ..=2.).contains(&self.wobble)
+            && (1..=12).contains(&self.endless_flip_max)
     }
 }

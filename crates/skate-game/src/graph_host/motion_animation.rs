@@ -24,6 +24,10 @@ pub struct MotionAnimation {
     current: Option<PlaybackTree>,
     pub channels: super::motion_channels::MotionChannels,
     pub current_name: Option<String>,
+    /// Endless Tricks. The clip the *next* play should use instead of its authored one, so a
+    /// repeated rotation runs the authored cycle clip rather than replaying a whole trick
+    /// performance. `None` on every stock path, and consumed by the play it applies to.
+    pub next_animation: Option<String>,
     pub motion_intents: IntentMap,
     pub filtered_intents: IntentMap,
     pub motion_attributes: Vec<MotionGraphAttribute>,
@@ -109,6 +113,7 @@ impl MotionAnimation {
             current: None,
             channels: super::motion_channels::MotionChannels::default(),
             current_name: None,
+            next_animation: None,
             motion_intents: IntentMap::new(),
             filtered_intents: IntentMap::new(),
             motion_attributes: Vec::new(),
@@ -478,9 +483,14 @@ impl PlaybackService for MotionAnimation {
     fn set_posture_enabled(&mut self, enabled: bool) {
         self.posture.set_requested(enabled);
     }
-    fn play(&mut self, request: PlaybackRequest) -> Result<bool, String> {
+    fn play(&mut self, mut request: PlaybackRequest) -> Result<bool, String> {
         if !(1..=4).contains(&request.transition.kind) {
             return Ok(false);
+        }
+        // Endless Tricks: a repeated rotation plays the authored cycle clip in place of the
+        // trick's own air clip. `None` on every stock path.
+        if let Some(cycle) = self.next_animation.take() {
+            request.animation = cycle;
         }
         if request.transition.kind == 1 {
             self.current = None;
