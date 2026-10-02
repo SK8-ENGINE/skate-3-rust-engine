@@ -60,8 +60,7 @@ pub(crate) fn build(
     let mut app = App::new();
     crate::custom_models::register_source(&mut app);
     crate::modding::register_source(&mut app);
-    app.add_plugins(
-        DefaultPlugins
+    let plugins = DefaultPlugins
             .set(AssetPlugin {
                 file_path: config.asset_root.to_string_lossy().into_owned(),
                 ..default()
@@ -81,15 +80,23 @@ pub(crate) fn build(
                     // This workaround belongs only to the rendering adapter.
                     instance_flags: InstanceFlags::empty(),
                     features: wgpu_features(),
+                    // MoltenVK lacks robustBufferAccess2, so wgpu requests naga buffer
+                    // bounds checks, which naga 27 cannot emit for runtime arrays inside
+                    // binding arrays. Without BUFFER_BINDING_ARRAY, materials take the
+                    // non-bindless path.
+                    #[cfg(target_os = "macos")]
+                    disabled_features: Some(bevy::render::settings::WgpuFeatures::BUFFER_BINDING_ARRAY),
                     ..default()
                 }),
                 ..default()
-            }).build().disable::<bevy::log::LogPlugin>()
-            // Gameplay and menu navigation both use raw XInput. No game system
-            // consumes Bevy gamepad events/rumble; its second device backend can
-            // stall PreUpdate (70.68 ms in the University capture).
-            .disable::<bevy::gilrs::GilrsPlugin>(),
-    )
+            }).build().disable::<bevy::log::LogPlugin>();
+    // Windows gameplay and menu navigation use raw XInput. No game system
+    // consumes Bevy gamepad events/rumble there; its second device backend can
+    // stall PreUpdate (70.68 ms in the University capture). Elsewhere gilrs
+    // is the device backend behind input::platform.
+    #[cfg(windows)]
+    let plugins = plugins.disable::<bevy::gilrs::GilrsPlugin>();
+    app.add_plugins(plugins)
     .insert_resource(bevy::winit::WinitSettings {focused_mode:bevy::winit::UpdateMode::Continuous,unfocused_mode:bevy::winit::UpdateMode::Continuous})
     .insert_resource(config)
     .insert_resource(crate::retail_render::RetailScene(retail_scene))

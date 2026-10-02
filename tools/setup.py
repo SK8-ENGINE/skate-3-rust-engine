@@ -33,7 +33,9 @@ def main():
     parser.add_argument('--base',type=Path,required=True)
     parser.add_argument('--game-exe',type=Path,required=True)
     parser.add_argument('--refresh',action='store_true')
+    parser.add_argument('--source',type=Path,help='Xbox 360 ISO or default.xex; runs without the window')
     args=parser.parse_args()
+    if args.source:return headless(args)
     import tkinter as tk
     from tkinter import filedialog,messagebox,ttk
     from tools.asset_pipeline.customiser_setup import install
@@ -106,5 +108,19 @@ def main():
         window.after(200,lambda:begin(reuse) if not running else None)
     window.mainloop()
     return 0 if success else 2
+
+def headless(args):
+    from tools.asset_pipeline.customiser_setup import install
+    from tools.asset_pipeline.optional_content import summary
+    try:
+        installed_root=install(args.source,args.base,args.game_exe,lambda text:print(text,flush=True),refresh=args.refresh)
+    except Exception as error:
+        args.base.mkdir(parents=True,exist_ok=True)
+        (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
+        print(f'Setup could not finish: {error}\nDetails: {args.base/"setup-error.log"}',file=sys.stderr)
+        return 2
+    warnings=summary(installed_root)
+    print(f'Ready with {len(warnings)} unavailable components. Details: {installed_root/"setup-report.json"}' if warnings else 'Ready')
+    return 0
 
 if __name__=='__main__':raise SystemExit(main())

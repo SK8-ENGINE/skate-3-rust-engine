@@ -97,7 +97,13 @@ def unpack_zip(archive,destination):
             if (info.external_attr>>16)&0o170000==0o120000:raise RuntimeError('Tool archive contains a symbolic link')
         z.extractall(destination)
 
-def dependency(cache,name,url,sha,report):
+def dependency(cache,name,url,sha,report,windows=os.name=='nt'):
+    # The pinned download is a Win64 build. Elsewhere the tool comes from PATH
+    # (the devenv shell provides extract-xiso).
+    if not windows:
+        executable=shutil.which(name)
+        if executable is None:raise RuntimeError(f'Missing tool: {name} is not on PATH (run setup inside `devenv shell`)')
+        return Path(executable)
     folder=cache/name
     marker=folder/'.complete'
     if not marker.is_file():
@@ -300,7 +306,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
             extractor=dependency(base/'tools','extract-xiso',XISO_URL,XISO_SHA,report)
             game_root=work/'disc'
             report('Extracting your ISO')
-            run([extractor,'-x',iso,'-d',game_root],log,report)
+            run([extractor,'-d',game_root,'-x',iso],log,report)
         else:game_root=game_root.resolve()
         required_files=['default.xex']
         if 'core' in groups:required_files += ['data/big/miscload.big','data/big/miscboot.big','data/big/db.big']

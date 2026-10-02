@@ -27,14 +27,15 @@ impl Default for PublishedTickInput {
 pub(crate) struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
+        platform::install(app);
         app.init_resource::<ControllerInput>()
             .init_resource::<PublishedTickInput>()
-            .add_systems(PreUpdate, poll_controllers.run_if(crate::graphics_menu::gameplay_active))
+            .add_systems(PreUpdate, poll_controllers.after(platform::DeviceSet).run_if(crate::graphics_menu::gameplay_active))
             .add_systems(FixedUpdate, publish_actions.in_set(SimulationSet::Input));
     }
 }
 
-pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<crate::config::Config>,net:Option<Res<crate::multiplayer::Multiplayer>>,windows:Query<&Window>,mut capabilities:Local<[platform::CapabilityCache;4]>) {
+pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<crate::config::Config>,net:Option<Res<crate::multiplayer::Multiplayer>>,windows:Query<&Window>,devices:platform::Devices,mut capabilities:Local<[platform::CapabilityCache;4]>) {
     let previous = input.status;
     let focused=windows.iter().any(|w|w.focused);
     let active=net.is_some_and(|n|n.active());
@@ -42,12 +43,12 @@ pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<cra
         if active && ((!focused && config.multiplayer.controller.is_none()) || config.multiplayer.controller.is_some_and(|selected|selected as usize!=slot)) {
             capabilities[slot].invalidate();
             Err(platform::DeviceError::Disconnected)
-        } else {platform::poll_cached(slot, &mut capabilities[slot])}
+        } else {devices.poll_cached(slot, &mut capabilities[slot])}
     }));
     for (index, (&before, &after)) in previous.iter().zip(&input.status).enumerate() {
         if before != after {
             match after {
-                ControllerStatus::Ready => info!("Controller {index}: raw XInput ready"),
+                ControllerStatus::Ready => info!("Controller {index}: {} ready", platform::BACKEND),
                 ControllerStatus::Unavailable(platform::DeviceError::Disconnected) => {
                     info!("Controller {index}: disconnected");
                 }

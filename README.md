@@ -60,6 +60,8 @@ only changed asset groups.
 
 ## Build
 
+### Windows
+
 Requires Windows, Rust with the MSVC toolchain, and LLVM installed in its default
 location. Run `BUILD.bat` to build, then `PLAY.bat` to launch the test world.
 `PLAY.bat` opens your saved map (University by default); use the in-game menu to switch maps, or drag a `.skate` file onto `PLAY.bat`. An XInput controller is required for gameplay;
@@ -69,6 +71,57 @@ Development builds use a prepared asset set in `assets/private/` or the
 installed asset directory. `scripts/Build-Release.ps1` builds the portable Windows
 package and requires Python 3.13. GitHub Actions builds `main` automatically;
 numbered releases are published separately.
+
+### macOS and Linux
+
+Install [Nix](https://nixos.org/download) and [devenv](https://devenv.sh/getting-started/),
+then enter the development shell with `devenv shell`. With
+[direnv](https://direnv.net/), run `direnv allow` once and the shell loads on `cd`.
+The shell provides stable Rust, Python 3.13 with the setup packages, and
+`extract-xiso`. It also provides the Vulkan loader and MoltenVK on macOS, and the
+Vulkan, X11/Wayland, ALSA and udev libraries on Linux. Entering the shell
+installs pre-commit hooks that run `cargo check --workspace --locked` for Rust
+changes and `nixfmt` for Nix files.
+
+```sh
+skate-setup path/to/Skate3.iso   # or .../default.xex; preflight, build, asset setup
+skate-run                        # extra args go to the game, e.g. --map path/to/map.skate
+```
+
+`skate-setup` rejects images without an XDVDFS `default.xex` (PS3 discs, for
+example), builds the workspace, then converts assets without the setup window
+(`tools/setup.py --source`), passing `--refresh` when an installation exists.
+`skate-run` launches with the installation recorded in `data/installation.json`
+(`skate-assets` prints its path). The manual equivalent:
+
+```sh
+cargo build --workspace --locked
+# One-time headless asset setup: supply your Skate 3 ISO or default.xex.
+python tools/setup.py --base data --game-exe target/debug/skate3rust --source path/to/Skate3.iso
+cargo run --bin skate3rust -- --assets data/installations/<id>/assets
+```
+
+`<id>` is the directory recorded in `data/installation.json`. Run all of these
+inside the shell, including `git commit`: the hooks build with the shell's
+toolchain. Setup uses the `extract-xiso` on `PATH`, and the game needs the
+shell's Vulkan environment.
+
+`cargo build --release --locked --no-default-features --bin skate3rust` builds a
+single optimized binary without Bevy's dynamic linking. On macOS it still loads
+the Vulkan loader and MoltenVK at runtime and links libiconv from the Nix store,
+so it runs only where those are available (for example inside the shell).
+
+Any gamepad that gilrs recognizes as a standard gamepad works. Its buttons and
+sticks map to the XInput layout without deadzones, and devices keep their slot
+until they disconnect. On macOS the renderer runs Vulkan through MoltenVK, and
+materials use the non-bindless path. The shell sets `MVK_CONFIG_FAST_MATH_ENABLED=0`:
+with fast-math, the depth prepass and the main pass disagree on skinned, morphed
+customiser skaters, which then render as black-and-white patches. Launching outside
+the shell brings that back. The launch scripts (`*.bat`, `scripts/*.ps1`)
+and release packaging are Windows-only.
+
+Run the explicit GPU shader probes on macOS with
+`SKATE_SHADER_PROBE_FALLBACK=1 cargo test -p skate-game --bin skate3rust _pipeline_probe -- --ignored`.
 
 Custom animations and climbing support remain available, but no custom clips
 are shipped. The included format-demo map is original procedural content.

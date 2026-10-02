@@ -6,6 +6,7 @@
 /data/
 __pycache__/
 *.pyc
+.DS_Store
 /assets/private/
 /maps/private/
 /maps/*.skate
@@ -83,3 +84,14 @@ __pycache__/
 /PLAY-NATIVE-TRAINER.bat
 /PLAY-SCROLL-SETTINGS.bat
 /PLAY-SHOWCASE.bat
+
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml

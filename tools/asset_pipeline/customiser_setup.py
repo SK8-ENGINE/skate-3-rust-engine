@@ -175,7 +175,8 @@ def install(iso, base, game_exe, report, refresh=False):
             source = Path(temp)/'disc'
             extractor = core.dependency(base/'tools', 'extract-xiso', core.XISO_URL, core.XISO_SHA, report)
             with (Path(temp)/'extract.log').open('w') as log:
-                core.run([extractor, '-x', selected, '-d', source], log, report)
+                # Options before the ISO: BSD getopt (macOS) stops at the first operand.
+                core.run([extractor, '-d', source, '-x', selected], log, report)
         else:
             source = source_directory(selected, require_core=not refresh)
         stage = core._install(iso, base, game_exe, report, game_root=source, refresh=refresh,
