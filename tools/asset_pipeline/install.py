@@ -174,7 +174,13 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
     build_archive(manifest_path,collision)
     finished('collision_archive')
     final=maps/(label+'.skate')
-    write_map(manifest_path,final,collision,report,prepared_spawn=spawn.result(label))
+    # Authored retail start (map_starts.py) when _install found one; else geometry.
+    starts=work/'map-starts.json'
+    start=json.loads(starts.read_text(encoding='utf-8')).get(district) if starts.is_file() else None
+    if start:report(f"{label}: authored start {start['locator']} ({start['source']})")
+    write_map(manifest_path,final,collision,report,
+              prepared_spawn=tuple(start['position']) if start else spawn.result(label),
+              prepared_heading=start['heading'] if start else 0.)
     finished('write_map')
     from .dynamic_props import export as write_props
     caches=list((work/'dmo/cache').glob('DMO_*'))
@@ -337,6 +343,13 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         if 'maps' in groups:
             archives=list((game_root/'data/content').glob('worldDIST_*.big'))
             archives.sort(key=lambda p:(p.stem!='worldDIST_University',p.name.lower()))
+            from .map_starts import prepare as map_starts
+            try:
+                starts=map_starts(game_root,converted)
+            except CONTENT_ERRORS as error:
+                starts={}
+                report(f'Authored map starts unavailable ({error}); using geometric spawns')
+            (work/'map-starts.json').write_text(json.dumps(starts),encoding='utf-8')
             workers=map_workers()
             report(f'Converting {len(archives)} maps with {workers} workers')
             def map_job(archive):
