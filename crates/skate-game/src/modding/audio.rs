@@ -37,8 +37,6 @@ struct ModAudio {
     clips: BTreeMap<Key, Clip>,
     voices: BTreeMap<Key, Voice>,
 }
-#[derive(Component)]
-struct ModAudioListener;
 
 pub(super) fn install(app: &mut App) {
     app.init_resource::<ModAudio>();
@@ -202,21 +200,9 @@ fn sync(world: &mut World) {
     let global_gain = world.get_resource::<GlobalVolume>()
         .map_or(1.0, |volume| volume.volume.to_linear());
     let global_gain = if global_gain.is_finite() { global_gain.clamp(0.0, 1.0) } else { 0.0 };
-    // Use this frame's camera Transform. Bevy propagates it before audio PostUpdate.
+    // The spatial listener (shared with game audio) follows the camera in game_audio.
     let camera = world.query_filtered::<&Transform, With<crate::camera::GameplayCamera>>()
         .iter(world).next().copied();
-    if let Some(camera) = camera {
-        let listener = world.query_filtered::<Entity, With<ModAudioListener>>().iter(world).next();
-        if let Some(entity) = listener { world.entity_mut(entity).insert(camera); }
-        else {
-            // The supplied project has no other audio listener. Do not create two
-            // if a later engine version already supplies one.
-            let external = world.query_filtered::<Entity, With<SpatialListener>>().iter(world).next();
-            if external.is_none() {
-                world.spawn((ModAudioListener, SpatialListener::new(0.2), camera));
-            }
-        }
-    }
     let paused = {
         let mods = world.resource::<Mods>();
         camera.is_none() || mods.manager.snapshot["paused"].as_bool().unwrap_or(true)

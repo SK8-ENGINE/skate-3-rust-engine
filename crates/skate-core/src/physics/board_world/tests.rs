@@ -240,3 +240,134 @@ fn predictive_contacts_and_retention_match_full_scan_for_every_primitive() {
     }
     assert!(observed);
 }
+
+fn water_face(height: f32) -> WorldTriangle {
+    WorldTriangle::from_vertices(
+        [
+            Vector3::new(-2., height, -2.),
+            Vector3::new(-2., height, 2.),
+            Vector3::new(2., height, -2.),
+        ],
+        material(),
+        0x637, // surface ID 1591: type 12
+        0xe0,
+        [1.; 3],
+        0.,
+    )
+    .unwrap()
+}
+
+#[test]
+fn water_is_not_solid_but_reports_its_surface() {
+    assert!(is_water_tag(0x637) && !is_water_tag(0x637 - 0x80));
+    let sphere = |y: f32| BoardWorldVolume {
+        body: CollisionBody::Board(BodyId::Deck),
+        primitive: ContactPrimitive::Sphere(Sphere {
+            center: Vector3::new(-1., y, -1.),
+            radius: 0.2,
+        }),
+        linear_velocity: Vector3::new(0., -1., 0.),
+        material: material(),
+    };
+    let query = WorldContactSettings {
+        volume_padding: 0.05,
+        maximum_separating_distance: 0.1,
+        edge_cos_bend_normal_threshold: -1.,
+        convexity_epsilon: 0.,
+        is_object: false,
+    };
+    let retention = ContactRetentionSettings {
+        capacity: 100,
+        duplicate_distance_squared: 0.000001,
+        deferred_reduction: false,
+    };
+    // A sphere resting on a solid face at the same place touches it.
+    let mut solid = BoardWorld::new(vec![face(0., 17, 0.)]);
+    assert!(!solid.query_primitives(&[sphere(0.15)], query, retention).is_empty());
+    // On water it produces no contact at all.
+    let mut world = BoardWorld::new(vec![water_face(0.)]);
+    assert!(world.query_primitives(&[sphere(0.15)], query, retention).is_empty());
+    // Surface lookup: inside the triangle, below or just above the surface.
+    assert_eq!(world.water_surface_at(Vector3::new(-1., -0.5, -1.), 0.05, 3.), Some(0.));
+    assert_eq!(world.water_surface_at(Vector3::new(-1., 0.03, -1.), 0.05, 3.), Some(0.));
+    assert_eq!(world.water_surface_at(Vector3::new(-1., 0.2, -1.), 0.05, 3.), None);
+    assert_eq!(world.water_surface_at(Vector3::new(-1., -4., -1.), 0.05, 3.), None);
+    assert_eq!(world.water_surface_at(Vector3::new(1.5, -0.5, 1.5), 0.05, 3.), None);
+    // Rays still hit water (wipeout prediction and respawn checks rely on it).
+    let hit = world
+        .query_thin_line(Vector3::new(-1., 1., -1.), Vector3::new(-1., -1., -1.))
+        .unwrap();
+    assert!(hit.is_some_and(|h| is_water_tag(h.tag)));
+}
+
+#[test]
+fn shallow_water_over_a_floor_is_not_deep_water() {
+    // Water at y = 0 over a solid floor 5 cm below it (x < 0 half) only.
+    let floor = WorldTriangle::from_vertices(
+        [Vector3::new(-2., -0.05, -2.), Vector3::new(-2., -0.05, 2.), Vector3::new(0., -0.05, -2.)],
+        material(),
+        17,
+        0xe0,
+        [1.; 3],
+        0.,
+    )
+    .unwrap();
+    let world = BoardWorld::new(vec![water_face(0.), floor]);
+    let over_floor = Vector3::new(-1.5, -0.02, -1.);
+    let open = Vector3::new(0.5, -0.5, -1.5);
+    assert_eq!(world.water_surface_at(over_floor, 0.05, 3.), Some(0.));
+    assert_eq!(world.deep_water_surface_at(over_floor, 0.05, 3., 0.5), None);
+    assert_eq!(world.deep_water_surface_at(open, 0.05, 3., 0.5), Some(0.));
+}
+
+#[test]
+fn water_is_shallow_only_over_a_nearby_floor() {
+    let floor = WorldTriangle::from_vertices(
+        [Vector3::new(-3., -0.05, -3.), Vector3::new(-3., -0.05, 3.), Vector3::new(0., -0.05, -3.)],
+        material(),
+        17,
+        0xe0,
+        [1.; 3],
+        0.,
+    )
+    .unwrap();
+    let world = BoardWorld::new(vec![water_face(0.), floor]);
+    assert!(world.water_shallow_at(Vector3::new(-1.5, 0., -1.5)));
+    assert!(!world.water_shallow_at(Vector3::new(1., 0., -1.5)));
+}
+
+#[test]
+fn shallow_water_is_solid_and_deep_water_is_not() {
+    let floor = |y: f32| {
+        WorldTriangle::from_vertices(
+            [Vector3::new(-2., y, -2.), Vector3::new(-2., y, 2.), Vector3::new(2., y, -2.)],
+            material(),
+            17,
+            0xe0,
+            [1.; 3],
+            0.,
+        )
+        .unwrap()
+    };
+    let sphere = |y: f32| BoardWorldVolume {
+        body: CollisionBody::Board(BodyId::Deck),
+        primitive: ContactPrimitive::Sphere(Sphere { center: Vector3::new(-1., y, -1.), radius: 0.2 }),
+        linear_velocity: Vector3::new(0., -1., 0.),
+        material: material(),
+    };
+    let query = WorldContactSettings {
+        volume_padding: 0.05,
+        maximum_separating_distance: 0.1,
+        edge_cos_bend_normal_threshold: -1.,
+        convexity_epsilon: 0.,
+        is_object: false,
+    };
+    let retention = ContactRetentionSettings { capacity: 100, duplicate_distance_squared: 0.000001, deferred_reduction: false };
+    // A channel 5 cm deep: the body rests on the water itself.
+    let mut shallow = BoardWorld::new(vec![water_face(0.), floor(-0.05)]);
+    let hits = shallow.query_primitives(&[sphere(0.15)], query, retention).to_vec();
+    assert!(hits.iter().any(|h| is_water_tag(h.contact.tag)));
+    // A pool 2 m deep: no contact with the water surface.
+    let mut deep = BoardWorld::new(vec![water_face(0.), floor(-2.)]);
+    assert!(deep.query_primitives(&[sphere(0.15)], query, retention).is_empty());
+}

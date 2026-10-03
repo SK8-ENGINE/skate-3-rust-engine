@@ -127,17 +127,21 @@ fn surface_flags_use_actual_contacts_and_reset_each_frame() {
     first.position.y = 2.0;
     let mut last = first;
     last.position.y = 5.0;
+    // The deck's audio surface (CollisionInfo+12): the last report's tag & 0x7F.
+    last.other_surface = 12 << 7 | 41;
     let mut lines = WheelLineState::default();
     lines.physics_surfaces[0] = 8;
     ground.update(&[first, last], &lines, UP, 80.0, false);
     assert_eq!(ground.collision_flags, 1 << 25);
     assert_eq!(ground.surface_twelve_height, 5.0);
+    assert_eq!(ground.part_audio_surfaces, [0, 0, 41]);
     //A wheel ray reporting surface8 alone does not set the physical flag.
     ground.update(&[report(BodyId::RightFrontWheel, UP)], &lines, UP, 80.0, false);
     assert_eq!(ground.collision_flags, 1 << 31);
     ground.update(&[], &lines, UP, 80.0, false);
     assert_eq!(ground.collision_flags, 0);
     assert_eq!(ground.surface_twelve_height, 0.0);
+    assert_eq!(ground.part_audio_surfaces, [0; 3]);
 }
 
 #[test]
@@ -155,4 +159,21 @@ fn opposing_contacts_use_deck_projection_range_and_reset_without_deck_contacts()
     assert_eq!(state.opposing_contact, 0.0);
     state.update(&reports[2..], &lines, UP, 80.0, false);
     assert_eq!(state.opposing_contact, 0.0);
+}
+
+#[test]
+fn wheel_lines_keep_audio_and_physics_bits_of_the_same_tag() {
+    let mut lines = WheelLineState::default();
+    let hit = |tag| Some(WheelLineHit { fraction: 0.5, normal: UP, surface_tag: tag });
+    // Audio bits 0..7, physics type bits 7..12 (water 1591 = audio 55, physics 12).
+    lines.publish([hit(1591), hit(3 << 7 | 9), None, hit(0)]);
+    assert_eq!(lines.physics_surfaces, [12, 3, 0, 0]);
+    assert_eq!(lines.audio_surfaces, [55, 9, 0, 0]);
+    assert_eq!(lines.seam_patterns, [0; 4]);
+    // Seam pattern bits 12..15 (audio state +636): sidewalk 11 on asphalt 1.
+    lines.publish([hit(11 << 12 | 3 << 7 | 1), None, None, None]);
+    assert_eq!((lines.audio_surfaces[0], lines.physics_surfaces[0], lines.seam_patterns[0]), (1, 3, 11));
+    lines.publish([None; 4]);
+    assert_eq!(lines.audio_surfaces, [0; 4]);
+    assert_eq!(lines.seam_patterns, [0; 4]);
 }

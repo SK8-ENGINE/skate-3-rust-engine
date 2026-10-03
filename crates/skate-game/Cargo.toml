@@ -34,7 +34,10 @@ blake3 = "=1.8.7"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 skate-mods = { path = "../skate-mods" }
 skate-dynamics = { path = "../skate-dynamics" }
+skate-audio = { path = "../skate-audio" }
 gltf = { version = "=1.4.1", default-features = true }
+# SDL3 gamepad input for every platform, built from source and statically linked.
+sdl3 = { version = "=0.20.0", features = ["build-from-source-static"] }
 
 [dev-dependencies]
 naga = { version = "=27.0.3", features = ["wgsl-in"] }

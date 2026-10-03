@@ -129,6 +129,23 @@ impl PlayerInputRuntime {
         self.physical.ground.flag_273 = u8::from(self.processed.flags_2468 & 0x0010_0000 != 0);
         Ok(())
     }
+    /// Water (surface type 12) contact for Collision+3481/+28, which reach the
+    /// wipeout special-surface path as Processed2488 bit30 and Processed2924.
+    /// Project choice, see docs/hails-additions/09-water.md: the retail writer
+    /// is unconfirmed. The skater body's contact (SkeletonCollision4081/height,
+    /// the same layout as 4079/4080 -> Collision3479/3480) wins over the
+    /// board's (Body872 bit25 / Body864).
+    pub fn publish_water(
+        &mut self,
+        board: &skate_core::physics::board_ground::BoardGroundState,
+        body: &skate_core::physics::skeleton_body::SkeletonCollisionFeedback,
+    ) {
+        publish_water(
+            &mut self.physical,
+            body.flags.material_12.then_some(body.material_12_height),
+            (board.collision_flags & (1 << 25) != 0).then_some(board.surface_twelve_height),
+        );
+    }
     pub fn process_stage<C: PlayerInputCallbacks>(
         &mut self,
         board: &mut BoardRuntime,
@@ -182,9 +199,27 @@ fn xyz(v: [f32; 4]) -> Vector3 {
     Vector3::new(v[0], v[1], v[2])
 }
 
+/// The packet reset leaves both fields clear when neither owner touched water.
+fn publish_water(out: &mut PhysicalPlayerInput, body: Option<f32>, board: Option<f32>) {
+    if let Some(height) = body.or(board) {
+        out.collision.flag_3481 = 1;
+        out.collision.scalar_28 = height;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn water_contact_prefers_the_skater_body_height() {
+        let mut out = PhysicalPlayerInput::default();
+        publish_water(&mut out, None, None);
+        assert_eq!((out.collision.flag_3481, out.collision.scalar_28), (0, 0.0));
+        publish_water(&mut out, None, Some(217.87));
+        assert_eq!((out.collision.flag_3481, out.collision.scalar_28), (1, 217.87));
+        publish_water(&mut out, Some(10.9), Some(217.87));
+        assert_eq!((out.collision.flag_3481, out.collision.scalar_28), (1, 10.9));
+    }
     #[test]
     #[ignore = "requires private stock collections"]
     fn original_player_input_settings_and_reset_load() {

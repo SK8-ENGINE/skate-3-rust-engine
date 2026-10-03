@@ -85,9 +85,10 @@ pub(crate) fn build(
                 }),
                 ..default()
             }).build().disable::<bevy::log::LogPlugin>()
-            // Gameplay and menu navigation both use raw XInput. No game system
-            // consumes Bevy gamepad events/rumble; its second device backend can
-            // stall PreUpdate (70.68 ms in the University capture).
+            // Gameplay and menu navigation both use raw pad states from
+            // input::platform (SDL3, XInput fallback). No game system consumes
+            // Bevy gamepad events/rumble; its second device backend can stall
+            // PreUpdate (70.68 ms in the University capture).
             .disable::<bevy::gilrs::GilrsPlugin>(),
     )
     .insert_resource(bevy::winit::WinitSettings {focused_mode:bevy::winit::UpdateMode::Continuous,unfocused_mode:bevy::winit::UpdateMode::Continuous})
@@ -142,6 +143,8 @@ pub(crate) fn build(
     app.add_plugins(crate::multiplayer::MultiplayerPlugin);
     app.add_plugins(crate::scoring_hud::ScoringHudPlugin);
     app.add_plugins(crate::debug_cam::DebugCamPlugin);
+    app.add_plugins(crate::water_splash::WaterSplashPlugin);
+    app.add_plugins(crate::game_audio::GameAudioPlugin);
     app.add_systems(Last, crate::crash_context::sample);
     crate::profiling::install(&mut app);
     app

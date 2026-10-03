@@ -22,6 +22,18 @@ use super::{
     },
 };
 
+/// Retail surface type 12 (`(tag >> 7) & 31`): water.
+pub const fn is_water_tag(tag: u32) -> bool {
+    tag & 0xF80 == 0x600
+}
+
+/// Water with geometry within this depth under the surface (at a given point)
+/// is shallow: solid there, like retail's University fountain channel, where
+/// the bailed skater lies on the water. Deeper water is not solid: bodies sink
+/// in and float (Aletown canal). Project-chosen depth
+/// (docs/hails-additions/09-water.md).
+pub const FLOAT_DEPTH: f32 = 0.5;
+
 #[derive(Clone, Copy, Debug)]
 pub struct WorldTriangle {
     pub triangle: Triangle,
@@ -125,6 +137,8 @@ pub struct BoardWorld {
     query_index: query_index::QueryIndex,
     maximum_fatness: f32,
     maximum_triangle_margin: f32,
+    /// Indices of water triangles, for `water_surface_at`.
+    water: Vec<usize>,
     contacts: Vec<BoardCollision>,
     buffer: ContactBuffer,
 }
@@ -161,7 +175,11 @@ impl BoardWorld {
                 span * (2. * broadphase::THIN_MARGIN)
             })
             .fold(0., f32::max);
+        let water = (0..triangles.len())
+            .filter(|&i| is_water_tag(triangles[i].tag))
+            .collect();
         Self {
+            water,
             triangles,
             external: None,
             triangle_bounds,
@@ -182,6 +200,14 @@ impl BoardWorld {
                 records: [[0; 64]; 50],
             },
         }
+    }
+
+    /// Whether the water at `point` on its surface is shallow: some geometry
+    /// lies within `FLOAT_DEPTH` under it (a channel, a ledge, a bank).
+    pub fn water_shallow_at(&self, point: Vector3) -> bool {
+        let start = Vector3::new(point.x, point.y - 0.001, point.z);
+        let end = Vector3::new(point.x, point.y - FLOAT_DEPTH, point.z);
+        !matches!(self.query_thin_line(start, end), Ok(None))
     }
 
     pub fn with_query_metadata(
@@ -328,12 +354,13 @@ impl BoardWorld {
             .and_then(|b| Bounds::from_points(b.iter().flat_map(|b| [b.min, b.max])))
             .map(|b| b.expanded(padding));
         let ranges = self.candidate_ranges(bounds);
-        let output = &mut self.contacts;
+        // Taken out so water contacts can run `&self` line queries below.
+        let mut output = std::mem::take(&mut self.contacts);
         let mut publish = |records: &[ContactRecord]| {
             output.extend(records.iter().map(collision_from_record));
         };
-        for index in ranges.into_iter().flatten() {
-            let entry = &self.triangles[index];
+        'triangles: for index in ranges.into_iter().flatten() {
+            let entry = self.triangles[index];
             for (volume, volume_bounds) in volumes.iter().zip(&volume_bounds) {
                 if self.query_metadata.is_some()
                     && volume_bounds.is_some_and(|b| !self.triangle_bounds[index].overlaps(b))
@@ -348,6 +375,16 @@ impl BoardWorld {
                 ) else {
                     continue;
                 };
+                // Project choice (docs/hails-additions/09-water.md): deep water
+                // is not solid; shallow water (a floor within FLOAT_DEPTH under
+                // the contact) is, as in retail. Ray and trajectory queries
+                // still see all water.
+                if is_water_tag(entry.tag)
+                    && manifold.count > 0
+                    && !self.water_shallow_at(manifold.points[0].b)
+                {
+                    continue;
+                }
                 let material = combine_contact_materials(volume.material, entry.material);
                 for pair in &manifold.points[..manifold.count] {
                     let contact = RetailContactInput {
@@ -361,7 +398,7 @@ impl BoardWorld {
                     };
                     let Some(slot) = self.buffer.allocate(&mut publish) else {
                         self.buffer.flush(&mut publish);
-                        return &self.contacts;
+                        break 'triangles;
                     };
                     self.buffer.records[slot] = retention_record(volume.body, contact);
                     //8277C23C removes the most recent record on rejection.
@@ -371,12 +408,57 @@ impl BoardWorld {
                 }
             }
         }
-        self.buffer.flush(&mut publish);
+        if self.buffer.full == 0 {
+            self.buffer.flush(&mut publish);
+        }
+        self.contacts = output;
         &self.contacts
     }
 
     pub fn contacts(&self) -> &[BoardCollision] {
         &self.contacts
+    }
+
+    /// `water_surface_at`, but only where the water is at least `min_depth`
+    /// deep: no solid (or other) geometry within `min_depth` under the surface
+    /// at the point's XZ. Shallow water over a floor is not something to float in.
+    pub fn deep_water_surface_at(
+        &self,
+        point: Vector3,
+        above: f32,
+        max_depth: f32,
+        min_depth: f32,
+    ) -> Option<f32> {
+        let surface = self.water_surface_at(point, above, max_depth)?;
+        let start = Vector3::new(point.x, surface - 0.001, point.z);
+        let end = Vector3::new(point.x, surface - min_depth, point.z);
+        matches!(self.query_thin_line(start, end), Ok(None)).then_some(surface)
+    }
+
+    /// Height of the water surface over `point`, when the point lies at most
+    /// `max_depth` below it (or less than `above` over it). Water surfaces are
+    /// the type-12 triangles, interpolated at the point's XZ; the nearest
+    /// surface at or above the point wins.
+    pub fn water_surface_at(&self, point: Vector3, above: f32, max_depth: f32) -> Option<f32> {
+        let mut best: Option<f32> = None;
+        for &index in &self.water {
+            let [a, b, c] = self.triangles[index].triangle.vertices;
+            let det = (b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z);
+            if det.abs() < 1e-8 {
+                continue;
+            }
+            let u = ((point.x - a.x) * (c.z - a.z) - (c.x - a.x) * (point.z - a.z)) / det;
+            let v = ((b.x - a.x) * (point.z - a.z) - (point.x - a.x) * (b.z - a.z)) / det;
+            if u < 0. || v < 0. || u + v > 1. {
+                continue;
+            }
+            let height = a.y + u * (b.y - a.y) + v * (c.y - a.y);
+            let depth = height - point.y;
+            if depth > -above && depth <= max_depth && best.is_none_or(|h| height < h) {
+                best = Some(height);
+            }
+        }
+        best
     }
 
     pub fn dropped_contacts(&self) -> u32 {

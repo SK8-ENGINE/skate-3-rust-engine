@@ -75,6 +75,9 @@ impl Wipeout {
     }
 }
 
+/// Last of the 34 native request slots; nothing reads it by index.
+const WATER_BAIL_REASON: usize = 33;
+
 ///Player postphysics82BD83E0 follows contact/error publication with the
 ///selected state's check, before FootIK sees that tick's wipeout request.
 pub(super) fn check_after_physics(
@@ -99,7 +102,24 @@ pub(super) fn check_after_physics(
         grind_locked_to_middle: skater.trajectory.selector.grind_locked_to_middle(),
         grind_normal: skater.trajectory.selector.grind_normal(),
     };
-    match skater.player_state.current() {
+    // Project choice (docs/hails-additions/09-water.md): no recovered retail
+    // check bails on water contact, yet the wipeout state has a complete water
+    // path (Collision3481 -> special surface, buoyancy, IsInWater). Touching
+    // water (surface type 12) with the board or body requests an ordinary bail;
+    // the reason slot is otherwise unused and is not a runout reason.
+    let state = skater.player_state.current();
+    let water = physics.riding.ground.collision_flags & (1 << 25) != 0
+        || skater.collision_feedback.flags.material_12;
+    if water
+        && !matches!(
+            state,
+            PhysicalStateId::WipeoutGround | PhysicalStateId::Teleporting | PhysicalStateId::Sleeping
+        )
+    {
+        skater.wipeout.state.request(WATER_BAIL_REASON, 0.0);
+        bevy::log::info!("WATER_BAIL tick={} state={state:?}", physics.ticks);
+    }
+    match state {
         PhysicalStateId::FootPlant | PhysicalStateId::HandPlant => {
             let frame = observations.frame()?;
             if skater.player_state.current() == PhysicalStateId::HandPlant {

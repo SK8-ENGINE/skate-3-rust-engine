@@ -9,6 +9,8 @@ pub struct RetailTriangle {
     pub points: [[f32; 3]; 3],
     pub edges: Option<[u8; 3]>,
     pub surface: u16,
+    /// Unit flag 0x80: the unit carries a surface ID (`surface` is 0 otherwise).
+    pub has_surface: bool,
     pub group: u16,
     pub one_sided: bool,
 }
@@ -38,8 +40,16 @@ fn id(data: &[u8], at: &mut usize, width: u8) -> Result<u16, String> {
     Ok(value)
 }
 
-/// Visits complete clusters in archive order, retaining only one decoded
-/// cluster at a time. The callback can build its own spatial query index.
+/// Visits complete clusters in archive order, retaining one decoded mesh at a
+/// time. The callback can build its own spatial query index. Returns the number
+/// of triangles visited.
+///
+/// Meshes in which no unit carries a surface ID are skipped. Across every
+/// shipped district these are only 12-triangle boxes (zone/trigger/bounds
+/// volumes); authored player positions lie inside some of them, e.g. the
+/// SkateSchool area and DownTown's Kube Tower landing, so they are not solid.
+/// Meshes that mix surfaced and surfaceless units are ordinary geometry and
+/// are kept whole.
 pub fn visit_clusters(
     data: &[u8],
     mut visit: impl FnMut(&str, &[RetailTriangle]) -> Result<(), String>,
@@ -96,6 +106,7 @@ fn mesh_clusters(
     let one_sided = be16(data, 60)? & 0x10 != 0;
     let mut previous_end = table + count * 4;
     let mut total = 0;
+    let mut clusters = Vec::with_capacity(count);
     for i in 0..count {
         let offset = be32(data, table + i * 4)? as usize;
         if offset < previous_end {
@@ -109,10 +120,16 @@ fn mesh_clusters(
         previous_end = offset + size;
         let triangles = decode_cluster(cluster, granularity, data[62], data[63], one_sided)?;
         total += triangles.len();
-        visit(&triangles)?;
+        clusters.push(triangles);
     }
     if total != be32(data, 40)? as usize {
         return Err("RWCM triangle count mismatch".into());
+    }
+    if !clusters.iter().flatten().any(|t| t.has_surface) {
+        return Ok(0); // volume, not collision (see visit_clusters)
+    }
+    for triangles in &clusters {
+        visit(triangles)?;
     }
     Ok(total)
 }
@@ -192,6 +209,7 @@ fn decode_cluster(
             points,
             edges,
             surface,
+            has_surface: flags & 0x80 != 0,
             group,
             one_sided,
         });

@@ -15,8 +15,13 @@ use bevy::{
     prelude::*,
     render::extract_component::ExtractComponent,
     render::{
+        Render, RenderApp, RenderSystems,
+        extract_resource::{ExtractResource, ExtractResourcePlugin},
+        render_asset::RenderAssets,
+        renderer::RenderQueue,
+        storage::GpuShaderStorageBuffer,
         render_resource::{
-            AsBindGroup, Extent3d, Face, RenderPipelineDescriptor, SpecializedMeshPipelineError,
+            AsBindGroup, BufferUsages, Extent3d, Face, RenderPipelineDescriptor, SpecializedMeshPipelineError,
             TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
         },
         storage::ShaderStorageBuffer,
@@ -130,20 +135,23 @@ fn pack_slot(class: usize, layer: usize, clamp: bool) -> u32 {
     (u32::from(clamp) << 31) | ((class as u32) << 16) | layer as u32
 }
 
-/// Shared frame state, matching `FrameState` in the bindings module: 144 bytes.
+/// Shared frame state, matching `FrameState` in the bindings module: 256 bytes.
 ///
 /// `shadow.w` gates every dynamic-shadow read in the world shader. Shadows are
 /// out of scope for v1 (RFC 1 D5), so it stays zero and the shader never touches
 /// the cascade bindings; re-enabling them is a write to this field.
-#[derive(Resource, Clone, Default)]
+#[derive(Resource, Clone, Default, ExtractResource)]
 pub(crate) struct FrameStateData {
     pub shadow: Vec4,
     pub clock: Vec4,
     pub pca: [Vec4; 7],
+    /// The same PCA animation, slowed (`WATER_PCA_RATE`) and interpolated
+    /// between frames, for family 33 water (canals, fountains).
+    pub pca_slow: [Vec4; 7],
 }
 
 impl FrameStateData {
-    const SIZE: usize = 9 * 16;
+    const SIZE: usize = 16 * 16;
 
     /// Eases the shadow floor towards the local probe's ambient term. Carried
     /// over with the character lighting that feeds it.
@@ -166,6 +174,7 @@ impl FrameStateData {
         for row in std::iter::once(self.shadow)
             .chain(std::iter::once(self.clock))
             .chain(self.pca)
+            .chain(self.pca_slow)
         {
             for component in row.to_array() {
                 out.extend_from_slice(&component.to_le_bytes());
@@ -772,6 +781,8 @@ impl MaterialTable {
         // texture ids it wants, so page sizing can see the whole demand.
         let mut requests: Vec<Option<Request>> = Vec::with_capacity(map.materials.len());
         let mut unsupported = 0usize;
+        let mut unsupported_shaders = std::collections::BTreeMap::<String, usize>::new();
+        let mut water = Vec::with_capacity(map.materials.len());
         for material in &map.materials {
             let definition = material
                 .retail_definition
@@ -783,8 +794,12 @@ impl MaterialTable {
                 // second world material path to fall back to (RFC 1 D8), so an
                 // unsupported family renders as plain diffuse plus lightmap.
                 unsupported += 1;
+                *unsupported_shaders
+                    .entry(format!("{} (family {})", definition.shader, definition.family))
+                    .or_default() += 1;
                 definition.family = 1;
             }
+            water.push(definition.family == 33);
             requests.push(Some(Request::new(
                 material,
                 &definition,
@@ -794,9 +809,18 @@ impl MaterialTable {
                 map,
             )));
         }
+        // decal.y: area of the water body (family 33 calms small bodies).
+        let areas = crate::water_bodies::body_areas(&map.geometry.vertices, &map.geometry.indices, &water);
+        for (request, area) in requests.iter_mut().zip(&areas) {
+            if let Some(request) = request
+                && *area > 0.
+            {
+                request.params.decal.y = *area;
+            }
+        }
         if unsupported > 0 {
             warn!(
-                "{unsupported} of {} world materials use an unsupported shader family and render as family 1",
+                "{unsupported} of {} world materials use an unsupported shader family and render as family 1: {unsupported_shaders:?}",
                 map.materials.len()
             );
         }
@@ -1369,13 +1393,13 @@ fn load_pca(mut commands: Commands, config: Res<crate::config::Config>) {
 }
 
 fn initialize_frame_state(mut buffers: ResMut<Assets<ShaderStorageBuffer>>) {
-    if let Err(error) = buffers.insert(
-        FRAME_STATE.id(),
-        ShaderStorageBuffer::new(
-            &FrameStateData::default().encode(),
-            RenderAssetUsages::RENDER_WORLD,
-        ),
-    ) {
+    let mut buffer = ShaderStorageBuffer::new(
+        &FrameStateData::default().encode(),
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    // Written in place every frame by `write_frame_state`.
+    buffer.buffer_description.usage |= BufferUsages::COPY_DST;
+    if let Err(error) = buffers.insert(FRAME_STATE.id(), buffer) {
         // Without this buffer every world bind group is unsatisfiable, so the
         // whole map would render black. Fail loudly.
         error!("could not install the shared frame state buffer: {error}");
@@ -1387,18 +1411,63 @@ fn initialize_frame_state(mut buffers: ResMut<Assets<ShaderStorageBuffer>>) {
 /// bindings entirely.
 fn advance_frame_state(
     mut state: ResMut<FrameStateData>,
-    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     time: Res<Time>,
     pca: Option<Res<OceanPca>>,
 ) {
     state.clock.x = time.elapsed_secs();
+    state.clock.z = water_time(time.elapsed_secs_f64());
     if let Some(pca) = pca {
         let frame = ((time.elapsed_secs_f64() * f64::from(pca.hz)) as usize) % pca.frames.len();
         state.pca = pca.frames[frame].map(Vec4::from_array);
+        state.pca_slow = slow_pca(&pca, time.elapsed_secs_f64());
         state.clock.y = 1.;
     }
-    if let Some(buffer) = buffers.get_mut(&FRAME_STATE) {
-        buffer.data = Some(state.encode());
+}
+
+/// Speed of the family 33 wave animation relative to the retail 30 Hz.
+/// Project choice: the user found the Aletown canal's waves a little fast.
+const WATER_PCA_RATE: f64 = 0.75;
+
+/// The PCA frame at `WATER_PCA_RATE`, blended linearly between neighbouring
+/// frames (PCA weights combine linearly) so the slower rate does not stutter.
+/// The last frame blends into the first, as the animation loops.
+fn slow_pca(pca: &OceanPca, elapsed: f64) -> [Vec4; 7] {
+    let position = (elapsed * f64::from(pca.hz) * WATER_PCA_RATE).rem_euclid(pca.frames.len() as f64);
+    let index = position as usize % pca.frames.len();
+    let next = (index + 1) % pca.frames.len();
+    let blend = position.fract() as f32;
+    std::array::from_fn(|row| {
+        Vec4::from_array(pca.frames[index][row]).lerp(Vec4::from_array(pca.frames[next][row]), blend)
+    })
+}
+
+/// Water shader time. Retail rate: the PCA water update adds 1/60 per call,
+/// once per 30 Hz frame, so water time runs at half real-time speed (disc
+/// build's update routine 0x8276D3D8, reference only).
+///
+/// Retail restarts it after 5; here that made every scroll layer jump by
+/// speed * 5 every 10 s (half a tile for flowing water's 0.1). Project choice:
+/// loop over a period at which every authored scroll speed (all multiples of
+/// 0.01) completes whole texture repeats, so the restart is invisible, while
+/// keeping t small enough for f32 shader precision.
+const WATER_TIME_RATE: f64 = 0.5;
+const WATER_TIME_PERIOD: f64 = 1000.0;
+
+fn water_time(elapsed_secs: f64) -> f32 {
+    (elapsed_secs * WATER_TIME_RATE).rem_euclid(WATER_TIME_PERIOD) as f32
+}
+
+/// Uploads this frame's state into the one GPU buffer every world material
+/// bound at preparation. Replacing the asset's data instead (as before) makes
+/// Bevy create a new GPU buffer that no existing material bind group sees, so
+/// the clock, ocean PCA and shadow floor stayed at their first values.
+fn write_frame_state(
+    state: Res<FrameStateData>,
+    buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
+    queue: Res<RenderQueue>,
+) {
+    if let Some(buffer) = buffers.get(FRAME_STATE.id()) {
+        queue.write_buffer(&buffer.buffer, 0, &state.encode());
     }
 }
 
@@ -1421,8 +1490,15 @@ impl Plugin for RetailRenderPlugin {
                 crate::retail_character::CharacterLightingPlugin,
                 crate::retail_exposure::RetailExposurePlugin,
             ))
+            .add_plugins(ExtractResourcePlugin::<FrameStateData>::default())
             .add_systems(Startup, (initialize_frame_state, load_pca))
             .add_systems(Update, advance_frame_state);
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.add_systems(
+                Render,
+                write_frame_state.in_set(RenderSystems::PrepareResources),
+            );
+        }
     }
 }
 
@@ -1608,6 +1684,22 @@ mod tests {
     }
 
     #[test]
+    fn slow_water_pca_blends_frames_and_loops() {
+        // Frame i holds the value i in every component.
+        let pca = OceanPca {
+            hz: 30.,
+            frames: (0..30).map(|i| [[i as f32; 4]; 7]).collect(),
+        };
+        let at = |frame: f64| slow_pca(&pca, frame / (30. * WATER_PCA_RATE))[3].x;
+        assert!((at(4.0) - 4.0).abs() < 1e-4);
+        assert!((at(4.5) - 4.5).abs() < 1e-4);
+        // The last frame blends into the first, then the animation repeats.
+        assert!((at(29.5) - 14.5).abs() < 1e-4);
+        assert!((at(30.0) - 0.0).abs() < 1e-4);
+        assert!((at(64.0) - 4.0).abs() < 1e-3);
+    }
+
+    #[test]
     fn gpu_struct_sizes_match_the_shader() {
         let mut bytes = Vec::new();
         WorldParams::default().encode(&mut bytes);
@@ -1619,6 +1711,18 @@ mod tests {
         assert_eq!(bytes.len(), MaterialSlots::SIZE);
 
         assert_eq!(FrameStateData::default().encode().len(), FrameStateData::SIZE);
+        // Water time: half speed, no restart within a short session.
+        assert_eq!(water_time(0.0), 0.0);
+        assert_eq!(water_time(2.0), 1.0);
+        assert!((water_time(10.0) - 5.0).abs() < 1e-5);
+        assert!((water_time(1999.0) - 999.5).abs() < 1e-3);
+        assert!(water_time(2000.0).abs() < 1e-3);
+        // Seamless restart: every authored water scroll speed
+        // (render-parameters water[1]) moves a whole number of tiles per period.
+        for speed in [0.01, 0.2, 0.1, 0.4, 0.22] {
+            let tiles = speed * WATER_TIME_PERIOD;
+            assert!((tiles - tiles.round()).abs() < 1e-6, "speed {speed} is not seamless");
+        }
     }
 
     #[test]

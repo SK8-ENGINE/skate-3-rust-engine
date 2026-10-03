@@ -67,7 +67,8 @@ def _prepare(game, assets, report=print):
     from tools.asset_pipeline.customisation_library import prepare as library
     from tools.asset_pipeline.customisation_profiles import generate
     from tools.asset_pipeline.customiser_lighting import prepare as lighting
-    from tools.asset_pipeline.native_roster import prepare as native_roster
+    from tools.asset_pipeline.native_roster import prepare_parallel as native_roster
+    from tools.asset_pipeline.customisation_workers import customiser_workers
     from . import customiser_cache as cache
     base = assets/'private/customisation'
     source = source_fingerprint(game)
@@ -131,7 +132,8 @@ def _prepare(game, assets, report=print):
         cache.stage(directory, old_directory, name, stage_versions[name], source, optional_action, assets, report)
     run_stage('catalog', lambda: catalog(game, directory))
     def build_library():
-        data = library(dict(assets=str(assets), game_root=str(game), directory=str(directory), library_index='library-base.json'))
+        data = library(dict(assets=str(assets), game_root=str(game), directory=str(directory), library_index='library-base.json',
+                            workers=customiser_workers()))
         if not data['models']:
             raise RuntimeError('Character library preparation failed: '+str(data['errors'])[:1000])
         for error in data['errors']:report('Unavailable customiser item: '+str(error))
@@ -150,7 +152,7 @@ def _prepare(game, assets, report=print):
         if (directory/'roster-work').exists():shutil.rmtree(directory/'roster-work')
         (directory/'native-roster').mkdir(exist_ok=True)
         roster = native_roster(game, assets, directory/'native-roster',
-                              directory/'database/collections.json', directory/'roster-work')
+                              directory/'database/collections.json', directory/'roster-work', customiser_workers())
         unavailable = [item for item in roster if item['status'] != 'ready']
         for item in unavailable:report(f'Unavailable optional character {item["name"]}: {item["error"]}')
         (directory/'native-roster/complete.json').write_text(json.dumps({'characters': sum(item['status']=='ready' for item in roster), 'unavailable': unavailable}))

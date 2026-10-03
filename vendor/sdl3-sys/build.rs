@@ -1,0 +1,79 @@
+#[cfg(feature = "build-from-source")]
+const SOURCE_DIR: &str = sdl3_src::SOURCE_DIR;
+
+const LINK_FRAMEWORK: bool = cfg!(feature = "link-framework");
+
+include!("build-common.rs");
+
+fn main() -> Result<(), Box<dyn Error>> {
+    build(|config| {
+        let _ = config;
+        #[cfg(feature = "build-from-source")]
+        {
+            #[cfg(feature = "sdl-lean-and-mean")]
+            {
+                let mut build = cc::Build::new();
+                build.define("SDL_LEAN_AND_MEAN", "1");
+                config.init_c_cfg(build);
+            }
+
+            config.define("SDL_EXAMPLES", "OFF");
+            config.define("SDL_REVISION", sdl3_src::REVISION);
+            config.define("SDL_TESTS", "OFF");
+
+            // skate3rust patch: SDL's CMake project uses policy CMP0091, so the
+            // -MT that cmake-rs adds for crt-static is ignored and SDL links the
+            // DLL CRT (unresolved __imp_* symbols in static-CRT builds). Select
+            // the runtime Rust links: never the debug CRT, static iff crt-static.
+            if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+                let static_crt = env::var("CARGO_CFG_TARGET_FEATURE")
+                    .is_ok_and(|features| features.split(',').any(|f| f == "crt-static"));
+                config.define(
+                    "CMAKE_MSVC_RUNTIME_LIBRARY",
+                    if static_crt { "MultiThreaded" } else { "MultiThreadedDLL" },
+                );
+            }
+
+            if LINK_FRAMEWORK {
+                config.define("SDL_FRAMEWORK", "ON");
+            } else if cfg!(feature = "link-static") {
+                config.define("SDL_STATIC", "ON");
+            }
+
+            cmake_vars! { config =>
+                SDL_ASAN,
+                SDL_CCACHE,
+                SDL_LIBC,
+                SDL_RPATH,
+                SDL_UNIX_CONSOLE_BUILD,
+                SDL_AUDIO,
+                SDL_VIDEO,
+                SDL_GPU,
+                SDL_RENDER,
+                SDL_CAMERA,
+                SDL_JOYSTICK,
+                SDL_HAPTIC,
+                SDL_HIDAPI,
+                SDL_POWER,
+                SDL_SENSOR,
+                SDL_DIALOG,
+                SDL_TRAY,
+            }
+        }
+        Ok(())
+    })?;
+
+    let enabled_assert_levels = cfg!(feature = "assert-level-disabled") as usize
+        + cfg!(feature = "assert-level-release") as usize
+        + cfg!(feature = "assert-level-debug") as usize
+        + cfg!(feature = "assert-level-paranoid") as usize;
+    if enabled_assert_levels == 0 {
+        if env::var("DEBUG").unwrap() == "true" {
+            println!(r#"cargo::rustc-cfg=feature="assert-level-debug""#);
+        } else {
+            println!(r#"cargo::rustc-cfg=feature="assert-level-release""#);
+        }
+    }
+
+    Ok(())
+}

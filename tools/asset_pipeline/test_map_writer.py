@@ -59,5 +59,28 @@ class MapWriterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'No supported spawn'):
             SpawnSelector('DIST_Test').result('test')
 
+    def test_spawn_prefers_ground_over_roofs_and_floating_panels(self):
+        def tri(a,b,c):return SimpleNamespace(a=a,b=b,c=c)
+        def mesh(*triangles):return SimpleNamespace(bounds_min=(-1e3,-1e3,-1e3),bounds_max=(1e3,1e3,1e3),triangles=list(triangles))
+        # Retail park: floor wound downward, roof above it wound upward.
+        floor=mesh(tri((-40,0,-40),(40,0,-40),(-40,0,40)),tri((40,0,-40),(40,0,40),(-40,0,40)))
+        roof=mesh(tri((-40,30,-40),(-40,30,40),(40,30,-40)),tri((40,30,-40),(-40,30,40),(40,30,40)))
+        selector=SpawnSelector('DIST_Park');selector.consider([roof,floor])
+        self.assertEqual(selector.result('Park')[1],1.)
+        # A small panel over the void in the middle of two floor slabs.
+        slabs=mesh(tri((-60,0,-20),(-60,0,20),(-10,0,-20)),tri((10,0,-20),(60,0,20),(60,0,-20)))
+        panel=mesh(tri((-2,20,-2),(-2,20,2),(2,20,-2)))
+        selector=SpawnSelector('DIST_Park');selector.consider([panel,slabs])
+        x,y,z=selector.result('Park')
+        self.assertEqual(y,1.)
+        self.assertGreater(abs(x),10)
+        # City-sized districts keep the original rule: the same roof/floor
+        # layout scaled past GROUND_MAX_EXTENT spawns on the upward roof, as
+        # before, instead of the "lowest surface" (underground in real cities).
+        big_floor=mesh(tri((-400,0,-400),(400,0,-400),(-400,0,400)),tri((400,0,-400),(400,0,400),(-400,0,400)))
+        big_roof=mesh(tri((-400,30,-400),(-400,30,400),(400,30,-400)),tri((400,30,-400),(-400,30,400),(400,30,400)))
+        selector=SpawnSelector('DIST_City');selector.consider([big_roof,big_floor])
+        self.assertEqual(selector.result('City')[1],31.)
+
 
 if __name__=='__main__':unittest.main()

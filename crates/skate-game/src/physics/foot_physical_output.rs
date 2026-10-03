@@ -25,6 +25,11 @@ impl FootPhysicalOutputs {
             },
         })
     }
+    /// The deck box the feet (and the hands, Skeleton+602/+603) are tested against: DeckWidth / 2
+    /// and DeckFrontEndSize + DeckMidLength / 2.
+    pub fn deck_box(&self) -> (f32, f32) {
+        (self.settings.deck_half_width, self.settings.deck_total_half_length)
+    }
     pub fn publish(&mut self, record: &SkeletonPhysicalRecord, dt: f32) -> FootPhysicalOutput {
         self.output = self.state.update(record, dt, self.settings);
         self.output

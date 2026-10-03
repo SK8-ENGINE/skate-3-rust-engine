@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import hashlib
 import struct
 
 
@@ -191,13 +192,37 @@ def _decode_section(
     return decoded, end
 
 
+def _check_stride(asset_id, source_path, asset_header_size, stored_size,
+                  asset_stride, first_asset_offset, cursor, source_size):
+    minimum_stride = asset_header_size + stored_size
+    if (
+        asset_stride < minimum_stride
+        or asset_stride % first_asset_offset != 0
+        or cursor + asset_stride > source_size
+    ):
+        raise StreamFormatError(
+            f"SFIL asset 0x{asset_id:016X} in {source_path} "
+            f"has invalid stride 0x{asset_stride:X}"
+        )
+
+
 def read_sfil(
     path: str | Path,
     records: list[AssetRecord],
     *,
     require_all_records: bool = True,
     record_index: dict[int, AssetRecord] | None = None,
+    known_copies: dict[int, bytes] | None = None,
 ) -> list[StreamAsset]:
+    """Decode every asset of one SFIL file.
+
+    ``known_copies`` (asset id -> digest of its first stored copy) lets a
+    district load skip copies already decoded from another cell file: a copy
+    whose stored bytes (header + payload) match the first copy decodes to the
+    same data, so it is neither decoded nor returned. Copies that differ are
+    decoded and returned for the caller's conflict check. Digests of newly
+    decoded assets are added to the dict.
+    """
     source_path = Path(path)
     source = source_path.read_bytes()
     if len(source) < SFIL_HEADER_SIZE or source[:4] != b"SFIL":
@@ -236,6 +261,22 @@ def read_sfil(
             )
         if asset_id in seen_ids:
             raise StreamFormatError(f"duplicate SFIL asset 0x{asset_id:016X}")
+
+        copy_digest = None
+        if known_copies is not None:
+            span_end = cursor + asset_header_size + stored_size
+            if span_end > len(source):
+                raise StreamFormatError(
+                    f"SFIL asset 0x{asset_id:016X} exceeds its source file"
+                )
+            copy_digest = hashlib.blake2b(source_view[cursor:span_end], digest_size=32).digest()
+            if known_copies.get(asset_id) == copy_digest:
+                # Identical stored copy of an asset decoded from another cell.
+                seen_ids.add(asset_id)
+                _check_stride(asset_id, source_path, asset_header_size, stored_size,
+                              asset_stride, first_asset_offset, cursor, len(source))
+                cursor += asset_stride
+                continue
 
         if stored_size == record.total_size and asset_header_size >= SFIL_HEADER_SIZE:
             data_start = cursor + asset_header_size
@@ -280,16 +321,10 @@ def read_sfil(
             )
         )
         seen_ids.add(asset_id)
-        minimum_stride = asset_header_size + stored_size
-        if (
-            asset_stride < minimum_stride
-            or asset_stride % first_asset_offset != 0
-            or cursor + asset_stride > len(source)
-        ):
-            raise StreamFormatError(
-                f"SFIL asset 0x{asset_id:016X} in {source_path} "
-                f"has invalid stride 0x{asset_stride:X}"
-            )
+        if copy_digest is not None:
+            known_copies.setdefault(asset_id, copy_digest)
+        _check_stride(asset_id, source_path, asset_header_size, stored_size,
+                      asset_stride, first_asset_offset, cursor, len(source))
         cursor += asset_stride
 
     missing = set(by_id) - seen_ids if require_all_records else set()
@@ -328,12 +363,16 @@ def load_district_stream(
 
     assets_by_id: dict[int, StreamAsset] = {}
     record_index = {record.asset_id: record for record in records}
+    # Cells repeat shared assets; identical stored copies are not decoded again
+    # (DownTown: ~1.5 GB of RefPack data for ~0.35 GB of unique assets).
+    known_copies: dict[int, bytes] = {}
     for stream_file in stream_files:
         for asset in read_sfil(
             stream_file,
             records,
             require_all_records=False,
             record_index=record_index,
+            known_copies=known_copies,
         ):
             asset_id = asset.record.asset_id
             previous = assets_by_id.get(asset_id)

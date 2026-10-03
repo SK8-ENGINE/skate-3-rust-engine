@@ -59,7 +59,7 @@ def character(game_root, stage, work, report, log, converted=None):
     (private/'game.json').write_text(json.dumps(game_manifest),encoding='utf-8')
 
 
-def environment(game_root, stage, work, report, log, converted=None):
+def environment(game_root, stage, work, report, log, converted=None, game_exe=None):
     private=stage/"assets/private"
     stock=private/"stock"
     report('Preparing retail sky domes')
@@ -78,9 +78,35 @@ def environment(game_root, stage, work, report, log, converted=None):
     attempt('skies',lambda assets:write_skies(game_root,assets,converted))
     from .render_parameters import convert as write_render_parameters
     attempt('parameters',lambda assets:write_render_parameters(assets,converted))
+    # Particle sprites (water splash; dust/leaf/... for later effects).
+    report('Extracting particle sprites')
+    from .particles import convert as write_particles
+    attempt('particles',lambda assets:write_particles(game_root,assets))
+    if game_exe is not None:
+        # Water/ocean animation table, held only in the executable.
+        report('Extracting the original water animation')
+        from .ocean_pca import convert as write_ocean_pca
+        attempt('ocean',lambda assets:write_ocean_pca(game_exe,game_root/'default.xex',assets,log))
     report('Extracting original travel destinations and location names')
     from .teleports import convert as write_teleports
     attempt('teleports',lambda assets:write_teleports(game_root,assets,converted))
     report('Preparing global foliage backdrops')
     from .backdrop import convert as write_backdrops
     attempt('backdrops',lambda assets:write_backdrops(game_root,assets,converted))
+
+
+def audio(game_root, stage, work, report, log, tools):
+    private=stage/"assets/private"
+    from .audio_export import VGMSTREAM_SHA, VGMSTREAM_URL, convert
+    from .optional_content import CONTENT_ERRORS, note
+    availability=private/'audio-availability.json'
+    report('Preparing game audio')
+    try:
+        try:vgmstream=engine.dependency(tools,'vgmstream-cli',VGMSTREAM_URL,VGMSTREAM_SHA,report)
+        except OSError as error:raise RuntimeError(f'Could not download the audio decoder: {error}') from error
+        convert(game_root,private,work/'audio',vgmstream,report,log)
+    except CONTENT_ERRORS as error:
+        if (private/'audio').exists():shutil.rmtree(private/'audio')
+        note(availability,'Game audio',error,report=report)
+        return
+    availability.unlink(missing_ok=True)

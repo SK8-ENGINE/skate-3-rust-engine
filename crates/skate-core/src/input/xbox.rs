@@ -2,6 +2,7 @@
 use super::controller::magnitude;
 
 /// Fields of the native Xbox state passed by value to 8296D5F8.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct XboxState {
     pub buttons: u16,
     pub triggers: [u8; 2],

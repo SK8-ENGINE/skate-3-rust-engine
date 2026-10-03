@@ -59,11 +59,18 @@ pub fn set_wipeout_drag(body:&mut SkeletonBody,drag:f32) {
 }
 ///82BE3998. Source uses cached physical-record positions before the live writes.
 pub fn special_surface(body:&mut SkeletonBody,height:f32) {
+    special_surface_where(body,height,|_|true);
+}
+/// `special_surface`, applied only to parts for which `floats(part)` holds.
+/// Other parts are treated as above the water (no push, light drag). Project
+/// addition for non-solid water: a part resting on a floor just under the
+/// surface must not be pushed up every step (docs/hails-additions/09-water.md).
+pub fn special_surface_where(body:&mut SkeletonBody,height:f32,floats:impl Fn(usize)->bool) {
     const WEIGHTS:[f32;23]=[1.7,1.5,1.2,1.0,1.0,1.0,1.2,1.0,1.0,1.0,
         1.2,1.0,1.0,1.0,0.5,0.5,0.5,0.6,0.5,0.5,0.5,0.6,1.0];
     for i in 1..24 {
         let depth=(height+0.1)-body.record.pose[i][3][1];
-        let drag=if depth>0.0 {
+        let drag=if depth>0.0 && floats(i) {
             body.apply_part_displacement(i,[0.0,depth.mul_add(0.6,0.1)*WEIGHTS[i-1],0.0,0.0]);
             0.1
         } else {0.005};

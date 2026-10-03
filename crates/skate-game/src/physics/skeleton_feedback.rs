@@ -84,6 +84,9 @@ pub(super) fn publish(
         physics.settings.step.simulation.time_step,
         p.flags_2472,
     );
+    // Water makes no contacts: classify the body from position instead,
+    // before the postphysics wipeout checks read this frame's feedback.
+    super::water::mark_skater(physics, skater);
 }
 
 fn publish_board_observations(

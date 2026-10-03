@@ -12,6 +12,38 @@ def saved_source(marker):
     if selected.is_file() or selected.is_dir():return selected
     return None
 
+LONG_PATHS_KEY=r'SYSTEM\CurrentControlSet\Control\FileSystem'
+
+def long_paths_enabled():
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,LONG_PATHS_KEY) as key:
+            return winreg.QueryValueEx(key,'LongPathsEnabled')[0]==1
+    except OSError:return False
+
+def enable_long_paths():
+    """Ask for elevation once to enable Win32 long paths; True only if this call enabled them."""
+    # Character roster work paths below data/installations exceed MAX_PATH for
+    # installs in deep folders. Declining UAC keeps setup running; only the
+    # affected optional characters are then reported unavailable.
+    if os.name!='nt' or long_paths_enabled():return False
+    import subprocess
+    command=("Start-Process reg.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "
+             f"'add','HKLM\\{LONG_PATHS_KEY}','/v','LongPathsEnabled','/t','REG_DWORD','/d','1','/f'")
+    subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',command],
+                   creationflags=subprocess.CREATE_NO_WINDOW)
+    return long_paths_enabled()
+
+def restart():
+    # Windows reads LongPathsEnabled once at process start.
+    import subprocess
+    env=os.environ.copy()
+    if getattr(sys,'frozen',False):
+        env['PYINSTALLER_RESET_ENVIRONMENT']='1'
+        command=[sys.executable,*sys.argv[1:]]
+    else:command=[sys.executable,str(Path(__file__).resolve()),*sys.argv[1:]]
+    return subprocess.call(command,env=env)
+
 def main():
     if len(sys.argv)>1 and sys.argv[1]=='--character-import':
         # Keep the importer inside the already versioned setup payload: even
@@ -34,6 +66,7 @@ def main():
     parser.add_argument('--game-exe',type=Path,required=True)
     parser.add_argument('--refresh',action='store_true')
     args=parser.parse_args()
+    if enable_long_paths():return restart()
     import tkinter as tk
     from tkinter import filedialog,messagebox,ttk
     from tools.asset_pipeline.customiser_setup import install
@@ -64,9 +97,9 @@ def main():
         def work():
             try:
                 installed_root=install(Path(iso),args.base,args.game_exe,lambda text:messages.put(('progress',text)),refresh=updating)
-                from tools.asset_pipeline.optional_content import summary
+                from tools.asset_pipeline.validation_report import summary
                 warnings=summary(installed_root)
-                messages.put(('done',f'Ready with {len(warnings)} unavailable components. Details: {installed_root / "setup-report.json"}' if warnings else 'Ready'))
+                messages.put(('done',f'Ready with {len(warnings)} warnings or unavailable components. Details: {installed_root / "setup-report.json"}' if warnings else 'Ready'))
             except Exception as error:
                 args.base.mkdir(parents=True,exist_ok=True)
                 (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
@@ -90,7 +123,7 @@ def main():
         while not messages.empty():
             kind,text=messages.get_nowait();status.set(text)
             if kind=='done':
-                if text!='Ready':messagebox.showwarning('Setup completed with unavailable content',text,parent=window)
+                if text!='Ready':messagebox.showwarning('Setup completed with warnings',text,parent=window)
                 running=False;success=True;progress.stop();window.destroy();return
             if kind=='error':
                 running=False;progress.stop();button.config(state='normal')

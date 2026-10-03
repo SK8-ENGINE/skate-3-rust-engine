@@ -1,0 +1,9 @@
+{
+  "id": "dev-water-test-teleport",
+  "api": 2,
+  "name": "Water Test Teleport (dev)",
+  "version": "0.1.0",
+  "author": "Hails",
+  "description": "Dev only, for branch gameplay/water: F2 University fountain basin, F3 University reservoir, F4 DownTown fountain, F7 DownTown Aletown canal drop the skater into the water; Shift+F2/F3/F4 stand on dry ground facing it. F5 toggles a position readout. F6 is the camera key.",
+  "entry": "main.lua"
+}

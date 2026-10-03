@@ -48,4 +48,35 @@ class StreamTests(unittest.TestCase):
                 read_sfil('fixture.xsf',[missing])
 
 
+    def test_identical_copies_from_other_cells_are_skipped_not_decoded(self):
+        raw,record=self.fixture()
+        known={}
+        with patch.object(Path,'read_bytes',return_value=raw):
+            first=read_sfil('a.xsf',[record],record_index={123:record},known_copies=known)
+            self.assertEqual(len(first),1)
+            self.assertIn(123,known)
+            with patch('skate3_streams._decode_section',side_effect=AssertionError('decoded a known copy')):
+                again=read_sfil('b.xsf',[record],record_index={123:record},known_copies=known,
+                                require_all_records=False)
+        self.assertEqual(again,[])
+
+    def test_differing_copies_are_still_decoded_for_the_conflict_check(self):
+        raw,record=self.fixture()
+        changed=bytearray(raw);changed[256]^=0xff
+        known={}
+        with patch.object(Path,'read_bytes',return_value=raw):
+            read_sfil('a.xsf',[record],known_copies=known)
+        with patch.object(Path,'read_bytes',return_value=bytes(changed)):
+            other=read_sfil('b.xsf',[record],known_copies=known)
+        self.assertEqual(len(other),1)
+        self.assertNotEqual(other[0].data,bytes(range(32)))
+
+    def test_duplicates_within_one_file_are_still_rejected_with_known_copies(self):
+        raw,record=self.fixture()
+        doubled=bytearray(raw[:384])+raw[128:384]
+        with patch.object(Path,'read_bytes',return_value=bytes(doubled)):
+            with self.assertRaisesRegex(StreamFormatError,'duplicate'):
+                read_sfil('a.xsf',[record],known_copies={})
+
+
 if __name__=='__main__':unittest.main()

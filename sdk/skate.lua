@@ -562,3 +562,56 @@ function sdk.graphs.read(graph) end
 ---@param index integer runtime ID from the catalog; zero-based
 ---@param enabled? boolean nil restores the original gate
 function sdk.graphs.set_enabled(graph, target, index, enabled) end
+
+-- World audio extension 1 (capability `world_audio`): publish traffic vehicles, pedestrians and
+-- skaters to the game's retail world audio, exactly as an engine system would (doc
+-- docs/hails-additions/15-world-audio.md). Keys belong to this mod; 16 objects per mod, 64 in all;
+-- an object not updated for 0.5 s is parked; everything is removed on disable / reload. The game
+-- decides who is audible with retail's limits (4 nearest cars within 40 m, 15 nearest peds within
+-- 50 m, footsteps for the nearest 3, one skater within 30 m; 8 / 24 / 3 with the opt-in
+-- non-retail "more audible" setting).
+---@class WorldAudioOptions
+---@field position? Vec3 world position (ignored while body is set)
+---@field velocity? Vec3 m/s; default: from the position change (give it for teleporting objects)
+---@field heading? number rad about +Y, 0 = +Z
+---@field body? string follow one of this mod's physics bodies (position, rotation, velocity)
+---@field engine? string traffic: aud_traffic_engine record (c01_family01, c03_sports01, c04_taxi01, c05_truck01, c00_heavy01, c06_sports02, c07_family02, c08_family03); unknown = silent
+---@field speed? number traffic / lite skater: m/s (default |velocity|)
+---@field load? number traffic: the driver's signed acceleration m/s² (default: from the speed change; hard stop ≈ -15)
+---@field horn? integer traffic: 0 none, 1..5 horn kind, 6 alarm (prefer the events)
+---@field skidding? boolean traffic: the tyres skid
+---@field voice? integer ped: speech voice id 41..96 (0 none)
+---@field shoe_class? integer ped: 1..5 (default 2; 1 is silent)
+---@field weight? integer ped: 1..5 (default 1)
+---@field close_range? boolean ped: a security guard's close-range footstep levels
+---@field feet? boolean[] ped: {foot A planted, foot B planted}
+---@field materials? integer[] ped: audio surface materials under the feet (default 0)
+---@field footsteps? boolean ped: footsteps on (default: retail's 3-nearest rule)
+---@field source? string skater (spawn only): 'lite' (default) or 'state_log:<name>' (a ghost replaying logs/<name>.tsv of this mod or SKATE_AUDIO_STATE_LOGS/<name>.tsv)
+---@field from? number ghost: window start (s)
+---@field seconds? number ghost: window length (s, default 20), looped
+---@field wheels? boolean[] lite skater: wheels down {FL, FR, RL, RR}
+---@field material? integer lite skater: material under the board (default: the ground's)
+---@field grinding? boolean lite skater
+---@field grind_material? integer lite skater
+---@field air? boolean lite skater: in the air
+sdk.world_audio = {}
+---@param key string
+---@param kind 'traffic'|'ped'|'skater'
+---@param opts? WorldAudioOptions
+function sdk.world_audio.spawn(key, kind, opts) end
+---Merge fields into the object's description (a field of another kind is an error).
+---@param key string
+---@param opts WorldAudioOptions
+function sdk.world_audio.update(key, opts) end
+---@param key string
+---@param event 'horn'|'alarm'|'speech'
+---@param opts? {kind?:integer, seconds?:number, value?:string|integer} horn: kind 1..5 for seconds; alarm: retail's 8 s; speech: value name (warn, cheer, slam, flee, nearby, DoWarning, LongCheer, ...) or number
+function sdk.world_audio.event(key, event, opts) end
+---@param key string
+function sdk.world_audio.remove(key) end
+---@param key string
+---@return {kind:string, audible:boolean, instance?:integer, parked:boolean}|nil
+function sdk.world_audio.read(key) end
+---@return {more_audible:boolean, instances:{traffic:integer,peds:integer,skaters:integer}, published:table, audible:table}
+function sdk.world_audio.info() end

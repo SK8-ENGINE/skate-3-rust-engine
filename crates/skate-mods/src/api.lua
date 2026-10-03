@@ -287,6 +287,33 @@ function sdk.audio.stop(key, fade_out)
 end
 function sdk.audio.stop_all() submit{kind="audio_stop_all"} end
 
+-- World audio extension 1 (backward-compatible with API 2): publish traffic vehicles, peds and
+-- skaters to the game's retail world audio (the same path engine systems use). Keys are scoped
+-- to the calling mod; 16 objects per mod, 64 in all; an object not updated for 0.5 s is parked;
+-- everything is removed when the mod is disabled or reloaded. The retail limits decide which
+-- objects sound (4 nearest cars within 40 m, 15 nearest peds within 50 m, 1 skater within 30 m).
+sdk.world_audio = { version = 1 }
+function sdk.world_audio.spawn(key, kind, opts)
+    submit{kind="world_audio_spawn",key=key,object=kind,options=opts or {}}
+end
+function sdk.world_audio.update(key, opts)
+    submit{kind="world_audio_update",key=key,options=opts or {}}
+end
+-- event: 'horn' {kind=1..5, seconds=s}, 'alarm' (retail's 8 s), 'speech' {value=name or number}
+function sdk.world_audio.event(key, event, opts)
+    submit{kind="world_audio_event",key=key,event=event,options=opts or {}}
+end
+function sdk.world_audio.remove(key) submit{kind="world_audio_remove",key=key} end
+-- {kind=..., audible=bool, instance=n or nil} for one of this mod's objects (nil if unknown).
+function sdk.world_audio.read(key)
+    local owners = as_table(sdk.snapshot.world_audio) or {}
+    return (owners[sdk.mod_id] or {})[key]
+end
+-- {more_audible=bool, instances={traffic=4, peds=15, skaters=1}, published={...}}
+function sdk.world_audio.info()
+    return as_table(sdk.snapshot.world_audio_info) or {more_audible=false,instances={traffic=4,peds=15,skaters=1}}
+end
+
 sdk.player = {}
 function sdk.player.suspend(suspended) submit{kind="player_suspend",suspended=suspended} end
 function sdk.player.physics() return as_table(sdk.snapshot.player_physics) or {} end

@@ -38,7 +38,7 @@ pub(crate) struct AnimationSource {
     evaluator: Arc<PoseEvaluator>,
 }
 impl AnimationSource {
-    fn load(root: &Path) -> Result<Arc<Self>, String> {
+    pub(crate) fn load(root: &Path) -> Result<Arc<Self>, String> {
         let banks = skate_data::animation_banks::AnimationBanks::load(root)?;
         let mut evaluator = PoseEvaluator::from_banks(&banks)?;
         evaluator.load_authored_clips(root)?;

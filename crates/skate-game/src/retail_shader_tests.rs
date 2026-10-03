@@ -18,6 +18,9 @@ use std::collections::HashMap;
 fn validate(source: &str, extras: &[&str]) -> naga::Module {
     let mut defs = HashMap::from([("MATERIAL_BIND_GROUP".into(), ShaderDefValue::UInt(3))]);
     for &name in [
+        // Bevy's mesh pipeline sets this for every mesh with positions
+        // (bevy_pbr mesh.rs); forward_io's Vertex only declares it then.
+        "VERTEX_POSITIONS",
         "VERTEX_UVS_A",
         "VERTEX_UVS_B",
         "VERTEX_TANGENTS",

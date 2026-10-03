@@ -17,6 +17,7 @@ mod camera_stream;
 pub(crate) use participation::{player_suspended, peer_suspended};
 mod session;
 mod volumes;
+mod world_audio;
 mod capture;
 pub(crate) mod player_physics;
 
@@ -198,6 +199,7 @@ impl Plugin for ModdingPlugin {
         .init_resource::<ModMenu>();
         menu::install(app);
         audio::install(app);
+        world_audio::install(app);
         graphics_dynamic::install(app);
         capture::install(app);
         app.add_systems(
@@ -528,6 +530,8 @@ fn snapshot_ro(world: &World, mods: &mut Mods, camera: Option<[f32; 3]>) -> serd
         "volumes": mods.manager.packages.keys().map(|owner| {
             (owner.clone(), volumes::snapshot(mods, owner, &local_id, &observation::local(world), &mods.skater_remote))
         }).collect::<serde_json::Map<String, Value>>(),
+        "world_audio": mods.manager.packages.keys().map(|owner| (owner.clone(), world_audio::snapshot(world, owner))).collect::<serde_json::Map<String, Value>>(),
+        "world_audio_info": world_audio::info(world),
         "session": session::lua(mods, net.get("active").and_then(Value::as_bool).unwrap_or(false), &local_id, host, &host_id, &players),
         "attach": mods.attach.as_ref().map(|a| json!({"body": a.body, "owner": a.owner})),
         "detach_error": mods.detach_error,
@@ -730,6 +734,7 @@ fn update(world: &mut World) {
 fn clear_runtime(world: &mut World, mods: &mut Mods) {
     replication::reset(world,mods);
     audio::clear(world);
+    world_audio::clear(world);
     graphics_dynamic::clear(world);
     canvas::clear_owner(world, &mut mods.canvases, None);
     detach_player(world, mods, true);
@@ -796,6 +801,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
         mods.command_results.retain(|(owner,_),_|owner!=id);
         mods.input_overrides.retain(|_,(owner,_)|owner!=id);
         audio::stop_owner(world, id, true);
+        world_audio::clear_owner(world, id);
         graphics_dynamic::clear_owner(world, id);
         volumes::clear_owner(world, mods, id);
         capture::clear_owner(world, id);
@@ -868,6 +874,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
             mods.manager.fail(&id, e);
             mods.input_overrides.retain(|_,(owner,_)|owner!=&id);
             audio::stop_owner(world, &id, true);
+            world_audio::clear_owner(world, &id);
             graphics_dynamic::clear_owner(world, &id);
             volumes::clear_owner(world, mods, &id);
             capture::clear_owner(world, &id);
@@ -893,6 +900,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
             mods.manager.fail(&id, e);
             mods.input_overrides.retain(|_,(owner,_)|owner!=&id);
             audio::stop_owner(world, &id, true);
+            world_audio::clear_owner(world, &id);
             graphics_dynamic::clear_owner(world, &id);
             volumes::clear_owner(world, mods, &id);
             capture::clear_owner(world, &id);
@@ -962,6 +970,10 @@ fn apply_one(
         Command::AudioUpdate { key, options } => audio::update_voice(world, id, &key, options),
         Command::AudioStop { key, fade_out } => audio::stop(world, id, &key, fade_out),
         Command::AudioStopAll {} => audio::stop_owner(world, id, false),
+        Command::WorldAudioSpawn { key, object, options } => world_audio::spawn(world, mods, id, key, object, options)?,
+        Command::WorldAudioUpdate { key, options } => world_audio::update(world, mods, id, &key, options)?,
+        Command::WorldAudioEvent { key, event, options } => world_audio::event(world, id, &key, &event, options)?,
+        Command::WorldAudioRemove { key } => world_audio::remove(world, id, &key),
         Command::GraphicsMeshBuffer { key, options } => {
             graphics_dynamic::mesh_buffer(world, mods, id, key, options)?;
         }

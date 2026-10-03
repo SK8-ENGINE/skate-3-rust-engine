@@ -9,10 +9,14 @@ pub(crate) struct Config {
     pub map_path: Option<PathBuf>,
     pub difficulty: crate::difficulty::Difficulty,
     pub check_assets: bool,
+    /// `--validate-maps`: validate map paths read from stdin (see map_validation).
+    pub validate_maps: bool,
     pub start_paused: bool,
     pub multiplayer: crate::multiplayer::Options,
     pub map_fingerprint: u64,
     pub teleport: Option<String>,
+    /// `--mute`: no game or mod audio (game_audio).
+    pub mute: bool,
 }
 
 impl Config {
@@ -24,10 +28,12 @@ impl Config {
             map_path: None,
             difficulty: crate::difficulty::Difficulty::default(),
             check_assets: false,
+            validate_maps: false,
             start_paused: false,
             multiplayer: crate::multiplayer::Options::default(),
             map_fingerprint: 0,
             teleport: None,
+            mute: false,
         };
         let mut difficulty_override = None;
         let mut explicit_map = false;
@@ -70,7 +76,10 @@ impl Config {
                 }
                 Some("--test-world") => { explicit_map = true; config.map = None; config.map_path = None; }
                 Some("--check-assets") => config.check_assets = true,
+                // Maps arrive on stdin; never load the saved default map.
+                Some("--validate-maps") => { config.validate_maps = true; explicit_map = true; }
                 Some("--start-paused") => config.start_paused = true,
+                Some("--mute") => config.mute = true,
                 Some("--teleport") => config.teleport = Some(args.next().ok_or("--teleport requires a destination ID")?.to_string_lossy().into_owned()),
                 Some("--difficulty") => {
                     let value = args.next().ok_or("--difficulty requires easy, normal, hardcore, motorized or custom")?;
@@ -85,7 +94,7 @@ impl Config {
                 }
                 _ => {
                     return Err(format!(
-                        "Unknown argument {arg:?}. Usage: skate3rust [--assets DIRECTORY] [--map MAP.skate | --test-world] [--difficulty easy|normal|hardcore|motorized|custom] [--verify CAPTURE.png] [--check-assets] [--start-paused]"
+                        "Unknown argument {arg:?}. Usage: skate3rust [--assets DIRECTORY] [--map MAP.skate | --test-world] [--difficulty easy|normal|hardcore|motorized|custom] [--verify CAPTURE.png] [--check-assets | --validate-maps] [--start-paused] [--mute]"
                     ));
                 }
             }
@@ -103,6 +112,9 @@ impl Config {
                 config.map = Some(skate_data::skate_map::SkateMap::load(&path)?);
                 config.map_path = Some(path.canonicalize().map_err(|e| e.to_string())?);
             }
+        }
+        if config.validate_maps && (config.map.is_some() || config.check_assets) {
+            return Err("--validate-maps reads maps from stdin; do not combine it with --map or --check-assets".into());
         }
         config.map_fingerprint = map_fingerprint(config.map_path.as_deref())?;
         if config.multiplayer.direct.is_some() && config.multiplayer.session==0 {return Err("Direct multiplayer requires --net-session (a nonzero number shared by both players)".into());}

@@ -42,6 +42,7 @@ mod animation_input;
 mod animation_phase;
 mod biped_ground;
 mod frame;
+pub(crate) mod startup_check;
 #[cfg(debug_assertions)]
 mod dev_trace;
 mod grind;
@@ -67,6 +68,7 @@ mod skeleton_grind_air;
 mod teleport_state;
 mod wipeout;
 mod wipeout_states;
+pub(crate) mod water;
 mod respawn;
 //TEMPORARY opt-in observations for the bottom-up source audit.
 mod biped_air;
@@ -406,6 +408,13 @@ impl Plugin for PhysicsPlugin {
     }
 }
 
+/// Collision+16 low 16 bits: the board's surface vote (82C08818, 12 when a board
+/// contact is water), as respawn reads it. Read-only, for game_audio (the audio
+/// record's `+813`, the board in water).
+pub(crate) fn board_surface(physics: &GamePhysics) -> u32 {
+    ground_runtime::active_surface(&physics.riding, &physics.board) & 0xffff
+}
+
 pub(crate) fn advance(
     mut physics: ResMut<GamePhysics>,
     mut skater: ResMut<SkaterRuntime>,
@@ -483,6 +492,8 @@ impl GamePhysics {
             self.processed_flags_2468,
             self.settings.step.simulation.time_step,
         )?;
+        // Water makes no contacts: classify the board from position instead.
+        water::mark_board(self);
         let partial = skateboard_controller::partial_request(
             &skater.skateboard_controller,
             &self.riding.ground,
@@ -556,6 +567,14 @@ mod air_tests;
 #[cfg(test)]
 #[path = "tests/wipeout_playback.rs"]
 mod wipeout_tests;
+
+#[cfg(test)]
+#[path = "tests/water_drop.rs"]
+mod water_drop_tests;
+
+#[cfg(test)]
+#[path = "tests/audio_state_capture.rs"]
+mod audio_state_capture_tests;
 
 fn present(
     physics: Res<GamePhysics>,

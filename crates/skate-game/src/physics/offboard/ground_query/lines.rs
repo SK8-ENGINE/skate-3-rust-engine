@@ -80,7 +80,11 @@ pub(super) fn query_pools(
                         fraction: 0.,
                         volume_parameter: [0.; 3],
                     };
-                    if triangle_segment(&mut hit, line.start, delta, vertices, line.radius, 0.) {
+                    if triangle_segment(&mut hit, line.start, delta, vertices, line.radius, 0.)
+                        // Deep water is not solid (physics/water.rs): no on-foot support.
+                        && !(skate_core::physics::board_world::is_water_tag(u32::from(packed_surface))
+                            && mesh.world.is_some_and(|w| !w.water_shallow_at(hit.position)))
+                    {
                         // Native outer leaf uses fsel, including its unordered choice.
                         let lower = if -hit.fraction >= 0. {
                             0.

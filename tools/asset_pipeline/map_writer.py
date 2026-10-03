@@ -45,16 +45,67 @@ def write_textures(output,root,textures):
             if name is not None:pending.append(pool.submit(packed_texture,root,name,textures[name]))
 def normalise(a):return a/np.maximum(np.linalg.norm(a,axis=1,keepdims=True),1e-20)
 
+GROUND_HEADROOM=2.5  # clear metres above a spawn surface
+GROUND_RADIUS=25.    # neighbourhood searched for lower ground
+GROUND_STEP=1.       # a surface this far above nearby ground is a roof/platform
+GROUND_CANDIDATES=512
+# Only compact districts (skate parks) use ground_spawn. City districts are
+# kilometres wide with collision under the streets, where "lowest surface"
+# is underground; they keep the original rule.
+GROUND_MAX_EXTENT=500.
+
+def ground_spawn(triangles):
+    """Walkable ground nearest the area-weighted centre of flat surfaces.
+
+    Retail collision winding is not consistent (some park floors face down),
+    so orientation is ignored. A candidate must be the lowest surface at its
+    XZ, have headroom, and have no ground more than GROUND_STEP lower nearby;
+    that rejects roofs and floating panels at a park's edge. Returns None if
+    no candidate qualifies."""
+    t=np.asarray(triangles,dtype=np.float64)
+    a,b,c=t[:,0],t[:,1],t[:,2]
+    ab=b-a;ac=c-a
+    cross=np.cross(ab,ac);length=np.linalg.norm(cross,axis=1)
+    flat=(length>=4)&(np.abs(cross[:,1])>=.9*length)
+    if not flat.any():return None
+    points=((a+b+c)/3)[flat];weights=length[flat]
+    middle=(points[:,[0,2]]*weights[:,None]).sum(0)/weights.sum()
+    order=np.argsort(((points[:,[0,2]]-middle)**2).sum(1))
+    det=ab[:,0]*ac[:,2]-ac[:,0]*ab[:,2]
+    low=np.minimum(np.minimum(a,b),c);high=np.maximum(np.maximum(a,b),c)
+    flat_low=low[flat];flat_high=high[flat]
+    for index in order[:GROUND_CANDIDATES]:
+        x,y,z=points[index]
+        # Extents, not centres: one large floor triangle can reach the candidate.
+        near=((flat_low[:,0]<=x+GROUND_RADIUS)&(flat_high[:,0]>=x-GROUND_RADIUS)
+              &(flat_low[:,2]<=z+GROUND_RADIUS)&(flat_high[:,2]>=z-GROUND_RADIUS))
+        if flat_low[near,1].min()<y-GROUND_STEP:continue
+        under=((low[:,0]<=x)&(x<=high[:,0])&(low[:,2]<=z)&(z<=high[:,2])&(np.abs(det)>=1e-12)).nonzero()[0]
+        d=det[under];dx=x-a[under,0];dz=z-a[under,2]
+        first=(dx*ac[under,2]-ac[under,0]*dz)/d;second=(ab[under,0]*dz-dx*ab[under,2])/d
+        inside=(first>=-1e-5)&(second>=-1e-5)&(first+second<=1.00001)
+        heights=(a[under,1]+first*ab[under,1]+second*ac[under,1])[inside]
+        if heights.size and heights.min()<y-.05:continue
+        above=heights[heights>y+.05]
+        if above.size and above.min()-y<GROUND_HEADROOM:continue
+        return (float(x),float(y)+1.,float(z))
+    return None
+
 class SpawnSelector:
-    """Keep the original triangle search order while consuming decoded meshes."""
+    """University keeps its authored XZ. Compact districts prefer ground_spawn;
+    large ones, and parks where it finds nothing, use the original
+    nearest-origin upward triangle."""
     def __init__(self, district_name):
         self.university=district_name=='DIST_University'
         self.best=None
+        self.triangles=[]
 
     def consider(self, meshes):
         university=self.university;best=self.best
         for mesh in meshes:
             if not mesh.triangles:continue
+            if not university:
+                self.triangles.append(np.asarray([(tri.a,tri.b,tri.c) for tri in mesh.triangles],dtype=np.float32))
             if university and not (mesh.bounds_min[0]<=330<=mesh.bounds_max[0] and mesh.bounds_min[2]<=-710<=mesh.bounds_max[2]):continue
             if not university and best is not None:
                 nearest=sum(max(mesh.bounds_min[j],-mesh.bounds_max[j],0.)**2 for j in (0,2))
@@ -83,6 +134,11 @@ class SpawnSelector:
         self.best=best
 
     def result(self, map_name):
+        if self.triangles:
+            triangles=np.concatenate(self.triangles)
+            span=triangles.reshape(-1,3).max(0)-triangles.reshape(-1,3).min(0)
+            ground=ground_spawn(triangles) if max(span[0],span[2])<=GROUND_MAX_EXTENT else None
+            if ground is not None:return ground
         if self.best is None:raise ValueError('No supported spawn surface in '+map_name)
         return self.best[1]
 
@@ -93,17 +149,14 @@ def spawn_point(manifest,root):
     for entry in manifest['simulation_assets']:
         if not entry.get('collision_meshes'):continue
         bounds=[mesh['bounds'] for mesh in entry['collision_meshes']]
+        # Other districts need every mesh: ground_spawn compares all surfaces.
         if selector.university:
             if not any(b['minimum'][0]<=330<=b['maximum'][0] and
                        b['minimum'][2]<=-710<=b['maximum'][2] for b in bounds):continue
-        elif selector.best is not None:
-            def nearest_square(b):
-                return sum(max(b['minimum'][j],-b['maximum'][j],0.)**2 for j in (0,2))
-            if min(map(nearest_square,bounds))>selector.best[0]+.01:continue
         selector.consider(decode_rx2_clustered_meshes((root/entry['rx2']).read_bytes()))
     return selector.result(manifest['map_name'])
 
-def write(manifest_path,output,collision,report=lambda _:None, *, render_only=False, prepared_spawn=None):
+def write(manifest_path,output,collision,report=lambda _:None, *, render_only=False, prepared_spawn=None, prepared_heading=0.):
     root=manifest_path.parent;m=json.loads(manifest_path.read_text());textures=m['textures']
     ids={name:i+1 for i,name in enumerate(sorted(textures))}
     excluded=set(m['normal_texture_policy']['excluded_texture_ids'])
@@ -171,7 +224,8 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
                  1.,.96,.86,.42,.56,.92,1.,.18,.34,.10,1.,1.,1.]
     rails=m['grind_splines'];output.parent.mkdir(parents=True,exist_ok=True)
     with output.open('wb') as f:
-        f.write(b'SKATE14\0');u(f,0x12345678);string(f,m['map_name']);floats(f,*spawn,0.,*environment)
+        # Heading (radians about +Y; forward = (sin h, 0, cos h)) follows the spawn.
+        f.write(b'SKATE14\0');u(f,0x12345678);string(f,m['map_name']);floats(f,*spawn,0. if render_only else prepared_heading,*environment)
         u(f,nm,len(ids),nv,ni,0,len(rails),0,0,0);f.write(mats.getvalue())
         write_textures(f,root,textures)
         stored(f,vertices.getvalue());stored(f,indices.getvalue());stored(f,b'')

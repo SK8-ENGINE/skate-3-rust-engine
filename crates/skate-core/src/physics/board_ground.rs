@@ -46,6 +46,13 @@ pub struct WheelLineState {
     pub normals: [Vector3; 4],
     pub distances: [f32; 4],
     pub physics_surfaces: [u32; 4],
+    /// Audio material (surface tag bits 0..6, `& 0x7F`) per wheel, 0 on a miss. Not
+    /// part of 82C079E0; kept for the engine's rolling sound.
+    pub audio_surfaces: [u32; 4],
+    /// Seam pattern (surface tag bits 12..15, `>> 12 & 0xF`) per wheel, 0 on a miss: the
+    /// audio state's `+636..+648` (82C079E0 stores it next to the material). Engine-side input
+    /// for the rolling bed's seam-pattern gain envelope and `Class_Seams`.
+    pub seam_patterns: [u32; 4],
     pub minimum_distance: f32,
 }
 impl Default for WheelLineState {
@@ -55,6 +62,8 @@ impl Default for WheelLineState {
             normals: [UP; 4],
             distances: [0.0; 4],
             physics_surfaces: [0; 4],
+            audio_surfaces: [0; 4],
+            seam_patterns: [0; 4],
             minimum_distance: 0.0,
         }
     }
@@ -66,6 +75,8 @@ impl WheelLineState {
         self.minimum_distance = WHEEL_LINE_LENGTH;
         for (i, hit) in hits.into_iter().enumerate() {
             self.physics_surfaces[i] = 0;
+            self.audio_surfaces[i] = 0;
+            self.seam_patterns[i] = 0;
             if let Some(hit) = hit {
                 let distance = hit.fraction * WHEEL_LINE_LENGTH;
                 self.minimum_distance = if distance - self.minimum_distance >= -0.0 {
@@ -76,6 +87,8 @@ impl WheelLineState {
                 self.normals[i] = hit.normal;
                 self.distances[i] = distance;
                 self.physics_surfaces[i] = (hit.surface_tag >> 7) & 31;
+                self.audio_surfaces[i] = hit.surface_tag & 0x7F;
+                self.seam_patterns[i] = (hit.surface_tag >> 12) & 0xF;
             }
         }
     }
@@ -122,6 +135,9 @@ pub struct BoardGroundState {
     /// Angular drag: S3 postphysics82C08634 writes wheel inertia+36;
     /// paired S2 postphysics82B372E0 names this mAngularDrag.
     pub wheel_angular_drag: [f32; 4],
+    /// CollisionInfo+4/+8/+12: the trucks' and deck's last contact audio surface (tag & 0x7F,
+    /// 0 without contact this frame), read by the audio state as materials +652..+660.
+    pub part_audio_surfaces: [u32; 3],
 }
 impl Default for BoardGroundState {
     fn default() -> Self {
@@ -138,6 +154,7 @@ impl Default for BoardGroundState {
             collision_flags: 0,
             valid_wheel_normals: [false; 4], part_contact_count: 0,
             wheel_contact_count: 0, time_without_wheel_contact: 0.0, wheel_angular_drag: [0.0; 4],
+            part_audio_surfaces: [0; 3],
         }
     }
 }
@@ -179,6 +196,7 @@ impl BoardGroundState {
         self.collision_flags &= 0x01ff_ffff;
         self.overall_normal = UP;
         self.valid_wheel_normals.fill(true);
+        self.part_audio_surfaces = [0; 3];
         let mut highest_y = -2.0;
         let mut highest_part = None;
         //82C07E24..30 seeds min/max; only deck reports enter82C07EAC..CC.
@@ -211,6 +229,7 @@ impl BoardGroundState {
             }
             if i >= 4 {
                 surfaces[i] = surface; //82C081B4..81E0, last report wins.
+                self.part_audio_surfaces[i - 4] = u32::from(report.other_surface) & 0x7F;
             }
             let contact = &mut self.parts[i];
             if !contact.in_contact || report.normal.y > contact.normal.y {

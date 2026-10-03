@@ -616,13 +616,13 @@ mod tests {
         world.insert_resource(crate::config::Config {
             asset_root: "unused".into(), verification_capture: None,
             map: None, map_path: None, difficulty: crate::difficulty::Difficulty::Hardcore,
-            check_assets: false, start_paused: false, teleport: None,
+            check_assets: false, validate_maps: false, start_paused: false, teleport: None, mute: false,
             multiplayer: Default::default(), map_fingerprint: 0,
         });
         world.insert_resource(crate::retail_render::RetailScene(false));
         world.init_resource::<Assets<crate::customiser_material::SkaterMaterial>>();
         world.insert_resource(crate::retail_render::FrameStateData {
-            shadow: Vec4::ONE, clock: Vec4::ONE, pca: [Vec4::ONE; 7],
+            shadow: Vec4::ONE, clock: Vec4::ONE, pca: [Vec4::ONE; 7], pca_slow: [Vec4::ONE; 7],
         });
         let material = Handle::<StandardMaterial>::default();
         let player = world.spawn((

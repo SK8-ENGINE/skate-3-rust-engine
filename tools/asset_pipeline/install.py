@@ -6,19 +6,47 @@ from tools.owned_game.big import BigArchive
 
 TOOLS=Path(__file__).resolve().parents[1]
 
+GIB=1024**3
+
+def available_memory():
+    """Available physical memory in bytes, or None where it cannot be queried."""
+    if os.name!='nt':return None
+    import ctypes
+    class Memory(ctypes.Structure):
+        _fields_=[('length',ctypes.c_ulong),('load',ctypes.c_ulong)]+[(name,ctypes.c_ulonglong) for name in
+            ('total','available','page_total','page_available','virtual_total','virtual_available','extended')]
+    memory=Memory();memory.length=ctypes.sizeof(memory)
+    return memory.available if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)) else None
+
 def map_workers():
     count=min(3,max(1,(os.cpu_count() or 1)//2))
-    if os.name=='nt':
-        import ctypes
-        class Memory(ctypes.Structure):
-            _fields_=[('length',ctypes.c_ulong),('load',ctypes.c_ulong)]+[(name,ctypes.c_ulonglong) for name in
-                ('total','available','page_total','page_available','virtual_total','virtual_available','extended')]
-        memory=Memory();memory.length=ctypes.sizeof(memory)
-        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):
-            # Reserve memory for the desktop; each map and its loader can
-            # briefly hold several copies of geometry and textures.
-            count=min(count,max(1,(memory.available-2*1024**3)//(3*1024**3)))
+    available=available_memory()
+    if available is not None:
+        # Reserve memory for the desktop; each map and its loader can
+        # briefly hold several copies of geometry and textures.
+        count=min(count,max(1,(available-2*GIB)//(3*GIB)))
     return count
+
+def overlap_customiser(workers):
+    """Run the character customiser beside the map jobs only with room for one
+    more 3 GiB slot on top of the map workers and the 2 GiB desktop reserve."""
+    available=available_memory()
+    return available is None or available>=2*GIB+(workers+1)*3*GIB
+
+class Background:
+    """Run an action on a thread; join() waits and re-raises its exception."""
+    def __init__(self,action,name):
+        import threading
+        self.error=None
+        def target():
+            try:action()
+            except BaseException as error:self.error=error
+        self.thread=threading.Thread(target=target,name=name,daemon=True)
+        self.thread.start()
+
+    def join(self):
+        self.thread.join()
+        if self.error is not None:raise self.error
 XISO_URL='https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso-Win64_Release.zip'
 XISO_SHA='fec88d03c7efd6205ab09be4abba70c0afd0eb27a5709f0a6235b828ba5ac11e'
 
@@ -107,12 +135,13 @@ def dependency(cache,name,url,sha,report):
     if executable is None:raise RuntimeError('Missing downloaded tool: '+name)
     return executable
 
-def run(args,log,report):
+def spawn(args,**popen):
     kwargs={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
     external=os.name=='nt' and getattr(sys,'frozen',False) and Path(args[0]).resolve()!=Path(sys.executable).resolve()
     if external:
         # External tools and the game must load their own libraries, not
         # the setup bundle's DLL directory inherited by child processes.
+        # SetDllDirectoryW is process-wide: only spawn external tools from one thread.
         import ctypes
         ctypes.windll.kernel32.SetDllDirectoryW(None)
         env=os.environ.copy()
@@ -121,14 +150,93 @@ def run(args,log,report):
                                    if p and not Path(p).resolve().is_relative_to(bundle))
         kwargs['env']=env
     try:
-        child=subprocess.Popen([str(a) for a in args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
-                               text=True,encoding='utf-8',errors='replace',**kwargs)
+        return subprocess.Popen([str(a) for a in args],text=True,encoding='utf-8',errors='replace',**kwargs,**popen)
     finally:
         if external:ctypes.windll.kernel32.SetDllDirectoryW(sys._MEIPASS)
+
+def run(args,log,report):
+    child=spawn(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
     with child as process:
         for line in process.stdout:
             log.write(line);log.flush()
         if process.wait():raise RuntimeError('Conversion failed. See '+str(log.name))
+
+class MapValidator:
+    """One `skate3rust --validate-maps` process (crates/skate-game/src/map_validation.rs).
+
+    Shared stock data loads once, so each map costs well under a second instead
+    of a full --check-assets launch. Requests are one path (or TEST_WORLD) per
+    line; each answer is one `SKATE_MAP_CHECK {json}` stdout line. Game logs go
+    to stderr and are copied to the setup log. Use from one thread only.
+    """
+    READY='SKATE_VALIDATOR_READY'
+    RESULT='SKATE_MAP_CHECK '
+
+    def __init__(self,args,log):
+        import threading
+        self.process=spawn(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        self.log=log;self.lock=threading.Lock()
+        def copy_stderr():
+            with self.process.stderr as stream:
+                for line in stream:
+                    with self.lock:log.write(line);log.flush()
+        threading.Thread(target=copy_stderr,daemon=True).start()
+        ready=self.process.stdout.readline()
+        if not ready.startswith(self.READY):
+            self.close()
+            raise RuntimeError('Map validator did not start'+(f': {ready.strip()}' if ready.strip() else ''))
+        self.write(ready)
+
+    def write(self,line):
+        with self.lock:self.log.write(line if line.endswith('\n') else line+'\n');self.log.flush()
+
+    def check(self,request):
+        """Return the result dict; RuntimeError if the validator is gone."""
+        if '\n' in str(request) or '\r' in str(request):raise ValueError('Invalid map path')
+        try:
+            self.process.stdin.write(f'{request}\n');self.process.stdin.flush()
+            while True:
+                line=self.process.stdout.readline()
+                if not line:break
+                self.write(line)
+                if line.startswith(self.RESULT):return json.loads(line[len(self.RESULT):])
+        except (OSError,ValueError) as error:
+            raise RuntimeError(f'Map validator failed: {error}') from error
+        raise RuntimeError(f'Map validator exited (code {self.process.poll()})')
+
+    def close(self):
+        try:self.process.stdin.close()
+        except OSError:pass  # already exited: the pipe is broken
+        try:self.process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            self.process.kill();self.process.wait()
+        self.process.stdout.close()
+
+def start_validator(game_exe,assets,log,report):
+    """MapValidator, or None (older game exe / start failure: use --check-assets)."""
+    try:
+        validator=MapValidator([game_exe,'--assets',assets,'--validate-maps'],log)
+    except (OSError,RuntimeError) as error:
+        report(f'Map validator unavailable ({error}); validating with --check-assets per map')
+        return None
+    import weakref
+    # Never leave the process behind if setup fails before closing it.
+    weakref.finalize(validator,validator.process.kill)
+    return validator
+
+def record_validation(private,entry,result,report):
+    """Store non-blocking findings as map-status/<map>-validation.json (status warning)."""
+    from .setup_state import atomic_json
+    path=private/'map-status'/(entry['name']+'-validation.json')
+    if result is None:return
+    entry.setdefault('phase_seconds',{})['validate']=round(result['seconds'],3)
+    if result['warnings']:
+        path.parent.mkdir(parents=True,exist_ok=True)
+        atomic_json(path,{'version':1,'component':entry['name']+' map checks','status':'warning',
+                          'warnings':result['warnings']})
+        report(f"{entry['name']}: map check warnings: {'; '.join(result['warnings'])}")
+    else:
+        path.unlink(missing_ok=True)
 
 def task(script,*args):
     if getattr(sys,'frozen',False):return [sys.executable,'--task',str(script),*map(str,args)]
@@ -174,7 +282,13 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
     build_archive(manifest_path,collision)
     finished('collision_archive')
     final=maps/(label+'.skate')
-    write_map(manifest_path,final,collision,report,prepared_spawn=spawn.result(label))
+    # Authored retail start (map_starts.py) when _install found one; else geometry.
+    starts=work/'map-starts.json'
+    start=json.loads(starts.read_text(encoding='utf-8')).get(district) if starts.is_file() else None
+    if start:report(f"{label}: authored start {start['locator']} ({start['source']})")
+    write_map(manifest_path,final,collision,report,
+              prepared_spawn=tuple(start['position']) if start else spawn.result(label),
+              prepared_heading=start['heading'] if start else 0.)
     finished('write_map')
     from .dynamic_props import export as write_props
     caches=list((work/'dmo/cache').glob('DMO_*'))
@@ -190,9 +304,7 @@ def convert_map(archive,work,maps,stage,game_exe,log,report):
         placed,unresolved=0,0
     finished('props')
     report(f'{label}: placed {placed} authored DMO instances, {unresolved} unresolved templates')
-    report('Checking converted map: '+label)
-    run([game_exe,'--assets',stage/'assets','--map',final,'--check-assets'],log,report)
-    finished('validate')
+    # Validation runs in the parent (_install, MapValidator) as each map finishes.
     entry={'name':label,'path':'maps/'+final.name,'sha256':digest(final)}
     remove_intermediate(district_work,work)
     finished('hash_and_cleanup')
@@ -236,7 +348,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         with (base/'refresh-validation.log').open('w',encoding='utf-8') as log:
             run([game_exe,'--assets',previous[0]/'assets','--test-world','--check-assets'],log,report)
         if finalize:finalize(previous[0])
-        from .optional_content import summary
+        from .validation_report import summary
         summary(previous[0])
         atomic_json(base/'installation.json', {**previous[1], 'pipelines':target_versions,
                     'outputs':outputs(previous[0]), 'source':source})
@@ -321,7 +433,9 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         if 'character' in groups:
             exports.character(game_root,stage,work,report,log,converted)
         if 'environment' in groups:
-            exports.environment(game_root,stage,work,report,log,converted)
+            exports.environment(game_root,stage,work,report,log,converted,game_exe)
+        if 'audio' in groups:
+            exports.audio(game_root,stage,work,report,log,base/'tools')
         if 'maps' in groups:
             report('Preparing authored movable-object models')
             from .dynamic_props import prepare_catalog
@@ -333,11 +447,40 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
                 if (work/'dmo').exists():remove_intermediate(work/'dmo',work)
                 note(private/'native-props/props-availability.json','Movable props',error,report=report)
         report('Validating skater, input and animation data')
-        run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
+        validator=start_validator(game_exe,stage/'assets',log,report)
+        customiser=None  # Background customiser when overlapped with the map stage
+        def validate(request):
+            """Today's checks raise (map rejected); new findings come back as warnings."""
+            nonlocal validator
+            if validator is not None:
+                try:result=validator.check(request)
+                except RuntimeError as error:
+                    report(f'{error}; validating with --check-assets per map')
+                    validator.close();validator=None
+                else:
+                    if not result['ok']:raise RuntimeError('Map validation failed: '+'; '.join(result['errors']))
+                    return result
+            target=['--test-world'] if request=='TEST_WORLD' else ['--map',request]
+            run([game_exe,'--assets',stage/'assets',*target,'--check-assets'],log,report)
+            return None
+        validate('TEST_WORLD')
         if 'maps' in groups:
             archives=list((game_root/'data/content').glob('worldDIST_*.big'))
             archives.sort(key=lambda p:(p.stem!='worldDIST_University',p.name.lower()))
+            from .map_starts import prepare as map_starts
+            try:
+                starts=map_starts(game_root,converted)
+            except CONTENT_ERRORS as error:
+                starts={}
+                report(f'Authored map starts unavailable ({error}); using geometric spawns')
+            (work/'map-starts.json').write_text(json.dumps(starts),encoding='utf-8')
             workers=map_workers()
+            # The customiser reads only stock, default-skater and disc data (all
+            # prepared above) and writes only assets/private/customisation, so it
+            # runs beside the map jobs instead of after them.
+            if finalize and overlap_customiser(workers):
+                report('Preparing the character customiser alongside the maps')
+                customiser=Background(lambda:finalize(stage),'customiser')
             report(f'Converting {len(archives)} maps with {workers} workers')
             def map_job(archive):
                 result=work/(archive.stem+'.json')
@@ -352,8 +495,12 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
                 futures={pool.submit(map_job,a):a for a in sorted(archives,key=lambda p:-p.stat().st_size)}
                 for future in as_completed(futures):
                     archive=futures[future]
-                    try:completed[archive.name]=future.result()
+                    try:
+                        completed[archive.name]=future.result()
+                        # Validate while the remaining maps keep converting.
+                        checked=validate(stage/completed[archive.name]['path'])
                     except CONTENT_ERRORS as error:
+                        completed.pop(archive.name,None)
                         label=archive.stem.removeprefix('worldDIST_')
                         (maps/(label+'.skate')).unlink(missing_ok=True)
                         props=private/'native-props'/(label+'.skate')
@@ -361,6 +508,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
                         note(private/'map-status'/(label+'-availability.json'),label,error,report=report)
                         continue
                     (private/'map-status'/(completed[archive.name]['name']+'-availability.json')).unlink(missing_ok=True)
+                    record_validation(private,completed[archive.name],checked,report)
                     report(f"Converted {len(completed)}/{len(archives)} maps: {completed[archive.name]['name']}")
             catalog=[completed[a.name] for a in archives if a.name in completed]
             if previous:
@@ -371,7 +519,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
                     src=(previous[0]/old['path']).resolve()
                     if not src.is_relative_to((previous[0]/'maps').resolve()):raise ValueError('Invalid old map path')
                     if not src.is_file() or digest(src)!=old.get('sha256'):continue
-                    try:run([game_exe,'--assets',stage/'assets','--map',src,'--check-assets'],log,report)
+                    try:validate(src)
                     except CONTENT_ERRORS:continue
                     target=stage/old['path'];target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,target)
                     catalog.append(old)
@@ -384,7 +532,8 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
                     if old['path'] not in valid_paths:(stage/old['path']).unlink(missing_ok=True)
             if not catalog:raise RuntimeError('No playable map could be prepared or recovered. Restore at least one worldDIST_*.big archive beside default.xex and retry; the previous installation has been kept.')
         report('Validating installed runtime inputs')
-        run([game_exe,'--assets',stage/'assets','--test-world','--check-assets'],log,report)
+        validate('TEST_WORLD')
+        if validator is not None:validator.close()
         settings=stage/'settings';settings.mkdir(exist_ok=True)
         if not previous:
             (settings/'default-map.json').write_text(json.dumps(next((m['path'] for m in catalog if m['name']=='University'),catalog[0]['path'])),encoding='utf-8')
@@ -394,8 +543,9 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
             if selected.is_file() and not (stage/json.loads(selected.read_text())).is_file():
                 selected.write_text(json.dumps(catalog[0]['path']))
         remove_intermediate(work,stage)
-        if finalize:finalize(stage)
-        from .optional_content import summary
+        if customiser is not None:customiser.join()
+        elif finalize:finalize(stage)
+        from .validation_report import summary
         warnings=summary(stage)
     # Publish after core validation and all optional outcomes have been recorded.
     marker=base/'installation.json.new'
@@ -403,5 +553,5 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
     marker.replace(base/'installation.json')
     remove_setup_logs(stage,report)
     remove_stale_installations(base,stage,report)
-    report(f'Setup complete ({len(warnings)} unavailable/retained components; see setup-report.json)' if warnings else 'Setup complete')
+    report(f'Setup complete ({len(warnings)} warnings or unavailable/retained components; see setup-report.json)' if warnings else 'Setup complete')
     return stage

@@ -3,6 +3,8 @@
 /logs/
 /.local/
 /settings/
+# TRACE_PLAY.bat's CPU trace output.
+/trace-*.json
 /data/
 __pycache__/
 *.pyc
@@ -36,6 +38,24 @@ __pycache__/
 *.stategraph
 *.rwcmset
 !/crates/skate-data/tests/fixtures/retail-collision.rwcmset
+# Retail audio and anything decoded from it (tools/asset_pipeline/audio_export.py).
+*.snr
+*.sns
+*.sek
+*.abk
+*.bnk
+*.csi
+*.ems
+*.grain
+*.mus
+*.mpf
+*.xma
+# Decoded retail WAVs: setup and the research tools write them only into the private install
+# folders (also ignored whole above); mods and the SDK may ship their own WAVs anywhere else.
+/assets/private/**/*.wav
+/data/**/*.wav
+/maps/private/**/*.wav
+/.local/**/*.wav
 .env
 .env.*
 *.pem
@@ -83,3 +103,9 @@ __pycache__/
 /PLAY-NATIVE-TRAINER.bat
 /PLAY-SCROLL-SETTINGS.bat
 /PLAY-SHOWCASE.bat
+
+# Claude Code notes and skills (local only).
+/.claude/
+
+# The world audio test mod's ghost input: the user's own recorded audio state logs (never committed).
+mods/world-audio-test/logs/

@@ -20,7 +20,21 @@ use skate_core::{
 };
 use skate_data::{animation_frames::AnimationFrames, collections::Collections};
 
+/// Audible animation events since game_audio last took them. Native clears
+/// these attributes within the tick, so they are latched here as they occur.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct AudioEvents {
+    /// `push_contact` (foot hits the ground while pushing).
+    pub push: bool,
+    /// `brake_contact` with strength +1 (foot goes down to brake) / -1 (foot up).
+    pub brake_down: bool,
+    pub brake_up: bool,
+    /// Largest `AudibleFootStepStrength` seen.
+    pub footstep: f32,
+}
+
 pub(crate) struct AnimationInput {
+    pub audio: AudioEvents,
     pub fields: ScalarAttributeInputs,
     pub extra: ExtendedAttributes,
     pub contacts: ContactEventState,
@@ -41,6 +55,7 @@ impl AnimationInput {
             .position(|n| n.eq_ignore_ascii_case("RightToeBase"))
             .ok_or("Stock skeleton is missing RightToeBase")?;
         Ok(Self {
+            audio: AudioEvents::default(),
             height_overrides: crate::difficulty::NATIVE_MODES.map(|key|
                 data.boolean("physics_mode", key, "JumpHeightOverrideEnabled"))
                 .into_iter().collect::<Result<Vec<_>, _>>()?.try_into().unwrap(),
@@ -135,7 +150,7 @@ impl AnimationInput {
             external_impulse_active,
             ..self.settings
         };
-        process_attributes::process(
+        let result = process_attributes::process(
             attributes,
             &pose,
             &mut self.fields,
@@ -145,6 +160,14 @@ impl AnimationInput {
             &mut self.output,
             settings,
             Some(map),
-        )
+        );
+        // Observation only: nothing in physics reads `audio`.
+        self.audio.push |= self.fields.flags2468 & (1 << 27) != 0;
+        // contact_events: brake_contact sets bit 28, plus 30 for strength +1 and 23 for -1.
+        let brake = self.fields.flags2468 & (1 << 28) != 0;
+        self.audio.brake_down |= brake && self.fields.flags2468 & (1 << 30) != 0;
+        self.audio.brake_up |= brake && self.fields.flags2468 & (1 << 23) != 0;
+        self.audio.footstep = self.audio.footstep.max(self.extra.footstep_strength);
+        result
     }
 }

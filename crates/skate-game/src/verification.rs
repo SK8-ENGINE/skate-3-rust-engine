@@ -48,7 +48,9 @@ fn verify(
         && std::env::var("SKATE_VERIFY_REPLAY").as_deref() == Ok("1") {
         replay.enter();
     }
-    if animation.ready && state.elapsed > 4. && !state.requested {
+    // SKATE_VERIFY_AT: capture time in seconds (default 4), e.g. to catch an effect.
+    let capture_at = std::env::var("SKATE_VERIFY_AT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(4.);
+    if animation.ready && state.elapsed > capture_at && !state.requested {
         commands
             .spawn(Screenshot::primary_window())
             .observe(save_to_disk(path.clone()))
@@ -59,7 +61,7 @@ fn verify(
             );
         state.requested = true;
     }
-    if state.captured && state.elapsed > 6. {
+    if state.captured && state.elapsed > capture_at + 2. {
         let input_report = format!(
             "Game integration capture (not a Skate 3 parity verdict)\nExecutable: {}\nPolls: {}\nConsumed batches: {}\nStatus: {:?}\nPacket numbers: {:?}\nActions 64..81 by device: {:?}\nDerived ticks: {}\nIntents: {:?}\nDifficulty index: {}\nPhysics ticks: {}\nContacts: {}\nBody positions: {:?}\nPhysical pose publications: {}\nGraph animation ticks: {}\nTruck targets: {:?}\nGround speed: {}\nGameplay camera shot: {}\nCamera frame: {:?}\n",
             std::env::current_exe()
