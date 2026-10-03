@@ -616,7 +616,7 @@ mod tests {
         world.insert_resource(crate::config::Config {
             asset_root: "unused".into(), verification_capture: None,
             map: None, map_path: None, difficulty: crate::difficulty::Difficulty::Hardcore,
-            check_assets: false, start_paused: false, teleport: None,
+            check_assets: false, validate_maps: false, start_paused: false, teleport: None,
             multiplayer: Default::default(), map_fingerprint: 0,
         });
         world.insert_resource(crate::retail_render::RetailScene(false));

@@ -42,6 +42,7 @@ mod animation_input;
 mod animation_phase;
 mod biped_ground;
 mod frame;
+pub(crate) mod startup_check;
 #[cfg(debug_assertions)]
 mod dev_trace;
 mod grind;
