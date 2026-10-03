@@ -33,7 +33,9 @@ def main():
     parser.add_argument('--base',type=Path,required=True)
     parser.add_argument('--game-exe',type=Path,required=True)
     parser.add_argument('--refresh',action='store_true')
+    parser.add_argument('--source',type=Path,help='Xbox 360 ISO or default.xex; runs without the window')
     args=parser.parse_args()
+    if args.source:return headless(args)
     import tkinter as tk
     from tkinter import filedialog,messagebox,ttk
     from tools.asset_pipeline.customiser_setup import install
@@ -48,7 +50,7 @@ def main():
     window.title('Skate 3 Rust Engine setup')
     window.geometry('700x420');window.resizable(False,False)
     icon=ROOT/'docs/images/skating-crab.ico'
-    if icon.is_file():window.iconbitmap(str(icon))
+    if icon.is_file() and os.name=='nt':window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
     ttk.Label(frame,text='Update game assets' if updating else 'Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
     ttk.Label(frame,text=('Asset version changes: '+(', '.join(sorted(changed)) or 'none')+'.\nOnly changed or incomplete groups will be prepared again.\nYour previous character data remains until preparation succeeds.\n'
@@ -106,5 +108,19 @@ def main():
         window.after(200,lambda:begin(reuse) if not running else None)
     window.mainloop()
     return 0 if success else 2
+
+def headless(args):
+    from tools.asset_pipeline.customiser_setup import install
+    from tools.asset_pipeline.optional_content import summary
+    try:
+        installed_root=install(args.source,args.base,args.game_exe,lambda text:print(text,flush=True),refresh=args.refresh)
+    except Exception as error:
+        args.base.mkdir(parents=True,exist_ok=True)
+        (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
+        print(f'Setup could not finish: {error}\nDetails: {args.base/"setup-error.log"}',file=sys.stderr)
+        return 2
+    warnings=summary(installed_root)
+    print(f'Ready with {len(warnings)} unavailable components. Details: {installed_root/"setup-report.json"}' if warnings else 'Ready')
+    return 0
 
 if __name__=='__main__':raise SystemExit(main())

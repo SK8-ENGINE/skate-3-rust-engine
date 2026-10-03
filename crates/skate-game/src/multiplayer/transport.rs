@@ -1,10 +1,14 @@
-use skate_net::directory::{self, Command as LobbyCommand, Event, Request, Response};
+use skate_net::directory::{Command as LobbyCommand, Response};
+#[cfg(feature = "steam")]
+use skate_net::directory::{self, Event, Request};
 use std::{
     io,
     net::{SocketAddr, UdpSocket},
-    process::{Child, Command, Stdio},
-    time::{Duration, Instant},
 };
+#[cfg(feature = "steam")]
+use std::time::{Duration, Instant};
+#[cfg(feature = "steam")]
+use std::process::{Child, Command, Stdio};
 
 /// Platform adapters move opaque bounded datagrams; session/actors live above this.
 pub(super) trait Transport: Send + Sync {
@@ -81,6 +85,7 @@ impl Transport for Direct {
         "Direct connection (Steam not required)".into()
     }
 }
+#[cfg(feature = "steam")]
 pub(super) struct Steam {
     socket: UdpSocket,
     child: Child,
@@ -96,6 +101,7 @@ pub(super) struct Steam {
     last_command: Instant,
     request_id: u64,
 }
+#[cfg(feature = "steam")]
 impl Steam {
     pub fn new(peer: u64, session: u64) -> Result<Self, String> {
         let socket = UdpSocket::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -105,8 +111,9 @@ impl Steam {
             .parent()
             .unwrap()
             .to_path_buf();
-        let helper = dir.join("steam-relay/skate-steam-relay.exe");
-        if !helper.is_file() || !dir.join("steam-relay/steam_api64.dll").is_file() {
+        let relay = dir.join("steam-relay");
+        let helper = relay.join(skate_platform::exe::exe_name("skate-steam-relay"));
+        if !helper.is_file() || !relay.join(skate_platform::exe::steam_api_library()).is_file() {
             return Err(
                 "Steam relay files missing; solo and direct multiplayer remain available".into(),
             );
@@ -123,11 +130,7 @@ impl Steam {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000);
-        }
+        skate_platform::process::detached(&mut command);
         let child = command
             .spawn()
             .map_err(|e| format!("Could not start Steam relay: {e}"))?;
@@ -148,6 +151,7 @@ impl Steam {
         })
     }
 }
+#[cfg(feature = "steam")]
 impl Drop for Steam {
     fn drop(&mut self) {
         if let Some(peer) = self.peer {
@@ -165,6 +169,7 @@ impl Drop for Steam {
         let _ = self.child.wait();
     }
 }
+#[cfg(feature = "steam")]
 impl Transport for Steam {
     fn command(&mut self, command: LobbyCommand) -> Result<(), String> {
         if self.pending.is_some() {
@@ -291,5 +296,27 @@ impl Transport for Steam {
     }
     fn congested(&self) -> bool {
         self.congested
+    }
+}
+
+/// Steam-less builds keep direct UDP multiplayer and report Steam as absent.
+#[cfg(not(feature = "steam"))]
+pub(super) struct Steam;
+#[cfg(not(feature = "steam"))]
+impl Steam {
+    pub fn new(_peer: u64, _session: u64) -> Result<Self, String> {
+        Err("Steam multiplayer is not included in this build; direct multiplayer remains available".into())
+    }
+}
+#[cfg(not(feature = "steam"))]
+impl Transport for Steam {
+    fn send(&mut self, _peer: u64, _data: &[u8]) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "Steam not included in this build"))
+    }
+    fn receive(&mut self) -> io::Result<Vec<(u64, Vec<u8>)>> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "Steam not included in this build"))
+    }
+    fn status(&self) -> String {
+        "Steam not included in this build".into()
     }
 }

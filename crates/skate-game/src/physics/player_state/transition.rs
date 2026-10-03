@@ -64,6 +64,17 @@ pub(super) fn set(
     // RevertGround owns a real native Enter/Update/Fill lifecycle. Preserve
     // the selector request so its turning controller can run.
     skater.player_state.requested_state = requested;
+    // PhysicsAirSecondary (202) has no recovered native owner (the Task-B
+    // adapter was never integrated): it is the air variant the selector picks
+    // while a GrindTrick-flagged animation runs (grind-outs, darkslides).
+    // Run it as plain PhysicsAir — the selector asks for PhysicsAir anyway
+    // once the flag clears — instead of aborting the tick. The coordinator
+    // latch above keeps the raw selector request.
+    let requested = if requested == PhysicalStateId::PhysicsAirSecondary {
+        PhysicalStateId::PhysicsAir
+    } else {
+        requested
+    };
     let current = skater.player_state.current();
     if current == requested {
         return Ok(());

@@ -10,7 +10,7 @@ $previousFlags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
 Push-Location $sourceRoot
 try {
     $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static'
-    cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $targetPath -p skate-game --bin skate3rust --no-default-features -- -C extra-filename= -o "$outputPath/skate3rust.exe" -C "link-arg=/PDB:$outputPath/skate3rust.pdb" *> "$outputPath/compile.log"
+    cargo rustc --release --locked --target x86_64-pc-windows-msvc --target-dir $targetPath -p skate-game --bin skate3rust --no-default-features --features steam -- -C extra-filename= -o "$outputPath/skate3rust.exe" -C "link-arg=/PDB:$outputPath/skate3rust.pdb" *> "$outputPath/compile.log"
     if ($LASTEXITCODE -ne 0) { Get-Content "$outputPath/compile.log" -Tail 40; throw 'Game build failed' }
     & "$PSScriptRoot/verify_windows_build_sources.ps1" -Pdb "$outputPath/skate3rust.pdb" -SourceRoot $sourceRoot -ReportPath "$outputPath/source-checks.json"
 } finally {

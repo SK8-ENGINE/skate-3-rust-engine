@@ -35,6 +35,7 @@ impl ContactCorrection {
         if !(maximum <= f32::from_bits(0x38d1_b717)) {
             let inverse = inverse_length(dot(selected, selected));
             self.direction = selected.map(|value| value * inverse);
+            self.direction[3] = 0.0;
             self.active = true;
             let length = magnitude(maximum);
             let excess = length - f32::from_bits(0x3d4c_cccd);
@@ -46,6 +47,9 @@ impl ContactCorrection {
             );
         }
         self.displacement = reject(self.displacement, input.up_axis_16);
+        // Geometric displacement: keep the host's W=0 convention so garbage W
+        // lanes cannot accumulate into the ground frame.
+        self.displacement[3] = 0.0;
     }
 }
 

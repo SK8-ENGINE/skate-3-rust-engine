@@ -50,23 +50,32 @@ impl ReckoningFrames {
     }
 
     ///82D8D688. Cross products use the unnormalized intermediate axis;
-    ///normalization has two refinements and no epsilon fallback in this leaf.
+    ///normalization has two refinements and no epsilon fallback in this leaf,
+    ///so degenerate inputs preserve the preceding frame instead (the same
+    ///criterion as calculate_tilt): a single degenerate tick otherwise seeds
+    ///NaN into the system frame, which then persists permanently downstream.
     pub fn calculate_transform(&mut self, up: [f32; 4], ground_normal: [f32; 4]) {
-        let right = cross(up, self.heading);
+        if !up.iter().all(|v| v.is_finite()) || !self.heading.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        let right = normalize_or(cross(up, self.heading), self.system[0]);
         let forward = cross(right, up);
-        self.heading = normalize(forward);
-        self.system[0] = normalize(right);
+        self.heading = normalize_or(forward, self.heading);
+        self.system[0] = right;
         self.system[1] = up;
         self.system[2] = self.heading;
         self.unflipped = self.system;
         self.system = compose_affine(&self.body_flip, &self.system);
         self.inverse_system = inverse(&self.system);
 
-        let ground_right = cross(ground_normal, self.heading);
+        if !ground_normal.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        let ground_right = normalize_or(cross(ground_normal, self.heading), self.ground[0]);
         let ground_forward = cross(ground_right, ground_normal);
-        self.ground[0] = normalize(ground_right);
+        self.ground[0] = ground_right;
         self.ground[1] = ground_normal;
-        self.ground[2] = normalize(ground_forward);
+        self.ground[2] = normalize_or(ground_forward, self.ground[2]);
     }
 
     ///82D8D930. Signed angle is wrapped by fraction/floor, not scalar atan2.
@@ -134,6 +143,16 @@ fn normalize(value: [f32; 4]) -> [f32; 4] {
     let reciprocal = inverse_length_squared(dot3(value, value), 2);
     value.map(|v| v * reciprocal)
 }
+/// Degenerate or non-finite inputs (dot3 <= epsilon, including NaN) return the
+/// fallback, which callers pass as the last known-good value.
+fn normalize_or(value: [f32; 4], fallback: [f32; 4]) -> [f32; 4] {
+    const EPSILON: f32 = f32::from_bits(0x3586_37bd);
+    if dot3(value, value) > EPSILON {
+        normalize(value)
+    } else {
+        fallback
+    }
+}
 fn cross(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     [
         (-a[2]).mul_add(b[1], a[1] * b[2]),
@@ -192,5 +211,51 @@ mod tests {
         };
         state.calculate_tilt(false, &curve, &curve);
         assert_eq!(state.lateral_tilt, [0.3, 0., 0., 0.]);
+    }
+
+    fn assert_finite(state: &ReckoningFrames) {
+        for frame in [&state.system, &state.ground, &state.unflipped, &state.inverse_system] {
+            for row in frame {
+                assert!(row.iter().all(|v| v.is_finite()), "non-finite row {row:?}");
+            }
+        }
+        assert!(state.heading.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn parallel_up_and_heading_preserve_the_previous_frame() {
+        let mut state = ReckoningFrames::new();
+        state.heading = [0.0, 0.0, 1.0, 0.0];
+        state.calculate_transform([0., 1., 0., 0.], [0., 1., 0., 0.]);
+        let previous = state.system;
+        // Degenerate tick: up parallel to heading makes cross(up, heading) = 0.
+        state.calculate_transform([0., 0., 1., 0.], [0., 1., 0., 0.]);
+        assert_finite(&state);
+        assert_eq!(state.system[0], previous[0]);
+        // Repeated degenerate ticks stay finite.
+        for _ in 0..8 {
+            state.calculate_transform([0., 0., 1., 0.], [0., 1., 0., 0.]);
+        }
+        assert_finite(&state);
+        // Recovery: a normal tick produces a valid frame again.
+        state.calculate_transform([0., 1., 0., 0.], [0., 1., 0., 0.]);
+        assert_finite(&state);
+        assert_eq!(state.system[1], [0., 1., 0., 0.]);
+    }
+
+    #[test]
+    fn non_finite_up_leaves_everything_untouched() {
+        let mut state = ReckoningFrames::new();
+        state.heading = [0.0, 0.0, 1.0, 0.0];
+        state.calculate_transform([0., 1., 0., 0.], [0., 1., 0., 0.]);
+        let before = state.clone();
+        state.calculate_transform([f32::NAN; 4], [0., 1., 0., 0.]);
+        assert_eq!(state.system, before.system);
+        assert_eq!(state.heading, before.heading);
+        assert_finite(&state);
+        state.heading = [f32::NAN; 4];
+        let before = state.clone();
+        state.calculate_transform([0., 1., 0., 0.], [0., 1., 0., 0.]);
+        assert_eq!(state.system, before.system);
     }
 }

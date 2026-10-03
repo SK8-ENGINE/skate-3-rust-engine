@@ -146,7 +146,9 @@ impl GroundOrientation {
         let side = scale(input.previous_reckoning_right, dot(self.up_velocity, input.previous_reckoning_right));
         self.up_velocity = madd(side, settings.extra_side_damping, subtract(self.up_velocity, side));
         let unnormalized = add(self.up, self.up_velocity);
-        self.up = normalize_safe(unnormalized, unnormalized);
+        // Fall back to the last valid up, not the possibly-degenerate value:
+        // normalize_safe(x, x) would latch NaN permanently once seeded.
+        self.up = normalize_safe(unnormalized, self.up);
         if 0.0 > dot(self.up_velocity, desired_velocity) {
             self.up_velocity = scale(self.up_velocity, settings.anti_wobble_damping);
         }
