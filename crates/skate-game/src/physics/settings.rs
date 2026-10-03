@@ -18,6 +18,16 @@ use skate_core::{
 };
 use skate_data::collections::Collections;
 
+/// Constraint iterations of the skater's `rw::physics::Simulation` (+176), read by the solver
+/// stages `82AE30F0` / `82AE27D0` as their loop count. Measured in TU3 (recomp, Aletown,
+/// board + skater pipeline with 28 joints / 53 drives): 50 on every solve. Setup `82DC2840`
+/// first copies 25 from the hard-coded config built by `8275DCC8` (`li r27,25`); the value is
+/// 50 before the first gameplay solve (the later writer is not identified yet). The stock
+/// `physics/default.RWMaxIterations` is 25, equal to the setup value but not the live one;
+/// solving with 25 left wheels sinking ~10x faster than retail (-0.012 vs -0.001 m/s at rest)
+/// and the ollie pop's deck ~1 cm low by its 4th frame (retail-matching with 50).
+pub(crate) const SIMULATION_ITERATIONS: u32 = 50;
+
 pub(crate) struct PhysicsSettings {
     pub step: BoardStepSettings,
     pub masses: [RetailBodyMassProperties; 7],
@@ -88,7 +98,7 @@ impl PhysicsSettings {
         );
         let step = BoardStepSettings {
             simulation,
-            iterations: data.integer("physics", "default", "RWMaxIterations")?,
+            iterations: SIMULATION_ITERATIONS,
             base_truck_transforms: calculate_truck_transforms(RetailTruckTransformInputs {
                 deck_mid_length: geometry.deck_mid_length,
                 truck_z_position_front: geometry.truck_z_position_front,
@@ -105,8 +115,8 @@ impl PhysicsSettings {
             }),
             force_point_y_offset: f("physicsdeck", "DeckForceYOffset")?,
         };
-        if wheel_radius <= 0.0 || mass_factor <= 0.0 || step.iterations == 0 {
-            return Err("Invalid stock board radius, mass factor or solver iterations".into());
+        if wheel_radius <= 0.0 || mass_factor <= 0.0 {
+            return Err("Invalid stock board radius or mass factor".into());
         }
         Ok(Self {
             step,
