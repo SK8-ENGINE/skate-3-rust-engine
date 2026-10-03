@@ -8,6 +8,8 @@ pub const MAGIC: &[u8; 8] = b"SK8NET05";
 pub const HEADER: usize = 29;
 pub const BODY: u8 = 1;
 pub const POSE: u8 = 2;
+/// Largest finite binary16 rate. Saturate the wire value, never the local simulation.
+pub const MAX_RATE: f32 = 65_504.;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Packed {
     /// Source capture time in milliseconds; forwarding never retimestamps it.
@@ -149,7 +151,7 @@ fn read_pose(r: &mut Reader, origin: [f32; 3]) -> Option<Pose> {
 }
 fn rates(b: &mut Vec<u8>, v: [f32; 3]) {
     for f in v {
-        b.extend(f16::from_f32(f).to_bits().to_le_bytes());
+        b.extend(f16::from_f32(f.clamp(-MAX_RATE, MAX_RATE)).to_bits().to_le_bytes());
     }
 }
 fn read_rates(r: &mut Reader, bound: f32) -> Option<[f32; 3]> {
@@ -176,11 +178,11 @@ impl Packed {
                 || !body
                     .velocity
                     .iter()
-                    .all(|v| v.is_finite() && v.abs() <= 250.)
+                    .all(|v| v.is_finite())
                 || !body
                     .angular
                     .iter()
-                    .all(|v| v.is_finite() && v.abs() <= 500.)
+                    .all(|v| v.is_finite())
             {
                 return None;
             }
@@ -229,8 +231,8 @@ impl Packed {
             let mut r = Reader(row);
             let body = Body {
                 pose: read_pose(&mut r, root.p)?,
-                velocity: read_rates(&mut r, 250.)?,
-                angular: read_rates(&mut r, 500.)?,
+                velocity: read_rates(&mut r, MAX_RATE)?,
+                angular: read_rates(&mut r, MAX_RATE)?,
             };
             if !r.0.is_empty() {
                 return None;

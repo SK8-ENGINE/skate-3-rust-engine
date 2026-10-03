@@ -159,3 +159,28 @@ fn contact_planes_constrain_physical_pose_error_without_inventing_impulse() {
     collision.planes[0].normal = [-1.0, 0.0, 0.0, 0.0];
     assert_eq!(collision.filter_error(error, axis), [0.0; 4]);
 }
+
+
+#[test]
+fn a_moving_group_8_body_reaches_native_impact_feedback_for_a_stationary_actor() {
+    let physical = SkeletonPhysicalRecord::default();
+    let frames = [IDENTITY; 26];
+    let weights = [1.0; 24];
+    for offboard in [false, true] {
+        let mut input = input(&physical, &frames, &weights);
+        input.offboard = offboard;
+        input.reference_velocity = [0.0; 4];
+        let mut contact = report([-1.0, 0.0, 0.0, 0.0]);
+        contact.other_group = 8;
+        contact.body_a.linear_velocity = [0.0; 4];
+        contact.body_b.state_flags = 4;
+        contact.body_b.inverse_mass = 1.0 / 1400.0;
+        contact.body_b.linear_velocity = [14.0, 0.0, 0.0, 0.0];
+        let mut collision = SkeletonCollisionFeedback::new(settings());
+        collision.update(&input, &[contact]);
+        assert!(collision.flags.group_8 && collision.flags.has_impulse);
+        assert!((collision.maximum_group_8_force - 14.0).abs() < 1e-5);
+        collision.update(&input, &[]);
+        assert_eq!(collision.maximum_group_8_force, 0.0);
+    }
+}

@@ -49,23 +49,28 @@ fn spawn(mut commands: Commands, config: Res<Config>, retail: Res<crate::retail_
     }
 }
 
-#[derive(Default)]
-pub(crate) struct VehicleCameraBlend { active:bool, previous:Option<Transform>, from:Option<Transform>, elapsed:f32 }
-
-pub(crate) fn present(vehicles: Res<crate::modding::vehicles::Vehicles>, mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
+pub(crate) fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window>,
     history: Res<crate::presentation::Presentation>, time: Res<Time<Fixed>>,
     replay: Res<crate::replay::Replay>,
-    virtual_time: Res<Time<Virtual>>, mut vehicle_blend: Local<VehicleCameraBlend>,
     customiser: Option<Res<crate::customiser::Customiser>>,
     mut cameras: Query<(&mut Camera, &mut Transform, &mut Projection), With<GameplayCamera>>) {
     if let Ok(window) = windows.single() {
-        runtime.set_aspect_ratio(window.width() / window.height());
+        // A minimized window reports 0x0, and 0/0 is NaN. That poisons the
+        // projection's field of view and trips the non-finite frame check, so
+        // keep the last good ratio until the window has area again.
+        let ratio = window.width() / window.height();
+        if ratio.is_finite() && ratio > 0. {
+            runtime.set_aspect_ratio(ratio);
+        }
     }
     let Some((previous, current, alpha)) = history.view(&replay, time.overstep_fraction()) else { return; };
+    let manual_pose = crate::debug_cam::DebugCam::pose(&runtime);
     for (mut camera, mut transform, mut projection) in &mut cameras {
         *transform = crate::presentation::blend(previous.camera, current.camera, alpha);
         if replay.active {
             if let Some(free) = replay.free_camera { *transform = free; }
+        } else if let Some(pose) = manual_pose {
+            *transform = pose;
         }
         if let Projection::Perspective(p) = &mut *projection {
             p.fov = previous.fov + (current.fov - previous.fov) * alpha;
@@ -79,21 +84,6 @@ pub(crate) fn present(vehicles: Res<crate::modding::vehicles::Vehicles>, mut run
             *transform = Transform::from_translation(eye).looking_at(center + right * (distance * 0.265625), Vec3::Y);
             if let Projection::Perspective(p) = &mut *projection { p.fov = 50_f32.to_radians(); }
         }
-        let vehicle=vehicles.camera();
-        let active=vehicle.is_some();
-        if active!=vehicle_blend.active {
-            vehicle_blend.from=vehicle_blend.previous;vehicle_blend.elapsed=0.;vehicle_blend.active=active;
-        }
-        if let Some(pose)=vehicle {*transform=pose;}
-        vehicle_blend.elapsed+=virtual_time.delta_secs();
-        if let Some(from)=vehicle_blend.from {
-            if vehicle_blend.elapsed<0.5 && from.translation.distance(transform.translation)<50. {
-                let t=(vehicle_blend.elapsed/0.5).clamp(0.,1.);*transform=crate::presentation::blend(from,*transform,t*t*(3.-2.*t));
-            } else {vehicle_blend.from=None;}
-        }
-        // Vehicle motion is already interpolated with the rider/chassis. A separate
-        // follow filter introduces relative motion and makes fixed ticks visible.
-        vehicle_blend.previous=Some(*transform);
         camera.is_active = true;
     }
 }

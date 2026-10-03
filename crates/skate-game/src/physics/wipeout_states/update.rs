@@ -140,7 +140,7 @@ pub(crate) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             &mut skater.skeleton,
             com,
             &effective,
-            state.predicted_position,
+            p,
             &runtime.profiles[state.profile],
             &skater.animated_skeleton.roots.animation_to_world,
             &skater.animated_skeleton.record.pose,

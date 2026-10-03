@@ -3,8 +3,9 @@
 use skate_core::{
     camera::{
         AnchorTrackingSettings, AngleTrackingSettings, AvoidanceSettings, DistanceTrackingSettings,
-        DropSettings, FrameSettings, LookSettings, OrientationSettings, OrientationTrackerSettings,
-        RigPositioningSettings, RigSettings, ShakeSettings, ManagerSettings, CompassSettings,
+        DropSettings, FrameSettings, LookSettings, ManualCamSettings, OrientationSettings,
+        OrientationTrackerSettings, RigPositioningSettings, RigSettings, ShakeSettings,
+        ManagerSettings, CompassSettings,
     },
     point_graph::PointGraph,
 };
@@ -52,6 +53,17 @@ pub(crate) fn drop_settings(data: &Collections) -> Result<DropSettings, String> 
         )?,
         maximum_drop_distance: data.float("camera_droppredictor", "default", "MaxDropDistance")?,
     })
+}
+
+pub(crate) fn manual_cam_settings(data: &Collections) -> Result<ManualCamSettings, String> {
+    let mut settings = ManualCamSettings::default();
+    if let Ok(speed) = data.float("camera", "freecam", "FreeCamHeadingSpeed") {
+        settings.move_speed = speed.max(1.0) * 4.0;
+    }
+    if let Ok(speed) = data.float("camera", "freecam", "FreeCamElevationSpeed") {
+        settings.look_speed = speed.max(0.1);
+    }
+    Ok(settings)
 }
 
 pub(crate) fn look_settings(data: &Collections) -> Result<LookSettings, String> {

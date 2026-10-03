@@ -28,6 +28,14 @@ pub(super) fn line(world: &BoardWorld, start: [f32; 4], end: [f32; 4], radius: f
             }
         }
     }
+    if let Some(external) = world.external_line(start, vector(end), radius) {
+        let hit = external.hit.geometry;
+        let candidate = hit.fraction.clamp(0.0, 1.0);
+        if candidate < fraction {
+            result = FatLineResult { position: lanes(hit.position), normal: lanes(hit.normal),
+                fraction: candidate, hit: 1, surface: external.hit.tag };
+        }
+    }
     Ok(result)
 }
 pub(super) fn no_hit() -> FatLineResult {

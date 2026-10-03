@@ -16,6 +16,7 @@ pub(crate) struct AirReckoning {
     modes: [settings::Mode; 5],
 }
 impl AirReckoning {
+    pub(crate) fn adopt_mode_settings(&mut self, other: Self) { self.modes = other.modes; }
     pub fn update_plant(&mut self,riding:&mut RidingOutputs,p:&ProcessedPhysicsInput,up:[f32;4],heading:[f32;4]) {
         reckoning::update_plant(&mut riding.reckoning,&mut riding.reckoning_frames,
             &mut riding.body_spin,&mut self.state,&self.settings,up,heading,p.flags_2468&(1<<20)!=0);

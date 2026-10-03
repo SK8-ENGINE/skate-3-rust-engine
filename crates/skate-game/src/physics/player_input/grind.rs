@@ -34,7 +34,9 @@ pub(crate) struct PreContext {
     pub balance_2720: f32,
     pub translation_2796: f32,
     pub stability_nudge_2800: f32,
+    #[cfg(test)]
     pub up_down_2804: f32,
+    #[cfg(test)]
     pub grab_min_height_2808: f32,
 }
 
@@ -165,6 +167,7 @@ impl GrindInputState {
     }
 
     ///82D8A638 resets the manager, not the separately constructed child objects.
+    #[cfg(test)]
     pub fn reset(&mut self) {
         self.previous_state = 0;
         self.engagement_counter = 0;

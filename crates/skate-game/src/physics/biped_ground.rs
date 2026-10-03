@@ -270,7 +270,9 @@ pub(crate) fn update(
         |input| Ok::<_, String>(owner.geometry.consume(input)),
     )?;
     owner.geometry_adjustment = Some(job.geometry);
-    let result = owner.run(job.job);
+    let previous_position=owner.controller.state.position_368;
+    let mut result=owner.run(job.job);
+    super::solid_contacts::constrain_ground(owner,&mut result,previous_position,&physics.network_proxies.solids);
     if result
         .physical_frame
         .iter()
@@ -383,6 +385,7 @@ pub(crate) fn submit_geometry(
         .ok_or("Ground geometry submission requires completed motion")?;
     owner.geometry.submit(
         &physics.world,
+        &physics.network_proxies.solids,
         owner.ground.frame_80,
         result.velocity,
         skate_core::player::offboard::ground_query::QueryContext {

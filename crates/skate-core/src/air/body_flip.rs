@@ -105,3 +105,58 @@ fn rotation(axis: [f32; 4], angle: f32) -> Matrix {
         [0.0; 4],
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::physics::skeleton_animation_record::IDENTITY;
+
+    #[test]
+    fn perfect_front_and_back_flips_finish_at_one_revolution_with_spin() {
+        for direction in [-1., 1.] {
+            let mut state = BodyFlipState {
+                angle: 0.,
+                speed: 0.,
+                requested_speed: 0.,
+                spin_transform: IDENTITY,
+                combined_transform: IDENTITY,
+            };
+            let settings = BodyFlipSettings {
+                smoothing: Some(1.),
+                maximum_speed: Some(20.),
+                spin_scale: Some(1.),
+                missing_attribute_value: 0.,
+            };
+            for tick in 1..=360 {
+                update(
+                    &mut state,
+                    &settings,
+                    &BodyFlipInput {
+                        requested_speed: direction * 4.,
+                        spin_angle: std::f32::consts::TAU * (tick as f32 / 180.).min(1.),
+                        normal: [0., 1., 0., 0.],
+                        flip_axis: [1., 0., 0., 0.],
+                        timestep: 1. / 60.,
+                        perfect_body_flips: true,
+                    },
+                );
+                assert!(state.angle.abs() <= std::f32::consts::TAU);
+                assert!(state.angle * direction > 0.);
+                assert!(
+                    state
+                        .combined_transform
+                        .iter()
+                        .flatten()
+                        .all(|x| x.is_finite())
+                );
+            }
+            assert!((state.angle - direction * std::f32::consts::TAU).abs() < 0.001);
+            // After both revolutions, all three spatial basis axes are upright again.
+            for i in 0..3 {
+                for j in 0..3 {
+                    assert!((state.combined_transform[i][j] - IDENTITY[i][j]).abs() < 0.001);
+                }
+            }
+        }
+    }
+}

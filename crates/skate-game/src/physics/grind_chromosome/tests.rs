@@ -72,3 +72,21 @@ fn twist_uses_128_not_forward32_and_names_keep_both_id_domains() {
     assert!(names::lookup([0, 0, 0, 0, 4, 0]).is_none());
     assert!(names::lookup([0, 0, 0, 0, 0, u32::MAX]).is_none());
 }
+
+#[test]
+fn frontlip_and_frontboard_publish_distinct_native_scorables() {
+    let mut chromosome = Chromosome::new(false);
+    let mut i = input();
+    i.family = Some(Family::Boardslide);
+    i.basic_twist_axis_128 = [0., 0., 1., 0.];
+    let lip = chromosome.update(i).unwrap();
+    let mut out = skate_core::player::input_phase::GrindOutputFields::default();
+    publish(lip, &mut out);
+    assert_eq!(out.scorable_id_152, 28);
+    assert_eq!(lip.scoring.unwrap().name().attribute, "FS_LIP");
+    i.feet_256_272 = [[-1., 0., 0., 0.]; 2];
+    for _ in 0..14 {
+        publish(chromosome.update(i).unwrap(), &mut out);
+    }
+    assert_eq!(out.scorable_id_152, 25);
+}

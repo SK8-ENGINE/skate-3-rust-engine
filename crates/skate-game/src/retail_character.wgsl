@@ -1,3 +1,6 @@
+// Characters are per-entity draws, not merged geometry, so unlike the world
+// shader this one keeps a plain per-draw uniform and implicit-derivative
+// sampling: every branch here is uniform across the draw.
 #import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings as frame}
 #import skate_character_lighting::{CharacterParams, shade_character, character_normal, character_albedo}
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> p: CharacterParams;

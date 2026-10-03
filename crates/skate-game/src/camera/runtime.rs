@@ -3,8 +3,8 @@
 //! once per completed physical/animation publication; rendering only presents it.
 use std::path::Path;
 use bevy::prelude::Resource;
-use skate_core::{camera::{CameraFrame, CameraMan, CompassSettings, ManagerSettings,
-    MovingObstacleProvider, ShakeSamples, SimulationRateRequest, SlowMotionSettings},
+use skate_core::{camera::{CameraFrame, CameraMan, CompassSettings, ManualCam, ManualCamSettings,
+    ManagerSettings, MovingObstacleProvider, ShakeSamples, SimulationRateRequest, SlowMotionSettings},
     physics::board_world::BoardWorld, point_graph::PointGraph};
 use skate_data::collections::Collections;
 use super::{collision::CameraCollision, graph::CameraGraph, graph_subject::CameraGraphEnvironment,
@@ -29,6 +29,8 @@ pub(crate) struct CameraRuntime {
     /// Native message order, including End followed by Begin in one graph tick.
     /// The simulation schedule drains these after advance.
     pub simulation_rate_requests: Vec<SimulationRateRequest>,
+    pub manual_cam: ManualCam,
+    pub manual_cam_settings: ManualCamSettings,
 }
 
 #[cfg(test)]
@@ -58,13 +60,29 @@ impl CameraRuntime {
             compass_settings: settings::compass_settings(&data)?, shakes: [samples("1.shk")?, samples("2.shk")?],
             trajectories: core::array::from_fn(|_| TrajectoryResult::new()), frame: None,
             latest_subject: None,
-            simulation_rate_requests: Vec::new() })
+            simulation_rate_requests: Vec::new(),
+            manual_cam: ManualCam::default(),
+            manual_cam_settings: settings::manual_cam_settings(&data)? })
     }
 
+    /// Ignores a degenerate ratio rather than storing it.
+    ///
+    /// A minimized window reports 0x0, so the caller's `width / height` is
+    /// `0.0 / 0.0` — NaN. Storing that makes the manager derive a NaN field of
+    /// view, which fails the non-finite frame check on every subsequent frame
+    /// even after the window is restored. Keeping the last good ratio is
+    /// correct: nothing is visible while minimized.
     pub fn set_aspect_ratio(&mut self, value: f32) {
-        self.manager.state.aspect_ratio = value;
+        if value.is_finite() && value > 0.0 {
+            self.manager.state.aspect_ratio = value;
+        }
     }
     pub fn selected_shot(&self) -> &str { &self.manager.shots.current().name }
+
+    /// `GetMatrix` for presentation capture when manual cam may be active.
+    pub fn presentation_frame(&self) -> Option<CameraFrame> {
+        self.frame.map(|frame| self.manual_cam.get_matrix(&frame))
+    }
 
     pub fn advance(&mut self, dt: f32, snapshot: CameraSubjectSnapshot,
         world: &BoardWorld, query_gravity: [f32; 4], environment: &CameraGraphEnvironment,

@@ -33,6 +33,7 @@ pub(crate) struct AnimationInput {
 }
 
 impl AnimationInput {
+    pub(crate) fn adopt_mode_settings(&mut self, other: Self) { self.height_overrides = other.height_overrides; }
     pub fn load(data: &Collections, frames: &AnimationFrames, mode: &str) -> Result<Self, String> {
         let right_toe = frames
             .bone_names

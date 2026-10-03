@@ -41,6 +41,8 @@ pub struct AirOutputFields {
     pub footplant_right_450: u8,
     pub reached_apex_436: u8,
     pub flag_441: u8,
+    /// Reckoning +1597, published by Skate 3 82DB70D0.
+    pub flag_445: u8,
     pub flag_446: u8,
     pub flag_447: u8,
     pub flag_448: u8,

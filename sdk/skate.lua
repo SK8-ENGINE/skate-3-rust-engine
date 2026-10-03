@@ -1,191 +1,564 @@
 ---@meta
--- SDK 1 language-server declarations. Add this directory as a Lua workspace library.
--- This file is not executed. Runtime reference: docs/lua-modding.md.
----@alias Vec3 number[] Three finite components, 1-based, Y up, metres.
----@alias SettingValue boolean|number|string
----@class GrindSnapshot
----@field active boolean
----@field name string
----@field kind integer
----@field distance number
+-- SDK 2 language-server declarations. Not executed at runtime.
+---@alias Vec3 number[]
+---@alias Quat number[] xyzw
+---@class DeformationOptions
+---@field yield_speed? number contact impulse/body mass threshold, m/s (default 2)
+---@field compliance? number metres per m/s above yield (default 0.045)
+---@field radius? number impact region metres (default 1.2)
+---@field max_displacement? number cumulative offset limit metres (default 0.55)
+---@field max_step? number per-impact crush metres (default 0.22)
+---@field cooldown? number minimum update interval seconds (default 0.10)
+---@field resolution? integer[] XYZ lattice counts, default {9,5,17}; <=2048 total
+---@class BodyDesc
+---@field deformation? DeformationOptions
+---@field shape {type:'box'|'sphere'|'capsule'|'convex'|'mesh', half_extents?:Vec3, radius?:number, half_height?:number, points?:Vec3[], path?:string, object?:string}
+---@field body_type 'dynamic'|'kinematic'|'static'
+---@field mass? number
+---@field position? Vec3
+---@field heading? number
+---@field friction? number
+---@field ccd? boolean
+---@field sensor? boolean
+---@field membership? integer
+---@field filter? integer
+---@field center_of_mass? Vec3 body-local COM (weight transfer under corner loads)
+---@field collider_offset? Vec3 chassis-local collider translation (legacy vehicle.json)
+---@field inertia_half_extents? Vec3 optional inertia box; with COM sets MassProperties
+---@field linear_damping? number default 0.08
+---@field angular_damping? number default 0.5
+---@class SpringRayOpts
+---@field local_origin Vec3
+---@field local_direction? Vec3 default {0,-1,0}
+---@field rest_length number
+---@field max_travel? number
+---@field contact_radius? number
+---@field stiffness number
+---@field compression? number
+---@field relaxation? number
+---@field damping? number alias for compression/relaxation
+---@field max_force? number
+---@field dt number
+---@class SpringRayHit
+---@field in_contact boolean
+---@field point Vec3
+---@field normal Vec3
+---@field hard_point Vec3
+---@field direction_ws Vec3
+---@field suspension_length number
+---@field load number
+---@field relative_velocity number
+---@class BodySnapshot
+---@field player_overlapping boolean Enabled native local board/skater volumes touching this body; includes sensors. Solid contact margin 0.025m; sensors require intersection. Updated each fixed callback, false while suspended/attached. Geometric query only; collision masks do not suppress it.
+---@field position Vec3
+---@field rotation Quat
+---@field linvel Vec3
+---@field angvel Vec3
+---@field force Vec3 last sdk.physics.force this tick (zeros if none); Rapier user forces are cleared each tick
+---@field torque Vec3 last sdk.physics.torque this tick
+---@field mass number
+---@field speed number |linvel|
 ---@class PlayerSnapshot
----@field position Vec3 Animation root position.
----@field velocity Vec3 Physical board velocity, including when offboard.
----@field heading number Animation-root yaw in radians, zero faces +Z.
+---@field landed_trick_base string Engine-authored base label identifier (not localized), captured with landing_seq
+---@field landed_spin_degrees integer Signed body rotation from the settled scorer; excludes board shuvit rotation
+---@field landed_clean boolean Quality captured at the confirmed landing
+---@field landed_sketchy boolean Sketchy quality captured at the confirmed landing
+---@field suspended boolean local or remote simulation/visibility suspension
+---@field id? string
+---@field local? boolean
+---@field name? string display name from the multiplayer menu
+---@field position Vec3
+---@field velocity Vec3
+---@field angvel Vec3
+---@field forward Vec3
+---@field heading number
+---@field rotation Quat
+---@field speed number
 ---@field on_board boolean
----@field state integer Native state identifier, not a trick name.
+---@field state integer
 ---@field category integer
+---@field filtered integer
+---@field mode string ground|air|grind|offboard|offboard_air|bail|teleport
+---@field grind string|nil
 ---@field bailing boolean
----@field grind GrindSnapshot
----@class MapSnapshot
----@field name string
----@field generation integer
----@class AnimationInfo
----@field bone_names string[]
----@field slots table<string, {fps:number,frame_count:integer}>
+---@field trick string HUD trick name; empty when idle
+---@field trick_seq integer increments each newly announced trick; NOT a landing
+---@field landing_seq integer monotonic confirmed, banked on-board sequence counter
+---@field landed_trick string last confirmed landing label; persists until another landing
+---@field bail_seq integer monotonic wipeout-entry counter
+---@field new_trick boolean true for the announce frame
+---@field modified_trick boolean
+---@field close_tricks boolean
+---@field sequence boolean combo/line still live
+---@field score number
+---@field line number
+---@field multiplier number
+---@field line_time number
+---@field clean boolean
+---@field sketchy boolean
+---@field switch boolean
+---@field fakie boolean
+---@field nollie boolean
+---@field intents table<string, number>
+---@class ContactEvent
+---@field a string|nil body key or `"ground"` when the other side is owned
+---@field b string|nil body key or `"ground"`
+---@field started boolean true on pair begin, false on end
+---@class TouchingPair
+---@field a string|nil body key or `"ground"`
+---@field b string|nil body key or `"ground"`
+---@class PadSnapshot
+---@field buttons integer XInput button bits
+---@field triggers number[] LT, RT in 0..1
+---@field left number[] stick XY
+---@field right number[] stick XY
+---@class NetworkInfo
+---@field active boolean
+---@field local_id string
+---@field is_host boolean
+---@field host_id string
+---@field players string[]
+---@field states table<string, table<string, table<string, any>>> mod_id → peer_id → key → value
+---@field status string
 ---@class SDKSnapshot
 ---@field player PlayerSnapshot
----@field map MapSnapshot
----@field animation AnimationInfo
----@field network NetworkInfo
+---@field skaters table<string, PlayerSnapshot>
+---@field map {name:string, generation:integer}
 ---@field tick integer
 ---@field keys table<string,boolean>
----@field actions number[] 18 values; Lua index 1 corresponds to native action 64.
+---@field actions number[]
+---@field pad PadSnapshot
 ---@field paused boolean
 ---@field replay boolean
+---@field camera? {position:Vec3}
+---@field attach? {body:string, owner:string}
+---@field physics {bodies:table<string,BodySnapshot>, contacts:ContactEvent[], touching:TouchingPair[]}
+---@field network? NetworkInfo
 ---@class ModCallbacks
 ---@field on_load? fun()
----@field on_unload? fun() Commands discarded; host always cleans up.
----@field on_update? fun(event:{dt:number}) Active render time; max dt 0.25 seconds.
----@field on_fixed_update? fun(event:{dt:number}) After native physics, before next input publication.
----@field on_settings? fun(event:{key:string,value:SettingValue}) sdk.settings already updated.
----@field on_event? fun(event:ModEvent)
----@class ModEvent
----@field name 'world_changed'|'bail_changed'|'player_state_changed'|'grind_changed'
----@field map? MapSnapshot world_changed only
----@field bailing? boolean bail_changed only
----@field previous? integer player_state_changed only
----@field state? integer player_state_changed only
----@field grind? GrindSnapshot grind_changed only
+---@field on_unload? fun()
+---@field on_ui_update? fun(event:{dt:number,paused:boolean}) runs while paused; does not advance simulation timers (menus >= 2)
+---@field on_update? fun(event:{dt:number})
+---@field on_fixed_update? fun(event:{dt:number})
+---@field on_settings? fun(event:{key:string,value:any})
+---@field on_event? fun(event:{name:string})
 sdk = {
-    api_version = 1,
-    ---@type table<string,SettingValue>
+    api_version = 2,
+    ---@type string
+    mod_id = "",
+    ---@type table<string, any>
     settings = {},
     ---@type SDKSnapshot
     snapshot = {},
-    player = {}, input = {}, ui = {}, scene = {}, animation = {},
-    time = {elapsed = 0},
+    physics = {}, graphics = {}, player = {}, camera = {}, input = {}, ui = {}, net = {}, assets = {},
+    time = { elapsed = 0 },
 }
----@param text string At most 2048 UTF-8 bytes; queues labelled INFO output.
+---@param text string
 function sdk.log(text) end
----@param path string Relative within mod root; max 256 KiB, UTF-8 only; errors on failure.
+---@param path string
 ---@return string
 function sdk.read_text(path) end
+---@param path string package-relative .glb
+---@return {nodes:string[], meshes:string[]}
+function sdk.assets.objects(path) end
+---@param key string
+---@param body BodyDesc
+function sdk.physics.spawn(key, body) end
+---@param key string
+function sdk.physics.remove(key) end
+---@param key string
+---@param opts {shape:{type:'mesh'|'convex', path?:string, object?:string, points?:Vec3[]}, position?:Vec3, friction?:number}
+function sdk.physics.add_collider(key, opts) end
+---@param key string
+---@param force Vec3
+---@param point? Vec3
+function sdk.physics.force(key, force, point) end
+---@param key string
+---@param impulse Vec3
+---@param point? Vec3
+function sdk.physics.impulse(key, impulse, point) end
+---@param key string
+---@param torque Vec3
+function sdk.physics.torque(key, torque) end
+---@param key string
+---@param torque Vec3
+function sdk.physics.torque_impulse(key, torque) end
+---@param origin Vec3
+---@param direction Vec3
+---@param opts? {max_distance?:number, filter?:'all'|'ground', exclude?:string[]}
+---@return {body:string|nil, point:Vec3, normal:Vec3, toi:number}|nil
+function sdk.physics.raycast(origin, direction, opts) end
+---@param key string
+---@param point Vec3
+---@return Vec3|nil
+function sdk.physics.velocity_at(key, point) end
+---@param key string
+---@param point Vec3
+---@param direction Vec3
+---@return number|nil
+function sdk.physics.effective_inv_mass(key, point, direction) end
+---@param key string
+---@param opts SpringRayOpts
+---@return SpringRayHit|nil
+function sdk.physics.spring_ray(key, opts) end
+---@param key string
+---@param local_accel Vec3
+---@param dt? number
+---@return Vec3|nil
+function sdk.physics.local_ang_accel_impulse(key, local_accel, dt) end
+---@param key string
+---@param linvel Vec3
+function sdk.physics.set_linvel(key, linvel) end
+---@param key string
+---@param angvel Vec3
+function sdk.physics.set_angvel(key, angvel) end
+---@param key string
+---@param position Vec3
+---@param rotation Quat
+function sdk.physics.set_pose(key, position, rotation) end
+---@param key string
+---@param joint {body_a:string, body_b:string, anchor_a:Vec3, anchor_b:Vec3, axis?:Vec3, limits?:[number,number], contacts_enabled?:boolean}
+function sdk.physics.revolute(key, joint) end
+---@param key string
+---@param joint {body_a:string, body_b:string, anchor_a?:Vec3, anchor_b?:Vec3, axis?:Vec3, limits?:[number,number], contacts_enabled?:boolean}
+function sdk.physics.prismatic(key, joint) end
+---@param key string
+---@param motor {mode:'velocity', target_velocity:number, factor?:number, max_force?:number}|{mode:'position', target_position:number, stiffness:number, damping:number, max_force?:number}
+function sdk.physics.joint_motor(key, motor) end
+---@param key string
+---@param spring {position?:number, target_position?:number, stiffness:number, damping:number, max_force?:number}
+function sdk.physics.joint_spring(key, spring) end
+---@param key string
+function sdk.physics.remove_joint(key) end
+---@param key string
+---@return BodySnapshot|nil
+function sdk.physics.read(key) end
+---@return ContactEvent[] edge events from the previous Rapier step
+function sdk.physics.contacts() end
+---@return TouchingPair[] pairs in contact after the previous Rapier step (`ground` included)
+function sdk.physics.touching() end
+---@param key string
+---@param opts {path?:string, body?:string, position?:Vec3, rotation?:Quat, scale?:Vec3, color?:Vec3, visible?:boolean, opacity?:number}
+-- opts.deform_nodes: optional string[] of GLB scene node names whose meshes follow the bound body deformation.
+function sdk.graphics.mesh(key, opts) end
+---@param key string
+function sdk.graphics.remove(key) end
+---@param key string
+---@param visible boolean
+function sdk.graphics.set_visible(key, visible) end
+---@class MeshBufferOpts
+---@field body? string
+---@field position? Vec3 body-local when bound, world when unbound
+---@field rotation? Quat
+---@field scale? Vec3
+---@field blend? boolean default true
+---@field unlit? boolean default true
+---@field visible? boolean default true
+---@field depth_bias? number decal bias, default 0
+---@field texture? string mod-relative PNG path, e.g. textures/skid_tread.png
+---@field capture? string named camera capture; mutually exclusive with texture
+---@field tint? Vec3 material tint, default white
+---@class MeshBufferWrite
+---@field positions Vec3[]
+---@field normals? Vec3[]
+---@field colors? number[][] per-vertex RGBA (packed flat by the runtime)
+---@field uvs? number[][]
+---@field indices integer[] 0-based triangle indices
+---@class LightOpts
+---@field kind? "point"|"spot"
+---@field body? string
+---@field position? Vec3
+---@field offset? Vec3
+---@field direction? Vec3 spot axis
+---@field color? Vec3
+---@field intensity? number
+---@field range? number
+---@field inner_angle? number
+---@field outer_angle? number
+---@param key string
+---@param opts? MeshBufferOpts
+function sdk.graphics.mesh_buffer(key, opts) end
+---@param key string
+---@param data MeshBufferWrite
+function sdk.graphics.mesh_buffer_write(key, data) end
+---@param key string
+---@param data MeshBufferWrite append-only delta; indices are absolute in the combined mesh
+function sdk.graphics.mesh_buffer_append(key, data) end
+---@param key string
+---@param opts? LightOpts
+function sdk.graphics.light(key, opts) end
 ---@return PlayerSnapshot
 function sdk.player.read() end
----@param position Vec3 Components within ±100000 metres; author supplies a valid destination.
----@param heading number Radians around world Y; zero faces +Z.
----@param on_board boolean
-function sdk.player.teleport(position, heading, on_board) end
----@param key string Bevy physical KeyCode name, e.g. KeyJ, F6, Space. Unknown returns false.
+---Freeze and hide the local skater and remove their collision participation.
+---False releases only this mod's suspension; unload/world change also releases it.
+---@param suspended boolean
+function sdk.player.suspend(suspended) end
+---@return table<string, PlayerSnapshot>
+function sdk.player.skaters() end
+---@param id string|number
+---@return PlayerSnapshot|nil
+function sdk.player.skater(id) end
+---@param body string
+---@param offset? Vec3
+function sdk.player.attach(body, offset) end
+function sdk.player.detach() end
+---@return string|nil
+function sdk.player.attached() end
+---@param body? string
+---@param offset? Vec3
+function sdk.camera.follow(body, offset) end
+function sdk.camera.clear_follow() end
+---@param position Vec3
+---@param look_at? Vec3
+function sdk.camera.set(position, look_at) end
+---@param peer string|number|nil peer whose actual camera transform/FOV to mirror; nil restores native camera
+function sdk.camera.watch(peer) end
+---@param key string
 ---@return boolean
 function sdk.input.down(key) end
----@param id integer Native published gameplay action 64..81; invalid ID raises an error.
+---@param id integer
 ---@return number
 function sdk.input.action(id) end
----@param key string Owner-local stable visual key, 1..64 lowercase ASCII letters/digits/._-
----@param text string At most 1024 UTF-8 bytes.
+---@return PadSnapshot
+function sdk.input.pad() end
+---@param key string
+---@param text string
 function sdk.ui.text(key, text) end
----@param key string Same namespace as sdk.ui.text; repeated key updates/replaces.
----@param position Vec3
----@param size Vec3 Each component >0 and <=100 metres.
----@param color Vec3 Each sRGB component in 0..1.
-function sdk.scene.cube(key, position, size, color) end
----@param key string Remove owner's text or cube; absent is a no-op.
-function sdk.scene.remove(key) end
----@param key string Timer key, 1..64 bytes. Existing timer is replaced.
----@param seconds number Finite delay 0..86400 active Update seconds.
----@param callback function One-shot callback, part of the on_update transaction/quota.
-function sdk.time.after(key, seconds, callback) end
----@param key string Absent is a no-op.
-function sdk.time.cancel(key) end
----@return AnimationInfo
-function sdk.animation.info() end
----@param path string Package-relative original body-clip JSON, <=4 MiB; host validates supported slots and exact timing.
-function sdk.animation.replace(path) end
-
----@class TrainerTuning Numeric fields default to 1; multipliers of current stock settings.
----@field pop? number 0.25..4, native ground pop heights.
----@field grind_pop? number 0.25..4, native grind launch height.
----@field push_speed? number 0.25..4, push target and maximum pushable speed.
----@field push_power? number 0.25..4, native push velocity-change limits.
----@field braking? number 0.25..4, foot and tail brake force.
----@field steering? number 0.25..4, general steering scalar.
----@field wobble? number 0..2, speed wobble amplitude.
----@field offboard_jump? number 0.25..4, native biped launch height.
----@field grip? number 0.25..4, wheel static/dynamic and sideways slide friction.
----@field turn_power? number 0.25..4, native heading turn strength.
----@field hold_fakie? boolean Defaults false; suppress automatic fakie stance switching.
----@field manual_drag? number 0.25..4, manual balance linear drag.
-sdk.trainer = {}
----@param tuning TrainerTuning Owned, reversible native tuning. Conflicting owner is rejected.
-function sdk.trainer.apply(tuning) end
-
----@class VehicleControls
----@field pitch? number -1..1; airborne nose up to nose down (left stick vertical)
----@field throttle? number -1..1, reverse to forward
----@field steering? number -1..1, right to left
----@field brake? number 0..1
----@field handbrake? boolean
----@class VehicleTuning
----@field engine_volume? number 0..1; requires engine_audio.enabled in definition
----@field engine_force? number 0..100000 N
----@field max_speed? number 1..100 m/s, engine limit
----@field brake_impulse? number 0..10000
----@field steering_angle? number 0.01..1.2 radians
----@field tire_grip? number 0.1..20
----@class VehicleSnapshot
----@field position number[] metres
----@field rotation number[] quaternion xyzw
----@field heading number radians
----@field speed number signed m/s
----@field phase 'parked'|'entering'|'driving'|'exiting'
----@field occupied boolean
----@field ready boolean
-sdk.vehicle = {}
----@param key string Owner-local key
----@param definition string Package-relative vehicle JSON
----@param position number[] World position
----@param heading? number Radians
-function sdk.vehicle.spawn(key,definition,position,heading) end
+---Local-only text in Pause > Multiplayer > Debug; never draws a gameplay overlay.
+---Up to 8 entries per mod, 1024 UTF-8 bytes each. Empty text removes an entry.
 ---@param key string
----@return VehicleSnapshot?
-function sdk.vehicle.read(key) end
----@param key string
----@param controls VehicleControls Refresh every fixed tick
-function sdk.vehicle.control(key,controls) end
----@param key string
----@param tuning VehicleTuning
-function sdk.vehicle.tune(key,tuning) end
----@param key string
-function sdk.vehicle.enter(key) end
----@param key string
-function sdk.vehicle.exit(key) end
----@param key string
----@param position number[]
----@param heading? number
-function sdk.vehicle.reset(key,position,heading) end
----@param key string
-function sdk.vehicle.remove(key) end
----@return table Normalized keyboard/controller axes plus interact and pad_buttons
-function sdk.vehicle.input() end
-
----@class VehicleBailEvent
----@field name 'vehicle_bailed'
----@field owner string
----@field key string
----@field reason 'crash'|'rider_impact'|'inverted'
----@field position number[] World seat position at detection, metres
----@field velocity number[] Carried world velocity plus launch lift, m/s
----@field angular_velocity number[] World angular velocity, rad/s
--- Configure rider_safety in the vehicle definition; see docs/vehicle-sdk.md.
-
----@class NetworkInfo
----@field active boolean
----@field local_id string Keep 64-bit player IDs as strings. Offline: "0".
----@field is_host boolean
----@field states table<string,table<string,table<string,any>>> Mod ID -> peer ID -> state keys.
----@field status string Matching/limit diagnostics.
-sdk.net = {}
+---@param text string
+function sdk.ui.multiplayer_debug(key, text) end
 ---@return NetworkInfo
 function sdk.net.info() end
----@param key string Stable owner-local key, 1..64 characters.
----@param value any JSON-compatible value, at most 512 encoded bytes; nil clears.
-function sdk.net.publish(key,value) end
----@param peer string Player ID from sdk.net.info(), never converted to a number.
+---@return string[]
+function sdk.net.players() end
 ---@param key string
----@return any Latest value for this mod/peer/key, or nil.
-function sdk.net.read(peer,key) end
--- State coalesces; this is not an exactly-once event channel.
--- World cubes and owned vehicles replicate automatically for matching enabled mods.
--- See docs/multiplayer-mods.md for ownership, collision and late-join behavior.
+---@param value any JSON-compatible; at most 512 encoded bytes; nil clears
+function sdk.net.publish(key, value) end
+---@param peer string|number peer id from info().local_id / remote peers
+---@param key string
+---@return any|nil
+function sdk.net.read(peer, key) end
+
+
+---@class TeleportOptions
+---@field position Vec3 world position, each coordinate within +/-100000
+---@field heading? number radians, default 0
+---@field velocity? Vec3 world linear velocity, each component within +/-200
+---@param options TeleportOptions moves only the local player through native travel
+function sdk.player.teleport(options) end
+
+sdk.session = {}
+---@return {active:boolean, local_id:string, is_host:boolean, authority:string, players:string[]}
+function sdk.session.info() end
+---The transport host may reclaim authority; the current authority may renew it.
+function sdk.session.claim() end
+---@param peer string|number connected peer; transfer is ratified asynchronously by host
+function sdk.session.transfer(peer) end
+---@param peer string|number connected peer; requires session authority
+---@param options TeleportOptions
+function sdk.session.teleport(peer, options) end
+
+sdk.volumes = {}
+---@param key string mod-owned id; at most 32 boxes per mod
+---@param options {position:Vec3, size:Vec3, rotation?:Quat, visible?:boolean, color?:Vec3, opacity?:number}
+function sdk.volumes.box(key, options) end
+---@param key string
+function sdk.volumes.remove(key) end
+---@param key string
+---@return {position:Vec3,size:Vec3,rotation:Quat,inside:string[]}|nil point overlaps, not physical collisions
+function sdk.volumes.read(key) end
+
+---@param key string mod-owned id; at most 2 per mod, 4 total
+---@param options {position:Vec3,look_at:Vec3,fov?:number,width?:integer,height?:integer} fov radians [0.2,2.5]; sizes [64,512], multiples of 16
+function sdk.camera.capture(key, options) end
+---@param key string releases the named target; bound meshes lose their image
+function sdk.camera.clear_capture(key) end
+
+
+---@class MenuItem
+---@field id string unique within this menu
+---@field label string
+---@field description? string
+---@field enabled? boolean default true
+---@field children? MenuItem[] submenu, up to 4 levels
+---@param key string mod-owned id; up to 8 menus per mod
+---@param options {title:string,section?:string,items:MenuItem[]} up to 64 total items
+---Actions dispatch on_event {name="menu_action",menu=key,item=item.id} to the owner, including while paused.
+function sdk.ui.menu(key, options) end
+---@param key string
+function sdk.ui.remove_menu(key) end
+
+---@class NativeContact
+---@field a {kind:string,index?:integer} board, skater, external, or world
+---@field b {kind:string,index?:integer}
+---@field point Vec3 world contact point
+---@field normal Vec3 native A-side normal
+---@field force Vec3 native solved normal plus friction force
+---@field normal_force Vec3
+---@field friction_force Vec3
+---@field impulse Vec3 force times simulation dt
+---@field static_friction number combined contact coefficient
+---@field dynamic_friction number combined contact coefficient
+---@field material_tags integer[] A and B material tags
+---@field id string stable body pair, shared by manifold points
+---@field phase 'begin'|'stay'|'end'
+---@field relative_velocity_before_solve Vec3 A minus B at contact point, including angular velocity
+---@field closing_speed number m/s; zero on end
+---@class NativeJoint
+---@field index integer zero-based native joint ID (use this, not Lua array index)
+---@field name string native authored joint name
+---@field parent integer native part index
+---@field child integer native part index
+---@field swing_limit number radians
+---@field twist_limit number radians
+---@field free_swing boolean
+---@field free_twist boolean
+---@field drive_enabled boolean false when a mod suppresses the child's animation drives
+---@field override_owner? string
+---@field enabled boolean
+---@field possession_enabled boolean
+---@field load? NativeJointLoad most recent eligible solved row
+---@field parameters integer[] native words, read-only
+---@field frames integer[] native words, read-only
+---@return {tick:integer,dt:number,contacts:NativeContact[],joints:NativeJoint[],parts:table[],ragdoll:boolean,partial_ragdoll:boolean} local player only
+function sdk.player.physics() end
+---@return NativeContact[] most recent solved frame, max 128 active plus end reports to reach 256
+function sdk.player.contacts() end
+---@return NativeJoint[]
+function sdk.player.joints() end
+---@return {index:integer,position:Vec3,velocity:Vec3,angvel:Vec3,inverse_mass:number}[]
+function sdk.player.parts() end
+---@param joint integer zero-based index from sdk.player.joints()
+---@param options JointOverride angles [0.01,pi], radians
+---Replaces this mod's override; omitted properties follow native state. Another mod cannot take an owned joint.
+function sdk.player.set_joint(joint, options) end
+---@param joint integer restores this mod's joint override
+function sdk.player.reset_joint(joint) end
+---Restores all joint AND part overrides owned by this mod.
+function sdk.player.reset_joints() end
+
+-- General engine access: see GENERAL_API.md for units, lifecycle and limitations.
+sdk.commands = {}
+---@class CommandResult
+---@field token integer latest request token for this key
+---@field ok boolean host execution succeeded; not remote acknowledgement
+---@field error? string
+---@field value? any catalog for engine_inspect, otherwise nil
+---@field tick integer
+---@param key string at most 64 result keys per mod
+---@param command table validated native command; no nested request
+---@return integer token
+function sdk.commands.request(key, command) end
+---@param key string
+---@return CommandResult|nil nil until the latest token is observed
+function sdk.commands.result(key) end
+
+sdk.engine = {version=1}
+---@return string[]
+function sdk.engine.systems() end
+---@param system string player, rig, bodies, input, graphs, animation, scoring, world, camera, network, commands
+---@return table|nil latest snapshot
+function sdk.engine.read(system) end
+---@param key string command result key
+---@param system 'graphs'|'scoring'
+function sdk.engine.inspect(key, system) end
+
+---@class BodyReference
+---@field kind 'skater'|'board'|'mod'
+---@field index? integer zero-based native physical body ID
+---@field key? string mod-owned Rapier body key
+---@class NativeBody: BodyReference
+---@field position Vec3 world centre of mass
+---@field rotation Quat XYZW
+---@field velocity Vec3 world m/s
+---@field angvel Vec3 world rad/s
+---@field inverse_mass number
+---@field inverse_inertia Vec3[] world matrix columns
+---@field state_flags integer effective native solve state
+---@field name? string mapped animation bone name
+---@field joint? integer native joint whose child is this body
+---@field collision_enabled? boolean effective enabled flag
+---@field animation_drives? boolean permits native animation drives
+---@field possession_drives? boolean permits native board-holding drives
+---@field material? {static_friction:number,dynamic_friction:number}
+---@field override? {owner:string,options:PartOverride}
+sdk.bodies = {}
+---@param ref BodyReference
+---@return NativeBody|table|nil
+function sdk.bodies.read(ref) end
+---@param ref BodyReference
+---@param value Vec3 world N s
+---@param point? Vec3 world point; omitted means centre of mass
+function sdk.bodies.impulse(ref, value, point) end
+---@param ref BodyReference
+---@param value Vec3 world N m s
+function sdk.bodies.angular_impulse(ref, value) end
+
+---@class JointOverride
+---@field swing_limit? number [0.01,pi] radians
+---@field twist_limit? number [0.01,pi] radians
+---@field free_swing? boolean
+---@field free_twist? boolean
+---@field enabled? boolean false removes entire constraint including linear attachment
+---@field drive_enabled? boolean false suppresses child animation drives
+---@field possession_enabled? boolean false suppresses child board-holding drives
+---@field descendants? boolean extends drive suppressions to child subtree
+---@class PartOverride
+---@field motion? 'dynamic'|'frozen'|'static' solve flags 4/2/1; not a player state change
+---@field collision? boolean
+---@field friction? number [0,10], both material coefficients
+---@field animation_drives? boolean
+---@field possession_drives? boolean
+---@class NativeJointLoad
+---@field linear_impulse Vec3 world N s on child/A
+---@field angular_impulse Vec3 world N m s, direct angular couple
+---@field force Vec3 N
+---@field torque Vec3 N m, excluding linear anchor lever-arm contribution
+---@field solver_words integer[] packed native u32 values
+---@class NativeRig
+---@field tick integer completed solve cursor
+---@field dt number seconds
+---@field parts NativeBody[]
+---@field board NativeBody[]
+---@field joints NativeJoint[]
+---@field contacts NativeContact[] at most 128 active, plus end reports to reach 256
+---@field contacts_truncated boolean observation rows were omitted; pair tracking continues
+---@field ragdoll boolean native mode
+---@field partial_ragdoll boolean native mode
+sdk.rig = {}
+---@return NativeRig
+---@param fields? string[] Optional top-level rig fields; omit for the complete rig.
+function sdk.rig.read(fields) end
+---@return NativeBody[]
+function sdk.rig.parts() end
+---@return NativeJoint[]
+function sdk.rig.joints() end
+---@return NativeContact[]
+function sdk.rig.contacts() end
+---@param index integer native joint ID, not a Lua array index
+---@param options JointOverride replacement override; omitted fields follow native settings
+function sdk.rig.configure_joint(index, options) end
+---@param index integer native joint ID
+function sdk.rig.reset_joint(index) end
+---@param index integer physical skater part ID
+---@param options PartOverride
+function sdk.rig.configure_part(index, options) end
+---@param index integer physical skater part ID
+function sdk.rig.reset_part(index) end
+---Restores all joint AND part overrides owned by this mod.
+function sdk.rig.reset() end
+
+---@param id integer mapped gameplay action 64..81
+---@param value? number [-1,1]; nil restores normal input
+function sdk.input.override_action(id, value) end
+sdk.graphs = {}
+---@param graph 'action'|'motion'
+---@return {current?:integer,previous?:integer,name?:string,dt:number,state_times:table,active_behaviors:integer[]}|nil
+function sdk.graphs.read(graph) end
+---@param graph 'action'|'motion'
+---@param target 'state'|'transition'|'behavior'
+---@param index integer runtime ID from the catalog; zero-based
+---@param enabled? boolean nil restores the original gate
+function sdk.graphs.set_enabled(graph, target, index, enabled) end

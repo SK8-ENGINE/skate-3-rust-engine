@@ -1,0 +1,348 @@
+//! Package-scoped graphics and immutable-bind-pose node overrides. All physics
+//! and gameplay stay outside this module. A scene node is not a vehicle part.
+use super::Mods;
+use bevy::{prelude::*, scene::{SceneInstance,SceneSpawner}};
+use skate_mods::scene::{GraphicsDefinition, NodeState, TransformOptions, TransformState};
+use std::{collections::{BTreeMap,BTreeSet},time::Instant};
+
+#[derive(Clone)]
+pub(super) struct TimedNode { pub state:NodeState, pub received:Instant }
+#[derive(Clone,Copy)]
+struct Binding { entity:Entity, authored:Transform }
+pub(super) struct Owned {
+    pub(super) deformation: super::graphics_deformation::State,
+    pub entity:Entity,
+    pub mesh:Option<AssetId<Mesh>>,
+    pub material:Option<AssetId<StandardMaterial>>,
+    pub body:Option<String>,
+    pub definition:GraphicsDefinition,
+    pub transform:TransformState,
+    pub visible:bool,
+    pub serial:u64,
+    pub nodes:BTreeMap<String,TimedNode>,
+    bindings:BTreeMap<String,Binding>,
+    ambiguous:BTreeSet<String>,
+    warned:BTreeSet<String>,
+    pub(super) ready:bool,
+}
+
+pub(super) fn transform(state:&TransformState) -> Transform {
+    Transform {
+        translation:Vec3::from_array(state.position),
+        rotation:Quat::from_array(state.rotation).normalize(),
+        scale:Vec3::from_array(state.scale),
+    }
+}
+pub(super) fn node_transform(authored:Transform, state:&NodeState, age:f32) -> Transform {
+    let mut delta=transform(&state.transform);
+    let age=age.clamp(0.,0.10);
+    delta.translation += Vec3::from_array(state.linear_velocity)*age;
+    delta.rotation=(Quat::from_scaled_axis(Vec3::from_array(state.angular_velocity)*age)*delta.rotation).normalize();
+    if state.relative {
+        Transform { translation:authored.translation+delta.translation,
+            rotation:(delta.rotation*authored.rotation).normalize(),scale:authored.scale*delta.scale }
+    } else { delta }
+}
+
+/// Canonical containment defeats symlink escapes as well as lexical traversal.
+/// Remote peers supply only a relative descriptor in a matching local package.
+pub(super) fn asset_path(mods:&Mods, package_id:&str, path:&str) -> Result<String,String> {
+    if !skate_mods::scene::valid_asset(path) || path.is_empty() { return Err("invalid GLB asset path".into()); }
+    let package=mods.manager.packages.get(package_id).ok_or("missing local package")?;
+    let root=package.root.canonicalize().map_err(|e|format!("package path: {e}"))?;
+    let full=root.join(path).canonicalize().map_err(|e|format!("GLB {path}: {e}"))?;
+    if !full.starts_with(&root) || !full.is_file() { return Err("GLB escapes its package".into()); }
+    let reader_root=super::package_root().canonicalize().map_err(|e|e.to_string())?;
+    let relative=full.strip_prefix(&reader_root).map_err(|_|"GLB outside mods asset reader")?;
+    Ok(format!("mods://{}",relative.to_string_lossy().replace('\\',"/")))
+}
+
+pub(super) fn spawn(
+    world:&mut World, mods:&mut Mods, owner:&str, package:&str, key:String,
+    definition:GraphicsDefinition, state:TransformState, visible:bool, serial:Option<u64>,
+) -> Result<(),String> {
+    if !definition.validate() || !state.validate() || !skate_mods::scene::valid_key(&key) {
+        return Err("invalid graphics descriptor or transform".into());
+    }
+    let slot=(owner.to_owned(),key);
+    if !mods.graphics.contains_key(&slot) && mods.graphics.keys().filter(|(o,_)| o==owner).count() >= 64 {
+        return Err("64 graphics instances per owner maximum".into());
+    }
+    // Validate before removing a live instance. An async GLB load is never a
+    // license to fall back to an arbitrary path or another package's scene.
+    let path=if definition.path.is_empty() { None } else { Some(asset_path(mods,package,&definition.path)?) };
+    super::retire_graphics(world,mods,&slot);
+    let t=transform(&state);
+    let visibility=if visible { Visibility::Visible } else { Visibility::Hidden };
+    let (entity,mesh,material)=if let Some(path)=path {
+        let scene=world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset(path));
+        (world.spawn((SceneRoot(scene),t,visibility)).id(),None,None)
+    } else {
+        let mesh=world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(1.,1.,1.));
+        let c=definition.color;
+        let a=definition.opacity;
+        let material=world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
+            base_color:Color::srgba(c[0],c[1],c[2],a),
+            alpha_mode: if a < 1. { AlphaMode::Blend } else { AlphaMode::Opaque },
+            ..default()
+        });
+        (world.spawn((Mesh3d(mesh.clone()),MeshMaterial3d(material.clone()),t,visibility)).id(),Some(mesh.id()),Some(material.id()))
+    };
+    mods.graphics_serial=mods.graphics_serial.wrapping_add(1);
+    world.entity_mut(entity).insert((crate::retail_character::ModGraphicsLit,bevy::camera::visibility::RenderLayers::from_layers(&[0,28])));
+    mods.graphics.insert(slot,Owned {
+        deformation: Default::default(),
+        entity,mesh,material,body:definition.body.clone(),definition,transform:state,visible,
+        serial:serial.unwrap_or(mods.graphics_serial),nodes:BTreeMap::new(),bindings:BTreeMap::new(),
+        ambiguous:BTreeSet::new(),warned:BTreeSet::new(),ready:false,
+    });
+    Ok(())
+}
+pub(super) fn set_node(mods:&mut Mods,owner:&str,key:&str,node:String,options:TransformOptions) -> Result<(),String> {
+    let owned=mods.graphics.get_mut(&(owner.to_owned(),key.to_owned())).ok_or("unknown graphics key")?;
+    if owned.nodes.len() >= 64 && !owned.nodes.contains_key(&node) { return Err("64 node overrides per graphics instance maximum".into()); }
+    let frame=owned.nodes.entry(node).or_insert_with(||TimedNode { state:NodeState::default(),received:Instant::now() });
+    frame.state.apply(&options); frame.received=Instant::now();
+    Ok(())
+}
+pub(super) fn reset_node(world:&mut World,mods:&mut Mods,owner:&str,key:&str,node:&str) {
+    if let Some(owned)=mods.graphics.get_mut(&(owner.to_owned(),key.to_owned())) {
+        owned.nodes.remove(node);
+        if let Some(b)=owned.bindings.get(node) {
+            if let Some(mut t)=world.get_mut::<Transform>(b.entity) { *t=b.authored; }
+        }
+    }
+}
+
+fn bind(world:&mut World,owned:&mut Owned) {
+    if owned.ready { return; }
+    if owned.definition.path.is_empty() { owned.ready=true; return; }
+    let Some(instance)=world.get::<SceneInstance>(owned.entity) else { return };
+    let spawner=world.resource::<SceneSpawner>();
+    if !spawner.instance_is_ready(**instance) { return; }
+    let entities:Vec<_>=spawner.iter_instance_entities(**instance).collect();
+    let mut opacity_materials=BTreeMap::new();
+    for entity in entities {
+        prepare_mesh(world,entity,owned.definition.opacity,&mut opacity_materials);
+        let (Some(name),Some(t))=(world.get::<Name>(entity),world.get::<Transform>(entity)) else { continue };
+        let name=name.as_str().to_owned();
+        if owned.bindings.insert(name.clone(),Binding { entity,authored:*t }).is_some() {
+            owned.ambiguous.insert(name);
+        }
+    }
+    owned.ready=true;
+}
+
+fn prepare_mesh(world:&mut World,entity:Entity,opacity:f32,cache:&mut BTreeMap<AssetId<StandardMaterial>,Handle<StandardMaterial>>) {
+    let Some(handle)=world.get::<MeshMaterial3d<StandardMaterial>>(entity).map(|m|m.0.clone()) else {return};
+    // The baked world's dynamic-shadow map includes layer 28. Keep authored
+    // materials (and their alpha-aware shadow shaders) for every GLB primitive.
+    let layers=world.get::<bevy::camera::visibility::RenderLayers>(entity).cloned().unwrap_or_default().with(28);
+    world.entity_mut(entity).insert(layers);
+    if opacity>=0.999 {return;}
+    let replacement=if let Some(existing)=cache.get(&handle.id()) {existing.clone()} else {
+        let mut assets=world.resource_mut::<Assets<StandardMaterial>>();
+        let Some(mut material)=assets.get(&handle).cloned() else {return};
+        material.base_color.set_alpha(material.base_color.alpha()*opacity);
+        material.alpha_mode=AlphaMode::Blend;
+        let replacement=assets.add(material);
+        cache.insert(handle.id(),replacement.clone());
+        replacement
+    };
+    world.entity_mut(entity).insert(MeshMaterial3d(replacement));
+}
+
+pub(super) fn sync(world:&mut World,mods:&mut Mods) {
+    for ((owner,key),owned) in &mut mods.graphics {
+        let mut t=transform(&owned.transform);
+        let mut visible=owned.visible;
+        if let Some(body)=&owned.body {
+            if let Some(snap)=mods.bodies.get(&(owner.clone(),body.clone())).and_then(|id|mods.world.read(*id)) {
+                let q=Quat::from_array(snap.rotation).normalize();
+                t.translation=Vec3::from_array(snap.position)+q*t.translation;
+                t.rotation=(q*t.rotation).normalize();
+            } else if let Some((position,rotation))=mods.replication.pending_root(owner,body) {
+                t.translation=position+rotation*t.translation;
+                t.rotation=(rotation*t.rotation).normalize();
+            } else {
+                // Out-of-order network spawn: never show a body-bound scene
+                // at the origin while no validated pose has arrived.
+                visible=false;
+            }
+        }
+        if let Some(mut current)=world.get_mut::<Transform>(owned.entity) { if *current!=t {*current=t;} }
+        if let Some(mut current)=world.get_mut::<Visibility>(owned.entity) { let next=if visible { Visibility::Visible } else { Visibility::Hidden }; if *current!=next {*current=next;} }
+        bind(world,owned);
+        if let Some(id)=owned.body.as_ref().and_then(|body|mods.bodies.get(&(owner.clone(),body.clone()))).copied() {
+            if let Some(field)=mods.world.deformation(id) {
+                super::graphics_deformation::sync(world,owned,id,field,mods.world.collider_offset(id).unwrap_or([0.;3]));
+            }
+        }
+        for (name,node) in &owned.nodes {
+            if owned.ambiguous.contains(name) || !owned.bindings.contains_key(name) {
+                if owned.ready && owned.warned.insert(name.clone()) {
+                    warn!("graphics {owner}/{key}: node '{name}' missing or ambiguous in local GLB");
+                }
+                continue;
+            }
+            let binding=owned.bindings[name];
+            let age=if owner.starts_with('@') { node.received.elapsed().as_secs_f32() } else { 0. };
+            if let Some(mut current)=world.get_mut::<Transform>(binding.entity) {
+                let next=node_transform(binding.authored,&node.state,age);
+                if *current!=next {*current=next;}
+            }
+        }
+    }
+}
+
+/// Actual current solid collider edges, not the mesh or an approximate box.
+/// Green=local; amber=remote replica; cyan=physical center of mass.
+pub(crate) fn debug(mods:Res<Mods>,mut gizmos:Gizmos) {
+    if mods.debug_owners.is_empty() { return; }
+    let mut budget=60_000;
+    for body in mods.world.solid_bodies() {
+        let Some(((owner,_),_))=mods.bodies.iter().find(|(_,id)| **id==body.id) else { continue };
+        let package=owner.split_once(':').map_or(owner.as_str(),|(_,id)|id);
+        if !mods.debug_owners.contains(owner) && !mods.debug_owners.contains(package) { continue; }
+        let color=if owner.starts_with('@') { Color::srgb(1.,0.65,0.1) } else { Color::srgb(0.1,1.,0.25) };
+        // Shared triangle edges need only one line. This keeps detailed
+        // compounds visible without spending the line budget twice per edge.
+        let mut edges=BTreeSet::new();
+        for collider in &body.colliders {
+            for triangle in skate_dynamics::solid::collider_triangles(collider) {
+                for (a,b) in [(0,1),(1,2),(2,0)] {
+                    let mut first=triangle[a].map(f32::to_bits);
+                    let mut second=triangle[b].map(f32::to_bits);
+                    if first>second { std::mem::swap(&mut first,&mut second); }
+                    if !edges.insert((first,second)) { continue; }
+                    if budget==0 { return; } budget-=1;
+                    gizmos.line(Vec3::from_array(triangle[a]),Vec3::from_array(triangle[b]),color);
+                }
+            }
+        }
+        let com=Vec3::from_array(body.center_of_mass.to_array());
+        for axis in [Vec3::X,Vec3::Y,Vec3::Z] {
+            gizmos.line(com-axis*0.12,com+axis*0.12,Color::srgb(0.,1.,1.));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn authored_materials_cast_shadows_and_opacity_is_instance_local() {
+        use bevy::camera::visibility::RenderLayers;
+        let mut world=World::new();
+        world.init_resource::<Assets<StandardMaterial>>();
+        let source=world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
+            metallic:0.8,perceptual_roughness:0.23,double_sided:true,cull_mode:None,
+            base_color:Color::srgba(0.2,0.3,0.4,0.6),alpha_mode:AlphaMode::Mask(0.3),..default()
+        });
+        let original=world.spawn(MeshMaterial3d(source.clone())).id();
+        let faded=world.spawn(MeshMaterial3d(source.clone())).id();
+        let mut cache=BTreeMap::new();
+        prepare_mesh(&mut world,original,1.,&mut cache);
+        prepare_mesh(&mut world,faded,0.5,&mut cache);
+        assert_eq!(world.get::<MeshMaterial3d<StandardMaterial>>(original).unwrap().0,source);
+        for entity in [original,faded] {
+            assert!(world.get::<RenderLayers>(entity).unwrap().intersects(&RenderLayers::layer(28)));
+        }
+        let assets=world.resource::<Assets<StandardMaterial>>();
+        assert_eq!(assets.get(&source).unwrap().base_color.alpha(),0.6);
+        assert_eq!(assets.get(&source).unwrap().alpha_mode,AlphaMode::Mask(0.3));
+        let material=assets.get(&world.get::<MeshMaterial3d<StandardMaterial>>(faded).unwrap().0).unwrap();
+        assert_eq!(material.base_color.alpha(),0.3);
+        assert_eq!(material.metallic,0.8);
+        assert_eq!(material.perceptual_roughness,0.23);
+        assert!(material.double_sided);
+        assert!(material.cull_mode.is_none());
+    }
+
+    #[test] fn bind_delta_does_not_accumulate_or_discard_authored_scale() {
+        let authored=Transform::from_xyz(2.,3.,4.).with_scale(Vec3::splat(2.));
+        let mut state=NodeState::default(); state.transform.position=[0.,0.2,0.];
+        state.transform.rotation=Quat::from_rotation_y(0.4).to_array();
+        let a=node_transform(authored,&state,0.);
+        let b=node_transform(authored,&state,0.);
+        assert_eq!(a,b); assert_eq!(a.scale,Vec3::splat(2.));
+        assert!((a.translation.y-3.2).abs()<1e-5);
+    }
+    #[test] fn node_extrapolation_freezes_at_one_tenth_second() {
+        let mut state=NodeState::default();state.angular_velocity=[20.,0.,0.];
+        assert_eq!(node_transform(Transform::IDENTITY,&state,1.),node_transform(Transform::IDENTITY,&state,0.1));
+    }
+}
+
+#[cfg(test)]
+mod deformation_tests {
+    use super::*;
+    use bevy::mesh::VertexAttributeValues;
+    #[test]
+    fn deformation_is_instance_local_and_keeps_glb_materials_and_rigid_parts() {
+        let mut world=World::new();world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<StandardMaterial>>();
+        let source=world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(1.,1.,1.));
+        let material=world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {metallic:0.9,..default()});
+        let root=world.spawn(Transform::IDENTITY).id();
+        let panel=world.spawn((Name::new("panel"),Transform::from_xyz(0.5,0.,0.),ChildOf(root),
+            Mesh3d(source.clone()),MeshMaterial3d(material.clone()))).id();
+        let rigid=world.spawn((Name::new("rigid"),Transform::IDENTITY,ChildOf(root),Mesh3d(source.clone()))).id();
+        let mut owned=Owned {entity:root,mesh:None,material:None,body:Some("object".into()),
+            definition:GraphicsDefinition {path:String::new(),body:Some("object".into()),color:[1.;3],opacity:1.,deform_nodes:vec!["panel".into()]},
+            transform:TransformState {position:[0.25,0.,0.],scale:[2.,1.,1.],..default()},visible:true,serial:1,
+            nodes:BTreeMap::new(),bindings:BTreeMap::new(),ambiguous:BTreeSet::new(),warned:BTreeSet::new(),ready:true,
+            deformation:default()};
+        let field=skate_dynamics::deformation::Field {min:[-4.;3],max:[4.;3],resolution:[2;3],offsets:vec![[0.,0.,-0.2];8],revision:1};
+        super::super::graphics_deformation::sync(&mut world,&mut owned,1,&field,[0.25,0.,0.]);
+        let handle=world.get::<Mesh3d>(panel).unwrap().0.clone();
+        assert_ne!(handle,source);
+        assert_eq!(world.get::<Mesh3d>(rigid).unwrap().0,source);
+        assert_eq!(world.get::<MeshMaterial3d<StandardMaterial>>(panel).unwrap().0,material);
+        let meshes=world.resource::<Assets<Mesh>>();
+        let Some(VertexAttributeValues::Float32x3(original))=meshes.get(&source).unwrap().attribute(Mesh::ATTRIBUTE_POSITION) else {panic!()};
+        let Some(VertexAttributeValues::Float32x3(damaged))=meshes.get(&handle).unwrap().attribute(Mesh::ATTRIBUTE_POSITION) else {panic!()};
+        for (a,b) in original.iter().zip(damaged) {assert!((b[2]-a[2]+0.2).abs()<1e-5);assert_eq!(b[0],a[0]);}
+        super::super::graphics_deformation::sync(&mut world,&mut owned,1,&field,[0.25,0.,0.]);
+        assert_eq!(world.get::<Mesh3d>(panel).unwrap().0,handle);
+        // New replica layout rebinds weights to retained ORIGINAL vertices.
+        let repaired=skate_dynamics::deformation::Field {min:[-4.;3],max:[4.;3],resolution:[3;3],offsets:vec![[0.;3];27],revision:0};
+        super::super::graphics_deformation::sync(&mut world,&mut owned,2,&repaired,[0.25,0.,0.]);
+        let meshes=world.resource::<Assets<Mesh>>();
+        assert_eq!(meshes.get(&handle).unwrap().attribute(Mesh::ATTRIBUTE_POSITION),meshes.get(&source).unwrap().attribute(Mesh::ATTRIBUTE_POSITION));
+        owned.deformation.clear(&mut world);
+        assert!(world.resource::<Assets<Mesh>>().get(&handle).is_none());
+        assert!(world.resource::<Assets<Mesh>>().get(&source).is_some());
+    }
+}
+
+#[cfg(test)]
+mod deformation_timing {
+    use super::*;
+    #[test]
+    #[ignore = "manual actual Skyline asset timing probe"]
+    fn actual_asset_deformation_cpu_cost() {
+        let path=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods/Skyline_Drive_Mod/skyline.glb");
+        let geometry=skate_mods::model::read_geometry_file(&path,"skyline_mesh",&Default::default()).unwrap();
+        let vertices=geometry.vertices.len();
+        let mut source=Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList,bevy::asset::RenderAssetUsages::default());
+        source.insert_attribute(Mesh::ATTRIBUTE_POSITION,geometry.vertices);
+        source.insert_indices(bevy::mesh::Indices::U32(geometry.triangles.into_iter().flatten().collect()));
+        source.compute_normals();
+        let mut world=World::new();world.init_resource::<Assets<Mesh>>();
+        let source=world.resource_mut::<Assets<Mesh>>().add(source);
+        let root=world.spawn(Transform::IDENTITY).id();
+        world.spawn((Name::new("shell"),Transform::IDENTITY,ChildOf(root),Mesh3d(source)));
+        let mut owned=Owned {entity:root,mesh:None,material:None,body:Some("object".into()),
+            definition:GraphicsDefinition {path:String::new(),body:Some("object".into()),color:[1.;3],opacity:1.,deform_nodes:vec!["shell".into()]},
+            transform:default(),visible:true,serial:1,nodes:BTreeMap::new(),bindings:BTreeMap::new(),ambiguous:BTreeSet::new(),warned:BTreeSet::new(),ready:true,deformation:default()};
+        let mut field=skate_dynamics::deformation::Field {min:[-2.,-1.,-3.],max:[2.,2.,3.],resolution:[9,5,17],offsets:vec![[0.;3];9*5*17],revision:1};
+        for i in 0..field.offsets.len() {let p=field.rest(i);if p.z>1. {field.offsets[i][2]=-0.2;}}
+        let t=std::time::Instant::now();super::super::graphics_deformation::sync(&mut world,&mut owned,1,&field,[0.;3]);
+        let initial=t.elapsed();
+        field.revision+=1;for p in &mut field.offsets {p[2]*=1.2;}
+        let t=std::time::Instant::now();super::super::graphics_deformation::sync(&mut world,&mut owned,1,&field,[0.;3]);let update=t.elapsed();
+        let t=std::time::Instant::now();for _ in 0..10000 {super::super::graphics_deformation::sync(&mut world,&mut owned,1,&field,[0.;3]);}
+        eprintln!("Skyline welded vertices={vertices}; initial mesh bind/update={initial:?}; subsequent damage={update:?}; 10000 unchanged checks={:?}; excludes GPU upload/tangents",t.elapsed());
+    }
+}

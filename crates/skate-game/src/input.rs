@@ -8,7 +8,7 @@ mod gesture_mapping_data;
 pub(crate) mod gesture_mapping;
 pub(crate) mod gesture_input;
 pub(crate) mod platform;
-pub(crate) use controllers::{ControllerInput, ControllerStatus};
+pub(crate) use controllers::{ControllerInput, ControllerStatus, RawInput};
 use skate_core::input::tick::TickInput;
 
 #[derive(Resource, Clone, Copy, Debug)]
@@ -57,15 +57,30 @@ pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<cra
     }
 }
 
-fn publish_actions(
+pub(crate) fn publish_actions(
     mut input: ResMut<ControllerInput>,
     mut published: ResMut<PublishedTickInput>,
-    menu:Option<Res<crate::graphics_menu::Menu>>,
+    menu: Option<Res<crate::graphics_menu::Menu>>,
+    debug: Res<crate::debug_cam::DebugCam>,
+    camera: Res<crate::camera::CameraRuntime>,
+    mods: Option<Res<crate::modding::Mods>>,
 ) {
-    if !crate::graphics_menu::gameplay_active(menu) {input.discard_gameplay();}
+    let blocked = !crate::graphics_menu::gameplay_active(menu) || debug.suppress_gameplay(&camera);
+    if blocked {
+        input.discard_gameplay();
+    }
     input.publish_actions();
-    published.0 = input.tick_input();
+    let tick = input.tick_input();
+    let mut values=*tick.actions().values();
+    if !blocked { crate::modding::override_actions(mods.as_deref(), &mut values); }
+    let tick=TickInput::new(tick.tick(),skate_core::input::gameplay_map::GameplayActions::from_values(values),tick.controller_available());
+    published.0 = if debug.suppress_gameplay(&camera) {
+        TickInput::new(
+            tick.tick(),
+            skate_core::input::gameplay_map::GameplayActions::from_values([0.0; 18]),
+            tick.controller_available(),
+        )
+    } else {
+        tick
+    };
 }
-
-#[cfg(test)]
-pub(crate) mod manual_replay;

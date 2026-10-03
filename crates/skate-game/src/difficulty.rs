@@ -12,16 +12,20 @@ pub(crate) enum Difficulty {
     Easy = 0,
     Normal = 1,
     Hardcore = 2,
+    Motorized = 3,
+    Custom = 4,
 }
 impl Difficulty {
-    pub const ALL: [Self; 3] = [Self::Easy, Self::Normal, Self::Hardcore];
-    pub fn key(self) -> &'static str { NATIVE_MODES[self as usize] }
+    pub const ALL: [Self; 5] = [Self::Easy, Self::Normal, Self::Hardcore, Self::Motorized, Self::Custom];
+    pub fn key(self) -> &'static str { if self == Self::Custom { "custom" } else { self.profile_key() } }
+    // Custom owns the unused native test slot; stock modes retain their indices.
+    pub fn profile_key(self) -> &'static str { NATIVE_MODES[self as usize] }
     pub fn label(self) -> &'static str {
-        match self { Self::Easy => "Easy", Self::Normal => "Normal", Self::Hardcore => "Hardcore" }
+        match self { Self::Easy => "Easy", Self::Normal => "Normal", Self::Hardcore => "Hardcore", Self::Motorized => "Motorized", Self::Custom => "Custom" }
     }
     pub fn parse(value: &str) -> Result<Self, String> {
         Self::ALL.into_iter().find(|d| d.key().eq_ignore_ascii_case(value))
-            .ok_or_else(|| format!("Unknown difficulty {value:?}; expected easy, normal or hardcore"))
+            .ok_or_else(|| format!("Unknown difficulty {value:?}; expected easy, normal, hardcore, motorized or custom"))
     }
     pub fn path(root: &Path) -> PathBuf {
         root.parent().unwrap_or(root).join("settings/gameplay.json")
@@ -55,7 +59,7 @@ mod tests {
             let bytes = serde_json::to_vec(&Saved { difficulty: d }).unwrap();
             assert_eq!(serde_json::from_slice::<Saved>(&bytes).unwrap().difficulty, d);
         }
-        assert!(Difficulty::parse("motorized").is_err());
+        assert!(Difficulty::parse("test").is_err());
         assert!(serde_json::from_str::<Saved>(r#"{"difficulty":"made-up"}"#).is_err());
     }
 }

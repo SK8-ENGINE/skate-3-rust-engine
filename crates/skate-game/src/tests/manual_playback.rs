@@ -21,6 +21,7 @@ fn run_manual(sign: i16) {
     let mut input = crate::input::ControllerInput::default();
     let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
     let mut manual_seen = false;
+    let mut manual_score = 0.0_f32;
     let mut balance_seen = false;
     let mut controller_seen = false;
     let mut timer_seen = false;
@@ -64,6 +65,15 @@ fn run_manual(sign: i16) {
             )
         });
         manual_seen |= skater.animation.motion.flags.manualing;
+        if skater.animation.motion.flags.manualing {
+            manual_score = manual_score.max(skater.scoring.sequence_score());
+            if tick % 30 == 0 {
+                eprintln!("MANUAL_SCORE sign={sign} tick={tick} score={} flags={:08x} name={:?} velocity={:?} forward={:?}",
+                    skater.scoring.sequence_score(), skater.animation.motion.score_packet.flags,
+                    skater.scoring.trick_name(), physics.board.bodies()[6].rates.linear_velocity,
+                    physics.board.part_transforms()[6].basis.columns[2]);
+            }
+        }
         balance_seen |=
             skater.animation.motion.flags.manualing && skater.animation_input.fields.balance != 0.0;
         controller_seen |= skater.ground.manual.elapsed > 0.0
@@ -89,6 +99,7 @@ fn run_manual(sign: i16) {
         assert!(camera.frame.is_some());
         assert_eq!(physics.exchange.output().unwrap().tick + 1, physics.ticks);
     }
+    assert!(manual_score > 0.0, "Gameplay manual never earned points: sign={sign}");
     assert!(manual_seen, "Authored manual never entered: sign={sign}");
     assert!(
         balance_seen,
@@ -112,3 +123,4 @@ fn run_manual(sign: i16) {
         physics.ticks
     );
 }
+

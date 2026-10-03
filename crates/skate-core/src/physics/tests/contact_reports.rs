@@ -86,7 +86,7 @@ fn report_budget_is_shared_by_parts_and_keeps_native_contact_order() {
         });
     }
     let mut output = Vec::new();
-    board_reports::collect(&mut output, &rows, &bodies(), 60.0);
+    board_reports::collect(&mut output, &rows, &bodies(), &[], 60.0);
     assert_eq!(
         output.iter().map(|r| r.other_surface).collect::<Vec<_>>(),
         (1..=16).collect::<Vec<_>>()
@@ -94,7 +94,7 @@ fn report_budget_is_shared_by_parts_and_keeps_native_contact_order() {
     rows[0].words[20] = 0;
     rows[1].words[11] = 0;
     rows[2].words[43] = 6; // Different part, same board: excluded from reports.
-    board_reports::collect(&mut output, &rows, &bodies(), 60.0);
+    board_reports::collect(&mut output, &rows, &bodies(), &[], 60.0);
     assert_eq!(
         output.iter().map(|r| r.other_surface).collect::<Vec<_>>(),
         (4..=19).collect::<Vec<_>>()

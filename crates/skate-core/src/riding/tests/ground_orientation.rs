@@ -37,3 +37,30 @@ fn changed_contact_normal_does_not_instantly_replace_the_skater_up() {
     assert!(state.up.y>0.99 && state.up.x>0.0 && state.up.x<0.04);
     assert_eq!(&state.slow_filter.words()[4..8],&lanes(state.up).map(f32::to_bits));
 }
+#[test]
+fn landing_with_reported_tiny_up_residual_stays_finite() {
+    let s = settings();
+    // Exercise the recorded near-vertical orientation and its settled limit.
+    for previous_up in [UP, Vector3::new(-1.6165965e-22, 1.0, -4.2145673e-22)] {
+    let mut state = GroundOrientation::new(&s);
+    state.up = previous_up;
+    // Filter velocity is not in the report; exercise a small finite residual.
+    state.up_velocity = Vector3::new(1.0e-22, 0.0, 2.0e-22);
+    let mut landing = input(UP);
+    landing.animation_balance = -0.36950988;
+    landing.wheel_contact_count = 2;
+    landing.speed = 3.4837468;
+    landing.previous_reckoning_right = Vector3::new(-0.49704847, 2.853549e-22, 0.86772275);
+    state.update(&s, landing);
+    for v in [state.up, state.up_velocity, state.target] {
+        assert!(v.x.is_finite() && v.y.is_finite() && v.z.is_finite(), "{v:?}");
+    }
+    assert!((state.up.y - 1.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn acceleration_clamp_preserves_tiny_finite_delta() {
+    let delta = Vector3::new(1.6165965e-22, 0.0, 4.2145673e-22);
+    assert_eq!(clamp_length(delta, 0.03), delta);
+}

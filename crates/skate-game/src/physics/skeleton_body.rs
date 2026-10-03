@@ -162,30 +162,7 @@ pub(crate) fn load_joints(
         }
     });
     // InitAttribData stores these in ascending physical child order1..22.
-    let names = [
-        "JOINT_NECK_NECK1",
-        "JOINT_SPINE3_NECK",
-        "JOINT_LEFT_FOREARM_HAND",
-        "JOINT_LEFT_ARM_FOREARM",
-        "JOINT_LEFT_SHOULDER_ARM",
-        "JOINT_SPINE3_LEFT_SHOULDER",
-        "JOINT_RIGHT_FOREARM_HAND",
-        "JOINT_RIGHT_ARM_FOREARM",
-        "JOINT_RIGHT_SHOULDER_ARM",
-        "JOINT_SPINE3_RIGHT_SHOULDER",
-        "JOINT_SPINE2_SPINE3",
-        "JOINT_SPINE1_SPINE2",
-        "JOINT_SPINE_SPINE1",
-        "JOINT_HIPS_SPINE",
-        "JOINT_LEFT_FOOT_TOE_BASE",
-        "JOINT_LEFT_LEG_FOOT",
-        "JOINT_LEFT_UPLEG_LEG",
-        "JOINT_HIPS_LEFT_LEG",
-        "JOINT_RIGHT_FOOT_TOE_BASE",
-        "JOINT_RIGHT_LEG_FOOT",
-        "JOINT_RIGHT_UPLEG_LEG",
-        "JOINT_HIPS_RIGHT_LEG",
-    ];
+    let names = JOINT_NAMES;
     let mut settings = Vec::with_capacity(22);
     for name in names {
         let words = data.words::<5>("physics_skeleton_joints", "default", name)?;
@@ -319,3 +296,28 @@ pub(crate) fn load(
         simulation,
     ))
 }
+
+pub(crate) const JOINT_NAMES: [&str;22] = [
+        "JOINT_NECK_NECK1",
+        "JOINT_SPINE3_NECK",
+        "JOINT_LEFT_FOREARM_HAND",
+        "JOINT_LEFT_ARM_FOREARM",
+        "JOINT_LEFT_SHOULDER_ARM",
+        "JOINT_SPINE3_LEFT_SHOULDER",
+        "JOINT_RIGHT_FOREARM_HAND",
+        "JOINT_RIGHT_ARM_FOREARM",
+        "JOINT_RIGHT_SHOULDER_ARM",
+        "JOINT_SPINE3_RIGHT_SHOULDER",
+        "JOINT_SPINE2_SPINE3",
+        "JOINT_SPINE1_SPINE2",
+        "JOINT_SPINE_SPINE1",
+        "JOINT_HIPS_SPINE",
+        "JOINT_LEFT_FOOT_TOE_BASE",
+        "JOINT_LEFT_LEG_FOOT",
+        "JOINT_LEFT_UPLEG_LEG",
+        "JOINT_HIPS_LEFT_LEG",
+        "JOINT_RIGHT_FOOT_TOE_BASE",
+        "JOINT_RIGHT_LEG_FOOT",
+        "JOINT_RIGHT_UPLEG_LEG",
+        "JOINT_HIPS_RIGHT_LEG",
+    ];

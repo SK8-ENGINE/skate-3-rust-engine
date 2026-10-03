@@ -174,8 +174,12 @@ def install(iso, base, game_exe, report, refresh=False):
             if not selected.is_file():raise RuntimeError('Select an existing Skate 3 Xbox 360 ISO')
             source = Path(temp)/'disc'
             extractor = core.xiso_extractor(base, report)
-            with (Path(temp)/'extract.log').open('w') as log:
-                core.run([extractor, '-d', source, '-x', selected], log, report)  # options first: BSD getopt stops at the first operand
+            # Keep the log outside the temporary source directory so a failed
+            # extraction does not delete the file named in the error message.
+            base.mkdir(parents=True, exist_ok=True)
+            with (base/'extract.log').open('w', encoding='utf-8') as log:
+                # extract-xiso expects all options before the ISO path.
+                core.run([extractor, '-x', '-d', source, selected], log, report)
         else:
             source = source_directory(selected, require_core=not refresh)
         stage = core._install(iso, base, game_exe, report, game_root=source, refresh=refresh,

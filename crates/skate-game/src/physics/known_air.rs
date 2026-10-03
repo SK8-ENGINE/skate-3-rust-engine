@@ -20,6 +20,7 @@ pub(crate) struct KnownAir {
     flip_axis_adjustment: [f32; 4],
 }
 impl KnownAir {
+    pub(crate) fn adopt_mode_settings(&mut self, other: Self) { self.modes = other.modes; }
     pub fn load(data: &Collections) -> Result<Self, String> {
         let (settings, modes) = settings::load(data)?;
         Ok(Self {

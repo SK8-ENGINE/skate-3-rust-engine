@@ -107,17 +107,8 @@ pub(super) fn build_rails(rails: &[Rail]) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-pub(crate) fn primitives(map: Option<&SkateMap>) -> Result<Vec<Primitive>,String> {
-    let bytes = build(map)?;
-    primitives_from_blob(&bytes)
-}
-
 // Only accepts a blob returned by build/build_rails; public package input is
 // validated there. Owner is a map-local header handle, not the repeating ID.
-pub(super) fn primitives_from_blob(bytes: &[u8]) -> Result<Vec<Primitive>,String> {
-    decoded_from_blob(bytes).map(|(primitives, _)| primitives)
-}
-
 pub(super) fn decoded_from_blob(bytes: &[u8]) -> Result<(Vec<Primitive>, Vec<PrimitiveMetadata>),String> {
     let word = |at| u32::from_be_bytes(bytes[at..at+4].try_into().unwrap());
     let mut result = Vec::new();

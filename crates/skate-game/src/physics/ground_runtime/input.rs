@@ -118,7 +118,7 @@ impl GroundSettings {
             propulsion: GroundPropulsionInput {
                 flags_2468: p.flags_2468,
                 flags_2472: p.flags_2472,
-                target_speed: a.contacts.push_speed * self.push_target_multiplier,
+                target_speed: push_target(a.contacts.push_speed, p.scalar_2612, self.push_target_multiplier),
                 signed_speed: p.scalar_2612,
                 absolute_body_speed: t.absolute_speed,
                 scalar_2660: t.total_mass,
@@ -271,4 +271,29 @@ fn xyz(v: [f32; 4]) -> Vector3 {
 }
 fn v(v: Vector3) -> [f32; 4] {
     [v.x, v.y, v.z, 0.0]
+}
+
+
+/// Scale the animation-requested speed *gain*, not the existing velocity.
+/// Preserve the exact native target at 1x; caps/contacts still belong to core.
+fn push_target(target:f32,current:f32,strength:f32)->f32 {
+    if strength==1. {target} else {current+(target-current).max(0.)*strength}
+}
+
+#[cfg(test)]
+mod custom_push_tests {
+    use super::push_target;
+    use skate_core::{math::Vector3,riding::push::{calculate_acceleration,PushInput,PushLimits}};
+    #[test]
+    fn higher_limits_alone_do_not_increase_animation_requested_push() {
+        let force=|strength,cap|calculate_acceleration(PushInput {
+            flags_2468:0x0200_0000,flags_2472:0,target_speed:push_target(3.2,3.,strength),
+            current_speed:3.,absolute_body_speed:3.,scale:80.,delta_seconds:1./60.,direction:Vector3::new(0.,0.,1.),
+        },PushLimits {maximum_pushable_speed:8.5,low_speed_change:cap,high_speed_change:cap}).vector.z;
+        assert_eq!(force(1.,1.5),force(1.,10.));
+        assert!((force(5.,10.)/force(1.,10.)-5.).abs()<0.001);
+        assert_eq!(force(0.,10.),0.);
+        assert_eq!(push_target(3.2,5.,10.),5.);
+        assert_eq!(push_target(3.2,5.,1.).to_bits(),3.2f32.to_bits());
+    }
 }

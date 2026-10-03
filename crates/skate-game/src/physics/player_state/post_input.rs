@@ -32,62 +32,6 @@ impl PostInputState {
         }
     }
 }
-///Scorer/decision state that still advances in the genuine no-candidate path
-///82D8AB08 ->82D86808/82D86C88/82D86DE8/82D89F58/82D739D8.
-pub(crate) struct EmptyEdgePost {
-    free_frames: u32,
-    duration: u32,
-    engage_state: u32,
-    expiry: f32,
-    pop_frames: u32,
-    lean: [f32; 2],
-    reset_frames: u32,
-    previous_grind: u32,
-    blend: f32,
-}
-impl EmptyEdgePost {
-    fn new() -> Self {
-        Self {
-            free_frames: 0,
-            duration: 0,
-            engage_state: 0,
-            expiry: 0.0,
-            pop_frames: 0,
-            lean: [0.0; 2],
-            reset_frames: 0,
-            previous_grind: 0,
-            blend: 0.0,
-        }
-    }
-    fn advance(&mut self, p: &mut skate_core::player::input_phase::ProcessedPhysicsInput) {
-        //No candidate means82D8ACF0 skips wallassist,82D86318 skips geometry.
-        self.expiry = (self.expiry - p.timestep_2604).max(0.0);
-        self.free_frames = self.free_frames.wrapping_add(1);
-        if self.free_frames > 20 {
-            self.duration = 0;
-            self.engage_state = 2;
-        }
-        self.pop_frames = decrement(self.pop_frames);
-        for value in &mut self.lean {
-            *value *= f32::from_bits(0x3f68f5c3);
-            if value.abs() < 0.0001 {
-                *value = 0.0;
-            }
-        }
-        self.reset_frames = decrement(self.reset_frames);
-        if self.reset_frames > 0 {
-            p.flags_2476 |= 0x02000000;
-        }
-        if p.grind_words_2532_2536[0] != u32::MAX {
-            self.previous_grind = p.grind_words_2532_2536[0];
-        }
-        self.blend = (self.blend + 0.0035).min(1.0);
-    }
-}
-fn decrement(v: u32) -> u32 {
-    let n = v.wrapping_sub(1);
-    if n & 0x80000000 != 0 { 0 } else { n }
-}
 struct Services<'a> {
     heading: f32,
     grind: &'a mut super::super::player_input::grind::GrindInputState,

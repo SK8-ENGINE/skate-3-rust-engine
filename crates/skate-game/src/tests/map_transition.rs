@@ -38,8 +38,8 @@ fn installed_worlds_prepare_commit_and_retire_without_simulation() {
     world.init_resource::<Assets<Mesh>>();
     world.init_resource::<Assets<Image>>();
     world.init_resource::<Assets<StandardMaterial>>();
-    world.init_resource::<Assets<crate::retail_render::RetailWorldMaterial>>();
-    world.init_resource::<Assets<crate::retail_render::RetailSkyMaterial>>();
+    world.init_resource::<Assets<crate::retail_render::WorldMaterial>>();
+    world.init_resource::<Assets<bevy::render::storage::ShaderStorageBuffer>>();
     let character = world.spawn((crate::world::PlayerRoot, Transform::default())).id();
     let mut initial = PreparedScene::new(&world);
     initial.prepare(None, &root);
@@ -83,8 +83,10 @@ fn installed_worlds_prepare_commit_and_retire_without_simulation() {
         if file.is_none() {
             assert_eq!(world.resource::<Assets<Mesh>>().len(), procedural_meshes);
             assert_eq!(world.resource::<Assets<Image>>().len(), 0);
-            assert_eq!(world.resource::<Assets<crate::retail_render::RetailSkyMaterial>>().len(), 0);
-            assert_eq!(world.resource::<Assets<crate::retail_render::RetailWorldMaterial>>().len(), 0);
+            assert_eq!(world.resource::<Assets<crate::retail_render::WorldMaterial>>().len(), 0);
+            // Material tables are storage buffers now, so they are part of what
+            // retirement has to release (RFC 1 D2).
+            assert_eq!(world.resource::<Assets<bevy::render::storage::ShaderStorageBuffer>>().len(), 0);
             assert_eq!(world.query_filtered::<Entity, With<crate::map_render::MapEntity>>().iter(&world).count(), procedural_entities);
         }
         eprintln!("LIFECYCLE_CHECK generation={} map={file:?} triangles={triangles} entities={} meshes={} images={}",

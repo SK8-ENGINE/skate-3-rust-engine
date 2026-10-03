@@ -10,7 +10,8 @@ use crate::{config::Config, map_library::Entry, map_render::PreparedScene,
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct MapTransitionSet;
 #[derive(Message)]
-pub(crate) struct WorldChanged { pub generation: u64 }
+pub(crate) struct WorldChanged;
+
 
 #[cfg(test)]
 #[path = "tests/map_transition.rs"]
@@ -80,7 +81,9 @@ impl Plugin for MapTransitionPlugin {
     fn build(&self, app: &mut App) {
         let config = app.world().resource::<Config>();
         let current = CurrentMap::from_package(config.map_path.clone(), config.map.as_ref());
-        app.insert_resource(current).init_resource::<MapTransition>().add_message::<WorldChanged>()
+        app.insert_resource(current)
+            .init_resource::<MapTransition>()
+            .add_message::<WorldChanged>()
             .add_systems(PreUpdate, poll.in_set(MapTransitionSet).after(crate::graphics_menu::MenuInput)
                 .before(crate::input::poll_controllers))
             .configure_sets(FixedUpdate, (
@@ -128,7 +131,7 @@ fn start(world: &World, entry: Entry) -> Result<Phase, String> {
                     stage.store(1, Ordering::Relaxed);
                     let physics = info_span!("load_physics").in_scope(|| GamePhysics::load_with_difficulty(&root, map.as_ref(), difficulty))?;
                     stage.store(2, Ordering::Relaxed);
-                    let skater = SkaterRuntime::load_for_world(&root, &graphs, &physics, difficulty.key(), Some(source))?;
+                    let skater = SkaterRuntime::load_for_world(&root, &graphs, &physics, difficulty.profile_key(), Some(source))?;
                     let mut controls = PlayerControls::load(&root)?;
                     controls.preferences = preferences;
                     let camera = crate::camera::CameraRuntime::load(&root)?;
@@ -230,7 +233,7 @@ fn commit(world: &mut World, mut prepared: PreparedWorld) -> String {
         prepared.metadata.generation, prepared.metadata.name, prepared.metadata.spawn,
         prepared.metadata.heading, std::process::id());
     if let Some(mut messages) = world.get_resource_mut::<Messages<WorldChanged>>() {
-        messages.write(WorldChanged { generation: prepared.metadata.generation });
+        messages.write(WorldChanged);
     }
     world.insert_resource(prepared.metadata);
     eprintln!("MAP_PUBLISH_TIMING cpu_ms={}", publication_started.elapsed().as_millis());

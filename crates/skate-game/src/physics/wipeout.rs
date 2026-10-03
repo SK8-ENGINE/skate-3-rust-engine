@@ -13,6 +13,7 @@ pub(crate) struct Wipeout {
     modes: [Mode; 5],
 }
 impl Wipeout {
+    pub(crate) fn adopt_mode_settings(&mut self, other: Self) { self.modes = other.modes; }
     pub fn check_air_collision(
         &mut self,
         p: &ProcessedPhysicsInput,
@@ -129,6 +130,7 @@ pub(super) fn check_after_physics(
         PhysicalStateId::GroundAnimation => {
             skater.wipeout.check_ground_animation(&observations, 1.0)
         }
+        PhysicalStateId::PhysicsAirSecondary => skater.wipeout.check_ground_animation(&observations, skater.grind_trick.wipeout_scale()),
         PhysicalStateId::PhysicsAir => skater.wipeout.check_air(&observations, false),
         _ => Ok(()), //Other concrete states dispatch their own postphysics check.
     }

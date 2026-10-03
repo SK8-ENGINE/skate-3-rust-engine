@@ -33,7 +33,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         p.flags_2472,
     );
     physics.settings.wheel_material = s.wheel_material;
-    let mut mode = *skater
+    let mode = *skater
         .ground_animation_settings
         .modes
         .get(p.state_variant_index_2528 as usize)
@@ -43,9 +43,6 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
                 p.state_variant_index_2528
             )
         })?;
-    mode.minimum_height_64 *= physics.trainer.pop;
-    mode.minimum_height_68 *= physics.trainer.pop;
-    mode.maximum_height *= physics.trainer.pop;
     skater.ground_animation.jump = ground_jump::calculate(
         GroundJumpInput {
             flags_2468: p.flags_2468,

@@ -77,7 +77,11 @@ impl GroundSettings {
         //broadcasts82165A10 (zero) into830BD380 for speed override direction.
         let threshold = [f32::from_bits(0x3586_37bd); 4];
         Ok(Self {
-            push_target_multiplier: 1.,
+            // Only Custom overrides the animation-requested push gain. Original
+            // profiles and raw stock test collections keep the native 1x path.
+            push_target_multiplier: if mode=="test" && data.field("physics_mode",mode,"HostPushStrength").is_ok() {
+                m("HostPushStrength")?
+            } else {1.},
             foot_force_offset: f("physics_feet", "FootForceOffset")?,
             absorption_front: f("physics_feet", "AbsorptionFootForceScalar")?,
             absorption_rear: f("physics_feet", "AbsorptionFootForceRearScalar")?,
@@ -206,22 +210,6 @@ impl GroundSettings {
             wobble_activation: m("Hash_77AFCE78FE1206CA")?,
             wobble_amplitude: m("Hash_5B57F2CCCCEEF430")?,
         })
-    }
-    pub fn tuned(&self, tuning: skate_mods::TrainerTuning) -> Self {
-        let mut result=self.clone();
-        result.push_target_multiplier = tuning.push_speed;
-        result.propulsion.maximum_pushable_speed *= tuning.push_speed;
-        for dv in &mut result.propulsion.mode_speed_changes { *dv *= tuning.push_power; }
-        result.propulsion.braking.input_force *= tuning.braking;
-        result.propulsion.braking.override_force *= tuning.braking;
-        result.steering.general_scalar *= tuning.steering;
-        result.wobble_amplitude *= tuning.wobble;
-        result.slide.friction *= tuning.grip;
-        result.wheel_material.static_friction *= tuning.grip;
-        result.wheel_material.dynamic_friction *= tuning.grip;
-        result.heading.turn_strength *= tuning.turn_power;
-        result.drag.balance_drag *= tuning.manual_drag;
-        result
     }
     pub fn board(&self) -> GroundBoardSettings<'_> {
         GroundBoardSettings {

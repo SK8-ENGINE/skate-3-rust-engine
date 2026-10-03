@@ -22,6 +22,7 @@ mod map_library;
 mod map_render;
 mod map_transition;
 mod difficulty;
+mod custom_difficulty;
 mod graph_host;
 mod graph_runtime;
 mod input;
@@ -41,8 +42,11 @@ mod teleport_menu;
 mod render_capacity;
 mod retail_render;
 mod retail_character;
+mod retail_exposure;
 mod retail_irradiance;
+mod retail_sky;
 mod presentation;
+mod debug_cam;
 mod replay;
 mod world;
 mod grind_world;
@@ -113,7 +117,7 @@ fn main() -> bevy::app::AppExit {
         physics.board.set_transform(spawn);
     }
     eprintln!("REPORT_META stage=skater_initialization");
-    let skater = match bevy::log::info_span!("load_skater").in_scope(|| physics::SkaterRuntime::load(&config.asset_root, &graphs, &physics, config.difficulty.key())) {
+    let skater = match bevy::log::info_span!("load_skater").in_scope(|| physics::SkaterRuntime::load(&config.asset_root, &graphs, &physics, config.difficulty.profile_key())) {
         Ok(skater) => skater,
         Err(error) => {
             eprintln!("{error}");

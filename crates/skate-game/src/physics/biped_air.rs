@@ -36,7 +36,12 @@ pub(crate) fn consume_selector(
     let clearance = skater.offboard_air_selector.settings.deck_center_to_truck;
     skater
         .offboard_air_selector
-        .consume(&physics.world, context, clearance)
+        .consume(
+            &physics.world,
+            &physics.network_proxies.solids,
+            context,
+            clearance,
+        )
         .map(|_| ())
         .map_err(str::to_owned)
 }

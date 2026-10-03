@@ -73,7 +73,7 @@ impl Config {
                 Some("--start-paused") => config.start_paused = true,
                 Some("--teleport") => config.teleport = Some(args.next().ok_or("--teleport requires a destination ID")?.to_string_lossy().into_owned()),
                 Some("--difficulty") => {
-                    let value = args.next().ok_or("--difficulty requires easy, normal or hardcore")?;
+                    let value = args.next().ok_or("--difficulty requires easy, normal, hardcore, motorized or custom")?;
                     difficulty_override = Some(crate::difficulty::Difficulty::parse(&value.to_string_lossy())?);
                 }
                 Some("--verify") => {
@@ -85,7 +85,7 @@ impl Config {
                 }
                 _ => {
                     return Err(format!(
-                        "Unknown argument {arg:?}. Usage: skate3rust [--assets DIRECTORY] [--map MAP.skate | --test-world] [--difficulty easy|normal|hardcore] [--verify CAPTURE.png] [--check-assets] [--start-paused]"
+                        "Unknown argument {arg:?}. Usage: skate3rust [--assets DIRECTORY] [--map MAP.skate | --test-world] [--difficulty easy|normal|hardcore|motorized|custom] [--verify CAPTURE.png] [--check-assets] [--start-paused]"
                     ));
                 }
             }

@@ -1,5 +1,5 @@
 //!82770B40/82771D08 mesh traversal and82770E00/82772028 nearby collection.
-//!This adapter only accepts BoardWorld's authored static-world contract.
+//!Authored map pools plus the host's immutable solid moving-geometry provider.
 use skate_core::{
     air::trajectory::{QueryRequest, QueryResult, SurfaceHit, query_trajectory},
     math::Vector3,
@@ -140,7 +140,7 @@ impl<'a> StaticScene<'a> {
             // Temporary audit-only error detail: preserve the rejected producer
             // packet and caller chain. Invalid spatial values are never substituted.
             bevy::log::error!(
-                "OFFBOARD_INVALID_SWEEP start={:?} end={:?} radius={} start_bits={:08x?} end_bits={:08x?} radius_bits={:08x} group={} reject={:08x} caller={}",
+                "OFFBOARD_INVALID_SWEEP start={:?} end={:?} radius={} start_bits={:08x?} end_bits={:08x?} radius_bits={:08x} group={} reject={:08x}",
                 probe.start,
                 probe.end,
                 probe.radius,
@@ -149,7 +149,6 @@ impl<'a> StaticScene<'a> {
                 probe.radius.to_bits(),
                 group,
                 reject,
-                std::backtrace::Backtrace::force_capture(),
             );
             return Err("Invalid offboard swept-line request");
         }
@@ -218,6 +217,20 @@ impl<'a> StaticScene<'a> {
                 }
             }
         }
+        if pool == QueryPool::Ground
+            && let Some(hit) = self.world.external_line(start, vec3(probe.end), probe.radius)
+        {
+            if hit.hit.geometry.fraction < nearest {
+                output = Some(LineHit {
+                    position: lanes(hit.hit.geometry.position),
+                    normal: lanes(hit.hit.geometry.normal),
+                    fraction: hit.hit.geometry.fraction,
+                    surface: hit.surface,
+                    geometry: hit.geometry_id,
+                    mesh_frame: hit.frame,
+                });
+            }
+        }
         Ok(output)
     }
     fn nearby(
@@ -227,7 +240,17 @@ impl<'a> StaticScene<'a> {
         radius: f32,
         group: i32,
     ) -> Result<Vec<[Vector; 3]>, &'static str> {
-        let mut output = Vec::with_capacity(64);
+        let mut output = if pool == QueryPool::Ground {
+            self.world
+                .external_nearby(vec3(center), radius)
+                .into_iter()
+                .take(64)
+                .map(|triangle| triangle.map(lanes))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::with_capacity(64)
+        };
+        if output.len() >= 64 { return Ok(output); }
         //82770E00 does not apply the trajectory mesh rejection mask here.
         let bounds = self
             .world

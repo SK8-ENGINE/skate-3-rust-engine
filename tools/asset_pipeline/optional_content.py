@@ -44,5 +44,8 @@ def summary(stage):
             try:items = json.loads((active/filename).read_text()).get(key, [])
             except (OSError, ValueError):continue
             if items:warnings.append(dict(component=component, status='unavailable', items=items))
-    atomic_json(stage/'setup-report.json', {'version': 1, 'warnings': warnings})
+    if warnings:
+        atomic_json(stage/'setup-report.json', {'version': 1, 'warnings': warnings})
+    else:
+        (stage/'setup-report.json').unlink(missing_ok=True)
     return warnings

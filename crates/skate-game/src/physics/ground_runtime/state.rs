@@ -1,7 +1,7 @@
 //! Native Ground controller ownership. Source entry/update and output retain
 //! the same instances; constructing this does not mark Ground as entered.
 use super::super::animation_input::AnimationInput;
-use super::{GroundControllers, GroundPumping};
+use super::GroundPumping;
 use skate_core::physics::board_toolkit::BoardToolkit;
 use skate_core::{
     physics::manual::state::ManualState,
@@ -34,6 +34,7 @@ pub(crate) struct GroundState {
     pub(super) entry_settings: super::entry::EntrySettings,
 }
 impl GroundState {
+    pub(crate) fn adopt_mode_settings(&mut self, other: Self) { self.auto_push_enabled = other.auto_push_enabled; self.pumping_settings = other.pumping_settings; }
     pub fn load(data: &Collections, _mode: &str, human_player: bool) -> Result<Self, String> {
         let push = |field| data.float("physics_push", "default", field);
         Ok(Self {
@@ -90,14 +91,5 @@ impl GroundState {
             },
             self.output_settings,
         )
-    }
-    pub fn controllers(&mut self) -> GroundControllers<'_> {
-        GroundControllers {
-            speed_wobble: &mut self.wobble,
-            truck_steering: &mut self.steering,
-            speed_model: &mut self.speed,
-            manual: &mut self.manual,
-            heading_previous: &mut self.heading_previous,
-        }
     }
 }

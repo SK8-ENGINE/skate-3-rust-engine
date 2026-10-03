@@ -512,19 +512,36 @@ impl SpecializedComputePipeline for DownsampleDepthPipeline {
     }
 }
 
-/// Stores a placeholder texture that can be bound to a depth pyramid binding if
-/// no depth pyramid is needed.
+/// Placeholder storage views for unused depth-pyramid mip bindings.
+///
+/// Each slot has its own texture. A single shared dummy fails wgpu validation when
+/// the ReadWrite mip (binding 6 / `mips[5]`) and any WriteOnly pad both reference it
+/// in one compute dispatch.
 #[derive(Resource, Deref, DerefMut)]
-pub struct DepthPyramidDummyTexture(TextureView);
+pub struct DepthPyramidDummyTexture([TextureView; DEPTH_PYRAMID_MIP_COUNT]);
 
 pub fn init_depth_pyramid_dummy_texture(mut commands: Commands, render_device: Res<RenderDevice>) {
     commands.insert_resource(DepthPyramidDummyTexture(
-        create_depth_pyramid_dummy_texture(
-            &render_device,
-            "depth pyramid dummy texture",
-            "depth pyramid dummy texture view",
-        ),
+        create_depth_pyramid_dummy_textures(&render_device, "depth pyramid dummy texture"),
     ));
+}
+
+/// Creates one placeholder storage view per depth-pyramid mip binding slot.
+pub fn create_depth_pyramid_dummy_textures(
+    render_device: &RenderDevice,
+    texture_label: &'static str,
+) -> [TextureView; DEPTH_PYRAMID_MIP_COUNT] {
+    array::from_fn(|i| {
+        create_depth_pyramid_dummy_texture(
+            render_device,
+            texture_label,
+            if i == 5 {
+                "depth pyramid dummy texture view read_write"
+            } else {
+                "depth pyramid dummy texture view write"
+            },
+        )
+    })
 }
 
 /// Creates a placeholder texture that can be bound to a depth pyramid binding
@@ -537,7 +554,11 @@ pub fn create_depth_pyramid_dummy_texture(
     render_device
         .create_texture(&TextureDescriptor {
             label: Some(texture_label),
-            size: Extent3d::default(),
+            size: Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
@@ -580,16 +601,18 @@ impl ViewDepthPyramid {
     pub fn new(
         render_device: &RenderDevice,
         texture_cache: &mut TextureCache,
-        depth_pyramid_dummy_texture: &TextureView,
+        depth_pyramid_dummy_textures: &[TextureView; DEPTH_PYRAMID_MIP_COUNT],
         size: UVec2,
         texture_label: &'static str,
         texture_view_label: &'static str,
     ) -> ViewDepthPyramid {
         // Calculate the size of the depth pyramid. This is the size of the
         // depth buffer rounded down to the previous power of two.
+        // Keep at least 32px so the ReadWrite SPD intermediate mip exists as a
+        // real subresource instead of a dummy pad.
         let depth_pyramid_size = Extent3d {
-            width: previous_power_of_two(size.x),
-            height: previous_power_of_two(size.y),
+            width: previous_power_of_two(size.x).max(32),
+            height: previous_power_of_two(size.y).max(32),
             depth_or_array_layers: 1,
         };
 
@@ -626,7 +649,7 @@ impl ViewDepthPyramid {
                     array_layer_count: Some(1),
                 })
             } else {
-                (*depth_pyramid_dummy_texture).clone()
+                depth_pyramid_dummy_textures[i].clone()
             }
         });
 
@@ -807,5 +830,8 @@ fn prepare_downsample_depth_view_bind_groups(
 /// Returns the previous power of two of x, or, if x is exactly a power of two,
 /// returns x unchanged.
 fn previous_power_of_two(x: u32) -> u32 {
+    if x == 0 {
+        return 1;
+    }
     1 << (31 - x.leading_zeros())
 }

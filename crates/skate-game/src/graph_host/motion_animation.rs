@@ -34,6 +34,8 @@ pub struct MotionAnimation {
     ///Actual fullSkaterAnim15180 flags. AddBindPose consumes bits22/21 on
     ///construction; the owner publishes the updated flags back to the actor.
     pub skater_animation_flags: Option<u32>,
+    /// Pending SkaterAnim15184 write from AirDismounting; consumed by the actor.
+    pub air_dismount_revert_frames: Option<i32>,
     /// SkaterAnim15188/15196/15200 at the graph publication boundary.
     pub natural_stance: u32,
     pub relative_stance: u32,
@@ -101,6 +103,7 @@ impl MotionAnimation {
             posture: PendingPosture::default(),
             posture_bank_valid: false,
             skater_animation_flags: None,
+            air_dismount_revert_frames: None,
             natural_stance: 1,
             relative_stance: 0,
             requested_stance: 0,
@@ -515,3 +518,7 @@ impl PlaybackService for MotionAnimation {
 mod jump_into_tests;
 #[path = "motion_grind/animation_owner.rs"]
 mod grind_owner;
+
+#[cfg(test)]
+#[path = "tests/motion_air_dismounting.rs"]
+mod air_dismounting_tests;

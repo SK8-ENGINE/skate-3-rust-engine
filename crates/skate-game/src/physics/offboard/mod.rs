@@ -12,6 +12,7 @@ pub(crate) mod grab_scene;
 pub(crate) mod ground_geometry;
 pub(crate) mod ground_query;
 pub(crate) mod ground_sync;
+pub(crate) mod mod_solid_ground;
 pub(crate) mod landing_deck;
 pub(crate) mod pose_adjust;
 pub(crate) mod post_physics;

@@ -21,10 +21,6 @@ struct Marker {
     generation: u64,
 }
 
-/// Audio owners consume these native GlobalFEPlaySound event IDs.
-#[derive(Message, Clone, Copy, Debug)]
-pub(crate) struct SessionMarkerAudio(pub u64);
-
 #[derive(Resource, Default)]
 pub(crate) struct SessionMarker {
     marker: Option<Marker>,
@@ -53,7 +49,6 @@ impl Plugin for SessionMarkerPlugin {
             }
         }
         app.init_resource::<SessionMarker>()
-            .add_message::<SessionMarkerAudio>()
             .add_systems(
                 PreUpdate,
                 suspend.after(crate::map_transition::MapTransitionSet),
@@ -97,7 +92,6 @@ fn suspend(
 }
 
 fn update(
-    vehicles: Res<crate::modding::vehicles::Vehicles>,
     mut session: ResMut<SessionMarker>,
     input: Res<ControllerInput>,
     map: Res<CurrentMap>,
@@ -105,9 +99,7 @@ fn update(
     mut skater: ResMut<SkaterRuntime>,
     validation: Res<validation::Validation>,
     replay: Res<crate::replay::Replay>,
-    mut audio: MessageWriter<SessionMarkerAudio>,
 ) {
-    if vehicles.occupied() {session.blocked_until_release = true;return;}
     if replay.active {
         return;
     }
@@ -119,6 +111,7 @@ fn update(
         return;
     }
     let p = &skater.player_input.physical;
+    let processed = &skater.player_input.processed;
     let on_board = p.state.category_12 != 500;
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
     let mut transform = skater.animated_skeleton.roots.animation_to_world;
@@ -132,19 +125,13 @@ fn update(
             deck.translation.z,
             0.,
         ];
-        //82591E30: above .5m/s, project normalized velocity onto world Up.
-        //The cross products are deliberately not normalized a second time.
-        let velocity = Vec3::from_slice(&p.skateboard.vector_80.map(f32::from_bits)[..3]);
-        if velocity.length_squared() > 0.25 {
-            let right = Vec3::Y.cross(velocity.normalize());
-            let forward = right.cross(Vec3::Y);
-            if forward.length_squared() > 0.9 {
-                transform[0] = right.extend(0.).to_array();
-                transform[1] = Vec3::Y.extend(0.).to_array();
-                transform[2] = forward.extend(0.).to_array();
-            }
-        }
     }
+    transform = crate::physics::facing_from_visual(
+        transform,
+        processed.flags_2468,
+        processed.flags_2476,
+        on_board,
+    );
     let state = p.state.state_16;
     let state_allowed = (p.state.category_12 == 100
         && p.collision.wheel_count_0 >= 2
@@ -169,9 +156,6 @@ fn update(
                 foot_forward: skater.animation.foot_forward(),
                 generation: map.generation,
             });
-            audio.write(SessionMarkerAudio(0x0d6c_88a3_b91c_828f));
-        } else {
-            audio.write(SessionMarkerAudio(0x66b3_afe3_b602_918c));
         }
     }
     session.last_batch = input.consumed_batches;
@@ -198,7 +182,6 @@ fn update(
                         skater
                             .teleport_state
                             .request_manual(target.transform, target.on_board);
-                        audio.write(SessionMarkerAudio(0x7f13_5f9f_d28f_7f21));
                     }
                     Err(e) => {
                         warn!("Session marker return rejected: {e}");

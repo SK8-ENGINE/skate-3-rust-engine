@@ -1,52 +1,96 @@
-#import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings as frame}
+#import bevy_pbr::{mesh_functions, view_transformations::position_world_to_clip}
+#import bevy_pbr::mesh_view_bindings as frame
 #import bevy_pbr::shadows::fetch_directional_shadow
-
 #import skate_retail::material_bindings as bindings
-#ifdef BINDLESS
-#import bevy_pbr::mesh_bindings::mesh
-#endif
 
-// Textures and base UVs both have V flipped by the exporter. Scale in the
-// authored coordinate system, then return to the flipped texture rows.
-fn scaled_uv(uv: vec2<f32>, scale: f32) -> vec2<f32> {
-    return vec2<f32>(uv.x*scale, 1.0-(1.0-uv.y)*scale);
+// Merged world geometry: one draw covers many materials, each vertex naming its
+// own. `material_index` must be `@interpolate(flat)` — interpolating it corrupts
+// material lookup across triangle interiors without any visible error.
+//
+// The fragment body below is a direct port. The only edits are `slot` coming from
+// the vertex attribute rather than the mesh instance, and explicit gradients
+// replacing implicit derivatives (see RFC 1 §7). The family math is unchanged.
+
+struct Vertex {
+    @builtin(instance_index) instance_index: u32,
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) uv_b: vec2<f32>,
+    @location(4) color: vec4<f32>,
+    @location(5) material_index: u32,
+    // Zero where the map authored no frame; the fragment falls back to
+    // screen-space derivatives per vertex rather than per mesh.
+    @location(6) tangent: vec4<f32>,
+}
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) world_position: vec4<f32>,
+    @location(1) world_normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) uv_b: vec2<f32>,
+    @location(4) color: vec4<f32>,
+    @location(5) @interpolate(flat) material_index: u32,
+    @location(6) world_tangent: vec4<f32>,
+}
+
+@vertex
+fn vertex(v: Vertex) -> VertexOutput {
+    var out: VertexOutput;
+    let world_from_local = mesh_functions::get_world_from_local(v.instance_index);
+    out.world_position = mesh_functions::mesh_position_local_to_world(
+        world_from_local, vec4<f32>(v.position, 1.0));
+    out.clip_position = position_world_to_clip(out.world_position.xyz);
+    out.world_normal = mesh_functions::mesh_normal_local_to_world(v.normal, v.instance_index);
+    out.uv = v.uv;
+    out.uv_b = v.uv_b;
+    out.color = v.color;
+    out.material_index = v.material_index;
+    // Leaves a zero tangent zero, which the fragment tests for.
+    out.world_tangent = mesh_functions::mesh_tangent_local_to_world(
+        world_from_local, v.tangent, v.instance_index);
+    return out;
 }
 
 @fragment
 fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
-#ifdef BINDLESS
-    let slot = mesh[i.instance_index].material_and_lightmap_bind_group_slot & 0xffffu;
-    let index = bindings::indices[slot];
-    let p = bindings::params[index.params];
-    let frame_state = bindings::frames[index.frame_state];
-#else
-    let slot = 0u;
-    let p = bindings::p;
-    let frame_state = bindings::frame_state;
-#endif
+    let slot = i.material_index;
+    let p = bindings::params[slot];
+    let frame_state = bindings::frame_state();
     let fam = u32(p.mode.x);
     let flags = u32(p.mode.y);
+
+    // Gradients are built here, in uniform control flow, and threaded into the
+    // branches below. Every derived UV is an affine transform of one of these,
+    // so its gradients are the same transform of theirs.
+    let g = bindings::gradients(i.uv);
+    let g_decal = bindings::gradients(i.color.xy);
+    let g_detail = bindings::gradients_scaled(g, p.surface.z);
+    let g_macro = bindings::gradients_scaled(g, p.surface.x);
+
     var diffuse_uv=i.uv;
+    // The scroll offset is constant across the primitive, so gradients are unchanged.
     if fam==14u { diffuse_uv+=fract(frame_state.clock.x*p.water[1].xy*vec2<f32>(1.0,-1.0)); }
-    let a = bindings::sample_diffuse(slot, diffuse_uv);
+    let a = bindings::sample_diffuse(slot, diffuse_uv, g);
     let lm = bindings::sample_lightmap(slot, i.uv_b, 0.0).rgb;
-    // Sample before alpha rejection: implicit derivatives must be uniform.
+    // Sample before alpha rejection: gradients must stay uniform.
     var nm = vec3<f32>(0.5,0.5,1.0);
     var detail = vec2<f32>(0.5);
     var overlay_sample = vec3<f32>(0.5);
     var art = vec4<f32>(0.0);
     var masks = vec3<f32>(0.0);
-    if (flags & 1u) != 0u && (fam <= 6u || fam == 13u) { nm = bindings::sample_normal_map(slot,i.uv).rgb; }
+    if (flags & 1u) != 0u && (fam <= 6u || fam == 13u) { nm = bindings::sample_normal_map(slot,i.uv,g).rgb; }
     if (flags & 2u) != 0u && fam != 2u {
-        detail = bindings::sample_detail_map(slot,scaled_uv(i.uv,p.surface.z)).rg;
+        detail = bindings::sample_detail_map(slot,bindings::scaled_uv(i.uv,p.surface.z),g_detail).rg;
     }
     if fam == 5u || fam == 6u || fam == 13u {
         // The reference folds the reflective material's constant detail texel.
         if (flags & 128u) != 0u { detail = bindings::load_detail(slot,vec2<i32>(0),0).rg; }
     }
-    if (flags & 4u) != 0u { overlay_sample = bindings::sample_macro_map(slot,scaled_uv(i.uv,p.surface.x)).rgb; }
-    if (flags & 8u) != 0u && (fam == 3u || fam == 4u) { art = bindings::sample_decal_map(slot,i.color.xy); }
-    if (flags & 16u) != 0u { masks = bindings::sample_specular_map(slot,i.uv).rgb; }
+    if (flags & 4u) != 0u { overlay_sample = bindings::sample_macro_map(slot,bindings::scaled_uv(i.uv,p.surface.x),g_macro).rgb; }
+    if (flags & 8u) != 0u && (fam == 3u || fam == 4u) { art = bindings::sample_decal_map(slot,i.color.xy,g_decal); }
+    if (flags & 16u) != 0u { masks = bindings::sample_specular_map(slot,i.uv,g).rgb; }
     var wn = normalize(i.world_normal);
     let dp1 = dpdx(i.world_position.xyz);
     let dp2 = dpdy(i.world_position.xyz);
@@ -59,12 +103,13 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     var kb = dp2p * du1.y + dp1p * du2.y;
     kt *= -inverseSqrt(max(dot(kt,kt),1e-12));
     kb *= inverseSqrt(max(dot(kb,kb),1e-12));
-#ifdef VERTEX_TANGENTS
+    // Prefer the authored frame where the map supplied one. The derivative basis
+    // above is only a stand-in, and it disagrees with the authored orientation on
+    // surfaces whose UVs were laid out by hand.
     if dot(i.world_tangent.xyz,i.world_tangent.xyz) > 0.01 {
         kt = normalize(i.world_tangent.xyz);
         kb = normalize(cross(wn,kt)) * i.world_tangent.w;
     }
-#endif
     let rpos = i.world_position.xyz - frame::view.world_position;
     let vd = -normalize(rpos);
     // Authored render-location direction for the tangent-space sign terms.
@@ -94,15 +139,16 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
         let raw_uv=vec2<f32>(i.uv.x,1.0-i.uv.y);
         let uv=raw_uv*p.water[1].w;
         let sample_uv=vec2<f32>(uv.x,1.0-uv.y);
-        let c0=bindings::sample_normal_map(slot,sample_uv)*2.0-1.0;
-        let c1=bindings::sample_detail_map(slot,sample_uv)*2.0-1.0;
+        let g_pca=bindings::gradients_scaled(g,p.water[1].w);
+        let c0=bindings::sample_normal_map(slot,sample_uv,g_pca)*2.0-1.0;
+        let c1=bindings::sample_detail_map(slot,sample_uv,g_pca)*2.0-1.0;
         let pca=(vec3<f32>(dot(c0,frame_state.pca[1])+dot(c1,frame_state.pca[2]),
             dot(c0,frame_state.pca[3])+dot(c1,frame_state.pca[4]),
             dot(c0,frame_state.pca[5])+dot(c1,frame_state.pca[6]))+frame_state.pca[0].xyz)*2.0-1.0;
         var overlay=1.0;
         if (flags & 4u)!=0u {
             let uv_overlay=raw_uv*p.surface.x;
-            overlay=bindings::sample_macro_map(slot,vec2<f32>(uv_overlay.x,1.0-uv_overlay.y)).r;
+            overlay=bindings::sample_macro_map(slot,vec2<f32>(uv_overlay.x,1.0-uv_overlay.y),g_macro).r;
         }
         let tonedown=2.0*p.water[1].z*saturate(dot(c1,frame_state.pca[6])+overlay);
         let nt=normalize(max(abs(normalize(mix(vec3<f32>(0.0,0.0,1.0),pca,tonedown))),vec3<f32>(0.001)));
@@ -130,14 +176,19 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
         let uv_scale=select(1.0,p.water[3].x,fam==33u);
         let uv1=raw_uv*p.water[2].xy*uv_scale+p.water[1].xy*t;
         let uv2=raw_uv*p.water[2].zw*uv_scale+p.water[1].zw*t;
-        let n1=bindings::sample_normal_map(slot,vec2<f32>(uv1.x,1.0-uv1.y));
-        let n2=bindings::sample_normal_map(slot,vec2<f32>(uv2.x,1.0-uv2.y));
+        // The double V flip cancels, so per-axis scaling is all that carries over.
+        let s1=p.water[2].xy*uv_scale;
+        let s2=p.water[2].zw*uv_scale;
+        let g1=bindings::Gradients(g.ddx*s1,g.ddy*s1);
+        let g2=bindings::Gradients(g.ddx*s2,g.ddy*s2);
+        let n1=bindings::sample_normal_map(slot,vec2<f32>(uv1.x,1.0-uv1.y),g1);
+        let n2=bindings::sample_normal_map(slot,vec2<f32>(uv2.x,1.0-uv2.y),g2);
         var vn=normalize((2.0*n1.rgb+2.0*n2.rgb-2.0)*p.water[0].xzw);
         var water_n=normalize(vn.x*kt+vn.y*kb+vn.z*wn);
         var sample_uv=i.uv;
         if fam==33u {
-            let c1=bindings::sample_detail_map(slot,vec2<f32>(uv1.x,1.0-uv1.y))*2.0-1.0;
-            let c2=bindings::sample_detail_map(slot,vec2<f32>(uv2.x,1.0-uv2.y))*2.0-1.0;
+            let c1=bindings::sample_detail_map(slot,vec2<f32>(uv1.x,1.0-uv1.y),g1)*2.0-1.0;
+            let c2=bindings::sample_detail_map(slot,vec2<f32>(uv2.x,1.0-uv2.y),g2)*2.0-1.0;
             let a1=n1*2.0-1.0;
             let a2=n2*2.0-1.0;
             // water_defaultPS instructions 22..54: the native mean is XYZ,
@@ -157,7 +208,7 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
             water_n=first*inverseSqrt(max(dot(first,first),1e-12));
             let refract=second*inverseSqrt(max(dot(second,second),1e-12));
             sample_uv+=0.02*refract.xz*vec2<f32>(1.0,-1.0);
-            d=bindings::sample_diffuse(slot,sample_uv).rgb;
+            d=bindings::sample_diffuse(slot,sample_uv,g).rgb;
             d*=d;
             vn=water_n;
         }
@@ -184,7 +235,7 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
         }
         let kd=dot(water_n,vec3<f32>(0.58*sign(sun.x),0.62*sign(sun.y),0.39))*2.39562;
         var wm=vec2<f32>(0.0);
-        if (flags & 16u)!=0u { wm=saturate(bindings::sample_specular_map(slot,sample_uv).xz-p.water[3].y); }
+        if (flags & 16u)!=0u { wm=saturate(bindings::sample_specular_map(slot,sample_uv,g).xz-p.water[3].y); }
         let reflected_light=2.0*water_n*dot(water_n,sun)-sun;
         let ks=pow(max(saturate(dot(vd,reflected_light)),1e-6),p.water[3].z);
         var spec=ks*wm.x*vec3<f32>(2.1,1.8,1.5)*saturate(lml.g-0.1);
@@ -257,6 +308,11 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     // Reduced curve is the full curve with the linear input capped at one.
     if fam == 8u { xe = min(xe,vec3<f32>(1.0)); }
     if p.foliage_debug.w != 0.0 { return vec4<f32>(p.foliage_debug.rgb, 1.0); }
+    // Compiled only for the classes whose materials carry a cutoff. The opaque
+    // classes leave it out so the hardware can write depth before shading and
+    // reject what is hidden; see RenderClass.
+#ifdef WORLD_ALPHA_CUTOFF
     if a.a < p.mode.z { discard; }
+#endif
     return vec4<f32>(xe,alpha);
 }

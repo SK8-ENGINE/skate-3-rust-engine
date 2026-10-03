@@ -1,0 +1,40 @@
+{
+  "provenance": "User audio.rar pack; engine code from nissan_silvia mod.",
+  "format": "PCM16 WAV",
+  "sounds": [
+    {
+      "file": "engine.wav",
+      "sample_rate": 44100,
+      "channels": 2,
+      "duration_s": 0.683,
+      "loop": true,
+      "base_rpm": 3400
+    },
+    {
+      "file": "turbo_loop.wav",
+      "sample_rate": 48000,
+      "duration_s": 4.0,
+      "loop": true
+    },
+    {
+      "file": "pop.wav",
+      "sample_rate": 48000,
+      "duration_s": 0.26,
+      "loop": false
+    },
+    {
+      "file": "lift.wav",
+      "sample_rate": 48000,
+      "duration_s": 0.48,
+      "loop": false
+    },
+    {
+      "file": "brake.wav",
+      "sample_rate": 48000,
+      "channels": 2,
+      "duration_s": 8.0,
+      "loop": true,
+      "note": "8s pink-noise scrub + source texture; dual detuned layers in-game"
+    }
+  ]
+}
