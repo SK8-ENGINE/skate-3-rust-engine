@@ -1,5 +1,5 @@
 """Publish owned retail Marquee models without autorigging or retargeting."""
-import argparse, hashlib, json, os, shutil, struct, sys, tempfile
+import argparse, hashlib, json, os, shutil, struct, sys, tempfile, time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import numpy as np
@@ -56,18 +56,45 @@ def roster(rows):
                        'animation_style':STYLES.get(key,'Aggressive')})
     return sorted(result,key=lambda r:r['name'])
 
-def prepare(game,assets,library,collections,work,only=None):
+def _publish(dest,write):
+    """Write via a unique temporary file and rename, so parallel roster workers
+    sharing work/ caches never see a partial file (identical content either way).
+
+    The first publisher wins and an existing dest is never replaced: on Windows,
+    renaming over a file another worker is opening fails for one side (WinError 5
+    for the writer, Errno 13 for the reader). os.rename does not overwrite there,
+    and every worker writes identical bytes, so an existing dest is kept."""
+    temporary=dest.with_name(f'{dest.stem}.{os.getpid()}.tmp{dest.suffix}')
+    try:
+        write(temporary)
+        for attempt in range(20):
+            if dest.exists():return
+            try:
+                (os.rename if os.name=='nt' else os.replace)(temporary,dest);return
+            except FileExistsError:
+                return
+            except PermissionError:
+                time.sleep(.05*(attempt+1))  # transient lock (e.g. antivirus scan)
+        os.replace(temporary,dest)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+def prepare(game,assets,library,collections,work,only=None,report_path=None):
     archive=BigArchive(game/'data/content/marquee.big')
     resources=Resources(archive)
     work.mkdir(parents=True,exist_ok=True)
     parser=import_rx2_parser(Path(__file__).resolve().parents[1]/'vendor/utt')
     def extract(path):
         dest=work/'source'/path
-        if not dest.exists():dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(resources.read(path))
+        if not dest.exists():
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            _publish(dest,lambda tmp:tmp.write_bytes(resources.read(path)))
         return dest
     def texture(tid):
         dest=work/'decoded'/(tid+'.png');dest.parent.mkdir(exist_ok=True)
-        if not dest.exists():decode_texture(parser,extract('data/content/marquee/texture/0x'+tid+'.rx2'),dest)
+        if not dest.exists():
+            source=extract('data/content/marquee/texture/0x'+tid+'.rx2')
+            _publish(dest,lambda tmp:decode_texture(parser,source,tmp))
         return dest
     records=roster(json.loads(collections.read_text())['collections']);report=[]
     for item in records:
@@ -124,6 +151,35 @@ def prepare(game,assets,library,collections,work,only=None):
             print('READY',key,flush=True)
         except CONTENT_ERRORS as e:
             report.append({**item,'status':'error','error':str(e)});print('ERROR',key,str(e),flush=True)
+    (report_path or work/'report.json').write_text(json.dumps(report,indent=2))
+    return report
+
+def prepare_parallel(game,assets,library,collections,work,workers):
+    """prepare() split over worker processes (customisation_workers.py --roster).
+
+    Characters write disjoint outputs (library/entries/<id>, work/<key>); shared
+    work caches are written atomically. Reports are merged back into roster
+    order, so the result equals a serial prepare(). Falls back to prepare()
+    for one worker or if any worker fails."""
+    records=roster(json.loads(collections.read_text())['collections'])
+    keys=[item['key'] for item in records]
+    # An empty `only` means "all" to prepare(): never hand a worker no keys.
+    workers=min(workers,len(keys))
+    if workers<2:return prepare(game,assets,library,collections,work)
+    from tools.asset_pipeline.customisation_workers import run_parallel
+    work.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='roster-workers-',dir=work) as tmp:
+        requests=[];reports=[]
+        for index in range(workers):
+            request=Path(tmp)/f'{index}.json';result=Path(tmp)/f'{index}-report.json'
+            request.write_text(json.dumps(dict(game=str(game),assets=str(assets),library=str(library),
+                collections=str(collections),work=str(work),only=keys[index::workers],report=str(result))))
+            requests.append(['--roster',request]);reports.append(result)
+        failures=[error for error in run_parallel(requests,workers) if error is not None]
+        if failures or not all(r.is_file() for r in reports):
+            return prepare(game,assets,library,collections,work)  # finishes whatever is missing
+        merged={item['key']:item for r in reports for item in json.loads(r.read_text())}
+    report=[merged[key] for key in keys]
     (work/'report.json').write_text(json.dumps(report,indent=2))
     return report
 

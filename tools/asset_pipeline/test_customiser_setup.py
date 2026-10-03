@@ -63,7 +63,8 @@ class CharacterSetup(unittest.TestCase):
             def lighting(game, assets, directory, data):
                 (directory/'native-lighting.json').write_text('{"pro":{}}')
                 (directory/'library-v3.json').write_text(json.dumps(data))
-            def roster(game, assets, library, collections, work):
+            def roster(game, assets, library, collections, work, workers):
+                self.assertGreaterEqual(workers, 1)
                 library.mkdir(exist_ok=True)
                 return roster_results.pop(0)
             roster_results = [[{'status': 'ready', 'key': 'pro'},
@@ -72,7 +73,7 @@ class CharacterSetup(unittest.TestCase):
                  patch('tools.asset_pipeline.customisation_library.prepare', side_effect=library), \
                  patch('tools.asset_pipeline.customisation_profiles.generate', return_value=[]), \
                  patch('tools.asset_pipeline.customiser_lighting.prepare', side_effect=lighting), \
-                 patch('tools.asset_pipeline.native_roster.prepare', side_effect=roster):
+                 patch('tools.asset_pipeline.native_roster.prepare_parallel', side_effect=roster):
                 s.prepare(Path(temp)/'source', assets, lambda _: None)
             base = assets/'private/customisation'
             current = json.loads((base/'current.json').read_text())

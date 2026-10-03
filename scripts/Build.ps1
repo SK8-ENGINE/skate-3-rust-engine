@@ -18,6 +18,16 @@ try {
         if (-not $Dev) { $buildArgs += '--release' }
         & cargo @buildArgs
         if ($LASTEXITCODE -ne 0) { throw 'Build failed; see the compiler output above.' }
+        # Native RefPack for asset setup from this checkout (fast_refpack.py loads
+        # target/native/refpack.dll; releases bundle the same DLL). Without it
+        # setup decodes RefPack in pure Python, ~10x slower. Same flags as releases.
+        $refpackSource = Join-Path $ProjectRoot 'tools/asset_pipeline/refpack_native.rs'
+        $refpack = Join-Path $ProjectRoot 'target/native/refpack.dll'
+        if (-not (Test-Path -LiteralPath $refpack) -or (Get-Item -LiteralPath $refpackSource).LastWriteTime -gt (Get-Item -LiteralPath $refpack).LastWriteTime) {
+            New-Item -ItemType Directory -Path (Split-Path $refpack) -Force | Out-Null
+            & rustc --edition 2024 --crate-type cdylib -C opt-level=3 -C panic=abort -C target-feature=+crt-static $refpackSource -o $refpack
+            if ($LASTEXITCODE -ne 0) { throw 'Native RefPack compilation failed' }
+        }
     }
     $profile = if ($Dev) { 'debug' } else { 'release' }
     $debugDirectory = Join-Path $TargetDirectory $profile
