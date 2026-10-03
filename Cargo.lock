@@ -1896,6 +1896,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmake"
+version = "0.1.58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4492,6 +4501,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
+name = "rpkg-config"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a2d2f3481209a6b42eec2fbb49063fb4e8d35b57023401495d4fe0f85c817f0"
+
+[[package]]
 name = "rstar"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4605,6 +4620,98 @@ dependencies = [
  "memmap2",
  "smithay-client-toolkit",
  "tiny-skia",
+]
+
+[[package]]
+name = "sdl3"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f90c470b564b34e7f9ff0719ed7dc05ec71bc73fa4b28e0750a17b8987cf45f8"
+dependencies = [
+ "bitflags 2.13.1",
+ "libc",
+ "sdl3-image-sys",
+ "sdl3-mixer-sys",
+ "sdl3-sys",
+ "sdl3-ttf-sys",
+]
+
+[[package]]
+name = "sdl3-image-src"
+version = "3.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd9494480b91011c3eff1d15235a30c34f758ac4ee6b0a97579b0291d4fc2c85"
+
+[[package]]
+name = "sdl3-image-sys"
+version = "0.7.0+SDL-image-3.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e12eec1cd8dcb6be4430976d9b01ae1dcccc674aea5f5ca2bd7ffb2c881ed79d"
+dependencies = [
+ "cmake",
+ "pkg-config",
+ "rpkg-config",
+ "sdl3-image-src",
+ "sdl3-sys",
+ "vcpkg",
+]
+
+[[package]]
+name = "sdl3-mixer-src"
+version = "3.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cd815ae87084588c7dbd027c1667b0a5e21a6b5ae7b22ecb230bc21c7063eca"
+
+[[package]]
+name = "sdl3-mixer-sys"
+version = "0.7.0+SDL-mixer-3.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6150136321198ec95cccfb6168d838f114273a7615d21b513e5277c86f7d3aa1"
+dependencies = [
+ "cmake",
+ "pkg-config",
+ "rpkg-config",
+ "sdl3-mixer-src",
+ "sdl3-sys",
+ "vcpkg",
+]
+
+[[package]]
+name = "sdl3-src"
+version = "3.4.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5bfd475a15a4679b94f6579aed7d52c69f3e04d80e6707712373f12903a2ef91"
+
+[[package]]
+name = "sdl3-sys"
+version = "0.7.1+SDL-3.4.16"
+dependencies = [
+ "cc",
+ "cmake",
+ "pkg-config",
+ "rpkg-config",
+ "sdl3-src",
+ "vcpkg",
+]
+
+[[package]]
+name = "sdl3-ttf-src"
+version = "3.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f28923d2ce72ff317d8eb7cec97ddfb8f351c330d7bcbf8c76e91332122c93b3"
+
+[[package]]
+name = "sdl3-ttf-sys"
+version = "0.7.1+SDL-ttf-3.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d254e537d2d96b3e2d6e8a3dd4850a1361b8689c3d95c6c1dfdc02b091307eef"
+dependencies = [
+ "cmake",
+ "pkg-config",
+ "rpkg-config",
+ "sdl3-sys",
+ "sdl3-ttf-src",
+ "vcpkg",
 ]
 
 [[package]]
@@ -4768,6 +4875,7 @@ dependencies = [
  "image",
  "naga",
  "naga_oil",
+ "sdl3",
  "serde",
  "serde_json",
  "skate-core",
@@ -5397,6 +5505,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "vcpkg"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vec_map"

@@ -85,9 +85,10 @@ pub(crate) fn build(
                 }),
                 ..default()
             }).build().disable::<bevy::log::LogPlugin>()
-            // Gameplay and menu navigation both use raw XInput. No game system
-            // consumes Bevy gamepad events/rumble; its second device backend can
-            // stall PreUpdate (70.68 ms in the University capture).
+            // Gameplay and menu navigation both use raw pad states from
+            // input::platform (SDL3, XInput fallback). No game system consumes
+            // Bevy gamepad events/rumble; its second device backend can stall
+            // PreUpdate (70.68 ms in the University capture).
             .disable::<bevy::gilrs::GilrsPlugin>(),
     )
     .insert_resource(bevy::winit::WinitSettings {focused_mode:bevy::winit::UpdateMode::Continuous,unfocused_mode:bevy::winit::UpdateMode::Continuous})

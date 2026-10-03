@@ -2,6 +2,7 @@ param([string]$TargetDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) '
 $ProjectRoot = Split-Path $PSScriptRoot -Parent
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Ensure-WindowsSdk.ps1')
+. (Join-Path $PSScriptRoot 'Ensure-CMake.ps1')
 . (Join-Path $PSScriptRoot 'PowerShellCompat.ps1')
 Push-Location $ProjectRoot
 try {

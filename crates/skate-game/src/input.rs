@@ -29,9 +29,44 @@ impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ControllerInput>()
             .init_resource::<PublishedTickInput>()
+            .add_systems(Startup, start_controllers)
             .add_systems(PreUpdate, poll_controllers.run_if(crate::graphics_menu::gameplay_active))
             .add_systems(FixedUpdate, publish_actions.in_set(SimulationSet::Input));
     }
+}
+
+/// settings/controller.json, e.g. {"paddles": {"right1": "a", "left1": "x"}}.
+/// Paddle names are right1, left1, right2, left2 (SDL paddle order); values
+/// are names from `platform::BUTTON_NAMES`.
+#[derive(serde::Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct ControllerSettings {
+    paddles: std::collections::BTreeMap<String, String>,
+}
+
+fn start_controllers(config: Res<crate::config::Config>) {
+    let root = &config.asset_root;
+    let path = root.parent().unwrap_or(root).join("settings/controller.json");
+    match std::fs::read(&path) {
+        Ok(bytes) => match serde_json::from_slice::<ControllerSettings>(&bytes) {
+            Ok(settings) => {
+                let mut masks = [0u16; 4];
+                for (paddle, button) in &settings.paddles {
+                    let slot = ["right1", "left1", "right2", "left2"].iter().position(|p| p == paddle);
+                    match (slot, platform::button_mask(button)) {
+                        (Some(slot), Some(mask)) => masks[slot] = mask,
+                        _ => warn!("{}: ignoring paddle mapping {paddle:?} -> {button:?}", path.display()),
+                    }
+                }
+                platform::set_paddles(masks);
+            }
+            Err(error) => warn!("Invalid controller settings {}: {error}", path.display()),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => warn!("Cannot read controller settings {}: {error}", path.display()),
+    }
+    // Start the device backend now rather than stalling the first gameplay frame.
+    let _ = platform::poll(0);
 }
 
 pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<crate::config::Config>,net:Option<Res<crate::multiplayer::Multiplayer>>,windows:Query<&Window>,mut capabilities:Local<[platform::CapabilityCache;4]>) {
@@ -47,7 +82,7 @@ pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<cra
     for (index, (&before, &after)) in previous.iter().zip(&input.status).enumerate() {
         if before != after {
             match after {
-                ControllerStatus::Ready => info!("Controller {index}: raw XInput ready"),
+                ControllerStatus::Ready => info!("Controller {index}: ready"),
                 ControllerStatus::Unavailable(platform::DeviceError::Disconnected) => {
                     info!("Controller {index}: disconnected");
                 }

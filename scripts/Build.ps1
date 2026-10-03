@@ -8,6 +8,7 @@ param(
 # Do NOT pass --no-default-features here — that static-links Bevy and takes many minutes.
 $ProjectRoot = Split-Path $PSScriptRoot -Parent
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Ensure-CMake.ps1')
 $sw = [Diagnostics.Stopwatch]::StartNew()
 Push-Location $ProjectRoot
 try {

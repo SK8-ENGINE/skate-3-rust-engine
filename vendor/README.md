@@ -95,3 +95,15 @@ Upstream references reviewed September 6, 2026:
 When upgrading Bevy, reassess this patch and rerun the GPU test, stationary and
 moving-camera benchmarks, and visual comparison. Do not assume an unchanged
 private renderer implementation across engine versions.
+
+## SDL3 static C runtime
+
+`sdl3-sys` is vendored from crates.io 0.7.1+SDL-3.4.16 with its original license.
+The only change is in `build.rs`: when building SDL from source for an MSVC target,
+it defines `CMAKE_MSVC_RUNTIME_LIBRARY` to match the C runtime Rust links
+(`MultiThreaded` with `+crt-static`, as release packages and CI use; otherwise
+`MultiThreadedDLL`). SDL's CMake project enables policy CMP0091, which ignores
+the `-MT` flag cmake-rs adds, so without this the static-CRT link fails with
+unresolved `__imp_*` CRT symbols. Development builds (`scripts/Build.ps1`) are
+unaffected. When upgrading `sdl3`/`sdl3-sys`, re-vendor and reapply this change,
+or drop it if upstream cmake-rs/sdl3-sys handle the runtime themselves.

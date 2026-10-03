@@ -1,0 +1,204 @@
+[package]
+name = "sdl3-sys"
+version = "0.7.1+SDL-3.4.16"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Maia S Ravn <maia.noreply@runbox.com>"]
+license = "Zlib"
+description = "Low level Rust bindings for SDL 3"
+repository = "https://codeberg.org/maia/sdl3-sys-rs"
+documentation = "https://docs.rs/sdl3-sys"
+keywords = ["sdl", "windowing", "graphics", "multimedia", "gamedev"]
+categories = [
+    "external-ffi-bindings",
+    "rendering",
+    "game-development",
+    "multimedia",
+    "no-std",
+]
+links = "SDL3"
+
+[features]
+default = ["use-pkg-config", "use-vcpkg"]
+
+# Build and link SDL 3 from source instead of linking a pre-existing library
+build-from-source = ["dep:cc", "dep:cmake", "dep:rpkg-config", "dep:sdl3-src"]
+
+# Build and link a static SDL library from source
+build-from-source-static = ["build-from-source", "link-static"]
+
+# Link SDL as a static library. The default is to link a shared/dynamic library.
+link-static = []
+
+# Link SDL as an Apple framework. The link-static feature has no effect if this is enabled.
+link-framework = []
+
+# Don't link anything, and provide linking flags via Cargo metadata.
+no-link = []
+
+# When building from source, use the `SDL_UNIX_CONSOLE_BUILD` flag to disable the X11 dependency
+# and build a console-only version of SDL. This has no effect when not building from source.
+sdl-unix-console-build = []
+no-sdl-unix-console-build = []
+
+# Use pkg-config to get link flags for SDL. Only used when not building from source.
+# This has no effect if the link-framework feature is enabled.
+use-pkg-config = ["dep:pkg-config"]
+
+# Use vcpkg to get link flags for SDL. Only used when not building from source.
+# The link-static feature has no effect when using vcpkg.
+# This has no effect if the link-framework feature is enabled.
+use-vcpkg = ["dep:vcpkg"]
+
+# Enable APIs that require Microsoft's Game Development Kit (GDK).
+# (This is not related to Gnome's GDK)
+target-gdk = []
+
+# These are mutually exlusive; if more than one is enabled, the former in the list is used
+# (so e.g. disabled overrides release). If none are selected, either release or debug will
+# be enabled based on the build profile
+assert-level-disabled = []
+assert-level-release = []
+assert-level-debug = []
+assert-level-paranoid = []
+
+# Implement the Debug trait for applicable types
+debug-impls = []
+
+# Implement the Display trait for applicable types
+display-impls = []
+
+# Enable metadata
+metadata = []
+only-metadata = ["metadata", "no-link"]
+
+# Enable nightly features
+nightly = []
+
+# Optional integrations
+use-ash-v0-38 = ["dep:ash-v0-38"]
+use-libc-v0-2 = ["dep:libc-v0-2"]
+use-windows-sys-v0-59 = ["dep:windows-sys-v0-59"]
+use-x11-v2 = ["dep:x11-v2"]
+use-x11-dl-v2 = ["dep:x11-dl-v2"]
+
+# Retained for backwards compatibility
+use-windows-sys-v0-60 = ["use-windows-sys-v0-59"]
+
+# Subsystems to enable when building from source.
+# By default, everything is autodetected and enabled if available
+no-default-subsystems = [
+    "no-sdl-audio",
+    "no-sdl-video",
+    "no-sdl-gpu",
+    "no-sdl-render",
+    "no-sdl-camera",
+    "no-sdl-joystick",
+    "no-sdl-haptic",
+    "no-sdl-hidapi",
+    "no-sdl-power",
+    "no-sdl-sensor",
+    "no-sdl-dialog",
+    "no-sdl-tray",
+]
+sdl-audio = []
+sdl-video = []
+sdl-gpu = ["sdl-video"]
+sdl-render = ["sdl-video"]
+sdl-camera = ["sdl-video"]
+sdl-joystick = []
+sdl-haptic = []
+sdl-hidapi = []
+sdl-power = []
+sdl-sensor = []
+sdl-dialog = []
+sdl-tray = []
+no-sdl-audio = []
+no-sdl-video = []
+no-sdl-gpu = []
+no-sdl-render = []
+no-sdl-camera = []
+no-sdl-joystick = []
+no-sdl-haptic = []
+no-sdl-hidapi = []
+no-sdl-power = []
+no-sdl-sensor = []
+no-sdl-dialog = []
+no-sdl-tray = []
+
+# Misc CMake options for when building from source
+sdl-asan = []
+sdl-ccache = []
+sdl-libc = []
+sdl-rpath = []
+no-sdl-asan = []
+no-sdl-ccache = []
+no-sdl-libc = []
+no-sdl-rpath = []
+
+# Not currently used by SDL, retained for backwards compatibility
+sdl-gpu-dxvk = []
+no-sdl-gpu-dxvk = []
+
+# Define SDL_LEAN_AND_MEAN when compiling SDL (disabled by default)
+sdl-lean-and-mean = []
+no-sdl-lean-and-mean = []
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies.ash-v0-38]
+package = "ash"
+version = "0.38"
+default-features = false
+optional = true
+
+[dependencies.libc-v0-2]
+package = "libc"
+version = "0.2"
+default-features = false
+optional = true
+
+[dependencies.windows-sys-v0-59]
+package = "windows-sys"
+version = ">=0.59, <=0.61"
+optional = true
+features = ["Win32_UI_WindowsAndMessaging"]
+
+[dependencies.x11-v2]
+package = "x11"
+version = "2.21"
+optional = true
+
+[dependencies.x11-dl-v2]
+package = "x11-dl"
+version = "2.21"
+optional = true
+
+[build-dependencies.cc]
+version = "1.2"
+optional = true
+
+[build-dependencies.cmake]
+version = "0.1"
+optional = true
+
+[build-dependencies.pkg-config]
+version = "0.3"
+optional = true
+
+[build-dependencies.rpkg-config]
+version = "0.1.2"
+optional = true
+
+[build-dependencies.sdl3-src]
+version = "=3.4.16"
+path = "../sdl3-src"
+optional = true
+
+[build-dependencies.vcpkg]
+version = "0.2"
+optional = true
+
+[dev-dependencies]
+sdl3-main = { path = "../sdl3-main" }

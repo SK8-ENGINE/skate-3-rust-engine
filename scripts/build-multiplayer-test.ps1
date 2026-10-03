@@ -1,5 +1,6 @@
 param([string]$OutputDirectory = 'bin/multiplayer')
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Ensure-CMake.ps1')
 $workspace = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $workspace
 $output = [IO.Path]::GetFullPath((Join-Path $workspace $OutputDirectory))
