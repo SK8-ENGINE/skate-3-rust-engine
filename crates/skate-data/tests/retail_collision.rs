@@ -64,6 +64,44 @@ fn preserves_all_vertex_encodings_and_little_endian_unit_ids() {
     assert_eq!(clusters, 3);
 }
 
+/// Removes the surface ID from the first unit of fixture mesh `index`: clears
+/// unit flag 0x80 and shortens the unit stream by the 2-byte ID (its last field).
+fn strip_surface(bytes: &mut [u8], index: usize) {
+    let be16 = |b: &[u8], at: usize| u16::from_be_bytes(b[at..at + 2].try_into().unwrap());
+    let be32 = |b: &[u8], at: usize| u32::from_be_bytes(b[at..at + 4].try_into().unwrap()) as usize;
+    let mut at = 12;
+    let mut mesh = 0;
+    for _ in 0..=index {
+        let name_len = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        at += 4 + name_len;
+        let size = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        mesh = at + 4;
+        at = mesh + size;
+    }
+    assert_eq!(bytes[mesh + 63], 2, "fixture surface IDs are 2 bytes");
+    let cluster = mesh + be32(bytes, mesh + be32(bytes, mesh + 52));
+    let unit_start = (usize::from(be16(bytes, cluster + 4)) + 1) * 16;
+    assert_ne!(bytes[cluster + unit_start] & 0x80, 0);
+    bytes[cluster + unit_start] &= !0x80;
+    let length = be16(bytes, cluster + 2) - 2;
+    bytes[cluster + 2..cluster + 4].copy_from_slice(&length.to_be_bytes());
+}
+
+#[test]
+fn skips_meshes_without_any_surface_ids() {
+    let mut bytes = FIXTURE.to_vec();
+    strip_surface(&mut bytes, 1);
+    let mut names = Vec::new();
+    let total = visit_clusters(&bytes, |name, triangles| {
+        assert!(triangles.iter().all(|t| t.has_surface));
+        names.push(name.to_owned());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(names, ["compression-0", "compression-2"]);
+    assert_eq!(total, 2);
+}
+
 #[test]
 fn rejects_every_truncated_prefix_and_trailing_bytes() {
     for end in 0..FIXTURE.len() {
