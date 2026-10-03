@@ -5,7 +5,7 @@ use skate_core::{
     math::Vector3,
     physics::{
         board_world::{
-            BoardWorld,
+            BoardWorld, is_water_tag,
             query_metadata::{QueryMetadata, QueryPool},
         },
         triangle_query::{TriangleLineHit, triangle_segment},
@@ -192,6 +192,10 @@ impl<'a> StaticScene<'a> {
                 if !triangle_segment(&mut hit, start, direction, vertices, probe.radius, 0.) {
                     continue;
                 }
+                // Deep water is not solid (physics/water.rs): no on-foot support.
+                if is_water_tag(self.world.triangles()[index].tag) && !self.world.water_shallow_at(hit.position) {
+                    continue;
+                }
                 let lower = if -hit.fraction >= 0. {
                     0.
                 } else {
@@ -268,6 +272,15 @@ impl<'a> StaticScene<'a> {
             let first = candidates.partition_point(|&i| i < mesh.triangle_range.start);
             let last = candidates.partition_point(|&i| i < mesh.triangle_range.end);
             for &index in &candidates[first..last] {
+                let triangle = &self.world.triangles()[index];
+                if is_water_tag(triangle.tag) {
+                    // Deep water is not solid: test the water under the centre.
+                    let [a, b, c] = triangle.triangle.vertices;
+                    let y = (a.y + b.y + c.y) / 3.;
+                    if !self.world.water_shallow_at(Vector3::new(center[0], y, center[2])) {
+                        continue;
+                    }
+                }
                 let vertices = self.world.triangles()[index].triangle.vertices.map(lanes);
                 if triangle_box(vertices, center, radius) {
                     output.push(vertices);

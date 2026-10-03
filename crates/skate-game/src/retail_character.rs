@@ -622,7 +622,7 @@ mod tests {
         world.insert_resource(crate::retail_render::RetailScene(false));
         world.init_resource::<Assets<crate::customiser_material::SkaterMaterial>>();
         world.insert_resource(crate::retail_render::FrameStateData {
-            shadow: Vec4::ONE, clock: Vec4::ONE, pca: [Vec4::ONE; 7],
+            shadow: Vec4::ONE, clock: Vec4::ONE, pca: [Vec4::ONE; 7], pca_slow: [Vec4::ONE; 7],
         });
         let material = Handle::<StandardMaterial>::default();
         let player = world.spawn((

@@ -67,6 +67,7 @@ mod skeleton_grind_air;
 mod teleport_state;
 mod wipeout;
 mod wipeout_states;
+pub(crate) mod water;
 mod respawn;
 //TEMPORARY opt-in observations for the bottom-up source audit.
 mod biped_air;
@@ -483,6 +484,8 @@ impl GamePhysics {
             self.processed_flags_2468,
             self.settings.step.simulation.time_step,
         )?;
+        // Water makes no contacts: classify the board from position instead.
+        water::mark_board(self);
         let partial = skateboard_controller::partial_request(
             &skater.skateboard_controller,
             &self.riding.ground,
@@ -556,6 +559,10 @@ mod air_tests;
 #[cfg(test)]
 #[path = "tests/wipeout_playback.rs"]
 mod wipeout_tests;
+
+#[cfg(test)]
+#[path = "tests/water_drop.rs"]
+mod water_drop_tests;
 
 fn present(
     physics: Res<GamePhysics>,

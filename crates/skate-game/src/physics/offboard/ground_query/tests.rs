@@ -127,6 +127,7 @@ fn mesh<'a>(triangles: &'a [WorldTriangle], surfaces: &'a [u16], matching_group:
     Mesh {
         triangles,
         surfaces,
+        world: None,
         matching_group,
         local_to_world: Frame::IDENTITY,
         world_to_local: Frame::IDENTITY,

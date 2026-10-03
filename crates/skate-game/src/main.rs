@@ -45,6 +45,8 @@ mod retail_character;
 mod retail_exposure;
 mod retail_irradiance;
 mod retail_sky;
+mod water_bodies;
+mod water_splash;
 mod presentation;
 mod debug_cam;
 mod replay;
@@ -58,6 +60,10 @@ fn main() -> bevy::app::AppExit {
         Err(error) => { eprintln!("{error}"); return bevy::app::AppExit::Success; },
         Ok(false) => {}
     }
+    // Setup tool mode: `--extract-ocean-pca <default.xex> <ocean-pca.json>`.
+    // Before the crash supervisor, whose report window would block setup on
+    // a failed (non-zero) extraction.
+    if let Some(code) = extract_ocean_pca() { std::process::exit(code); }
     if let Some(code) = crash_report::entry() { std::process::exit(code); }
     let _trace = match profiling::init() {
         Ok(guard) => guard,
@@ -148,3 +154,30 @@ fn main() -> bevy::app::AppExit {
 #[cfg(test)]
 #[path = "tests/action_host.rs"]
 mod action_host_tests;
+
+/// Writes the retail water/ocean animation table for setup (see
+/// skate_data::ocean_pca). Runs before any game initialization.
+fn extract_ocean_pca() -> Option<i32> {
+    let mut args = std::env::args_os().skip(1);
+    if args.next()? != "--extract-ocean-pca" {
+        return None;
+    }
+    let (Some(xex), Some(out), None) = (args.next(), args.next(), args.next()) else {
+        eprintln!("Usage: skate3rust --extract-ocean-pca <default.xex> <ocean-pca.json>");
+        return Some(2);
+    };
+    let result = std::fs::read(&xex)
+        .map_err(|e| format!("{}: {e}", std::path::Path::new(&xex).display()))
+        .and_then(|bytes| skate_data::ocean_pca::json_from_xex(&bytes))
+        .and_then(|json| std::fs::write(&out, json).map_err(|e| format!("{}: {e}", std::path::Path::new(&out).display())));
+    match result {
+        Ok(()) => {
+            println!("OCEAN_PCA_READY");
+            Some(0)
+        }
+        Err(error) => {
+            eprintln!("Ocean PCA extraction failed: {error}");
+            Some(1)
+        }
+    }
+}

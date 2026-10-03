@@ -26,6 +26,9 @@ pub struct Mesh<'a> {
     pub triangles: &'a [WorldTriangle],
     /// Exact packed source surface, one entry per triangle; never inferred from tag.
     pub surfaces: &'a [u16],
+    /// Decides where water is shallow (solid, `BoardWorld::water_shallow_at`);
+    /// without a world, water is solid everywhere.
+    pub world: Option<&'a skate_core::physics::board_world::BoardWorld>,
 }
 #[derive(Clone, Copy)]
 pub struct Segment {

@@ -12,6 +12,7 @@ mod graph_subject;
 mod graph_conditions;
 mod graph;
 mod runtime;
+mod water;
 mod publication;
 pub(crate) use publication::{
     snapshot as publish_camera_subject, CameraPublicationInputs, CameraStateOutput,

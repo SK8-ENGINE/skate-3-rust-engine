@@ -64,6 +64,10 @@ pub(crate) fn advance(
         volumes: Vec::new(),
     };
     let gravity = physics.settings.step.simulation.gravity_acceleration;
+    // Water bail: the wipeout's special surface (physics/water.rs) and its height.
+    let water = (skater.player_state.current() == skate_core::player::state::PhysicalStateId::WipeoutGround
+        && skater.wipeout_state.state.special_surface)
+        .then_some(skater.wipeout_state.state.surface_height);
     camera
         .advance(
             physics.settings.step.simulation.time_step,
@@ -72,6 +76,7 @@ pub(crate) fn advance(
             [gravity.x, gravity.y, gravity.z, 0.0],
             &environment,
             &mut StaticWorld,
+            water,
         )
         .map(|_| ())
 }

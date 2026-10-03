@@ -31,6 +31,8 @@ pub(crate) struct CameraRuntime {
     pub simulation_rate_requests: Vec<SimulationRateRequest>,
     pub manual_cam: ManualCam,
     pub manual_cam_settings: ManualCamSettings,
+    /// Keeps the camera above water while the skater is in it.
+    water: super::water::WaterView,
 }
 
 #[cfg(test)]
@@ -62,7 +64,8 @@ impl CameraRuntime {
             latest_subject: None,
             simulation_rate_requests: Vec::new(),
             manual_cam: ManualCam::default(),
-            manual_cam_settings: settings::manual_cam_settings(&data)? })
+            manual_cam_settings: settings::manual_cam_settings(&data)?,
+            water: Default::default() })
     }
 
     /// Ignores a degenerate ratio rather than storing it.
@@ -72,6 +75,11 @@ impl CameraRuntime {
     /// view, which fails the non-finite frame check on every subsequent frame
     /// even after the window is restored. Keeping the last good ratio is
     /// correct: nothing is visible while minimized.
+    /// Water-shot vignette amount for the tone pass (0 when not in water).
+    pub fn water_vignette(&self) -> f32 {
+        self.water.vignette()
+    }
+
     pub fn set_aspect_ratio(&mut self, value: f32) {
         if value.is_finite() && value > 0.0 {
             self.manager.state.aspect_ratio = value;
@@ -86,7 +94,9 @@ impl CameraRuntime {
 
     pub fn advance(&mut self, dt: f32, snapshot: CameraSubjectSnapshot,
         world: &BoardWorld, query_gravity: [f32; 4], environment: &CameraGraphEnvironment,
-        moving: &mut impl MovingObstacleProvider) -> Result<CameraFrame, String> {
+        moving: &mut impl MovingObstacleProvider,
+        // Water surface while the skater is in a water bail (camera/water.rs).
+        water: Option<f32>) -> Result<CameraFrame, String> {
         if let Some(previous) = self.latest_subject.as_ref()
             && snapshot.tick <= previous.tick
         {
@@ -126,6 +136,8 @@ impl CameraRuntime {
                 subject.landing_position,
             ));
         }
+        let root = subject.rig.skeleton_root[3];
+        let frame = self.water.adjust(frame, world, [root[0], root[1], root[2]], water, dt);
         self.frame = Some(frame);
         Ok(frame)
     }

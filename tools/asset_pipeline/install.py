@@ -107,12 +107,13 @@ def dependency(cache,name,url,sha,report):
     if executable is None:raise RuntimeError('Missing downloaded tool: '+name)
     return executable
 
-def run(args,log,report):
+def spawn(args,**popen):
     kwargs={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
     external=os.name=='nt' and getattr(sys,'frozen',False) and Path(args[0]).resolve()!=Path(sys.executable).resolve()
     if external:
         # External tools and the game must load their own libraries, not
         # the setup bundle's DLL directory inherited by child processes.
+        # SetDllDirectoryW is process-wide: only spawn external tools from one thread.
         import ctypes
         ctypes.windll.kernel32.SetDllDirectoryW(None)
         env=os.environ.copy()
@@ -121,10 +122,12 @@ def run(args,log,report):
                                    if p and not Path(p).resolve().is_relative_to(bundle))
         kwargs['env']=env
     try:
-        child=subprocess.Popen([str(a) for a in args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
-                               text=True,encoding='utf-8',errors='replace',**kwargs)
+        return subprocess.Popen([str(a) for a in args],text=True,encoding='utf-8',errors='replace',**kwargs,**popen)
     finally:
         if external:ctypes.windll.kernel32.SetDllDirectoryW(sys._MEIPASS)
+
+def run(args,log,report):
+    child=spawn(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
     with child as process:
         for line in process.stdout:
             log.write(line);log.flush()
@@ -321,7 +324,7 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
         if 'character' in groups:
             exports.character(game_root,stage,work,report,log,converted)
         if 'environment' in groups:
-            exports.environment(game_root,stage,work,report,log,converted)
+            exports.environment(game_root,stage,work,report,log,converted,game_exe)
         if 'maps' in groups:
             report('Preparing authored movable-object models')
             from .dynamic_props import prepare_catalog
