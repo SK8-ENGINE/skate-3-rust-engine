@@ -1,5 +1,24 @@
 # Local Bevy patch
 
+## Multi-process swapchain recovery
+
+`bevy_render` is vendored from crates.io 0.18.1 with its original MIT and Apache
+licenses. Only `src/view/window/mod.rs` changes: surface timeouts skip the current
+window frame on every platform; lost/outdated surfaces are reconfigured and
+retried once. Generic acquisition errors (seen when starting another Vulkan
+client on Windows/NVIDIA) also receive one reconfiguration/retry, with at most
+eight consecutive failed frames before reporting a fatal error. Warnings are
+rate-limited and retained textures/views are cleared before reconfiguration.
+Memory exhaustion remains fatal; this does not recover a genuinely lost GPU
+device or suppress wgpu validation errors. Simulation/networking do not pause
+when a window frame is skipped.
+
+Run the CPU-only regression tests with:
+
+```powershell
+cargo test -p bevy_render --lib surface_recovery_tests
+```
+
 ## Bindless material resource reuse
 
 `bevy_pbr/src/material_bind_groups.rs` chooses a fitting slab requiring the fewest
