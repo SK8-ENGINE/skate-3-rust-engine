@@ -30,6 +30,8 @@ half = "=2.7.1"
 serde_json.workspace = true
 serde.workspace = true
     skate-net = { path = "../skate-net" }
+skate-proto = { path = "../skate-proto" }
+prost = "=0.13.4"
 blake3 = "=1.8.7"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 skate-mods = { path = "../skate-mods" }

@@ -17,16 +17,20 @@ impl Plugin for CharacterLightingPlugin {
         embedded_asset!(app, "retail_character.wgsl");
         embedded_asset!(app, "retail_character_depth.wgsl");
         embedded_asset!(app, "retail_character_common.wgsl");
-        let common: Handle<Shader> = bevy::asset::load_embedded_asset!(app.world().resource::<AssetServer>(), "retail_character_common.wgsl");
+        let common: Handle<Shader> = bevy::asset::load_embedded_asset!(
+            app.world().resource::<AssetServer>(),
+            "retail_character_common.wgsl"
+        );
         app.insert_resource(CharacterShader(common));
         app.add_plugins(MaterialPlugin::<CharacterMaterial>::default())
             .add_systems(Startup, load)
-            .add_systems(PreUpdate, load.after(crate::map_transition::MapTransitionSet).run_if(crate::retail_render::world_changed))
-            .add_systems(Update, (bind, shadow_views).chain())
             .add_systems(
-                Update,
-                update.after(crate::multiplayer::RemoteRenderSet),
-            );
+                PreUpdate,
+                load.after(crate::map_transition::MapTransitionSet)
+                    .run_if(crate::retail_render::world_changed),
+            )
+            .add_systems(Update, (bind, shadow_views).chain())
+            .add_systems(Update, update.after(crate::multiplayer::RemoteRenderSet));
     }
 }
 #[derive(Clone, Debug, Deserialize)]
@@ -37,8 +41,13 @@ pub(crate) struct MaterialData {
 }
 impl MaterialData {
     pub(crate) fn is_hair(&self) -> bool {
-        matches!(self.shader.as_str(), "character.hair" | "character.hair_ropa"
-            | "character.default_hair" | "character.default_hair_ropa")
+        matches!(
+            self.shader.as_str(),
+            "character.hair"
+                | "character.hair_ropa"
+                | "character.default_hair"
+                | "character.default_hair_ropa"
+        )
     }
 }
 
@@ -90,10 +99,14 @@ struct CharacterMaterial {
 }
 impl Material for CharacterMaterial {
     fn fragment_shader() -> ShaderRef {
-        bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_character.wgsl")).with_source("embedded").into()
+        bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_character.wgsl"))
+            .with_source("embedded")
+            .into()
     }
     fn prepass_fragment_shader() -> ShaderRef {
-        bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_character_depth.wgsl")).with_source("embedded").into()
+        bevy::asset::AssetPath::from(bevy::asset::embedded_path!("retail_character_depth.wgsl"))
+            .with_source("embedded")
+            .into()
     }
     fn alpha_mode(&self) -> AlphaMode {
         self.alpha
@@ -111,15 +124,23 @@ struct OriginalCharacterMaterial {
     material: Handle<StandardMaterial>,
     layers: Option<RenderLayers>,
 }
-fn load(mut commands: Commands, config: Res<crate::config::Config>, sources: Query<Entity, With<ShadowSource>>, mut shadow: ResMut<crate::retail_render::FrameStateData>,
+fn load(
+    mut commands: Commands,
+    config: Res<crate::config::Config>,
+    sources: Query<Entity, With<ShadowSource>>,
+    mut shadow: ResMut<crate::retail_render::FrameStateData>,
     retail: Res<crate::retail_render::RetailScene>,
     originals: Query<(Entity, &OriginalCharacterMaterial)>,
     cameras: Query<(Entity, &RenderLayers), With<crate::camera::GameplayCamera>>,
     mut customiser: ResMut<Assets<crate::customiser_material::SkaterMaterial>>,
 ) {
-    for (_, material) in customiser.iter_mut() { material.extension.retail.light = Vec4::ZERO; }
+    for (_, material) in customiser.iter_mut() {
+        material.extension.retail.light = Vec4::ZERO;
+    }
     commands.remove_resource::<Lighting>();
-    for e in &sources { commands.entity(e).try_despawn(); }
+    for e in &sources {
+        commands.entity(e).try_despawn();
+    }
     // Only the floor: the clock and ocean PCA in this resource are rewritten
     // every frame and are not this system's to reset.
     shadow.shadow = Vec4::ZERO;
@@ -128,15 +149,23 @@ fn load(mut commands: Commands, config: Res<crate::config::Config>, sources: Que
     // entity that is already gone is the expected case, not an error.
     for (entity, original) in &originals {
         let mut entity = commands.entity(entity);
-        entity.try_remove::<(MeshMaterial3d<CharacterMaterial>, OriginalCharacterMaterial)>()
+        entity
+            .try_remove::<(MeshMaterial3d<CharacterMaterial>, OriginalCharacterMaterial)>()
             .try_insert(MeshMaterial3d(original.material.clone()));
-        if let Some(layers) = &original.layers { entity.try_insert(layers.clone()); }
-        else { entity.try_remove::<RenderLayers>(); }
+        if let Some(layers) = &original.layers {
+            entity.try_insert(layers.clone());
+        } else {
+            entity.try_remove::<RenderLayers>();
+        }
     }
     for (entity, layers) in &cameras {
-        commands.entity(entity).try_insert(layers.clone().without(28));
+        commands
+            .entity(entity)
+            .try_insert(layers.clone().without(28));
     }
-    if !retail.0 { return; }
+    if !retail.0 {
+        return;
+    }
     let Some(map_path) = &config.map_path else {
         return;
     };
@@ -151,8 +180,12 @@ fn load(mut commands: Commands, config: Res<crate::config::Config>, sources: Que
             return;
         }
     };
-    data.native = std::fs::read(crate::customiser_parts::asset_directory(&config.asset_root).join("native-lighting.json"))
-        .ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    data.native = std::fs::read(
+        crate::customiser_parts::asset_directory(&config.asset_root).join("native-lighting.json"),
+    )
+    .ok()
+    .and_then(|b| serde_json::from_slice(&b).ok())
+    .unwrap_or_default();
     let name = map_path.file_stem().unwrap_or_default().to_string_lossy();
     let overlay = config
         .asset_root
@@ -260,9 +293,20 @@ fn bind(
     source: Res<Assets<StandardMaterial>>,
     server: Res<AssetServer>,
     mut materials: ResMut<Assets<CharacterMaterial>>,
-    entities: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, Option<&RenderLayers>)>,
+    entities: Query<(
+        Entity,
+        &GltfMaterialName,
+        &MeshMaterial3d<StandardMaterial>,
+        Option<&RenderLayers>,
+    )>,
     parents: Query<&ChildOf>,
-    players: Query<(), Or<(With<crate::world::PlayerRoot>, With<crate::multiplayer::appearance::RemoteCharacter>)>>,
+    players: Query<
+        (),
+        Or<(
+            With<crate::world::PlayerRoot>,
+            With<crate::multiplayer::appearance::RemoteCharacter>,
+        )>,
+    >,
     mod_graphics: Query<(), With<ModGraphicsLit>>,
     parts: Query<(), With<crate::customiser_parts::PartRoot>>,
     native: Query<&crate::custom_models::NativeModelRoot>,
@@ -273,7 +317,9 @@ fn bind(
     };
     for (entity, name, handle, layers) in &entities {
         let under_player = parents.iter_ancestors(entity).any(|e| players.contains(e));
-        let under_mod = parents.iter_ancestors(entity).any(|e| mod_graphics.contains(e));
+        let under_mod = parents
+            .iter_ancestors(entity)
+            .any(|e| mod_graphics.contains(e));
         if under_mod || !under_player {
             continue;
         }
@@ -282,7 +328,9 @@ fn bind(
         if under_player && parents.iter_ancestors(entity).any(|e| parts.contains(e)) {
             continue;
         }
-        let native_key = parents.iter_ancestors(entity).find_map(|e| native.get(e).ok().map(|n| &n.0));
+        let native_key = parents
+            .iter_ancestors(entity)
+            .find_map(|e| native.get(e).ok().map(|n| &n.0));
         if under_player
             && native_key.is_none()
             && parents.iter_ancestors(entity).any(|e| imports.contains(e))
@@ -309,7 +357,7 @@ fn bind(
         } else {
             -1.
         };
-        let tint=Vec4::from_array(m.base_color.to_linear().to_f32_array());
+        let tint = Vec4::from_array(m.base_color.to_linear().to_f32_array());
         let specular = data.specular.as_ref();
         let material = materials.add(CharacterMaterial {
             params: CharacterParams {
@@ -345,7 +393,10 @@ fn bind(
             .entity(entity)
             .try_remove::<MeshMaterial3d<StandardMaterial>>()
             .try_insert((
-                OriginalCharacterMaterial { material: handle.0.clone(), layers: layers.cloned() },
+                OriginalCharacterMaterial {
+                    material: handle.0.clone(),
+                    layers: layers.cloned(),
+                },
                 MeshMaterial3d(material),
                 RenderLayers::from_layers(&[0, 28]),
             ));
@@ -369,9 +420,15 @@ fn shadow_views(
 fn update(
     lighting: Option<ResMut<Lighting>>,
     local_root: Query<(Entity, &Transform), With<crate::world::PlayerRoot>>,
-    remote_roots: Query<(Entity, &Transform), With<crate::multiplayer::appearance::RemoteCharacter>>,
+    remote_roots: Query<
+        (Entity, &Transform),
+        With<crate::multiplayer::appearance::RemoteCharacter>,
+    >,
     character_meshes: Query<(Entity, &MeshMaterial3d<CharacterMaterial>)>,
-    customiser_meshes: Query<(Entity, &MeshMaterial3d<crate::customiser_material::SkaterMaterial>)>,
+    customiser_meshes: Query<(
+        Entity,
+        &MeshMaterial3d<crate::customiser_material::SkaterMaterial>,
+    )>,
     parents: Query<&ChildOf>,
     mut materials: ResMut<Assets<CharacterMaterial>>,
     mut customiser: ResMut<Assets<crate::customiser_material::SkaterMaterial>>,
@@ -425,7 +482,11 @@ fn customiser_retail_enabled(retail: &CharacterParams) -> bool {
     retail.options.z < 0. || retail.tint.w > 0.
 }
 
-pub(crate) fn seed_customiser_retail(material: &mut crate::customiser_material::SkaterMaterial, light: Vec4, sh: [Vec4; 9]) {
+pub(crate) fn seed_customiser_retail(
+    material: &mut crate::customiser_material::SkaterMaterial,
+    light: Vec4,
+    sh: [Vec4; 9],
+) {
     if !customiser_retail_enabled(&material.extension.retail) {
         return;
     }
@@ -438,25 +499,37 @@ fn apply_sh_to_hierarchy(
     sh: [Vec4; 9],
     light: Vec4,
     character_meshes: &Query<(Entity, &MeshMaterial3d<CharacterMaterial>)>,
-    customiser_meshes: &Query<(Entity, &MeshMaterial3d<crate::customiser_material::SkaterMaterial>)>,
+    customiser_meshes: &Query<(
+        Entity,
+        &MeshMaterial3d<crate::customiser_material::SkaterMaterial>,
+    )>,
     parents: &Query<&ChildOf>,
     materials: &mut Assets<CharacterMaterial>,
     customiser: &mut Assets<crate::customiser_material::SkaterMaterial>,
 ) {
     for (entity, handle) in character_meshes {
-        if !parents.iter_ancestors(entity).any(|ancestor| ancestor == root) {
+        if !parents
+            .iter_ancestors(entity)
+            .any(|ancestor| ancestor == root)
+        {
             continue;
         }
         // Assets::get_mut queues Modified even when no field is written. Read
         // first so stationary objects do not rebuild their GPU materials.
-        if materials.get(&handle.0).is_some_and(|material| lighting_changed(&material.params, &sh, light)) {
+        if materials
+            .get(&handle.0)
+            .is_some_and(|material| lighting_changed(&material.params, &sh, light))
+        {
             let material = materials.get_mut(&handle.0).unwrap();
             material.params.sh = sh;
             material.params.light = light;
         }
     }
     for (entity, handle) in customiser_meshes {
-        if !parents.iter_ancestors(entity).any(|ancestor| ancestor == root) {
+        if !parents
+            .iter_ancestors(entity)
+            .any(|ancestor| ancestor == root)
+        {
             continue;
         }
         if customiser.get(&handle.0).is_some_and(|material| {
@@ -472,9 +545,11 @@ fn apply_sh_to_hierarchy(
 
 fn lighting_changed(params: &CharacterParams, sh: &[Vec4; 9], light: Vec4) -> bool {
     params.light.to_array().map(f32::to_bits) != light.to_array().map(f32::to_bits)
-        || params.sh.iter().zip(sh).any(|(a, b)| {
-            a.to_array().map(f32::to_bits) != b.to_array().map(f32::to_bits)
-        })
+        || params
+            .sh
+            .iter()
+            .zip(sh)
+            .any(|(a, b)| a.to_array().map(f32::to_bits) != b.to_array().map(f32::to_bits))
 }
 
 #[cfg(test)]
@@ -491,53 +566,109 @@ mod tests {
         let world = app.world_mut();
         let diffuse = world.resource_mut::<Assets<Image>>().add(Image::default());
         let normal = world.resource_mut::<Assets<Image>>().add(Image::default());
-        let source = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
-            base_color_texture: Some(diffuse.clone()), normal_map_texture: Some(normal.clone()),
-            base_color: Color::srgba(1., 0., 0., 0.5), alpha_mode: AlphaMode::Blend, ..default()
-        });
+        let source = world
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                base_color_texture: Some(diffuse.clone()),
+                normal_map_texture: Some(normal.clone()),
+                base_color: Color::srgba(1., 0., 0., 0.5),
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            });
         world.insert_resource(Lighting {
             data: LightingData {
                 materials: HashMap::from([
-                    ("Retail_Rostral".into(), MaterialData { shader: "character.face".into(), params: vec![[9.; 4]; 9], specular: Some("Rostral_specular.png".into()) }),
-                    ("Retail_Organ".into(), MaterialData { shader: "character.default_cloth".into(), params: vec![[2.; 4]; 9], specular: Some("stock_cloth_specular.png".into()) }),
-                ]), default_sh: [[0.; 3]; 9], native: HashMap::new(),
-            }, probes: default(), light: Vec4::ONE, display_sh: None,
+                    (
+                        "Retail_Rostral".into(),
+                        MaterialData {
+                            shader: "character.face".into(),
+                            params: vec![[9.; 4]; 9],
+                            specular: Some("Rostral_specular.png".into()),
+                        },
+                    ),
+                    (
+                        "Retail_Organ".into(),
+                        MaterialData {
+                            shader: "character.default_cloth".into(),
+                            params: vec![[2.; 4]; 9],
+                            specular: Some("stock_cloth_specular.png".into()),
+                        },
+                    ),
+                ]),
+                default_sh: [[0.; 3]; 9],
+                native: HashMap::new(),
+            },
+            probes: default(),
+            light: Vec4::ONE,
+            display_sh: None,
         });
         let root = world.spawn(ModGraphicsLit).id();
-        let meshes: Vec<_> = ["CarPaint", "Retail_Rostral"].into_iter().map(|name| {
-            world.spawn((ChildOf(root), GltfMaterialName(name.into()), MeshMaterial3d(source.clone()))).id()
-        }).collect();
+        let meshes: Vec<_> = ["CarPaint", "Retail_Rostral"]
+            .into_iter()
+            .map(|name| {
+                world
+                    .spawn((
+                        ChildOf(root),
+                        GltfMaterialName(name.into()),
+                        MeshMaterial3d(source.clone()),
+                    ))
+                    .id()
+            })
+            .collect();
         world.run_system_once(bind).unwrap();
         for mesh in meshes {
-            assert!(world.get::<MeshMaterial3d<CharacterMaterial>>(mesh).is_none());
-            assert_eq!(world.get::<MeshMaterial3d<StandardMaterial>>(mesh).unwrap().0, source);
+            assert!(world
+                .get::<MeshMaterial3d<CharacterMaterial>>(mesh)
+                .is_none());
+            assert_eq!(
+                world
+                    .get::<MeshMaterial3d<StandardMaterial>>(mesh)
+                    .unwrap()
+                    .0,
+                source
+            );
         }
     }
 
     #[test]
     fn unchanged_lighting_does_not_emit_material_modifications() {
+        use crate::customiser_material::SkaterMaterial;
         use bevy::asset::AssetEvent;
         use bevy::ecs::system::RunSystemOnce;
-        use crate::customiser_material::SkaterMaterial;
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<CharacterMaterial>()
             .init_asset::<SkaterMaterial>();
-        let character = app.world_mut().resource_mut::<Assets<CharacterMaterial>>().add(CharacterMaterial {
-            params: CharacterParams::default(), diffuse: None, normal: None, mask: None,
-            alpha: AlphaMode::Opaque,
-        });
+        let character = app
+            .world_mut()
+            .resource_mut::<Assets<CharacterMaterial>>()
+            .add(CharacterMaterial {
+                params: CharacterParams::default(),
+                diffuse: None,
+                normal: None,
+                mask: None,
+                alpha: AlphaMode::Opaque,
+            });
         let mut skater = SkaterMaterial::default();
         skater.extension.retail.options.z = -1.;
-        let customiser = app.world_mut().resource_mut::<Assets<SkaterMaterial>>().add(skater);
+        let customiser = app
+            .world_mut()
+            .resource_mut::<Assets<SkaterMaterial>>()
+            .add(skater);
         let root = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn((ChildOf(root), MeshMaterial3d(character.clone())));
-        app.world_mut().spawn((ChildOf(root), MeshMaterial3d(customiser.clone())));
+        app.world_mut()
+            .spawn((ChildOf(root), MeshMaterial3d(character.clone())));
+        app.world_mut()
+            .spawn((ChildOf(root), MeshMaterial3d(customiser.clone())));
         // Flush Added events before measuring updates.
         app.update();
-        app.world_mut().resource_mut::<Messages<AssetEvent<CharacterMaterial>>>().clear();
-        app.world_mut().resource_mut::<Messages<AssetEvent<SkaterMaterial>>>().clear();
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<CharacterMaterial>>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<SkaterMaterial>>>()
+            .clear();
 
         for (sh, light, expected) in [
             ([Vec4::ZERO; 9], Vec4::ZERO, 0),
@@ -545,22 +676,66 @@ mod tests {
             ([Vec4::ONE; 9], Vec4::ONE, 0),
             ([Vec4::ONE; 9], Vec4::ZERO, 1),
         ] {
-            app.world_mut().run_system_once(move |
-                meshes: Query<(Entity, &MeshMaterial3d<CharacterMaterial>)>,
-                cac: Query<(Entity, &MeshMaterial3d<SkaterMaterial>)>,
-                parents: Query<&ChildOf>,
-                mut materials: ResMut<Assets<CharacterMaterial>>,
-                mut customiser: ResMut<Assets<SkaterMaterial>>,
-            | apply_sh_to_hierarchy(root, sh, light, &meshes, &cac, &parents, &mut materials, &mut customiser)).unwrap();
+            app.world_mut()
+                .run_system_once(
+                    move |meshes: Query<(Entity, &MeshMaterial3d<CharacterMaterial>)>,
+                          cac: Query<(Entity, &MeshMaterial3d<SkaterMaterial>)>,
+                          parents: Query<&ChildOf>,
+                          mut materials: ResMut<Assets<CharacterMaterial>>,
+                          mut customiser: ResMut<Assets<SkaterMaterial>>| {
+                        apply_sh_to_hierarchy(
+                            root,
+                            sh,
+                            light,
+                            &meshes,
+                            &cac,
+                            &parents,
+                            &mut materials,
+                            &mut customiser,
+                        )
+                    },
+                )
+                .unwrap();
             app.update();
-            let character_events: Vec<_> = app.world_mut().resource_mut::<Messages<AssetEvent<CharacterMaterial>>>().drain().collect();
-            let customiser_events: Vec<_> = app.world_mut().resource_mut::<Messages<AssetEvent<SkaterMaterial>>>().drain().collect();
-            assert_eq!(character_events.iter().filter(|event| matches!(event, AssetEvent::Modified { .. })).count(), expected);
-            assert_eq!(customiser_events.iter().filter(|event| matches!(event, AssetEvent::Modified { .. })).count(), expected);
-            let params = &app.world().resource::<Assets<CharacterMaterial>>().get(&character).unwrap().params;
+            let character_events: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<AssetEvent<CharacterMaterial>>>()
+                .drain()
+                .collect();
+            let customiser_events: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<AssetEvent<SkaterMaterial>>>()
+                .drain()
+                .collect();
+            assert_eq!(
+                character_events
+                    .iter()
+                    .filter(|event| matches!(event, AssetEvent::Modified { .. }))
+                    .count(),
+                expected
+            );
+            assert_eq!(
+                customiser_events
+                    .iter()
+                    .filter(|event| matches!(event, AssetEvent::Modified { .. }))
+                    .count(),
+                expected
+            );
+            let params = &app
+                .world()
+                .resource::<Assets<CharacterMaterial>>()
+                .get(&character)
+                .unwrap()
+                .params;
             assert_eq!(params.sh, sh);
             assert_eq!(params.light, light);
-            let params = &app.world().resource::<Assets<SkaterMaterial>>().get(&customiser).unwrap().extension.retail;
+            let params = &app
+                .world()
+                .resource::<Assets<SkaterMaterial>>()
+                .get(&customiser)
+                .unwrap()
+                .extension
+                .retail;
             assert_eq!(params.sh, sh);
             assert_eq!(params.light, light);
         }
@@ -568,11 +743,36 @@ mod tests {
 
     #[test]
     fn customiser_hair_families_include_pro_skater_defaults() {
-        for shader in ["character.hair", "character.hair_ropa", "character.default_hair", "character.default_hair_ropa"] {
-            assert!(MaterialData {shader:shader.into(),params:vec![],specular:None}.is_hair(), "{shader}");
+        for shader in [
+            "character.hair",
+            "character.hair_ropa",
+            "character.default_hair",
+            "character.default_hair_ropa",
+        ] {
+            assert!(
+                MaterialData {
+                    shader: shader.into(),
+                    params: vec![],
+                    specular: None
+                }
+                .is_hair(),
+                "{shader}"
+            );
         }
-        for shader in ["character.default_skin", "character.default_cloth", "character.default_cloth_ropa"] {
-            assert!(!MaterialData {shader:shader.into(),params:vec![],specular:None}.is_hair(), "{shader}");
+        for shader in [
+            "character.default_skin",
+            "character.default_cloth",
+            "character.default_cloth_ropa",
+        ] {
+            assert!(
+                !MaterialData {
+                    shader: shader.into(),
+                    params: vec![],
+                    specular: None
+                }
+                .is_hair(),
+                "{shader}"
+            );
         }
     }
     #[test]
@@ -580,33 +780,117 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()));
-        app.init_resource::<Assets<StandardMaterial>>().init_resource::<Assets<CharacterMaterial>>();
+        app.init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<CharacterMaterial>>();
         let world = app.world_mut();
-        let material = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
-        let authored = MaterialData { shader: "character.cloth".into(), params: vec![[2., 3., 4., 5.]; 9], specular: None };
+        let material = world
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+        let authored = MaterialData {
+            shader: "character.cloth".into(),
+            params: vec![[2., 3., 4., 5.]; 9],
+            specular: None,
+        };
         world.insert_resource(Lighting {
-            data: LightingData { materials: HashMap::new(), default_sh: [[0.; 3]; 9],
-                native: HashMap::from([("pro".into(), HashMap::from([("Retail_Torso".into(), authored)]))]) },
-            probes: default(), light: Vec4::ONE, display_sh: None,
+            data: LightingData {
+                materials: HashMap::new(),
+                default_sh: [[0.; 3]; 9],
+                native: HashMap::from([(
+                    "pro".into(),
+                    HashMap::from([("Retail_Torso".into(), authored)]),
+                )]),
+            },
+            probes: default(),
+            light: Vec4::ONE,
+            display_sh: None,
         });
         let player = world.spawn(crate::world::PlayerRoot).id();
-        let pro = world.spawn((crate::custom_models::NativeModelRoot("pro".into()), ChildOf(player))).id();
-        let torso = world.spawn((ChildOf(pro), GltfMaterialName("Retail_Torso".into()), MeshMaterial3d(material.clone()))).id();
-        let part = world.spawn((crate::customiser_parts::PartRoot("shirt".into()), ChildOf(player))).id();
-        let cloth = world.spawn((ChildOf(part), GltfMaterialName("Retail_Torso".into()), MeshMaterial3d(material))).id();
-        let hair_data=MaterialData {shader:"character.default_hair".into(),params:vec![[1.;4];9],specular:None};
-        world.resource_mut::<Lighting>().data.native.get_mut("pro").unwrap().insert("Retail_Hair".into(),hair_data);
-        let hair_material=world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
-        let hair=world.spawn((ChildOf(pro),GltfMaterialName("Retail_Hair".into()),MeshMaterial3d(hair_material))).id();
+        let pro = world
+            .spawn((
+                crate::custom_models::NativeModelRoot("pro".into()),
+                ChildOf(player),
+            ))
+            .id();
+        let torso = world
+            .spawn((
+                ChildOf(pro),
+                GltfMaterialName("Retail_Torso".into()),
+                MeshMaterial3d(material.clone()),
+            ))
+            .id();
+        let part = world
+            .spawn((
+                crate::customiser_parts::PartRoot("shirt".into()),
+                ChildOf(player),
+            ))
+            .id();
+        let cloth = world
+            .spawn((
+                ChildOf(part),
+                GltfMaterialName("Retail_Torso".into()),
+                MeshMaterial3d(material),
+            ))
+            .id();
+        let hair_data = MaterialData {
+            shader: "character.default_hair".into(),
+            params: vec![[1.; 4]; 9],
+            specular: None,
+        };
+        world
+            .resource_mut::<Lighting>()
+            .data
+            .native
+            .get_mut("pro")
+            .unwrap()
+            .insert("Retail_Hair".into(), hair_data);
+        let hair_material = world
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+        let hair = world
+            .spawn((
+                ChildOf(pro),
+                GltfMaterialName("Retail_Hair".into()),
+                MeshMaterial3d(hair_material),
+            ))
+            .id();
         world.run_system_once(bind).unwrap();
-        let hair_handle=&world.get::<MeshMaterial3d<CharacterMaterial>>(hair).unwrap().0;
-        assert_eq!(world.resource::<Assets<CharacterMaterial>>().get(hair_handle).unwrap().params.options.w,1.);
+        let hair_handle = &world
+            .get::<MeshMaterial3d<CharacterMaterial>>(hair)
+            .unwrap()
+            .0;
+        assert_eq!(
+            world
+                .resource::<Assets<CharacterMaterial>>()
+                .get(hair_handle)
+                .unwrap()
+                .params
+                .options
+                .w,
+            1.
+        );
 
-        let h = &world.get::<MeshMaterial3d<CharacterMaterial>>(torso).unwrap().0;
-        assert_eq!(world.resource::<Assets<CharacterMaterial>>().get(h).unwrap().params.rows[0], Vec4::new(2., 3., 4., 5.));
-        assert!(world.get::<MeshMaterial3d<StandardMaterial>>(torso).is_none());
-        assert!(world.get::<MeshMaterial3d<CharacterMaterial>>(cloth).is_none());
-        assert!(world.get::<MeshMaterial3d<StandardMaterial>>(cloth).is_some());
+        let h = &world
+            .get::<MeshMaterial3d<CharacterMaterial>>(torso)
+            .unwrap()
+            .0;
+        assert_eq!(
+            world
+                .resource::<Assets<CharacterMaterial>>()
+                .get(h)
+                .unwrap()
+                .params
+                .rows[0],
+            Vec4::new(2., 3., 4., 5.)
+        );
+        assert!(world
+            .get::<MeshMaterial3d<StandardMaterial>>(torso)
+            .is_none());
+        assert!(world
+            .get::<MeshMaterial3d<CharacterMaterial>>(cloth)
+            .is_none());
+        assert!(world
+            .get::<MeshMaterial3d<StandardMaterial>>(cloth)
+            .is_some());
     }
 
     #[test]
@@ -614,33 +898,72 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
         let mut world = World::new();
         world.insert_resource(crate::config::Config {
-            asset_root: "unused".into(), verification_capture: None,
-            map: None, map_path: None, difficulty: crate::difficulty::Difficulty::Hardcore,
-            check_assets: false, start_paused: false, teleport: None,
-            multiplayer: Default::default(), map_fingerprint: 0,
+            asset_root: "unused".into(),
+            verification_capture: None,
+            map: None,
+            map_path: None,
+            difficulty: crate::difficulty::Difficulty::Hardcore,
+            check_assets: false,
+            start_paused: false,
+            teleport: None,
+            multiplayer: Default::default(),
+            map_fingerprint: 0,
+            gpu_backend: None,
+            multi_instance: false,
         });
         world.insert_resource(crate::retail_render::RetailScene(false));
         world.init_resource::<Assets<crate::customiser_material::SkaterMaterial>>();
         world.insert_resource(crate::retail_render::FrameStateData {
-            shadow: Vec4::ONE, clock: Vec4::ONE, pca: [Vec4::ONE; 7],
+            shadow: Vec4::ONE,
+            clock: Vec4::ONE,
+            pca: [Vec4::ONE; 7],
         });
         let material = Handle::<StandardMaterial>::default();
-        let player = world.spawn((
-            OriginalCharacterMaterial { material: material.clone(), layers: None },
-            MeshMaterial3d(Handle::<CharacterMaterial>::default()),
-            RenderLayers::from_layers(&[0, 28]),
-        )).id();
+        let player = world
+            .spawn((
+                OriginalCharacterMaterial {
+                    material: material.clone(),
+                    layers: None,
+                },
+                MeshMaterial3d(Handle::<CharacterMaterial>::default()),
+                RenderLayers::from_layers(&[0, 28]),
+            ))
+            .id();
         let light = world.spawn(ShadowSource).id();
-        let camera = world.spawn((crate::camera::GameplayCamera, RenderLayers::from_layers(&[0, 28]))).id();
+        let camera = world
+            .spawn((
+                crate::camera::GameplayCamera,
+                RenderLayers::from_layers(&[0, 28]),
+            ))
+            .id();
         let overlay = world.spawn(RenderLayers::layer(31)).id();
         world.run_system_once(load).unwrap();
         assert!(world.get_entity(light).is_err());
-        assert_eq!(world.get::<MeshMaterial3d<StandardMaterial>>(player).unwrap().0, material);
-        assert!(world.get::<MeshMaterial3d<CharacterMaterial>>(player).is_none());
+        assert_eq!(
+            world
+                .get::<MeshMaterial3d<StandardMaterial>>(player)
+                .unwrap()
+                .0,
+            material
+        );
+        assert!(world
+            .get::<MeshMaterial3d<CharacterMaterial>>(player)
+            .is_none());
         assert!(world.get::<RenderLayers>(player).is_none());
-        assert_eq!(world.get::<RenderLayers>(camera).unwrap(), &RenderLayers::default());
-        assert_eq!(world.get::<RenderLayers>(overlay).unwrap(), &RenderLayers::layer(31));
-        assert_eq!(world.resource::<crate::retail_render::FrameStateData>().shadow, Vec4::ZERO);
+        assert_eq!(
+            world.get::<RenderLayers>(camera).unwrap(),
+            &RenderLayers::default()
+        );
+        assert_eq!(
+            world.get::<RenderLayers>(overlay).unwrap(),
+            &RenderLayers::layer(31)
+        );
+        assert_eq!(
+            world
+                .resource::<crate::retail_render::FrameStateData>()
+                .shadow,
+            Vec4::ZERO
+        );
     }
 
     #[test]
@@ -654,7 +977,11 @@ mod tests {
         let mut receivers = 0;
         let mut character_sources = 0;
         for (light, layers, cascades) in world
-            .query::<(&DirectionalLight, Option<&RenderLayers>, &bevy::light::CascadeShadowConfig)>()
+            .query::<(
+                &DirectionalLight,
+                Option<&RenderLayers>,
+                &bevy::light::CascadeShadowConfig,
+            )>()
             .iter(&world)
         {
             let layers = layers.cloned().unwrap_or_default();

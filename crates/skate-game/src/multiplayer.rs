@@ -1,13 +1,14 @@
 //! Transport-neutral ten-player free-skate; each player owns their simulation.
-mod render;
 pub(crate) mod appearance;
 mod appearance_transfer;
-mod transport;
-mod nametags;
 mod hud;
+mod nametags;
+mod render;
+mod server_session;
+mod transport;
 use crate::{
     app::SimulationSet,
-    physics::{GamePhysics, SkaterRuntime, network},
+    physics::{network, GamePhysics, SkaterRuntime},
 };
 use bevy::prelude::*;
 use skate_net::{
@@ -37,6 +38,8 @@ pub(crate) fn unique() -> u64 {
 pub(crate) struct Options {
     pub direct: Option<(SocketAddr, SocketAddr)>,
     pub host: Option<SocketAddr>,
+    /// Authoritative session server address (`--net-server`).
+    pub server: Option<SocketAddr>,
     pub session: u64,
     pub spawn_offset: f32,
     pub appearance: Option<String>,
@@ -63,6 +66,95 @@ struct Remote {
     body_seq: u32,
     pose_seq: u32,
 }
+impl Remote {
+    fn new(initial: BodyState) -> Self {
+        Self {
+            roots: VecDeque::new(),
+            poses: VecDeque::new(),
+            epoch: 0,
+            visual_since: 0,
+            body: initial,
+            body_at: Instant::now(),
+            body_seq: 0,
+            pose_seq: 0,
+        }
+    }
+    /// Folds one decoded body sample into the render buffer. `captured_ms` is
+    /// the sender's clock, `received_ms` our session-relative arrival time.
+    /// Returns false when the sample is stale.
+    fn ingest_body(
+        &mut self,
+        seq: u32,
+        captured_ms: u64,
+        received_ms: u64,
+        state: BodyState,
+    ) -> bool {
+        if seq <= self.body_seq {
+            return false;
+        }
+        if self.roots.back().is_some_and(|p| {
+            skate_net::prediction::is_discontinuity(
+                &self.body,
+                &state,
+                (captured_ms as f64 / 1000. - p.captured) as f32,
+            )
+        }) {
+            self.roots.clear();
+            self.poses.clear();
+            self.epoch += 1;
+            self.visual_since = captured_ms;
+        }
+        self.roots.push_back(VisualRoot {
+            captured: captured_ms as f64 / 1000.,
+            received: received_ms as f64 / 1000.,
+            pose: state.root,
+        });
+        while self.roots.len() > 64 {
+            self.roots.pop_front();
+        }
+        self.body = state;
+        self.body_at = Instant::now();
+        self.body_seq = seq;
+        true
+    }
+    /// Folds one decoded pose sample into the render buffer. `anchors` is the
+    /// local bone set; a mismatch clears bones so the stock rig is used.
+    fn ingest_pose(
+        &mut self,
+        seq: u32,
+        captured_ms: u64,
+        received_ms: u64,
+        mut pose: skate_net::packed::PoseState,
+        rig_matches: bool,
+        anchors: &[usize],
+    ) -> bool {
+        if seq <= self.pose_seq {
+            return false;
+        }
+        self.pose_seq = seq;
+        if captured_ms < self.visual_since {
+            return false;
+        }
+        if !rig_matches
+            || pose
+                .bones
+                .iter()
+                .map(|b| b.index as usize)
+                .ne(anchors.iter().copied())
+        {
+            pose.bones.clear();
+        }
+        self.poses.push_back(VisualPose {
+            captured: captured_ms as f64 / 1000.,
+            received: received_ms as f64 / 1000.,
+            bones: pose.bones,
+        });
+        while self.poses.len() > 64 {
+            self.poses.pop_front();
+        }
+        true
+    }
+}
 pub const NAME_KEY: &str = "mp:name";
 const MAX_NAME: usize = 16;
 
@@ -73,6 +165,9 @@ pub(crate) struct NetworkActor(pub u64);
 pub(crate) struct Multiplayer {
     transport: Option<Box<dyn transport::Transport>>,
     lobby: Option<Session>,
+    /// Authoritative session server connection. When present, it replaces the
+    /// client-hosted `lobby` as the source of identity, roster and snapshots.
+    server: Option<server_session::SkatedSession>,
     info: Info,
     schema: network::Schema,
     anchors: Vec<usize>,
@@ -101,17 +196,44 @@ pub(crate) struct Multiplayer {
 }
 impl Multiplayer {
     pub(crate) fn diagnostic_summary(&self) -> String {
-        let provider = if self.room.is_some() { "platform_relay" }
-            else if self.transport.is_some() { "direct_local" } else { "inactive" };
-        let rtt = self.lobby.as_ref().map(|lobby| lobby.stats.rtt_ms);
-        format!("provider:{provider} active:{} remote_count:{} rtt_ms:{rtt:?}", self.active(), self.remotes.len())
+        let provider = if self.server.is_some() {
+            "session_server"
+        } else if self.room.is_some() {
+            "platform_relay"
+        } else if self.transport.is_some() {
+            "direct_local"
+        } else {
+            "inactive"
+        };
+        let rtt = if let Some(server) = &self.server {
+            Some(server.rtt_ms)
+        } else {
+            self.lobby.as_ref().map(|lobby| lobby.stats.rtt_ms)
+        };
+        format!(
+            "provider:{provider} active:{} remote_count:{} rtt_ms:{rtt:?}",
+            self.active(),
+            self.remotes.len()
+        )
     }
     pub(crate) fn mod_identity(&self) -> (bool, u64, bool) {
+        if let Some(server) = &self.server {
+            // The server is the authority; no client is host.
+            return (server.is_connected(), server.actor_id(), false);
+        }
         self.lobby
             .as_ref()
             .map_or((false, 0, true), |l| (true, l.local, l.is_host()))
     }
     pub(crate) fn player_ids(&self) -> Vec<u64> {
+        if let Some(server) = &self.server {
+            let mut ids = vec![server.actor_id()];
+            ids.extend(server.peers.keys().copied());
+            ids.extend(self.remotes.keys().copied());
+            ids.sort_unstable();
+            ids.dedup();
+            return ids;
+        }
         let Some(lobby) = &self.lobby else {
             return Vec::new();
         };
@@ -123,10 +245,31 @@ impl Multiplayer {
         ids
     }
     pub(crate) fn session_identity(&self) -> Option<(u64, u64, u64)> {
-        self.lobby.as_ref().map(|l| (l.session, l.local, l.host_peer()))
+        if let Some(server) = &self.server {
+            return server
+                .is_connected()
+                .then_some((server.lobby_id(), server.actor_id(), 0));
+        }
+        self.lobby
+            .as_ref()
+            .map(|l| (l.session, l.local, l.host_peer()))
     }
     pub(crate) fn host_actor(&self) -> u64 {
-        self.lobby.as_ref().and_then(|l| l.host_actor()).unwrap_or(0)
+        // In server mode there is no client host; the server owns authority.
+        if self.server.is_some() {
+            return 0;
+        }
+        self.lobby
+            .as_ref()
+            .and_then(|l| l.host_actor())
+            .unwrap_or(0)
+    }
+    /// Local actor id, valid in both lobby and server modes.
+    pub(crate) fn local_actor(&self) -> u64 {
+        if let Some(server) = &self.server {
+            return server.actor_id();
+        }
+        self.lobby.as_ref().map_or(0, |l| l.local)
     }
     pub(crate) fn published_name(&self) -> String {
         sanitize_name(&self.player_name)
@@ -151,28 +294,43 @@ impl Multiplayer {
         persist_player_name(&self.name_path, &self.player_name);
     }
     pub(crate) fn publish_application(&mut self, key: &str, value: Vec<u8>) -> bool {
+        if let Some(server) = &mut self.server {
+            server.publish_application(key, value);
+            return true;
+        }
         let now = self.started.elapsed().as_millis() as u64;
         self.lobby
             .as_mut()
             .is_some_and(|l| l.publish_application(key, value, now))
     }
     pub(crate) fn application_records(&self) -> Vec<(u64, String, u32, Vec<u8>)> {
+        if let Some(server) = &self.server {
+            return server
+                .applications
+                .iter()
+                .map(|((actor, key), (seq, value))| (*actor, key.clone(), *seq, value.clone()))
+                .collect();
+        }
         self.lobby.as_ref().map_or_else(Vec::new, |l| {
             l.actors
                 .iter()
                 .filter(|(id, _)| **id != l.local)
                 .flat_map(|(&id, actor)| {
-                    actor.application.iter().map(move |(key, r)| {
-                        (id, key.clone(), r.seq, r.value.clone())
-                    })
+                    actor
+                        .application
+                        .iter()
+                        .map(move |(key, r)| (id, key.clone(), r.seq, r.value.clone()))
                 })
                 .collect()
         })
     }
     pub fn active(&self) -> bool {
-        self.lobby.is_some()
+        self.lobby.is_some() || self.server.is_some()
     }
     pub fn leave(&mut self) {
+        if let Some(server) = &mut self.server {
+            server.goodbye();
+        }
         if let (Some(lobby), Some(t)) = (&self.lobby, &mut self.transport) {
             for p in lobby.goodbye() {
                 let _ = t.send(p.peer, &p.data);
@@ -180,6 +338,7 @@ impl Multiplayer {
         }
         self.transport = None;
         self.lobby = None;
+        self.server = None;
         self.remotes.clear();
         self.names.clear();
         self.host_code.clear();
@@ -219,6 +378,37 @@ impl Multiplayer {
                 },
             ),
             Err(e) => self.status = format!("Could not open local session: {e}"),
+        }
+    }
+    /// Connects to the authoritative session server. This replaces the
+    /// client-hosted lobby: identity, roster and snapshot relay come from the
+    /// server, and every gameplay datagram is exchanged through it.
+    pub fn session_server(&mut self, addr: std::net::SocketAddr) {
+        self.leave();
+        // A fresh actor id keeps this client distinct across reconnects.
+        let id = unique();
+        let info = server_session::client_info(
+            id,
+            self.info.map,
+            self.info.rig,
+            self.info.physics,
+            self.info.appearance,
+        );
+        let name = self.published_name();
+        match server_session::SkatedSession::connect(addr, info, name) {
+            Ok(session) => {
+                self.started = Instant::now();
+                self.last_metrics = Instant::now();
+                self.counts = (0, 0);
+                self.rates.clear();
+                self.provider_metrics.clear();
+                self.visual_status.clear();
+                self.status = format!("Contacting session server at {addr}...");
+                self.server = Some(session);
+            }
+            Err(e) => {
+                self.status = format!("Could not open session socket: {e}");
+            }
         }
     }
     fn lobby_command(&mut self, command: LobbyCommand) {
@@ -337,6 +527,7 @@ impl Plugin for MultiplayerPlugin {
         let mut net = Multiplayer {
             transport: None,
             lobby: None,
+            server: None,
             info: Info {
                 id: unique(),
                 map: config.map_fingerprint,
@@ -386,7 +577,10 @@ impl Plugin for MultiplayerPlugin {
                 .unwrap_or_else(|| load_player_name(&player_name_path(&config.asset_root))),
             names: BTreeMap::new(),
         };
-        if let Some(bind) = config
+        if let Some(server) = config.multiplayer.server {
+            // The authoritative session server replaces any local or Steam path.
+            net.session_server(server);
+        } else if let Some(bind) = config
             .multiplayer
             .host
             .or(config.multiplayer.direct.map(|(b, _)| b))
@@ -401,7 +595,12 @@ impl Plugin for MultiplayerPlugin {
             }
         }
         app.insert_resource(net)
-            .add_systems(PreUpdate, (world_changed, receive, sync_names).chain().after(crate::map_transition::MapTransitionSet))
+            .add_systems(
+                PreUpdate,
+                (world_changed, receive, sync_names)
+                    .chain()
+                    .after(crate::map_transition::MapTransitionSet),
+            )
             .add_systems(Startup, hud::setup)
             .add_systems(Update, hud::draw)
             .add_systems(Update, send_pose)
@@ -433,10 +632,15 @@ fn world_changed(
     skater: Res<SkaterRuntime>,
     mut net: ResMut<Multiplayer>,
 ) {
-    if changed.read().count() == 0 { return; }
+    if changed.read().count() == 0 {
+        return;
+    }
     net.leave();
     net.info.map = config.map_fingerprint;
-    net.map_name = config.map_path.as_ref().and_then(|p| p.file_stem())
+    net.map_name = config
+        .map_path
+        .as_ref()
+        .and_then(|p| p.file_stem())
         .map(|n| skate_net::directory::label(&n.to_string_lossy()))
         .unwrap_or_else(|| "Test world".into());
     if let Ok(schema) = network::Schema::new(&physics, &skater) {
@@ -451,6 +655,10 @@ fn world_changed(
 }
 fn receive(mut net: ResMut<Multiplayer>) {
     let now = net.started.elapsed().as_millis() as u64;
+    if net.server.is_some() {
+        receive_from_server(&mut net, now);
+        return;
+    }
     let net = &mut *net;
     let Some(t) = &mut net.transport else {
         return;
@@ -582,8 +790,11 @@ fn receive(mut net: ResMut<Multiplayer>) {
                 continue;
             };
             if remote.roots.back().is_some_and(|p| {
-                skate_net::prediction::is_discontinuity(&remote.body, &state,
-                (revision.state.captured as f64 / 1000. - p.captured) as f32)
+                skate_net::prediction::is_discontinuity(
+                    &remote.body,
+                    &state,
+                    (revision.state.captured as f64 / 1000. - p.captured) as f32,
+                )
             }) {
                 remote.roots.clear();
                 remote.poses.clear();
@@ -666,19 +877,160 @@ fn receive(mut net: ResMut<Multiplayer>) {
         net.last_metrics = Instant::now();
     }
 }
-pub(crate) fn prepare(net: Res<Multiplayer>, mut physics: ResMut<GamePhysics>, skater: Res<SkaterRuntime>, mods: Option<Res<crate::modding::Mods>>) {
+/// Server-backed receive path. The server is the hub: it assigns identity, owns
+/// the roster and relays peers' full snapshots. There is no client host, no ACK
+/// and no per-peer scheduling here.
+fn receive_from_server(net: &mut Multiplayer, now: u64) {
+    let info = {
+        let server = net.server.as_ref().unwrap();
+        server_session::client_info(
+            server.actor_id(),
+            net.info.map,
+            net.info.rig,
+            net.info.physics,
+            net.info.appearance,
+        )
+    };
+    let name = net.published_name();
+
+    let polled = {
+        let server = net.server.as_mut().unwrap();
+        server.poll(&info, &name)
+    };
+
+    let local = net.server.as_ref().map_or(0, |s| s.actor_id());
+    let connected = net.server.as_ref().is_some_and(|s| s.is_connected());
+
+    // Admit any peer that appeared in the roster, then fold its samples.
+    for (&actor, _) in net.server.as_ref().unwrap().peers.iter() {
+        if net.remotes.contains_key(&actor) {
+            continue;
+        }
+        // We need an initial body to seed the collision shape; the first
+        // decoded body snapshot below will fill it.
+        if let Some((_, _, _, state)) = polled.bodies.iter().find(|(a, _, _, _)| *a == actor) {
+            let fallback = net
+                .server
+                .as_ref()
+                .unwrap()
+                .peers
+                .get(&actor)
+                .map_or(false, |p| p.rig != net.info.rig);
+            info!("MULTIPLAYER_CONNECTED peer={actor} fallback={fallback}");
+            net.remotes.insert(actor, Remote::new(state.clone()));
+        }
+    }
+    // A body snapshot may arrive before the roster entry: accept either order.
+    for (actor, _, _, state) in &polled.bodies {
+        if !net.remotes.contains_key(actor) {
+            info!("MULTIPLAYER_CONNECTED peer={actor} fallback=false");
+            net.remotes.insert(*actor, Remote::new(state.clone()));
+        }
+    }
+
+    for (actor, seq, captured_ms, state) in polled.bodies.clone() {
+        if let Some(remote) = net.remotes.get_mut(&actor) {
+            remote.ingest_body(seq, captured_ms, now, state);
+        }
+    }
+    for (actor, seq, captured_ms, pose) in polled.poses {
+        if actor == local {
+            continue;
+        }
+        let rig_matches = net
+            .server
+            .as_ref()
+            .and_then(|s| s.peers.get(&actor))
+            .is_none_or(|p| p.rig == net.info.rig);
+        let anchors = net.anchors.clone();
+        if let Some(remote) = net.remotes.get_mut(&actor) {
+            remote.ingest_pose(seq, captured_ms, now, pose, rig_matches, &anchors);
+        }
+    }
+
+    // Drop remotes no longer in the roster, and stall out silent ones.
+    let roster: std::collections::BTreeSet<u64> =
+        net.server.as_ref().unwrap().peers.keys().copied().collect();
+    net.remotes.retain(|id, remote| {
+        if *id == local || !roster.contains(id) {
+            return false;
+        }
+        remote.body_at.elapsed() < Duration::from_millis(3500)
+    });
+
+    // Populate display names from application records.
+    for (peer, key, _, bytes) in net.application_records() {
+        if key != NAME_KEY {
+            continue;
+        }
+        if let Ok(raw) = String::from_utf8(bytes) {
+            net.names.insert(peer, sanitize_name(&raw));
+        }
+    }
+    let live: std::collections::BTreeSet<u64> = net.player_ids().into_iter().collect();
+    net.names.retain(|id, _| live.contains(id));
+
+    // Status line.
+    let peer_count = net.server.as_ref().map_or(0, |s| s.peer_count());
+    let notice = net
+        .server
+        .as_ref()
+        .map(|s| s.notice().to_owned())
+        .unwrap_or_default();
+    net.status = if !connected {
+        if notice.is_empty() {
+            "Connecting to session server...".into()
+        } else {
+            notice
+        }
+    } else if peer_count > 0 {
+        format!(
+            "Session server: {} players | collisions on | synced characters",
+            peer_count + 1
+        )
+    } else {
+        "Session server connected | waiting for players (1/10)".into()
+    };
+
+    if net.last_metrics.elapsed() >= Duration::from_secs(1) {
+        let rtt = net.server.as_ref().map_or(0, |s| s.rtt_ms);
+        net.rates = format!(
+            "Session server | RTT {rtt} ms | remotes {}",
+            net.remotes.len()
+        );
+        info!("MULTIPLAYER_STATS server_peers={peer_count} {}", net.rates);
+        net.last_metrics = Instant::now();
+    }
+}
+pub(crate) fn prepare(
+    net: Res<Multiplayer>,
+    mut physics: ResMut<GamePhysics>,
+    skater: Res<SkaterRuntime>,
+    mods: Option<Res<crate::modding::Mods>>,
+) {
     physics.network_active = net.active();
     physics.network_contacts = 0;
     let mut proxies = std::mem::take(&mut physics.network_proxies);
     proxies.bodies.clear();
     proxies.volumes.clear();
-    proxies.solids.clear();proxies.groups.clear();proxies.actors.clear();
-    proxies.dynamics_before.clear();proxies.dynamics_deltas.clear();
+    proxies.solids.clear();
+    proxies.groups.clear();
+    proxies.actors.clear();
+    proxies.dynamics_before.clear();
+    proxies.dynamics_deltas.clear();
     for (peer, remote) in &net.remotes {
-        if mods.as_ref().is_some_and(|m| crate::modding::peer_suspended(m, *peer)) { continue; }
-        if let Some(prediction) = skate_net::prediction::CollisionPrediction::at(remote.body_at.elapsed().as_secs_f32()) {
+        if mods
+            .as_ref()
+            .is_some_and(|m| crate::modding::peer_suspended(m, *peer))
+        {
+            continue;
+        }
+        if let Some(prediction) =
+            skate_net::prediction::CollisionPrediction::at(remote.body_at.elapsed().as_secs_f32())
+        {
             proxies.append(
-                *peer, &remote.body,
+                *peer,
+                &remote.body,
                 &net.schema,
                 &physics,
                 &skater,
@@ -688,33 +1040,66 @@ pub(crate) fn prepare(net: Res<Multiplayer>, mut physics: ResMut<GamePhysics>, s
     }
     physics.network_proxies = proxies;
 }
-fn send(mut net: ResMut<Multiplayer>, physics: Res<GamePhysics>, skater: Res<SkaterRuntime>, mods:Option<Res<crate::modding::Mods>>) {
+fn send(
+    mut net: ResMut<Multiplayer>,
+    physics: Res<GamePhysics>,
+    skater: Res<SkaterRuntime>,
+    mods: Option<Res<crate::modding::Mods>>,
+) {
     if !net.active() || skater.pose_generation == 0 {
         return;
     }
     let now = net.started.elapsed().as_millis() as u64;
     if net.last_body.elapsed() >= Duration::from_millis(49) {
-        let mut state=network::capture_body(&physics,&skater);
-        if let Some(root)=mods.as_ref().and_then(|m|crate::modding::attachment::local_root(m)) {
-            state.root=network::pose(root.to_matrix());
-            state.enabled=if mods.as_ref().is_some_and(|m|crate::modding::player_attached(m)) {1u64<<62} else {0};
+        let mut state = network::capture_body(&physics, &skater);
+        if let Some(root) = mods
+            .as_ref()
+            .and_then(|m| crate::modding::attachment::local_root(m))
+        {
+            state.root = network::pose(root.to_matrix());
+            state.enabled = if mods
+                .as_ref()
+                .is_some_and(|m| crate::modding::player_attached(m))
+            {
+                1u64 << 62
+            } else {
+                0
+            };
         }
-        if mods.as_ref().is_some_and(|m| crate::modding::player_suspended(m)) { state.enabled = 0; }
-        if let Some(p) = Packed::body(&state) {
+        if mods
+            .as_ref()
+            .is_some_and(|m| crate::modding::player_suspended(m))
+        {
+            state.enabled = 0;
+        }
+        if let Some(server) = &mut net.server {
+            server.maybe_send_body(&state, now);
+        } else if let Some(p) = Packed::body(&state) {
             net.lobby.as_mut().unwrap().publish(packed::BODY, p, now);
         }
         net.last_body = Instant::now();
     }
 }
-pub(crate) fn send_pose(mut net: ResMut<Multiplayer>, skater: Res<SkaterRuntime>, mods:Option<Res<crate::modding::Mods>>) {
+pub(crate) fn send_pose(
+    mut net: ResMut<Multiplayer>,
+    skater: Res<SkaterRuntime>,
+    mods: Option<Res<crate::modding::Mods>>,
+) {
     if !net.active() || skater.pose_generation == 0 {
         return;
     }
     let now = net.started.elapsed().as_millis() as u64;
     if net.last_pose.elapsed() >= Duration::from_millis(if net.loopback { 49 } else { 99 }) {
-        let mut pose=network::capture_pose(&skater,&net.anchors);
-        if let Some(root)=mods.as_ref().and_then(|m|crate::modding::attachment::local_root(m)) {pose.root=network::pose(root.to_matrix());}
-        if let Some(p) = Packed::pose(&pose) {
+        let mut pose = network::capture_pose(&skater, &net.anchors);
+        if let Some(root) = mods
+            .as_ref()
+            .and_then(|m| crate::modding::attachment::local_root(m))
+        {
+            pose.root = network::pose(root.to_matrix());
+        }
+        if let Some(server) = &mut net.server {
+            server.maybe_send_pose(&pose, now);
+        } else if let Some(p) = Packed::pose(&pose) {
             net.lobby.as_mut().unwrap().publish(packed::POSE, p, now);
         }
         net.last_pose = Instant::now();
@@ -732,8 +1117,14 @@ fn load_player_name(path: &std::path::Path) -> String {
     let Ok(bytes) = std::fs::read(path) else {
         return "Player".into();
     };
-    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
-    sanitize_name(value.get("name").and_then(|v| v.as_str()).unwrap_or("Player"))
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    sanitize_name(
+        value
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Player"),
+    )
 }
 
 fn persist_player_name(path: &std::path::Path, name: &str) {
@@ -766,40 +1157,74 @@ pub(crate) fn sanitize_name(raw: &str) -> String {
 
 fn sync_names(mut net: ResMut<Multiplayer>, mut ping_sent: Local<Option<Instant>>) {
     let name = net.published_name();
-    if let Some(local) = net.lobby.as_ref().map(|l| l.local) {
+    let local = net.local_actor();
+    if local != 0 {
         net.names.insert(local, name.clone());
     }
     if net.active() {
         let _ = net.publish_application(NAME_KEY, name.into_bytes());
-        // Each player advertises their measured host RTT through the existing
+        // Each player advertises their measured server RTT through the existing
         // actor-owned metadata stream, so clients can display the whole roster.
         if ping_sent.is_none_or(|sent| sent.elapsed() >= Duration::from_secs(1)) {
-            let ping = net.lobby.as_ref().and_then(|l| if l.is_host() { Some(0) }
-                else { (l.stats.rtt_ms > 0).then_some(l.stats.rtt_ms) });
+            let ping = if let Some(server) = &net.server {
+                Some(server.rtt_ms)
+            } else {
+                net.lobby.as_ref().and_then(|l| {
+                    if l.is_host() {
+                        Some(0)
+                    } else {
+                        (l.stats.rtt_ms > 0).then_some(l.stats.rtt_ms)
+                    }
+                })
+            };
             if let Some(ping) = ping {
                 let _ = net.publish_application(hud::PING_KEY, ping.to_le_bytes().to_vec());
             }
             *ping_sent = Some(Instant::now());
         }
-        let records = net.application_records();
-        for (peer, key, _, bytes) in records {
-            if key != NAME_KEY {
-                continue;
+        // The lobby path reads records here; the server path fills names in
+        // receive_from_server, so skip to avoid duplicated work.
+        if net.server.is_none() {
+            let records = net.application_records();
+            for (peer, key, _, bytes) in records {
+                if key != NAME_KEY {
+                    continue;
+                }
+                if let Ok(raw) = String::from_utf8(bytes) {
+                    net.names.insert(peer, sanitize_name(&raw));
+                }
             }
-            if let Ok(raw) = String::from_utf8(bytes) {
-                net.names.insert(peer, sanitize_name(&raw));
-            }
+            let live: std::collections::BTreeSet<u64> = net.player_ids().into_iter().collect();
+            net.names.retain(|id, _| live.contains(id));
         }
-        let live: std::collections::BTreeSet<u64> = net.player_ids().into_iter().collect();
-        net.names.retain(|id, _| live.contains(id));
     }
 }
 
 impl Multiplayer {
     pub(crate) fn debug_sections(&self) -> [String; 3] {
-        [format!("CONNECTION\n{}\n{}", self.status, self.diagnostic_summary()),
-            format!("TRAFFIC & TRANSPORT\n{}\n{}", if self.rates.is_empty() { "No traffic samples yet" } else { &self.rates },
-                if self.provider_metrics.is_empty() { "No provider metrics" } else { &self.provider_metrics }),
-            format!("INTERPOLATION\n{}", if self.visual_status.is_empty() { "No remote playback samples" } else { &self.visual_status })]
+        [
+            format!("CONNECTION\n{}\n{}", self.status, self.diagnostic_summary()),
+            format!(
+                "TRAFFIC & TRANSPORT\n{}\n{}",
+                if self.rates.is_empty() {
+                    "No traffic samples yet"
+                } else {
+                    &self.rates
+                },
+                if self.provider_metrics.is_empty() {
+                    "No provider metrics"
+                } else {
+                    &self.provider_metrics
+                }
+            ),
+            format!(
+                "INTERPOLATION\n{}",
+                if self.visual_status.is_empty() {
+                    "No remote playback samples"
+                } else {
+                    &self.visual_status
+                }
+            ),
+        ]
     }
 }

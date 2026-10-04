@@ -761,6 +761,7 @@ impl MaterialTable {
         map: &SkateMap,
         tuning: &MaterialTuning,
         sky: &crate::retail_sky::SkyEnvironment,
+        max_texture_size: Option<u32>,
         materials: &mut impl AssetSink<WorldMaterial>,
         images: &mut impl AssetSink<Image>,
         buffers: &mut impl AssetSink<ShaderStorageBuffer>,
@@ -832,12 +833,12 @@ impl MaterialTable {
             materials: HashMap::new(),
             slabs: 0,
         };
-        let mut slab = Slab::new(&page_sizes);
+        let mut slab = Slab::new(&page_sizes, max_texture_size);
         for (source, request) in requests.iter().enumerate() {
             let Some(request) = request else { continue };
             if !slab.fits(request, map) {
                 table.seal(slab, map, materials, images, buffers);
-                slab = Slab::new(&page_sizes);
+                slab = Slab::new(&page_sizes, max_texture_size);
             }
             // `seal` is what increments the count, so the slab being filled is
             // always the next index.
@@ -1064,6 +1065,7 @@ impl Request {
 /// Accumulates one slab: its pages, its cube array and its GPU arrays.
 struct Slab {
     pages: Vec<Page>,
+    max_texture_size: Option<u32>,
     /// Canonical texture id to (class, layer) within this slab.
     placed: HashMap<u32, (usize, usize)>,
     cubes: Vec<u32>,
@@ -1073,8 +1075,9 @@ struct Slab {
 }
 
 impl Slab {
-    fn new(page_sizes: &[(u32, u32)]) -> Self {
+    fn new(page_sizes: &[(u32, u32)], max_texture_size: Option<u32>) -> Self {
         Self {
+            max_texture_size,
             pages: page_sizes
                 .iter()
                 .map(|&(width, height)| Page {
@@ -1191,34 +1194,40 @@ impl Slab {
         let Some(page) = self.pages.get(class).filter(|p| !p.layers.is_empty()) else {
             return placeholder_page(images);
         };
+        // Keep source page classes/layer assignments intact. Only the uploaded
+        // resolution changes in the explicit local test profile.
+        let (width, height) = limited_page_size(page.width, page.height, self.max_texture_size);
         let mut bytes = Vec::new();
         let mut levels = 1;
         for &id in &page.layers {
             let texture = &map.textures[id as usize - 1];
             let owned;
-            let rgba = if texture.width == page.width && texture.height == page.height {
+            let rgba = if texture.width == width && texture.height == height {
                 &texture.rgba
             } else {
                 owned = resample(
                     &texture.rgba,
                     texture.width,
                     texture.height,
-                    page.width,
-                    page.height,
+                    width,
+                    height,
                 );
                 &owned
             };
             if page.mips {
-                let (chain, count) = mip_chain(rgba, page.width, page.height, 1);
+                let (chain, count) = mip_chain(rgba, width, height, 1);
                 levels = count;
                 bytes.extend_from_slice(&chain);
             } else {
                 bytes.extend_from_slice(rgba);
             }
         }
+        if self.max_texture_size.is_some() {
+            eprintln!("SKATE_LOCAL_TEXTURE_PAGE width={width} height={height} layers={} bytes={}", page.layers.len(), bytes.len());
+        }
         images.add(array_image(
-            page.width,
-            page.height,
+            width,
+            height,
             page.layers.len() as u32,
             levels,
             bytes,
@@ -1263,6 +1272,16 @@ impl Slab {
             TextureViewDimension::CubeArray,
         ))
     }
+}
+
+/// Preserve aspect ratio and never enlarge an already small texture page.
+fn limited_page_size(width: u32, height: u32, limit: Option<u32>) -> (u32, u32) {
+    let Some(limit) = limit else { return (width, height) };
+    let limit = limit.max(1);
+    let edge = width.max(height);
+    if edge <= limit { return (width, height); }
+    let scaled = |dimension| (u64::from(dimension) * u64::from(limit) / u64::from(edge)).max(1) as u32;
+    (scaled(width), scaled(height))
 }
 
 fn array_image(
@@ -1676,6 +1695,29 @@ mod tests {
             255, 255, 255, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255,
         ];
         assert_eq!(resample(&rgba, 2, 2, 1, 1), vec![127, 127, 127, 255]);
+    }
+
+    #[test]
+    fn local_texture_limit_preserves_normal_mode_and_page_aspect_ratio() {
+        assert_eq!(limited_page_size(2048, 1024, None), (2048, 1024));
+        assert_eq!(limited_page_size(2048, 1024, Some(256)), (256, 128));
+        assert_eq!(limited_page_size(64, 128, Some(256)), (64, 128));
+        assert_eq!(limited_page_size(1, 2048, Some(256)), (1, 256));
+        assert_eq!(limited_page_size(4, 2, Some(0)), (1, 1));
+    }
+
+    #[test]
+    fn limited_pages_keep_all_layers_and_complete_mips() {
+        let (width, height) = limited_page_size(4, 2, Some(2));
+        let rgba = [100, 150, 200, 255].repeat(8);
+        let scaled = resample(&rgba, 4, 2, width, height);
+        let (chain, levels) = mip_chain(&scaled, width, height, 1);
+        let bytes = chain.repeat(2);
+        let image = array_image(width, height, 2, levels, bytes, TextureViewDimension::D2Array);
+        assert_eq!(image.texture_descriptor.size, Extent3d { width: 2, height: 1, depth_or_array_layers: 2 });
+        assert_eq!(image.texture_descriptor.mip_level_count, 2);
+        assert_eq!(image.data.as_ref().unwrap().len(), 24);
+        assert_eq!(image.texture_view_descriptor.as_ref().unwrap().dimension, Some(TextureViewDimension::D2Array));
     }
 
     #[test]

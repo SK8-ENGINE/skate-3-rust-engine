@@ -10,7 +10,7 @@
 //! carries its own release behaviour, so adding a renderer asset type needs no
 //! change here.
 use bevy::{
-    asset::{Asset, AssetId, Assets, AssetHandleProvider},
+    asset::{Asset, AssetHandleProvider, AssetId, Assets},
     ecs::world::CommandQueue,
     prelude::*,
 };
@@ -135,6 +135,7 @@ pub(crate) struct PreparedScene {
     sky: StagedAssets<crate::retail_sky::SkyMaterial>,
     params: StagedAssets<bevy::render::storage::ShaderStorageBuffer>,
     commands: SceneCommands,
+    max_texture_size: Option<u32>,
     pub stats: crate::skate_world::SceneStats,
     pub retail: bool,
 }
@@ -149,6 +150,10 @@ impl PreparedScene {
             sky: StagedAssets::new(world),
             params: StagedAssets::new(world),
             commands: SceneCommands::default(),
+            max_texture_size: world
+                .get_resource::<crate::config::Config>()
+                .filter(|config| config.multi_instance)
+                .map(|_| 256),
             stats: default(),
             retail: false,
         }
@@ -157,7 +162,11 @@ impl PreparedScene {
     /// Worker-thread body. Builds all geometry, materials and images for the map.
     pub(crate) fn prepare(&mut self, map: Option<&SkateMap>, asset_root: &Path) {
         let Some(map) = map else {
-            crate::world::spawn_test_world(&mut self.commands, &mut self.meshes, &mut self.standard);
+            crate::world::spawn_test_world(
+                &mut self.commands,
+                &mut self.meshes,
+                &mut self.standard,
+            );
             return;
         };
         self.retail = crate::retail_render::RetailScene::for_map(map);
@@ -165,11 +174,14 @@ impl PreparedScene {
         // The sky is loaded before the world because its authored fog frame and
         // sun direction are encoded into the per-material storage buffer while
         // the material table is built, not patched in afterwards.
-        let sky = self.retail.then(|| {
-            crate::retail_sky::SkyPackage::load(asset_root, &map.name)
-                .inspect_err(|error| warn!("Retail sky unavailable for {}: {error}", map.name))
-                .ok()
-        }).flatten();
+        let sky = self
+            .retail
+            .then(|| {
+                crate::retail_sky::SkyPackage::load(asset_root, &map.name)
+                    .inspect_err(|error| warn!("Retail sky unavailable for {}: {error}", map.name))
+                    .ok()
+            })
+            .flatten();
         let environment = sky
             .as_ref()
             .map(crate::retail_sky::SkyPackage::environment)
@@ -178,6 +190,7 @@ impl PreparedScene {
             map,
             &tuning,
             &environment,
+            self.max_texture_size,
             &mut self.commands,
             &mut self.meshes,
             &mut self.world_materials,
@@ -206,12 +219,27 @@ impl PreparedScene {
         std::mem::take(&mut self.commands.queue).apply(world);
         world.insert_resource(MapAssets {
             groups: vec![
-                Box::new(std::mem::replace(&mut self.meshes, StagedAssets::new(world))),
-                Box::new(std::mem::replace(&mut self.images, StagedAssets::new(world))),
-                Box::new(std::mem::replace(&mut self.standard, StagedAssets::new(world))),
-                Box::new(std::mem::replace(&mut self.world_materials, StagedAssets::new(world))),
+                Box::new(std::mem::replace(
+                    &mut self.meshes,
+                    StagedAssets::new(world),
+                )),
+                Box::new(std::mem::replace(
+                    &mut self.images,
+                    StagedAssets::new(world),
+                )),
+                Box::new(std::mem::replace(
+                    &mut self.standard,
+                    StagedAssets::new(world),
+                )),
+                Box::new(std::mem::replace(
+                    &mut self.world_materials,
+                    StagedAssets::new(world),
+                )),
                 Box::new(std::mem::replace(&mut self.sky, StagedAssets::new(world))),
-                Box::new(std::mem::replace(&mut self.params, StagedAssets::new(world))),
+                Box::new(std::mem::replace(
+                    &mut self.params,
+                    StagedAssets::new(world),
+                )),
             ],
         });
     }
@@ -245,8 +273,7 @@ pub(crate) fn advance_day(
             (environment.hour + time.delta_secs() * environment.speed / 3600.0).rem_euclid(24.0);
         let angle = (environment.hour / 24.0) * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
         let direction = Vec3::new(angle.cos(), angle.sin(), 0.25).normalize();
-        *transform = Transform::from_translation(direction * 100.0)
-            .looking_at(Vec3::ZERO, Vec3::Y);
+        *transform = Transform::from_translation(direction * 100.0).looking_at(Vec3::ZERO, Vec3::Y);
         // Fade out below the horizon rather than snapping to black.
         light.illuminance = 11_000.0 * direction.y.max(0.0).powf(0.4);
     }
@@ -256,12 +283,22 @@ pub(crate) fn position_celestial_bodies(
     environments: Query<&DayEnvironment>,
     mut bodies: Query<(&CelestialBody, &mut Transform, &mut Visibility)>,
 ) {
-    let Ok(environment) = environments.single() else { return };
+    let Ok(environment) = environments.single() else {
+        return;
+    };
     let angle = (environment.hour / 24.0) * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
     for (body, mut transform, mut visibility) in &mut bodies {
-        let phase = if body.moon { angle + std::f32::consts::PI } else { angle };
+        let phase = if body.moon {
+            angle + std::f32::consts::PI
+        } else {
+            angle
+        };
         let direction = Vec3::new(phase.cos(), phase.sin(), 0.25).normalize();
         transform.translation = direction * 400.0;
-        *visibility = if direction.y > -0.05 { Visibility::Inherited } else { Visibility::Hidden };
+        *visibility = if direction.y > -0.05 {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }

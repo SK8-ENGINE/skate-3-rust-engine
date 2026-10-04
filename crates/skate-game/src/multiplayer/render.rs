@@ -17,7 +17,7 @@ struct OutfitPiece {
     mid: String,
 }
 
-use skate_net::interpolation::{Buffer, Clock, position};
+use skate_net::interpolation::{position, Buffer, Clock};
 #[derive(Resource)]
 pub(super) struct RemoteSkins {
     reported: f64,
@@ -105,7 +105,11 @@ impl Plugin for RemoteRenderPlugin {
             (spawn, bind, present)
                 .chain()
                 .in_set(RemoteRenderSet)
-                .after(crate::modding::bridge::sync_network),
+                .after(crate::modding::bridge::sync_network)
+                // The local skater owns its bone transforms each frame. Remote
+                // writing must not interleave with it: an unordered run during
+                // the spawn frame leaves the local mesh pulled to the origin.
+                .after(crate::app::FrameSet::Animation),
         );
     }
 }
@@ -247,6 +251,7 @@ fn bind(
     net: Res<Multiplayer>,
     mut skins: ResMut<RemoteSkins>,
     skater: Res<SkaterRuntime>,
+    local_animation: Res<crate::animation::AnimationStatus>,
     meshes: Query<(Entity, &SkinnedMesh)>,
     nodes: Query<(&Name, &Transform)>,
     parents: Query<&ChildOf>,
@@ -259,12 +264,20 @@ fn bind(
     mut morphs: Query<(Entity, &mut MorphWeights)>,
     lighting: Option<Res<crate::retail_character::Lighting>>,
 ) {
+    // The remote bind writes bone transforms on the same `Transform` query the
+    // local animation system uses. It must only run once the local skater's own
+    // bones are bound: during the frame both scenes finish spawning, an early
+    // remote bind can otherwise race the local `AnimationStatus::bind` and leave
+    // the local mesh collapsed toward the origin.
+    if !local_animation.ready {
+        return;
+    }
     let default_sh = lighting.as_ref().map(|lighting| lighting.default_sh());
     let initial_poses: BTreeMap<_, _> = skins
         .actors
         .iter()
-        .filter(|(_,skin)|skin.pending.is_some())
-        .map(|(&id,_)| {
+        .filter(|(_, skin)| skin.pending.is_some())
+        .map(|(&id, _)| {
             let bones = net
                 .remotes
                 .get(&id)
@@ -392,8 +405,15 @@ fn bind(
             commands.entity(old).despawn();
         }
         commands.entity(p.root).insert(Visibility::Inherited);
-        info!("ONLINE_CHARACTER_VISIBLE peer={id} joints={} kind={}", bindings.len(),
-            if matches!(p.look, Look::Imported(_)) { "import" } else { "retail" });
+        info!(
+            "ONLINE_CHARACTER_VISIBLE peer={id} joints={} kind={}",
+            bindings.len(),
+            if matches!(p.look, Look::Imported(_)) {
+                "import"
+            } else {
+                "retail"
+            }
+        );
         skin.bindings = bindings;
         skin.poses = Buffer::default();
         skin.pending = None;
@@ -430,12 +450,16 @@ fn present(
     mut skins: ResMut<RemoteSkins>,
     mut nodes: Query<&mut Transform>,
     mut visibility: Query<&mut Visibility>,
-    mods:Option<Res<crate::modding::Mods>>,
+    mods: Option<Res<crate::modding::Mods>>,
 ) {
     let basis = Mat4::from_cols(Vec4::X, -Vec4::Z, Vec4::Y, Vec4::W);
     let now = net.started.elapsed().as_secs_f64();
-    let solids = mods.as_ref().map_or_else(Vec::new, |m| crate::modding::bridge::visual_solids(m));
-    let continuous = skins.contact_at.is_some_and(|last| now >= last && now - last <= 0.1);
+    let solids = mods
+        .as_ref()
+        .map_or_else(Vec::new, |m| crate::modding::bridge::visual_solids(m));
+    let continuous = skins
+        .contact_at
+        .is_some_and(|last| now >= last && now - last <= 0.1);
     for (&id, remote) in &net.remotes {
         let Some(mut skin) = skins.actors.remove(&id) else {
             continue;
@@ -503,18 +527,30 @@ fn present(
                     transform.translation = Vec3::from_array(p);
                 }
                 let seated = remote.body.enabled & (1u64 << 62) != 0;
-                let attached = mods.as_ref().is_some_and(|m| crate::modding::replication::attached_root(m, id).is_some());
-                let suspended = mods.as_ref().is_some_and(|m| crate::modding::peer_suspended(m, id));
+                let attached = mods
+                    .as_ref()
+                    .is_some_and(|m| crate::modding::replication::attached_root(m, id).is_some());
+                let suspended = mods
+                    .as_ref()
+                    .is_some_and(|m| crate::modding::peer_suspended(m, id));
                 if !continuous || skin.contact_enabled != remote.body.enabled {
                     skin.contact_parts.clear();
                 }
                 skin.contact_enabled = remote.body.enabled;
                 if !seated && !attached && !suspended && !solids.is_empty() {
-                    let mut parts = net.schema.visual_colliders(&remote.body, transform.to_matrix());
+                    let mut parts = net
+                        .schema
+                        .visual_colliders(&remote.body, transform.to_matrix());
                     let offset = skate_dynamics::visual_contact::resolve(
-                        &parts, &skin.contact_parts, &solids, &skins.contact_solids);
+                        &parts,
+                        &skin.contact_parts,
+                        &solids,
+                        &skins.contact_solids,
+                    );
                     transform.translation += Vec3::from_array(offset.to_array());
-                    for part in &mut parts { part.pose.translation += offset; }
+                    for part in &mut parts {
+                        part.pose.translation += offset;
+                    }
                     skin.contact_parts = parts;
                 } else {
                     skin.contact_parts.clear();
@@ -533,11 +569,25 @@ fn present(
                 }
             }
         }
-        let attached=mods.as_ref().and_then(|m|crate::modding::replication::attached_root(m,id));
-        if let Some(root)=skin.root {
-            if let Some((transform,_))=attached { if let Ok(mut t)=nodes.get_mut(root) {*t=transform;} }
-            if let Ok(mut v)=visibility.get_mut(root) {
-                *v=if attached.is_some_and(|(_,hidden)|hidden) || mods.as_ref().is_some_and(|m|crate::modding::peer_suspended(m,id)) {Visibility::Hidden} else {Visibility::Inherited};
+        let attached = mods
+            .as_ref()
+            .and_then(|m| crate::modding::replication::attached_root(m, id));
+        if let Some(root) = skin.root {
+            if let Some((transform, _)) = attached {
+                if let Ok(mut t) = nodes.get_mut(root) {
+                    *t = transform;
+                }
+            }
+            if let Ok(mut v) = visibility.get_mut(root) {
+                *v = if attached.is_some_and(|(_, hidden)| hidden)
+                    || mods
+                        .as_ref()
+                        .is_some_and(|m| crate::modding::peer_suspended(m, id))
+                {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Inherited
+                };
             }
         }
         let seated = remote.body.enabled & (1u64 << 62) != 0;
@@ -653,22 +703,29 @@ mod online_owned_tests {
             )> = SystemState::new(app.world_mut());
             let (meshes, nodes, parents) = queries.get(app.world());
             let animation = crate::animation::AnimationStatus::for_scene(
-                root, &names, &meshes, &nodes, &parents
-            ).unwrap();
-            let joints=animation.online_bindings();
+                root, &names, &meshes, &nodes, &parents,
+            )
+            .unwrap();
+            let joints = animation.online_bindings();
             assert!(!joints.is_empty());
             // A received model must accept poses before display, then keep moving.
-            let first:Vec<_>=(0..names.len()).map(|i|Mat4::from_translation(Vec3::new(i as f32*0.01,1.,0.))).collect();
-            for (joint,pose) in animation.pose_transforms(&first) {
+            let first: Vec<_> = (0..names.len())
+                .map(|i| Mat4::from_translation(Vec3::new(i as f32 * 0.01, 1., 0.)))
+                .collect();
+            for (joint, pose) in animation.pose_transforms(&first) {
                 assert!(pose.to_matrix().is_finite());
-                *app.world_mut().get_mut::<Transform>(joint).unwrap()=pose;
+                *app.world_mut().get_mut::<Transform>(joint).unwrap() = pose;
             }
-            *app.world_mut().get_mut::<Visibility>(root).unwrap()=Visibility::Inherited;
-            let second:Vec<_>=first.iter().enumerate().map(|(i,m)|*m*Mat4::from_rotation_z(0.01*(i+1) as f32)).collect();
-            for (joint,pose) in animation.pose_transforms(&second) {
+            *app.world_mut().get_mut::<Visibility>(root).unwrap() = Visibility::Inherited;
+            let second: Vec<_> = first
+                .iter()
+                .enumerate()
+                .map(|(i, m)| *m * Mat4::from_rotation_z(0.01 * (i + 1) as f32))
+                .collect();
+            for (joint, pose) in animation.pose_transforms(&second) {
                 assert!(pose.to_matrix().is_finite());
-                assert_ne!(*app.world().get::<Transform>(joint).unwrap(),pose);
-                *app.world_mut().get_mut::<Transform>(joint).unwrap()=pose;
+                assert_ne!(*app.world().get::<Transform>(joint).unwrap(), pose);
+                *app.world_mut().get_mut::<Transform>(joint).unwrap() = pose;
             }
             app.world_mut().entity_mut(root).despawn();
             app.update();

@@ -1,7 +1,7 @@
 //! Appearance identities reference prepared retail assets; only imported GLBs travel online.
 use super::{
-    Multiplayer,
     appearance_transfer::{Exchange, MAX_BLOB},
+    Multiplayer,
 };
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};

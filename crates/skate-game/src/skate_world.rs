@@ -19,8 +19,8 @@ use skate_core::{
     math::Vector3,
     physics::{
         board_world::{
-            BoardWorld, WorldTriangle,
             query_metadata::{Bounds, QueryMesh, QueryMetadata, QueryPool},
+            BoardWorld, WorldTriangle,
         },
         collision::TriangleFeature,
         contact::RetailContactMaterial,
@@ -71,6 +71,7 @@ pub(crate) fn spawn(
     map: &SkateMap,
     tuning: &crate::retail_render::MaterialTuning,
     environment: &crate::retail_sky::SkyEnvironment,
+    max_texture_size: Option<u32>,
     commands: &mut SceneCommands,
     meshes: &mut impl AssetSink<Mesh>,
     materials: &mut impl AssetSink<WorldMaterial>,
@@ -78,7 +79,15 @@ pub(crate) fn spawn(
     buffers: &mut impl AssetSink<bevy::render::storage::ShaderStorageBuffer>,
 ) -> SceneStats {
     let _span = info_span!("spawn_world").entered();
-    let table = MaterialTable::build(map, tuning, environment, materials, images, buffers);
+    let table = MaterialTable::build(
+        map,
+        tuning,
+        environment,
+        max_texture_size,
+        materials,
+        images,
+        buffers,
+    );
 
     let mut triangles: Vec<Triangle> = Vec::with_capacity(map.geometry.indices.len() / 3);
     for tri in map.geometry.indices.chunks_exact(3) {
@@ -91,7 +100,9 @@ pub(crate) fn spawn(
         else {
             continue;
         };
-        let Some(entry) = table.entry(source) else { continue };
+        let Some(entry) = table.entry(source) else {
+            continue;
+        };
         let position = |i: u32| Vec3::from_array(map.geometry.vertices[i as usize].position);
         triangles.push(Triangle {
             indices: [a, b, c],
@@ -103,10 +114,17 @@ pub(crate) fn spawn(
 
     // Partition by render class first: classes cannot share a draw (RFC 1 §4),
     // so splitting here keeps every leaf single-class for free.
-    let mut stats = SceneStats { slabs: table.slab_count(), triangles: triangles.len(), ..default() };
+    let mut stats = SceneStats {
+        slabs: table.slab_count(),
+        triangles: triangles.len(),
+        ..default()
+    };
     let mut buckets: HashMap<(RenderClass, u16), Vec<usize>> = HashMap::new();
     for (index, triangle) in triangles.iter().enumerate() {
-        buckets.entry((triangle.class, triangle.slab)).or_default().push(index);
+        buckets
+            .entry((triangle.class, triangle.slab))
+            .or_default()
+            .push(index);
     }
 
     // Draws per render class. The class mix is what decides whether the draw
@@ -228,22 +246,24 @@ fn merge(
                 // One-based, as in the bucketing pass above. Triangles whose
                 // material is absent were dropped there, so every vertex
                 // reachable here has one.
-                material_index
-                    .push(table.slab_index(v.material.saturating_sub(1) as usize));
+                material_index.push(table.slab_index(v.material.saturating_sub(1) as usize));
                 tangents.push(tangent(v));
             }
             indices.push(index);
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_1, lightmap_uv)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, decal_uv)
-        .with_inserted_attribute(ATTRIBUTE_MATERIAL_INDEX, material_index)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_1, lightmap_uv)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, decal_uv)
+    .with_inserted_attribute(ATTRIBUTE_MATERIAL_INDEX, material_index)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
     mesh.insert_indices(Indices::U32(indices));
     let aabb = Aabb::from_min_max(min, max);
     (mesh, aabb)
@@ -468,7 +488,8 @@ fn retail_collision_world(
             )
             .ok_or("Invalid RWCM cluster bounds")?;
             meshes.push(QueryMesh {
-                geometry: 0, rejection_flags: 0,
+                geometry: 0,
+                rejection_flags: 0,
                 triangle_range: range,
                 local_to_world: RetailAffineTransform::IDENTITY,
                 world_to_local: RetailAffineTransform::IDENTITY,
@@ -617,10 +638,15 @@ pub(crate) fn collision_world(
     let mut meshes = Vec::new();
     for start in (0..triangles.len()).step_by(64) {
         let end = (start + 64).min(triangles.len());
-        let bounds = Bounds::from_points(triangles[start..end].iter().flat_map(|t| t.triangle.vertices))
-            .ok_or("SKATE collision bounds empty")?;
+        let bounds = Bounds::from_points(
+            triangles[start..end]
+                .iter()
+                .flat_map(|t| t.triangle.vertices),
+        )
+        .ok_or("SKATE collision bounds empty")?;
         meshes.push(QueryMesh {
-            geometry: 0, rejection_flags: 0,
+            geometry: 0,
+            rejection_flags: 0,
             triangle_range: start..end,
             local_to_world: RetailAffineTransform::IDENTITY,
             world_to_local: RetailAffineTransform::IDENTITY,
@@ -653,12 +679,10 @@ mod tests {
     #[ignore = "Requires private installed assets; CPU only, no GPU or window"]
     fn static_draw_budget_holds_on_an_installed_map() {
         let root = std::path::PathBuf::from(
-            std::env::var("SKATE_TRANSITION_TEST_ASSETS")
-                .expect("SKATE_TRANSITION_TEST_ASSETS"),
+            std::env::var("SKATE_TRANSITION_TEST_ASSETS").expect("SKATE_TRANSITION_TEST_ASSETS"),
         );
-        let path = std::path::PathBuf::from(
-            std::env::var("SKATE_BUDGET_MAP").expect("SKATE_BUDGET_MAP"),
-        );
+        let path =
+            std::path::PathBuf::from(std::env::var("SKATE_BUDGET_MAP").expect("SKATE_BUDGET_MAP"));
         let map = skate_data::skate_map::SkateMap::load(&path).unwrap();
         let mut world = World::new();
         world.init_resource::<Assets<Mesh>>();
@@ -689,7 +713,12 @@ mod tests {
     }
 
     fn triangle(centroid: Vec3) -> Triangle {
-        Triangle { indices: [0, 1, 2], centroid, slab: 0, class: RenderClass::Opaque }
+        Triangle {
+            indices: [0, 1, 2],
+            centroid,
+            slab: 0,
+            class: RenderClass::Opaque,
+        }
     }
 
     #[test]
@@ -699,9 +728,17 @@ mod tests {
             .collect();
         let mut members: Vec<usize> = (0..triangles.len()).collect();
         let leaves = partition(&mut members, &triangles);
-        assert!(leaves.len() >= 4, "expected several leaves, got {}", leaves.len());
+        assert!(
+            leaves.len() >= 4,
+            "expected several leaves, got {}",
+            leaves.len()
+        );
         for leaf in &leaves {
-            assert!(leaf.len() <= LEAF_TRIANGLE_BUDGET, "leaf of {} triangles", leaf.len());
+            assert!(
+                leaf.len() <= LEAF_TRIANGLE_BUDGET,
+                "leaf of {} triangles",
+                leaf.len()
+            );
         }
     }
 
