@@ -1,4 +1,3 @@
-"""External tool resolution per platform, using synthetic files only."""
 import os
 from pathlib import Path
 import tempfile

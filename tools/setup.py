@@ -173,7 +173,6 @@ def main():
     return 0 if success else 2
 
 def headless(args):
-    """The window's install, reporting progress on stdout instead of Tk."""
     from tools.asset_pipeline.customiser_setup import install
     from tools.asset_pipeline.validation_report import summary
     from tools.asset_pipeline.versions import installed
