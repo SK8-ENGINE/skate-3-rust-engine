@@ -67,6 +67,13 @@ location. Run `BUILD.bat` to build, then `PLAY.bat` to launch the test world.
 `PLAY.bat` opens your saved map (University by default); use the in-game menu to switch maps, or drag a `.skate` file onto `PLAY.bat`. An SDL3-compatible gamepad is required for gameplay;
 Escape opens difficulty and graphics settings.
 
+On Apple Silicon macOS and on x86_64 or aarch64 Linux, `nix develop` (Nix with
+flakes enabled) opens a shell with Rust, CMake for the SDL3 build, Python 3.13
+with the setup packages, extract-xiso and vgmstream, and the libraries the game
+loads at runtime (the Vulkan loader, and MoltenVK on macOS). On macOS the shell
+uses the system compiler and SDK, so install the Xcode Command Line Tools first.
+Build inside it with `cargo build --locked -p skate-game --bin skate3rust`.
+
 Development builds use a prepared asset set in `assets/private/` or the
 installed asset directory. `scripts/Build-Release.ps1` builds the portable Windows
 package and requires Python 3.13. GitHub Actions builds `main` automatically;
