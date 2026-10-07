@@ -74,6 +74,21 @@ loads at runtime (the Vulkan loader, and MoltenVK on macOS). On macOS the shell
 uses the system compiler and SDK, so install the Xcode Command Line Tools first.
 Build inside it with `cargo build --locked -p skate-game --bin skate3rust`.
 
+To play from a checkout on macOS or Linux, convert your disc once without the
+setup window, then point the game at the installed assets:
+
+```sh
+python tools/setup.py --base data --game-exe target/debug/skate3rust --source path/to/Skate3.iso
+cargo run --bin skate3rust -- --assets data/installations/<id>/assets
+```
+
+`--source` also accepts `default.xex` in an extracted game folder, and
+`installations/<id>` is the `directory` recorded in `data/installation.json`.
+Run both inside the shell: setup uses its extract-xiso and vgmstream, and the
+game needs its Vulkan environment. On macOS the renderer runs Vulkan through
+MoltenVK with non-bindless materials; the shell disables MoltenVK fast-math,
+which otherwise corrupts customiser skaters.
+
 Development builds use a prepared asset set in `assets/private/` or the
 installed asset directory. `scripts/Build-Release.ps1` builds the portable Windows
 package and requires Python 3.13. GitHub Actions builds `main` automatically;
