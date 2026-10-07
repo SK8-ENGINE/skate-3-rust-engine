@@ -992,11 +992,26 @@ fn preferences(
     mut physics: ResMut<crate::physics::GamePhysics>,
     mut skater: ResMut<crate::physics::SkaterRuntime>,
 ) {
-    apply_preferences(&state.draft, &mut physics, &mut skater.animation);
-    if let Some(style) = models.native_style() {
-        skater.animation.motion.playback_context.pro_skater = skate_core::animation::skeleton_input::name::encode(style.as_bytes());
-        skater.animation.motion.animation.posture.set_profile(0);
-        physics.set_gesture_preferences(None);
+    // Reapplied every frame, which is normally a no-op. Writing through `ResMut`
+    // would still flag both resources changed each frame and defeat consumers
+    // that cache on their change ticks (the mods' native snapshot rebuilt on
+    // every call), so only an actual difference is flagged.
+    let before = (physics.preferences(), skater.animation.customisation());
+    {
+        let physics = physics.bypass_change_detection();
+        let animation = &mut skater.bypass_change_detection().animation;
+        apply_preferences(&state.draft, physics, animation);
+        if let Some(style) = models.native_style() {
+            animation.motion.playback_context.pro_skater = skate_core::animation::skeleton_input::name::encode(style.as_bytes());
+            animation.motion.animation.posture.set_profile(0);
+            physics.set_gesture_preferences(None);
+        }
+    }
+    if physics.preferences() != before.0 {
+        physics.set_changed();
+    }
+    if skater.animation.customisation() != before.1 {
+        skater.set_changed();
     }
 }
 pub(crate) fn apply_preferences(

@@ -222,6 +222,12 @@ impl GamePhysics {
             self.animation_profile.wheel_hardness = wheel.clamp(0.0, 1.0);
         }
     }
+    /// What the two preference setters above write, so a reapplication that
+    /// changes nothing can skip change detection.
+    pub(crate) fn preferences(&self) -> (f32, f32, Option<[u32; 4]>) {
+        let profile = &self.animation_profile;
+        (profile.truck_tightness, profile.wheel_hardness, profile.gesture_selections)
+    }
     pub(crate) fn set_difficulty(&mut self, difficulty: crate::difficulty::Difficulty) {
         // Actor publication carries this selector into the next physical packet.
         // Keep the board, active trick, equipment preferences and controller history.
