@@ -3,7 +3,7 @@
 //! axes/trigger bytes reach the TU3 converter without Bevy/gilrs deadzones or
 //! normalized-axis reconstruction. `SKATE3_INPUT=xinput` selects the original
 //! Windows XInput transport, which is also the fallback if SDL cannot start.
-use super::controller_kind::{ControllerKind, XinputCaps};
+use super::controller_kind::ControllerKind;
 use skate_core::input::xbox::XboxState;
 use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -57,7 +57,10 @@ pub(crate) struct DevicePacket {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DeviceError {
     Disconnected,
+    // XInput result codes; only the Windows XInput transport produces them.
+    #[cfg_attr(not(windows), allow(dead_code))]
     State(u32),
+    #[cfg_attr(not(windows), allow(dead_code))]
     Capabilities(u32),
     /// No device backend could be started.
     #[cfg(not(windows))]
@@ -108,7 +111,7 @@ impl<T: Clone> CapabilityCache<T> {
 #[cfg(windows)]
 mod windows {
     use super::*;
-    use crate::input::controller_kind;
+    use crate::input::controller_kind::{self, XinputCaps};
     use std::mem::MaybeUninit;
 
     // ABI from the installed Windows SDK Xinput.h. No OS-owned pointers are

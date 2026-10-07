@@ -74,6 +74,7 @@ impl ControllerInput {
     pub(crate) fn active_slot(&self) -> Option<usize> {
         self.status.iter().position(|s| *s == ControllerStatus::Ready)
     }
+    #[cfg(test)]
     pub(crate) fn kind(&self, slot: usize) -> Option<&ControllerKind> {
         self.kinds.get(slot)?.as_deref()
     }

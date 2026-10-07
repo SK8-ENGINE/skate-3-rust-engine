@@ -14,6 +14,7 @@ use serde::Serialize;
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Backend {
     Sdl,
+    #[cfg_attr(not(windows), allow(dead_code))]
     Xinput,
 }
 
@@ -224,6 +225,7 @@ pub(crate) fn family_from_sdl(kind: sdl3::gamepad::GamepadType) -> Family {
 }
 
 /// XINPUT_DEVSUBTYPE_* → family (XInput fallback without vendor/product).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn family_from_xinput_subtype(subtype: u8) -> Family {
     match subtype {
         0x01 => Family::XinputGamepad,
@@ -287,14 +289,18 @@ pub(crate) fn from_sdl(report: SdlReport, user: &[Model]) -> ControllerKind {
 /// XInput capability data: XInputGetCapabilities, plus vendor/product from
 /// XInputGetCapabilitiesEx when xinput1_4 provides it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) struct XinputCaps {
     pub subtype: u8,
     pub flags: u16,
     pub vendor_product: Option<(u16, u16)>,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 const XINPUT_CAPS_WIRELESS: u16 = 0x0002;
 
+/// Identity of an XInput slot; built only by the Windows XInput transport.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn from_xinput(caps: XinputCaps, user: &[Model]) -> ControllerKind {
     let coarse = family_from_xinput_subtype(caps.subtype);
     let model = caps.vendor_product.and_then(|(v, p)| model(user, v, p));

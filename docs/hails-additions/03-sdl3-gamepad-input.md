@@ -101,6 +101,11 @@ once cmake-rs or sdl3-sys handle CMP0091 themselves.
   `MultiThreadedDLL`.
 - In play: Xbox Elite Series 2 over Bluetooth LE detected as
   `Controller 0 ... ready`; normal skating across several sessions.
+- macOS (Apple Silicon, macOS 26, SDL 3.4.16): a Nintendo Switch Pro
+  Controller over Bluetooth is detected as
+  `Controller 0: SDL gamepad "Nintendo Switch Pro Controller" (NintendoSwitchPro, vendor 057e product 2009, paddles not reported, path "DevSrvsID:…")`;
+  sticks, triggers and buttons work in play. SDL runs on its own
+  `sdl-gamepad` thread there too; macOS needs no main-thread pumping.
 
 ## Known limitations / open questions
 
@@ -113,6 +118,6 @@ once cmake-rs or sdl3-sys handle CMP0091 themselves.
 - Controller type is detected but only logged; carrying it into the game (for
   button prompts, per-model defaults) is future work. Nintendo layouts keep
   SDL's positional mapping on purpose.
-- Linux/macOS: the backend is platform-neutral but was only built and tested
-  on Windows here.
+- Linux: the backend is platform-neutral but has not been tested on Linux
+  hardware yet (Windows and macOS are, above).
 - The SDL build adds about 1¾ minutes to a clean build and needs CMake.
