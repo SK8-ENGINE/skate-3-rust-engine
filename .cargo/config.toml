@@ -1,0 +1,6 @@
+# Keep DWARF in the object files instead of the linked binary. The dev binary
+# otherwise carries ~520 MB of debug info that LLD re-links on every rebuild;
+# backtraces still resolve file:line from target/. Linux only: MSVC already
+# splits debug info into PDBs and rejects `unpacked`.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "split-debuginfo=unpacked"]
