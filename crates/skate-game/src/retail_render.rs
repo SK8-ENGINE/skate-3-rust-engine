@@ -633,20 +633,53 @@ impl Usage {
 /// Returns a lookup from 1-based source id to canonical 1-based id, with 0
 /// meaning "no texture" in both directions.
 fn canonical_texture_ids(textures: &[skate_data::skate_map::Texture]) -> Vec<u32> {
-    let mut seen: HashMap<(u32, u32, u32, &[u8]), u32> = HashMap::new();
+    // Hashing every pixel serially took ~250 ms on a full district, so digests
+    // are computed in parallel; a digest match still compares the pixels.
+    let digests = parallel_map(textures, |texture| *blake3::hash(&texture.rgba).as_bytes());
+    let mut seen: HashMap<(u32, u32, u32, [u8; 32]), u32> = HashMap::new();
     let mut ids = vec![0; textures.len() + 1];
-    for (index, texture) in textures.iter().enumerate() {
+    for (index, (texture, digest)) in textures.iter().zip(digests).enumerate() {
         let id = index as u32 + 1;
-        ids[index + 1] = *seen
-            .entry((
-                texture.width,
-                texture.height,
-                texture.color_space,
-                texture.rgba.as_slice(),
-            ))
+        let first = *seen
+            .entry((texture.width, texture.height, texture.color_space, digest))
             .or_insert(id);
+        ids[index + 1] = if textures[first as usize - 1].rgba == texture.rgba { first } else { id };
     }
     ids
+}
+
+/// Maps `items` on up to eight scoped threads, preserving input order. Dynamic
+/// assignment balances a few large textures against many small ones (the same
+/// scheme as the map texture decoder).
+fn parallel_map<T: Sync, R: Send>(items: &[T], job: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let workers = std::thread::available_parallelism()
+        .map_or(1, |n| n.get().min(8))
+        .min(items.len());
+    if workers <= 1 {
+        return items.iter().map(job).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let run = || {
+        let mut done = Vec::new();
+        loop {
+            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(item) = items.get(index) else { break };
+            done.push((index, job(item)));
+        }
+        done
+    };
+    let mut results: Vec<Option<R>> = items.iter().map(|_| None).collect();
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = (1..workers).map(|_| scope.spawn(&run)).collect();
+        let mut finished = run();
+        for job in jobs {
+            finished.extend(job.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
+        }
+        for (index, result) in finished {
+            results[index] = Some(result);
+        }
+    });
+    results.into_iter().map(|result| result.expect("every item is claimed once")).collect()
 }
 
 /// A page under construction: one texture size, one growing list of layers.
@@ -671,22 +704,7 @@ pub(crate) fn mip_chain(rgba: &[u8], width: u32, height: u32, layers: u32) -> (V
         bytes.extend_from_slice(&level);
         while w > 1 || h > 1 {
             let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
-            let mut next = vec![0; nw * nh * 4];
-            for y in 0..nh {
-                for x in 0..nw {
-                    for c in 0..4 {
-                        let mut sum = 0u32;
-                        for dy in 0..2 {
-                            for dx in 0..2 {
-                                sum += level
-                                    [((y * 2 + dy).min(h - 1) * w + (x * 2 + dx).min(w - 1)) * 4 + c]
-                                    as u32;
-                            }
-                        }
-                        next[(y * nw + x) * 4 + c] = ((sum + 2) / 4) as u8;
-                    }
-                }
-            }
+            let next = halve(&level, w, h, nw, nh);
             bytes.extend_from_slice(&next);
             level = next;
             w = nw;
@@ -694,6 +712,39 @@ pub(crate) fn mip_chain(rgba: &[u8], width: u32, height: u32, layers: u32) -> (V
         }
     }
     (bytes, count)
+}
+
+/// One 2x2 box-filter step. Even sizes take a row-pair fast path with no edge
+/// clamping; it produces the same bytes as the general loop.
+fn halve(level: &[u8], w: usize, h: usize, nw: usize, nh: usize) -> Vec<u8> {
+    let mut next = vec![0; nw * nh * 4];
+    if w % 2 == 0 && h % 2 == 0 {
+        for (y, out) in next.chunks_exact_mut(nw * 4).enumerate() {
+            let top = &level[2 * y * w * 4..][..w * 4];
+            let bottom = &level[(2 * y + 1) * w * 4..][..w * 4];
+            for ((pixel, a), b) in out.chunks_exact_mut(4).zip(top.chunks_exact(8)).zip(bottom.chunks_exact(8)) {
+                for c in 0..4 {
+                    let sum = a[c] as u32 + a[c + 4] as u32 + b[c] as u32 + b[c + 4] as u32;
+                    pixel[c] = ((sum + 2) / 4) as u8;
+                }
+            }
+        }
+        return next;
+    }
+    for y in 0..nh {
+        for x in 0..nw {
+            for c in 0..4 {
+                let mut sum = 0u32;
+                for dy in 0..2 {
+                    for dx in 0..2 {
+                        sum += level[((y * 2 + dy).min(h - 1) * w + (x * 2 + dx).min(w - 1)) * 4 + c] as u32;
+                    }
+                }
+                next[(y * nw + x) * 4 + c] = ((sum + 2) / 4) as u8;
+            }
+        }
+    }
+    next
 }
 
 /// Area-average resample, used only for textures whose size did not earn a page.
@@ -1215,29 +1266,25 @@ impl Slab {
         let Some(page) = self.pages.get(class).filter(|p| !p.layers.is_empty()) else {
             return placeholder_page(images);
         };
+        let pixels = |id: u32| -> std::borrow::Cow<'_, [u8]> {
+            let texture = &map.textures[id as usize - 1];
+            if texture.width == page.width && texture.height == page.height {
+                (&texture.rgba[..]).into()
+            } else {
+                resample(&texture.rgba, texture.width, texture.height, page.width, page.height).into()
+            }
+        };
         let mut bytes = Vec::new();
         let mut levels = 1;
-        for &id in &page.layers {
-            let texture = &map.textures[id as usize - 1];
-            let owned;
-            let rgba = if texture.width == page.width && texture.height == page.height {
-                &texture.rgba
-            } else {
-                owned = resample(
-                    &texture.rgba,
-                    texture.width,
-                    texture.height,
-                    page.width,
-                    page.height,
-                );
-                &owned
-            };
-            if page.mips {
-                let (chain, count) = mip_chain(rgba, page.width, page.height, 1);
+        if page.mips {
+            // Mip chains dominate world spawn; layers are independent.
+            for (chain, count) in parallel_map(&page.layers, |&id| mip_chain(&pixels(id), page.width, page.height, 1)) {
                 levels = count;
                 bytes.extend_from_slice(&chain);
-            } else {
-                bytes.extend_from_slice(rgba);
+            }
+        } else {
+            for &id in &page.layers {
+                bytes.extend_from_slice(&pixels(id));
             }
         }
         images.add(array_image(
@@ -1511,6 +1558,46 @@ pub(crate) fn world_changed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The even-size fast path must reproduce the clamped box filter exactly,
+    /// including the round-half-up of `(sum + 2) / 4`.
+    #[test]
+    fn halve_fast_path_matches_clamped_filter() {
+        let clamped = |level: &[u8], w: usize, h: usize, nw: usize, nh: usize| {
+            let mut next = vec![0u8; nw * nh * 4];
+            for y in 0..nh {
+                for x in 0..nw {
+                    for c in 0..4 {
+                        let sum: u32 = [(0, 0), (0, 1), (1, 0), (1, 1)].iter().map(|&(dy, dx)| {
+                            level[((y * 2 + dy).min(h - 1) * w + (x * 2 + dx).min(w - 1)) * 4 + c] as u32
+                        }).sum();
+                        next[(y * nw + x) * 4 + c] = ((sum + 2) / 4) as u8;
+                    }
+                }
+            }
+            next
+        };
+        for (w, h) in [(2, 2), (8, 4), (64, 2), (6, 10), (5, 4), (4, 1), (1, 1), (7, 3)] {
+            let level: Vec<u8> = (0..w * h * 4).map(|i| (i * 37 % 251) as u8).collect();
+            let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+            assert_eq!(halve(&level, w, h, nw, nh), clamped(&level, w, h, nw, nh), "{w}x{h}");
+        }
+    }
+
+    #[test]
+    fn canonical_ids_share_identical_pixels_only() {
+        let texture = |width, rgba: Vec<u8>| skate_data::skate_map::Texture {
+            name: String::new(), width, height: 1, color_space: 0, rgba,
+        };
+        let textures = [
+            texture(1, vec![1, 2, 3, 4]),
+            texture(1, vec![1, 2, 3, 5]),
+            texture(1, vec![1, 2, 3, 4]),
+            texture(2, vec![1, 2, 3, 4, 1, 2, 3, 4]),
+            texture(2, vec![1, 2, 3, 4, 1, 2, 3, 4]),
+        ];
+        assert_eq!(canonical_texture_ids(&textures), [0, 1, 2, 1, 4, 4]);
+    }
 
     /// The per-vertex material index only works if no vertex is shared between
     /// triangles of different materials. `main` never had to care: it split
