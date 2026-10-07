@@ -39,8 +39,7 @@ gltf = { version = "=1.4.1", default-features = true }
 # SDL3 gamepad input for every platform, built from source and statically linked.
 sdl3 = { version = "=0.20.0", features = ["build-from-source-static"] }
 
-# The renderer requests Backends::VULKAN only; on macOS wgpu compiles Vulkan
-# solely behind `vulkan-portability` (MoltenVK, provided by `nix develop`).
+# Required for the Vulkan-only renderer to use MoltenVK.
 [target.'cfg(target_os = "macos")'.dependencies]
 wgpu = { version = "=27.0.1", default-features = false, features = ["vulkan-portability"] }
 

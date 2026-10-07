@@ -62,32 +62,44 @@ only changed asset groups.
 
 ## Build
 
-Requires Windows, Rust with the MSVC toolchain, and LLVM installed in its default
+On Windows, install Rust with the MSVC toolchain and LLVM in its default
 location. Run `BUILD.bat` to build, then `PLAY.bat` to launch the test world.
 `PLAY.bat` opens your saved map (University by default); use the in-game menu to switch maps, or drag a `.skate` file onto `PLAY.bat`. An SDL3-compatible gamepad is required for gameplay;
 Escape opens difficulty and graphics settings.
 
 On Apple Silicon macOS and on x86_64 or aarch64 Linux, `nix develop` (Nix with
-flakes enabled) opens a shell with Rust, CMake for the SDL3 build, Python 3.13
-with the setup packages, extract-xiso and vgmstream, and the libraries the game
-loads at runtime (the Vulkan loader, and MoltenVK on macOS). On macOS the shell
-uses the system compiler and SDK, so install the Xcode Command Line Tools first.
-Build inside it with `cargo build --locked -p skate-game --bin skate3rust`.
-
-To play from a checkout on macOS or Linux, convert your disc once without the
-setup window, then point the game at the installed assets:
+flakes enabled) provides Rust, the C/C++ compiler and linker, CMake for SDL3,
+Python with the setup packages, extract-xiso, vgmstream, and the runtime libraries.
+`flake.lock` pins these dependencies. On macOS it also supplies the Apple SDK:
+engine builds use Nix's Clang and Mach-O linker, not the system Command Line
+Tools or whichever SDK `xcrun` happens to select. Xcode-only profiling tools
+remain optional system tools; run them outside this shell.
 
 ```sh
-python tools/setup.py --base data --game-exe target/debug/skate3rust --source path/to/Skate3.iso
-cargo run --bin skate3rust -- --assets data/installations/<id>/assets
+nix develop
+skate-build
+skate-setup path/to/Skate3.iso  # Once; also accepts an extracted default.xex
+skate-run                     # Builds if needed, then launches installed assets
 ```
 
-`--source` also accepts `default.xex` in an extracted game folder, and
-`installations/<id>` is the `directory` recorded in `data/installation.json`.
-Run both inside the shell: setup uses its extract-xiso and vgmstream, and the
-game needs its Vulkan environment. On macOS the renderer runs Vulkan through
-MoltenVK with non-bindless materials; the shell disables MoltenVK fast-math,
-which otherwise corrupts customiser skaters.
+If assets are already installed, skip setup. `skate-setup` builds the engine
+before conversion and refreshes an existing installation. `skate-assets` prints
+the prepared asset directory: `SKATE3_ASSETS` takes precedence, then checkout
+`assets/`, then the installation recorded in `data/installation.json`.
+Relative overrides are resolved from the checkout root.
+`skate-run` forwards game arguments, for example `skate-run --test-world`.
+These commands also work from checkout subdirectories, or without entering an
+interactive shell: `nix develop -c skate-run`.
+
+Build and run inside the shell: the game needs its Vulkan libraries and dynamic
+Rust/Bevy libraries. Linux still requires a working graphical session and GPU
+driver on the host. On macOS the renderer runs Vulkan through MoltenVK with
+non-bindless materials; the shell disables MoltenVK fast-math, which otherwise
+corrupts customiser skaters. No devenv, direnv, or system SDK override is needed.
+
+When switching from a different compiler, an existing SDL CMake cache may reject
+the change. Run `cargo clean -p sdl3-sys` once inside the shell, then `skate-build`;
+the rest of the Rust build cache can stay.
 
 Development builds use a prepared asset set in `assets/private/` or the
 installed asset directory. `scripts/Build-Release.ps1` builds the portable Windows

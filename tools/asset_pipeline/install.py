@@ -129,8 +129,7 @@ def unpack_zip(archive,destination):
         z.extractall(destination)
 
 def dependency(cache,name,url,sha,report,windows=os.name=='nt'):
-    # Pinned downloads are Win64 builds. Elsewhere the tool comes from PATH
-    # (`nix develop` provides extract-xiso and vgmstream-cli).
+    # Pinned tool downloads are Windows-only.
     if not windows:
         executable=shutil.which(name)
         if executable is None:raise RuntimeError(f'Missing tool: {name} is not on PATH (run setup inside `nix develop`)')
