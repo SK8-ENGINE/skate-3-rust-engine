@@ -267,7 +267,9 @@ pub(crate) fn observe(
 ) {
     let _timing = super::timing::scope(&super::timing::OBSERVE);
     // Animation events latched during the tick (physics never reads these).
-    let audio = std::mem::take(&mut skater.animation_input.audio);
+    // Draining this transient latch is not a skater state change; flagging it
+    // would invalidate the mods' native snapshot a second time every tick.
+    let audio = std::mem::take(&mut skater.bypass_change_detection().animation_input.audio);
     let p = &skater.player_input.physical;
     let filtered = p.filtered_state_0;
     let state = skater.player_state.current() as u32;

@@ -109,6 +109,11 @@ impl SkaterAnimation {
         let name: &[u8] = match style { 1 => b"Loose", 2 => b"Gonzo", 3 => b"Aggressive", _ => b"" };
         self.motion.playback_context.pro_skater = encode(name);
     }
+    /// What the customiser's preferences write here (stance, style, posture),
+    /// so a reapplication that changes nothing can skip change detection.
+    pub(crate) fn customisation(&self) -> (i32, skate_core::animation::output::attributes::AttributeName, u32) {
+        (self.state.publication.natural_stance, self.motion.playback_context.pro_skater, self.motion.animation.posture.profile())
+    }
     pub fn stance(&self) -> (bool, bool) {
         (self.state.fakie(), self.state.mirrored())
     }
