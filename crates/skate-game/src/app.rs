@@ -9,8 +9,8 @@ use crate::{
 use bevy::{
     prelude::*,
     render::{
-        RenderPlugin,
         settings::{Backends, InstanceFlags, RenderCreation, WgpuFeatures, WgpuSettings},
+        RenderPlugin,
     },
 };
 use skate_data::GameAssets;
@@ -56,7 +56,10 @@ pub(crate) fn build(
     physics: GamePhysics,
     skater: SkaterRuntime,
 ) -> App {
-    let retail_scene = config.map.as_ref().is_some_and(|map| crate::retail_render::RetailScene::for_map(map));
+    let retail_scene = config
+        .map
+        .as_ref()
+        .is_some_and(|map| crate::retail_render::RetailScene::for_map(map));
     let mut app = App::new();
     crate::custom_models::register_source(&mut app);
     crate::modding::register_source(&mut app);
@@ -68,7 +71,11 @@ pub(crate) fn build(
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: config.multiplayer.title.clone().unwrap_or_else(||"Skate 3 Rust Engine".into()),
+                    title: config
+                        .multiplayer
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| "Skate 3 Rust Engine".into()),
                     resolution: (1280, 800).into(),
                     ..default()
                 }),
@@ -81,17 +88,27 @@ pub(crate) fn build(
                     // This workaround belongs only to the rendering adapter.
                     instance_flags: InstanceFlags::empty(),
                     features: wgpu_features(),
+                    // Naga 27 cannot bounds-check runtime arrays in binding arrays on MoltenVK.
+                    #[cfg(target_os = "macos")]
+                    disabled_features: Some(
+                        bevy::render::settings::WgpuFeatures::BUFFER_BINDING_ARRAY,
+                    ),
                     ..default()
                 }),
                 ..default()
-            }).build().disable::<bevy::log::LogPlugin>()
+            })
+            .build()
+            .disable::<bevy::log::LogPlugin>()
             // Gameplay and menu navigation both use raw pad states from
             // input::platform (SDL3, XInput fallback). No game system consumes
             // Bevy gamepad events/rumble; its second device backend can stall
             // PreUpdate (70.68 ms in the University capture).
             .disable::<bevy::gilrs::GilrsPlugin>(),
     )
-    .insert_resource(bevy::winit::WinitSettings {focused_mode:bevy::winit::UpdateMode::Continuous,unfocused_mode:bevy::winit::UpdateMode::Continuous})
+    .insert_resource(bevy::winit::WinitSettings {
+        focused_mode: bevy::winit::UpdateMode::Continuous,
+        unfocused_mode: bevy::winit::UpdateMode::Continuous,
+    })
     .insert_resource(config)
     .insert_resource(crate::retail_render::RetailScene(retail_scene))
     .insert_resource(assets::AssetManifest(manifest))
@@ -135,7 +152,10 @@ pub(crate) fn build(
         verification::VerificationPlugin,
         crate::performance::PerformancePlugin,
     ));
-    app.add_plugins((crate::session_marker::SessionMarkerPlugin, crate::customiser::CustomiserPlugin));
+    app.add_plugins((
+        crate::session_marker::SessionMarkerPlugin,
+        crate::customiser::CustomiserPlugin,
+    ));
     app.add_plugins(crate::custom_models::CustomModelsPlugin);
     app.add_plugins(crate::trigger_volumes::TriggerVolumesPlugin);
     app.add_plugins(crate::retail_menus::RetailMenusPlugin);
