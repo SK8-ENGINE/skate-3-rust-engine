@@ -366,6 +366,23 @@ impl GamePhysics {
         true
     }
 
+    /// Stream a map prop out (`dormant`: body asleep and still, collision parked, model hidden) or back in (at its
+    /// authored pose when `authored`, retail; else where it was left) for the DMO census (`living_world::dmo_stream`).
+    /// Refused for the held prop and unknown ids. The single authority for streaming.
+    pub(crate) fn stream_prop(&mut self, id: u32, dormant: bool, authored: bool) -> bool {
+        if self.prop_carry.held() == Some(id) {
+            return false;
+        }
+        let (Some(layer), Some(dynamics)) = (self.prop_layer.as_mut(), self.prop_dynamics.as_mut()) else {
+            return false;
+        };
+        let Some((instance, origin, basis)) = dynamics.set_dormant(id, dormant, authored) else { return false };
+        if let Err(error) = layer.rebake(instance, basis.columns, origin) {
+            warn!("SKATE_PROP_STREAM: rebake {id}: {error}");
+        }
+        true
+    }
+
     /// Create a prop body mid-game (a released hand prop, a mod's prop): collision triangles in
     /// the prop layer plus an awake body at the spec's pose and velocities, stepped, pushed and
     /// rebaked like a map prop. Works on maps without placed props (the layer starts empty).

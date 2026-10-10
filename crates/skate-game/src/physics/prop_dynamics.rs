@@ -340,6 +340,9 @@ pub(crate) struct PropBody {
     material: RetailContactMaterial,
     enable_sleep: bool,
     asleep: bool,
+    /// Streamed out by the DMO census (`skate_core::living_world::dmo`): asleep, collision parked, never woken,
+    /// pushed, grabbed or listed until it streams back in.
+    dormant: bool,
     /// MOBJ template name: the prop type key of `PropTuningTable`.
     template: String,
     /// Retail type data of this prop (vault record name and values,
@@ -542,6 +545,22 @@ pub(crate) fn dmo_type_blocks(
 pub(crate) struct DmoType {
     pub key: String,
     pub blocks: PropMaterialBlocks,
+    /// The type's `livingworld_dynamicobject_priority` value (the census score; `None` = `keepalways`).
+    pub priority: Option<u32>,
+}
+
+/// The priority class the characteristics' `Priority` RefSpec points into, and its value field.
+pub(crate) const DMO_PRIORITY_CLASS: &str = "livingworld_dynamicobject_priority";
+const DMO_PRIORITY_VALUE: &str = "Hash_52BD74D46C494CB7";
+
+/// A DMO type's priority [data]: the characteristics record's `Priority` RefSpec (key hash in its first 8 bytes)
+/// -> the `livingworld_dynamicobject_priority` record's value (`neverkeep` 0, `lowpriority` 1, `default` 100,
+/// `mediumpriority` 200, `highpriority` 450, `keepalways` 0xFFFFFFFF = `None`).
+pub(crate) fn dmo_type_priority(collections: &skate_data::collections::Collections, record: &str) -> Result<Option<u32>, String> {
+    let w = collections.words::<4>(DMO_TYPE_CLASS, record, "Priority")?;
+    let key = format!("Hash_{:016X}", (u64::from(w[0]) << 32) | u64::from(w[1]));
+    let value = collections.integer(DMO_PRIORITY_CLASS, &key, DMO_PRIORITY_VALUE)?;
+    Ok((value != u32::MAX).then_some(value))
 }
 
 /// How a Move Object command reaches the held body (retail interface slot 9
@@ -1121,6 +1140,7 @@ impl PropDynamics {
             },
             enable_sleep: authored.enable_sleep,
             asleep: !authored.initially_awake,
+            dormant: false,
             runtime: false,
             physics: authored,
         })
@@ -1242,7 +1262,7 @@ impl PropDynamics {
     /// `PROP_GRAB_TAG | body id`, spline / geometry `PROP_GRAB_TAG | body id << 6 | index`. NOT RETAIL YET: the
     /// assembly is a stand-in with the object id (the `+172` object is not identified).
     pub(crate) fn grab_objects(&self) -> Vec<skate_core::player::offboard::grab_scene::Object> {
-        self.bodies.iter().filter_map(Self::grab_object_of).collect()
+        self.bodies.iter().filter(|b| !b.dormant).filter_map(Self::grab_object_of).collect()
     }
 
     /// One prop's grab-scene object (see [`Self::grab_objects`]) from its current pose; `None` without
@@ -1407,6 +1427,7 @@ impl PropDynamics {
         let mut out: Vec<_> = self
             .bodies
             .iter()
+            .filter(|b| !b.dormant)
             .map(|b| (b.id, b.rates.position, b.rates.basis, b.half_extents, b.rates.linear_velocity, self.held == Some(b.id)))
             .collect();
         out.sort_by_key(|b| b.0);
@@ -1420,6 +1441,66 @@ impl PropDynamics {
         Some((b.rates.position, b.rates.basis, b.half_extents, b.rates.linear_velocity, b.rates.angular_velocity, b.inertia))
     }
 
+    /// Stream one body out (`dormant` true: asleep, still, its collision parked at [`HELD_PARK`]) or back in (asleep
+    /// as at map load; at its authored spawn pose when `authored`, as retail respawns a culled DMO from its placement
+    /// record, research b98). Refused (None) for the held prop and unknown ids; returns the layer instance to rebake
+    /// and the pose (origin, basis) for streaming in, or the park for streaming out.
+    pub(crate) fn set_dormant(&mut self, id: u32, dormant: bool, authored: bool) -> Option<(usize, Vector3, Basis3)> {
+        if self.held == Some(id) || self.is_dormant(id) == dormant {
+            return None;
+        }
+        if !dormant && authored {
+            let (origin, basis) = self.spawn_pose(id)?;
+            self.teleport(id, origin, basis);
+        }
+        let body = self.bodies.get_mut(*self.by_id.get(&id)?)?;
+        if body.dormant == dormant {
+            return None;
+        }
+        body.dormant = dormant;
+        body.asleep = true;
+        body.rates.linear_velocity = Vector3::ZERO;
+        body.rates.angular_velocity = Vector3::ZERO;
+        body.baked = (!dormant).then(|| (body.origin(), body.rates.basis));
+        let identity = Basis3 { columns: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] };
+        Some(if dormant { (body.instance, HELD_PARK, identity) } else { (body.instance, body.origin(), body.rates.basis) })
+    }
+
+    /// The map props as DMO census placements (runtime props, a ped's released hand prop or a mod's copy, are not
+    /// streamed): id, authored position, bounding radius (box half diagonal) and
+    /// the type priority (no type data: the `default` record, 100).
+    pub(crate) fn dmo_placements(&self) -> Vec<skate_core::living_world::dmo::DmoPlacement> {
+        let mut out: Vec<_> = self
+            .bodies
+            .iter()
+            .filter(|b| !b.runtime)
+            .map(|b| {
+                // The census places it where it spawns: the authored pose (retail placement record +0).
+                let (p, h) = (b.spawn_origin, b.half_extents);
+                skate_core::living_world::dmo::DmoPlacement {
+                    id: b.id,
+                    position: [p.x, p.y, p.z],
+                    radius: (h.x * h.x + h.y * h.y + h.z * h.z).sqrt(),
+                    priority: b.type_data.as_ref().map_or(Some(100), |t| t.priority),
+                    keep: false,
+                    streamable: true,
+                }
+            })
+            .collect();
+        out.sort_by_key(|p| p.id);
+        out
+    }
+
+    /// The streamed-out bodies.
+    pub(crate) fn dormant_ids(&self) -> std::collections::BTreeSet<u32> {
+        self.bodies.iter().filter(|b| b.dormant).map(|b| b.id).collect()
+    }
+
+    /// Whether a body is streamed out.
+    pub(crate) fn is_dormant(&self, id: u32) -> bool {
+        self.by_id.get(&id).is_some_and(|&i| self.bodies[i].dormant)
+    }
+
     /// World position of one body's box centre.
     pub(crate) fn position_of(&self, id: u32) -> Option<Vector3> {
         Some(self.bodies.get(*self.by_id.get(&id)?)?.rates.position)
@@ -1430,7 +1511,7 @@ impl PropDynamics {
     /// `(id, centre)`.
     pub(crate) fn nearest_body(&self, point: Vector3, radius: f32) -> Option<(u32, Vector3)> {
         let mut best: Option<(u32, Vector3, f32)> = None;
-        for body in &self.bodies {
+        for body in self.bodies.iter().filter(|b| !b.dormant) {
             // Local-space point clamped into the box: the gap vector to it is
             // the surface distance (zero when the point is inside).
             let d = sub(point, body.rates.position);
@@ -1696,7 +1777,7 @@ impl PropDynamics {
     fn apply_upright(&mut self, time_step: f32) {
         let settings = self.tuning.upright;
         let replaces = self.move_rules.yaw_replaces_torque;
-        for body in &mut self.bodies {
+        for body in self.bodies.iter_mut().filter(|b| !b.dormant) {
             let Some(timer) = body.upright_timer else { continue };
             let timer = timer + settings.tick_seconds;
             body.upright_timer = (timer <= settings.window_seconds).then_some(timer);
@@ -1867,6 +1948,9 @@ impl PropDynamics {
         let time_step = self.step_simulation().time_step;
         self.apply_upright(time_step);
         for index in 0..self.bodies.len() {
+            if self.bodies[index].dormant {
+                continue;
+            }
             let held = self.is_held(index);
             // Skater push: cheap bounds reject, then the retail pair query.
             // The carried prop is velocity-driven by the carrier; letting the
@@ -1923,7 +2007,7 @@ impl PropDynamics {
         let solver = self.tuning.solver;
         let simulation = self.step_simulation();
         // Awake bodies in body order (deterministic; plain indices).
-        let awake: Vec<usize> = (0..self.bodies.len()).filter(|&i| !self.bodies[i].asleep).collect();
+        let awake: Vec<usize> = (0..self.bodies.len()).filter(|&i| !self.bodies[i].asleep && !self.bodies[i].dormant).collect();
         self.stats.awake = awake.len() as u32;
         // Parameter block swap (82C53EF8): a body commanded since its last
         // step runs on the commanded block, otherwise on its free block;
@@ -2297,7 +2381,7 @@ impl PropDynamics {
         }
         let box_primitive = self.bodies[index].box_primitive();
         for other in 0..self.bodies.len() {
-            if other == index {
+            if other == index || self.bodies[other].dormant {
                 continue;
             }
             if !self.bodies[index].bounds().overlaps(self.bodies[other].bounds().expanded(tuning.contact_padding)) {
@@ -2555,12 +2639,19 @@ pub(crate) fn apply_prop_tuning(
 /// transform holds the template-origin placement; scale stays as spawned.
 pub(crate) fn sync_prop_transforms(
     physics: Res<super::GamePhysics>,
-    mut props: Query<(&crate::skate_world::PropInstance, &mut Transform)>,
+    mut props: Query<(&crate::skate_world::PropInstance, &mut Transform, Option<&mut Visibility>)>,
 ) {
     let Some(dynamics) = physics.prop_dynamics() else {
         return;
     };
-    for (prop, mut transform) in &mut props {
+    for (prop, mut transform, visibility) in &mut props {
+        // Streamed-out props are hidden (retail destroys and recreates them).
+        if let Some(mut v) = visibility {
+            let want = if dynamics.is_dormant(prop.id) { Visibility::Hidden } else { Visibility::Inherited };
+            if *v != want {
+                *v = want;
+            }
+        }
         let Some((origin, basis)) = dynamics.pose(prop.id) else {
             continue;
         };
@@ -4517,10 +4608,10 @@ mod tests {
             ..Default::default()
         };
         let mut types = std::collections::BTreeMap::new();
-        types.insert("other".to_owned(), DmoType { key: "x".into(), blocks: PropMaterialBlocks::default() });
+        types.insert("other".to_owned(), DmoType { priority: Some(100), key: "x".into(), blocks: PropMaterialBlocks::default() });
         assert_eq!(dynamics.set_type_data(&types), 0, "no type for this template id");
         assert_eq!(dynamics.body_material(0), authored);
-        types.insert("template".to_owned(), DmoType { key: "cart".into(), blocks: retail });
+        types.insert("template".to_owned(), DmoType { priority: Some(100), key: "cart".into(), blocks: retail });
         assert_eq!(dynamics.set_type_data(&types), 1);
         assert_eq!(dynamics.type_key(7), Some("cart"));
         // Upright fixture body: the upright pair.
@@ -4552,7 +4643,7 @@ mod tests {
         let authored = dynamics.bodies[0].inertia;
         assert_eq!(dynamics.body_inertia(0), authored, "no type data: authored damping");
         let mut types = std::collections::BTreeMap::new();
-        types.insert("template".to_owned(), DmoType { key: "lw_props".into(), blocks: PropMaterialBlocks {
+        types.insert("template".to_owned(), DmoType { priority: Some(100), key: "lw_props".into(), blocks: PropMaterialBlocks {
             linear_drag: Some(0.1), angular_drag: Some(0.35), ..Default::default() } });
         assert_eq!(dynamics.set_type_data(&types), 1);
         let inertia = dynamics.body_inertia(0);
@@ -4591,7 +4682,7 @@ mod tests {
         let authored = dynamics.bodies[0].inertia;
         let h = dynamics.bodies[0].authored_half_extents;
         let mut types = std::collections::BTreeMap::new();
-        types.insert("template".to_owned(), DmoType { key: "dt_keg".into(), blocks: PropMaterialBlocks {
+        types.insert("template".to_owned(), DmoType { priority: Some(100), key: "dt_keg".into(), blocks: PropMaterialBlocks {
             mass: Some(150.0), maximum_linear_velocity: Some(20.0), maximum_angular_velocity: Some(10.0),
             inertia_scale: Some([1.2; 3]), inertia_offset: Some([0.0, 0.5, 0.0]), ..Default::default() } });
         assert_eq!(dynamics.set_type_data(&types), 1);

@@ -1240,7 +1240,11 @@ pub(crate) fn load_dmo_types(
         let key = names.get(&id).map_or(record, |name| *name);
         match dmo_type_blocks(&collections, key) {
             Ok(blocks) => {
-                types.insert(template.clone(), DmoType { key: key.to_owned(), blocks });
+                let priority = crate::physics::prop_dynamics::dmo_type_priority(&collections, key).unwrap_or_else(|error| {
+                    warn!("SKATE_PROP_TYPES: {map_name} template {template}: priority: {error}");
+                    Some(100)
+                });
+                types.insert(template.clone(), DmoType { key: key.to_owned(), blocks, priority });
             }
             Err(error) => warn!("SKATE_PROP_TYPES: {map_name} template {template}: {error}"),
         }

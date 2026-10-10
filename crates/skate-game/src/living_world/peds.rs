@@ -1442,8 +1442,12 @@ pub(crate) fn think_peds(
     // same message in one system conflict).
     mut events: ResMut<bevy::ecs::message::Messages<PedEvent>>,
     mut cursor: Local<Option<bevy::ecs::message::MessageCursor<PedEvent>>>,
-    (mut traffic_events, cars, mut plugin_props): (MessageReader<super::vehicles::TrafficEvent>, Query<(&super::vehicles::TrafficCar, &super::vehicles::CarMotion)>, ResMut<PedPluginProps>),
+    (mut traffic_events, cars, mut plugin_props, physics): (MessageReader<super::vehicles::TrafficEvent>, Query<(&super::vehicles::TrafficCar, &super::vehicles::CarMotion)>, ResMut<PedPluginProps>, Option<Res<crate::physics::GamePhysics>>),
 ) {
+    // Streamed-out props (DMO streaming): their plugins are not offered and a ped using one lets go. A world prop's
+    // plugin id carries its DMO body id in the low 32 bits (`ped_plugins::map_props`).
+    let dormant = physics.as_ref().and_then(|p| p.prop_dynamics()).map(|d| d.dormant_ids()).unwrap_or_default();
+    let streamed_out = |plugin_id: u64| dormant.contains(&(plugin_id as u32));
     // Horn kind 2 at a ped (`sub_82E3C3D0`: the honker id into brain `+3232`; the last car wins).
     let honked: BTreeMap<u64, u64> = traffic_events.read().filter_map(|e| match e { super::vehicles::TrafficEvent::HonkedAt { id, ped } => Some((*ped, id.to_u64())), _ => None }).collect();
     let Some(graph) = data.graph.as_deref() else { return };
@@ -1528,7 +1532,7 @@ pub(crate) fn think_peds(
                     })
                     .collect();
                 for (index, prop) in pp.props.iter_mut().enumerate() {
-                    if !data.plugin_graphs.contains_key(&prop.class) {
+                    if !data.plugin_graphs.contains_key(&prop.class) || streamed_out(prop.id) {
                         continue;
                     }
                     let class = data.plugins.classes.get(&prop.class);
@@ -1770,7 +1774,7 @@ pub(crate) fn think_peds(
             }
             mind.refusals.tick(dt, &plugin_props.settings);
             // HasPlugin: a conversation member, or a ped that took a world prop.
-            let prop_wp = mind.prop.and_then(|(i, id, w)| plugin_props.props.get(i).filter(|p| p.id == id).and_then(|p| p.waypoints.get(w)).copied());
+            let prop_wp = mind.prop.and_then(|(i, id, w)| plugin_props.props.get(i).filter(|p| p.id == id && !streamed_out(id)).and_then(|p| p.waypoints.get(w)).copied());
             if mind.prop.is_some() && prop_wp.is_none() {
                 mind.prop = None;
             }

@@ -300,6 +300,73 @@ fn a_thrown_can_reaches_the_skater_region_forces() {
     assert!(peak > 1.0, "the can's contact reaches the region forces: {peak}");
 }
 
+/// DMO streaming on DownTown's placed props (doc 27 "DMO streaming"): from the map spawn the fill pass keeps at most
+/// 49 live props, all within 90 m; the others go dormant (collision parked, out of the obstacle list); walking 300 m away
+/// culls the near ones and brings the props there in.
+#[test]
+#[ignore = "requires an installed map (SKATE3_ASSET_ROOT, SKATE3_MAP=<maps/DownTown.skate>)"]
+fn dmo_streaming_keeps_49_live_props_round_the_spawn() {
+    use skate_core::living_world::dmo::{DmoDecision, DmoStream, DmoStreamSettings, DmoView};
+    use skate_core::living_world::Observer;
+    let root_dir = std::path::PathBuf::from(std::env::var_os("SKATE3_ASSET_ROOT").unwrap());
+    let map_path = std::path::PathBuf::from(std::env::var_os("SKATE3_MAP").unwrap());
+    let map = skate_data::skate_map::SkateMap::load(&map_path).unwrap();
+    let mut physics = GamePhysics::load_with_difficulty(&root_dir, Some(&map), crate::difficulty::Difficulty::Easy).unwrap();
+    let placements = physics.prop_dynamics().unwrap().dmo_placements();
+    let total = placements.len();
+    let settings = DmoStreamSettings::default();
+    let mut stream = DmoStream::new(placements, &settings);
+    let deck = physics.board.bodies()[BodyId::Deck.index()].rates.position;
+    let view = |x: f32, z: f32| (Observer { position: [x, deck.y, z], velocity: [0.0; 3] }, DmoView { camera: [x, deck.y + 2.0, z], forward: [0.0, 0.0, 1.0], reference: [x, deck.y, z] });
+    let here = view(deck.x, deck.z);
+    stream.step(&[here], &settings, true, &|_| false);
+    let dormant: Vec<u32> = stream.placements.iter().filter(|p| !stream.live.contains(&p.id)).map(|p| p.id).collect();
+    for &id in &dormant {
+        assert!(physics.stream_prop(id, true, true));
+    }
+    let live = stream.live.len();
+    eprintln!("DownTown: {total} placed props, {live} live after the fill, {} dormant", dormant.len());
+    assert!(live <= 49 && live > 0);
+    let flat = |p: [f32; 3]| ((p[0] - deck.x).powi(2) + (p[2] - deck.z).powi(2)).sqrt();
+    assert!(stream.placements.iter().filter(|p| stream.live.contains(&p.id)).all(|p| flat(p.position) <= 90.0));
+    let dynamics = physics.prop_dynamics().unwrap();
+    assert_eq!(dynamics.obstacle_boxes().len(), live, "dormant props leave the obstacle list");
+    assert!(dormant.iter().all(|&id| dynamics.is_dormant(id)));
+    // Knock one live prop 2 m aside: after a cull it comes back at its authored pose (retail, b98).
+    let moved = *stream.live.iter().next().unwrap();
+    let (spawn_origin, spawn_basis) = physics.prop_dynamics().unwrap().spawn_pose(moved).unwrap();
+    let shifted = skate_core::math::Vector3::new(spawn_origin.x + 2.0, spawn_origin.y, spawn_origin.z);
+    physics.prop_dynamics_mut().unwrap().teleport(moved, shifted, spawn_basis);
+    // Far away: the spawn's props cull, others come in.
+    let far = view(deck.x + 300.0, deck.z);
+    let mut changes = Vec::new();
+    for _ in 0..20 {
+        changes.extend(stream.step(&[far], &settings, false, &|_| false));
+    }
+    let culled = changes.iter().filter(|d| matches!(d, DmoDecision::Cull(_))).count();
+    eprintln!("300 m away: {culled} culled, {} spawned, {} live", changes.iter().filter(|d| matches!(d, DmoDecision::Spawn(_))).count(), stream.live.len());
+    assert!(culled > 0);
+    for d in changes {
+        match d {
+            DmoDecision::Spawn(id) => assert!(physics.stream_prop(id, false, true)),
+            DmoDecision::Cull(id) | DmoDecision::Evict(id) => assert!(physics.stream_prop(id, true, true)),
+        }
+    }
+    assert_eq!(physics.prop_dynamics().unwrap().obstacle_boxes().len(), stream.live.len());
+    // Back at the spawn: the knocked prop is in again, at its authored pose.
+    for _ in 0..20 {
+        for d in stream.step(&[here], &settings, false, &|_| false) {
+            match d {
+                DmoDecision::Spawn(id) => assert!(physics.stream_prop(id, false, true)),
+                DmoDecision::Cull(id) | DmoDecision::Evict(id) => assert!(physics.stream_prop(id, true, true)),
+            }
+        }
+    }
+    assert!(stream.live.contains(&moved) && !physics.prop_dynamics().unwrap().is_dormant(moved));
+    let (origin, _) = physics.prop_dynamics().unwrap().pose(moved).unwrap();
+    assert!((origin.x - spawn_origin.x).abs() < 1e-4 && (origin.z - spawn_origin.z).abs() < 1e-4, "authored pose: {origin:?} vs {spawn_origin:?}");
+}
+
 /// Mode 7's controller B (NavMeshController, b78 to b80) on a simulated skater: B's intents alone (no pad, the AI
 /// source present but not fresh) make it press the off-board toggle, step off, turn on foot through `OB_Steer` ->
 /// `ob_Turn` (Processed +2680 = -OB_Steer) and line up with the node direction, then hand back (arrived).

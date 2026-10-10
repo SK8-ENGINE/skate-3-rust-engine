@@ -858,9 +858,7 @@ radius 20; retail defaults, data-driven), `DmoPlacement`, `DmoView`, `score` / `
 (cull with groups, one eviction, spawn with group expansion and evict-if-better; held ids exempt), `set_position`
 (keep where left). Decisions are serialisable (`Spawn` / `Cull` / `Evict` with the map prop id) for a host.
 
-**NOT RETAIL YET / open.** Not wired into the game yet (step 2 streams the map props' bodies, collision and models;
-waits for the pose write-back answer: does a moved prop come back where it was left or at its authored pose, b98).
-The score's count `n` (`sub_82C503F0`) is 1; the overlap blocker is not modelled; touching is bounding spheres (the
+**NOT RETAIL YET / open.** Wired into the game in step 2 below. The score's count `n` (`sub_82C503F0`) is 1; the overlap blocker is not modelled; touching is bounding spheres (the
 retail test's factor 0.5 is not decoded); the eviction queue order is the live score; the safety layer
 (`livingworld_dmo_safety`) is not found; multiple observers are ours.
 
@@ -868,6 +866,36 @@ retail test's factor 0.5 is not decoded); the eviction queue order is the live s
 `touching_props_spawn_and_cull_as_a_group`, `the_score_follows_the_retail_weights`,
 `the_pool_cap_evicts_the_lowest_score_once_per_pass`, `the_spawn_budget_is_49_per_pass_and_100_when_filling`,
 `streaming_is_deterministic`.
+
+## DMO streaming in the game (2026-10-10, D3 step 2)
+
+**Change.** On by default, as retail (`SKATE_DMO_STREAM=0` turns it off; `LivingWorldSettings.dmo_stream`):
+`living_world::dmo_stream::stream_dmos` runs the census core on the map's placed props (census slot 2 of 4, the first pass
+after a map load fills from nothing with budget 100, every prop it does not pick goes dormant). A culled or evicted prop
+goes **dormant** (`GamePhysics::stream_prop` -> `PropDynamics::set_dormant`): body asleep and still, collision parked at
+`HELD_PARK`, model hidden (`sync_prop_transforms`), out of the obstacle list, grab search, upright, box-vs-box contact
+and grab scene; a spawn brings it back asleep at its **authored pose** (`respawn_authored`, retail). Ped plugins skip
+dormant props and a ped using one lets go (plugin id low 32 bits = DMO body id). The held prop and props in the
+player's saved placement layouts (#15, not retail) are never streamed. Range and weights come from the export
+(`tables.json`), type priorities from each characteristics record's `Priority` RefSpec (`dmo_type_priority`).
+Logs: `DMO_STREAM fill=.. spawned=.. culled=.. evicted=.. live=..`, `DMO_STREAM_CHANGE` (debug).
+
+**Evidence, the pose** (research b98): retail spawns a culled DMO from its placement record +0, and nothing writes the live
+pose there (the only writer after creation, `sub_82C50EE8`, writes authored matrices); the live pose goes into a
+separate moved-pose map (table+0x9090, 512 entries, `sub_82C50950` per tick for records with flag 0x40) that only
+rebuilds a record at a chunk reload [code; end-to-end medium]. So a knocked-over prop is back in place when the player
+returns. The safety layer is census painter layer 14, read by `sub_82C55A50` (max of the `livingworld_dynamicobject_safety`
+values at the centre and four points, any forbidden = 0); it never resets an object, it only stops a moved pose from
+being remembered and weighs the moved-pose priority [code / data].
+
+**NOT RETAIL YET / open.** The moved-pose map and chunk reloads are not modelled (so "keep where left" never happens);
+the skatepark / extended challenge range records (150 / 200, 100 / 130) are not selected (how retail picks them is
+open), all maps use `dynamicobjects`; retail's 49 pool also counts hand props (ours: separate pools); the safety layer
+is not exported. Not seen in game yet.
+
+**Verification.** skate-game data-gated `dmo_streaming_keeps_49_live_props_round_the_spawn` (DownTown: 786 placed props,
+29 live within 90 m of the spawn after the fill, 757 dormant and out of the obstacle list; 300 m away 29 culled and 8
+spawned; a prop moved 2 m comes back at its authored pose).
 
 ## Open questions
 
