@@ -122,6 +122,9 @@ pub struct CensusKindConfig {
     /// Spawns while the zombie cheat is on. Peds: yes and without the cap (`sub_826B8B88`);
     /// vehicles: no (`sub_826B7760`) [code].
     pub spawn_in_zombie: bool,
+    /// Culled whatever the distance while the zombie cheat is on: vehicles yes (the cull `sub_826BAAB8` despawns a
+    /// car beyond the cull radius OR when the zombie query is true) [code]; peds no.
+    pub cull_in_zombie: bool,
 }
 
 impl CensusKindConfig {
@@ -141,6 +144,7 @@ impl CensusKindConfig {
             initial_pool: None,
             placement: None,
             spawn_in_zombie: true,
+            cull_in_zombie: false,
         }
     }
     pub fn retail_vehicles() -> Self {
@@ -151,6 +155,7 @@ impl CensusKindConfig {
             initial_pool: Some(retail::VEHICLE_INITIAL_LIMIT),
             placement: Some(PlacementRules::default()),
             spawn_in_zombie: false,
+            cull_in_zombie: true,
             ..Self::retail_pedestrians()
         }
     }

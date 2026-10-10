@@ -366,9 +366,18 @@ pub(crate) fn census_pass(cfg: &CensusKindConfig, st: &mut KindState, inputs: &T
     if circles.is_empty() {
         return;
     }
-    let serials: Vec<u32> = st.live.iter().filter(|(_, l)| census::beyond_cull(l.position, &circles)).map(|(s, _)| *s).collect();
-    for s in serials {
-        if let Some(r) = st.despawn(s, tick, DespawnReason::Distance) {
+    let zombie_cull = inputs.zombie && cfg.cull_in_zombie;
+    let serials: Vec<(u32, DespawnReason)> = st
+        .live
+        .iter()
+        .filter_map(|(s, l)| match () {
+            _ if census::beyond_cull(l.position, &circles) => Some((*s, DespawnReason::Distance)),
+            _ if zombie_cull => Some((*s, DespawnReason::Disabled)),
+            _ => None,
+        })
+        .collect();
+    for (s, reason) in serials {
+        if let Some(r) = st.despawn(s, tick, reason) {
             out.push(Decision::Despawn(r));
         }
     }

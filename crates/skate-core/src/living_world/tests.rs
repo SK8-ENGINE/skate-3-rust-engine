@@ -385,6 +385,27 @@ fn zombie_mode_peds_ignore_the_cap_no_traffic_no_skaters() {
     assert_eq!(world.count(Kind::Skater), 0);
 }
 
+/// Turning zombie mode on removes the traffic already driving (`sub_826BAAB8`: cull beyond the radius OR zombie) and
+/// keeps the peds.
+#[test]
+fn zombie_mode_culls_the_live_traffic() {
+    let map = map();
+    let obs = [still(0.0, 0.0)];
+    let mut inputs = offline(&obs, &map);
+    let mut world = LivingWorld::new(config(), 13);
+    for _ in 0..400 {
+        world.step(&inputs);
+    }
+    let (peds, cars) = (world.count(Kind::Pedestrian), world.count(Kind::Vehicle));
+    assert!(cars > 0 && peds > 0, "traffic and peds before: {cars} / {peds}");
+    inputs.zombie = true;
+    // The census kinds take turns (rotation slots): one round of passes.
+    let decisions: Vec<_> = (0..8).flat_map(|_| world.step(&inputs)).collect();
+    assert_eq!(world.count(Kind::Vehicle), 0);
+    assert!(world.count(Kind::Pedestrian) >= peds, "peds stay");
+    assert!(decisions.iter().any(|d| matches!(d, Decision::Despawn(r) if r.reason == DespawnReason::Disabled)));
+}
+
 #[test]
 fn disabled_kind_despawns_and_density_setting_scales() {
     let map = map();
@@ -616,7 +637,7 @@ fn vehicle_code_constants() {
     assert_eq!((v.pool, v.initial_pool), (Some(15), Some(15)));
     assert_eq!((v.attempts_per_pass, v.spawns_per_pass, v.initial_attempts, v.initial_spawns), (2, 1, 6000, 600));
     assert_eq!(v.initial_ring, (8.0, 80.0));
-    assert!(!v.spawn_in_zombie);
+    assert!(!v.spawn_in_zombie && v.cull_in_zombie);
     assert_eq!(v.rotation_slot, 1);
     // Factory placement (sub_82C36300 / sub_82E14928): 15 m margin, extra 0, half 0.5, 20 m
     // overlap query, lane roll 100.

@@ -901,10 +901,13 @@ each tick; the body walks a one-point route to the zombie goal at the brain's sp
 `zombie_sprint_speed`, `zombie_walk_speed`.
 
 **NOT RETAIL YET / open.** The yellow screen tint is not found (b95 leads: `82763EE0` / `82764480`, `8249DC60`,
-`827F4D28`, the `zombiemode` hash at `0x820C1058`). The cheat screen entry belongs to the UI work. Existing traffic
-is not culled when the mode turns on (retail's vehicle cull `826BAAB8` takes a despawn branch, medium); the "goal
+`827F4D28`, the `zombiemode` hash at `0x820C1058`). The cheat screen entry belongs to the UI work. The "goal
 reached" radius (0.5 m) and "ZombieChannel" (`ped.vfn240`, 0.2 / 0.2 / 1.0) are not read; how peds in a plugin become
 zombies is open. Retail aims every zombie at the single local player; a host picking per ped is not retail.
+
+**Traffic.** Retail's vehicle cull `826BAAB8` despawns a car beyond the cull radius OR whenever the zombie query is true
+[code, main-read], so turning the mode on empties the streets; ours: `CensusKindConfig::cull_in_zombie` (vehicles true,
+peds false), reason `Disabled`; test `zombie_mode_culls_the_live_traffic`.
 
 **Verification.** skate-core `zombies_follow_the_player_and_mill_round_them`; skate-game data-gated
 `living_world_zombie_mode_runs_zombie_follow_on_the_stock_graph` (stock graph: ZombieFollow, intent 0, goal the player,
