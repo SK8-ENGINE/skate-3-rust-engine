@@ -804,6 +804,45 @@ fn living_world_ped_ai_graph_runs_on_the_brain() {
     assert!(faced, "warning stops and faces the skater");
 }
 
+/// Zombie mode on the stock ped graph (data-gated, b95): a wandering ped enters ZombieFollow (`pedestrian_zombiefollow.xml`),
+/// plays the `zombie` anim set, drops its hand prop and heads for the player; with the mode off it wanders again.
+#[test]
+fn living_world_zombie_mode_runs_zombie_follow_on_the_stock_graph() {
+    use skate_core::graph::controller::Controller;
+    use skate_core::living_world::peds::brain::{motion, BrainHost, BrainSettings, PedBrain};
+    let Some(root) = std::env::var_os("SKATE3_ASSET_ROOT").map(std::path::PathBuf::from).filter(|r| r.join(super::ped_graph::AI_GRAPH).exists()) else {
+        eprintln!("skipped: set SKATE3_ASSET_ROOT to the converted assets");
+        return;
+    };
+    let ai = super::ped_graph::PedGraph::load(&root, super::ped_graph::AI_GRAPH).expect("ped AI graph");
+    let program = &ai.graph.runtime.program;
+    let mut controller = Controller::new(program.topology.states.len());
+    let mut brain = PedBrain { rng: Some(skate_core::living_world::Rng::new(5)), ..Default::default() };
+    brain.hand_prop.holding = true;
+    let settings = BrainSettings::default();
+    let none = |_: u64| None;
+    let player = [30.0f32, 0.0, 0.0];
+    let state_name = |c: &Controller| c.frame.current.map(|s| ai.graph.binding.states[s].name.clone());
+    let run = |controller: &mut Controller, brain: &mut PedBrain, zombie: bool| {
+        brain.zombie = zombie;
+        for _ in 0..30 {
+            brain.tick_timers(1.0 / 30.0);
+            let mut host = BrainHost { behaviors: &ai.behaviors, conditions: &ai.conditions, brain, settings: &settings, position: [0.0; 3], heading: 0.0, skater: Some((player, [0.0; 3])), target_position: &none, chase: Default::default() };
+            controller.update(program, 1.0 / 30.0, &mut host);
+        }
+    };
+    run(&mut controller, &mut brain, false);
+    assert_eq!(brain.motion_intent, Some(motion::WANDER));
+    run(&mut controller, &mut brain, true);
+    eprintln!("zombie state {:?}, intent {:?}, goal {:?}, speed {:?}, anim {:?}", state_name(&controller), brain.motion_intent, brain.zombie_goal, brain.speed_suggestion, brain.anim_override);
+    assert_eq!((brain.motion_intent, brain.zombie_goal, brain.speed_suggestion), (Some(motion::ZOMBIE_FOLLOW), Some(player), Some(8.0)));
+    assert_eq!(brain.anim_override.as_deref(), Some("zombie"));
+    assert!(!brain.hand_prop.holding, "DropHandProp on entry");
+    run(&mut controller, &mut brain, false);
+    eprintln!("after state {:?}, intent {:?}", state_name(&controller), brain.motion_intent);
+    assert_eq!((brain.motion_intent, brain.anim_override.as_deref()), (Some(motion::WANDER), None));
+}
+
 /// Mood system on the stock tables (data-gated): an adult male hit by the skater does nothing on
 /// the first hit, warns on the second (Nth 2) and chases on the third (Nth 3).
 #[test]

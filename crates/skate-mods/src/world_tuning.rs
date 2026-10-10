@@ -199,6 +199,8 @@ pub struct LivingWorldPatch {
     pub ambient_skaters: Option<u32>,
     /// Retail Free Play options (`skate_core::living_world::FreePlay`).
     pub free_play: Option<FreePlayPatch>,
+    /// The zombie cheat (free skate: every ped follows and attacks the skater, no traffic or NPC skaters).
+    pub zombie: Option<bool>,
 }
 
 /// One living-world kind: `enabled`, `density` (0..=4, 1 = retail).
@@ -308,6 +310,24 @@ pub struct PedBrainPatch {
     pub run_from_honker_distance: Option<f32>,
     pub run_from_honker_speed: Option<f32>,
     pub warn_speech: Option<i32>,
+    /// Hand props: the attack throw's speed and look-ahead (retail 10.0 m/s, 0.8333 s), its jitter (0.25 m) and lift
+    /// (1.0 m), the light (bin) throw's speed (5.0); 0..=100. `hand_prop_skater_contact` (thrown props hit the
+    /// skater) and `starting_hand_props` (peds start out carrying), retail true.
+    pub attack_throw_speed: Option<f32>,
+    pub attack_throw_lead_seconds: Option<f32>,
+    pub attack_throw_jitter: Option<f32>,
+    pub attack_throw_lift: Option<f32>,
+    pub light_throw_speed: Option<f32>,
+    pub hand_prop_skater_contact: Option<bool>,
+    pub starting_hand_props: Option<bool>,
+    /// ZombieFollow: follow distance (8 m), sprint distance (15 m), ring around the player (1..8 m), sprint and walk
+    /// speeds (8, 3 m/s); 0..=100.
+    pub zombie_follow_distance: Option<f32>,
+    pub zombie_sprint_distance: Option<f32>,
+    pub zombie_ring_min: Option<f32>,
+    pub zombie_ring_max: Option<f32>,
+    pub zombie_sprint_speed: Option<f32>,
+    pub zombie_walk_speed: Option<f32>,
 }
 
 /// One traffic driver's horn: `blocked_time`, `obstacle_time` (s, retail 4 / taxi 1, 2), `approach_speed_kmh`
@@ -764,7 +784,7 @@ impl Merge for LivingWorldPatch {
         merge_nested(&mut self.pedestrians, &b.pedestrians);
         merge_nested(&mut self.vehicles, &b.vehicles);
         merge_nested(&mut self.free_play, &b.free_play);
-        merge_opts!(self, b; ambient_skaters);
+        merge_opts!(self, b; ambient_skaters, zombie);
         match (self.traffic_horn.as_mut(), &b.traffic_horn) {
             (Some(a), Some(b)) => b.iter().for_each(|(k, v)| {
                 a.entry(k.clone()).or_insert_with(|| v.clone());
@@ -870,7 +890,7 @@ impl Merge for NpcSimulatedPatch {
 
 impl Merge for PedBrainPatch {
     fn merge(&mut self, b: &Self) {
-        merge_opts!(self, b; enabled, mood, wander_speed, warn_seconds, know_about_seconds, conversation_turn_seconds, conversation_gather_seconds, run_from_honker_distance, run_from_honker_speed, warn_speech);
+        merge_opts!(self, b; enabled, mood, wander_speed, warn_seconds, know_about_seconds, conversation_turn_seconds, conversation_gather_seconds, run_from_honker_distance, run_from_honker_speed, warn_speech, attack_throw_speed, attack_throw_lead_seconds, attack_throw_jitter, attack_throw_lift, light_throw_speed, hand_prop_skater_contact, starting_hand_props, zombie_follow_distance, zombie_sprint_distance, zombie_ring_min, zombie_ring_max, zombie_sprint_speed, zombie_walk_speed);
     }
 }
 
@@ -970,7 +990,7 @@ impl LivingWorldPatch {
             })
             && self.npc_avoid.as_ref().is_none_or(NpcAvoidPatch::validate)
             && self.ped_brain.as_ref().is_none_or(|p| {
-                [p.wander_speed, p.warn_seconds, p.know_about_seconds, p.conversation_turn_seconds, p.conversation_gather_seconds, p.run_from_honker_distance, p.run_from_honker_speed].into_iter().all(|v| v.is_none_or(|v| v.is_finite() && (0.0..=100.0).contains(&v)))
+                [p.wander_speed, p.warn_seconds, p.know_about_seconds, p.conversation_turn_seconds, p.conversation_gather_seconds, p.run_from_honker_distance, p.run_from_honker_speed, p.attack_throw_speed, p.attack_throw_lead_seconds, p.attack_throw_jitter, p.attack_throw_lift, p.light_throw_speed, p.zombie_follow_distance, p.zombie_sprint_distance, p.zombie_ring_min, p.zombie_ring_max, p.zombie_sprint_speed, p.zombie_walk_speed].into_iter().all(|v| v.is_none_or(|v| v.is_finite() && (0.0..=100.0).contains(&v)))
                     && p.warn_speech.is_none_or(|v| (0..=127).contains(&v))
             })
             && self.traffic_horn.as_ref().is_none_or(|m| {
@@ -1148,6 +1168,8 @@ mod tests {
         assert!(!valid_patch("living_world", &json!({"npc_avoid": {"swerve": 1.0}})));
         assert!(valid_patch("living_world", &json!({"ped_brain": {"enabled": false, "warn_seconds": 5.0}})));
         assert!(!valid_patch("living_world", &json!({"ped_brain": {"wander_speed": -1.0}})));
+        assert!(valid_patch("living_world", &json!({"zombie": true, "ped_brain": {"zombie_sprint_speed": 6.0, "attack_throw_jitter": 0.0, "starting_hand_props": false}})));
+        assert!(!valid_patch("living_world", &json!({"ped_brain": {"zombie_ring_max": -1.0}})));
         assert!(valid_patch("living_world", &json!({"npc_simulated": {"respawn_seconds": 3.0, "respawn_min": 0.0}})));
         assert!(!valid_patch("living_world", &json!({"npc_simulated": {"respawn_seconds": 90.0}})));
         assert!(valid_patch("living_world", &json!({"npc_simulated": {"anticipation_distance": 5.0, "anticipation_frames": 90, "max_crossed_nodes": 4}})));

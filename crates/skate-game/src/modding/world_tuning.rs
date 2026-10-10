@@ -268,6 +268,9 @@ pub(crate) fn apply_living_world(s: &mut LivingWorldSettings, p: &LivingWorldPat
     if let Some(n) = p.ambient_skaters {
         s.ambient_skaters = n;
     }
+    if let Some(z) = p.zombie {
+        s.zombie = z;
+    }
     if let Some(f) = &p.free_play {
         let d = skate_core::living_world::FreePlay::default();
         s.free_play = Some(skate_core::living_world::FreePlay {
@@ -306,6 +309,21 @@ pub(crate) fn apply_living_world(s: &mut LivingWorldSettings, p: &LivingWorldPat
         b.values.warn_speech = f.warn_speech.unwrap_or(b.values.warn_speech);
         b.run_from_honker.side_distance = f.run_from_honker_distance.unwrap_or(b.run_from_honker.side_distance);
         b.run_from_honker.run_speed = f.run_from_honker_speed.unwrap_or(b.run_from_honker.run_speed);
+        let h = &mut b.values.hand_prop;
+        h.attack_speed = f.attack_throw_speed.unwrap_or(h.attack_speed);
+        h.attack_lead_seconds = f.attack_throw_lead_seconds.unwrap_or(h.attack_lead_seconds);
+        h.jitter_max = f.attack_throw_jitter.unwrap_or(h.jitter_max);
+        h.aim_lift = f.attack_throw_lift.unwrap_or(h.aim_lift);
+        h.light_speed = f.light_throw_speed.unwrap_or(h.light_speed);
+        h.skater_contact = f.hand_prop_skater_contact.unwrap_or(h.skater_contact);
+        h.starting_props = f.starting_hand_props.unwrap_or(h.starting_props);
+        let z = &mut b.values.zombie_follow;
+        z.follow_distance = f.zombie_follow_distance.unwrap_or(z.follow_distance);
+        z.sprint_distance = f.zombie_sprint_distance.unwrap_or(z.sprint_distance);
+        z.ring_min = f.zombie_ring_min.unwrap_or(z.ring_min);
+        z.ring_max = f.zombie_ring_max.unwrap_or(z.ring_max);
+        z.sprint_speed = f.zombie_sprint_speed.unwrap_or(z.sprint_speed);
+        z.walk_speed = f.zombie_walk_speed.unwrap_or(z.walk_speed);
     }
     if let Some(f) = &p.npc_avoid {
         let a = &mut s.npc_avoid;
@@ -510,6 +528,7 @@ pub(crate) fn read(world: &World, domain: &str) -> Value {
                 "pedestrians": {"enabled": s.pedestrians.enabled, "density": s.pedestrians.density},
                 "vehicles": {"enabled": s.vehicles.enabled, "density": s.vehicles.density},
                 "ambient_skaters": s.ambient_skaters,
+                "zombie": s.zombie,
                 "free_play": s.free_play.map(|f| json!({"traffic": f.traffic, "pedestrians": f.pedestrians, "ai_skaters": f.ai_skaters})),
                 "npc_simulated": {"enabled": s.npc_simulated.enabled, "radius": s.npc_simulated.radius, "max": s.npc_simulated.max, "respawn_seconds": s.npc_simulated.respawn_seconds, "respawn_min": s.npc_simulated.respawn_min, "respawn_max": s.npc_simulated.respawn_max, "anticipation_distance": s.npc_simulated.signals.anticipation_distance, "anticipation_frames": s.npc_simulated.signals.anticipation_frames, "max_crossed_nodes": s.npc_simulated.signals.max_crossed_nodes, "walk_back": s.npc_simulated.walk_back, "walk_arrive_distance": s.npc_simulated.navmesh.arrive_h, "walk_stuck_ticks": s.npc_simulated.navmesh.stuck_waypoint_ticks},
                 "npc_avoid": npc_avoid,

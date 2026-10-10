@@ -495,6 +495,46 @@ fn the_starting_hand_prop_follows_the_chance_and_the_running_total() {
     assert_eq!(HandProp::starting_pick(0.0, &list, 1, 1), None, "pros never carry");
 }
 
+/// ZombieFollow (`826A91A8` / `826A9250` / `826A9518`): the goal is the player beyond 8 m, a point 1..8 m round them once
+/// the goal is reached inside 8 m; 8 m/s beyond 15 m, else 3 m/s. OverrideAnimData sets the anim set for the state's
+/// life; ped speech is not sent in zombie mode (`826A77A8`).
+#[test]
+fn zombies_follow_the_player_and_mill_round_them() {
+    let behaviors = ops(&[("ZombieFollow", &[]), ("OverrideAnimData", &[("overrideEntityName", "zombie")]), ("SendSpeechEvent", &[("speechvalue", "20")])]);
+    assert_eq!(behaviors[1], PedOp::OverrideAnimData { entity: "zombie".into() });
+    let mut brain = PedBrain { rng: Some(crate::living_world::Rng::new(3)), zombie: true, ..Default::default() };
+    let settings = BrainSettings::default();
+    let none = |_: u64| None;
+    let f = frame();
+    let player = [20.0, 0.0, 0.0];
+    let mut h = BrainHost { behaviors: &behaviors, conditions: &[], brain: &mut brain, settings: &settings, position: [0.0; 3], heading: 0.0, skater: Some((player, [0.0; 3])), target_position: &none, chase: Default::default() };
+    h.begin(0, [0; 6], &f);
+    assert_eq!((h.brain.motion_intent, h.brain.zombie_goal), (Some(motion::ZOMBIE_FOLLOW), Some(player)));
+    h.update(0, [0; 6], &f);
+    assert_eq!((h.brain.zombie_goal, h.brain.speed_suggestion), (Some(player), Some(8.0)), "20 m away: run at the player");
+    h.position = [10.0, 0.0, 0.0];
+    h.update(0, [0; 6], &f);
+    assert_eq!((h.brain.zombie_goal, h.brain.speed_suggestion), (Some(player), Some(3.0)), "10 m: walk, still at the player");
+    // Inside 8 m with the goal reached: a ring point 1..8 m from the player.
+    h.position = [19.8, 0.0, 0.0];
+    h.update(0, [0; 6], &f);
+    let g = h.brain.zombie_goal.unwrap();
+    let r = ((g[0] - player[0]).powi(2) + (g[2] - player[2]).powi(2)).sqrt();
+    assert!((1.0..8.0).contains(&r), "ring point {g:?} at {r}");
+    h.update(0, [0; 6], &f);
+    assert_eq!(h.brain.zombie_goal, Some(g), "not reached yet: keep the point");
+    h.end(0, [0; 6], &f);
+    assert_eq!(h.brain.zombie_goal, None);
+    h.begin(1, [0; 6], &f);
+    assert_eq!(h.brain.anim_override.as_deref(), Some("zombie"));
+    h.end(1, [0; 6], &f);
+    assert_eq!(h.brain.anim_override, None);
+    h.brain.speech = None;
+    h.begin(2, [0; 6], &f);
+    h.update(2, [0; 6], &f);
+    assert_eq!(h.brain.speech, None, "no ped speech in zombie mode");
+}
+
 /// The sit plugin's ops (`826A2898` SetSitTimer, `826AD1F0` GoingToStandBackUp): the sit time lies between the ped type's
 /// min and max, the stand-up roll follows its chance, and timer 24 is retail's SitTimer.
 #[test]

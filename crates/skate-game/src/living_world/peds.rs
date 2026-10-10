@@ -708,7 +708,9 @@ pub(crate) fn advance_peds(
         None => &NoSignals,
     };
     for (k, (ped, mut body, mut transform, mut audio, mind)) in list.into_iter().enumerate() {
-        let Some(set) = data.anim_sets.get(&ped.anim_set).or_else(|| data.anim_sets.get("default")) else { continue };
+        // OverrideAnimData (zombie mode: the `zombie` set) wins over the ped's own set while its state runs.
+        let anim_set = mind.and_then(|m| m.brain.anim_override.as_deref()).filter(|n| data.anim_sets.contains_key(*n)).unwrap_or(&ped.anim_set);
+        let Some(set) = data.anim_sets.get(anim_set).or_else(|| data.anim_sets.get("default")) else { continue };
         let target = tick.saturating_sub(ped.spawn_tick);
         let body = &mut *body;
         let me = id_order(ped.id);
@@ -1800,6 +1802,7 @@ pub(crate) fn think_peds(
                 let v = observers.observers.get(chasee.wrapping_sub(PLAYER_TARGET_BASE) as usize).map_or([0.0; 3], |o| o.velocity);
                 Some((skate_core::living_world::peds::chase::should_block(at, q, v, 0.0, r), g.formation_point(me, q)))
             };
+            mind.brain.zombie = settings.zombie;
             let mut host = skate_core::living_world::peds::brain::BrainHost {
                 behaviors: &graph.behaviors,
                 conditions: &graph.conditions,
@@ -2103,6 +2106,14 @@ pub(crate) fn think_peds(
             _ if mind.brain.search_point.is_some() => {
                 let p = mind.brain.search_point.unwrap_or_default();
                 if mind.chase_goal.take().is_some() || body.nav.route.as_ref().is_none_or(|r| r.points.first() != Some(&p)) {
+                    body.nav.set_route(one_point(p));
+                }
+            }
+            // ZombieFollow (`826A9250`): walk / run to the brain's goal (the player or a point of the ring round them).
+            (Some(skate_core::living_world::peds::brain::motion::ZOMBIE_FOLLOW), ..) if mind.brain.zombie_goal.is_some() => {
+                let p = mind.brain.zombie_goal.unwrap_or_default();
+                mind.chase_goal = None;
+                if body.nav.route.as_ref().is_none_or(|r| r.points.first() != Some(&p)) {
                     body.nav.set_route(one_point(p));
                 }
             }

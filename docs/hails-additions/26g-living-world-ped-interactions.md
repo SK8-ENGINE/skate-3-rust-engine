@@ -849,8 +849,9 @@ world prop descriptors' transfer gates were not ported, so `usetrashbin.xml` exi
 - A thrown prop hitting the skater has no special effect: the DMO class posts nothing and the skater contact switch treats
   groups 12 / 13 / 14 as an ordinary prop contact [code, b92].
 
-**Change.** Core `peds/hand_prop.rs`: `HandPropSettings` (retail defaults, in `BrainSettings.hand_prop`, so the
-`ped_brain` mod domain reaches them), `launch`, `flat_angle`, `light_throw_clip`, `PedBrain::start_light_throw` /
+**Change.** Core `peds/hand_prop.rs`: `HandPropSettings` (retail defaults, in `BrainSettings.hand_prop`; mod keys in the
+`ped_brain` domain since the zombie step: `attack_throw_speed`, `attack_throw_lead_seconds`, `attack_throw_jitter`,
+`attack_throw_lift`, `light_throw_speed`, `hand_prop_skater_contact`, `starting_hand_props`), `launch`, `flat_angle`, `light_throw_clip`, `PedBrain::start_light_throw` /
 `drop_hand_prop` / `update_hand_prop_release` / `update_hand_prop_link`. Brain: `HandProp` gets `linked`, `throw` and the
 record bools; ops `ThrowHandPropAtTrashBin`, `DropHandProp`, `DisallowHandPropActions` (flag); conditions
 `HasDisposableHandProp`, `CanSitWithHandProp`, `CanAttackThrowHandProp`; requests `HandPropClip` / `HandPropReleased`;
@@ -875,6 +876,39 @@ inferred from the clip names. `IsNearCrossWalk` answers false. The attack throw:
 vending / sit gates `HasFirstWaypointAvailable` / `InFrontOfFirstWaypoint`, which the first run showed): ped #2 took the
 vending machine, created `pop` at tick 1051 and sat on a bench with it (pop allows sitting); no ped took a bin in the run,
 so the throw is not seen in game yet.
+
+### Zombie mode: the ped side
+
+**Problem.** The zombie cheat (free skate: peds chase and attack the skater) had only its census rules; the brain's
+`IsZombieMode` read a flag nobody set, and the stock graph's `ZombieFollow` / `OverrideAnimData` ops were not ported.
+
+**Evidence** (research b95; main-checked: the ZombieFollow update `826A9250` distances and speeds, constants
+`0x82099250` 8.0, `0x820BD16C` 15.0, `0x8231A844` 1.0, `0x82063B08` 3.0):
+- Stock graph [data]: `Wander` -> `ZombieFollow` when `IsZombieMode`; the state runs `OverrideAnimData overrideEntityName="zombie"`,
+  `DropHandProp`, `ZombieFollow`, and leaves to Colliding / AddressWants, or to Wander when the mode is off. Scatter, the
+  chase start timer, the primary-only intercept, rest and the taunt are all gated off in zombie mode by the stock graphs.
+- ZombieFollow [code]: Begin `826A91A8` motion intent 0, goal = the player. Update: beyond 8 m the goal is the player;
+  inside, once the goal is reached (steering vfunc +124, inferred), a random point 1..8 m round the player
+  (`82E17508`, the same jitter as the attack throw); speed 8 m/s beyond 15 m, else 3 m/s. End `826A9518` resets.
+- `SendSpeechEvent` Begin `826A77A8` sends nothing in zombie mode [code, b95].
+
+**Change.** Core: ops `ZombieFollow` and `OverrideAnimData { entity }` (cleared on End, inferred),
+`IgnoreTakedownTargetNavRigVolume` as a marker; `ZombieFollowSettings` (retail defaults); brain `zombie_goal`,
+`anim_override`; no ped speech in zombie mode. Game: the brain's `zombie` flag follows `LivingWorldSettings.zombie`
+each tick; the body walks a one-point route to the zombie goal at the brain's speed; the anim set override picks the
+`zombie` set. Toggle (no cheat screen yet): `SKATE_ZOMBIE=1` or the mod value `living_world.zombie`; mod keys
+`ped_brain.zombie_follow_distance`, `zombie_sprint_distance`, `zombie_ring_min`, `zombie_ring_max`,
+`zombie_sprint_speed`, `zombie_walk_speed`.
+
+**NOT RETAIL YET / open.** The yellow screen tint is not found (b95 leads: `82763EE0` / `82764480`, `8249DC60`,
+`827F4D28`, the `zombiemode` hash at `0x820C1058`). The cheat screen entry belongs to the UI work. Existing traffic
+is not culled when the mode turns on (retail's vehicle cull `826BAAB8` takes a despawn branch, medium); the "goal
+reached" radius (0.5 m) and "ZombieChannel" (`ped.vfn240`, 0.2 / 0.2 / 1.0) are not read; how peds in a plugin become
+zombies is open. Retail aims every zombie at the single local player; a host picking per ped is not retail.
+
+**Verification.** skate-core `zombies_follow_the_player_and_mill_round_them`; skate-game data-gated
+`living_world_zombie_mode_runs_zombie_follow_on_the_stock_graph` (stock graph: ZombieFollow, intent 0, goal the player,
+8 m/s, `zombie` set, prop dropped; back to wander when off); skate-mods patch validation. Not seen in game yet.
 
 ### Peds that start out carrying a hand prop
 
@@ -926,7 +960,7 @@ facing the skater and never threw.
 **Change.** Core `peds/hand_prop.rs`: `intercept`, `jitter`, `AttackAim`, `attack_point`, `attack_throw_clip`,
 `PedBrain::start_attack_throw` (the aim and its 3 RNG draws come first, as retail, from the brain's seeded RNG, so a host
 decides them); settings `attack_lead_seconds`, `intercept_epsilon`, `jitter_min` / `jitter_max`, `aim_lift` (retail
-defaults, `ped_brain` mod domain). Brain: op `ThrowHandPropAtWantTarget { want }` (Begin / Update), `ChaseView.velocity`
+defaults; mod keys `ped_brain.attack_throw_*`, see the bin throw section). Brain: op `ThrowHandPropAtWantTarget { want }` (Begin / Update), `ChaseView.velocity`
 (target velocities by id) and `own_velocity`. Game: `PedBody.velocity` (last console tick's movement), the velocity map
 of peds and players passed to the brain; the attack clips in the ped clip list. The release, flight and link reuse the
 bin throw's path above.

@@ -201,7 +201,8 @@ impl Default for LivingWorldSettings {
             ped_brain: Default::default(),
             traffic_horn: Default::default(),
             free_play: None,
-            zombie: false,
+            // The zombie cheat; no cheat screen yet: `SKATE_ZOMBIE=1` or the mod value `zombie`.
+            zombie: std::env::var("SKATE_ZOMBIE").ok().as_deref() == Some("1"),
             net_role: NetRole::Standalone,
             seed: 0,
             debug: false,

@@ -59,11 +59,38 @@ pub struct BrainSettings {
     pub new_chasee_speech: i32,
     /// Hand prop release values (`peds/hand_prop.rs`).
     pub hand_prop: super::hand_prop::HandPropSettings,
+    /// ZombieFollow's distances and speeds (`826A9250`; retail hard-codes them).
+    pub zombie_follow: ZombieFollowSettings,
+}
+
+/// ZombieFollow (`826A91A8` / `826A9250` / `826A9518`) [code]: beyond `follow_distance` the goal is the player; inside
+/// it, once the goal is reached, a random point `ring_min..ring_max` around the player (`82E17508`); the speed is
+/// `sprint_speed` beyond `sprint_distance`, else `walk_speed`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZombieFollowSettings {
+    /// `0x82099250` 8.0 m.
+    pub follow_distance: f32,
+    /// `0x820BD16C` 15.0 m.
+    pub sprint_distance: f32,
+    /// The ring around the player: `0x8231A844` 1.0 and `0x82099250` 8.0 m.
+    pub ring_min: f32,
+    pub ring_max: f32,
+    /// `0x82099250` 8.0 and `0x82063B08` 3.0 m/s.
+    pub sprint_speed: f32,
+    pub walk_speed: f32,
+    /// "Goal reached" (the steering's vfunc +124; its radius is not read): ours, within this flat distance [inferred].
+    pub arrive_distance: f32,
+}
+
+impl Default for ZombieFollowSettings {
+    fn default() -> Self {
+        Self { follow_distance: 8.0, sprint_distance: 15.0, ring_min: 1.0, ring_max: 8.0, sprint_speed: 8.0, walk_speed: 3.0, arrive_distance: 0.5 }
+    }
 }
 
 impl Default for BrainSettings {
     fn default() -> Self {
-        Self { wander_speed: 2.0, warn_seconds: 3.5, know_about_seconds: 30.0, watch_cone: 0.959_931, watch_ahead: 4.0, warn_speech: 53, tazer_draw_seconds: 0.133, tazer_hit_seconds: 0.3, taze_speech: 66, end_taze_speech: 67, greet_seconds: 3.5, conversation_turn_seconds: 3.0, conversation_gather_seconds: 30.0, greet_speech: 56, return_greet_speech: 63, chases_enabled: true, start_chase_speech: 55, new_chasee_speech: 15, hand_prop: Default::default() }
+        Self { wander_speed: 2.0, warn_seconds: 3.5, know_about_seconds: 30.0, watch_cone: 0.959_931, watch_ahead: 4.0, warn_speech: 53, tazer_draw_seconds: 0.133, tazer_hit_seconds: 0.3, taze_speech: 66, end_taze_speech: 67, greet_seconds: 3.5, conversation_turn_seconds: 3.0, conversation_gather_seconds: 30.0, greet_speech: 56, return_greet_speech: 63, chases_enabled: true, start_chase_speech: 55, new_chasee_speech: 15, hand_prop: Default::default(), zombie_follow: Default::default() }
     }
 }
 
@@ -149,6 +176,8 @@ pub mod motion {
     pub const INTERCEPT: u8 = 3;
     /// RunFromHonker (`826A1330`).
     pub const RUN_FROM_HONKER: u8 = 5;
+    /// ZombieFollow Begin (`826A91A8`: `ped.vfn192(0)`).
+    pub const ZOMBIE_FOLLOW: u8 = 0;
 }
 
 /// One graph operation, parsed from its name and attributes.
@@ -446,6 +475,11 @@ pub enum PedOp {
     ThrowHandPropAtWantTarget { want: String },
     /// `826A8730` Begin: `82E3EBE0(ped, 0, zero)`, the held prop is released in place (b25 §6).
     DropHandProp,
+    /// ZombieFollow (`826A91A8` / `826A9250` / `826A9518`, b95): follow the player, mill around inside the ring.
+    ZombieFollow,
+    /// OverrideAnimData (factory `826CA578`): the ped plays another entity type's animation set while the state runs
+    /// (`overrideEntityName`; stock: `zombie`). Clearing it on End is [inferred] (no vtable found).
+    OverrideAnimData { entity: String },
     /// `826A7900` Begin / `826A7918` End: `brain+3279` bit 0x10 for the behaviour's life (b25 §3).
     DisallowHandPropActions,
     SetWaitingToReactFlagOnBegin,
@@ -625,12 +659,13 @@ impl PedOp {
             "ThrowHandPropAtTrashBin" => PedOp::ThrowHandPropAtTrashBin,
             "ThrowHandPropAtWantTarget" => PedOp::ThrowHandPropAtWantTarget { want: want() },
             "DropHandProp" => PedOp::DropHandProp,
+            "ZombieFollow" => PedOp::ZombieFollow,
+            "OverrideAnimData" => PedOp::OverrideAnimData { entity: text("overrideEntityName").unwrap_or_default().to_ascii_lowercase() },
             "DisallowHandPropActions" => PedOp::DisallowHandPropActions,
             "HasDisposableHandProp" => PedOp::HasDisposableHandProp,
             "CanSitWithHandProp" => PedOp::CanSitWithHandProp,
             "CanAttackThrowHandProp" => PedOp::CanAttackThrowHandProp,
-            "SetExplicitTurnDirectionToWaypointOrientation" => PedOp::Marker { name: name.to_string() },
-            "KnowAboutChasers" | "AllowPedestrianJumping" => PedOp::Marker { name: name.to_string() },
+            "KnowAboutChasers" | "AllowPedestrianJumping" | "IgnoreTakedownTargetNavRigVolume" => PedOp::Marker { name: name.to_string() },
             _ => PedOp::Pending { name: name.to_string() },
         }
     }
@@ -767,6 +802,10 @@ pub struct PedBrain {
     pub begin_colliding: bool,
     pub colliding: bool,
     pub zombie: bool,
+    /// ZombieFollow's current goal (host steers the body to it).
+    pub zombie_goal: Option<Vec3>,
+    /// OverrideAnimData's entity type: the host plays that type's animation set.
+    pub anim_override: Option<String>,
     pub has_plugin: bool,
     /// Outputs the body follows.
     pub motion_intent: Option<u8>,
@@ -1217,6 +1256,11 @@ impl Host for BrainHost<'_> {
                     }
                 }
             }
+            PedOp::ZombieFollow => {
+                b.motion_intent = Some(motion::ZOMBIE_FOLLOW);
+                b.zombie_goal = self.skater.map(|(p, _)| p);
+            }
+            PedOp::OverrideAnimData { entity } => b.anim_override = Some(entity.clone()),
             PedOp::DropHandProp => {
                 if let Some(velocity) = b.drop_hand_prop() {
                     b.chase_requests.push(ChaseRequest::HandPropReleased { velocity });
@@ -1254,7 +1298,8 @@ impl Host for BrainHost<'_> {
                 b.set_timer(timers::WARN, s.warn_seconds);
                 b.speech = Some(s.warn_speech);
             }
-            PedOp::SendSpeech { value } => b.speech = Some(*value),
+            // `826A77A8`: no ped speech event in zombie mode (b95).
+            PedOp::SendSpeech { value } if !b.zombie => b.speech = Some(*value),
             PedOp::SetSimpleTimer { timer, length } => b.set_timer(*timer, *length),
             PedOp::InterceptChasee => {
                 b.motion_intent = Some(motion::INTERCEPT);
@@ -1507,6 +1552,20 @@ impl Host for BrainHost<'_> {
         let b = &mut *self.brain;
         match op {
             PedOp::Wander => b.speed_suggestion = Some(s.wander_speed),
+            PedOp::ZombieFollow => {
+                if let Some((player, _)) = self.skater {
+                    let z = s.zombie_follow;
+                    let flat = |a: Vec3, c: Vec3| ((a[0] - c[0]).powi(2) + (a[2] - c[2]).powi(2)).sqrt();
+                    let d = flat(self.position, player);
+                    let reached = b.zombie_goal.is_none_or(|g| flat(self.position, g) <= z.arrive_distance);
+                    if d > z.follow_distance {
+                        b.zombie_goal = Some(player);
+                    } else if reached {
+                        b.zombie_goal = Some(super::hand_prop::jitter(b.rng(), player, z.ring_min, z.ring_max));
+                    }
+                    b.speed_suggestion = Some(if d > z.sprint_distance { z.sprint_speed } else { z.walk_speed });
+                }
+            }
             PedOp::ThrowHandPropAtWantTarget { want } => {
                 if !b.hand_prop.holding && b.timer(super::hand_prop::THROW_REACTION_TIMER) <= 0.0 {
                     b.unset_want(want);
@@ -1657,6 +1716,8 @@ impl Host for BrainHost<'_> {
         let b = &mut *self.brain;
         match op {
             PedOp::OwnPluginObject => b.own_plugin_object = false,
+            PedOp::ZombieFollow => b.zombie_goal = None,
+            PedOp::OverrideAnimData { .. } => b.anim_override = None,
             PedOp::DisallowHandPropActions => b.hand_prop_actions_disallowed = false,
             PedOp::DisableCollisionsWithBehaviourSource => {
                 b.own_plugin_object = false;
