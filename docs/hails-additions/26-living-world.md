@@ -4,6 +4,10 @@ Branch: `world/living-world` (built on all the audio work, #32, which it publish
 for all of it (user, 2026-10-04: "this work shall be one PR"; traffic added the same day: "add this to the living
 world work"). Details: [`living-world/`](living-world/) (designs and the data formats of milestone 1).
 
+**Status (2026-10-10): feature complete for this PR, to be play-tested by Hails.** The scope is frozen; the
+remaining step is the user's play session and the fixes it shows. Work for later PRs is listed in the #52 description
+under "Follow-ups".
+
 This doc is split into the files below so each topic can be read on its own. Every section keeps its heading, so
 an old link `26-living-world.md#<section>` becomes `<file>#<section>` with the same anchor. New sections go into
 the file of their topic (and get a line here).
