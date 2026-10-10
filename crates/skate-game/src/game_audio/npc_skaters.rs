@@ -101,14 +101,14 @@ impl NpcHost {
                     }
                     let muted = self.rules.as_deref().is_some_and(|r| {
                         let (name, index) = super::mod_audio::player_slot(&slot);
-                        r.mutes(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::Npc, class, slot: name, id: index, owner })
+                        r.mutes(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::Npc, class, slot: name, id: index, owner, hit: None })
                     });
                     if !muted {
                         self.nodes.insert((owner, slot), rt.post(id, &words));
                     }
                     if self.events.is_some() {
                         let (name, index) = super::mod_audio::player_slot(&slot);
-                        super::mod_audio::record(&mut self.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::Npc, class, slot: name, id: index, owner });
+                        super::mod_audio::record(&mut self.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::Npc, class, slot: name, id: index, owner, hit: None });
                     }
                 }
                 Command::Redeliver { slot, words } => {
@@ -134,13 +134,16 @@ impl NpcHost {
         let Native { mixmap, shared, world, .. } = native;
         if let Some(m) = mixmap.as_mut() {
             let l = Listener::default();
-            for (_, mut npc) in self.objects.drain() {
+            for npc in self.objects.values_mut() {
                 npc.deactivate(m, &l);
             }
         }
-        self.objects.clear();
-        if !self.nodes.is_empty() || !self.beds.is_empty() {
+        if !self.nodes.is_empty() || !self.beds.is_empty() || !self.objects.is_empty() {
             if let Ok(mut runtime) = super::timing::lock(shared, &super::timing::GAME_LOCK) {
+                // Their Splice sounds too (a dropped skater is never updated again).
+                for (_, mut npc) in self.objects.drain() {
+                    npc.release(&mut runtime.splice_host());
+                }
                 for (_, node) in self.nodes.drain() {
                     runtime.release(node);
                 }
@@ -149,6 +152,7 @@ impl NpcHost {
                 }
             }
         }
+        self.objects.clear();
         self.nodes.clear();
         self.beds.clear();
         self.grunts.clear();
@@ -271,6 +275,7 @@ pub(crate) fn pre(host: &mut NpcHost, published: &NpcSkaters, native: &mut Nativ
         if let Some(mut npc) = host.objects.remove(&id) {
             npc.deactivate(m, &l);
             npc.stop_wheels(&mut rt.stream_host());
+            npc.release(&mut rt.splice_host());
             host.posts += npc.posts;
         }
         host.release_all(rt, id);
@@ -314,6 +319,7 @@ pub(crate) fn pre(host: &mut NpcHost, published: &NpcSkaters, native: &mut Nativ
         npc.loose_board = p.loose_board;
         let cmds = npc.process(m, &s, tuning, &mut super::mod_audio::Observed::new(&mut rt.splice_host(), &mut host.events, super::mod_audio::Source::Npc, id).rules(host.rules.as_deref()));
         host.apply(rt, id, cmds);
+        super::player_audio::body_hits(npc.body_hits(), super::mod_audio::Source::Npc, id, Some(cam), &mut host.events);
         // The routing's binds wait for the bed's step after the ticks (dropped without a bed).
         if !host.beds.contains_key(&id) {
             npc.routed.grains.clear();

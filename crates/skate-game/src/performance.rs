@@ -1,6 +1,13 @@
 //! Frame timing harness. Active only when `SKATE_PERF_REPORT` names an output
 //! path: warms up, samples a fixed window, writes JSON, then exits.
 //!
+//! With trace-all (`SKATE_TRACE_ALL=1`) it never exits: it rolls for the whole
+//! session in windows of [`ROLLING_WINDOW`] seconds and a writer thread rewrites
+//! the JSON after every window (every window's summary, plus the newest window's
+//! render diagnostics; per-frame samples are in the frame log). The game thread
+//! only pushes one sample per frame into a preallocated buffer and hands the full
+//! buffer over once per window.
+//!
 //! The `Performance` resource is absent in normal play, which is why callers
 //! take it as `Option<ResMut<_>>` — instrumentation must never cost anything in
 //! a shipping session.
@@ -19,6 +26,8 @@ use std::{
 const WARMUP: f32 = 10.0;
 /// Seconds of samples retained.
 const SAMPLE: f32 = 15.0;
+/// Seconds per window of the rolling (trace-all) report.
+pub(crate) const ROLLING_WINDOW: f32 = 15.0;
 /// A frame slower than this is counted separately: at 300 FPS the budget is
 /// 3.33 ms, so 8 ms is an unambiguous hitch rather than jitter.
 const HITCH_MS: f32 = 8.0;
@@ -123,9 +132,30 @@ struct Frame {
     triangles: u32,
 }
 
+/// One finished window handed to the report writer thread.
+struct Window {
+    index: u64,
+    started_s: f32,
+    window_s: f32,
+    samples: Vec<Frame>,
+    draws: DrawStats,
+    render_phase_ms: [f32; 6],
+    gpu: Vec<(String, f64)>,
+}
+
+/// The rolling report (trace-all): window bookkeeping and the writer thread's queue.
+struct Rolling {
+    warmup: f32,
+    window: f32,
+    index: u64,
+    window_started: f32,
+    sender: std::sync::mpsc::SyncSender<Window>,
+}
+
 #[derive(Resource)]
 pub(crate) struct Performance {
     output: PathBuf,
+    rolling: Option<Rolling>,
     started: Instant,
     frame_started: Option<Instant>,
     main_elapsed: Duration,
@@ -139,6 +169,7 @@ impl Performance {
     fn new(output: PathBuf) -> Self {
         Self {
             output,
+            rolling: None,
             started: Instant::now(),
             frame_started: None,
             main_elapsed: Duration::ZERO,
@@ -155,6 +186,46 @@ impl Performance {
     pub(crate) fn physics(&mut self, elapsed: Duration) {
         self.physics_elapsed += elapsed;
     }
+
+    /// The rolling report: windows of `window` seconds after the warmup, summarised and written
+    /// by the `perf-report` thread.
+    pub(crate) fn rolling(output: PathBuf, window: f32) -> Self {
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<Window>(4);
+        let path = output.clone();
+        let _ = std::thread::Builder::new().name("perf-report".into()).spawn(move || {
+            let mut windows: Vec<serde_json::Value> = Vec::new();
+            while let Ok(window) = receiver.recv() {
+                let mut report = summarise(&window.samples, &window.draws);
+                report.render_phase_ms = window.render_phase_ms;
+                report.gpu = window.gpu;
+                report.samples.clear();
+                info!(
+                    "SKATE_PERF window={} t={:.0}s fps={:.1} low1={:.1} frame_ms_mean={:.3} p99={:.3} max={:.1} main={:.3} physics={:.3} hitches={} draws={}",
+                    window.index, window.started_s, report.fps, report.fps_1_percent_low, report.frame_ms_mean,
+                    report.frame_ms_p99, report.frame_ms_max, report.main_schedule_ms_mean, report.physics_ms_mean,
+                    report.frames_over_hitch, report.draw_calls
+                );
+                windows.push(window_summary(&report, window.index, window.started_s));
+                if let Err(error) = write_rolling(&path, &report, &windows, window.window_s) {
+                    error!("SKATE_PERF_REPORT could not be written: {error}");
+                }
+            }
+        });
+        let mut performance = Self::new(output);
+        // One window at a generous 600 FPS; a full buffer is handed over once per window.
+        performance.samples = Vec::with_capacity((window * 600.0) as usize);
+        performance.rolling = Some(Rolling { warmup: WARMUP, window, index: 0, window_started: 0.0, sender });
+        performance
+    }
+
+    /// The rolling report with another warmup (tests).
+    #[cfg(test)]
+    pub(crate) fn with_warmup(mut self, warmup: f32) -> Self {
+        if let Some(rolling) = self.rolling.as_mut() {
+            rolling.warmup = warmup;
+        }
+        self
+    }
 }
 
 pub(crate) struct PerformancePlugin;
@@ -163,9 +234,21 @@ impl Plugin for PerformancePlugin {
         let Some(output) = std::env::var_os("SKATE_PERF_REPORT").map(PathBuf::from) else {
             return;
         };
-        info!("SKATE_PERF starting: warmup={WARMUP}s sample={SAMPLE}s output={output:?}");
+        let performance = if crate::trace_all::on() {
+            info!("SKATE_PERF starting (rolling, trace-all): warmup={WARMUP}s window={ROLLING_WINDOW}s output={output:?}");
+            Performance::rolling(output, ROLLING_WINDOW)
+        } else {
+            info!("SKATE_PERF starting: warmup={WARMUP}s sample={SAMPLE}s output={output:?}");
+            Performance::new(output)
+        };
+        install(app, performance);
+    }
+}
+
+/// The report's systems and, on request, the GPU diagnostics and the render phase split.
+pub(crate) fn install(app: &mut App, performance: Performance) {
         let phases = RenderPhases::default();
-        app.insert_resource(Performance::new(output))
+        app.insert_resource(performance)
             .init_resource::<DrawStats>()
             .insert_resource(phases.clone())
             .add_systems(First, frame_begin)
@@ -173,7 +256,14 @@ impl Plugin for PerformancePlugin {
         // GPU timestamp/statistics queries add work of their own. Ordinary CPU
         // frame comparisons must not enable them implicitly.
         if std::env::var("SKATE_PERF_GPU").as_deref() == Ok("1") {
-            app.add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
+            let every = gpu_sample_every();
+            info!("SKATE_PERF_GPU sample_every={every} frames ({ENV_GPU_EVERY}; 1 = every frame, 0 = off)");
+            if every > 0 {
+                app.add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
+                if every > 1 {
+                    install_gpu_sampling(app, every, recorder_type(bevy::render::renderer::RenderContext::new));
+                }
+            }
         }
 
         // Phase-boundary systems serialize otherwise overlapping render work.
@@ -210,6 +300,81 @@ impl Plugin for PerformancePlugin {
                 end_render_frame.after(RenderSystems::Cleanup),
             ),
         );
+}
+
+/// How often the GPU queries run, in rendered frames (`SKATE_PERF_GPU_EVERY`).
+pub(crate) const ENV_GPU_EVERY: &str = "SKATE_PERF_GPU_EVERY";
+/// Trace-all default: one frame in 30 (about one per second at 30 fps, two at 60).
+const TRACE_ALL_GPU_EVERY: u32 = 30;
+
+/// The GPU query interval: `SKATE_PERF_GPU_EVERY` when set (1 = every frame, the
+/// single report's behaviour; 0 = no GPU queries), otherwise 30 in trace-all and 1
+/// for the one-shot `SKATE_PERF_REPORT` benchmark.
+fn gpu_sample_every() -> u32 {
+    parse_gpu_sample_every(std::env::var(ENV_GPU_EVERY).ok().as_deref(), crate::trace_all::on())
+}
+
+fn parse_gpu_sample_every(value: Option<&str>, trace_all: bool) -> u32 {
+    let default = if trace_all { TRACE_ALL_GPU_EVERY } else { 1 };
+    match value.map(str::trim) {
+        Some(v) if !v.is_empty() => v.parse().unwrap_or_else(|_| {
+            warn!("{ENV_GPU_EVERY}={v:?} is not a frame count, using {default}");
+            default
+        }),
+        _ => default,
+    }
+}
+
+/// Whether render frame `frame` (counting from 0) records GPU queries.
+fn gpu_frame_sampled(frame: u64, every: u32) -> bool {
+    every > 0 && frame % u64::from(every) == 0
+}
+
+/// Names Bevy's diagnostics recorder type: the render world resource
+/// `RenderDiagnosticsPlugin` inserts is crate-private in bevy_render, but
+/// `RenderContext::new` takes it, so its type is inferred from that signature.
+fn recorder_type<R>(_new: fn(bevy::render::renderer::RenderDevice, Option<R>) -> bevy::render::renderer::RenderContext<'static>) -> std::marker::PhantomData<R> {
+    std::marker::PhantomData
+}
+
+/// The recorder while it is parked (frames without GPU queries).
+#[derive(Resource)]
+struct GpuSampleGate<R: Resource> {
+    every: u32,
+    frame: u64,
+    parked: Option<R>,
+}
+
+/// Bevy's render system records GPU queries only while the recorder resource is in the render
+/// world (it removes it, runs the graph, and puts it back). On frames that are not sampled the
+/// gate moves it aside, so those frames carry no timestamp or pipeline statistics queries.
+/// Readbacks still in flight complete on the GPU and are collected on the next sampled frame.
+fn install_gpu_sampling<R: Resource>(app: &mut App, every: u32, _recorder: std::marker::PhantomData<R>) {
+    use bevy::render::{Render, RenderApp, RenderSystems};
+    let Some(render) = app.get_sub_app_mut(RenderApp) else {
+        return;
+    };
+    render.insert_resource(GpuSampleGate::<R> { every, frame: 0, parked: None });
+    render.add_systems(
+        Render,
+        gate_gpu_queries::<R>
+            .after(RenderSystems::PrepareBindGroups)
+            .before(RenderSystems::Render),
+    );
+}
+
+fn gate_gpu_queries<R: Resource>(world: &mut World) {
+    let Some(mut gate) = world.get_resource_mut::<GpuSampleGate<R>>() else {
+        return;
+    };
+    let sampled = gpu_frame_sampled(gate.frame, gate.every);
+    gate.frame += 1;
+    if sampled {
+        if let Some(recorder) = gate.parked.take() {
+            world.insert_resource(recorder);
+        }
+    } else if let Some(recorder) = world.remove_resource::<R>() {
+        world.resource_mut::<GpuSampleGate<R>>().parked = Some(recorder);
     }
 }
 
@@ -263,7 +428,7 @@ fn frame_end(
     }
     let elapsed = performance.started.elapsed().as_secs_f32();
     if !performance.sampling {
-        if elapsed < WARMUP {
+        if elapsed < performance.rolling.as_ref().map_or(WARMUP, |r| r.warmup) {
             return;
         }
         performance.sampling = true;
@@ -288,6 +453,30 @@ fn frame_end(
         triangles: draws.world_triangles + draws.mod_triangles,
     });
 
+    if let Some(rolling) = performance.rolling.as_mut() {
+        if elapsed < rolling.warmup + rolling.window_started + rolling.window {
+            return;
+        }
+        let window_s = rolling.window;
+        let started_s = rolling.warmup + rolling.window_started;
+        rolling.window_started += rolling.window;
+        rolling.index += 1;
+        let index = rolling.index;
+        let render_phase_ms = phases.means();
+        phases.reset();
+        // Once per window, not per frame: the full buffer goes to the writer thread (which sorts
+        // and formats) and a fresh one of the same size takes its place.
+        let capacity = performance.samples.capacity();
+        let samples = std::mem::replace(&mut performance.samples, Vec::with_capacity(capacity));
+        let window = Window { index, started_s, window_s, samples, draws: *draws, render_phase_ms, gpu: gpu_diagnostics(&diagnostics) };
+        if let Some(rolling) = performance.rolling.as_ref() {
+            if rolling.sender.try_send(window).is_err() {
+                warn!("SKATE_PERF window {index} dropped (report writer busy)");
+            }
+        }
+        return;
+    }
+
     if elapsed < WARMUP + SAMPLE {
         return;
     }
@@ -296,13 +485,7 @@ fn frame_end(
     report.render_phase_ms = phases.means();
     // Every render diagnostic, so GPU pass costs land in the report without
     // this module needing to know the pass names the render graph happens to use.
-    report.gpu = diagnostics
-        .iter()
-        .filter(|d| d.path().as_str().starts_with("render/"))
-        .filter_map(|d| d.smoothed().map(|v| (d.path().to_string(), v)))
-        .filter(|(_, v)| *v > 0.0)
-        .collect();
-    report.gpu.sort_by(|a, b| b.1.total_cmp(&a.1));
+    report.gpu = gpu_diagnostics(&diagnostics);
     match write_report(&performance.output, &report) {
         Ok(()) => info!("SKATE_PERF_REPORT written to {:?}", performance.output),
         Err(error) => error!("SKATE_PERF_REPORT could not be written: {error}"),
@@ -335,6 +518,61 @@ fn frame_end(
         eprintln!("SKATE_PERF_GPU {name} {value:.0}");
     }
     exit.write(AppExit::Success);
+}
+
+/// Every render diagnostic, highest first.
+fn gpu_diagnostics(diagnostics: &bevy::diagnostic::DiagnosticsStore) -> Vec<(String, f64)> {
+    let mut gpu: Vec<(String, f64)> = diagnostics
+        .iter()
+        .filter(|d| d.path().as_str().starts_with("render/"))
+        .filter_map(|d| d.smoothed().map(|v| (d.path().to_string(), v)))
+        .filter(|(_, v)| *v > 0.0)
+        .collect();
+    gpu.sort_by(|a, b| b.1.total_cmp(&a.1));
+    gpu
+}
+
+/// One window's entry in the rolling report.
+fn window_summary(report: &Report, index: u64, started_s: f32) -> serde_json::Value {
+    serde_json::json!({
+        "window": index,
+        "start_s": started_s,
+        "frames": report.frames,
+        "fps": report.fps,
+        "fps_1_percent_low": report.fps_1_percent_low,
+        "frame_ms_mean": report.frame_ms_mean,
+        "frame_ms_median": report.frame_ms_median,
+        "frame_ms_p95": report.frame_ms_p95,
+        "frame_ms_p99": report.frame_ms_p99,
+        "frame_ms_max": report.frame_ms_max,
+        "frames_over_8ms": report.frames_over_hitch,
+        "main_schedule_ms_mean": report.main_schedule_ms_mean,
+        "physics_ms_mean": report.physics_ms_mean,
+        "draw_calls": report.draw_calls,
+        "triangles": report.triangles,
+        "render_phase_ms": report.render_phase_ms,
+    })
+}
+
+/// The rolling report: every window so far, and the newest window's render diagnostics.
+fn write_rolling(path: &std::path::Path, latest: &Report, windows: &[serde_json::Value], window_s: f32) -> std::io::Result<()> {
+    let json = serde_json::json!({
+        "mode": "rolling",
+        "warmup_seconds": WARMUP,
+        "window_seconds": window_s,
+        "gpu_queries_enabled": std::env::var("SKATE_PERF_GPU").as_deref() == Ok("1"),
+        "gpu_sample_every_frames": gpu_sample_every(),
+        "render_phase_instrumentation": std::env::var("SKATE_PERF_RENDER").as_deref() == Ok("1"),
+        "note":"per-frame samples are in the SKATE_FRAME_LOG file",
+        "latest_render_diagnostics": latest.gpu.iter()
+            .map(|(name, value)| serde_json::json!({ "name": name, "ms": value }))
+            .collect::<Vec<_>>(),
+        "windows": windows,
+    });
+    // Write then rename, so a reader (or a crash mid-write) never sees half a file.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&json)?)?;
+    std::fs::rename(&tmp, path)
 }
 
 struct Report {
@@ -410,8 +648,9 @@ fn write_report(path: &std::path::Path, report: &Report) -> std::io::Result<()> 
     let json = serde_json::json!({
         "frames": report.frames,
         "gpu_queries_enabled": std::env::var("SKATE_PERF_GPU").as_deref() == Ok("1"),
+        "gpu_sample_every_frames": gpu_sample_every(),
         "render_phase_instrumentation": std::env::var("SKATE_PERF_RENDER").as_deref() == Ok("1"),
-        "fps": report.fps,
+        "fps":report.fps,
         "fps_1_percent_low": report.fps_1_percent_low,
         "slowest_1_percent_ms_mean": report.slowest_1_percent_ms_mean,
         "frame_ms_mean": report.frame_ms_mean,
@@ -452,6 +691,42 @@ mod tests {
 
     fn frame(total_ms: f32) -> Frame {
         Frame { total_ms, ..default() }
+    }
+
+    #[test]
+    fn gpu_sample_interval_defaults_and_overrides() {
+        assert_eq!(parse_gpu_sample_every(None, true), 30);
+        assert_eq!(parse_gpu_sample_every(None, false), 1);
+        assert_eq!(parse_gpu_sample_every(Some("1"), true), 1);
+        assert_eq!(parse_gpu_sample_every(Some(" 0 "), true), 0);
+        assert_eq!(parse_gpu_sample_every(Some("120"), false), 120);
+        assert_eq!(parse_gpu_sample_every(Some("x"), true), 30);
+        assert_eq!(parse_gpu_sample_every(Some(""), false), 1);
+        let picked: Vec<u64> = (0..65).filter(|&f| gpu_frame_sampled(f, 30)).collect();
+        assert_eq!(picked, vec![0, 30, 60]);
+        assert!((0..10).all(|f| gpu_frame_sampled(f, 1)));
+        assert!(!(0..10).any(|f| gpu_frame_sampled(f, 0)));
+    }
+
+    /// The gate moves the recorder out on unsampled frames and back on sampled ones, and
+    /// never loses or duplicates it.
+    #[test]
+    fn gpu_gate_parks_and_restores_the_recorder() {
+        #[derive(Resource)]
+        struct Recorder(u32);
+        let mut world = World::new();
+        world.insert_resource(Recorder(7));
+        world.insert_resource(GpuSampleGate::<Recorder> { every: 3, frame: 0, parked: None });
+        let mut present = Vec::new();
+        for _ in 0..7 {
+            gate_gpu_queries::<Recorder>(&mut world);
+            let here = world.get_resource::<Recorder>().is_some();
+            let parked = world.resource::<GpuSampleGate<Recorder>>().parked.is_some();
+            assert!(here != parked, "exactly one copy of the recorder");
+            present.push(here);
+        }
+        assert_eq!(present, vec![true, false, false, true, false, false, true]);
+        assert_eq!(world.resource::<Recorder>().0, 7);
     }
 
     #[test]

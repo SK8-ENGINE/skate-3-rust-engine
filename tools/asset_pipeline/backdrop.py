@@ -1,6 +1,7 @@
-"""Retain foliage in authored global world models outside district streams."""
+"""Export each district's global presentation model (sea, far shore, tree walls) outside district streams."""
 import json
 import hashlib
+import re
 import struct
 import sys
 import tempfile
@@ -31,6 +32,120 @@ def texture_groups(raw, table, channels):
             if kind in channels:
                 groups[-1][kind] = (v[4] << 32) | v[5]
     return groups
+
+
+def presentation_meshes(metadata):
+    """Every mesh of the global model, as retail draws the whole model.
+
+    Industrial's model (DIST_Water) carries the sea surface itself
+    (`ocean.default`, about 16 x 13 km at y -7.7..-3.3), the harbour's
+    `ocean.reflection` sheets, distant shore and pier geometry
+    (`environment.*`) that is in no district stream, and the tree wall.
+    An earlier shader whitelist kept only the trees and reflection sheets, so
+    the sea itself was never exported.
+    """
+    return list(enumerate(metadata))
+
+
+_CELL = re.compile(r'cPres_(-?\d+)_(-?\d+)_high')
+
+
+def stream_cell(name):
+    """Grid cell (x, z) of a `cPres_<x>_<z>_high[...]` stream file, None for unpaired files (`cPres_Global_proxy`)."""
+    m = _CELL.search(name)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def proxy_drawn_files(proxy_files, district_files):
+    """Proxy stream files retail draws while every full-detail cell is loaded.
+
+    Retail pairs each full-detail cell `cPres_X_Z_high` with the proxy cell
+    `cPres_X_Z_high_proxy` (proxy world manager, format "cPres_%d_%d_high_%s",
+    TU3 sub_8247EF40) and, when the streamer activates the full cell,
+    deactivates its proxy partner (sub_8247BB50 -> sub_82C985A8: activate
+    0x4C5724D2 full cell, deactivate 0x4158EE18 proxy cell). The engine keeps
+    every district cell loaded, so the retail result is: a proxy cell draws
+    only when it has no full-detail partner (Industrial's 59 south-hill cells,
+    none in DownTown or University). Unpaired files (`cPres_Global_proxy`) are
+    never swapped, so they stay.
+    """
+    full = {stream_cell(n) for n in district_files} - {None}
+    return sorted(n for n in proxy_files if stream_cell(n) not in full)
+
+
+def proxy_texture_keys(textures, models):
+    """The proxy stream's Tex table lists its textures with bit 63 of the
+    asset id set (0xAC70170A... for the 0x2C70170A... its materials name), so
+    key each one by the id the materials use; textures no drawn model uses are
+    left out."""
+    used = {n for m in models for mesh in m['meshes']
+            for n in [mesh.get('texture_id'), *mesh.get('retail_texture_ids', {}).values()] if n}
+    keyed = {}
+    for key, value in textures.items():
+        plain = f'0x{int(key, 16) & ~(1 << 63):016x}'
+        key = plain if key not in used and plain in used else key
+        if key in used:
+            keyed[key] = value
+    return keyed
+
+
+def convert_proxy(game_root, output, label, report=print):
+    """Export the far-proxy terrain retail draws (see `proxy_drawn_files`) to
+    `private/native-backdrops/<map>.proxy.skate`; returns the number of drawn
+    proxy models, 0 when the district has no proxy stream or no unpaired cell."""
+    content = game_root/'data/content'
+    proxy_big = next((p for p in content.glob('proxy*_100_Proxy.big')
+                      if p.stem.lower() == f'proxy{label}_100_proxy'.lower()), None)
+    district_big = next((p for p in content.glob('worldDIST_*.big')
+                         if p.stem.lower() == f'worlddist_{label}'.lower()), None)
+    target = output/(label+'.proxy.skate')
+    target.unlink(missing_ok=True)
+    if proxy_big is None or district_big is None:
+        return 0
+    district_files = [Path(e.path).name for e in BigArchive(district_big).entries if '/cPres_' in e.path]
+    archive = BigArchive(proxy_big)
+    stream_name = proxy_big.stem.removeprefix('proxy')
+    drawn = set(proxy_drawn_files([Path(e.path).name for e in archive.entries
+                                   if Path(e.path).name.startswith('cPres_')], district_files))
+    if not any(stream_cell(n) for n in drawn):
+        return 0
+    tools = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(tools/'vendor/university/tools/vanilla_map_extraction/tools'))
+    import prepare_hawaiian_dream
+    prepare = prepare_hawaiian_dream.prepare
+    load = prepare_hawaiian_dream.load_district_stream
+
+    def presentation_only(directory, kind, name):
+        # Proxy streams carry presentation only: no Sim table of contents.
+        if kind == 'Sim' and not (Path(directory)/f'{name}_Sim.xst').is_file():
+            return []
+        return load(directory, kind, name)
+    prepare_hawaiian_dream.load_district_stream = presentation_only
+    try:
+        return _write_proxy(prepare, archive, stream_name, label, drawn, target, tools, report)
+    finally:
+        prepare_hawaiian_dream.load_district_stream = load
+
+
+def _write_proxy(prepare, archive, stream_name, label, drawn, target, tools, report):
+    with tempfile.TemporaryDirectory(prefix='skate-proxy-') as temporary:
+        root = Path(temporary)
+        archive.extract_entries(archive.entries, root/'raw')
+        stream = root/'raw/data/content/world/stream'/stream_name
+        manifest_path = prepare(stream_directory=stream, output_root=root/'intermediate', utt_root=tools/'vendor/utt',
+            district_name=stream_name, map_name=label, package_name='Skate 3 owned disc',
+            cache_format='skate3-rust-map-v1',
+            # Proxy textures sit in the stream's own Tex table (no cTex_ files).
+            texture_stream_names=('Tex',) if (stream/f'{stream_name}_Tex.xst').is_file() else (),
+            raw_texture_cache=True, write_render_sources=False)
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        manifest['models'] = [m for m in manifest['models'] if m['stream_file'] in drawn]
+        manifest['grind_splines'] = []
+        manifest['textures'] = proxy_texture_keys(manifest['textures'], manifest['models'])
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        write(manifest_path, target, None, render_only=True)
+    report(f'{label}: proxy terrain {len(manifest["models"])} models from {len(drawn)} unpaired proxy files')
+    return len(manifest['models'])
 
 
 def convert(game_root, assets, converted):
@@ -71,8 +186,7 @@ def convert(game_root, assets, converted):
         groups, bindings = prep._bind_material_groups_by_guid(
             raw, prep._group_material_parameters(model.materials), len(model.meshes),
             allow_import_order_fallback=False)
-        selected = [(i, prep._material_metadata(groups, i)) for i in range(len(model.meshes))]
-        selected = [(i, m) for i, m in selected if m['shader_name'] in ('tree.default', 'animated.tree', 'ocean.reflection', 'environment.reflective_simple')]
+        selected = presentation_meshes([prep._material_metadata(groups, i) for i in range(len(model.meshes))])
         if not selected:
             continue
         textures = rx2_parser.parse_rx2(archive.read(entries['data/content/' + texture_name + '.rx2']))
@@ -118,6 +232,7 @@ def convert(game_root, assets, converted):
             path.write_text(json.dumps(manifest))
             write(path, output/(name+'.skate'), None, render_only=True)
             count += 1
+        convert_proxy(game_root, output, name)
     return count
 
 
@@ -135,4 +250,4 @@ if __name__ == '__main__':
         stem = Path(work)/'data/db'
         names = (Path(__file__).parent/'names.txt').read_text(encoding='utf-8').splitlines()
         converted = convert_vlt(stem/'skaterschema', stem/'skatercollections', names)
-        print('Prepared', convert(args.game_root, args.assets, converted), 'authored foliage backdrops')
+        print('Prepared', convert(args.game_root, args.assets, converted), 'global presentation backdrops')

@@ -164,15 +164,19 @@ def spawn_point(manifest,root):
         selector.consider(decode_rx2_clustered_meshes((root/entry['rx2']).read_bytes()))
     return selector.result(manifest['map_name'])
 
-def write(manifest_path,output,collision,report=lambda _:None, *, render_only=False, prepared_spawn=None, prepared_heading=0.):
+def write(manifest_path,output,collision,report=lambda _:None, *, render_only=False, prepared_spawn=None, prepared_heading=0., extensions=None):
     root=manifest_path.parent;m=json.loads(manifest_path.read_text());textures=m['textures']
     ids={name:i+1 for i,name in enumerate(sorted(textures))}
     excluded=set(m['normal_texture_policy']['excluded_texture_ids'])
     mats=io.BytesIO();vertices=io.BytesIO();indices=io.BytesIO();nv=ni=nm=0
+    # Per-model index ranges in the final buffer let callers reference shared
+    # geometry (MOBJ instances point at these without duplicating triangles).
+    ranges=[]
     dtype=np.dtype([('p','<f4',(3,)),('n','<f4',(3,)),('uv','<f4',(2,)),('lm','<f4',(2,)),
                     ('mat','<u4'),('decal','<f4',(2,)),('frame','i1',(4,))])
     for number,model in enumerate(m['models']):
         if number%100==0:report(f"Writing {m['map_name']}: model {number+1}/{len(m['models'])}")
+        first_index=ni
         with np.load(root/model['npz'],allow_pickle=False) as archive:
             for mesh in model['meshes']:
                 i=mesh['index']
@@ -224,6 +228,7 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
                     record['frame'][:,:3]=np.rint(np.clip(binormal,-1,1)*127).astype('i1');record['frame'][:,3]=np.rint(sign*127).astype('i1')
                 if not np.isfinite(pos).all():raise ValueError('Non-finite map geometry')
                 vertices.write(record.tobytes());indices.write((faces+nv).astype('<u4').tobytes());nv+=len(pos);ni+=faces.size;nm+=1
+        ranges.append((first_index,ni-first_index))
     report('Selecting starting position: '+m['map_name']);spawn=(0.,0.,0.) if render_only else (prepared_spawn if prepared_spawn is not None else spawn_point(m,root))
     # Match the supplied exporter's environment defaults. Native sky shaders
     # remain a separate runtime feature; no geometry is synthesized here.
@@ -231,8 +236,12 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
                  .045,.10,.26,1.,.32,.10,.05,.035,.06,.007,.015,.045,.045,.085,.17,.008,.014,.032,
                  1.,.96,.86,.42,.56,.92,1.,.18,.34,.10,1.,1.,1.]
     rails=m['grind_splines'];output.parent.mkdir(parents=True,exist_ok=True)
-    extensions=[(b'WMET',json.dumps(m,separators=(',',':')).encode())]
-    if not render_only:extensions.insert(0,(b'RWCM',collision.read_bytes()))
+    # `extensions` is a list of (tag, schema, payload) triples, or a
+    # callable invoked with the per-model index ranges once geometry is
+    # final (MOBJ records reference those ranges).
+    extra=[e if len(e)==3 else (e[0],1,e[1]) for e in (extensions(ranges) if callable(extensions) else extensions or [])]
+    records=[(b'WMET',1,json.dumps(m,separators=(',',':')).encode())]+extra
+    if not render_only:records.insert(0,(b'RWCM',1,collision.read_bytes()))
     from tools.asset_pipeline.setup_budget import job_threads
     threads=job_threads()
     # The geometry and extension blobs do not depend on the textures: compress
@@ -240,8 +249,8 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
     # written in the original order, so the file is byte-identical.
     with output.open('wb') as f, ThreadPoolExecutor(max_workers=2) as blobs:
         geometry=[blobs.submit(packed_blob,data) for data in (vertices.getvalue(),indices.getvalue(),b'')]
-        packed_extensions=[(tag,len(data),blobs.submit(packed_blob,data)) for tag,data in extensions]
-        del vertices,indices,extensions
+        packed_extensions=[(tag,schema,len(data),blobs.submit(packed_blob,data)) for tag,schema,data in records]
+        del vertices,indices,records
         f.write(b'SKATE14\0');u(f,0x12345678);string(f,m['map_name']);floats(f,*spawn,0. if render_only else prepared_heading,*environment)
         u(f,nm,len(ids),nv,ni,0,len(rails),0,0,0);f.write(mats.getvalue())
         write_textures(f,root,textures,threads)
@@ -256,8 +265,8 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
                 if len(raw)!=120:raise ValueError('Invalid native spline segment')
                 f.write(np.frombuffer(raw,dtype='>u4').astype('<u4').tobytes())
         u(f,len(packed_extensions))
-        for tag,size,blob in packed_extensions:
-            f.write(tag);u(f,1,size)
+        for tag,schema,size,blob in packed_extensions:
+            f.write(tag);u(f,schema,size)
             for part in blob.result():f.write(part)
     report('Map written: '+m['map_name'])
     if not render_only:

@@ -408,6 +408,9 @@ impl SpeechValue {
 pub struct PedSpeechEvent {
     pub ped: Entity,
     pub value: SpeechValue,
+    /// A conversation turn's variant and row value (`ped+2472` / `+2476`); no known audio
+    /// meaning yet (b43), carried for a later port.
+    pub topic: Option<(u8, i32)>,
 }
 
 /// Hold horn kind `kind` (1..=5) for `seconds` (the AI's choice; not retail data), then back to
@@ -484,8 +487,8 @@ impl ImpactSource {
 /// length the rule tests: the relative velocity at the contact in m/s (the vehicle's minus the
 /// other body's; measured with the hook `VEHHIT`, not mass-weighted: a board, the rider and a
 /// pedestrian each give their own speed against the car). Send one per contact (or per frame while touching: a
-/// repeat restarts the alarm, as in retail). Engine traffic does not exist yet; its collision
-/// handling will send this.
+/// repeat restarts the alarm, as in retail). Engine traffic sends one per skater contact
+/// (`living_world::vehicles::apply_vehicle_hits`).
 #[derive(Message, Clone, Copy, Debug)]
 pub struct VehicleImpact {
     pub vehicle: Entity,
@@ -501,9 +504,9 @@ impl VehicleImpact {
 }
 
 /// Read back: the car alarm rule set a parked car's alarm off (`restart` = it was already
-/// sounding; retail restarts its timer). Engine traffic restarts the car's parked timer here
-/// (retail zeroes `+3712` too, which delays pulling out) and must not pull out while the alarm
-/// sounds (`StayingParked`'s pull-out condition `sub_82C3A3A8` is false while bit 0x10 is set).
+/// sounding; retail restarts its timer). Engine traffic reads the sounding alarm back every tick
+/// (`Car::alarming`): the parked timer `+3712` stays 0 and the car does not pull out while it
+/// sounds (`StayingParked` `82C39138`, pull-out condition `sub_82C3A3A8`).
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct VehicleAlarmStarted {
     pub vehicle: Entity,

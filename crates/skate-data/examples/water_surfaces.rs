@@ -20,7 +20,15 @@ struct Water {
 fn main() {
     let mut failed = false;
     for path in std::env::args_os().skip(1) {
-        let map = match skate_data::skate_map::SkateMap::load(std::path::Path::new(&path)) {
+        // Presentation packages (private/native-backdrops, native-props) have
+        // no collision; read them with the render-only reader.
+        let loaded = skate_data::skate_map::SkateMap::load(std::path::Path::new(&path)).or_else(|e| {
+            std::fs::read(&path)
+                .map_err(|io| io.to_string())
+                .and_then(|bytes| skate_data::skate_map::SkateMap::parse_render_only(&bytes))
+                .map_err(|_| e)
+        });
+        let map = match loaded {
             Ok(map) => map,
             Err(e) => {
                 eprintln!("{}: {e}", path.to_string_lossy());

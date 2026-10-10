@@ -43,6 +43,9 @@ def _retail_shader_family(shader_name: str) -> int:
         return 32
     if shader.startswith("sky."):
         return 40
+    if shader.startswith("dynamicobject."):
+        # Props (DMOs): dynamicobject_defaultPS, sun + shadow lit, no lightmap.
+        return 15
     return 0
 
 def _retail_render_flags(shader_name: str, alpha_mode: int) -> int:

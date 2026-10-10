@@ -88,6 +88,110 @@ Diagnostics only; nothing in retail Skate 3 to match. The proof obligation is th
 `cargo test -p skate-game --release --bin skate3rust -- frame_timing graphics_menu`, plus skate-mods
 `frame_statistics_have_defaults_and_keep_host_values`. Listed in "Verification" below.
 
+### `FRAME_HITCH` log line (2026-10-08)
+
+Problem: the user reported "considerable frametime lags while flipping in the air on large jumps", then
+"yes on every large jump when flipping" (session 2026-10-07 13:09, spillway after the observatory). The
+game log had no frame times (the counter only drew the overlay, `SKATE_FRAME_LOG` was off), so the hitch
+could not be placed or attributed afterwards.
+
+Change: `frame_timing/hitch.rs` writes one `FRAME_HITCH` line per hitch frame, always on, rate-limited:
+frame ms, median, main-thread CPU, physics loop ms and steps, wait outside the schedules (render thread,
+GPU, present, OS), the game thread's wait for the audio render lock, the wall time of the stages (fixed
+input / controls / physics; frame assets / present / animation / audio pass), the phases inside the
+physics tick (animation graphs, collision and solve, finish, scoring) and the scoring HUD (fixed advance,
+frame render), the slowest of them, the player (state, airborne, wheels, body flip, trick name and
+sequence, board position, tick), the entity count and the audio load (mixer voices and AEMS instances of
+the last rendered block), plus how many hitch frames the rate limit skipped.
+
+- Thresholds are data with defaults (`HitchConfig`: factor 2.0 x median, floor 50 ms, at most one line
+  per 0.5 s), overridable without a rebuild: `SKATE_FRAME_HITCH=off` or
+  `SKATE_FRAME_HITCH=factor=2,floor_ms=50,interval_s=0.5`. No mod tuning path exists for the frame
+  diagnostics (the snapshot's `frame` section is read-only), see open questions.
+- Observation only: the marker systems write only `HitchSpans`; the phase timers are relaxed atomics
+  around existing calls; the audio counters are two stores per rendered block and one clock pair per game
+  thread lock. Test `systems_write_only_their_own_state`, and the existing
+  `game_is_identical_with_diagnostics_on_or_off`.
+
+Measurements so far (headless, 2026-10-08, optimised test build):
+
+- `flip_hitch_timing` (new, data-gated, `tests/flip_hitch_timing.rs`): scripted ollies, kickflips,
+  heelflips and late flips through the real `frame::advance`, on normal airs and on large airs (upward
+  speed added on the first airborne tick, ~5 s of air), first use and repeated. Worst physics tick 2.8 ms,
+  median about 1 ms; animation graphs at most 0.5 ms, scoring 0.0 ms. No tick spikes on a flip, first or
+  repeated. Stock clips decode lazily on first use (`animation_frames/native.rs`), but that costs well
+  under a millisecond and happens once per clip, so it cannot cause a hitch on every flip.
+- `e2e_render` with `E2E_TIMING=1` on 70 s of the 13:58 session's audio state log with 12 airs of 1.2-2.2 s
+  with spins (rows 77000-81200 of `state_20261007_135825.tsv`), all player layers including tricks and
+  treatment: game-thread audio at most 0.18 ms per frame, render at most 0.5 ms per 256-frame block
+  (budget 5.3 ms). A ground-riding window of the same session gives the same numbers. The trick and
+  treatment banks are loaded and decoded at boot (`native.rs` `load_optional_player_banks`), so a flip
+  reads nothing from disk.
+- So the player's physics, animation graphs, scoring and player audio are not the cause. Not measurable
+  headlessly: the frame-side animation present / skinning, the camera, the HUD render and the renderer;
+  the `FRAME_HITCH` line separates those in the next session.
+
+### Scoring HUD asset churn (2026-10-08, branch `world/hud-hitch`)
+
+Problem: lead for the flip hitch: the phases named for it include `hud_advance` and `hud_render`, and the
+scoring HUD looked like it rebuilt its meshes and materials every frame.
+
+Root cause found in the code: `scoring_hud::render` does keep one retained slot (entity, mesh, material)
+per draw, so it does not add new assets per frame. But for every slot, every frame, it called
+`Assets::get_mut` on the mesh and the material and replaced them, and inserted `Visibility` on every slot
+entity. `get_mut` marks the asset modified whether or not anything changed (the same trap the HUD target
+resize hit earlier), so every HUD glyph and shape was re-extracted, its vertex buffer re-uploaded and its
+material bind group rebuilt in the render world every frame. The number of draws grows with the trick text
+on screen, so the churn is highest exactly while a trick name and score are shown in the air.
+
+Evidence (headless, optimised test build, the real scoring runtime and the real HUD movie;
+`scoring_hud::draw_tests::hud_writer_is_identical_and_skips_unchanged_assets`, 2400 frames: ten 2.5 s airs
+with three flips each, multiplier 3 from the second air, a bail; two runs, same numbers):
+
+| | old writer | new writer |
+|---|---|---|
+| Mesh `Modified` events per frame (mean) | 21.9 | 1.3 |
+| Material `Modified` events per frame (mean) | 21.9 | 2.3 |
+| Worst frame (mesh + material events) | 80 (40 draws on screen) | 50 (frames where the trick text changes) |
+| Writer cost, main thread, p50 / p99 | 9.8-10.1 / 19.1-19.6 us | 4.4 / 22.6-23.9 us |
+
+Other main-thread HUD costs in the same run: `hud_runtime::update` (the `hud_advance` phase) p50 15 us,
+p99 130 us; `apt_scene::draw` p50 20 us, p99 35 us. Maxima (35-260 us) moved between runs and are noise.
+So on the main thread the HUD costs well under a millisecond with either writer and cannot by itself
+make a frame twice the median; `hud_advance` / `hud_render` naming a hitch would point elsewhere. The cost
+the fix removes lands in the render world (extract, mesh allocator, bind groups: up to 80 asset
+re-preparations per frame on trick frames), which headless tests cannot time; in a `FRAME_HITCH` line it
+shows as `wait` outside the schedules, not as `hud_render`.
+
+Change (`crates/skate-game/src/scoring_hud.rs`): `apply_draws` writes a slot's mesh only when its
+positions, UVs or normals differ bit for bit (`to_bits`, so -0.0 / +0.0 and NaN payloads count as
+changes) from what the mesh already holds, its material only when the colour transform bits or the atlas
+handle differ, and its `Visibility` only when it differs from the value it last inserted (`Slot::visibility`,
+`None` until the first insert so a new slot keeps the spawn default `Inherited` for its first frame, as
+before). New slots are spawned exactly as before. Slot order, z, render layer and the panic-free
+behaviour on a missing texture are unchanged. The main-thread p99 is about 4 us higher (the comparison
+runs before a rebuild on frames where a slot changes); traded for removing ~40 render-world re-uploads per
+frame on average.
+
+Verification:
+- Identity: the old writer is kept verbatim as a test-only reference; the test drives both with the same
+  draws every frame and asserts, after every frame, that every slot is identical: entity, `Visibility`,
+  `Transform` z bits, `RenderLayers`, mesh and material handle bindings, topology, indices, asset usage,
+  every attribute's bytes, colour transform bits and atlas texture. Passes on all 2400 frames, twice.
+- `skate-game` suite: 561 passed, 1 failed in the binary (`setup::tests::pipelines_accept_valid_group_outputs_when_fingerprint_changes`,
+  the known pre-existing failure), the existing `hud_target_changes_only_on_resize_and_refreshes_composite` passes.
+- Retail parity: the HUD look cannot change; the render world receives the same asset contents, only
+  fewer redundant change notices. Moddability: mods only read the HUD's trick names
+  (`modding::observation`); no mod writes HUD geometry, so there is nothing to reset on mod disable.
+  Deterministic, no networking.
+
+Open questions (need a user session with `FRAME_HITCH`, or trace-all with `SKATE_PERF_RENDER`):
+- Whether this churn was the flip hitch: compare `wait` and the render phase split (`PrepareAssets`,
+  `PrepareMeshes`) on large flips before and after this branch.
+- If hitches remain with `hud_render` or `hud_advance` as the slowest phase, the cause is not their own
+  cost (sub-millisecond headless); look at what the frame waited on.
+- `hud_runtime::update` p99 130 us is the largest HUD cost left; not a hitch, not changed here.
+
 ### Follow-up: Simple and Verbose modes
 
 The full readout covers a lot of the screen for everyday play. The GRAPHICS row "Frame-time counter" now cycles
@@ -214,6 +318,10 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   `graphics_menu.rs`, `modding/mod.rs`; `crates/skate-mods/src/vm.rs`; `sdk/ENGINE_API.md`, `sdk/skate.lua`.
 - `tools/asset_pipeline/setup_budget.py` (new), `install.py`, `map_writer.py`, `pipeline-equivalence.json`;
   tests `test_setup_budget.py` (new), `test_map_writer.py`.
+- `FRAME_HITCH`: `frame_timing/hitch.rs` (new), `frame_timing/mod.rs`, `physics/frame.rs`
+  (phase timers), `scoring_hud.rs` (HUD phases), `game_audio/timing.rs` (voice and lock counters),
+  `game_audio/mod.rs` (`timing`, `CueSet` visible to the crate), `tests/flip_hitch_timing.rs` (new),
+  `physics.rs` (test module).
 
 ## Open questions
 
@@ -224,3 +332,100 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   (`TRACE_PLAY.bat`) for that; not built into the counter.
 - Phase 5 leftovers in vendored parsers (above), and `hash_and_cleanup` (~3 s, I/O).
 - Default on/off of the counter: off (todo); the user may prefer on.
+- `FRAME_HITCH`: the cause of the flip hitch on large airs is not found yet (the scoring HUD asset churn, removed on `world/hud-hitch`, is the first candidate, see above); the next session with the line
+  names the stage. Thresholds are env-tunable only; a mod-facing setter (and reset on mod disable) would
+  need a writable frame-diagnostics section in the mod API.
+
+## Trace-all mode (`SKATE_TRACE_ALL=1`)
+
+Status: done on `world/trace-all` (not yet played).
+
+Problem: one play session should capture every trace the engine has, and the name has to mean what it says. Before, trace-all only meant whatever the launcher remembered to set, and two of those switches were unsafe for a whole session: `SKATE_PERF_REPORT` exits the game after 25 s, and `SKATE_GPU_TIMING` makes device creation fail on an adapter without timestamp queries.
+
+Change (`crates/skate-game/src/trace_all.rs`): `apply()` runs first in the game process, before any thread or the log subscriber, and sets every session diagnostic switch that is not already on. Every existing reader (including the `OnceLock` caches in audio and physics) then sees it unchanged. Paths the launcher did not set go next to the ones it did set (fallback `<exe dir>/logs/trace-all-<unix seconds>`). One `TRACE_ACTIVE` startup line lists every active trace and where it writes.
+
+| Switch | Output |
+|---|---|
+| `SKATE_FRAME_LOG` | `frames.tsv`, one row per frame (writer thread) |
+| `SKATE_AUDIO_STATE_LOG` | `audio_state.tsv`, one row per audio frame (writer thread; rows are now copied as values and formatted on the writer thread) |
+| `SKATE_PERF_REPORT` | `perf.json`, rolling: 15 s windows for the whole session, rewritten by the `perf-report` thread after every window (write then rename), one `SKATE_PERF window=` line per window; never exits |
+| `SKATE_PERF_GPU` | render diagnostics in the report (GPU pass times when supported); in trace-all the GPU queries run on one frame in 30 (`SKATE_PERF_GPU_EVERY`, see [GPU queries sampled](#gpu-queries-sampled-skate_perf_gpu_every)) |
+| `SKATE_PERF_RENDER` | render phase split in the report, reset per window |
+| `SKATE_GPU_TIMING` | in trace-all the features are not forced: Bevy's default `Functionality` priority already requests every feature the adapter has, so timestamps are on when supported and device creation cannot fail; `GPU_TIMING timestamp_query=yes/no` logged once |
+| `SKATE_AUDIO_TRACE` | log: `AUDIO_NATIVE` post/release, `AUDIO_EVENT` brake/push/grind |
+| `SKATE_AUDIO_TIMING` | log: audio cost once per second |
+| `SKATE_LIVING_WORLD_DEBUG` | log: population / NPC / traffic readout every 5 s |
+| `SKATE_FPS_LOG` | log: `SKATE_FPS_SAMPLE` lines |
+| Chrome trace (`--trace`) | armed for F9 / F10 to `chrome-trace.json` next to the report (nothing timed or written until F9; field-less spans no longer allocate a label) |
+
+Not included on purpose: test or tool switches (`SKATE_BUDGET_MAP`, `SKATE_VERIFY_*`, `SKATE_RETAIL_*_VECTORS`, data roots) and switches that change the game (`SKATE_AUDIO_MORE_AUDIBLE`, `SKATE_FIXED_EXPOSURE`). `SKATE_AEMS` (still set by the launcher) has no reader any more.
+
+Log writer: with trace-all every log line goes through a bounded queue (16384 lines) to a `log-writer` thread instead of a blocking stderr write on the calling thread (the crash supervisor relays stderr through a pipe). A full queue drops and counts (`LOG_DROPPED`), never blocks. A panic or clean exit waits for the queue to drain first.
+
+`SKATE_PERF_RENDER` cost: the seven marker systems sit between render sets that Bevy already chains (`ExtractCommands, PrepareAssets, PrepareMeshes, ManageViews, Queue, PhaseSort, Prepare, Render, Cleanup`), so they add no ordering beyond what exists; each does one atomic swap.
+
+New or changed log lines (always on unless noted, all edge-triggered or rate-limited):
+- `MANUAL_LANDING` per landing (ported from the hails-only line), now with `engage_time` (the motion graph's `ManualEngageTime` intent at touchdown), `graph_state` (motion graph state id and name) and `clip`.
+- `PROP_HELD from=... to=...` on every grab / release edge; `HELD_PROP` at 5 per second in trace-all (1 per second otherwise).
+- `BOARD_POSSESSION hold / let_go` on the board hand edges (board dropped to grab a prop).
+- `RETAIL_MATERIAL_FAMILIES` once per material table load (family counts, 15 = dynamicobject D9).
+- `WORLD_SHADOW_FLOOR rgb=[...] retail=true/false` at startup and whenever a mod changes the floor (car shadows under bridges).
+- `GPU_TIMING timestamp_query=yes/no ...` once at startup (trace-all or `SKATE_GPU_TIMING`).
+
+Already diagnosable and left as they are: `AUDIO_LANDING`, `AUDIO_EVENT body impact` (a silent fall shows as air / bail / region impact columns in the audio state log with no body impact line), `NPC_SKATER_BACKWARDS`, `PED_*`, `FRAME_HITCH` plus the frame log.
+
+### Measured overhead
+
+`frame_timing::tests::trace_all_overhead` (`--ignored --nocapture`): a 3000-frame headless app with the always-on frame timing plugin, against the same app plus the trace-all per-frame work on the game thread (frame log row, rolling perf sample and window handover), best of 7 interleaved runs, two runs:
+
+| Run | off (us/frame) | on (us/frame) | delta |
+|---|---|---|---|
+| 1 | 28.85 (spread 3.17) | 34.10 (spread 4.50) | 5.25 us |
+| 2 | 28.76 (spread 2.52) | 35.27 (spread 2.81) | 6.52 us |
+
+About 6 us per frame, 0.04 % of a 16.7 ms frame and inside the run-to-run spread. `game_audio::state_log::tests::state_log_row_cost`: formatting a state log row costs 1.81 us; the game thread now only copies it into the queue, 0.03 us. Log lines in trace-all cost one small buffer and a `try_send` on the calling thread instead of a stderr write. GPU timestamp query cost cannot be measured headless (needs the game window); it is only on when the adapter supports it.
+
+### Tests
+
+- `trace_all::tests` (every switch turned on, launcher paths kept, already-on switches left alone).
+- `frame_timing::tests::game_is_identical_with_trace_all_on_or_off`: the fixed-step game is bit-identical with the trace-all per-frame diagnostics, and the rolling report writes windows instead of exiting. The existing `game_is_identical_with_diagnostics_on_or_off` still passes.
+- Full `skate-game` suite: 563 passed, 1 failed (`setup::tests::pipelines_accept_valid_group_outputs_when_fingerprint_changes`, the known pre-existing failure).
+
+### Files
+
+`crates/skate-game/src/trace_all.rs` (new), `main.rs`, `app.rs`, `performance.rs`, `profiling.rs`, `game_audio/state_log.rs`, `physics/manual_landing_log.rs` (new), `physics.rs`, `physics/prop_dynamics.rs`, `physics/offboard/board_manager.rs`, `retail_render.rs`, `frame_timing/mod.rs`.
+
+### GPU queries sampled (`SKATE_PERF_GPU_EVERY`)
+
+Status: done in the `world/living-world` worktree (2026-10-08), uncommitted, not yet played.
+
+Problem: after a trace-all session (University, 2026-10-08 09:58) the user said "ooooof the fps and lag on the trace all is ROUGH." The perf report showed every window at a 33.6 ms median (p95 about 34.6 ms) with the main schedule at about 9 ms, physics about 3 ms, render CPU about 3 ms and the GPU passes about 9.5 ms in total. The suspect was the per-pass GPU timestamp and pipeline statistics queries that `SKATE_PERF_GPU` adds (Bevy `RenderDiagnosticsPlugin`) on every pass of every frame.
+
+Root cause of the 33.6 ms: not the queries. The settings file every launcher version shares (`data/installations/<id>/settings/graphics.json`, written 2026-10-07 23:20) has `"fps": 30`, the graphics menu's FPS limit, and `graphics_menu::pace` sleeps every frame up to 1/30 s. The game runs with `PresentMode::AutoNoVsync`, so nothing else locks the frame rate. The session's frame log agrees: frame median 33.56 ms against a main thread median of 8.76 ms, and `AUDIO_TIMING frame=33.6 ms`. The missing ~24 ms per frame is the limiter's sleep. Turning Esc > GRAPHICS > FPS limit back to Off brings the frame rate back.
+
+The queries still cost something, so they are sampled now. Bevy's readback is asynchronous (`map_async`, collected on a later frame), so the queries never stall the CPU; their cost is GPU work and resolve copies on every pass.
+
+Change (`crates/skate-game/src/performance.rs`):
+- `SKATE_PERF_GPU_EVERY=<frames>`: how often the GPU queries run. Default 30 in trace-all, 1 (every frame, the old behaviour) for the one-shot `SKATE_PERF_REPORT` benchmark; 0 turns the GPU queries off while every other trace stays on. A launcher version or user can set it like any other switch (`versions.json` `env`). The value is logged at startup (`SKATE_PERF_GPU sample_every=`) and written into the report (`gpu_sample_every_frames`).
+- Bevy's render system only records GPU queries while its diagnostics recorder resource is in the render world (it removes it, runs the graph, puts it back). A render world system right before `RenderSystems::Render` moves the recorder aside on frames that are not sampled and back on sampled ones. The recorder type is crate-private in bevy_render, so it is named through the public `RenderContext::new` signature; no vendoring.
+- Bevy smooths render diagnostics over about 0.1 s, so with every frame sampled the report already held roughly the newest frames; with one frame in 30 it holds the newest sampled frame. Readbacks in flight are collected on the next sampled frame, so values arrive up to one interval late.
+- Nothing else changes: frame log, audio state log, perf windows, render phase split and log lines are written by the same code as before.
+
+Measured (release build, same build and scene for every mode: University spawn, idle, muted, windowed 1280x800, FPS limit off through a separate settings folder, RTX 4080 SUPER, Vulkan; 60 s per run, first 25 s dropped; two rounds, the second in reverse order; tool `.local/research/traceall-gpu-bench.ps1`):
+
+| Mode | Round 1 frame ms median / p95 | Round 2 frame ms median / p95 | Main ms median (r1 / r2) |
+|---|---|---|---|
+| no trace (frame log only) | 2.46 / 4.67 | 3.27 / 5.94 | 2.03 / 2.56 |
+| trace-all, GPU queries off (`EVERY=0`) | 2.60 / 4.86 | 2.79 / 4.99 | 2.10 / 2.21 |
+| trace-all, sampled (default, 30) | 3.54 / 5.99 | 2.95 / 5.28 | 2.72 / 2.32 |
+| trace-all, every frame (`EVERY=1`, old) | 3.83 / 6.20 | 4.01 / 6.29 | 2.81 / 2.92 |
+
+Every-frame queries cost about 1.2 ms per frame here (median 3.92 against 2.70 with them off, both rounds averaged), about 40 % of a frame in this light scene. Sampled costs 0.16 to 0.94 ms over off, inside the run-to-run spread (the no-trace runs differ by 0.8 ms between rounds). At the user's 30 fps limit none of this was visible; it matters once the limit is off.
+
+Identical traces: in all six trace-all runs the audio state log has the same 88-column header and 0 malformed rows, the frame log the same header and 0 malformed rows, and `perf.json` the same keys with 3 windows. Sampled and every-frame reports both hold the 17 `elapsed_gpu` entries. The sampled report lists 76 render diagnostics against 82: six invocation counts of the transparent 2D/3D passes were zero on every sampled frame, and the report already leaves out zero values. Use `SKATE_PERF_GPU_EVERY=1` to catch passes that only run now and then. Tests: `performance::tests::gpu_sample_interval_defaults_and_overrides`, `performance::tests::gpu_gate_parks_and_restores_the_recorder` (the recorder is never lost or doubled), and the existing `frame_timing::tests::game_is_identical_with_trace_all_on_or_off` / `..._with_diagnostics_on_or_off` pass (28 passed in `performance::`, `frame_timing::`, `trace_all::`).
+
+### Open questions
+
+- The Chrome trace is armed with F9 / F10 on the keyboard only; a couch session with a pad will not start it.
+- The launcher still sets `SKATE_AEMS=1`, which nothing reads.
+- `BOARD_POSSESSION` lines come from the shared board controller; if NPC or remote skaters drive it the line has no owner field yet.

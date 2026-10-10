@@ -247,6 +247,70 @@ fn finalize_principal_mass(
     }
 }
 
+/// Per-type body values a dynamic world object (DMO) builds its Inertia from
+/// (TU3 82C4E568, once per body build): the type record's mass (data +304),
+/// velocity caps (+292 linear, +296 angular), drag (+308 / +336) and the box
+/// inertia shape (+16 scale and +32 offset on the AABB half extents).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DmoBodyData {
+    pub mass: f32,
+    pub maximum_linear_velocity: f32,
+    pub maximum_angular_velocity: f32,
+    pub linear_drag: f32,
+    pub angular_drag: f32,
+    pub inertia_scale: Vector3,
+    pub inertia_offset: Vector3,
+}
+
+/// TU3 82C4E568 Inertia fill for a DMO body from its local AABB half extents:
+/// inverse mass = 1 / mass (+16), caps and drag copied as is (+24 / +28 /
+/// +32 / +36), and the box inertia of 82C47FC8 on
+/// `h = half_extents * inertia_scale + inertia_offset` (vmaddfp, fused). When
+/// any of h.x, h.y, h.z is not > 0 (NaN included) retail uses (1000, 1000,
+/// 1000) instead (0x82256FE8). 82C47FC8: k = (1/3) / inverse mass, inverse
+/// tensor = 1 / (k (h.y^2 + h.z^2), k (h.x^2 + h.z^2), k (h.x^2 + h.y^2)) with
+/// two Newton steps on the estimate, +20 = 1 / the smallest inverse moment.
+pub fn dmo_body_inertia(half_extents: Vector3, data: DmoBodyData) -> RetailInertiaDynamics {
+    let inverse_mass = 1.0 / data.mass;
+    let h = Vector3::new(
+        half_extents.x.mul_add(data.inertia_scale.x, data.inertia_offset.x),
+        half_extents.y.mul_add(data.inertia_scale.y, data.inertia_offset.y),
+        half_extents.z.mul_add(data.inertia_scale.z, data.inertia_offset.z),
+    );
+    let h = if h.x > 0.0 && h.y > 0.0 && h.z > 0.0 {
+        h
+    } else {
+        Vector3::new(1000.0, 1000.0, 1000.0)
+    };
+    // 0x822F87B8 = 1/3 as f32, divided by the inverse mass (fdivs).
+    let k = (1.0f32 / 3.0) / inverse_mass;
+    let (x2, y2, z2) = (h.x * h.x, h.y * h.y, h.z * h.z);
+    let inverse_tensor = Vector3::new(
+        refined_reciprocal((y2 + z2) * k),
+        refined_reciprocal((x2 + z2) * k),
+        refined_reciprocal((x2 + y2) * k),
+    );
+    let smallest_xy = if inverse_tensor.x < inverse_tensor.y {
+        inverse_tensor.x
+    } else {
+        inverse_tensor.y
+    };
+    let smallest_inverse = if smallest_xy < inverse_tensor.z {
+        smallest_xy
+    } else {
+        inverse_tensor.z
+    };
+    RetailInertiaDynamics {
+        inverse_tensor,
+        inverse_mass,
+        spherical: 1.0 / smallest_inverse,
+        maximum_linear_velocity: data.maximum_linear_velocity,
+        maximum_angular_velocity: data.maximum_angular_velocity,
+        linear_drag: data.linear_drag,
+        angular_drag: data.angular_drag,
+    }
+}
+
 fn refined_reciprocal(value: f32) -> f32 {
     let mut estimate = native_arithmetic::reciprocal_estimate(value);
     for _ in 0..2 {
@@ -259,6 +323,34 @@ fn refined_reciprocal(value: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dmo_body_inertia_is_the_scaled_box_and_falls_back_to_1000() {
+        let data = DmoBodyData {
+            mass: 100.0,
+            maximum_linear_velocity: 100.0,
+            maximum_angular_velocity: 50.0,
+            linear_drag: 0.1,
+            angular_drag: 0.35,
+            inertia_scale: Vector3::new(1.2, 1.2, 1.2),
+            inertia_offset: Vector3::ZERO,
+        };
+        let i = dmo_body_inertia(Vector3::new(0.5, 1.0, 0.25), data);
+        assert_eq!(i.inverse_mass, 0.01);
+        assert_eq!((i.maximum_linear_velocity, i.maximum_angular_velocity, i.linear_drag, i.angular_drag), (100.0, 50.0, 0.1, 0.35));
+        let (x, y, z) = (0.6f32, 1.2f32, 0.3f32);
+        let k = 100.0 / 3.0;
+        let moments = [(y * y + z * z) * k, (x * x + z * z) * k, (x * x + y * y) * k];
+        for (got, want) in [i.inverse_tensor.x, i.inverse_tensor.y, i.inverse_tensor.z].into_iter().zip(moments) {
+            assert!((got * want - 1.0).abs() < 1e-5);
+        }
+        // +20 is the largest moment (1 / the smallest inverse): z, x^2 + y^2.
+        assert!((i.spherical / moments[2] - 1.0).abs() < 1e-5);
+        // Any half extent not > 0 after scale + offset: retail's 1000 box.
+        let flat = dmo_body_inertia(Vector3::new(0.5, 0.0, 0.25), data);
+        let big = (1000.0f32 * 1000.0 * 2.0) * k;
+        assert!((flat.inverse_tensor.x * big - 1.0).abs() < 1e-5);
+    }
 
     #[test]
     fn both_mass_finalizers_preserve_nan_and_use_volume_only_below_threshold() {

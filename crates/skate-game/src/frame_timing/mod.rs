@@ -19,6 +19,7 @@
 //! Observation only: these systems read clocks and write only this module's own
 //! resource and its overlay entities (test `systems_touch_only_their_own_state`),
 //! so gameplay is identical with the readout and the log on or off.
+pub(crate) mod hitch;
 pub(crate) mod log;
 pub(crate) mod stats;
 
@@ -61,6 +62,8 @@ pub(crate) struct FrameTiming {
     steps_pending: u32,
     last_main_ms: f32,
     last_fixed_ms: f32,
+    last_median_ms: Option<f32>,
+    last_now_s: f64,
     origin: Instant,
     /// Start of the current frame: monotonic and wall clock.
     frame_started: Option<(Instant, f64)>,
@@ -89,6 +92,8 @@ impl Default for FrameTiming {
             steps_pending: 0,
             last_main_ms: 0.0,
             last_fixed_ms: 0.0,
+            last_median_ms: None,
+            last_now_s: 0.0,
             origin: Instant::now(),
             frame_started: None,
             fixed_started: None,
@@ -152,6 +157,8 @@ impl FrameTiming {
         self.last_steps = steps;
         self.last_main_ms = main_ms;
         self.last_fixed_ms = fixed_ms;
+        self.last_median_ms = median;
+        self.last_now_s = now_s;
         if self.history.len() == stats::HITCH_HISTORY {
             self.history.pop_front();
         }
@@ -179,6 +186,19 @@ impl FrameTiming {
         self.hitches = self.window.iter().filter(|s| s.hitch).count();
         self.shown = std::mem::take(&mut self.interval);
         true
+    }
+
+    /// The frame `begin_frame` closed last (the `FRAME_HITCH` line's numbers).
+    pub(crate) fn closed(&self) -> hitch::ClosedFrame {
+        hitch::ClosedFrame {
+            frame: self.frame,
+            ms: self.last_ms,
+            median_ms: self.last_median_ms,
+            main_ms: self.last_main_ms,
+            fixed_ms: self.last_fixed_ms,
+            steps: self.last_steps,
+            now_s: self.last_now_s,
+        }
     }
 
     fn now_s(&self) -> f64 {
@@ -262,6 +282,7 @@ impl Plugin for FrameTimingPlugin {
             .add_systems(RunFixedMainLoop, end_fixed.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop))
             .add_systems(bevy::app::FixedFirst, count_fixed_step)
             .add_systems(Last, (record, show).chain());
+        hitch::register(app);
     }
 }
 
@@ -551,6 +572,93 @@ mod tests {
         assert!(last_steps <= 8, "only the final frame's steps are unlogged: {last_steps}");
         assert!(rows.iter().all(|r| r.main_ms <= r.frame_ms + 0.01), "a frame contains its schedules");
         let _ = std::fs::remove_file(path);
+    }
+
+    /// The same game with every trace-all diagnostic that runs per frame on the game thread: the
+    /// frame timing plugin, the frame log and the rolling performance report (short windows, so
+    /// several are handed to the writer thread during the run).
+    fn run_trace_all(dir: &std::path::Path, frames: u64) -> (Sim, std::time::Duration) {
+        use bevy::time::TimeUpdateStrategy;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).init_resource::<Sim>().add_systems(FixedUpdate, sim);
+        app.add_plugins(FrameTimingPlugin);
+        app.insert_resource(FrameLogSink(log::FrameLog::open(dir.join("frames.tsv")).unwrap()));
+        app.init_resource::<bevy::diagnostic::DiagnosticsStore>();
+        crate::performance::install(
+            &mut app,
+            crate::performance::Performance::rolling(dir.join("perf.json"), 0.02).with_warmup(0.0),
+        );
+        let started = std::time::Instant::now();
+        for i in 0..frames {
+            let ms = if i % 97 == 0 { 120 } else { 3 + i % 5 * 4 };
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(std::time::Duration::from_millis(ms)));
+            app.update();
+        }
+        let elapsed = started.elapsed();
+        let sim = app.world().resource::<Sim>().clone();
+        app.world_mut().remove_resource::<FrameLogSink>();
+        (sim, elapsed)
+    }
+
+    /// Trace-all on or off: the simulated game sees the same fixed steps and deltas, bit for bit,
+    /// and the rolling report keeps writing windows instead of exiting the app.
+    #[test]
+    fn game_is_identical_with_trace_all_on_or_off() {
+        let (plain, _) = run_app(false, None);
+        let dir = std::env::temp_dir().join(format!("skate-trace-all-app-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (traced, _) = run_trace_all(&dir, 600);
+        assert_eq!(plain, traced);
+        assert_eq!(plain.state.to_bits(), traced.state.to_bits());
+        // The writer thread rewrites the report after each window; give it a moment.
+        let report = dir.join("perf.json");
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !report.exists() && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let json: serde_json::Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+        assert_eq!(json["mode"], "rolling");
+        assert!(!json["windows"].as_array().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Per-frame game-thread cost of the trace-all diagnostics (run with `--ignored --nocapture`):
+    /// the same 3000-frame app as normal play has it (the frame timing plugin is always on) and with
+    /// the trace-all additions (frame log, rolling perf report), interleaved, best of 5 each.
+    #[test]
+    #[ignore = "timing measurement, run by hand"]
+    fn trace_all_overhead() {
+        use bevy::time::TimeUpdateStrategy;
+        let frames = 3000u64;
+        let plain = || {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins).init_resource::<Sim>().add_systems(FixedUpdate, sim);
+            app.add_plugins(FrameTimingPlugin);
+            let started = std::time::Instant::now();
+            for i in 0..frames {
+                let ms = if i % 97 == 0 { 120 } else { 3 + i % 5 * 4 };
+                app.insert_resource(TimeUpdateStrategy::ManualDuration(std::time::Duration::from_millis(ms)));
+                app.update();
+            }
+            started.elapsed()
+        };
+        let dir = std::env::temp_dir().join(format!("skate-trace-all-cost-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (mut off, mut on) = (Vec::new(), Vec::new());
+        for _ in 0..7 {
+            off.push(plain());
+            on.push(run_trace_all(&dir, frames).1);
+        }
+        let per_frame = |v: &[std::time::Duration]| v.iter().min().unwrap().as_secs_f64() * 1e6 / frames as f64;
+        let spread = |v: &[std::time::Duration]| {
+            let us: Vec<f64> = v.iter().map(|d| d.as_secs_f64() * 1e6 / frames as f64).collect();
+            us.iter().cloned().fold(f64::MIN, f64::max) - us.iter().cloned().fold(f64::MAX, f64::min)
+        };
+        eprintln!(
+            "TRACE_ALL_OVERHEAD frames={frames} off_us_per_frame={:.2} (spread {:.2}) on_us_per_frame={:.2} (spread {:.2}) delta_us={:.2}",
+            per_frame(&off), spread(&off), per_frame(&on), spread(&on), per_frame(&on) - per_frame(&off)
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Diagnostics never change the game: no system here writes any resource

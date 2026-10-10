@@ -9,6 +9,9 @@ pub enum Provider {
     Dmo { selection_variant:u8,matching_group:i32,record_enabled:bool },
     ///82C4BE80: actual dynamic-object provider, no actor matching gate.
     LivingWorld,
+    ///82C35B98 / 82C35840 (vtable 0x82322514, scene slot +4088, query mode bit 0x02): traffic cars. No disabled
+    ///gate, no kind filter (records are type 1), assembly required (car+172 chain, b49).
+    Vehicle,
 }
 #[derive(Clone,Debug)]
 pub struct Spline { pub descriptor:Descriptor,pub geometry:Arc<Geometry>,pub word_272:u32 }
@@ -41,6 +44,9 @@ impl Registry {
             }
             for spline in &object.splines {
                 if !matches!(spline.descriptor.kind,1|2) {return Err("Unknown native grab descriptor kind");}
+                if matches!(object.provider,Provider::Vehicle)!=(spline.descriptor.kind==1) {
+                    return Err("Car grab records are type 1, others type 2");
+                }
                 object.record(spline)?;
             }
             if objects[..index].iter().any(|prior|prior.id==object.id) {

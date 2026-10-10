@@ -600,7 +600,7 @@ fn apply(host: &mut WorldHost, rt: &mut skate_audio::runtime::Runtime, cmds: Vec
                 }
                 let muted = host.rules.as_deref().is_some_and(|r| {
                     let (name, index) = super::mod_audio::world_slot(&slot);
-                    r.mutes(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::World, class, slot: name, id: index, owner })
+                    r.mutes(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::World, class, slot: name, id: index, owner, hit: None })
                 });
                 if !muted {
                     host.nodes.insert((owner, slot), rt.post(id, &words));
@@ -608,7 +608,7 @@ fn apply(host: &mut WorldHost, rt: &mut skate_audio::runtime::Runtime, cmds: Vec
                 host.posts += 1;
                 if host.events.is_some() {
                     let (name, index) = super::mod_audio::world_slot(&slot);
-                    super::mod_audio::record(&mut host.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::World, class, slot: name, id: index, owner });
+                    super::mod_audio::record(&mut host.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::World, class, slot: name, id: index, owner, hit: None });
                 }
             }
             WorldCommand::Redeliver { owner, slot, words } => {
@@ -621,7 +621,7 @@ fn apply(host: &mut WorldHost, rt: &mut skate_audio::runtime::Runtime, cmds: Vec
                     rt.release(node);
                     if host.events.is_some() {
                         let (name, index) = super::mod_audio::world_slot(&slot);
-                        super::mod_audio::record(&mut host.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Release, source: super::mod_audio::Source::World, class: "", slot: name, id: index, owner });
+                        super::mod_audio::record(&mut host.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Release, source: super::mod_audio::Source::World, class: "", slot: name, id: index, owner, hit: None });
                     }
                 }
             }

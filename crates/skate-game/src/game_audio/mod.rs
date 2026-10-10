@@ -40,7 +40,7 @@ mod state_log;
 mod seed;
 mod state_replay;
 mod swap;
-mod timing;
+pub(crate) mod timing;
 pub(crate) mod tuning;
 mod voices;
 pub(crate) mod world_bridge;
@@ -319,7 +319,7 @@ pub(crate) enum AudioRow {
 struct GameAudioListener;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-struct CueSet;
+pub(crate) struct CueSet;
 
 pub(crate) struct GameAudioPlugin;
 impl Plugin for GameAudioPlugin {

@@ -40,6 +40,21 @@ impl Registry {
             mesh_assemblies,
         })
     }
+    /// Replace the traffic cars (`Provider::Vehicle`, the scene's `+4088` provider) with this tick's; the other
+    /// objects stay. On a validation error the registry is unchanged.
+    pub(crate) fn set_cars(&mut self, cars: Vec<Object>) -> Result<(), String> {
+        let mut objects: Vec<Object> = self.objects.objects.iter().filter(|o| !matches!(o.provider, native::Provider::Vehicle)).cloned().collect();
+        objects.extend(cars);
+        self.objects = native::Registry::new(objects).map_err(str::to_owned)?;
+        Ok(())
+    }
+    /// Replace the props (`Provider::LivingWorld`, the scene's `+4084` world-object provider) with this tick's.
+    pub(crate) fn set_props(&mut self, props: Vec<Object>) -> Result<(), String> {
+        let mut objects: Vec<Object> = self.objects.objects.iter().filter(|o| !matches!(o.provider, native::Provider::LivingWorld)).cloned().collect();
+        objects.extend(props);
+        self.objects = native::Registry::new(objects).map_err(str::to_owned)?;
+        Ok(())
+    }
     fn assembly(&self, mesh: u32) -> Option<u32> {
         self.mesh_assemblies
             .iter()

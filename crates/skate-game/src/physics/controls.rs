@@ -23,6 +23,9 @@ pub(crate) struct PlayerControls {
     pub bumper_state_502: bool,
     pub bumper_state_104: bool,
     pub preferences: PushPreferences,
+    /// An AI skater's controls: its controllers fill the control map (retail runs no pad fill for them), so the
+    /// pad-derived off-board intents never overwrite a value the AI wrote this tick.
+    pub ai_driven: bool,
     //One tick's native PlayerUI82898D20 result, shared by animation and PhysIn.
     //None means the native offboard remap gate did not run, not missing camera.
     offboard_axes: Option<[f32; 2]>,
@@ -43,6 +46,7 @@ impl Default for PlayerControls {
             bumper_state_502: false,
             bumper_state_104: false,
             preferences: PushPreferences::default(),
+            ai_driven: false,
             offboard_axes: None,
             gestures: None,
         }

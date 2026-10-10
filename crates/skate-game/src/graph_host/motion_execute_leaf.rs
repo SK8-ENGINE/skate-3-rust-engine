@@ -484,6 +484,35 @@ pub(super) fn execute(
                             _ => unreachable!(),
                         }
                     }
+                    // Skitch nodes (`82BBC538` / `82BBC390` / `82BBC7C8`; motion_skitching.rs).
+                    crate::graph_host::motion_stock_gameplay::Operation::EnterSkitchingBehaviour
+                    | crate::graph_host::motion_stock_gameplay::Operation::SkitchingBehaviour => {
+                        if phase != 2 {
+                            let p = host.gameplay_conditions
+                                .ok_or("Skitching behaviours require the physical publication")?;
+                            let crouch = host.skitching.crouch(p.skitch_grab_height);
+                            host.animation.set_attribute(SettableAttribute { name: encode(b"Crouch"), value: crouch, normalized: false, sequence_id: -1 });
+                            if let Instance::EnterSkitching(state) = instance {
+                                let (t, len) = (host.animation.current_time().unwrap_or(0.0), host.animation.current_length().unwrap_or(0.0));
+                                let reach = state.update(&host.skitching, p.time_to_skitch, t, len);
+                                host.animation.set_attribute(SettableAttribute { name: encode(b"reachspeed"), value: reach, normalized: false, sequence_id: -1 });
+                            }
+                            if let Instance::Skitching(state) = instance {
+                                let absorb = state.update(&host.skitching, p.skitch_absorb);
+                                host.animation.set_attribute(SettableAttribute { name: encode(b"absorbspeed"), value: absorb, normalized: false, sequence_id: -1 });
+                                host.animation.set_attribute(SettableAttribute { name: encode(b"PushSpeed"), value: p.skitch_push, normalized: false, sequence_id: -1 });
+                            }
+                        }
+                    }
+                    // 82BBC858: ShimmySpeed. NOT RETAIL YET: the SKCH_2H_SHIMMY channels are not started.
+                    crate::graph_host::motion_stock_gameplay::Operation::SkitchShimmyingBehaviour => {
+                        if phase != 2 {
+                            let p = host.gameplay_conditions
+                                .ok_or("SkitchShimmyingBehaviour requires the physical publication")?;
+                            let value = crate::graph_host::motion_skitching::shimmy_speed(&host.skitching, p.skitch_shimmy);
+                            host.animation.set_attribute(SettableAttribute { name: encode(b"ShimmySpeed"), value, normalized: false, sequence_id: -1 });
+                        }
+                    }
                     other => {
                         return Err(format!(
                             "MotionGraph stock gameplay producer {other:?} is not implemented"

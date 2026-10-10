@@ -37,6 +37,14 @@ impl SkateboardOffset {
         self.height_refreshed = true;
     }
 
+    /// The skitch lean (`82D4A0C0` writes Skeleton+15696 and +16389 / +16392 only): the orientation channel for
+    /// 15 updates, the height channel's counter untouched.
+    pub fn refresh_orientation(&mut self, transform: AnimationPartTransform) {
+        self.transform = transform;
+        self.orientation_frames = 15.0;
+        self.orientation_refreshed = true;
+    }
+
     /// LandingAdjust writes only Y and its own duration, preserving X/Z/basis.
     pub fn refresh_height(&mut self, height: f32, frames: f32) {
         self.transform[3][1] = height;

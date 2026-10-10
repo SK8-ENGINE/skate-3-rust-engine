@@ -80,7 +80,7 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     var overlay_sample = vec3<f32>(0.5);
     var art = vec4<f32>(0.0);
     var masks = vec3<f32>(0.0);
-    if (flags & 1u) != 0u && (fam <= 6u || fam == 13u) { nm = bindings::sample_normal_map(slot,i.uv,g).rgb; }
+    if (flags & 1u) != 0u && (fam <= 6u || fam == 13u || fam == 15u) { nm = bindings::sample_normal_map(slot,i.uv,g).rgb; }
     if (flags & 2u) != 0u && fam != 2u {
         detail = bindings::sample_detail_map(slot,bindings::scaled_uv(i.uv,p.surface.z),g_detail).rg;
     }
@@ -232,8 +232,10 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
             let vz=(frame::view.view_from_world*i.world_position).z;
             for(var id=0u;id<frame::lights.n_directional_lights;id+=1u) {
                 if (frame::lights.directional_lights[id].flags & 5u)==5u {
-                    let floor=select(frame_state.shadow.rgb,vec3<f32>(0.09,0.13,0.05),fam==33u);
-                    lml=min(lml,vec3<f32>(fetch_directional_shadow(id,i.world_position,wn,vz))+floor); break;
+                    // water_defaultPS / flowingwater_defaultPS use the same RGB floor as
+                    // the other world receivers (their lightmap sits in G,B,R registers,
+                    // so the literal reads 0.09, 0.13, 0.05 in register order).
+                    lml=min(lml,vec3<f32>(fetch_directional_shadow(id,i.world_position,wn,vz))+frame_state.shadow.rgb); break;
                 }
             }
         }
@@ -260,10 +262,67 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     } else if fam == 11u || fam == 12u {
         lin = d;
         if fam == 11u { lin *= p.family.w; }
+    } else if fam == 15u {
+        // dynamicobject_defaultPS (props). Instruction numbers are the shader's
+        // ALU slots; see doc 27 "D9". c9 g_vLightDir is the authored sun
+        // direction, c14/c15 m_params are p.water[0]/p.water[1].
+        // 12, 20..24: detail normal added in tangent space.
+        var dxy = vec2<f32>(0.5);
+        if (flags & 2u) != 0u { dxy = detail; }
+        let raw = vec3<f32>(nm.xy*2.0+dxy*2.0-2.0,nm.z*2.0-1.0);
+        // 25..28: normalised before both the frame transform and the kd term.
+        let vnd = raw*inverseSqrt(max(dot(raw,raw),1e-12));
+        // 29..34: world normal from the interpolated frame.
+        let n = normalize(vnd.x*kt+vnd.y*kb+vnd.z*wn);
+        // 35..37: sun term and its back-face step.
+        let nl = dot(n,sun);
+        // 58..60, 72..81: signs of the sun in the unperturbed tangent frame.
+        let s = vec2<f32>(0.58*sign(dot(kt,sun)),0.62*sign(dot(kb,sun)));
+        // 86..88: tangent-space pseudo light, scaled by 2.3956 at 96.
+        let kd_raw = vnd.x*s.x+vnd.y*s.y+vnd.z*0.39;
+        let kd = kd_raw*2.39562;
+        // 53..56, 66, 70..82: dynamic shadow map (retail: 4-tap CSM atlas).
+        var csm = 1.0;
+        if frame_state.shadow.w>0.0 {
+            let view_z=(frame::view.view_from_world*i.world_position).z;
+            for (var light_id=0u; light_id<frame::lights.n_directional_lights; light_id+=1u) {
+                if (frame::lights.directional_lights[light_id].flags & 5u)==5u {
+                    csm=fetch_directional_shadow(light_id,i.world_position,wn,view_z);
+                    break;
+                }
+            }
+        }
+        // 49..52, 65, 67..82: retail also reads the static world shadow map
+        // (shadowWorld) and floors it at g_CSMSelfBias.w; 84..85 take
+        // min(step(nl)*csm, max(world, floor)). This engine has no world
+        // shadow pass yet, so the world term is fully lit.
+        let world_visibility = 1.0;
+        let shade = min(select(0.0,1.0,nl>=0.0)*csm,world_visibility);
+        // 57, 64, 68, 88: counter light (sun mirrored about the vertical),
+        // weighted by m_params[1].w.
+        let counter = p.water[1].w*saturate(dot(n,vec3<f32>(-sun.x,sun.y,-sun.z)));
+        // 86, 92..95, 97: direct + counter + ambient (m_params[1].rgb).
+        let light = vec3<f32>(saturate(nl)*shade+counter)+p.water[1].xyz;
+        lin = kd*light*d;
+        if (flags & 16u) != 0u {
+            // 61..63, 70, 81, 83: view direction in the tangent frame.
+            let vt = normalize(vec3<f32>(dot(vd,kt),dot(vd,kb),dot(vd,wn)));
+            // 89..91: the pseudo light reflected about the detail normal.
+            let reflected = vec3<f32>(s,0.39)-2.0*kd_raw*vnd;
+            // 66, 71, 92..95: power 10 + 290 * specular.g.
+            let ks = pow(max(saturate(dot(vt,-reflected)),1e-6),10.0+290.0*masks.y);
+            // 96, 98..100: shadowed, masked by specular.r.
+            lin += ks*vec3<f32>(2.1,1.8,1.5)*shade*masks.x;
+        }
+        // Alpha-tested props test the diffuse alpha (WORLD_ALPHA_CUTOFF).
+        alpha = 1.0;
     } else {
-        if (fam == 3u || fam == 4u) && (flags & 8u) != 0u && (flags & 512u) == 0u { d = mix(d,art.rgb*art.rgb,art.a*p.decal.x); }
+        if (fam == 3u || fam == 4u) && (flags & 8u) != 0u && (flags & 512u) == 0u { d = mix(d,art.rgb*art.rgb,art.a*p.decal.x*frame_state.clock.w); }
         if (flags & 4u) != 0u && fam < 13u && (flags & 256u) == 0u { d *= saturate((overlay_sample-0.5)*p.surface.y+0.5); }
-        var kd = 0.93429;
+        // Flat-normal kd (0.39 * 2.39562) of the normal-mapped programs. Families
+        // 7 / 8 (alphatestdefaultenvironment_defaultPS 27-34, environmentdiffuse_defaultPS
+        // 26-34) have no kd term: lin = min(lightmap^2, vis + floor) * diffuse^2 * m_params[0].y.
+        var kd = select(0.93429, 1.0, fam == 7u || fam == 8u);
         if (fam <= 6u || fam == 13u) && (flags & 1u) != 0u {
             var dxy = vec2<f32>(0.5);
             if (flags & 2u) != 0u && fam != 2u { dxy = detail; }
@@ -312,6 +371,8 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     if p.fog_ramp.z != 1.0 { f = pow(max(f,1e-6),p.fog_ramp.z); }
     var fog_a = 1.0+p.fog_color.a*f;
     if fam <= 8u || fam == 13u || fam == 16u { fog_a *= p.surface.w; }
+    // dynamicobject_defaultPS 98, 101: m_params[0].y scales the fogged light.
+    if fam == 15u { fog_a *= p.water[0].y; }
     var xe = max((lin*fog_a+p.fog_color.rgb*f)*p.mode.w,vec3<f32>(0.0));
     // Reduced curve is the full curve with the linear input capped at one.
     if fam == 8u { xe = min(xe,vec3<f32>(1.0)); }

@@ -38,6 +38,15 @@ impl PoseEvaluator {
         Ok(())
     }
 
+    /// Play length of a clip in seconds, (frames - 1) / fps like `ClipClock::length` at speed 1
+    /// (the authored replacement when one is loaded, as [`Self::evaluate`] samples it).
+    pub fn clip_length(&self, name: &str) -> Result<f32, String> {
+        let stock = self.frames.clip(name)?;
+        let clip = self.authored.clip(&stock.name).unwrap_or(stock);
+        let fps = f32::from_bits(clip.fps_bits);
+        Ok(if fps.is_finite() && fps > 0.0 && clip.frames.len() > 1 { (clip.frames.len() - 1) as f32 / fps } else { 0.0 })
+    }
+
     /// Executes the ordered stock tree. This uses the native immediate ACS
     /// arithmetic; the host does not recreate packed animation job commands.
     pub fn evaluate(&self, commands: &[PoseCommand]) -> Result<Vec<Sqt>, String> {

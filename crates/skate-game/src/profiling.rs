@@ -37,6 +37,14 @@ struct Options {
 
 fn options() -> Result<Option<Options>, String> {
     let args: Vec<String> = std::env::args().collect();
+    if crate::trace_all::on() && !args.iter().any(|a| a == "--trace") {
+        // Trace-all arms the Chrome capture for F9 / F10 (armed costs only the span bookkeeping:
+        // nothing is timed or written until F9), next to the other trace-all outputs.
+        let dir = std::env::var_os("SKATE_PERF_REPORT")
+            .and_then(|p| PathBuf::from(p).parent().map(PathBuf::from))
+            .unwrap_or_default();
+        return Ok(Some(Options { output: dir.join("chrome-trace.json"), wait: true, gpu: false, seconds: None }));
+    }
     let Some(index) = args.iter().position(|a| a == "--trace") else {
         // The modifiers are meaningless alone; catching that here avoids a run
         // that silently produces no trace.
@@ -151,6 +159,9 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_new_span(&self, attrs:&Attributes<'_>, id:&Id, ctx:Context<'_,S>) {
+        // A span without fields is labelled by its static name at exit: no allocation here
+        // (trace-all keeps this layer armed for a whole session).
+        if attrs.fields().is_empty() {return;}
         let mut label=TraceLabel(attrs.metadata().name().to_owned());attrs.record(&mut label);
         if let Some(span)=ctx.span(id) {span.extensions_mut().insert(label);}
     }
@@ -181,6 +192,136 @@ impl Drop for Guard {
             capture.finish();
             info!("SKATE_TRACE finished");
         }
+        drain_log_queue(std::time::Duration::from_secs(2));
+    }
+}
+
+/// Lines waiting for (or being written by) the log writer thread.
+static LOG_PENDING: AtomicU64 = AtomicU64::new(0);
+/// Lines dropped because the queue was full (the writer reports them).
+static LOG_DROPPED: AtomicU64 = AtomicU64::new(0);
+static LOG_QUEUE: OnceLock<std::sync::mpsc::SyncSender<Vec<u8>>> = OnceLock::new();
+/// Queued lines before new ones are dropped (never blocks the game).
+const LOG_QUEUE_LINES: usize = 16_384;
+
+/// Whether log lines go through the writer thread (trace-all) rather than straight to stderr.
+pub(crate) fn log_writer_threaded() -> bool {
+    LOG_QUEUE.get().is_some()
+}
+
+/// The Chrome capture's state for the startup line.
+pub(crate) fn chrome_trace_state() -> &'static str {
+    match CAPTURE.get() {
+        None => "off",
+        Some(c) if c.recording.load(Ordering::Relaxed) => "recording",
+        Some(_) => "armed (F9 start, F10 stop)",
+    }
+}
+
+/// Wait until the writer thread has written every queued line, at most `limit`.
+fn drain_log_queue(limit: std::time::Duration) {
+    if LOG_QUEUE.get().is_none() {
+        return;
+    }
+    let until = Instant::now() + limit;
+    while LOG_PENDING.load(Ordering::Acquire) != 0 && Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+/// The log subscriber's writer. Direct stderr normally; with trace-all every formatted line is
+/// handed to a bounded queue and written by its own thread, so a slow pipe (the crash supervisor
+/// relays stderr) or a burst of trace lines never stalls a frame. A panic or a clean exit waits
+/// for the queue to drain first, so the last lines before a crash are kept.
+#[derive(Clone, Copy)]
+enum LogWriter {
+    Stderr,
+    Queued,
+}
+
+impl LogWriter {
+    fn install(threaded: bool) -> Self {
+        if !threaded {
+            return Self::Stderr;
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(LOG_QUEUE_LINES);
+        let spawned = std::thread::Builder::new().name("log-writer".into()).spawn(move || {
+            let mut reported = 0u64;
+            while let Ok(line) = rx.recv() {
+                let mut err = std::io::stderr().lock();
+                let _ = err.write_all(&line);
+                LOG_PENDING.fetch_sub(1, Ordering::Release);
+                // Batch: write everything already queued before flushing.
+                while let Ok(line) = rx.try_recv() {
+                    let _ = err.write_all(&line);
+                    LOG_PENDING.fetch_sub(1, Ordering::Release);
+                }
+                let dropped = LOG_DROPPED.load(Ordering::Relaxed);
+                if dropped != reported {
+                    let _ = writeln!(err, "LOG_DROPPED lines={} (log queue full)", dropped - reported);
+                    reported = dropped;
+                }
+                let _ = err.flush();
+            }
+        });
+        if spawned.is_err() || LOG_QUEUE.set(tx).is_err() {
+            return Self::Stderr;
+        }
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            drain_log_queue(std::time::Duration::from_millis(500));
+            previous(info);
+        }));
+        Self::Queued
+    }
+}
+
+/// One formatted event, sent whole when the formatter drops it.
+enum LineWriter {
+    Stderr(std::io::Stderr),
+    Queued(Vec<u8>),
+}
+
+impl Write for LineWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Stderr(err) => err.write(bytes),
+            Self::Queued(buf) => {
+                buf.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Stderr(err) => err.flush(),
+            Self::Queued(_) => Ok(()),
+        }
+    }
+}
+
+impl Drop for LineWriter {
+    fn drop(&mut self) {
+        let Self::Queued(buf) = self else { return };
+        if buf.is_empty() {
+            return;
+        }
+        let Some(tx) = LOG_QUEUE.get() else { return };
+        LOG_PENDING.fetch_add(1, Ordering::AcqRel);
+        if tx.try_send(std::mem::take(buf)).is_err() {
+            LOG_PENDING.fetch_sub(1, Ordering::AcqRel);
+            LOG_DROPPED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+impl<'a> bevy::log::tracing_subscriber::fmt::MakeWriter<'a> for LogWriter {
+    type Writer = LineWriter;
+    fn make_writer(&'a self) -> LineWriter {
+        match self {
+            Self::Stderr => LineWriter::Stderr(std::io::stderr()),
+            Self::Queued => LineWriter::Queued(Vec::with_capacity(256)),
+        }
     }
 }
 
@@ -193,7 +334,7 @@ pub(crate) fn init() -> Result<Guard, String> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,wgpu=warn,naga=warn,bevy_render=info"));
     let stderr = bevy::log::tracing_subscriber::fmt::layer()
-        .with_writer(std::io::stderr)
+        .with_writer(LogWriter::install(crate::trace_all::on()))
         .with_target(false);
 
     let Some(options) = options()? else {

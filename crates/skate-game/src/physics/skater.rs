@@ -25,8 +25,43 @@ use skate_core::physics::{
 use skate_data::collections::Collections;
 use std::path::Path;
 
+/// A pending ped takedown on the skater (see [`SkaterRuntime::takedown`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Takedown {
+    /// Unit direction from the chaser to the skater (zero when they coincide).
+    pub direction: [f32; 3],
+    /// Seconds the latch has been set.
+    pub age: f32,
+}
+
+impl Takedown {
+    /// `82592390`: normalize(skater - chaser), zero when coincident.
+    pub fn from_positions(skater: [f32; 3], chaser: [f32; 3]) -> Self {
+        let d = [skater[0] - chaser[0], skater[1] - chaser[1], skater[2] - chaser[2]];
+        let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let direction = if l > 1e-6 { [d[0] / l, d[1] / l, d[2] / l] } else { [0.0; 3] };
+        Self { direction, age: 0.0 }
+    }
+}
+
+/// How long a takedown latch waits for the wipeout before it is dropped, s. NOT RETAIL: retail's
+/// clear of `1904` bit 30 is not found (b15); this keeps a missed wipeout from holding the flag.
+pub(crate) const TAKEDOWN_LATCH_SECONDS: f32 = 2.0;
+
 #[derive(Resource)]
 pub(crate) struct SkaterRuntime {
+    /// The AI controller's physics record (an NPC skater; `None` for the local player). Retail:
+    /// AIPhysicsInput `*(skater+1840)`, written by the PathController, with the actor's "input
+    /// fresh" bit (`1904` bit 27) and the controller pointer (`1828`).
+    pub ai_physics: Option<AiPhysicsSource>,
+    /// A ped took this skater down (retail `82592390`: actor `1904` bit 30 and the direction
+    /// away from the chaser at `*(actor+1832)`), published as the packet's external impulse until
+    /// WipeoutGround Enter used it.
+    pub takedown: Option<Takedown>,
+    /// The vehicle-group solids (traffic car proxies, mod vehicles) the skeleton touched in the last
+    /// solve: (solid id, contact point, relative speed at the contact m/s). The living world maps them to
+    /// cars (the hit brake, the parked car alarm).
+    pub vehicle_hits: Vec<(u64, [f32; 3], f32)>,
     pub scoring: crate::scoring_runtime::Runtime,
     pub climbing: super::climbing::Runtime,
     /// Completed physical pose in native animation space, read by rendering.
@@ -49,6 +84,7 @@ pub(crate) struct SkaterRuntime {
     pub ground_animation_settings: super::ground_animation::GroundAnimationSettings,
     pub revert_state: super::revert_state::RevertState,
     pub slide_state: super::slide_state::SlideState,
+    pub skitch_state: super::skitch_state::SkitchState,
     pub trajectory: super::air_trajectory::AirTrajectoryRuntime,
     pub grind_camera: super::grind_camera::GrindCamera,
     pub grind: super::grind::Runtime,
@@ -127,6 +163,11 @@ impl SkaterRuntime {
         self.animation_input.adopt_mode_settings(animation);
         self.player_input.player.state_variants_1408 = player.player.state_variants_1408;
         Ok(())
+    }
+
+    /// Completed placements of this skater (retail place-skater counter +1864).
+    pub(crate) fn placements(&self) -> u32 {
+        self.respawn.placements
     }
 
     pub(crate) fn travel_to(&mut self, transform: [[f32; 4]; 4]) -> Result<(), String> {
@@ -261,6 +302,9 @@ impl SkaterRuntime {
             initial_targets.following_com,
         ];
         Ok(Self {
+            ai_physics: None,
+            takedown: None,
+            vehicle_hits: Vec::new(),
             respawn,
             scoring: crate::scoring_runtime::Runtime::load(&data)?,
             climbing: super::climbing::Runtime::load(asset_root, &animation.evaluator.frames.bone_names)?,
@@ -290,6 +334,7 @@ impl SkaterRuntime {
             ground_animation_settings: super::ground_animation::GroundAnimationSettings::load(&data)?,
             revert_state: super::revert_state::RevertState::load(&data)?,
             slide_state: super::slide_state::SlideState::load(&data)?,
+            skitch_state: Default::default(),
             trajectory,
             grind_camera: super::grind_camera::GrindCamera::default(),
             grind: super::grind::Runtime::load(&data)?,
@@ -353,4 +398,13 @@ impl SkaterRuntime {
             )?,
         })
     }
+}
+
+/// An NPC skater's AI physics record for the next tick (doc 26, "Simulated NPC skaters").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AiPhysicsSource {
+    /// The record (`skate_core::riding::grounded::state::board_path` reads +32 / +48 / +64 / +160).
+    pub record: skate_core::animation::output::actor_packet::ExternalPhysicsInput,
+    /// Set when the AI wrote `record` this tick (`1904` bit 27); the next packet consumes it.
+    pub fresh: bool,
 }

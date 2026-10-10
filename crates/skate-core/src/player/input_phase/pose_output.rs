@@ -82,11 +82,18 @@ pub struct AnimationOutputFields {
     pub tricks_blocked_on_stairs_166: u8,
     /// Ground Fill82D3A4F0 -> PhysicsWantsManualExit82BA7988.
     pub manual_opposition_168: u8,
+    /// State 104 (`82D4C078`, b58): the posed hand's shimmy rate (912 x 60; IsSkitchShimmying,
+    /// SkitchShimmyingBehaviour).
+    pub skitch_shimmy_136: f32,
+    /// State 104 (b58 / b59): 988 (the hands' grip height, EnterSkitchingBehaviour / SkitchingBehaviour) and the hand
+    /// bitmask 984 (SkitchingPosition).
+    pub skitch_grip_132: f32,
+    pub skitch_hands_140: u32,
 }
 impl Default for AnimationOutputFields {
     fn default() -> Self {
         // Animation82DE3F38 stores FLT_MAX at144 and zero at148.
-        Self { collision_time_144: f32::MAX, profile_148: 0, tricks_blocked_on_stairs_166: 0, manual_opposition_168: 0 }
+        Self { collision_time_144: f32::MAX, profile_148: 0, tricks_blocked_on_stairs_166: 0, manual_opposition_168: 0, skitch_shimmy_136: 0.0, skitch_grip_132: 0.0, skitch_hands_140: 0 }
     }
 }
 

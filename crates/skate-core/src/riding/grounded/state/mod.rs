@@ -5,6 +5,7 @@
 //! implementation.
 
 pub mod board;
+pub mod board_path;
 pub mod board_types;
 pub mod contact_state;
 pub mod corrections;

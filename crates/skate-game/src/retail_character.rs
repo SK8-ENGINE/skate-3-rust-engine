@@ -22,10 +22,10 @@ impl Plugin for CharacterLightingPlugin {
         app.add_plugins(MaterialPlugin::<CharacterMaterial>::default())
             .add_systems(Startup, load)
             .add_systems(PreUpdate, load.after(crate::map_transition::MapTransitionSet).run_if(crate::retail_render::world_changed))
-            .add_systems(Update, (bind, shadow_views).chain())
+            .add_systems(Update, (bind, shadow_views).chain().in_set(CharacterUpdateSet))
             .add_systems(
                 Update,
-                update.after(crate::multiplayer::RemoteRenderSet),
+                update.after(crate::multiplayer::RemoteRenderSet).in_set(CharacterUpdateSet),
             );
     }
 }
@@ -73,8 +73,12 @@ pub(crate) struct CharacterParams {
     pub rows: [Vec4; 9],
     pub sh: [Vec4; 9],
 }
+/// Character material binding and lighting updates; the ghost fade draws after them.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CharacterUpdateSet;
+
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
-struct CharacterMaterial {
+pub(crate) struct CharacterMaterial {
     #[uniform(0)]
     params: CharacterParams,
     #[texture(1)]
@@ -99,6 +103,18 @@ impl Material for CharacterMaterial {
         self.alpha
     }
 }
+/// Placement fade (`skater_ghost`): the shader's output alpha is `alpha * tint.a`, the
+/// retail `i_params.x` opacity multiply.
+impl crate::skater_ghost::GhostMaterial for CharacterMaterial {
+    fn ghost(&mut self, original: &Self, opacity: f32) {
+        self.alpha = match original.alpha {
+            AlphaMode::Opaque | AlphaMode::Mask(_) | AlphaMode::AlphaToCoverage => AlphaMode::Blend,
+            other => other,
+        };
+        self.params.tint.w = original.params.tint.w * opacity;
+    }
+}
+
 #[derive(Component)]
 struct ShadowSource;
 
@@ -260,7 +276,7 @@ fn bind(
     source: Res<Assets<StandardMaterial>>,
     server: Res<AssetServer>,
     mut materials: ResMut<Assets<CharacterMaterial>>,
-    entities: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, Option<&RenderLayers>)>,
+    entities: Query<(Entity, &GltfMaterialName, &MeshMaterial3d<StandardMaterial>, Option<&RenderLayers>, Option<&crate::skater_ghost::GhostSaved<StandardMaterial>>)>,
     parents: Query<&ChildOf>,
     players: Query<(), Or<(With<crate::world::PlayerRoot>, With<crate::multiplayer::appearance::RemoteCharacter>)>>,
     mod_graphics: Query<(), With<ModGraphicsLit>>,
@@ -271,7 +287,9 @@ fn bind(
     let Some(lighting) = lighting else {
         return;
     };
-    for (entity, name, handle, layers) in &entities {
+    for (entity, name, handle, layers, ghost) in &entities {
+        // A mesh mid placement fade binds from its own material, not the faded copy.
+        let handle = ghost.map_or(&handle.0, |g| &g.original);
         let under_player = parents.iter_ancestors(entity).any(|e| players.contains(e));
         let under_mod = parents.iter_ancestors(entity).any(|e| mod_graphics.contains(e));
         if under_mod || !under_player {
@@ -301,7 +319,7 @@ fn bind(
         if data.params.len() != 9 {
             continue;
         }
-        let Some(m) = source.get(&handle.0) else {
+        let Some(m) = source.get(handle) else {
             continue;
         };
         let alpha_cutoff = if let AlphaMode::Mask(cutoff) = m.alpha_mode {
@@ -345,7 +363,7 @@ fn bind(
             .entity(entity)
             .try_remove::<MeshMaterial3d<StandardMaterial>>()
             .try_insert((
-                OriginalCharacterMaterial { material: handle.0.clone(), layers: layers.cloned() },
+                OriginalCharacterMaterial { material: handle.clone(), layers: layers.cloned() },
                 MeshMaterial3d(material),
                 RenderLayers::from_layers(&[0, 28]),
             ));
@@ -376,6 +394,7 @@ fn update(
     mut materials: ResMut<Assets<CharacterMaterial>>,
     mut customiser: ResMut<Assets<crate::customiser_material::SkaterMaterial>>,
     mut shadow: ResMut<crate::retail_render::FrameStateData>,
+    shadow_settings: Option<Res<crate::retail_render::WorldShadowSettings>>,
     time: Res<Time>,
 ) {
     let Some(mut lighting) = lighting else {
@@ -402,8 +421,9 @@ fn update(
             &mut customiser,
         );
         lighting.display_sh = Some(displayed);
-        // Adapter floor: the local probe's direction-independent ambient term.
-        shadow.approach(sh[0].truncate(), time.delta_secs());
+        // Retail world shadow floor (a constant in every world receiver shader),
+        // not the local probe's ambient term: see RETAIL_WORLD_SHADOW_FLOOR.
+        shadow.enable_world_shadows(shadow_settings.map_or(crate::retail_render::RETAIL_WORLD_SHADOW_FLOOR, |s| s.floor));
     }
     for (remote, root) in &remote_roots {
         let sh = lighting.probes.sample(root.translation, fallback);

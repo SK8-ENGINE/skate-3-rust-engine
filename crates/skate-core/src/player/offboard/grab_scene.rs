@@ -5,7 +5,7 @@ pub mod registry;
 mod query;
 mod math;
 mod qualify;
-pub use qualify::{qualify,closest_point,best_spline};
+pub use qualify::{qualify,qualify_at,closest_point,best_spline,best_spline_excluding,nearest_distance,at_distance};
 pub use query::query;
 pub use record::{AssemblyData, Geometry, RecordInput};
 pub use registry::{Object, Provider, Registry, Spline};

@@ -56,6 +56,76 @@ def roster(rows):
                        'animation_style':STYLES.get(key,'Aggressive')})
     return sorted(result,key=lambda r:r['name'])
 
+# NPC skater character pool (living world). Retail fills the free-roam AI pool from every
+# characters_marquee record whose layout byte +9 is set (sub_82461878 -> sub_82461550, TU3):
+# the pros and IP cast (looks = marquee recipes, converted by prepare() above), the community
+# skaters (online uploads; EA's servers are gone) and teammate_01..04. A teammate qualifies only
+# when its save slot is filled (table 0x8309A800 + index*23904, word +8192 != 0), and its look is
+# loaded from that save (sub_827CE490): the disc has no marquee recipe for teammate_NN. Our
+# equivalent of the save slot is the player's customiser library, so a teammate is bound at
+# runtime to a library entry (settings/living_world_teammates.json, see bind_teammates()). The
+# generic ambient_skater_01..09 have +9 = 0 and are not in the free-roam pool.
+POOL_FIELD='Hash_9A19F602E62EC9E0'      # characters_marquee layout byte +9
+TEAMMATE_FIELD='Hash_46437782A3CDBAEA'  # teammate record (sub_82458228)
+TEAMMATE_INDEX='Hash_337CF781F31C8877'  # its save slot index (sub_82458280)
+COMMUNITY_FIELD='Hash_31A41CDD1EE6C5AC' # community skater (sub_82C2C168)
+TEAMMATE_BINDINGS='living_world_teammates.json'
+
+def _inherited(rows,key,field):
+    node=rows.get(key);seen=set()
+    while node and node['key'] not in seen:
+        seen.add(node['key'])
+        if field in node['fields']:return node['fields'][field].get('data')
+        node=rows.get(node['parent'])
+    return None
+
+def _flag(value):
+    return bool(value) and bytes.fromhex(value)[:1]!=b'\0'
+
+def npc_pool(rows):
+    """The free-roam NPC skater pool: [{key, source, ...}] in record order.
+    source 'marquee' = converted by prepare() (same key and identity as the roster entry);
+    'save' = a teammate whose look comes from the save (bind_teammates); 'online' = a community
+    skater (no data offline, listed for completeness, never spawned without a mod)."""
+    marquee={r['key']:r for r in rows if r['class']=='characters_marquee'}
+    converted={item['key']:item for item in roster(rows)}
+    pool=[]
+    for key,row in marquee.items():
+        if not _flag(_inherited(marquee,key,POOL_FIELD)):continue
+        recipe=_inherited(marquee,key,'Hash_6C9F05D8DBE7A492') or ''
+        if not recipe:continue  # group records (pro_skaters, teammates, ...) never spawn
+        if _flag(_inherited(marquee,key,TEAMMATE_FIELD)):
+            index=_inherited(marquee,key,TEAMMATE_INDEX)
+            pool.append({'key':key,'source':'save','teammate_index':bytes.fromhex(index)[0] if index else None})
+        elif _flag(_inherited(marquee,key,COMMUNITY_FIELD)):
+            pool.append({'key':key,'source':'online'})
+        elif key in converted:
+            item=converted[key]
+            pool.append({'key':key,'source':'marquee','recipe':item['recipe'],
+                         'id':hashlib.sha256(('native-marquee-v1:'+key).encode()).hexdigest(),
+                         'animation_style':item['animation_style']})
+        else:
+            pool.append({'key':key,'source':'marquee','recipe':recipe,'status':'not_in_roster'})
+    return pool
+
+def bind_teammates(pool,library,bindings):
+    """Resolve the runtime teammate hook. bindings = {teammate key: customiser library entry id}
+    (the player's 'recruited' teammates; a key that is missing or null stays unrecruited, like an
+    empty retail save slot, and is not eligible). Returns {key: entry folder} for bindings whose
+    entry exists (library/entries/<id>/character.glb) and the list of problems."""
+    ready,problems={},[]
+    teammates={item['key'] for item in pool if item['source']=='save'}
+    for key,entry in sorted((bindings or {}).items()):
+        if key not in teammates:
+            problems.append(f'{key} is not a teammate record');continue
+        if not entry:continue
+        if not isinstance(entry,str) or not entry.isalnum():
+            problems.append(f'{key}: invalid library entry id');continue
+        folder=Path(library)/'entries'/entry
+        if (folder/'character.glb').is_file():ready[key]=folder
+        else:problems.append(f'{key}: library entry {entry} has no character.glb')
+    return ready,problems
+
 def _publish(dest,write):
     """Write via a unique temporary file and rename, so parallel roster workers
     sharing work/ caches never see a partial file (identical content either way).

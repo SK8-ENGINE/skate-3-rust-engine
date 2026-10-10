@@ -99,6 +99,9 @@ pub(crate) enum EventKind {
     EmitterStop,
     Zone,
     Speech,
+    /// A body region's hit posted by the body poster (`sub_824BC188`), with its data in
+    /// [`EventRow::hit`]: observe only, no sound of its own (the hit's contacts are posts).
+    BodyImpact,
 }
 
 impl EventKind {
@@ -111,6 +114,7 @@ impl EventKind {
             Self::EmitterStop => "emitter_stop",
             Self::Zone => "zone",
             Self::Speech => "speech",
+            Self::BodyImpact => "body_impact",
         }
     }
 }
@@ -151,6 +155,13 @@ pub(crate) struct EventRow {
     pub id: i32,
     /// The world / NPC object, the zone key, the speaker; 0 for the local player.
     pub owner: u64,
+    /// A body impact's region, impact, tiers, materials and position ([`EventKind::BodyImpact`]).
+    pub hit: Option<skate_audio::player::contacts::BodyHit>,
+}
+
+/// The event row of a body hit (`Contacts::body_hits`) of the local player (owner 0) or an NPC.
+pub(crate) fn body_impact_row(source: Source, owner: u64, hit: skate_audio::player::contacts::BodyHit) -> EventRow {
+    EventRow { kind: EventKind::BodyImpact, source, class: "", slot: "body", id: hit.region as i32, owner, hit: Some(hit) }
 }
 
 /// A post site's buffer: Some while a mod subscribes (`AudioApi::events_on`).
@@ -174,7 +185,9 @@ pub(crate) fn record(buf: &mut EventBuf, row: EventRow) {
 ///   `livingword_footstep` post;
 /// - `horn` / `alarm`: a traffic horn / car alarm post;
 /// - `tazer`: a ped's `c_tazer` post; `body_fall`: a ped's body-fall Splice start;
-/// - `emitter`: a world emitter start; `zone_change`: a zone ambience change; `speech`: a line.
+/// - `emitter`: a world emitter start; `zone_change`: a zone ambience change; `speech`: a line;
+/// - `body_impact`: a body region's hit of the local player or an NPC skater (`sub_824BC188`), with
+///   the region, impact, tiers, materials and position (observe only: not a rule tag).
 ///
 /// The pop / land ids are the running player's (`events_frame` copies them every frame a mod
 /// subscribes, so they follow a native start, restart or tuning change); 0 is "unset" and never
@@ -185,7 +198,7 @@ pub(crate) struct Tags {
     pub land: i32,
 }
 
-pub(crate) const TAGS: [&str; 12] = ["pop", "land", "grind_start", "grind_end", "footstep", "horn", "alarm", "tazer", "body_fall", "emitter", "zone_change", "speech"];
+pub(crate) const TAGS: [&str; 13] = ["pop", "land", "grind_start", "grind_end", "footstep", "horn", "alarm", "tazer", "body_fall", "emitter", "zone_change", "speech", "body_impact"];
 
 impl Tags {
     pub(crate) fn from_tuning(c: &skate_audio::player::contacts::ContactsTuning) -> Self {
@@ -213,6 +226,7 @@ impl Tags {
             (EventKind::EmitterStart, _) => Some("emitter"),
             (EventKind::Zone, _) => Some("zone_change"),
             (EventKind::Speech, _) => Some("speech"),
+            (EventKind::BodyImpact, _) => Some("body_impact"),
             _ => None,
         }
     }
@@ -269,8 +283,17 @@ impl Events {
                 truncated = true;
                 break;
             }
-            rows.push(json!({"kind": r.kind.name(), "source": r.source.name(), "class": r.class, "slot": r.slot, "id": r.id,
-                "owner": r.owner.to_string(), "tag": tag}));
+            let mut row = json!({"kind": r.kind.name(), "source": r.source.name(), "class": r.class, "slot": r.slot, "id": r.id,
+                "owner": r.owner.to_string(), "tag": tag});
+            if let Some(h) = r.hit {
+                let m = h.message;
+                row["region"] = json!(h.region);
+                row["impact"] = json!(h.impact);
+                row["tier"] = json!(m.tier);
+                row["material"] = json!(m.material);
+                row["position"] = json!(m.position);
+            }
+            rows.push(row);
         }
         Some(json!({"serial": self.serial, "rows": rows, "truncated": truncated}))
     }
@@ -640,7 +663,7 @@ impl skate_audio::player::contacts::SpliceHost for Observed<'_, '_> {
     }
     fn start(&mut self, bank: &str, id: u32, block: [f32; 6]) -> Option<skate_audio::splice::SoundId> {
         if let Some(rules) = self.rules {
-            let row = EventRow { kind: EventKind::Splice, source: self.source, class: intern(bank), slot: self.slot, id: id as i32, owner: self.owner };
+            let row = EventRow { kind: EventKind::Splice, source: self.source, class: intern(bank), slot: self.slot, id: id as i32, owner: self.owner, hit: None };
             if rules.mutes(&row) {
                 // The request is still reported to subscribers; the sound does not start.
                 record(self.rows, row);
@@ -649,7 +672,7 @@ impl skate_audio::player::contacts::SpliceHost for Observed<'_, '_> {
         }
         let sound = self.inner.start(bank, id, block);
         if sound.is_some() && self.rows.is_some() {
-            record(self.rows, EventRow { kind: EventKind::Splice, source: self.source, class: intern(bank), slot: self.slot, id: id as i32, owner: self.owner });
+            record(self.rows, EventRow { kind: EventKind::Splice, source: self.source, class: intern(bank), slot: self.slot, id: id as i32, owner: self.owner, hit: None });
         }
         sound
     }
@@ -966,7 +989,7 @@ mod tests {
         world.init_resource::<super::super::world_sources::WorldHost>();
         world.init_resource::<super::super::npc_skaters::NpcHost>();
         world.init_resource::<super::super::world_speech::WorldSpeech>();
-        let row = |kind, source, class, slot, id| EventRow { kind, source, class, slot, id, owner: 0 };
+        let row = |kind, source, class, slot, id| EventRow { kind, source, class, slot, id, owner: 0, hit: None };
         world.run_system_once(events_frame).unwrap();
         assert!(world.resource::<Native>().player.as_ref().unwrap().events.is_none(), "no subscriber: no buffer");
         world.resource_mut::<AudioApi>().events.push(row(EventKind::Zone, Source::Ambience, "", "", 0));
@@ -996,13 +1019,52 @@ mod tests {
         assert!(world.resource::<AudioApi>().snapshot(None, 0, "dev.a").is_null());
     }
 
+    /// `body_impact`: the body poster's hits of the local player and of an NPC skater reach a
+    /// subscriber with region, impact, tiers, materials and position (the skater point, retail's
+    /// `+48`); a stopped mod's subscription and the sites' buffers go.
+    #[test]
+    fn body_impacts_reach_a_subscriber_per_skater() {
+        use skate_audio::player::{collision::Message, contacts::BodyHit};
+        let mut world = World::new();
+        let mut n = native();
+        n.player = Some(super::super::player_audio::PlayerAudio::new(Default::default(), true));
+        world.insert_resource(n);
+        world.init_resource::<AudioApi>();
+        world.init_resource::<super::super::world_sources::WorldHost>();
+        world.init_resource::<super::super::npc_skaters::NpcHost>();
+        world.init_resource::<super::super::world_speech::WorldSpeech>();
+        world.resource_mut::<AudioApi>().subscribe("dev.a", Some(vec!["body_impact".into()]), None).unwrap();
+        world.run_system_once(events_frame).unwrap();
+        let hit = |region, position| BodyHit { region, impact: 3.03, message: Message { material: [99, 2], tier: [2, 2], position, level: [20000, 30000], local: true } };
+        let player = [hit(4, [323.5, 88.3, -644.6])];
+        super::super::player_audio::body_hits(&player, Source::Player, 0, Some([326.5, 89.8, -642.6]), &mut world.resource_mut::<Native>().player.as_mut().unwrap().events);
+        super::super::player_audio::body_hits(&[hit(0, [5.0, 1.0, 2.0])], Source::Npc, 42, None, &mut world.resource_mut::<super::super::npc_skaters::NpcHost>().events);
+        world.run_system_once(events_frame).unwrap();
+        let s = world.resource::<AudioApi>().snapshot(None, 0, "dev.a");
+        let rows = s["events"]["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        let r = &rows[0];
+        assert_eq!((r["tag"].as_str(), r["kind"].as_str(), r["source"].as_str(), r["owner"].as_str()), (Some("body_impact"), Some("body_impact"), Some("player"), Some("0")));
+        assert_eq!((r["region"].as_u64(), r["tier"].clone(), r["material"].clone()), (Some(4), json!([2, 2]), json!([99, 2])));
+        assert_eq!(r["position"], json!([323.5f32, 88.3f32, -644.6f32]));
+        assert!((r["impact"].as_f64().unwrap() - 3.03).abs() < 1e-5);
+        assert_eq!((rows[1]["source"].as_str(), rows[1]["owner"].as_str(), rows[1]["region"].as_u64()), (Some("npc"), Some("42"), Some(0)));
+        // Mod disabled: subscription dropped, then the sites' buffers.
+        world.resource_mut::<AudioApi>().clear_owner(None, 0, "dev.a");
+        world.run_system_once(events_frame).unwrap();
+        world.run_system_once(events_frame).unwrap();
+        assert!(world.resource::<Native>().player.as_ref().unwrap().events.is_none());
+        assert!(world.resource::<super::super::npc_skaters::NpcHost>().events.is_none());
+        assert!(world.resource::<AudioApi>().snapshot(None, 0, "dev.a").is_null());
+    }
+
     /// Found by the in-game autotest: a mod that subscribes in `on_load`, before native audio
     /// starts, kept unset pop / land ids for the session (pops untagged, a Splice row with id 0
     /// tagged `land`). The ids now follow the running player, whenever it starts or changes.
     #[test]
     fn event_tags_follow_the_player_whatever_the_subscription_order() {
         use skate_audio::player::contacts::BANK;
-        let splice = |id| EventRow { kind: EventKind::Splice, source: Source::Player, class: BANK, slot: "", id, owner: 0 };
+        let splice = |id| EventRow { kind: EventKind::Splice, source: Source::Player, class: BANK, slot: "", id, owner: 0, hit: None };
         let tags_of = |world: &World, owner: &str| -> Vec<(i32, Option<String>)> {
             let s = world.resource::<AudioApi>().snapshot(None, 0, owner);
             s["events"]["rows"].as_array().unwrap().iter().map(|r| (r["id"].as_i64().unwrap() as i32, r["tag"].as_str().map(str::to_owned))).collect()

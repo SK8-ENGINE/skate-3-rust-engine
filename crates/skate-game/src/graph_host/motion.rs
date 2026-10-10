@@ -115,6 +115,8 @@ pub struct MotionHost {
     pub flags: super::motion_landing::Flags,
     hippy_jump: super::motion_hippy_jump::Settings,
     finger_flip: super::motion_finger_flip::Settings,
+    /// `anim_skitching/default` for the skitch nodes.
+    pub(crate) skitching: super::motion_skitching::Settings,
     pub landing_physical: Option<super::motion_landing::Physical>,
     pub wipeout_physical: Option<super::motion_wipeout::Physical>,
     pub wipeout_controls: super::motion_wipeout::Controls,
@@ -143,6 +145,46 @@ pub struct MotionHost {
     manual: skate_core::animation::manual::Settings,
     next_instance: u32,
 }
+/// The authored `UpdateRidingFakie` settings of the stock motion graph (every node, in graph
+/// order): the retail fakie rule's thresholds, also used by the NPC replay puppet.
+pub(crate) fn stock_riding_fakie_settings(graph: &LoadedGraph) -> Result<Vec<skate_core::animation::riding_fakie::Settings>, String> {
+    Ok(graph
+        .binding
+        .instantiate_operations(&graph.source, &mut MotionFactory)
+        .map_err(|e| e.to_string())?
+        .operations
+        .into_iter()
+        .filter_map(|o| match o {
+            MotionOperation::UpdateRidingFakie(s) => Some(s),
+            _ => None,
+        })
+        .collect())
+}
+
+/// A motion animation over stock metadata alone (no graph), for building stock trees outside the
+/// player's host (tests, the NPC puppet's channel).
+pub(crate) fn metadata_animation(metadata: skate_data::animation_metadata::AnimationMetadata) -> super::motion_animation::MotionAnimation {
+    super::motion_animation::MotionAnimation::from_metadata(metadata)
+}
+
+/// The pose commands of the stock tree `name` (built like a channel's tree,
+/// `MotionAnimation::build_tree`) with `attributes` set (e.g. the fakie channel's `torso`) at
+/// `time` s (wrapped by the tree's length: channel trees loop).
+pub(crate) fn tree_commands(
+    animation: &super::motion_animation::MotionAnimation,
+    name: &str,
+    attributes: &[SettableAttribute],
+    time: f32,
+) -> Result<Vec<skate_core::animation::playback_tree::PoseCommand>, String> {
+    let mut tree = animation.build_tree(name)?;
+    tree.set_attributes(attributes)?;
+    let length = tree.length();
+    tree.set_time(if length > 0.0 { time.max(0.0).rem_euclid(length) } else { 0.0 });
+    let mut out = Vec::new();
+    tree.evaluate(skate_core::animation::playback_tree::Evaluation { cull_threshold: 0.0, update_history: false }, true, &mut out)?;
+    Ok(out)
+}
+
 impl MotionHost {
     pub(super) fn end_gesture_channels(&mut self) {
         // EndGesture nodes share the graph-wide gesture channel owner. The
@@ -292,6 +334,7 @@ impl MotionHost {
             manual: super::motion_manual::settings(data)?,
             hippy_jump: super::motion_hippy_jump::Settings::load(data)?,
             finger_flip: super::motion_finger_flip::Settings::load(data)?,
+            skitching: super::motion_skitching::Settings::load(data),
             next_instance: 1,
         })
     }

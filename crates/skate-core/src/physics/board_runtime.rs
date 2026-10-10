@@ -185,6 +185,25 @@ impl BoardRuntime {
         copy_pose(&hook, &mut self.hook.body.rates);
     }
 
+    /// `82D9C8C8(board, transform, part)`: one part alone (`82BD4318`), the others stay; a
+    /// frozen part is woken first (`82ADF7B8`: body state 2 -> active list).
+    pub fn set_single_part_transform(&mut self, id: BodyId, target: RetailAffineTransform) {
+        let i = id.index();
+        if self.bodies[i].state_flags & 7 == BoardMotion::Frozen.flags() {
+            self.bodies[i].state_flags = (self.bodies[i].state_flags & !7) | BoardMotion::Active.flags();
+        }
+        let mut part = PartPose {
+            transform: pose_words(self.part_transforms()[i]),
+            local_mass_frame: Some(mass_frame_words(self.mass_frames[i])),
+            body: Some(body_pose_words(self.bodies[i].rates)),
+            inertia: Some(inertia_words(self.bodies[i].inertia)),
+        };
+        set_part_transform(&mut part, pose_words(target));
+        copy_pose(&part, &mut self.bodies[i].rates);
+        self.bodies[i].rates.world_inverse_inertia =
+            world_inverse_inertia(self.bodies[i].rates.basis, self.bodies[i].inertia.inverse_tensor);
+    }
+
     /// Gameplay may publish actual velocities/accumulators or physical mode
     /// changes here. Rendering should use the immutable view or part poses.
     pub fn bodies_mut(&mut self) -> &mut [BodySnapshot; BODY_COUNT] {

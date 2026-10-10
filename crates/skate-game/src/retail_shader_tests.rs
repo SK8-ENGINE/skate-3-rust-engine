@@ -136,6 +136,62 @@ fn world_shader_validates_under_non_uniform_material_slots() {
     validate(include_str!("retail_world.wgsl"), &[]);
 }
 
+/// The lightmapped environment branch of `retail_world.wgsl` (families 1 to 8
+/// and 13), cut out so the per-family pins below only match inside it.
+fn lit_environment_branch() -> &'static str {
+    let src = include_str!("retail_world.wgsl");
+    let start = src.find("if (fam == 3u || fam == 4u) && (flags & 8u)").expect("lit environment branch");
+    let end = start + src[start..].find("var f = saturate(").expect("fog after the branch");
+    &src[start..end]
+}
+
+/// Families 7 / 8 are `environmentsimple.alphatest` / `environmentsimple.diffuse`
+/// (`tools/asset_pipeline/retail_material.py`), whose VLT effects are
+/// `alphatestdefaultenvironment` / `environmentdiffuse`. Both retail programs
+/// (`shaders_final.big`, instructions 27-34 / 26-34) compute
+/// `min(avg4(lightmap)^2, vis + floor) * diffuse^2 * m_params[0].y` with no kd
+/// term, so kd is exactly 1 for them. The other families without a normal map
+/// keep the flat-normal kd `0.39 * 2.3956` of the normal-mapped programs.
+#[test]
+fn simple_diffuse_and_alphatest_families_have_no_kd_term() {
+    let branch = lit_environment_branch();
+    assert!(
+        branch.contains("var kd = select(0.93429, 1.0, fam == 7u || fam == 8u);"),
+        "families 7 / 8 must start from kd = 1"
+    );
+    // The normal-map kd path must not reach families 7 / 8.
+    assert!(branch.contains("if (fam <= 6u || fam == 13u) && (flags & 1u) != 0u {"));
+    // The lightmapped radiance is lightmap * kd * diffuse, nothing else.
+    assert!(branch.contains("lin = lml*kd*d;"));
+    // The flat-normal constant is the retail 0.39 * 2.3956 (rounded as in the shader).
+    assert!((0.39_f32 * 2.39562 - 0.93429).abs() < 1e-5);
+}
+
+/// Which programs normalise the tangent normal before the kd dot product.
+/// `environment.default` (family 1, VLT effect `baseenvironment`) does
+/// (`baseenvironment_defaultPS` 29-33: rsq of the combined normal, kd from the
+/// normalised xy at 66). `environmentsimple.default` (family 2, effect
+/// `defaultenvironment`) and `environment.reflective_simple` (family 6, effect
+/// `baseenvironmentreflective_simple`) do not: `defaultenvironment_defaultPS`
+/// takes kd from the raw `2n - 1` (38, 61, 63, 67) and
+/// `baseenvironmentreflective_simple_defaultPS` from the raw `2n - 1`
+/// (14-22, 45, 63, 74-76); their rsq instructions normalise only the view
+/// vector, the world normal used for specular / reflection and the
+/// tangent-frame sun whose signs pick the kd weights.
+#[test]
+fn tangent_normal_is_normalised_for_kd_only_where_retail_does() {
+    let branch = lit_environment_branch();
+    assert!(branch.contains("var vnd = raw;"));
+    assert!(
+        branch.contains("if fam != 2u && fam != 6u { vnd = raw * inverseSqrt(max(dot(raw,raw),1e-12)); }"),
+        "families 2 / 6 take kd from the raw tangent normal, the others normalise it"
+    );
+    // kd reads the (possibly raw) tangent normal with the retail weights.
+    assert!(branch.contains(
+        "kd = (vnd.x*0.58*sign(dot(kt,sun))+vnd.y*0.62*sign(dot(kb,sun))+vnd.z*0.39)*2.39562;"
+    ));
+}
+
 /// The dome is one draw with no material table, so what is worth checking is the
 /// binding numbers: they are written out by hand here and have to stay in step
 /// with `SkyMaterial`'s `AsBindGroup` derive.

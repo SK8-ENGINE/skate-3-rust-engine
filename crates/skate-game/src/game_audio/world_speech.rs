@@ -929,7 +929,7 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
                     speech.lines += 1;
                     // Observe-only row for mods: class "speech" (living world) or "maincast".
                     let class = if bank == MAIN_CAST_BANK { "maincast" } else { "speech" };
-                    super::mod_audio::record(&mut speech.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Speech, source: super::mod_audio::Source::Speech, class, slot: "", id: line.event as i32, owner: speaker });
+                    super::mod_audio::record(&mut speech.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Speech, source: super::mod_audio::Source::Speech, class, slot: "", id: line.event as i32, owner: speaker, hit: None });
                     debug!("AUDIO_WORLD speech start owner={speaker} {} take {}", d.index.clips.get(line.clip).map_or("?", |c| c.name.as_str()), line.take);
                 }
                 Event::Cut { speaker, .. } => debug!("AUDIO_WORLD speech cut owner={speaker} (level at or below 200 for 2 s)"),

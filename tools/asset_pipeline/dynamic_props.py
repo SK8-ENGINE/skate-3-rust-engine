@@ -3,6 +3,11 @@
 This preserves initial placement, not DMO simulation. Native 0x825876D0 reads
 the locator matrix and template ID at +112; RX2 EB001D records are 128 bytes.
 No name matching, random placement, ground snapping or collision synthesis.
+
+Geometry is exported once per template and each placement becomes a MOBJ
+schema 4 instance record (identity, name, shared index range, row-vector
+affine transform). The runtime spawns one entity per instance; the JSON
+sidecar retains full IDs and matrices.
 """
 import argparse
 import copy
@@ -68,8 +73,12 @@ def locators(raw):
 
 def template_meshes(raw):
     """Resolve EB000D tInstance -> EB0001 model -> EB0023 mesh -> declaration."""
+    from .grab_data import GRABDATA, section_splines
     table = sections(raw)
     result = {}
+    # Grab splines by position (b48, validated against parkassets' single-template copies; the retail link is
+    # not decoded): the GRABDATA section between a template's EB0001 model and the next template's model.
+    model_indices = sorted(struct.unpack_from('>I', raw, at+128)[0] for _, at, _ in records(raw, 0xEB000D, 160))
     for _, at, _ in records(raw, 0xEB000D, 160):
         key = f'{struct.unpack_from(">Q", raw, at+104)[0]:016X}'
         index = struct.unpack_from('>I', raw, at+128)[0]
@@ -91,9 +100,29 @@ def template_meshes(raw):
             mesh_info.append(table[descriptor][0])
         if key in result:
             raise ValueError('Duplicate DMO template ID')
-        result[key] = dict(mesh_info=mesh_info, matrix=matrix(raw, at),
-                          model_matrix=matrix(raw, base+struct.unpack_from('>I', raw, base+32)[0]))
+        following = next((i for i in model_indices if i > index), len(table))
+        grab = [i for i in range(index + 1, following) if table[i][5] == GRABDATA]
+        if len(grab) > 1:
+            raise ValueError('Two GRABDATA sections for one DMO template')
+        splines = [dict(points=g['control_points'], direction=g['direction'], bounds=g['bounds'], flags=g['flags'])
+                   for i in grab for g in section_splines(raw, table[i][0], table[i][2])]
+        result[key] = dict(mesh_info=mesh_info, matrix=matrix(raw, at), grab_splines=splines,
+                          model_matrix=matrix(raw, base+struct.unpack_from('>I', raw, base+32)[0]),
+                          characteristics=characteristics_key(raw, at))
     return result
+
+
+def characteristics_key(raw, at):
+    """Per-type DMO data record of one EB000D template.
+
+    +112 is the vault class's 'default' collection id and +120 the record key
+    of class livingworld_dynamicobject_characteristics: the record whose
+    layout the DMO constructor 82C51E28 keeps at DMO+4380 -> +4 (+272
+    restitution, +312 upright flag, +316..+328 friction pairs). Only the key is
+    exported; the values stay in the installation's stock vault.
+    """
+    record = struct.unpack_from('>Q', raw, at+120)[0]
+    return f'Hash_{record:016X}' if record else None
 
 
 def transform_mesh(arrays, index, transform):
@@ -171,6 +200,53 @@ def load_catalog(path):
     return data['templates'], data['textures']
 
 
+def mobj_extension(records, ranges):
+    """MOBJ schema 4 payload: schema 3 record plus a 12-float row-vector affine.
+
+    `records` holds (locator, model_position, transform) tuples; `ranges` is
+    the per-model (first index, index count) list reported by the map writer.
+    """
+    out = bytearray()
+    u = lambda *v: out.extend(struct.pack('<'+'I'*len(v), *v))
+    f = lambda *v: out.extend(struct.pack('<'+'f'*len(v), *v))
+    u(len(records)); ids = set()
+    for item, model, transform in records:
+        identity = int(item['instance_id'], 16) & 0xFFFFFFFF
+        if identity in ids:
+            raise ValueError('Conflicting DMO identity '+item['instance_id'])
+        ids.add(identity)
+        if not np.isfinite(transform).all():
+            raise ValueError('Non-finite DMO transform '+item['instance_id'])
+        name = f"{item['template_id']}/{item['name']}".encode('utf-8')
+        u(identity, len(name)); out.extend(name)
+        f(*transform[3, :3])  # origin duplicates the affine translation
+        first, count = ranges[model]
+        u(first, count, 0, 0, 0)  # render range, collision range, no rails
+        u(0, 0)  # no physics body, collision shape unused
+        f(100., .55, .05, .05, .15, 1.)  # authored-style physics defaults
+        u(1, 0)  # enable_sleep, initially_awake
+        f(*transform[:3, :3].ravel(), *transform[3, :3])
+    return bytes(out)
+
+
+def hotpoint_props(instance_id, template_id, transform, hotpoints, classes):
+    """Each hotpoint with a plugin class as one waypoint group (`82C4E128`) at the prop's initial placement: the
+    model-frame point and facing axis (row 2) through the same row-vector transform as the prop's geometry."""
+    result = []
+    for index, h in enumerate(hotpoints):
+        cls = classes.get(str(h['type']), classes.get('default'))
+        if cls in (None, 'root'):
+            continue
+        position = (np.array([*h['position'], 1.0]) @ transform)[:3]
+        facing = (np.array([*h['axes'][2], 0.0]) @ transform)[:3]
+        length = float(np.hypot(facing[0], facing[2]))
+        if length < 1e-6:
+            raise ValueError('Hotpoint facing has no horizontal direction')
+        result.append({'instance_id': instance_id, 'template_id': template_id, 'index': index, 'type': h['type'], 'class': cls,
+                       'position': position.tolist(), 'facing': [float(facing[0] / length), 0.0, float(facing[2] / length)]})
+    return result
+
+
 def export(manifest_path, cache_roots, output, *, catalog_path=None):
     district = json.loads(manifest_path.read_text())
     templates, textures = catalog(cache_roots) if catalog_path is None else load_catalog(catalog_path)
@@ -184,23 +260,45 @@ def export(manifest_path, cache_roots, output, *, catalog_path=None):
             if key in placements and placements[key] != item:
                 raise ValueError('Conflicting DMO locator '+key)
             placements[key] = item
-    report = dict(map=district['map_name'], instances=[], unresolved=[], simulation='initial placement only')
+    report = dict(map=district['map_name'], instances=[], unresolved=[], simulation='initial placement only',
+                  types={}, grab_splines={}, hotpoints={}, hotpoint_classes={}, plugin_props=[])
+    # Ped plugin hotpoints per template (parkassets.big, `hotpoint_data`), written by prepare_catalog beside the catalog.
+    hotpoint_file = Path(catalog_path).parent/'hotpoints.json' if catalog_path is not None else None
+    hotpoint_table = json.loads(hotpoint_file.read_text()) if hotpoint_file is not None and hotpoint_file.is_file() else {}
     with tempfile.TemporaryDirectory(prefix='skate-dmo-') as work:
-        root = Path(work); models = []; used = set()
-        for number, item in enumerate(placements.values()):
+        root = Path(work); models = []; records = []; used = set(); positions = {}
+        for item in placements.values():
             template = templates.get(item['template_id'])
             if template is None:
                 report['unresolved'].append(item)
                 continue
+            key = item['template_id']
+            if key not in positions:
+                # Template geometry stays in model space; instance transforms
+                # carry the full placement so every locator shares one range.
+                arrays = {}
+                meshes = copy.deepcopy(template['meshes'])
+                with np.load(template['npz'], allow_pickle=False) as original:
+                    for mesh in meshes:
+                        index = mesh['index']
+                        for name in original.files:
+                            if name.endswith('_'+str(index)):
+                                arrays[name] = original[name]
+                        used.update(mesh['retail_texture_ids'].values())
+                path = f'{len(models)}.npz'; np.savez(root/path, **arrays)
+                positions[key] = len(models)
+                models.append(dict(asset_id=key, meshes=meshes, npz=path))
             transform = template['model_matrix'] @ template['matrix'] @ np.array(item['matrix'])
-            arrays = {}; meshes = copy.deepcopy(template['meshes'])
-            with np.load(template['npz'], allow_pickle=False) as original:
-                for mesh in meshes:
-                    arrays.update(transform_mesh(original, mesh['index'], transform))
-                    used.update(mesh['retail_texture_ids'].values())
-            path = f'{number}.npz'; np.savez(root/path, **arrays)
-            models.append(dict(asset_id=item['instance_id'], meshes=meshes, npz=path))
-            report['instances'].append(dict(item, model_asset=template['asset_id'], meshes=len(meshes)))
+            records.append((item, positions[key], transform))
+            report['instances'].append(dict(item, model_asset=template['asset_id'], meshes=len(template['meshes'])))
+            if template.get('characteristics'):
+                report['types'][key] = template['characteristics']
+            if template.get('grab_splines'):
+                report['grab_splines'][key] = template['grab_splines']
+            if key in hotpoint_table.get('hotpoints', {}):
+                report['hotpoints'][key] = hotpoint_table['hotpoints'][key]
+                report['hotpoint_classes'] = hotpoint_table['classes']
+                report['plugin_props'].extend(hotpoint_props(item['instance_id'], key, transform, hotpoint_table['hotpoints'][key], hotpoint_table['classes']))
         if models:
             manifest = dict(map_name=district['map_name'], district_name=district['district_name'],
                 models=models, textures={key:textures[key] for key in sorted(used)},
@@ -209,7 +307,8 @@ def export(manifest_path, cache_roots, output, *, catalog_path=None):
             # Publish only a complete package; preserve the previous one on failure.
             temporary = output.with_suffix('.skate.new')
             try:
-                write(root/'manifest.json', temporary, None, render_only=True)
+                write(root/'manifest.json', temporary, None, render_only=True,
+                      extensions=lambda ranges: [(b'MOBJ', 4, mobj_extension(records, ranges))])
                 temporary.replace(output)
             finally:
                 temporary.unlink(missing_ok=True)
@@ -233,6 +332,9 @@ def prepare_catalog(game_root, work):
                 district_name=stream.name, map_name=stream.name, raw_texture_cache=True)
         roots.append(root)
     save_catalog(roots, work/'catalog.json')
+    # Ped plugin hotpoints (seats, bins, newspaper boxes) live in parkassets.big, not in worlddmo.big.
+    from .hotpoint_data import CLASSES, parkassets_hotpoints
+    (work/'hotpoints.json').write_text(json.dumps(dict(classes=CLASSES, hotpoints=parkassets_hotpoints(game_root))))
     return roots
 
 

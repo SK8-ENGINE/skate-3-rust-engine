@@ -608,7 +608,7 @@ mod tests {
         }
         // Events.
         app.world_mut().write_message(VehicleAlarm { vehicle: car });
-        app.world_mut().write_message(PedSpeechEvent { ped: peds[0], value: SpeechValue::WARN });
+        app.world_mut().write_message(PedSpeechEvent { ped: peds[0], value: SpeechValue::WARN, topic: None });
         app.update();
         assert_eq!(app.world().resource::<WorldOwners>().vehicles[&car.to_bits()].horn, 6);
         assert_eq!(app.world().get::<PedAudio>(peds[0]).unwrap().speech_value, 53);

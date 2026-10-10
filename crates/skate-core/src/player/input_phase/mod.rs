@@ -6,7 +6,7 @@
 
 mod publication;
 mod special_surface;
-pub use special_surface::publish_special_surface;
+pub use special_surface::{BoundaryContact, publish_special_surface};
 mod motion_math;
 mod runtime;
 mod types;

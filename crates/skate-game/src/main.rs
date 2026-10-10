@@ -43,11 +43,14 @@ mod customiser_material;
 mod custom_models;
 mod teleport_menu;
 mod render_capacity;
+mod retail_backdrop;
 mod retail_render;
 mod retail_character;
 mod retail_exposure;
+mod colour_matrix;
 mod retail_irradiance;
 mod retail_sky;
+mod skater_ghost;
 mod presentation;
 mod debug_cam;
 mod replay;
@@ -59,7 +62,9 @@ mod water_splash;
 mod game_audio;
 pub(crate) mod world_audio;
 pub(crate) mod ui_audio;
+mod living_world;
 mod trigger_volumes;
+mod trace_all;
 
 fn main() -> bevy::app::AppExit {
     match updater::recover() {
@@ -74,10 +79,13 @@ fn main() -> bevy::app::AppExit {
     // Setup tool mode: `--extract-menu-tables <default.xex> <menu-tables.json>`.
     if let Some(code) = extract_menu_tables() { std::process::exit(code); }
     if let Some(code) = crash_report::entry() { std::process::exit(code); }
+    // Before any thread and the log subscriber: `SKATE_TRACE_ALL=1` turns every diagnostic on.
+    trace_all::apply();
     let _trace = match profiling::init() {
         Ok(guard) => guard,
         Err(error) => { eprintln!("{error}"); return bevy::app::AppExit::error(); }
     };
+    trace_all::announce();
     let _startup = bevy::log::info_span!("startup").entered();
     eprintln!("REPORT_META stage=configuration_and_installation");
     let config = match bevy::log::info_span!("load_configuration_and_map").in_scope(config::Config::from_env) {

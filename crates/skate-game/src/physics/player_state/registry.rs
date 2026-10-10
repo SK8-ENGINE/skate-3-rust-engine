@@ -39,6 +39,7 @@ impl StateRegistry {
                     | PhysicalStateId::OffBoardPushing
                     | PhysicalStateId::GroundAnimation
                     | PhysicalStateId::SlideGround
+                        | PhysicalStateId::Skitching
                     | PhysicalStateId::WipeoutGround
                     | PhysicalStateId::Teleporting
                     | PhysicalStateId::LandingOnDeck
@@ -81,6 +82,7 @@ impl StateRegistry {
                         | PhysicalStateId::OffBoardPushing
                         | PhysicalStateId::GroundAnimation
                         | PhysicalStateId::SlideGround
+                        | PhysicalStateId::Skitching
                         | PhysicalStateId::WipeoutGround
                         | PhysicalStateId::Teleporting
                         | PhysicalStateId::LandingOnDeck,
@@ -94,6 +96,7 @@ impl StateRegistry {
                         | PhysicalStateId::OffBoardPushing
                         | PhysicalStateId::GroundAnimation
                         | PhysicalStateId::SlideGround
+                        | PhysicalStateId::Skitching
                         | PhysicalStateId::WipeoutGround
                         | PhysicalStateId::Teleporting
                         | PhysicalStateId::LandingOnDeck
@@ -132,5 +135,15 @@ mod tests {
         );
         assert!(!registry.can_transition(PhysicalStateId::Sleeping, PhysicalStateId::PhysicsAir));
         assert!(registry.capability(PhysicalStateId::BipedAir).supported);
+    }
+
+    #[test]
+    fn skitching_is_connected_to_ground_and_back() {
+        let registry = StateRegistry::new();
+        let c = registry.capability(PhysicalStateId::Skitching);
+        assert!(c.supported && c.has_enter && c.has_exit);
+        assert!(registry.can_transition(PhysicalStateId::PhysicsGround, PhysicalStateId::Skitching));
+        assert!(registry.can_transition(PhysicalStateId::Skitching, PhysicalStateId::PhysicsGround));
+        assert!(registry.can_transition(PhysicalStateId::Skitching, PhysicalStateId::WipeoutGround));
     }
 }

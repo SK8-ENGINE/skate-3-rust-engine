@@ -248,7 +248,7 @@ fn query_edges() -> Vec<EdgeSegment> {
         .collect()
 }
 
-pub(super) fn query_settings() -> (WorldContactSettings, ContactRetentionSettings) {
+pub(crate) fn query_settings() -> (WorldContactSettings, ContactRetentionSettings) {
     (
         WorldContactSettings {
             // Serialized primitive82DC3AE4/82DC3B84, source literal82165A00.

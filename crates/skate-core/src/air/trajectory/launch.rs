@@ -85,6 +85,8 @@ pub(super) struct LaunchBatch {
     pub local_board_position: Vector, //2832
     pub local_com_position: Vector,   //2784
     pub com_displacement: Vector,     //2768
+    ///9659: the recorded AI arc was cast (sub_82D68C80 then skips the grind lock and pass 2).
+    pub recorded: bool,
 }
 pub(super) fn batch(info: LaunchInfo, input: SelectorInput, s: &SelectorSettings) -> LaunchBatch {
     let velocities = candidate_velocities(info, s);
@@ -112,6 +114,36 @@ pub(super) fn batch(info: LaunchInfo, input: SelectorInput, s: &SelectorSettings
     }
     let com_displacement = sub(info.animation_com_position, origin);
     let duration = max_time(info.start_velocity, s);
+    //sub_82D682E8 -> sub_82D67B50 / sub_82D67A00: an AI skater taking off near its recorded jump
+    //casts that one arc (count 1, flag 9659); the computed start velocity (2192) stays.
+    if let Some(arc) = input
+        .recorded_arc
+        .filter(|arc| {
+            let window = (s.recorded_arc_radius_squared, s.recorded_arc_speed_ratio_min, s.recorded_arc_speed_ratio_max);
+            accepts_recorded(*arc, info.start_velocity, origin, info.timestep, window)
+        })
+    {
+        return LaunchBatch {
+            requests: vec![QueryRequest {
+                trajectory: Trajectory {
+                    position: arc.position,
+                    velocity: arc.velocity,
+                    acceleration: arc.acceleration,
+                    duration,
+                },
+                radius: s.trajectory_radius,
+                start_error: s.recorded_arc_error,
+                end_error: s.recorded_arc_error,
+            }],
+            velocities: vec![info.start_velocity],
+            origin,
+            board_position,
+            com_displacement,
+            local_board_position: transform(info.reckoning_inverse, sub(info.board_position, origin)),
+            local_com_position: transform(info.reckoning_inverse, com_displacement),
+            recorded: true,
+        };
+    }
     let requests = velocities
         .iter()
         .map(|&velocity| QueryRequest {
@@ -134,6 +166,51 @@ pub(super) fn batch(info: LaunchInfo, input: SelectorInput, s: &SelectorSettings
         com_displacement,
         local_board_position: transform(info.reckoning_inverse, sub(info.board_position, origin)),
         local_com_position: transform(info.reckoning_inverse, com_displacement),
+        recorded: false,
+    }
+}
+///sub_82D67B50: the board one step after take-off within the radius of the recorded start, moving
+///with the recorded velocity, at a speed ratio inside the window (unchecked below 0.0001 m/s).
+pub(super) fn accepts_recorded(
+    arc: super::RecordedArc,
+    velocity: Vector,
+    origin: Vector,
+    timestep: f32,
+    (radius_squared, ratio_min, ratio_max): (f32, f32, f32),
+) -> bool {
+    let next = madd(velocity, timestep, origin);
+    let d = sub(next, arc.position);
+    if dot(d, d) >= radius_squared || dot(velocity, arc.velocity) < 0.0 {
+        return false;
+    }
+    let speed = length(velocity);
+    if speed <= f32::from_bits(0x38d1_b717) {
+        return true;
+    }
+    let ratio = length(arc.velocity) / speed;
+    (ratio_min..=ratio_max).contains(&ratio)
+}
+
+#[cfg(test)]
+mod recorded_tests {
+    use super::*;
+
+    #[test]
+    fn a_recorded_arc_is_accepted_only_near_its_start_and_speed() {
+        let window = (4.0, 0.333, 3.0);
+        let arc = super::super::RecordedArc { position: [0.0, 0.0, 1.0, 0.0], velocity: [0.0, 3.0, 6.0, 0.0], acceleration: [0.0, -9.8, 0.0, 0.0] };
+        let dt = 1.0 / 60.0;
+        let v = [0.0, 3.0, 6.0, 0.0];
+        assert!(accepts_recorded(arc, v, [0.0, 0.0, 0.0, 1.0], dt, window));
+        // More than 2 m from the recorded start one step later.
+        assert!(!accepts_recorded(arc, v, [0.0, 0.0, -1.5, 1.0], dt, window));
+        // Moving against the recorded velocity.
+        assert!(!accepts_recorded(arc, [0.0, -3.0, -6.0, 0.0], [0.0, 0.0, 0.0, 1.0], dt, window));
+        // Recorded speed more than 3x / less than 1/3 of the take-off speed.
+        assert!(!accepts_recorded(arc, [0.0, 0.5, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0], dt, window));
+        assert!(!accepts_recorded(arc, [0.0, 12.0, 24.0, 0.0], [0.0, 0.0, 0.0, 1.0], dt, window));
+        // Standing still: the ratio is not checked.
+        assert!(accepts_recorded(arc, [0.0; 4], [0.0, 0.0, 0.0, 1.0], dt, window));
     }
 }
 ///82D68698 deliberately uses the original -19.6 and -1/9.8 coefficients.

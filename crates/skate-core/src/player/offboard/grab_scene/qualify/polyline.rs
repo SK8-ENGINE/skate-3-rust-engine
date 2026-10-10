@@ -6,7 +6,7 @@ fn indices(r:&Record)->impl Iterator<Item=usize> {
     let reverse=r.byte(200)&0x20!=0;
     (0..count).map(move |i| if reverse {count-1-i} else {i})
 }
-pub(super) fn nearest_distance(r:&Record,world:Vector)->f32 {
+pub fn nearest_distance(r:&Record,world:Vector)->f32 {
     if r.points().len()<=1 {return 0.;}
     let local=inverse_point(frame(r),world);
     let mut indices=indices(r);
@@ -29,7 +29,7 @@ pub(super) fn nearest_distance(r:&Record,world:Vector)->f32 {
     }
     distance
 }
-pub(super) fn at_distance(r:&Record,distance:f32)->Vector {
+pub fn at_distance(r:&Record,distance:f32)->Vector {
     let endpoints=r.endpoints();
     if r.points().len()<=1 || 0.>=distance {return endpoints[0];}
     let mut indices=indices(r);

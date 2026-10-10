@@ -3415,6 +3415,131 @@ Results: skate-audio 228 pass; game_audio 58 pass (new world test included, run 
 builds. e2e doesn't run the changed code: `world_sources` is not in the harness, and
 `prefetch.rs` only gained a counter and a public `contains`.
 
+### Silent cliff fall: the body hits played at the board (2026-10-08, `player::contacts`)
+
+**Problem.** The user (2026-10-07, verbatim): "I had a no sound fall. jumped off a cliff and when i landed in balled up
+mode as well as spread eagle it made no noise".
+
+**Root cause.** The body poster (`Contacts::body`) posted every body-region hit at `board_position`. In that fall the
+board stayed up the slope while the skater fell about 45 m down, so the hits played 44 m from the skater and the
+camera: posted, but inaudible.
+
+**Evidence.**
+- Session `game-20261007-151236` / `state_20261007_151236.tsv` (third segment): walk off the edge at COM y 133.8, bail,
+  five seconds of ragdoll air with every region clear, ground contact at 21:30:01.415 (head 0.321, legs 0.606 / 0.501
+  on concrete, |COM v| 22.8 m/s, speed graph x5: tier 2 on concrete, no cooldown). The pair, second, cloth and pad
+  messages all posted. Board (342.5, 107.0, -679.5) against COM (323.5, 88.3, -644.6): 44 m.
+- Retail `sub_824BC188` (the body poster) posts via `bl 0x82486EF0` with `lvx128 vN, state, r18`, r18 = 48: audio
+  state `+48`. The instance bridge `sub_824B0DA8` writes state `+48` from the skater record's `+0` (the skater point,
+  our `com_position`) and state `+144` from record `+48` (the board, our `board_position`).
+- Cross-check of the other posters: grind start `sub_824BB0E0` `li r5, 48` (skater; ours already `com_position`),
+  deck impact `sub_824BD000` `li r24, 144` (board; ours `board_position`, correct), landing pair `sub_824BA630`
+  `li r5, 144` (board; ours `board_position`, correct). Only the body poster was wrong.
+- The earlier recomp bail runs (`bailx3_20261003_110208`, `bandq_20261003_105210`) validated tiers and levels, not
+  positions; their boards landed near the body, which hid this.
+
+**Change.**
+- `Contacts::body` posts at `s.com_position` (doc comment cites `sub_824BC188` `+48` and the bridge mapping). The
+  second, cloth and pad messages copy the pair's position, so all four move. NPC skaters run the same code
+  (`world::skaters`), so their bails are fixed too.
+- `Contacts::body_hits`: one `BodyHit` (region, impact after the speed graph, the pair message) per region that
+  posted, cleared at the start of every process and bounded (32). Read by both hosts after the process
+  (`player_audio::body_hits`, used for the local player and by `npc_skaters::pre` for each held NPC).
+- Diagnostics: one `AUDIO_EVENT body impact owner=.. region=.. impact=.. tier=a/b material=a/b pos=(x,y,z) dist=..`
+  line per region hit (distance to the listener camera; -1 when the host has none yet). The 15-console-frame cooldown
+  per region keeps it to a few lines per bail, never one per frame.
+- Moddability: a `body_impact` event tag (`EventKind::BodyImpact`, slot `body`, id = region) for the local player
+  (owner 0) and NPC skaters (owner = skater id); the row adds `region`, `impact`, `tier`, `material`, `position`. It
+  is observe only (not a rule tag: the hit's sounds are ordinary posts that rules already reach). Subscriptions drop
+  with the mod (`AudioApi::clear_owner`), and the sites' buffers go the next frames. Bands, cooldowns, the speed graph
+  and the pad thresholds stay data-driven in `ContactsTuning` / the collision tuning with retail defaults. SDK:
+  `sdk/skate.lua` `AudioEvent` fields, `api.lua` comment, doc 16.
+
+**Files.** `crates/skate-audio/src/player/contacts.rs`, `crates/skate-audio/src/world/skaters.rs`,
+`crates/skate-game/src/game_audio/{player_audio, npc_skaters, mod_audio}.rs` (plus the `hit: None` field on every
+other `EventRow` site: `ambience`, `emitters`, `mod_rules`, `mod_voices`, `world_sources`, `world_speech`),
+`crates/skate-mods/src/api.lua`, `sdk/skate.lua`, `docs/hails-additions/16-audio-modding.md`.
+
+**Verification.**
+- New tests: `the_body_poster_posts_at_the_skater_not_the_board` (all four retail points: body and grind start at the
+  skater, deck and landing pair at the board), `a_cliff_fall_lands_its_body_hits_at_the_body` (the session's shape:
+  300 frames of ragdoll air, then the head / leg hits with the board 44 m away; every message at the body, within 5 m
+  of a camera beside it), `body_impacts_reach_a_subscriber_per_skater` (player and NPC rows with their fields; mod
+  disable drops subscription and buffers).
+- `cargo test -p skate-audio --locked`: 245 pass. `cargo test -p skate-game --release --bin skate3rust --locked --
+  game_audio`: 77 pass.
+- e2e (`game_audio::e2e::e2e_render`, `E2E_FPS=60`) before and after on the 13 scenarios, the 4 real sessions of the
+  optimisation bench and a cut of the cliff-fall log (rows 50740..51770): 69 of 72 outputs byte-identical. Only
+  `cliff_fall` changes, the only input with body posts: its body trace has the same frames and post counts with new
+  digests (the position is hashed), and its voices differ only in gain and send (same voices, same pitches) from the
+  first body post on. Its deck trace is identical. (The e2e replay puts COM and board 0.9 m apart, so the change is
+  small there; the 44 m case is the unit test.)
+- To playtest: the user does a cliff fall (tuck and spread eagle) and checks the landing is heard.
+
+### Landing into a manual: retail parity checked, a per-landing diagnostic line (2026-10-08, `player::contacts`)
+
+**Problem.** The user (2026-10-07, verbatim): "there is no landing noise when landing in manual", then "its not always
+manuals that are silent landings". There is no session with a manual landing in it yet, so the check works from the
+retail code.
+
+**Root cause.** Not found in the Contacts code: it matches retail gate for gate (below). Landing into a manual posts the
+same sounds in retail and ours. What is left is outside these gates: a start the host refuses (the NPC voice leak fixed
+in 54cf8f5, which is not on `gameplay/audio` yet), a quiet variant or level, or physics inputs we have not seen in a
+session. The new line tells these apart from one session.
+
+**Evidence** (TU3 recomp, reference only; [code]).
+- Frame order `sub_824B8218`: manual landing `sub_824BB330`, its result into the touchdowns `sub_824B86E0` (r4), then the
+  process `sub_824B90D8`. Ours: `Contacts::process`, same order.
+- `sub_824B90D8`: calls the landing `sub_824BA630` when `+120` (airborne last frame) is set and `+332` (airborne) and
+  `+341` (grinding) are clear. No balance gate. `sub_824BA630` starts the landing impact for the local player (`+72`)
+  and posts the pair contact (first landed wheel `+464` with a material `+620`, landing-flag materials only). Ours:
+  `land()` / `land_pair()`, same gates.
+- `sub_824B86E0`: two newly landed wheels with none counted (kind 1, "a pair from nothing") call the touchdown
+  `sub_824B8D48` with no manual gate. Only the last pair (two new wheels with two counted, `0x824B8B24` and
+  `0x824B8CA8`) is skipped when the manual landing returned true (r26) or `+121` (in a manual) is set.
+  `sub_824B8D48` returns when all four slots (`+140`, stride 24) are held. Ours: same.
+- `sub_824BB330`: `+340` set latches `+121`; with `+340` clear and `+121` set it reads `+200`: 3 or 4 wheels release
+  the old holder (`+36`), start kind 4 variant 0, mark all wheels counted (`+132..+135`) and clear `+121`; 0 wheels
+  clears `+121`; 1 or 2 wheels keep it. Ours: `manual_landing()`, same.
+- The inputs: the packer `sub_827A1B78` builds record `+148` from state byte 60 (`rlwimi .., 26, 5, 5`, the bridge's
+  `+340`) and Air `+438` (bit 31, the bridge's `+332`); ProcessOutput `sub_82DB6EC0` (`0x82DB764C`) writes Air `+438` =
+  physical state in 200..300 and the wheel count word 0. Ours: `balance` = flag 60, `airborne` = state 200..300 with no
+  wheel down: the same.
+- So a front or nose manual landing on two wheels plays, in retail and ours: the landing impact (1095), the pair
+  contact (on a landing material) and the kind 1 touchdown on the landing frame; nothing when the back pair comes
+  down inside the manual; the manual landing (kind 4) when the manual ends with 3 or 4 wheels down.
+
+**Change** (diagnostics only, no sound changes).
+- `Contacts::landing_note` (`LandingNote`): per process with a landing, a manual landing or a manual-skipped back pair:
+  the impact (`started` / `novoice` / `notlocal`), the pair (`posted:tier` / `nomaterial` / `notlandingmaterial` /
+  `silent`), the touchdown (kind, variant, `started` / `novoice` / `noslot` / `skippedmanual`), the manual landing,
+  balance, in a manual, wheels, contact and landed masks, air time. NPC skaters fill it too (per skater, no shared
+  state); only the local player logs it.
+- `player_audio`: one `AUDIO_LANDING ...` line per such process (a landing gives one line, a manual landing up to
+  three: landing, skipped back pair, manual landing).
+- Moddability: no threshold or window changed; the ids, gains and landing data stay in `ContactsTuning` / the
+  collision tuning with retail defaults (mod-reachable through the tuning overlay).
+
+**Files.** `crates/skate-audio/src/player/contacts.rs`, `crates/skate-game/src/game_audio/player_audio.rs`.
+
+**Verification.**
+- New tests (one per retail rule): `a_landing_into_a_manual_plays_the_impact_and_the_pair_touchdown`,
+  `the_back_pair_in_a_manual_is_silent_until_the_manual_landing`, `a_manual_let_go_on_two_wheels_lands_with_the_manual_sound`,
+  `leaving_the_ground_ends_the_manual_latch`, `a_remote_landing_notes_the_impact_as_not_local`.
+- `cargo test -p skate-audio --locked`: 250 pass. `cargo test -p skate-game --release --bin skate3rust --locked --
+  game_audio::`: 77 pass.
+- e2e (`e2e_bench.sh`, row mode) before and after on the 13 scenarios (`manual15` among them) and the 4 real sessions
+  of the optimisation bench: 34 of 34 outputs (renders and voice logs) byte-identical. Nothing audible changes.
+- To playtest: land into nose and tail manuals (from a plain ollie and after a flip trick), let some run out onto
+  four wheels and some roll off into the air; report any silent one with the time, then read its `AUDIO_LANDING` line.
+
+**Open questions.**
+- Which of the outcomes a silent manual landing shows in a user session (`AUDIO_LANDING`): `novoice` points at the
+  voice cap (54cf8f5), `started` everywhere points at levels or the mix, a missing line at the physics inputs.
+- `sub_824B86E0` returns early when a game flag (`*(0x830CFDC4)` `+564`, then a hash lookup) is set for the local
+  player with `+64` clear; not modelled, it would only make retail quieter.
+- The landing catch itself (when a landing becomes a manual) is the authored motion graph's, not Contacts'.
+
 ## Credits
 
 The retail measurements in this document were taken with **[skate3recomp](https://github.com/mchughalex/skate3recomp)**

@@ -175,7 +175,7 @@ pub(super) fn set(
         PhysicalStateId::LandingOnDeck => super::super::landing_on_deck::exit(physics, skater)?,
         PhysicalStateId::SlideGround => super::super::slide_state::exit(physics, skater)?,
         PhysicalStateId::WipeoutGround => super::super::wipeout_states::exit(physics, skater),
-        PhysicalStateId::Sleeping | PhysicalStateId::Teleporting => {} //82B61BB8.
+        PhysicalStateId::Sleeping | PhysicalStateId::Teleporting | PhysicalStateId::Skitching => {} //82B61BB8.
         state if state.is_grind() || state == PhysicalStateId::Nonspecific => {
             super::super::grind::exit(physics, skater)?
         }
@@ -192,10 +192,18 @@ pub(super) fn set(
         PhysicalStateId::KnownAir => super::super::known_air::enter(physics, skater),
         PhysicalStateId::BipedAir => super::super::biped_air::enter(physics, skater),
         PhysicalStateId::BipedGround => super::super::biped_ground::enter(physics, skater),
-        PhysicalStateId::OffBoardPushing => super::super::biped_ground::enter(physics, skater),
+        PhysicalStateId::OffBoardPushing => {
+            // Move Object enter 82D442D0: shared off-board enter (stand-in:
+            // BipedGround's), then the board part (let go / hide).
+            super::super::biped_ground::enter(physics, skater)?;
+            let drop_board = physics.prop_carry.locomotion().drop_board;
+            super::super::biped_ground::ground_board::enter_move_object(physics, skater, drop_board);
+            Ok(())
+        }
         PhysicalStateId::GroundAnimation => super::super::ground_animation::enter(physics, skater),
         PhysicalStateId::LandingOnDeck => super::super::landing_on_deck::enter(physics, skater),
         PhysicalStateId::SlideGround => super::super::slide_state::enter(physics, skater),
+        PhysicalStateId::Skitching => super::super::skitch_state::enter(physics, skater),
         PhysicalStateId::WipeoutGround => super::super::wipeout_states::enter(physics, skater),
         PhysicalStateId::Teleporting => {
             skater.teleport_state.enter();

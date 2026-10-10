@@ -17,9 +17,10 @@ def convert(assets, converted):
     collections = Collections(converted)
     result = {}
     aliases = ('default', 'reflection', 'backlituvscroll', 'transparent',
-               'flowing', 'flowingalpha', 'alpha', 'skatepark', 'videoscreen')
+               'flowing', 'flowingalpha', 'alpha', 'skatepark', 'videoscreen', 'alphatest')
     for (cls, key), row in collections.rows.items():
-        for family in ('water', 'ocean', 'incandescent'):
+        # dynamicobject: the props' m_params (dynamicobject_defaultPS c14..c15).
+        for family in ('water', 'ocean', 'incandescent', 'dynamicobject'):
             if cls != key_hash('material_' + family):
                 continue
             fields, _ = collections.resolve(cls, key)

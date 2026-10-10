@@ -99,6 +99,26 @@ def environment(game_root, stage, work, report, log, converted=None, game_exe=No
     attempt('backdrops',lambda assets:write_backdrops(game_root,assets,converted))
 
 
+def livingworld(game_root, stage, work, report, log, converted=None):
+    """Optional living world (pedestrians + NPC skaters): on failure the world runs empty and
+    setup reports it (living_world-availability.json)."""
+    private=stage/"assets/private"
+    from .living_world import export_group
+    from .optional_content import CONTENT_ERRORS, note
+    availability=private/'living_world-availability.json'
+    report('Preparing the living world (pedestrians and NPC skaters)')
+    try:
+        if (private/'living_world').exists():shutil.rmtree(private/'living_world')
+        # Own vault conversion (with the summary-report record names), not core's `converted`.
+        result=export_group({'game_root':game_root,'private':private,'work':work/'living_world','report':report})
+        for warning in result['peds']['warnings']+result['skaters'].get('warnings',[]):log.write(f'living world: {warning}\n')
+    except CONTENT_ERRORS as error:
+        if (private/'living_world').exists():shutil.rmtree(private/'living_world')
+        note(availability,'Living world',error,report=report)
+        return
+    availability.unlink(missing_ok=True)
+
+
 def audio(game_root, stage, work, report, log, tools):
     private=stage/"assets/private"
     from .audio_export import VGMSTREAM_SHA, VGMSTREAM_URL, convert

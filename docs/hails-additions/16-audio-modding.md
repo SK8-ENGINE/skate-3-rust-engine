@@ -200,7 +200,7 @@ and NPC hosts (posts, releases, ped Splice steps, ped body falls and phone rings
 world emitter start / stop, zone ambience changes and speech line starts (class `speech` for the living world, `maincast`
 for the main cast). Tags: `pop`, `land` (the board contacts' Splice starts with the running player's Contacts tuning pop and landing ids, whenever the mod subscribed),
 `grind_start`, `grind_end` (the grind slot's post / release), `footstep`, `horn`, `alarm`, `tazer` (a ped's `c_tazer`
-post), `body_fall` (a ped's body-fall Splice start), `emitter`, `zone_change`, `speech`. Rows are one frame late; at most 256 a frame (`truncated` says when more happened). Nothing is recorded while
+post), `body_fall` (a ped's body-fall Splice start), `emitter`, `zone_change`, `speech`, `body_impact` (a body region's hit of the local player or an NPC skater from the body poster `sub_824BC188`; the row adds `region`, `impact`, `tier`, `material`, `position`; observe only, not a rule tag). Rows are one frame late; at most 256 a frame (`truncated` says when more happened). Nothing is recorded while
 no mod subscribes. Muting, replacing or layering a retail sound: declarative rules (K).
 
 ## F. Tooling, lifecycle and the menu

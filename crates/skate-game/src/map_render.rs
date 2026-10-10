@@ -43,7 +43,7 @@ pub(crate) struct StagedAssets<A: Asset> {
 }
 
 impl<A: Asset> StagedAssets<A> {
-    fn new(world: &World) -> Self {
+    pub(crate) fn new(world: &World) -> Self {
         Self {
             provider: world.resource::<Assets<A>>().get_handle_provider(),
             pending: Vec::new(),
@@ -51,7 +51,7 @@ impl<A: Asset> StagedAssets<A> {
         }
     }
 
-    fn publish(&mut self, world: &mut World) {
+    pub(crate) fn publish(&mut self, world: &mut World) {
         let mut assets = world.resource_mut::<Assets<A>>();
         for (handle, asset) in self.pending.drain(..) {
             self.owned.push(handle.id());
@@ -97,6 +97,25 @@ impl SceneCommands {
     pub(crate) fn spawn<B: Bundle>(&mut self, bundle: B) {
         self.queue.push(move |world: &mut World| {
             world.spawn((bundle, MapEntity));
+        });
+    }
+
+    /// Apply the queued spawns now (tests; production goes through
+    /// `PreparedScene::publish`).
+    #[cfg(test)]
+    pub(crate) fn apply(&mut self, world: &mut World) {
+        std::mem::take(&mut self.queue).apply(world);
+    }
+
+    /// A parent with children in one deferred command. Only the parent gets
+    /// `MapEntity`: despawning it removes the children with it, and marking
+    /// them too would make retirement despawn them twice.
+    pub(crate) fn spawn_with_children<B: Bundle, C: Bundle>(&mut self, bundle: B, children: Vec<C>) {
+        self.queue.push(move |world: &mut World| {
+            let parent = world.spawn((bundle, MapEntity)).id();
+            for child in children {
+                world.spawn((child, ChildOf(parent)));
+            }
         });
     }
 }
@@ -184,6 +203,56 @@ impl PreparedScene {
             &mut self.images,
             &mut self.params,
         );
+        // The district's global presentation model (ocean, far sea planes,
+        // tree walls): retail districts only. Dropped by the renderer rewrite
+        // (upstream e2b85b64) together with the props; restored here.
+        if self.retail {
+            if let Some(backdrop) = crate::retail_backdrop::load_package(asset_root, &map.name) {
+                crate::skate_world::spawn_backdrop(
+                    &backdrop,
+                    &tuning,
+                    &environment,
+                    &mut self.commands,
+                    &mut self.meshes,
+                    &mut self.world_materials,
+                    &mut self.images,
+                    &mut self.params,
+                );
+            }
+            // Unpaired far-proxy cells (Industrial's south hills under the
+            // tree wall), as retail's per-cell proxy swap leaves them.
+            if let Some(proxy) = crate::retail_backdrop::load_proxy_package(asset_root, &map.name) {
+                crate::skate_world::spawn_proxy_terrain(
+                    &proxy,
+                    &tuning,
+                    &environment,
+                    &mut self.commands,
+                    &mut self.meshes,
+                    &mut self.world_materials,
+                    &mut self.images,
+                    &mut self.params,
+                );
+            }
+        }
+        // Movable props (SK8-ENGINE PR #15): retail districts only, as before
+        // the renderer rewrite.
+        if self.retail {
+            if let Some((props, objects)) =
+                crate::skate_world::load_prop_package(asset_root, &map.name)
+            {
+                crate::skate_world::spawn_instances(
+                    &props,
+                    &objects,
+                    &tuning,
+                    &environment,
+                    &mut self.commands,
+                    &mut self.meshes,
+                    &mut self.world_materials,
+                    &mut self.images,
+                    &mut self.params,
+                );
+            }
+        }
         if let Some(sky) = sky {
             sky.spawn(
                 &mut self.commands,

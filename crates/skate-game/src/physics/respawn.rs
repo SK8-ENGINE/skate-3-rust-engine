@@ -7,6 +7,7 @@ use skate_core::{
         skeleton_animation_record::AnimationPartTransform as Matrix,
     },
     player::{
+        input_phase::BoundaryContact,
         respawn::{Candidate, Ground, History, Observation, Validation, surface_allowed},
     },
 };
@@ -17,6 +18,114 @@ pub(super) struct Runtime {
     history: History,
     settings: Settings,
     measurements: i32,
+    /// Why the next checkpoint reply happens (first request since the last reply wins).
+    pending: Option<Pending>,
+    /// Completed respawns, drained into [`PlayerRespawn`] messages after the physics tick.
+    pub(super) outbox: Vec<PlayerRespawn>,
+    /// Completed placements (teleports of any kind) of this skater, retail place-skater counter
+    /// owner +1864 (sub_825926F8). Read by `skater_ghost` to restart the fade-in.
+    pub(crate) placements: u32,
+}
+
+/// Stable id of the local player in [`PlayerRespawn`] (single-player scene).
+pub(crate) const LOCAL_PLAYER_ID: u32 = 0;
+
+/// Why the skater was sent to the checkpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RespawnReason {
+    /// `CalcSuggestedState` air count passed the limit (retail 300 ticks): fell with no ground.
+    AirTimeout,
+    /// Wipeout auto reset (`physics_wipeout` Teleport* times), output byte 69.
+    WipeoutAutoReset,
+    /// Touched a type-6 `physics_unrideable` surface (ProcessOutput 82DB8120: board/feet/plant
+    /// contact via 82DB80C8, or the ragdoll SkeletonCollision+214 branch), e.g. Industrial's
+    /// invisible sea floor at y -4.0 (surface 768).
+    Boundary,
+    /// Any other teleport request reaching the checkpoint manager (flags 2468 bit 1 / 2472 bit 18).
+    Requested,
+    /// Reserved for type-12 water. The Industrial sea reset is the type-6 floor under the water
+    /// ([`Self::Boundary`]); no type-12 reset path is decoded, so nothing emits this.
+    #[allow(dead_code)]
+    Water,
+}
+
+impl RespawnReason {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::AirTimeout => "air_timeout",
+            Self::WipeoutAutoReset => "wipeout_auto_reset",
+            Self::Boundary => "boundary",
+            Self::Requested => "requested",
+            Self::Water => "water",
+        }
+    }
+}
+
+/// One checkpoint respawn of a player, emitted by the owning simulation on its fixed 1/60 s
+/// tick (serialisable, stable ids; no networking).
+#[derive(bevy::prelude::Message, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct PlayerRespawn {
+    pub player_id: u32,
+    /// Physics tick of the checkpoint reply.
+    pub tick: u64,
+    pub reason: RespawnReason,
+    /// Checkpoint position (m, world).
+    pub checkpoint: [f32; 3],
+    /// Checkpoint heading (forward axis).
+    pub heading: [f32; 3],
+    pub on_board: bool,
+    /// Air frames counted when an `AirTimeout` request was made (0 otherwise).
+    pub air_frames: i32,
+}
+
+/// Respawn tuning a host setting or a mod (`sdk.world.set_tuning('respawn', ...)`) changes.
+/// `default()` = retail (mod disable). Pushed into the live selector before each physics tick,
+/// so a map load (new skater) keeps it. The wipeout auto-reset times stay vault data
+/// (`physics_wipeout` Teleport*).
+#[derive(bevy::prelude::Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RespawnSettings {
+    /// Air ticks (1/60 s) before the checkpoint teleport request; retail 300 (5 s).
+    pub air_timeout_ticks: i32,
+}
+
+impl Default for RespawnSettings {
+    fn default() -> Self {
+        Self { air_timeout_ticks: skate_core::player::selector::RETAIL_AIR_TIMEOUT_FRAMES }
+    }
+}
+
+pub(crate) fn apply_respawn_settings(
+    settings: bevy::prelude::Res<RespawnSettings>,
+    skater: Option<bevy::prelude::ResMut<SkaterRuntime>>,
+) {
+    if let Some(mut skater) = skater {
+        let limit = skate_core::player::selector::AirTimeoutFrames(settings.air_timeout_ticks);
+        if skater.player_state.selector.air_timeout != limit {
+            skater.player_state.selector.air_timeout = limit;
+        }
+    }
+}
+
+/// Publish the tick's completed respawns as [`PlayerRespawn`] messages.
+pub(crate) fn emit_respawns(
+    skater: Option<bevy::prelude::ResMut<SkaterRuntime>>,
+    mut out: bevy::prelude::MessageWriter<PlayerRespawn>,
+) {
+    if let Some(mut skater) = skater {
+        if !skater.respawn.outbox.is_empty() {
+            out.write_batch(std::mem::take(&mut skater.respawn.outbox));
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Pending {
+    reason: RespawnReason,
+    air_frames: i32,
+    position: [f32; 3],
+    /// Branch that raised a [`RespawnReason::Boundary`] request.
+    contact: Option<BoundaryContact>,
 }
 struct Settings {
     height: f32,
@@ -37,6 +146,9 @@ impl Runtime {
                 score: 0.,
             }),
             measurements: 0,
+            pending: None,
+            outbox: Vec::new(),
+            placements: 0,
             settings: Settings {
                 height: value("Hash_C0526C883AF0ECCA")?,
                 radius: value("Hash_CEB092E418A5B001")?,
@@ -48,6 +160,65 @@ impl Runtime {
     }
     pub fn reset_measurements(&mut self) {
         self.measurements = 0;
+    }
+    /// Record why a teleport was requested; the first request before the reply is kept.
+    pub fn note_request(&mut self, reason: RespawnReason, air_frames: i32, position: [f32; 3]) {
+        if self.pending.is_none() {
+            self.pending = Some(Pending { reason, air_frames, position, contact: None });
+        }
+    }
+    /// Record a type-6 `physics_unrideable` teleport request (same first-request rule).
+    pub fn note_boundary(&mut self, contact: BoundaryContact, position: [f32; 3]) {
+        if self.pending.is_none() {
+            self.pending = Some(Pending {
+                reason: RespawnReason::Boundary,
+                air_frames: 0,
+                position,
+                contact: Some(contact),
+            });
+        }
+    }
+    /// Tag the checkpoint reply with the pending reason (default `requested`), log it and queue
+    /// the [`PlayerRespawn`] message. `position` = skater root, used when nothing was noted.
+    fn complete(&mut self, tick: u64, candidate: &Candidate, position: [f32; 3]) {
+        let pending = self.pending.take().unwrap_or(Pending {
+            reason: RespawnReason::Requested,
+            air_frames: 0,
+            contact: None,
+            position,
+        });
+        let checkpoint: [f32; 3] = candidate.transform[3][..3].try_into().unwrap();
+        if pending.reason == RespawnReason::AirTimeout {
+            bevy::log::info!(
+                "AIR_TIMEOUT_RESPAWN air_frames={} position={:?} checkpoint={:?} on_board={}",
+                pending.air_frames,
+                pending.position,
+                checkpoint,
+                !candidate.offboard
+            );
+        }
+        let boundary = pending.contact.map_or(String::new(), |c| {
+            let surface = c.packed_surface.map_or("none".to_owned(), |s| s.to_string());
+            format!(" state={} surface={surface} from={:?}", c.state, pending.position)
+        });
+        bevy::log::info!(
+            "BAIL_CHECKPOINT reason={}{boundary} position={:?} heading={:?} stance={} offboard={} score={}",
+            pending.reason.name(),
+            candidate.transform[3],
+            candidate.transform[2],
+            candidate.stance,
+            candidate.offboard,
+            candidate.score
+        );
+        self.outbox.push(PlayerRespawn {
+            player_id: LOCAL_PLAYER_ID,
+            tick,
+            reason: pending.reason,
+            checkpoint,
+            heading: candidate.transform[2][..3].try_into().unwrap(),
+            on_board: !candidate.offboard,
+            air_frames: if pending.reason == RespawnReason::AirTimeout { pending.air_frames } else { 0 },
+        });
     }
 }
 
@@ -67,14 +238,8 @@ pub(super) fn request(physics: &GamePhysics, skater: &mut SkaterRuntime) -> Resu
         transform: candidate.transform,
         on_board: !candidate.offboard,
     });
-    bevy::log::info!(
-        "BAIL_CHECKPOINT position={:?} heading={:?} stance={} offboard={} score={}",
-        candidate.transform[3],
-        candidate.transform[2],
-        candidate.stance,
-        candidate.offboard,
-        candidate.score
-    );
+    let position = skater.animated_skeleton.roots.animation_to_world[3][..3].try_into().unwrap();
+    skater.respawn.complete(physics.ticks, &candidate, position);
     Ok(())
 }
 
@@ -240,6 +405,77 @@ mod tests {
     use skate_core::physics::{
         contact::RetailContactMaterial, skeleton_animation_record::IDENTITY,
     };
+    fn runtime() -> Runtime {
+        Runtime {
+            history: History::new(Candidate { transform: IDENTITY, stance: 0, offboard: false, score: 0. }),
+            settings: Settings { height: 0.4, radius: 0.5, drop: 1., normal_y: 0.75, minimum_frames: 15 },
+            measurements: 0,
+            pending: None,
+            outbox: Vec::new(),
+            placements: 0,
+        }
+    }
+    /// Runs the core 82DB8120 port the way player_state/publication.rs does and completes the
+    /// checkpoint reply; returns the queued message.
+    fn reset_after(
+        state: u32,
+        set: impl Fn(&mut skate_core::player::input_phase::PhysicalPlayerInput),
+        earlier: Option<RespawnReason>,
+    ) -> PlayerRespawn {
+        use skate_core::player::input_phase::{PhysicalPlayerInput, ProcessedPhysicsInput};
+        let mut runtime = runtime();
+        if let Some(reason) = earlier {
+            runtime.note_request(reason, 7, [0.; 3]);
+        }
+        let mut out = PhysicalPlayerInput::default();
+        set(&mut out);
+        let processed = ProcessedPhysicsInput { state_2508: state, ..Default::default() };
+        let contact = skate_core::player::input_phase::publish_special_surface(
+            &mut out,
+            &processed,
+            &mut [false; 36],
+            0,
+            0.,
+        )
+        .expect("type-6 contact raises the teleport request");
+        assert_eq!(out.state.flag_69, 1);
+        runtime.note_boundary(contact, [1., -4., 2.]);
+        let mut candidate = Candidate { transform: IDENTITY, stance: 0, offboard: false, score: 0. };
+        candidate.transform[3] = [5., 1., 6., 1.];
+        runtime.complete(42, &candidate, [9.; 3]);
+        assert!(runtime.pending.is_none());
+        let mut out = std::mem::take(&mut runtime.outbox);
+        assert_eq!(out.len(), 1);
+        out.remove(0)
+    }
+    #[test]
+    fn type_six_board_contact_resets_with_reason_boundary() {
+        let event = reset_after(100, |out| out.collision.surface_type_16 = 6, None);
+        assert_eq!(event.reason, RespawnReason::Boundary);
+        assert_eq!((event.tick, event.player_id, event.air_frames), (42, LOCAL_PLAYER_ID, 0));
+        assert_eq!(event.checkpoint, [5., 1., 6.]);
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"reason\":\"boundary\""), "{json}");
+    }
+    #[test]
+    fn type_six_ragdoll_contact_resets_with_reason_boundary() {
+        let event = reset_after(300, |out| out.collision.flag_214 = 1, None);
+        assert_eq!(event.reason, RespawnReason::Boundary);
+    }
+    #[test]
+    fn earlier_request_before_the_reply_keeps_its_reason() {
+        let event = reset_after(
+            100,
+            |out| out.collision.surface_type_16 = 6,
+            Some(RespawnReason::AirTimeout),
+        );
+        assert_eq!((event.reason, event.air_frames), (RespawnReason::AirTimeout, 7));
+        // With nothing noted the reply stays `requested`.
+        let mut runtime = runtime();
+        let candidate = Candidate { transform: IDENTITY, stance: 0, offboard: false, score: 0. };
+        runtime.complete(1, &candidate, [0.; 3]);
+        assert_eq!(runtime.outbox[0].reason, RespawnReason::Requested);
+    }
     #[test]
     fn real_scene_records_a_checkpoint_and_recovers_it_from_an_unsupported_position() {
         let world = super::super::ground::world(RetailContactMaterial {

@@ -23,3 +23,4 @@ pub mod offboard;
 pub mod conditioner_capabilities;
 pub mod teleport_state;
 pub mod respawn;
+pub mod ghost;

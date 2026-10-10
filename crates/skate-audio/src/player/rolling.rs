@@ -155,6 +155,41 @@ pub fn selector(surface: i32) -> i32 {
     }
 }
 
+/// The rolling surface of an audio material (wheel tag − 1; 143 = none) from the retail vault's
+/// `Sk8::AudioSurfaceMap` word +4 (lookup `sub_82494CD8`; decoded in grain-player-spec §1.4),
+/// material 143 → 3 (`sub_824C82A8`). The default when the install has no surface table; the
+/// install's table (a mod can replace it with the audio tuning) wins in [`surface_for`].
+pub fn retail_surface(material: u32) -> i32 {
+    if material >= NO_MATERIAL {
+        return 3;
+    }
+    match material + 1 {
+        2 => 1,
+        4 | 66 => 2,
+        3 | 51..=54 | 57 | 60 | 63..=65 | 92 | 93 => 4,
+        6 | 7 | 41..=50 | 58 | 59 | 94 => 5,
+        5 => 6,
+        10 | 70 => 7,
+        8 => 8,
+        9 | 11..=36 | 38..=40 | 84 | 85 | 89 | 91 => 9,
+        67 => 10,
+        68 | 69 => 12,
+        37 => 13,
+        90 => 0,
+        // 1, 55, 56, 61, 62, 71–83, 86–88 and materials ≥ 94 (`sub_82494CD8`'s fallback entry).
+        _ => 3,
+    }
+}
+
+/// The rolling surface of an audio material as `sub_824C82A8` reads it: 143 → 3, else the install's
+/// AudioSurfaceMap word 1 ([`PlayerTuning::surface_entry`]), else [`retail_surface`].
+pub fn surface_for(t: &PlayerTuning, material: u32) -> i32 {
+    if material >= NO_MATERIAL {
+        return 3;
+    }
+    t.surface_entry(material).map_or_else(|| retail_surface(material), |e| e[1])
+}
+
 /// `sub_824C4C18`: a Class_rolling packet (12 words).
 pub fn class_rolling_words(speed: i32, selector: i32, surface: i32) -> Vec<i32> {
     let mut w = vec![0i32; 12];
@@ -653,6 +688,117 @@ mod tests {
             Command::Post { slot, words, .. } => Some((*slot, words.clone())),
             _ => None,
         }).collect()
+    }
+
+    /// What retail plays on a rolling surface.
+    #[derive(Clone, Copy, Debug)]
+    enum Plays {
+        /// A grain member pair, hard / soft wheels (`sub_824C8370`; metal has only the hard one).
+        Grain(&'static str, &'static str),
+        /// No grain: a per-surface Class_rolling patch with this selector (`sub_824C5CA8`).
+        Patch(i32),
+        /// Not tied to retail code yet: listed, asserted as we do it today.
+        Unverified(&'static str),
+    }
+
+    /// Every audio surface tag (`tag & 0x7F`) by rolling surface, decoded from the vault's
+    /// `Sk8::AudioSurfaceMap` word +4 (grain-player-spec §1.4; the data-gated
+    /// `grain_for_matches_the_vault_surface_map_and_the_bed_loads` in skate-game checks it against
+    /// the install's table). Tag 0 and tags ≥ 95 → surface 3 (material 143 / `sub_82494CD8`'s fallback
+    /// entry).
+    const RETAIL_ROUTING: &[(i32, &[u32], Plays)] = &[
+        (1, &[2], Plays::Grain("asphalt_rough_hard", "asphalt_rough_soft")),
+        (2, &[4, 66], Plays::Grain("concrete_rough_hard", "concrete_rough_soft")),
+        (4, &[3, 51, 52, 53, 54, 57, 60, 63, 64, 65, 92, 93], Plays::Grain("concrete_smooth_hard", "concrete_smooth_soft")),
+        (5, &[6, 7, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 58, 59, 94], Plays::Grain("wood_ramp_hard", "wood_ramp_soft")),
+        (6, &[5], Plays::Grain("concrete_aggregate_hard", "concrete_aggregate_soft")),
+        (7, &[10, 70], Plays::Patch(1)),
+        (8, &[8], Plays::Patch(2)),
+        (9, &[9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 84, 85, 89, 91], Plays::Grain("metal_smooth_hard", "metal_smooth_hard")),
+        (10, &[67], Plays::Patch(10)),
+        (12, &[68, 69], Plays::Patch(11)),
+        (13, &[37], Plays::Patch(9)),
+        // Surface 0 has no member and is not in the Class_rolling switch: sub_824C8370 returns the
+        // `default` key, so a grain bind runs on the `default` collection. Which recording that
+        // plays is not traced yet (we bind asphalt_rough_hard with the `default` tuning).
+        (0, &[90], Plays::Unverified("asphalt_rough_hard, `default` tuning")),
+    ];
+
+    fn retail_surface_of_tag(tag: u32) -> i32 {
+        RETAIL_ROUTING.iter().find(|(_, tags, _)| tags.contains(&tag)).map_or(3, |r| r.0)
+    }
+
+    /// Retail parity for every audio surface tag 0..127, hard and soft wheels: tag → material
+    /// (tag − 1, 0 → 143) → rolling surface (`sub_824C82A8` + `sub_82494CD8`, the AudioSurfaceMap
+    /// word +4) → what the owner's routing `sub_824C5CA8` starts: a grain bind of `sub_824C8370`'s
+    /// member (kind 1) with no Class_rolling patch, or the per-surface Class_rolling patch
+    /// (`sub_824C4C18`, selector by the `+1488` switch: 7→1, 8→2, 10→10, 11→12, 12→11, 13→9, w6 = the
+    /// surface) with **no grain**. Run on both the install-table route ([`surface_for`] with a
+    /// table) and the no-table default ([`retail_surface`]).
+    #[test]
+    fn every_surface_tag_routes_as_retail() {
+        // Every tag 1..94 is listed once; the rest are surface 3 (asphalt_smooth).
+        let mut seen = std::collections::HashSet::new();
+        for (_, tags, _) in RETAIL_ROUTING {
+            for &tag in *tags {
+                assert!(seen.insert(tag), "tag {tag} listed twice");
+            }
+        }
+        let material_of = |tag: u32| if tag == 0 { NO_MATERIAL } else { tag - 1 };
+        // An install table built from the decoded map (95 rows, material 94 = the fallback entry).
+        let rows: Vec<(u32, i32)> = (0..95).map(|m| (m, retail_surface_of_tag(m + 1))).collect();
+        let table = tuning(&rows);
+        let none = PlayerTuning::default();
+        for tag in 0..128u32 {
+            let material = material_of(tag);
+            let surface = retail_surface_of_tag(tag);
+            assert_eq!(retail_surface(material), surface, "tag {tag}: no-table default");
+            assert_eq!(surface_for(&none, material), surface, "tag {tag}: no table");
+            assert_eq!(surface_for(&table, material), surface, "tag {tag}: install table");
+            let plays = RETAIL_ROUTING.iter().find(|r| r.0 == surface).map_or(Plays::Grain("asphalt_smooth_hard", "asphalt_smooth_soft"), |r| r.2);
+            for soft in [false, true] {
+                let mut s = roll(20.0, material, material);
+                s.soft_wheels = soft;
+                let mut r = Rolling::default();
+                let (cmds, routed) = r.process(&s, &table, &RollingInputs::default());
+                let patches: Vec<Vec<i32>> = posts(&cmds).into_iter().filter(|(slot, _)| matches!(slot, Slot::RollingSurface(_))).map(|(_, w)| w).collect();
+                let ctx = format!("tag {tag} (material {material}, surface {surface}, soft {soft})");
+                match plays {
+                    Plays::Grain(hard, soft_stem) => {
+                        assert!(grain_surface(surface), "{ctx}");
+                        assert!(patches.is_empty(), "{ctx}: retail posts no Class_rolling patch on a grain surface");
+                        assert_eq!(routed.grains, vec![GrainEvent::Bind { truck: 0, surface, soft }], "{ctx}");
+                        let m = member(surface, soft);
+                        assert_eq!(m.stem, if soft { soft_stem } else { hard }, "{ctx}");
+                        assert!(!m.default_tuning, "{ctx}");
+                        assert!(r.primary_is_grain(), "{ctx}");
+                    }
+                    Plays::Patch(sel) => {
+                        assert!(!grain_surface(surface), "{ctx}");
+                        assert!(routed.grains.is_empty(), "{ctx}: retail binds no grain on a Class_rolling surface");
+                        assert_eq!(selector(surface), sel, "{ctx}");
+                        assert_eq!(patches.len(), 1, "{ctx}");
+                        assert_eq!((patches[0][4], patches[0][6]), (sel, surface), "{ctx}: selector w4, surface w6");
+                        assert!(!r.primary_is_grain(), "{ctx}: the rattle stays off");
+                    }
+                    Plays::Unverified(today) => {
+                        assert!(patches.is_empty(), "{ctx}");
+                        assert_eq!(routed.grains, vec![GrainEvent::Bind { truck: 0, surface, soft }], "{ctx}");
+                        let m = member(surface, soft);
+                        assert!(m.default_tuning && m.stem == "asphalt_rough_hard", "{ctx}: UNVERIFIED, we play {today}");
+                    }
+                }
+            }
+        }
+        // Leaving a Class_rolling surface for a grain one releases the patch and binds the grain;
+        // the other way round stops the grain and posts the patch (`sub_824C5CA8`'s stop branch).
+        let mut r = Rolling::default();
+        let (grass, concrete) = (7, 3); // tag 8 (surface 8), tag 4 (surface 2)
+        let _ = r.process(&roll(20.0, concrete, concrete), &table, &RollingInputs::default());
+        let (cmds, routed) = r.process(&roll(20.0, grass, grass), &table, &RollingInputs::default());
+        assert!(routed.grains.contains(&GrainEvent::Stop { truck: 1 }) || routed.grains.contains(&GrainEvent::Stop { truck: 0 }), "{:?}", routed.grains);
+        assert!(!routed.grains.iter().any(|g| matches!(g, GrainEvent::Bind { .. })), "no grain on grass: {:?}", routed.grains);
+        assert_eq!(posts(&cmds).iter().filter(|(slot, w)| matches!(slot, Slot::RollingSurface(_)) && w[4] == 2 && w[6] == 8).count(), 1);
     }
 
     #[test]

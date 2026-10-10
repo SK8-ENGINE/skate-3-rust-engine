@@ -108,7 +108,7 @@ pub(super) fn update(
         .filter(|key| library.zone(*key).and_then(|z| z.bed.as_ref()).is_some()).unwrap_or(0);
     if desired != state.zone_seen {
         state.zone_seen = desired;
-        api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Zone, source: super::mod_audio::Source::Ambience, class: "", slot: "", id: 0, owner: desired });
+        api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Zone, source: super::mod_audio::Source::Ambience, class: "", slot: "", id: 0, owner: desired, hit: None });
     }
 
     let zone = library.zone(state.control.current).cloned();

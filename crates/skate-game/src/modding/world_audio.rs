@@ -242,7 +242,7 @@ pub(super) fn event(world: &mut World, owner: &str, key: &str, event: &str, opts
                 _ => None,
             }
             .ok_or_else(|| format!("unknown speech value {:?}", opts.value))?;
-            world.write_message(PedSpeechEvent { ped: entity, value });
+            world.write_message(PedSpeechEvent { ped: entity, value, topic: None });
         }
         _ => return Err(format!("event {event} does not apply to a {kind:?} object")),
     }

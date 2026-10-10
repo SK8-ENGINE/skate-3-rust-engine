@@ -93,3 +93,34 @@ class TransparentEnvironmentMaterialTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class DynamicObjectMaterialTests(unittest.TestCase):
+    def test_props_classify_as_their_own_family(self):
+        from .retail_material import _retail_shader_family, _retail_render_flags
+        self.assertEqual(_retail_shader_family('dynamicobject.default'), 15)
+        self.assertEqual(_retail_shader_family('dynamicobject.alphatest'), 15)
+        self.assertEqual(_retail_render_flags('dynamicobject.alphatest', 1) & 5, 5)
+        # Neighbouring families are unchanged.
+        self.assertEqual(_retail_shader_family('environment.default'), 1)
+        self.assertEqual(_retail_shader_family('incandescent.backlituvscroll'), 14)
+        self.assertEqual(_retail_shader_family('vehicle.default'), 0)
+
+    def test_dynamicobject_m_params_are_exported_per_variant(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from .render_parameters import convert
+        params = [raw(.4, 1., 0., 0.), raw(.04, .04, .04, 0.)]
+        def material(key):
+            r = row('material_dynamicobject', key)
+            r['fields']['m_params'] = {'type': 'fixture', 'data': '', 'array': {'items': params}}
+            return r
+        exposure = row('Hash_1FFDC8E3ACA07C1F', 'auto_exposure', auto_exposure_target_luminance=raw(.25),
+                       auto_exposure_min=raw(.75), auto_exposure_max=raw(2.5), auto_exposure_damping=raw(.5))
+        data = {'collections': [material('default'), material('alphatest'), exposure]}
+        with TemporaryDirectory() as tmp:
+            self.assertEqual(convert(Path(tmp), data), 2)
+            result = json.loads((Path(tmp) / 'private/render-parameters.json').read_text(encoding='utf-8'))
+        for name in ('dynamicobject.default', 'dynamicobject.alphatest'):
+            self.assertEqual([[round(v, 6) for v in r] for r in result[name]], [[.4, 1., 0., 0.], [.04, .04, .04, 0.]])

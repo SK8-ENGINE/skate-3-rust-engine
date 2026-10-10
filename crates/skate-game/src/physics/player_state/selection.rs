@@ -47,6 +47,15 @@ pub(super) fn advance(
     let current = skater.player_state.current();
     let requested = skater.player_state.selector.calculate(current, &input);
     skater.player_state.requested_state = requested;
+    if skater.player_state.selector.request_teleport {
+        //0x82D8B034: count > limit sets selector+57 (request teleport -> state 702).
+        let deck = physics.board.part_transforms()[skate_core::physics::board::BodyId::Deck.index()].translation;
+        skater.respawn.note_request(
+            super::super::respawn::RespawnReason::AirTimeout,
+            skater.player_state.selector.air_frames,
+            [deck.x, deck.y, deck.z],
+        );
+    }
     if requested != current {
         //82DB5FF4 restores the actual counter also used by ground-history.
         skater.player_input.player.ground_history_frames_1304 = 100;

@@ -1107,7 +1107,7 @@ pub(crate) mod tests {
         let rule: skate_mods::audio_rules::Rule = serde_json::from_value(serde_json::json!({"match": {"tag": "horn"}, "action": "replace", "play": {"path": "t.wav"}})).unwrap();
         let set = super::super::mod_rules::RuleSet::for_test(&[("dev.a", "honk", rule)], Default::default());
         world.resource_mut::<super::super::mod_rules::AudioRules>().set = Some(set.clone());
-        let row = super::super::mod_audio::EventRow { kind: super::super::mod_audio::EventKind::Post, source: super::super::mod_audio::Source::World, class: skate_audio::world::traffic::HORN_CLASS, slot: "horn", id: 0, owner: 7 };
+        let row = super::super::mod_audio::EventRow { kind: super::super::mod_audio::EventKind::Post, source: super::super::mod_audio::Source::World, class: skate_audio::world::traffic::HORN_CLASS, slot: "horn", id: 0, owner: 7, hit: None };
         assert!(set.mutes(&row), "replaced");
         let mut out = Vec::new();
         let mut heard = false;
@@ -1156,8 +1156,8 @@ pub(crate) mod tests {
                 }
             }
         };
-        let world_row = |class: &'static str, slot: &'static str| EventRow { kind: EventKind::Post, source: Source::World, class, slot, id: 0, owner: 7 };
-        let player_row = |id: i32| EventRow { kind: EventKind::Post, source: Source::Player, class: "Class_x", slot: "x", id, owner: 0 };
+        let world_row = |class: &'static str, slot: &'static str| EventRow { kind: EventKind::Post, source: Source::World, class, slot, id: 0, owner: 7, hit: None };
+        let player_row = |id: i32| EventRow { kind: EventKind::Post, source: Source::Player, class: "Class_x", slot: "x", id, owner: 0, hit: None };
         // Run `frames`, return (left, right) RMS of the last half and the mod voice.
         let run = |world: &mut World, frames: usize| {
             let mut out = Vec::new();
@@ -1196,7 +1196,7 @@ pub(crate) mod tests {
         reset(&mut world);
         // An offset: the car 5 m right, the sound 10 m to its left (5 m left of the listener).
         car(&mut world, Some([5.0, 0.0, 0.0]));
-        assert!(!set.mutes(&EventRow { kind: EventKind::Post, source: Source::World, class: skate_audio::world::traffic::ALARM_CLASS, slot: "alarm", id: 0, owner: 7 }), "layered");
+        assert!(!set.mutes(&EventRow { kind: EventKind::Post, source: Source::World, class: skate_audio::world::traffic::ALARM_CLASS, slot: "alarm", id: 0, owner: 7, hit: None }), "layered");
         let (l, r, _) = run(&mut world, 30);
         assert!(l > 2.0 * r && l > 0.005, "offset to the left: L {l} R {r}");
         reset(&mut world);

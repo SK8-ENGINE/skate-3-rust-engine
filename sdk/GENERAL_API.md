@@ -17,6 +17,8 @@ sound plays at the owner of the game's sound by default, following it; `play.at`
 `world` (a fixed `position`) or `centre`, `play.falloff` the reach; 3: `play.frame = 'owner'` puts the `offset`
 in the owner's axes (right, up, facing), and a rule sound at a published emitter follows it when it moves),
 `audio_tuning=1` (`sdk.audio.set_tuning / tuning / tuned`: player / world / bus / reverb tuning while the mod runs)
+`world_tuning=1` (`sdk.world.set_tuning / tuning`: living world draw distance and NPC / ped fades, dynamic prop
+tuning and collision boxes, prop carry buttons, grab range and held-prop move speeds while the mod runs),
 and `world_audio=4` (publishing cars, peds and skaters to the game's world audio; 2: `emitter` and `reverb_zone`
 objects; a mod emitter has its own emitter instance by default, `settings/audio.json` `"mod_emitter_slots":
 "shared"` makes it share retail's 5 with the map's emitters; 3: `slots = 'own'` gives a car or ped its own

@@ -154,6 +154,11 @@ impl Owner {
         Ok(())
     }
 
+    /// The validated candidates (owner+11312, count +1440) the riding skitch latch walks (`82D39D98`).
+    pub(crate) fn validated(&self) -> &[Record] {
+        &self.validated
+    }
+
     pub(crate) fn best(&self, position: Vector) -> Option<Record> {
         selection::best(&self.validated, position)
     }

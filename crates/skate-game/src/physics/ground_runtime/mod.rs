@@ -4,6 +4,7 @@ mod corrections;
 mod entry;
 mod state;
 mod update;
+mod skitch;
 pub(crate) use entry::GroundEntryTargets;
 pub(crate) use state::GroundState;
 pub(crate) use update::{GroundUpdateFrame, GroundUpdateTargets};

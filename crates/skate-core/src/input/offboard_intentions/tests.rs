@@ -139,6 +139,43 @@ fn obstacle_correction_stops_direct_approach_but_preserves_tangent_motion() {
 }
 
 #[test]
+fn object_move_maps_left_stick_and_right_stick_rotation() {
+    let mut words = [0; 26];
+    words[7] = 0.75f32.to_bits();
+    words[8] = (-0.5f32).to_bits();
+    words[9] = 1.5f32.to_bits();
+    let output = produce_object_move(&DerivedControllerInput::from_words(words), &ObjectMoveCurves::flat());
+    assert_eq!(output[0].name, "OB_ObjectMvZ");
+    assert_eq!(output[0].value, -0.5);
+    assert_eq!(output[1].name, "OB_ObjectMvX");
+    assert_eq!(output[1].value, 0.75);
+    assert_eq!(output[2].name, "OB_ObjectMvRot");
+    // Right stick X, clamped to [-1, 1] (constants 8216DEE0 / 8231A844).
+    assert_eq!(output[2].value, 1.0);
+}
+
+#[test]
+fn object_move_z_gain_follows_the_stick_angle_curve() {
+    // Shipped Z curve shape: full gain straight ahead/back, a dip on diagonals.
+    let mut curves = ObjectMoveCurves::flat();
+    curves.z_gain = crate::point_graph::PointGraph {
+        x: [0.0, 0.1, 0.2, 0.6, 0.7, 0.8, 0.9, 1.0],
+        y: [1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0],
+    };
+    let mut words = [0; 26];
+    // Straight stick (x = 0): |a|/pi is 0 or 1, full gain.
+    words[8] = 1.0f32.to_bits();
+    assert_eq!(produce_object_move(&DerivedControllerInput::from_words(words), &curves)[0].value, 1.0);
+    // Pure sideways: |a| = pi/2, key 0.5, half gain on Z (Z is zero anyway).
+    words[7] = 1.0f32.to_bits();
+    words[8] = 0.0f32.to_bits();
+    let side = produce_object_move(&DerivedControllerInput::from_words(words), &curves);
+    assert_eq!((side[0].value, side[1].value), (0.0, 1.0));
+    // Rotation never comes from the left stick.
+    assert_eq!(side[2].value, 0.0);
+}
+
+#[test]
 fn zero_and_tiny_headings_use_original_length_threshold() {
     assert_eq!(analog(0.0, 1.0, [0.0; 4], None)[0].value, 0.0);
     assert_eq!(analog(0.0, 1.0, [0.0, 0.0, 0.5e-6, 0.0], None)[0].value, 0.0);

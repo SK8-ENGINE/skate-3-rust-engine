@@ -397,6 +397,10 @@ pub struct Mixer {
     pub max_voices: usize,
     /// Opens refused because of `max_voices` or a missing sample.
     pub refused: u64,
+    /// Of [`Self::refused`]: the opens refused because of `max_voices` (diagnostics).
+    pub refused_cap: u64,
+    /// Finished voices freed to make room at the cap ([`Self::make_room`]; diagnostics).
+    pub evicted: u64,
     scratch: Box<Scratch>,
 }
 
@@ -408,7 +412,7 @@ impl Default for Mixer {
 
 impl Mixer {
     pub fn new() -> Self {
-        Self { voices: Vec::new(), buses: Buses::default(), next: 0, banks: HashMap::new(), fold: [0.0; 6], group_gain: [1.0; 2], max_voices: 96, refused: 0, scratch: Box::new(Scratch { src: [[0.0; BLOCK]; 6], six: [[0.0; BLOCK]; 6] }) }
+        Self { voices: Vec::new(), buses: Buses::default(), next: 0, banks: HashMap::new(), fold: [0.0; 6], group_gain: [1.0; 2], max_voices: 96, refused: 0, refused_cap: 0, evicted: 0, scratch: Box::new(Scratch { src: [[0.0; BLOCK]; 6], six: [[0.0; BLOCK]; 6] }) }
     }
 
     /// Register a bank's sample headers (by slot) and PCM (None = play silence for the sample's
@@ -455,6 +459,31 @@ impl Mixer {
         self.voices.len()
     }
 
+    /// Room for one more voice under `max_voices`. At the cap, voices whose sample has ended
+    /// (`done`: nothing left to play, every owner query already reads them as gone) are freed
+    /// first, folding their last send values as a release does. Below the cap nothing changes, so
+    /// what plays is identical until the cap is reached; a finished voice never blocks a new one
+    /// (retail does not keep finished voices allocated, spec §6.6).
+    fn make_room(&mut self) -> bool {
+        if self.voices.len() < self.max_voices {
+            return true;
+        }
+        let before = self.voices.len();
+        let fold = &mut self.fold;
+        self.voices.retain(|v| {
+            if v.done {
+                for (f, l) in fold.iter_mut().zip(v.send.last) {
+                    *f += l;
+                }
+                false
+            } else {
+                true
+            }
+        });
+        self.evicted += (before - self.voices.len()) as u64;
+        self.voices.len() < self.max_voices
+    }
+
     fn voice(&mut self, id: u32) -> Option<&mut Voice> {
         self.voices.iter_mut().find(|v| v.id == id)
     }
@@ -476,10 +505,12 @@ impl Mixer {
             self.refused += 1;
             return None;
         };
-        if self.voices.len() >= self.max_voices {
+        if !self.make_room() {
             self.refused += 1;
+            self.refused_cap += 1;
             return None;
         }
+        let samples = self.banks.get(&bank);
         let pcm = samples.and_then(|b| b.pcm.get(usize::from(slot)).cloned().flatten());
         let group = samples.map_or(GROUP_WORLD, |b| b.group);
         self.next = self.next.wrapping_add(1).max(1);
@@ -656,10 +687,12 @@ impl VoiceHost for Mixer {
             self.refused += 1;
             return None;
         };
-        if self.voices.len() >= self.max_voices {
+        if !self.make_room() {
             self.refused += 1;
+            self.refused_cap += 1;
             return None;
         }
+        let samples = self.banks.get(&r.bank);
         let pcm = samples.and_then(|b| b.pcm.get(r.slot as usize).cloned().flatten());
         let group = samples.map_or(GROUP_WORLD, |b| b.group);
         self.next = self.next.wrapping_add(1).max(1);
@@ -839,6 +872,49 @@ mod tests {
             m.render(&mut bus);
         }
         assert!(!m.query(v).alive);
+    }
+
+    /// The 2026-10-07 silent landings: at the cap, finished voices (sample ended, never released by
+    /// their owner) are freed for a new open; live voices still refuse it.
+    #[test]
+    fn finished_voices_do_not_block_a_new_open_at_the_cap() {
+        let (short, short_pcm) = mono(0.004, 48000, false); // under one block
+        let (long, long_pcm) = mono(1.0, 48000, false);
+        let mut m = Mixer::new();
+        m.max_voices = 4;
+        m.add_bank(0, vec![Some(short), Some(long)], vec![Some(short_pcm), Some(long_pcm)]);
+        let mut bus = [[0.0f32; BLOCK]; 6];
+        // Below the cap a finished voice stays until its owner releases it (unchanged behaviour).
+        let a = m.open(&request(0)).unwrap();
+        for _ in 0..3 {
+            m.render(&mut bus);
+        }
+        assert!(!m.query(a).alive);
+        m.open(&request(1)).unwrap();
+        assert_eq!((m.voice_count(), m.evicted), (2, 0));
+        // Fill the cap with live voices: the next open is refused and counted.
+        m.open(&request(1)).unwrap();
+        m.open(&request(1)).unwrap();
+        assert_eq!(m.voice_count(), 4);
+        m.release(a);
+        m.open(&request(1)).unwrap();
+        assert!(m.open(&request(1)).is_none());
+        assert_eq!((m.refused, m.refused_cap), (1, 1));
+        // Four finished voices at the cap: the open frees them and succeeds.
+        let mut m = Mixer::new();
+        m.max_voices = 4;
+        let (short, short_pcm) = mono(0.004, 48000, false);
+        m.add_bank(0, vec![Some(short)], vec![Some(short_pcm)]);
+        for _ in 0..4 {
+            m.open(&request(0)).unwrap();
+        }
+        for _ in 0..3 {
+            m.render(&mut bus);
+        }
+        assert_eq!(m.voice_count(), 4);
+        let fresh = m.open(&request(0)).expect("finished voices make room");
+        assert_eq!((m.voice_count(), m.evicted, m.refused), (1, 4, 0));
+        assert!(m.query(fresh).alive);
     }
 
     #[test]

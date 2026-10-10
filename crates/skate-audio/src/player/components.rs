@@ -254,6 +254,18 @@ impl Grind {
         }
     }
 
+    /// The owner's release: stop every held grind on / off sound and drop the queued starts.
+    pub fn release_sounds(&mut self, host: &mut dyn super::contacts::SpliceHost) {
+        for slot in self.hits.iter_mut() {
+            for sound in [&mut slot.on, &mut slot.off] {
+                if let Some(id) = sound.take() {
+                    host.release(id);
+                }
+            }
+        }
+        self.pending.clear();
+    }
+
     /// `sub_824C42A8` (the end of the Rail updater): per slot the on and the off sound, gain =
     /// level(1) / 32767 × its level, pitch = pitch(2) / 4096 × its pitch, azimuth raw(0), the env
     /// send level(5); a sound that ended is released.

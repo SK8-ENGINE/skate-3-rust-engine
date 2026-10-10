@@ -362,6 +362,12 @@ impl NpcSkater {
         self.board.deck_calls = calls;
     }
 
+    /// The body poster's hits of the last [`Self::process`] (`Contacts::body_hits`: the host's
+    /// diagnostic line and the mods' `body_impact` event, as the local player's).
+    pub fn body_hits(&self) -> &[contacts::BodyHit] {
+        &self.board.body_hits
+    }
+
     /// The collision messages this skater's contacts posted (hand them to the collision manager
     /// before its process, like the local player's).
     pub fn take_collisions(&mut self) -> Vec<Message> {
@@ -430,9 +436,19 @@ impl NpcSkater {
         self.wheels.update(&s, &Flat, &WheelsTuning::default(), streams);
     }
 
+    /// The skater lost its instance: release every Splice sound it holds (contacts, hands on deck,
+    /// grind on / off, clothing foley). Retail's release stops every layer; a dropped skater is
+    /// never updated again, so a held sound would otherwise keep its mixer voices for good (the
+    /// 2026-10-07 silent landings: the leak filled the mixer's voice cap).
+    pub fn release(&mut self, splice: &mut dyn SpliceHost) {
+        self.board.release_all(splice);
+        self.grind.release_sounds(splice);
+        self.clothing.release_all(splice);
+    }
+
     /// The skater lost its instance: deactivate the 3-D blocks (every B lookup of the slot then
-    /// reads "no position"). The host releases the packets it holds for the skater; the Splice
-    /// one-shots end by themselves.
+    /// reads "no position"). The host releases the packets it holds for the skater and calls
+    /// [`Self::release`] for its Splice sounds.
     pub fn deactivate(&mut self, m: &mut MixMap, l: &Listener) {
         let g = self.instance;
         self.positions[0].write(m, keys::obj_pos(g), l, None);
@@ -458,6 +474,77 @@ impl crate::player::Outputs for Flat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mixer::Mixer;
+    use crate::runtime::SpliceAccess;
+    use crate::splice::SplicePlayer;
+    use crate::splice::format::{Group, Member, Record, SpliceBank};
+
+    /// A `Skate_Collisions` stand-in: one record (every Contacts id resolves to it) of one 2 s layer,
+    /// so the sounds are still playing when the skater is released.
+    fn collisions(mixer: &mut Mixer) -> SplicePlayer {
+        let member = Member { sample: 0, route: 0, gain: 1.0, pitch: 1.0, rate2: 1.0, pan: -127.0, delay: 0.0, start: 0.0, length: 2.0, fade_in_end: 0.0, fade_out_start: 0.0, curve: 0, gain_spread: 1.0, pitch_rand: 0.0, delay_rand: 0.0, probability: 1.0 };
+        let bank = SpliceBank { records: vec![Record { gain: 1.0, pitch_base: 1.0, pitch_rand: 0.0, groups: vec![Group { mode: 0, state: 0, members: vec![member] }] }], containers: Vec::new(), samples: 1 };
+        let pcm = std::sync::Arc::new(crate::mixer::Pcm { rate: 48000, channels: vec![vec![0.25; 96000]] });
+        let mut p = SplicePlayer::new();
+        p.load_bank(contacts::BANK, bank, vec![Some(pcm)], mixer);
+        p
+    }
+
+    fn rolling() -> AudioState {
+        AudioState { ground_speed: 6.0, wheel_count: 4, wheel_contact: [true; 4], wheel_material: [2; 4], dt: 1.0 / 60.0, ..Default::default() }
+    }
+
+    /// An ollie and its landing on `npc`'s Contacts: pop, roll, ollie, then the touchdowns and the
+    /// landing impact, all still held when it returns.
+    fn ollie_and_land(npc: &mut NpcSkater, host: &mut dyn SpliceHost) {
+        let (t, c) = (PlayerTuning::default(), ContactsTuning::default());
+        for _ in 0..3 {
+            npc.board.process(&rolling(), [0; 4], &t, &c, host);
+        }
+        let air = AudioState { airborne: true, wheel_count: 0, wheel_contact: [false; 4], trick_active: true, audio_trick: 28, jump_velocity: 0.3, ..rolling() };
+        for _ in 0..30 {
+            npc.board.process(&air, [0; 4], &t, &c, host);
+        }
+        npc.board.process(&rolling(), [2; 4], &t, &c, host);
+    }
+
+    /// The 2026-10-07 silent landings: a released NPC skater's Splice sounds held their mixer voices
+    /// for good, and the leak filled the voice cap. Its release now frees every one.
+    #[test]
+    fn releasing_an_npc_skater_frees_its_splice_sounds_and_mixer_voices() {
+        let mut mixer = Mixer::new();
+        let mut player = collisions(&mut mixer);
+        let mut bus = [[0.0f32; crate::BLOCK]; 6];
+        let start = (player.sound_count(), mixer.voice_count());
+        let mut npc = NpcSkater::new(1, Parts::default(), true, true, true);
+        ollie_and_land(&mut npc, &mut SpliceAccess { player: &mut player, mixer: &mut mixer });
+        mixer.render(&mut bus);
+        assert!(player.sound_count() >= 5 && mixer.voice_count() >= 5, "the landing holds its sounds: {}", player.sound_count());
+        npc.release(&mut SpliceAccess { player: &mut player, mixer: &mut mixer });
+        drop(npc);
+        // The released voices play their stop fade for one block, then leave.
+        mixer.render(&mut bus);
+        assert_eq!((player.sound_count(), mixer.voice_count()), start);
+    }
+
+    #[test]
+    fn two_hundred_claim_release_cycles_keep_the_voice_count_bounded() {
+        let mut mixer = Mixer::new();
+        let mut player = collisions(&mut mixer);
+        let mut bus = [[0.0f32; crate::BLOCK]; 6];
+        let mut most = 0;
+        for i in 0..200 {
+            let mut npc = NpcSkater::new(1 + i % 3, Parts::default(), true, true, true);
+            ollie_and_land(&mut npc, &mut SpliceAccess { player: &mut player, mixer: &mut mixer });
+            mixer.render(&mut bus);
+            most = most.max(mixer.voice_count());
+            npc.release(&mut SpliceAccess { player: &mut player, mixer: &mut mixer });
+            mixer.render(&mut bus);
+            assert_eq!((player.sound_count(), mixer.voice_count()), (0, 0), "cycle {i}");
+        }
+        assert_eq!(mixer.refused, 0, "no open was refused");
+        assert!(most < 20, "one skater's landing: {most} voices");
+    }
 
     #[test]
     fn one_npc_within_30_m_holds_the_second_instance_until_it_leaves() {

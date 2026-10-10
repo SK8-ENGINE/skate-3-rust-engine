@@ -16,10 +16,10 @@ were ordinary ground or empty space. The retail game has water-specific behaviou
 Retail collision units carry a 16-bit surface ID. The surface **type** is
 `(surface >> 7) & 31`; the engine already treats type 12 as water:
 
-- `crates/skate-core/src/physics/board_ground.rs` — the board sets collision flag
+- `crates/skate-core/src/physics/board_ground.rs`: the board sets collision flag
   bit 25 (`Body872`) and records the contact height (`Body864`,
   `surface_twelve_height`) when any part touches type 12.
-- `crates/skate-game/src/physics/wipeout_states/prediction.rs` — the wipeout
+- `crates/skate-game/src/physics/wipeout_states/prediction.rs`: the wipeout
   trajectory query tests `surface & 0xF80 == 0x600` (type 12).
 
 New tool: `crates/skate-data/examples/water_surfaces.rs` lists the surface types
@@ -35,7 +35,7 @@ Results (installation `c82bd63f…`):
 |---|---|---|---|---|
 | DownTown | 355 (330 flat, all one-sided) | 1591 only | 0.4 m … 48.3 m, many levels | fountains/pools spread over 26 tiles |
 | University | 322 (all flat, all one-sided) | 1591 only | 296 at 217.9 m, rest 67.9–71.0 m | reservoir plus smaller pools |
-| Industrial, all parks | 0 | — | — | — |
+| Industrial, all parks | 0 | - | - | - |
 
 So water collision exists only in DownTown and University. Every collision
 stream is already converted (cities use their `cSim_*_high` tiles; parks use
@@ -414,6 +414,478 @@ sky cube. Texture decoding was checked and is correct. The reservoir's
 reflection is scaled by olm² × fresnel × 0.2 (retail tuning) and reads very dark.
 No retail reference was found to compare; the user accepted the look for now.
 
+### Industrial's sea rendered as a black void (global presentation model)
+
+User (2026-10-08): "the ocean by the docks does NOT render correct and is just a
+black void". Location from their 2026-10-07 13:58 session: Industrial, about
+x -400..-560, z -70..-270, near y 0.
+
+Root cause, two parts:
+
+1. The sea is not in the district map. Retail's world record points each
+   district at one extra global model (world fields `951898F6C0FA6856` model,
+   `CA5A157A65E75934` textures) in `miscload.big`. For Industrial that is
+   `data/content/world/models/DIST_Water.rx2`, 27 meshes [data]: mesh 7
+   `ocean.default` (family 31, the sea surface: 204 vertices, x -8166..8005,
+   z -4980..8529, y -7.7..-3.3, with normal, normal2, environment cube,
+   lightmap and macro overlay), 13 `ocean.reflection` sheets (family 32, the
+   harbour reflections, top at y -6.5, e.g. mesh 16 at x -827..-525,
+   z -271..-77), distant shore and pier geometry (`environment.default` /
+   `environmentsimple.*`, x down to -1131, z up to 1141, in no district
+   stream), one reflective building and the tree wall. The district map has no
+   water or ocean material at all (`water_surfaces` render scan).
+   `tools/asset_pipeline/backdrop.py` exported this model with a shader
+   whitelist (trees, then also `ocean.reflection` and
+   `environment.reflective_simple`), so the sea surface and the far shore
+   were never exported.
+2. Nothing drew the package anyway. Upstream e2b85b64 (2026-09-12, renderer
+   rewrite) deleted `retail_backdrop.rs` and its call in `map_render.rs`
+   together with the prop package; the props were restored later (PR #15),
+   the backdrop never was. No upstream commit, PR or issue mentions removing
+   it on purpose. So since then the tree walls and DownTown's/University's far
+   sea planes were missing too, and Industrial's harbour showed the clear
+   colour.
+
+Change:
+
+- `backdrop.py`: `presentation_meshes` keeps every mesh of the global model
+  (retail draws the whole model). Industrial's package grows from 15 to 27
+  meshes; DownTown gains its three small presentation meshes; University is
+  unchanged. Changing `backdrop.py` changes the environment recipe, so setup
+  refreshes that group once.
+- `retail_backdrop.rs` (new): loads `private/native-backdrops/<map>.skate`
+  (render-only reader; rejects collision, lights, doors, rails), logs
+  `SKATE_BACKDROP: <map> triangles=… materials=…`.
+- `skate_world::spawn_backdrop`: the same retail material path and draw
+  partitioning as the district (`spawn_static`), without lights or the
+  `SKATE_RENDER_READY` line; every draw carries `Backdrop`.
+- `map_render::PreparedScene::prepare`: retail districts load it after the
+  district, before the props and the sky. Map retirement removes it with the
+  map (`MapEntity`, staged assets).
+- Moddability: `BackdropSettings { visible }` (retail true) is the one
+  authority; mods use `sdk.world.set_tuning('backdrop', {visible = false})`
+  (world tuning domain `backdrop`, `sdk.world.tuning(key, 'backdrop')` reads
+  it), first writer wins, a stopped mod gives it back. The package itself is
+  a content file. Multiplayer: presentation only, no gameplay state.
+
+Verification: `--verify` captures with a scratch camera mod, camera at
+(-520, 30, -90) looking at (-580, -7, -170) (player teleported to
+(-470, 2, -150)). With `sdk.world.set_tuning('backdrop', {visible = false})`
+(the state before this change) the harbour is a flat black area; with the
+backdrop it shows the sea and the tree wall on the hills; user: "THERE WE GO IT
+GOT THE OCEAN". The log shows `SKATE_BACKDROP: Industrial triangles=7768
+materials=27` and no unsupported-family fallback for the backdrop materials.
+DownTown (`triangles=860 materials=4`) shows no change or artifacts at the
+Aletown spawn; University (`triangles=1587 materials=2`) now draws its far sea
+plane (`environment.reflective_simple`, y -62), which reads pale blue-white
+from the hills: no retail reference checked yet. Tests:
+`retail_backdrop::tests` (visibility follows settings, missing package),
+`modding::world_tuning::tests::backdrop_visible_by_default_set_and_reset_on_disable`,
+skate-mods `world_tuning` patch validation, `test_backdrop.test_every_global_mesh_is_kept`,
+and the asset-backed `industrial_backdrop_covers_the_docks_sea` (`--ignored`,
+`SKATE3_ASSET_ROOT`): passes on the new export, fails on the old one.
+
+### Floating trees in Industrial's south hills (far-proxy terrain)
+
+User (2026-10-08, after the sea fix): "the water looks good in the rust engine,
+i can see the floating tree's still in the distance".
+
+Root cause [data]: the tree wall (`DIST_Water.rx2` mesh 14, 358 billboard
+clusters at z -500..-986) stands on far-proxy terrain from
+`data/content/proxyIndustrial_100_Proxy.big` (stream `Industrial_100_Proxy`:
+284 `cPres_X_Z_high_proxy` cells, `proxyworld.default` hills plus their own
+trees and environment meshes). Setup never read the proxy streams. 59 proxy
+cells (x -2350..850, z -650..-950) have no full-detail district cell; the
+other 225 overlap district cells (17.6 % of their vertices more than 0.5 m
+above the full-detail surface), so drawing them all would poke through.
+
+Retail rule [code, TU3]: the proxy world manager pairs each full-detail cell
+with its proxy cell by name (`sub_8247EF40`, format `cPres_%d_%d_high_%s` at
+0x82251A04 with `proxy`, map at manager +848, maintained by the streamer's cell
+pass `sub_8247CE58` through `sub_8247EF40` / `sub_8247F060`). When the streamer
+activates a full cell (`sub_8247BB50` -> `sub_82C985A8`) it posts activate
+(0x4C5724D2) for the full cell and deactivate (0x4158EE18) for the paired proxy
+cell; `sub_8247BD28` is the reverse path. So a proxy cell draws only while its
+full-detail cell is not active. The engine keeps every district cell loaded,
+so the retail result here is: only the unpaired proxy cells draw (Industrial
+59, DownTown 0, University 0).
+
+Change:
+
+- `backdrop.py`: `proxy_drawn_files` (the rule above; unpaired files such as
+  `cPres_Global_proxy` stay) and `convert_proxy`, which runs the district
+  converter on the proxy stream (presentation only, its own Tex table) and
+  writes the unpaired cells to `private/native-backdrops/<map>.proxy.skate`.
+  The proxy Tex table lists its textures with bit 63 of the asset id set;
+  `proxy_texture_keys` keys them by the id the materials use.
+- `retail_backdrop.rs`: `load_proxy_package`, `ProxyTerrain` draw tag;
+  `skate_world::spawn_proxy_terrain`; `map_render` loads it after the backdrop.
+- Moddability: `BackdropSettings::proxy_terrain` (retail true) in the same
+  `backdrop` world tuning domain: `sdk.world.set_tuning('backdrop',
+  {proxy_terrain = false})`, first writer wins per field, reset when the mod
+  stops. The package is a content file a mod can replace. Multiplayer:
+  presentation only.
+
+Verification: Industrial's package holds 59 `proxyworld.default` meshes
+(477 triangles, 3.9 MB with only the textures they use; the unpaired cells
+carry no trees of their own, those are in the global model); the log shows
+`SKATE_BACKDROP: Industrial.proxy triangles=477 materials=59`. A muted
+`--verify` capture from The Tanker (player (-440.6, 22.4, 36.5), eye
+(-437.6, 24.6, 39.1), look (-455.6, 21.0, 23.3)) now shows green hills under
+the tree wall where the trees floated against the sky before, as in the recomp
+shot from the same spot; the sea is unchanged.
+
+Tests: `test_backdrop.test_proxy_cell_draws_only_without_full_detail_partner`,
+`test_proxy_texture_ids_drop_the_tex_table_flag`,
+`test_proxy_cells_per_district_on_owned_disc` (`SKATE3_DISC`; Industrial 59,
+DownTown 0, University 0), `retail_backdrop::tests::proxy_terrain_visibility_is_its_own_switch`,
+`modding::world_tuning::tests::proxy_terrain_defaults_to_retail_set_and_reset_on_disable`,
+skate-mods `world_tuning` patch validation.
+
+Retail's in-water rule at the docks is not part of this change: the harbour
+has no water collision (section 4) and the free-skate water/out-of-bounds
+reset is skater state (`IsInWater` action-graph condition, not traced; see
+`.claude/notes/triggers-volumes-re.md` section 4).
+
+### Falling into the Industrial sea (retail air timeout)
+
+Problem: riding off Industrial's dock edge drops the skater through the backdrop sea. Nothing said
+why or when they came back, and the air limit could not be changed by a mod.
+
+Retail at the sea [user's RPCS3 footage, `.local/research/in-water/rpcs3-*.jpg`]: jumping off the
+docks or the tanker, the skater is reset about 1.4 to 3 s after leaving the edge, as they reach
+the water, not after 5 s: bail camera (vignette, Hall of Meat counter), a hard cut, then the
+skater fades in as a ghost at a safe spot next to where they jumped; no splash. That is a
+different trigger from the air timeout below. Industrial has no water collision (surface type 12)
+[code], so the trigger is not the type-12 water path either.
+
+Mechanism found (sea reset barrier) [code, data]: an invisible collision floor at y -4.0 under the
+whole Industrial sea, surface 768 = physics type 6 `physics_unrideable` (11,411 triangles,
+x -3679..1839, z -492..1457), present in our converted `Industrial.skate`. Not a trigger volume,
+kill height or timer. In retail the contact path `sub_82DB6EC0` -> `sub_82DB8120` (0x82DB7C58) ->
+`sub_82DB80C8` sets PlayerState+69 (teleport request) for type 6 (types 9/12 set +65, bail); for a
+ragdoll (category 300) SkeletonCollision+4068 is set on a type-6 touch (`sub_82BD4A30`), copied to
+Collision+214 (`sub_82BD60C8`) and turned into +69 at 0x82DB81CC. +69 -> flags+2472 bit 18 ->
+`CalcSuggestedState` state 702 -> checkpoint manager `sub_82592518` / `sub_825926F8`. The
+checkpoint search (`sub_82BFB3F8`) rejects types 5/6/9/12/13. The same type 6 also covers
+Industrial's quay walls (772) and roofs, and areas on other maps. Our engine had already ported
+the whole chain (`skate-core` `player/input_phase/special_surface.rs`, the board/feet/plant
+branches and the ragdoll +214 branch; `skate-game` `physics/skeleton_feedback.rs` publishes +214),
+so the reset itself works; only the logged reason was wrong (`requested`). Full research:
+`.claude/todo/ocean-docks-black-void.md`, section "Retail sea reset barrier".
+
+Retail air timeout [code]: `PhysicalPlayerStateChanger::CalcSuggestedState` (`0x82D8ADE8`) counts
+frames in physical category 200 (air) at selector+44; the count holds while flags+2468 bit 3
+(animation packet flag 10375) is set and restarts on any other category. At `0x82D8B034`,
+`count > 300` sets selector+57 (request teleport) and keeps the state; the next tick takes state
+702 (Teleporting) and the checkpoint manager (`sub_82592518`, reply `sub_825926F8`) places the
+skater at the best recorded safe checkpoint. 300 ticks at the fixed 1/60 s step = 5.0 s after
+leaving the ground. It ends a fall only where no type-6 floor or other ground is below (the sea
+floor above ends a fall into Industrial's sea long before). A skater who bails mid-fall (wipeout, category 300)
+restarts the count and gets the wipeout auto reset instead (vault `physics_wipeout`:
+TeleportMinTimeForAutoReset 3.5 s, TeleportMinTimeAfterSettlingForAutoReset 2.5 s,
+TeleportMaxTime 20.0 s, TeleportAutoResetFadeOutTime 0.5 s [data]). Both were already ported;
+this change adds diagnosis, a mod entry point and a respawn event. Behaviour at retail defaults
+is unchanged.
+
+Change:
+- `skate-core` `player/selector`: the limit is a selector setting `AirTimeoutFrames`
+  (default `RETAIL_AIR_TIMEOUT_FRAMES` = 300); the comparison stays `air_frames > limit`.
+- `skate-game` `physics/respawn.rs`: the request sites record why a checkpoint teleport was asked
+  for (selector request: `air_timeout`, wipeout output byte 69: `wipeout_auto_reset`, a type-6
+  `physics_unrideable` contact: `boundary`, anything else: `requested`; `water` stays reserved for
+  type-12 water, which no decoded path resets; the first request before the reply is kept).
+  `publish_special_surface` returns a `BoundaryContact { state, packed_surface }` when its type-6
+  or ragdoll +214 branch raises +69 (no behaviour change); `player_state/publication.rs` records
+  it with `note_boundary`. Log lines:
+  `AIR_TIMEOUT_RESPAWN air_frames=.. position=.. checkpoint=.. on_board=..` (position = deck at
+  the request tick) and `BAIL_CHECKPOINT reason=.. position=..` for every checkpoint respawn; for
+  `boundary` it adds `state=<selected state> surface=<packed surface, or none for the board and
+  ragdoll branches> from=<skater root at the request>`.
+- Multiplayer-ready event: `PlayerRespawn { player_id, tick, reason, checkpoint, heading,
+  on_board, air_frames }` (serde, `reason` as snake_case), written by the owning simulation after
+  its fixed 1/60 s physics tick (`emit_respawns`). Local player id 0. No networking.
+- Moddable: world tuning domain `respawn`, field `air_timeout_ticks` (integer 1..216000, retail
+  300) through `sdk.world.set_tuning('respawn', {air_timeout_ticks = n})`; validated at the serde
+  boundary, first writer wins, removed when the mod stops. `RespawnSettings` is pushed into the
+  live selector before each physics tick, so a map load keeps it. The wipeout auto-reset times
+  were already vault data and stay there. Documented in `api.lua` and `sdk/skate.lua`.
+
+Tests:
+- `skate-core` selector: `air_timeout_requests_the_checkpoint_on_the_301st_air_frame_at_retail_default`
+  (no request on air ticks 1..300, the bit 3 hold, request on 301, reset on ground) and
+  `air_timeout_setting_moves_the_request_tick`; the existing teleport priority test is unchanged.
+- `skate-mods` world tuning: `respawn` patch validation (0, 216001, fractions, negatives and
+  unknown fields rejected).
+- `skate-game` world tuning: `respawn_air_timeout_defaults_to_retail_set_and_reset_on_disable`.
+- `skate-game` `physics/air_timeout_tests.rs` (asset-backed, `--ignored`): a skater moved 5 km off
+  DownTown falls with no ground below and respawns with reason `air_timeout`, `air_frames` 301,
+  301..320 ticks after leaving the ground; the event serialises with `"reason":"air_timeout"`.
+- `skate-core` special surface: `type_six_contacts_report_a_boundary_request` (board type 6,
+  ragdoll +214, feet packed 768 report the branch; types 0/9/12 and ragdoll water do not).
+- `skate-game` `physics/respawn.rs`: `type_six_board_contact_resets_with_reason_boundary`,
+  `type_six_ragdoll_contact_resets_with_reason_boundary` (core branch -> `note_boundary` ->
+  checkpoint reply -> `PlayerRespawn` with `"reason":"boundary"`) and
+  `earlier_request_before_the_reply_keeps_its_reason`.
+- `skate-game` `physics/boundary_tests.rs` (asset-backed, `--ignored`, `SKATE3_MAP` = Industrial):
+  finds an open-sea column whose top surface is the type-6 floor, drops the skater 3 m above it
+  and expects the first respawn with reason `boundary` within 300 ticks. Run 2026-10-08: column x -3600 z -400,
+  floor y -3.999, surface 768; respawn `boundary` 48 ticks after the drop, back on board.
+
+Open items:
+- The sea reset mechanism is decoded (type-6 floor, above; reason `boundary`). Still open: the
+  ghost fade-in after the cut is missing in ours (leads: camera subject opacity / vault
+  `FXSubjectOpacity` computed but not applied; `GetTeleportFadeInProgress`,
+  `TeleportAutoResetFadeOutTime`), and the timing is not measured against the footage.
+- The air timeout itself (5 s, camera during the fall and the respawn) is still to be confirmed in
+  retail footage away from the sea; values stay from the code until then.
+
+### Skater fades in after every placement (retail "ghost")
+
+Problem: after a checkpoint respawn (for example from the Industrial sea) retail draws the skater
+see-through for a moment, then solid ("ghost"). Ours drew them solid at once.
+
+Root cause (retail, decoded from the TU3 code, located with one muted recomp run; reports
+`.local/research/report-ghost-writer.md`, `report-ghost-fade-2.md`, `report-ghost-trace.md`):
+- Every skater placement component keeps a fade-in timer in seconds (owner +1868). The
+  place-skater handler `sub_825926F8` sets it to 0 and counts the placement (+1864); the
+  component constructor `sub_82590DC0` starts it at 0, so a new skater fades in too.
+- Each tick `sub_82594488(owner, dt)` publishes the opacity: timer < 1.0 -> clamp(timer, 0, 1),
+  except that the timer stays put above 0.68 while state byte 71 is set; then timer += dt. A
+  fade-out timer (+1872) starts at FLT_MAX (off).
+- The opacity goes into the 208-byte per-skater render record (+190 = opacity * 255) and reaches
+  the character shaders as `i_params.x`, which scales the output alpha.
+
+Change:
+- `skate_core::player::ghost` (`GhostFade`, `GhostSettings`): the timer and curve, generalised
+  as opacity = clamp(timer / fade_in_seconds, 0, 1) (identical at the retail 1.0 s). Time-based,
+  so the curve is the same at any tick rate.
+- Every completed teleport of our skater ends in one reset (`physics/frame.rs`, the `teleported`
+  branch): checkpoint respawns, wipeout auto resets, teleport menu / map / mod teleports and the
+  session marker return. It now counts the placement (`respawn::Runtime::placements`, retail
+  +1864). `skater_ghost::emit_placements` turns a new count, or a newly loaded skater (spawn, map
+  change), into a serialisable `SkaterPlaced { player_id, placement }` message; `step_fades`
+  restarts that player's fade and steps all fades on the fixed tick.
+- Drawing: while the local player's opacity is below 1, every mesh under `PlayerRoot` (body,
+  hair, clothes, board parts; `CharacterMaterial`, the customiser `SkaterMaterial` and plain
+  `StandardMaterial`) draws a blended copy of its own material with the alpha scaled
+  (`CharacterMaterial`: `tint.a`, which the shader already multiplies into its output alpha).
+  At 1.0 the mesh gets its original material handle back and the copy is dropped, so solid
+  frames draw exactly the materials they drew before. The retail character binding uses the
+  original material when a mesh is bound mid fade.
+- Moddable: world tuning domain `ghost` {`enabled`, `fade_in_seconds`, `hold_alpha`}, retail
+  defaults true / 1.0 / 0.68, validated (0..60 s, 0..1), first writer wins, reset when the mod
+  stops; documented in `api.lua` and `sdk/skate.lua`.
+- Multiplayer-ready: fades are kept per stable player id and driven only by placement messages;
+  render-only, no networking.
+
+NOT RETAIL yet:
+- The hold condition (state byte 71, opacity waits at 0.68) is undecoded; it is never set here.
+- The render-side smoother `sub_8278C4D8` (15/s up, 5/s down toward the published opacity) is
+  not ported; the 1 s ramp is slower than it, so the drawn value follows the published one.
+- NPC skaters use the same retail component, but in our engine they do not go through the
+  player placement path; their spawn fade-in is the living-world `NpcFade`. Remote players in
+  multiplayer stay solid until placements are sent for them.
+- Blended skaters do not write depth, so overlapping limbs can show through each other during
+  the fade.
+- Presentation differs, the code does not: in retail the timer starts at the placement, not at
+  the teleport request (recomp trace: the ramp starts about 6.4 s after a Challenge Map teleport
+  request, at the post-load placement), so after a menu teleport most of the 1.0 s runs behind
+  the loading screen. The user's RPCS3 video (teleport to The Tanker,
+  `.local/research/in-water/rpcs3-menu-teleport-tanker-10fps.jpg`) shows the skater see-through
+  for only about 0.3 s after the loading screen clears. Ours also starts at the completed
+  placement (and at the new skater after a map load), but our teleports have no loading screen,
+  so the whole 1 s is visible in ours. Open item.
+
+Tests: `skate_core::player::ghost::tests` (curve, frame-rate independence, restart, disable,
+hold, validation), `skater_ghost::tests` (every placement restarts the fade; blended copy while
+faded, original handle and untouched material when solid; message round trip),
+`modding::world_tuning::tests::ghost_fade_defaults_to_retail_set_and_reset_on_disable`.
+
+Files: `crates/skate-core/src/player/ghost.rs` (new), `crates/skate-game/src/skater_ghost.rs`
+(new), `physics/frame.rs`, `physics/respawn.rs`, `physics/skater.rs`, `retail_character.rs`,
+`retail_render.rs`, `main.rs`, `modding/world_tuning.rs`, `crates/skate-mods/src/world_tuning.rs`,
+`crates/skate-mods/src/api.lua`, `sdk/skate.lua`.
+
+### Auto-exposure meter reads retail's input (frame brightness)
+
+Problem: at The Tanker our sky is about 1.46x darker and our sea about 2.2x darker
+than RPCS3 and the recomp, while the lit deck is about 1.6x brighter. The code
+comparison is in `.claude/todo/frame-brightness.md`. Sky, final copy, ocean maths
+and the exposure evaluator all match retail. The meter input did not: ours
+metered linear HDR Rec.709 luminance capped at 16 (described in the code as a
+"portable" meter).
+
+Retail (TU3):
+- `sub_827F0D00` locks a surface (texture at +664 of the object at
+  `this + 4 * (this[460] + 117)`, via `0x82A79048`) and passes width, height, pitch
+  and bits to `sub_827F0B78`.
+- `sub_827F0B78` walks every pixel of that surface (16 bytes, 4 pixels per step).
+  Each big-endian u32 becomes `u32 / 2^24` (`vcuxwfp128 ..,24`), so its top byte,
+  times 1/255 (vector at 0x8232F5D0). It multiplies that by the centre weight
+  `(c - |x*y|)^2` and sums. `sub_827F0D00` multiplies the sum by 2.515
+  (0x821A01E8), divides by w*h, and runs the evaluator.
+- The top byte of an A8R8G8B8 word read big-endian (0xAARRGGBB) is alpha. The
+  bloom downsample writes that alpha. `bloom_dof_tap4_minusthresholdPS`
+  (shaders_final.big) squares 4 taps of the scene target (which holds
+  sqrt(tm/2)), averages them, saturates each channel (`mul_sat`), then sets
+  `oC0.w = dp3_sat(r1.zxy, (0.3, 0.3, 0.4))`, i.e. 0.3 R + 0.4 G + 0.3 B of
+  sat(tm/2). `bloom_dof_tap4_minusthreshold_alphalumPS` averages 4 taps of all four
+  channels (fetch swizzle xyzw) and saturates them.
+- Which level is locked: not traced. The level does not change the mean, because
+  every level is a box average of sat(tm/2), which is already in 0..1. It only
+  changes the spatial sampling and adds one 8-bit rounding per level (at most
+  0.5/255 each, small against the 0.25 target). The low bytes of the word add at
+  most 1/255 of R to the reading. Confidence that the meter reads this alpha:
+  medium-high. The surface format at +664 was not traced to its creation.
+
+Change (`crates/skate-game/src/retail_exposure.wgsl`, `retail_exposure.rs`):
+- Each meter sample is now the tone curve at the current exposure: tm/2 per
+  channel, saturated, dotted with the meter weights, saturated, and rounded to 8
+  bits (`meter_luminance`, mirrored in the shader). The centre weighting,
+  2.515 scale, evaluator and 30 Hz time basis are unchanged.
+- NOT RETAIL: the meter samples a 16x16 bilinear grid of our HDR target, not the
+  console's 4-tap downsample chain.
+- Moddable: the new world tuning domain `exposure` (`ExposureMeter`):
+  `meter_weights = {r, g, b}` (retail {0.3, 0.4, 0.3}) and `meter_scale` (retail
+  2.515), first writer wins, reset when the mod stops. It is readable via
+  `sdk.world.tuning(key, 'exposure')`. `RETAIL_EXPOSURE_METER` is logged on every
+  change.
+
+Verification:
+- Unit tests: `retail_exposure::tests` checks the meter against retail's formula
+  written out from the shader (sqrt/square round trip, `r1.zxy` weights, 8-bit;
+  within one 8-bit step), the knee (xe = 1 reads 0.5), that a bright sky reads
+  far below the old HDR meter, and the retail defaults.
+  `modding::world_tuning::tests::exposure_meter_defaults_to_retail_set_and_reset_on_disable`
+  and the skate-mods patch validation cover the mod domain. The shader passes the
+  WGSL validation test.
+- Capture at The Tanker (muted `--verify`, scratch asset root with a fresh
+  backdrop export): sky median 129,182,224, tone-inverted G xe 0.302 (before
+  0.310); sea 90,113,132 (before 100,123,138); lit deck 157,149,142 (before
+  152,145,140). RPCS3: sky 168,213,250 (xe 0.454), sea 125,175,210, deck
+  128,115,102 (xe 0.108). The camera framing differs from the before shot.
+- Result: the retail meter barely moves our exposure here (sky about 0.97x of
+  before). Below xe 1, tm/2 is close to xe, and the blue-weighted 0.3/0.4/0.3
+  roughly cancels the Rec.709 green weight on the sky. The meter only differs
+  where pixels are bright (xe > 1). So the meter is not the main cause of the
+  1.46x sky gap. The deck is the stronger lead: retail's lit deck is at xe 0.108
+  while its sky is at 0.454. Ours is at 0.19 with the sky at 0.30, so our lit
+  world surfaces are about 2.6x brighter relative to the sky. That raises our
+  meter and pulls our exposure down. Next: world surface radiance (lightmap
+  sample / squaring, sun term) at the deck. Not changed here.
+
+### World shader families 7 / 8 lost their kd term (and 2 / 6 checked)
+
+Problem: the world surface radiance check (`.claude/todo/frame-brightness.md`,
+"World surface radiance vs retail") found two possible mismatches in
+`retail_world.wgsl`: families 7 / 8 multiplied the lightmap by the flat-normal kd
+0.93429 (about 7 % darker grass cards, foliage and simple diffuse surfaces), and
+families 2 / 6 did not normalise the tangent normal before kd.
+
+Which retail program each family is [data, VLT `skatercollections.vlt`, effect
+field `effect`, class and key names checked with `tools/asset_pipeline/vlt.py`
+`hash64`]: family 1 `environment.default` -> `baseenvironment`; family 2
+`environmentsimple.default` -> `defaultenvironment`; family 6
+`environment.reflective_simple` -> `baseenvironmentreflective_simple`; family 7
+`environmentsimple.alphatest` -> `alphatestdefaultenvironment`; family 8
+`environmentsimple.diffuse` -> `environmentdiffuse` (family numbers from
+`tools/asset_pipeline/retail_material.py`).
+
+Retail [code, `shaders_final.big`, `*_defaultPS.fpo` read with `xenos_disasm.py`]:
+- `environmentdiffuse_defaultPS` 26-34 and `alphatestdefaultenvironment_defaultPS`
+  27-35: sum of 4 lightmap taps times 0.25, squared, `min` with CSM visibility plus
+  the (0.05, 0.09, 0.13) floor, times diffuse^2, times `c9.y` (m_params[0].y), then
+  the fog `mad`. No kd term.
+- `defaultenvironment_defaultPS`: kd is built from the raw `2n - 1` tangent normal
+  (38), weighted by the signs of the tangent-frame sun times (0.62, 0.58) (56-61),
+  plus 0.39 times the raw z (63, 64, 66), times 2.3956 (67). The `rsq` at 46-55
+  normalise the view vector, the world normal used for specular, and the
+  tangent-frame sun whose signs only are used. So kd is NOT normalised.
+- `baseenvironmentreflective_simple_defaultPS`: the same, kd from the raw `2n - 1`
+  (14-22, 45, 58-63, 74-76). Not normalised.
+- `baseenvironment_defaultPS` (family 1) does normalise (29-33, kd from the
+  normalised normal at 66).
+
+Change (`crates/skate-game/src/retail_world.wgsl:322-325`): kd
+starts at 1.0 for families 7 / 8 (`select(0.93429, 1.0, fam == 7u || fam == 8u)`),
+so their radiance is `min(lightmap^2, vis + floor) * diffuse^2 * m_params[0].y`
+as in retail. Families 2 / 6 already take kd from the raw normal (`fam != 2u &&
+fam != 6u` guard on the normalise), which matches retail, so they are unchanged.
+The research note's mismatch 2 was a misreading of which vector the `rsq`
+normalises.
+
+Verification: new tests in `crates/skate-game/src/retail_shader_tests.rs`,
+`simple_diffuse_and_alphatest_families_have_no_kd_term` and
+`tangent_normal_is_normalised_for_kd_only_where_retail_does`, pin each family's
+kd to the retail program above; `world_shader_validates_under_non_uniform_material_slots`
+validates the WGSL. `cargo test --locked -p skate-game --bin skate3rust -- shader_tests decals retail_shader world_tuning`: 29 passed, 0 failed (2026-10-08).
+
+Open (found while reading, not changed):
+- Our perturbed world normal for specular / reflection uses `max(raw.z, 0.05)`
+  (`retail_world.wgsl:344`); retail
+  `defaultenvironment_defaultPS` 40-44 and `baseenvironmentreflective_simple_defaultPS`
+  18, 23-24 use the raw z. Check `baseenvironment` too before changing.
+- `baseenvironmentreflective_simple_defaultPS` fetches no detail map, while ours
+  lets family 6 use the detail normal when flag 128 is set. What flag 128 marks
+  is not confirmed.
+- m_params[0].y is still the constant `surface.w = 1` for world families (retail
+  data 1.0 for every lit world material). Making it data-driven and mod-reachable
+  is a separate job.
+
+### Stains and wear decals drawn at retail strength
+
+Problem: lit world surfaces measured about 2.6x too bright against the sky
+compared with retail (`.claude/todo/frame-brightness.md`, "Deck input probe"). At
+the Industrial Tanker deck (-440.6, 22.1, 36.5) the surface is material
+`environment.decal` (our family 3): a white threadplate diffuse with the dark
+`decal_wear_sp_id_concstains_02_d` stain decal on top.
+
+Root cause: `stain_opacity()` in `retail_render.rs` (upstream commit 79ea829c,
+"Reduce weathering decal strength") scaled the decal alpha by 0.35 for every decal
+texture whose name contained grime, grunge, stain, oildirt, drainage or
+ground_decals. Its own comment called it "an explicit visual tuning choice, not a
+recovered native material constant". So the dark stains were drawn at 35 %, and
+the deck came out about 2.7x brighter than retail where the stain covers it.
+
+Retail [code, `shaders_final.big`, `decalenvironment_defaultPS.fpo` read with
+`xenos_disasm.py`]: line 57 computes `art^2 - d`, line 59 multiplies it by `art.a`
+and adds `d`, so `d = mix(d, art^2, art.a)` with no strength constant. The decal
+texture's own alpha is the only weight.
+
+Measured [data, offline probe on the dev install's `Industrial.skate`, 5x5 grid
+around the deck]: sunlit lightmap raw 0.80 to 0.87, diffuse raw 0.26 to 0.64,
+`lm^2 * kd * d^2` about 0.13 (0.08 with the grunge macro), which reproduces our
+frame (about 0.086); retail implies about 0.043. With the stain at full strength
+(stain alpha 1.0, art^2 about 0.07, d about 0.25) ours goes from 0.187 to 0.070,
+the retail value. The lightmap UVs, the abs() on them and the diffuse decode
+were checked and are not the cause.
+
+Change:
+- `crates/skate-game/src/retail_render.rs`: `stain_opacity()` removed; every
+  material's `decal.x` is 1.0 (retail). New resource `DecalSettings` (retail
+  `RETAIL_DECAL_OPACITY` 1.0), published every frame as `frame_state.clock.w`
+  (`advance_frame_state`).
+- `crates/skate-game/src/retail_world.wgsl`: the decal blend weight is
+  `art.a * p.decal.x * frame_state.clock.w`, so the strength changes live with
+  no material rebuild.
+- Mods: new world tuning domain `decals` (`crates/skate-mods/src/world_tuning.rs`
+  `DecalsPatch`, `crates/skate-game/src/modding/world_tuning.rs`):
+  `sdk.world.set_tuning('decals', {opacity = 0.35})` brings back the lighter
+  look; first writer wins; the mod's patch is dropped when it stops. Documented in
+  `sdk/skate.lua` and `crates/skate-mods/src/api.lua`.
+
+Verification: `retail_render` test `world_decals_default_to_retail_full_strength`,
+`world_tuning` test `decals_default_to_retail_set_and_reset_on_disable` (default,
+first writer, invalid values, reset on disable), and the WGSL validation tests in
+`retail_shader_tests.rs`. Every map gets darker stains, so a regression check on
+all maps and a matched-pose Tanker capture follow.
+
+Open:
+- Family 4 (tileable decals) shares this blend in our shader; the other retail
+  decal programs (tileable, simple_tileable, environmentparkdecal) are not read yet.
+- Per-texture decal strength for mods (only a global strength now).
+
 ## Verification
 
 - Unit test `physics::player_input::tests::water_contact_prefers_the_skater_body_height`.
@@ -463,6 +935,7 @@ No retail reference was found to compare; the user accepted the look for now.
 
 ## Files
 
+- `crates/skate-core/src/player/selector/mod.rs` (`AirTimeoutFrames`, `RETAIL_AIR_TIMEOUT_FRAMES`), `crates/skate-game/src/physics/respawn.rs` (`RespawnReason`, `PlayerRespawn`, `RespawnSettings`), `crates/skate-game/src/physics/air_timeout_tests.rs` (new), `crates/skate-game/src/physics/player_state/selection.rs`, `crates/skate-game/src/physics/player_state/wipeout_output.rs`, world tuning `respawn` domain (`crates/skate-mods/src/world_tuning.rs`, `crates/skate-game/src/modding/world_tuning.rs`).
 - `crates/skate-data/examples/water_surfaces.rs` (new, diagnostic only: surface types, water heights, `WATER_POINTS`, `WATER_VIEW`, `RENDER_AT`, `MODEL_MATERIALS`, `TEXTURES`, `MATERIAL`; SKATE material ids are 1-based).
 - `crates/skate-game/src/physics/player_input/mod.rs` (`publish_water`, unit test).
 - `crates/skate-game/src/physics/frame.rs` (call site).
@@ -471,7 +944,7 @@ No retail reference was found to compare; the user accepted the look for now.
 - `crates/skate-core/src/physics/board_world.rs` (`is_water_tag`, water skip in `query_primitives`, `water_surface_at`) and `board_world/tests.rs` (`water_is_not_solid_but_reports_its_surface`).
 - `crates/skate-game/src/physics/water.rs` (new), wired from `physics.rs` (`finish_skater`), `skeleton_feedback.rs` and `frame.rs`.
 - `crates/skate-game/src/camera/water.rs` (new), `camera/runtime.rs` (`water` argument, `water_vignette`), `camera.rs`, `physics/camera_output.rs` (water bail state).
-- `crates/skate-game/src/retail_exposure.rs`, `retail_exposure.wgsl`, `retail_tone.wgsl` (vignette).
+- `crates/skate-game/src/retail_exposure.rs`, `retail_exposure.wgsl` (retail meter input, `exposure` domain), `retail_tone.wgsl` (vignette).
 - `crates/skate-game/src/water_splash.rs` (new), `main.rs`, `app.rs` (plugin).
 - `tools/asset_pipeline/particles.py` (new), `test_particles.py`, `asset_exports.py`, `versions.py` (environment group).
 - `crates/skate-game/src/verification.rs` (`SKATE_VERIFY_AT`).
@@ -484,3 +957,4 @@ No retail reference was found to compare; the user accepted the look for now.
 - `crates/skate-data/examples/xex_unpack.rs` (diagnostic: unpack + locate table).
 - `crates/skate-game/src/main.rs` (`--extract-ocean-pca`).
 - `tools/asset_pipeline/ocean_pca.py` (`convert`), `asset_exports.py`, `install.py`, `versions.py`.
+- Industrial sea / backdrop: `crates/skate-game/src/retail_backdrop.rs` (new, tests), `skate_world.rs` (`spawn_backdrop`, `spawn_static`), `map_render.rs`, `main.rs`, `app.rs`, `modding/world_tuning.rs` and `modding/engine_access.rs` (domain `backdrop`), `crates/skate-mods/src/world_tuning.rs` (`BackdropPatch`), `crates/skate-mods/src/api.lua`, `sdk/skate.lua`, `tools/asset_pipeline/backdrop.py` (`presentation_meshes`), `test_backdrop.py`, `crates/skate-data/examples/water_surfaces.rs` (reads render-only packages).

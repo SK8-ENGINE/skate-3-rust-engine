@@ -341,6 +341,14 @@ impl BoardWorld {
         self.buffer.capacity = retention.capacity;
         self.buffer.distance_squared_threshold = retention.duplicate_distance_squared;
         self.buffer.deferred_reduction = u8::from(retention.deferred_reduction);
+        // No volumes, no pairs: the union bounds below would be None and
+        // candidate_ranges(None) means "every triangle", so a hidden board
+        // (all volumes disabled, state 3) walked the whole map each tick
+        // for an empty result (fix15). The result and buffer state are the
+        // same as the full walk's: nothing allocated, nothing flushed.
+        if volumes.is_empty() {
+            return &self.contacts;
+        }
         let padding =
             if query.volume_padding.is_finite() && query.maximum_separating_distance.is_finite() {
                 query.volume_padding.max(0.) + query.maximum_separating_distance.max(0.)
@@ -478,6 +486,99 @@ impl BoardWorld {
             }
         }
         best
+    }
+
+    /// Replace a contiguous run of triangles in place (same count, same order).
+    /// Used by prop instances rebaked at a new rigid pose: adjacency flags and
+    /// edge cosines are rigid-motion invariant, so callers reuse them. Per-triangle
+    /// and per-mesh bounds plus the broadphase index are refreshed.
+    pub fn replace_triangles(
+        &mut self,
+        range: std::ops::Range<usize>,
+        triangles: &[WorldTriangle],
+    ) -> Result<(), &'static str> {
+        if range.len() != triangles.len() || range.end > self.triangles.len() {
+            return Err("replacement triangles must match the existing range");
+        }
+        self.triangles[range.clone()].copy_from_slice(triangles);
+        for (i, entry) in triangles.iter().enumerate() {
+            self.triangle_bounds[range.start + i] =
+                Bounds::from_points(entry.triangle.vertices).ok_or("invalid triangle bounds")?;
+        }
+        if let Some(metadata) = &mut self.query_metadata {
+            for mesh in &mut metadata.meshes {
+                if mesh.triangle_range.start < range.end && range.start < mesh.triangle_range.end {
+                    mesh.local_bounds = Bounds::from_points(
+                        self.triangles[mesh.triangle_range.clone()]
+                            .iter()
+                            .flat_map(|t| t.triangle.vertices),
+                    )
+                    .ok_or("invalid query mesh bounds")?;
+                }
+            }
+            let meshes = metadata.meshes.clone();
+            self.query_index = query_index::QueryIndex::new(&meshes);
+        }
+        Ok(())
+    }
+
+    /// Append triangles after the existing ones (a prop body created mid-game).
+    /// Existing triangle indices, order and query meshes are unchanged; the new
+    /// range gets its own query meshes (64-triangle chunks, the portable world's
+    /// grouping) so its bounds never widen an existing chunk. `packed_surfaces`
+    /// holds one authored surface code per triangle (required when the world has
+    /// query metadata). Returns the new range.
+    pub fn append_triangles(
+        &mut self,
+        triangles: &[WorldTriangle],
+        packed_surfaces: &[u16],
+    ) -> Result<std::ops::Range<usize>, &'static str> {
+        let start = self.triangles.len();
+        let mut bounds = Vec::with_capacity(triangles.len());
+        for entry in triangles {
+            bounds.push(Bounds::from_points(entry.triangle.vertices).ok_or("invalid triangle bounds")?);
+        }
+        if self.query_metadata.is_some() && packed_surfaces.len() != triangles.len() {
+            return Err("appended triangles need one packed surface each");
+        }
+        self.triangles.extend_from_slice(triangles);
+        for (i, entry) in triangles.iter().enumerate() {
+            let fatness = if entry.triangle.fatness.is_finite() && entry.triangle.fatness >= 0. {
+                entry.triangle.fatness
+            } else {
+                f32::INFINITY
+            };
+            self.maximum_fatness = self.maximum_fatness.max(fatness);
+            let b = bounds[i];
+            let span = (b.max.x - b.min.x).max(b.max.y - b.min.y).max(b.max.z - b.min.z);
+            self.maximum_triangle_margin = self.maximum_triangle_margin.max(span * (2. * broadphase::THIN_MARGIN));
+            if is_water_tag(entry.tag) {
+                self.water.push(start + i);
+            }
+        }
+        self.triangle_bounds.extend(bounds);
+        let end = self.triangles.len();
+        if let Some(metadata) = &mut self.query_metadata {
+            metadata.packed_surfaces.extend_from_slice(packed_surfaces);
+            for chunk in (start..end).step_by(64) {
+                let chunk_end = (chunk + 64).min(end);
+                metadata.meshes.push(query_metadata::QueryMesh {
+                    triangle_range: chunk..chunk_end,
+                    local_to_world: crate::physics::drive_frames::RetailAffineTransform::IDENTITY,
+                    world_to_local: crate::physics::drive_frames::RetailAffineTransform::IDENTITY,
+                    local_bounds: Bounds::from_points(
+                        self.triangles[chunk..chunk_end].iter().flat_map(|t| t.triangle.vertices),
+                    )
+                    .ok_or("invalid query mesh bounds")?,
+                    matching_group: -1,
+                    rejection_flags: 0,
+                    geometry: 0,
+                    pool: query_metadata::QueryPool::Ground,
+                });
+            }
+            self.query_index = query_index::QueryIndex::new(&metadata.meshes);
+        }
+        Ok(start..end)
     }
 
     pub fn dropped_contacts(&self) -> u32 {

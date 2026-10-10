@@ -1,6 +1,19 @@
 //! TU3 Sequence82B95C18 and Blend82B96058/82B961F8/82B963D8.
 use super::{clip_clock::AdvanceResult, output::attributes::{AnimationAttribute,AttributeName}, playback::TransitionSettings, playback_parameters::SettableAttribute, playback_tree::{Evaluation,PlaybackTree,PoseCommand}};
 
+/// Blend82B96058's weight of the incoming tree `elapsed` s into a `seconds` long transition:
+/// `elapsed / seconds` clamped to 0..1, eased with `3w^2 - 2w^3` unless the transition is shorter
+/// than 0.05 s (`0x3d4ccccd`), which stays linear. Shared by the player's graph transitions and
+/// the NPC skater puppet crossfade (living world).
+pub fn transition_weight(elapsed:f32,seconds:f32)->f32 {
+    let value=elapsed/seconds;
+    let lower=if -value>=0.0 {0.0} else {value};
+    let weight=if 1.0-lower>=0.0 {lower} else {1.0};
+    if seconds<f32::from_bits(0x3d4ccccd) || weight>1.0 || weight<0.0 {return weight;}
+    let square=weight*weight;let cube=square*weight;
+    square.mul_add(3.0,-(cube*2.0))
+}
+
 #[derive(Clone,Debug)]
 pub struct PlaybackTransition {
     pub from:Box<PlaybackTree>,
@@ -45,14 +58,7 @@ impl PlaybackTransition {
     }
     pub fn attributes(&self,mask:u32)->Result<Vec<AnimationAttribute>,String> {self.attributes_child().attributes(mask)}
     pub fn query_attribute(&self,name:AttributeName,mask:u32,output:&mut AnimationAttribute)->Result<bool,String> {self.attributes_child().query_attribute(name,mask,output)}
-    pub fn weight(&self)->f32 {
-        let value=self.elapsed/self.settings.seconds;
-        let lower=if -value>=0.0 {0.0} else {value};
-        let weight=if 1.0-lower>=0.0 {lower} else {1.0};
-        if self.settings.seconds<f32::from_bits(0x3d4ccccd) || weight>1.0 || weight<0.0 {return weight;}
-        let square=weight*weight;let cube=square*weight;
-        square.mul_add(3.0,-(cube*2.0))
-    }
+    pub fn weight(&self)->f32 {transition_weight(self.elapsed,self.settings.seconds)}
     pub fn evaluate(&mut self,parameters:Evaluation,enabled:bool,output:&mut Vec<PoseCommand>)->Result<bool,String> {
         if self.settings.kind==4 {return if self.sequence_complete {self.to.evaluate(parameters,enabled,output)} else {self.from.evaluate(parameters,enabled,output)};}
         let weight=self.weight();

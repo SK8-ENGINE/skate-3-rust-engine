@@ -130,6 +130,7 @@ impl Owner {
     }
 }
 
+
 pub(crate) fn enter(_physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
     let p = &skater.player_input.processed;
     //82D30848 calls GetEffectiveRoot82BE3650 BEFORE Ground placement.
@@ -225,12 +226,42 @@ pub(crate) fn update(
         );
     }
     let frame = skater.biped_ground.ground.frame_80;
+    // Move Object (502): the stock graph swaps OBGround's locomotion
+    // AttachIntents for MovingObjectNew's OB_ObjectMv set, and retail moves
+    // the OBJECT from them (82D45318, prop_carry) while the skater follows the
+    // object's grab edge: 82D45D30 builds the skater's target frame from the
+    // grab record, 82D46218 / 82D463D8 blend toward it, 82BDF268 moves the
+    // character there. The frame blend is a snap at retail data (it only
+    // blends when the frame jumps >= 60 m per tick: physics_state_offboard
+    // +448 = 1.0 x 60, 82D46218), so the facing snaps to the edge normal as
+    // in retail. The skater target is the root moved by the step of the
+    // retail follow point +416 published by prop_carry (the step is bounded
+    // there, 82BD41B0), one tick behind the prop. NOT RETAIL YET: 82BDF268 itself (character sweep,
+    // step-up, weight +1124); the walking job's velocity override moves the
+    // root onto the target each tick. The walking stick stays idle.
+    let moving_object = (p.state_2508 == 502 && physics.prop_carry.held().is_some())
+        .then(|| physics.prop_carry.skater_target())
+        .flatten()
+        .map(|(target, facing)| {
+            let root = skater.animated_skeleton.roots.animation_to_world[3];
+            let dt = physics.settings.step.simulation.time_step.max(1e-4);
+            let (dx, dz) = (target.x - root[0], target.z - root[2]);
+            let velocity = [dx / dt, 0.0, dz / dt, 0.0];
+            let wrap = |a: f32| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            let turn = wrap(facing.x.atan2(facing.z) - frame[2][0].atan2(frame[2][2]));
+            (velocity, turn)
+        });
+    let (stick_x, stick_z) = if moving_object.is_some() {
+        (0.0, 0.0)
+    } else {
+        (extra.biped_world_x, extra.biped_world_z)
+    };
     let input = skate_core::player::offboard::ground_input::GroundInput {
         processed_flags_2472: p.flags_2472,
         processed_direct_2684: extra.offboard_magnitude,
         processed_direct_2680: extra.offboard_turn,
-        processed_stick_2692: extra.biped_world_x,
-        processed_stick_2688: extra.biped_world_z,
+        processed_stick_2692: stick_x,
+        processed_stick_2688: stick_z,
         processed_scale_2912: fields.magnitude_scale,
         processed_scale_2908: fields.turn_scale,
         frame_forward_112: [frame[2][0], frame[2][1], frame[2][2]],
@@ -242,7 +273,7 @@ pub(crate) fn update(
     );
     let third_line = p.line_tests_960_1008_1056[2];
     let owner = &mut skater.biped_ground;
-    let job = ground_job::prepare(
+    let mut job = ground_job::prepare(
         &mut owner.contact,
         &mut owner.ground.distance_164,
         ground_job::Input {
@@ -270,6 +301,46 @@ pub(crate) fn update(
         |input| Ok::<_, String>(owner.geometry.consume(input)),
     )?;
     owner.geometry_adjustment = Some(job.geometry);
+    if let Some((velocity, angle)) = moving_object {
+        // Face the grab edge (the prop's turn carries the skater round).
+        if angle != 0.0 {
+            let motion = &mut owner.controller.state.motion;
+            motion.frame_0[0] = super::prop_carry::yaw_row(motion.frame_0[0], angle);
+            motion.frame_0[2] = super::prop_carry::yaw_row(motion.frame_0[2], angle);
+        }
+        // Drive the planar velocity through the controller's velocity
+        // override (gate >= 0, zero blend time: the target is taken as is),
+        // so contacts and obstacle rejection still apply. Every held tick,
+        // also a zero step: retail moves the character to the follow point
+        // each tick (82D44A10 -> 82BDF268), so a skater already at the point
+        // stays there. Gating a zero step out handed the root back to the
+        // walking approach, which walked the skater into a resting prop
+        // until the hold rule failed (2026-10-08, exposed by the retail row
+        // solver: a prop at rest no longer jitters the follow point).
+        {
+            // The override gate is the job's requested phase (296), which the
+            // cadence 82D80720 also takes as a phase request over the
+            // requested duration (288). Request the phase the cadence is at
+            // over a positive duration: the walk cycle holds still while
+            // carrying. Phase 0 over the carry state's zero duration divided
+            // by zero (2026-10-05 crash: NaN CadenceStartPercent picked no
+            // walk-into-stand clip when the prop was let go).
+            job.job.requested_phase = owner.controller.state.cadence.phase.phase;
+            job.job.requested_duration = 1.0;
+            job.job.override_duration = 0.0;
+            job.job.animation_velocity = velocity;
+            // NOT RETAIL YET (part of the follow move above): the walking
+            // controller's approach (82D7F458..FDD0) steps toward the
+            // contact target projected onto the FACING line, so following a
+            // prop that slides along its edge would come out as a forward
+            // step. Retail 502 never runs that job (82D4E2F8 is only
+            // submitted from BipedGround 82D30D30); it moves the character
+            // with 82BDF268, not decoded. Until it is, the follow move drops
+            // the target-contact bit (2) for this job only (support contact
+            // bit 1 still keeps the feet on the ground; no 0.3 m step-up).
+            job.job.flags &= !2;
+        }
+    }
     let previous_position=owner.controller.state.position_368;
     let mut result=owner.run(job.job);
     super::solid_contacts::constrain_ground(owner,&mut result,previous_position,&physics.network_proxies.solids);

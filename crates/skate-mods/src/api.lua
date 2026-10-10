@@ -324,7 +324,8 @@ function sdk.audio.mixmap(slot, object, instance, output)
 end
 -- Audio events (capability audio_events): subscribe{tags={'pop','land',...}} (empty = every row),
 -- subscribe(nil) stops. Tags: pop, land, grind_start, grind_end, footstep, horn, alarm, tazer,
--- body_fall, emitter, zone_change, speech. Observe only, one frame late; at most 256 rows a frame.
+-- body_fall, emitter, zone_change, speech, body_impact (a skater's body region hit: region, impact, tier,
+-- material, position). Observe only, one frame late; at most 256 rows a frame.
 function sdk.audio.subscribe(opts)
     if opts == nil then submit{kind="audio_subscribe"} else submit{kind="audio_subscribe",tags=opts.tags or {}} end
 end
@@ -369,6 +370,47 @@ function sdk.audio.tuned() return (audio_mine().tuning) or {} end
 function sdk.audio.frontend(name) submit{kind="audio_frontend",name=name} end
 -- The teleport effect (screen static + the skater's teleport crackle) at amount 0..1; send it every frame to hold it.
 function sdk.audio.teleport_effect(amount) submit{kind="audio_teleport_effect",amount=amount} end
+
+-- World tuning (capability world_tuning): patch the living world ("living_world": npc_draw_distance,
+-- skater_fade, skater_line_chain, ped_fade, skater_clips, skater_blend_seconds, skater_stance, skater_stance_events, ped_obstacles, npc_skater_props, ped_vehicle_contact, npc_tricks, skater_trick_profiles, npc_simulated, skaters, pedestrians, vehicles, ambient_skaters, free_play), dynamic props ("props": default / by_template prop tuning, collision_box)
+-- or prop carrying ("carry": grab_bit, placement_bit, grab_range, push_speed, pull_speed, side_speed,
+-- turn_rate, grip_reach, linear_clamp, yaw_clamp, relatch, slew_per_tick, yaw_rate_feedback, linear_controller, yaw_controller,
+-- lever_rotation, lever_yaw, mass_speed, inertia_yaw_gain, let_go_distance, drop_board, follow_step, hold_angle_limit, hold_max_angle_to_horizontal, hold_box_extents,
+-- record_272_speed_scale, grab_end_exclusion, hand_ik_enter, hand_ik_curve, hand_ik_rate, hand_ik_reach, commanded_material, upright_cos, apply_at_com,
+-- yaw_replaces_torque, ignore_vertical, wake_on_command, by_template[<MOBJ template>] = {material_held, material_free,
+-- material_free_upright, upright_pair, restitution, record_272, linear_drag, angular_drag, mass,
+-- maximum_linear_velocity, maximum_angular_velocity, inertia_scale, inertia_offset})
+-- or the dynamic shadow floor on the baked world ("shadows": world_floor =
+-- {r, g, b}, each 0..1, retail {0.05, 0.09, 0.13}) or the district backdrop ("backdrop": visible,
+-- retail true: Industrial's sea, far sea planes, tree walls; proxy_terrain, retail true: the far-proxy hills
+-- under Industrial's south tree wall) or the checkpoint respawn ("respawn": air_timeout_ticks, retail 300 =
+-- 5 s of 1/60 s ticks in the air before the skater is sent to the last checkpoint, 1..216000) or the
+-- auto-exposure meter ("exposure": meter_weights, retail {0.3, 0.4, 0.3}; meter_scale, retail 2.515) or the skater
+-- fade-in after every placement ("ghost": enabled, retail true; fade_in_seconds, retail 1.0, 0..60; hold_alpha,
+-- retail 0.68, 0..1) or the world decals ("decals": opacity, retail 1.0, 0..1: strength of every decal over
+-- its surface, applied at once) while this mod
+-- runs; nil restores
+-- this mod's patch of the domain, everything is restored when the mod stops. First writer wins.
+sdk.world = { version = 1 }
+function sdk.world.set_tuning(domain, patch) submit{kind="world_set_tuning",domain=domain,patch=patch} end
+-- Read a domain as the game uses it now: the value arrives as sdk.commands.result(key).value.
+function sdk.world.tuning(key, domain) sdk.engine.inspect(key, "world_tuning:" .. domain) end
+-- Reset one dynamic prop (stable map id) to its authored pose, at rest; its saved layout entry is
+-- dropped (retail cMsgResetDMO; refused for the held prop). doc 27, Object Dropper and reset.
+function sdk.world.reset_prop(id) submit{kind="world_reset_prop",id=id} end
+-- Upright one prop (retail phone Upright, cMsgUprightDMO): 2 s self-righting window.
+function sdk.world.upright_prop(id) submit{kind="world_upright_prop",id=id} end
+-- Convenience (not a retail action): reset_prop for every moved or placed prop.
+function sdk.world.reset_moved_props() submit{kind="world_reset_moved_props"} end
+-- Create a dynamic prop mid-game: a copy of map prop `from` (stable map id: model, collision,
+-- physics) at opts.position {x, y, z}, turned opts.yaw radians, thrown at opts.velocity {x, y, z}
+-- m/s with opts.spin {x, y, z} rad/s (arrays). The same key again replaces it; the mod's props go on disable.
+-- doc 27, Props created mid-game.
+function sdk.world.spawn_prop(key, from, opts)
+  opts = opts or {}
+  submit{kind="world_spawn_prop",key=key,from=from,position=opts.position,yaw=opts.yaw,velocity=opts.velocity,spin=opts.spin}
+end
+function sdk.world.remove_prop(key) submit{kind="world_remove_prop",key=key} end
 
 -- World audio extension 1 (backward-compatible with API 2): publish traffic vehicles, peds and
 -- skaters to the game's retail world audio (the same path engine systems use). Keys are scoped

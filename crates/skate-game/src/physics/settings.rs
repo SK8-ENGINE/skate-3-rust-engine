@@ -42,6 +42,13 @@ pub(crate) struct PhysicsSettings {
     pub standard_wheel_material: RetailContactMaterial,
     pub floor_material: RetailContactMaterial,
     pub input_magnitude_threshold: f32,
+    /// Object-move (Move Object mode) stick curves, inputlistener 8259C4B0.
+    pub object_move: skate_core::input::offboard_intentions::ObjectMoveCurves,
+    /// Move Object command tuning (class 3EDA5B140604613D); the stock
+    /// fallback only when the collection lacks it.
+    pub move_object: skate_core::player::offboard::move_object::MoveObjectTuning,
+    /// `physics_ai` `default`: the AI board path gains (`82C05EC0`).
+    pub physics_ai: skate_core::riding::grounded::state::board_path::PhysicsAiTuning,
 }
 
 impl PhysicsSettings {
@@ -154,6 +161,15 @@ impl PhysicsSettings {
                 restitution: 1.0,
             },
             input_magnitude_threshold: f("inputlistener", "StickMagnitudeMinToCountHeld")?,
+            object_move: super::offboard::settings::load_object_move_curves(data)?,
+            move_object: super::offboard::settings::load_move_object_tuning(data).unwrap_or_else(|error| {
+                bevy::log::warn!("SKATE_MOVE_OBJECT: stock tuning missing ({error}); using built-in stock values");
+                Default::default()
+            }),
+            physics_ai: super::board_path::load_physics_ai(data).unwrap_or_else(|error| {
+                bevy::log::warn!("SKATE_PHYSICS_AI: stock physics_ai missing ({error}); using the default record's values");
+                Default::default()
+            }),
         })
     }
 }

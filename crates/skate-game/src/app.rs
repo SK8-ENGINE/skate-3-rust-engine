@@ -22,8 +22,15 @@ use skate_data::GameAssets;
 /// queries are not free. Without them a pass's cost can only be inferred from
 /// invocation counts, which says nothing about how long the pass took. Set
 /// `SKATE_GPU_TIMING=1` to get `render/**/elapsed_gpu`.
+///
+/// Trace-all (`SKATE_TRACE_ALL=1`) never requires them: Bevy's default `Functionality` priority
+/// already requests every feature the adapter has, so the timestamp queries are on when the GPU
+/// supports them and device creation can not fail when it does not ([`log_gpu_timing`] says which).
 fn wgpu_features() -> WgpuFeatures {
     let default = WgpuSettings::default().features;
+    if crate::trace_all::on() {
+        return default;
+    }
     if std::env::var_os("SKATE_GPU_TIMING").is_some_and(|v| v != "0") {
         default
             | WgpuFeatures::TIMESTAMP_QUERY
@@ -32,6 +39,20 @@ fn wgpu_features() -> WgpuFeatures {
     } else {
         default
     }
+}
+
+/// The GPU timing features the device got, logged once at startup (trace-all or `SKATE_GPU_TIMING`).
+fn log_gpu_timing(device: Option<Res<bevy::render::renderer::RenderDevice>>) {
+    let Some(device) = device else { return };
+    let features = device.features();
+    let has = |f: WgpuFeatures| if features.contains(f) { "yes" } else { "no" };
+    info!(
+        "GPU_TIMING timestamp_query={} inside_encoders={} pipeline_statistics={}{}",
+        has(WgpuFeatures::TIMESTAMP_QUERY),
+        has(WgpuFeatures::TIMESTAMP_QUERY_INSIDE_ENCODERS),
+        has(WgpuFeatures::PIPELINE_STATISTICS_QUERY),
+        if features.contains(WgpuFeatures::TIMESTAMP_QUERY) { "" } else { " (adapter lacks timestamps: no GPU pass times, the rest of the trace continues)" }
+    );
 }
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -118,6 +139,7 @@ pub(crate) fn build(
             .chain(),
     )
     .add_plugins(crate::frame_timing::FrameTimingPlugin)
+    .add_plugins(crate::retail_backdrop::BackdropPlugin)
     .add_plugins((
         crate::retail_render::RetailRenderPlugin,
         input::InputPlugin,
@@ -148,7 +170,11 @@ pub(crate) fn build(
     app.add_plugins(crate::water_splash::WaterSplashPlugin);
     app.add_plugins(crate::ui_audio::UiAudioPlugin);
     app.add_plugins(crate::game_audio::GameAudioPlugin);
+    app.add_plugins(crate::living_world::LivingWorldPlugin);
     app.add_systems(Last, crate::crash_context::sample);
+    if crate::trace_all::on() || std::env::var_os("SKATE_GPU_TIMING").is_some_and(|v| v != "0") {
+        app.add_systems(Startup, log_gpu_timing);
+    }
     crate::profiling::install(&mut app);
     app
 }

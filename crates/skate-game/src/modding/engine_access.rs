@@ -34,6 +34,8 @@ pub(super) fn inspect(world: &World, system: &str) -> Value {
         "audio_catalog" => crate::game_audio::catalog(world),
         // A tuning domain (or a path inside it) as the game uses it now (`sdk.audio.tuning`).
         s if s.starts_with("audio_tuning:") => crate::game_audio::tuning_read(world, &s["audio_tuning:".len()..]),
+        // A world tuning domain (living_world / props / carry / shadows / backdrop) as the game uses it now (`sdk.world.tuning`).
+        s if s.starts_with("world_tuning:") => super::world_tuning::read(world, &s["world_tuning:".len()..]),
         _ => Value::Null,
     }
 }

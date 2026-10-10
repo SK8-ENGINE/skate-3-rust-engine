@@ -119,6 +119,63 @@ fn dot(a: [f32; 4], b: [f32; 4]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
+/// Shipped inputlistener curves read by the object-move producer 8259C4B0,
+/// all evaluated at |stick angle| / pi (angle = atan2(x, -y) of the raw left
+/// stick, constant 0x3EA2F983 at 822F8610). Defaults come from setup data; a
+/// mod may override them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ObjectMoveCurves {
+    /// Key 1A1A7AC37A72DF87 (PointNegGraphData8): OB_ObjectMvX gain.
+    pub x_gain: crate::point_graph::PointGraph<8>,
+    /// Key 05BA8B52C23B3481 (PointNegGraphData8): OB_ObjectMvZ gain.
+    pub z_gain: crate::point_graph::PointGraph<8>,
+    /// Key 9ADFC2E222938C1E (PointNegGraphData16): left-stick share of
+    /// OB_ObjectMvRot. Every shipped Y value is zero, so in retail the left
+    /// stick never rotates the skater and object; only the right stick does.
+    pub rotation: crate::point_graph::PointGraph<16>,
+}
+
+impl ObjectMoveCurves {
+    /// Unit gains and no left-stick rotation (the shipped shape without the
+    /// Z dip on diagonals); for tests and hosts without setup data.
+    pub fn flat() -> Self {
+        Self {
+            x_gain: crate::point_graph::PointGraph { x: [0.0; 8], y: [1.0; 8] },
+            z_gain: crate::point_graph::PointGraph { x: [0.0; 8], y: [1.0; 8] },
+            rotation: crate::point_graph::PointGraph { x: [0.0; 16], y: [0.0; 16] },
+        }
+    }
+}
+
+/// Object-move inputs while carrying a prop (retail Move Object mode),
+/// 8259C4B0 called from Fill825999F0 with the current RawControllerInput
+/// (derived words 7..13). The stock OffBoard AG forwards all three to the MG,
+/// where MovingObjectNew attaches them to the same-named skeleton-input
+/// channels:
+/// - OB_ObjectMvX = raw left X * x_gain(|a|/pi);
+/// - OB_ObjectMvZ = raw left Y * z_gain(|a|/pi);
+/// - OB_ObjectMvRot = clamp(raw right X + sign(a) * rotation(|a|/pi) * s, -1, 1).
+///
+/// `a` is atan2(x, -y) wrapped to (-pi, pi]. The scale `s` (caller f21) is
+/// not resolved; it only multiplies the rotation curve, which is all zero in
+/// the shipped data, so the left-stick term is left out.
+pub fn produce_object_move(
+    controller: &DerivedControllerInput,
+    curves: &ObjectMoveCurves,
+) -> [OffboardIntent; 3] {
+    let words = controller.words();
+    let x = f32::from_bits(words[7]);
+    let y = f32::from_bits(words[8]);
+    let right_x = f32::from_bits(words[9]);
+    let angle = x.atan2(-y);
+    let key = angle.abs() * f32::from_bits(0x3ea2_f983);
+    [
+        OffboardIntent { name: "OB_ObjectMvZ", value: curves.z_gain.evaluate(key) * y },
+        OffboardIntent { name: "OB_ObjectMvX", value: curves.x_gain.evaluate(key) * x },
+        OffboardIntent { name: "OB_ObjectMvRot", value: right_x.clamp(-1.0, 1.0) },
+    ]
+}
+
 fn safe_unit(vector: [f32; 4]) -> [f32; 4] {
     let squared = dot(vector, vector);
     let mut inverse = crate::physics::reciprocal_sqrt::estimate(squared);

@@ -10,6 +10,70 @@ use skate_core::{
 };
 use skate_data::{animation_metadata::AnimationMetadata, collections::Collections};
 
+/// Object-move curves of the inputlistener collection read by 8259C4B0
+/// (`skate_core::input::offboard_intentions::produce_object_move`).
+pub(crate) fn load_object_move_curves(
+    data: &Collections,
+) -> Result<skate_core::input::offboard_intentions::ObjectMoveCurves, String> {
+    Ok(skate_core::input::offboard_intentions::ObjectMoveCurves {
+        x_gain: curves::load::<8>(data, "inputlistener", "Hash_1A1A7AC37A72DF87")?.0,
+        z_gain: curves::load::<8>(data, "inputlistener", "Hash_05BA8B52C23B3481")?.0,
+        rotation: curves::load::<16>(data, "inputlistener", "Hash_9ADFC2E222938C1E")?.0,
+    })
+}
+
+/// Move Object tuning, attribute class `3EDA5B140604613D` key `default`
+/// (read by 82D444A0 / 82D45318). Image constants keep their defaults.
+pub(crate) fn load_move_object_tuning(
+    data: &Collections,
+) -> Result<skate_core::player::offboard::move_object::MoveObjectTuning, String> {
+    use skate_core::player::offboard::move_object::{ControllerGains, MoveObjectTuning};
+    const CLASS: &str = "Hash_3EDA5B140604613D";
+    let f = |name: &str| data.float(CLASS, "default", name);
+    let curve = |name: &str| curves::load::<8>(data, CLASS, name).map(|c| c.0);
+    let gains = |name: &str| data.words::<4>(CLASS, "default", name).map(ControllerGains::from_words);
+    // 82D46610 hand IK window: the larger x end (bounds[2]) of the two enter curves.
+    let (hand_ik_curve, ik_bounds) = curves::load::<8>(data, CLASS, "Hash_702F25BA3A5AAA56")?;
+    let (_, weight_bounds) = curves::load::<8>(data, CLASS, "Hash_1348E9A1F213B42D")?;
+    Ok(MoveObjectTuning {
+        hand_ik_enter: f("Hash_5E35DB02BE697A58")?,
+        hand_ik_window: ik_bounds[2].max(weight_bounds[2]),
+        hand_ik_curve,
+        push_speed: f("Hash_2258076B612569A9")?,
+        pull_speed: f("Hash_F1C038722EC7D0C6")?,
+        side_speed: f("Hash_096A4FA6489E5541")?,
+        lever_rotation: curve("Hash_E4FF0185DA44CDBD")?,
+        lever_yaw: curve("Hash_BFB3BEF0BB2661C0")?,
+        mass_speed: curve("Hash_57D37D696363167E")?,
+        inertia_yaw_gain: curve("Hash_EABFCC79873A2859")?,
+        yaw_clamp: f("Hash_AD327350D151B1E3")?,
+        linear_clamp: f("Hash_791421DDAF54C2D5")?,
+        relatch: f("Hash_557FA142008FD7CE")?,
+        lift_gain: f("Hash_FDE807D9B85A6AC2")?,
+        linear_controller: gains("Hash_DF79539DBDA006EE")?,
+        yaw_controller: gains("Hash_B46764285AD1DC5F")?,
+        // 82D46610 / 82D43B20: anchor reach from this collection.
+        anchor_reach: f("Hash_96ECC98838ECCC11")?,
+        // Hold qualification (82D44A10 -> 82E08EE8): physics_state_offboard
+        // `default` +0 / +32 / +452 / +436 (the settings at state+56).
+        hold_box_extents: offboard_vector(data, "GrabBoxSizeGrabbing")?,
+        hold_box_offset: offboard_vector(data, "GrabBoxOffset")?,
+        hold_angle_limit: data.float("physics_state_offboard", "default", "GrabSplineAngleLimitGrabbing")?,
+        hold_max_angle_to_horizontal: data.float("physics_state_offboard", "default", "GrabSplineMaxAngleToHorizontalGrabbing")?,
+        // 82D444A0 grip clamp: physics_state_offboard `default` +444.
+        grab_end_exclusion: data.float("physics_state_offboard", "default", "GrabSplineEndExclusion")?,
+        ..MoveObjectTuning::default()
+    })
+}
+
+fn offboard_vector(data: &Collections, name: &str) -> Result<[f32; 3], String> {
+    let v = data.words::<4>("physics_state_offboard", "default", name)?.map(f32::from_bits);
+    if v.iter().any(|x| !x.is_finite()) {
+        return Err(format!("{name}: non-finite vector"));
+    }
+    Ok([v[0], v[1], v[2]])
+}
+
 pub(crate) struct Settings {
     pub controller: controller::Settings,
     pub board: skate_core::player::offboard::ground_sync::BoardSettings,

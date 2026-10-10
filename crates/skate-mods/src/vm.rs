@@ -262,6 +262,38 @@ pub enum Command {
         #[serde(default)]
         patch: Option<Value>,
     },
+    /// World tuning extension 1: patch a typed living-world / props / carry domain while the mod
+    /// runs (`patch` absent = restore this mod's patch of the domain).
+    WorldSetTuning {
+        domain: String,
+        #[serde(default)]
+        patch: Option<Value>,
+    },
+    /// Reset moved objects (doc 27, Object Dropper and reset): every dynamic prop away from its
+    /// authored pose goes back to it (retail cMsgResetDMO per object).
+    WorldResetMovedProps {},
+    /// Reset one dynamic prop (stable map id) to its authored pose (retail cMsgResetDMO).
+    WorldResetProp { id: u32 },
+    /// Upright one dynamic prop (stable map id): retail cMsgUprightDMO, the 2 s self-righting
+    /// window (doc 27, Upright).
+    WorldUprightProp { id: u32 },
+    /// Create a dynamic prop mid-game (the engine path behind released hand props, doc 27
+    /// "Props created mid-game"): a copy of map prop `from` (its model, collision and physics
+    /// block) at `position`, turned `yaw` radians about world up, moving at `velocity` (m/s) and
+    /// spinning at `spin` (rad/s). Keyed per mod (`key` again replaces it); removed on disable.
+    WorldSpawnProp {
+        key: String,
+        from: u32,
+        position: [f32; 3],
+        #[serde(default)]
+        yaw: f32,
+        #[serde(default)]
+        velocity: [f32; 3],
+        #[serde(default)]
+        spin: [f32; 3],
+    },
+    /// Remove a prop this mod created with `WorldSpawnProp`.
+    WorldRemoveProp { key: String },
     /// Audio extension 4 (doc 16 L2): write one input of a retail MixMap controller (`value` absent
     /// = release it: the input gets back the value before this mod's first write).
     AudioSetMixmapInput {
@@ -606,7 +638,7 @@ impl Command {
         match self {
             Self::RigPart {index,options} => *index<26 && options.as_ref().is_none_or(|o|o.validate()),
             Self::GraphGate {graph,target,index,..} => matches!(graph.as_str(),"action"|"motion") && matches!(target.as_str(),"state"|"transition"|"behavior") && *index<65536,
-            Self::EngineInspect {system} => matches!(system.as_str(),"graphs"|"scoring"|"audio_catalog") || crate::audio_tuning::valid_inspect(system),
+            Self::EngineInspect {system} => matches!(system.as_str(),"graphs"|"scoring"|"audio_catalog") || crate::audio_tuning::valid_inspect(system) || crate::world_tuning::valid_inspect(system),
             Self::Request {key,command,token} => *token<=9_007_199_254_740_991 && crate::schema::valid_id(key) && !matches!(**command,Self::Request{..}) && command.validate(),
             Self::InputOverride {action,value} => (64..=81).contains(action) && value.is_none_or(|v|v.is_finite() && (-1.0..=1.0).contains(&v)),
             Self::NativeImpulse {body,impulse,point:p,..} => body.validate() && impulse.iter().all(|v|v.is_finite() && v.abs()<=100_000.) && p.as_ref().is_none_or(point),
@@ -638,6 +670,15 @@ impl Command {
             Self::AudioSetMixmapInput { slot, object, instance, input, value, float } => crate::audio::valid_symbol(slot) && *object <= 127 && *instance <= 31 && *input <= 15
                 && value.is_none_or(|v| v.is_finite() && (*float || (v.fract() == 0.0 && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&v)))),
             Self::AudioSeed { .. } => true,
+            Self::WorldResetMovedProps {} => true,
+            Self::WorldResetProp { .. } => true,
+            Self::WorldUprightProp { .. } => true,
+            Self::WorldSpawnProp { key, position, yaw, velocity, spin, .. } => crate::schema::valid_id(key)
+                && position.iter().all(|v| v.is_finite() && v.abs() <= 100_000.)
+                && yaw.is_finite() && yaw.abs() <= 1000.
+                && velocity.iter().chain(spin).all(|v| v.is_finite() && v.abs() <= 200.),
+            Self::WorldRemoveProp { key } => crate::schema::valid_id(key),
+            Self::WorldSetTuning { domain, patch } => crate::world_tuning::DOMAINS.contains(&domain.as_str()) && patch.as_ref().is_none_or(|p| crate::world_tuning::valid_patch(domain, p)),
             Self::AudioSetTuning { domain, patch } => crate::audio_tuning::DOMAINS.contains(&domain.as_str()) && patch.as_ref().is_none_or(|p| crate::audio_tuning::valid_patch(domain, p)),
             Self::AudioWatch { globals, mixmap } => globals.len() <= crate::audio::MAX_WATCH && globals.iter().all(|g| crate::audio::valid_symbol(g))
                 && mixmap.len() <= crate::audio::MAX_WATCH && mixmap.iter().all(crate::audio::MixMapKey::validate),
@@ -920,6 +961,12 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AudioRule { .. } => "audio_rule",
         Command::AudioSetMixmapInput { .. } => "audio_set_mixmap_input",
         Command::AudioSeed { .. } => "audio_seed",
+        Command::WorldSetTuning { .. } => "world_set_tuning",
+        Command::WorldResetMovedProps {} => "world_reset_moved_props",
+        Command::WorldResetProp { .. } => "world_reset_prop",
+        Command::WorldUprightProp { .. } => "world_upright_prop",
+        Command::WorldSpawnProp { .. } => "world_spawn_prop",
+        Command::WorldRemoveProp { .. } => "world_remove_prop",
         Command::WorldAudioSpawn { .. } => "world_audio_spawn",
         Command::WorldAudioUpdate { .. } => "world_audio_update",
         Command::WorldAudioEvent { .. } => "world_audio_event",
@@ -1276,6 +1323,7 @@ impl Vm {
             capabilities.set("audio_events", 3)?;
             // Tuning writes at run time (`sdk.audio.set_tuning`: player / world / bus / reverb domains).
             capabilities.set("audio_tuning", 1)?;
+            capabilities.set("world_tuning", 1)?;
             // Retail menus (sdk.menus): edit the retail menu structure, handle any entry.
             capabilities.set("retail_menus", 1)?;
             sdk.set("_native_capabilities", capabilities)?;
@@ -2420,6 +2468,66 @@ mod world_audio_tests {
         assert!(cmds.iter().all(Command::validate));
         assert!(matches!(&cmds[1], Command::AudioSetTuning { patch: None, .. }), "nil restores");
         assert!(matches!(&cmds[2], Command::Request { command, .. } if matches!(&**command, Command::EngineInspect { system } if system == "audio_tuning:world/traffic_engine/c04_taxi01")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// World tuning extension 1: `world_set_tuning` validates per domain, the Lua wrappers submit
+    /// set / restore / read and `world_tuning` is advertised.
+    #[test]
+    fn world_tuning_commands_deserialize_and_validate() {
+        for (value, ok) in [
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_draw_distance":2.0}}), true),
+            (json!({"kind":"world_set_tuning","domain":"carry"}), true),
+            (json!({"kind":"engine_inspect","system":"world_tuning:props"}), true),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"nope":1}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_tricks":{"mode":"recorded","min_air_frames":30},"skater_trick_profiles":{"default":{"regular":[{"trick":96,"weight":1.0}]}}}}), true),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_tricks":{"mode":"scripted"}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_simulated":{"enabled":true,"radius":30.0,"max":2}}}), true),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_simulated":{"radius":-1.0}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"free_play":{"traffic":0.3,"ai_skaters":false},"pedestrians":{"density":2.0},"ambient_skaters":5}}), true),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"free_play":{"traffic":1.5}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"vehicles":{"density":9.0}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"ambient_skaters":20}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"skater_trick_profiles":{"default":{"regular":[{"trick":400,"weight":1.0}]}}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"skater_trick_profiles":{"default":{"nollie":[{"trick":117,"weight":-1.0}]}}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"roads","patch":{}}), false),
+            (json!({"kind":"world_reset_moved_props"}), true),
+            (json!({"kind":"world_reset_prop","id":7}), true),
+            (json!({"kind":"world_upright_prop","id":7}), true),
+            (json!({"kind":"world_spawn_prop","key":"can","from":7,"position":[1,2,3],"velocity":[4,2,0]}), true),
+            (json!({"kind":"world_spawn_prop","key":"can","from":7,"position":[1,2,3],"velocity":[400,0,0]}), false),
+            (json!({"kind":"world_spawn_prop","key":"../x","from":7,"position":[1,2,3]}), false),
+            (json!({"kind":"world_remove_prop","key":"can"}), true),
+        ] {
+            let c: Command = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(c.validate(), ok, "{value}");
+        }
+        let root = std::env::temp_dir().join(format!("skate-world-tuning-lua-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"), r#"
+            local M = {}
+            function M.on_update()
+                assert(sdk.capabilities.world_tuning == 1, 'capability')
+                sdk.world.set_tuning('living_world', {skater_fade = {fade_seconds = 2}})
+                sdk.world.set_tuning('living_world', nil)
+                sdk.world.tuning('t', 'carry')
+                sdk.world.reset_moved_props()
+                sdk.world.reset_prop(7)
+                sdk.world.upright_prop(7)
+                sdk.world.spawn_prop('can', 7, {position = {1, 2, 3}, velocity = {4, 2, 0}})
+                sdk.world.remove_prop('can')
+            end
+            return M
+        "#).unwrap();
+        let manifest: Manifest = serde_json::from_value(json!({
+            "id":"tests.world-tuning","api":2,"name":"World tuning","version":"1.0.0",
+            "author":"test","description":"test","entry":"main.lua","settings":{}})).unwrap();
+        let mut vm = Vm::new(&root, &manifest, &BTreeMap::new(), &Value::Null).unwrap();
+        let cmds = vm.call("on_update", json!({"dt": 0.016}), &json!({})).unwrap();
+        let kinds: Vec<_> = cmds.iter().map(command_kind).collect();
+        assert_eq!(kinds, ["world_set_tuning", "world_set_tuning", "request", "world_reset_moved_props", "world_reset_prop", "world_upright_prop", "world_spawn_prop", "world_remove_prop"]);
+        assert!(cmds.iter().all(Command::validate));
+        assert!(matches!(&cmds[1], Command::WorldSetTuning { patch: None, .. }), "nil restores");
         let _ = std::fs::remove_dir_all(root);
     }
 

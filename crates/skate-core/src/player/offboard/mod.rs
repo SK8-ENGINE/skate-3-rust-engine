@@ -15,6 +15,7 @@ pub mod ground_entry;
 pub mod ground_query;
 pub mod ground_sync;
 pub mod grab_scene;
+pub mod move_object;
 pub mod ground_reckoning;
 pub mod ground_lifecycle;
 pub mod contact_toolkit;

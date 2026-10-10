@@ -444,7 +444,7 @@ pub(super) fn update(
                 info!("AUDIO_EMITTER stop {} #{}", state.emitters[node.record].bank, node.record);
                 if api.events.on() {
                     let e = &state.emitters[node.record];
-                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner() });
+                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner(), hit: None });
                 }
             }
             if let Some(post) = node.post {
@@ -508,11 +508,11 @@ pub(super) fn update(
                 // sound placed at the owner plays at the record, with the record's reach.
                 let muted = rules.set.as_deref().is_some_and(|r| {
                     let site = (e.shape.position, super::mod_voices::Reach { extent: e.shape.extent, forward: e.shape.forward, core: e.shape.core, curve: e.falloff });
-                    r.mutes_at_published(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner() }, Some(site), node.entity.map(Entity::to_bits))
+                    r.mutes_at_published(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner(), hit: None }, Some(site), node.entity.map(Entity::to_bits))
                 });
                 node.post = if muted { None } else { native.post_emitter(&payload) };
                 if api.events.on() && (node.post.is_some() || muted) {
-                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner() });
+                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner(), hit: None });
                 }
             }
             Err(error) => warn!("AUDIO_EMITTER {}: {error}", e.bank),
@@ -582,7 +582,7 @@ fn sync_dynamic(
             return true;
         }
         if node.started && api.events.on() {
-            api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: "", slot: "", id: 0, owner: entity.to_bits() });
+            api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: "", slot: "", id: 0, owner: entity.to_bits(), hit: None });
         }
         if let Some(post) = node.post {
             native.release(post);

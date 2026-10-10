@@ -156,6 +156,21 @@ impl AnimationPhaseOutput {
         };
     }
     ///Actor825926F8 reply ->10704/10768/10784, then82DB5BE0 maps physical input.
+    /// The AI controller's record (`82593640`: P+10512, +10688 = input fresh, +10689 =
+    /// controller present). Not called for the local player.
+    pub(super) fn publish_ai_physics(&mut self, source: &mut super::super::skater::AiPhysicsSource) {
+        self.external.copy_from(&source.record);
+        self.reset.external_physics_input_active = source.fresh;
+        self.reset.externally_controlled = true;
+        source.fresh = false;
+    }
+    /// A ped takedown (`82593640` copies actor `1904` bit 30 to P+10496 and the direction to
+    /// P+10480; `82DB5BE0` maps them to Processed +2468 bit 2 and +1520).
+    pub(super) fn publish_takedown(&mut self, direction: [f32; 3]) {
+        self.publication.flags_10375_10496_10784[1] = 1;
+        self.publication.vector_10480 = [direction[0], direction[1], direction[2], 0.0].map(f32::to_bits);
+        self.reset.external_impulse_active = true;
+    }
     pub(super) fn publish_external_reset(
         &mut self,
         reply: skate_core::animation::output::actor_packet::ExternalReset,
@@ -174,8 +189,8 @@ impl AnimationPhaseOutput {
             flag_10370: self.mirrored,
             flag_10373: self.weight_forwards,
             suppress_transition_10376: u8::from(r.actor_flag_1908_bit2),
-            use_external_physics_10688: 0,
-            external_physics_flag_10689: 0,
+            use_external_physics_10688: u8::from(r.external_physics_input_active),
+            external_physics_flag_10689: u8::from(r.externally_controlled),
             flag_10786: u8::from(r.prevent_manual_respawn),
             flag_10787: r.ignore_respawn_reset_button,
             force_braking_10796: u8::from(r.force_braking),

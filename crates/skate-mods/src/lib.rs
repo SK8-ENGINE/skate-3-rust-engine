@@ -6,6 +6,7 @@ pub mod audio_merge;
 pub mod audio_rules;
 pub mod audio_tuning;
 pub mod world_audio;
+pub mod world_tuning;
 pub mod menus;
 pub mod graphics_dynamic;
 pub mod presentation;

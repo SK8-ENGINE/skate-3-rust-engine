@@ -335,3 +335,62 @@ pub const IDENTIFIERS: [(&str, u32, usize); 332] = [
     ("darkslideout_fsright", 3, 2),          // 330
     ("lateflip_darkcatch", 3, 2),            // 331
 ];
+
+/// Trick chain links of table820862A8: `(id, previous level (+4), base (+8))` for the rows where
+/// either is set (every other row has -1 / -1). Numbered flips step down one level to the
+/// previous number and name the plain flip as base; late flips have the ollie (128) as base.
+pub const LINKS: [(u16, i16, i16); 18] = [
+    (93, 92, 92),
+    (94, 93, 92),
+    (97, 96, 96),
+    (98, 97, 96),
+    (100, -1, 128),
+    (101, -1, 128),
+    (102, -1, 128),
+    (103, -1, 128),
+    (104, -1, 128),
+    (105, -1, 128),
+    (114, 113, 113),
+    (115, 114, 113),
+    (118, 117, 117),
+    (119, 118, 117),
+    (134, 94, 92),
+    (135, 98, 96),
+    (136, 115, 113),
+    (137, 119, 117),
+];
+
+/// The ollie (`EScorableID` 128), the base of the late flips.
+pub const OLLIE: i16 = 128;
+
+/// Table row of a trick id, `None` outside 0..332.
+fn row(id: i16) -> Option<usize> {
+    usize::try_from(id).ok().filter(|&i| i < IDENTIFIERS.len())
+}
+
+/// Category (+16) of a trick id: 1 ollie / nollie, 2 flip, 3 fingerflip, 4 grab, 5 grind / slide,
+/// 6 handplant, 7 nocomply, 8 manual, 9 powerslide, 10 hippy jump, 11 revert, 12 boneless /
+/// fastplant, 13 footplant.
+pub fn category(id: i16) -> Option<usize> {
+    row(id).map(|i| IDENTIFIERS[i].2)
+}
+
+/// Previous chain level (+4) and base trick (+8) of a trick id (-1 = none).
+pub fn links(id: i16) -> (i16, i16) {
+    LINKS.iter().find(|l| i32::from(l.0) == i32::from(id)).map_or((-1, -1), |l| (l.1, l.2))
+}
+
+pub fn previous_level(id: i16) -> i16 {
+    links(id).0
+}
+
+pub fn base(id: i16) -> i16 {
+    links(id).1
+}
+
+/// A higher chain level (heelflip2 / 3 / 4 and the nollie forms): its base is set, is another
+/// trick and not the ollie ([code] `sub_8246A080`, the late flips are not chain levels).
+pub fn is_chain_level(id: i16) -> bool {
+    let b = base(id);
+    row(b).is_some() && b != id && b != OLLIE
+}

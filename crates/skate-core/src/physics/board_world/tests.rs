@@ -388,6 +388,42 @@ fn water_collision_depends_on_native_group_not_floor_depth() {
     }
 }
 
+/// fix15: a hidden board has every volume disabled. An empty query must give
+/// the same empty result and buffer state as before, without walking the
+/// whole world (candidate_ranges(None) is "every triangle").
+#[test]
+fn empty_volume_query_is_empty_and_resets_the_previous_result() {
+    let query = WorldContactSettings {
+        volume_padding: 0.05,
+        maximum_separating_distance: 0.1,
+        edge_cos_bend_normal_threshold: -1.,
+        convexity_epsilon: 0.,
+        is_object: false,
+    };
+    let retention = ContactRetentionSettings {
+        capacity: 100,
+        duplicate_distance_squared: 0.000001,
+        deferred_reduction: false,
+    };
+    let sphere = BoardWorldVolume {
+        collision_group: 4,
+        body: CollisionBody::Board(BodyId::Deck),
+        primitive: ContactPrimitive::Sphere(Sphere {
+            center: Vector3::new(-1., 0.15, -1.),
+            radius: 0.2,
+        }),
+        motion: crate::physics::board_world::VolumeMotion { linear_velocity: Vector3::new(0., -1., 0.), ..Default::default() },
+        material: material(),
+    };
+    let mut world = BoardWorld::new(vec![face(0., 17, 0.)]);
+    assert!(!world.query_primitives(&[sphere], query, retention).is_empty());
+    assert!(world.query_primitives(&[], query, retention).is_empty());
+    assert!(world.contacts().is_empty());
+    assert_eq!(world.dropped_contacts(), 0);
+    // A later real query is unaffected.
+    assert!(!world.query_primitives(&[sphere], query, retention).is_empty());
+}
+
 #[test]
 fn volume_query_bounds_follow_82777e70() {
     let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-5, "{a} != {b}");
@@ -502,4 +538,29 @@ fn volume_query_shape_bounds_follow_the_retail_bounds_slots() {
     assert_eq!(b.max.x.to_bits(), ex.to_bits());
     assert_eq!(b.min.y.to_bits(), (-ey).to_bits());
     assert_eq!(b.max.z.to_bits(), (0.2f32 + 0.03).to_bits());
+}
+
+/// A prop body created mid-game: appended triangles are found by queries, keep
+/// their tag and surface, and the existing triangles and meshes are unchanged.
+#[test]
+fn appended_triangles_are_queried_and_existing_ones_kept() {
+    let mut world = annotated(vec![face(0., 1, 0.), face(10., 2, 0.)]);
+    fn world_line(x: f32) -> (Vector3, Vector3) {
+        (Vector3::new(x - 1., 1., 0.), Vector3::new(x - 1., -1., 0.))
+    }
+    let (start, end) = world_line(50.);
+    assert!(world.query_thin_line(start, end).unwrap().is_none());
+    let meshes_before = world.query_metadata().unwrap().meshes.len();
+    let range = world.append_triangles(&[face(50., 9, 0.)], &[23]).unwrap();
+    assert_eq!(range, 2..3);
+    let hit = world.query_thin_line(start, end).unwrap().expect("appended face is queried");
+    assert_eq!(hit.tag, 9);
+    let metadata = world.query_metadata().unwrap();
+    assert_eq!(metadata.packed_surfaces, [17, 17, 23]);
+    assert_eq!(metadata.meshes.len(), meshes_before + 1);
+    assert_eq!(metadata.meshes[meshes_before].triangle_range, 2..3);
+    metadata.validate(world.triangles()).unwrap();
+    let (start, end) = world_line(0.);
+    assert_eq!(world.query_thin_line(start, end).unwrap().unwrap().tag, 1);
+    assert!(world.append_triangles(&[face(60., 9, 0.)], &[]).is_err(), "surface count must match");
 }

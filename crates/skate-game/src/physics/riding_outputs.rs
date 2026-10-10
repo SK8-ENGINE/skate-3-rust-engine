@@ -275,10 +275,12 @@ impl RidingOutputs {
     /// StartSkateboardLineTests82DB6310 ->82C07788: four current wheel positions,
     /// each queried0.2m along negative Reckoning up, radius0 and static-world
     /// backend. World8275EA20 submits these before actor SetUpPhysics.
+    /// Static prop instances form a second world; each wheel keeps the nearer hit.
     pub fn start_wheel_queries(
         &mut self,
         board: &BoardRuntime,
         world: &BoardWorld,
+        props: Option<&BoardWorld>,
     ) -> Result<(), String> {
         if self.pending_wheel_queries.is_some() {
             return Err("Wheel queries were started twice without result publication".into());
@@ -286,14 +288,22 @@ impl RidingOutputs {
         let lines = wheel_lines(board, self.reckoning.up);
         let mut results = [None; 4];
         for (i, line) in lines.into_iter().enumerate() {
-            results[i] = world
+            let mut hit = world
                 .query_thin_line(line.start, line.end)
-                .map_err(|e| format!("Wheel{i} stock line query: {e}"))?
-                .map(|hit| WheelLineHit {
-                    fraction: hit.geometry.fraction,
-                    normal: hit.geometry.normal,
-                    surface_tag: hit.tag,
-                });
+                .map_err(|e| format!("Wheel{i} stock line query: {e}"))?;
+            if let Some(props) = props {
+                let prop_hit = props
+                    .query_thin_line(line.start, line.end)
+                    .map_err(|e| format!("Wheel{i} prop line query: {e}"))?;
+                if prop_hit.is_some_and(|p| hit.is_none_or(|h| p.geometry.fraction < h.geometry.fraction)) {
+                    hit = prop_hit;
+                }
+            }
+            results[i] = hit.map(|hit| WheelLineHit {
+                fraction: hit.geometry.fraction,
+                normal: hit.geometry.normal,
+                surface_tag: hit.tag,
+            });
         }
         self.probes.start(board, world)?;
         self.pending_wheel_queries = Some(results);

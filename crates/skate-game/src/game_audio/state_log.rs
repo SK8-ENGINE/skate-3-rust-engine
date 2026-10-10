@@ -124,18 +124,19 @@ impl Row {
     }
 }
 
-/// The writer thread's queue (rows as text). The game thread only formats and enqueues: a disk
+/// The writer thread's queue (rows as values: `Row` is `Copy`, so the game thread neither formats
+/// nor allocates; the writer thread formats). A disk
 /// flush or OS stall must never block a frame (19:20 listening test: `observe` took 143–751 ms
 /// on three frames while the flush ran on the game thread).
-static QUEUE: OnceLock<Option<std::sync::mpsc::SyncSender<String>>> = OnceLock::new();
+static QUEUE: OnceLock<Option<std::sync::mpsc::SyncSender<Row>>> = OnceLock::new();
 /// Rows dropped because the queue was full (reported by the writer at the end).
 static DROPPED: AtomicU64 = AtomicU64::new(0);
 
-fn queue() -> Option<&'static std::sync::mpsc::SyncSender<String>> {
+fn queue() -> Option<&'static std::sync::mpsc::SyncSender<Row>> {
     QUEUE
         .get_or_init(|| {
             let path = std::path::PathBuf::from(std::env::var_os("SKATE_AUDIO_STATE_LOG")?);
-            let (tx, rx) = std::sync::mpsc::sync_channel::<String>(4096);
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Row>(4096);
             std::thread::Builder::new()
                 .name("audio-state-log".into())
                 .spawn(move || {
@@ -146,7 +147,8 @@ fn queue() -> Option<&'static std::sync::mpsc::SyncSender<String>> {
                     }
                     bevy::log::info!("Game audio: audio state log → {}", path.display());
                     let mut rows = 0u32;
-                    while let Ok(line) = rx.recv() {
+                    while let Ok(row) = rx.recv() {
+                        let line = row.line();
                         if writeln!(out, "{line}").is_err() {
                             return;
                         }
@@ -163,11 +165,11 @@ fn queue() -> Option<&'static std::sync::mpsc::SyncSender<String>> {
         .as_ref()
 }
 
-/// Append a row: formatted here, written by the log thread (never blocks; a full queue drops the
+/// Append a row: copied here, formatted and written by the log thread (never blocks; a full queue drops the
 /// row and counts it).
 pub(crate) fn write(row: &Row) {
     let Some(tx) = queue() else { return };
-    if tx.try_send(row.line()).is_err() {
+    if tx.try_send(*row).is_err() {
         DROPPED.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -186,6 +188,35 @@ pub(crate) fn enabled() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What moving the formatting to the writer thread took off the game thread (run with
+    /// `--ignored --nocapture`): formatting a row against copying it into the queue.
+    #[test]
+    #[ignore = "timing measurement, run by hand"]
+    fn state_log_row_cost() {
+        let row = Row { ms: 12.5, frame: 3, speed: 5.5, wheels: 15, tag: 3, air: true, family: -1, scorable: 128, state: 201, board: [1.0, 2.0, 3.0], ..Default::default() };
+        let n = 20_000u32;
+        let started = std::time::Instant::now();
+        let mut bytes = 0usize;
+        for i in 0..n {
+            let mut r = row;
+            r.frame = u64::from(i);
+            bytes += std::hint::black_box(r.line()).len();
+        }
+        let format_us = started.elapsed().as_secs_f64() * 1e6 / f64::from(n);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Row>(4096);
+        let reader = std::thread::spawn(move || rx.iter().count());
+        let started = std::time::Instant::now();
+        for i in 0..n {
+            let mut r = row;
+            r.frame = u64::from(i);
+            while tx.try_send(r).is_err() {}
+        }
+        let send_us = started.elapsed().as_secs_f64() * 1e6 / f64::from(n);
+        drop(tx);
+        assert_eq!(reader.join().unwrap(), n as usize);
+        eprintln!("STATE_LOG_ROW_COST format_us={format_us:.3} copy_send_us={send_us:.3} bytes_per_row={}", bytes / n as usize);
+    }
 
     #[test]
     fn a_row_has_the_header_columns_in_order() {

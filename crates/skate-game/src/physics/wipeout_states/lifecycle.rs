@@ -72,6 +72,8 @@ pub(crate) fn enter(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Re
             ),
         );
     }
+    // The takedown's impulse is used: drop the latch (ours; retail's clear is not found).
+    skater.takedown = None;
     if p.probe_1792.byte_104 != 0 {
         body::add_velocity(
             &mut skater.skeleton,
