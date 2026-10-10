@@ -30,7 +30,7 @@ use bevy::{
         },
         render_resource::{binding_types::*, *},
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        view::ViewTarget,
+        view::{ViewDepthTexture, ViewTarget},
     },
 };
 use std::{collections::VecDeque, sync::Mutex};
@@ -112,11 +112,15 @@ impl Plugin for RetailExposurePlugin {
         embedded_asset!(app, "retail_tone.wgsl");
         app.init_resource::<Settings>()
             .init_resource::<ExposureMeter>()
+            .init_resource::<crate::colour_matrix::ColourGrade>()
+            .init_resource::<crate::colour_matrix::ColourRecords>()
             .add_plugins((
                 ExtractResourcePlugin::<Settings>::default(),
+                ExtractResourcePlugin::<crate::colour_matrix::ColourGrade>::default(),
                 ExtractComponentPlugin::<RetailTone>::default(),
             ))
-            .add_systems(Startup, load)
+            .add_systems(Startup, (load, crate::colour_matrix::load_records))
+            .add_systems(PostUpdate, crate::colour_matrix::update_grade)
             .add_systems(
                 PreUpdate,
                 load.after(crate::map_transition::MapTransitionSet)
@@ -214,11 +218,14 @@ struct Pipeline {
     tone: CachedRenderPipelineId,
     settings: Buffer,
     state: Buffer,
+    /// The colour grade (`ColourGrade`, 8 vec4) and a 1x1 depth texture used when the view's depth cannot be sampled.
+    grade: Buffer,
+    fallback_depth: TextureView,
     sampler: Sampler,
     // The buffers, sampler and layouts are immutable for this Pipeline's life.
     // Source views can alternate, resize or belong to different cameras. Keep a
     // bounded cache so retired targets cannot accumulate across map/size changes.
-    bindings: Mutex<VecDeque<(TextureViewId, BindGroup, BindGroup)>>,
+    bindings: Mutex<VecDeque<((TextureViewId, TextureViewId), BindGroup, BindGroup)>>,
 }
 
 fn initialize(
@@ -248,6 +255,8 @@ fn initialize(
                 texture_2d(TextureSampleType::Float { filterable: true }),
                 sampler(SamplerBindingType::Filtering),
                 storage_buffer_read_only::<Vec4>(false),
+                texture_depth_2d(),
+                uniform_buffer::<[Vec4; 8]>(false),
             ),
         ),
     );
@@ -290,6 +299,23 @@ fn initialize(
         contents: &bytes([Vec4::new(2.5, 0., 0., 0.)]),
         usage: BufferUsages::STORAGE,
     });
+    let grade = device.create_buffer_with_data(&BufferInitDescriptor {
+        label: Some("retail colour grade"),
+        contents: &bytes(crate::colour_matrix::ColourGrade::default().rows),
+        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+    });
+    let fallback_depth = device
+        .create_texture(&TextureDescriptor {
+            label: Some("retail colour grade fallback depth"),
+            size: Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Depth32Float,
+            usage: TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+        .create_view(&TextureViewDescriptor::default());
     commands.insert_resource(Pipeline {
         compute_layout,
         tone_layout,
@@ -297,6 +323,8 @@ fn initialize(
         tone,
         settings,
         state,
+        grade,
+        fallback_depth,
         sampler: device.create_sampler(&SamplerDescriptor {
             mag_filter: FilterMode::Linear,
             min_filter: FilterMode::Linear,
@@ -314,7 +342,8 @@ fn bytes<const N: usize>(values: [Vec4; N]) -> Vec<u8> {
         .collect()
 }
 
-fn upload(settings: Res<Settings>, pipeline: Res<Pipeline>, queue: Res<RenderQueue>) {
+fn upload(settings: Res<Settings>, grade: Res<crate::colour_matrix::ColourGrade>, pipeline: Res<Pipeline>, queue: Res<RenderQueue>) {
+    queue.write_buffer(&pipeline.grade, 0, &bytes(grade.rows));
     let mut data = [0u8; 48];
     for (chunk, value) in data.chunks_exact_mut(4).zip(
         [settings.tuning, settings.timing, settings.meter]
@@ -329,7 +358,7 @@ fn upload(settings: Res<Settings>, pipeline: Res<Pipeline>, queue: Res<RenderQue
 fn prune_bindings(pipeline: Res<Pipeline>, views: Query<&ViewTarget, With<RetailTone>>) {
     // Bind groups retain their textures. Release retired camera/resize targets
     // before rendering, including when there are no exposure views left.
-    pipeline.bindings.lock().unwrap().retain(|(id, _, _)| {
+    pipeline.bindings.lock().unwrap().retain(|((id, _), _, _)| {
         views.iter().any(|view| {
             *id == view.main_texture_view().id() || *id == view.main_texture_other_view().id()
         })
@@ -343,13 +372,13 @@ struct ExposureLabel;
 struct ExposureNode;
 
 impl ViewNode for ExposureNode {
-    type ViewQuery = (&'static ViewTarget, &'static RetailTone);
+    type ViewQuery = (&'static ViewTarget, &'static RetailTone, Option<&'static ViewDepthTexture>);
 
     fn run<'w>(
         &self,
         _: &mut RenderGraphContext,
         context: &mut RenderContext,
-        (view, _): QueryItem<Self::ViewQuery>,
+        (view, _, depth): QueryItem<Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
         let p = world.resource::<Pipeline>();
@@ -360,13 +389,18 @@ impl ViewNode for ExposureNode {
         ) else {
             return Ok(());
         };
+        // The view depth for the grade's near / far mix; the fallback when it is multisampled or not sampleable.
+        let depth = depth
+            .filter(|d| d.texture.sample_count() == 1 && d.texture.usage().contains(TextureUsages::TEXTURE_BINDING))
+            .map_or(&p.fallback_depth, |d| d.view());
         let post = view.post_process_write();
+        let key = (post.source.id(), depth.id());
         use bevy::render::diagnostic::RecordDiagnostics;
         let diagnostics = context.diagnostic_recorder();
         let mut bindings = p.bindings.lock().unwrap();
         let index = if let Some(index) = bindings
             .iter()
-            .position(|(id, _, _)| *id == post.source.id())
+            .position(|(id, _, _)| *id == key)
         {
             index
         } else {
@@ -387,12 +421,14 @@ impl ViewNode for ExposureNode {
                     post.source,
                     &p.sampler,
                     p.state.as_entire_binding(),
+                    depth,
+                    p.grade.as_entire_binding(),
                 )),
             );
             if bindings.len() == 8 {
                 bindings.pop_front();
             }
-            bindings.push_back((post.source.id(), meter, output));
+            bindings.push_back((key, meter, output));
             bindings.len() - 1
         };
         let (_, meter, output) = &bindings[index];

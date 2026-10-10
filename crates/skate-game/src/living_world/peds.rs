@@ -727,10 +727,11 @@ pub(crate) fn advance_peds(
                 TauntClip::Playing if body.player.state != Locomotion::Reaction => body.taunt = TauntClip::Done,
                 _ => {}
             }
-            // A hand prop throw clip (`82E3E648`, ped vfunc +240): played once over what runs.
+            // A hand prop throw clip (`82E3E648`, ped vfunc +240 = the channel request `82E3A418`): a channel clip (its
+            // weights pick the upper body, b99), played once over locomotion; it replaces the carry pose, which comes back
+            // once the slot is free and the prop is still held.
             if let Some((clip, blend)) = body.plugin_motion.throw_clip.take() {
-                let step = skate_core::living_world::peds::skater_contact::ReactionStep { anim: clip, mirror: false, blend, cycle: false };
-                if !body.player.react(set, vec![step], 0.0) {
+                if !body.player.channel_request(set, clip, blend, blend) {
                     info!("PED_HAND_PROP ped=#{} no clip {clip} tick={tick}", ped.id.serial);
                 }
             }
@@ -827,6 +828,19 @@ pub(crate) fn advance_peds(
                     turn = out.turn;
                 }
                 None => body.player.intent = body.path.intent(dt, body.player.state),
+            }
+            // The carry pose (`82E3F048`): while the hand prop is held and the channel is free, its record's carry
+            // animation is requested again (blend 0.2); a released or dropped prop stops it with a 0.2 s fade (unlink
+            // `82E3FAE0`). Retail requests it only while the prop is linked; ours: while held.
+            if let Some(h) = mind.map(|m| &m.brain.hand_prop) {
+                let carry = h.key.as_ref().and_then(|k| data.hand_props.props.get(k)).and_then(|r| r.carry_channel.as_deref());
+                match (h.holding, carry) {
+                    (true, Some(name)) if body.player.channel_idle() => {
+                        body.player.channel_request(set, name, 0.2, 0.2);
+                    }
+                    (false, _) if body.player.channel_clip().is_some_and(|c| c.starts_with("NPC_CARRY")) => body.player.channel_stop(0.2),
+                    _ => {}
+                }
             }
             let out = body.player.step(dt, set, &*data);
             body.heading += turn;

@@ -78,6 +78,25 @@ impl PedBank {
         Ok(this)
     }
 
+    /// A channel clip's per-bone weights (each part's table of one big-endian f32 per channel, bones of parts without a
+    /// table weigh 0); `None` when no part has a table.
+    fn channel_weights(&self, parts: &[crate::abin::PartEntry]) -> Option<Vec<f32>> {
+        let h = self.bank.hierarchy()?;
+        let mut weights = vec![0.0; h.bone_count as usize];
+        let mut any = false;
+        for (entry, layout) in parts.iter().zip(&h.parts) {
+            let Some(range) = entry.part.as_ref().and_then(|p| p.channel_weights.clone()) else { continue };
+            let bytes = self.bank.bytes().get(range)?;
+            for (i, w) in bytes.chunks_exact(4).enumerate() {
+                if let Some(slot) = weights.get_mut(layout.sqt_offset as usize + i) {
+                    *slot = f32::from_be_bytes([w[0], w[1], w[2], w[3]]);
+                    any = true;
+                }
+            }
+        }
+        any.then_some(weights)
+    }
+
     /// Decode the parts present (clip part i = hierarchy part i); absent bones stay identity.
     fn decode_parts(&self, parts: &[crate::abin::PartEntry], frames: usize) -> Result<(Vec<Vec<Sqt>>, Vec<bool>), String> {
         let h = self.bank.hierarchy().ok_or("no hierarchy")?;
@@ -129,7 +148,7 @@ impl PedBank {
             })
             .collect();
         let speed = f32::from_bits(clip.base_speed_bits);
-        Ok(PedClip {
+        Ok(PedClip { channel_weights: self.channel_weights(&clip.parts),
             name: header.name.clone(),
             fps: f32::from_bits(clip.fps_bits) * if speed.is_finite() && speed > 0.0 { speed } else { 1.0 },
             frames,
@@ -261,6 +280,30 @@ impl PedTables {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Data-gated: the carry clips are channel clips whose per-bone weights pick the bones they take over (the rest
+    /// weigh 0); walk cycles carry no weight table.
+    #[test]
+    fn carry_clips_carry_per_bone_channel_weights() {
+        let Some(root) = std::env::var_os("SKATE3_ASSET_ROOT").map(std::path::PathBuf::from).filter(|r| r.join(PED_BANK).exists()) else {
+            eprintln!("skipped: set SKATE3_ASSET_ROOT to the converted assets");
+            return;
+        };
+        let bank = PedBank::load(&root).expect("ped bank");
+        let h = bank.bank.hierarchy().unwrap();
+        for name in ["NPC_CARRY_SML_RH_0_CYC", "NPC_CARRY_BIG_RH_0_CYC", "NPC_CARRY_PAPER_RH_0_CYC", "NPC_CARRY_WINE_RH_0_CYC"] {
+            let clip = bank.clip(name).unwrap();
+            let w = clip.channel_weights.unwrap_or_else(|| panic!("{name}: no channel weights"));
+            let on: Vec<String> = w.iter().enumerate().filter(|(_, v)| **v > 0.0).map(|(i, v)| format!("{}={v}", h.bone_names.get(i).cloned().unwrap_or_default())).collect();
+            eprintln!("{name}: {} of {} bones weighted: {}", on.len(), w.len(), on.join(" "));
+            assert!(!on.is_empty() && on.len() < w.len());
+        }
+        assert!(bank.clip("NPC_WNDR_WLK_N_0_CYC").unwrap().channel_weights.is_none());
+        for name in ["NPC_THROW_LIGHTRH_N_0_N", "NPC_ATCK_THROWRH_N_0_N", "NPC_ATCK_THROWRH_L_90_N", "SG_TAZR_TAZR_F_0_CYC"] {
+            let w = bank.clip(name).unwrap().channel_weights;
+            eprintln!("{name}: {:?} weighted bones", w.map(|w| w.iter().filter(|v| **v > 0.0).count()));
+        }
+    }
 
     #[test]
     fn logical_names_hash_like_the_export() {

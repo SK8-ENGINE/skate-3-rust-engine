@@ -17,7 +17,7 @@ fn sqt(t: [f32; 3]) -> Sqt {
 
 fn clip(name: &str, frames: usize, speed: f32, looping: bool, windows: Vec<ClipWindow>) -> PedClip {
     let len = (frames - 1) as f32 / 30.0;
-    PedClip {
+    PedClip { channel_weights: None,
         name: name.into(),
         fps: 30.0,
         frames: (0..frames).map(|f| vec![sqt([0.0, 0.0, speed * f as f32 / 30.0]), IDENTITY, IDENTITY]).collect(),

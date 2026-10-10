@@ -47,6 +47,7 @@ mod retail_backdrop;
 mod retail_render;
 mod retail_character;
 mod retail_exposure;
+mod colour_matrix;
 mod retail_irradiance;
 mod retail_sky;
 mod skater_ghost;

@@ -134,7 +134,7 @@ fn sqt(t: [f32; 3], yaw: f32) -> Sqt {
 /// hips bent by `bend` so poses differ.
 fn clip(name: &str, frames: usize, speed: f32, turn: f32, looping: bool, bend: f32, windows: Vec<ClipWindow>) -> PedClip {
     let len = (frames - 1) as f32 / FPS;
-    PedClip {
+    PedClip { channel_weights: None,
         name: name.into(),
         fps: FPS,
         frames: (0..frames)
@@ -311,7 +311,7 @@ fn mirror_fixture() -> (PedRig, PedAnimSet, BTreeMap<String, PedClip>) {
         animated: vec![true, true, true, true],
     };
     let bend = |a: f32| Sqt { scale: [1.0; 4], rotation: [(a * 0.5).sin(), 0.0, 0.0, (a * 0.5).cos()], translation: [0.0, 0.0, 0.0, 1.0] };
-    let still = |name: &str, frames: usize, turn: f32, looping: bool| PedClip {
+    let still = |name: &str, frames: usize, turn: f32, looping: bool| PedClip { channel_weights: None,
         name: name.into(),
         fps: FPS,
         frames: (0..frames)
@@ -451,4 +451,37 @@ fn a_sitting_ped_holds_the_idle_until_released_then_stands_up() {
     }
     assert!(log.iter().any(|c| c == "STANDUP"));
     assert!(!p.reacting(), "the run ended after the stand-up");
+}
+
+/// The ped channel (b99, `82E32878` / `82E3A5A0`): a carry clip fades in over 0.2 s and takes over only the bones its
+/// channel weights pick (here the hips), the rest keeps locomotion; a stop fades it out and frees the slot.
+#[test]
+fn the_channel_overrides_only_its_weighted_bones_and_fades() {
+    let (rig, mut set, mut clips) = fixture();
+    let mut carry = clip("CARRY", 3, 0.0, 0.0, true, 1.0, vec![]);
+    carry.channel_weights = Some(vec![0.0, 1.0, 0.0]);
+    clips.insert("CARRY".into(), carry);
+    set.entries.insert("CarrySmallRHChannel".into(), vec![RemapClip { clip: "CARRY".into(), windows: vec![] }]);
+    let mut p = PedAnimPlayer::new(&set, 1).unwrap();
+    let base = p.pose(&rig, &clips, 0.0).unwrap();
+    assert!(p.channel_idle());
+    assert!(p.channel_request(&set, "CarrySmallRHChannel", 0.2, 0.2));
+    assert!(!p.channel_request(&set, "NoSuchChannel", 0.2, 0.2) && p.channel_clip() == Some("CARRY"), "unknown name: nothing replaced");
+    p.step(0.1, &set, &clips);
+    let half = p.pose(&rig, &clips, 0.0).unwrap();
+    for _ in 0..3 {
+        p.step(0.1, &set, &clips);
+    }
+    let full = p.pose(&rig, &clips, 0.0).unwrap();
+    let yaw = |q: [f32; 4]| 2.0 * q[1].atan2(q[3]);
+    assert!((yaw(full[1].rotation) - 1.0).abs() < 1e-3, "hips take the carry pose: {:?}", full[1].rotation);
+    let h = yaw(half[1].rotation);
+    assert!(h > yaw(base[1].rotation) + 0.1 && h < 0.95, "half way through the fade: {h}");
+    assert_eq!(full[2], base[2], "a zero-weight bone keeps locomotion");
+    assert_eq!(full[1].translation[3], 1.0, "the weight lane does not leak into the pose");
+    p.channel_stop(0.2);
+    for _ in 0..3 {
+        p.step(0.1, &set, &clips);
+    }
+    assert!(p.channel_idle(), "the stop fade freed the slot");
 }

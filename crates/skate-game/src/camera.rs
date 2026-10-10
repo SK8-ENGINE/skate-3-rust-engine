@@ -44,7 +44,13 @@ fn spawn(mut commands: Commands, config: Res<Config>, retail: Res<crate::retail_
     commands.insert_resource(CameraAngleSettings::load(&config.asset_root));
     let mut camera = commands.spawn((
         GameplayCamera,
-        Camera3d::default(),
+        // Depth sampleable by the retail tone pass (the colour grade's near / far mix, `postfx_visualfxPS`).
+        Camera3d {
+            depth_texture_usages: (bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT
+                | bevy::render::render_resource::TextureUsages::TEXTURE_BINDING)
+                .into(),
+            ..default()
+        },
         Camera { is_active: false, ..default() },
         Transform::default(),
     ));

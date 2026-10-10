@@ -900,8 +900,20 @@ each tick; the body walks a one-point route to the zombie goal at the brain's sp
 `ped_brain.zombie_follow_distance`, `zombie_sprint_distance`, `zombie_ring_min`, `zombie_ring_max`,
 `zombie_sprint_speed`, `zombie_walk_speed`.
 
-**NOT RETAIL YET / open.** The yellow screen tint is not found (b95 leads: `82763EE0` / `82764480`, `8249DC60`,
-`827F4D28`, the `zombiemode` hash at `0x820C1058`). The cheat screen entry belongs to the UI work. The "goal
+**The yellow screen (research b100 / b101; values main-checked in the stock collections).** `827F4D28` sets post FX
+bit 0x2000 while the zombie query is true and `827F5450` then builds the near and far colour matrices from the `post_fx`
+record `colour_matrix_zombiemode` (`827F13D8`: `multiply * Sat_s(contrast * (x - midpoint) + midpoint + add)`, luma
+0.3 / 0.6 / 0.1) instead of the identity `colour_matrix`, a full replace with no fade [code]. Values [data]: multiply
+(2.0, 1.4, 1.0), saturation 0.5, contrast 1.3 near / 1.5 far, add 0 near / -0.4 far, midpoint 0.5, distances 50 / 100.
+`postfx_visualfxPS` applies them after the tone curve: near rows c7..c9, far rows c10..c12, mixed linearly in view
+depth (`827F3D20`: full near to 50 m, full far from 100 m) [code / data]. Ours: skate-core `colour_matrix` (builder),
+skate-game `colour_matrix` (stock records, `ColourGrade` picked by the zombie flag, the camera's near plane), the retail
+tone pass reads the view depth (gameplay camera depth now sampleable; a 1x1 fallback when it is not) and applies the
+grade before its clamp. The base record is the identity, so the picture is unchanged outside zombie mode (DownTown
+captures with the mode off and on). Open: the shader's own luma (0.3 / 0.5 / 0.2) desaturate step with the bloom colour,
+the tint lookup texture and the stencil mask term (b101) are not modelled.
+
+**NOT RETAIL YET / open.** The cheat screen entry belongs to the UI work. The "goal
 reached" radius (0.5 m) and "ZombieChannel" (`ped.vfn240`, 0.2 / 0.2 / 1.0) are not read; how peds in a plugin become
 zombies is open. Retail aims every zombie at the single local player; a host picking per ped is not retail.
 
@@ -936,6 +948,36 @@ sets it is not found (all our ambient peds roll). Retail's rolls come from its g
 
 **Verification.** skate-core `the_starting_hand_prop_follows_the_chance_and_the_running_total`; skate-game
 `starting_hand_props_load_the_chance_and_the_list`. Not seen in game yet.
+
+### Ped carry poses and the ped channel
+
+**Problem.** A ped holding a can, a bag or a newspaper kept its walk pose: the arm swung through the prop.
+
+**Evidence** (research b99; main-checked: the clip channel weights from the bank, the logical names in the anim set):
+- Retail plays the carry pose on the ped's one channel slot ("PedChannel", the skeleton controller at
+  `skeleton+17936`) [code]: ped vfunc +240 (`82E3A418`) looks the logical name up in the ped's anim set and requests it
+  (`82E32878`: blend in / out); the per-frame state machine `82E3A5A0` plays it, fades it and frees the slot (state 7).
+  While a prop is linked and held, the update `82E3F048` re-requests the record's carry name whenever the slot is free
+  (0.2 s blends); the unlink `82E3FAE0` stops it with a 0.2 s fade. The same slot plays the throws, the tazer and the
+  greet / warn gestures; a request replaces what plays.
+- Which bones a channel clip takes over is in the clip data [data, main-read]: the clip parts' channel weight tables.
+  All four carry clips (`NPC_CARRY_{SML,BIG,PAPER,WINE}_RH_0_CYC`, logical names `CarrySmallRHChannel` /
+  `CarryBigRHChannel` / `CarryPaperRHChannel` / `CarryWineRHChannel`) weigh exactly the right arm chain (shoulder, arm,
+  forearm, hand, hand prop bone) 1.0 and every other bone 0; the throw and tazer clips weigh 17 upper-body bones; walk
+  cycles have no table. The blend is retail's `ACSChannelBlend` (already ported, `pose_blend::channel_blend_sample`):
+  per bone, coefficient = channel fade x the bone's weight.
+
+**Change.** skate-data: `PedClip.channel_weights` from the parts' weight tables. Core `peds/anim.rs`: the channel slot
+(`channel_request` by logical name, `channel_stop`, `channel_idle`; fades during `step`; one-shot clips fade out at
+their end) blended over locomotion in `pose`; the carry names join the clip list. Game: while a hand prop is held and
+the slot is free, its record's carry name is requested (0.2 / 0.2); a released prop stops a carry pose with a 0.2 s fade;
+the throw clips now play on the channel (upper body over the walk), as retail.
+
+**NOT RETAIL YET / open.** Retail requests the carry while the prop is linked; ours while held. The tazer, greet and
+warn gestures do not use the channel yet; `StopChannel` (Avoid / Collision states) is not ported. Not seen in game yet.
+
+**Verification.** skate-data data-gated `carry_clips_carry_per_bone_channel_weights` (the four carry clips: 5 of 50
+bones, the right arm chain; throws / tazer 17); skate-core `the_channel_overrides_only_its_weighted_bones_and_fades`.
 
 ### Ped attack throw at the skater
 

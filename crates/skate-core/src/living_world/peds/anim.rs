@@ -66,6 +66,10 @@ pub struct PedClip {
     pub loop_rotation: [f32; 4],
     pub loop_translation: [f32; 3],
     pub windows: Vec<ClipWindow>,
+    /// A channel clip's per-bone channel weights (the clip parts' weight table): how much of each bone the clip takes
+    /// over when it plays on the ped's channel (`ACSChannelBlend`: coefficient = channel weight x bone weight).
+    /// `None` for plain clips.
+    pub channel_weights: Option<Vec<f32>>,
 }
 
 impl PedClip {
@@ -149,6 +153,8 @@ pub mod names {
         "HandPropThrowLightR90", "HandPropThrowLightR45",
         // The attack throw (`super::hand_prop::attack_throw_clip`).
         "HandPropAttackThrow", "HandPropAttackThrowLeft", "HandPropAttackThrowRight",
+        // The hand prop carry poses on the ped channel (`livingworld_handprops` `Hash_FC1D2C4E5CCA6AED`, b99).
+        "CarrySmallRHChannel", "CarryBigRHChannel", "CarryPaperRHChannel", "CarryWineRHChannel",
     ];
 }
 
@@ -245,6 +251,21 @@ pub struct PedAnimPlayer {
     pub intent: Intent,
     plays: u32,
     reaction: Option<ReactionRun>,
+    channel: Option<ChannelRun>,
+}
+
+/// The ped's one channel slot ("PedChannel", the skeleton controller at `skeleton+17936`; requests `82E32878`, state
+/// machine `82E3A5A0`, research b99) [code]: a clip played over locomotion on the bones its channel weights pick
+/// (carry poses, the tazer, greet / warn gestures). A request replaces what plays; a stop fades it out.
+#[derive(Clone, Debug, PartialEq)]
+struct ChannelRun {
+    clip: String,
+    time: f32,
+    /// Fade 0..1 and the seconds to full / to nothing.
+    weight: f32,
+    blend_in: f32,
+    blend_out: f32,
+    stopping: bool,
 }
 
 /// A running collision reaction: its steps, the current one and the ground time left.
@@ -286,6 +307,7 @@ impl PedAnimPlayer {
             intent: Intent::Idle,
             plays: 0,
             reaction: None,
+            channel: None,
         })
     }
 
@@ -355,8 +377,62 @@ impl PedAnimPlayer {
         self.current.windows.is_empty() || self.current.windows.iter().any(|&(s, e, tag)| tag != 0 && self.current.time >= s && self.current.time <= e)
     }
 
+    /// Play the logical animation `name` of `set` on the channel (ped vfunc +240 `82E3A418`: the name through the
+    /// anim set, then a request with blend in / out), replacing what plays. False when the set has no such clip.
+    pub fn channel_request(&mut self, set: &PedAnimSet, name: &str, blend_in: f32, blend_out: f32) -> bool {
+        let Some(entry) = pick(set, name, &mut self.rng) else { return false };
+        let weight = self.channel.as_ref().filter(|c| !c.stopping).map_or(0.0, |c| c.weight);
+        self.channel = Some(ChannelRun { clip: entry.clip, time: 0.0, weight, blend_in, blend_out, stopping: false });
+        true
+    }
+
+    /// Stop the channel with a fade (`state 5`, fade `blend_out`); no-op when idle.
+    pub fn channel_stop(&mut self, fade: f32) {
+        if let Some(c) = self.channel.as_mut() {
+            c.stopping = true;
+            c.blend_out = fade;
+        }
+    }
+
+    /// The slot is free (`skeleton+140 == 7`).
+    pub fn channel_idle(&self) -> bool {
+        self.channel.is_none()
+    }
+
+    /// The clip on the channel, if any.
+    pub fn channel_clip(&self) -> Option<&str> {
+        self.channel.as_ref().map(|c| c.clip.as_str())
+    }
+
+    fn step_channel(&mut self, dt: f32, clips: &dyn PedClips) {
+        let Some(c) = self.channel.as_mut() else { return };
+        let Some(clip) = clips.clip(&c.clip) else {
+            self.channel = None;
+            return;
+        };
+        let len = clip.length();
+        c.time += dt;
+        if clip.looping && len > 0.0 {
+            c.time %= len;
+        } else if c.time >= len {
+            // A one-shot clip ends: the slot fades out.
+            c.time = len;
+            c.stopping = true;
+        }
+        let rate = |s: f32| if s > 0.0 { dt / s } else { 1.0 };
+        if c.stopping {
+            c.weight -= rate(c.blend_out);
+            if c.weight <= 0.0 {
+                self.channel = None;
+            }
+        } else {
+            c.weight = (c.weight + rate(c.blend_in)).min(1.0);
+        }
+    }
+
     /// Advance by `dt` seconds (the host steps once per population world tick, dt = 1/60).
     pub fn step(&mut self, dt: f32, set: &PedAnimSet, clips: &dyn PedClips) -> StepOut {
+        self.step_channel(dt, clips);
         let mut out = StepOut::default();
         // Clock: advance both layers (looping clips wrap with the loop transform).
         let mut root = [RootMotion::default(), RootMotion::default()];
@@ -518,6 +594,19 @@ impl PedAnimPlayer {
                 let w = self.blend_weight();
                 for (a, b) in pose.iter_mut().zip(p) {
                     *a = pose_blend::blend_sample(b, *a, w);
+                }
+            }
+        }
+        // The channel over it (`ACSChannelBlend`): per bone, coefficient = fade x the clip's channel weight.
+        if let Some((c, clip)) = self.channel.as_ref().and_then(|c| Some((c, clips.clip(&c.clip)?))) {
+            if let (Some(weights), Some(mut ch)) = (clip.channel_weights.as_ref(), clip.sample(c.time)) {
+                if ch.len() == pose.len() {
+                    add_reference(rig, &mut ch);
+                    for ((a, mut b), w) in pose.iter_mut().zip(ch).zip(weights) {
+                        b.translation[3] = *w;
+                        let blended = pose_blend::channel_blend_sample(*a, b, c.weight, false);
+                        *a = Sqt { translation: [blended.translation[0], blended.translation[1], blended.translation[2], a.translation[3]], ..blended };
+                    }
                 }
             }
         }
