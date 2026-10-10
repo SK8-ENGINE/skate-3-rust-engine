@@ -831,6 +831,44 @@ removed and the slot reused) and `runtime_spawn_keeps_map_props` (map prop body 
 refuse removal); `skate-mods` command validation and the Lua calls. The map load path is the same code moved into
 `build_body` / `welded_edge_features`; all existing prop tests pass. Not checked in game yet.
 
+## DMO streaming: the census core (2026-10-10, D3 step 1)
+
+**Problem.** Every placed prop exists from map load to the end of the session; retail streams DMOs with the living
+world census: they spawn near the player and go beyond the cull radius, within a 49-object pool.
+
+**Evidence** (research b97; main-checked: the cull's horizontal distance (`826BAD98`: the height lane is swapped out by
+the perm at `0x822FB890` before `vmsum3fp`), the pool test `subfic 49`, the five weights and the range records in the
+export, the priority records):
+- Census pass `sub_826B7980` [code]: circle from the `dynamicobjects` range record (`livingworld_census_ranges`:
+  0 / 90 / 100 m; `skatepark_dynamicobjects` 150 / 200, `extended_challenge_dynamicobjects` 100 / 130 [data]); retail
+  DMO records have no speed keys and no forward offset.
+- Cull `sub_826BAD98` [code]: horizontal distance beyond the cull radius, cullable objects only, the whole linked group
+  (`sub_82C52600`); then at most one eviction per pass while the pool holds 49 or more.
+- Spawn `sub_826B9D58` [code]: placements within the outer radius (max 256), touching neighbours within 20 m join so
+  clusters come together, 49 spawns per pass (100 in fill mode); with the pool full a placement must outscore the
+  eviction front, which then goes.
+- Score `sub_82C4A130` / `sub_82C55160` [code]: `s1 = 250 x priority x k_flag` (keepalways or flag 0x10: 2^31),
+  `s2 = 300 x -n x k_flag`, `s3 = 450 x -distance / (k_flag x k_view^2)`, compared as `(s1 + s2 + s3) x k_view`;
+  `k_view` 2.5 in front of the camera, `k_flag` 2.0 with flag 0x10 [data `livingworld.dynamicobjects`]. Type
+  priorities (`livingworld_dynamicobject_priority`, referenced by each characteristics record's `Priority`): of 230
+  types, 98 `mediumpriority` (200), 84 `highpriority` (450), 47 `lowpriority` (1), 1 `keepalways` [data].
+
+**Change.** skate-core `living_world/dmo.rs`: `DmoStreamSettings` (range, weights, cap 49, budgets 49 / 100, group
+radius 20; retail defaults, data-driven), `DmoPlacement`, `DmoView`, `score` / `score_value`, `DmoStream::step`
+(cull with groups, one eviction, spawn with group expansion and evict-if-better; held ids exempt), `set_position`
+(keep where left). Decisions are serialisable (`Spawn` / `Cull` / `Evict` with the map prop id) for a host.
+
+**NOT RETAIL YET / open.** Not wired into the game yet (step 2 streams the map props' bodies, collision and models;
+waits for the pose write-back answer: does a moved prop come back where it was left or at its authored pose, b98).
+The score's count `n` (`sub_82C503F0`) is 1; the overlap blocker is not modelled; touching is bounding spheres (the
+retail test's factor 0.5 is not decoded); the eviction queue order is the live score; the safety layer
+(`livingworld_dmo_safety`) is not found; multiple observers are ours.
+
+**Verification.** skate-core `placements_spawn_inside_90_and_cull_beyond_100_horizontally`,
+`touching_props_spawn_and_cull_as_a_group`, `the_score_follows_the_retail_weights`,
+`the_pool_cap_evicts_the_lowest_score_once_per_pass`, `the_spawn_budget_is_49_per_pass_and_100_when_filling`,
+`streaming_is_deterministic`.
+
 ## Open questions
 
 - Retail parity: every DMO is dynamic and box-approximated; retail drives DMOs through `LWDynamicObjectMan` with

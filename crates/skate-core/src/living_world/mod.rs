@@ -25,6 +25,7 @@ pub mod avoid;
 pub mod census;
 pub mod clock;
 pub mod config;
+pub mod dmo;
 pub mod draw_distance;
 pub mod leave_fade;
 pub mod npc_tricks;
