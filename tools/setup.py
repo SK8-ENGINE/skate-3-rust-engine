@@ -73,6 +73,24 @@ def restart():
     else:command=[sys.executable,str(Path(__file__).resolve()),*sys.argv[1:]]
     return subprocess.call(command,env=env)
 
+def headless(args):
+    from tools.asset_pipeline.customiser_setup import install
+    from tools.asset_pipeline.versions import installed
+    from tools.asset_pipeline.validation_report import summary
+    refresh=args.refresh or installed(args.base) is not None
+    try:
+        installed_root=install(args.source,args.base,args.game_exe,lambda text:print(text,flush=True),refresh=refresh)
+    except Exception:
+        args.base.mkdir(parents=True,exist_ok=True)
+        (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
+        traceback.print_exc()
+        print('Setup could not finish. Details: '+str(args.base/'setup-error.log'))
+        return 2
+    warnings=summary(installed_root)
+    print(f'Ready with {len(warnings)} warnings or unavailable components. Details: {installed_root/"setup-report.json"}'
+          if warnings else 'Ready')
+    return 0
+
 def main():
     tolerate_dead_console()
     if len(sys.argv)>1 and sys.argv[1]=='--character-import':
@@ -95,8 +113,11 @@ def main():
     parser.add_argument('--base',type=Path,required=True)
     parser.add_argument('--game-exe',type=Path,required=True)
     parser.add_argument('--refresh',action='store_true')
+    # Headless: convert from this ISO / default.xex without the setup window.
+    parser.add_argument('--source',type=Path)
     args=parser.parse_args()
     if enable_long_paths():return restart()
+    if args.source is not None:return headless(args)
     import tkinter as tk
     from tkinter import filedialog,messagebox,ttk
     from tools.asset_pipeline.customiser_setup import install
@@ -111,7 +132,8 @@ def main():
     window.title('Skate 3 Rust Engine setup')
     window.geometry('700x420');window.resizable(False,False)
     icon=ROOT/'docs/images/skating-crab.ico'
-    if icon.is_file():window.iconbitmap(str(icon))
+    # Tk accepts .ico window icons only on Windows.
+    if os.name=='nt' and icon.is_file():window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
     ttk.Label(frame,text='Update game assets' if updating else 'Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
     ttk.Label(frame,text=('Asset version changes: '+(', '.join(sorted(changed)) or 'none')+'.\nOnly changed or incomplete groups will be prepared again.\nYour previous character data remains until preparation succeeds.\n'
