@@ -36,3 +36,4 @@ strip = "debuginfo"
 bevy_pbr = { path = "vendor/bevy_pbr" }
 bevy_core_pipeline = { path = "vendor/bevy_core_pipeline" }
 sdl3-sys = { path = "vendor/sdl3-sys" }
+cpal = { path = "vendor/cpal" }

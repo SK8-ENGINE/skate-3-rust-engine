@@ -372,12 +372,6 @@ impl Plugin for GameAudioPlugin {
 fn setup(mut commands: Commands, config: Res<crate::config::Config>) {
     commands.insert_resource(AudioSettings::load(&config));
     commands.spawn((GameAudioListener, SpatialListener::new(0.2), Transform::default()));
-    // The browser build has no game audio yet: its banks would stream from the player's disk,
-    // and play through Web Audio (web port milestone 6). Without a library the game runs silent.
-    if cfg!(target_arch = "wasm32") {
-        info!("Game audio is not in the browser build yet");
-        return;
-    }
     match Library::load(&config.asset_root) {
         Ok(library) => commands.insert_resource(library),
         Err(error) => info!("Game audio unavailable (run setup to extract it): {error}"),

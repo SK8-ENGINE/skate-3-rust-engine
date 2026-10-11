@@ -36,6 +36,9 @@ disk as the engine needs them, and keeps the settings the engine writes in the b
 On the next visit, Chrome and Edge offer **Use “<folder>” again**, which asks to read the same
 folder without picking it.
 
+Pads come through the Gamepad API (press a button on yours once the page is open), and audio
+through Web Audio: see [input-audio.md](input-audio.md).
+
 The automated check, `node tools/web-port/smoke.mjs`, cannot use real game data, so it uses a
 synthetic installation instead (below).
 
@@ -68,6 +71,8 @@ saved(path, bytes) → IndexedDB ◄───  settings written by the engine
   - under `assets/private`: the JSON files, menu movies, HUD and particles
   - the stock files startup reads: input config, state and camera graphs, the two animation
     banks, gesture patterns, camera shakes and CAC recipes
+  - the audio, except the ambience beds and decoded speech, which are read as they play
+    ([input-audio.md](input-audio.md))
   - the start map named by `settings/default-map.json`, with its sidecars, sky and lighting
 
   The customiser's models and textures, and the character, go through Bevy's asset server, which
@@ -88,8 +93,6 @@ saved(path, bytes) → IndexedDB ◄───  settings written by the engine
 
 | | Why | Where it comes back |
 |---|---|---|
-| Game audio | Banks would stream from disk, and play through Web Audio. Without its library the game runs silent, as it does natively when audio was not extracted | Milestone 6 |
-| Controllers | No pad backend yet: the keyboard drives the menus (arrows, Tab, Enter, Esc), but skating needs a pad | Milestone 6 (Gamepad API) |
 | Multiplayer | No UDP or Steam relay in a browser | Milestone 5 (WebSocket relay) |
 | Lua mods, imported custom characters | No Lua build for wasm32; the character library lives in `%LOCALAPPDATA%` | — |
 | Setup and the installation check | The page cannot run the setup tool; it only checks for `assets/private/game.json`. Refresh an outdated installation natively | — |

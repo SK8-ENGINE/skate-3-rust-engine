@@ -44,13 +44,14 @@ gltf = { version = "=1.4.1", default-features = true }
 sdl3 = { version = "=0.20.0", features = ["build-from-source-static"] }
 
 # The browser build renders through WebGPU, not Bevy's default WebGL2 (docs/web-port). It reads
-# the player's installation through the page (`web.rs`), and the wall clock through `Date.now()`:
-# `SystemTime::now` panics on wasm32-unknown-unknown.
+# the player's installation through the page (`web.rs`), pads through the Gamepad API, and the
+# wall clock through `Date.now()`: `SystemTime::now` panics on wasm32-unknown-unknown.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 bevy = { workspace = true, features = ["webgpu"] }
 js-sys = "=0.3.104"
 wasm-bindgen = "=0.2.127"
 wasm-bindgen-futures = "=0.4.77"
+web-sys = { version = "=0.3.104", features = ["Gamepad", "GamepadButton", "GamepadMappingType", "Navigator", "Window"] }
 web-time = "=1.1.0"
 
 [dev-dependencies]

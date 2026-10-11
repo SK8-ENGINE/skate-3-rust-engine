@@ -1391,13 +1391,23 @@ impl Library {
         if self.failed.contains(file) {
             return None;
         }
-        match skate_fs::read(self.path(file)) {
+        let path = self.path(file);
+        match skate_fs::read(&path) {
             Ok(bytes) => {
+                #[cfg(target_arch = "wasm32")]
+                crate::web::took(&path);
                 let peak = wav_peak(&bytes);
                 let channels = wav_channels(&bytes);
                 let clip = Clip { handle: assets.add(AudioSource { bytes: bytes.into() }), key: file.into(), peak, channels };
                 self.loaded.insert(file.to_owned(), clip.clone());
                 Some(clip)
+            }
+            // In the browser a big file (an ambience bed) is read from the player's disk when it
+            // is first wanted: not a failure, it is here a few frames later (`reading`).
+            #[cfg(target_arch = "wasm32")]
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                crate::web::read_later(&path);
+                None
             }
             Err(error) => {
                 // Once per file: a damaged install must not spam the log every frame.
@@ -1405,6 +1415,18 @@ impl Library {
                 self.failed.insert(file.to_owned());
                 None
             }
+        }
+    }
+
+    /// Whether the ambience bed `name` is still being read (the browser build; never natively,
+    /// where a read finishes before it returns).
+    pub(crate) fn ambience_reading(&self, name: &str) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        return self.manifest.ambience.get(name).is_some_and(|entry| crate::web::reading(&self.path(&entry.file)));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = name;
+            false
         }
     }
 

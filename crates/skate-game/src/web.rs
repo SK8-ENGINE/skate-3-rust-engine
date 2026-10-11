@@ -17,6 +17,7 @@ use bevy::{
     },
 };
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -161,8 +162,9 @@ fn read_at_startup(path: &Path) -> bool {
     let json = path.extension().is_some_and(|e| e == "json");
     match path.iter().next().and_then(|top| top.to_str()).unwrap_or_default() {
         "stock" => STOCK.iter().any(|stock| path.starts_with(stock)) || (json && path.parent() == Some(Path::new("stock"))),
-        // No game audio in the browser yet (`game_audio::setup`).
-        "audio" => false,
+        // The audio runtime's projects, banks, grains and wheels (about 120 MB) load at once at
+        // its start; the ambience beds (about 550 MB) and decoded speech are read when they play.
+        "audio" => !path.starts_with("audio/ambience") && !(path.starts_with("audio/speech") && path.extension().is_some_and(|e| e == "wav")),
         // Per map: read with the map (`map_files`), apart from the small descriptions.
         "native-skies" => json,
         "native-lighting" | "native-props" | "native-backdrops" => false,
@@ -194,6 +196,40 @@ pub(crate) fn release_map(assets: &Path, left: Option<&Path>, current: Option<&P
     let keep = map_files(assets, current);
     for file in map_files(assets, left).into_iter().filter(|file| !keep.contains(file)) {
         skate_fs::release(file);
+    }
+}
+
+/// Files being read in the background for [`read_later`].
+static READING: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+/// Files [`read_later`] fetched, which the page can drop once they are taken: nothing reads one of
+/// these big files twice.
+static READ_LATER: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+/// A synchronous read found `path` was not read ahead (`WouldBlock`): read it in the background so
+/// a later read finds it. What plays from disk (ambience beds, speech) waits for it a few frames.
+pub(crate) fn read_later(path: &Path) {
+    if !READING.lock().unwrap_or_else(|e| e.into_inner()).insert(path.to_owned()) {
+        return;
+    }
+    READ_LATER.lock().unwrap_or_else(|e| e.into_inner()).insert(path.to_owned());
+    let path = path.to_owned();
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(error) = skate_fs::prefetch([&path]).await {
+            warn!("{}: {error}", path.display());
+        }
+        READING.lock().unwrap_or_else(|e| e.into_inner()).remove(&path);
+    });
+}
+
+/// Whether `path` is still being read for [`read_later`].
+pub(crate) fn reading(path: &Path) -> bool {
+    READING.lock().unwrap_or_else(|e| e.into_inner()).contains(path)
+}
+
+/// The caller has `path`'s bytes: a file read for [`read_later`] need not stay in the page.
+pub(crate) fn took(path: &Path) {
+    if READ_LATER.lock().unwrap_or_else(|e| e.into_inner()).remove(path) {
+        skate_fs::release(path);
     }
 }
 
@@ -285,8 +321,29 @@ pub(crate) fn stopped(message: String) -> AppExit {
         )
         .insert_resource(Stopped(message))
         .add_systems(Startup, show)
-        .add_systems(Update, announce)
+        .add_systems(Update, (announce, list_controllers))
         .run()
+}
+
+/// The stop screen's controller line: the pads the browser exposes, so a player can check one
+/// before the game itself starts.
+#[derive(Component)]
+struct ControllerList;
+
+fn list_controllers(mut text: Query<&mut Text, With<ControllerList>>) {
+    let pads: Vec<String> = (0..4)
+        .filter_map(|slot| crate::input::platform::poll(slot).ok().and_then(|packet| Some(format!("{slot}: {}", packet.kind?.summary()))))
+        .collect();
+    let line = if pads.is_empty() {
+        "No controller yet: press a button on one.".to_string()
+    } else {
+        format!("Controllers {}", pads.join("; "))
+    };
+    for mut text in &mut text {
+        if text.0 != line {
+            text.0 = line.clone();
+        }
+    }
 }
 
 fn show(mut commands: Commands, stopped: Res<Stopped>) {
@@ -305,6 +362,7 @@ fn show(mut commands: Commands, stopped: Res<Stopped>) {
         .with_children(|page| {
             page.spawn((Text::new("SKATE / 3"), TextFont { font_size: 48., ..default() }, TextColor(Color::srgb(0.78, 0.96, 0.3))));
             page.spawn((Text::new(stopped.0.clone()), TextFont { font_size: 18., ..default() }, TextColor(Color::WHITE)));
+            page.spawn((ControllerList, Text::default(), TextFont { font_size: 14., ..default() }, TextColor(Color::srgb(0.55, 0.62, 0.62))));
         });
 }
 

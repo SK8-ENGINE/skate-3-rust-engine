@@ -10,6 +10,10 @@
 //              demo map, parsed and fingerprinted), then stops at the placeholder input.cfg, which
 //              is as far as anything but a real converted installation goes. One read-ahead file
 //              is withheld on purpose, so startup must notice the miss, read it and start again.
+//              Two fake pads are plugged in: one in the standard layout, which the stop screen's
+//              controller list must pick up through the Gamepad API, and one without it. Then the
+//              main thread stalls for 400 ms, and the audio output (Bevy → cpal → Web Audio) must
+//              not schedule a buffer in the past afterwards (vendor/README.md, cpal).
 //
 // Each fails on a panic, any console error (a shader the browser's WebGPU rejects, a pipeline or
 // validation failure), a page error or a timeout. Saves target/web/smoke.png, but headless
@@ -77,10 +81,10 @@ const server = createServer(async (request, response) => {
 await new Promise((ready) => server.once('listening', ready));
 const url = `http://localhost:${server.address().port}/`;
 const folders = await synthetic();
-const browser = await chromium.launch({ args: ['--enable-unsafe-webgpu'] });
+const browser = await chromium.launch({ args: ['--enable-unsafe-webgpu', '--autoplay-policy=no-user-gesture-required'] });
 
 /** Opens the page in a fresh profile; `choose` picks a folder through the directory input. */
-async function run(name, { folder, withhold, until, check }) {
+async function run(name, { folder, withhold, gamepads, until, check, after }) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await context.newPage();
   // Use the <input webkitdirectory> path: the File System Access picker cannot be automated.
@@ -88,6 +92,34 @@ async function run(name, { folder, withhold, until, check }) {
     delete window.showDirectoryPicker;
     delete Window.prototype.showDirectoryPicker;
   });
+  // Every Web Audio buffer start: when it was asked to play, against the audio clock.
+  await page.addInitScript(() => {
+    globalThis.skateAudioStarts = [];
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (when = 0, ...rest) {
+      globalThis.skateAudioStarts.push({ when, now: this.context.currentTime, duration: this.buffer?.duration ?? 0 });
+      return start.call(this, when, ...rest);
+    };
+  });
+  if (gamepads) {
+    // Gamepad objects as the browser makes them: the real prototypes, so the engine's type checks
+    // pass, with own values in place of a device.
+    await page.addInitScript(() => {
+      const button = (pressed) => Object.create(GamepadButton.prototype, {
+        pressed: { value: pressed }, touched: { value: pressed }, value: { value: pressed ? 1 : 0 },
+      });
+      const pad = (index, id, mapping) => Object.create(Gamepad.prototype, {
+        id: { value: id }, index: { value: index }, connected: { value: true }, mapping: { value: mapping },
+        timestamp: { value: 0 }, buttons: { value: Array.from({ length: 17 }, (_, i) => button(i === 0)) },
+        axes: { value: [0.5, -0.5, 0, 0] },
+      });
+      const pads = [
+        pad(0, 'Xbox 360 Controller (STANDARD GAMEPAD Vendor: 045e Product: 028e)', 'standard'),
+        pad(1, 'Unmapped Pad', ''),
+      ];
+      navigator.getGamepads = () => [...pads, null, null];
+    });
+  }
   if (withhold) {
     // Leave one file out of the first read-ahead, as a missing read-ahead rule would.
     await page.addInitScript((withheld) => {
@@ -134,6 +166,7 @@ async function run(name, { folder, withhold, until, check }) {
     await page.waitForTimeout(250);
   }
   if (!failure) failure = check(lines, await message());
+  if (!failure && after) failure = await after(page);
   if (name === 'synthetic') await page.screenshot({ path: join(work, 'smoke.png') });
   await context.close();
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
@@ -163,16 +196,35 @@ await run('not-ours', {
 const lines = await run('synthetic', {
   folder: folders.pkg,
   withhold: INPUT_CFG,
+  gamepads: true,
   until: (lines) => seen(lines, 'SKATE_WEB_READY') && seen(lines, 'SKATE_WEB_STOPPED'),
   check(lines, message) {
     const stop = seen(lines, 'SKATE_WEB_STOPPED');
     if (!stop.includes('Input configuration') || !stop.includes('input.cfg')) return `stopped somewhere else: ${stop}`;
     if (!message.includes('Input configuration')) return `the page does not show the stop: ${message}`;
     if (!seen(lines, 'SKATE_WEB_READ_AHEAD attempt=1 files=1')) return 'the withheld file was not read on a retry';
+    if (!seen(lines, 'Controller 0: gamepad "Xbox 360 Controller')) return 'the standard pad did not reach controller slot 0';
+    if (!seen(lines, 'Gamepad "Unmapped Pad": the browser does not map it')) return 'the unmapped pad was not reported';
+    if (seen(lines, 'Controller 1: gamepad')) return 'the unmapped pad took a slot';
+    return null;
+  },
+  async after(page) {
+    await page.waitForTimeout(1_000);
+    const before = await page.evaluate(() => globalThis.skateAudioStarts.length);
+    if (before === 0) return 'no audio output: Web Audio never started a buffer';
+    // A main-thread stall longer than both of cpal's buffers, as a map load in the browser makes.
+    await page.evaluate(() => { const end = performance.now() + 400; while (performance.now() < end); });
+    await page.waitForTimeout(1_000);
+    const starts = await page.evaluate(() => globalThis.skateAudioStarts);
+    const later = starts.slice(before);
+    if (later.length < 4) return `audio output stopped after the stall (${later.length} buffers)`;
+    const late = later.filter((s) => s.when < s.now - 0.001);
+    if (late.length) return `${late.length} of ${later.length} audio buffers after the stall were scheduled in the past (overlapped playback)`;
+    console.log(`  audio: ${starts.length} buffers, ${later.length} after a 400 ms stall, none scheduled in the past`);
     return null;
   },
 });
-for (const tag of ['SKATE_WEB_READ_AHEAD', 'SKATE_WEB_READY', 'SKATE_WEB_STOPPED']) {
+for (const tag of ['SKATE_WEB_READ_AHEAD', 'Controller 0:', 'SKATE_WEB_READY', 'SKATE_WEB_STOPPED']) {
   for (const line of lines.filter((l) => l.includes(tag))) console.log(`  ${line.slice(0, 200)}`);
 }
 

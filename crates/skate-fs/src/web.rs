@@ -6,6 +6,7 @@ use std::{
     ffi::OsString,
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    collections::BTreeSet,
     sync::{Arc, Mutex, MutexGuard},
 };
 use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
@@ -40,7 +41,7 @@ extern "C" {
 
 static TREE: Mutex<Option<Tree>> = Mutex::new(None);
 /// Installation files a synchronous read wanted before they were read ahead.
-static MISSES: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+static MISSES: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
 
 fn tree() -> MutexGuard<'static, Option<Tree>> {
     TREE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -99,7 +100,7 @@ fn contents(path: &Path) -> io::Result<Vec<u8>> {
             let name = page_path(&path).ok_or_else(|| not_found(&path))?;
             let value = page_read(&name).map_err(|e| js_error(&name, e))?;
             uint8(value).ok_or_else(|| {
-                MISSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(path.clone());
+                MISSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(path.clone());
                 io::Error::new(
                     io::ErrorKind::WouldBlock,
                     format!("{name}: not read in advance; the browser build reads files ahead with skate_fs::prefetch"),
@@ -151,10 +152,7 @@ pub fn missed() -> bool {
 /// The installation files synchronous reads have wanted, and not had, since the last call: what
 /// a retry should [`prefetch`].
 pub fn take_misses() -> Vec<PathBuf> {
-    let mut misses = std::mem::take(&mut *MISSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
-    misses.sort();
-    misses.dedup();
-    misses
+    std::mem::take(&mut *MISSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())).into_iter().collect()
 }
 
 /// Lets the page drop a prefetched file (a map left behind). A later synchronous read needs

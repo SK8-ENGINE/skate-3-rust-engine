@@ -48,6 +48,9 @@ pub(super) struct State {
     /// The map's crossfade bank, the content generation its layouts were built for, and the
     /// layouts (built when either changes, i.e. at map load or an audio content restart).
     layouts: Option<(Option<String>, u64, super::crossfade_layouts::Layouts)>,
+    /// A bed the browser was still reading from the player's disk when its zone wanted it: it
+    /// starts once read, if the zone still wants it. Never set natively, where reads finish.
+    pending_bed: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -128,18 +131,25 @@ pub(super) fn update(
             voices.stop(id, 0.05);
             state.fading.push(clip);
         }
+        state.pending_bed = None;
     }
     if change.start_bed {
         let zone = library.zone(state.control.current).cloned();
         if let Some(bed) = zone.as_ref().and_then(|z| z.bed.clone()) {
-            if let Some(clip) = library.ambience(&mut assets, &bed) {
-                let play = Play { category: Category::Ambience, volume: 0.0, pitch: 1.0, position: None,
-                    looping: true, fade_in: 0.0, envelope: None };
-                if let Some(id) = voices.play(&mut commands, &clip, play, now) {
-                    info!("AUDIO_AMBIENCE zone {} bed {bed}", zone.as_ref().and_then(|z| z.name.as_deref()).unwrap_or("?"));
-                    state.bed = Some((id, clip));
-                } else { state.fading.push(clip); }
+            if !start_bed(state, zone.as_ref(), &bed, &mut commands, &mut library, &mut voices, &mut assets, now)
+                && library.ambience_reading(&bed)
+            {
+                state.pending_bed = Some(bed);
             }
+        }
+    } else if let Some(bed) = state.pending_bed.take() {
+        let zone = library.zone(state.control.current).cloned();
+        if state.bed.is_none()
+            && zone.as_ref().and_then(|z| z.bed.as_ref()) == Some(&bed)
+            && !start_bed(state, zone.as_ref(), &bed, &mut commands, &mut library, &mut voices, &mut assets, now)
+            && library.ambience_reading(&bed)
+        {
+            state.pending_bed = Some(bed);
         }
     }
     let zone = library.zone(state.control.current);
@@ -149,6 +159,22 @@ pub(super) fn update(
             mixmap.set_input(skate_audio::mixmap::keys::AMBIENCE, 0, state.control.input(fade_in, fade_out));
         }
     }
+}
+
+/// Starts the zone's bed; false when its clip is not available (yet, in the browser).
+#[allow(clippy::too_many_arguments)]
+fn start_bed(
+    state: &mut State, zone: Option<&super::library::Zone>, bed: &str, commands: &mut Commands, library: &mut Library,
+    voices: &mut Voices, assets: &mut Assets<AudioSource>, now: f64,
+) -> bool {
+    let Some(clip) = library.ambience(assets, bed) else { return false };
+    let play = Play { category: Category::Ambience, volume: 0.0, pitch: 1.0, position: None,
+        looping: true, fade_in: 0.0, envelope: None };
+    if let Some(id) = voices.play(commands, &clip, play, now) {
+        info!("AUDIO_AMBIENCE zone {} bed {bed}", zone.and_then(|z| z.name.as_deref()).unwrap_or("?"));
+        state.bed = Some((id, clip));
+    } else { state.fading.push(clip); }
+    true
 }
 
 /// Native 824D42C8 reads outputs after the MixMap tick. Bevy playback remains an interim host;
@@ -215,6 +241,7 @@ fn stop_all(state: &mut State, voices: &mut Voices, fade: f32) {
         state.fading.push(clip);
     }
     state.control = Default::default();
+    state.pending_bed = None;
 }
 
 #[allow(clippy::too_many_arguments)]

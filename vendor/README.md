@@ -107,3 +107,17 @@ the `-MT` flag cmake-rs adds, so without this the static-CRT link fails with
 unresolved `__imp_*` CRT symbols. Development builds (`scripts/Build.ps1`) are
 unaffected. When upgrading `sdl3`/`sdl3-sys`, re-vendor and reapply this change,
 or drop it if upstream cmake-rs/sdl3-sys handle the runtime themselves.
+
+## Web Audio after a stall (cpal)
+
+`cpal` is the unmodified crates.io 0.15.3 source, with its Apache-2.0 licence, except for one
+condition in `src/host/webaudio/mod.rs`. Only the browser build compiles that file; the native
+hosts (WASAPI, ALSA, CoreAudio) are unchanged.
+
+cpal's Web Audio host alternates two buffers. When one ends, it schedules the other at a time
+cursor. If the page's main thread stalls past both buffers, the cursor falls behind the audio
+clock (in the browser build, a map load runs on the main thread). Upstream then schedules both
+buffers in the past, so they start at once and play overlapped until the cursor catches up,
+which takes about as long as the stall did. Upstream already restarts the cursor 25 ms ahead of
+the clock for the first buffer; the patch does the same whenever the cursor is behind, so a
+stall costs only a short gap.

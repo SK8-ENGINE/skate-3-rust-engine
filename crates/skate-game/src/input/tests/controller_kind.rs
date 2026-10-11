@@ -150,6 +150,31 @@ fn settings_ids_accept_hex_strings_and_numbers() {
     assert_eq!(parse_id(&"xyz".into()), None);
 }
 
+#[test]
+fn gamepad_api_ids_give_name_and_usb_ids_in_chrome_and_firefox_forms() {
+    assert_eq!(
+        parse_gamepad_id("Xbox 360 Controller (STANDARD GAMEPAD Vendor: 045e Product: 028e)"),
+        ("Xbox 360 Controller".into(), Some((0x045e, 0x028e)))
+    );
+    assert_eq!(parse_gamepad_id("Xbox 360 Controller (XInput STANDARD GAMEPAD)"), ("Xbox 360 Controller".into(), None));
+    assert_eq!(parse_gamepad_id("054c-0ce6-DualSense Wireless Controller"), ("DualSense Wireless Controller".into(), Some((0x054c, 0x0ce6))));
+    assert_eq!(parse_gamepad_id("Some Pad (Bluetooth)"), ("Some Pad (Bluetooth)".into(), None));
+    assert_eq!(parse_gamepad_id(""), (String::new(), None));
+}
+
+#[test]
+fn gamepad_api_pads_take_the_model_family() {
+    let kind = from_gamepad_api("DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)", &[]);
+    assert_eq!((kind.family, kind.backend, kind.vendor_id), (Family::Playstation5, Backend::GamepadApi, Some(0x054c)));
+    assert_eq!(kind.name, "DualSense Wireless Controller");
+    assert_eq!(kind.prompt_style, PromptStyle::Playstation);
+    let unknown = from_gamepad_api("Generic USB Joypad", &[]);
+    assert_eq!((unknown.family, unknown.vendor_id), (Family::Standard, None));
+    let elite = from_gamepad_api("045e-0b00-", &[]);
+    assert_eq!((elite.family, elite.name.as_str(), elite.hardware_paddles), (Family::XboxElite, "Xbox Elite Series 2", 4));
+    assert_eq!(serde_json::to_value(&kind).unwrap()["backend"], "gamepad_api");
+}
+
 /// Reads slot 0 through XInput (and XInputGetCapabilitiesEx) on this machine.
 /// Needs a connected pad; prints what the fallback reports.
 #[cfg(windows)]

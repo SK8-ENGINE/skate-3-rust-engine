@@ -67,6 +67,20 @@
     message.textContent = text;
   };
 
+  // Browsers may hold audio until the player interacts with the page: resume any audio context
+  // the engine made (Bevy's output, through cpal's Web Audio host) on the next click or key.
+  if (window.AudioContext) {
+    const contexts = [];
+    window.AudioContext = class extends window.AudioContext {
+      constructor(...options) {
+        super(...options);
+        contexts.push(this);
+      }
+    };
+    const resume = () => contexts.filter((c) => c.state === 'suspended').forEach((c) => c.resume());
+    for (const type of ['pointerdown', 'keydown']) addEventListener(type, resume, { capture: true });
+  }
+
   // The engine reports through these (crates/skate-game/src/web.rs).
   globalThis.skatePage = {
     status: show,

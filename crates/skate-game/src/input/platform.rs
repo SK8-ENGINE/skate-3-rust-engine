@@ -1,8 +1,9 @@
-//! Device transport. SDL3 gamepads are the default on every platform; each
+//! Device transport. SDL3 gamepads are the default on every native platform; each
 //! state is re-expressed as the XInput-shaped `XboxState`, so raw signed
 //! axes/trigger bytes reach the TU3 converter without Bevy/gilrs deadzones or
 //! normalized-axis reconstruction. `SKATE3_INPUT=xinput` selects the original
 //! Windows XInput transport, which is also the fallback if SDL cannot start.
+//! The browser build reads the Gamepad API's standard layout into the same shape.
 use super::controller_kind::{ControllerKind, XinputCaps};
 use skate_core::input::xbox::XboxState;
 use std::sync::{Arc, OnceLock};
@@ -474,9 +475,156 @@ mod sdl {
     }
 }
 
+/// The W3C Gamepad API's "standard" layout in XInput's shape: what the browser build reads.
+/// Pure, so it is tested natively.
+#[cfg(any(target_arch = "wasm32", test))]
+mod standard {
+    use skate_core::input::xbox::XboxState;
+
+    /// Standard-layout button index → XInput `wButtons` bit, by position like SDL's South/East/
+    /// West/North. Buttons 6 and 7 are the analog triggers; 16, the guide button, has no XInput bit.
+    pub(super) const BUTTONS: [(usize, u16); 14] = [
+        (12, 0x0001), (13, 0x0002), (14, 0x0004), (15, 0x0008),
+        (9, 0x0010), (8, 0x0020), (10, 0x0040), (11, 0x0080),
+        (4, 0x0100), (5, 0x0200),
+        (0, 0x1000), (1, 0x2000), (2, 0x4000), (3, 0x8000),
+    ];
+    pub(super) const LEFT_TRIGGER: usize = 6;
+    pub(super) const RIGHT_TRIGGER: usize = 7;
+
+    /// An axis in -1..=1 → XInput's -32768..=32767.
+    pub(super) fn stick(value: f64) -> i16 {
+        let value = if value.is_finite() { value.clamp(-1., 1.) } else { 0. };
+        (if value < 0. { value * 32768. } else { value * 32767. }).round() as i16
+    }
+
+    /// A trigger in 0..=1 → XInput's byte.
+    pub(super) fn trigger(value: f64) -> u8 {
+        let value = if value.is_finite() { value.clamp(0., 1.) } else { 0. };
+        (value * 255.).round() as u8
+    }
+
+    /// `pressed`/`value` per button index; `axes` are left X/Y then right X/Y, Y positive down
+    /// (XInput's Y is positive up).
+    pub(super) fn state(pressed: impl Fn(usize) -> bool, value: impl Fn(usize) -> f64, axes: [f64; 4]) -> XboxState {
+        XboxState {
+            buttons: BUTTONS.iter().filter(|&&(index, _)| pressed(index)).fold(0, |bits, &(_, bit)| bits | bit),
+            triggers: [trigger(value(LEFT_TRIGGER)), trigger(value(RIGHT_TRIGGER))],
+            left: [stick(axes[0]), stick(-axes[1])],
+            right: [stick(axes[2]), stick(-axes[3])],
+        }
+    }
+}
+
+/// The browser's pads, through the Gamepad API. Browsers only expose a pad once a button on it
+/// has been pressed while the page is open.
+#[cfg(target_arch = "wasm32")]
+mod gamepad_api {
+    use super::*;
+    use crate::input::controller_kind;
+    use bevy::log::{info, warn};
+    use std::{collections::BTreeSet, sync::Mutex};
+    use wasm_bindgen::JsCast;
+    use web_sys::{Gamepad, GamepadButton, GamepadMappingType};
+
+    /// The Gamepad API reports gamepads only; this is XINPUT_DEVSUBTYPE_GAMEPAD.
+    const SUBTYPE_GAMEPAD: u8 = 1;
+
+    struct Slot {
+        /// The browser's own index for the pad.
+        index: u32,
+        number: u32,
+        state: XboxState,
+        kind: Arc<ControllerKind>,
+    }
+
+    struct Slots {
+        slots: [Option<Slot>; 4],
+        /// Pads without the standard layout, already reported.
+        ignored: BTreeSet<String>,
+    }
+
+    static SLOTS: Mutex<Slots> = Mutex::new(Slots { slots: [None, None, None, None], ignored: BTreeSet::new() });
+
+    fn connected() -> Vec<Gamepad> {
+        let Some(pads) = web_sys::window().and_then(|window| window.navigator().get_gamepads().ok()) else {
+            return Vec::new();
+        };
+        pads.iter().filter_map(|pad| pad.dyn_into::<Gamepad>().ok()).filter(Gamepad::connected).collect()
+    }
+
+    fn read(pad: &Gamepad) -> XboxState {
+        let buttons: Vec<GamepadButton> = pad.buttons().iter().filter_map(|b| b.dyn_into().ok()).collect();
+        let axes: Vec<f64> = pad.axes().iter().map(|a| a.as_f64().unwrap_or(0.)).collect();
+        standard::state(
+            |i| buttons.get(i).is_some_and(GamepadButton::pressed),
+            |i| buttons.get(i).map_or(0., GamepadButton::value),
+            std::array::from_fn(|i| axes.get(i).copied().unwrap_or(0.)),
+        )
+    }
+
+    /// Mirrors the SDL thread: pads keep their slot while connected, a new one takes its browser
+    /// index if free or else the first free slot, and the packet number advances on change.
+    fn refresh(shared: &mut Slots) {
+        let pads = connected();
+        for (index, slot) in shared.slots.iter_mut().enumerate() {
+            if slot.as_ref().is_some_and(|s| !pads.iter().any(|pad| pad.index() == s.index)) {
+                *slot = None;
+                info!("Controller {index}: gamepad removed");
+            }
+        }
+        for pad in &pads {
+            if pad.mapping() != GamepadMappingType::Standard {
+                if shared.ignored.insert(pad.id()) {
+                    warn!("Gamepad {:?}: the browser does not map it to the standard layout, so it is not used", pad.id());
+                }
+                continue;
+            }
+            let slot = match shared.slots.iter().position(|s| s.as_ref().is_some_and(|s| s.index == pad.index())) {
+                Some(slot) => slot,
+                None => {
+                    let preferred = usize::try_from(pad.index()).ok().filter(|&i| i < 4 && shared.slots[i].is_none());
+                    let Some(slot) = preferred.or_else(|| shared.slots.iter().position(Option::is_none)) else {
+                        if shared.ignored.insert(pad.id()) {
+                            warn!("Gamepad {:?}: all four controller slots are in use", pad.id());
+                        }
+                        continue;
+                    };
+                    info!("Controller {slot}: gamepad {:?} (Gamepad API index {})", pad.id(), pad.index());
+                    let kind = Arc::new(controller_kind::from_gamepad_api(&pad.id(), controller_kind::user_models()));
+                    shared.slots[slot] = Some(Slot { index: pad.index(), number: 0, state: XboxState::default(), kind });
+                    slot
+                }
+            };
+            let state = read(pad);
+            let slot = shared.slots[slot].as_mut().expect("slot just found or filled");
+            if state != slot.state {
+                slot.number = slot.number.wrapping_add(1);
+                slot.state = state;
+            }
+        }
+    }
+
+    pub(super) fn poll(index: usize) -> Result<DevicePacket, DeviceError> {
+        let mut shared = SLOTS.lock().unwrap_or_else(|e| e.into_inner());
+        refresh(&mut shared);
+        shared.slots[index]
+            .as_ref()
+            .map(|slot| DevicePacket {
+                number: slot.number,
+                state: slot.state,
+                subtype: SUBTYPE_GAMEPAD,
+                kind: Some(slot.kind.clone()),
+            })
+            .ok_or(DeviceError::Disconnected)
+    }
+}
+
 enum Backend {
     #[cfg(not(target_arch = "wasm32"))]
     Sdl(&'static sdl::Shared),
+    #[cfg(target_arch = "wasm32")]
+    GamepadApi,
     #[cfg(windows)]
     XInput,
     #[cfg(not(windows))]
@@ -512,11 +660,11 @@ fn start_sdl() -> Backend {
     }
 }
 
-/// The browser has no SDL. Its pads arrive through the Gamepad API (web port milestone 6).
+/// The browser has no SDL: its pads arrive through the Gamepad API.
 #[cfg(target_arch = "wasm32")]
 fn start_sdl() -> Backend {
-    bevy::log::warn!("Controller input is not available in the browser build yet");
-    Backend::Unavailable
+    bevy::log::info!("Controller input: Gamepad API (a pad appears once one of its buttons is pressed)");
+    Backend::GamepadApi
 }
 
 pub(crate) fn poll_cached(
@@ -529,6 +677,11 @@ pub(crate) fn poll_cached(
         Backend::Sdl(shared) => {
             let _ = cache;
             sdl::poll(shared, index)
+        }
+        #[cfg(target_arch = "wasm32")]
+        Backend::GamepadApi => {
+            let _ = cache;
+            gamepad_api::poll(index)
         }
         #[cfg(windows)]
         Backend::XInput => windows::poll(index as u32, cache),
@@ -572,6 +725,34 @@ mod conversion_tests {
         assert_eq!(button_mask("A"), Some(0x1000));
         assert_eq!(button_mask("left_shoulder"), Some(0x0100));
         assert_eq!(button_mask("guide"), None);
+    }
+
+    #[test]
+    fn standard_layout_buttons_land_on_the_xinput_bits_of_the_same_names() {
+        // Standard-layout order: A B X Y, LB RB, LT RT, back start, LS RS, up down left right.
+        let names = ["a", "b", "x", "y", "left_shoulder", "right_shoulder", "", "", "back", "start",
+            "left_stick", "right_stick", "dpad_up", "dpad_down", "dpad_left", "dpad_right"];
+        for (index, name) in names.iter().enumerate().filter(|(_, name)| !name.is_empty()) {
+            let state = standard::state(|i| i == index, |_| 0., [0.; 4]);
+            assert_eq!(Some(state.buttons), button_mask(name), "{name}");
+        }
+        let all = standard::state(|_| true, |_| 1., [0.; 4]);
+        assert_eq!(all.buttons, BUTTON_NAMES.iter().fold(0, |bits, &(_, bit)| bits | bit), "every XInput button, no extra bits");
+        assert_eq!(all.triggers, [255, 255]);
+    }
+
+    #[test]
+    fn standard_layout_axes_and_triggers_reach_xinput_ranges() {
+        // Y is positive down in the Gamepad API and positive up in XInput.
+        let state = standard::state(|_| false, |i| [0., 0., 0., 0., 0., 0., 0.5, 0.][i.min(7)], [1., 1., -1., -1.]);
+        assert_eq!(state.left, [i16::MAX, i16::MIN]);
+        assert_eq!(state.right, [i16::MIN, i16::MAX]);
+        assert_eq!(state.triggers, [128, 0]);
+        assert_eq!(standard::stick(0.), 0);
+        assert_eq!(standard::stick(f64::NAN), 0);
+        assert_eq!(standard::stick(2.), i16::MAX);
+        assert_eq!(standard::trigger(-0.5), 0);
+        assert_eq!(standard::trigger(f64::INFINITY), 0);
     }
 }
 

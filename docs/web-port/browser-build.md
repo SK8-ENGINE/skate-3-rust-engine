@@ -31,16 +31,16 @@ three pages:
 It fails on a panic, a console error or a page error, and writes a screenshot to
 `target/web/smoke.png`.
 
-Results at milestone 3 (Rust 1.97.0; Playwright's Chromium with SwiftShader WebGPU):
+Results at milestone 6 (Rust 1.97.0; Playwright's Chromium with SwiftShader WebGPU):
 
 | | |
 |---|---|
-| `web` profile build of the engine (4 cores) | 9 min 19 s with dependencies cold (milestone 2); 2 min 42 s after a change to the game |
-| `skate3rust_bg.wasm` | 132.4 MB raw, **22.1 MB gzip** (what a static host sends) |
-| `smoke.mjs` | picker, no-installation and synthetic-installation pages pass: no console error, panic or page error; the synthetic installation reaches its placeholder input config in about 2 s, after one read-ahead retry |
+| `web` profile build of the engine (4 cores) | 9 min 19 s with dependencies cold (milestone 2); about 3 min after a change to the game |
+| `skate3rust_bg.wasm` | 132.6 MB raw, **22.1 MB gzip** (what a static host sends) |
+| `smoke.mjs` | picker, no-installation and synthetic-installation pages pass with no console error, panic or page error. The synthetic installation reaches its placeholder input config after one read-ahead retry. The fake standard pad reaches slot 0 and the unmapped one is refused. After a 400 ms stall, 22 of 22 audio buffers are scheduled on time (15 of 30 were late with unpatched cpal) |
 | `installation.test.mjs` | 4 passed |
-| Native `skate-game` tests | the same outcome for all 674: 490 passed, 183 ignored, and the setup fingerprint test fails as it did before the port |
-| Native `skate-fs`, `skate-data`, `skate-net` tests | 6, 44 and 40 passed |
+| Native `skate-game` tests | 494 passed (the 490 from before the port plus 4 new input tests), 183 ignored; the setup fingerprint test fails as it did before the port |
+| Native `skate-fs`, `skate-data`, `skate-net`, `skate-audio` tests | all pass (6, 44, 40 and 253) |
 | Native `skate-mods` tests | 105 passed; `skyline_physics` fails as before (it needs `sdk/examples/skyline/skyline.glb`, which `.gitignore` keeps out of every checkout) |
 
 What the smoke test cannot show:
@@ -72,8 +72,8 @@ installation anywhere public.
 | File access | `skate-fs`: the mounted installation, writes in memory and IndexedDB | `skate-fs` re-exports `std::fs` |
 | Clocks | `bevy::platform::time::Instant` (`web-time`), `web-time`'s `SystemTime` | the same types are `std::time`'s |
 | Map changes | files read ahead, then the loader runs on the main thread | worker threads |
-| Game audio | none yet (no library loaded: the game runs silent) | unchanged |
-| Controllers | no backend yet; the Gamepad API arrives in milestone 6 | SDL3 (XInput fallback on Windows) |
+| Game audio | Web Audio through Bevy/rodio/cpal; the audio core read ahead, beds and speech read as they play ([input-audio.md](input-audio.md)) | unchanged |
+| Controllers | the Gamepad API's standard layout in the XInput shape ([input-audio.md](input-audio.md)) | SDL3 (XInput fallback on Windows) |
 | Lua mods | none: `mlua`'s vendored C Lua does not target wasm32-unknown-unknown. `skate_mods::Vm` is uninhabited there and package validation says why | unchanged |
 | Asset sources | the default source reads the mounted installation without blocking; `mods`, `characters`, `online-characters` are not registered | `FileAssetReader` sources |
 | Multiplayer | UDP sockets and the Steam relay helper fail to open (browsers have neither); the WebSocket relay is milestone 5 | unchanged |
@@ -91,7 +91,7 @@ Still open:
 - `skate-dynamics` wraps convex decomposition in `catch_unwind`, which cannot catch on wasm
   (panics abort), so bad input must be rejected before it.
 - The audio bank prefetch thread fails to start in the browser and falls back to loading on the
-  game thread. That is moot until audio arrives (milestone 6).
+  game thread (2.6–5.4 ms per bank, from files read ahead).
 - The frame and audio-state logs (`SKATE_FRAME_LOG`, `SKATE_AUDIO_STATE_LOG`) write from threads,
   but environment variables are never set in a browser, so they never start there.
 - Multiplayer transports (milestone 5).

@@ -467,7 +467,22 @@ impl Voices<'_> {
                 audio.join(stem).join(format!("{:02}.wav", line.take))
             }
         };
-        let pcm = match skate_fs::read(&path).ok().and_then(|b| super::library::wav_pcm(&b)) {
+        let bytes = match skate_fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            // In the browser a take is read from the player's disk when it is first wanted: this
+            // line stays silent, the next one with the take plays it.
+            #[cfg(target_arch = "wasm32")]
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                crate::web::read_later(&path);
+                return None;
+            }
+            Err(_) => None,
+        };
+        #[cfg(target_arch = "wasm32")]
+        if bytes.is_some() {
+            crate::web::took(&path);
+        }
+        let pcm = match bytes.and_then(|b| super::library::wav_pcm(&b)) {
             Some(p) => p,
             None => {
                 if !*self.missing {

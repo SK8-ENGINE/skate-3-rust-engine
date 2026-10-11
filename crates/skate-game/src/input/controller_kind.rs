@@ -15,6 +15,9 @@ use serde::Serialize;
 pub(crate) enum Backend {
     Sdl,
     Xinput,
+    /// The browser's Gamepad API (the browser build).
+    #[cfg(any(target_arch = "wasm32", test))]
+    GamepadApi,
 }
 
 /// Coarse controller kind. Stable snake_case names are the mod-facing form.
@@ -145,6 +148,8 @@ impl ControllerKind {
                 self.xinput_subtype.unwrap_or(0),
                 if self.wireless == Some(true) { " wireless" } else { "" }
             ),
+            #[cfg(any(target_arch = "wasm32", test))]
+            Backend::GamepadApi => ", Gamepad API".into(),
         };
         if self.hardware_paddles > 0 || self.paddles > 0 {
             text += &format!(", paddles {} of {}", self.paddles, self.hardware_paddles.max(self.paddles));
@@ -323,6 +328,58 @@ pub(crate) fn from_xinput(caps: XinputCaps, user: &[Model]) -> ControllerKind {
         misc_button: false,
         prompt_style: family.prompt_style(),
     }
+}
+
+/// A pad the browser maps to the standard layout. Its id names it, and Chrome and Firefox add
+/// the USB vendor and product: "Xbox 360 Controller (STANDARD GAMEPAD Vendor: 045e Product:
+/// 028e)", "045e-028e-Xbox 360 Controller".
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn from_gamepad_api(id: &str, user: &[Model]) -> ControllerKind {
+    let (name, vendor_product) = parse_gamepad_id(id);
+    let model = vendor_product.and_then(|(v, p)| model(user, v, p));
+    let family = model.as_ref().and_then(|m| m.family).unwrap_or(Family::Standard);
+    ControllerKind {
+        family,
+        name: if name.is_empty() {
+            model.as_ref().map_or_else(|| family.name().to_string(), |m| m.name.clone())
+        } else {
+            name
+        },
+        vendor_id: vendor_product.map(|v| v.0),
+        product_id: vendor_product.map(|v| v.1),
+        backend: Backend::GamepadApi,
+        driver: "Gamepad API".into(),
+        xinput_subtype: None,
+        wireless: None,
+        // The standard layout has no paddles.
+        paddles: 0,
+        hardware_paddles: model.map_or(0, |m| m.paddles),
+        touchpad: false,
+        misc_button: false,
+        prompt_style: family.prompt_style(),
+    }
+}
+
+/// A Gamepad API id's name and USB vendor/product, in Chrome's and Firefox's forms.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn parse_gamepad_id(id: &str) -> (String, Option<(u16, u16)>) {
+    let hex = |s: &str| (s.len() == 4).then(|| u16::from_str_radix(s, 16).ok()).flatten();
+    // Chrome: "Name (STANDARD GAMEPAD Vendor: 045e Product: 028e)" or "Name (XInput STANDARD GAMEPAD)".
+    if let Some(open) = id.rfind(" (").filter(|_| id.ends_with(')')) {
+        let details = &id[open + 2..id.len() - 1];
+        let field = |label: &str| details.split(label).nth(1).and_then(|rest| hex(rest.trim().get(..4)?));
+        if details.contains("GAMEPAD") || details.contains("Vendor:") {
+            return (id[..open].trim().to_string(), field("Vendor:").zip(field("Product:")));
+        }
+    }
+    // Firefox: "045e-028e-Name".
+    let mut parts = id.splitn(3, '-');
+    if let (Some(vendor), Some(product), Some(name)) = (parts.next(), parts.next(), parts.next()) {
+        if let (Some(vendor), Some(product)) = (hex(vendor), hex(product)) {
+            return (name.trim().to_string(), Some((vendor, product)));
+        }
+    }
+    (id.trim().to_string(), None)
 }
 
 /// User model entries (settings/controller.json `models`), shared with the
