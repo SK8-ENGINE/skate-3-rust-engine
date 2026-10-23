@@ -113,6 +113,7 @@
                 linuxRuntimeLibs
                 # SDL requires these headers when X11 is enabled.
                 ++ (with pkgs; [
+                  libxcb
                   libxext
                   libxfixes
                   libxscrnsaver
