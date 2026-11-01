@@ -126,6 +126,13 @@ pub fn off_board_frames(line: &ReplayLine, node: u32, into: u32, s: &PushSetting
     frames_to(line, node, into, s.off_board_frames, |n| n.flags & node_flags::OFF_BOARD != 0)
 }
 
+/// `sub_8246B4C8`'s direction gate: the line against the facing of `sub_82468FC0`, the effective forward negated while
+/// riding fakie.
+pub fn against_line(forward: Vec3, fakie: bool, along: Vec3) -> bool {
+    let sign = if fakie { -1.0 } else { 1.0 };
+    (forward[0] * along[0] + forward[1] * along[1] + forward[2] * along[2]) * sign < 0.0
+}
+
 /// The push intents of this tick, or `None` (`sub_8246B4C8`). The caller runs it only on the ground, on the board,
 /// outside a hold, and below the target (at or above it retail brakes instead).
 pub fn push(input: &PushInput, s: &PushSettings) -> Option<[(&'static str, f32); 3]> {
@@ -202,6 +209,15 @@ pub fn brake(input: &PushInput, on_line: bool, s: &BrakeSettings, push: &PushSet
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fakie_skater_travelling_along_the_line_is_not_against_it() {
+        let (board, along) = ([0.0, 0.0, -1.0], [0.0, 0.0, 1.0]);
+        assert!(against_line(board, false, along), "forward stance, board against the line");
+        assert!(!against_line(board, true, along), "fakie: the facing is the board's other end");
+        assert!(against_line(along, true, along), "fakie with the board along the line faces away");
+        assert!(!against_line(along, false, along));
+    }
 
     fn input(speed: f32, target: f32) -> PushInput {
         PushInput { speed, target, category: 0, stuck_stage: 0, against_forward: false, heading_error: 0.0, trick_frames: None, off_board_frames: None, slope: 0.0, mirrored: true, fakie: false }

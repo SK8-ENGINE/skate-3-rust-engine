@@ -1108,6 +1108,7 @@ pub(crate) fn simulate(
                 let airborne_now = (200..300).contains(&(state_now as u32)) && sim.body.runtime.player_input.processed.wheel_count_2556 == 0;
                 // This tick's ground-steer heading error (`pc+824`) for the powerslide writer; 0 when not computed.
                 let mut slide_error = 0.0f32;
+                let mut ground_steered = false;
                 // The node-change handler's gate and body point for this tick's cursor steps (sub_8246BEE0, b674). NOT
                 // RETAIL YET: the upcoming-trick test (pc+796 / +797) has no stand-in.
                 replay.body_gate = Some(skate_core::living_world::replay::BodyGate {
@@ -1494,6 +1495,7 @@ pub(crate) fn simulate(
                                 };
                                 let g = ground_steer::heading_error(&input, t);
                                 slide_error = g.error;
+                                ground_steered = true;
                                 let s = ground_steer::stick(g.error, t.full_deg);
                                 intents.extend(ground_steer::intents(s).into_iter().map(|(k, v)| (k.to_string(), v)));
                                 if sim.chain_trace > 0 {
@@ -1537,7 +1539,10 @@ pub(crate) fn simulate(
                         let at = [deck.translation.x, deck.translation.y, deck.translation.z];
                         let off_line = (at[0] - target.position[0]).hypot(at[2] - target.position[2]);
                         let along = target.step;
-                        let heading_error = if along[0].hypot(along[2]) > 1e-5 { (forward[0] * along[2] - forward[2] * along[0]).atan2(forward[0] * along[0] + forward[2] * along[2]) } else { 0.0 };
+                        let riding_fakie = sim.body.runtime.animation.packet.riding_fakie;
+                        let facing = if riding_fakie { forward.map(|x| -x) } else { forward };
+                        // `pc+824`, the ground steer's error, when it ran this tick: docs/hails-additions/26e-living-world-skater-ai.md#push-while-riding-fakie
+                        let heading_error = if ground_steered { slide_error } else if along[0].hypot(along[2]) > 1e-5 { (facing[0] * along[2] - facing[2] * along[0]).atan2(facing[0] * along[0] + facing[2] * along[2]) } else { 0.0 };
                         let w = GamePhysics::context_deck_velocity(&sim.context);
                         let near = off_line <= t.look_ahead_distance;
                         let (node, into) = (replay.cursor.node, replay.cursor.frame_in_segment);
@@ -1546,7 +1551,7 @@ pub(crate) fn simulate(
                             target: avoid.last.shape_speed(ai_push::target_speed(target.step, off_line, t), false),
                             category: sim.slot.category,
                             stuck_stage: replay.avoid.controller.sub_mode,
-                            against_forward: forward[0] * along[0] + forward[1] * along[1] + forward[2] * along[2] < 0.0,
+                            against_forward: ai_push::against_line(forward, riding_fakie, along),
                             heading_error,
                             trick_frames: near.then(|| ai_push::trick_frames(line, node, into, t)).flatten(),
                             off_board_frames: near.then(|| ai_push::off_board_frames(line, node, into, t)).flatten(),

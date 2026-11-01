@@ -1606,3 +1606,16 @@ landing loss of skater #7 at node 26. Not play-tested.
   (skate-game).
 - Open: retail uses the path point's up vector, ours y-up (only differs on steep lines); whether retail runs the ground
   steer during skitch (mode 4) is unchecked, ours skips it. Not play-checked.
+
+
+## Push while riding fakie
+
+**Problem.** Laptop session game-20261101-101251: 66 NPC bails in 26 minutes, 25 of them the stuck chain's stage 5 give-up, mostly off the path at about 1 m/s. 24 of those 25 had `riding_fakie` backwards lines in the run-up. A skater that landed fakie could not push.
+
+**Root cause.** `sub_8246B4C8` takes its direction gate from `sub_82468FC0`: the effective forward, negated while `[PhysOut+56]+155` (riding fakie) is set (read in Ghidra, b200). Its heading gate reads `pc+824`, the ground steer's error, measured from that same facing (b353). Ours used the effective forward without the negation for both, so a fakie skater read about 180 degrees and never pushed.
+
+**Change.** `ai_push::against_line` applies the negation. The push and brake heading gate use this tick's ground steer error when the steer ran, else the angle from the fakie-corrected facing. Values stay in `npc_push`; no new constant. Multiplayer: same inputs, deterministic.
+
+**Verification.** `a_fakie_skater_travelling_along_the_line_is_not_against_it`. Muted University run, community skate park, 300 s, player idle (`.local/poc-tests/out/board-yaw`, `on` = before, `fix` = after): bails 15 -> 10, stage 5 give-ups 4 -> 1, bails with no wipeout reason 5 -> 1, landings 151 -> 206, tricks 274 -> 383. `NPC_SKATER_BACKWARDS` 42 -> 70: skaters keep riding fakie instead of stalling. One run per build, so a direction, not a rate.
+
+**Open.** The trick signals' `heading_error` in `npc_sim.rs` still uses the raw effective forward; check its retail field. Node 60's reason 3 bails are unchanged: 63.3 degrees against the 63.0 limit (`WIPEOUT_REASONS deck_error`), cause open. `pc+0x26C` as the line direction is inferred (b341).
