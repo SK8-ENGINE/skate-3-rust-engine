@@ -92,6 +92,10 @@ fn hud(assets: &Path, movies: &Path) -> Vec<Finding> {
             }
         }
     }
+    let scene = assets.join("private/hud/scene");
+    if scene.join("TrickGuide.skate").is_file() && !scene.join("MarqueeStage.skate").is_file() {
+        out.push(finding("hud", "menu stage missing: MarqueeStage.skate"));
+    }
     out.extend(hud_features(assets));
     out
 }
@@ -296,7 +300,7 @@ static FORCE_MENU_REFRESH: std::sync::atomic::AtomicBool = std::sync::atomic::At
 
 /// A finding that forces the refresh: the menu movies or tables (the `hud` group's menu files).
 pub(crate) fn forces_refresh(f: &Finding) -> bool {
-    f.group == "hud" && (f.reason.starts_with("menu movie") || f.reason.starts_with("menu tables"))
+    f.group == "hud" && (f.reason.starts_with("menu movie") || f.reason.starts_with("menu tables") || f.reason.starts_with("menu stage"))
 }
 
 /// Restart into the refresh once. Never from a run the refresh itself started (`--refresh-assets`), so a refresh that
@@ -350,6 +354,7 @@ mod tests {
         assert!(forces_refresh(&finding("hud", "menu movies are version 5 (this build reads 6)")));
         assert!(forces_refresh(&finding("hud", "menu tables lack the FE screens")));
         assert!(forces_refresh(&finding("hud", "menu movie manifest missing")));
+        assert!(forces_refresh(&finding("hud", "menu stage missing: MarqueeStage.skate")));
         assert!(!forces_refresh(&finding("hud", "hud textures missing")), "other hud files only offer the refresh");
         assert!(!forces_refresh(&finding("audio", "menu movies")), "other groups do not force it");
     }
@@ -457,6 +462,13 @@ mod tests {
             serde_json::json!({"format": crate::retail_menu_movies::FORMAT, "version": crate::retail_menu_movies::VERSION, "files": {"a.json": {}}}).to_string()).unwrap();
         assert_eq!(hud(&dir, &dir.join("private/menu-movies")).into_iter().map(|f| f.reason).collect::<Vec<_>>(), ["menu movie file missing: a.json"]);
         std::fs::write(private.join("menu-movies/a.json"), "{}").unwrap();
+        assert!(hud(&dir, &dir.join("private/menu-movies")).is_empty());
+        // A set exported before the skater select stage existed.
+        let scene = private.join("hud/scene");
+        std::fs::create_dir_all(&scene).unwrap();
+        std::fs::write(scene.join("TrickGuide.skate"), "").unwrap();
+        assert_eq!(hud(&dir, &dir.join("private/menu-movies")).into_iter().map(|f| f.reason).collect::<Vec<_>>(), ["menu stage missing: MarqueeStage.skate"]);
+        std::fs::write(scene.join("MarqueeStage.skate"), "").unwrap();
         assert!(hud(&dir, &dir.join("private/menu-movies")).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }

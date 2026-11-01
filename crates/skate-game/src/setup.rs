@@ -275,7 +275,8 @@ fn update_game_files_now() -> Result<(), (i32, String)> {
         return Err((2, format!("no game files at {}", assets.display())));
     }
     let started = std::time::Instant::now();
-    let findings = crate::asset_check::check(&assets);
+    let mut findings = crate::asset_check::check(&assets);
+    findings.extend(dev_converter_findings(root, &assets));
     eprintln!("ASSET_CHECK done in {} ms: {} problem(s)", started.elapsed().as_millis(), findings.len());
     let refreshed = refresh_for(findings, |groups| {
         for group in groups {
@@ -296,6 +297,41 @@ fn update_game_files_now() -> Result<(), (i32, String)> {
     .map_err(failed)?;
     eprintln!("{}", if refreshed { "GAME_FILES refreshed" } else { "GAME_FILES current: nothing to refresh" });
     Ok(())
+}
+
+/// Development copies have no release.json to compare converters with, so an explicit refresh asks the checkout's
+/// `versions.py`. Details: docs/hails-additions/08-setup-performance.md#asset-staleness-check
+fn dev_converter_findings(exe_dir: &Path, assets: &Path) -> Vec<crate::asset_check::Finding> {
+    let Some(checkout) = exe_dir.ancestors().find(|d| d.join("tools/asset_pipeline/versions.py").is_file()) else { return Vec::new() };
+    let Ok(base) = dev_base(assets) else { return Vec::new() };
+    let Ok(Some((_, marker))) = installed(&base) else { return Vec::new() };
+    let tools = checkout.join("tools/asset_pipeline");
+    let output = Command::new("py").arg("-3.13").arg("-I").arg(tools.join("versions.py")).current_dir(checkout).output();
+    let expected = match output {
+        Ok(o) if o.status.success() => serde_json::from_slice::<serde_json::Value>(&o.stdout).ok(),
+        _ => None,
+    };
+    let Some(expected) = expected else {
+        eprintln!("ASSET_CHECK converter versions unavailable: checking the files only");
+        return Vec::new();
+    };
+    let equivalence = std::fs::read(tools.join("pipeline-equivalence.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    converter_findings(&marker, &expected, equivalence.as_ref())
+}
+
+fn converter_findings(marker: &serde_json::Value, expected: &serde_json::Value, equivalence: Option<&serde_json::Value>) -> Vec<crate::asset_check::Finding> {
+    // Setup appends the DLC identity; a changed pack is the DLC check's finding, not a converter change.
+    let mut marker = marker.clone();
+    if let Some(pipelines) = marker["pipelines"].as_object_mut() {
+        for hash in pipelines.values_mut() {
+            if let Some((converter, _)) = hash.as_str().and_then(|h| h.split_once("+dlc:")) {
+                *hash = serde_json::Value::String(converter.to_owned());
+            }
+        }
+    }
+    outdated_groups(&marker, expected, equivalence).into_iter()
+        .map(|group| crate::asset_check::Finding { group, reason: "converter changed since setup".into() })
+        .collect()
 }
 
 /// What the start-of-game check found (`asset_check::check`): `refresh` runs once with the out-of-date groups, only
@@ -774,6 +810,18 @@ mod tests {
         .unwrap();
         assert_eq!(current["fingerprint"].as_str(), Some("new"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_explicit_refresh_reports_changed_converters() {
+        let marker = serde_json::json!({"version": 1, "pipelines": {"core": "a", "hud": "old", "maps": "m1"}});
+        let expected = serde_json::json!({"core": "a", "hud": "new", "maps": "m2"});
+        let equivalence = serde_json::json!({"maps": [["m1", "m2"]]});
+        let groups: Vec<String> = converter_findings(&marker, &expected, Some(&equivalence)).into_iter().map(|f| f.group).collect();
+        assert_eq!(groups, ["hud"]);
+        assert!(converter_findings(&marker, &marker["pipelines"], None).is_empty());
+        let with_dlc = serde_json::json!({"version": 1, "pipelines": {"hud": "new+dlc:pack"}});
+        assert!(converter_findings(&with_dlc, &serde_json::json!({"hud": "new"}), None).is_empty(), "DLC identity is not a converter change");
     }
 
     #[test]

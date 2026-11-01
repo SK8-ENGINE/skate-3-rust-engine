@@ -435,6 +435,10 @@ Detail moved out of the code comments of `crates/skate-game/src/asset_check.rs`;
 
 Launch-time asset staleness check. It reads the converted files themselves on every start, not a stamp: every output setup recorded must still be there at its recorded size, and each group's files must hold what this build reads (format versions and content). A failing group is logged (`ASSET_CHECK <group>: <reason>`) and marked stale (`setup::mark_stale`), so the PC overlay offers Extras > Refresh Game Files, which makes setup rebuild exactly those groups. Runs on a background thread once the startup loading screen is gone, so its thousands of file reads do not compete with the start's own loading on an HDD.
 
+A file a later build added is not in an older install's receipts, so it needs its own check. Laptop session game-20261101-084423: an Oct 25 install had no `private/hud/scene/MarqueeStage.skate`, FE 60 drew the preview skater in the live world with no stage, and both `--check-assets` and Refresh Game Files said the files were current. The check now reports `menu stage missing` when `TrickGuide.skate` exists without it (older hud export), and that finding forces the refresh like out-of-date menus.
+
+Development and launcher copies have no `release.json`, so nothing compared their converters with the install's (`installation.json` `pipelines`). `--update-game-files`, an explicit request, now runs the checkout's `tools/asset_pipeline/versions.py` and reports every group that differs, ignoring setup's `+dlc:` suffix (a changed pack is the DLC check's finding) and honouring `pipeline-equivalence.json`. A failure to run Python is logged and falls back to the file checks. Normal starts stay file-only: a Python start on every launch would slow them. Tests: `asset_check::tests::hud_check_reads_the_files_not_a_stamp`, `setup::tests::an_explicit_refresh_reports_changed_converters`. Open: the forced refresh on the real laptop install is the end-to-end check.
+
 ## Code reference: splash.rs
 
 Detail moved out of the code comments of `crates/skate-game/src/splash.rs`; each comment there links its section here.
