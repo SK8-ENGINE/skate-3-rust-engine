@@ -93,7 +93,7 @@ impl SimulatedTierSettings {
 pub(crate) const WIPEOUT_BIT: u32 = 0x0004_0000;
 
 /// `NPC_SKATER_BACKWARDS` line for a simulated NPC, read from its body (b352): docs/hails-additions/26e-living-world-skater-ai.md#simulated-backwards-line
-pub(crate) fn backwards_line(id: super::LivingWorldId, character: &str, sim: &NpcSim) -> Option<String> {
+pub(crate) fn backwards_line(id: super::LivingWorldId, character: &str, sim: &NpcSim, line: Option<&skate_core::living_world::replay::ReplayLine>, cursor: &skate_core::living_world::replay::LineCursor) -> Option<String> {
     // Ground frames on the board only: air, off-board and wipeout frames are not a backwards ride (b616).
     let p = &sim.body.runtime.player_input.processed;
     let state = sim.body.runtime.player_state.current() as u32;
@@ -110,14 +110,17 @@ pub(crate) fn backwards_line(id: super::LivingWorldId, character: &str, sim: &Np
         return None;
     }
     let p = GamePhysics::context_deck(&sim.context).translation;
+    let recorded_fakie = line.and_then(|l| l.nodes.get(cursor.node as usize)).map(|n| skate_core::living_world::replay::node_recorded_fakie(n, velocity));
+    let line_id = cursor.line.iter().take(4).map(|b| format!("{b:02x}")).collect::<String>();
     Some(format!(
-        "NPC_SKATER_BACKWARDS #{} {character} tier sim state {state} flip {} heading {:.0} velocity_yaw {:.0} off {:.0} deg {speed:.1} m/s riding_fakie {} pos {:.1} {:.1} {:.1}",
+        "NPC_SKATER_BACKWARDS #{} {character} tier sim state {state} flip {} heading {:.0} velocity_yaw {:.0} off {:.0} deg {speed:.1} m/s riding_fakie {} line {line_id} node {} recorded_fakie {recorded_fakie:?} pos {:.1} {:.1} {:.1}",
         id.serial,
         sim.air.flip,
         yaw(forward).to_degrees(),
         yaw(velocity).to_degrees(),
         off.abs().to_degrees(),
         sim.body.runtime.animation.packet.riding_fakie,
+        cursor.node,
         p.x,
         p.y,
         p.z,

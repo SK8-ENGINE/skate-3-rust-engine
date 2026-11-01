@@ -223,6 +223,10 @@ pub(crate) fn entry() -> Option<i32> {
         present("Skate 3 diagnostic UI preview\nSynthetic report only; no game was started.\n");
         return Some(0);
     }
+    // Their exit code is the answer to the caller, not a crash.
+    if std::env::args_os().any(|a| a == "--check-assets" || a == "--validate-maps") {
+        return None;
+    }
     let capture = Arc::new(Mutex::new(Capture::default()));
     let start = Instant::now();
     let result = std::env::current_exe().and_then(|exe| {

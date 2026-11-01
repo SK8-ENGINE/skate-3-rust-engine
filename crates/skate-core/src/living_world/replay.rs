@@ -424,6 +424,12 @@ pub struct FacingCheck {
     pub backwards: bool,
 }
 
+/// [`FacingCheck::recorded_fakie`] for travel along `velocity` at a node.
+pub fn node_recorded_fakie(node: &ReplayNode, velocity: [f32; 3]) -> bool {
+    let g = rotate(path_frame(node), [0.0, 0.0, 1.0]);
+    g[0].hypot(g[2]) > 1e-3 && yaw_angle(g, velocity).abs() > std::f32::consts::FRAC_PI_2
+}
+
 /// [`FacingCheck`] for a sample of `line`; `None` when the ground speed is below
 /// [`facing_diagnostic::MIN_SPEED`] or the heading is vertical.
 pub fn facing_check(line: &ReplayLine, s: &ReplaySample) -> Option<FacingCheck> {
@@ -436,10 +442,7 @@ pub fn facing_check(line: &ReplayLine, s: &ReplaySample) -> Option<FacingCheck> 
         return None;
     }
     let angle = yaw_angle(f, v).abs();
-    let recorded_fakie = line.nodes.get(s.node as usize).is_some_and(|n| {
-        let g = rotate(path_frame(n), [0.0, 0.0, 1.0]);
-        g[0].hypot(g[2]) > 1e-3 && yaw_angle(g, v).abs() > std::f32::consts::FRAC_PI_2
-    });
+    let recorded_fakie = line.nodes.get(s.node as usize).is_some_and(|n| node_recorded_fakie(n, v));
     Some(FacingCheck { heading_yaw: f[0].atan2(f[2]), velocity_yaw: v[0].atan2(v[2]), angle, recorded_fakie, drawn_fakie: s.fakie, backwards: angle > facing_diagnostic::BACKWARDS_ANGLE })
 }
 

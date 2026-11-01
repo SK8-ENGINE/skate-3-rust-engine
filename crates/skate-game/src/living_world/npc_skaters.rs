@@ -2100,7 +2100,7 @@ pub(crate) fn log_backwards(state: Res<PopulationState>, npcs: Query<(&NpcSkater
         }
         // A simulated NPC is drawn from its body, never from the cursor's sample (b352).
         let text = if let Some(sim) = sim {
-            super::npc_sim::backwards_line(npc.id, &npc.character, sim)
+            super::npc_sim::backwards_line(npc.id, &npc.character, sim, lines.get(&replay.cursor.line), &replay.cursor)
         } else {
             let (Some(s), Some(line)) = (replay.last.as_ref(), lines.get(&replay.cursor.line)) else { continue };
             if s.line != replay.cursor.line {
