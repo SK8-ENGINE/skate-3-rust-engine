@@ -336,9 +336,10 @@ pub fn manual_value(trick: i16, tunable: f32) -> f32 {
 }
 
 /// The trick anticipated ahead (`pc+792`, with `pc+796` set, `sub_824691A0`): the recorded trick of the first start
-/// node in the look-ahead, under the anticipation gates of [`signals`].
+/// node in the look-ahead. Retail gates this on the off-line distance only; heading and an open trick gate posting
+/// `AnticMag`, not `pc+796`.
 pub fn anticipated(line: &ReplayLine, s: &SignalSettings, input: &SignalInput) -> Option<i16> {
-    if input.off_line > s.anticipation_distance || input.in_trick || input.heading_error.abs() >= s.anticipation_heading {
+    if input.off_line > s.anticipation_distance {
         return None;
     }
     let n = upcoming_start(line, input.node, input.frame_in_segment, s.anticipation_frames)?;
@@ -562,6 +563,15 @@ mod tests {
         // Reaching the node: the trick, by its scorable name.
         let go = sig(&l, &s, &at(20, Some(19)), &|_| 85);
         assert_eq!(names(&go), ["Trick", "360flip", "GestureSpeed", "TrickHeight", "DontMirrorTrick"]);
+    }
+
+    /// `sub_824691A0`: only the off-line distance gates the anticipated trick; heading and an open trick do not.
+    #[test]
+    fn the_anticipated_trick_ignores_heading_and_an_open_trick() {
+        let l = line(20, 85, &[]);
+        let s = SignalSettings::default();
+        assert_eq!(anticipated(&l, &s, &SignalInput { heading_error: 3.0, in_trick: true, ..at(5, Some(4)) }), Some(85));
+        assert_eq!(anticipated(&l, &s, &SignalInput { off_line: 3.5, ..at(5, Some(4)) }), None);
     }
 
     #[test]

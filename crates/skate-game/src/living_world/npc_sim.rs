@@ -203,6 +203,8 @@ pub(crate) struct NpcSim {
     /// `+931`), research b113; cleared with the controller.
     slot: skate_core::living_world::ai_signals::TrickSlot,
     board_yaw: skate_core::living_world::ai_signals::BoardYaw,
+    /// `pc+824`, the ground steer's last error; retail keeps it between steer ticks.
+    ground_error: Option<f32>,
     /// The body after the last step (board and skeleton), the proxy others collide with; `None` until the first step.
     last_body: Option<skate_net::packed::BodyState>,
     /// The full retail audio-state record of the last step (`skate_events::skater_audio_state`, what the player's
@@ -257,6 +259,7 @@ fn clear_line_state(sim: &mut NpcSim) {
     sim.air = Default::default();
     sim.slot = Default::default();
     sim.board_yaw = Default::default();
+    sim.ground_error = None;
 }
 
 /// The ground steer's far aim; while avoid-steering it moves into the gap (`8246D560` -> `82464E30`, b612).
@@ -487,7 +490,7 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, hold_ticks)?;
     sim.handover_push = Some((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
     Ok(sim)
@@ -560,6 +563,7 @@ fn settle(sim: &mut NpcSim, hold_ticks: u32) {
     sim.trace_ticks = trace_ticks();
     sim.slot = Default::default();
     sim.board_yaw = Default::default();
+    sim.ground_error = None;
     sim.hold_ticks = hold_ticks;
     sim.placed_at = None;
     sim.air = Default::default();
@@ -1374,7 +1378,9 @@ pub(crate) fn simulate(
                         let at = [deck.translation.x, deck.translation.y, deck.translation.z];
                         let off_line = (at[0] - target.position[0]).hypot(at[2] - target.position[2]);
                         let along = target.step;
-                        let heading_error = if along[0].hypot(along[2]) > 1e-5 { (forward[0] * along[2] - forward[2] * along[0]).atan2(forward[0] * along[0] + forward[2] * along[2]) } else { 0.0 };
+                        let facing = if sim.body.runtime.animation.packet.riding_fakie { forward.map(|x| -x) } else { forward };
+                        // `AnticMag`'s gate reads `pc+824`; the steer runs later in this function, so last tick's.
+                        let heading_error = sim.ground_error.unwrap_or_else(|| if along[0].hypot(along[2]) > 1e-5 { (facing[0] * along[2] - facing[2] * along[0]).atan2(facing[0] * along[0] + facing[2] * along[2]) } else { 0.0 });
                         let input = skate_core::living_world::ai_signals::SignalInput {
                             node: replay.cursor.node,
                             frame_in_segment: replay.cursor.frame_in_segment,
@@ -1388,8 +1394,7 @@ pub(crate) fn simulate(
                         let chosen = |n: u32| tricks.iter().rev().find(|r| r.line == cursor_line && r.node == n).map_or_else(|| line.node_trick(&line.nodes[n as usize]), |r| r.chosen);
                         let slot_tricks = state.npc.tricks.slot_tricks_for(&npc.character);
                         let v = skate_core::living_world::ai_signals::signals(line, &rules.signals, &input, &chosen, &mut sim.slot, slot_tricks);
-                        anticipated = skate_core::living_world::ai_signals::anticipated(line, &rules.signals, &input);
-                        v
+                        anticipated = skate_core::living_world::ai_signals::anticipated(line, &rules.signals, &input);                        v
                     }
                     None => Vec::new(),
                 };
@@ -1496,6 +1501,7 @@ pub(crate) fn simulate(
                                 let g = ground_steer::heading_error(&input, t);
                                 slide_error = g.error;
                                 ground_steered = true;
+                                sim.ground_error = Some(g.error);
                                 let s = ground_steer::stick(g.error, t.full_deg);
                                 intents.extend(ground_steer::intents(s).into_iter().map(|(k, v)| (k.to_string(), v)));
                                 if sim.chain_trace > 0 {
