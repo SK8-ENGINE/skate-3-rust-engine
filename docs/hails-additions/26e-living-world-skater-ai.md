@@ -538,7 +538,7 @@ re-checked every address below in the recomp):
   normalised dot with +Z, made `2 pi -` it when `cross(v, +Z) . +Y < 0` (so `atan2(-v.x, v.z)` in [0, 2 pi); 0 for a
   zero vector; node matrix row 2 = the quaternion applied to +Z, `sub_82453970`). d is wrapped to [-pi, pi], folded
   to [-pi/2, pi/2] (nose and tail on the same line); above 0.31416 rad (18 deg) `BoardAdjustAngle` = +-pi/2 by the
-  sign of d and `BoardAdjustMag` = |d| x 6.0606 (not clamped). The air arm (`sub_8246B358` -> `sub_82471008`) posts
+  sign of d and `BoardAdjustMag` = |d| x 2/pi (`0x822F8B7C`, 0.63662: 90 deg = 1.0, the full FLAT clip; not clamped; we used 6.0606 from the neighbouring `0x822F8C7C` until 2026-11-02, research b801). The air arm (`sub_8246B358` -> `sub_82471008`) posts
   them every airborne tick, after the yaw steer; with a manual anticipated ahead it posts -2.677 (nosemanual) / 0.257
   instead, magnitude |0.5|. This was the open sign: decoded, no guess left.
 
@@ -1325,11 +1325,11 @@ Retail (TU3, evidence only; re-implemented):
 
 **Change.** `ai_signals::landing_node`; `npc_sim` uses it and cursor A for both. Test: `the_board_yaw_node_is_the_first_ground_node_after_the_air`. Diagnostics: `NPC_GRIND_TRY` (each airborne NPC tick near a rail) and `NPC_GRIND_DROP` (a candidate rejected after the investigation); tally tool `.local/poc-tests/npc_grinds.py`.
 
-**Open.** A recorded truck grind can still become a boardslide. At DownTown rail 6126 the recomp's skaters did 50-50s and 5-0s (9 of 9), ours boardslides with the board about 90 degrees off the body, from a recorded twist of 31 degrees (the recomp's board turns about 26 degrees in the air). With the twist off ours lands the recorded 5-0. Checked and matching the data: `angleRot90` turns the posted +pi/2 into the `IA_ADJUST_FLAT_FS` clip; `BLEND_ADJUST_RIGHT` is a phase blend on `MAGNITUDE` from idle (0) to that clip (1.0); the ollie may branch to `InAir.BoardAdjusts` once its clip has `CanBranch` (from 0.107 of `OLLIE_LOW_A`), and ours does so 0.07 to 0.14 s after takeoff. Not yet checked: the flat clip's own board yaw relative to the body, how the air board follows the animated board, the filtered magnitude in a short jump. Evidence: `.local/research/b800-npc-grind-family-rail-6126.md`. Idle test runs: `SKATE_TEST_STEP_OFF=<tick>` presses the player's off-board toggle once.
+**Cause found (2026-11-02, research b801).** At DownTown rail 6126 a recorded truck grind became a boardslide: the recomp's skaters did 50-50s and 5-0s (9 of 9), ours boardslid with the board about 90 degrees off the body from a recorded twist of 31 degrees (the recomp's board turns about 26 degrees in the air). The takeoff magnitude scale was wrong: retail multiplies |d| by 2/pi (`0x822F8B7C`), we used 6.0606 (`0x822F8C7C`), so a 31 degree twist posted 3.3 (full `IA_ADJUST_FLAT_FS` clip) instead of 0.345 (about a third of it). Fixed, see [Takeoff board yaw](#takeoff-board-yaw). Open: a re-run of the idle test at rail 6126 to confirm truck grinds, and whether the node 39 bails that start with a board adjust go away. Evidence: `.local/research/b800-npc-grind-family-rail-6126.md`, `.local/research/b801-board-adjust-angle.md`. Idle test runs: `SKATE_TEST_STEP_OFF=<tick>` presses the player's off-board toggle once.
 
 ### Takeoff board yaw
 
-`sub_8246B1F8` on the takeoff edge, from the cursor node's recorded board and skater frames: d = heading(board forward) - heading(skater forward) ([`retail_heading`]), wrapped to [-pi, pi], folded to [-pi/2, pi/2] (nose and tail lie on the same board line); outside the dead zone the angle is +-pi/2 by the sign of d and the magnitude |d| x scale (not clamped here).
+`sub_8246B1F8` on the takeoff edge, from the cursor node's recorded board and skater frames: d = heading(board forward) - heading(skater forward) ([`retail_heading`]), wrapped to [-pi, pi], folded to [-pi/2, pi/2] (nose and tail lie on the same board line); outside the dead zone the angle is +-pi/2 by the sign of d and the magnitude |d| x scale (2/pi, not clamped here).
 
 ## Code reference: living_world/npc_tricks.rs
 

@@ -276,7 +276,7 @@ pub fn retail_heading(v: Vec3) -> f32 {
 pub struct BoardYawTuning {
     /// No tweak while the folded yaw is at or under this (rad, `0x822F9284`, 0.31416 = 18 deg).
     pub dead_zone: f32,
-    /// `BoardAdjustMag` = |yaw| x this (`0x822F8C7C`, 6.0606).
+    /// `BoardAdjustMag` = |yaw| x this (`0x822F8B7C`, 2/pi: a 90 deg yaw is a full adjust).
     pub mag_scale: f32,
     /// `BoardAdjustAngle` with a manual ahead: nose-side and tail-side values (`0x822F94A8` / `0x822F94AC`).
     pub manual_ahead_angles: (f32, f32),
@@ -284,7 +284,7 @@ pub struct BoardYawTuning {
 
 impl Default for BoardYawTuning {
     fn default() -> Self {
-        Self { dead_zone: 0.31416, mag_scale: 6.0606, manual_ahead_angles: (-2.677, 0.257) }
+        Self { dead_zone: 0.31416, mag_scale: core::f32::consts::FRAC_2_PI, manual_ahead_angles: (-2.677, 0.257) }
     }
 }
 
@@ -541,12 +541,12 @@ mod tests {
         use core::f32::consts::FRAC_PI_2;
         let t = BoardYawTuning::default();
         // Board turned +80 deg about +Y from the skater (a noseblunt-like pose): d = heading(board) - heading(skater)
-        // = -80 deg, so the angle is -pi/2 and the magnitude 80 deg x 6.0606. (Exactly 90 deg is the fold edge: the
+        // = -80 deg, so the angle is -pi/2 and the magnitude 80/90 (80 deg x 2/pi). (Exactly 90 deg is the fold edge: the
         // byte rounding of the recorded frames decides the side there, as in retail.)
         let b = BoardYaw::takeoff(decode(yaw(80.0)), decode(yaw(0.0)), &t);
         assert!(b.set && b.latched);
         assert!((b.angle + FRAC_PI_2).abs() < 1e-6, "{b:?}");
-        assert!((b.mag - 80f32.to_radians() * 6.0606).abs() < 0.05, "{b:?}");
+        assert!((b.mag - 80.0 / 90.0_f32).abs() < 0.01, "{b:?}");
         // The other side and the reversed board (tail first) give the mirrored / same results.
         assert!((BoardYaw::takeoff(decode(yaw(-80.0)), decode(yaw(0.0)), &t).angle - FRAC_PI_2).abs() < 1e-6);
         let tail = BoardYaw::takeoff(decode(yaw(-160.0)), decode(yaw(0.0)), &t);

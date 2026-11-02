@@ -180,7 +180,7 @@ pub struct NpcSimulatedPatch {
     pub walk_stuck_ticks: Option<u32>,
     /// The takeoff board yaw toward the recorded board angle (`BoardAdjustAngle` / `BoardAdjustMag` in the air, so a
     /// recorded slide lands as recorded; research b113; retail on), its dead zone (rad, 0..=pi/2; retail 0.31416) and
-    /// magnitude scale (0..=100; retail 6.0606).
+    /// magnitude scale (0..=100; retail 2/pi = 0.63662).
     pub board_yaw: Option<bool>,
     pub board_yaw_dead_zone: Option<f32>,
     pub board_yaw_mag_scale: Option<f32>,
