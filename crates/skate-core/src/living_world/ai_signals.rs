@@ -298,6 +298,28 @@ pub struct BoardYaw {
     pub mag: f32,
 }
 
+/// `sub_824566C8`: the first ground node after the next air section from `from`, where the recording lands; a landing
+/// inside a footplant (category 13) does not count.
+pub fn landing_node(line: &ReplayLine, from: u32) -> Option<u32> {
+    let (mut category, mut in_air) = (0, false);
+    for (i, node) in line.nodes.iter().enumerate().skip(from as usize) {
+        match node.event {
+            node_events::START_TRICK => category = catalog::category(line.node_trick(node)).unwrap_or(0),
+            node_events::END_TRICK => category = 0,
+            _ => {}
+        }
+        if node.flags & node_flags::AIRBORNE != 0 {
+            in_air = true;
+        } else if in_air {
+            if category != 13 {
+                return u32::try_from(i).ok();
+            }
+            in_air = false;
+        }
+    }
+    None
+}
+
 impl BoardYaw {
     /// 8246B1F8 on the takeoff edge: board yaw from the node's recorded board and skater frames: docs/hails-additions/26e-living-world-skater-ai.md#takeoff-board-yaw
     pub fn takeoff(board: [f32; 4], skater: [f32; 4], t: &BoardYawTuning) -> Self {
@@ -542,6 +564,27 @@ mod tests {
 
     fn decode(raw: [u8; 4]) -> [f32; 4] {
         crate::living_world::replay::decode_orientation(raw)
+    }
+
+    #[test]
+    fn the_board_yaw_node_is_the_first_ground_node_after_the_air() {
+        let air = node_flags::AIRBORNE;
+        let mut l = line(30, 85, &[(5, air), (6, air), (10, air)]);
+        assert_eq!(landing_node(&l, 0), Some(7));
+        assert_eq!(landing_node(&l, 6), Some(7));
+        assert_eq!(landing_node(&l, 7), Some(11));
+        assert_eq!(landing_node(&l, 11), None);
+        // A landing inside a footplant does not count.
+        let footplant = (0..332).find(|&t| catalog::category(t) == Some(13)).unwrap();
+        l.jumps[0].trick = footplant;
+        l.nodes[30].event = 0;
+        l.nodes[4].event = node_events::START_TRICK;
+        l.nodes[4].jump = Some(0);
+        assert_eq!(landing_node(&l, 0), None);
+        l.nodes[8].event = node_events::END_TRICK;
+        assert_eq!(landing_node(&l, 0), Some(11));
+        l.nodes[7].event = node_events::END_TRICK;
+        assert_eq!(landing_node(&l, 0), Some(7));
     }
 
     #[test]

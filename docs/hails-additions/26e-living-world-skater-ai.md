@@ -534,7 +534,7 @@ re-checked every address below in the recomp):
   holds `PhysGrindUpDown` -1, a nosegrind +1, grab variants `Left/RightGroundGrab`; 50-50s, noseblunts, tailslides,
   boardslides have an empty list. Intent names: the executable's enum table (0x82FCB260, 146 names).
 - **The takeoff board yaw** (`sub_8246B1F8`): on the takeoff edge, d = heading(recorded board forward) -
-  heading(recorded skater forward) of the cursor node, where `sub_8296EC98(v, +Z, +Y)` is the acos of the
+  heading(recorded skater forward) of the node the jump lands on (corrected 2026-11-01, see [below](#board-yaw-reads-the-landing-node)), where `sub_8296EC98(v, +Z, +Y)` is the acos of the
   normalised dot with +Z, made `2 pi -` it when `cross(v, +Z) . +Y < 0` (so `atan2(-v.x, v.z)` in [0, 2 pi); 0 for a
   zero vector; node matrix row 2 = the quaternion applied to +Z, `sub_82453970`). d is wrapped to [-pi, pi], folded
   to [-pi/2, pi/2] (nose and tail on the same line); above 0.31416 rad (18 deg) `BoardAdjustAngle` = +-pi/2 by the
@@ -1316,6 +1316,14 @@ Retail (TU3, evidence only; re-implemented):
 - trick slot: `pc+832` category (from the recorded trick, table 0x820862A8), `pc+844` trick, `pc+904` ticks since the start node (0 there, +1 after every writer call); an end node or a failed dispatch clears the category (0x8246A6D4). Jump table 0x8246A45C: 1 / 2 perform; 3 / 4 / 12 take the trick only when the profile's slot-tricks byte (+51) is set (`sub_82469EF0`; else the slot keeps the old trick); 5 / 7 / 10 / 13 take it; 6 / 9 only validate; 8 is the manual value; 11 (revert) posts `Trick` and `SlideFs180` (fsrevert, id 4) / `SlideBs180` (bsrevert, id 5) (`sub_8246A1E8`).
 - per-tick writer `sub_824696B8` (jump table 0x824698F8): categories 1-5, 7, 10, 12, 13 post the slot trick's `SkaterIntentTuple` list (`sub_82470ED0`: entry live from `start` to `end`, `end` < 0 = open); 6 (handplant) posts `GrabWorld` 1.0; 8 `Manual`; 9 the powerslide keys; 11 nothing.
 - takeoff board yaw (`sub_8246B1F8`) and its post in the air arm (`sub_8246B358` -> `sub_82471008`): see [`BoardYaw`].
+
+### Board yaw reads the landing node
+
+**Problem.** NPC skaters missed about 28% of their recorded grinds in a 23-minute session, and caught grinds were often another family. Of the recorded truck grinds that came out as boardslides, 12 of 12 had a takeoff yaw posted, against 0 of 13 for 50-50s and 1 of 19 for 5-0s.
+
+**Root cause.** `sub_8246A700` on the takeoff edge calls `sub_824566C8(line, pc+652)` from cursor A: the first node without the airborne flag after one with it, not counting a landing while the open trick's category is 13 (start node sets the category, end node clears it). That node goes into cursor C (`pc+712`), which `sub_8246B1F8` reads; with no such node `pc+0x3A2` stays 0 and nothing is posted. Ours read the replay cursor's node at takeoff. The flip latch reads cursor A's frame (`pc+0x260`); ours read the replay cursor too.
+
+**Change.** `ai_signals::landing_node`; `npc_sim` uses it and cursor A for both. Test: `the_board_yaw_node_is_the_first_ground_node_after_the_air`. Diagnostics: `NPC_GRIND_TRY` (each airborne NPC tick near a rail) and `NPC_GRIND_DROP` (a candidate rejected after the investigation); tally tool `.local/poc-tests/npc_grinds.py`.
 
 ### Takeoff board yaw
 

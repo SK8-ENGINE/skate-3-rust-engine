@@ -1420,19 +1420,25 @@ pub(crate) fn simulate(
                 let character = sim.body.runtime.animated_skeleton.roots.animation_to_world;
                 let (char_forward, char_up) = ([character[2][0], character[2][1], character[2][2]], [character[1][0], character[1][1], character[1][2]]);
                 if let Some(line) = lines.get(&replay.cursor.line) {
-                    let node_forward = skate_core::living_world::air_steer::node_skater_forward(line, replay.cursor.node);
+                    // Cursor A (`pc+608`, `pc+652`), as `sub_8246A700` reads it; the replay cursor when off its line.
+                    let cursor_a = sim.follow.filter(|(id, _)| *id == replay.cursor.line).map_or(replay.cursor.node, |(_, f)| f.a.0);
+                    let node_forward = skate_core::living_world::air_steer::node_skater_forward(line, cursor_a);
                     if sim.air.airborne && !airborne_now {
                         // The air steer's check (b616): the landing facing against the recorded one, sign expected = latch.
                         let d = char_forward[0] * node_forward[0] + char_forward[2] * node_forward[2];
                         info!("NPC_SKATER_LAND #{} {} node {} flip {} char.node {d:.2} aligned {}", npc.id.serial, npc.character, replay.cursor.node, sim.air.flip, (d < 0.0) == sim.air.flip);
                     }
                     if sim.air.tick(airborne_now, char_forward, node_forward) {
-                        // `sub_8246B1F8`: the cursor node's recorded board-vs-skater yaw, posted while airborne.
-                        let n = &line.nodes[(replay.cursor.node as usize).min(line.nodes.len() - 1)];
-                        use skate_core::living_world::replay::decode_orientation;
-                        sim.board_yaw = skate_core::living_world::ai_signals::BoardYaw::takeoff(decode_orientation(n.board), decode_orientation(n.skater), &rules.board_yaw);
+                        // `sub_8246A700` -> `sub_824566C8` -> `sub_8246B1F8`: the recorded board-vs-skater yaw of the node
+                        // the jump lands on, posted while airborne.
+                        use skate_core::living_world::{ai_signals, replay::decode_orientation};
+                        let landing = ai_signals::landing_node(line, cursor_a);
+                        sim.board_yaw = landing.map_or_else(ai_signals::BoardYaw::default, |i| {
+                            let n = &line.nodes[i as usize];
+                            ai_signals::BoardYaw::takeoff(decode_orientation(n.board), decode_orientation(n.skater), &rules.board_yaw)
+                        });
                         if sim.board_yaw.set {
-                            info!("NPC_SKATER_BOARD_YAW #{} {} node {} angle {:.2} mag {:.2} slot {} {}", npc.id.serial, npc.character, replay.cursor.node, sim.board_yaw.angle, sim.board_yaw.mag, sim.slot.category, super::npc_skaters::trick_name(sim.slot.trick));
+                            info!("NPC_SKATER_BOARD_YAW #{} {} node {} landing {:?} angle {:.2} mag {:.2} slot {} {}", npc.id.serial, npc.character, cursor_a, landing, sim.board_yaw.angle, sim.board_yaw.mag, sim.slot.category, super::npc_skaters::trick_name(sim.slot.trick));
                         }
                         let d = GamePhysics::context_deck(&sim.context).basis.columns[2];
                         let v = sim.last_deck.map(|q| { let p = projected_point(sim, state_now).0; [p[0] - q[0], p[1] - q[1], p[2] - q[2]] }).unwrap_or([0.0; 3]);
