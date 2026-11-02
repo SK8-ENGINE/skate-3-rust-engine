@@ -394,7 +394,7 @@ function sdk.audio.teleport_effect(amount) submit{kind="audio_teleport_effect",a
 -- under Industrial's south tree wall) or the checkpoint respawn ("respawn": air_timeout_ticks, retail 300 =
 -- 5 s of 1/60 s ticks in the air before the skater is sent to the last checkpoint, 1..216000) or the
 -- auto-exposure meter ("exposure": meter_weights, retail {0.3, 0.4, 0.3}; meter_scale, retail 2.515) or the skater
--- fade-in after every placement ("ghost": enabled, retail true; fade_in_seconds, retail 1.0, 0..60; hold_alpha,
+-- fade-in after every placement ("ghost": enabled, default false; fade_in_seconds, retail 1.0, 0..60; hold_alpha,
 -- retail 0.68, 0..1) or the world decals ("decals": opacity, retail 1.0, 0..1: strength of every decal over
 -- its surface, applied at once) or the park videoscreens' live feed ("video_screens": enabled, default true;
 -- width / height in pixels, 16..2048; rate_hz, 1..240; max_distance in m, 1..10000) or the props' impact sounds

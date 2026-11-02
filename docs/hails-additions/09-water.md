@@ -695,7 +695,8 @@ NOT RETAIL yet:
   `.local/research/in-water/rpcs3-menu-teleport-tanker-10fps.jpg`) shows the skater see-through
   for only about 0.3 s after the loading screen clears. Ours also starts at the completed
   placement (and at the new skater after a map load), but our teleports have no loading screen,
-  so the whole 1 s is visible in ours. Open item.
+  so the whole 1 s was visible in ours. Closed: the fade is now off by default, see
+  [the ghost fade rule](26c-living-world-npc-skaters.md#ghost-fade-rule).
 
 Tests: `skate_core::player::ghost::tests` (curve, frame-rate independence, restart, disable,
 hold, validation), `skater_ghost::tests` (every placement restarts the fade; blended copy while

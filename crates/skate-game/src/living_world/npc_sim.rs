@@ -205,6 +205,8 @@ pub(crate) struct NpcSim {
     board_yaw: skate_core::living_world::ai_signals::BoardYaw,
     /// `pc+824`, the ground steer's last error; retail keeps it between steer ticks.
     ground_error: Option<f32>,
+    /// Ticks since the last landing (`pc+900`, `sub_8246A700`).
+    since_landing: u32,
     /// The body after the last step (board and skeleton), the proxy others collide with; `None` until the first step.
     last_body: Option<skate_net::packed::BodyState>,
     /// The full retail audio-state record of the last step (`skate_events::skater_audio_state`, what the player's
@@ -490,7 +492,7 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, hold_ticks)?;
     sim.handover_push = Some((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
     Ok(sim)
@@ -1373,6 +1375,7 @@ pub(crate) fn simulate(
                 // below when the dispatcher would not have run this tick.
                 let slot_before = sim.slot;
                 let mut anticipated = None;
+                sim.since_landing = if sim.air.airborne && !airborne_now { 0 } else { sim.since_landing.saturating_add(1) };
                 let intents = match lines.get(&replay.cursor.line) {
                     Some(line) => {
                         let at = [deck.translation.x, deck.translation.y, deck.translation.z];
@@ -1387,7 +1390,7 @@ pub(crate) fn simulate(
                             last_node: sim.last_node,
                             off_line,
                             heading_error,
-                            in_trick: replay.cursor.current_trick() >= 0,
+                            manual_window: airborne_now || sim.since_landing < 5,
                         };
                         let cursor_line = replay.cursor.line;
                         let tricks = &replay.tricks;
@@ -1574,6 +1577,7 @@ pub(crate) fn simulate(
                                 debug!("NPC_SKATER_AI_PUSH #{} node {node} speed {:.2} target {:.2} slope {:.2}", npc.id.serial, input.speed, input.target, input.slope);
                             }
                             sim.pushing = true;
+                            skate_core::living_world::ai_signals::drop_for_push(&mut intents);
                             intents.extend(push.into_iter().map(|(k, v)| (k.to_string(), v)));
                         } else {
                             sim.pushing = false;

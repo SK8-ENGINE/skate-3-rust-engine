@@ -44,8 +44,8 @@ pub struct SignalInput {
     pub off_line: f32,
     /// Angle between the skater's facing and the line, radians.
     pub heading_error: f32,
-    /// A trick span is open (no new anticipation, no crouch).
-    pub in_trick: bool,
+    /// In the air or under 5 ticks after landing (`pc+0x3A0`, `pc+900`): only then a manual ahead is posted.
+    pub manual_window: bool,
 }
 
 /// The first start-trick node within `frames` recorded frames after (`node`, `into`)
@@ -67,26 +67,7 @@ pub fn upcoming_start(line: &ReplayLine, node: u32, into: u32, frames: u32) -> O
 /// The signals of this tick. `chosen` gives the trick started at a start-trick node (the npc_tricks
 /// choice the replay cursor made; the recorded trick when it has none).
 pub fn signals(line: &ReplayLine, s: &SignalSettings, input: &SignalInput, chosen: &dyn Fn(u32) -> i16, slot: &mut TrickSlot, slot_tricks: bool) -> Vec<Signal> {
-    let mut out = Vec::new();
-    // Anticipation.
-    if input.off_line <= s.anticipation_distance && !input.in_trick && input.heading_error.abs() < s.anticipation_heading {
-        if let Some(n) = upcoming_start(line, input.node, input.frame_in_segment, s.anticipation_frames) {
-            let recorded = line.node_trick(&line.nodes[n as usize]);
-            match catalog::category(recorded) {
-                Some(1 | 2) => {
-                    out.push(("AnticMag".into(), 1.0));
-                    let angle = if super::npc_tricks::is_nollie(recorded) { core::f32::consts::PI } else { 0.0 };
-                    out.push(("AnticAngle".into(), angle));
-                }
-                // `sub_824696B8` with `pc+788` = 8: the manual's side, `sub_82469338(pc+792)` (+ nose, - tail).
-                Some(8) => out.push(("Manual".into(), manual_value(recorded, s.manual_value))),
-                _ => {}
-            }
-        }
-    }
-    if !input.in_trick && line.nodes.get(input.node as usize).is_some_and(|n| n.flags & node_flags::CROUCHED != 0) {
-        out.push(("Crouch".into(), 1.0));
-    }
+    let mut dispatched = Vec::new();
     // Dispatch: the newest start-trick node crossed this tick.
     let limit = if input.last_node.is_none() { 1 } else { s.max_crossed_nodes };
     let from = input.last_node.map_or(input.node, |l| l + 1);
@@ -96,11 +77,36 @@ pub fn signals(line: &ReplayLine, s: &SignalSettings, input: &SignalInput, chose
             if line.nodes[n as usize].event == node_events::END_TRICK {
                 slot.category = 0;
             } else {
-                dispatch(line.node_trick(&line.nodes[n as usize]), chosen(n), slot, slot_tricks, s.manual_value, &mut out);
+                dispatch(line.node_trick(&line.nodes[n as usize]), chosen(n), slot, slot_tricks, s.manual_value, &mut dispatched);
             }
         }
     }
+    // The writer `sub_824696B8` runs after the dispatch, so it reads the slot as dispatched.
+    let mut out = Vec::new();
+    let upcoming = (input.off_line <= s.anticipation_distance)
+        .then(|| upcoming_start(line, input.node, input.frame_in_segment, s.anticipation_frames))
+        .flatten()
+        .map(|n| line.node_trick(&line.nodes[n as usize]));
+    let category = upcoming.and_then(catalog::category);
+    let anticipating = matches!(category, Some(1 | 2)) && input.heading_error.abs() < s.anticipation_heading && slot.category != 8;
+    if let (true, Some(recorded)) = (anticipating, upcoming) {
+        out.push(("AnticMag".into(), 1.0));
+        let angle = if super::npc_tricks::is_nollie(recorded) { core::f32::consts::PI } else { 0.0 };
+        out.push(("AnticAngle".into(), angle));
+    }
+    if !anticipating && slot.category == 0 && line.nodes.get(input.node as usize).is_some_and(|n| n.flags & node_flags::CROUCHED != 0) {
+        out.push(("Crouch".into(), 1.0));
+    }
+    if let (Some(8), true, true, Some(recorded)) = (category, input.manual_window, slot.category != 8, upcoming) {
+        out.push(("Manual".into(), manual_value(recorded, s.manual_value)));
+    }
+    out.extend(dispatched);
     out
+}
+
+/// The push writer set `pc+0x39E` this tick: the writer posts no anticipation and no crouch.
+pub fn drop_for_push(out: &mut Vec<Signal>) {
+    out.retain(|x| !matches!(x.0.as_str(), "AnticMag" | "AnticAngle" | "Crouch"));
 }
 
 /// One timed intent of a trick (`Sk8::Score::SkaterIntentTuple`, 16 B: i32 intent index into
@@ -413,7 +419,7 @@ mod tests {
     }
 
     fn at(node: u32, last: Option<u32>) -> SignalInput {
-        SignalInput { node, frame_in_segment: 0, last_node: last, off_line: 0.2, heading_error: 0.1, in_trick: false }
+        SignalInput { node, frame_in_segment: 0, last_node: last, off_line: 0.2, heading_error: 0.1, manual_window: false }
     }
 
     fn names(v: &[Signal]) -> Vec<&str> {
@@ -565,12 +571,29 @@ mod tests {
         assert_eq!(names(&go), ["Trick", "360flip", "GestureSpeed", "TrickHeight", "DontMirrorTrick"]);
     }
 
+    /// `sub_824696B8`: an open trick other than a manual does not stop `AnticMag`, a manual does; anticipating or
+    /// pushing stops the crouch.
+    #[test]
+    fn the_writer_gates_anticipation_on_a_manual_and_on_the_push() {
+        let l = line(20, 85, &[(5, node_flags::CROUCHED)]);
+        let s = SignalSettings::default();
+        let mut grinding = TrickSlot { category: 5, ..TrickSlot::default() };
+        assert_eq!(names(&signals(&l, &s, &at(5, Some(4)), &|_| 85, &mut grinding, true)), ["AnticMag", "AnticAngle"]);
+        let mut manual = TrickSlot { category: 8, ..TrickSlot::default() };
+        assert!(signals(&l, &s, &at(5, Some(4)), &|_| 85, &mut manual, true).is_empty());
+        let facing_away = sig(&l, &s, &SignalInput { heading_error: 1.0, ..at(5, Some(4)) }, &|_| 85);
+        assert_eq!(names(&facing_away), ["Crouch"]);
+        let mut pushed = sig(&l, &s, &at(5, Some(4)), &|_| 85);
+        drop_for_push(&mut pushed);
+        assert!(pushed.is_empty());
+    }
+
     /// `sub_824691A0`: only the off-line distance gates the anticipated trick; heading and an open trick do not.
     #[test]
     fn the_anticipated_trick_ignores_heading_and_an_open_trick() {
         let l = line(20, 85, &[]);
         let s = SignalSettings::default();
-        assert_eq!(anticipated(&l, &s, &SignalInput { heading_error: 3.0, in_trick: true, ..at(5, Some(4)) }), Some(85));
+        assert_eq!(anticipated(&l, &s, &SignalInput { heading_error: 3.0, ..at(5, Some(4)) }), Some(85));
         assert_eq!(anticipated(&l, &s, &SignalInput { off_line: 3.5, ..at(5, Some(4)) }), None);
     }
 
@@ -593,7 +616,8 @@ mod tests {
         let mut l = line(10, 3, &[]);
         l.nodes[14].event = node_events::END_TRICK;
         let s = SignalSettings::default();
-        let ahead = sig(&l, &s, &at(5, Some(4)), &|_| 3);
+        assert!(sig(&l, &s, &at(5, Some(4)), &|_| 3).is_empty(), "on the ground, long after landing");
+        let ahead = sig(&l, &s, &SignalInput { manual_window: true, heading_error: 3.0, ..at(5, Some(4)) }, &|_| 3);
         assert_eq!(ahead, vec![("Manual".to_string(), -0.5)]);
         let mut slot = TrickSlot::default();
         let start = signals(&l, &s, &at(10, Some(9)), &|_| 3, &mut slot, true);
@@ -602,7 +626,7 @@ mod tests {
         for _ in 0..3 {
             assert_eq!(slot_signals(&mut slot, &[], 1.0, Slide::default()), vec![("Manual".to_string(), -0.5)]);
         }
-        signals(&l, &s, &SignalInput { in_trick: true, ..at(14, Some(13)) }, &|_| 3, &mut slot, true);
+        signals(&l, &s, &at(14, Some(13)), &|_| 3, &mut slot, true);
         assert_eq!(slot.category, 0);
         assert!(slot_signals(&mut slot, &[], 1.0, Slide::default()).is_empty(), "nothing after the end node");
         assert_eq!(manual_value(2, s.manual_value), 0.5, "a nosemanual's side is +");
@@ -614,8 +638,9 @@ mod tests {
         let s = SignalSettings::default();
         assert!(names(&sig(&l, &s, &at(10, Some(5)), &|_| 85)).iter().all(|n| *n != "Trick"));
         assert!(names(&sig(&l, &s, &at(10, Some(7)), &|_| 85)).contains(&"Trick"));
-        assert!(names(&sig(&l, &s, &at(3, Some(2)), &|_| 85)).contains(&"Crouch"));
-        assert!(!names(&sig(&l, &s, &SignalInput { in_trick: true, ..at(3, Some(2)) }, &|_| 85)).contains(&"Crouch"));
+        assert!(names(&sig(&l, &s, &SignalInput { heading_error: 1.0, ..at(3, Some(2)) }, &|_| 85)).contains(&"Crouch"));
+        let mut grinding = TrickSlot { category: 5, ..TrickSlot::default() };
+        assert!(!names(&signals(&l, &s, &SignalInput { heading_error: 1.0, ..at(3, Some(2)) }, &|_| 85, &mut grinding, true)).contains(&"Crouch"));
     }
 }
 

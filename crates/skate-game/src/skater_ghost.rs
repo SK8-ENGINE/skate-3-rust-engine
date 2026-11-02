@@ -16,7 +16,7 @@ pub(crate) struct SkaterPlaced {
     pub placement: u32,
 }
 
-/// Fade tuning a mod changes (`sdk.world.set_tuning('ghost', ...)`); `default()` = retail.
+/// Fade tuning a mod changes (`sdk.world.set_tuning('ghost', ...)`); `default()` = no visible fade.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Default)]
 pub(crate) struct GhostTuning(pub GhostSettings);
 
@@ -245,7 +245,7 @@ mod tests {
     fn every_placement_kind_restarts_the_fade() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<GhostTuning>()
+            .insert_resource(GhostTuning(GhostSettings { enabled: true, ..GhostSettings::default() }))
             .init_resource::<SkaterGhosts>()
             .add_message::<SkaterPlaced>()
             .add_systems(Update, step_fades);

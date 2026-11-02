@@ -1182,6 +1182,8 @@ Retail keeps a fade-in timer in seconds per skater placement component (owner +1
 - else a fade-out timer (+1872, constructor FLT_MAX = off) would apply; nothing in our port starts it,
 - else 1.0.
 
+**Default off.** The skater must be fully faded in when the screen shows it. Our respawns and same-map teleports have no screen cover to hide the 1 s ramp, so `GhostSettings::default()` has `enabled: false` and a placed skater draws solid at once. This follows the user's account of retail play; it differs from the earlier reading that the ramp is partly visible in retail (the trace and the RPCS3 video in [09-water.md](09-water.md)). A mod can turn the ramp on with `ghost.enabled`.
+
 Generalised for mods: opacity = clamp(timer / fade_in_seconds, 0, 1) and the hold compares the opacity with `hold_alpha` (retail 1.0 s and 0.68, where both forms are the same). Time-based, so the curve is the same at any tick rate.
 
 NOT RETAIL YET: who sets state byte 71 (the 0.68 hold) is undecoded; hosts pass `hold = false`.

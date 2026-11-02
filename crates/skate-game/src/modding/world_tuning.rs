@@ -870,21 +870,21 @@ mod tests {
     }
 
     #[test]
-    fn ghost_fade_defaults_to_retail_set_and_reset_on_disable() {
+    fn ghost_fade_defaults_off_set_and_reset_on_disable() {
         let mut w = world();
-        assert_eq!(read(&w, "ghost"), json!({"enabled": true, "fade_in_seconds": 1.0f32, "hold_alpha": 0.68f32}));
+        assert_eq!(read(&w, "ghost"), json!({"enabled": false, "fade_in_seconds": 1.0f32, "hold_alpha": 0.68f32}));
         set(&mut w, "dev.a", "ghost", Some(json!({"fade_in_seconds": 2.5}))).unwrap();
-        set(&mut w, "dev.b", "ghost", Some(json!({"fade_in_seconds": 0.5, "enabled": false}))).unwrap();
+        set(&mut w, "dev.b", "ghost", Some(json!({"fade_in_seconds": 0.5, "enabled": true}))).unwrap();
         let g = w.resource::<GhostTuning>().0;
         assert_eq!(g.fade_in_seconds, 2.5, "first writer wins");
-        assert!(!g.enabled, "unset field from the next writer");
+        assert!(g.enabled, "unset field from the next writer");
         assert!(set(&mut w, "dev.a", "ghost", Some(json!({"fade_in_seconds": -1.0}))).is_err());
         assert!(set(&mut w, "dev.a", "ghost", Some(json!({"hold_alpha": 2.0}))).is_err());
         assert!(set(&mut w, "dev.a", "ghost", Some(json!({"colour": 1}))).is_err());
         clear_owner(&mut w, "dev.a");
         assert_eq!(w.resource::<GhostTuning>().0.fade_in_seconds, 0.5);
         clear_all(&mut w);
-        assert_eq!(*w.resource::<GhostTuning>(), GhostTuning::default(), "mod disable restores retail");
+        assert_eq!(*w.resource::<GhostTuning>(), GhostTuning::default(), "mod disable restores the default");
     }
 
     #[test]

@@ -163,7 +163,7 @@ Domains:
 - `backdrop`: `visible` (bool), the district's global presentation model (Industrial's sea, the far sea planes, distant tree walls). Retail draws it (true). `proxy_terrain` (bool), the far-proxy hills retail leaves drawn where no full-detail cell pairs with them (Industrial's south hills under the tree wall). Retail true.
 - `respawn`: `air_timeout_ticks` (integer, 1..=[`MAX_AIR_TIMEOUT_TICKS`]), the fixed 1/60 s ticks a skater may spend in the air before the checkpoint respawn (retail 300 = 5 s, `CalcSuggestedState` `count > 300`), e.g. after falling off the map.
 - `exposure`: the auto-exposure meter. `meter_weights = {r, g, b}` (each 0..=1; retail {0.3, 0.4, 0.3}, the channel weights retail's bloom downsample dots its tone-mapped value with) and `meter_scale` (0..=[`MAX_METER_SCALE`]; retail 2.515, the evaluator's average scale).
-- `ghost`: the skater fade-in after every placement (respawn, teleport, marker return, spawn). `enabled` (bool, retail true), `fade_in_seconds` (0..=[`MAX_GHOST_FADE_IN_SECONDS`], retail 1.0; 0 = no fade) and `hold_alpha` (0..=1, retail 0.68, the opacity the fade waits at while retail's hold condition is set; that condition is not decoded yet, so it has no effect now).
+- `ghost`: the skater fade-in after every placement (respawn, teleport, marker return, spawn). `enabled` (bool, default false: the skater is solid when the screen shows it), `fade_in_seconds` (0..=[`MAX_GHOST_FADE_IN_SECONDS`], retail 1.0; 0 = no fade) and `hold_alpha` (0..=1, retail 0.68, the opacity the fade waits at while retail's hold condition is set; that condition is not decoded yet, so it has no effect now).
 - `video_screens`: the park videoscreens' live feed ([doc 35](35-world-shading-parity.md#videoscreen-live-feed)). `enabled` (bool, default true), `width` / `height` (16..=[`MAX_VIDEO_FEED_SIZE`], default 512 x 288), `rate_hz` (1..=240, default 30) and `max_distance` (1..=10000 m, default 300). The defaults are provisional, not retail values yet.
 - `prop_sounds`: the dynamic props' impact sounds ([doc 27](27-dynamic-props.md#prop-sounds)). `enabled` (bool, retail true) and `types`: per prop type key (the characteristics record name, e.g. `dumpster`) any of `material` / `secondary` (0..=143), `use_contact_material`, `impact_min` / `impact_max` (m/s), `cooldown` (0..=600 console evaluations), `speed_attenuation` / `spin_attenuation` (above 0) over the type's retail record; a type without one starts from a silent record.
 
@@ -342,7 +342,7 @@ fails or reloads). Domains:
   retail 2.515): the factor on the centre-weighted average before it is compared with the area's
   target. A higher reading lowers the exposure.
 'ghost': the skater fades in after every placement (checkpoint respawn, teleport, session marker
-  return, spawn). enabled (retail true); fade_in_seconds (retail 1.0, 0..60, 0 = no fade): seconds from
+  return, spawn). enabled (default false); fade_in_seconds (retail 1.0, 0..60, 0 = no fade): seconds from
   placement to fully solid; hold_alpha (retail 0.68, 0..1): the opacity retail waits at while its hold
   condition is set (not decoded yet, so it has no effect now).
 'decals': opacity (retail 1.0, 0..1): strength of every world decal (stains, wear, graphics) over its

@@ -4,10 +4,11 @@
 /// Longest fade a mod may ask for (s); also where the timer stops counting.
 pub const MAX_FADE_IN_SECONDS: f32 = 60.0;
 
-/// Fade tuning (`ghost` world tuning domain). `default()` = retail.
+/// Fade tuning (`ghost` world tuning domain). `default()` draws the skater solid at once, so it is never seen
+/// fading: docs/hails-additions/26c-living-world-npc-skaters.md#ghost-fade-rule
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GhostSettings {
-    /// Fade in after placements at all (retail true).
+    /// Fade in after placements at all (default false, a mod may turn it on).
     pub enabled: bool,
     /// Seconds from placement to fully opaque (retail 1.0, sub_82594488 compares timer < 1.0).
     pub fade_in_seconds: f32,
@@ -17,7 +18,7 @@ pub struct GhostSettings {
 
 impl Default for GhostSettings {
     fn default() -> Self {
-        Self { enabled: true, fade_in_seconds: 1.0, hold_alpha: 0.68 }
+        Self { enabled: false, fade_in_seconds: 1.0, hold_alpha: 0.68 }
     }
 }
 
@@ -78,9 +79,20 @@ mod tests {
 
     const DT: f32 = 1.0 / 60.0;
 
+    fn fading() -> GhostSettings {
+        GhostSettings { enabled: true, ..GhostSettings::default() }
+    }
+
+    #[test]
+    fn by_default_a_placed_skater_is_solid_at_once() {
+        let mut f = GhostFade::default();
+        f.place();
+        assert_eq!(f.step(DT, &GhostSettings::default(), false), 1.0);
+    }
+
     #[test]
     fn retail_curve_is_linear_over_one_second() {
-        let s = GhostSettings::default();
+        let s = fading();
         let mut f = GhostFade::default();
         assert_eq!(f.step(DT, &s, false), 0.0, "placement tick draws at 0");
         let mut last = 0.0;
@@ -98,7 +110,7 @@ mod tests {
 
     #[test]
     fn frame_rate_independent() {
-        let s = GhostSettings::default();
+        let s = fading();
         let (mut a, mut b) = (GhostFade::default(), GhostFade::default());
         for _ in 0..30 {
             a.step(1.0 / 60.0, &s, false);
@@ -112,7 +124,7 @@ mod tests {
 
     #[test]
     fn place_restarts_and_disabled_is_solid() {
-        let s = GhostSettings::default();
+        let s = fading();
         let mut f = GhostFade::default();
         for _ in 0..120 {
             f.step(DT, &s, false);
@@ -130,7 +142,7 @@ mod tests {
 
     #[test]
     fn hold_waits_past_hold_alpha() {
-        let s = GhostSettings::default();
+        let s = fading();
         let mut f = GhostFade::default();
         for _ in 0..600 {
             f.step(DT, &s, true);
