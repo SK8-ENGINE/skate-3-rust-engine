@@ -18,8 +18,8 @@ fn log_air_try(p: &ProcessedPhysicsInput, board: &[[f32; 4]; 4], edges: &[skate_
     let Some((dist, above, tangent)) = nearest else { return };
     let w = p.vectors_400_416[0];
     bevy::log::info!(
-        "NPC_GRIND_TRY state={} family={:?} proximity={} disabled={} history={:?} cooldown={:?} rails={} dist={:.2} above={:.2} fwd.rail={:.2} right.rail={:.2} up.rail={:.2} vy={:.2} speed={:.2} at=[{:.1}, {:.1}, {:.1}]",
-        p.state_2508, result.candidate.map(|c| c.kind), result.proximity.is_some(), disabled, history, cooldown, edges.len(), dist, above,
+        "NPC_GRIND_TRY #{} state={} family={:?} proximity={} disabled={} history={:?} cooldown={:?} rails={} dist={:.2} above={:.2} fwd.rail={:.2} right.rail={:.2} up.rail={:.2} vy={:.2} speed={:.2} at=[{:.1}, {:.1}, {:.1}]",
+        crate::physics::log_npc(), p.state_2508, result.candidate.map(|c| c.kind), result.proximity.is_some(), disabled, history, cooldown, edges.len(), dist, above,
         dot(v3(&board[2]), tangent), dot(v3(&board[0]), tangent), dot(v3(&board[1]), tangent), float(w)[1], p.scalar_2652, at[0], at[1], at[2],
     );
 }

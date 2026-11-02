@@ -702,6 +702,7 @@ fn run_steps(
                     t.push(std::thread::current().id());
                 }
                 let NpcSim { context, body, audio, audio_memory, .. } = sim;
+                crate::physics::set_log_npc(job.serial);
                 let stepped = worker.advance_npc_skater(context, &mut body.runtime, &mut body.controls, graphs, &mut body.camera, intents);
                 if stepped.is_ok() {
                     // The step's audio record, read with this NPC's own board and riding state swapped in.
@@ -1438,6 +1439,11 @@ pub(crate) fn simulate(
                             ai_signals::BoardYaw::takeoff(decode_orientation(n.board), decode_orientation(n.skater), &rules.board_yaw)
                         });
                         if sim.board_yaw.set {
+                            let nodes: Vec<String> = (cursor_a.saturating_sub(4)..=landing.unwrap_or(cursor_a) + 1).filter_map(|i| line.nodes.get(i as usize).map(|n| {
+                                let y = ai_signals::BoardYaw::takeoff(decode_orientation(n.board), decode_orientation(n.skater), &rules.board_yaw);
+                                format!("{i}:{}{}e{}m{:.1}", if n.flags & skate_core::living_world::replay::node_flags::AIRBORNE != 0 { 'A' } else { 'g' }, n.frames, n.event, y.mag)
+                            })).collect();
+                            info!("NPC_SKATER_YAW_NODES #{} {}", npc.id.serial, nodes.join(" "));
                             info!("NPC_SKATER_BOARD_YAW #{} {} node {} landing {:?} angle {:.2} mag {:.2} slot {} {}", npc.id.serial, npc.character, cursor_a, landing, sim.board_yaw.angle, sim.board_yaw.mag, sim.slot.category, super::npc_skaters::trick_name(sim.slot.trick));
                         }
                         let d = GamePhysics::context_deck(&sim.context).basis.columns[2];
@@ -1632,6 +1638,12 @@ pub(crate) fn simulate(
                         let opened = sim.slot.ticks == 0 && sim.slot.category != 0 && sim.slot != slot_before;
                         let schedule = usize::try_from(sim.slot.trick).ok().and_then(|t| sim.body.runtime.scoring.data.by_id(t)).map(|d| d.intents.clone()).unwrap_or_default();
                         if opened && !intents.iter().any(|x| x.0 == "Trick") {
+                            if let Some(n) = lines.get(&replay.cursor.line).and_then(|l| l.nodes.get(replay.cursor.node as usize)) {
+                                use skate_core::living_world::replay::{decode_orientation, rotate};
+                                let z = [0.0, 0.0, 1.0];
+                                let (b, k) = (rotate(decode_orientation(n.board), z), rotate(decode_orientation(n.skater), z));
+                                info!("NPC_SKATER_SLOT_POSE #{} node {} recorded at [{:.2}, {:.2}, {:.2}] board [{:.2}, {:.2}] skater [{:.2}, {:.2}] actual at [{:.2}, {:.2}, {:.2}] board [{:.2}, {:.2}]", npc.id.serial, replay.cursor.node, n.position[0], n.position[1], n.position[2], b[0], b[2], k[0], k[2], deck.translation.x, deck.translation.y, deck.translation.z, forward[0], forward[2]);
+                            }
                             info!("NPC_SKATER_SIM_SLOT #{} {} category {} {} node {} schedule {}", npc.id.serial, npc.character, sim.slot.category, super::npc_skaters::trick_name(sim.slot.trick), replay.cursor.node, schedule.len());
                         }
                         let slide = skate_core::living_world::ai_signals::Slide { on_path: on_path || left_path, heading_error: slide_error, values: rules.powerslide };

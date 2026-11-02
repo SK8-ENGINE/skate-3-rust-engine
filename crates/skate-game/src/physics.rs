@@ -1375,6 +1375,16 @@ mod difficulty_tests;
 // Set per thread by GamePhysics::advance_npc_skater (NPC steps run on worker threads).
 thread_local! {
     static STEPPING_NPC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static NPC_LOG_SERIAL: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The NPC serial shared physics log lines name on this thread.
+pub(crate) fn set_log_npc(serial: u32) {
+    NPC_LOG_SERIAL.with(|c| c.set(serial));
+}
+
+pub(crate) fn log_npc() -> u32 {
+    NPC_LOG_SERIAL.with(std::cell::Cell::get)
 }
 
 /// `npc` while an NPC skater steps on this thread, else `player`: the `actor` field of shared physics log lines.

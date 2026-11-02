@@ -1325,6 +1325,8 @@ Retail (TU3, evidence only; re-implemented):
 
 **Change.** `ai_signals::landing_node`; `npc_sim` uses it and cursor A for both. Test: `the_board_yaw_node_is_the_first_ground_node_after_the_air`. Diagnostics: `NPC_GRIND_TRY` (each airborne NPC tick near a rail) and `NPC_GRIND_DROP` (a candidate rejected after the investigation); tally tool `.local/poc-tests/npc_grinds.py`.
 
+**Open.** A recorded truck grind can still become a boardslide. At DownTown rail 6126 the recomp's skaters did 50-50s and 5-0s (9 of 9), ours boardslides with the board about 90 degrees off the body, from a recorded twist of 31 degrees. `BoardAdjustMag` above 1 appears to rotate the board too far; the graph path is not read yet. Evidence: `.local/research/b800-npc-grind-family-rail-6126.md`. Idle test runs: `SKATE_TEST_STEP_OFF=<tick>` presses the player's off-board toggle once.
+
 ### Takeoff board yaw
 
 `sub_8246B1F8` on the takeoff edge, from the cursor node's recorded board and skater frames: d = heading(board forward) - heading(skater forward) ([`retail_heading`]), wrapped to [-pi, pi], folded to [-pi/2, pi/2] (nose and tail lie on the same board line); outside the dead zone the angle is +-pi/2 by the sign of d and the magnitude |d| x scale (not clamped here).
