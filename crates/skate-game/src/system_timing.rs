@@ -26,7 +26,7 @@ const FIXED_STEP: &str = "FixedMain::run_fixed_main";
 const COMMANDS: &str = "cmd:";
 
 /// Systems named so far; a slot is never reused.
-const SLOTS: usize = 2048;
+const SLOTS: usize = 8192;
 /// Systems on the line.
 const TOP: usize = 16;
 /// A single run this long also lists the system after the top ones (`slow`), whatever its rank.
@@ -134,7 +134,11 @@ where
                 names.push(name);
                 names.len() - 1
             }
-            None => return,
+            None => {
+                static FULL: std::sync::Once = std::sync::Once::new();
+                FULL.call_once(|| warn!("SYSTEM_TIMING: all {SLOTS} name slots used; later systems are not timed"));
+                return;
+            }
         };
         drop(names);
         if let Some(span) = ctx.span(id) {
@@ -202,7 +206,7 @@ pub(crate) struct SystemTimingPlugin;
 impl Plugin for SystemTimingPlugin {
     fn build(&self, app: &mut App) {
         if on() {
-            app.add_systems(Last, report);
+            app.add_systems(Last, (report, count_material_events));
         }
         if fixed_on() {
             app.add_systems(Last, report_fixed);
@@ -255,6 +259,12 @@ fn report(mut state: Local<ReportState>) {
         top.join(" "),
         if slow.is_empty() { String::new() } else { format!(" | slow {}", slow.join(" ")) }
     );
+    let living = crate::living_world::timing::take_second();
+    let parts: Vec<String> = crate::living_world::timing::NAMES.iter().zip(living).map(|(n, us)| format!("{n}={:.3}", us as f64 / 1e3 / frames as f64)).collect();
+    let phases = crate::frame_timing::hitch::take_phase_second();
+    let parts_p: Vec<String> = crate::frame_timing::hitch::PHASES.iter().zip(phases).map(|(n, us)| format!("{n}={:.3}", us as f64 / 1e3 / frames as f64)).collect();
+    info!("PHYSICS_PHASES frames={frames} | {}", parts_p.join(" "));
+    info!("LIVING_TIMING frames={frames} ms_per_frame={:.3} | {}", living.iter().sum::<u64>() as f64 / 1e3 / frames as f64, parts.join(" "));
 }
 
 #[derive(Default)]
@@ -386,4 +396,47 @@ mod tests {
         let names: Vec<String> = schedules.get(bevy::app::FixedMain).unwrap().systems().unwrap().map(|(_, s)| s.name().to_string()).collect();
         assert_eq!(names.iter().filter(|n| n.ends_with(FIXED_STEP)).count(), 1, "{names:?}");
     }
+}
+
+/// Added / modified material assets per second, per material type (`MATERIAL_EVENTS`): a material written every frame
+/// makes the render world rebuild its bind group every frame (`prepare_material_bind_groups`).
+#[allow(clippy::too_many_arguments)]
+fn count_material_events(
+    mut ped: MessageReader<AssetEvent<crate::living_world::ped_material::PedMaterial>>,
+    mut vehicle: MessageReader<AssetEvent<crate::living_world::vehicle_material::VehicleMaterial>>,
+    mut character: MessageReader<AssetEvent<crate::retail_character::CharacterMaterial>>,
+    mut world: MessageReader<AssetEvent<crate::retail_render::WorldMaterial>>,
+    mut hud: MessageReader<AssetEvent<crate::scoring_hud::HudMaterial>>,
+    mut standard: MessageReader<AssetEvent<StandardMaterial>>,
+    mut colour: MessageReader<AssetEvent<ColorMaterial>>,
+    mut images: MessageReader<AssetEvent<Image>>,
+    mut state: Local<(Option<Instant>, [[u64; 2]; 8])>,
+) {
+    fn tally<A: Asset>(r: &mut MessageReader<AssetEvent<A>>, c: &mut [u64; 2]) {
+        for e in r.read() {
+            match e {
+                AssetEvent::Added { .. } => c[0] += 1,
+                AssetEvent::Modified { .. } => c[1] += 1,
+                _ => {}
+            }
+        }
+    }
+    let c = &mut state.1;
+    tally(&mut ped, &mut c[0]);
+    tally(&mut vehicle, &mut c[1]);
+    tally(&mut character, &mut c[2]);
+    tally(&mut world, &mut c[3]);
+    tally(&mut hud, &mut c[4]);
+    tally(&mut standard, &mut c[5]);
+    tally(&mut colour, &mut c[6]);
+    tally(&mut images, &mut c[7]);
+    let now = Instant::now();
+    let since = *state.0.get_or_insert(now);
+    if now.duration_since(since).as_secs_f32() < 1.0 {
+        return;
+    }
+    state.0 = Some(now);
+    let names = ["ped", "vehicle", "character", "world", "hud", "standard", "colour", "image"];
+    let parts: Vec<String> = names.iter().zip(std::mem::take(&mut state.1)).map(|(n, [a, m])| format!("{n}={a}+{m}")).collect();
+    info!("MATERIAL_EVENTS added+modified per second | {}", parts.join(" "));
 }

@@ -256,6 +256,8 @@ def write(manifest_path,output,collision,report=lambda _:None, *, render_only=Fa
     # The geometry and extension blobs do not depend on the textures: compress
     # them on two more threads while the textures are written. Every blob is
     # written in the original order, so the file is byte-identical.
+    # A new file, never written through a hard link of the previous installation's map (doc 08 "Maps refresh").
+    output.unlink(missing_ok=True)
     with output.open('wb') as f, ThreadPoolExecutor(max_workers=2) as blobs:
         geometry=[blobs.submit(packed_blob,data) for data in (vertices.getvalue(),indices.getvalue(),b'')]
         packed_extensions=[(tag,schema,len(data),blobs.submit(packed_blob,data)) for tag,schema,data in records]

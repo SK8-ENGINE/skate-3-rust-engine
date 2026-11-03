@@ -572,24 +572,32 @@ def decode_speech(archive_path: Path, index: dict, output: Path, work: Path, vgm
     """Decode the takes of `events` to output/<clip stem>/<take>.wav (`decode` = audio_export._decode).
     Returns the number of takes written."""
     from tools.owned_game.big import BigArchive
+    from .audio_export import _in_order
     archive = BigArchive(archive_path)
     by_name = {Path(e.path).name: e for e in archive.entries}
-    written = 0
+    # Clips decode on the audio decode workers (each a vgmstream process; doc 08 "Speech decode in parallel"). Clips
+    # sharing a folder stay together in their index order, so the result is the same as one after another.
+    groups: dict[str, list] = {}
     for clip in index['clips']:
-        if clip['event'] not in events:
-            continue
-        data = archive.read(by_name[clip['name']])
-        folder = work / Path(clip['name']).stem
-        folder.mkdir(parents=True, exist_ok=True)
-        names = []
-        for i, t in enumerate(clip['takes']):
-            (folder / f'{i:02d}.snr').write_bytes(bytes.fromhex(t['snr']))
-            (folder / f'{i:02d}.sns').write_bytes(data[t['offset']:t['offset'] + t['size']])
-            names.append(f'{i:02d}.snr')
-        decode(vgmstream, folder, names, log)
-        target = output / Path(clip['name']).stem
-        target.mkdir(parents=True, exist_ok=True)
-        for i in range(len(clip['takes'])):
-            (folder / f'{i:02d}.snr.wav').replace(target / f'{i:02d}.wav')
-            written += 1
-    return written
+        if clip['event'] in events:
+            groups.setdefault(Path(clip['name']).stem, []).append(clip)
+
+    def decode_group(stem):
+        written = 0
+        for clip in groups[stem]:
+            data = archive.read(by_name[clip['name']])
+            folder = work / stem
+            folder.mkdir(parents=True, exist_ok=True)
+            names = []
+            for i, t in enumerate(clip['takes']):
+                (folder / f'{i:02d}.snr').write_bytes(bytes.fromhex(t['snr']))
+                (folder / f'{i:02d}.sns').write_bytes(data[t['offset']:t['offset'] + t['size']])
+                names.append(f'{i:02d}.snr')
+            decode(vgmstream, folder, names, log)
+            target = output / stem
+            target.mkdir(parents=True, exist_ok=True)
+            for i in range(len(clip['takes'])):
+                (folder / f'{i:02d}.snr.wav').replace(target / f'{i:02d}.wav')
+                written += 1
+        return written
+    return sum(_in_order(decode_group, groups))

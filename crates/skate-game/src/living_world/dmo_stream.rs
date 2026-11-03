@@ -85,9 +85,10 @@ pub(crate) fn stream_dmos(
         return;
     }
     let Some(dynamics) = physics.prop_dynamics() else { return };
-    let placements = dynamics.dmo_placements();
-    let fill = st.built != Some((generation, placements.len()));
+    // Every tick only the count is compared; the placements are built when the census refills.
+    let fill = st.built != Some((generation, dynamics.dmo_placement_count()));
     if fill {
+        let placements = dynamics.dmo_placements();
         if st.data.is_none() || st.built.is_none_or(|b| b.0 != generation) {
             st.data = config.as_ref().and_then(|c| read_data(&c.asset_root));
         }

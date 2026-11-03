@@ -96,6 +96,20 @@ When upgrading Bevy, reassess this patch and rerun the GPU test, stationary and
 moving-camera benchmarks, and visual comparison. Do not assume an unchanged
 private renderer implementation across engine versions.
 
+## Fade alpha in MeshTag
+
+`bevy_pbr/src/render/pbr_fragment.wgsl` (`pbr_input_from_standard_material`) and
+`bevy_pbr/src/render/pbr_prepass_functions.wgsl` (`prepass_alpha_discard`) replace
+the material's `base_color.a` with `bitcast<f32>(tag ^ 0x80000000)` when the
+mesh's `MeshTag` is not 0. The game's NPC / ped fade (`living_world::npc_skaters::present_fade`,
+`fade_tag`) writes the fade alpha there instead of into a per-NPC material copy
+every frame, which made Bevy rebuild that material's bind group each frame; the
+value is the same f32 the copy held, so drawing and the blended shadow's discard
+are unchanged. Meshes without a `MeshTag` (tag 0) are untouched; nothing else in
+the game sets one, so a mod or feature that wants `MeshTag` must use another
+encoding or stop the fade from owning it. Doc:
+`docs/hails-additions/34-physics-performance.md#fades-meshtag`.
+
 ## SDL3 static C runtime
 
 `sdl3-sys` is vendored from crates.io 0.7.1+SDL-3.4.16 with its original license.

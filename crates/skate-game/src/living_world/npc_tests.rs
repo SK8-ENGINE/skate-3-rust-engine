@@ -469,12 +469,15 @@ fn living_world_npc_skaters_fade_in_from_transparent_with_blended_copies() {
             let mats = a.world().resource::<Assets<StandardMaterial>>();
             let m = mats.get(&used).unwrap();
             assert_eq!(m.alpha_mode, AlphaMode::Blend);
-            assert!((m.base_color.alpha() - f.alpha).abs() < 1e-6);
+            // The alpha rides in the mesh's MeshTag: the exact f32 the copy's base_color alpha held before (base 1).
+            let tag = a.world().get::<bevy::mesh::MeshTag>(mesh).expect("fading mesh has a tag").0;
+            assert_eq!(f32::from_bits(tag ^ 0x8000_0000).to_bits(), (1.0f32 * f.alpha.clamp(0.0, 1.0)).to_bits(), "tick {tick}");
             assert_eq!(mats.get(&shared).unwrap().alpha_mode, AlphaMode::Opaque);
             assert!(a.world().get::<NpcFadeMaterials>(e).is_some());
         } else {
             assert_eq!(used.id(), shared.id(), "shared material back at alpha 1");
             assert!(a.world().get::<NpcFadeMaterials>(e).is_none(), "copies freed");
+            assert!(a.world().get::<bevy::mesh::MeshTag>(mesh).is_none(), "tag removed at alpha 1");
         }
         fades.push((tick - spawn_tick, f.alpha));
     }

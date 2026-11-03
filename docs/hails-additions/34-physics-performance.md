@@ -126,3 +126,128 @@ Verification: the new data-gated test `npc_fakie_tree_cache_matches_a_fresh_buil
 fresh build over 400 steps (times past the tree's length, torso 0 / 0.25 / 0.5 / 1, a construction value change, a
 name that does not build); it passes, both NPC golden digests did not move, and the full skate-game suite is green
 (978 passed, 2026-10-29).
+
+## Gameplay frame-time pass: readouts, walking ground query, DMO count (2026-11-02, USER-ASKS 467)
+Goal: lower frame time with NPC skaters, peds and traffic around, with gameplay unchanged.
+
+### Readouts (observation only)
+- `SYSTEM_TIMING` kept a name slot per system and stopped at 2048. The living world's FixedUpdate systems were named after the
+  slots ran out, so they were never timed: in the user's 2026-11-01 trace-all session the fixed step had 1.6 ms per step of
+  unattributed "gaps". Now 8192 slots and a one-time warning when they run out; gaps fell to 0.2 ms per step.
+- New per-second lines under `SKATE_SYSTEM_TIMING=1`: `LIVING_TIMING` (the living world's own spans, ms per frame),
+  `PHYSICS_PHASES` (the physics phase timers, which `FRAME_HITCH` only prints on hitch frames) and `MATERIAL_EVENTS` (material
+  assets added / modified per second per type).
+- Bench: `.local/perf-bench/lw_bench.sh` (release exe, University library, muted, player off the board, NPC Skater Physics
+  on, 150 s; marks a run DISTURBED when another game process runs at the same time) and `system_timing_summary.py`.
+
+### Where the time goes (desktop, release, 2 NPC skaters, 15 peds)
+- Living world on vs off (`SKATE_LIVING_WORLD=0`): frame p50 4.00 vs 3.02 ms, p99 7.38 vs 5.69 ms; main thread +0.86 ms per
+  frame, render thread +0.48 ms.
+- Main thread, per frame: NPC skater physics 0.18 ms, Bevy material specialization checks about 0.25 ms in total, transform
+  propagation and visibility about 0.13 ms, ped think + advance 0.09 ms; the other living world systems are each below
+  0.01 ms.
+- Render thread: `prepare_material_bind_groups` +0.36 ms, from material writes: 450 to 1300 `PedMaterial` and 1000 to 1500
+  `StandardMaterial` modifications per second (the NPC / ped fade copies; peds fade by camera distance, so a ped in the fade
+  band changes alpha whenever the camera moves). Not on the critical path today (render 1.9 ms vs main 3.7 ms).
+- CPU profile (WPR, 150 s): inside the walking player's physics step, a third of the samples were
+  `ground_query::world::with_world_scene` copying every static edge of the map into a new Vec on each ground query.
+
+### Changes
+1. `with_world_scene` reads the map's static edges in place (`Scene::static_metadata`) instead of copying them. `append`
+   converts one edge at a time with the same field copies, in the same order, with the same 40-edge cap.
+   Test `static_edges_read_in_place_match_the_converted_copy`: 600 random edges, 400 queries, bit-equal candidates from the
+   old copied list and the in-place list.
+2. `stream_dmos` compared `dmo_placements().len()` every fixed tick, which built and sorted a placement per map prop;
+   now `dmo_placement_count()` (the same filter, counted); the placements are built only when the census refills.
+
+### Result (interleaved A/B, 2 runs each, no run disturbed)
+| | base | new |
+|---|---|---|
+| player physics (`physics::advance`, walking), per step | 1.28 / 1.32 ms | 0.87 / 0.85 ms |
+| `stream_dmos`, per step | 0.028 / 0.029 ms | 0.007 / 0.007 ms |
+| fixed step | 2.82 / 2.86 ms | 2.39 / 2.37 ms |
+| frame p50 / p90 / p99 | 3.78 / 6.08 / 7.14, 3.78 / 6.10 / 6.90 ms | 3.75 / 5.68 / 6.88, 3.68 / 5.65 / 6.62 ms |
+
+### Second batch (user 2026-11-02: spans off unless profiling; menu VM first; better ways for grab props and fades)
+3. **Bevy system spans off unless something reads them** (`profiling::init`): without a Chrome capture and without
+   `SKATE_SYSTEM_TIMING` / `SKATE_FIXED_TIMING`, the default filter adds `bevy_ecs::system::function_system=warn` and
+   `bevy_ecs::query::state=warn` (both spans are info level; that module's warnings still log). Log lines lose their
+   `system{name=...}:` prefix in normal play; trace-all keeps it (it turns the timing readouts on). `RUST_LOG` still wins.
+4. **Menu / HUD movie VM** (`apt_vm.rs`):
+   - `Vm::get`'s case-insensitive fallback scanned every key of every object in the prototype chain on each miss. Object
+     members are now a `Fields` type (reads through `Deref`, writes only through `insert` / `remove`, no `DerefMut`, so the
+     compiler routes every write through it) that counts each key's ASCII-lowercase form; the fallback skips objects with
+     no key of the query's lowercase form. `eq_ignore_ascii_case(a, b)` is exactly `a.to_ascii_lowercase() ==
+     b.to_ascii_lowercase()`, and matching objects are still scanned in the same order, so the result is the same.
+     Test `get_with_folded_key_skip_matches_the_full_scan` (20 000 random inserts / removes / prototype changes with
+     mixed-case and non-ASCII keys: equal to the old scan every step; folded counts always match the keys).
+   - `Vm::collect` (the HUD movies collect every frame): the mark buffer is kept, slots already freed and empty are not
+     rebuilt, the free list is returned by reference instead of cloned. Collection still runs at the same points, so
+     object ids are unchanged.
+5. **Grab scene prop geometry** (`prop_dynamics.rs`): each grab-scene refresh (twice per tick) built a new `Arc<Geometry>`
+   and points Vec per spline of every awake prop. The geometry depends only on the splines, the grab slot and
+   `axis_scale`; it is now built once per body (`rebuild_grab_geometry`, called wherever the splines or the slot change;
+   `axis_scale` is fixed after creation) and shared. Test builds compare the cache with a fresh build on every call
+   (`grab_object_of`), so every prop-grab test checks it.
+
+Proof: the physics, living world, APT, HUD, menu and prop suites with the data-gated tests on the real install: 501
+passed; the 8 failures are the two climbing tests that fail the same way without these changes and six that need other
+maps; with University for the grind / water / map-startup ones those 5 pass too (the boundary test needs Industrial, the
+recorded test an input recording).
+
+Result (both batches against the same base exe, interleaved, no run disturbed):
+| | base | new |
+|---|---|---|
+| with the timing readouts on (spans on in both): frame p90 / p99 | 6.04 / 6.94, 6.00 / 6.79 ms | 5.60 / 6.62, 5.57 / 6.68 ms |
+| plain (as in normal play: spans off in new): frame p50 | 3.65 / 4.00 ms | 3.43 / 3.77 ms |
+| plain: frame p90 | 5.89 / 6.28 ms | 5.30 / 5.54 ms |
+| plain: frame p99 | 6.90 / 7.32 ms | 6.66 / 6.51 ms |
+| plain: main thread p50 | 2.62 / 2.81 ms | 2.50 / 2.66 ms |
+
+Laptop (second PC, automated, 2026-11-02): the same 501 passed / 8 known failures; `lw_bench.sh` PLAIN, interleaved,
+no run disturbed, hails-local (both batches) vs hails-additions 6bd43e6f:
+| | hails-additions | new |
+|---|---|---|
+| frame p50 | 4.85 / 4.69 ms | 4.32 / 4.47 ms |
+| frame p90 | 7.64 / 7.51 ms | 6.39 / 6.51 ms |
+| frame p99 | 8.47 / 8.19 ms | 6.96 / 7.12 ms |
+| main thread p50 | 3.29 / 3.19 ms | 2.81 / 2.82 ms |
+A trace-all run there (spans on in both; first batch only) gave about 0.1 to 0.2 ms at the median and 0.25 ms at p90 / p99.
+
+### Fades: MeshTag
+(user 2026-11-02: go ahead.) The fade wrote each fading NPC's / ped's blended material copies every frame
+(`present_fade`, StandardMaterial and PedMaterial): 450 to 1500 writes per second per type with 15 peds (peds fade by
+camera distance, so one in the fade band changes alpha whenever the camera moves), and each write made Bevy rebuild that
+material's bind group and re-run the specialization checks.
+
+Change:
+- The copies stay as before (created when a fade starts, per NPC, from the source at that moment, freed with
+  `NpcFadeMaterials`), but the per-frame alpha goes to each mesh's `MeshTag` (`fade_tag(base * alpha)` =
+  `to_bits() ^ 0x8000_0000`; tag 0 = not fading; -0.0 is drawn as +0.0, the same blend). At alpha 1 the original
+  material comes back and the tag is removed.
+- Shaders read the same f32 back with `bitcast`: the ped shader (`ped_material.wgsl`, output alpha) and the vendored
+  PBR fragment and prepass discard (`vendor/README.md` "Fade alpha in MeshTag"). PedMaterial has no prepass fragment
+  shader, so its shadow pass never read the alpha (`prepass/mod.rs` `fragment_required`); StandardMaterial's blended
+  shadows discard below 0.05 alpha, so the prepass gets the same substitution.
+- Bevy copies the tag into the mesh uniform on both the CPU and the GPU preprocessing path and re-extracts on
+  `Changed<MeshTag>` / removal.
+
+Proof: the fade test now checks that the mesh's tag carries the exact bits of the old copy's alpha on every tick and is
+removed at alpha 1; living world + replay suites pass (187); the game runs with no shader or pipeline errors, peds render
+and fade (`--verify` capture); `MATERIAL_EVENTS` shows `PedMaterial` modifications 450..1300 -> 0 and StandardMaterial
+769..1509 -> 0 per second (the CharacterMaterial lighting writes, 160..280 per second, are a separate path and already
+skip unchanged values).
+
+Result (plain, interleaved against the second-batch build, 2 runs each, no run disturbed): frame p50 3.65 / 3.63 ->
+3.30 / 3.25 ms, p90 5.52 / 5.52 -> 5.60 / 5.40 ms, p99 6.48 / 6.57 -> 6.75 / 6.47 ms, main thread p50 2.59 / 2.60 ->
+2.64 / 2.61 ms: the gain is the render side (bind group rebuilds), which held frames back more than the main thread's
+numbers showed.
+
+### Checked and left alone
+- `think_peds` builds a String per entity per tick for its entity map: about 1200 small allocations a second, too small to
+  matter.
+- `sync_npc_worker` copies only small per-tick lists; the props are shared behind an `Arc`.
+
+### Open leads
+- `refresh_grab_props` still rebuilds the grab scene registry twice per tick (player step and NPC phase); skipping the
+  second needs proof that nothing moves the props in between.

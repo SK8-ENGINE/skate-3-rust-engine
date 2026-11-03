@@ -414,7 +414,8 @@ it, it took a while and then it eventually opened").
 **Root cause.** `tools/setup.py` ran `damaged()` (`asset_pipeline/group_receipts.py`) before creating its window, only
 to list the groups in its label. `damaged()` re-reads and SHA-256 hashes every installed output file of every group
 (audio, maps, props, stock data), minutes on a hard drive. `install()` then ran the same check again on the worker
-thread, so the files were hashed twice.
+thread, so the files were hashed twice. (Since 2026-10-23 the check compares size and time first and hashes only a
+file whose time moved; see "Setup speed pass: speech decode and refresh check" below for its cost now.)
 
 **Change.** setup.py keeps only the version check before the window (0.75 s measured on the user's installation);
 the file check runs once, inside `install()` on the worker thread, and `damaged(report=...)` shows
@@ -489,3 +490,103 @@ file names; `tools/vendor/skate3_ui/scene_graph.py`: a font definition keeps its
 all by design (the customisation set's fresh id in its 7 files, and `maps.json` timings); the file lists are equal.
 `test_map_writer` and the HUD / menu tests pass. A Refresh Game Files rewrites the maps once (the map writer's
 fingerprint changed).
+
+## Setup speed pass: speech decode and refresh check (2026-11-02, USER-ASKS 464)
+
+**Problem.** A first setup from the Xbox 360 ISO took 500 s on the desktop (world/replay 02c67017, ISO on the F: hard
+disk, install on K:), and a Refresh Game Files with nothing to do took 18.5 s. Earlier passes had been measured from an
+extracted `default.xex` and before Ped Speech was on by default.
+
+**Root cause.** (1) Speech: `world_audio.decode_speech` decoded its clips one after another, one vgmstream process per
+clip (3011 world, 1283 main-cast and 405 announcer clips, about 33k takes), while the sound banks already decoded on
+`setup_budget.decode_workers()` threads. World speech took about 250 s and main-cast about 107 s of the audio stage, the
+critical path of the whole setup. (2) Refresh: `group_receipts.valid_group_receipt` resolved the installation root once
+per file and ran two stat calls per file: 149k `_getfinalpathname` calls (6.9 s) and 76k stats (2.5 s) for about 37k
+files (cProfile of a no-change refresh).
+
+**Change.** `decode_speech` runs the clips through `audio_export._in_order` (the bank decoders' pool, sized from the
+machine); clips sharing a folder stay together in index order, so the result is the same as one after another.
+`valid_group_receipt` resolves the root once and makes one stat per file (a regular-file check instead of `is_file()`);
+the per-file resolve and the inside-the-installation check stay. `pipeline-equivalence.json` gets the proven pair for
+the audio fingerprint, so existing installs do not redo their audio. `group_receipts.py` is in no fingerprint.
+
+**Verification** (bench `.local/perf-bench/setup_bench.py`, skill setup-bench; `--keep` added for refresh runs):
+
+| Run | Before | After |
+| --- | --- | --- |
+| First setup from the ISO | 500 s | 188 s |
+| World / main-cast speech | 250 / 107 s | 67 / 27 s |
+| Refresh, nothing to do (2 runs each) | 18.3 / 18.7 s | 14.9 / 14.5 s |
+| Refresh, audio check | 7.5 s | 4.0 s |
+| First setup from the ISO, every change of this pass (fresh, final audit) | 500 s | 176.7 s |
+| Refresh from the ISO, nothing to do, every change | 18.5 s | 9.2 s |
+
+- Identity: same 40727 paths; every differing file is in the known noise set, plus
+  `assets/private/session-marker/hud.json` on ISO runs: its `source_manifest_sha256` hashes the UI archive records,
+  which hold the archive's absolute path inside the run's random `character-source-*` extraction folder (pre-existing,
+  differs between any two ISO runs).
+- Damage audit: one deleted speech take and a same-size one-byte change in `stock/data/config/input.cfg` were detected
+  by the changed code; the refresh rebuilt the affected groups and every file hashed as before (only the two noise
+  files differ).
+- Unit tests: test_living_world, test_optional_content, test_versions, test_setup_assets, test_setup_shared_links (47).
+
+### ISO refresh without extracting the disc
+
+**Change.** `asset_pipeline/xiso.py` reads named files straight out of the Xbox 360 image (XDVDFS: the volume
+descriptor 32 sectors into the game partition, binary-tree directories). On a refresh from an ISO, `tools/setup.py`
+calls `asset_pipeline/iso_refresh.py`: it takes only the five files the checks read (`default.xex` and the customiser's
+source archives, 637 MB instead of the whole disc's 6.1 GB) into a folder marked `.partial-source`. When
+`install._install_stages` then finds a group to rebuild, or the customiser set is not current for this code and disc,
+it raises `NeedsFullSource` before writing anything and the refresh runs again with the whole disc, as before. The
+customiser's `prepare()` never runs on a partial source (its optional-content handling could drop the set pointer on a
+missing file); when the set is current the partial path does what its success path does. Neither file is in a
+fingerprint; the install.py guard is a local import, so no group fingerprint moves.
+
+**Verification.** The five files read this way are byte-identical to extract-xiso's (the customiser source fingerprint
+and the `default.xex` hash both match the ISO install's records). No-change refresh from the ISO: 14.7 s -> 11.6 s
+warm (the extraction step is 0.8 s instead of 3 s warm and about 33 s cold). Fallbacks, each repaired to the baseline
+hashes: a deleted main-cast take (the guard asks for the whole disc for audio after 4 s), an incomplete customiser set
+(the finish step asks for it). `test_xiso.py`: both partition layouts, letter case, missing paths, a folder asked for
+as a file, a file that is not a disc image.
+
+### Customiser check cost
+
+**Change.** The customiser stage receipts (`*-complete.json`) record each file's time, and `customiser_cache.stage_valid`
+uses `group_receipts.valid_group_receipt` (a file is hashed only when its size or time moved), so a refresh no longer
+hashes the whole 1.9 GB set. Also fixed: a reused stage rewrote its JSON files in text mode, which turned their line
+ends into CRLF on Windows; they are copied as bytes now (only the set path prefix replaced). `customiser_cache.py` is
+part of the customiser fingerprint, so every install redoes its customiser once (27 to 34 s on the desktop, the
+unchanged stages reused); there is no equivalence mechanism for the customiser.
+
+**Verification.** No-change refresh 11.6 s -> 9.2 s. The rebuilt set matches the baseline set file by file except the
+known set-id noise, the three other stage receipts (they now hold file times, so they differ between runs like
+`installation.json`) and two JSON files whose CRLF came from the reuse before the fix (equal to the baseline with line
+ends normalised; the fixed reuse copies them byte for byte). A one-byte change to a set texture (same size) was found
+and only its stage (the library) was rebuilt, back to the original hash. A full build also leaves the roster stage's
+scratch folder `roster-work/` in the set; a reused stage does not recreate it (nothing reads it).
+
+### Maps refresh
+
+**Change.** A refresh that rebuilds the maps hard-links the previous `maps/` (10 maps: `.skate`, `.irradiance`,
+`.triggers`, 859 MB) instead of copying it, and records the links in `shared`, so `shared_changed()` refuses to publish
+if one was written in place. `map_writer.write` and `irradiance.write` unlink their output before writing (the
+`.triggers` writer already replaces); the failed-map fallback skips the copy when the target is still the linked
+previous file. Equivalence pairs for hud, environment and maps (`map_writer.py` / `irradiance.py` are in their
+fingerprints), after the identity proof below.
+
+**Verification.** A refresh rebuilding hud, environment and maps with every previous map file also hard-linked into a
+witness folder first: all 30 witness files byte-identical afterwards, the published install equal to the baseline.
+Gain: on the desktop's K: drive with a warm cache the copy was only 0.2 s (links 0.005 s); the saving is on hard disks
+(859 MB read and written) and the disk space of a second copy while both installations exist.
+`test_setup_shared_links.MapWriters`: writing a linked `.irradiance` leaves the previous file and passes the shared
+check. Unit tests run: 120 (setup, customiser, maps, versions, living world).
+
+**Final audit.** A fresh full setup from the ISO with every change of this pass against the pristine baseline: the same
+40727 paths; the only differing files are the known noise set, `session-marker/hud.json` (ISO-run noise, above) and the
+three customiser stage receipts that now hold file times (`catalog-complete.json`, `menu-complete.json`,
+`roster-complete.json`).
+
+**Open.** Measured on the desktop only (laptop numbers to come); the cold-cache ISO extraction is not measured
+separately. Pre-existing, seen during this pass: old customisation sets are never removed (each about 1.9 GB, partly
+hard-linked); the maps receipt records only `.skate`, so a damaged `.irradiance` or `.triggers` is not detected; the
+session-marker `hud.json` hashes absolute archive paths (differs between ISO runs).

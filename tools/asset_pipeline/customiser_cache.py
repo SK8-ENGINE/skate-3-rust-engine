@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 import shutil
 import time
-from .setup_state import atomic_json, receipt, valid_receipt
+from .group_receipts import valid_group_receipt
+from .setup_state import atomic_json, receipt
 
 SHARED = ('owned_game/**/*.py', 'vendor/utt/**/*.py', 'vendor/utt/**/*.json',
           'asset_pipeline/fast_refpack.py', 'asset_pipeline/refpack_native.rs',
@@ -62,7 +63,7 @@ def read(path):
 def stage_valid(directory, name, saved):
     files = saved.get('files')
     return (isinstance(files, dict) and set(REQUIRED[name]).issubset(files)
-            and valid_receipt(directory, files))
+            and valid_group_receipt(directory, files))
 
 
 def stage(directory, previous, name, version, source, action, assets, report):
@@ -88,8 +89,9 @@ def stage(directory, previous, name, version, source, action, assets, report):
             src = previous/relative; dst = directory/relative
             dst.parent.mkdir(parents=True, exist_ok=True)
             if src.suffix == '.json':
-                # Runtime references are relative to assets, including generation.
-                dst.write_text(src.read_text().replace(old_prefix,new_prefix))
+                # Runtime references are relative to assets, including generation. As bytes: text mode turned the
+                # line ends into CRLF on Windows, so a reused stage was not byte-identical to its source.
+                dst.write_bytes(src.read_bytes().replace(old_prefix.encode(),new_prefix.encode()))
             else:
                 try:dst.hardlink_to(src)
                 except OSError:shutil.copy2(src,dst)
@@ -103,6 +105,9 @@ def stage(directory, previous, name, version, source, action, assets, report):
         paths.extend(path.rglob('*') if path.is_dir() else [path])
     files = receipt(directory, paths)
     if not files:raise RuntimeError('Character stage produced no output: '+name)
+    # Size and time per file: a refresh hashes only a file whose time moved (doc 08 "Customiser check cost").
+    for relative, item in files.items():
+        item['mtime_ns'] = (directory.resolve()/relative).stat().st_mtime_ns
     atomic_json(marker, dict(version=version, source=source, files=files))
     elapsed = time.perf_counter()-start
     timing = read(directory/'timings.json')

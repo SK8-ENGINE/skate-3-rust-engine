@@ -701,7 +701,7 @@ impl Stage {
             roots.extend(m.classes.values());
             roots.extend(m.script_moved.iter().chain(&m.attached).chain(m.scaled.keys()));
         }
-        let free: BTreeSet<usize> = self.vm.collect(roots)?.into_iter().collect();
+        let free: BTreeSet<usize> = self.vm.collect(roots)?.iter().copied().collect();
         self.state.dynamic.retain(|id, _| !free.contains(id));
         // Twice the survivors, but never past three quarters of the VM's guard: garbage must not fill the slots to the
         // guard before a collection runs.

@@ -83,13 +83,23 @@ fn pbr_input_from_standard_material(
 #endif  // MESHLET_MESH_MATERIAL_PASS
 #ifdef BINDLESS
     let flags = pbr_bindings::material_array[material_indices[slot].material].flags;
-    let base_color = pbr_bindings::material_array[material_indices[slot].material].base_color;
+    var base_color = pbr_bindings::material_array[material_indices[slot].material].base_color;
     let deferred_lighting_pass_id =
         pbr_bindings::material_array[material_indices[slot].material].deferred_lighting_pass_id;
 #else   // BINDLESS
     let flags = pbr_bindings::material.flags;
-    let base_color = pbr_bindings::material.base_color;
+    var base_color = pbr_bindings::material.base_color;
     let deferred_lighting_pass_id = pbr_bindings::material.deferred_lighting_pass_id;
+#endif
+
+    // skate3rust: an NPC / ped fade passes its alpha per instance in MeshTag (vendor/README.md "Fade alpha in MeshTag").
+#ifndef MESHLET_MESH_MATERIAL_PASS
+#ifdef VERTEX_OUTPUT_INSTANCE_INDEX
+    let fade_tag = mesh[in.instance_index].tag;
+    if fade_tag != 0u {
+        base_color.a = bitcast<f32>(fade_tag ^ 0x80000000u);
+    }
+#endif
 #endif
 
     let double_sided = (flags & pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT) != 0u;

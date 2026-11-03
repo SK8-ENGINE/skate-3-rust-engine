@@ -1742,6 +1742,13 @@ impl FadeMaterial for super::ped_material::PedMaterial {
     }
 }
 
+/// A fade alpha as the `MeshTag` the PBR and ped shaders read (`bitcast<f32>(tag ^ 0x80000000)`; tag 0 = not fading):
+/// the same f32 the copy's material held before. -0.0 (which would be tag 0) draws as +0.0, the same blend.
+pub(crate) fn fade_tag(alpha: f32) -> u32 {
+    let bits = alpha.to_bits() ^ 0x8000_0000;
+    if bits == 0 { 0x8000_0000 } else { bits }
+}
+
 /// Blended material copies of one NPC while it fades (spawn fade in, leave fade). Absent while the
 /// NPC is solid. Dropping it (despawn, mod disable, map change) frees the copies: they are only
 /// held here.
@@ -1767,6 +1774,7 @@ pub(crate) fn present_fade<M: FadeMaterial>(
     mut npcs: Query<(Entity, &NpcFade, Option<&mut NpcFadeMaterials<M>>)>,
     children: Query<&Children>,
     mut meshes: Query<&mut MeshMaterial3d<M>>,
+    mut tags: Query<&mut bevy::mesh::MeshTag>,
     materials: Option<ResMut<Assets<M>>>,
 ) {
     let Some(mut materials) = materials else { return };
@@ -1778,6 +1786,9 @@ pub(crate) fn present_fade<M: FadeMaterial>(
                     if let Ok(mut m) = meshes.get_mut(*mesh) {
                         m.0 = original.clone();
                     }
+                    if tags.contains(*mesh) {
+                        commands.entity(*mesh).remove::<bevy::mesh::MeshTag>();
+                    }
                 }
                 commands.entity(e).remove::<NpcFadeMaterials<M>>();
             }
@@ -1788,7 +1799,7 @@ pub(crate) fn present_fade<M: FadeMaterial>(
             Some(s) => s.into_inner(),
             None => fresh.insert(NpcFadeMaterials::default()),
         };
-        let mut added = false;
+        let mut swapped = false;
         for mesh in children.iter_descendants(e) {
             let Ok(mut m) = meshes.get_mut(mesh) else { continue };
             let current = m.0.id();
@@ -1804,18 +1815,25 @@ pub(crate) fn present_fade<M: FadeMaterial>(
                     blended.set_fade(base * alpha);
                     let h = materials.add(blended);
                     state.copies.insert(current, (h.clone(), base));
-                    added = true;
                     h
                 }
             };
             state.originals.retain(|(x, _)| *x != mesh);
             state.originals.push((mesh, m.0.clone()));
             m.0 = copy;
+            swapped = true;
         }
-        if added || state.alpha != alpha {
-            for (h, base) in state.copies.values() {
-                if let Some(mat) = materials.get_mut(h.id()) {
-                    mat.set_fade(*base * alpha);
+        // The alpha goes to each mesh's MeshTag, not into the copy: a material write rebuilt its bind group every frame
+        // (doc 34 "Fades: MeshTag").
+        if swapped || state.alpha != alpha {
+            for (mesh, original) in &state.originals {
+                let Some((_, base)) = state.copies.get(&original.id()) else { continue };
+                let tag = bevy::mesh::MeshTag(fade_tag(*base * alpha));
+                match tags.get_mut(*mesh) {
+                    Ok(mut t) => *t = tag,
+                    Err(_) => {
+                        commands.entity(*mesh).insert(tag);
+                    }
                 }
             }
             state.alpha = alpha;

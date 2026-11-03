@@ -106,8 +106,54 @@ pub enum ObjectKind {
 #[derive(Clone, Debug)]
 pub struct Object {
     pub kind: ObjectKind,
-    pub fields: BTreeMap<String, Value>,
+    pub fields: Fields,
     pub prototype: Option<usize>,
+}
+/// An object's members (read through `Deref`), with a count of each key's ASCII-lowercase form so the case-insensitive
+/// lookup in [`Vm::get`] can skip objects that cannot match. Writes go through `insert` / `remove`, which keep the
+/// count; there is no `DerefMut`.
+#[derive(Clone, Default)]
+pub struct Fields {
+    map: BTreeMap<String, Value>,
+    folded: std::collections::HashMap<String, u32>,
+}
+impl Fields {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn insert(&mut self, key: String, value: Value) -> Option<Value> {
+        if let Some(slot) = self.map.get_mut(&key) {
+            return Some(std::mem::replace(slot, value));
+        }
+        *self.folded.entry(key.to_ascii_lowercase()).or_default() += 1;
+        self.map.insert(key, value)
+    }
+    pub fn remove(&mut self, key: &str) -> Option<Value> {
+        let old = self.map.remove(key)?;
+        let folded = key.to_ascii_lowercase();
+        if let Some(n) = self.folded.get_mut(&folded) {
+            *n -= 1;
+            if *n == 0 {
+                self.folded.remove(&folded);
+            }
+        }
+        Some(old)
+    }
+    /// Whether some key equals `lower` (an ASCII-lowercased name) ignoring ASCII case.
+    pub fn may_match_folded(&self, lower: &str) -> bool {
+        self.folded.contains_key(lower)
+    }
+}
+impl std::ops::Deref for Fields {
+    type Target = BTreeMap<String, Value>;
+    fn deref(&self) -> &Self::Target {
+        &self.map
+    }
+}
+impl std::fmt::Debug for Fields {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.map.fmt(f)
+    }
 }
 #[derive(Clone, Debug)]
 struct Function {
@@ -152,6 +198,8 @@ pub const UPDATE_BUDGET: usize = 2_000_000;
 pub struct Vm {
     pub objects: Vec<Object>,
     free_objects: Vec<usize>,
+    /// `collect`'s mark bits, kept between collections.
+    marked: Vec<bool>,
     functions: Vec<Function>,
     pub global: usize,
     remaining: usize,
@@ -332,7 +380,7 @@ impl Vm {
         if let Some(id) = self.free_objects.pop() {
             self.objects[id] = Object {
                 kind,
-                fields: BTreeMap::new(),
+                fields: Fields::new(),
                 prototype: None,
             };
             return id;
@@ -340,7 +388,7 @@ impl Vm {
         let id = self.objects.len();
         self.objects.push(Object {
             kind,
-            fields: BTreeMap::new(),
+            fields: Fields::new(),
             prototype: None,
         });
         id
@@ -349,11 +397,13 @@ impl Vm {
     /// roots; script references and prototypes preserve retired clips when
     /// they remain reachable. Stable handles never move during collection. Returns every free slot (host side
     /// tables drop entries for these).
-    pub fn collect(&mut self, host_roots: impl IntoIterator<Item = usize>) -> Result<Vec<usize>, String> {
+    pub fn collect(&mut self, host_roots: impl IntoIterator<Item = usize>) -> Result<&[usize], String> {
         if self.depth != 0 {
             return Err("Cannot collect during an APT call".into());
         }
-        let mut marked = vec![false; self.objects.len()];
+        let mut marked = std::mem::take(&mut self.marked);
+        marked.clear();
+        marked.resize(self.objects.len(), false);
         let mut pending: Vec<_> = host_roots.into_iter().collect();
         pending.push(self.global);
         while let Some(id) = pending.pop() {
@@ -373,17 +423,22 @@ impl Vm {
             }
         }
         self.free_objects.clear();
-        for (id, live) in marked.into_iter().enumerate() {
+        for (id, &live) in marked.iter().enumerate() {
             if !live {
-                self.objects[id] = Object {
-                    kind: ObjectKind::Plain,
-                    fields: BTreeMap::new(),
-                    prototype: None,
-                };
+                // A slot freed before and not reused is already this empty object.
+                let o = &self.objects[id];
+                if !(matches!(o.kind, ObjectKind::Plain) && o.fields.is_empty() && o.prototype.is_none()) {
+                    self.objects[id] = Object {
+                        kind: ObjectKind::Plain,
+                        fields: Fields::new(),
+                        prototype: None,
+                    };
+                }
                 self.free_objects.push(id);
             }
         }
-        Ok(self.free_objects.clone())
+        self.marked = marked;
+        Ok(&self.free_objects)
     }
     pub fn set(
         &mut self,
@@ -402,6 +457,7 @@ impl Vm {
     /// retail registers the pause menu object as "CoreMenu" (the only spelling in the image, 0x82300C68) and
     /// core_menu.apt reads it as `coremenu`, so retail's lookup ignores case (SWF 6 rules).
     pub fn get(&self, object: usize, key: &str) -> Value {
+        let mut lower = None;
         for exact in [true, false] {
             let mut current = Some(object);
             for _ in 0..64 {
@@ -410,8 +466,10 @@ impl Vm {
                 };
                 let found = if exact {
                     o.fields.get(key)
-                } else {
+                } else if o.fields.may_match_folded(lower.get_or_insert_with(|| key.to_ascii_lowercase())) {
                     o.fields.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v)
+                } else {
+                    None
                 };
                 if let Some(v) = found {
                     return v.clone();
@@ -1137,6 +1195,55 @@ impl Vm {
 
 #[cfg(test)]
 mod tests {
+    /// `Vm::get` before the folded-key skip (exact pass, then a case-insensitive scan of every object in the chain).
+    fn get_reference(vm: &Vm, object: usize, key: &str) -> Value {
+        for exact in [true, false] {
+            let mut current = Some(object);
+            for _ in 0..64 {
+                let Some(o) = current.and_then(|i| vm.objects.get(i)) else { break };
+                let found = if exact { o.fields.get(key) } else { o.fields.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v) };
+                if let Some(v) = found {
+                    return v.clone();
+                }
+                current = o.prototype;
+            }
+        }
+        Value::Undefined
+    }
+
+    #[test]
+    fn get_with_folded_key_skip_matches_the_full_scan() {
+        let names = ["x", "X", "_x", "_X", "coremenu", "CoreMenu", "COREMENU", "length", "Length", "onEnterFrame", "onenterframe", "a\u{e9}", "A\u{e9}", "\u{c9}", "0", "1"];
+        let mut seed = 0x2545_F491_u64;
+        let mut next = |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        let mut vm = Vm::new();
+        let ids: Vec<usize> = (0..12).map(|_| vm.object(ObjectKind::Plain)).collect();
+        for step in 0..20_000 {
+            let id = ids[next(ids.len())];
+            match next(4) {
+                0 | 1 => vm.set(id, names[next(names.len())], Value::Number(step as f64)).unwrap(),
+                2 => {
+                    vm.objects[id].fields.remove(names[next(names.len())]);
+                }
+                _ => vm.objects[id].prototype = if next(3) == 0 { None } else { Some(ids[next(ids.len())]) },
+            }
+            let (object, key) = (ids[next(ids.len())], names[next(names.len())]);
+            assert_eq!(vm.get(object, key), get_reference(&vm, object, key), "step {step}: {key} on {object}");
+            for o in &vm.objects {
+                let mut folded: std::collections::HashMap<String, u32> = Default::default();
+                for k in o.fields.keys() {
+                    *folded.entry(k.to_ascii_lowercase()).or_default() += 1;
+                }
+                assert_eq!(folded, o.fields.folded, "folded counts follow the keys");
+            }
+        }
+    }
+
     use super::*;
 
     struct Stub(Vec<String>);

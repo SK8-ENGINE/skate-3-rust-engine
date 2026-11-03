@@ -139,7 +139,7 @@ def main():
     from tools.asset_pipeline.versions import installed, fingerprints, changed_groups
     previous=installed(args.base) if args.refresh else None
     # Only the cheap version check before the window opens: install() checks
-    # the installed files (damaged(): hashes every output) on the worker thread
+    # the installed files (damaged(): size and time of every output, hashing only changed ones) on the worker thread
     # with progress. Doing it here too kept the window closed for minutes.
     changed=changed_groups(previous[1].get('pipelines',{}),fingerprints()) if previous else set()
     updating=previous is not None
@@ -174,7 +174,12 @@ def main():
         button.config(state='disabled');running=True;progress.start()
         def work():
             try:
-                installed_root=install(Path(iso),args.base,args.game_exe,lambda text:messages.put(('progress',text)),refresh=updating)
+                say=lambda text:messages.put(('progress',text))
+                if updating and Path(iso).suffix.lower()=='.iso':
+                    # Nothing to rebuild: no whole-disc extraction (doc 08 "ISO refresh without extracting the disc").
+                    from tools.asset_pipeline.iso_refresh import install as iso_refresh
+                    installed_root=iso_refresh(Path(iso),args.base,args.game_exe,say)
+                else:installed_root=install(Path(iso),args.base,args.game_exe,say,refresh=updating)
                 from tools.asset_pipeline.validation_report import summary
                 warnings=summary(installed_root)
                 messages.put(('done',f'Ready with {len(warnings)} warnings or unavailable components. Details: {installed_root / "setup-report.json"}' if warnings else 'Ready'))

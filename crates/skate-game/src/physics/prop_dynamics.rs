@@ -343,6 +343,31 @@ const GENERATED_GRAB_HEIGHT: f32 = 1.0;
 /// Better Object Mover's grab splines for a prop without authored ones: one per vertical box face along its
 /// horizontal edge at [`GENERATED_GRAB_HEIGHT`], approach = the face's outward normal and flags 4, as the authored
 /// splines are laid out (template space, scale divided out: `grab_object_of` multiplies it back in).
+/// A body's grab-scene spline geometry (the first 64 splines; ids from its grab slot, points scaled by `axis_scale`).
+fn grab_geometry_of(b: &PropBody) -> Vec<std::sync::Arc<skate_core::player::offboard::grab_scene::Geometry>> {
+    let s = b.axis_scale;
+    b.grab_splines
+        .iter()
+        .take(64)
+        .enumerate()
+        .map(|(i, g)| {
+            let key = PROP_GRAB_TAG | (b.grab_slot << 6) | i as u32;
+            std::sync::Arc::new(skate_core::player::offboard::grab_scene::Geometry {
+                id: key,
+                points: g.points.iter().map(|p| [p[0] * s.x, p[1] * s.y, p[2] * s.z, 1.0]).collect(),
+                approach_vectors: vec![[g.direction[0], g.direction[1], g.direction[2], 0.0]],
+                word_60: g.flags,
+            })
+        })
+        .collect()
+}
+
+impl PropBody {
+    fn rebuild_grab_geometry(&mut self) {
+        self.grab_geometry = grab_geometry_of(self);
+    }
+}
+
 fn generated_grab_splines(b: &PropBody) -> Vec<crate::living_world::vehicles::CarGrabSpline> {
     let (c, h, s) = ([b.local_center.x, b.local_center.y, b.local_center.z], [b.half_extents.x, b.half_extents.y, b.half_extents.z], [b.axis_scale.x, b.axis_scale.y, b.axis_scale.z]);
     if h.iter().chain(&s).any(|v| !(v.is_finite() && v.abs() > 1e-4)) {
@@ -416,6 +441,9 @@ pub(crate) struct PropBody {
     /// The template's authored grab splines (template space; `set_grab_splines`), or with Better Object Mover on and
     /// none authored, generated ones ([`generated_grab_splines`]).
     grab_splines: Vec<crate::living_world::vehicles::CarGrabSpline>,
+    /// The grab-scene geometry of `grab_splines` (first 64) for `grab_slot` and `axis_scale`, rebuilt by
+    /// `rebuild_grab_geometry` whenever either changes, shared by every tick's grab-scene objects.
+    grab_geometry: Vec<std::sync::Arc<skate_core::player::offboard::grab_scene::Geometry>>,
     /// The template has authored grab splines (retail can move it).
     authored_grab: bool,
     /// Box derived from the render AABB (scale folded in), kept so a
@@ -1274,6 +1302,7 @@ impl PropDynamics {
                 continue;
             };
             body.grab_slot = bodies.len() as u32;
+            body.rebuild_grab_geometry();
             bodies.push(body);
             by_id.insert(entry.id, bodies.len() - 1);
         }
@@ -1507,6 +1536,7 @@ impl PropDynamics {
         }
         body.grab_slot = self.next_grab_slot;
         self.next_grab_slot = self.next_grab_slot.wrapping_add(1);
+        body.rebuild_grab_geometry();
         body.type_data = spec.type_data.clone();
         body.rates.linear_velocity = spec.linear_velocity;
         body.rates.angular_velocity = spec.angular_velocity;
@@ -1623,6 +1653,7 @@ impl PropDynamics {
             template: template.to_string(),
             type_data: None,
             grab_splines: Vec::new(),
+            grab_geometry: Vec::new(),
             authored_grab: false,
             tuning: PropTuning::default(),
             authored_center: local_center,
@@ -1776,6 +1807,7 @@ impl PropDynamics {
             if better && !body.authored_grab {
                 body.grab_splines = generated_grab_splines(body);
             }
+            body.rebuild_grab_geometry();
         }
         count
     }
@@ -1791,6 +1823,7 @@ impl PropDynamics {
         let mut generated = 0;
         for body in self.bodies.iter_mut().filter(|b| !b.authored_grab) {
             body.grab_splines = if on { generated_grab_splines(body) } else { Vec::new() };
+            body.rebuild_grab_geometry();
             generated += usize::from(!body.grab_splines.is_empty());
         }
         generated
@@ -1870,13 +1903,14 @@ impl PropDynamics {
     }
 
     fn grab_object_of(b: &PropBody) -> Option<skate_core::player::offboard::grab_scene::Object> {
-        use skate_core::player::offboard::grab_scene::{AssemblyData, Descriptor, Geometry, Object, PartData, Provider, RatesData, Spline};
+        use skate_core::player::offboard::grab_scene::{AssemblyData, Descriptor, Object, PartData, Provider, RatesData, Spline};
+        #[cfg(test)]
+        assert_eq!(format!("{:?}", b.grab_geometry), format!("{:?}", grab_geometry_of(b)), "grab geometry cache is current");
         (!b.grab_splines.is_empty() && b.grab_slot < (1 << 24))
             .then(|| {
                 let id = PROP_GRAB_TAG | b.grab_slot;
                 let o = b.origin();
                 let c = b.rates.basis.columns;
-                let s = b.axis_scale;
                 Object {
                     id,
                     provider: Provider::LivingWorld,
@@ -1901,20 +1935,14 @@ impl PropDynamics {
                     frame: [[c[0][0], c[0][1], c[0][2], 0.0], [c[1][0], c[1][1], c[1][2], 0.0], [c[2][0], c[2][1], c[2][2], 0.0], [o.x, o.y, o.z, 1.0]],
                     object_vector_128: [b.rates.linear_velocity.x, b.rates.linear_velocity.y, b.rates.linear_velocity.z, 0.0],
                     splines: b
-                        .grab_splines
+                        .grab_geometry
                         .iter()
-                        .take(64)
                         .enumerate()
-                        .map(|(i, g)| {
+                        .map(|(i, geometry)| {
                             let key = PROP_GRAB_TAG | (b.grab_slot << 6) | i as u32;
                             Spline {
                                 descriptor: Descriptor { kind: 2, id: key },
-                                geometry: std::sync::Arc::new(Geometry {
-                                    id: key,
-                                    points: g.points.iter().map(|p| [p[0] * s.x, p[1] * s.y, p[2] * s.z, 1.0]).collect(),
-                                    approach_vectors: vec![[g.direction[0], g.direction[1], g.direction[2], 0.0]],
-                                    word_60: g.flags,
-                                }),
+                                geometry: std::sync::Arc::clone(geometry),
                                 word_272: 0,
                             }
                         })
@@ -2100,6 +2128,11 @@ impl PropDynamics {
     /// The map props as DMO census placements (runtime props, a ped's released hand prop or a mod's copy, are not
     /// streamed): id, authored position, bounding radius (box half diagonal) and
     /// the type priority (no type data: the `default` record, 100).
+    /// `dmo_placements().len()` without building them.
+    pub(crate) fn dmo_placement_count(&self) -> usize {
+        self.bodies.iter().filter(|b| !b.runtime).count()
+    }
+
     pub(crate) fn dmo_placements(&self) -> Vec<skate_core::living_world::dmo::DmoPlacement> {
         let mut out: Vec<_> = self
             .bodies

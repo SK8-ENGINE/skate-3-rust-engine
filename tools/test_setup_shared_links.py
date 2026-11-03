@@ -54,6 +54,26 @@ class SharedLinks(unittest.TestCase):
         self.assertEqual(shared_changed(self.shared), [])
 
 
+class MapWriters(unittest.TestCase):
+    """A maps rebuild hard-links the previous maps into the new installation; the writers must make new files."""
+
+    def test_writing_a_linked_irradiance_file_leaves_the_previous_one(self):
+        import json
+        from tools.asset_pipeline.irradiance import write
+        with tempfile.TemporaryDirectory() as temp:
+            temp = Path(temp)
+            previous, new = temp/'old.irradiance', temp/'new.irradiance'
+            previous.write_bytes(b'previous installation')
+            os.link(previous, new)
+            manifest = temp/'manifest.json'
+            manifest.write_text(json.dumps({'other_presentation_assets': []}))
+            linked = [(new, os.stat(new))]
+            write(manifest, new)
+            self.assertEqual(previous.read_bytes(), b'previous installation')
+            self.assertEqual(new.read_bytes()[:4], b'SHP1')
+            self.assertEqual(shared_changed(linked), [])
+
+
 class ReceiptTimes(unittest.TestCase):
     """damaged() skips the re-hash when size and modification time match (group_receipts.valid_group_receipt)."""
 

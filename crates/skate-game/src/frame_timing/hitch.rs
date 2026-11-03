@@ -82,18 +82,30 @@ pub(crate) const PHASE_SCORING: usize = 3;
 pub(crate) const PHASE_HUD_ADVANCE: usize = 4;
 pub(crate) const PHASE_HUD_RENDER: usize = 5;
 static PHASE_US: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+/// The same sums since the last `PHYSICS_PHASES` line (`system_timing.rs`).
+static PHASE_SECOND_US: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+
+fn add_phase_us(phase: usize, us: u64) {
+    PHASE_US[phase].fetch_add(us, Ordering::Relaxed);
+    PHASE_SECOND_US[phase].fetch_add(us, Ordering::Relaxed);
+}
+
+/// The phase sums since the last call (µs), reset to zero.
+pub(crate) fn take_phase_second() -> [u64; 11] {
+    std::array::from_fn(|i| PHASE_SECOND_US[i].swap(0, Ordering::Relaxed))
+}
 
 /// Runs `f`, adding its wall time to physics phase `phase` (always on: one clock read each side).
 pub(crate) fn phase<R>(phase: usize, f: impl FnOnce() -> R) -> R {
     let t = Instant::now();
     let r = f();
-    PHASE_US[phase].fetch_add(t.elapsed().as_micros() as u64, Ordering::Relaxed);
+    add_phase_us(phase, t.elapsed().as_micros() as u64);
     r
 }
 
 /// Adds the time since `started` to physics phase `phase`.
 pub(crate) fn add_phase(phase: usize, started: Instant) {
-    PHASE_US[phase].fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
+    add_phase_us(phase, started.elapsed().as_micros() as u64);
 }
 
 /// Takes (and resets) the physics phase sums (µs), as the log line does each frame.

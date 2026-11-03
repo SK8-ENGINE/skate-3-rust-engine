@@ -439,6 +439,10 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
         if previous and previous[1].get('source_hash') not in (None,digest(game_root/'default.xex')):
             raise RuntimeError('Select the same Xbox game edition used to set up this copy')
     if previous:groups.update(damaged(*previous, exclude=groups, report=report))
+    if game_root is not None and (game_root/'.partial-source').is_file() and groups:
+        # A refresh from an ISO started with only the checked disc files (iso_refresh.py): get the whole disc first.
+        from .iso_refresh import NeedsFullSource
+        raise NeedsFullSource(', '.join(sorted(groups)))
     def outputs(stage):
         saved=previous[1].get('outputs',{}) if previous else {}
         return {g:saved[g] if g not in groups and g in saved else record(stage,g) for g in GROUPS}
@@ -483,6 +487,14 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                     except OSError:shutil.copy2(src,dst)
                 else:shutil.copy2(src,dst)
                 return dst
+            def link_rebuilt_map(src,dst):
+                # A maps rebuild replaces each map file (the writers unlink first), so the previous files can be
+                # shared instead of copied (1.4 GB); shared_changed() refuses to publish if one was written in place.
+                try:
+                    os.link(src,dst)
+                    shared.append((Path(dst),os.stat(dst)))
+                except OSError:shutil.copy2(src,dst)
+                return dst
             def copy_asset(src,dst):
                 resolved=Path(src).resolve()
                 if resolved in unchanged:
@@ -510,7 +522,7 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
             if entry.is_dir():
                 shutil.copytree(entry,stage/entry.name,
                     ignore=ignore_rebuilt_assets if entry.name=='assets' else None,
-                    copy_function=copy_map if entry.name=='maps' and 'maps' not in groups
+                    copy_function=(copy_map if 'maps' not in groups else link_rebuilt_map) if entry.name=='maps'
                     else copy_asset if entry.name=='assets' else shutil.copy2)
             else:shutil.copy2(entry,stage/entry.name)
     private=stage/'assets/private';private.mkdir(parents=True,exist_ok=True)
@@ -783,7 +795,9 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                     if not src.is_file() or digest(src)!=old.get('sha256'):continue
                     try:validate(src)
                     except CONTENT_ERRORS:continue
-                    target=stage/old['path'];target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,target)
+                    target=stage/old['path'];target.parent.mkdir(parents=True,exist_ok=True)
+                    # Still the linked previous file when its job did not run (a kept DLC map): nothing to copy.
+                    if not (target.is_file() and os.path.samefile(src,target)):shutil.copy2(src,target)
                     catalog.append(old)
                     note(private/'map-status'/(old['name']+'-availability.json'),old['name'],
                          RuntimeError('New source map unavailable; previous map passed validation'),retained=True,report=report)

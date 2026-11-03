@@ -1,6 +1,6 @@
 // Retail ped body shader livingworld_stamp_defaultPS (TU3 shaders_final.big), from the microcode (research b614).
 // Port notes: docs/hails-additions/26f-living-world-peds.md#ped-material-the-retail-shadow-side-2026-10-25-user-asks-352
-#import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings as frame}
+#import bevy_pbr::{forward_io::VertexOutput, mesh_view_bindings as frame, mesh_bindings::mesh}
 #import bevy_pbr::shadows::fetch_directional_shadow
 #import skate_character_lighting::{character_normal, character_albedo}
 
@@ -47,5 +47,8 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     let kr = p.light.xyz - 2.0 * ndl * vn;
     let spec = pow(saturate(dot(vd, -kr)), p.rows[2].w) * shadow * p.rows[2].rgb * pow(max(1.0 - nv, 1e-6), p.rows[1].w);
     let lit = albedo * (key + ambient) + spec;
-    return vec4<f32>(lit * p.rows[0].y * p.light.w, p.options.y);
+    // The fade alpha per instance in MeshTag while a fade runs (npc_skaters::present_fade), else i_params.x.
+    let fade_tag = mesh[i.instance_index].tag;
+    let alpha = select(p.options.y, bitcast<f32>(fade_tag ^ 0x80000000u), fade_tag != 0u);
+    return vec4<f32>(lit * p.rows[0].y * p.light.w, alpha);
 }

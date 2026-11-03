@@ -328,13 +328,18 @@ pub(crate) fn init() -> Result<Guard, String> {
     // Installing one here as well makes that call fail with `SetLoggerError`,
     // and `init` unwraps, so doing this "defensively" panics before the window
     // ever opens.
+    let options = options()?;
+    // Bevy's per-system spans (feature `trace`) are only read by the Chrome capture and the SYSTEM_TIMING /
+    // FIXED_TIMING readouts; without them every system run still paid the span enter / exit (doc 34 "Gameplay
+    // frame-time pass"). Info level, so `warn` drops the spans and keeps that module's warnings.
+    let spans = if options.is_none() && crate::system_timing::layer().is_none() { ",bevy_ecs::system::function_system=warn,bevy_ecs::query::state=warn" } else { "" };
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,wgpu=warn,naga=warn,bevy_render=info"));
+        .unwrap_or_else(|_| EnvFilter::new(format!("info,wgpu=warn,naga=warn,bevy_render=info{spans}")));
     let stderr = bevy::log::tracing_subscriber::fmt::layer()
         .with_writer(LogWriter::install(crate::trace_all::on()))
         .with_target(false);
 
-    let Some(options) = options()? else {
+    let Some(options) = options else {
         // `try_init` rather than `init`: losing the race for the global
         // subscriber costs log formatting, and killing the process over log
         // formatting is never the right trade.

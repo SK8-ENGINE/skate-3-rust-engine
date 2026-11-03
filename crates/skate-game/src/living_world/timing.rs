@@ -19,6 +19,8 @@ pub(crate) const TRAFFIC: usize = 8;
 pub(crate) const VEHICLE_CONTACTS: usize = 9;
 
 static US: [AtomicU64; NAMES.len()] = [const { AtomicU64::new(0) }; NAMES.len()];
+/// The same sums since the last `LIVING_TIMING` line (`system_timing.rs`).
+static SECOND_US: [AtomicU64; NAMES.len()] = [const { AtomicU64::new(0) }; NAMES.len()];
 
 /// Adds the time until it is dropped to system `index`.
 pub(crate) struct Span(usize, Instant);
@@ -29,11 +31,18 @@ pub(crate) fn span(index: usize) -> Span {
 
 impl Drop for Span {
     fn drop(&mut self) {
-        US[self.0].fetch_add(self.1.elapsed().as_micros() as u64, Ordering::Relaxed);
+        let us = self.1.elapsed().as_micros() as u64;
+        US[self.0].fetch_add(us, Ordering::Relaxed);
+        SECOND_US[self.0].fetch_add(us, Ordering::Relaxed);
     }
 }
 
 /// This frame's sums in microseconds, reset to zero.
 pub(crate) fn take() -> [u64; NAMES.len()] {
     std::array::from_fn(|i| US[i].swap(0, Ordering::Relaxed))
+}
+
+/// The sums since the last call in microseconds, reset to zero.
+pub(crate) fn take_second() -> [u64; NAMES.len()] {
+    std::array::from_fn(|i| SECOND_US[i].swap(0, Ordering::Relaxed))
 }

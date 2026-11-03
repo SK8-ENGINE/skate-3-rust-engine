@@ -1,5 +1,6 @@
 """Validate prepared groups without treating user files as extractor output."""
 import json
+import stat
 from .setup_state import receipt, valid_receipt
 
 ROOTS = {
@@ -66,11 +67,15 @@ def valid_group_receipt(root, files_):
         return False
     hashed = {}
     try:
+        # The root once, not per file; one stat per file (a refresh checks ~37k files, doc 08 "Refresh check cost").
+        inside = root.resolve()
         for name, item in files_.items():
             path = (root/name).resolve()
-            if not path.is_relative_to(root.resolve()) or not path.is_file():
+            if not path.is_relative_to(inside):
                 return False
             status = path.stat()
+            if not stat.S_ISREG(status.st_mode):
+                return False
             if status.st_size != item['size']:
                 return False
             if item.get('mtime_ns') != status.st_mtime_ns:
@@ -90,7 +95,7 @@ def damaged(root, marker, exclude=(), report=None):
     checked = [group for group in ROOTS if group not in exclude]
     for group, roots in ROOTS.items():
         if group in exclude:continue
-        # Every installed file is re-read and hashed: minutes on a hard drive,
+        # Every installed file is checked (size and time; a changed one is hashed): tens of thousands of files,
         # so setup's window shows which group it is on.
         if report:report(f'Checking your installed game files: {group} ({checked.index(group)+1} of {len(checked)})...')
         if group in saved:
