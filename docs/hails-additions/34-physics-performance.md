@@ -342,6 +342,16 @@ log line). Desktop, timing readouts on, skip on vs off: 2D graph 0.36 vs 0.42 ms
 per frame (most of the 2D cost is the other two 2D cameras' fixed passes); screenshots with and without the skip show
 the same HUD. Tests: scoring HUD, HUD movies, menus and APT 65 pass.
 
+## Session marker camera off while empty
+(2026-11-02 night, USER-ASKS 470.) The session marker layer (29: the marker HUD, the teleport effect screen) has its
+own window camera (order 1, no clear) that ran its 2D passes and the final write every frame though it is empty
+almost always. 2D cameras do no tonemapping (`Camera2d` requires `Tonemapping::None`, dither off), so with nothing
+drawn it only wrote the same image again. `session_marker::hud::gate_marker_camera` (PostUpdate, after visibility
+propagation) keeps it on only while an entity on layer 29 is visible; off, the output camera writes that image last.
+`SKATE_MARKER_CAMERA_GATE=0` keeps it always on (`MARKER_CAMERA_GATE` log line). Desktop, timing readouts on, gate on vs
+off: render thread 1.82 vs 1.95 ms per frame, 2D graph 0.28 vs 0.37 ms, submit 0.40 vs 0.44 ms, frame p50 3.55 vs 3.72
+ms; the screenshot matches. Test `marker_camera_runs_only_while_its_layer_shows_something`; skate-game 991 pass.
+
 ## Where the frame goes now (2026-11-02 night, desktop)
 After the passes above (University library, muted, plain): frame p50 about 2.9 to 3.7 ms run to run, main thread
 about 2.3 to 2.8 ms, and the main thread now waits for the render thread part of each frame, so both pace it.
