@@ -181,7 +181,9 @@ impl Plugin for ScoringHudPlugin {
             (resize_target, reset, hud_minimap::track_heading, hud_minimap::called_skater_icons, render)
                 .chain()
                 .after(crate::app::FrameSet::Physics),
-        );
+        )
+        // After every Update writer of layer 31 (this HUD and the retail menu stage).
+        .add_systems(PostUpdate, gate_hud_camera);
     }
 }
 fn setup(
@@ -346,6 +348,7 @@ fn setup(
                 RenderTarget::Image(target.clone().into()),
                 RenderLayers::layer(31),
                 Msaa::Off,
+                HudCamera,
             ));
             hud.composite = composites.add(HudComposite { image: target });
             commands.spawn((
@@ -864,6 +867,7 @@ fn apply_draws_with(
         };
         let material = hud_material(draw, texture, gamma);
         if index == slots.len() {
+            hud_changed();
             let mesh = meshes.add(hud_mesh(draw));
             let material = materials.add(material);
             let entity = commands
@@ -887,6 +891,7 @@ fn apply_draws_with(
                 .is_some_and(|m| mesh_matches(m, draw))
             {
                 if let Some(old) = meshes.get_mut(&slot.mesh) {
+                    hud_changed();
                     *old = hud_mesh(draw);
                 }
             }
@@ -895,6 +900,7 @@ fn apply_draws_with(
                 .is_some_and(|m| material_matches(m, &material))
             {
                 if let Some(old) = materials.get_mut(&slot.material) {
+                    hud_changed();
                     *old = material;
                 }
             }
@@ -905,8 +911,59 @@ fn apply_draws_with(
         set_visibility(commands, slot, Visibility::Hidden);
     }
 }
+/// Any HUD / menu stage draw changed since the last frame (`count_hud_changes`, the `hud_dirty` count of `LOAD_EVENTS`).
+static HUD_CHANGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The same, for the HUD camera's gate (`gate_hud_camera`).
+static HUD_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn hud_changed() {
+    HUD_CHANGED.store(true, std::sync::atomic::Ordering::Relaxed);
+    HUD_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The camera that draws the HUD and the menu stage (layer 31) into the HUD texture.
+#[derive(Component)]
+pub(crate) struct HudCamera;
+
+/// Draw the HUD texture only on frames where something it shows changed (doc 34 "HUD texture redrawn only when it
+/// changes"): a HUD / menu stage draw (spawn, mesh, material or visibility), any image asset (atlases, new menu
+/// textures, the target's resize), a removed 2D mesh entity, or the first frames. Otherwise the camera stays off and
+/// the texture keeps its last frame, which is what drawing the same content again gives.
+/// `SKATE_HUD_SKIP_UNCHANGED=0` draws every frame (A/B checks).
+fn gate_hud_camera(
+    mut cameras: Query<&mut Camera, With<HudCamera>>,
+    mut images: MessageReader<AssetEvent<Image>>,
+    mut removed: RemovedComponents<Mesh2d>,
+    mut frames: Local<u32>,
+) {
+    static SKIP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let skip = *SKIP.get_or_init(|| {
+        let skip = std::env::var("SKATE_HUD_SKIP_UNCHANGED").map_or(true, |v| v != "0");
+        info!("HUD_SKIP_UNCHANGED {}", if skip { "on" } else { "off" });
+        skip
+    });
+    let changed = HUD_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed);
+    let image = images.read().count() > 0;
+    let gone = removed.read().count() > 0;
+    *frames = frames.saturating_add(1);
+    let active = !skip || changed || image || gone || *frames <= 3;
+    for mut camera in &mut cameras {
+        if camera.is_active != active {
+            camera.is_active = active;
+        }
+    }
+}
+
+/// Counts the frames in which a HUD draw changed (observation only).
+pub(crate) fn count_hud_changes() {
+    if HUD_CHANGED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        let _event = crate::living_world::timing::event(crate::living_world::timing::EV_HUD_DIRTY);
+    }
+}
+
 fn set_visibility(commands: &mut Commands, slot: &mut Slot, visibility: Visibility) {
     if slot.visibility != Some(visibility) {
+        hud_changed();
         commands.entity(slot.entity).insert(visibility);
         slot.visibility = Some(visibility);
     }
