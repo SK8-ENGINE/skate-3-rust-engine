@@ -427,8 +427,11 @@ mod parallel {
     }
 
     /// skate3rust patch: failed queue polls (lock busy, or empty while another worker works) before an idle worker
-    /// yields its CPU.
-    const IDLE_SPINS_BEFORE_YIELD: u32 = 64;
+    /// yields its CPU: `SKATE_TRANSFORM_YIELD_SPINS` (default 64; 0 = never yield, upstream's behaviour), read once.
+    fn idle_spins_before_yield() -> u32 {
+        static SPINS: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        *SPINS.get_or_init(|| std::env::var("SKATE_TRANSFORM_YIELD_SPINS").ok().and_then(|v| v.parse().ok()).unwrap_or(64))
+    }
 
     /// A parallel worker that will consume processed parent entities from the queue, and push
     /// children to the queue once it has propagated their [`GlobalTransform`].
@@ -446,9 +449,10 @@ mod parallel {
         // propagation workers yield"). Spinning without yielding kept a preempted worker that still held work off
         // its CPU for a scheduler quantum (~30 ms) while the idle ones spun at a boosted priority.
         let mut idle_spins = 0u32;
+        let limit = idle_spins_before_yield();
         let mut idle = |spins: &mut u32| {
             *spins += 1;
-            if *spins >= IDLE_SPINS_BEFORE_YIELD {
+            if limit != 0 && *spins >= limit {
                 *spins = 0;
                 std::thread::yield_now();
             } else {

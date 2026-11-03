@@ -302,7 +302,16 @@ Proof: skate-game 991 pass, 235 ignored; data-gated living world and replay pass
 Result (desktop, plain, interleaved against the build before, 2 runs each of 150 s, no run disturbed): frames of 20 ms
 or more after the start 22 / 12 -> 1 / 1; per-second worst frame p90 27.1 / 28.7 -> 11.0 / 9.6 ms; p99.9 19.5 / 17.8
 -> 19.5 / 9.2 ms; median 3.42 / 3.35 -> 3.62 / 3.43 ms and p90 5.69 / 5.64 -> 6.16 / 5.74 ms (0.1 to 0.2 ms at the
-median, maybe the yields' cost; a larger spin count before the yield, 512, is the open tuning test).
+median across two different builds).
+
+Tuning (one build, `SKATE_TRANSFORM_YIELD_SPINS` only, interleaved, 2 runs of 150 s each):
+| spins before the yield | frame p50 | p99 | p99.9 | frames of 20 ms or more after the start |
+|---|---|---|---|---|
+| 0 (upstream: never yield) | 3.46 / 3.87 ms | 7.17 / 8.56 ms | 21.8 / 16.0 ms | 27 / 8 |
+| 64 (default) | 3.31 / 3.35 ms | 6.73 / 6.74 ms | 9.0 / 8.9 ms | 1 / 0 |
+| 512 | 3.56 / 3.31 ms | 7.57 / 7.03 ms | 9.2 / 9.3 ms | 1 / 0 |
+64 is the best in every column, the median included: the earlier median difference was between two builds, not the
+yields' cost.
 
 ### Checked and left alone
 - `think_peds` builds a String per entity per tick for its entity map: about 1200 small allocations a second, too small to

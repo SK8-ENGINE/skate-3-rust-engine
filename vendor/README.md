@@ -114,7 +114,8 @@ encoding or stop the fade from owning it. Doc:
 
 `bevy_transform` is the unmodified crates.io 0.18.1 source except `src/systems.rs` `parallel::propagation_worker`:
 an idle worker (queue lock busy, or queue empty while another worker still works) calls `std::thread::yield_now`
-after `IDLE_SPINS_BEFORE_YIELD` (64) failed polls instead of spinning on, and drops the queue lock before it yields.
+after `SKATE_TRANSFORM_YIELD_SPINS` failed polls (default 64; 0 = never yield, upstream's behaviour, for A/B checks)
+instead of spinning on, and drops the queue lock before it yields.
 Why: `propagate_parent_transforms` starts one worker per compute thread and the idle ones spun without ever yielding.
 A Windows Performance Recorder trace with context switches (2026-11-02, `.local/research/b230-process-stall-candidates.md`
 "WPR capture") showed the worker that still held work preempted for a moment and then kept off its CPU for 32 ms by
