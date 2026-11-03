@@ -330,17 +330,13 @@ Result (one build, the setting only, desktop): with the timing readouts the chec
 vs 6.01 / 7.91 ms, main thread p50 2.29 / 2.33 vs 2.31 / 2.54 ms: a small gain, mostly fewer pool scopes (the checks
 ran beside other systems). Tests: skate-game 991 pass, 235 ignored; data-gated living world, replay, menu and HUD pass.
 
-## HUD texture redrawn only when it changes
-(2026-11-02 night, USER-ASKS 470; the laptop's profile showed the 2D graphs above the 3D one.) The HUD and the retail
-menu stage draw into the HUD texture with their own camera (layer 31) every frame, though their movies change it
-about 30 times a second (`hud_dirty` in `LOAD_EVENTS`; the APT movies run at 30 fps). `scoring_hud::gate_hud_camera`
-(PostUpdate, after both writers) keeps that camera on only for a frame where a HUD / menu draw changed (a new slot, a
-mesh, material or visibility write in `apply_draws_with`), any image asset changed (atlases, new menu textures, the
-target's resize), a 2D mesh entity was removed, or the first three frames; otherwise the texture keeps its last frame,
-which is what drawing the same content again gives. `SKATE_HUD_SKIP_UNCHANGED=0` draws every frame (`HUD_SKIP_UNCHANGED`
-log line). Desktop, timing readouts on, skip on vs off: 2D graph 0.36 vs 0.42 ms, HUD opaque 2D pass 0.23 vs 0.24 ms
-per frame (most of the 2D cost is the other two 2D cameras' fixed passes); screenshots with and without the skip show
-the same HUD. Tests: scoring HUD, HUD movies, menus and APT 65 pass.
+## HUD texture redrawn only when it changes: tried and reverted
+(2026-11-02 night.) The HUD and menu stage camera (layer 31) redraws the HUD texture every frame though its movies
+change it about 30 times a second. A gate that turned the camera off on unchanged frames lowered the 2D graph (0.42 ->
+0.36 ms) and the laptop's main thread (about -0.06 ms) but raised frame p50 in all four laptop pairs (+0.20 / +0.36
+ms; +0.17 / +0.08 with the other switches) and slightly on the desktop (3.65 vs 3.59 ms): turning a camera on about
+30 times a second costs more than the skipped draws (Bevy prepares a returning view again). Reverted; a camera that
+stays off (the session marker one below) does not pay this.
 
 ## Session marker camera off while empty
 (2026-11-02 night, USER-ASKS 470.) The session marker layer (29: the marker HUD, the teleport effect screen) has its

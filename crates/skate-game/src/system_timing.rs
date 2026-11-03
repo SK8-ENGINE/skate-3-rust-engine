@@ -218,7 +218,7 @@ pub(crate) struct SystemTimingPlugin;
 impl Plugin for SystemTimingPlugin {
     fn build(&self, app: &mut App) {
         if on() {
-            app.add_systems(Last, (report, count_material_events, crate::scoring_hud::count_hud_changes));
+            app.add_systems(Last, (report, count_material_events));
         }
         if fixed_on() {
             app.add_systems(Last, report_fixed);
