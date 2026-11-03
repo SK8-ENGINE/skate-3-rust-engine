@@ -430,7 +430,11 @@ mod parallel {
     /// yields its CPU: `SKATE_TRANSFORM_YIELD_SPINS` (default 64; 0 = never yield, upstream's behaviour), read once.
     fn idle_spins_before_yield() -> u32 {
         static SPINS: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-        *SPINS.get_or_init(|| std::env::var("SKATE_TRANSFORM_YIELD_SPINS").ok().and_then(|v| v.parse().ok()).unwrap_or(64))
+        *SPINS.get_or_init(|| {
+            let spins = std::env::var("SKATE_TRANSFORM_YIELD_SPINS").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
+            bevy_log::info!("TRANSFORM_YIELD idle propagation workers yield after {spins} polls (0 = never)");
+            spins
+        })
     }
 
     /// A parallel worker that will consume processed parent entities from the queue, and push
