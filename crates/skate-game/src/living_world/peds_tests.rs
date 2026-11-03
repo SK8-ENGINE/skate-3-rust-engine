@@ -1132,3 +1132,19 @@ fn a_chase_caught_event_posts_a_caught_line() {
     assert_eq!(posted.len(), 1);
     assert!(posted[0].starts_with("ID_CHASE_CAUGHT_"), "{posted:?}");
 }
+
+#[test]
+fn ped_tint_keep_holds_the_most_recently_used_and_evicts_the_oldest() {
+    let mut materials = Assets::<StandardMaterial>::default();
+    let handles: Vec<Handle<StandardMaterial>> = (0..4).map(|_| materials.add(StandardMaterial::default())).collect();
+    let key = |i: usize| (handles[i].id(), [i as u32; 8]);
+    let mut keep = super::peds::PedTintKeep::with_cap(2);
+    keep.touch(key(0), || handles[0].clone().untyped());
+    keep.touch(key(1), || handles[1].clone().untyped());
+    keep.touch(key(0), || unreachable!("a kept entry is not created again"));
+    keep.touch(key(2), || handles[2].clone().untyped());
+    assert_eq!(keep.keys(), vec![key(0), key(2)], "the least recently used (1) is evicted");
+    let mut off = super::peds::PedTintKeep::with_cap(0);
+    off.touch(key(3), || unreachable!("cap 0 keeps nothing"));
+    assert!(off.keys().is_empty());
+}

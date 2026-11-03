@@ -25,6 +25,9 @@ const FIXED_STEP: &str = "FixedMain::run_fixed_main";
 /// Command applications get their own slot under this prefix (`system_commands` spans).
 const COMMANDS: &str = "cmd:";
 
+const RENDER_PARTS_0: &str = "submit_graph_commands";
+const RENDER_PARTS_1: &str = "present_frames";
+const RENDER_PARTS_2: &str = "command_buffer_generation_tasks";
 /// Systems named so far; a slot is never reused.
 const SLOTS: usize = 8192;
 /// Systems on the line.
@@ -116,14 +119,23 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-        let commands = match attrs.metadata().name() {
+        let span_name = attrs.metadata().name();
+        let commands = match span_name {
             "system" => false,
             "system_commands" if fixed_on() => true,
+            // The render frame's parts (bevy_render), so a long render frame names the part: graph nodes, command
+            // buffer recording, submit, present.
+            RENDER_PARTS_0 | RENDER_PARTS_1 | RENDER_PARTS_2 | "node" | "run_graph" => false,
             _ => return,
         };
         let mut field = NameField::default();
         attrs.record(&mut field);
-        let Some(name) = field.0 else { return };
+        let name = match span_name {
+            "node" | "run_graph" => field.0.map(|n| format!("render:{span_name}:{}", short(&n))),
+            RENDER_PARTS_0 | RENDER_PARTS_1 | RENDER_PARTS_2 => Some(format!("render:{span_name}")),
+            _ => field.0,
+        };
+        let Some(name) = name else { return };
         let step = !commands && name.ends_with(FIXED_STEP);
         let name = if commands { format!("{COMMANDS}{name}") } else { name };
         let t = table();
@@ -264,6 +276,9 @@ fn report(mut state: Local<ReportState>) {
     let phases = crate::frame_timing::hitch::take_phase_second();
     let parts_p: Vec<String> = crate::frame_timing::hitch::PHASES.iter().zip(phases).map(|(n, us)| format!("{n}={:.3}", us as f64 / 1e3 / frames as f64)).collect();
     info!("PHYSICS_PHASES frames={frames} | {}", parts_p.join(" "));
+    let events = crate::living_world::timing::take_events();
+    let parts_e: Vec<String> = crate::living_world::timing::EVENT_NAMES.iter().zip(events).map(|(n, (c, us, max))| format!("{n}={c}/{:.2}/{:.2}", us as f64 / 1e3, max as f64 / 1e3)).collect();
+    info!("LOAD_EVENTS count/total_ms/max_ms | {}", parts_e.join(" "));
     info!("LIVING_TIMING frames={frames} ms_per_frame={:.3} | {}", living.iter().sum::<u64>() as f64 / 1e3 / frames as f64, parts.join(" "));
 }
 

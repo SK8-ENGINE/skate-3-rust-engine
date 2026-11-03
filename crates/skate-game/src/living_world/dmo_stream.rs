@@ -71,6 +71,7 @@ pub(crate) fn stream_dmos(
     mut st: ResMut<DmoStreamState>,
 ) {
     let _span = super::timing::span(super::timing::DMO_STREAM);
+    let _event = super::timing::event(super::timing::EV_DMO_PASS);
     let Some(physics) = physics.as_deref_mut() else { return };
     let s = settings.dmo_stream;
     let generation = map.as_ref().map_or(0, |m| m.generation);

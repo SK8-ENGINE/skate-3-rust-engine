@@ -1520,6 +1520,7 @@ pub(crate) fn present_ped_looks(
         if puppet.bindings.is_some() || !instances.get(scene).is_ok_and(|i| spawner.instance_is_ready(**i)) {
             continue;
         }
+        let _event = super::timing::event(super::timing::EV_PED_BIND);
         match crate::animation::AnimationStatus::for_scene(scene, &data.rig.names, &skins, &nodes, &parents) {
             Ok(b) => {
                 // GLB bind globals per rig bone from the skin's inverse bind matrices.
@@ -1569,6 +1570,51 @@ pub(crate) struct PedTinted;
 #[derive(Resource, Default)]
 pub(crate) struct PedMaterials(BTreeMap<(AssetId<StandardMaterial>, [u32; 8]), AssetId<StandardMaterial>>);
 
+/// The most recently used recoloured ped materials, held strongly so a ped spawning with a recent (source material,
+/// tint pair) reuses the finished texture instead of recolouring and uploading it again on the main thread (doc 34
+/// "Ped tint cache"). `SKATE_PED_TINT_CACHE=<n>` entries, default 32 (0 = off: copies live only while a ped uses them).
+/// Entries whose source material is gone (a map change) are dropped.
+#[derive(Resource)]
+pub(crate) struct PedTintKeep {
+    cap: usize,
+    keep: std::collections::VecDeque<((AssetId<StandardMaterial>, [u32; 8]), UntypedHandle)>,
+}
+
+impl Default for PedTintKeep {
+    fn default() -> Self {
+        let cap = std::env::var("SKATE_PED_TINT_CACHE").ok().and_then(|v| v.parse().ok()).unwrap_or(32);
+        Self { cap, keep: Default::default() }
+    }
+}
+
+impl PedTintKeep {
+    #[cfg(test)]
+    pub(crate) fn with_cap(cap: usize) -> Self {
+        Self { cap, keep: Default::default() }
+    }
+    #[cfg(test)]
+    pub(crate) fn keys(&self) -> Vec<(AssetId<StandardMaterial>, [u32; 8])> {
+        self.keep.iter().map(|(k, _)| *k).collect()
+    }
+    pub(crate) fn touch(&mut self, key: (AssetId<StandardMaterial>, [u32; 8]), handle: impl FnOnce() -> UntypedHandle) {
+        if self.cap == 0 {
+            return;
+        }
+        match self.keep.iter().position(|(k, _)| *k == key) {
+            Some(i) => {
+                let entry = self.keep.remove(i).expect("index from position");
+                self.keep.push_back(entry);
+            }
+            None => {
+                self.keep.push_back((key, handle()));
+                while self.keep.len() > self.cap {
+                    self.keep.pop_front();
+                }
+            }
+        }
+    }
+}
+
 /// Whether a ped GLB material gets the tint (shader extras, else body slot `Rostral_*`): docs/hails-additions/26f-living-world-peds.md#ped-material-tint-rule
 pub(crate) fn ped_material_colorized(name: Option<&str>, extras: Option<&str>) -> bool {
     match extras {
@@ -1598,11 +1644,13 @@ pub(crate) fn present_ped_tints(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<PedMaterials>,
     mut lit_cache: ResMut<PedLitMaterials>,
+    mut keep: ResMut<PedTintKeep>,
     mut lit_materials: Option<ResMut<Assets<super::ped_material::PedMaterial>>>,
     lighting: Option<Res<crate::retail_character::Lighting>>,
     looks: Res<PedLooks>,
 ) {
     cache.0.retain(|_, id| materials.contains(*id));
+    keep.keep.retain(|(key, _)| materials.contains(key.0));
     if let Some(lit) = lit_materials.as_ref() {
         lit_cache.0.retain(|_, id| lit.contains(*id));
     }
@@ -1630,16 +1678,21 @@ pub(crate) fn present_ped_tints(
             if rows.is_some()
                 && let Some(m) = lit_cache.0.get(&key).and_then(|id| lit_materials.as_mut()?.get_strong_handle(*id))
             {
+                let _hit = super::timing::event(super::timing::EV_PED_TINT_HIT);
+                keep.touch(key, || m.clone().untyped());
                 commands.entity(ent).remove::<MeshMaterial3d<StandardMaterial>>().insert(MeshMaterial3d(m));
                 continue;
             }
             if rows.is_none()
                 && let Some(m) = cache.0.get(&key).and_then(|id| materials.get_strong_handle(*id))
             {
+                let _hit = super::timing::event(super::timing::EV_PED_TINT_HIT);
+                keep.touch(key, || m.clone().untyped());
                 commands.entity(ent).insert(MeshMaterial3d(m));
                 continue;
             }
             let Some(base) = source.base_color_texture.clone() else { continue };
+            let _event = super::timing::event(super::timing::EV_PED_TINT_MISS);
             let texture = if colorized {
                 let Some(image) = images.get(&base) else {
                     pending = true;
@@ -1665,6 +1718,7 @@ pub(crate) fn present_ped_tints(
                         alpha: AlphaMode::Opaque,
                     });
                     lit_cache.0.insert(key, h.id());
+                    keep.touch(key, || h.clone().untyped());
                     commands.entity(ent).remove::<MeshMaterial3d<StandardMaterial>>().insert(MeshMaterial3d(h));
                 }
                 _ => {
@@ -1672,6 +1726,7 @@ pub(crate) fn present_ped_tints(
                     m.base_color_texture = Some(texture);
                     let h = materials.add(m);
                     cache.0.insert(key, h.id());
+                    keep.touch(key, || h.clone().untyped());
                     commands.entity(ent).insert(MeshMaterial3d(h));
                 }
             }
@@ -1904,6 +1959,7 @@ pub(crate) fn install(app: &mut App) {
         .add_systems(FixedUpdate, (load_ped_data, apply_ped_records, release_rejected, update_ped_obstacles, think_peds, super::ped_hand_props::sync_hand_props, apply_skater_takedowns, post_chase_messages, super::ped_alerts::update_ped_alerts, advance_peds, log_ped_readout).chain().after(super::step_population).distributive_run_if(crate::replay::world_live))
         .init_resource::<PedMaterials>()
             .init_resource::<PedLitMaterials>()
+            .init_resource::<PedTintKeep>()
         .add_systems(Update, (present_ped_looks, present_ped_tints, update_ped_light, present_ped_pose).chain().after(crate::app::FrameSet::Animation).before(super::npc_skaters::present_fade::<StandardMaterial>));
 }
 

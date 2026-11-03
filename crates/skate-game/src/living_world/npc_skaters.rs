@@ -1529,6 +1529,7 @@ pub(crate) fn present_looks(
         if puppet.bindings.is_some() || !instances.get(scene).is_ok_and(|i| spawner.instance_is_ready(**i)) {
             continue;
         }
+        let _event = super::timing::event(super::timing::EV_NPC_BIND);
         match crate::animation::AnimationStatus::for_scene(scene, &skater.animation.evaluator.frames.bone_names, &skins, &nodes, &parents) {
             Ok(b) => {
                 for (mesh, _) in &skins {
@@ -1810,6 +1811,7 @@ pub(crate) fn present_fade<M: FadeMaterial>(
                 Some((h, _)) => h.clone(),
                 None => {
                     let Some(source) = materials.get(current) else { continue };
+                    let _event = super::timing::event(super::timing::EV_FADE_COPY);
                     let mut blended = source.clone();
                     let base = source.fade_base();
                     blended.set_fade(base * alpha);

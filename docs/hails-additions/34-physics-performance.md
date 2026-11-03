@@ -243,6 +243,46 @@ Result (plain, interleaved against the second-batch build, 2 runs each, no run d
 2.64 / 2.61 ms: the gain is the render side (bind group rebuilds), which held frames back more than the main thread's
 numbers showed.
 
+## In-play loading (2026-11-02, USER-ASKS 469)
+Question: can assets be pre-loaded / loaded during play more cheaply? Measured per event first (`LOAD_EVENTS` line under
+`SKATE_SYSTEM_TIMING=1`: count / total ms / longest ms per second; desktop, release, muted, University library, 150 s):
+
+| event | count | mean | longest |
+|---|---|---|---|
+| ped tint recolour + new texture (`present_ped_tints`, main thread; plus a 1 MB upload) | 24 | 1.6 ms | 1.9 ms |
+| ped rig bind | 24 | 0.05 ms | 0.08 ms |
+| NPC skater rig bind | 32 | 0.06 ms | 0.10 ms |
+| fade material copy | 416 | ~0 | 0.03 ms |
+| DMO prop stream pass | 7401 | 0.01 ms | 28.7 ms (the census's first fill, once per map) |
+
+Audio banks and speech already load on their own threads (emitter prefetch, speech takes). Research inventory:
+`.local/research/in-play-loading.md`.
+
+### Ped tint cache
+The recoloured ped materials were cached by weak id, so when the last ped with a (source material, tint pair)
+despawned its texture went, and the next ped with that pair recoloured and uploaded it again: every ped spawn in the
+bench missed. `PedTintKeep` now holds the most recently used ones strongly (`SKATE_PED_TINT_CACHE=<n>`, default 32
+entries, about 32 to 64 MB of kept textures; 0 = the old behaviour); entries whose source material is gone (a map
+change) are dropped. Same pixels: the recolour is a pure function of the source texture and the tint pair, and the key
+is both. Bench with the cache: half of the tint lookups hit. Test `ped_tint_keep_holds_the_most_recently_used_and_evicts_the_oldest`.
+Not helped: the start of a map, when the first population (15 peds) binds within a second and every tint misses
+(23.6 ms of recolouring in that second).
+
+### DMO first fill: left as is
+The first census fill culls about 460 props at once: bake 5.8 ms, triangle replace and index rebuild 5.9 ms, the rest
+about 9 ms. It runs on the first fixed tick, just after the loading screen; while a startup hold is up virtual time is
+paused, so no tick can run behind it, and running the fill earlier with other inputs (camera, observers) or a first tick
+behind the hidden window would not keep the outcome the same.
+
+### The in-play hitches are not loading
+The 20 to 48 ms hitches (about one per 10 s in the bench) come just as often with the living world off (19 against 16
+to 21 at 20 ms or more in 150 s). With the render frame's parts timed (`SYSTEM_TIMING` now also names bevy_render's
+`run_graph` / `node` / `submit_graph_commands` / `present_frames` / `command_buffer_generation_tasks` spans), the
+render-side ones sit in `command_buffer_generation_tasks` (Bevy's parallel draw recording on the compute pool), in the
+same seconds as `propagate_parent_transforms` on the main thread: the process-wide stall of doc 25 (research b230), a
+blocked task picked up by a waiting compute-pool scope. Open; a Windows Performance Recorder trace with context
+switches of one stall is the next step there.
+
 ### Checked and left alone
 - `think_peds` builds a String per entity per tick for its entity map: about 1200 small allocations a second, too small to
   matter.
