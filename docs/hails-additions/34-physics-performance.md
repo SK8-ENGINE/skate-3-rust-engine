@@ -318,6 +318,18 @@ stalls there (frames of 20 ms or more after the start 2 / 0 with the setting 0, 
 one 92 ms frame), p99.9 11.1 to 11.6 ms either way, p50 3.89 / 3.93 against 3.95 / 3.99 ms: the stall depends on the
 machine (the desktop runs about 20 compute workers), and the yield costs nothing measurable where it does not occur.
 
+## Serial specialization check
+(2026-11-02 night, USER-ASKS 470.) Bevy's `check_entities_needing_specialization` runs once per material type every
+frame (about ten types) as a `par_iter` over the type's mesh entities; the per-entity test is tiny, so each one cost
+about 0.1 to 0.16 ms of compute-pool scope even for a type with one or two entities (the session marker `Effect`).
+Vendored `bevy_pbr` now collects them with a plain `iter()` (`vendor/README.md` "Serial specialization check";
+`SKATE_SERIAL_SPECIALIZATION_CHECK=0` = upstream, a `SPECIALIZATION_CHECK` line names the mode). Same entities.
+
+Result (one build, the setting only, desktop): with the timing readouts the checks leave the per-system list (parallel:
+`Effect` alone 0.160 ms per frame); plain runs, serial vs parallel: p50 2.87 / 2.95 vs 2.83 / 3.18 ms, p99 6.03 / 6.21
+vs 6.01 / 7.91 ms, main thread p50 2.29 / 2.33 vs 2.31 / 2.54 ms: a small gain, mostly fewer pool scopes (the checks
+ran beside other systems). Tests: skate-game 991 pass, 235 ignored; data-gated living world, replay, menu and HUD pass.
+
 ### Checked and left alone
 - `think_peds` builds a String per entity per tick for its entity map: about 1200 small allocations a second, too small to
   matter.

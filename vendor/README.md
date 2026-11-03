@@ -110,6 +110,16 @@ the game sets one, so a mod or feature that wants `MeshTag` must use another
 encoding or stop the fade from owning it. Doc:
 `docs/hails-additions/34-physics-performance.md#fades-meshtag`.
 
+## Serial specialization check
+
+`bevy_pbr/src/material.rs` `check_entities_needing_specialization` collects the entities whose mesh or material
+changed with a plain `iter()` instead of `par_iter()` (`SKATE_SERIAL_SPECIALIZATION_CHECK=0` restores the parallel
+pass; a `SPECIALIZATION_CHECK` log line names the mode). It runs once per material type every frame (about ten types
+in the game); the per-entity test is a few change-tick compares, so the parallel version's compute-pool scope cost
+more than the work (about 0.1 ms per type per frame even for a type with one or two entities). The same entities
+are collected; the order of the list differed run to run already and does not reach the result (each entity is
+specialized on its own). Doc: `docs/hails-additions/34-physics-performance.md#serial-specialization-check`.
+
 ## Transform propagation workers yield
 
 `bevy_transform` is the unmodified crates.io 0.18.1 source except `src/systems.rs` `parallel::propagation_worker`:
