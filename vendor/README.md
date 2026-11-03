@@ -110,6 +110,21 @@ the game sets one, so a mod or feature that wants `MeshTag` must use another
 encoding or stop the fade from owning it. Doc:
 `docs/hails-additions/34-physics-performance.md#fades-meshtag`.
 
+## Transform propagation workers yield
+
+`bevy_transform` is the unmodified crates.io 0.18.1 source except `src/systems.rs` `parallel::propagation_worker`:
+an idle worker (queue lock busy, or queue empty while another worker still works) calls `std::thread::yield_now`
+after `IDLE_SPINS_BEFORE_YIELD` (64) failed polls instead of spinning on, and drops the queue lock before it yields.
+Why: `propagate_parent_transforms` starts one worker per compute thread and the idle ones spun without ever yielding.
+A Windows Performance Recorder trace with context switches (2026-11-02, `.local/research/b230-process-stall-candidates.md`
+"WPR capture") showed the worker that still held work preempted for a moment and then kept off its CPU for 32 ms by
+spinning workers at a boosted priority; the frame (main thread, and the render thread's command buffer tasks in the
+same pool) waited with it: the 20 to 90 ms in-play stalls. On Windows `yield_now` is `SwitchToThread`, which runs
+another ready thread of that processor. The work and its order inside a worker are unchanged, and each GlobalTransform
+is computed from its parent as before, so the results are the same. Doc:
+`docs/hails-additions/34-physics-performance.md#transform-propagation-stalls`. On a Bevy upgrade: check whether
+upstream's worker still spins without yielding; re-apply or drop the patch.
+
 ## SDL3 static C runtime
 
 `sdl3-sys` is vendored from crates.io 0.7.1+SDL-3.4.16 with its original license.

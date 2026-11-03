@@ -283,6 +283,27 @@ same seconds as `propagate_parent_transforms` on the main thread: the process-wi
 blocked task picked up by a waiting compute-pool scope. Open; a Windows Performance Recorder trace with context
 switches of one stall is the next step there.
 
+## Transform propagation stalls
+(2026-11-02, USER-ASKS 469; the doc 25 process-wide stall, research b230.) A Windows Performance Recorder trace with
+context switches of one 36 ms stall: the main thread waited 32.7 ms on a compute-pool worker that was not waiting at
+all but runnable: preempted on its CPU and kept off it for 32.5 ms by three other compute workers running
+`propagate_parent_transforms`' propagation worker at a boosted priority. Bevy 0.18.1 starts one such worker per compute
+thread and the idle ones spin (`try_lock` / empty queue -> `continue`) without yielding, so a preempted worker that
+still holds work waits a scheduler quantum or two; every scope on the pool (the render thread's command buffer tasks,
+the specialization `par_iter`s) waits with it. That is why the stalls cluster at about 33 / 66 ms and come as often with
+the living world off.
+
+Change: vendored `bevy_transform` 0.18.1 (`vendor/README.md` "Transform propagation workers yield"): an idle worker
+drops the queue lock and calls `std::thread::yield_now` (Windows `SwitchToThread`: another ready thread of that CPU
+runs) after 64 failed polls. The work, and which entity's GlobalTransform is computed from which parent, are unchanged.
+
+Proof: skate-game 991 pass, 235 ignored; data-gated living world and replay pass (the NPC golden digests among them).
+
+Result (desktop, plain, interleaved against the build before, 2 runs each of 150 s, no run disturbed): frames of 20 ms
+or more after the start 22 / 12 -> 1 / 1; per-second worst frame p90 27.1 / 28.7 -> 11.0 / 9.6 ms; p99.9 19.5 / 17.8
+-> 19.5 / 9.2 ms; median 3.42 / 3.35 -> 3.62 / 3.43 ms and p90 5.69 / 5.64 -> 6.16 / 5.74 ms (0.1 to 0.2 ms at the
+median, maybe the yields' cost; a larger spin count before the yield, 512, is the open tuning test).
+
 ### Checked and left alone
 - `think_peds` builds a String per entity per tick for its entity map: about 1200 small allocations a second, too small to
   matter.
