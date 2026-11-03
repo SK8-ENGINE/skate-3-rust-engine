@@ -330,6 +330,20 @@ Result (one build, the setting only, desktop): with the timing readouts the chec
 vs 6.01 / 7.91 ms, main thread p50 2.29 / 2.33 vs 2.31 / 2.54 ms: a small gain, mostly fewer pool scopes (the checks
 ran beside other systems). Tests: skate-game 991 pass, 235 ignored; data-gated living world, replay, menu and HUD pass.
 
+## Where the frame goes now (2026-11-02 night, desktop)
+After the passes above (University library, muted, plain): frame p50 about 2.9 to 3.7 ms run to run, main thread
+about 2.3 to 2.8 ms, and the main thread now waits for the render thread part of each frame, so both pace it.
+- GPU (`SKATE_PERF_GPU=1`, every frame): about 1.2 ms in total; main opaque 3D 0.58 ms, shadow cascades 0.04 to 0.09
+  ms each (five: one directional light with 4 cascades and one with 1), mesh preprocessing 0.09 ms. Not GPU-bound.
+- Render thread CPU: prepare 0.66 ms, graph 2.1 ms: encoding the five shadow cascades about 0.5 ms, submit 0.49 ms,
+  command buffer tasks 0.48 ms, present 0.39 ms, the 2D graphs of three 2D cameras (output, HUD texture, session
+  marker) 0.46 ms with the HUD's opaque 2D pass 0.27 ms (every HUD draw is its own mesh and material: one draw call
+  each; merging them would change draw order, not attempted).
+- Main thread: fixed step 0.7 ms per frame (player physics 0.26, NPC skater physics 0.18), directional light
+  visibility 0.19, transform propagation 0.18, visibility 0.15; everything else below 0.1 ms each.
+No single waste of the size of the stalls or the material rewrites is left; the rest is spread over Bevy and driver
+internals.
+
 ### Checked and left alone
 - `think_peds` builds a String per entity per tick for its entity map: about 1200 small allocations a second, too small to
   matter.
