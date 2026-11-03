@@ -350,6 +350,9 @@ ms; the screenshot matches. Test `marker_camera_runs_only_while_its_layer_shows_
 Plain, 3 interleaved pairs of 150 s (judged by frame p50, after the HUD skip lesson above): gate off vs on frame p50
 2.84 / 2.83 / 2.84 vs 2.77 / 2.73 / 2.73 ms, p90 4.93 / 4.91 / 4.99 vs 4.83 / 4.81 / 4.85 ms, p99 5.89 / 5.84 / 5.91 vs
 5.77 / 5.76 / 5.77 ms, main thread 2.28 / 2.26 / 2.27 vs 2.18 / 2.16 / 2.15 ms: about -0.1 ms everywhere, every pair.
+Laptop (automated, a6f620d7, 3 pairs): gate off vs on frame p50 4.07 vs 3.82 ms (every pair better: -0.38 / -0.14
+/ -0.23), p99 7.48 vs 7.28 ms, main thread 3.04 vs 2.85 ms. The night's three kept switches together (transform yield,
+serial check, marker gate) against all three off, 2 pairs: p50 4.06 vs 3.90, p99 7.55 vs 7.32, p99.9 11.21 vs 9.88 ms.
 
 ## Where the frame goes now (2026-11-02 night, desktop)
 After the passes above (University library, muted, plain): frame p50 about 2.9 to 3.7 ms run to run, main thread
