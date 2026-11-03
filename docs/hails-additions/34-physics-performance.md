@@ -313,6 +313,11 @@ Tuning (one build, `SKATE_TRANSFORM_YIELD_SPINS` only, interleaved, 2 runs of 15
 64 is the best in every column, the median included: the earlier median difference was between two builds, not the
 yields' cost.
 
+Laptop (second PC, 16 threads, automated, same A/B on its build of 1307e0aa): the upstream behaviour shows almost no
+stalls there (frames of 20 ms or more after the start 2 / 0 with the setting 0, 0 / 1 with 64, both near the start but
+one 92 ms frame), p99.9 11.1 to 11.6 ms either way, p50 3.89 / 3.93 against 3.95 / 3.99 ms: the stall depends on the
+machine (the desktop runs about 20 compute workers), and the yield costs nothing measurable where it does not occur.
+
 ### Checked and left alone
 - `think_peds` builds a String per entity per tick for its entity map: about 1200 small allocations a second, too small to
   matter.
