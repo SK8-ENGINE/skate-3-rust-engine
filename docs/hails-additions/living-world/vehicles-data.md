@@ -1,7 +1,7 @@
 # Living world: vehicle data and the road network v2 (milestone V0, 2026-10-05)
 
 Branch `world/living-world`. Design: [`vehicles-design.md`](vehicles-design.md) section 3.1 / V0.
-Tags: [code] read from the TU3 code (addresses are evidence only), [data] read from the disc (checked on every
+Tags: [code] read from the TU3 (title update 3) code (addresses are evidence only), [data] read from the disc (checked on every
 shipped record / object), [trace] recomp only. Nothing here is copied into the repo: the setup reads it all from the
 user's disc.
 
@@ -128,9 +128,9 @@ The driver is **part of the body mesh**: a low-poly dark figure (head, shoulders
 each car's `Accessory` part, in the left front seat (+X, left-hand drive), using a dark area of the body atlas. There
 is no driver model, recipe part, ped reference or texture of its own (all 73 vehicle textures are referenced by the
 recipes), and the window material is a flat 32 x 32 grey (nothing painted on the glass). Rendered with the windows
-left out: `.local/research/npc/m1-out/vehicles/taxi_side_nowindows.png`, `sports_car_01_side_nowindows.png`,
-`taxi_front_nowindows.png`. So drivers come for free with the car mesh; no driver system is needed (user: "I can
-definitely see drivers in the cars").
+left out (local renders of the taxi side, sports car side and
+taxi front). So drivers come for free with the car mesh; no driver system is needed (the user
+sees drivers in the cars).
 
 ## Values and findings
 - [data] Palettes: the base records (`vehicles`, `vehicle_sedan` ...) hold chassis (0, 0, 1) and secondary (1, 0, 0);

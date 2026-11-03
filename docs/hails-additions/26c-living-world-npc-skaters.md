@@ -7,7 +7,7 @@ Part of doc 26, the living world (index: [26-living-world.md](26-living-world.md
 Ambient NPC skaters are visible in free roam: the population's skater spawn records become skaters that ride the
 retail recorded lines kinematically (the "replay tier"; the simulated tier with the full skater physics follows).
 
-What retail does, checked in the code for this milestone (TU3):
+What retail does, checked in the code for this milestone (TU3, title update 3):
 - An NPC is a full skater steered along its line by the `PathController` (ctor `sub_824685F0`). At a node that
   carries a branch group the controller picks where to continue (`sub_8246BEE0`): stay on the line, or a branch
   target that exists, is not in use and is valid. The lowest score of `sub_8246C230` wins, the first on ties; there
@@ -79,9 +79,9 @@ key (`NpcSkaterLooks`); NPC events are messages; spawn / despawn go through the 
 
 ## NPC skaters fading out near the player (line end), 2026-10-05
 
-**Problem.** User: "npc skaters are still fading out way too fast, and way too close to the player. I think its
-measuing the distance from its spawn point, not the players distance from them.." and "They should continue skating
-around".
+**Problem.** The user reported that NPC skaters still faded out far too soon and too close to the player, suspected the
+distance was measured from the spawn point rather than from the player, and said they should keep skating
+around.
 
 **Cause.** The replay tier faded every skater 1 s before the end of its recorded line when no branch group was
 ahead, wherever that was. [data] No line on the disc has a branch group on its last node (760 of 760 DownTown lines,
@@ -149,8 +149,8 @@ Not seen in game yet.
 
 ## NPC skaters snapping between animations, 2026-10-05
 
-**Problem.** User: "npc skaters look better, but they still snap between animations, there is no interpolation
-between them."
+**Problem.** The user reported that NPC skaters looked better but still snapped between animations, with no
+interpolation between them.
 
 **Cause.** The replay tier shows one stock clip per replay phase and swapped clips on the frame the phase changed
 (rolling to air, air to rolling, ground trick, off board, also when a branch or line chain changes the phase). The
@@ -249,8 +249,8 @@ mesh beyond its 4.5 / 6 m corridor). A gap-scaled blend time or the simulated ti
 
 ## NPC skaters switching the side they stand on, 2026-10-05
 
-**Problem.** User: "NPC skaters look much better and seem to skate much smoother. They still have weirdness with
-switching sides they are standing on their boards randomly". In the user's capture an NPC rolling on flat ground
+**Problem.** The user found NPC skaters much better and smoother, but they still switched the side they stand on
+their boards at random. In the user's capture an NPC rolling on flat ground
 turns its whole body round in under 0.1 s while the board keeps rolling the same way.
 
 **Root cause.** The replay tier draws the recorded skater orientation as the puppet root. The lines are recorded
@@ -297,11 +297,9 @@ character's stance (regular or goofy) mirrors them. Recorded in-line facing chan
 
 ## NPC skaters popping between animations, tricks not playing, 2026-10-05
 
-**Problem.** User (after fixes 12 to 19): "NPC skaters still seem to pop between animations and trick animations
-appear to be missing or not playing." / "they pop between the animations, one ends and suddenly the next is already
-partially going, their limbs jump to each position between making them appear to pop between animations" / "When
-they jump nothing plays, i can hear the sounds of a tick, but the board doesn't do the trick and their limbs do not
-animate like they are doing the trick."
+**Problem.** The user reported (after fixes 12 to 19) that NPC skaters still popped between animations: one ends and
+the next is already partly played, so the limbs jump between poses. Trick animations seemed missing: on a jump
+the trick sound plays, but neither the board nor the limbs do the trick.
 
 **Root cause.**
 1. The puppet crossfade (fix 12) only knew ONE previous phase. On the shipped lines 13,183 of 27,464 phase changes
@@ -328,7 +326,7 @@ animate like they are doing the trick."
   `KICKFLIP_IN_LOW_A` / `KICKFLIP_IN_HIGH_A`. The board is the rig's `Skateboard_Root`, so the trick clip moves body
   and board together (kickflip air sequence: board turns 169 deg).
 - [video] Retail (RPCS3, `2026-10-05 13-01-52.mp4` 3:23.6, a varial heelflip from the same trick trees): the board
-  turns under a continuous body over about 0.4 s (`.local/research/npc/fix21/retail-varial-heelflip-board.jpg`).
+  turns under a continuous body over about 0.4 s (a local screenshot).
   NPC skaters in that recording are too far from the camera to read limb detail.
 
 **Change.**
@@ -362,7 +360,7 @@ and `..._trick_jump_has_no_pose_pop`: on recorded jump timelines the pose at a p
 0.008 m, the one-previous-clip blend by 0.83 m); skate-mods `world_tuning` 3 passed; skate-data `living_world_data`
 8 passed (new `npc_skater_trick_slots_and_phase_changes_on_the_exported_lines`). Not seen in game yet.
 
-**Trick height (2026-10-29, research `.local/research/b690-npc-skater-presentation.md`):** retail's AI perform step
+**Trick height (2026-10-29, research b690):** retail's AI perform step
 (`sub_82469448`, the only direct caller of `sub_82470DD8`) always posts TrickHeight 1.0 normalized (`0x8231A844`) for
 trick categories 1 / 2 [code], and `PhaseBlend` sorts its children by the value each reports, so the AI plays the
 highest child, e.g. `KICKFLIP_IN_HIGH_A` and the `T_HI_*` cycles. The replay-tier puppet's `stock_tree_leaf` now picks
@@ -371,13 +369,13 @@ whose child is a subtree keeps the first child: the ollie (`B_OLLIE_A` = `OLLIE_
 subtree) still plays `OLLIE_LOW_A` (open: the subtree's value). Data-gated tests
 `living_world_npc_trick_clips_exist_and_flip_the_board`, `living_world_npc_trick_jump_has_no_pose_pop`.
 
-**Next (research `.local/research/b691-npc-grabs-grinds.md`, names checked in the installed
+**Next (research b691, names checked in the installed
 `MotionGraph_OnBoard.stategraph`):** each stock grab / grind / slide / manual state names its score (`ScoringGrabs
 grabName=` / `ScoringTrick trick=`) next to the animations it plays, so an index score name -> INTO / CYC / OUT built
 from the loaded graph gives retail's clips with no hand table (e.g. fsgrab `GR_GRAB_N_FS_0_INTO` / `BLEND_FS_TWEAK2` /
 `GR_GRAB_N_FS_0_OUT`; fs_overcrook plays `B_BS_GRINDCROOKS`, so no name rule). Ground grabs (gnd_bsgrab, 829 slots)
 are the most visible miss. Grind / slide trees are TWIST phase blends over DISTTOCOG and need attribute trees
-(`tree_commands`, like the fakie channel). Not ported yet. Inputs (research `.local/research/b692-npc-grab-inputs.md`): the AI posts each grab's
+(`tree_commands`, like the fakie channel). Not ported yet. Inputs (research b692): the AI posts each grab's
 `scoring_trick` intent tuples by name (`sub_824696B8` -> `sub_82470ED0`; ours already does on the sim tier,
 `ai_signals.rs` `slot_signals`): FS / BS variants as unit TweakX / TweakY, mute / seatbelt as BoardAdjustAngle /
 Mag; `BLEND_FS_TWEAK2` is a 2-D blend space over TWEAK_X / TWEAK_Y, the BS / mute / stale / dbl tweaks phase blends;
@@ -413,8 +411,8 @@ landing clips (`B_LAND_*`, 0.15 s) are not played; the per-skater `PROSKATER` se
 
 ## Silent landings (NPC skater sounds filled the voice cap), 2026-10-07
 
-**Problem.** User: "landing was quiet randomly", "At the carvetron. had two silent landings", "there were several",
-and after the next session "last session had a silent landing near the end of the session".
+**Problem.** The user reported random quiet landings (two silent ones at the Carvetron, several in all),
+and after the next session one more silent landing near its end.
 
 **Root cause.** The landing logic plays every touchdown (a headless replay of the last 95 s of the user's 46-minute
 session starts the touchdown voices on every landing). The in-game mixer, however, was full: it sat at its 96-voice cap
@@ -430,7 +428,7 @@ the cap.
 in; 96 every second in the last ~105 s. The per-minute voice floor rose from 17 to 90, only while NPC skaters were
 released (58 after 63 releases, flat while none were released, 90 after 143), while the world at the end held
 `skaters 2/0`. 143 of the 621 landings fell in seconds at the cap. Full report:
-`.local/research/audio/silent-landings-2026-10-07.md` (local, not in the repo).
+a local research note (not in the repo).
 
 **Change.**
 1. Retail parity (retail's release stops every layer): `NpcSkater::release` releases every Splice sound the skater
@@ -473,8 +471,8 @@ check it against `sub_824BB330` if the user still hears it.
 ## NPC Skater Physics: hitches, skaters vanishing up close, path projection (2026-10-13)
 
 ### Problem
-User (2026-10-13): "I can only see skaters in the distance, anytime I get close they just dissapear." / "yea npc
-skaters just dissapear when they get close and I get massive hitches" / "FIX IT, IM NOT SWITCHING IT OFF".
+The user reported (2026-10-13) that skaters were only visible in the distance and disappeared up close,
+with large hitches, and wanted it fixed rather than the opt-in switched off.
 Sessions `hails-additions/logs/game-20261013-183803` and `-204749` (NPC Skater Physics opt-in on): 59 / 63 switches
 replay -> physics, 26 / 43 bails; 35 of 39 switches hitched over 150 ms.
 
@@ -485,10 +483,10 @@ replay -> physics, 26 / 43 bails; 35 of 39 switches hitched over 150 ms.
   player's teleport (`SkaterRuntime::travel`; retail places its AI skater object again). Its own context is kept (a
   fresh context restarted the clock and the camera refused the older subject tick). Earlier the same day: a blocked
   skater no longer restarts the sim every frame beyond the radius.
-- **Start state** (research `.local/research/npc/b109-npc-sim-bails.md`): sims started between nodes, from rest
+- **Start state** (research b109): sims started between nodes, from rest
   (the teleport reset zeroed the context velocity) and 0.1 m up. Now a sim starts only on a node with retail's spawn
   push (x 0.75, `82C04168`) carried through the teleport.
-- **Path projection** (research `.local/research/npc/b110-ai-path-projection.md`, new skate-core
+- **Path projection** (research b110, new skate-core
   `living_world/path_follow.rs`): the line cursor of a simulated skater followed the recording's clock, so the
   target and the trick events ran away from the skater (137 of 144 trick dispatches were more than 1 m off the line).
   Ported `sub_8246D560`: nearest node in a forward window (`sub_82455BB0`), two-segment projection with the 0.5
@@ -528,11 +526,11 @@ replay -> physics, 26 / 43 bails; 35 of 39 switches hitched over 150 ms.
 ## NPC Skater Physics: bails (2026-10-13 night)
 
 ### Problem
-User (2026-10-13): "FIX IT, IM NOT SWITCHING IT OFF" (NPC Skater Physics skaters bail and vanish up close). Muted
+The user's decision (2026-10-13): fix it, the opt-in stays on (NPC Skater Physics skaters bail and vanish up close). Muted
 DownTown baseline (radius 150 m, 150 s, player idle): 17 bails, 79 on/off-path switches.
 
 ### Causes and changes
-- **Steering record off the path** (`sub_8246DB50`, main checked 0x8246DB50..0x8246DD40): retail zeroes the record,
+- **Steering record off the path** (`sub_8246DB50`, verified 0x8246DB50..0x8246DD40): retail zeroes the record,
   seeds the flag word with `pc+922 << 25` and clears bits 31..26, and only builds the steering target
   (`sub_8246DE38`) when the skater is on the path and past the start nodes (`pc+920`, `pc+937`), or always without
   on-board steering. Ours wrote the steering target every tick, pulling a skater that had left its line back toward a
@@ -547,13 +545,13 @@ DownTown baseline (radius 150 m, 150 s, player idle): 17 bails, 79 on/off-path s
 - **Stale first tick:** the first tick after a start or respawn projected the body's position from before the queued
   teleport (a pooled body: anywhere), moving the cursor nodes ahead ("left the path at node 1 (A 5+1.00, 79.25 m)").
   `NpcSim::teleport_pending` skips the projection until the teleport has been applied.
-- **Respawn node** (`sub_8246ED68`, decoded and main checked 0x8246ED68..0x8246EE24, picked when the bail starts by
+- **Respawn node** (`sub_8246ED68`, decoded and verified 0x8246ED68..0x8246EE24, picked when the bail starts by
   `sub_8246EE30`): the projection's search node `pc+816` plus 2, a remembered prop node ahead within 20 instead,
   clamped to the last node, then the first safe node (`sub_82455728`, our `ai_controller::safe_node`). Ours placed the
   skater where it fell, on a take-off: one skater respawned 24 times in a row at node 17, wiping out right after each
   placement. Now `ai_controller::respawn_node`. Not ported: game modes 19 / 20 (`sub_824681D8`) use
   `sub_824553D8(line, cursor A)`.
-- **Lost hand-over** (research `.local/research/npc/b115-lost-handover.md`; main checked the test's structure in
+- **Lost hand-over** (research b115; verified the test's structure in
   `sub_82468DD8`): on a tick its search node did not advance, a skater that was off the path, more than 6.0 m from
   the search node and from both lane edge points, and slower than 14 m/s (`pc+808`) is lost; that raises the same
   reposition request (`ctrl+941`) mode 7 raises, so controller B walks it back (goal `pc+816` + 2, safe node). On B's
@@ -562,19 +560,19 @@ DownTown baseline (radius 150 m, 150 s, player idle): 17 bails, 79 on/off-path s
   on the path at B's goal node. Now `path_follow::lost`, `PathFollow::reattach`, `path_follow::nearest_node`; the
   reposition counts from `pc+816`. Log `NPC_SKATER_LOST`. Values in `PathTuning` (`lost_radius` 6.0,
   `lost_max_speed` 14.0; retail defaults, mod-overridable).
-- **Projected point** (research `.local/research/npc/b116-path-follow-inputs.md`, main checked the state 500 /
+- **Projected point** (research b116, verified the state 500 /
   wipeout tests in `sub_82467FC8`): off the board (BipedGround) or wiping out retail projects the animation root
   (Skeleton +416), not the board; the speed `pc+808` (`sub_8246BCF8`) is that point's displacement, negative only
   above 0.01 m/s against the heading (the skeleton's forward off the board). Ours projected the deck always, so a
   skater walking back was measured where its board lay. Now `npc_sim::projected_point`; the hand-back's nearest node
   uses the skater too.
-- **Getting back on the board** (research `.local/research/npc/b117-ai-reboarding.md`, main checked the press in
+- **Getting back on the board** (research b117, verified the press in
   `sub_8246FA30`): retail's line controller A, not controller B, re-boards a skater: every path tick it presses the
   off-board toggle (`824712E0`: `NewToggleOffBoardState` + `ToggleOffBoardState` while off the board and not
   toggling, every 5 ticks) and then sets mode 2 ("get on") for the next tick; A's activate clears it. Ours had no
   toggle in A, so a skater handed back by controller B stood off its board for good. Now
   `ai_controller::OffBoardToggle` in the line tick (period from the controller B settings, retail 4).
-- **Line ends and switches** (research `.local/research/npc/b118-node-change-line-end.md`): retail has no
+- **Line ends and switches** (research b118): retail has no
   "finished" line for an AI skater: at the end it looks for the next line every tick (`sub_8246C7F8`), and every
   switch runs the reset `sub_82468AC8`, which leaves the skater off the path (rejoin commit again) but keeps the start
   gate `pc+937`. Ours handed a simulated skater at a line end back to the replay tier, which faded it out, and
@@ -582,14 +580,14 @@ DownTown baseline (radius 150 m, 150 s, player idle): 17 bails, 79 on/off-path s
   (log `NPC_SKATER_CHAIN`; replaced 2026-10-30 by the chain inside `npc_sim::simulate` on the trigger tick, doc 26e "Line end trigger"), no line-end hand-back, and `PathFollow::switch_to` on a switch and on controller B's
   hand-back. The retry runs whenever the cursor sits on the last node (the projection holds it there, so it never
   became "finished" and never retried at first).
-- **Line-end fallback** (research `.local/research/npc/b122-line-candidates.md`, `sub_82458968` mode 1): with no
+- **Line-end fallback** (research b122, `sub_82458968` mode 1): with no
   line start within 4 m, retail takes the nearest free start at any distance (a valid one over a nearer invalid one
   below 36 m^2; per-character validity is not modelled, so every line counts as valid). Ours ended the line, and the
   skater rode off, got lost, bailed and was respawned at the line end again: two skaters made 70 of 72 bails in a
   300 s run that way (each placement there launched them at 25 to 100 m/s, cause not found; trace
   `NPC_SKATER_PLACED` at debug level). Now `ChainConfig::fallback` (on for the physics tier only; the replay tier
   cannot ride the gap). Not ported yet: retail's end point (B past 0.8 of the second-to-last segment), junction scoring from the physics skater.
-- **Ground steer** (research `.local/research/npc/b121-ai-ground-steer.md`): retail also steers an AI skater with
+- **Ground steer** (research b121): retail also steers an AI skater with
   stick input every path tick on the ground, on or off the path (`sub_8246ACF0` -> `sub_8246AA00` /
   `sub_82471070`): the heading error to a point 45 ticks ahead on the line, moving toward the point 2 ticks ahead
   when the skater is 0.4 to 3 m off it, written to `Turn`, `BodySpin` and `KickTurn` (full at 18 degrees). Off the
@@ -599,13 +597,13 @@ DownTown baseline (radius 150 m, 150 s, player idle): 17 bails, 79 on/off-path s
 - **Respawned cursor ran ahead:** the re-created cursor counts its own frames, but the follow target still held the
   old count, so the cursor ran up to 38 nodes ahead right after the respawn (then "lost" 50 m from the path). Now the
   target is reset with the cursor.
-- **Airborne** (research `.local/research/npc/b119-state-byte-438.md`, main checked the writer in `sub_82DB6EC0`):
+- **Airborne** (research b119, verified the writer in `sub_82DB6EC0`):
   the skater state byte `+438` that `sub_8246DB50` and the junction switch read is "an air state (200..299) with no
   wheel touching", not "riding". While airborne retail writes no steering target and does not drop the path. Now the
   sim passes it to `ai_record::steers` and `PathFollow::tick`. The replay tier's flip latch reads the same byte as
   "riding" (replay.rs `node_riding`); left as is tonight (research b120 first: it touches the facing rule behind the
   earlier backwards-riding fix).
-- **Air steer** (research `.local/research/npc/b123-ai-air-steer.md`): in the air retail steers the character toward
+- **Air steer** (research b123): in the air retail steers the character toward
   the recorded skater forward at the near look-ahead (`sub_8246B358`, reversed when the takeoff latch `pc+927` says
   the character faced against the node's recorded skater, `sub_8246A700`), with a 2 degree dead zone and full stick
   at 10 (`sub_82471188`), on the same three keys. Now skate-core `living_world::air_steer` (tuning
@@ -648,7 +646,7 @@ DownTown baseline (radius 150 m, 150 s, player idle): 17 bails, 79 on/off-path s
 The 2026-10-25 re-run also counted `NPC_SKATER_LAND`: on, 123 / 117 landings, all aligned with the recording; off,
 10 / 7 of 120 / 116 landed against it. Sim `NPC_SKATER_BACKWARDS` (ground, on board) was 36 / 28 on vs 16 / 25 off,
 mostly `riding_fakie` (27 / 19 on), which retail allows after a latched landing; one skater (#2 at radius 150) gave 9
-around its own bail / respawn cycle. Logs: `.local/poc-tests/out/b616/`.
+around its own bail / respawn cycle. Logs: local test output of research b616.
 
 The long frames left (100 to 165 ms) show no physics steps and nothing in the instrumented stages or the living
 world systems: not the NPCs; open.
@@ -664,7 +662,7 @@ world systems: not the NPCs; open.
   `PathFollow::chained_to`, `PathTuning::line_end_lost_radius`, test
   `a_line_end_chain_tests_lost_at_four_and_a_half_metres`). A junction switch keeps the 6 m test after no node
   change. The node-change handler `sub_8246BEE0` is the body gate above.
-- Next (research `.local/research/b694-npc-line-end-trigger.md`, decoded in Ghidra and the recomp asm): retail's chain
+- Next (research b694, decoded in Ghidra and the recomp asm): retail's chain
   `sub_8246C7F8` searches line starts within 4.0 m of the skater's body point and scores them with the skater's own
   heading and speed (`sub_8246C3C0`); ours searches from the line's last node and its last segment (`replay.rs`
   `chain`, `choose_next_line`). Retail tests the line end (`sub_8246D3C0`, the previous tick's A / t, 0.8) before
@@ -676,13 +674,13 @@ world systems: not the NPCs; open.
 ## NPC Skater Physics: bails right after a placement (2026-10-15)
 
 **Problem.** Simulated NPC skaters wiped out about 0.45 s after every placement (switch to physics and every respawn), so
-the user rarely saw one ride past (user: "the skaters seemed to crash as soon as I saw them").
+the user rarely saw one ride past (to the user the skaters seemed to crash as soon as they came into view).
 
 **Evidence.**
 - New log `WIPEOUT_REASONS` (`physics/player_state/selection.rs`): placement bails come from PhysicsGround with ground
   request 3 (deck angle error) and 18 (squash). They fire when the 0.4 s teleport wipeout cooldown runs out, so the bad
   state is there from the first tick. A review of 225 bails in 13 user sessions found the same in older builds at
-  0.2 to 0.3 s, matching their cooldown (`.local/research/npc-sim-bail-log-review.md`).
+  0.2 to 0.3 s, matching their cooldown (a local research note).
 - New debug log `NPC_SKATER_STEER` (deck, line and velocity yaw per tick after a placement): on ticks 3 to 5 the deck
   tumbles (up y 0.82 to -0.26), then the skater is left 50 to 60 deg off its line at 3 m/s and takes off crooked
   (`NPC_SKATER_TAKEOFF char.deck 0.72`, `deck.travel -0.41`). Placement frames themselves are upright
@@ -690,7 +688,7 @@ the user rarely saw one ride past (user: "the skaters seemed to crash as soon as
 - Every placement ran two resets: `SkaterRuntime::travel` queues the host teleport with the spawn push and the actor
   reply, which resets again one tick later and snaps the rolling board back (two `player teleport spawn` lines per
   placement). Retail places once (`825926F8`) and runs its hold branch (`824701F8`: no steer while the placed skater
-  settles) (`.local/research/npc-sim-placement-bails.md`, code reading, not traced).
+  settles) (a local research note, code reading, not traced).
 
 **Change.**
 - `place` uses one reset, the host teleport with the spawn push (`SkaterRuntime::teleport_with_velocity`).
@@ -734,19 +732,19 @@ TELEPORT=dist_university_library`, radius 150 m):
 **Retail riding mode (recomp trace, 2026-10-15).** Hook `AIPC922` (category `aiskater`, `824660A0`, research-hooks
 branch, committed): the path controller's `pc+922` (the hips ground test, which keeps the record's physics-riding bit
 25) is 0 only on a controller's first sample and at its end, 1 for its whole ride (24 controllers, 360 samples,
-`.local/research/aipc922/`). Retail's ambient AI skaters ride with full physics, like ours; FollowPath (105) is not their
+a local data folder). Retail's ambient AI skaters ride with full physics, like ours; FollowPath (105) is not their
 riding mode. `824660A0` writes `pc+922` every call (not a one-way latch).
 
 **Third pass (same day, after the user's play-tests).**
-- Vanishing: the user saw skaters "vanish instantly, board and all, never come back" at the switch to physics. The
+- Vanishing: the user saw skaters vanish instantly, board and all, and never come back at the switch to physics. The
   render pose of a simulated skater is relative to its animation root (joints within ~2 m of 0, new log
   `NPC_SKATER_DRAWN`), but the draw set the puppet root to the world origin, so every simulated skater was drawn at the
   map origin. The puppet root now sits at the animation root (`npc_skaters.rs`, `NpcSim::animation_root`).
 - Placement: one actor reply (retail `825926F8`, `SkaterRuntime::place_by_reply`) for the switch from replay too; the
   host teleport alone moved the board but not the animation root.
 - Placement guard: the reply lands a tick or two later; the guard lifted after one tick, so the first projection used
-  the pooled body (71 m off the line) and the skater was "lost" and walked off within 0.1 s (user: "they often bail and
-  then run off to a new line"). It now lifts when the placement count changes (logged 30-tick limit).
+  the pooled body (71 m off the line) and the skater was "lost" and walked off within 0.1 s (the user saw them often bail
+  and then run off to a new line). It now lifts when the placement count changes (logged 30-tick limit).
 - Ghost proxy: `push_proxies` built collision solids from every NPC's replay sample, simulated ones included, so a
   simulated skater rode with an invisible solid copy of itself on its line (contact bails, flings) and the player hit that
   copy. Simulated NPCs get no replay proxy now. Done since 7fb5dd0f (2026-10-16): each simulated NPC's own last-step
@@ -794,7 +792,7 @@ riding mode. `824660A0` writes `pc+922` every call (not a one-way latch).
 
 ## NPC skater x player contacts in the session log (2026-10-18)
 
-- **Problem:** laptop session 2026-10-18 22:01, the user: "I was hit by a npc skater and caused them to bail." (in
+- **Problem:** laptop session 2026-10-18 22:01, an NPC skater hit the user and bailed (in
   Aletown, near the end). The log had no line for a skater touching another skater, so the bail could not be tied to
   the contact.
 - **Change (log only, behaviour unchanged):** after each simulated NPC's step, `npc_sim::log_skater_contact` reads its
@@ -822,7 +820,7 @@ NPC skaters, replay tier (doc 26, milestone 3): turns the population's skater sp
 - **Look**: the character's native roster GLB (`CustomModels::online_native_path`, the same files the customiser and online players use), or a mod's GLB from [`NpcSkaterLooks`], else the stock skater. Bound to the stock skeleton like a remote player (`AnimationStatus`).
 - **Puppet animation** (`Update`): one stock clip per [`ReplayPhase`] ([`puppet_clip`]), evaluated with the player's evaluator; root = the recorded position and skater orientation. The stock graphs are not run (simplification until the simulated tier). The clip time is the time since the phase began; a looping clip (`_CYC` in its name) wraps by its length like the player's `ClipClock`, others hold their last frame. Each NPC carries [`NpcPuppetClip`] (the clip and time in effect). A mod may override the clip per phase id or `<phase>.<style>` (`LivingWorldSettings::skater_clips`, `sdk.world.set_tuning('living_world', {skater_clips})`); an override that does not evaluate falls back to the shipped pick. A phase change (also one a branch or line chain brings) crossfades from the previous phase's clip, which keeps playing, with the player's graph transition curve (`playback_transition::transition_weight`, Blend82B96058: smoothstep over the transition time) over [`RETAIL_BLEND_SECONDS`] (the stock graph's default transition time); mods set it per phase (`skater_blend_seconds`). The weight is a function of the cursor's phase frames, so a client derives the same pose. Render (fix 14): drawn from the cursor one tick back ([`NpcReplay::previous`]) towards the current one by the fixed-step fraction, like the player, with the recorded branches (`LineCursor::render_sample`); clip and blend times include the sub-frame; after a branch or chain the root blends onto the new line (`replay::LineSwitch`, `skater_line_chain.blend_seconds`). Fix 21: the crossfade nests like a retail transition (Blend82B96058 keeps the running transition as the outgoing tree): the cursor remembers the last `replay::PHASE_HISTORY` phases and the pose is built from every phase whose blend still runs ([`puppet_layers`]), so a phase change during a blend (half of all changes on the shipped lines) no longer restarts from one clip. A recorded trick slot (`EScorableID`) plays its stock trick animation on body and board (the board is the rig's `Skateboard_Root`): `<anim>_G` on the ground, `<anim>_A` once airborne, like `T_Trick.xml` ([`retail_trick_anim`]; mods: `skater_clips["trick.<id name>"]`).
 - **Fade** (`Update`, [`present_fade`]): while [`NpcFade::alpha`] is below 1 every mesh under the NPC (body and board) draws with a per-NPC blended copy of its material; at 1 the shared materials come back and the copies are freed, so a solid NPC costs what it did before.
-- **Audio**: [`NpcSkaterAudio`](crate::world_audio::NpcSkaterAudio) with a lite state from the cursor (position, velocity, air, ground trick as a grind) and the character's voice; #32's host picks the one audible NPC by retail's rule.
+- **Audio**: `NpcSkaterAudio` with a lite state from the cursor (position, velocity, air, ground trick as a grind) and the character's voice; #32's host picks the one audible NPC by retail's rule.
 - **Events** for engine systems and the planned `sdk.living_world`: [`NpcSkaterEvent`].
 
 Multiplayer: nothing here decides a spawn; the entity is rebuilt from a `SpawnRecord`, the tick and [`BranchRecord`]s alone (`Decider::Mirror` on a client).
@@ -908,7 +906,7 @@ Test: `npc_tests::a_grab_landed_open_holds_or_continues_and_never_takes_off_agai
 
 Problem: a grab span still open when the NPC touched down started a new GroundTrick layer whose clip was the takeoff sequence (`B_OLLIE_G+Into+Cyc`), so the NPC replayed its ollie on landing.
 
-Retail [data, stock graph; research b709 / b710, main checked `T_FSBSGrab.xml` Cyc transitions and our AG-before-MG order `skater_animation.rs`]: the FS / BS / DBL Cyc's high-priority transitions are WipeOut, then the ground grab hold `OnGround...Grabbing.<X>.<X>Cyc`, then `Land.GrabLanding.<X>`. The AG posts `GroundFSGrab` / `GroundBSGrab` on the first ground tick before the MG picks, so a slot still open at touchdown plays the ground hold (`GroundGrabs/FSGrab.xml` `BLEND_FSGRAB`, time 0.2). Mute / stale have neither (normal landing).
+Retail [data, stock graph; research b709 / b710, verified `T_FSBSGrab.xml` Cyc transitions and our AG-before-MG order `skater_animation.rs`]: the FS / BS / DBL Cyc's high-priority transitions are WipeOut, then the ground grab hold `OnGround...Grabbing.<X>.<X>Cyc`, then `Land.GrabLanding.<X>`. The AG posts `GroundFSGrab` / `GroundBSGrab` on the first ground tick before the MG picks, so a slot still open at touchdown plays the ground hold (`GroundGrabs/FSGrab.xml` `BLEND_FSGRAB`, time 0.2). Mute / stale have neither (normal landing).
 
 Ours: `puppet_layer_clip` marks a GroundTrick right after the same span's AirTrick as landed; `scored_trick_clip` (`landed`) gives the FS / BS / DBL family's ground grab Cyc with its `cyc_seconds` blend; otherwise the air clip continues in one layer. Never a second takeoff.
 
@@ -1073,7 +1071,7 @@ Layout (big-endian; every `m_p*` offset is relative to the start of the
 struct that contains it). Field names follow the Skate 2 symbols as
 documented by DumbadsSkate3ModdingTools (Ethanw05; credits there to SunJay,
 Dumbad, RenderWareGavin, Tuukkas); every field was re-checked against the
-user's disc ([data], `.claude/notes/npc-skaters-re.md` section 3):
+user's disc ([data], the local NPC skaters research note, section 3):
 
 ```text
 AIPATHDATA  +0 u32 path count, +4 u32 offset of the path array (0x10), +8 8 pad
@@ -1148,7 +1146,7 @@ The manager removes a fading skater below the threshold (`sub_8245A9B8`). Checke
 
 Problem: a simulated NPC skater that bailed stayed solid on the ground until its respawn popped it onto its line.
 
-Retail [trace + code; research b715, the skate3recomp hooks NPCLATCH / NPCBAIL / NPCREMOVE, `.local/research/b705/fire_trace.tsv`]: six ambient (kind 0) bails at Aletown all ran the same chain: the bail latch (`8246EF78`) rises; the bail wait (`8246EA90`) starts the fade at 4.0 s (`pc+0x1D` set, the `+1872` timer from 0); at 5.0 s (the 5.0 s ambient delay) it places the skater again (`8246E558`, lr `0x8246ECE8`) with the timer at 0.983, and the latch falls with the post-bail countdown at 8. No removal followed any bail (`8245DCE0` never ran from the manager's opacity branch, lr `0x8245AC6C`), so the reading above that the manager removes a fading skater below 0.2 does not happen for a bail: it is faded out and re-placed. The recomp runs the retail code but is not retail; this matches the bail wait's own order (fade start, then the place).
+Retail [trace + code; research b715, the skate3recomp hooks NPCLATCH / NPCBAIL / NPCREMOVE, research b705/fire_trace.tsv`]: six ambient (kind 0) bails at Aletown all ran the same chain: the bail latch (`8246EF78`) rises; the bail wait (`8246EA90`) starts the fade at 4.0 s (`pc+0x1D` set, the `+1872` timer from 0); at 5.0 s (the 5.0 s ambient delay) it places the skater again (`8246E558`, lr `0x8246ECE8`) with the timer at 0.983, and the latch falls with the post-bail countdown at 8. No removal followed any bail (`8245DCE0` never ran from the manager's opacity branch, lr `0x8245AC6C`), so the reading above that the manager removes a fading skater below 0.2 does not happen for a bail: it is faded out and re-placed. The recomp runs the retail code but is not retail; this matches the bail wait's own order (fade start, then the place).
 
 Ours: `LeaveFadeConfig::bail_alpha` (solid until `bail_fade_lead_seconds` before the respawn, then `1 - t / fade_seconds`); `npc_sim::simulate` counts ticks since the bail and sets `NpcSim::bail_alpha`, back to 1 at the respawn; `advance` multiplies the NPC's drawn alpha by it. Mod keys `skater_fade.bail_fade` (retail true) and `skater_fade.bail_fade_lead_seconds` (1.0); the fade length is `skater_fade.fade_seconds`.
 

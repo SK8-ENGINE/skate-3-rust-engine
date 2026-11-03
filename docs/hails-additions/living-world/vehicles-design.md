@@ -2,18 +2,18 @@
 
 Status: design, 2026-10-04. V0 (vehicle data) done 2026-10-05: [`vehicles-data.md`](vehicles-data.md); findings below
 updated where V0 changed them.
-Part of the ONE living-world PR (user, 2026-10-04: "Lets begin work on adding vehicles to the game as well ... IF you
-need more data, just ask. finding your way to vehicles automated will be tough." then "add this to the living world
-work"). Skitching is an explicit part of it (user, 2026-10-04).
-Evidence: `.claude/notes/npc-livingworld-re.md` §1, §2, §3, §6, §6b-6f and the new §7 (this pass);
-`.claude/notes/world-traffic-audio.md` (traffic audio port, car alarm trigger); `world-audio-hookin-spec.md`.
-Tags: **[code]** retail code read in the TU3 static recompilation (reference only, addresses given), **[data]** the
+Part of the ONE living-world PR (user, 2026-10-04: start adding vehicles to the game, ask for more data when needed since
+automated runs to find vehicles will be hard; then the user added it to the living world
+work). Skitching is an explicit part of it (user, 2026-10-04).
+Evidence: the local living world research note, §1, §2, §3, §6, §6b-6f and the new §7 (this pass);
+`../audio-specs/world-traffic-audio.md` (traffic audio port, car alarm trigger); `../audio-specs/world-audio-hookin-spec.md`.
+Tags: **[code]** retail code read in the TU3 (title update 3) static recompilation (reference only, addresses given), **[data]** the
 user's disc data, **[trace]** measured in the recomp (the recomp is not retail; timing differs). Code wins.
 Credit: the TU3 static recompilation (skate3recomp / rexglue / Xenia) as the code reference; road and AIPATH layouts
 cross-checked where possible against DumbadsSkate3ModdingTools by Ethanw05; the andrewnakas `mx/vehicle` fork as
 prior work for the mod-facing shape (described, not copied: no licence).
 
-Moddability rule (CLAUDE.md, 2026-10-04): every value below is a setup-data default a mod can override, every system
+Moddability rule (project rule, 2026-10-04): every value below is a setup-data default a mod can override, every system
 has an engine-facing and a mod-facing entry point, and a mod's changes are undone on disable.
 
 ## 1. What retail does
@@ -347,8 +347,8 @@ V8 finishes the PR. V6 can start immediately (static RE only).
 ## 9. Data requests for the user
 Only what code, disc data and the existing sessions cannot answer. All are user-played sessions in the recomp with
 `.local\recomp\PLAY_TRACE_ALL.bat <label>` (categories audio, npc, world, traffic, aiskater, dsp; screenshots on).
-Each needs the hooks proven first in a background run of ours (memory "verify hooks before sessions"); the new
-hooks they need are listed in `.claude/todo/vehicles.md`.
+Each needs the hooks proven first in a background run of ours (project rule "verify hooks before sessions"); the new
+hooks they need are listed in the local vehicles todo.
 - **D1. Skitch session (needed for V7), ~5 min, DownTown streets (e.g. near Aletown / Hotel District).** Grab 6-8
   cars: from a stop, at walking pace, at full pushing speed; from the left rear, centre and right rear corners; try to
   grab a car that is too fast or too far (and say so out loud or note the time); hold one skitch through a junction

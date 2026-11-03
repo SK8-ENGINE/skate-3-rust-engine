@@ -1,8 +1,8 @@
 # 26: Living world: NPC skaters, pedestrians and traffic
 
 Branch: `world/living-world` (built on all the audio work, #32, which it publishes sounds into). One upstream PR
-for all of it (user, 2026-10-04: "this work shall be one PR"; traffic added the same day: "add this to the living
-world work"). Details: [`living-world/`](living-world/) (designs and the data formats of milestone 1).
+for all of it (the user's decision, 2026-10-04: this work is one PR; the user added traffic to the living
+world work the same day). Details: [`living-world/`](living-world/) (designs and the data formats of milestone 1).
 
 **Status (2026-10-10): feature complete for this PR, to be play-tested by Hails.** The scope is frozen; the
 remaining step is the user's play session and the fixes it shows. Work for later PRs is listed in the #52 description

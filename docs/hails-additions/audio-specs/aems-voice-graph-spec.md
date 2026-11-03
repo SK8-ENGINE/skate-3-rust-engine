@@ -163,7 +163,7 @@ Only records with id ≥ 9 are read. Their value selects the bus:
 
 ## 4. Modules
 
-### 4.1 SndPlayer1 (source) — process `sub_82B34278` [T, gate-1], play `sub_82B32DC8` [T]
+### 4.1 SndPlayer1 (source): process `sub_82B34278` [T, gate-1], play `sub_82B32DC8` [T]
 
 **State.**
 - A ring of up to 20 48-byte play records (table offset +464; cursor +469; write index +467; ring size +470).
@@ -227,7 +227,7 @@ seek is "restart at 0, decode a 384-frame pre-roll, skip target − 384" [T].
   - the admission check `rate × span ≤ queued` (`play.rs`);
   - the spans +32/+36.
 
-### 4.2 Rechannel — `sub_82B2C8F0` [V]
+### 4.2 Rechannel: `sub_82B2C8F0` [V]
 - If the incoming count (pass +60) differs from its declared count (+42), the module converts through the route
   matrix (§6.1). The first route into an output overwrites, later routes add, and unrouted owned outputs are zeroed.
 - For non-standard counts it copies min(n, m) channels at unity and zero-pads.
@@ -235,7 +235,7 @@ seek is "restart at 0, decode a 384-frame pre-roll, skip target − 384" [T].
 - **No-op when the counts are equal**, which is always the case in the voice graph unless a stream's channel count
   differs from the descriptor's.
 
-### 4.3 Resample — prepare `sub_82B2DAC8` [V], process `sub_82B2DBA8` [T], kernel `sub_82B43FB8` [V]
+### 4.3 Resample: prepare `sub_82B2DAC8` [V], process `sub_82B2DBA8` [T], kernel `sub_82B43FB8` [V]
 
 **Parameters.**
 - +52 = pitch scale (property 0 / 4096);
@@ -334,7 +334,7 @@ Measured retail values (session 20261001_211347 MOD lines):
 - History is written back after the block.
 - The recomp runs with flush-to-zero; Xenon hardware may not. This is mostly moot because of the bias. UNCERTAIN.
 
-### 4.6 Gain (Gai0) — `sub_82B23B50` [V: 185 replayed]
+### 4.6 Gain (Gai0): `sub_82B23B50` [V: 185 replayed]
 - Parameter 0 = target gain (+52, linear amplitude, class default 1.0). +56 = applied gain.
 - Per block:
   - **restart flag** (the pass's "module not yet reached in this graph's progress" flag, i.e. first/restarted block;
@@ -348,7 +348,7 @@ Measured retail values (session 20261001_211347 MOD lines):
 - So a **64-sample linear de-click on every gain change** (1.33 ms), then flat [PA confirms GAIN_DECLICK 64].
 - The retail GAIN trace hook logs +52/+56 (change-only).
 
-### 4.7 GainFader (GaF0) — `sub_82B238A8` [T] (grain voices, not the standard voice graph)
+### 4.7 GainFader (GaF0): `sub_82B238A8` [T] (grain voices, not the standard voice graph)
 - A fade request carries a start time (f64, sample-accurate), a duration, a target and a curve:
   - 0 linear; 1 square-root (rsqrte + one Newton step); else sine (four-lane sine kernel).
 - Length = max(1, trunc(duration × rate)) samples. It may span many blocks.
@@ -357,7 +357,7 @@ Measured retail values (session 20261001_211347 MOD lines):
 - Grain player usage: fader to 0 immediately, then attack to 1 over the attack time; release to 0 over the release
   time.
 
-### 4.8 Send (Sen0) — process `sub_82B31838` [V: 933,816 calls], configure `sub_82B31370` [T]
+### 4.8 Send (Sen0): process `sub_82B31838` [V: 933,816 calls], configure `sub_82B31370` [T]
 
 **Fields.**
 - +52 target gain (parameter 0); +112 current gain (constructor 1.0); +116 dirty;
@@ -399,7 +399,7 @@ matrix into the bus layout and added to the bus's delta array. At the bus's next
   retail `sub_82B1E8D8` / `sub_824A2E98` are unverified. **UNCERTAIN**: check before relying on pause behaviour.
 - **Bad channel counts** 3, 5 and 7 hit empty route ranges and execute a garbage route once. Never send those.
 
-### 4.9 Pan2D1 (Pn21) — process `sub_82B29BE0` [T; its parts V]
+### 4.9 Pan2D1 (Pn21): process `sub_82B29BE0` [T; its parts V]
 
 **Instance.**
 - +748 source count (= the voice's channels); +752 destination count (6 for voices);
@@ -599,7 +599,7 @@ The rest of the graph processes the sum like a voice.
 | **Board grain chain** (`sub_824C8878`) | graph 1: `Sub0 → HI20 → LI20 → FSS → Sen0 (→ graph 3) → Gai0 → Sen0 (→ graph 2)`.<br>graph 3: `Sub0 → DCl0 ±0.09 → Gai0 → HS20 5 kHz/0.65 → Sen0 (→ graph 2)`.<br>graph 2: `Sub0 → Sen0 (→ manager+116) → Sen0 (env, vfunc60(13)/32767) → Pn21 → Sen0 (→ default bus)`. |
 | **Default/master bus** (`[0x830CFDBC]+44` / `[0x830775EC]`) | **not recovered** (UNCERTAIN). The output stage reads 8 planes and the 6→8 route maps LFE to plane 7, so retail's master is most likely an 8-channel submix [I]. **PR #4's master (Sub0 → Del0 15 ms, 6 ch, order 255) is its own invention**: it reuses the effect-return delay. Do not copy the 15 ms delay without evidence. |
 
-### 6.3 Output stage (Dac) — `sub_82B21F58` → `sub_82B21D98` [V: 800 replayed]
+### 6.3 Output stage (Dac): `sub_82B21F58` → `sub_82B21D98` [V: 800 replayed]
 1. **Route planes.** The 8 master planes go to N outputs, where N = global byte 0x8306705D (0 in the static image;
    PR #4 sets 6; the retail runtime value is UNCERTAIN). Output tables at 0x820ED6CC/0x820ED6DC:
 

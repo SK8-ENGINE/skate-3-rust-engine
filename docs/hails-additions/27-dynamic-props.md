@@ -1,8 +1,8 @@
 # 27. Dynamic props (movable DMOs) from upstream PR #15
 
 Status: cherry-picked onto `world/dynamic-props` (from `world/living-world` 5127ae6), builds and tests green on
-Windows in both link configurations; not yet checked in game. Planned to ride with the living world (upstream draft
-#52) as its dynamic-object part; the retail DMO system is planned in `.local/research/npc/dmo-plan.md`.
+Windows in both link configurations; not yet checked in game. Planned to ride with the living world (upstream
+#52) as its dynamic-object part; the retail DMO system is planned in a research note (the DMO plan).
 
 ## Credit
 
@@ -28,7 +28,7 @@ that collide, can be pushed, grabbed, dragged and placed, with layouts saved per
 - **Phase 1, collision:** each instance's render triangles, baked to world space, form a second `BoardWorld`
   (`skate_world::build_prop_layer`, `GamePhysics::prop_world`), queried beside the map world by board, skeleton
   and wheel queries. Surface tags use the same `audio | physics<<7 | pattern<<12` mapping as the map.
-- **Phase 2, rigid bodies** (`physics/prop_dynamics.rs`): TU3 integrator, retail rounded-box mass properties,
+- **Phase 2, rigid bodies** (`physics/prop_dynamics.rs`): TU3 (title update 3) integrator, retail rounded-box mass properties,
   GP pair queries for box vs world / box / skater volumes, a compact impulse pass; moved instances rebake their
   triangle range (`BoardWorld::replace_triangles`, new in skate-core).
 - **Phase 3, grab and carry** (`physics/prop_carry.rs`): A on foot toggles grab of the nearest prop
@@ -85,8 +85,8 @@ changes.
 
 ## Grabbing spins the player; dragging does not work (2026-10-05)
 
-**Problem.** User, verbatim: "when grabbing objects the player spun and had trouble with dragging them around as
-they should be able to". Video `2026-10-05 11-43-41.mp4`: 0:06 to 0:11.5 the skater holds a shopping cart (HUD
+**Problem.** The user reported that when grabbing objects the player spun and could not drag them around as
+they should. Video `2026-10-05 11-43-41.mp4`: 0:06 to 0:11.5 the skater holds a shopping cart (HUD
 diamond cyan), bent over it in the MovingObjectNew pose, and skater and cart circle round each other on the spot
 while the camera swings round; 0:43 to 1:14 the same with a bin.
 
@@ -215,7 +215,7 @@ its own shade is very dark, the lit edge bright).
   29..34: world normal from the interpolated frame. 35..37: N.L with c9 and the step N.L >= 0. 58..60, 72..81: signs
   of the light in the unperturbed tangent frame times (0.58, 0.62). 86..88, 96: kd = (vnd . (0.58 sx, 0.62 sy,
   0.39)) x 2.3956 (same literals as `environment.default`).
-- [code] Shadow: 53..56 four CSM depth taps at texel offsets (+-1, +-1), 66, 70..82 depth compare and bilinear
+- [code] Shadow: 53..56 four CSM (cascaded shadow map) depth taps at texel offsets (+-1, +-1), 66, 70..82 depth compare and bilinear
   weights; 49..52 four `shadowWorld` taps, 65, 67, 69..82 the same for the world map; 84..85
   S = min(step(N.L) x csm, max(world, `g_CSMSelfBias.w`)).
 - [code] Light: 57, 64, 68, 88: a counter light, saturate(N . (-L.x, L.y, -L.z)) x `m_params[1].w`; 92..95, 97:
@@ -637,10 +637,9 @@ test that needs private data the setup does not have. skate-game 549 pass + 1 kn
 ## Object Dropper and reset moved objects (2026-10-08, research milestone + reset port)
 
 **Problem.** The LB phone menu (session marker, `crates/skate-game/src/session_marker/`) draws the Object Dropper row
-at 0.3 opacity and does nothing with it; retail also lets the player put moved objects back. User: "add to the living
-world todo to also add the object spawner int he LB menu (it already contains the option, its just not linked to
-anything yet.) There is also an option to reset moved objects once you start moving them around in Retail we will
-want that."
+at 0.3 opacity and does nothing with it; retail also lets the player put moved objects back. The user asked to add to the living
+world todo: the object spawner in the LB menu (the option is there but not linked to anything yet), and
+retail's option to reset moved objects once they have been moved, which we want too.
 
 **Evidence** (TU3 recomp generated code and the TU3 image; reference only, credit skate3recomp / rexglue / Xenia).
 [code] = read in the recomp, [data] = image strings / descriptors.
@@ -723,7 +722,7 @@ session marker are not ported (Upright is, see below).
 
 **Files.** `crates/skate-game/src/physics/prop_dynamics.rs`, `crates/skate-game/src/physics.rs`,
 `crates/skate-game/src/physics/prop_carry.rs`, `crates/skate-game/src/modding/mod.rs`, `crates/skate-mods/src/vm.rs`,
-`crates/skate-mods/src/api.lua`. Research helpers: `.local/research/object-dropper/` (message-name lookup,
+`crates/skate-mods/src/api.lua`. Research helpers: a local data folder (message-name lookup,
 lookup8 name guesser).
 
 **Verification.** `reset_to_spawn_returns_moved_body` (moved list, pose, rest, sleep, unknown id);
@@ -837,7 +836,7 @@ refuse removal); `skate-mods` command validation and the Lua calls. The map load
 **Problem.** Every placed prop exists from map load to the end of the session; retail streams DMOs with the living
 world census: they spawn near the player and go beyond the cull radius, within a 49-object pool.
 
-**Evidence** (research b97; main-checked: the cull's horizontal distance (`826BAD98`: the height lane is swapped out by
+**Evidence** (research b97; verified: the cull's horizontal distance (`826BAD98`: the height lane is swapped out by
 the perm at `0x822FB890` before `vmsum3fp`), the pool test `subfic 49`, the five weights and the range records in the
 export, the priority records):
 - Census pass `sub_826B7980` [code]: circle from the `dynamicobjects` range record (`livingworld_census_ranges`:
@@ -922,9 +921,9 @@ spawned; a prop moved 2 m comes back at its authored pose).
 ## DMO streaming: one collision rebuild per pass (2026-10-13)
 
 - **Problem:** the first streaming pass on DownTown took 412 ms (`FRAME_HITCH ... dmo_stream:412.4`; research
-  `.local/research/peds/b111-dmo-eviction.md`). Every streamed prop rebaked its collision with
+  research b111). Every streamed prop rebaked its collision with
   `BoardWorld::replace_triangles`, which rebuilds the whole query index; the fill pass streams ~790 props.
-- **Change** (research `.local/research/b114-prop-stream-batching.md`, main checked the index build):
+- **Change** (research b114, verified the index build):
   `BoardWorld::replace_triangles_batch` applies all edits in order and rebuilds the mesh bounds and the index once;
   `replace_triangles` is a batch of one. `PropCollisionLayer::rebake_many`, `GamePhysics::stream_props` and
   `stream_dmos` collect a whole pass (and the streaming-off restore) into one call. The streaming decisions and their
@@ -942,11 +941,11 @@ spawned; a prop moved 2 m comes back at its authored pose).
 
 ## DMO streaming: a moved prop is kept, not evicted (2026-10-17)
 
-**Problem.** User (laptop session game-20261017-143646): "props reset their position WAY TOO EASILY. in retail they
-only reset if you get far away or hit the reset button". The log: 21,037 evictions against 353 distance culls in 13
+**Problem.** User (laptop session game-20261017-143646): props reset their position far too easily; in retail they
+only reset when the player gets far away or presses the reset button. The log: 21,037 evictions against 353 distance culls in 13
 minutes of DownTown; every eviction respawns the prop at its authored pose, so a knocked prop snapped back.
 
-**Retail [code] (research b184, `.local/research/b184-dmo-eviction-queue.md`).** The census evicts the eviction
+**Retail [code] (research b184).** The census evicts the eviction
 queue's front once per tick while the pool is full (`sub_826BAD98`), as ours does. The queue is a min-heap on the live
 score (`sub_82C49C80` insert from attach `sub_82C52718`, re-scored every manager tick `sub_82C49DB0`), and the live
 score `sub_82C55160` scores an object as kept when its own state says so (`sub_82C485C0`: DMO+0x1170 bit 0x20;
@@ -965,7 +964,7 @@ muted DownTown run: no errors (29 live at the spawn, under the cap, so no evicti
 
 **Question.** Retail's DMO contact callback `sub_82C54618` calls the velocity kick `sub_82C530F0` only for some
 touchers; which, and is a resting prop static to the skater otherwise (the saved stage A patch
-`.local/patches/stage-a-resting-props-static.patch` assumed so)?
+a local, unlanded patch, stage-a-resting-props-static, assumed so)?
 
 **Retail [code] (`sub_82C54618`, Ghidra + generated code).** The touching collidable is `[event+0x4C]`, its owner
 `[collidable+0x20]`. The owner is looked up for the interface whose type id is `sub_82586478` (returns the name
@@ -979,14 +978,14 @@ body against a prop, and only 17 kicked: one burst at 271717 to 271754 ms, 50 ms
 47BA3950 at 271667 ms). The hook's v1 kind / flag fields read the owner instead of the collidable and the IActor call,
 so they say nothing about the gate; v2 (recomp research hooks, PROPHIT `actor` / `actor_vfn14`) logs the real inputs.
 
-**User (2026-10-17).** About the moment at 271.7 s: "Hit and then bailed as a result". About rolling into props:
-"depends on the object. large dumpsters move less, smaller props move easier. Vending machines are heavy."
+**User (2026-10-17).** About the moment at 271.7 s: a hit, then a bail as a result. About rolling into props:
+it depends on the object; large dumpsters move less, smaller props move more easily, vending machines are heavy.
 
 **Reading.** Rolling into a resting prop moves it by mass (ordinary contact physics, as ours already does through
 the reduced mass of the pair in `push_from_skater`; since 2026-10-25 a contact row in the shared solve, see "Skater contacts as solver rows"); the kick is an extra impulse while the skater bails. So the stage
 A patch (resting prop static to the skater) is wrong and stays unapplied.
 
-**The "kick" is a clamp [code] (research b206, `.local/research/b206-prop-bail-kick.md`, read from the generated
+**The "kick" is a clamp [code] (research b206, read from the generated
 code because Ghidra garbles the multiply).** `sub_82C530F0` does not add an impulse: with w = the motion record's
 +0x7C (read as inverse mass, not decoded) and d = the DMO's vtable slot 6 vector (`82C48230`, a velocity; the
 callback records a contact only when |d| >= 0.25): s = 5w and the spin is clamped to 15w when the mass (1/w) is
@@ -1007,7 +1006,7 @@ when the pushing actor bails, apply the clamp and wake the prop, values data-dri
   scales by; written from 1 / the type mass, `82C4E568`); d is the prop's own velocity as its transform tracker
   measures it (`[dmo+0xA4]+0x90` = last update's displacement / dt, `82E0C578`), about 0 for a resting prop. So for a
   resting prop the cap is 5 / mass m/s (20 kg: 0.25 m/s) and 15 / mass rad/s, and from 200 kg on the prop is stopped.
-  Main checked in the callback decompile that the |d| >= 0.25 test guards only the non-actor contact record: the actor
+  Verified in the callback decompile that the |d| >= 0.25 test guards only the non-actor contact record: the actor
   branch calls `82C530F0` and returns before it.
 - **Change:** `prop_dynamics::bail_clamp` (pure, the formula above) runs once per prop per tick when a bailing pusher's
   volume touched it this tick, with d = the prop's velocity before this tick's pushes, then wakes it.
@@ -1254,7 +1253,7 @@ Detail moved out of the code comments of `crates/skate-core/src/player/offboard/
 
 ### Held update rebind
 
-The rebind block of Move Object's held update 82D44A10, the hand points of 82D45D30 and the frame blend 82D46218 / 82D463D8 (research b64 [code, TU3 recomp]; main checked the 0.5 hand factor and 82D43B20):
+The rebind block of Move Object's held update 82D44A10, the hand points of 82D45D30 and the frame blend 82D46218 / 82D463D8 (research b64 [code, TU3 recomp]; verified the 0.5 hand factor and 82D43B20):
 - every tick: the push latch (+1200 bit 0x02, set once |Player+736|^2 > 0.04) and the collision timer +1176 (+1/60 while Player+2484 bit 26 is set, else 0);
 - the block runs only with the hand flag (Player+2476 bit 21), the timer at most 0.4 s and the latch clear; path A (a published best record and CanGrabSpline 82E08EE8 on the held record at the grip) refreshes the record (grip kept, no blend); path B (owner flag 0x40, 82D4D150 mode 1 without the held descriptor, 82E08DB8, the held record's +196 / +216 non-zero) re-grabs with a new grip, zeroes the anchor velocity and starts a frame blend only when it already held last tick; anything else loses the hold (+1200 bit 0x20 clears);
 - 82D45D30: the hand points sit at grip +/- 0.5 x |hand bone 3 - hand bone 7| along the record, clamped to [0, length];
@@ -1354,7 +1353,7 @@ Reset ONE object (retail cMsgResetDMO, doc 27 "Object Dropper and reset"): the p
 
 ### Spawn push acceleration
 
-An AI spawn push: [`Self::set_context_velocity`], and the acceleration sampler's previous velocities take the pushed value, so the push itself reads as no acceleration. Outcome-matched: retail's spawn-placed skaters ride off and do their recorded tricks; with the one-step velocity jump read as acceleration, every placed NPC played the non-interruptable `RidingIdle.Bumped` clip for ~0.6 s and a recorded trick inside it never played (b194).
+An AI spawn push: [`Self::set_context_velocity`], and the acceleration sampler's previous velocities take the pushed value, so the push itself reads as no acceleration. Outcome-matched: retail's spawn-placed skaters ride off and do their recorded tricks; with the one-step velocity jump read as acceleration, every placed NPC played the non-interruptible `RidingIdle.Bumped` clip for ~0.6 s and a recorded trick inside it never played (b194).
 
 ## Code reference: physics/mass.rs (fork additions)
 
@@ -1388,12 +1387,12 @@ Detail moved out of the fork-added code comments of `crates/skate-core/src/playe
 ## Skater vs prop mesh
 
 2026-10-22, living world todo `living-world-ramp-prop-ride.md` (USER-ASKS 255), research b501
-(`.local/research/b501-ramp-prop-ride.md`).
+(research b501).
 
 - **Problem (laptop session 2026-10-22, Black Box park):** "Trying to skate one of the ramp props didn't work at all,
   the prop moved and my character fell inside of it." (DMO_Glbl_mediumQuarterPipe_1002, vault quarterpipe_medium,
   250 kg; ridden at 16:41:01, wipeout reason 1, the body sank into it.)
-- **Cause [code, main checked]:** the skater push collided the skater's volumes with the prop's box (the AABB of its
+- **Cause [code, verified]:** the skater push collided the skater's volumes with the prop's box (the AABB of its
   collision triangles). On a ramp the box includes the air above the slope, so a board on the slope was "inside" and
   shoved the prop along the box normal with the full closing speed every tick (under the PROP_SHOVE log threshold);
   once the prop slid away, its one-sided triangles never pushed the skater back out.
@@ -1414,7 +1413,7 @@ Detail moved out of the fork-added code comments of `crates/skate-core/src/playe
   didn't work. and then i moved it and tried again and it moved worse." Log: rides at the spawn pose 02:09:11 to
   02:09:25 (the board reaches the wood about 0.9 m up, then goes airborne), carried 02:09:28 to 02:09:34 (set down at
   [-4.57, 1.03, 9.17], asleep), rides 02:09:36 to 02:09:40. No line logged the prop's pose outside carrying.
-- **Cause [code, main checked]:** the mesh change above still pushed with our impulse: closing speed x reduced mass
+- **Cause [code, verified]:** the mesh change above still pushed with our impulse: closing speed x reduced mass
   (75 kg pusher) x `push_transfer` 0.5, capped at `board_push_speed` 6 m/s (`prop_dynamics.rs` defaults), applied
   before and outside the prop solve, and to resting (asleep) props too. The old test glided along the face (no closing
   speed), so it never saw a board driving into the slope.
@@ -1427,7 +1426,7 @@ Detail moved out of the fork-added code comments of `crates/skate-core/src/playe
   solve (`row_corrections`), solved in the same iterations as its floor rows: the volume is a body with its own
   velocity, its own reaction slot and mass `board_row_mass` (8 kg, our board solver's `board_mass`) for board volumes,
   the actor's push mass (75 kg default, peds 10) for body volumes; only the prop's correction is used. A closing touch
-  wakes a resting prop (OURS: retail's wake source is not found; the user's account is that props move by mass); 2026-10-28, asked whether riding into a resting cone or trash can without bailing moves it in retail, the user: "Yes", so research b619's bail-only reading is incomplete and is not ported). A
+  wakes a resting prop (OURS: retail's wake source is not found; the user's account is that props move by mass); 2026-10-28, asked whether riding into a resting cone or trash can without bailing moves it in retail, the user said yes, so research b619's bail-only reading is incomplete and is not ported). A
   bailing actor's contacts add no rows (the bail clamp handles them). The box fallback (props with no mesh) and
   `skater_rows = false` keep the impulse push. Mod keys `set_tuning('props', {solver = {skater_rows, board_row_mass}})`,
   validated (mass 0..=1000), read back, reset on mod disable.
@@ -1442,7 +1441,7 @@ Detail moved out of the fork-added code comments of `crates/skate-core/src/playe
 
 ## Prop watch line
 
-(2026-10-22, for the recomp comparison in `.local/research/b509-dmo-rows-trace-spec.md`)
+(2026-10-22, for the recomp comparison in research b509)
 
 - `SKATE_PROP_WATCH="x y z r"` (spaces or commas): the first tick a prop's centre is within `r` m of the point, the
   nearest one is armed (`PROP_WATCH_ARM id= template= distance= tick=`); from then on it writes
@@ -1481,7 +1480,7 @@ Detail moved out of the fork-added code comments of `crates/skate-core/src/playe
 User report (2026-10-26, RPCS3 clip of a dumpster pushed through DownTown): props made no sound at all: no rolling,
 no thumps going down stairs, no hits on other things. Retail has two sound objects per prop on MixMap slot 8
 ("Dynamic", 5 instances) fed by an audio-side table the physics fills every frame. Research: b625 (first pass,
-re-checked), the m-props findings (main), b628 (loop packets), b629 (loop banks), b630 (pushed prop object). Credit:
+re-checked), the m-props findings, b628 (loop packets), b629 (loop banks), b630 (pushed prop object). Credit:
 the retail behaviour was read from the TU3 code with skate3recomp (rexglue, Xenia) and Ghidra + Xenon360.
 
 ### What retail does [code]
@@ -1594,8 +1593,8 @@ World tuning domain `prop_sounds` ([doc 26a](26a-living-world-overview.md#world-
   sunk benches (USER-ASKS 390); fixed with that item, not here. Not play-checked.
 
 ## Sunk props come to rest; moved props cull where they are (2026-10-28, USER-ASKS 390, 394, research b651)
-- Problem (user, 2026-10-27): "the water bob might be a bit much, pushed a metal bench in the water and its bobbing
-  kinda weird"; "the benches i pushed in the water never got cleaned up, but the dumpster did."
+- Problem (user, 2026-10-27): the water bob may be too much; a metal bench pushed into the water bobbed
+  oddly, and the benches pushed into the water were never cleaned up, though the dumpster was.
 - Jiggle, root cause (ours, Better Water): every buoyancy / drag sample went through `apply_impulse`, which wakes the
   body and resets its sleep counter; and a sunk prop resting on the canal floor got a fresh small velocity from the
   samples every step (about 0.004 m/s), so the integrator's energy test never counted toward sleep. Bench
@@ -1616,10 +1615,10 @@ World tuning domain `prop_sounds` ([doc 26a](26a-living-world-overview.md#world-
   pool 49) for mods is not added yet. Not play-checked.
 
 ## Live props evict farthest first (2026-10-29, ask 401, research b657)
-- Problem (follow-up of the 2026-10-14 churn report, `.claude/todo/living-world-follow-ups.md`): which prop a full pool
+- Problem (follow-up of the 2026-10-14 churn report, local todo: living world follow-ups): which prop a full pool
   (49) evicts. Ours scored live non-keep props with `s1 = 250 x placement priority`, so the eviction front was ranked by
   priority and could be a near, in-view prop.
-- Retail [code, b657 `.local/research/b657-dmo-eviction.md`]: the live score `82C55160` gives every queued (live) object
+- Retail [code, b657]: the live score `82C55160` gives every queued (live) object
   `s1 = 2^31`; the placement priority only ranks spawn candidates (`82C4A130`). So the front is the lowest
   `((2^31 + s2) + s3) x k_view`: props behind the camera before props in front, and among them the farthest from the
   reference. One front kill per cull call while live >= 49 - reserved.
@@ -1628,7 +1627,7 @@ World tuning domain `prop_sounds` ([doc 26a](26a-living-world-overview.md#world-
   cap, ring and cull stay mod data (`dmo_stream`). Test: `the_pool_cap_evicts_the_lowest_score_once_per_pass`
   (updated: the farthest unheld prop goes first despite a higher priority). Not play-checked.
 - `n` (`DMO+0x1124`) is the prop's safety cost, not a part count (research b658, 2026-10-29; offsets and record values
-  checked by main in Ghidra and the converted collections). Attach `82C52718` calls `82C55858` (secondary interface
+  verified in Ghidra and the converted collections). Attach `82C52718` calls `82C55858` (secondary interface
   DMO+0x24, vtable 0x82322DE8 slot 0xD4) before the queue insert, so a queued prop is never unset. That re-scores the
   safety cost `DMO+0x1120` (`82C55A50`: painter layer 14 at the prop and 4 sample points, class
   `livingworld_dynamicobject_safety`, unsigned max from 1, any 0 gives 0) and sets `n = 0` if the cost or `cfg` is 0,

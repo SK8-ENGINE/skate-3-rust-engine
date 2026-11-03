@@ -23,7 +23,7 @@ Retail collision units carry a 16-bit surface ID. The surface **type** is
   trajectory query tests `surface & 0xF80 == 0x600` (type 12).
 
 New tool: `crates/skate-data/examples/water_surfaces.rs` lists the surface types
-in each map's embedded RWCM collision and details the type-12 triangles.
+in each map's embedded RWCM collision (the collision archive inside the `.skate` map) and details the type-12 triangles.
 
 ```
 cargo run --locked --release -p skate-data --example water_surfaces -- data/installations/<id>/maps/*.skate
@@ -109,9 +109,9 @@ solid one-sided collision, as before.
 
 First in-play test (University fountain basin): the skater landed on the water
 and rode on it; no bail. Expected: the published flag only feeds the wipeout
-state, and nothing starts a bail on water. I searched every recovered bail check
+state, and nothing starts a bail on water. A search of every recovered bail check
 (`skate-core/src/player/wipeout/`, the state selector, all motion-graph conditions
-in the stock state XML) and found no water/type-12 trigger. The retail
+in the stock state XML) found no water/type-12 trigger. The retail
 trigger is in code that hasn't been recovered, and no decrypted executable is
 available.
 
@@ -143,7 +143,7 @@ up when below height + 0.1) agrees.
   `FLOAT_DEPTH` under a surface point; `deep_water_surface_at` combines them.
   History: making shallow water solid (first per triangle, then per contact
   point) stopped the jitter but the body lay on top of the water like glass
-  (user: "looks quite bad"); the jitter was the buoyancy, not the non-solid
+  (the user found it looked bad); the jitter was the buoyancy, not the non-solid
   surface, so the surface is non-solid everywhere again and only buoyancy is
   limited to deep water.
 - Water used to be detected from contact reports, which no longer exist for deep
@@ -207,7 +207,7 @@ up when below height + 0.1) agrees.
   ~60 degrees and drifting toward overhead, with a dark rounded vignette;
   respawn after ~1-3.5 s; Thrasher "Hall of Meat" points count while floating.
   Retail water close up: even steel blue-grey with fine dark streaks
-  (~10-20 cm) that shimmer in place (PCA loop) with a slow drift.
+  (~10-20 cm) that shimmer in place (PCA loop: principal component analysis, frame means plus weights) with a slow drift.
 - **Board floats** (`apply_board_drag`): besides water drag, board parts in
   water get buoyancy that cancels gravity with the part centre at the surface,
   rising linearly to 3 g at 5 cm below and zero 5 cm above. Trace (Aletown):
@@ -244,8 +244,8 @@ up when below height + 0.1) agrees.
   0.4-1.6 m/s, drag and light gravity, growing 0.8-1.3 -> 1.8-2.8 m, alpha
   0.45-0.72, life 0.55-0.85 s; unlit alpha-blended `StandardMaterial` quads
   billboarded to the gameplay camera. No splash in shallow water (retail shows
-  none). A first version with a generated soft blob plus droplet dots "looked
-  like snow" (user); the retail sprite fixed that; the first sprite version was
+  none). A first version with a generated soft blob plus droplet dots looked
+  like snow to the user; the retail sprite fixed that; the first sprite version was
   "a bit strong" and was reduced (18 -> 13 sprites, lower alpha/brightness).
   Without the sprite file there is no splash (logged).
 - **Water colour (tried, rejected):** adding a steel-blue body colour under the
@@ -269,7 +269,7 @@ up when below height + 0.1) agrees.
   - **Cube blur:** the cube is read 3 mips blurrier. Tested +2/+3/+3.5/+4/+6/+9:
     +3 matched the broad and fine statistics, and +4 or more was flat.
   - **Tint:** the reflection is multiplied by (0.82, 1.0, 1.04). Unmodified, it
-    read grey (user: "not quite the same colour").
+    read grey (the user saw a slightly different colour).
   - **Anti-tiling and swells:** the normal used one fine layer at the 4x ripple
     scale, which tiled visibly over large stretches (user screenshots of the
     DownTown fountain). The normal is now the fine PCA wave plus the same wave
@@ -285,7 +285,7 @@ up when below height + 0.1) agrees.
     canal 4368 m² (5 chunks, full motion), DownTown fountain 1268 m²
     (size 0.69), others 99-4599 m². University's fountain channel is family
     30 and unchanged.
-  - **Slower waves (user request: canal "a tiny bit too fast"):** the PCA wave
+  - **Slower waves (user request: the canal waves were a little too fast):** the PCA wave
     animation (30 frames at 30 Hz, shared with the ocean) now has a second copy
     for family 33, `FrameStateData.pca_slow`. It runs at 0.75x
     (`WATER_PCA_RATE`), interpolated between frames (PCA weights combine
@@ -322,7 +322,7 @@ the water. Two more changes:
   `offboard/ground_query/lines.rs` (biped ground lines).
 - **Camera:** `camera/water.rs` `WaterView`, applied to the final frame in
   `CameraRuntime::advance`. While the skater root is in water (from 0.3 m above
-  water (any depth: a deep-only version let the low bail shot dip under the
+  water, any depth; a deep-only version let the low bail shot dip under the
   5 cm channel's surface, user GIF), the camera eases to at least 1.8 m above the surface, 3 m
   further back horizontally (first tuned 1.2 m / 1.5 m; user: still too close), and is re-aimed at the skater (blended by how far it
   moved). A camera under water for any other reason is lifted 0.3 m above the
@@ -416,8 +416,8 @@ No retail reference was found to compare; the user accepted the look for now.
 
 ### Industrial's sea rendered as a black void (global presentation model)
 
-User (2026-10-08): "the ocean by the docks does NOT render correct and is just a
-black void". Location from their 2026-10-07 13:58 session: Industrial, about
+The user reported (2026-10-08) that the ocean by the docks did not render and was
+a black void. Location from their 2026-10-07 13:58 session: Industrial, about
 x -400..-560, z -70..-270, near y 0.
 
 Root cause, two parts:
@@ -472,8 +472,8 @@ Verification: `--verify` captures with a scratch camera mod, camera at
 (-520, 30, -90) looking at (-580, -7, -170) (player teleported to
 (-470, 2, -150)). With `sdk.world.set_tuning('backdrop', {visible = false})`
 (the state before this change) the harbour is a flat black area; with the
-backdrop it shows the sea and the tree wall on the hills; user: "THERE WE GO IT
-GOT THE OCEAN". The log shows `SKATE_BACKDROP: Industrial triangles=7768
+backdrop it shows the sea and the tree wall on the hills; the user confirmed
+the ocean now shows. The log shows `SKATE_BACKDROP: Industrial triangles=7768
 materials=27` and no unsupported-family fallback for the backdrop materials.
 DownTown (`triangles=860 materials=4`) shows no change or artifacts at the
 Aletown spawn; University (`triangles=1587 materials=2`) now draws its far sea
@@ -487,8 +487,8 @@ and the asset-backed `industrial_backdrop_covers_the_docks_sea` (`--ignored`,
 
 ### Floating trees in Industrial's south hills (far-proxy terrain)
 
-User (2026-10-08, after the sea fix): "the water looks good in the rust engine,
-i can see the floating tree's still in the distance".
+The user reported (2026-10-08, after the sea fix) that the water looks good, but
+the floating trees are still visible in the distance.
 
 Root cause [data]: the tree wall (`DIST_Water.rx2` mesh 14, 358 billboard
 clusters at z -500..-986) stands on far-proxy terrain from
@@ -545,14 +545,14 @@ skate-mods `world_tuning` patch validation.
 Retail's in-water rule at the docks is not part of this change: the harbour
 has no water collision (section 4) and the free-skate water/out-of-bounds
 reset is skater state (`IsInWater` action-graph condition, not traced; see
-`.claude/notes/triggers-volumes-re.md` section 4).
+the local trigger volumes research note, section 4).
 
 ### Falling into the Industrial sea (retail air timeout)
 
 Problem: riding off Industrial's dock edge drops the skater through the backdrop sea. Nothing said
 why or when they came back, and the air limit could not be changed by a mod.
 
-Retail at the sea [user's RPCS3 footage, `.local/research/in-water/rpcs3-*.jpg`]: jumping off the
+Retail at the sea [user's RPCS3 footage, local screenshots]: jumping off the
 docks or the tanker, the skater is reset about 1.4 to 3 s after leaving the edge, as they reach
 the water, not after 5 s: bail camera (vignette, Hall of Meat counter), a hard cut, then the
 skater fades in as a ghost at a safe spot next to where they jumped; no splash. That is a
@@ -572,7 +572,7 @@ Industrial's quay walls (772) and roofs, and areas on other maps. Our engine had
 the whole chain (`skate-core` `player/input_phase/special_surface.rs`, the board/feet/plant
 branches and the ragdoll +214 branch; `skate-game` `physics/skeleton_feedback.rs` publishes +214),
 so the reset itself works; only the logged reason was wrong (`requested`). Full research:
-`.claude/todo/ocean-docks-black-void.md`, section "Retail sea reset barrier".
+the local todo on the ocean docks black void, section "Retail sea reset barrier".
 
 Retail air timeout [code]: `PhysicalPlayerStateChanger::CalcSuggestedState` (`0x82D8ADE8`) counts
 frames in physical category 200 (air) at selector+44; the count holds while flags+2468 bit 3
@@ -645,8 +645,8 @@ Open items:
 Problem: after a checkpoint respawn (for example from the Industrial sea) retail draws the skater
 see-through for a moment, then solid ("ghost"). Ours drew them solid at once.
 
-Root cause (retail, decoded from the TU3 code, located with one muted recomp run; reports
-`.local/research/report-ghost-writer.md`, `report-ghost-fade-2.md`, `report-ghost-trace.md`):
+Root cause (retail, decoded from the TU3 code, located with one muted recomp run; local research
+reports):
 - Every skater placement component keeps a fade-in timer in seconds (owner +1868). The
   place-skater handler `sub_825926F8` sets it to 0 and counts the placement (+1864); the
   component constructor `sub_82590DC0` starts it at 0, so a new skater fades in too.
@@ -692,7 +692,7 @@ NOT RETAIL yet:
   the teleport request (recomp trace: the ramp starts about 6.4 s after a Challenge Map teleport
   request, at the post-load placement), so after a menu teleport most of the 1.0 s runs behind
   the loading screen. The user's RPCS3 video (teleport to The Tanker,
-  `.local/research/in-water/rpcs3-menu-teleport-tanker-10fps.jpg`) shows the skater see-through
+  a local screenshot) shows the skater see-through
   for only about 0.3 s after the loading screen clears. Ours also starts at the completed
   placement (and at the new skater after a map load), but our teleports have no loading screen,
   so the whole 1 s was visible in ours. Closed: the fade is now off by default, see
@@ -712,7 +712,7 @@ Files: `crates/skate-core/src/player/ghost.rs` (new), `crates/skate-game/src/ska
 
 Problem: at The Tanker our sky is about 1.46x darker and our sea about 2.2x darker
 than RPCS3 and the recomp, while the lit deck is about 1.6x brighter. The code
-comparison is in `.claude/todo/frame-brightness.md`. Sky, final copy, ocean maths
+comparison is in the local frame brightness todo. Sky, final copy, ocean maths
 and the exposure evaluator all match retail. The meter input did not: ours
 metered linear HDR Rec.709 luminance capped at 16 (described in the code as a
 "portable" meter).
@@ -778,13 +778,13 @@ Verification:
 
 ### World shader families 7 / 8 lost their kd term (and 2 / 6 checked)
 
-Problem: the world surface radiance check (`.claude/todo/frame-brightness.md`,
+Problem: the world surface radiance check (the local frame brightness todo,
 "World surface radiance vs retail") found two possible mismatches in
 `retail_world.wgsl`: families 7 / 8 multiplied the lightmap by the flat-normal kd
 0.93429 (about 7 % darker grass cards, foliage and simple diffuse surfaces), and
 families 2 / 6 did not normalise the tangent normal before kd.
 
-Which retail program each family is [data, VLT `skatercollections.vlt`, effect
+Which retail program each family is [data, VLT (vault, EA's attribute database) `skatercollections.vlt`, effect
 field `effect`, class and key names checked with `tools/asset_pipeline/vlt.py`
 `hash64`]: family 1 `environment.default` -> `baseenvironment`; family 2
 `environmentsimple.default` -> `defaultenvironment`; family 6
@@ -837,7 +837,7 @@ Open (found while reading, not changed):
 ### Stains and wear decals drawn at retail strength
 
 Problem: lit world surfaces measured about 2.6x too bright against the sky
-compared with retail (`.claude/todo/frame-brightness.md`, "Deck input probe"). At
+compared with retail (the local frame brightness todo, "Deck input probe"). At
 the Industrial Tanker deck (-440.6, 22.1, 36.5) the surface is material
 `environment.decal` (our family 3): a white threadplate diffuse with the dark
 `decal_wear_sp_id_concstains_02_d` stain decal on top.
@@ -889,9 +889,9 @@ Open:
 
 ### Water camera restored after the upstream integration (2026-10-13)
 
-User (2026-10-13): "falling in water still causes the camera to go under the water surface for some reason and get
-stuck all zoomed in on the player. which is not right" / "look back to our old branch on what has changed since the
-camera worked perfectly at that time."
+The user reported (2026-10-13) that falling in water still sent the camera under the water surface, stuck zoomed
+in on the player, and asked to compare with the old branch, where the camera still worked, to see what had
+changed.
 
 - **What changed:** the camera worked on `water/retail-water` (upstream PR #30, head `5245a185`, merged 2026-10-06 as
   `c283cc57`). The next upstream integration `b3c96793` (2026-10-07, "Integrate retail audio fixes and current physics,
@@ -913,14 +913,14 @@ camera worked perfectly at that time."
   trigger is now the recovered water flag.
 - **Verification:** skate-game `camera::water::tests` (a water bail keeps the camera above the surface, settles 3 m up
   looking down, vignette at full weight, blends out; a dry camera is untouched). Muted run with the dev mod
-  `.local/poc-tests/mods/water-autotest` (drops the skater into the Aletown canal): `WATER_CAMERA water bail: shot in
+  a local dev mod, water-autotest (drops the skater into the Aletown canal): `WATER_CAMERA water bail: shot in
   surface=Some(8.934)`, then camera_y 11.68 = 3.00 m above the surface until the respawn; capture shows the overhead
   shot with the vignette.
 
 ### What else b3c96793 removed, and what is left to recover (2026-10-13)
 
-User (2026-10-13): "lets also recover the lost improvements noted here". Research b112 / b113 compared the deleted
-`physics/water.rs` and `water_bodies.rs` with the current code (main checked the key lines):
+The user asked (2026-10-13) to recover the lost improvements noted there as well. Research b112 / b113 compared the deleted
+`physics/water.rs` and `water_bodies.rs` with the current code (the key lines checked against the recomp code):
 - **Water detection, the water flag and the water bail:** replaced by the recovered retail contact path
   (`special_surface.rs`, contacts in `board_ground.rs` / `collision_update.rs`). Nothing to restore.
 - **"Shallow water solid, deep water not":** replaced by the retail group/surface exclusion table (`82767D60` sets only
@@ -944,8 +944,8 @@ User (2026-10-13): "lets also recover the lost improvements noted here". Researc
 
 ### Water look layer ("Better Water", 2026-10-15)
 
-**Problem.** User (2026-10-15, DownTown Aletown canal, hails-local d9e8df02): "the water effect jumps around alot
-too" and "the water effects look terrible, lets look to reimplement our water effects that upstream didn't take."
+**Problem.** User (2026-10-15, DownTown Aletown canal, hails-local d9e8df02): the water effect jumps
+around and looks poor; the user asked to reimplement our water effects that upstream did not take.
 
 **Root cause of the jump.** The retail scroll clock (`retail_render::WaterAnimation`, TU3 0x82790858) adds 1/60 per
 30 Hz update and restarts after 5, so every scroll layer (`retail_world.wgsl`, `p.water[1] * t`) snaps back by
@@ -953,8 +953,8 @@ speed x 5 every 10 s. This is the retail routine; our old `water_time` (seamless
 had hidden it and was removed by b3c96793.
 
 **Is ours retail?** No. Every piece below was a project choice matched by eye to RPCS3 footage (sections above);
-upstream's current shader is the retail port. User (2026-10-15): "If not make it a toggle in the extras menu for the
-guide overlay, with the default setting making it retail-like" and "Call it 'Better Water' for the toggle".
+upstream's current shader is the retail port. The user's decision (2026-10-15): otherwise make it a toggle in the
+guide overlay's extras menu, retail-like by default, named "Better Water".
 
 **Change.** `water_look.rs` (new): `WaterLook` values, `WaterLookSettings` (player file `settings/water-look.json`,
 one mod patch on top). Off (default) = every piece at its retail value, so the shader output is the retail program.
@@ -971,23 +971,23 @@ On ("Better Water", pause menu EXTRAS) restores, from PR #30's head 5245a185:
 | `scroll_rate` (texture scroll speed) | 0.5 | 1 |
 | `seamless_clock` (`water_time`) | on | on (see below) |
 
-**Seamless clock is on for both looks.** User (2026-10-15): "I can say as apart of our water testing I NEVER saw it
-reset like ours does in the rust engine reimplmentation of it". So the ported 0x82790858 restart is not what the
+**Seamless clock is on for both looks.** The user reported (2026-10-15) that in all their water testing they never saw it
+reset the way ours does in the Rust engine. So the ported 0x82790858 restart is not what the
 console shows; the seamless clock is the default with Better Water off too, and `seamless_clock = false` (mods only)
 gives the restart. Open: how retail hides the restart (consumer of the published value, shader-side wrap, or a second
-clock); research `.local/research/retail-water-scroll-clock.md`.
+clock); a local research note.
 **Found (2026-10-15):** the water shaders never see the 0x82790858 loop. They read the global `g_fAnimationTime`
 (`water_defaultPS`: `uv = raw * (c20 * c21.x) + c19 * c22.x`, c22 = `g_fAnimationTime` [data, shaders_final.big];
-FNV-1 hash 0xE5A76988 registered by sub_826DD6B8 [code, agent-decoded]). sub_82791628, the only caller of
-0x82790858, adds dt to its `.x` every update and nothing resets it [code, main-verified in skate3_recomp.34.cpp:
+FNV-1 hash 0xE5A76988 registered by sub_826DD6B8 [code, decoded from the recomp]). sub_82791628, the only caller of
+0x82790858, adds dt to its `.x` every update and nothing resets it [code, verified in skate3_recomp.34.cpp:
 `lvx128 v63` from block +0x40000+17024+336, `vaddfp128` with the splatted dt, `stvx128` back]. So retail scrolls
 seamlessly and the seamless clock is the retail behaviour; our 1000-unit loop only keeps f32 precision (invisible,
 every authored speed completes whole repeats). The 0x82790858 value (this+316) has no known reader.
 **Rate measured (2026-10-15):** recomp watch list (no hook build) on `*(0x83083C60)+0x443D0` and the loop counter
 `0x830CEC9C`, 52 s idle at the spawn, muted background run: `g_fAnimationTime.x` rises at **1.0025 per second** with
 no drop in 6,466 samples; the 0x82790858 loop restarts every ~0.55 s in the recomp (it steps per update) and no
-shader reads it. 0 malformed lines. Data: `.local/research/water-clock/` (`watch.txt`, `idle.tsv`, `rate.py`;
-script `.local/recomp/scripts/water_clock_idle.txt`). So the retail scroll runs at real time; `water_time` now uses
+shader reads it. 0 malformed lines. Data: a local data folder (`watch.txt`, `idle.tsv`, `rate.py`;
+a local recomp input script, water_clock_idle). So the retail scroll runs at real time; `water_time` now uses
 1.0 x `scroll_rate` (retail 1; Better Water keeps the earlier approved half speed, 0.5). The "half real-time, loops
 every 10 s" in [Water time](#water-time) came from the wrong clock.
 
@@ -1032,7 +1032,7 @@ body areas, `slow_pca`, `water_time`, tests), `retail_world.wgsl`, `retail_mater
 3. Industrial's sea: retail respawned the player (user's memory), possibly
    out of reach in retail. No collision data exists for it; see section 4.
 5. Water rendering (resolved, see above; kept for the record): static texture on the fountains, black on the
-   University reservoir). Cause found: the log says "52 of 8546 world
+   University reservoir. Cause found: the log says "52 of 8546 world
    materials use an unsupported shader family and render as family 1". Water
    (family 33) and ocean (family 31) shaders require `assets/private/ocean-pca.json`
    (`MaterialTuning::supported`, `read_pca`). Nothing in setup (here or on
@@ -1080,13 +1080,13 @@ body areas, `slow_pca`, `water_time`, tests), `retail_world.wgsl`, `retail_mater
 
 ### Better Water frame cost, measured (2026-10-18)
 
-User (final living world todo, verbatim): "lets begin optimizing the better water opt in so its efficient but also
-looks clean and realistic but not out of place for the game itself".
+The user's final living world todo: optimise the Better Water opt-in so it is efficient and
+looks clean and realistic without looking out of place in the game.
 
 Method: `tools/dev-bench/water-look-bench.ps1` (release build of world/living-world b87342e6, `--teleport
 dist_downtown_canalplaza`, idle, muted, windowed 1280x800, FPS limit off through its own settings folder, trace-all
 with `SKATE_PERF_GPU_EVERY=1`; 60 s per run, first 25 s dropped; two rounds, the second in reverse order; RTX 4080
-SUPER). Each mode writes its own `settings/water-look.json`. Code map: research b250 (`.local/research/b250-better-water-cost.md`).
+SUPER). Each mode writes its own `settings/water-look.json`. Code map: research b250.
 
 | Mode | frame_ms p50 (r1 / r2) | p99 | opaque pass GPU ms (r1 / r2) |
 |---|---|---|---|
@@ -1106,9 +1106,9 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 
 ## Better Water on flowing fountains (University), 2026-10-19
 
-- **Ask:** laptop session 2026-10-18 22:01: "apply better water to small fountains as well"; asked which ones, the
-  user (2026-10-19): "im talking about ones like the fountains near the pcu library spawn".
-- **Why they had none [code, research `.local/research/b287-better-water-fountains-swells.md`, main checked
+- **Ask:** laptop session 2026-10-18 22:01: apply Better Water to small fountains as well; asked which ones, the
+  user (2026-10-19) named fountains like the ones near the PCU library spawn.
+- **Why they had none [code, research b287, checked against
   `retail_world.wgsl:192` / `:255`]:** University's fountains are `water.flowing` (family 30,
   `flowingwater_defaultPS`, see "University water looks darker" above); every Better Water gate was `fam==33u`.
 - **Change (opt-in only):** `WaterLook::flowing_water` (Better Water: on; retail: off) and `flowing_ripple_scale`
@@ -1126,9 +1126,9 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 
 ## Better Water: a small splash in shallow water (fountains), 2026-10-19
 
-- **Ask (laptop session 2026-10-19 01:10, build edec93c):** the user: "Fountains: looks good, maybe a small splash
-  added like for deep water when the player falls in for better water mode", and then: "the fountain splash should
-  only haopen in better water mode".
+- **Ask (laptop session 2026-10-19 01:10, build edec93c):** the user found the fountains good and asked for a small
+  splash like the deep water one when the player falls in, and then that the fountain splash
+  happens only in Better Water mode.
 - **Retail:** shallow water (the University fountain channel) shows no splash (this doc, water entry splash), so the
   splash is ours and Better Water only.
 - **Change:** `WaterLook.shallow_splash` (Better Water default 0.5, retail look 0): when the skater root or the deck
@@ -1140,9 +1140,8 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 
 ## Better Water: calm swells on the open sea, 2026-10-19
 
-- **Ask (2026-10-19):** the user: "there are just a couple boats in the distance when you are at the Tanker spawn and
-  look out at the ocean, im sure if you don't make the swells too large and just make it look nice and calm but moving
-  it will be fine." So broad, calm swells on the open sea, no rings around boats (b301's boat positions not needed).
+- **Ask (2026-10-19):** the user noted there are only a couple of boats in the distance from the Tanker spawn, so
+  swells that are not too large, calm but moving, are enough. So broad, calm swells on the open sea, no rings around boats (b301's boat positions not needed).
 - **Which water:** the sea is the `ocean.default` backdrop (family 31, PCA normals and Ward specular, b287 table). Its
   mesh is 204 vertices over about 16 x 13 km (this doc, "ocean"), so the surface cannot move: the swells are shading
   only (b287 part 1).
@@ -1161,15 +1160,15 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 
 ## Better Water: fountains like the large water, flowing cascades, 2026-10-19
 
-- **Ask (2026-10-19):** the user: "in better water mode, water fountains (like the one I end my session next to) should
-  use the same water physics/shader and material as the larger bodies of water, just scaled down so it looks good as a
-  fountain. water flowing down the drop offs should look more like water flowing", and later: "yes, but other
-  fountains that use the same water materials for other fountains should get the same treatment."
-- **Which water [data, research b350 `.local/research/b350-fountain-water-plan.md`]:** the session ended at University
+- **Ask (2026-10-19):** in Better Water mode, fountains (like the one the session ended next to)
+  should use the same water physics, shader and material as the larger bodies of water, scaled down to suit a
+  fountain, and water flowing down the drop-offs should look like flowing water; later the user added that other
+  fountains using the same water materials get the same treatment.
+- **Which water [data, research b350]:** the session ended at University
   [344.6, 69.0, -293.9], the north end of fountain U1 (x 339..343, z -330..-283): basins and 15 vertical cascade quads,
   all `water.flowing` (family 30). Same family: University U2 (x 448..452, next to a `water.default` pool) and
   DownTown's stepped fountains D1 to D3 and canal channels (`water.flowingalpha`). Industrial and the parks have none.
-- **Cause [code, main verified]:** family 30 never runs the PCA wave block (`retail_world.wgsl`, `if fam==33u`) and has
+- **Cause [code, verified]:** family 30 never runs the PCA wave block (`retail_world.wgsl`, `if fam==33u`) and has
   no `normal2` texture; and the look slowed cascades to a quarter of retail: the flowing ripple scale (2) tiled the
   texture twice as densely without scaling the scroll, and `scroll_rate` 0.5 halved the clock (`water_look.rs`
   defaults; the scroll rows are retail's `water.flowing` (0, -0.2, 0, -0.1) per second).
@@ -1194,7 +1193,7 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 - **Verification:** `fountains_only_with_better_water_and_mods_can_set_them` (`water_look`),
   `fountains_borrow_the_largest_still_water_without_touching_retail_flags` (`retail_render`), the struct size and
   naga validation tests. Not play-tested: the numbers are starting values for the user's eyes at U1.
-- **Retail checks (b356, `.local/research/b356-flowing-water-speed-and-specular.md`):** no per-material flowing speed
+- **Retail checks (b356):** no per-material flowing speed
   [data: `flowingwater_defaultPS` / `flowingwateralpha_defaultPS` take only `m_params` c11..c14 and
   `g_fAnimationTime`; the 42 water materials carry no scalars]; "VERYSLOW" is a name only (its speed comes from UV
   density, and two of the three are not slower). Every family 30 / 33 material has a specular mask: University
@@ -1206,8 +1205,8 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 
 ## Better Water: fountain basins keep their own colour (2026-10-21, laptop session)
 
-- **Problem:** the user: "the watee fountain near the pcu library looks bad with better water on. it is using a weird
-  texture or something??": the PCU basin read as a flat pale grey-lavender sheet with orange blotches.
+- **Problem:** the user reported the fountain near the PCU library looked bad with Better Water on, as if it
+  used a wrong texture: the PCU basin read as a flat pale grey-lavender sheet with orange blotches.
 - **Cause [code, reproduced with a verify capture]:** with `fountain_water` on, a flat basin pixel took the donor's
   diffuse (University's large pool `water.default`: its floor texture with leaves), so the fountain showed a pool floor.
 - **Change (look layer, not retail):** basins keep their own diffuse (University's: black); the donor still gives
@@ -1216,8 +1215,8 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 
 ## Better Water: fountain basins in line with the Aletown canal (2026-10-21, laptop session)
 
-- **Problem:** after the basins kept their own colour (section above), the user: "pcu library water fountain water is
-  just too blue. try to bring it in line with the canal water from downtown aletown".
+- **Problem:** after the basins kept their own colour (section above), the user found the PCU library fountain
+  water too blue and asked to bring it in line with the DownTown Aletown canal water.
 - **Cause [code + data]:** University's fountain diffuse is black and its specular mask plain white (about 0.9, b356),
   so a basin pixel is almost only the steel-blue tinted sky reflection. The canal gets its colour from its own diffuse,
   under a flat mask of about 0.18 (`pool_S_30per`).
@@ -1226,7 +1225,7 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
   basins). Steep cascades keep their own. Mods: `sdk.graphics.water_look` keys of the same names (colour 0..1 per
   channel, reflection 0..2), released on disable. Log: `WATER_BODY` per water material (family, body area, bounds) at
   map load, so a water report can name the body (PCU basin: x 340..343, z -330..-283, y 67.9).
-- **Ripple:** the user, same session: "the fountain doesnt ripple enough". With a flat colour the basin shows its waves
+- **Ripple:** the user, same session, found the fountain did not ripple enough. With a flat colour the basin shows its waves
   only through the lighting, and the waves barely tilt it (luma stdev 1.8 over the water vs the canal's 13 to 17).
   Third key `fountain_ripple` (frame-state row `fountain_ripple`): a gain on the basin normal's tilt (0..8). Better
   Water's `fountain_waves` goes 0.5 -> 1 and `fountain_tile` 4 -> 2 m (finer ripple).
@@ -1238,7 +1237,7 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
   | Aletown canal (Better Water) | 70..86, 79..96, 88..104 | 18 | 12.7..17.5 |
   | PCU basin, before (b1841cc5 look) | 105, 128, 138 | 33 | 1.8 |
   | PCU basin, matched to the canal | 84, 96, 106 | 22 | 10.0 |
-  | PCU basin, new defaults (user: "go for a littlw more blue gray tint") | 83, 98, 113 | 30 | 10.9 |
+  | PCU basin, new defaults (user ask: a little more blue-grey tint) | 83, 98, 113 | 30 | 10.9 |
 
   Defaults: `fountain_colour` {0.018, 0.024, 0.032} (canal match {0.018, 0.022, 0.026}, then a little more blue-grey on the
   user's look at the capture), `fountain_reflection` 0.15, `fountain_ripple` 7. Reflection 0
@@ -1248,16 +1247,16 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 
 ## Better Water: falls match their water (2026-10-27)
 
-- **Problem:** the user, DownTown canal: "The waterfalls in the canal look terrible with better water mode on. it
-  causes them to become pure white and look like shit, they should match the rest of the water." (ShareX
+- **Problem:** the user, DownTown canal: with Better Water on, the canal waterfalls turned pure white instead of
+  matching the rest of the water (screenshots
   skate3rust_Ud4n8xsgfn / skate3rust_ZxJlTpJFLK, Better Water vs retail look).
 - **Cause [code]:** steep family 30 pixels (cascades) kept retail's own diffuse, a full reflection share and retail's
   specular, and got white foam (`cascade_foam` 0.6) that also raised their alpha; the fully steep ones skipped the
   look block altogether (`steep<1.0` gate). So the falls drew as bright opaque sheets next to the dark canal.
 - **Change (look layer, not retail):** `cascade_foam` defaults to 0 (the key stays for mods); the falls keep retail's
   shading. A first version also gave every family 30 pixel the basin look (`fountain_body` colour and reflection
-  share); the user then found the DownTown falls drawn as "incomplete and mispositioned" grey cards (ShareX
-  skate3rust_OOOr6Nploq, a clip of 2026-10-27). Fly cam captures (`DEBUG_CAM_POSE` spots [-215.97, 5.62, 498.61] and
+  share); the user then found the DownTown falls drawn as incomplete and mispositioned grey cards (the user's
+  clip of 2026-10-27). Fly cam captures (`DEBUG_CAM_POSE` spots [-215.97, 5.62, 498.61] and
   [-242.81, 2.55, 563.18], `tools/dev-bench/falls-capture.sh`): with Better Water off both falls are dark reflective
   water filling the opening, with it on a flat pale sheet. That part was taken out again. The dark band on the right of
   the large falls is there in both looks (map lighting, not the look layer).
@@ -1270,17 +1269,16 @@ A sunk prop resting on the floor gets no water forces below `prop_settle_speed` 
 ask 390): docs/hails-additions/27-dynamic-props.md#sunk-props-come-to-rest-moved-props-cull-where-they-are-2026-10-28-user-asks-390-394-research-b651
 
 - **Retail (Better Water off):** water is not solid to props; they fall through to the floor under it, with no lift,
-  drag or splash. Evidence: the user's RPCS3 clip (2026-10-26, `F:\Libraries\Videos\2026-10-26 11-00-29.mp4`, 0:38): a
+  drag or splash. Evidence: the user's RPCS3 clip (2026-10-26 11:00, at 0:38): a
   dumpster pushed into the Aletown canal tips over the edge and goes under the surface within about half a second,
-  no spray. Research b624 (`.local/research/b624-props-in-water.md`) read the opposite from the code (DMO groups 12 /
+  no spray. Research b624 read the opposite from the code (DMO groups 12 /
   13 / 14 are not in the stock water exclusion `82767D60`, so the surface would be a floor); its last link (part +0x5C
   to the query volume's group) was inferred, and the clip overrules it. Retail has no buoyancy, drag or density code
   for props (b624, high confidence); the only automatic DMO reset is below y -1000 (`82588380`, 0x822272E0).
   Ours: both prop contact loops skip water triangles (`is_water_tag`, `prop_dynamics.rs`).
-- **Better Water (ours, user 2026-10-26):** "if the water is deep, allow the prop to bounce, bob and float with the
-  water, if its shallow, have it sink if heavy and float near the top if small/light enough"; "the heavy dumpster
-  should always sink since its so heavy. If the water is deep enough (like the ocean) for the prop to dissapear, have
-  it fade out as it sinks." (`physics/prop_water.rs`, `PropDynamics::apply_water`):
+- **Better Water (ours, user 2026-10-26):** in deep water a prop bounces, bobs and floats with the
+  water; in shallow water it sinks if heavy and floats near the top if small or light; the heavy dumpster always
+  sinks; where the water is deep enough (like the ocean) for the prop to disappear, it fades out as it sinks. (`physics/prop_water.rs`, `PropDynamics::apply_water`):
   - Buoyancy from 8 box samples (octant centres, submerged share each), so a prop tips and settles naturally; the
     displaced volume is the solver mass over the prop's material density, because retail masses are pushing masses
     (the converted DownTown props come out at 13 to 20 kg/m3 by box volume).
@@ -1304,7 +1302,7 @@ ask 390): docs/hails-additions/27-dynamic-props.md#sunk-props-come-to-rest-moved
 - **Verification:** `props_fall_through_water_or_float_with_better_water` (retail floor, heavy sinks in deep water,
   medium floats 70 % under, shallow heavy on the floor, shallow light floats a quarter under, the abyss fade stops it
   mid-water), `prop_water` unit tests (Archimedes float heights, drag never reverses motion, tilted lift, bob range).
-  In game (DownTown, dev mod `.local/poc-tests/water-mods/prop-drop`): a garbage bag dropped into the Aletown canal
+  In game (DownTown, local dev mod prop-drop): a garbage bag dropped into the Aletown canal
   (1.73 m deep) floats, a dumpster copy (1.88 m tall) sinks to the canal floor. The sinking fade has not been seen on
   screen yet (no deep spot found by coordinates).
 - **Open:** user check of the feel; the canal dumpster stands upright with its lid just above the surface, where the

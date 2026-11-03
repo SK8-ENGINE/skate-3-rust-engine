@@ -55,7 +55,7 @@ looks slightly up; the field of view (lens 12) is the same.
 
 ### Measurement in the recomp
 
-A short muted scripted run of the recomp (`.local/research/low-camera/`, watch list `cam_watch.txt`:
+A short muted scripted run of the recomp (a local data folder, watch list `cam_watch.txt`:
 `0x83085450 @ +20`) read the camera type once a second from boot through gameplay and the Career menu: **0 (Low)** in
 every sample with the local save, which matches a profile set to Low. Driving the Career menu by script to flip the
 option did not work (only the first menu input of a run registered, twice), so the write itself was not observed; no
@@ -135,9 +135,9 @@ Tests:
 
 ## Camera slow motion: retail's subject gate (2026-10-23 / 24, USER-ASKS 294, 326)
 
-- **Problem:** desktop session 2026-10-23 17:57 (hails-additions 28181a30), MegaPark full: "significant lag while
-  jumping the mega ramp", "the rendering slowed down mid jump". The user, asked whether retail slows down there:
-  "IT DOESN'T HAPPEN IN RETAIL".
+- **Problem:** desktop session 2026-10-23 17:57 (hails-additions 28181a30), MegaPark full: the user reported significant lag
+  while jumping the mega ramp, with the rendering slowing down mid jump, and, asked whether retail slows down there,
+  that it does not happen in retail.
 - **Evidence:** the air 17:03:27.9 to 17:03:31.5 (3.6 s): the game drew 210+ frames a second throughout, but the
   simulation ran 39 and 48 ticks a second (FIXED_TIMING, `FixedMain::run_fixed_main` x39 / x48): slow motion.
 - **Cause:** the stock camera graph's `SlowMotionController` (settings `slowmotion_controller` / `default`,
@@ -151,7 +151,7 @@ Tests:
   `stock_skater_startup_builds_the_graphs_and_physical_body_from_the_same_rig` now expects the normal period after a
   request (it then stops at tick 600 on "Canonical world has no authored query metadata", a test-world limit
   unrelated to the clock).
-- **Recomp trace (2026-10-24, USER-ASKS 326; `.local/recomp/traces/b584/run1.tsv`, hooks `hooks_slowmo.cpp`, research
+- **Recomp trace (2026-10-24, USER-ASKS 326; trace b584 run1, hooks `hooks_slowmo.cpp`, research
   b573 / b584):** a scripted Stadium - Full mega ramp air (camera height 36.6 m on the deck, 13.2 m at the bottom of
   the roll-in, 23.8 m at the top of the air, landing at 51 s; screenshot "Very High Gap, Air Height 13.0 ft"). The
   controller's Begin ran at the takeoff (47.98 s) and posted 1/60 (the curve at 0); 82857EC8 kept the simulation at
@@ -160,13 +160,13 @@ Tests:
   The gate that stops Update is its second one [code, b573 + the trace]: the subject's component at `+0x710` was null
   (the first gate, online, passed, as Begin posted). Our controller has no such gate and its Update follows the curve
   (`skate_core::camera::slow_motion`), hence 39 / 48 ticks.
-- **The subject (research b586, run `.local/recomp/traces/b584/run2.tsv`):** `+0x710` of an Actor (vtable 823004A8,
+- **The subject (research b586, trace b584 run2):** `+0x710` of an Actor (vtable 823004A8,
   ctor 82590DC0) is its PhysicalPlayerHiLOD, always allocated by the ctor, so a live Actor always passes [code]. The
   controller's subject is word 1 of the CameraGraph's context block, copied from the camera system's subject
   (`camsys+0xA0`) when the graph is built (82DF49B0, built once by 82DF6590) [code]. In the run that word was 0 in all
   60 logged Updates while `camsys+0xA0` held a live subject (`SMSUBJ` / `CAMSUBJ` lines) [trace]: the copy is empty,
   so Update returns before it advances, every time. (The recomp boots straight into gameplay; a console goes through
-  the front end first. The user's "it doesn't happen in retail" agrees.)
+  the front end first. The user's report that it does not happen in retail agrees.)
 - **Change (2026-10-24):** `CameraGraph::slow_motion_subject` (false, retail's empty copy) gates the controller's
   Update (`slow_motion_update`: no request and no time passes without it), and the frame applies the requests again
   (Begin / End only ask for the normal 1/60, so nothing changes in play; a slower one is logged as

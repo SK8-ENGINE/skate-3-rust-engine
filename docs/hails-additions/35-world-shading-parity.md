@@ -121,7 +121,7 @@ family and drew as family 1, with every lamp showing its "off" texels.
   the recomp code).
 - [code] The two status constants are bound by name hash (0xC8E04C37, 0xC8E04C34) in `sub_826DD6B8` to the
   renderer fields `*(0x83083C60)+0x443E0` / `+0x443F0` (from the recomp code).
-- [trace] Read in the recomp (watch list, DownTown Aletown, 2026-10-09, `.local/research/traffic-light-status/`):
+- [trace] Read in the recomp (watch list, DownTown Aletown, 2026-10-09, a local data folder):
   each component is 0 or 2.0; slots 0 red, 1 amber, 2 and 3 green; a 17 s cycle: direction 1 green 7 s, amber
   1 s, all red 0.5 s, then direction 2 the same. This matches the `trafficlights` controller timing already in our
   living-world notes (0.5 / 8 / 0.5 / 7 / 1 s).
@@ -167,7 +167,7 @@ materials had cutoff -1, so nothing was alpha-tested; the shader's test compared
   the retail values are the fallback). Trees (families 9 and 10) now take their lightmap scale and floor from it,
   so their brightness follows the view direction as in retail.
 - Billboard multiplier: `m_params.y` of the VLT `material_advertisement` row is 0.35 (0x3EB33333; the other world
-  classes carry 1.0, `.local/research/world-m-params.md`, row verified by hand). `render_parameters.py` now
+  classes carry 1.0, a local research note, row verified by hand). `render_parameters.py` now
   exports the advertisement rows into `render-parameters.json`, and family 17's `surface.w` takes `m_params.y`
   from there (`material_multiplier`; retail 0.35 when an install predates the export). Before this our billboards
   were about 2.9 times too bright.
@@ -182,7 +182,7 @@ materials had cutoff -1, so nothing was alpha-tested; the shader's test compared
   comes from `render-parameters.json` (videoscreen 0.25, already exported; `incandescent.default` 1.0, unchanged).
   Render state (decoded from the recomp code): technique setter `sub_82CF1BE0`, depth 0 / blend 0 / raster 1, the same as
   baseincandescent (`sub_82CAED90`), so family 12's class fits. In retail the big park screens show a live view:
-  checked on the PS3 version in RPCS3 (user, 2026-10-09): "Confirmed its the skaters view with no HUD". The recomp
+  checked on the PS3 version in RPCS3 (user, 2026-10-09): the screens show the skater's view without the HUD. The recomp
   draws the static placeholder texture ("JUMBO TRON TEMP") instead. The live feed: see "Videoscreen live feed".
 - Lit signs: new family 18 (`INCANDESCENT_TRANSPARENT_FAMILY`), converter mapping and on-load upgrade like 17;
   the shader takes the family 12 path (`lin = d`) plus `m_params` and alpha = diffuse alpha. New render class
@@ -265,23 +265,23 @@ Python: `tools/asset_pipeline/test_environment.py` checks each shader's family.
 ## Videoscreen live feed
 
 Problem: in retail the park screens (MegaPark 1, MaloofMoneyCup 7 `incandescent.videoscreen` materials) show the
-skater's view without the HUD (user, PS3 in RPCS3, 2026-10-09: "Confirmed its the skaters view with no HUD"); ours
+skater's view without the HUD (the user checked this on the PS3 version in RPCS3, 2026-10-09); ours
 showed the static "JUMBO TRON TEMP" texture.
 
 Evidence (retail, research b622 / b623, 2026-10-26):
 - All 8 materials bind the same diffuse texture, GUID 0x000020d103e3870a (`blackScreenLogo_`, an ordinary resource
   in `worldDIST_MegaPark.big`), so retail runs one feed shared by every screen [data; counted again in our
-  converted maps: Maloof 7, MegaPark 1]. The GUID is not in the TU3 image and no code builds it [code+data], so the
+  converted maps: Maloof 7, MegaPark 1]. The GUID is not in the TU3 (title update 3) image and no code builds it [code+data], so the
   feed reaches the texture through a generic path.
 - One SceneRenderView only: constructor `sub_82811B88` has a single caller, `sub_826D35F8` [code, rechecked].
 - Ruled out as the producer: the render singleton's +0xC9D0 and +0x19940 members are shadow (light-space) views
-  (`sub_827FCC60` builds +0x19940 from the last CSM split and the light basis written by `sub_827FFFB0`) [code];
+  (`sub_827FCC60` builds +0x19940 from the last CSM (cascaded shadow map) split and the light basis written by `sub_827FFFB0`) [code];
   `sub_82790000` is the skater photo renderer (`PhotoEffects::GeneratePhoto` 0x8219D4D8,
   `SkaterPresentationPhoto::GeneratePhotoRequest` 0x821B81B4; only caller `sub_8278F4C0`) [code+data, rechecked].
 - The frame function `sub_827FF7D0` draws the HUD (Render2D, `825D9168`) after every scene pass, so any scene-side
   copy is HUD-free [code].
 - Not found yet: the producer itself, so the feed's resolution, update rate and camera pose are not retail values.
-  The recomp is not a reference here (it draws the placeholder). Leads: `.local/research/b623-handoff.md`.
+  The recomp is not a reference here (it draws the placeholder). Leads: research b623.
 
 Change (`video_screens.rs`):
 - `MaterialTable::build` lists the videoscreen materials; their `mode.y` gets `VIDEO_SCREEN_FLAG` (1024), and every
@@ -322,9 +322,9 @@ Tests: `video_screens.rs` (cadence at 30 / 60 / 144 / 240 fps, frustum and dista
 ## Open questions
 
 - Videoscreen feed camera (settled 2026-10-26, USER-ASKS 379): measured from the user's RPCS3 clip of Maloof
-  (`F:\Libraries\Videos\2026-10-26 11-06-05.mp4`, 0:15 / 0:17 / 0:45; research b643), the screen shows nearly the
+  (clip of 2026-10-26 11:06, 0:15 / 0:17 / 0:45; research b643), the screen shows nearly the
   same framing as the gameplay view (same heading, lens and tilt; at most about 0.8 m pulled back), so the feed
-  keeps copying the gameplay camera (user: "Keep as is"). The TU3 360 code has no second world camera for it
+  keeps copying the gameplay camera (the user's decision: keep as is). The TU3 360 code has no second world camera for it
   (research b626 / b638). Resolution and update rate are still not measured.
 - Pass and sort order of the fence draws in retail is not traced yet (two recomp trace runs did not capture a
   fence apply; the bind slot is `sub_82CA5C60`, the per-frame renderer update `sub_827FF7D0`);
@@ -409,7 +409,7 @@ Water scroll time: retail's `g_fAnimationTime`, which sub_82791628 accumulates w
 
 The lamp states the retail renderer uploads as `g_TrafficLightsStatus_1` / `_2`: one row per crossing direction, one component per lamp slot (0 red, 1 amber, 2 green, 3 lit together with green), 2.0 = on.
 
-Read in the recomp (DownTown Aletown, `.local/research/ traffic-light-status/`): a 17 s cycle, direction 1 green 7 s, amber 1 s, all red 0.5 s, then the same for direction 2, matching the `trafficlights` controller timing in the living-world notes. Every traffic light shares the two rows, so all crossings show the same phase. A resource so a mod, or the traffic controllers once they drive cars, can replace the table or the clock.
+Read in the recomp (DownTown Aletown, a local data folder): a 17 s cycle, direction 1 green 7 s, amber 1 s, all red 0.5 s, then the same for direction 2, matching the `trafficlights` controller timing in the living-world notes. Every traffic light shares the two rows, so all crossings show the same phase. A resource so a mod, or the traffic controllers once they drive cars, can replace the table or the clock.
 
 ## Code reference: retail_world.wgsl (fork additions)
 

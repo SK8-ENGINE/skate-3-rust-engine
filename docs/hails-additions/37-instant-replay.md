@@ -120,15 +120,15 @@ Test: the leash keeps a camera inside 40 m and pulls a far one onto the sphere.
 
 ## Editor buttons and the Finished menu as retail (2026-10-23, research b555 / b387, USER-ASKS 271)
 
-- **A on a Game camera key** opens nothing (`82612C28`: kind >= 3 returns; main checked `cmplwi r3,3; bge` to the
+- **A on a Game camera key** opens nothing (`82612C28`: kind >= 3 returns; verified `cmplwi r3,3; bge` to the
   epilogue). Ours opened its key edit; `Editor::reopen_at` now returns None and leaves the edited key alone.
 - **B / Back** raise the Finished menu only in playback, the instant replay and the timeline (retail modes 1 / 5 / 6,
   `82614E58`); trim and the key edit modes ignore them (the effects menu commits on B). Ours raised it in every mode
   but the effects menu.
 - **Save asks first:** retail's Save row confirms (title = the row, ID_REPLAY_EDITOR_POPUP_REPLAYSAVE "Save Replay?",
-  No / Yes; callback `82616000`, main checked: No skips the save and closes). Ours exported at once; now Save to PC
+  No / Yes; callback `82616000`, verified: No skips the save and closes). Ours exported at once; now Save to PC
   asks the same and No returns to the editor.
-- **Film pack Finished menu (research b557, main checked the reset calls and the exit's three events):** with the film
+- **Film pack Finished menu (research b557, verified the reset calls and the exit's three events):** with the film
   pack's screen, B goes straight to the quit warning and X on the timeline opens its menu (in its effects menu X still
   commits a soft key): Save to PC (with the Save Replay? confirm), Take Photo (the same flow as the base X), Replay
   Mode, Reset Timeline Current Channel, Reset Timeline. Replay Mode is a popup of three toggles that stays up
@@ -152,7 +152,7 @@ Test: the leash keeps a camera inside 40 m and pulls a far one onto the sphere.
   Per console frame: Follow / Tripod turn clamp(2.5 s, 3) degrees, distance -clamp(s, 0.2) (no scale: full speed at
   20 % stick) in 0.5..1000, look lift 0.01 in +-1; Free turn clamp(5 s, 1.6) degrees, move clamp(s, 0.2) m per axis
   in the yaw frame, height eased (velocity += 0.015, capped 0.2, applied, then x0.6: 0.0375 m per frame held; offset
-  +-10 m); lens 0.5 in 24..75. Main checked the 0.015 load (0x820D0190 in `82610F18`).
+  +-10 m); lens 0.5 in 24..75. Verified the 0.015 load (0x820D0190 in `82610F18`).
 - **Ours before:** distance and free moves were 0.2 x stick, free turn had half the slope, free height moved 0.2 x
   input per frame with no easing and no range.
 - **Change:** `camera_key::edit` uses those rates (CameraRules gains the free turn scale and the height step / cap /
@@ -197,10 +197,10 @@ pulls in front, leash before collision, a hidden player turns a non-Free camera 
 
 ### Editor cameras no longer stick under the ground; Advanced Camera rows highlight (2026-10-25, USER-ASKS 339)
 
-Problem (laptop session `game-20261025-085807`, the user: "setting it to free camera pushed it under ground and
-wouldnt let me get it back above ground or move the camera at all (up, down or in any direction) similar results with
-tripod camera with the move camera up function sort of working but just locking in on the player from the underside",
-"when trying to select the advaned camera section the selection highlight dissapeared"). The log showed the key edit
+Problem (laptop session `game-20261025-085807`, the user: free camera pushed the camera under ground and it could
+not be brought back up or moved in any direction; the tripod camera behaved similarly, its move-up only half working
+and locking onto the player from below; selecting the advanced camera section made the selection highlight
+disappear). The log showed the key edit
 modes (FreeKey, TripodKey) and the sticks arriving, and no camera pose.
 
 Cause, cameras [code, ours]: on a new shot (a cut) our constraint pulls the camera in front of an occluder on the line
@@ -252,10 +252,10 @@ Open: the id 2 playback reader, the DMO state entries (`82C48610`).
 
 ## Fixes from the first play test (desktop session 2026-10-20)
 
-User: "Ped held props get wonky and lose their attachpoint or just for some reason seem to float offset from the ped
-during the replay, only properly returning to their hand once you reach the end of the replay. They also slightly
-wobble in place even when the replay is paused at the end." / "the ped has dissapeared from the replay entirely and
-now i just ride over and bail on nothing".
+The user reported that ped hand props lose their attach point or float offset from the ped
+during the replay, returning to the hand only at its end, and wobble slightly even when the
+replay is paused at the end; later the ped vanished from the replay entirely, so the skater
+rides over and bails on nothing.
 - **The living world kept running during the replay.** The log showed fixed steps and 26 `PED_DESPAWN reason=Distance`
   lines while the replay was open: peds walked away from the frozen skater and despawned at 70 m, the hit ped (#3)
   at 15:01:50 among them. Retail plays recorded data while the world waits. The living world's fixed chains
@@ -273,9 +273,9 @@ Tests: the living world freezes while a replay is open (and runs in apps without
 
 ## Instant replay controls follow retail
 
-Retail's instant replay (editor mode 5; research b386, b387, b389; main verified the open function `82610458`
-setting mode 5 and the 150-frame check) replaces our own bindings (user 2026-10-20: "make the controls follow
-retail"):
+Retail's instant replay (editor mode 5; research b386, b387, b389; verified the open function `82610458`
+setting mode 5 and the 150-frame check) replaces our own bindings (user 2026-10-20: the controls follow
+retail):
 - **Back** (View / Select; F6 on the keyboard) opens the replay, only with at least 5 s recorded (retail's 150
   frames of the 30 fps timeline; the unit is inferred); a refusal is silent, as retail. `sdk.replay.open` uses the
   same check (`Replay::can_open`). It no longer closes the replay.
@@ -297,7 +297,7 @@ Tests: the controller test (open, scrub, jump, RB, stick resume, B), the quit wa
 
 ## Trigger scrub at retail's rate
 
-Retail's scrub (research b387 / b388; main verified `82610F18` reads the mode word and stores the rate at +0x34, and
+Retail's scrub (research b387 / b388; verified `82610F18` reads the mode word and stores the rate at +0x34, and
 `825071B8` passes it to the playhead step `82C7EF90`): per console frame the target is (RT - LT) x 0.005, the rate
 moves 0.25 of the way to it, clamps to +-0.005, and stops in a dead band (target < 1e-5 and rate <= 1e-4); the
 playhead moves by the rate as a fraction of the WHOLE recording, so a full sweep takes about 6.7 s whatever the
@@ -330,12 +330,12 @@ effect values and stepped marker lanes, and retail's length rules. Pure data, no
 
 ### Editor cameras: the constraint runs while editing, playback plays the key (2026-10-25, USER-ASKS 341)
 
-Problem (laptop session `game-20261025-094410`, the user: "the tripod moved due to the distance of the player from
-the positioning of the placed tripod causing it to slide to the chosen location. This all needs a retail parity pass
-as it doesnt feel correct to how the editor works in retail I believe."). The log: the key edit moved the Tripod eye
+Problem (laptop session `game-20261025-094410`, the user: the tripod moved with the player's distance from
+the placed tripod and slid to the chosen spot; the whole editor needs a retail parity pass, since it does not
+feel like the retail editor). The log: the key edit moved the Tripod eye
 55 m from the skater; on playback `REPLAY_CAMERA shot` put it at the skater root (wanted 55 m out, at = root).
 
-Cause [code, research `.local/research/b593-replay-editor-camera-parity.md`; main checked the gate]: retail's
+Cause [code, research b593; verified the gate]: retail's
 constraint `82683680` returns at once unless the byte 0x83037414 (0x830373F0 + 0x24) is set; the key edit opener
 `82614658` (and the other edit openers) set it to 1, the timeline mode `82612C28` clears it. So the leash and world
 collision run only while a key edit is open, and the held pose is written into the key (`82683450` -> `82C82E40` ->
@@ -360,11 +360,11 @@ Tests: `editor::tests::a_key_edit_stores_the_leashed_eye_and_playback_keeps_it`,
 
 ### Keyed cameras in the instant view (2026-10-26, USER-ASKS 353, research b615, recomp run m353)
 
-Problem (laptop session `game-20261025-171928`, the user: "Camera in replay went through ramps in the Skate.Park
-stadium full portion of the run", after adding camera keys). The Follow key was edited 1.37 m below the root; the
+Problem (laptop session `game-20261025-171928`, the user: the replay camera went through ramps in the Skate.Park
+Stadium full part of the run, after adding camera keys). The Follow key was edited 1.37 m below the root; the
 user played it from the Timeline.
 
-Retail [code, b615 `.local/research/b615-replay-camera-geometry.md`]: the gate byte 0x83037414 of the constraint
+Retail [code, b615]: the gate byte 0x83037414 of the constraint
 `82683680` is written every frame by the editor update `82610F18` per mode: mode 5 (the instant view) sets 1, mode 1
 (RB playback) sets 0, the key edits (7 / 8 / 10) set 1 through their openers, replay entry `82833CF0` sets 1.
 [trace, recomp run m353 (hook RCOLL on `82683680`, Mega-Park spawn, a Follow key orbited low, then RB play)]: mode 5
@@ -391,22 +391,22 @@ Tests: `replay::tests::keyed_cameras_are_constrained_in_the_instant_view_not_in_
 
 ### The Follow eye rides the gameplay camera (2026-10-25, USER-ASKS 346 / 349)
 
-Problem (laptop sessions `game-20261025-130256` and `-144414`, the user: "advanced follow camera at a low angle can
-cause the camera to get forced under the map when landing jumps", "it does a good job of switching sides but the
-camera still can peak under the map even from little jumps"). The log of the second: an Advanced Follow key at pitch
+Problem (laptop sessions `game-20261025-130256` and `-144414`, the user: at a low angle the advanced follow camera can
+be forced under the map when landing jumps; it switches sides well, but the
+camera can still peek under the map even from small jumps). The log of the second: an Advanced Follow key at pitch
 1.4 degrees, 1.86 m; the eye dipped 0.09 to 0.28 m below the skater root while the root climbed 2.09 -> 3.69 m.
 
 Cause [code, ours]: our Follow eye was an orbit in the skater root's full frame (`camera_key::pose`, the root from
 `presentation.rs` `animation_to_world`), so the body pitching or rolling on a ramp or landing swung a low eye into the
 ground. There is no smoothing: the view only blends two ticks.
 
-Retail [code + trace, research `.local/research/m346-follow-eye-space.md`]: `82C84CF8(take, &m, space, id)` builds
+Retail [code + trace, a local research note]: `82C84CF8(take, &m, space, id)` builds
 an element's frame; for space 0 an id at or below `[[0x830C1584]+0x24]` is the default subject `[0x83037408]+4`, a
 larger id is slot `id - 1` of the actor manager `0x830846C4` (rotation `826813C0`, position `82681870`). Slot 1 is the
 gameplay camera's matrix (`82672118([0x83083C38]+0x2FD20)`), slot 3 the flagged skater entry. Follow's setup
 `82C7FFB8` (also Advanced Follow, b405) writes eye object 2 and look object 4 (b402). A recomp watch run read the
-threshold as 0 in all 68 samples, before, in and after the Replay Editor (`.local/research/m346/run1.tsv`, watch list
-`follow_watch.txt`, script `.local/recomp/scripts/m346_replay_editor.txt`) [trace]. So the Follow eye rides the
+threshold as 0 in all 68 samples, before, in and after the Replay Editor (a local trace, watch list
+`follow_watch.txt`, recomp input script m346_replay_editor) [trace]. So the Follow eye rides the
 gameplay camera (position and rotation) and only the look rides the skater. The recorded gameplay camera keeps itself
 out of the ground, so an eye placed relative to it does not dive when the body pitches. Editing is unchanged: the
 sticks orbit the eye around the look point in world angles (the pivot rebuild, as Tripod); only the stored space
@@ -433,9 +433,9 @@ edited low (eye local [-1.89, -0.75, -1.91]); the edit-time constraint held it 0
 the recorded camera's full rotation, and a camera pitching on a landing swung the low eye into the ground.
 
 Retail [trace]: recomp hooks in `hooks_replay.cpp` (category `replay`: `RCAMN` call counts per caller, `RCAMF` the frame
-`82C84CF8` returns, `RCAMRAW` the raw matrix `82672118` copies), script `.local/recomp/scripts/m350_follow_key.txt`
+`82C84CF8` returns, `RCAMRAW` the raw matrix `82672118` copies), recomp input script m350_follow_key
 (Replay Editor, Edit timeline, rewind, Edit clip, Follow Camera, commit, scrub through the key), trace
-`.local/research/m350/run6.tsv`. At the commit the raw recorded camera (game axes, y up) had row 1 = (-0.135, 0.991,
+(local). At the commit the raw recorded camera (game axes, y up) had row 1 = (-0.135, 0.991,
 -0.007), pitched about 7.8 degrees, while the Follow eye frame (space 0, object 2) came back as rows (0.039, 0.999, 0),
 (-0.999, 0.039, 0), (0, 0, 1) at the camera's position: the camera's side axis (row 0) with its vertical part removed
 and renormalised, up = world up. That is the upright form b605 read in `828F36B0` (+0x194). `82C84CF8` / `82C82A50`
@@ -452,7 +452,7 @@ it only by the flattened side axis, the low eye stays where it was placed, the f
 `replay_set_camera` validation with `camera_full`.
 Playback [code b611 + trace run7]: every frame the render update `8279E350` ticks the editor camera `82C8A960` ->
 `82C8B9F8` -> `82C8C470` (the per-frame twin of `82C84CF8`, ~490 calls a second per caller). Hook `RCAMP`
-(`.local/research/m350/run7.tsv`): the eye call (lr `82C8BC40`) is space 0 object 2 and the look call (lr `82C8B95C`)
+(a local trace): the eye call (lr `82C8BC40`) is space 0 object 2 and the look call (lr `82C8B95C`)
 space 0 object 4 in all 1056 logged eye calls, with the three flag arguments (r7..r9) 0 throughout: no smoothing and
 no extra upright step, so the eye rides slot 1's own upright frame live every frame, as ours does (`camera_key::pose`
 per frame from the recorded camera at the cursor).
@@ -463,11 +463,11 @@ Open: the laptop retest.
 Question (left open by b593 when the tripod fix was confirmed): which camera retail shows before the first camera
 key of a clip when that key is placed mid-clip. Ours showed the recorded Game camera there.
 
-Retail [code, `.local/research/b603-camera-before-first-key.md`, `b604-pose-before-first-key.md`]: the camera type
+Retail [code, research b603, `b604-pose-before-first-key.md`]: the camera type
 flags are stored per segment, and an inserted segment takes the element's live value (`82C88A00`); a fresh clip's
 camera channel is one Game segment (`82C7F728`). A pick (`82614148`) of the same type inserts a key; of another type
 on a clip that is one Game segment it replaces the section with no dialog; otherwise a confirm dialog asks first
-(`826142F8`). The replace (`82614658` with replace = 1; main checked the calls in the recomp: `82C7FB08` merge,
+(`826142F8`). The replace (`82614658` with replace = 1; verified the calls in the recomp: `82C7FB08` merge,
 `82C7FFB8` insert, `82C7FE88`, `82C7F0A8` delete, `82C7FFB8` insert) leaves the section from its start to the
 playhead with the picked type, its eye / look records converted into the new camera's space at the pick
 (`82C854B8` / `82C856C8` via `82C852F0`). The key edit writers touch only the new key's segment (`82C84868`, state
@@ -482,7 +482,7 @@ The keyed-clip case is ported below.
 
 ### A camera picked on a keyed clip asks, then replaces its section (2026-10-25, USER-ASKS 341 follow-up, research b609 / b610)
 
-Retail [code, `.local/research/b609-camera-pick-on-keyed-clip.md`, `b610-section-start-pose.md`; main checked the
+Retail [code, research b609, `b610-section-start-pose.md`; verified the
 `82614148` branches in the recomp]:
 - **Insert or replace (`82614148`):** rows 0..6 are items 0, 1, 3, 2, 4, 5, 6, compared with the section's kind
   (`82508CE8`). A basic row inserts only over its own camera with hard keys (or the In / Out points) on both sides
@@ -512,7 +512,7 @@ soft Free 10; Follow at 5 asks, clears the soft keys, turns the 2 s Tripod key i
 look height, keeps 8 and 10; Advanced Tripod over Tripod only inserts; `fill_section = false` only inserts);
 `camera_keys_hold_cut_and_blend` now expects the Advanced Free pick inside the Tripod section to turn its 5 s key into
 Free. Not play-tested.
-Open (b610, b613 `.local/research/b613-replace-open-points.md`, code only, no trace yet):
+Open (b610, b613, code only, no trace yet):
 - Free start -> Follow: retail stores the world look point in the Follow eye frame but labels it object 4, so each
   frame it is re-applied at the skater root (the look lands about one camera distance past the skater); -> Tripod: the
   look is the pick-time point carried with the skater. ANSWERED 2026-10-29 (b655): retail's edit update zeroes the
@@ -528,8 +528,8 @@ Open (b610, b613 `.local/research/b613-replace-open-points.md`, code only, no tr
 
 ### Replay popups own the pad (2026-10-25, USER-ASKS 342)
 
-Problem (laptop session `game-20261025-114137`, the user: "going into options (pressing X while editing a clip)
-doesnt block input to the replay and your inputs can unpaise or make changes to the clip in the background"). The
+Problem (laptop session `game-20261025-114137`, the user: opening options (X while editing a clip)
+did not block input to the replay, so inputs could unpause it or change the clip in the background). The
 log: with the film pack menu (X) up, D-pad presses moved the clip (`REPLAY_CAMERA shot` lines, a refused marker), the
 A that picked Replay Mode also switched the editor Timeline -> Effects, and the B that closed it switched back.
 
@@ -560,7 +560,7 @@ minimum). Test: retail's mode transitions.
 `ReplayEdit::look_at(clip, frame, base)` turns a clip's look lanes into what the screen uses: the world grade's
 colour matrix record with the lanes' terms replaced, plus an RGBA tint overlay. Retail (research b380): the lane
 consumers (`82686DF0` brightness, `82687FD8` contrast, `826888B8` saturation) write an override copy of the world
-colour block that the post FX update uses instead of the base while set (main checked `82686DF0` stores the near and
+colour block that the post FX update uses instead of the base while set (verified `82686DF0` stores the near and
 far add terms at +0x7C00 / +0x7C40); brightness is the matrix add term on R, G, B; the values replace, never
 multiply; lane 6 is a separate RGBA screen tint. Our `colour_matrix::build` takes the same roles as retail's builder
 `827F13D8`, so the override record goes straight into it. A lane at its neutral default keeps the world's term
@@ -609,7 +609,7 @@ Actors that despawned inside the recorded window (ghosts) were drawn in playback
 The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane kept our own meaning: 100 = x1
 (default), 0 = greyscale. Retail's look defaults had not been read.
 
-### Retail [code, main read]
+### Retail [code, verified]
 - The editor starts brightness and saturation at 0 and speed at 100 (`82506CD8`: editor +0x1A0, +0x1A4, +0x19C);
   the lane steps are `8250ADF8` (brightness -100..100 by 20, contrast 10..30 by 2, saturation 0..100 by 10).
 - The saturation consumer `826888B8` copies SATURATE_NEAR (0x40) raw into the override block `+0x7C10` (slot 4) and
@@ -654,9 +654,9 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
 - Memory: 90 s of a busy world filled ~125 MB (laptop session 2026-10-20), so 4 min is ~335 MB.
 
 ## Laptop session 2026-10-20 11:35 (still props, peds at a distance, ped alerts)
-- User: "During replay the bench and ped both dissapeared at the beginning of the replay but reappear when they become
-  relevant again" / "The bench kind pops back into existance when I come back during the replay and get within like
-  5-10m maybe." / "the warning over a ped is just always there during replays. it probably should be hidden."
+- The user reported that the bench and the ped both vanished at the start of the replay and reappeared when they
+  became relevant again; the bench pops back into view when the replay comes back within about
+  5 to 10 m; and the alert over a ped is always shown during replays and should probably be hidden.
 - Bench: a still prop records a key only on a change; its first key came from its `Added` tick, which most render
   frames skip (no new 60 Hz replay frame), so the prop had no key until it next moved and played back hidden. Change:
   `replay/world.rs` records any actor without a track. Test `a_still_prop_added_between_replay_frames_still_plays_back`.
@@ -718,7 +718,7 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
 - The screen's prompts ask for HUD-style button names (`L3_Click_hud` for Hide, `EnableShowHide`; the transport row
   likewise); `prompt_glyphs::resolve` now reads `<name>_hud` as `<name>`, so Hide shows its L3 glyph and the transport
   buttons their RB / LT / RT / D-pad glyphs (all were blank). Test `every_retail_button_has_an_equivalent_on_every_family`.
-- Length text (research b397, `.local/research/b397-language-time-format.md`; main checked `ID_COMMON_METRIC_TIME` =
+- Length text (research b397; verified `ID_COMMON_METRIC_TIME` =
   "s" and `sub_824FE900` in the recomp): retail's `{0:time}` (handler 824FE900) is the number grouped by 3
   (`8290E370`) + " " + `ID_COMMON_METRIC_TIME`, not a clock: "Estimated Video Length: 42 s". NOT RETAIL YET: the
   default decimals (0 assumed). The general `{0:time}` / distance / speed types in `fe_language.rs` are a follow-up.
@@ -875,20 +875,20 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
   the playhead, then its edit mode). Not play-tested by the user yet.
 - Look target (b406, 2026-10-20): Follow / Tripod look at the look object's origin plus LOOK_Z straight up; every
   frame `82C80A78` writes one constant (the "no input" value, very likely 0.0) to LOOK_X / LOOK_Y (elements 3 / 4)
-  and writes LOOK_Z (element 5) back unchanged [code, main checked in the recomp]. LOOK_Z defaults to 0.0 (`82903840`)
-  and the D-pad moves it within +-1 m [code, agent]. There is no fixed look height in the camera code: the target is
+  and writes LOOK_Z (element 5) back unchanged [code, verified in the recomp]. LOOK_Z defaults to 0.0 (`82903840`)
+  and the D-pad moves it within +-1 m [code, research]. There is no fixed look height in the camera code: the target is
   the camera target entry flagged 0x400000 in the list at `[0x83083C38]+0x2E680` (its world matrix translation)
-  [code, agent, medium-high]. Which part of the skater that entry is (root, pelvis, a raised point) is OPEN; the
+  [code, research, medium-high]. Which part of the skater that entry is (root, pelvis, a raised point) is OPEN; the
   cheapest proof is a short recomp trace of `826824F8` next to the skater root. Until then our
   `look_target_height` (1 m) stands for the target's height over the root, still NOT RETAIL.
-  Recomp trace (2026-10-20, hook `CAMTGT` on the fork's research-hooks, trace `.local/research/b406/camtgt.tsv`): the
+  Recomp trace (2026-10-20, hook `CAMTGT` on the fork's research-hooks, trace research b406/camtgt.tsv`): the
   flagged entry is the skater's root at foot / deck level [trace]: standing on the board it sits 0.08 m above the
   board body, after stepping off it stays 0.09 m above the same ground while the board lies 3.6 m behind, it does not
   bob while pushing or walking, and it falls with the skater rolling downhill. With LOOK_Z reset to 0 when a camera
   is picked (b405, `82C7FFB8`), retail's Follow / Tripod look at the skater's feet until the D-pad raises it (max
   1 m). User 2026-10-20: "Retail: feet": `look_target_height` is now 0 (data, a mod may raise it); the D-pad lift
   still raises the aim per key.
-- Deleting keys (b407, 2026-10-20) [code, main checked the key id switch in the recomp]: b405 read `82612C28`'s case
+- Deleting keys (b407, 2026-10-20) [code, verified the key id switch in the recomp]: b405 read `82612C28`'s case
   numbers as hex; they are decimal key ids, so D-pad Up released (32) calls `82613650`, the delete, and D-pad Left
   released (34) is the seek to the start. `82613650` asks first: over a clip marker (a hard key)
   ID_REPLAY_EDITOR_DELETE_CLIP / _DESC, over a key marker (a soft key) ID_REPLAY_EDITOR_DELETE_KEY / _DESC, No / Yes;
@@ -920,16 +920,16 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
   Test `deleting_a_clip_marker_takes_the_key_markers_on_both_sides`.
 
 ## M3 step 2 research: the look lanes (b408, 2026-10-20)
-- Retail [code `82507438`, agent; our code lines checked by main]: with the film DLC the edit channel (Y) is 0
+- Retail [code `82507438`, research; our code lines verified]: with the film DLC the edit channel (Y) is 0
   camera, 1 speed, 2 shake, 3 brightness (setter `82C81750`), 4 contrast (`82C810A8`), 5 saturation (`82C813B0`), 6 a
   four-value tint (`82C81AC8`); without the DLC only speed and shake. No vignette, grain or letterbox lane exists.
-- Element defaults / ranges [code `82C8FAD8`, agent]: brightness 0 (-1..1), contrast 1 (0..50) with midpoint 0.5
+- Element defaults / ranges [code `82C8FAD8`, research]: brightness 0 (-1..1), contrast 1 (0..50) with midpoint 0.5
   (0..1), saturation 0 (0..1), tint X / Y 0 (-1..1), Z 1 (0..1); per-lane OVERRIDE flags (0x71..0x77, default 0).
 - A committed value also sets its lane's OVERRIDE flag at the key, and the renderer applies a lane only where the flag
-  is on [code, agent; brightness setter read in full by the agent, the others by pattern; main could not find the
+  is on [code, research; brightness setter read in full, the others by pattern; the check could not find the
   flag write in the recomp's `sub_82C81750` by a quick search: UNVERIFIED]. Ours counts a lane as set when it differs
   from its default (`replay_edit.rs` `look_at`, already labelled OURS).
-- Sampling [code `82C87640` / `82C8E680`, agent]: look values are interpolated (linear between soft keys), the flags
+- Sampling [code `82C87640` / `82C8E680`, research]: look values are interpolated (linear between soft keys), the flags
   stepped; ours steps every lane (`value_at`).
 - Renderer (b380, re-read): a set lane replaces its term in an override copy of the world colour block, built into the
   post FX matrix by `827F3D20` / `827F13D8`; the tint goes to a separate overlay. OPEN: who sets the +0x7E00 gate,
@@ -952,13 +952,13 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
   Pack (`82518AD0` with the string at 0x822FD708; main counted 7 of its 32 call sites loading that string), not a
   Filmer Pack [code]. The user's Create Park Upgrade package carries `DLC_PRODUCT,CCF0007`, the DLC editor movie
   `source/screens/replay2/replay_editor3`, `replay_help2` and the creator language tables with the channel labels
-  (ID_REPLAYEDITOR_CHANNEL_CAMERA .. _TINT) [data, main checked in the package]. Retail: Y cycles the channel
+  (ID_REPLAYEDITOR_CHANNEL_CAMERA .. _TINT) [data, verified in the package]. Retail: Y cycles the channel
   (Camera, Speed, Shake, Brightness, Contrast, Saturation, Tint), one panel per channel; new natives GetModeText,
-  GetMode, GetModeSliderValue, GetCurrentTint, the tint getters [code, agent]. The base movie `replay_editor2` cannot
+  GetMode, GetModeSliderValue, GetCurrentTint, the tint getters [code, research]. The base movie `replay_editor2` cannot
   show the look rows. Port: the DLC pipeline extracts replay_editor3 + its language table from the user's package,
   CCF0007 counts as owned on PC (user: always on), the stage loads replay_editor3 when present; without the package
-  our own one-line channel / value overlay (ours). Details in `.local/research/b410-replay-look-rows-ui.md`.
-- replay_editor3 handlers (b411, 2026-10-20) [code; main checked the state 24 loads in `82612328` and Y's state 23
+  our own one-line channel / value overlay (ours). Details in research b410.
+- replay_editor3 handlers (b411, 2026-10-20) [code; verified the state 24 loads in `82612328` and Y's state 23
   after `82507FC8` in `82612C28`]: Y cycles the channel 0..6 (wraps) and posts state 23 (kUpdateMode by
   elimination); entering the effects panel posts 22 then 4 for every channel; on the Tint channel Up / Down move the
   component cursor R, G, B, A (wraps) and post 24 (kRefreshTint by elimination), other channels post 5; Left / Right
@@ -967,17 +967,17 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
   Template 71 = `replay2/replay_editor3.swf` (with CCF0007), 72 = `replay2/replay_editor2.swf`. The movie's own constants (read 2026-10-29 from our export `replay2/replay_editor3.json`, the frame-1 setMember
   pushes): kEffectsMode 4, kRefreshEffectsMenu 5, kUpdateEffectValues 6, kUpdateMode 23, kRefreshTint 24, kReplayMode_Camera
   0, _Speed 1, _Shake 2, _Tint 6: every reading by elimination above holds. Open: whether B reverts edits.
-- DLC package reader (2026-10-20): `tools/owned_game/stfs.py` reads the user's STFS packages (header, file table,
+- DLC package reader (2026-10-20): `tools/owned_game/stfs.py` reads the user's STFS (Xbox 360 package format) packages (header, file table,
   consecutive files past the interleaved hash tables); tested on the Create Park Upgrade package: the 95,990,656-byte
   `creator_00000000.big` copies out and parses (1262 entries, `creator0.ver` = `695423:sk8build`). It carries
   `data/fe/source/screens/replay2/replay_editor3.*`, `replay_help2.*` and the creator language pair
   (`LANGUAGE_Labels_creator_skate3ng-dlc_creator.BIN` + English); the labels table ends with one NUL where the disc's
   end with two (one string short of the parser's count).
-- Tint overlay (b413, 2026-10-20) [code; main checked `827FE770`'s counter read at +0x347AC, its blend state call
+- Tint overlay (b413, 2026-10-20) [code; verified `827FE770`'s counter read at +0x347AC, its blend state call
   `82CFC990` and the draw `824FA4A0`]: retail draws lane 6 as one constant colour on a full-screen quad, straight alpha
   (SRC_ALPHA / INV_SRC_ALPHA), after the scene and before the front end's Render2D, so the HUD, menus and the editor
   are never tinted; the setter `82C81AC8` sets TINT_OVERRIDE, the consumer `82688E78` copies R, G, B, A to the overlay
-  and clears it when the override is off [code, agent]. Ours: the grade gets a ninth row (RGBA, alpha 0 = none) and
+  and clears it when the override is off [code, research]. Ours: the grade gets a ninth row (RGBA, alpha 0 = none) and
   the tone pass mixes it in as its last step (`retail_tone.wgsl`), the same result as the quad drawn right after the
   grade, under the UI, and carried into Save to PC. Open: whether retail's tint lands before or after its grade
   (inferred after, medium).
@@ -1221,7 +1221,7 @@ The editor's own keys (research b386, modes 6 / 2 / 0xB); true = the frame's inp
 
 ## Help screen, Start and the panel while the retail screen loads (2026-10-22, USER-ASKS 256)
 
-Research b500 (`.local/research/b500-replay-help-camera.md`); main checked our side (retail_menu_stage.rs Start
+Research b500; verified our side (retail_menu_stage.rs Start
 handling, replay.rs help block and panel gate).
 
 - **Problem (laptop session 2026-10-22 10:25):** "Opening the Help menu allows you to do things behind it, for
@@ -1261,7 +1261,7 @@ handling, replay.rs help block and panel gate).
   0, and converting Follow or Tripod to Free threw away the look distance.
 - Retail [code]: the Free look point is P = eye - D * dir(yaw, pitch). D is the camera field C+0x24, set by
   `82C82A50` to |eye - look| when Free is picked (`82C80540`). The recomp stores `fsqrts` to +36, with yaw at +0x1E
-  and pitch at +0x22 (main checked). `82C82E40` rebuilds P with D unchanged on every edit, and the `82683680` leash
+  and pitch at +0x22 (verified). `82C82E40` rebuilds P with D unchanged on every edit, and the `82683680` leash
   write-back keeps D. A converted key keeps P (b613): Follow keeps it in the eye frame, re-applied at the skater root;
   Tripod keeps it skater-local.
 - Change (`replay/camera_key.rs`):
@@ -1272,11 +1272,11 @@ handling, replay.rs help block and panel gate).
 - OURS: our look model has no lateral look offset, so P's lateral part is dropped; retail drops it too on the first
   edit tick (b655, "Look lift since the pick"). A Free key made from a Game view takes its distance to the skater root;
   retail uses the Game camera's look object 3 (actor slot 2, not identified).
-- Test: `free_look_distance_follows_retail`. Research: `.local/research/b652-free-look-point.md`,
-  `.local/research/b613-replace-open-points.md`. Not play-checked.
+- Test: `free_look_distance_follows_retail`. Research: research b652,
+  research b613. Not play-checked.
 
 ## Look lift since the pick (2026-10-29, research b655)
-- Retail [code, Ghidra `.local/research/b655/a.txt`]: the Follow / Tripod edit update `82C80A78` writes 0.0 to the look
+- Retail [code, Ghidra research b655/a.txt`]: the Follow / Tripod edit update `82C80A78` writes 0.0 to the look
   elements 3 and 4 every frame and keeps element 5 (the look height). The D-pad lift `82C80EA0` adds the step to an
   accumulator at C+0x38 (reset at every pick), clamps it to +-1.0 (`0x8231A844` / `0x8216DEE0`), and moves the key's
   look height only while the accumulator stays inside the range (no partial step at a bound).
@@ -1292,11 +1292,11 @@ handling, replay.rs help block and panel gate).
 Problem: picking Tripod from Free measured the look height as the world Y of the look point P above the skater root,
 so a skater tilted at the pick (ramp, air) got a different height than retail.
 
-Root cause (retail, Ghidra; research `.local/research/b655-replay-look-offset.md` section "b659"): the pick
+Root cause (retail, Ghidra; research b655 section "b659"): the pick
 (`82C80298` -> `82C856C8` target (0, live 0x58) -> `82C84CF8`) reads the skater through `82682638`, the full rotation
 rows of the skater's actor entry (pitch and roll kept), so the stored height is along the skater's tilted up. Each
 frame the aim (`82C8B9F8` -> `82C8C470`, look object 4) reads the skater through `826813C0`, which rebuilds the frame
-with a look-at (`8296F0A8`), heading only: the height is applied along world up. Main checked both accessors in
+with a look-at (`8296F0A8`), heading only: the height is applied along world up. Verified both accessors in
 Ghidra (the look-at tail in `826813C0`, none in `82682638`); that the look-at's up is world up rests on b611's trace
 of the same tail for the camera slot [inferred, medium-high].
 

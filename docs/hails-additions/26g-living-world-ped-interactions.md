@@ -4,15 +4,15 @@ Part of doc 26, the living world (index: [26-living-world.md](26-living-world.md
 
 ## Peds walking through props, 2026-10-05
 
-**Problem.** User: "Peds ... also completely ignore the props in the world and go right through them." (Same for
-NPC skaters: "npc skaters ... also ignore props in the world and go right through them."; ped side fixed here,
+**Problem.** The user reported that peds ignore the props in the world and walk right through them. (Same for
+NPC skaters; ped side fixed here,
 NPC skater side planned below.)
 
 **Cause.** Ped navigation (M3) only knew the static NavPower navmesh and the other peds. The props (#15's dynamic
 props, the DMOs) live in the physics' prop layer and were never handed to the peds, so a path or a step could run
 through a bin, bench or barrier.
 
-**Evidence (retail, [code], TU3 recompilation as reference).**
+**Evidence (retail, [code], TU3 (title update 3) recompilation as reference).**
 - Every world object carries an obstacle interface: register `sub_82595140` (entered through the base slot
   `sub_82595010` at vtable + 4) and update `sub_82595298`. Slot +68 says "I am an obstacle": 1 for the
   DynamicObject class (vtable `0x82322D50`, next to the string `dynamicobject` at `0x82322D2C`), for the player
@@ -45,8 +45,8 @@ through a bin, bench or barrier.
   extents, velocity, carried) and every mod body (`modding::bridge::obstacle_solids`: world AABB, the attached
   body carried; ids above 2^40); `advance_peds` steps with `step_avoiding` and never steps into a body
   (`resolve_step` slides along its face or the ped stays, then re-plans after 3 s as before).
-- Open (2026-10-07): user report "Moving objects does not update the collision for peds, untested on skater
-  npc's". The sessions had no obstacle lines, so logging came first: `PED_OBSTACLE` (a prop more than 0.1 m from
+- Open (2026-10-07): user report: moving objects does not update the collision for peds (not tested on NPC
+  skaters). The sessions had no obstacle lines, so logging came first: `PED_OBSTACLE` (a prop more than 0.1 m from
   where it was first seen: spawn, now, cut and cut centre, speed, moving, carried, footprint, version; on every
   change), `PED_OBSTACLES` (inputs, props, cut, moving, carried, moved; every 2 s with a moved prop, else 10 s) and
   `PED_BLOCKED` (a refused ped step into a body, or within 3 m of a moved prop's spawn spot; once per ped per
@@ -80,7 +80,7 @@ not changed here).
 
 ### NPC skaters riding through props, 2026-10-05 (fix 19)
 
-**Problem.** User: "They also ignore props in the world and go right through them." (NPC skaters; peds were fixed
+**Problem.** The user reported that they also ignore props and go right through them (NPC skaters; peds were fixed
 above.)
 
 **Root cause.** Our NPC skaters are replay puppets. Their kinematic proxies (body capsule + board) joined the
@@ -120,13 +120,12 @@ Not checked in game yet.
 **Open.** (1) The ObstacleAvoider (slow down, stop or steer for an entry ahead) needs decoding first: trace hooks on
 `sub_82463A40` (object added, its vtable = class) and `sub_82465578` (mode `+6000`, speed `+5996`), then an
 avoidance input on the replay cursor. (2) Retail NPCs can bail on a heavy prop; our puppet bulldozes it instead.
-Full report: `.local/research/npc/fix19-skater-props.md`.
+Full report: a local research note.
 
 ## Peds walking through a held prop, 2026-10-08
 
-**Problem.** User, verbatim: "Moving objects does not update the collision for peds, untested on skater npc's",
-then (2026-10-08) "I wasn't recreating the issue last night, that may have just been while I was holding the
-object, which is still wrong". So peds walk through a prop while the player holds it with Move Object.
+**Problem.** The user reported that moving objects does not update the collision for peds (not tested on NPC skaters),
+then (2026-10-08) that it may only happen while the player holds the object, which is still wrong. So peds walk through a prop while the player holds it with Move Object.
 
 **Cause.** The port treated "held" as retail's obstacle-off gate (the state word below), so a held prop was
 neither cut into the walkable area nor solid for a ped's step. The retail code says otherwise.
@@ -207,7 +206,7 @@ and check the `PED_OBSTACLE` lines (`held=true role=solid` while dragging, `role
 
 **Problem.** Skating into a ped did nothing. Retail peds fall over (animated knock-down, then get up) or stumble.
 
-**What retail does** [code, TU3; recomp disassembly as reference; `.local/research/peds/skater-ped-contact.md`]: the ped
+**What retail does** [code, TU3; recomp disassembly as reference; a local research note]: the ped
 contact callback `sub_82E38FB8`, kind 5 (an `IActor` toucher such as the skater):
 - inputs: the length of the ped body's linear and angular velocity after the contact solve, gated by entity
   `C04236FB548697D0` / `797AA1D5F828819B` (0 for every stock entity);
@@ -243,7 +242,7 @@ Not play-tested yet.
 **Problem.** Peds only wandered and reacted to contact; retail peds also warn, flee, observe, chase and take
 the skater down. That behaviour is mostly data: the stock ped AI graph and the mood tables.
 
-**Retail [code] [data] (`.local/research/peds/b1-ped-behaviour-runtime.md` to `b5-ped-mood-events.md`; main
+**Retail [code] [data] (research b1 to `b5-ped-mood-events.md`; main
 checked the key addresses).** Retail runs the ped AI graph on the same dynamic controller as the skater's graphs
 (vtable `0x82321EA8`, ctor `82C12E88`, created through `82C12DD0`); every ped condition goes through the masked
 activation gate `82C12D48`; behaviour slots 13 / 14 / 15 are Begin / Update / End. The shipped
@@ -285,8 +284,8 @@ takedown, taze, observe, speech events, crosswalk and road ops), the ped motion 
 
 ## Ped mood system: wants from the stock mood tables (2026-10-09)
 
-**Retail [code] [data] (`.local/research/peds/b4-ped-want-producer.md`, `b5-ped-mood-events.md`,
-`b6-ped-mood-fields.md`; main checked the producer call sites, the roll, the presence constants, the magnitude
+**Retail [code] [data] (research b4, `b5-ped-mood-events.md`,
+`b6-ped-mood-fields.md`; verified the producer call sites, the roll, the presence constants, the magnitude
 getter hash and its fallback).** Peds keep mood records (`brain+1040`, at most 10, keyed by instigator, second
 entity and category): presence of a player within 35 m posts every 0.5 s (`sub_82E3CA20`, category field `B1DD`,
 which is also the per-post magnitude), a collision posts `collision` to the hit ped and `nearbycollision` to the
@@ -320,8 +319,8 @@ Muted DownTown run (120 s, the player standing at the spawn): `PED_MOOD tables: 
 reaction sets, 110 entity types`, 45 peds wandering, no reaction (a default ped's presence results need about 10 s
 within 12 m or a hand prop; the rest are ped-to-ped greets, whose presence posting between peds is not done yet).
 
-**Warning stops the ped and faces the skater.** Ported from `.local/research/peds/b7-ped-reaction-movement.md`
-(main checked the constants): `StopAndFaceWantTarget` (Begin saves the speed suggestion; Update faces the want
+**Warning stops the ped and faces the skater.** Ported from research b7
+(verified the constants): `StopAndFaceWantTarget` (Begin saves the speed suggestion; Update faces the want
 target flat, speed 0.0 `0x82165A10`; End restores), `WatchWantTargetWithoutInterruptingLocomotion` (keeps walking
 while the target is within 55 deg of the facing, `0x821DBCF4`, else latches into stop and face until End),
 `TurnToFaceSkater`, `StandAndWatchSkater` (watch point 4 m ahead, `0x82257308`; jumps to the skater's position +
@@ -337,7 +336,7 @@ noise, greeted).
 
 ## Fleeing peds run away from the threat (2026-10-09)
 
-**Retail [code] (`.local/research/peds/b8-ped-flee-steering.md`; main checked the 15 m leg `0x820BD16C`, the 1 m/s
+**Retail [code] (research b8; verified the 15 m leg `0x820BD16C`, the 1 m/s
 speed gate `0x8231A844` and the 0.5 blend `0x8209975C` in `sub_82E318F8`).** The Flee intent installs a goal
 provider (`sub_82E35E80`) with a 2.0 m arrival radius. Each leg goes 15 m from the ped: straight away from the
 threat when the threat moves slower than 1 m/s or the ped is behind its motion, else `0.5 x (side + away)` (side =
@@ -366,10 +365,10 @@ clips. (The blocked-goal rewrite: see the next section.)
 
 ### Flee legs go round rails and walls (2026-10-27, ask 393)
 
-**Problem.** Fleeing peds ran into rails and walls and ran in place (session game-20261027-101012). The user: "peds
-fleeing still will run into rails and walls and get stuck trying to flee on a path that isn't traversible."
+**Problem.** Fleeing peds ran into rails and walls and ran in place (session game-20261027-101012). The user: fleeing
+peds still run into rails and walls and get stuck on a flee path that cannot be walked.
 
-**Root cause** (research b650, `.local/research/b650-ped-nav-failures.md`; main checked the code lines). Retail
+**Root cause** (research b650; verified the code lines). Retail
 [code]: the leg goal test `82C465A8` is not a line cast but the chase reachability test (ped and goal on the navmesh,
 connected); a reachable goal stays even with a wall between, and the NavPower path goes round. Only an unreachable goal
 is rewritten (`82C46208` -> `82933E18`) to the nearest navmesh point reachable from the ped's polygon (unbounded
@@ -391,13 +390,13 @@ whether it then stands or jogs in place is not checked.
 
 ### Flee re-leg when the path ends (2026-10-29, ask 430)
 Problem: a ped fleeing a pushed bench was blocked by the player 6.5 m short of its leg goal and stood there 45 s in Fleeing (session 2026-10-29, ped #163); ours asked for a new leg only on arrival within 2 m.
-Retail [code, research b697, main re-read `82E2CB08` in the recomp]: besides the arrival test (`82E2BC70`), the mover's per-tick update `82E2CB08` asks the goal provider for a new goal when the bot is done (`82E96728`: no path, or the path's end reached) and the mover's vfn 0xA0 returns 0; for Flee that is the flee goal vfn `82E31818`. There is no timer and no blocked-by-a-body rule; the 4-corner steer loop in `82E2C0C8` is the vehicle avoidance modifier, not used here.
+Retail [code, research b697, re-read `82E2CB08` in the recomp]: besides the arrival test (`82E2BC70`), the mover's per-tick update `82E2CB08` asks the goal provider for a new goal when the bot is done (`82E96728`: no path, or the path's end reached) and the mover's vfn 0xA0 returns 0; for Flee that is the flee goal vfn `82E31818`. There is no timer and no blocked-by-a-body rule; the 4-corner steer loop in `82E2C0C8` is the vehicle avoidance modifier, not used here.
 Ours: `PedNav::route_done` (skate-core `peds/wander.rs`) is set when a planned route's path ended or failed; `think_peds` gives a new leg on arrival or `route_done`. Mod key `ped_brain.flee_releg_on_nav_done` (retail true, doc 26a).
 Open: a ped pinned by a standing or moving skater with its path unfinished still presses on: how retail's walking path controller (`82EA0808`) steers round NavPower moving avoiders is not decoded (b697 open 1; next research b698).
 
 ## Peds speak from their AI graph (2026-10-09)
 
-**Retail [code] (`.local/research/peds/b9-ped-speech-events.md`; main checked every address below in the TU3
+**Retail [code] (research b9; verified every address below in the TU3
 recomp).** A graph speech value is not a sound request. `SendSpeechEvent` Begin (`sub_826A3508`) calls ped vfunc
 +204 with the op's `speechvalue` (float attribute truncated to an int; `speechevent` is only a label); that virtual
 (`sub_82E22798`) stores it at `ped+2468`. The ped constructor (`sub_82E33198`) starts the field at 68, which no line
@@ -424,7 +423,7 @@ speech manager; value 15 from NewChasee (`826A37F0`) maps to 607_chase_join and 
 
 ### Graph timers: SetSimpleTimer and SimpleTimerExpired (2026-10-09)
 
-**Retail [code] (main read these in the TU3 recomp).** `SetSimpleTimer` (factory `826C9E88`, Begin `826A2810`) and
+**Retail [code] (read in the TU3 recomp).** `SetSimpleTimer` (factory `826C9E88`, Begin `826A2810`) and
 `SimpleTimerExpired` (factory `826CFA50`, condition `826ACFF0`) read `timerName` (default "TimedRangeRandom") and
 `length` (default 0.0). The name maps to one of 47 timer indices (`sub_82E42B08`, e.g. 21 StartChase, 42
 TargetUnreachableTimer; unknown name = 47). The brain's timer map (`sub_82E40940`) removes a timer set to 0 or less
@@ -438,8 +437,8 @@ counts as expired. These ops are used 13 and 16 times in the stock graph (chase 
 
 ## Ped chases: chase record, chase groups and the intercept (2026-10-09)
 
-**Retail [code] (`.local/research/peds/b10-ped-chase-takedown.md`, `b11-ped-intercept-takedown.md`,
-`b12-ped-chase-group.md`; main checked the addresses named here).**
+**Retail [code] (research b10, `b11-ped-intercept-takedown.md`,
+`b12-ped-chase-group.md`; verified the addresses named here).**
 - Chase record: each ped type points at a `livingworld_entities_chase` record (entity field `FBC4...`; escape
   distance 65 m for pedestrians, 500 m security, run speed `CD65` 11 m/s, max lead time `47C9` 6 s, give up after
   `78E2` takedowns). The chase manager (`*0x830854B8`) holds the `global` record (predict angle `5D48` 22.5 deg,
@@ -494,7 +493,7 @@ the bail it causes is being researched), the takedown entry choice `82E3C000`, L
 
 ## Ped takedowns and chase exhaustion (2026-10-09)
 
-**Retail [code] (`.local/research/peds/b13` to `b17`; main checked the addresses named here and the setup data).**
+**Retail [code] (research b13 to `b17`; verified the addresses named here and the setup data).**
 - Choice (`82E3C000`, each tick from TakeDownTargetablePredictions): the ped type's `livingworld_entity_takedown`
   list (`generic_male` 7 entries) in priority order; approach side from `normalize(ped - target) . target
   velocity`; per entry the target `lead + 0.06` s ahead, at most 1.25 m above or below, distance from the reach point
@@ -504,7 +503,7 @@ the bail it causes is being researched), the takedown entry choice `82E3C000`, L
   speech 17; AttemptTakeDownTargetable Update (`826A4BE8`) succeeds when the ped touched its target during the
   takedown (the contact callback `82E38FB8` records the touch and counts it at `brain+3248`); success
   (`826A4E50`) calls the target's `vfn20(chaser position)`: on the player's actor (`82592390`) that sets `1904` bit
-  30 and the direction away from the chaser (main checked; the actor always accepts, `8281DD70` returns 1). Speech
+  30 and the direction away from the chaser (verified; the actor always accepts, `8281DD70` returns 1). Speech
   65 for the player, else 19. Failure: speech 18.
 - On the skater: the flag reaches the animation packet (P+10496, +10480; `82593640`), Processed +2468 bits 2 and 18
   (`82DB5BE0`, `82BDA0D0`); bit 18 is phys-out byte 59, which the stock motion graph reads (`IsPhysicsWiping`,
@@ -541,7 +540,7 @@ SetAltTargetToChaseePosition / mood suppression ops (research b18 running); Purs
 
 ## Ped perception, secondary chasers and tazers (2026-10-09)
 
-**Retail [code] (`.local/research/peds/b17` to `b20`; main checked the setup data and the key addresses).**
+**Retail [code] (research b17 to `b20`; verified the setup data and the key addresses).**
 - Perception (`b17`, `b18`): at most 5 entries per ped (`brain+624`), a new one evicts the oldest and starts "just
   told"; each tick memory and suppression run down, age up, the vision test (`82E27240`) sets "visible" and refreshes
   the last position: seen within 1 m (2 m height), or within the near range (20 m x the type's `D036`), or within the
@@ -579,7 +578,7 @@ the greet ops, research b22), the taunt after a takedown, hand props.
 
 ## Peds greet each other (2026-10-09)
 
-**Retail [code] (`.local/research/peds/b21-ped-greets-conversations.md`, `b22-ped-greet-ops.md`; main checked the
+**Retail [code] (research b21, `b22-ped-greet-ops.md`; verified the
 radius constants and the greet speech).** Every 0.5 s a ped posts presence about the other live peds within 35 m (at
 most 30, `sub_82E3CA20`) and then about players within 35 m. The stock greet results fire on presence (gated on the
 other ped's type, probability 0.5, cooldown 20 s) and raise `greet`. ChannelGreetWantTarget (`8269FAC0` /
@@ -605,7 +604,7 @@ meaning (`ped+2020`), the `ped+2480` speech tag.
 
 ## Ped conversations: the plugin runner and the conversation object (2026-10-09)
 
-**Retail [code] (`.local/research/peds/b23-ped-plugins-conversations.md`, `b24-conversation-object.md`; main checked
+**Retail [code] (research b23, `b24-conversation-object.md`; verified
 the spawn constants, the setup data chain, the conversation vtable and its completion state).** A conversation is a
 waypoint plugin: SpawnConversationArea (`826A6CD8`) spawns one 3 m ahead of the starter unless another is within
 50 m, and adds the starter and the greeted ped. In the main graph, HasPlugin moves a member into the Plugin state,
@@ -626,7 +625,7 @@ skate-game: the conversation plugin graph and tables load with the ped data, `Pe
 RNG), the plugin graph runs on the brain while the main graph is in Plugin, requests applied in `think_peds` (log
 `PED_CONVERSATION`).
 
-**Mood gate (`b28`, `b29`, main checked `sub_82E3BF70` and the producer's `ori 32`).** The mood producer
+**Mood gate (`b28`, `b29`, verified `sub_82E3BF70` and the producer's `ori 32`).** The mood producer
 (`sub_82E41B98`) does nothing for a busy ped (`sub_82E3BF70`: WaitingToReact `brain+3278` 0x20, IsReactingToMoodEvent
 0x10, `brain+3277` 0x04 (written by PedestrianColliding), `*(ped+96)`); a pass sets WaitingToReact itself; the want
 groups in `pedestrian_addresswants.xml` clear it when they begin (and set / unset IsReactingToMoodEvent). Check 8 of
@@ -657,7 +656,7 @@ lookat, spectate graphs load on the runtime).
 
 ## Conversation speech, gather timer and abort (2026-10-09)
 
-**Retail [code] (`.local/research/peds/b43-conversation-speech-slots.md`; main re-read `82E3DAD8`).**
+**Retail [code] (research b43; re-read `82E3DAD8`).**
 - Start (`82E1EBC0`) and every advance (`82E1ECB0`) store the turn's line id (`82E1EA98`: state 2 -> 0 or 1, 3 -> 3,
   4 -> 5, 5 -> 6, 6 -> 7, at `D+1168`) and re-roll the variant (`D+1156`, uniform [0, 2) by `82E17478`) once per turn.
 - ConversationSpeak Begin (`826A66B8`) calls `82E3DAD8`: the speaker's speech value (`ped+2468`, the channel of every
@@ -692,7 +691,7 @@ waypoint vfunc 24 body.
 
 ## Peds taunt after a takedown (2026-10-09)
 
-**Retail [code + data] (`.local/research/peds/b25-ped-taunt-handprops.md` sections 1-2; main checked the 65 / 19 speech
+**Retail [code + data] (research b25 sections 1-2; verified the 65 / 19 speech
 values).** After a successful takedown (or an aggressive capture) the graph turns the angry-chase want into a taunt
 want; `TakedownTauntVictim` (`826A70E0`) speaks 65 when the victim is the player and 19 otherwise, faces the victim,
 pushes attention and posts the "Taunt" motion intent: `motiongraph_taunt` plays the ped type's remapped "Taunt" clip
@@ -705,15 +704,15 @@ and requests the clip (`PedBody.taunt`), the body step plays it through the reac
 when it ends (a set without the clip completes at once). Log `PED_TAUNT`.
 
 **Engine choices.** The attention push (`sub_82E27A08`, priority 2) is not modelled; the clip plays through the collision
-reaction player (no locomotion while it runs), as the motion graph's state is non-interruptable.
+reaction player (no locomotion while it runs), as the motion graph's state is non-interruptible.
 
 **Verification.** skate-core `the_taunt_faces_the_victim_holds_the_intent_and_unsets_the_want`; skate-game living_world
 (71). Not seen in game yet. Open: the hand props (throw / drop), which our peds do not carry.
 
 ## Ped plugins on world props: data, rolls and the offer scan (groundwork, 2026-10-10)
 
-**Retail [code + data] (`.local/research/peds/b81-ped-plugin-acquisition.md`, `b82-ped-plugin-search.md`,
-`b83-plugin-offer-and-radii.md`; main checked the ped roll `82E3B060`, the d100 roll `8269A588`, the offer test
+**Retail [code + data] (research b81, `b82-ped-plugin-search.md`,
+`b83-plugin-offer-and-radii.md`; verified the ped roll `82E3B060`, the d100 roll `8269A588`, the offer test
 `826BFE18` and its constants, the sit ops and the stock tables).**
 - Plugin props: benches, trash bins, newspaper boxes, vending machines, ATMs, water fountains, look-at and spectate
   spots, gathering places. Each prop class (`livingworld_props`) names a descriptor (`PluginDescriptor/*.xml`: the plugin
@@ -748,8 +747,8 @@ University 37).
 
 ## Ped plugins on world props: motion states and the wiring (2026-10-10)
 
-**Retail [code + data] (`.local/research/peds/b84-plugin-intent-animation.md`, `b85-packet-completion-and-clips.md`;
-main checked the packet ops `826A2600` / `826A27D0` / `826ACF90` / `826A2770`, `LockFirstWaypoint` `826A0580` and the
+**Retail [code + data] (research b84, `b85-packet-completion-and-clips.md`;
+verified the packet ops `826A2600` / `826A27D0` / `826ACF90` / `826A2770`, `LockFirstWaypoint` `826A0580` and the
 motion XML).** The plugin body graph creates a monitored packet (one intent per stage, e.g. Sit then StandUp); the
 AI side only moves its stage; the ped motion graph plays a state per packet (Sit: Stand2Sit, SitIdleCyc held until
 StandUp, Sit2Stand; ATM: insert card, select, collect money, collect card; vending; water fountain until
@@ -787,8 +786,8 @@ Speak / TurnToFace flicker (conversation waypoints have no orientation).
 
 ## Ped plugins on world props: benches, bins and newspaper boxes from the model hotpoints (2026-10-10)
 
-**Retail [code + data] (`.local/research/peds/b86-dmo-hotpoints.md`, main checked the parse on the user's disc).** A dynamic
-object's seats, bin and newspaper-box points are hotpoints in its model RX2 in `parkassets.big` (RW type 0x00EB001E
+**Retail [code + data] (research b86, verified the parse on the user's disc).** A dynamic
+object's seats, bin and newspaper-box points are hotpoints in its model RX2 (Xbox 360 RenderWare 4 arena file) in `parkassets.big` (RW type 0x00EB001E
 HOTPOINTDATA: count, entries at +16, 112-byte records with a row-vector matrix whose row 3 is the position and row 2 the
 facing axis, +96 the type). `82C4E128` makes one one-waypoint group per hotpoint when the object spawns: type 0 is the root,
 8 is skipped, 1 a trash bin, 2 a newspaper box, any other type a seat. On the disc: 22 templates, 30 seats, 7 newspaper-box
@@ -820,7 +819,7 @@ logs each removal with its reason.
 
 ## Ped hand props: the vending machine can, the newspaper (2026-10-10)
 
-**Retail [code + data] (`.local/research/peds/b87-ped-hand-props.md`, `b89-hand-prop-models.md`, main checked the key
+**Retail [code + data] (research b87, `b89-hand-prop-models.md`, verified the key
 addresses).** The vending machine and newspaper box motion states run `SpawnInteractionBasedHandProp` (Begin `826AE950`) in the
 collect clip's branch window (`InTurnBranchWindow`). It asks the ped's plugin object (vfunc +52) for a hand prop key and
 `82E3DDA0` stores the `livingworld_handprops` record and sets the requested bit (`brain+3279` 0x01, which `HasHandProp`
@@ -862,7 +861,7 @@ to a bench. Not seen on screen yet.
 `DropHandProp`), the hand prop conditions (`HasDisposableHandProp`, `CanSitWithHandProp`, `CanAttackThrowHandProp`) and the
 world prop descriptors' transfer gates were not ported, so `usetrashbin.xml` exited at once and any ped took a bin.
 
-**Evidence** [code] (TU3 recomp, reference only; research b25, b87, b90, b91, b92; main-checked):
+**Evidence** [code] (TU3 recomp, reference only; research b25, b87, b90, b91, b92; verified):
 - `sub_82E3E648` starts a throw only while holding: pending + aimed bits, target, launch speed and release time; the light
   throw (bin) is 5.0 m/s (`0x821F1790`) after 0.91667 s (`0x82063BE0`), the attack throw 10.0 / 0.8333. Its clip by the
   flat angle to the target: below 0.6854 or above 5.5978 rad `HandPropThrowLightForward`, then `L45` (< 0.8854), `L90`
@@ -914,7 +913,7 @@ so the throw is not seen in game yet.
 **Problem.** The zombie cheat (free skate: peds chase and attack the skater) had only its census rules; the brain's
 `IsZombieMode` read a flag nobody set, and the stock graph's `ZombieFollow` / `OverrideAnimData` ops were not ported.
 
-**Evidence** (research b95; main-checked: the ZombieFollow update `826A9250` distances and speeds, constants
+**Evidence** (research b95; verified: the ZombieFollow update `826A9250` distances and speeds, constants
 `0x82099250` 8.0, `0x820BD16C` 15.0, `0x8231A844` 1.0, `0x82063B08` 3.0):
 - Stock graph [data]: `Wander` -> `ZombieFollow` when `IsZombieMode`; the state runs `OverrideAnimData overrideEntityName="zombie"`,
   `DropHandProp`, `ZombieFollow`, and leaves to Colliding / AddressWants, or to Wander when the mode is off. Scatter, the
@@ -930,9 +929,9 @@ so the throw is not seen in game yet.
 each tick; the body walks a one-point route to the zombie goal at the brain's speed; the anim set override picks the
 `zombie` set. Toggle (no cheat screen yet): `SKATE_ZOMBIE=1` or the mod value `living_world.zombie`; mod keys
 `ped_brain.zombie_follow_distance`, `zombie_sprint_distance`, `zombie_ring_min`, `zombie_ring_max`,
-`zombie_sprint_speed`, `zombie_walk_speed`, `zombie_arrive_distance` (goal reached, 2.0 m 3D: the mover arrival radius, b158 / main-read `82E2BC70`, `82E35E80`).
+`zombie_sprint_speed`, `zombie_walk_speed`, `zombie_arrive_distance` (goal reached, 2.0 m 3D: the mover arrival radius, b158 / verified `82E2BC70`, `82E35E80`).
 
-**The yellow screen (research b100 / b101; values main-checked in the stock collections).** `827F4D28` sets post FX
+**The yellow screen (research b100 / b101; values verified in the stock collections).** `827F4D28` sets post FX
 bit 0x2000 while the zombie query is true and `827F5450` then builds the near and far colour matrices from the `post_fx`
 record `colour_matrix_zombiemode` (`827F13D8`: `multiply * Sat_s(contrast * (x - midpoint) + midpoint + add)`, luma
 0.3 / 0.6 / 0.1) instead of the identity `colour_matrix`, a full replace with no fade [code]. Values [data]: multiply
@@ -954,7 +953,7 @@ reached" radius (0.5 m) and "ZombieChannel" (`ped.vfn240`, 0.2 / 0.2 / 1.0) are 
 zombies is open. Retail aims every zombie at the single local player; a host picking per ped is not retail.
 
 **Traffic.** Retail's vehicle cull `826BAAB8` despawns a car beyond the cull radius OR whenever the zombie query is true
-[code, main-read], so turning the mode on empties the streets; ours: `CensusKindConfig::cull_in_zombie` (vehicles true,
+[code, verified], so turning the mode on empties the streets; ours: `CensusKindConfig::cull_in_zombie` (vehicles true,
 peds false), reason `Disabled`; test `zombie_mode_culls_the_live_traffic`.
 
 **Verification.** skate-core `zombies_follow_the_player_and_mill_round_them`; skate-game data-gated
@@ -966,7 +965,7 @@ peds false), reason `Disabled`; test `zombie_mode_culls_the_live_traffic`.
 **Problem.** Only peds that used a vending machine or a newspaper box ever held a prop; retail also gives walking peds a
 starting prop (grocery bags, purses, briefcases, coffee, skateboards, maps, ...), and the angry throw needs one.
 
-**Evidence** [code, main-read]: the ped constructor `82E33198` rolls `8269A588` with the entity's field
+**Evidence** [code, verified]: the ped constructor `82E33198` rolls `8269A588` with the entity's field
 `Hash_3DB019A08284F45C` (chance; `rand() % 100 + 1 <= chance x 100`), then walks its `handprop_odds` list (field
 `Hash_46B836EE959C0238`, at most 32 entries of {handprop, probability}): a second `rand() % 100 + 1` roll picks the first
 entry whose running total x 100 (`0x820ED57C` = 100.0) reaches it, and `82E3DDA0` stores the record and sets the request
@@ -989,14 +988,14 @@ sets it is not found (all our ambient peds roll). Retail's rolls come from its g
 
 **Problem.** A ped holding a can, a bag or a newspaper kept its walk pose: the arm swung through the prop.
 
-**Evidence** (research b99; main-checked: the clip channel weights from the bank, the logical names in the anim set):
+**Evidence** (research b99; verified: the clip channel weights from the bank, the logical names in the anim set):
 - Retail plays the carry pose on the ped's one channel slot ("PedChannel", the skeleton controller at
   `skeleton+17936`) [code]: ped vfunc +240 (`82E3A418`) looks the logical name up in the ped's anim set and requests it
   (`82E32878`: blend in / out); the per-frame state machine `82E3A5A0` plays it, fades it and frees the slot (state 7).
   While a prop is linked and held, the update `82E3F048` re-requests the record's carry name whenever the slot is free
   (0.2 s blends); the unlink `82E3FAE0` stops it with a 0.2 s fade. The same slot plays the throws, the tazer and the
   greet / warn gestures; a request replaces what plays.
-- Which bones a channel clip takes over is in the clip data [data, main-read]: the clip parts' channel weight tables.
+- Which bones a channel clip takes over is in the clip data [data, verified]: the clip parts' channel weight tables.
   All four carry clips (`NPC_CARRY_{SML,BIG,PAPER,WINE}_RH_0_CYC`, logical names `CarrySmallRHChannel` /
   `CarryBigRHChannel` / `CarryPaperRHChannel` / `CarryWineRHChannel`) weigh exactly the right arm chain (shoulder, arm,
   forearm, hand, hand prop bone) 1.0 and every other bone 0; the throw and tazer clips weigh 17 upper-body bones; walk
@@ -1018,10 +1017,10 @@ bones, the right arm chain; throws / tazer 17); skate-core `the_channel_override
 ### A ped on the phone drops it for a chase (2026-10-27, ask 391)
 
 **Problem.** A ped on the phone that started an angry chase kept the talk pose for the whole chase (session
-game-20261027-101012, ped #189). The user: "got chased by a ped on a phone, but he kept being on the phone while
-chasing which looks weird and incorrect."
+game-20261027-101012, ped #189). The user was chased by a ped on a phone who stayed on the phone while
+chasing, which looks wrong.
 
-**Root cause** (research b649, `.local/research/b649-phone-ped-chase.md`; main checked the code lines). Retail
+**Root cause** (research b649; verified the code lines). Retail
 [data] `pedestrian_newchasee.xml` `HoldBeforeChaseStart` drops a prop that cannot be attack-thrown (`CantThrowHandProp`
 -> `DropHandProp`, no hang-up clip); [code] the idle action update `82E3F470` runs only in the held branch of
 `82E3ED50`, so the talk is never asked for after the drop; the unlink `82E3FAE0` stops whatever clip the channel plays
@@ -1044,7 +1043,7 @@ phone, `PED_FLEE_OBJECT prop=536870912` tick 40124, cutting `HoldBeforeChaseStar
 `IsFacingWantTarget angle=120 distance=20`) reached `ThrowHandPropAtWantTarget`, which was not ported: the ped stood
 facing the skater and never threw.
 
-**Evidence** [code] (TU3 recomp, reference only; research b25 §5, b92, b93; clip thresholds and names main-read):
+**Evidence** [code] (TU3 recomp, reference only; research b25 §5, b92, b93; clip thresholds and names verified):
 - Begin `826A7A58` -> `sub_82E3E960(ped, want target)`: the target and the ped's own body are both predicted 0.8333 s ahead
   (`0x82063BE4`, position + velocity x time); the XZ intercept solve `sub_82E15CD0` at 10.0 m/s (`0x82063BF0`) along the
   dominant axis (strict, so equal |dx| and |dz| have no solution) returns the target's point at the earliest
@@ -1073,7 +1072,7 @@ bin throw's path above.
 inferred. Retail's jitter draws come from its global generator, ours from the ped's seeded RNG. A zero-length (x, z)
 draw keeps the point (retail normalises it, unread).
 
-**The hit (b94, main-checked `82C56BA0`, `skeleton_feedback.rs:208`).** Before this change our skater body never collided
+**The hit (b94, verified `82C56BA0`, `skeleton_feedback.rs:208`).** Before this change our skater body never collided
 with any prop: the prop layer is only queried by the wheels (`physics.rs:754`) and props take a one-way push from the
 skater volumes (`prop_dynamics.rs` `push_from_skater`). Retail's skater contact (`82BD4A30`) handles a DMO like any other
 body: the relative normal speed (halved below `SmallObjectMassThreshold` 5.5) goes into the per-bucket force maxima that
@@ -1161,7 +1160,7 @@ skate-game `hand_prop_proxy_group_by_mass`, data-gated `a_thrown_can_reaches_the
 - Retail clears brain `+3277` bit 0x04 at PedestrianColliding Begin / End and sets `+3196` bit 0x20 at End (meanings
   open, not modelled). How `sub_82E38400` uses `ped+5680` exactly (ignore vs a different contact kind). Answered 2026-10-20 (b394): a contact from that entity is dropped entirely (`82E38738` -> `82E38940` returns 0), never cleared, so a ped that took the skater down ignores that skater's bumps for good; only the physics push stays. Ours matches (laptop session 2026-10-20, #104).
 - A bench moved under a seated ped (session `game-20261012-133659`: `PED_PLUGIN_SEAT_MOVED` while ped #6 sat; the
-  ped was left in the air). Retail (research `.local/research/peds/b102-moved-plugin-object-unseat.md`, main checked
+  ped was left in the air). Retail (research b102, verified
   `82E3DBE0` and `motiongraph_avoid.xml`): the grab is not refused and the ped keeps its plugin and seat. The owned
   object reporting a move (`82E3DBE0`: the DisableCollisionsWithBehaviourSource source, |v|^2 > 2.5e-5, OwnPluginObject
   bit 0x01 set, `[ped+5712]+1416 == 0`) makes the ped jump off forward (intent via `82E36B58`, motiongraph_avoid SitJump
@@ -1171,14 +1170,14 @@ skate-game `hand_prop_proxy_group_by_mass`, data-gated `a_thrown_can_reaches_the
   in for the object's vector), the body interrupts the sit cycle with `SitAvoidFwd` (`PedAnimPlayer::interrupt`), and
   the brain's locked waypoint follows the seat. Open: whether `82E3DBE0`'s vector is a velocity or a step, the
   `+1416` gate, the Back avoid (`ReturnToSit`) and who calls `82E3DBE0`.
-- Fixed (2026-10-13): a bench moved while its ped was still sitting down stayed sat on forever. User report: "When a
-  ped is in the middle of the sitting animation, if you move a bench they will stay sitting." Session
+- Fixed (2026-10-13): a bench moved while its ped was still sitting down stayed sat on forever. User report: moving a
+  bench while its ped is in the middle of the sitting animation leaves the ped sitting. Session
   `hails-local/logs/game-20261013-112342`: second grab at 17:25:21, ped #6 had restarted Sit at tick 2971; the AI left
   the sit (`WaitOutTimer -> TargetWaypointPrecise`) and asked to walk to the new seat for 20 s, but the body stayed at
   [-259.1, 42.97] until `ExitInteraction` (PluginTimeout). Cause: the jump-off only fires from the sitting cycle (right:
   SitJump needs LastState `SittingCyc`), and when the Sit packet ended mid-`Stand2Sit` the motion run was reset without
   releasing the held `SitIdleCyc`, so the body sat forever and locomotion never ran. Retail (`motiongraph_sit.xml`):
-  Sit is non-interruptable, `SittingInto` plays `Stand2Sit` out, `SittingCyc` goes to `SittingOut` (`Sit2Stand`) on
+  Sit is non-interruptible, `SittingInto` plays `Stand2Sit` out, `SittingCyc` goes to `SittingOut` (`Sit2Stand`) on
   "not HasIntent Sit", then `SitComplete` -> Locomotion. Change: `PluginMotionRun::orphaned` (skate-game
   `living_world/peds.rs`): a packet that ends while its clips play keeps the run, releases the held cycle as soon as
   it is reached and ends with the clips (log `PED_PLUGIN_MOTION ped=#N Sit ended mid-clip, standing up`). Applies to
@@ -1190,8 +1189,8 @@ skate-game `hand_prop_proxy_group_by_mass`, data-gated `a_thrown_can_reaches_the
 ## Zombie mode: zombies chase the skater (2026-10-13)
 
 ### Problem
-User (2026-10-13): "I also turned on zombie mode, the peds didn't chase me at all and instead were more interested in
-sitting on the benches". Session `hails-additions/logs/game-20261013-170436`: zombie mode on at 23:07:34Z; 22 of 31
+The user reported (2026-10-13) that with zombie mode on the peds did not chase the player at all and
+sat on the benches instead. Session `hails-additions/logs/game-20261013-170436`: zombie mode on at 23:07:34Z; 22 of 31
 peds reached ZombieFollow (they mill around the skater), no `skaterzombiechase` and no chase in the whole log; 9 peds
 stayed in seat / conversation plugins.
 
@@ -1200,7 +1199,7 @@ The chase in zombie mode is not in the ZombieFollow behaviour: it comes from the
 has `skaterzombiechase` at priority 1 (category `zombiemode`, instigator `skater`, want `angrychase`, want flag) [data].
 Nothing in our engine posted the `zombiemode` mood event, so the result could never fire.
 
-### Evidence (retail code, main-read)
+### Evidence (retail code, verified)
 - Poster `sub_82E24B60` (the skater-side broadcaster, also posts skaternoise 5, skaterskitch 4, skaterslam 2): at the
   end of its per-skater loop, when the living-world manager `*(0x83085494)` (set by `sub_826BBC40`) answers vfunc +156
   (the zombie test, b4 / b95), it posts category **19 = zombiemode** on the mood bus (`sub_82B938D8`, message id
@@ -1230,8 +1229,8 @@ Nothing in our engine posted the `zombiemode` mood event, so the result could ne
 With the broadcast alone only 2 or 3 of 31 peds chased and none followed: every ped got the chase want at any distance,
 most hit `CancelChase` (the player's group used the `global` record, max 5 chasers) and suppressed their mood for 5.5 s,
 over and over. Two more retail rules were missing:
-- **Zombie chase and takedown records** (research `.local/research/peds/b105-zombie-chase-record.md`, key hash and gate
-  main-read): the chase group init `82D967B0` (only caller: group ctor `8258E588`) gives every chase group, the
+- **Zombie chase and takedown records** (research b105, key hash and gate
+  verified): the chase group init `82D967B0` (only caller: group ctor `8258E588`) gives every chase group, the
   skater's and each ped's, the `livingworld_entities_chase` record `zombie` (hash 0x69FABBFD81C0E5A7, `82D96860`) while
   the zombie gate `*(0x83085494)` vfn +156 holds, else `global` (`*(0x830C7200)`, static init `82F8FEB8`) [code]. The
   ped constructor `82E33198` (`82E33FAC`..`82E3402C`) sets the ped's own chase record (`ped+5712`) and takedown table
@@ -1263,15 +1262,15 @@ over and over. Two more retail rules were missing:
 
 ### Sitting and gathering rates (user: "peds seem to be too interested in sitting over just walking around. Peds also
 seem to congregate too often")
-Research `.local/research/peds/b103-plugin-converse-rates.md` (main re-checked the data and our file:lines): every knob
+Research b103 (main re-checked the data and our file:lines): every knob
 checked matches retail. Stock `plugin_odds` for `waypoint_sit` are 0.7 to 0.8 for most ped types (adult_male 0.8, bum
 0.3) [data]; the offer radius is the prop class field `E2101F2B` (sit 10 m) [data], read at skate-game
 `living_world/peds.rs` (offer loop); the offer scan runs every 11 manager ticks at 60 Hz (`826C0058`, b83); a refusal
 blocks one prop for 30 s. DownTown has 639 seats among 860 hotpoint props. Conversations start without a roll
 whenever two compatible peds meet, limited by the 50 m spacing [data + code].
 
-Two mismatches found and fixed (research `.local/research/peds/b104-plugin-transfer-conditions.md`, constants and calls
-main-read):
+Two mismatches found and fixed (research b104, constants and calls
+verified):
 - `InFrontOfFirstWaypoint` (`8269CF58`, vtable `0x82308844`) [code]: the flat angle between waypoint 0's facing and the
   waypoint-to-ped vector must be under 0.523599 rad (`0x821DBCF0`) or over 5.75959 (`0x822F9114`): a 30 degree cone, no
   distance limit; a near-zero vector (length^2 <= 1e-4) passes. Ours was a 180 degree half-plane, so far more peds
@@ -1290,16 +1289,16 @@ main-read):
 ## Zombie takedowns on a downed skater, NPC skater sim flip-flop (2026-10-13)
 
 ### Problems
-User (2026-10-13): "First one had zombie mode on. it seems to sort of work but its pretty buggy and your character has
-buggy respawns where you can't move." Session `hails-additions/logs/game-20261013-183555`: SKATER_TAKEDOWN, the
+The user reported (2026-10-13) that zombie mode, on in the first session, half works but is buggy, and the
+player respawns unable to move. Session `hails-additions/logs/game-20261013-183555`: SKATER_TAKEDOWN, the
 wipeout auto-reset respawns the skater in the crowd, the next takedown lands 1 to 3 s later; ped #6 took the skater
 down twice within 1.3 s while they were still down.
 Second report: "It was REALLY hard to find skaters ... they literally seemed to despawn as soon as I got close to them
 ... Also the game had MAJOR lag spikes and hitches". Session `game-20261013-183803` (NPC Skater Physics opt-in on).
 
 ### Root causes and changes
-- **ChaseeIsWipedOut / CanAttemptTakeDownTargetable** (research `.local/research/peds/b106-chasee-wiped-out.md`, slot
-  and constant main-read): `ChaseeIsWipedOut` `826ACB70` = the chasee's chase group exists and its vfn +88 holds; for
+- **ChaseeIsWipedOut / CanAttemptTakeDownTargetable** (research b106, slot
+  and constant verified): `ChaseeIsWipedOut` `826ACB70` = the chasee's chase group exists and its vfn +88 holds; for
   the player that is `825948B0`, the phys-out byte 59 (Processed `+2468` bit 18, wiping out) [code]. The same
   `825948B0` is the target's vfn +24 in `CanAttemptTakeDownTargetable` `826ACA08` [code]. Ours had neither (Pending =
   false), so `not ChaseeIsWipedOut` was always true and a downed skater could be taken down again.
@@ -1324,9 +1323,9 @@ Second report: "It was REALLY hard to find skaters ... they literally seemed to 
   peds 112, skate-game 87).
 
 ## Floating peds on coarse navmesh triangles (2026-10-13)
-User (2026-10-13): "Additionally I saw floating peds during the test." Session `game-20261013-183555`: 12
+The user also saw floating peds during the test (2026-10-13). Session `game-20261013-183555`: 12
 `PED_FLOATING` lines, almost all on DownTown navmesh poly 7376 (area 17 = pavement), drawn about 1.7 m above the floor.
-Research `.local/research/peds/b107-floating-peds.md` (probe constants main-read): poly 7376 is one 25 m triangle of a
+Research b107 (probe constants verified): poly 7376 is one 25 m triangle of a
 fan (y 31.66 to 32.62) over pavement 1.6 to 1.8 m lower: a coarse but valid retail navmesh. Retail's NavPower mover
 probes the ground after the navmesh step (`82EA5F48`, debug bool `probe_for_ground` on by default) and, after a miss,
 casts again with 4x the reach (`0x82257308` 4.0) [code]. Ours probed 1.6 m down once and drew the ped at the navmesh
@@ -1334,9 +1333,9 @@ height on a miss. Change: skate-game `living_world/peds.rs` retries with `GROUND
 reach; upward stays one step (so overhead geometry is still never taken). Open: which mover byte enables the probe
 per ped (`(*(this+556))+109`) and the probe length L (`ctx+16`).
 
-Update 2026-10-19 (session `game-20261019-180444`, University terrace x 12..14, z -127..-220; user: "I thought I saw one
-but when i turned back around it looked like they got moved to the floor"). Research b351
-(`.local/research/b351-university-floating-strip.md`; main verified our lines): not a conversion gap [data: one
+Update 2026-10-19 (session `game-20261019-180444`, University terrace x 12..14, z -127..-220; the user thought they saw one,
+but on turning back it seemed moved to the floor). Research b351
+(research b351; verified our lines): not a conversion gap [data: one
 collision surface per logged point, a flat terrace at y 54.5]. The 16 m navmesh triangles span terrace and
 embankments, so on the lower half the navmesh sits 0.2 to 0.5 m under the floor; our window reached only 0.2 m up and
 the retry widened only downward, so the cast started below the surface and the ped stayed at the navmesh height
@@ -1344,25 +1343,25 @@ the retry widened only downward, so the cast started below the surface and the p
 symmetrically from point + axis x L to point - axis x L, retrying at 4L [code, recomp]. Change: the retry widens both
 ends by `GROUND_RETRY_FACTOR`; the floating check also looks 2 m up, so a sunk ped logs a negative `gap`. Open:
 retail's L for peds and the geometry filter of the cast (a recomp hook at `82EA5F48` with a short teleport drop at
-(12.9, 54.5, -220) would settle it). All maps counted by b358 (`.local/research/b358-navmesh-vs-floor-all-maps.md`,
+(12.9, 54.5, -220) would settle it). All maps counted by b358 (research b358,
 simulated casts on the extracted collision) [data]: walkable navmesh (pavement 0x11, road 0xA1) where both casts still
 miss a floor above: University 72 m2, DownTown 19,910 m2, Industrial 1,689 m2, almost all on road triangles of about
 2,000 m2 over sloped streets (floor 0.8 to 4.3 m above, e.g. DownTown polys 32918 / 32922 / 32923 at x 6..84,
 z 1314..1379); on pavement alone 72 / 176 / 8 m2. An upward retry of 1.6 m would leave 0 / 7,516 / 364 m2, 3.2 m
 0 / 589 / 0 m2 with the first overhead hits (DownTown polys 16685/16686, 32551/32552). Not changed: retail's L for peds
 decides it (recomp trace of `82EA5F48` pending, needs the user not gaming).
-Where retail draws the ped (b360, `.local/research/b360-ped-drawn-height.md`, partial) [code]: the probe runs once per
+Where retail draws the ped (b360, partial) [code]: the probe runs once per
 path-node advance (`sub_82E96B88`), at the next node point on the next polygon's plane and along that polygon's
 normal; a hit becomes the target of a NavPower path follower (vtable `0x8232E4F0`) whose position the bot reports, a
-miss leaves the plane point. The ped sync `82E37108` keeps the ped's own y (`vrlimi128 v123,v63,4,0`, main verified),
+miss leaves the plane point. The ped sync `82E37108` keeps the ped's own y (`vrlimi128 v123,v63,4,0`, verified),
 so the bot's probed y does not reach the ped there; who writes the ped's world matrix (ped vtable `0x8232BE80`
 slot +0x20, `82E221B0`) decides the drawn y and is still open (a hook on `82E221B0` with the `82EA5F48` run). Ours
 stays a render-only per-frame cast, a stand-in with probably the same visible result.
 
 ## Peds give up a chase they cannot reach (2026-10-13)
-User (2026-10-13): "the ped doesn't give up when attacking the player if they fall into the water, which is something
-we have seen in the recomp where being unable to reach the player causes them to give up".
-Research `.local/research/peds/b108-unreachable-target.md` (main-read: `826AD640` bit, `82E31D58` constant and result
+The user reported (2026-10-13) that the ped does not give up attacking when the player falls into the water,
+while in the recomp a ped that cannot reach the player gives up.
+Research b108 (verified: `826AD640` bit, `82E31D58` constant and result
 codes): `CannotReachChaseTarget` (`826AD640`) reads brain `+3280` bit 0x08 [code]; its only writer is the intercept goal
 provider's result (`82E31D58`): for result codes 0, 1 and 3 it sets the bit when the ped is within 5 m flat of the
 chasee (25.0 at `0x8209994C`) and clears it beyond [code]. The stock graph (`pedestrian_chasetargetunreachable.xml`):
@@ -1374,8 +1373,8 @@ result codes]. Log `PED_UNREACHABLE`. Test `an_unreachable_chasee_starts_the_rec
 Related, bench knocked into water: the ped gave up after ~67 s (tick 10251 to 14295, `ExitInteraction`), retail's
 60 s PluginTimeout; retail has no reachability check for plugins (b108) [data].
 
-Update 2026-10-19 (PR #52 next item 2; user 2026-10-15: "I angered a ped and he still attacked me after I fell in the
-water and was unreachable."). Research b302 (`.local/research/b302-chase-target-in-water.md`; main verified the intercept
+Update 2026-10-19 (PR #52 next item 2; user 2026-10-15: an angered ped still attacked after the player fell in the
+water and was out of reach). Research b302 (research b302; verified the intercept
 goal vtable `0x8232C8A8` slot 0x18 = `82E31D58` and our lines):
 - Retail [code]: no water rule. The report comes from the mover update `82E2CB08`: every 10 mover updates it snaps the
   ped and its current destination onto the navmesh (`82C465A8`, 0.5 m window) and tests that both have a polygon and
@@ -1383,7 +1382,7 @@ goal vtable `0x8232C8A8` slot 0x18 = `82E31D58` and our lines):
   posts an event; a reachable one posts none. The intercept goal's handler `82E31D58` then sets the bit to "within 5 m
   flat". So the bit only changes on an unreachable report, and a chasee climbing back onto the mesh does not end the wait.
 - Ours before: tested only the chasee off the mesh, every tick, and cleared the bit as soon as the chasee was back on the
-  mesh. The 2026-10-15 log (`.local/session-logs/hails-local-2026-10-16/game-20261015-133314.stderr.log`): #185 set the bit and
+  mesh. The 2026-10-15 log (session game-20261015-133314): #185 set the bit and
   gave up 5.05 s later (as designed); #189 set it at 19:47:58.87 and cleared it 0.85 s later with `near=false` (the
   swimmer more than 5 m away, which retail does too) and kept chasing; the skater left the water at 19:48:04.57 and was
   taken down on land at 19:48:07.96. So this case already followed retail's 5 m rule; what the port changes is the
@@ -1398,7 +1397,7 @@ goal vtable `0x8232C8A8` slot 0x18 = `82E31D58` and our lines):
 - Tests: `reach_reports_fail_off_the_mesh_and_across_islands_and_only_they_rewrite_the_bit` (chase.rs),
   `end_chase_resets_the_end_reason_and_unsets_angrychase` (now also the bit). skate-core peds 148, skate-game
   living_world 110 passed. Not play-tested.
-- Destination (research b306, `.local/research/b306-intercept-destination-off-mesh.md`; main checked the tail
+- Destination (research b306; verified the tail
   `loc_826A3F08` in `skate3_recomp.27.cpp`: `vfn168(speed)`, `vfn136(0.5)`, `vfn4(r1+128, 1)` on every path) [code]:
   InterceptChasee Update `826A3BF0` hands the mover the chasee's raw position unless the ped and the chasee are
   reachable (`82C465A8`) and the solver finds an intercept; then the lead point, projected onto the mesh where it can be
@@ -1433,9 +1432,9 @@ skate-game 693 (known failures only). Play test pending.
 
 ## Diagnostics: still peds report what they are doing (2026-10-16)
 
-**Problem.** The user saw small crowds of peds standing next to a pair in conversation ("some congregate, but far
-too many decide to join and it becomes little crowds of peds" / "they are all standing next to a couple of peds in
-conversation for some reason"). Session `game-20261015-220114` could not show why: conversations never had more than
+**Problem.** The user saw small crowds of peds standing next to a pair in conversation (some congregate, but far
+too many join, so little crowds form around a couple of peds in
+conversation). Session `game-20261015-220114` could not show why: conversations never had more than
 2 members, only 12 of 154 greets targeted a conversation member, and the log has no positions for peds standing still.
 
 **Change.** `PED_STILL` (skate-game `living_world/peds.rs`, `log_still_ped`): a ped that stays within 0.1 m for 5 s
@@ -1444,7 +1443,7 @@ membership and conversations within 5 m, animation (locomotion, clip, clip time,
 navigation (target, corner, waiting, route, poly, blocked), heading, velocity, flee / chase goals, mood store and the
 whole brain (minus its RNG). It repeats every 5 s while the ped stays; a report equal to the previous one logs a short
 "unchanged" line. Reports queue: at most one full report per tick (`STILL_REPORTS_PER_TICK`), so many stuck peds do
-not all format in the same frame (user: "make them queue up the self report so many peds stuck don't cause spikes").
+not all format in the same frame (the user asked to queue the self-reports so many stuck peds do not cause spikes).
 
 **Verification.** skate-game ped tests pass (22). Needs a user session to explain the crowds.
 
@@ -1466,24 +1465,24 @@ Refused conversation starts now log at INFO (`PED_CONVERSATION start ped=#n with
 **Problem.** The pros and filmers who stand at challenge spots in retail are challenge hosts (research b96), and our
 engine places none. Their spawn position was open.
 
-**Root cause / evidence** (research b129 `.local/research/peds/b129-standing-pros-placement.md`, b130
-`b130-marquee-skeleton.md`; main's checks marked):
+**Root cause / evidence** (research b129, b130
+`b130-marquee-skeleton.md`; verified points marked):
 - Each challenge record (class `A4F35B159D7432B5`) has a `tGlobalSpawnCharacterInfo` array (field
   `555C505A36C3353A`, 40-byte elements). Element `+24` is a text pointer to a **locator name**, not an id, e.g.
   `otl_univ_04_challengelocator_01` [data]. `sub_825543E0` reads it, hashes it (`sub_8296EA10`) and finds it in the
   LocationManager registry (`sub_82910CE8`); a hit goes to `sub_825547F0` -> `sub_82911008` (the record's `+48`, the
-  matrix's translation row), a miss to a pending list (`sub_82557228`) [code, main verified the call chain].
+  matrix's translation row), a miss to a pending list (`sub_82557228`) [code, verified the call chain].
 - The locators are the same `global_locators/*.rx2` records our teleports already read (`teleports.location_records`).
   Exact-name matching places 77 of 80 hosts (Industrial 26, University 23, DownTown 22, MaloofMoneyCup 3,
   BlackBoxPark 2, SkateSchool 1); `ftl_univ_01_kalis_locator_01`, `photo_dwtn_02_startlocator_01` and
   `street_dtwn_01_challengelocator_01` exist in no locator file, so retail keeps them pending (no host there,
-  inferred) [data, main ran the export 2026-10-16].
+  inferred) [data, export run 2026-10-16].
 - Some challenges have two elements (two people or two spots); `+28` is 0 / 1 / 2 (2 on every photo challenge),
   meaning open.
 - Model: the marquee skeleton (`MarqueeSkeletonPres`, 133 bones) shares bones 0 to 24 by name and index with the ped
   rig, so our name binding (`present_ped_looks`, `crates/skate-game/src/living_world/peds.rs:1134`) covers the body;
   retail ships no remap table. The photographer graph names `PHOT_SHOOT_REVIEW_N_0_N`, which no anim bank contains
-  [data, main checked the graph line].
+  [data, verified the graph line].
 
 **Change (step 1 of the port).** `tools/asset_pipeline/marquee_hosts.py`: the `livingworld` setup group writes
 `living_world/marquee_hosts.json` = per challenge and element {challenge, element, entity key, entity name (the key is
@@ -1505,7 +1504,7 @@ around a host.
 Stock graphs (0.8) got a 37 degree cone instead of 46, and the marquee graph's `FOVAngle="1.4"` could never be
 true, so a standing pro would never leave HoldAtSpawn.
 
-**Root cause / evidence** (research b131 `.local/research/peds/b131-marquee-ops.md`; main verified 2026-10-16):
+**Root cause / evidence** (research b131; verified 2026-10-16):
 the condition's evaluate `sub_826A9E60` loads op `+32` (`FOVAngle`, default 0.8) into v1 and calls `sub_82473930`,
 a range-reduced even polynomial with constant term 1 (a cosine), then tests the flat dot product against the
 result; op `+48` (`Distance`, default 0.0) compared with 0.0 skips the range test, else the flat distance must be
@@ -1523,13 +1522,13 @@ front of them now do so over a slightly wider cone.
 
 **Problem.** Session 10: "peds should have similar physics as npc skaters in the sense that they should move as your bump into them, whereas at the moment you go through them and they 'react' to it after the fact. they also can cause you to bail in retail if you run into them going fast or doing a trick."
 
-**Root cause** [code, research b138; main checked our side]. Retail peds are bodies in collision group 11 inside the
+**Root cause** [code, research b138; verified our side]. Retail peds are bodies in collision group 11 inside the
 skater's skeleton contact solve (`sub_82BD4A30`, group switch at `0x82BD5388`: 5 skater, 8 vehicle, 11 pedestrian).
 The solver pushes the two apart, the group-11 force is kept (`+4060`), and the contact also feeds the per-region
 strongest contact that the wipeout checks read, so a hard hit bails the skater through the ordinary thresholds. Our
 skeleton side already had group 11 (`maximum_group_11_force`), but no ped ever added a body, so the skater rolled
 through and only the distance test (`peds::skater_hit`) started the ped's reaction.
-Research b144 [code, main verified the groups in the recomp]: each ped's collision object builds two collision bodies
+Research b144 [code, verified the groups in the recomp]: each ped's collision object builds two collision bodies
 (`sub_82E268C8`, ctor `sub_82E0E2A0`): A in group 9 and B in group 11 (the one the skater meets). Agent-derived, not
 re-checked: B has two parts with finite masses (`sub_82AE7770`), posed from bones, and each body can be removed on its
 own (`sub_82E0E730`). Shapes, sizes and masses are data (collision asset, vault), still to be traced.
@@ -1541,7 +1540,7 @@ stumble, `sub_82E38FB8` kind 5) is unchanged. Mod tuning `living_world.ped_body 
 (validated, reset on mod disable).
 
 **Change (step 1b, retail parts).** Recomp trace b146 (`hooks_pedbody.cpp`, Aletown, 41 peds) and research b147
-(`sub_82E35838`, bone table `sub_82E33070` at 0x82FC9F14, main checked the table and Spine1): body B is three capsules
+(`sub_82E35838`, bone table `sub_82E33070` at 0x82FC9F14, verified the table and Spine1): body B is three capsules
 posed every frame from the skeleton: part 0 radius 0.20 half length 0.575 10 kg at Hips along Hips -> Head; parts 1 / 2
 radius 0.08 half length 0.20 20 kg each, halfway between LeftForeArm / RightForeArm and their hand along the forearm;
 all moved ahead by the ped's velocity x 1/60 s. `ped_body.rs` poses them from `peds::ped_globals` and the ped root
@@ -1558,7 +1557,7 @@ ped is not yet displaced by the push (b144 found no root write-back; open).
 data test `a_ped_body_is_solid_to_the_skater` (DownTown, standing skater): a ped closing at 1.4 m/s reaches group-11
 force 1.30 and no wipeout; at 9 m/s 20.61 and a wipeout at tick 8 (the ordinary region thresholds).
 
-Answered 2026-10-19 (b368, `.local/research/b368-ped-push-aside.md`, after b217) [code]: retail writes nothing from
+Answered 2026-10-19 (b368, after b217) [code]: retail writes nothing from
 the solve back to the ped or its NavPower bot (body B is keyframed from the bones every frame; the contact callback
 `82E38FB8` and `8269E170` only pick the reaction and its direction; the bot is resynced to the ped, never the other
 way). The ped is moved by the reaction clip's root motion [trace b217: stumble 0.25 to 1.1 m over 0.7 to 1.2 s,
@@ -1571,7 +1570,7 @@ a session (does it feel solid, do fast and mid-trick hits bail, does the ped's r
 **Problem** [code]. The speech tuning's first two words (setup exports them as `unknown_0` / `unknown_4`) were read by
 nobody: every line started the frame it was accepted, and a stream took the next line at once.
 
-**Retail** [code: research `speech-stream-start`, main read the start in Ghidra pseudocode]. `sub_82C5DC80` starts a
+**Retail** [code: research `speech-stream-start`, checked the start in Ghidra pseudocode]. `sub_82C5DC80` starts a
 line on its stream at once (active, speaking, interrupt rules, the queue waits) and schedules the voice at the library
 clock (a double) + the event's tuning `+0` (`sub_824823C0` reads the float); scripted dialogue holds a stream with
 the same clock + 1000.0 instead. `sub_82C5DA88` stores tuning `+4` on the stream after a start; `sub_82C5CC90` counts it
@@ -1590,10 +1589,10 @@ playing line), and keeps a stream that started a line closed to new lines until 
 
 ## Ghidra pass 1: knock-downs, mood escalation, chase groups, the taze capture (2026-10-16)
 
-The user asked for Ghidra fixes across the living world to get it closer to retail (plan
-`.claude/todo/living-world-ghidra-pass.md`). This pass compared the ped contact, aggression, chase and taze code with
+The user asked for Ghidra fixes across the living world to get it closer to retail (local
+plan: living world Ghidra pass). This pass compared the ped contact, aggression, chase and taze code with
 the TU3 pseudocode (Ghidra with the Xenon360 extension) and the generated recomp code. Research: b152 (aggression),
-b153 (taze), b154 (chase), b155 (speech, ported later); main re-read every address below before porting it.
+b153 (taze), b154 (chase), b155 (speech, ported later); re-read every address below before porting it.
 
 ### Problems and root causes [code]
 - **A warned ped never escalated to a chase.** The mood records' `7FF7` test ("outstanding reactions about the
@@ -1672,8 +1671,8 @@ b153 (taze), b154 (chase), b155 (speech, ported later); main re-read every addre
 ### Problem
 Only the players could knock a ped down or make it stumble. Retail's contact callback `sub_82E38FB8` reacts to any
 `IActor` owner (kind 5, skater thresholds 3.0 / 3.0) and to another ped (the toucher casts to `IPedestrian`,
-`sub_826C2C70`). The user confirmed both for retail (2026-10-16): asked whether NPC skaters knock peds over, "Yes they
-can"; asked whether peds stumble when another ped runs into them, "yes i think so?".
+`sub_826C2C70`). The user confirmed both for retail (2026-10-16): asked whether NPC skaters knock peds over: yes;
+asked whether peds stumble when another ped runs into them: probably yes.
 
 ### Retail [code]
 - Ped toucher (`sub_82E38FB8`, the block after the direction): the ped thresholds `081F978F8706D77B` /
@@ -1712,7 +1711,7 @@ can"; asked whether peds stumble when another ped runs into them, "yes i think s
 Peds carried their hand props but never used them, so the phone ring, the call lines and the litter line (speech 49,
 48, 50, 61; the audio side was ported, research b155 item 2) never happened.
 
-### Retail [code + data] (research b164; main re-read `82E3F818`, `82E1FCD8`, `82E3F1D8`, `82E3F470` and the strings)
+### Retail [code + data] (research b164; re-read `82E3F818`, `82E1FCD8`, `82E3F1D8`, `82E3F470` and the strings)
 - The attach (`82E3DE18`) takes the entity's usage of the prop (`livingworld_entities` `handprops`: {handprop, usage})
   and that usage's action list (`livingworld_handprops_usagecharacteristics` `actions`: {action, weight, min, max});
   a non-empty list sets has-actions (`+0xCCF` 0x20) and picks.
@@ -1748,11 +1747,11 @@ Peds carried their hand props but never used them, so the phone ring, the call l
 - **Problem (research b156 M1 / M2, b167):** a standing ped turned only by `StandTurnR180` (beyond 135 degrees) or
   pivoted on the spot at 45 deg/s; a walking ped stopped to pivot beyond 60 degrees. The `StandTurnR45..135` and
   `WalkTurnR45..180` clips were loaded but never played.
-- **Retail [code + data] (b167; main checked the branch directions and the edge addresses of `82E2A500` in the recomp
-  asm; the edge values were read from the image by the research agent):** the locomotion update `82E36870` ->
+- **Retail [code + data] (b167; verified the branch directions and the edge addresses of `82E2A500` in the recomp
+  asm; the edge values were read from the image in research):** the locomotion update `82E36870` ->
   `82E29540` -> `82E29D98` posts a turn intent through `82E2A500` while no turn or transition runs (loco +0x84 /
   +0x86). The angle (`82E2ABF8`) is the signed angle from the facing to the desired direction (`82E2AAA0`, b169,
-  main-checked): a forced facing (queue +0x820 when +0x834 & 0x20), else the first face request at ped+0xB0 more than
+  verified): a forced facing (queue +0x820 when +0x834 & 0x20), else the first face request at ped+0xB0 more than
   0.1 m away, else an override of the bot (mover slot 0x14), else NavPower's steering velocity normalised (mover slot
   0x0C, `82C47198`); zero steering posts no turn. The 4.25 that `82E2ABF8` passes on is not used by the angle (it is
   stored at cmd +0x80). Buckets: from
@@ -1788,7 +1787,7 @@ Peds carried their hand props but never used them, so the phone ring, the call l
   "peds seem to turn much better".
 
 ## Zombies reach their goal within the mover's 2 m (2026-10-16)
-- ZombieFollow's "goal reached" is the mover's vfunc +124 (`82E2BC70`, main read in the recomp asm): 3D distance
+- ZombieFollow's "goal reached" is the mover's vfunc +124 (`82E2BC70`, checked in the recomp asm): 3D distance
   within the arrival radius `+0x0C`, and every writer found sets it to `0x82060C50` 2.0 m (`82E35E80`, mover modes
   2 / 3 / 4 / 6; b158). Ours was 0.5 m flat [inferred]. Now 2.0 m in 3D, mod key `ped_brain.zombie_arrive_distance`;
   test `zombies_follow_the_player_and_mill_round_them` checks 2.1 m (not reached) and 1.92 m (reached).
@@ -1797,10 +1796,10 @@ Peds carried their hand props but never used them, so the phone ring, the call l
 - **Problem:** our walking peds steered at 45 deg/s (a locomotion record value read as degrees per second, meaning
   unverified); NavPower's real rate was unknown (b158 item 2, b169).
 - **Measurement [trace, recomp]:** a new recomp trace line `PEDFACE` (research hooks on the ped mover's think
-  `82E2CB08` and the steering getter `82E2D180`; offsets from b170, main-checked: ped = mover +4, the turn flag byte
+  `82E2CB08` and the steering getter `82E2D180`; offsets from b170, verified: ped = mover +4, the turn flag byte
   `*(ped+0x1704)+0x84`) logs each ped's facing, position, turn / transition flags and NavPower's last steering
-  direction about 3 times a second (the mover think's own rate). Scripted standing runs at PCU Library (user: "much
-  better location") and DownTown Aletown: 30 peds, 12,087 lines, 0 malformed. A walking ped's facing is within 5 deg of
+  direction about 3 times a second (the mover think's own rate). Scripted standing runs at PCU Library (a better
+  location, per the user) and DownTown Aletown: 30 peds, 12,087 lines, 0 malformed. A walking ped's facing is within 5 deg of
   the steering direction in nearly every sample (no facing lag). Outside turn clips the walking direction changes p50 0,
   p90 19, p95 48, p99 149, max 257 deg/s; turn clips p50 68, p90 178, max 328 deg/s.
 - **Change:** `WanderParams::steer_rate` 255 deg/s for the walking steer (the 45 deg/s value stays for standing peds
@@ -1811,17 +1810,17 @@ Peds carried their hand props but never used them, so the phone ring, the call l
   stuck_seconds, crosswalk}`, held in `LivingWorldSettings` (reset when the mod is disabled) and copied into the nav
   settings; before this no ped nav value (crosswalk rule included) was reachable from a mod.
 - **Tools:** `tools/claude-skills/recomp-research/tools/ped_face_rate.py` (PEDFACE) and `ped_turn_rate.py` (PEDXYZ);
-  scripts `.local/recomp/scripts/pedface_pcu_library.txt` / `pedface_stand.txt`. Credit: the skate3recomp static
+  local recomp input scripts pedface_pcu_library / pedface_stand. Credit: the skate3recomp static
   recompilation and its research hooks.
 - **Verification:** `ped_nav_is_mod_reachable_and_reset_on_disable`; ped suites (see the commit). Not play-tested yet:
   walking peds now follow path corners quickly instead of arcing slowly.
 
 ## Ped normal maps: the RGB layout (2026-10-16)
-- **Problem (user, verbatim: "the lighting of peds in the recomp are much better and smoother ours in the rust engine
-  are rough and blocky feeling dark patches", "mainly on the shadowed side"; research b171, main-checked):** the
+- **Problem (user: ped lighting in the recomp is much smoother; ours shows rough, blocky
+  dark patches, mainly on the shadowed side; research b171, verified):** the
   living-world model exporter read every normal map as retail's two-channel layout (x in alpha, y in green). Ped normal
   maps are DXT1 (rx2 format 82): no alpha, so x came out 1 and z 0 for every texel. The installed `female_adult_1.glb`
-  body and hair normal textures read R 218..255, B exactly 128 (main checked the pixels): every shaded normal lay flat
+  body and hair normal textures read R 218..255, B exactly 128 (verified the pixels): every shaded normal lay flat
   along the surface tangent, which lights as blotches that change per UV island and DXT block, worst away from the sun.
 - **Change:** `living_world_models._normal_png` picks the layout from the source: DXT5 two-channel (x in alpha;
   vehicles, unchanged) or DXT1 RGB (x in red; peds); the decoded PNG no longer carries the format, so a constant alpha
@@ -1834,7 +1833,7 @@ Peds carried their hand props but never used them, so the phone ring, the call l
 
 ## Moods: DisableAllMoods and prerequisite kind 8 (2026-10-17)
 
-From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.local/research/`):
+From the stuck-ped research for the laptop session 2026-10-17 (b175, b176):
 - `DisableAllMoods` now stops the mood producer. Retail's producer `sub_82E41B98` skips a ped while `brain+0xCCE` bit
   0x08 is set (set and restored by `826A5A20` / `826A5A50`) [code, b176]; ours set and restored `moods_disabled` but
   nothing read it. Now `peds.rs` skips `produce` for a busy ped or while it holds. No stock pedestrian graph uses
@@ -1849,8 +1848,8 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 ## A fast hit on a ped comes from the bodies meeting (2026-10-17)
 
-- **Problem:** user (laptop session game-20261017-143646): "while you can bump them, running into them fast should
-  cause bails". 12 ped knockdowns at 3.5 to 7.9 m/s, no skater wipeout after any of them.
+- **Problem:** user (laptop session game-20261017-143646): bumping peds is fine, but running into them fast should
+  cause bails. 12 ped knockdowns at 3.5 to 7.9 m/s, no skater wipeout after any of them.
 - **Retail [code] (research b185):** there is no ped-hit bail. The skater bails through the ordinary skeleton contact
   solve: the ped's body parts are group 11 in it (`sub_82BD4A30`), and the ground wipeout checks (`82D8F9E0`: contact
   force 8.5, arms 30.0, displacement 0.4, squash 0.6, x 0.3 mid-trick) read those contacts. The ped's reaction
@@ -1870,8 +1869,8 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 ## A ped that lost its prop no longer stalls a conversation (2026-10-17)
 
-- **Problem:** user (laptop session game-20261017-143646): "I feel like im still seeing alot of peds just standing
-  around and making small groups." Three conversations never finished (ids 60, 70, 85: 1 turn in 236 s, or stuck at
+- **Problem:** user (laptop session game-20261017-143646): still a lot of peds standing
+  around in small groups. Three conversations never finished (ids 60, 70, 85: 1 turn in 236 s, or stuck at
   state 3 until the log ended), and their members stayed put; 45% of the Plugin `PED_STILL` lines came from them.
 - **Root cause [log + code] (research b186):** a ped whose seat or newspaper box went away without ExitPlugin (streamed
   out, disabled, moved) dropped `mind.prop` silently but kept the prop's waypoint and facing. As a later conversation
@@ -1896,7 +1895,7 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 - **Ours before:** when a ped's 10 mood records were full, the oldest record went, so a long-lived collision or
   being-chased record could be pushed out by a stream of presence events.
-- **Retail [code] (research b189; main re-read the compares in the recomp):** `sub_82E414D8` (only caller
+- **Retail [code] (research b189; re-read the compares in the recomp):** `sub_82E414D8` (only caller
   `sub_82E41060`, after no record matched the same instigator, second entity and category) drops the new record when
   the store is full and it has both an instigator and a second entity; otherwise `sub_82E441C8` scans the records in
   slot order from (none, 0, -1.0) and takes the one whose category Priority is unsigned greater, or equal with a
@@ -1924,9 +1923,9 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 ## Peds stay solid while they react (2026-10-17)
 
-- **Problem:** user (laptop recomp session 175036 notes): "peds are much more solid in retail than ours. you cannot
-  move through a ped."
-- **Root cause (research b203, `.local/research/b203-peds-solid.md`; main checked `ped_body.rs`):** our
+- **Problem:** user (laptop recomp session 175036 notes): peds are much more solid in retail than ours; the player cannot
+  move through a ped.
+- **Root cause (research b203; verified `ped_body.rs`):** our
   `push_ped_proxies` took a ped's bodies out of the skater solve for the whole stumble or knock-down (the
   `in_collision` filter). Every touch starts at least a stumble (retail gate 0), so after the first touch the skater
   rolled through the ped.
@@ -1944,7 +1943,7 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 ## Hand props: retail rotation order (2026-10-17)
 
-- **Problem:** user: "ped hand props are NOT held properly with correct positioning/rotation and attachpoints".
+- **Problem:** user: ped hand props are not held with the right position, rotation and attach points.
 - **Retail [code] (research b202, b204, b205):** the per-frame placement `82E3E4F0` (only while the prop is in hand)
   writes World = H * T(offset) * R * inverse(P) through `82E3E1B0`: H = the RightHandProp bone times the ped's world
   matrix (`82E218A0`, slot 3 of the bone table filled by name in `82E33070`); R = Rz * Ry * Rx from the record's
@@ -1969,7 +1968,7 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 - **Report:** laptop session game-20261017-143646 (build e44f93a): peds "standing around and making small groups";
   PED_STILL Plugin 633 of 856 samples, conversation 530.
-- **Finding [log] (research b211, `.local/research/b211-ped-conversation-rates.md`):** that build lacks 01383e32 (main
+- **Finding [log] (research b211):** that build lacks 01383e32 (main
   checked with `git merge-base`). Three conversations (60, 70, 85) give 245 of the 530 samples: each stuck at state 3,
   the speaker flipping TurnToFaceWaypointOrientation / ListenToSpeaker every tick, at least two of them peds that had
   lost their seat but kept its waypoint, the case 01383e32 fixed. Three more waited out the 30 s gather and the 60 s
@@ -1983,7 +1982,7 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 ## Passers-by join conversations; the founders pass the same test (2026-10-17)
 
 - **Problem:** ours never added a third member to a conversation, and the starter and its target joined unconditionally
-  (b211, above). Research b212 (`.local/research/b212-conversation-join-despawn.md`); main re-read every address below.
+  (b211, above). Research b212; re-read every address below.
 - **Retail [code]:** a conversation area is an ordinary offer (vtable `0x8232B798`, add / remove in slots 15 / 16), so
   passers-by reach it through the same wandering-offer scan as seats and ATMs (`826C0058` -> `826BFE18`): no current
   plugin, not refused, `|dy| < 1.8`, horizontal distance under the offer radius (class field `E2101F2B17A0E6B5`,
@@ -2012,11 +2011,11 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 ## On foot: peds give when run into, benches are walked over, a pushed seat throws its ped off (2026-10-17)
 
-- **Report:** laptop session game-20261017-195628 (build 17b3d0d), the user's words: "Peds when run into are too solid.
-  They should be a little easier to push when run into."; "Running into a bench caused me to go through it instead of
-  walking over it. In retail I walked over the same bench at running speeds."; "Pushing a bench in retail bumps peds
-  physically and doesnt unseat them, it knocks them off the seat".
-- **Peds too solid (research b217, main checked the chain):** on foot the walker's last-mile capsule sweep
+- **Report:** laptop session game-20261017-195628 (build 17b3d0d), the user reported: peds are too solid when run
+  into and should be a little easier to push; running into a bench put the skater through it instead of over it,
+  while in retail they walked over the same bench at running speed; in retail a pushed bench bumps seated peds
+  physically and knocks them off the seat, rather than making them stand up.
+- **Peds too solid (research b217, verified the chain):** on foot the walker's last-mile capsule sweep
   (`physics/solid_contacts.rs` `constrained_position`) stops at the ped body proxies (they are in
   `network_proxies.solids`, `ped_body.rs` `push_ped_proxies`) as hard walls, so the skeleton never touched a ped,
   `ped_hits` stayed empty and the ped never reacted. Retail [code, b144 / b146 / b147 / b217]: the ped body is
@@ -2026,7 +2025,7 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
   ped side turns that into the part's speed after the hit by momentum (`ped_body.walker_mass`, mod-facing, 75 kg, NOT
   RETAIL YET: retail's on-foot path into peds is not found), which feeds the existing stumble / knock-down rules. Log
   `PED_BODY_CONTACT ped part by=walker closing part_speed`. Test `a_walker_stopped_by_a_ped_reports_the_part`.
-- **Bench walked through (research b218, main checked the probe call sites):** every on-foot query saw only the map
+- **Bench walked through (research b218, verified the probe call sites):** every on-foot query saw only the map
   world, so a prop was never step geometry; the skeleton's parts were dragged into the bench and shoved it. Retail
   [code]: the walker's query batches use pool mask 7; pool bit 2 (`82764AB0`: world+0x5580) is the pool the grab
   request asks with mask 2 (`8275FD00`), the DMOs [inference]; nearest hit across pools, the earlier pool on ties
@@ -2034,7 +2033,7 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
   `GamePhysics::biped_world()`; the contact toolkit scene, the ground geometry query and the biped air selector answer
   pool 2 from the prop world. The prop the player holds is left out (NOT RETAIL YET: retail's held-DMO filter is not
   decoded). Board states are unchanged. Test `biped_lines_see_the_prop_world_as_pool_two_without_the_held_prop`.
-- **Seated ped on a pushed bench (research b219, main re-read `82E3DBE0`):** retail never knocks a seated ped down with
+- **Seated ped on a pushed bench (research b219, re-read `82E3DBE0`):** retail never knocks a seated ped down with
   its own seat (`sub_82E38400` gives a plugin object kind 3 or 0, never 5). The owned object reports each move as a
   step vector (`82E3DBE0`): |d|^2 <= 2.5e-5 is added to `brain+3168` and carried by the root update; a bigger step, with
   OwnPluginObject and the byte `[ped+5888]+1416` == 0, queues Avoid / Jump / Forward (SitAvoidFwd). Ours read the
@@ -2043,9 +2042,9 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
   seat's move over one step of `SEAT_PUSH_STEP_SECONDS` is compared (1/60 s: the DMO post-update `82C562D0` sends
   its pose change once per sim tick, research b220, so the gate is 0.3 m/s); the jump is held until its clip starts. Logs `PED_SIT_AVOID ... locked=`, `played=`,
   `PED_SIT_AVOID_DONE moved=`.
-- **Which props the walker steps on (research b221-b223, recomp trace, main re-read the type setters):** retail's DMO
+- **Which props the walker steps on (research b221-b223, recomp trace, re-read the type setters):** retail's DMO
   pool rebuilds its query meshes every frame with rejection flags `1 << type` (`827778C0`); the walker's contact
-  probes ask with mask 0x6000, so types 13 and 14 are never its ground. [trace, `.local/research/prop-types/run1`,
+  probes ask with mask 0x6000, so types 13 and 14 are never its ground. [trace, a local data folder,
   hooks PROPTYPE / PROPSETTYPE on the recomp fork] every DMO spawn (`82C4E940` -> `82E0E338`) gets type 12 or 14; a
   ped's hand prop is made type 14 and switches to 13 the moment the ped takes it (slot 32 `82C56B00`), back to 14 on
   release (slot 33 `82C56BA0`: 12 when the type's mass is at least 5.5 kg, `0x822F8C68`, else 14, plus a 30 s timer).
@@ -2067,7 +2066,7 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 - **Report:** laptop session game-20261018-120611: peds still too solid on foot, and walking over the bench still bumps
   sometimes. The log had 0 `PED_BODY_CONTACT ... by=walker` lines; all 16 `PED_SKATER_CONTACT` lines came from NPC
   skaters.
-- **Root cause (research b223, main checked every line):** each ped part proxy id was `PED_PROXY_TAG | ped id << 2 |
+- **Root cause (research b223, verified every line):** each ped part proxy id was `PED_PROXY_TAG | ped id << 2 |
   part` with the ped id from `LivingWorldId::to_u64` (kind 1 in bit 56). Shifted by 2 the kind lands in bit 58, so the
   id's top 16 bits read 0x5445, not the tag 0x5045, and both tag tests (`solid_contacts.rs` walker hits,
   `skeleton_feedback.rs` board hits) dropped every real ped part. On foot the parts still stopped the walker's capsule
@@ -2088,10 +2087,10 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 ## The tazer draws, cycles and holsters with its clips and the taser in hand (2026-10-18)
 
-- **Problem:** user (laptop session 2026-10-18 152526): "I also pissed off a lady ped and it tased me. However, the
-  animation was not in yet." The taze logic worked (PED_TAZE -> SKATER_TAKEDOWN), but the ped played no clip and held
+- **Problem:** user (laptop session 2026-10-18 152526): an angered female ped tased the player, but the
+  animation was not in yet. The taze logic worked (PED_TAZE -> SKATER_TAKEDOWN), but the ped played no clip and held
   no taser.
-- **Retail (research b248, b153; main checked our anchors):** [data] TazerInto = `SG_TAZR_STND2TAZR_F_0_N`, TazerCyc
+- **Retail (research b248, b153; verified our anchors):** [data] TazerInto = `SG_TAZR_STND2TAZR_F_0_N`, TazerCyc
   = `SG_TAZR_TAZR_F_0_CYC`, TazerOut = `SG_TAZR_TAZR2STND_F_0_N`, all on the upper-body channel (ped vfn248 `82E3A3F0`
   -> vfn240 with blends 0.2) [code]. DrawTazer (`826A8258`) plays TazerInto; once timer 37 (0.133 s) runs out the
   "tazr" hand prop (tasergun_lw) is requested if the hand was empty at the draw. The ped update `82E3ED50` starts
@@ -2122,9 +2121,9 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
   part's own linear / angular speed after that solve: knock-down above 3.0, otherwise the standing stumble (b272
   [code]); the ped moves through that reaction, there is no root write-back. Two laptop recomp sessions
   (recomp-pedbody-20261018-205249 / -210429, 34 player x ped contacts, 9 of them on foot; analysis
-  `.local/research/b271-pedbody-session.md`) [trace]: on foot the player keeps moving through the contact at up to
+  research b271) [trace]: on foot the player keeps moving through the contact at up to
   ~6 m/s and the on-foot wipeout check `82D90148` never requests a bail (body region strength at most 3.95 of 20.0).
-  On board the user: "there were several bails caused by contact with peds" (board check `82D8F9E0`, unchanged).
+  On board the user had several bails from contact with peds (board check `82D8F9E0`, unchanged).
 - **Change:** `solid_contacts::constrained_position` skips group-11 solids (the walker block and its hit list
   `walker_ped_hits` are gone, as is `ped_body.walker_mass`); the ped parts (already 10 / 20 / 20 kg) are observed in
   the shared solve (`Proxies::observed`, never written back) and `capture_dynamics_reactions` records each part's
@@ -2157,8 +2156,8 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
   to 2.9). `peds.rs` took the largest |v| and the largest |w| over every part the skeleton touched, the forearms
   included. Two of the six were forearm-only touches, and a forearm's small inertia spins it fast from a light push.
 - **Retail [code]:** `sub_82E38FB8` contact kind 5 reads one body only: `lwz r4,8(r9)` (the parts array) then
-  `lwz r11,76(r4)` with no index, part 0, the 10 kg torso capsule (`.local/research/peds/fn_82E38FB8.txt` lines
-  442 / 450, main-read). From it: |linear velocity| (`+32`) and |angular velocity| (`+48`), against the entity
+  `lwz r11,76(r4)` with no index, part 0, the 10 kg torso capsule (a local disassembly listing, lines
+  442 / 450, verified). From it: |linear velocity| (`+32`) and |angular velocity| (`+48`), against the entity
   entry values (0 for stock entities) and then the set's 3.0 / 3.0 knock-down gate. No max or sum over parts.
 - **Change:** any touched part still starts the reaction, but the speed that decides it is the touched ped's
   reaction part after the solve (`ped_body::reaction_part_speed`, `SkaterRuntime::ped_after`, which holds every
@@ -2168,16 +2167,16 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 - **Moddability / multiplayer:** mod patch `ped_body {.., reaction_part}` (0..7, part index into `parts`). The
   choice is by part index, not by hit order, so every peer reads the same part.
 - **Verification:** test `the_reaction_reads_the_torso_whichever_part_was_touched`. Research
-  `.local/research/b283-ped-knockdown-gate.md`. Not play-tested.
-- **Torso spin (research `.local/research/b288-ped-torso-spin.md`; main checked the friction literal and the
+  research b283. Not play-tested.
+- **Torso spin (research b288; verified the friction literal and the
   combine):** a normal impulse on the capsule points through its axis, so one contact gives at most |w| / |v| =
   m h / I = 3.0 [arithmetic] (b283 said 4.0). The four torso knock-downs logged 4.8 to 5.5: friction at the capsule
   surface (radius 0.2) spins the torso about its long axis (inverse inertia 6.25), 4.4 to 6.3 for one contact with
   our part friction 0.5 (no retail source) and the max-combine (`physics/contact.rs:107`).
-- **Retail part material [code, research `.local/research/b289-ped-part-friction.md`]:** every ped part body gets
+- **Retail part material [code, research b289]:** every ped part body gets
   static / dynamic friction and restitution 0.0: `82E268C8` fills its three material slots (+80 / +84 / +88) from
-  `0x82165A10` (main checked the `lis r11,-32234` / `lfs f0,23056(r11)` load and the three stores; the 0.0 value and
-  the empty owner vfuncs +120 / +124 rest on the agent's dump), `82E0E4B0` writes them to the part definition +0x80
+  `0x82165A10` (verified the `lis r11,-32234` / `lfs f0,23056(r11)` load and the three stores; the 0.0 value and
+  the empty owner vfuncs +120 / +124 rest on the research dump), `82E0E4B0` writes them to the part definition +0x80
   and `82DC4588` copies them into the collision object, which the retail combine (`82763078`, ours
   `combine_contact_materials`) pairs with the skater bone's material (riding: friction 0). So a riding skater's
   contact with a ped part has no friction, and one contact can spin the torso at most 3.0 x |v| (under the gate at
@@ -2209,7 +2208,7 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 - **Problem:** laptop session 2026-10-18 22:01: benches pushed into water had no ped paths to them and kept their
   seats on offer. Asked whether a seat should stop being offered once its bench is in the water, the user: yes.
-- **Findings (research `.local/research/b286-bench-in-water.md`, main-checked):** the offer gate already skips a
+- **Findings (research b286, verified):** the offer gate already skips a
   `disabled` prop (`peds.rs` offer scan) and the drop path releases a ped walking to or sitting on one; the move check
   only ran for props with check limits. A seat under water is off the navmesh, so `PedNav::plan` finds no polygon
   and no path is planned: expected, not a bug (retail has no plugin reachability check either, only the 60 s
@@ -2224,8 +2223,8 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
   (`PluginProp` is host-owned), by stable prop id.
 - **Verification:** tests `a_seat_in_water_switches_the_bench_off` (skate-core) and the `ped_brain` patch checks
   (skate-mods). Not play-tested.
-- **First play (laptop 2026-10-19 00:19, build 0e2bb7d):** the user: "I pushed a bunch of benches in the water but I
-  never saw a ped try to path to them." The log had no line about the rule, so it could not show whether the seats
+- **First play (laptop 2026-10-19 00:19, build 0e2bb7d):** the user pushed several benches into the water and
+  never saw a ped try to path to them. The log had no line about the rule, so it could not show whether the seats
   counted as wet (the benches may stand in shallow water with dry seats, or not be seat props). Added
   `PED_PLUGIN_WATER <class> <id> wet lowest_seat surface occupants` on every change of a moved seat prop's water
   state (the first check after a move always logs), with any water surface up to 2 m above the lowest seat.
@@ -2258,9 +2257,9 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 ## A seated ped whose seat is dropped stands up (2026-10-19)
 
-- **Problem (laptop session 2026-10-19 01:10, build edec93c):** the user: "I pushed a bench in the water but for some
-  reason the ped sitting on it was left behind floating seated and unable to be bumped. This happened as the first
-  bench I grabbed and pushed in the water." Log: ped #105 sat on bench 1015, then `PED_PLUGIN_PROP ... leaves
+- **Problem (laptop session 2026-10-19 01:10, build edec93c):** the user pushed a bench into the water and the ped
+  sitting on it was left behind, floating seated and unable to be bumped; this was the first
+  bench they grabbed and pushed into the water. Log: ped #105 sat on bench 1015, then `PED_PLUGIN_PROP ... leaves
   waypoint_sit ... (dropped)` (before the grab, among `DMO_STREAM` evictions), its brain went on to a greet, but every
   later `PED_STILL` kept the position and the clip `NPC_SIT_IDLE03_N_0_CYC`, and bumps logged
   `PED_BODY_CONTACT_NO_REACTION ignore_standing=true`. A ped on a second bench jumped off as it should.
@@ -2324,8 +2323,8 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 - **Tests:** `chase_messages_follow_retails_bands` (skate-core), `a_taze_line_shows_its_text_and_plays_the_default_sound`
   (data-gated: load, show, label text, the default sound, 90 frames), tool tests for the HUD install.
 - **Open:** who sends the chase-over line (first argument 0); the line's on-screen look is not play-tested.
-- **Fix 2026-10-19 (laptop session 10:16, user: "clobbered text appeared after the ped got mad and attacked me, but
-  it never went away and was left on screen"):**
+- **Fix 2026-10-19 (laptop session 10:16, user: garbled text appeared after the ped got angry and attacked, and
+  it stayed on screen):**
   - Retail [code]: the post `82663F38` resets the shown-message counter (`+0xBC` = 0) and sets the active flag
     (`+0xC0` = 1); the central HUD update `82664550` adds one per update and at 180 (`0xB4`), or when `82663E40`
     says the HUD cannot show, clears both and sends the screen event 5. The movie's `SetState(5)` calls its hide
@@ -2343,8 +2342,8 @@ From the stuck-ped research for the laptop session 2026-10-17 (b175, b176 in `.l
 
 ## The alert over a ped that warns or chases you (2026-10-19)
 
-- **Ask (user, 2026-10-19):** "the ped alerts that appear over a peds head when they are mad (yellow) and when they
-  are chasing/tazing (orangeish red). the notification is kind of 'sim style'".
+- **Ask (user, 2026-10-19):** the alerts over a ped's head when they are angry (yellow) and when they
+  are chasing or tazing (orange-red); the notification is somewhat "sim style".
 - **Retail (research b191, 2026-10-17; re-checked in Ghidra 2026-10-19):** a screen-space HUD sprite, retail's
   "ChaseArrow" manager. The graph op `SendChaseStateMessage` (`826A77A8`) posts {ped, state} for a player target:
   warn (from `pedestrian_dowarning`), chase (intercept / secondary chaser), tired, giveup, end. The handler
@@ -2379,7 +2378,7 @@ yellow warning to show. Pissed it off to the point it went straight to red and a
 fall so easily from its own attack against the player; it can happen but it seems to happen every time I test it."
 
 Root cause / evidence:
-- Warn (research b316, b318; main checked the data and our code): the mood rows decide by the collision count on the
+- Warn (research b316, b318; verified the data and our code): the mood rows decide by the collision count on the
   skater's record, `skatercollisionwarn` (count 2, priority 2) before `skatercollisionchase` (count 3, priority 1);
   the producer skips a busy ped (`82E3BF70`), and a ped in a plugin is busy (`*(ped+96)` = the participant's plugin
   instance, b318). Retail's Plugin state goes to Colliding on a bump (`pedestrian_plugin.xml`, unless
@@ -2387,8 +2386,8 @@ Root cause / evidence:
   aborting an unfinished one, and clears the instance); Colliding goes on to Wander (`pedestrian_colliding.xml`).
   Ours only cleared `in_plugin` at Plugin End, so the ped walked back into its conversation, stayed busy through
   every bump and its first producer run saw count 4 to 6: straight to chase (#4: six bumps, then chase at 17:06:41).
-- Takedown (research b317; main checked the graph data): AttemptTakeDownTargetable and WaitForTakedownDecision are
-  not interruptable and have no Colliding transition (`pedestrian_attempttakedowntargetable.xml`); the contact
+- Takedown (research b317; verified the graph data): AttemptTakeDownTargetable and WaitForTakedownDecision are
+  not interruptible and have no Colliding transition (`pedestrian_attempttakedowntargetable.xml`); the contact
   callback `82E38FB8` only stores the reaction and sets the begin-colliding byte, the touch decides the takedown
   (`826A4BE8`) and success clears the byte (`826A4E50`). Ours played the reaction at the contact: #4 entered
   WaitForTakedownDecision at 17:06:44.206, its own lunge read as a Knockdown at 44.276, the takedown succeeded at
@@ -2410,8 +2409,8 @@ reaction; recomp traces proposed in b317 / b318 (not run).
 ## A failed takedown keeps its stored reaction, and may trip (2026-10-19)
 - **Problem:** ask 78 follow-up: during a takedown attempt ours dropped every contact (the target's touch decides the
   takedown, correct; anyone else's contact was played at once or lost), and a failed takedown never tripped.
-- **Retail** ([code] Ghidra + recomp, `.local/research/b326-failed-takedown-reaction.md`; design
-  `.local/research/b329-deferred-reaction-port-plan.md`): AttemptTakeDownTargetable Begin `826A49D8` clears the
+- **Retail** ([code] Ghidra + recomp, research b326; design
+  research b329): AttemptTakeDownTargetable Begin `826A49D8` clears the
   collision component's begin-colliding byte (+8), so a reaction stored before the attempt is dropped, and copies the
   chosen entry's byte +38 bit 0 ("may trip"). Its Update `826A4BE8`: a contact by anyone but the target blocks the
   decision (the graph's 3.0 s timer then fails it). TakeDownTargetableFailure Begin `826A5068`: trips (stores
@@ -2457,7 +2456,7 @@ category `pairtable`, skate3recomp research-hooks) dumped in a spawn-only run in
 symmetric, and body A collides with the static map (0), cars (8) and DMOs (12..14) but never with the skater (4..7)
 or another ped (9..11); body B collides with the skater and with other peds' body B, never with the map, cars or
 DMOs. Contacts on body A of kind 1 (the ped's own plugin object) and 2 (a car) move the ped root; any other contact
-leaves the root and body A is re-posed from it next frame. Matrix: `.local/research/b342-pairtable-matrix.txt`.
+leaves the root and body A is re-posed from it next frame. Matrix: research b342.
 
 **Change.** `ped_body.rs`: `PedProxy` (retail defaults, `PedBodySettings::proxy`, on), `body_a_id` (bit 47, so it
 never equals a body B part id and still names the ped), `body_a_volume` (upright capsule standing on the root,
@@ -2479,7 +2478,7 @@ contact stays the walker's separation (retail's 11 x 11 body B pair does not wri
 proxy keys. Not play-tested yet.
 
 ## A seated or prop-using ped can be knocked over by the skater (2026-10-19)
-Research b371 (`.local/research/b371-ped-reaction-retrigger.md`) [code]: our contact gate already let a ped through
+Research b371 [code]: our contact gate already let a ped through
 while its plugin or taunt clip played (retail skips a skater contact only while the ped is in a collision reaction),
 but the hit then called the animation player's `react`, which refuses while any reaction runs, and plugin and taunt
 clips run as reactions. So a ped on a bench, at an ATM or in a taunt was never knocked over or stumbled.
@@ -2490,7 +2489,7 @@ for security01) drives only the knock-down's ground state machine (re-armed by a
 re-reactions, blocked after 5 expiries), which ours does not have yet (follow-up, ped physics todo).
 
 ## A knocked-down ped gets up at retail's time (2026-10-19)
-Research b372 (`.local/research/b372-ped-knockdown-state-machine.md`) [code + data]: retail's knock-down Begin
+Research b372 [code + data]: retail's knock-down Begin
 (`sub_8269DA00`) starts the anim set's ground timer (`ground_seconds`, 1.5 s; 0.5 s for security01) with the fall,
 and `sub_8269E058` posts the `Recover` intent when it runs out; the motion graph holds the ground cycle until then. So
 the get-up comes at the later of the fall clip's end (0.967 s) and 1.5 s after the hit: about 0.53 s on the ground.
@@ -2502,7 +2501,7 @@ Still to port (b372 port plan): the rest of the Colliding state machine (a conta
 re-hits while down or getting up pick LyingDown / Crouched / Standing by `recovery_intervals*`, contacts blocked
 after more than 5 expiries); the reader of `[ped+0x1714]+0xD4` is not found. b372 also corrects the b156 addendum:
 LyingDown keeps the stored Begin direction, Crouched and Standing take the new hit's direction.
-Recomp measurement (2026-10-19, `.local/research/b359-ground-probe-hook-plan.md` section 9) [trace]: retail's ped probe
+Recomp measurement (2026-10-19, research b359 section 9) [trace]: retail's ped probe
 length L is 1.6 m (probe settings +16, every call seen; the retry scale 4.0). A hit and the mover update's calls were
 not captured (the hook crashed the recomp during the teleport's level load); not needed further, since the user confirmed retail peds always stand on the floor.
 
@@ -2519,10 +2518,10 @@ not captured (the hook crashed the recomp during the teleport's level load); not
   Not play-tested. Open: the reader of `[ped+0x1714]+0xD4`.
 - **Ground probe (b359, b358)** [trace]: the drawn ped's ground cast now uses retail's measured probe length 1.6 m
   both ways, then the 4x retry with retail's shape (a cast up to find a ceiling, then down from below it). Before,
-  the upward reach was 0.2 m, so peds on navmesh up to 4.3 m under a road were drawn sunk; user 2026-10-19: "Peds
-  dont fucking sink into the ground.. ever.." (retail outcome). Not play-tested; `PED_FLOATING` logs any gap.
+  the upward reach was 0.2 m, so peds on navmesh up to 4.3 m under a road were drawn sunk; user 2026-10-19: peds
+  never sink into the ground (retail outcome). Not play-tested; `PED_FLOATING` logs any gap.
 
-### Warn skipped after bump 2 (laptop session 2026-10-20, research b393; main checked the log and code)
+### Warn skipped after bump 2 (laptop session 2026-10-20, research b393; log and code verified)
 - Log: #281 was bumped three times (16:37:59, 16:38:00, 16:38:03) and chased on the third, count >= 3 as retail;
   #126 the same. After bump 2 the producer picked `converse_everyone` (priority 2, presence records ahead in slot
   order) over `skatercollisionwarn` (priority 2): the tie keeps the first hit, as retail's `82E41EB0` (`priority <
@@ -2536,8 +2535,8 @@ not captured (the hook crashed the recomp during the teleport's level load); not
   (`826B4C70`, G+6332 0x04).
 
 ### A slowly moved bench re-sat its ped a dozen times (laptop session 2026-10-20 11:21, b396, b219)
-- User: "after bumping the female ped near the on that attacked me and failed to reach me, she tried to resit about a
-  dozen times before giving up and walking off." Log #20: SitForever -> TargetWaypointPrecise -> EnterInteraction ->
+- The user bumped the female ped near the one that attacked and failed to reach them; she tried to sit again about a
+  dozen times before giving up and walking off. Log #20: SitForever -> TargetWaypointPrecise -> EnterInteraction ->
   SitForever ~12 times in 3 s (seat distance 0.046 to 0.052 around OnWaypoint's 0.05 m) until the bench was disabled.
 - Cause: b219's small-step carry was never ported. Retail sums a seat's steps at or under the 2.5e-5 m^2 gate into the
   ped's root (brain `+3168`, `82E36D70`), so a slowly pushed bench carries its seated ped; ours held the body on its
@@ -2562,9 +2561,9 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Ped brain
 
-A pedestrian's behaviour brain: the host the stock ped AI graph (`Pedestrian.stategraph`) runs on (doc 26 "Ped behaviour runtime"). Retail runs that graph on the same dynamic controller as the skater's graphs (`82C12E88` via `82C12DD0`; `.local/research/peds/b2-ped-aigraph-interpreter.md`), so the shared `graph::controller` drives it here too; this module owns what the graph's operations read and write: wants, timers and flags (the retail brain, `brain+412` wants, `82E40940` / `82E40A80` timers, `+3232` honker, `+3281` bit 0x80 scatter) and the outputs the body follows (motion intent, speed suggestion, flee target).
+A pedestrian's behaviour brain: the host the stock ped AI graph (`Pedestrian.stategraph`) runs on (doc 26 "Ped behaviour runtime"). Retail runs that graph on the same dynamic controller as the skater's graphs (`82C12E88` via `82C12DD0`; research b2), so the shared `graph::controller` drives it here too; this module owns what the graph's operations read and write: wants, timers and flags (the retail brain, `brain+412` wants, `82E40940` / `82E40A80` timers, `+3232` honker, `+3281` bit 0x80 scatter) and the outputs the body follows (motion intent, speed suggestion, flee target).
 
-Operations are parsed once from the graph's attributes ([`PedOp::parse`]); their values stay data. Operations not ported yet are [`PedOp::Pending`]: their conditions answer false and their behaviours do nothing, and the game reports them once (no silent default). Retail bodies (`.local/research/peds/b3-first-slice-operations.md`, main checked Wander and the warn timer): see each variant.
+Operations are parsed once from the graph's attributes ([`PedOp::parse`]); their values stay data. Operations not ported yet are [`PedOp::Pending`]: their conditions answer false and their behaviours do nothing, and the game reports them once (no silent default). Retail bodies (research b3, verified Wander and the warn timer): see each variant.
 
 Multiplayer: the brain is plain data owned by the host; wants carry stable target ids.
 
@@ -2596,8 +2595,8 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 A pedestrian's mood: what happened around it (the skater nearby, a collision, a trick) and the want producer that turns it into wants for the ped AI graph (doc 26 "Ped behaviour runtime"). All rules come from the stock mood tables (`livingworld_moodeventcategories`, `livingworld_entities_moodreactions`, `livingworld_entities_moodresults`, exported by setup); this module holds no values of its own.
 
-Retail (TU3, evidence only; re-implemented; `.local/research/peds/b4-ped-want-producer.md`, `b5-ped-mood-events.md`, `b6-ped-mood-fields.md`; main checked the key addresses):
-- posting `sub_82E41060`: an existing record with the same (instigator, second entity, category) is bumped (`sub_82E41750`: magnitude += the category's per-event magnitude, count += 1, age = 0, position = the event's), else a new one is pushed (`sub_82E414D8`: at most 10; when full only an event without an instigator or second entity may evict one: `sub_82E441C8` takes the record whose category Priority is numerically highest, the oldest on a tie, the first in slot order on an exact tie; b189, main re-read the compares). The per-event magnitude is the category field `B1DD` (the presence period, 0.5 s stock; discrete categories have none: the attribute default `0x830D0850`, 0.0);
+Retail (TU3, evidence only; re-implemented; research b4, `b5-ped-mood-events.md`, `b6-ped-mood-fields.md`; verified the key addresses):
+- posting `sub_82E41060`: an existing record with the same (instigator, second entity, category) is bumped (`sub_82E41750`: magnitude += the category's per-event magnitude, count += 1, age = 0, position = the event's), else a new one is pushed (`sub_82E414D8`: at most 10; when full only an event without an instigator or second entity may evict one: `sub_82E441C8` takes the record whose category Priority is numerically highest, the oldest on a tie, the first in slot order on an exact tie; b189, re-read the compares). The per-event magnitude is the category field `B1DD` (the presence period, 0.5 s stock; discrete categories have none: the attribute default `0x830D0850`, 0.0);
 - per tick (`sub_82E41600`): cooldowns run down and go at 0, ages run up, suppress timers run down to 0; magnitude and count never decay; a record older than its category's lifetime (`A379`, 30 s stock) goes (`sub_82E440E0`);
 - presence (`sub_82E3CA20`): every presence period each player within 35 m (`0x8206D148`) posts `presence` (instigator = player, second = the ped);
 - the producer `sub_82E41B98` / evaluator `sub_82E41EB0`: for each record not suppressed, the ped's reaction results by priority (lower wins), each checked in retail's order (see [`MoodTables::evaluate`]); the winner is rolled (`sub_8269A588`: `rand() % 100 + 1`, pass when p x 100 >= n; p 0 always passes), every roll starts the result's cooldown; on a pass the result's wants are raised on its target (instigator, second entity or the ped itself) and the record is suppressed for the result's suppress time. Not decoded (answer false, documented): the target checks `vfunc +28` / `+32` (`D9F3` / `D44E`), the hand-prop bit (`brain+3278` 0x02, `072D`), the ped-state prerequisites (kinds 1, 2, 4, 7, 8), the sight test (`sub_82E27240`; every post is seen). The count range (`7FF7`) reads the instigator's perception entry `+68`, raised wants about it (inferred).
@@ -2612,7 +2611,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Ped plugins
 
-Ped plugins on world props: benches, trash bins, newspaper boxes, vending machines, ATMs, water fountains, look-at and spectate spots, gathering places (retail TU3, evidence only; re-implemented; `.local/research/peds/b81-ped-plugin-acquisition.md`, `b82-ped-plugin-search.md`; main checked the ped roll `82E3B060` and the d100 roll `8269A588`):
+Ped plugins on world props: benches, trash bins, newspaper boxes, vending machines, ATMs, water fountains, look-at and spectate spots, gathering places (retail TU3, evidence only; re-implemented; research b81, `b82-ped-plugin-search.md`; verified the ped roll `82E3B060` and the d100 roll `8269A588`):
 - a plugin prop owns waypoint groups, one waypoint each for DMO hotpoints (`82C4E128`: hotpoint type 1 = trash bin, 2 = newspaper box, 0 = the root (no waypoint), 8 skipped, any other type = a seat) or the placed groups of the world (`waypoints.json`: vending machines, trash bins);
 - a ped type's `plugin_odds` (attribute `F89323E420A6AAA3`, a list of {prop class, probability}) drives two things: the ped's own yes / no when a prop is offered (`82E3B060`: odds x 100 >= `rand() % 100 + 1`; a refusal remembers the prop, `82E40BD0`, at most 16 entries with the value 30.0) and the spawner's weighted pick of a ped type to spawn at a free prop (`826B90F8`: weight = group weight x odds, draw = rand x 2^-32 x total; on success the prop's cooldown `+232` restarts from `+228`);
 - a descriptor takes one participant unless it says otherwise (`82C17AF8`: `maxNumberOfParticipants`, default 1).
@@ -2645,7 +2644,7 @@ Peds as solid bodies in the skater's contact solve (doc 26g, "Peds are solid"; r
 
 Retail: a ped is a body in collision group 11 that the skater's skeleton contact traversal (`sub_82BD4A30`, group switch at `0x82BD5388`) solves against like a car (8) or another skater (5): the solver pushes the two apart, the group-11 force goes to `+4060`, and every contact also feeds the per-region strongest contact the wipeout checks read, so a hard or mid-trick hit into a ped bails the skater through the ordinary thresholds [code, b138 finding 1]. The ped's own reaction (`sub_82E38FB8` kind 5: knock-down / stumble) stays in `peds::skater_hit`.
 
-The body (group 11, `sub_82E268C8`) has three capsule parts, measured in the recomp (b146: radius, half length, mass) and posed every frame from the animated skeleton by `sub_82E35838` (b147, main checked the table builder `sub_82E33070`): part 0 at Hips, framed along Hips -> Head; parts 1 / 2 halfway between LeftForeArm / LeftHand and RightForeArm / RightHand along the forearm; every part moved ahead by the ped's velocity x 1/60 s. The parts are keyframed (rebuilt from the pose, no write-back found): a finite mass for the solve, no rotation from it. NOT RETAIL YET: part 0's axis is taken as Hips -> Head (retail builds a frame from Hips' third axis and that direction, then turns it 90 degrees; which way is open); body A (retail's group-9 movement proxy, b342) is not ported, body B stays in the solve through every reaction, as retail (b203); bodies only within [`PedBodySettings::range`] of an observer (ours: posing costs time). All mod-overridable (`living_world.ped_body`).
+The body (group 11, `sub_82E268C8`) has three capsule parts, measured in the recomp (b146: radius, half length, mass) and posed every frame from the animated skeleton by `sub_82E35838` (b147, verified the table builder `sub_82E33070`): part 0 at Hips, framed along Hips -> Head; parts 1 / 2 halfway between LeftForeArm / LeftHand and RightForeArm / RightHand along the forearm; every part moved ahead by the ped's velocity x 1/60 s. The parts are keyframed (rebuilt from the pose, no write-back found): a finite mass for the solve, no rotation from it. NOT RETAIL YET: part 0's axis is taken as Hips -> Head (retail builds a frame from Hips' third axis and that direction, then turns it 90 degrees; which way is open); body A (retail's group-9 movement proxy, b342) is not ported, body B stays in the solve through every reaction, as retail (b203); bodies only within [`PedBodySettings::range`] of an observer (ours: posing costs time). All mod-overridable (`living_world.ped_body`).
 
 ### Ped body A
 
@@ -2665,7 +2664,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Ped chase intercept
 
-Ped chases (doc 26 "Ped chases"): the per-type chase record and where a chasing ped runs. Retail (TU3, evidence only; re-implemented; `.local/research/peds/b10-ped-chase-takedown.md`, `b11-ped-intercept-takedown.md`, main checked the constants and the angle source):
+Ped chases (doc 26 "Ped chases"): the per-type chase record and where a chasing ped runs. Retail (TU3, evidence only; re-implemented; research b10, `b11-ped-intercept-takedown.md`, verified the constants and the angle source):
 - each ped type points at a `livingworld_entities_chase` record (escape distance, exhaustion, run speed, max lead time, ...); the chase manager holds the `global` record (predict angle);
 - InterceptChasee Update (`826A3BF0`) asks the solver (`sub_82E3D4D8`) for a goal: the flat intercept time `t` with `|Q + V t - P| = speed t` (`sub_82E15CD0`); no solution or `t` not below the record's max lead time -> no new goal this tick. When the angle between (chaser - chasee) and the chasee's velocity lies strictly between the predict angle and 180 deg minus it, the goal leads the chasee (`Q + V t`); else it is the chasee itself. The goal keeps the higher of the two heights, the nav runs at the run speed with a 0.5 m arrival radius (`0x8209975C`). Which root `sub_82E15CD0` takes when there are two is not fully decoded: we take the smallest positive one (inferred).
 
@@ -2705,7 +2704,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Ped conversation object
 
-Ped conversations (doc 26 "Ped conversations"): the conversation object a ped spawns with SpawnConversationArea. Retail (TU3, evidence only; re-implemented; `.local/research/peds/b23-ped-plugins-conversations.md`, `b24-conversation-object.md`, main checked the vtable, the completion state and the spawn constants):
+Ped conversations (doc 26 "Ped conversations"): the conversation object a ped spawns with SpawnConversationArea. Retail (TU3, evidence only; re-implemented; research b23, `b24-conversation-object.md`, verified the vtable, the completion state and the spawn constants):
 - a conversation is a waypoint plugin entity (ctor `82E1CEC0`, interface vtable `0x8232B868`) with up to 3 member slots (participant, in-position bit) and a state (`D+1172`);
 - gathering (vf4) while it has room and the state is 0 or 1; a ped may join (vf8) when its entity type fills a free slot of the chosen row, or of any candidate row before one is chosen;
 - passers-by join through the ordinary offer scan (`826C0058` -> `826BFE18`, b212): the area is an offer whose transfer expression is `ConversationIsGatheringMembers` (vf4) and `EntityAllowedToJoinConversation` (vf8) and not `IsChasing`; the founders go through the same test (`826A6CD8` ignores its result);
@@ -2730,7 +2729,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 The skater touching a ped (doc 26, "Skater hits peds"): knock-down or standing stumble, the hit direction and the reaction animation.
 
-Retail [code, TU3; evidence only, `.local/research/peds/skater-ped-contact.md`]: the ped contact callback `sub_82E38FB8`, kind 5 (an `IActor` owner, e.g. the skater):
+Retail [code, TU3; evidence only, a local research note]: the ped contact callback `sub_82E38FB8`, kind 5 (an `IActor` owner, e.g. the skater):
 - inputs: the length of the ped body's linear (f29) and angular (f28) velocity after the contact solve, gated by entity `C04236FB548697D0` / `797AA1D5F828819B` (0 for every stock entity);
 - kind: knock-down when the ped's animation set allows it (byte 17, field `5B92564B352A9FAA`; off for the marquee sets) and either speed is above `541FFA2E9D81C947` / `7C5E39ECE5A5572E` (3.0 / 3.0); otherwise a standing stumble, unless the ped's brain says immune (`+3277` bit 0x10). The 6.0 thresholds (`081F978F8706D77B` / `5E566360FDC5FDD1`) and the "no reaction" cases are for a ped touching a ped (the toucher casts to `IPedestrian`, `sub_826C2C70`);
 - direction: the contact normal (y dropped) against the ped's forward: `a = acos(dot)`, negated when `cross(forward, normal).y > 0`, in degrees: 1 FromBack (|a| < 35), 2 FromLeft (35..145), 3 FromRight (-145..-35), 0 FromFront (beyond 145) (constants `0x8206D148`, `0x822F9428..30`; names from the table `0x830218B0`: FromFront, FromBack, FromLeft, FromRight, Knockdown, Standing).
@@ -2796,7 +2795,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Ped takedown choice
 
-Ped takedowns (doc 26 "Ped takedowns"): which takedown a chasing ped can try on its target. Retail (TU3, evidence only; re-implemented; `.local/research/peds/b16-takedown-choice-contact.md`, main checked the setup data): the ped type's `livingworld_entity_takedown` record lists takedowns in priority order. Each tick (`82E3C000`, from TakeDownTargetablePredictions):
+Ped takedowns (doc 26 "Ped takedowns"): which takedown a chasing ped can try on its target. Retail (TU3, evidence only; re-implemented; research b16, verified the setup data): the ped type's `livingworld_entity_takedown` record lists takedowns in priority order. Each tick (`82E3C000`, from TakeDownTargetablePredictions):
 - the approach side: `n = normalize(ped - target)`, `dot = n . target velocity`; side 1 when the target comes towards the ped (`dot > 0`), else 2; `speed = |dot|`;
 - an entry with a side needs that side and a speed above its minimum;
 - per entry (`82E3B548`): the target `lead + 0.06` s ahead (`pos + vel t`); more than 1.25 m above or below fails, else flattened to the ped's height; the distance from the ped's reach point (`ped + 0.2 x forward`) must lie in `(min + 0.2 + 0.06 s, reach + 0.2 + 0.06 s]` (`s` = the ped's speed); the signed bearing (about up, positive when `(forward x to_target) . up > 0`) in `[angle_min, angle_max]` degrees, or, for an entry that allows it, in `[-angle_max, -angle_min]` (mirrored, the `anim_b` clip);
@@ -2808,7 +2807,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Ped perception
 
-What a ped knows about and sees (doc 26 "Ped perception"). Retail (TU3, evidence only; re-implemented; `.local/research/peds/b17-chase-rest-lost.md`, `b18-ped-perception-mood-ops.md`, main checked the setup data):
+What a ped knows about and sees (doc 26 "Ped perception"). Retail (TU3, evidence only; re-implemented; research b17, `b18-ped-perception-mood-ops.md`, verified the setup data):
 - the brain keeps at most 5 perception entries (`brain+624`, 80 bytes each); a new entry (`82E42690`) evicts the oldest (largest age), starts with "just told" (flags 0x80), the given memory, age 0 and no mood suppression;
 - each tick (`82E418E8`) memory counts down, age up, the suppression down; the vision test sets "visible" (0x40) and refreshes the last position and velocity while seen; "just told" is cleared; an entry whose target is gone, or whose memory ran out while not just told, is erased;
 - the vision test (`82E27240`): seen within 1 m on the ground plane and 2 m in height (touch), or within the near range from the eye, or within the far range inside the view cone (`dot(dir, forward) > |cos(fov)|`) with a clear line of sight. Near / far = the mood event category `chasedpersondetectibilitytest` (20 / 30 m) times the ped type's perception scales (`D036` / `D238`, pedestrians 1.0); fov = `7435` (120 deg).
@@ -2819,7 +2818,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Ped flee
 
-Where a fleeing pedestrian runs (doc 26 "Ped behaviour runtime"). Retail (TU3, evidence only; re-implemented; `.local/research/peds/b8-ped-flee-steering.md`, main checked the leg length, the speed gate and the blend):
+Where a fleeing pedestrian runs (doc 26 "Ped behaviour runtime"). Retail (TU3, evidence only; re-implemented; research b8, verified the leg length, the speed gate and the blend):
 - the Flee intent installs a goal provider (`sub_82E35E80`, provider vtable `0x8232C818`) and an arrival radius of 2.0 m (`S.vfn136`, `0x82060C50`);
 - the direction (`sub_82E318F8`): `away` = flat ped position - flat threat position; when the threat moves slower than 1 m/s (`0x8231A844`) or the ped is behind its motion, straight away; else `0.5 x (side + normalize(away))` (`0x8209975C`; not renormalised), `side` = the threat's motion direction x up, on the ped's side;
 - the goal = position + direction x 15 m (`0x820BD16C`), then a navmesh cast (`sub_82C465A8`; a blocked goal is rewritten by `sub_82C46208`: we stop at the last clear point, inferred);
@@ -2827,7 +2826,7 @@ Where a fleeing pedestrian runs (doc 26 "Ped behaviour runtime"). Retail (TU3, e
 
 ### Object flee
 
-A ped flees a prop moving at it (ask 374, 2026-10-26). Retail (TU3, evidence only; re-implemented; main read `82E2EDC0`, `82E2F018` and `82E2EF40` in Ghidra and the generated code, `.local/research/b646/`):
+A ped flees a prop moving at it (ask 374, 2026-10-26). Retail (TU3, evidence only; re-implemented; checked `82E2EDC0`, `82E2F018` and `82E2EF40` in Ghidra and the generated code, research b646/`):
 - the gate (`82E2EDC0`): the flat distance from the ped to the prop's position squared is at most 64.0 (8 m, `0x820ED958`) and the prop's velocity squared at least 0.5625 (0.75 m/s, `0x822F915C`);
 - the lane (`82E2F018`): side = the prop's flat motion direction x up; the prop's four footprint corners (plugin object `0x8269B3D0` vt+0x94) give the lane's two edges along side (each at least 0, the prop's centre); the ped's offset along side must lie strictly inside the lane widened by 0.75 m (`0x821814A0`) each way; then the ped must be ahead of the edge corner on its side: (ped - corner) . velocity > 0, flat;
 - the write (`82E2EF40`): all 17 want slots lose "needs addressing" (`& 0x7F`), then the flee slot (`brain+0x214`) gets the prop's handle and flags 0x80 (needs addressing, 0x40 cleared). No mood event, no roll: the ped graph's Flee state (`pedestrian_wanttoflee.xml`) takes it from there.
@@ -2863,7 +2862,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Run from honker
 
-Running from a honking car (doc 26g "Peds run from honking cars"). Retail (TU3, evidence only; re-implemented; `.local/research/npc/b44-horn-honker.md`, `.local/research/peds/b45-runfromhonker-flee-timeout.md`; main re-read the honk receiver `sub_82E3C3D0` and the shape of `826A1358`):
+Running from a honking car (doc 26g "Peds run from honking cars"). Retail (TU3, evidence only; re-implemented; research b44, research b45; re-read the honk receiver `sub_82E3C3D0` and the shape of `826A1358`):
 - a traffic car's horn kind 2 writes its id into the ped brain's honker (`+3232`); `IsBeingHonkedAt` leads Wander / WanderFollow into RunFromHonker; only Wander's Begin clears the honker;
 - RunFromHonker Begin (`826A1330`) posts motion intent 5; Update (`826A1358`) looks the car up every frame and, while it exists, sends the ped to a goal `side_distance` sideways of the car's line, on the ped's side (strict `dot > 0` test, a tie goes to the minus side), at `run_speed` when the goal is more than `near_radius` away, else `near_speed`. A car that is gone leaves the last goal and speed; the op's `timeout` (30) is never read. The car vector Update reads (`[car+164]+144`) is not settled: velocity or an axis (open, b45); ours uses the car's forward axis, so a standing car still gives a side.
 
@@ -2885,7 +2884,7 @@ Detail moved out of the code comments of `crates/skate-game/src/living_world/ped
 
 ### Mood table loading
 
-The stock mood tables from setup data (`private/living_world/tables.json`, classes `livingworld_moodeventcategories`, `livingworld_entities_moodreactions`, `livingworld_entities_moodresults`, `livingworld_entities`) into `skate_core::living_world::peds::mood::MoodTables`, parents resolved (doc 26 "Ped behaviour runtime"). Field bindings: `.local/research/peds/b6-ped-mood-fields.md`.
+The stock mood tables from setup data (`private/living_world/tables.json`, classes `livingworld_moodeventcategories`, `livingworld_entities_moodreactions`, `livingworld_entities_moodresults`, `livingworld_entities`) into `skate_core::living_world::peds::mood::MoodTables`, parents resolved (doc 26 "Ped behaviour runtime"). Field bindings: research b6.
 
 ## Code reference: living_world/ped_graph.rs
 
@@ -2893,7 +2892,7 @@ Detail moved out of the code comments of `crates/skate-game/src/living_world/ped
 
 ### Ped AI graph loading
 
-The stock pedestrian AI graph (`Pedestrian.stategraph`) loaded on the shared graph runtime, with each operation parsed into the ped brain's `PedOp` (doc 26 "Ped behaviour runtime"). Retail runs this graph on the same dynamic controller as the skater's graphs, and the shipped file is already compiled (includes and templates expanded), so the existing decoder, binder and compiler load it unchanged (`.local/research/peds/b2-ped-aigraph-interpreter.md`).
+The stock pedestrian AI graph (`Pedestrian.stategraph`) loaded on the shared graph runtime, with each operation parsed into the ped brain's `PedOp` (doc 26 "Ped behaviour runtime"). Retail runs this graph on the same dynamic controller as the skater's graphs, and the shipped file is already compiled (includes and templates expanded), so the existing decoder, binder and compiler load it unchanged (research b2).
 
 Moddability: the graph path is data (`PedGraphPaths`); operation values come from the graph's attributes. Not-yet-ported operations are listed by [`PedGraph::pending`] and logged once.
 
@@ -2921,7 +2920,7 @@ The graph op `SendChaseStateMessage` (`826A77A8`) posts {ped, state} for a playe
 - **Retail [code, b515 / b516]:** ApproachWantTarget (`8269FDF0`) hands the target to the ped's mover, which ends in
   the NavPower bot path request (`82E957F8`). The path query (`82928BB0`, A* `82932CB8`) builds a path only when it
   reaches the goal poly: no partial paths. On a failure `82E96F08` puts the bot in mode 0 with an idle follower at
-  the ped's spot, so the ped stands. In mode 0 the skip test (`82E95668`, a 3D distance with `fsqrts`, main-checked)
+  the ped's spot, so the ped stands. In mode 0 the skip test (`82E95668`, a 3D distance with `fsqrts`, verified)
   compares with the ped's position, so the query runs again every update while the target is out of reach.
 - **Ours before:** the approach set a one-point route; with no path `PedNav::plan` walked straight at the point
   (`vec![target]`, the wander targets' retail fallback) and pushed against the navmesh edge.
@@ -2934,12 +2933,12 @@ The graph op `SendChaseStateMessage` (`826A77A8`) posts {ped, state} for a playe
 - **Tests:** `an_approach_goal_with_no_path_leaves_the_ped_standing` (skate-core nav tests). Not play-tested.
 
 ## Chase reach check snaps like retail (2026-10-28, USER-ASKS 392, research b650, b653)
-- Problem (user, 2026-10-27): "the ped is also NOT giving up on chasing me even though he CANNOT reach me".
+- Problem (user, 2026-10-27): the ped does not give up the chase even though he cannot reach the player.
 - Retail [code, b650]: there is no stall or path-failure give-up for a chaser. Near the chasee (5 m) the only exit is
   CannotReachChaseTarget, set by the mover's reach check (`82C465A8`) every 10 updates. That check snaps the ped and
   the destination with `82C46348` [code + data, b653]: the 3D-nearest walkable polygon point with no distance cap and
   NO height test, failing (code 3) when it lies more than 0.65 m away along X or along Z (radius 0.5 at `0x8209975C`
-  x the NavPower params scale 1.3 at `0x82099484`; main checked the compare at skate3_recomp.78.cpp:17500).
+  x the NavPower params scale 1.3 at `0x82099484`; verified the compare at skate3_recomp.78.cpp:17500).
 - Ours used `NavMesh::locate` (0.5 m round edge radius, 4.0 m height window) for the check.
 - Change: `NavMesh::reach_snap` and `chase::reach_failed_at` (skate-core `peds/nav.rs`, `peds/chase.rs`); the intercept
   and the reach check in `living_world/peds.rs` use them. Mod key `living_world.ped_brain.reach_snap_window`
@@ -2951,7 +2950,7 @@ The graph op `SendChaseStateMessage` (`826A77A8`) posts {ped, state} for a playe
   the in-polygon projection along the normal on slopes.
 
 ## Scatter alarm (2026-10-28, USER-ASKS 381, research b654)
-- Retail [code + data, b654; main checked the writer and the reset in the recomp]: `sub_826C1348`, once per world
+- Retail [code + data, b654; verified the writer and the reset in the recomp]: `sub_826C1348`, once per world
   step, reads the local player's PhysOut_Trick copy of the MotionGraph gesture block. The alarm byte (MG +5989) is
   written by `sub_8258FB30` (stw +3300 / stb +3305 / stb 1 +3304 on MG+0xA7C) from CharacterGesture (`82BAA320`) as
   "the running gesture is on D-pad Down" (k == 3); the reset `sub_825960C0` sets the id back to 37 (no gesture) and
@@ -2970,7 +2969,7 @@ The graph op `SendChaseStateMessage` (`826A77A8`) posts {ped, state} for a playe
   retail reads only the local player (online is open). Not play-checked.
 
 ## Vehicle flee opt-in (2026-10-29, W8, research b656)
-- Retail [code, `82E2C0C8`, the ped's VehicleAvoidance modifier; b646 pseudocode, generated code checked by main]: a car
+- Retail [code, `82E2C0C8`, the ped's VehicleAvoidance modifier; b646 pseudocode, generated code verified]: a car
   (IVehicle `0x82C34050`) within 10 m (100.0 squared at 0x820ED57C, 3D) makes the ped flee when the flat dot of
   (car - ped) and the car's velocity is above 3.0 (0x82063B08): read literally, the car moving AWAY along the line.
   Then every want's active bit is cleared and the flee want takes the car (same write as the prop rule).

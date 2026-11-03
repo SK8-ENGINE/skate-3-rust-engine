@@ -1,7 +1,7 @@
 # Living world: NPC skater data (milestone M1)
 
 2026-10-04. Branch `world/living-world`. Code and disc data only, no game
-launched. Labels: [code] retail code (TU3 recomp disassembly as reference), [data] the user's disc, [trace] recomp runs.
+launched. Labels: [code] retail code (TU3, title update 3, recomp disassembly as reference), [data] the user's disc, [trace] recomp runs.
 Format reference: DumbadsSkate3ModdingTools by Ethanw05 (field names of tAIPath / tAIPathNode / tAIPathNodeExtData from
 Skate 2 symbols; credits there to SunJay, Dumbad, RenderWareGavin, Tuukkas). No code copied; every field re-checked on
 the disc. Credit it in the doc and PR.

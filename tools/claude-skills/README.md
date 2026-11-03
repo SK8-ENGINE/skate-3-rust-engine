@@ -35,7 +35,7 @@ asking for the task it describes, or by name (for example `/regression-check`).
 | `build-and-run` | Build (dev and release link configurations), stage into `bin\`, test, smoke-test and launch the game; screenshot mode; audio diagnostics switches. |
 | `asset-setup` | Convert your own Skate 3 ISO / extracted disc into assets headlessly, refresh after converter changes, re-point the `assets` junction, diagnose spawns and invisible walls, repair the pro roster. |
 | `regression-check` | What to verify after converter, game code, input, water, audio, native dependency or performance changes: every-map spawn and collision baselines, test targets, smoke runs, fingerprint impact, "is this failure mine or upstream's". |
-| `vendor-patch` | Vendor and patch a crates.io dependency (Bevy, sdl3-sys) and handle native C/C++ dependencies in both CRT configurations. |
+| `vendor-patch` | Vendor and patch a crates.io dependency (Bevy, sdl3-sys) and handle native C/C++ dependencies in both C runtime (CRT) configurations. |
 | `make-mod` | Write and validate Lua API 2 mods, including the audio and world-audio mod APIs; moddability rules for engine features. |
 | `prior-work-check` | Search upstream PRs/issues, forks and sibling projects before starting work. |
 | `conflict-resolution` | Merge branches without losing lines: reuse existing resolutions, hunk-level reuse, a lost-line checker, semantic-conflict detection, stacking conflicting PRs. |
@@ -43,7 +43,7 @@ asking for the task it describes, or by name (for example `/regression-check`).
 | `recomp-research` | Reverse-engineer retail behaviour with the skate3recomp research build: find code, write guarded trace hooks, drive the game, analyse traces, port in your own words. |
 | `recomp-scripted-runs` | Unattended scripted recomp sessions (pad scripts, teleport routes, background mode, screenshots), passive sessions, the trace line catalogue, recomp artefacts to discount. |
 | `recomp-audio-trace` | Build the recomp research build (title update, clang toolchain) and trace which audio banks/samples retail plays. |
-| `ghidra` | Read retail TU3 functions as Ghidra pseudocode (Ghidra 12.1 + the Xenon360 XEX/XEXP loader with VMX128): where to get the latest releases, setup from your own install, a batch decompile tool, a headless wrapper, an optional language patch for five missing VMX128 instructions, known quirks. |
+| `ghidra` | Read retail TU3 (title update 3) functions as Ghidra pseudocode (Ghidra 12.1 + the Xenon360 XEX/XEXP loader with VMX128): where to get the latest releases, setup from your own install, a batch decompile tool, a headless wrapper, an optional language patch for five missing VMX128 instructions, known quirks. |
 | `aems-port` | The native Rust port of the retail audio runtime (AEMS evaluator, voice graph, MixMap, grain bed, Splice, player and world components): workflow, oracles, specs, the console-cadence rule. |
 | `audio-tuning` | Turn a "this sounds wrong" report into a measured, mechanism-level fix: state logs, headless e2e replays, recomp comparisons, world audio checks, re-exporting audio. |
 | `audio-autotest` | The automated in-game check of the audio modding features (muted in the background, or audible for a listener). |
@@ -84,8 +84,8 @@ search, vault inspection, setup equivalence) are in `tools/` (upstream PR #37, m
   mode, trace writer and hooks) as described in `recomp-research` and `recomp-scripted-runs`. Credit skate3recomp,
   its rexglue SDK and Xenia whenever you use findings from it. skate3recomp has no licence: it is a reference to run
   and read locally; never copy its code or generated code into the engine.
-- Audio skills (`aems-port`, `audio-tuning`, `audio-autotest`, the audio parts of `make-mod`) describe the audio
-  branch (upstream PR #32 and its follow-ups); on `main` without it, those crates and switches don't exist yet.
+- Audio skills (`aems-port`, `audio-tuning`, `audio-autotest`, the audio parts of `make-mod`) describe the native
+  audio engine (upstream PR #32, merged 2026-10-06, and its follow-ups).
 - For `ghidra`: [Ghidra](https://github.com/NationalSecurityAgency/ghidra) 12.1.x (NSA, Apache-2.0), a JDK 21 or newer, and
   the [Xenon360](https://github.com/EveryoneEverybody/Xenon360) extension (Apache-2.0) built for the same Ghidra version.
   Its output is a reading aid for your own copy of the game: never copy pseudocode into the engine.

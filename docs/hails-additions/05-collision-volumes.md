@@ -26,7 +26,7 @@ are" below):
 | −62.1…−0.5 / −1.53…6.65 / −3.6…12.7 | `tut_sksc_inthehub_vol_01` | the invisible wall in the spawn area |
 | −11.0…2.5 / 0…4.17 / −2.6…1.6 (three identical) | `coach_frank_sksc` / `ws_sksc_coachfrank_instance_01` | invisible block near the origin |
 | −212…578 / −73…79 / −483…492 | `tut_sksc_reset_vol01` | level bounds: floor under the whole map |
-| 104.1…199.7 / −4.1…4.1 / 151.5…247.1 | `tut_sksc_wrongway_vol_01` | — |
+| 104.1…199.7 / −4.1…4.1 / 151.5…247.1 | `tut_sksc_wrongway_vol_01` | n/a |
 
 Evidence that these are not solid in the original game: every authored
 SkateSchool locator (Coach Frank, the hub, all tutorial stations) is at

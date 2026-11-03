@@ -1,8 +1,8 @@
-# AEMS patch-program evaluator — behavioural specification (Skate 3 TU3)
+# AEMS patch-program evaluator: behavioural specification (Skate 3 TU3)
 
 Basis for a native Rust re-implementation. Written 2026-10-02 in our own words. Facts (offsets, opcode
 numbers, constants, addresses) come from:
-- the TU3 recomp (`skate3recomp/generated`, read with `tools/recomp-code-search/fn.sh`);
+- the TU3 (title update 3) recomp (`skate3recomp/generated`, read with `tools/recomp-code-search/fn.sh`);
 - the disc banks (our survey script `tools/audio-file-inspect/aems_survey.py`, all 376 `.abk` and 9 `.csi`);
 - the PoC probe (`emitter_probe` in our local PoC worktree, which runs upstream PR #4);
 - PR #4 and sk8Audio (reference only, no licence);
@@ -48,7 +48,7 @@ All multi-byte fields are big-endian. Offsets are from the start of the file (on
 offset listed in the rebase list becomes an absolute pointer. For a native port, keep offsets and resolve
 on access.
 
-### 1.1 ModuleBank (`.abk`, magic `ABKC`) — header, 0x5C bytes [V]
+### 1.1 ModuleBank (`.abk`, magic `ABKC`): header, 0x5C bytes [V]
 
 | Off | Name | Disc value / meaning |
 |---|---|---|
@@ -184,7 +184,7 @@ Counts run from 1 up to 10001 (Sk8_Air_Flip_Tricks, equal to its S10A capacity).
 | id | Name | Effect | Count |
 |---|---|---|---|
 | 0 | PITCHMULT | 1525 | resample ratio = value/4096 (clamp 0..65535) |
-| 1 | TIMEMULT | — | ignored |
+| 1 | TIMEMULT | n/a | ignored |
 | 2 | VOL | 1527 | master level value/32767 (clamp 0..32767); multiplies dry and send |
 | 3 | AZIMUTH | 1516 | pan angle = value·360/65536 degrees (alternate setter) |
 | 4 | ELEVATION | 2 | ignored |
@@ -485,7 +485,7 @@ uses the low word, so 32-bit wrapping is exact. Exceptions (op 9 unsigned compar
 
 **Float semantics:** all float math is **f32** with round-to-nearest after each operation:
 - int → float conversion = exact to f64, then round to f32;
-- "fused" means one rounding of a·b+c (PPC fmadds) — use an f64 FMA then round to f32; double rounding is
+- "fused" means one rounding of a·b+c (PPC fmadds): use an f64 FMA then round to f32; double rounding is
   theoretically possible but immaterial at these magnitudes [?];
 - **round(x)** = (x < 0 ? x − 0.5 : x + 0.5) in f32, then truncate toward zero to i32. Saturate like PPC
   fctiwz: >2³¹−1 → 0x7FFFFFFF; < −2³¹ or NaN → 0x80000000. Rust `as i32` maps NaN to 0, so special-case
@@ -652,8 +652,8 @@ It owns a child post: a nested class instance, e.g. c_tazer → `c_tazer_grn_pla
      = 0 when updateoutputs).
    - c = 1:
      - a voice exists → resume it;
-     - otherwise, unless (prev[0] = 2 and prev[1] = 1) — a voice that died while paused is not
-       restarted —
+     - otherwise, unless (prev[0] = 2 and prev[1] = 1) (a voice that died while paused is not
+       restarted)
        - k = sampleselect clamped to [0, count−1];
        - entry k's sample index `FFFF` → no voice (outputs cleared);
        - otherwise **open** a voice (§5.2).
@@ -672,7 +672,7 @@ It owns a child post: a nested class instance, e.g. c_tazer → `c_tazer_grn_pla
 - On open, all inputs are pushed (open applies the full set). Query and outputs happen **in the same
   walk**, so timeleft is valid immediately after the open.
 
-### 5.2 Voice open (device `sub_824A3140`) — what AEMS hands over [P]
+### 5.2 Voice open (device `sub_824A3140`): what AEMS hands over [P]
 
 - the sample: S10A slot = entry's s16 index, data = sfx bank + offset[index];
 - the entry's level % → per-voice player gain ×0.01;

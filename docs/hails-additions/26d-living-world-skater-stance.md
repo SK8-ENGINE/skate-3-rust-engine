@@ -4,9 +4,9 @@ Part of doc 26, the living world (index: [26-living-world.md](26-living-world.md
 
 ## NPC skaters riding backwards (fix 23), 2026-10-08
 
-**Problem.** User (test 6, 2026-10-05): "near the end of the session the skater randomly changed directions he was
-skating while still facing the original direction and skated backwards, grinded a ledge and then skated away
-backwards." Test 7: "Skating backward npcs is still a thing, you know that." The readout of test 6 showed the NPC
+**Problem.** The user (test 6, 2026-10-05): near the end of the session an NPC skater changed its riding direction while
+still facing the original way, skated backwards, ground a ledge and then rode away backwards. In test 7 NPCs still
+skated backwards. The readout of test 6 showed the NPC
 switching lines (...9b79 node 57, ...9a7c node 102, ...9b79 node 87, ...9ab6 node 8) and staying backwards.
 
 **Root cause.** Two parts.
@@ -65,15 +65,15 @@ by one decoded retail reader (below), not by a full port of how retail's skater 
   to the physics sim is drawn from its body, so its line reads the body instead of the cursor's ghost: `tier sim`,
   the effective board forward against the deck velocity and the body's retail fakie bit (`riding_fakie`,
   `82BB2330`). Before, all 161 `recorded_fakie false drawn_fakie true` lines of session 2026-10-19 18:04 were sim
-  NPCs judged on the ghost (27 NPCs, 12 lines); the drawing was not wrong (user: "I didn't notice"). Open: our code
+  NPCs judged on the ghost (27 NPCs, 12 lines); the drawing was not wrong (the user noticed nothing). Open: our code
   names two retail steering targets (skater frame x flip, `replay.rs:477-482`, and the path frame of `sub_8246DE38`,
   `replay.rs:414-428`); `sub_8246B358` / `sub_8246DE38` decide which. Answered by b353
-  (`.local/research/b353-npc-steer-target-frame.md`) [code]: on the ground retail aims at the path forward 2 ticks
+  (research b353) [code]: on the ground retail aims at the path forward 2 ticks
   ahead of cursor A (`sub_8246AA00` -> `sub_82471070`), measured from the effective deck forward (negated when riding
   fakie) and reversed on the path when it faces away; it reads neither the skater frame (`+208`) nor the flip
   (`+927`). Skater frame x flip is the air arm only (`sub_8246B358`, called while `+438`, the airborne byte, is set);
   `sub_8246DE38` builds the external-physics record, not the stick target. Ours already matches
-  (`ground_steer.rs` `heading_error`, main verified). Followed by b354 (`.local/research/b354-replay-flip-latch.md`, main verified
+  (`ground_steer.rs` `heading_error`, verified). Followed by b354 (research b354, verified
   the `+438` store in the recomp): `+438` = player state id in 200..300 and wheel count 0 (airborne), so retail
   latches `+927` at takeoff; ported (`node_airborne`, see Change). Open: whether the recorder's AIRBORNE node flag
   equals that predicate.
@@ -124,7 +124,7 @@ by one decoded retail reader (below), not by a full port of how retail's skater 
 
 **Problem.** Fix 23 said "retail keeps no facing state" and replaced the fix 16 rule with our own per-node fold
 (`drawn_skater`: the recorded skater frame turned wherever it faces more than 90 deg from the path frame). The retail
-parity review (`.local/research/retail-parity-review-2026-10-08.md`, item 6) found both wrong: retail keeps one latched
+parity review (a local research note, item 6) found both wrong: retail keeps one latched
 flip, and its target is the whole recorded skater frame, not a per-node fold against the board frame.
 
 **Retail evidence** (re-verified in the recomp source before porting).
@@ -155,7 +155,7 @@ flip, and its target is the whole recorded skater frame, not a per-node fold aga
   getting back on the board, from a wrong "riding" reading of `+438`.) Both
   are plain public fields, a pure function of the lines, the spawn and the branch records (a mirroring client derives
   the same values; tested).
-- **Default drawing stays the fix 23 per-node fold (`PerNode`), NOT RETAIL YET** (decision of the main session
+- **Default drawing stays the fix 23 per-node fold (`PerNode`), NOT RETAIL YET** (interim decision
   until the user decides). Reason, measured: drawing the retail target without retail's fakie / switch clips and
   stance mirror shows every stretch retail rides fakie or switch (character forward against travel) as riding
   backwards, the bug the user reported. `riding_entry` is a mod option and the target default once the stance mirror
@@ -202,7 +202,7 @@ flip, and its target is the whole recorded skater frame, not a per-node fold aga
   stance bits (the physics side of `sub_8246B358` -> `AIPhysicsInput`), and which pro natural stance each NPC has.
   Port: per replay sample derive fakie = the drawn retail target's forward against the board's riding direction
   (path frame), mirrored from the character's natural stance; feed both to the puppet's clip pick / playback context
-  (`is_mirrored`) and the fakie channel. Estimate: one agent run (about 60 min) to read the AI fakie/stance source
+  (`is_mirrored`) and the fakie channel. Estimate: one research run (about 60 min) to read the AI fakie/stance source
   and wire the two bits into the puppet with tests, a second for the clip set if the stock clips lack fakie variants.
   Then switch the default to `riding_entry`.
 - The `node_riding` mapping (air and off board leave riding) is inferred; whether retail's grind / manual states are
@@ -322,7 +322,7 @@ are drawn as recorded.
   (`skate_core::riding::steering::calculate_tilt`), truck targets `sub_82C040F0` and `SetTruckDriveFrames`
   `sub_82C0B9C0` (`skate_core::physics::truck_frames`), and the rigid-body wheel solve. There is no turn rate or yaw
   response constant on the AI side to port into the replay puppet; the rate is whatever the board physics produces.
-- Decision (main, 2026-10-08): no fitted turn rate for the puppet. The 0.2 s switch blend stays, labelled NOT RETAIL
+- Decision (2026-10-08): no fitted turn rate for the puppet. The 0.2 s switch blend stays, labelled NOT RETAIL
   YET in `ChainConfig::blend_seconds`. The faithful fix is the simulated NPC tier (PR #52 checklist item), where the
   AI steer drives the ported riding physics.
 

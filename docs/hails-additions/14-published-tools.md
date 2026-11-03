@@ -70,9 +70,7 @@ timing and threading), so its traces are evidence for values and logic, not for 
 
 ## Open questions
 
-- `crates/skate-game/src/game_audio/e2e.rs` still names the old local script paths in its header
-  comment; it could point to `tools/audio-e2e/` instead.
-- None of this is offered upstream yet; it would make a tooling PR of its own (see the PR plan).
+- None. The `e2e.rs` header now points to `tools/audio-e2e/`, and the tools landed upstream in #37.
 
 ## Credits
 

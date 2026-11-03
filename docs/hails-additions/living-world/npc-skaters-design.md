@@ -1,8 +1,8 @@
 # Living world: NPC skaters design (part of doc 26)
 
 Status: design, 2026-10-04; milestone M1 (data) is done (see `skaters-data.md`). Retail findings and their evidence:
-`.claude/notes/npc-skaters-re.md` (tags: [code] = retail code, [data] = disc data, [recomp] = observed in the
-recomp; the code is the source of truth). Credit: the TU3 static recompilation (skate3recomp by @mchughalex, rexglue SDK, Xenia)
+the local NPC skaters research note (tags: [code] = retail code, [data] = disc data, [recomp] = observed in the
+recomp; the code is the source of truth). Credit: the TU3 (title update 3) static recompilation (skate3recomp by @mchughalex, rexglue SDK, Xenia)
 as the reference for how the retail code is used; no game code or data is copied, the disc data is read at setup like every other
 asset.
 

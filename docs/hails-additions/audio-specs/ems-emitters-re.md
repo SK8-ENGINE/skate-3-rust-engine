@@ -3,7 +3,7 @@
 > **2026-10-02 19:00: the recomp sessions behind the measured sections below were deleted (pre-fix trace writer, a few malformed lines). Treat those findings as "re-verify on clean data" (only all_20261002_163809 / _164620 / _180430 and world_hooks are clean).**
 
 
-From reading the recompiled TU3 code (reference only; 2026-10-02). Addresses are evidence; never copy
+From reading the recompiled TU3 (title update 3) code (reference only; 2026-10-02). Addresses are evidence; never copy
 code. Record offsets are decimal.
 
 ## File and records
@@ -74,7 +74,7 @@ picks one at random), curve type 0xF209C093F40A4CCC.
 | Hash_C493ED34D1D32521 | patch index (clamped 0..500 for `c_emitter`) | 81 |
 | Hash_6D18B8674D7E5337 | `Sk8::Audio::eVolumeType`: 1 = looping emitter, 5 = reverb zone, 4 = single winner; 0/2/3/7 also exist | 1 (inherited) |
 | Hash_F209C093F40A4CCC | `eVolumeFalloffType`: 0 = (1−d)², 1 = 1−d, other = flat | 0 |
-| Hash_C48AB73A227B3B00 | variant list (RefSpec array) | — |
+| Hash_C48AB73A227B3B00 | variant list (RefSpec array) | n/a |
 
 Examples (volume / f9908 / patch):
 - water_lapping 1.0 / 15 / 82; water_lapping_pond 0.8 / 15 / 83; trees_rustle 0.25 / 38 / 76

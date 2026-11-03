@@ -115,7 +115,7 @@ must reach the deck torque.
     means is still unknown. In every trace it was 0.
   - **Traces (the recomp, Super-Ultra Mega-Park spawn, background, muted).** The new `ITERSET` /
     `ITERTICK` hooks (category `physics`) were used, plus a watch list for the byte, both owners' modes
-    and both Simulations' +176. 0 malformed lines. Data is in `.local/research/solver-iters/`.
+    and both Simulations' +176. 0 malformed lines. Data is in a local data folder.
     - `survey.tsv` covers riding, a forced bail on the board (both sticks + both triggers), the
       session-marker respawn, getting off the board and walking, a forced ledge bail on foot (FIRSTHIT
       +676 confirmed both bails), another respawn, getting back on the board, Start (opens the

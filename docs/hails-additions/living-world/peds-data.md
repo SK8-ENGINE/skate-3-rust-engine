@@ -1,7 +1,7 @@
 # Living world: pedestrian data and the setup group (milestone M0, 2026-10-04)
 
 Branch `world/living-world`. Design: `27-peds-design.md` section 2 / M0.
-Tags: [code] read from the TU3 code (addresses are evidence only), [data] read from the disc, [trace] recomp only.
+Tags: [code] read from the TU3 (title update 3) code (addresses are evidence only), [data] read from the disc, [trace] recomp only.
 
 ## What was built
 | Item | Status | Where |

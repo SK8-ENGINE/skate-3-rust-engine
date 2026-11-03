@@ -38,4 +38,4 @@ Found in a muted in-game log check of a mod that sent empty lists: the commands 
 
 ## Open questions
 
-None. The audio moddability PR (#36) carries the same helper for its audio commands. Whichever merges second keeps one copy of `lua_list.rs` (identical file).
+None. The audio moddability work (#36, folded into #32, merged) uses the same helper for its audio commands; the repository keeps one copy, `crates/skate-mods/src/lua_list.rs`.

@@ -10,10 +10,10 @@ ped and NPC-skater sounds and exposes `TrafficAudio` / `PedAudio` / `NpcSkaterAu
 
 ## What retail does
 
-Reference: the TU3 build through skate3recomp (by @mchughalex, built on the rexglue SDK; Xenia), the disc data read
+Reference: the TU3 (title update 3) build through skate3recomp (by @mchughalex, built on the rexglue SDK; Xenia), the disc data read
 in place, guarded hook runs of the recomp and the user's own play sessions. The retail code is the source of truth
-(user: "the recomp doesnt seem to have the peds and npc skaters 100% right so use the retail code as the source of
-truth"); the recomp only validates. Addresses are TU3; no game code or data is copied.
+(the user's decision: the recomp does not get peds and NPC skaters fully right, so the retail code is the source of
+truth); the recomp only validates. Addresses are TU3; no game code or data is copied.
 
 - **NPC skaters.** The manager `sub_8245BA28` (60-tick cycle) keeps 3 ambient skaters (5 AI in all, 7 skater slots
   shared with online players), spawns at the start of an unused recorded human line 60 to 90 m away and culls
@@ -82,7 +82,7 @@ When a mod stops, fails or reloads its patches go (`modding::world_tuning::clear
 | Domain | Fields (shipped value) | Resource |
 |---|---|---|
 | `living_world` | `npc_draw_distance` (1.0, 0.25..4), `skater_fade {fade_in_seconds 1, fade_seconds 1, despawn_alpha 0.2}`, `ped_fade {distance {45, 55}, fade_in_seconds 1, enabled true}` (a model record's own pair still wins), `skater_clips {[phase or phase.Style] = clip}` (empty = shipped picks), `skater_clips["trick.<scorable name>"] = trick animation base` (empty = Tricks.xml picks), `skater_blend_seconds {[phase or default or trick_takeoff or trick_air] = s}` (empty = 0.2 s; tricks 0.05 / 0.1 s), `skater_stance {[record id hex or record name] = regular or goofy}` (empty = the measured retail table; unknown records goofy; read at spawn), `skater_line_chain {radius 4, max_candidates 16, blend_seconds 0.2, keep_facing false}` (line end chaining; root blend onto the new line after a branch or chain, 0 = cut; keep_facing: fix 16 facing carry-over, mod option, not retail), `ped_obstacles {enabled true, min_half_extent 0.2, moving_speed 0.4, recut_fraction 0.25, detour_margin 0.1, step_height 0, held_is_obstacle true, moving_solid true}` (props and mod bodies as ped obstacles; a held prop stays one, retail; `moving_solid` is the NOT RETAIL YET stand-in for the NavPower moving avoider), `npc_skater_props {enabled true}` (NPC skaters push dynamic props), `ped_vehicle_contact {enabled true, push true}` (traffic cars push peds out of the way; no knock-down in retail), `npc_tricks {mode profile, gate_window 300, min_air_frames 50}` (NPC ollie / flip slots re-picked from the profile, or `recorded` / `none`), `skater_trick_profiles {[character key or profile name] = {regular, nollie}}` (empty = the disc's tables), `npc_simulated {enabled false, radius 40, max 3}`, `skaters` / `pedestrians` / `vehicles {enabled true, density 1}` (0..4, scales the census caps), `ambient_skaters 3` (0..8), `free_play {traffic, pedestrians, ai_skaters}` (absent = career free roam; retail Free Play: 0..1, 0 removes them at once) | `LivingWorldSettings`, rebuilt via `reset_mod_overrides()` so the player's menu draw distance returns |
-| `props` | `default` / `by_template[<MOBJ template>]`: every `PropTuning` field plus `collision_box {center, half_extents}`; a template entry starts from the patched default | `PropTuningSettings` |
+| `props` | `default` / `by_template[<MOBJ template> (MOBJ: the map's placed object records)]`: every `PropTuning` field plus `collision_box {center, half_extents}`; a template entry starts from the patched default | `PropTuningSettings` |
 | `carry` | `grab_bit` (28, RB), `placement_bit` (20, B), `grab_range` (2.0 m); Move Object: `push_speed` / `pull_speed` / `side_speed` (3.0 / 2.0 / 2.5), `turn_rate`, `grip_reach`, `linear_clamp` (20), `yaw_clamp` (6), `relatch` (0.1), `slew_per_tick` (4), `linear_controller` / `yaw_controller` ([20, 0, 40, 0.1]), the four curves, `let_go_distance` (1.0); slot 9 application: `commanded_material` ([0.03, 0.02] static / dynamic friction), `upright_cos` (0.65), `apply_at_com`, `yaw_replaces_torque`, `ignore_vertical`, `wake_on_command` (true), `by_template[<MOBJ template>] = {material_held, material_free, material_free_upright, upright_pair, restitution}` | `CarrySettings`, pushed into `PropCarry` and `PropDynamics` each tick (survives map loads) |
 
 Events (`on_event {name = "living_world", event = ...}`, `modding::living_world_events`): `spawn` / `despawn` with the
@@ -121,7 +121,7 @@ described, not copied.
 - AIPATH: branch weight meaning, node flag bit 4, orientation order, `m_ID` bytes 6 to 15; the 38 `ai_skater`
   tunables.
 - Roads: decoded in V0 except the meaning of a few raw fields (junction `flag_04`, connector `f32_50`, segment
-  `word_56`, quad tags); crosswalks for peds (navigation milestone); NavPower; DMO plugin anchors (benches, ATMs,
+  `word_56`, quad tags); crosswalks for peds (navigation milestone); NavPower; DMO (dynamic prop) plugin anchors (benches, ATMs,
   fountains are placed objects, not waypoint streams).
 - Ped rig: the converted models carry 39 bones, the animation bank 50; matched by name in the ped-body milestone.
 - How retail picks among shared-look entities (`sub_826B8B88`).
@@ -135,8 +135,8 @@ described, not copied.
 **Problem.** Laptop session 2026-10-19 18:04: the Skyline example car (`mods/Skyline_Drive_Mod`, `examples.skyline`,
 upstream since 2026-09-11) loaded at every start without the player turning it on, spawned at the player's spawn
 point, blocked peds walking by (`PED_BLOCKED ... (mod body)`, the car is a ped navigation obstacle) and cost 2 to 3 ms
-of each fixed step (`modding::fixed`). The user: "no? i didn't turn it on at least..", then "switch skyline off both
-for our upstream pr and in hails additions".
+of each fixed step (`modding::fixed`). The user had not turned it on and asked to switch Skyline off both
+for our upstream PR and in hails-additions.
 
 **Change.** Its `mod.json` sets `"enabled_by_default": false` (the field the dev test mods already use,
 `crates/skate-mods/src/schema.rs`), with the `mod.json` line of `SHA256SUMS.txt` updated (sums are over the LF form).

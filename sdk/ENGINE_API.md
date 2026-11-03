@@ -87,7 +87,7 @@ any mod hides it, it stays hidden. A disabled mod's hide goes with it.
 
 ## Loading screen (`sdk.loading`, capability `loading` 2: timing, stat rows and events since 2)
 
-The loading screen between maps (Skate 3's tips loader, FE 52) picks a Coach Frank line or a hint each time it opens.
+The loading screen between maps (Skate 3's tips loader, front-end screen 52) picks a Coach Frank line or a hint each time it opens.
 `sdk.loading.hint(key, {title=..., text=...})` and `sdk.loading.coach_frank(key, text)` add (or replace, by key) this
 mod's lines; a string id (`ID_HINTS_TITLE_3`) is localised, any other text shows as written.
 `sdk.loading.stat(key, {label=..., value=...})` adds a row to the Stats panel next to the player's career stats (the

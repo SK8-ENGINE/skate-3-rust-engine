@@ -1,6 +1,6 @@
-# Tricks component (Class_Flips, cloth_trick) and Class_Treatment — spec (2026-10-02)
+# Tricks component (Class_Flips, cloth_trick) and Class_Treatment: spec (2026-10-02)
 
-Our reading of the TU3 recompilation (`tools/recomp-code-search/fn.sh ADDR`, reference only); image constants by
+Our reading of the TU3 (title update 3) recompilation (`tools/recomp-code-search/fn.sh ADDR`, reference only); image constants by
 `img.py` (local tool); vault values from the user's `skater-collections.json`. Port: `crates/skate-audio`
 `player/tricks.rs`, `player/treatment.rs`, `player/globals.rs`.
 Tags: [R] read in the asm, [V] vault, [IMG] image, [T] retail trace, [U] UNCERTAIN.
@@ -29,7 +29,7 @@ Object fields [R] (`sub_824CBD98`): +16/+28 owner refs (+72 local byte), +32 aud
 6. Slew `sub_824CD170(dt)` (dt ≤ 0 → +72 := 0): target = `sub_824898C8()` ? T₁₃ : first set bit of G+96
    (0x8000 → T₁₅, 0x4000 → T₁₄, 0x2000 → T₁₃) else 0; step down trunc(R↓·dt), up trunc(R↑·dt) [V below].
    `sub_824898C8` = G+96 bit 0x2000 || (X+932 && copied X+476 byte) || X+1060 == 8 (X = *(0x830CFDC4)).
-7. `sub_824CD390`: game events 24685–24697 through `sub_824AA858` (trick-event system, no AEMS) — not ported.
+7. `sub_824CD390`: game events 24685–24697 through `sub_824AA858` (trick-event system, no AEMS): not ported.
 
 **Update `sub_824CBF78`** = `sub_824CC7D8`, `sub_824CCE48`, `sub_824CCFE8`:
 - Flip: id = off ? 34 : +348; if !(air || off) or id ≠ +52 → release. Else rewrite: w9/w8/w7 spins (Ri/Up/At),
@@ -47,7 +47,7 @@ w12–w15 0, w16 (+224 == 0), w17 27646, w18 14848, w19 6656, w20 0, w21 10000, 
 w9 id 0..40, w10 eEQ 0, rest 0.
 
 Banks: `Sk8_Air_Flip_Tricks` (Class_Flips, capacity 3), `Foley_Cloth` (cloth_trick capacity 3; its
-`c_foley_utility` is posted once at boot in retail — POST object 20 once per session [T]).
+`c_foley_utility` is posted once at boot in retail: POST object 20 once per session [T]).
 
 ## 2. Class_Treatment (vtable 0x822FCDA0, owner Treatments 0x40010070 = `keys::treatments(0)`)
 
@@ -72,7 +72,7 @@ PlayerPhysics.in11 reads (`sub_824B19C8`). Writer not located [U].
 | +343 | trick active | rec+148 & 0x01000000 | `trick_active` (= scorable present) ✓ |
 | +348 | audio trick | rec+180 = scorable record +164 (`8C3025DB4D1761AF`) | `audio_trick` (host-resolved) ✓ |
 | +352 | 2nd audio trick | rec+184 = scorable record +172 (`A2C5C22C5BE725F8`) | **new** `audio_trick_2`; 28 flips, 35 grabs, −1 ollie/nollie/footplants |
-| +344 | rec+148 & 0x00800000 = scorable record +176 bool (`7B9298C7883E2FA2`) | — | not read here |
+| +344 | rec+148 & 0x00800000 = scorable record +176 bool (`7B9298C7883E2FA2`) | n/a | not read here |
 | +310 | off-board hold expired: +309 (rec+164 bit 0 = [r30+72]+309) held > 0.4 × (1 − min(0.12·v₂₀₈, 1)) s (`0x8208EA70` 0.12, `0x82181B90` 0.4) | bridge | **new** `offboard_310`, not published: false |
 | +480/+484/+488 | deck ω · rows Ri/Up/At (B40+0, `sub_82772748`) | | +488 = `deck_spin`; **new** `deck_spin_xy` (host: ω·basis col 0 / col 1) |
 | +220 / +224 | G+0 time scale (1.0) / G+4 byte (c_tazer input) | G = *(0x83083C38)+0x2F070 | **new** `time_scale` (1.0), `global_224` (false) |

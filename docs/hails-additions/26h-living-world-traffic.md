@@ -65,7 +65,7 @@ Verification (milestone V0):
 **Problem.** Traffic needs the road network as a graph a car can drive on, retail's traffic lights and retail's rule for
 when a car may enter a junction, before the census (V2) and the driver (V4) can use them.
 
-**What retail does (code read, TU3 recomp as reference).**
+**What retail does (code read, TU3 (title update 3) recomp as reference).**
 - Road network object (global `0x830854C0`, vtable `0x8230C6A8`): `+8` vehicle by id, `+16` junction by node, `+24`
   lane run by id, `+32` segment by id, `+36` / `+40` signal controller by index (`sub_8269B2F0`, controllers 320 bytes
   apart) [code].
@@ -215,8 +215,8 @@ Census cars become visible, moving traffic that obeys the lights and is heard th
 
 **Problem.** First play video of the living-world build (DownTown): "At a certain point in the first map shown
 the cars leave the ground and fly off and all peds and vehicles cease to exist." The session log is empty; the
-video is the only record. User: "The cars appear to fly away when I jump as im going uphill, not clear if its
-related."
+video is the only record. The user saw cars appear to fly away when jumping while going uphill, possibly
+unrelated.
 
 **Evidence.**
 - [video] Frames 21.5-24.5 s (4 fps, zoomed): a green and a red car hang about two storeys up in front of the
@@ -271,8 +271,8 @@ would settle both.
 
 ## Car shadows from a bridge printed on the ground below, 2026-10-08
 
-**Problem.** Session 2026-10-07 12:14 (DownTown, player about [42.6, 15.8, 353]). User: "I did find a spot where
-vehicle shadows from the bridge overhead were appearing below".
+**Problem.** Session 2026-10-07 12:14 (DownTown, player about [42.6, 15.8, 353]). The user found a spot where
+vehicle shadows from the bridge overhead appeared below it.
 
 **Root cause.** Dynamic objects (skaters, traffic cars on layer 28, mod graphics) cast into one dynamic shadow map
 that the baked world receives (`retail_character.rs` "Dynamic object shadows onto baked world", upstream ddc3028).
@@ -329,7 +329,7 @@ systems use `modding::world_tuning::set` with the same domain.
 
 **Open questions.**
 - The retail visibility term (depth step plus `1 - blurred` from an exponential-blurred atlas, two cascades) is still
-  Bevy's PCF lookup in ours; only the floor is ported here. The sign convention of the scalar-constant subtract was
+  Bevy's PCF (percentage-closer filtering) lookup in ours; only the floor is ported here. The sign convention of the scalar-constant subtract was
   read as constant minus register (the only reading that leaves unshadowed receivers at full light).
 - Retail's cascade extent and which vehicles are submitted to the shadow pass (CPU side, "Shadow Map Cascade" /
   "DrawShadowCasterInstances") were not traced; ours keeps one 24 m cascade.
@@ -413,7 +413,7 @@ the two mod options), `living_world_car_box_matches_the_car_proxy`,
 
 ## Skitching: research and the tow spring (2026-10-09, groundwork)
 
-**Retail [code] (`.local/research/npc/b26-skitching.md`, `b27-skitch-state.md`, `b30-skitch-pull-release.md`; main
+**Retail [code] (research b26, `b27-skitch-state.md`, `b30-skitch-pull-release.md`; main
 checked the state id, the vault keys of the spring, its constants and the update gate).** Cars carry grab splines;
 the grab query (`GrabSplineQueryManager`) publishes grab records at ProcessedPhysIn +1888 / +2176 (ours:
 `player/post_input.rs:180` `publish_candidates_82d740f8`); with the hand flag (+2476 bit 21, not the animation's
@@ -425,15 +425,15 @@ the car with a velocity-target spring (`sub_82D4B500`, board force tag 6), not a
 
 **Change (groundwork only).** skate-core `riding::skitching`: `SkitchSpringSettings` (vault
 `physics_state_skitching/default` retail values) and `tow_spring` (`sub_82D4B500`); `SkitchSubMode` (`sub_82D49580`,
-`b31-skitch-submode-hold.md`, main checked its vault getters): modes 0 settle, 1 inside the grab range, 2 at the
+`b31-skitch-submode-hold.md`, verified its vault getters): modes 0 settle, 1 inside the grab range, 2 at the
 edge, 3 stepping off, 4 let go (readings inferred), with the 0.5 s settle timers, the 0.4 m edge band, the stick
 toward / outward tests and the outward car-acceleration push time; the riding skater's skitch query
-(`sub_82D39D98`, `b33-skitch-wiring.md`, main checked our publication of the hand flag): time to a candidate spline
+(`sub_82D39D98`, `b33-skitch-wiring.md`, verified our publication of the hand flag): time to a candidate spline
 `max(0, (ahead - 1.0) / max(closing, 0.5))`, latch below 0.1 s, the re-grab cooldown that skips the last car
 (`SkitchQuerySettings`, `choose_skitch`). The hand flag (2476 bit 21) is already published from the ground state's
 latch byte (`player/input_phase/publication.rs:262`, `riding/grounded/state/output.rs:159`); nothing sets the latch
 yet. The car grab splines are authored on the disc (`b34`, `b35`: RW4 GRABDATA `0x00EB001F` in the
-vehicle model-part `.rx2` files of `livingworld.big`; main ran the parser over the disc: 17 car models, one rear-edge
+vehicle model-part `.rx2` files of `livingworld.big`; the parser was run over the disc: 17 car models, one rear-edge
 Bezier spline each, 12 to 24 control points, direction (0, 0, -1), z -1.93 to -3.12 m in the model frame; grab
 record type 1): `tools/asset_pipeline/grab_data.py` parses them (not yet called by the vehicle exporter). Not wired: no state-104 handler,
 no hand-flag producer, no car grab splines yet.
@@ -448,7 +448,7 @@ gated by owner +12836 bit 0x40, open) and the car-side hook.
 
 ## Cars knock the skater down, and brake when hit (V5 start, 2026-10-09)
 
-**Retail [code] (`.local/research/npc/b37-traffic-v5-car-hits.md`; main checked the contact debug string and our
+**Retail [code] (research b37; verified the contact debug string and our
 vehicle group).** The skeleton contact pass (`sub_82BD4A30`) keeps the largest relative normal speed against
 vehicle-group (8) bodies; the Ground / Air wipeout checks (`sub_82D90C98`) bail the skater (reason 7, WipeoutGround)
 above `Wipeout_GroundVehicleContact` (9.0; `Wipeout_GroundSkitchingContact` while skitching), and touching a vehicle
@@ -471,8 +471,8 @@ asserts the group; skate-core `a_car_hit_by_the_skater_ahead_brakes_to_a_stop_th
 
 ## Traffic: obstacles ahead (V4 look-ahead, 2026-10-09)
 
-**Retail [code] (`.local/research/npc/b36-traffic-v4-driver.md`, `b41-v4-obstacles-corridor.md`,
-`b42-v4-leftovers.md`; main checked the characteristics / driver values, 0.68 and 0.025).** Every frame the traffic
+**Retail [code] (research b36, `b41-v4-obstacles-corridor.md`,
+`b42-v4-leftovers.md`; verified the characteristics / driver values, 0.68 and 0.025).** Every frame the traffic
 manager refills two obstacle lists (`sub_826B2EE0`): skaters (radius 0, soft) and world actors (peds radius 0.5 x
 body extents z, soft; movable props radius half their smallest extent, hard; traffic cars add nothing). Each car's
 look-ahead quad (`sub_82C400A8`) runs from its centre to the bumper plus speed + standoff, flared on the turning side
@@ -483,7 +483,7 @@ below 20 km/h only for opted-in drivers (all stock drivers). The planner brakes 
 
 **Change.** skate-core `living_world::traffic::obstacles` (`Obstacle`, `CarFrame`, `look_ahead_quad`, `in_quad`,
 `in_the_way`, `nearest`, `obstacle_accel`); `Car::obstacle` (the free distance) feeds `follow::step`; skate-game
-`look_ahead` builds the lists from the observers, the peds and the active DMO footprints (`PedObstacles`) and sets
+`look_ahead` builds the lists from the observers, the peds and the active DMO (dynamic prop) footprints (`PedObstacles`) and sets
 each car's nearest obstacle once per frame before the ticks.
 
 **Engine choices.** The ped radius is our fallback ped radius (0.35; retail's per-ped extents are collision data),
@@ -498,8 +498,8 @@ turn side `+3748` is open), and the lists use last frame's poses. The standoff i
 
 ## Traffic: the horn, and peds running from it (V4, 2026-10-09)
 
-**Retail [code] (`.local/research/npc/b36-traffic-v4-driver.md` sections 2, 4, 5, 8, `b41-v4-obstacles-corridor.md`
-section 3, `b44-horn-honker.md`, `.local/research/peds/b45-runfromhonker-flee-timeout.md`; main re-read the honk
+**Retail [code] (research b36 sections 2, 4, 5, 8, `b41-v4-obstacles-corridor.md`
+section 3, `b44-horn-honker.md`, research b45; re-read the honk
 receiver `sub_82E3C3D0` and the shape of `826A1358`).**
 - Limiter kind `+4392`: each driving-state update sets 0 (free) or 2 (stop point), the lead check 1 (behind a lead
   whose own kind is 1 or 5) or 3 (any other lead), the look-ahead 4 (obstacle); the nearest limit wins. The junction
@@ -551,8 +551,8 @@ the steering type's speed quantisation (6 stays 6, 3 becomes 2 in type 0); `IsOn
 
 ## Skitching step 1: car grab splines in the vehicle data (2026-10-09)
 
-**Retail [code + data] (`.local/research/npc/b34-car-grab-splines.md`, `b35-car-definition-resource.md`; main ran the
-parser over the disc).** Car grab splines are authored per model: RW4 GRABDATA (`0x00EB001F`) in the first part arena
+**Retail [code + data] (research b34, `b35-car-definition-resource.md`; the parser was
+run over the disc).** Car grab splines are authored per model: RW4 GRABDATA (`0x00EB001F`) in the first part arena
 of the recipe that has one (`82C2A8C8`), registered as grab records of type 1. On the disc 17 of the 18 car recipes
 have exactly one rear-edge spline (Bezier chains of 12 to 24 control points at z -1.7 to -3.1, direction (0, 0, -1));
 `reda_car` has none.
@@ -565,7 +565,7 @@ models.<record>.grab_splines = [{points, direction, bounds, flags}]` (model spac
 tests); skate-game `grab_splines_and_driver_horn_values_load`. The dev install's vehicles.json got the field by hand
 (same function) until the next setup refresh.
 
-**Open (next steps, `.local/research/npc/b46-skitch-port-map.md`, `b47-skitch-frame-transforms.md`).** The grab
+**Open (next steps, research b46, `b47-skitch-frame-transforms.md`).** The grab
 query's provider slots: `82760508` treats the mode as a bitmask (0x02 the provider at scene `+4088`, 0x04 the one at
 `+4084`; our offboard port is the 0x04 one); which provider enumerates cars and its gates are not decoded yet, nor
 whether a car record carries an assembly. Then the riding skitch query, state 104 (registry, dispatch, a no-op exit
@@ -573,7 +573,7 @@ like retail's `82B61BB8`, its own publication) and the car side.
 
 ## Skitching step 4a: the state-104 frame step, and the GRABDATA header fix (2026-10-09)
 
-**Retail [code] (`.local/research/npc/b32-skitch-frame.md` section 1, `b47-skitch-frame-transforms.md` section 1).**
+**Retail [code] (research b32 section 1, `b47-skitch-frame-transforms.md` section 1).**
 `sub_82D48148` re-orients the grab record to the board, keeps a three-frame history of the grab edge (direction,
 up, side, midpoint), measures the skater's along-edge coordinate in the previous frame and builds the axis point
 from it (b47 corrects b32: no relative transform there), maps the current grab point into the previous pose with
@@ -585,7 +585,7 @@ the distances and rates the tow spring reads, the side target (0.5 m along the s
 `step`; `to_world` / `to_local`); the car-motion frame (256 = 448) is kept for the hand targets, 384 (identity in
 retail) is left out. `tools/asset_pipeline/grab_data.py`: GRABDATA header +12 is the count of enabled entries (byte
 +70 non-zero, the length of the direction array), not the entry count again; 3 parkassets props with disabled
-entries failed before (main re-ran all 102 with GRABDATA: all parse).
+entries failed before (all 102 re-run with GRABDATA: all parse).
 
 **Engine choices.** A zero vector normalises to zero (retail's epsilon vector at `0x830BD350` is not read).
 
@@ -600,7 +600,7 @@ type-2 world-object provider (or the DMO manager on the alternate path), `+4088`
 
 ## Skitching step 2: cars in the grab scene (2026-10-09)
 
-**Retail [code] (`.local/research/npc/b49-grab-providers.md`; main checked the provider vtable against the image and
+**Retail [code] (research b49; verified the provider vtable against the image and
 the gates in `82C35B98`).** `82857FB0` fills the grab scene's two provider slots: `+4084` (query mode bit 0x04) gets
 the type-2 world-object provider (or the DMO manager on an alternate path), `+4088` (bit 0x02) the vehicle provider
 (vtable `0x82322514`: `82C36068` single record, `82C35B98` box query, `82C35840` radius query). `82760508` treats the
@@ -629,7 +629,7 @@ side (held flag, tow reaction), flag `0x83082929` (which maps take the DMO path)
 
 ## Skitching step 3: the riding skitch query (2026-10-09)
 
-**Retail [code] (`.local/research/npc/b33-skitch-wiring.md` section 2; main read the ground update branch, the box
+**Retail [code] (research b33 section 2; checked the ground update branch, the box
 flag of `82D2E250` and the query constants).**
 - The ground update `82D37C88` branches on Processed `+2476` bit 22 (the grab input): set, it runs the skitch query
   `82D39BB8`; clear, it invalidates the grab owner (`82D749D0`). Our ground update always invalidated.
@@ -660,7 +660,7 @@ regression check pending).
 
 ## Skitching step 4b: the hold target and the release impulses (2026-10-09)
 
-**Retail [code + data] (`.local/research/npc/b52-skitch-target-impulses.md` sections 1-2; main checked the impulse
+**Retail [code + data] (research b52 sections 1-2; verified the impulse
 vault keys).** `82D4B8C0` builds the hold target (the side-shifted previous frame at the hand's along coordinate),
 its horizontal direction (the tow spring's next axis), the yaw between the grab point and the target, and the lean
 yaw (`940`); `82D4BCF8` turns the skater's facing toward the target at up to 180 degrees per second, scaled by the
@@ -680,7 +680,7 @@ the vault values, `wrap`, `yaw`).
 
 ## Skitching step 4c: the hold step and the release (2026-10-09)
 
-**Retail [code + data] (`.local/research/npc/b53-skitch-hold-step.md`, b51 section 2; main checked the 1344 masks in
+**Retail [code + data] (research b53, b51 section 2; verified the 1344 masks in
 `82D49580`: the per-frame clear is 0x60, b31's 0x18 was wrong).** `82D49D70` keeps the hand's along target (904):
 while 1344 bit 0x08 is set it follows the clamped position, or ratchets with a stick past +-0.5; the bit clears when
 the skater rests near the posed hand and sets again when the hand is 0.2 m off or after 2 s; the posed hand (908)
@@ -702,7 +702,7 @@ Not wired: state 104's handler (registry, dispatch, enter / exit, forces, public
 
 ## Skitching step 4d: the along-the-bumper hand chain (2026-10-09)
 
-**Retail [code + data] (`.local/research/npc/b30-skitch-pull-release.md` section 4, `b31-skitch-submode-hold.md`
+**Retail [code + data] (research b30 section 4, `b31-skitch-submode-hold.md`
 section 2).** `82D48C98` low-passes the car's acceleration along the grab edge (0.9 / 0.1), turns it into a hard event
 past 40 and an excess over a dead-band curve, adds the stick's push (10) or, without stick or event, a velocity servo to
 rest, integrates the hand's velocity (capped at 1, or the stick gain against an opposing event; unbounded in the
@@ -719,8 +719,8 @@ frame layout) is being re-read (b55), as are the tow spring's body-height term a
 
 ## Skitching step 4e: state 104 in the game (2026-10-09)
 
-**Retail [code] (`.local/research/npc/b50-skitch-prestep-update.md`, `b51-skitch-forces-publish.md`, `b55-skitch-inputs.md`;
-main checked the publication gate, the 7199.999 constant and the skeleton load in the spring).** State 104 (vtable
+**Retail [code] (research b50, `b51-skitch-forces-publish.md`, `b55-skitch-inputs.md`;
+verified the publication gate, the 7199.999 constant and the skeleton load in the spring).** State 104 (vtable
 `0x82327398`): Enter `82D47278` + reset, an empty Exit, Update `82D477C0` (hands / forearms / head out of collision for
 5 frames, the gated body: record copy, off-ground pre-step, stick 924, frame step, sub-mode, hold step, along chain,
 forces, then the tail; always the reckoning and the skeleton ground update), publication `82D4C078`. b55 settled the
@@ -733,7 +733,7 @@ state registry supports 104 with transitions to and from the other states; `fram
 enters / exits it; the publication writes flag 304 (ready and not released), the car handle (36 / 40) and the re-grab
 timer (292); `AnimatedSkeleton.raw_part0_global` keeps the raw part-0 global for the spring.
 
-**Board forces (b56, main checked the Ground call sites).** `skitch_state::compose_board` composes `82D4AC38` with the
+**Board forces (b56, verified the Ground call sites).** `skitch_state::compose_board` composes `82D4AC38` with the
 Ground input builder: capture, tow spring (tag 6), slide friction (tag 1, heading time = the sub-mode time), tilt
 without history (0 off the ground), speed wobble (Ground's COM height; skipped off the ground), anti-flip, truck
 targets, heading (balance and spin both set), manual (powersliding off), the manual and anti-flip displacements and the
@@ -748,7 +748,7 @@ bin 664 pass (only the known setup fingerprint failure).
 
 ## Skitching step 5: the held car (2026-10-09)
 
-**Retail [code + trace] (`.local/research/npc/b57-held-car.md`; main checked the cap reads in `82C3FF38`).** Every gated
+**Retail [code + trace] (research b57; verified the cap reads in `82C3FF38`).** Every gated
 state-104 frame `82C361E8` marks the car held (`+4402` bit 0x02; `+4403` bit 0x80 when the holder is the player);
 `82C34CD0` moves both to their "last tick" bits and clears them every tick. A held car's speed cap is
 `(1.0 + 3680 + 3684) x the lane cap` (3684 = 0.2 in the recomp trace, so 1.2x); a player-held car skips traffic lights
@@ -769,7 +769,7 @@ calls (vt+84 / vt+88), the entered-on-red flag (`+3424` bit 0x04, `82C3B500`), N
 
 ## Skitching step 4f: the lean (2026-10-09)
 
-**Retail [code + data] (`.local/research/npc/b58-skitch-lean-outputs.md` part 1; main re-read the constants).**
+**Retail [code + data] (research b58 part 1; re-read the constants).**
 `82D4A0C0` turns the target step's lean yaw (940) into a lean angle (944): target = the sign of 940 times the curve
 `30FDFCE185CD3D4F` of |940| in degrees (0 while Processed 2488 bit 0x00800000), approached at 0.25 per update but at
 most 2 degrees; past 2 degrees the skeleton's board-offset orientation (Skeleton+15696) becomes a rotation of 944 about
@@ -789,7 +789,7 @@ from the hand-target step `82D4A378` (b59 decoding), state byte 53.
 
 ## Skitching step 4g: the hands (2026-10-09)
 
-**Retail [code + data] (`.local/research/npc/b59-skitch-hand-targets.md`; main checked the IK write path).**
+**Retail [code + data] (research b59; verified the IK write path).**
 `82D4A378` places each hand on the grab edge at the posed hand position plus that hand's skeleton-local offset, lets a
 hand go when the lean yaw leaves its bound (-60..35 / -35..60 degrees) or its shoulder is more than 0.9 + 0.7 m from
 its grip point (through the skeleton and the car's last-frame motion), moves the hand IK weights toward on / off by
@@ -807,7 +807,7 @@ animated tests. Not seen in game yet.
 
 ## Skitching step 4h: the skitch animation graph nodes (2026-10-09)
 
-**Retail [code + data] (`.local/research/npc/b60-skitch-graph-nodes.md`; main read the `anim_skitching/default` record
+**Retail [code + data] (research b60; checked the `anim_skitching/default` record
 and loaded the stock graph).** The stock ground motion graph (`ground.xml`, `Skitching/skitchpush.xml`,
 `skitchbrake.xml`) uses EnterSkitchingBehaviour / SkitchingBehaviour / SkitchShimmyingBehaviour and the conditions
 IsSkitchingWithAbsorb / SkitchingPosition / IsSkitchShimmying. Before this step our graph host returned an error on the
@@ -840,7 +840,7 @@ against the user's install); graph host tests (74).
 **Problem.** Traffic never reacted to a skater coming up from behind, and the earlier V3 notes read retail's
 "following" rule as a lead-car rule (`follow::retail_follow_accel`), which it is not.
 
-**Retail [code + data] (`.local/research/npc/b63-traffic-skater-scan.md`; main re-read the scan's resets
+**Retail [code + data] (research b63; re-read the scan's resets
 0x82165A10 / 0x8216DEE0, the state-104 skip, the 0.5 size factor, the quad B builder `82C400A8` (corners at +3520 to
 +3568, the back corners pushed `Hash_33466832` metres along their side edges) and the planner's five vault hashes).**
 - Skater scan `82C414A8` (per car, after the look-ahead, before the horn): nothing while a skater holds the car;
@@ -884,7 +884,7 @@ living_world 71 pass. Not play-tested yet.
 
 ## Skitching step 4i: PushSpeed's latch and step (2026-10-09)
 
-**Retail [code] (`.local/research/npc/b67-skitch-reel-in-decode.md`; main decoded `82D47BD8` and checked that the
+**Retail [code] (research b67; decoded `82D47BD8` and checked that the
 state-104 update `82D477C0` copies Player+1888 to state+1024).** PushSpeed (state+996, published as ground+308) moves
 toward 8 m/s by min(200 x state+1264, 3.5) per update unless state+1345 bit 0x10 is set. state+1264 is the held
 record's +240, the held object's inverse mass, not the step time (b30 / b61 read it as dt). The bit latches while the
@@ -904,7 +904,7 @@ author PushContact. Tests: skate-game skitch / living_world pass. Not play-teste
 **Problem.** The state-104 code read Processed+128 (the "board forward" of the re-orient test) as the deck's forward
 row and fed the target step the deck forward and Processed+592 where retail reads Processed+160 / +176.
 
-**Retail [code] (`.local/research/npc/b68-processed-128-matrix.md`; main checked the reader at the start of
+**Retail [code] (research b68; verified the reader at the start of
 `82D48148`: `lvx [state+16]+128`, dot with the bumper direction state+1136, flip when negative).** Processed+128..+191
 is the effective board transform that `82C013F0` (PrepareBoardToolkit, our `physics::board_toolkit`) stores each
 frame: row 0 the side axis, row 1 up, row 2 forward, row 3 the deck position (rows 0 and 2 negated by the stance bit).
@@ -917,7 +917,7 @@ facing / position are `effective[2]` / `effective[3]`. The frame step's own skat
 
 ## Skitching step 7: NPC skaters skitch (opt-in, 2026-10-09)
 
-**Retail [code] (`.local/research/npc/b65-npc-skitch-mode4.md`; main checked `sub_8246FA30` at 0x8246FC78: not
+**Retail [code] (research b65; verified `sub_8246FA30` at 0x8246FC78: not
 airborne (+928) and avoider mode ([ctrl+8]+6000) == 4 posts the intent at key 0x830BE780 with 1.0).** An AI skater in
 avoider mode 4 posts GrabWorld every tick (no timer), which reaches Processed2476 bit 22 like the player's grab, so the
 riding skitch query and state 104 run unchanged; while it posts it or skitches, the trick dispatch is skipped. It lets
@@ -939,7 +939,7 @@ play-tested.
 
 ## Manoeuvres groundwork: lane-change passage, stop spots, gap check (2026-10-09)
 
-**Retail [code + data] (`.local/research/npc/b69-traffic-manoeuvres.md` with the b71 / b72 extensions; main checked
+**Retail [code + data] (research b69 with the b71 / b72 extensions; verified
 the progress step `82C3C3C0` (speed x +/-1 x 1/60), the road-network values 1.3 / 10 in the exported tables and the
 vehicle-characteristics fixed layout).** The manoeuvre decider `82C41CD0` tries an overtake (never with stock data:
 `Hash_9366C67755A24D89` is 0), a lane change on a timer and a pull-over. A lane change is a passage: a cubic Hermite
@@ -974,7 +974,7 @@ acceleration); the real acceleration chain (spec+60 `Hash_03F46E22E52C0002` 0.2 
 and "blocked kind 4 vs 5" from `Hash_7C6B48BD9ADF8E6E`. The offsets came from b41's field order, which was the
 exported JSON sorted by hash, not the schema.
 
-**Retail [code + data] (b74 in `.local/research/npc/b69-traffic-manoeuvres.md`; main read the bit roller
+**Retail [code + data] (b74 in research b69; checked the bit roller
 `82C42348` at .78.cpp:7866: `[car+4116]` +20 -> bit 0x02, hash C423B7E0 -> 0x08, +12 -> 0x04, +16 -> 0x10, +36 -> 0x01,
 then hash 99083122 -> +4402 0x80; schema offsets from `vault_layout.py 02AA3F538D6C188A`).** Horn enabled = +36
 `Hash_50E084076390A573` (1.0 in every stock driver); blocked long = +20 `Hash_20E9C6487FDDBDE8` (0.5, normal 0.3,
@@ -988,7 +988,7 @@ or 5 by the driver's 0.3 to 0.8 chance instead of almost always kind 4.
 
 ## Traffic: cars change lane (2026-10-09)
 
-**Retail [code + data] (b69 / b71 / b72 / b74 / b76 in `.local/research/npc/b69-traffic-manoeuvres.md`; main read
+**Retail [code + data] (b69 / b71 / b72 / b74 / b76 in research b69; checked
 `IsRequiredToChangeLane` `82C39F78`).** On a lane, the decider rolls a lane change every lane-timer period (spec+48,
 10 s; go chance driver +28: 0.1 default, 0.4 taxi, 0 for fast / normal / reckless drivers) on roads whose `word_56`
 has bit 0x02. The change starts when pass = ext x the passage factor (spec+40) + speed and h = pass / 2 satisfy:
@@ -1013,7 +1013,7 @@ lengths (retail: extent + safety distance).
 
 ## Traffic: cars pull over, park and pull out (2026-10-09)
 
-**Retail [code + data] (b73 / b74 / b76 / b77 in `.local/research/npc/b69-traffic-manoeuvres.md`; main checked the
+**Retail [code + data] (b73 / b74 / b76 / b77 in research b69; verified the
 three passage builders' callers and the road record copy).** When the lane timer fires and no lane change starts, a car
 on the outer lane of a road whose `word_56` has bit 0x01 rolls the pull-over chance (driver `Hash_559BA807`, 0.02, taxi
 0.04; 0 while a skater holds it unless it has the "pulls over while held" trait, taxi 0.2) and reserves a stop spot
@@ -1044,7 +1044,7 @@ living_world 71. Not play-tested.
 
 ## Traffic: the car alarm on parked cars (2026-10-10)
 
-**Retail [code] (spec `.claude/notes/world-traffic-audio.md` "Car alarm trigger", recomp session 2026-10-04 16:11).**
+**Retail [code] (spec `audio-specs/world-traffic-audio.md` "Car alarm trigger", recomp session 2026-10-04 16:11).**
 StayingParked's begin / end (`82C39120` / `82C391F0`) set and clear `+3424` bit 0x80; the collision callback
 `sub_82C3C150` only tests a parked car: a contact whose vector `m+48` is longer than the spec's 0.1 sets the alarm
 (`+3424` bit 0x10) and zeroes the alarm timer `+3716` and the parked timer `+3712`. StayingParked's update `82C39138`
@@ -1167,8 +1167,8 @@ Install after refresh: 18 models, 107 rails. Play test pending.
 
 ## Skitching session logging (2026-10-15)
 
-**Problem.** Skitching wrote no session log lines, so a play session (planned by the user: "Third session will be
-trying out skitching") could not show where a grab failed or let go.
+**Problem.** Skitching wrote no session log lines, so a play session (the user planned the third session to
+try out skitching) could not show where a grab failed or let go.
 
 **Change.** Three lines, all on change only:
 - `SKITCH_LATCH <before> -> <after>` (`physics/ground_runtime/skitch.rs`): a grabbable spline (kind, id; kind 1 =
@@ -1200,7 +1200,7 @@ runs every state `set` enters (and Sleeping on exit) through the Calls assertion
 **Problem.** Session 3 (2026-10-16) crashed on the first grab ("PreState requires the selected state's actual
 PredictFutureOfDeck; state=Skitching"). After that fix, session 4: "skitching sorta works, i had to try like repeatedly to grab the car and when it finally did, my arms were all crossed over eachother and i was immediately flung by the car. I couldn't really control like you can in retail leaning with the turns to keep skitching the car." and "both arms just grab spots on the back of the car, not the shoulders of the car." The log showed one latch, sub-mode 1 for 6.7 s, then the release with both hands off.
 
-**Root causes and changes** (all [code], TU3 recomp read by main):
+**Root causes and changes** (all [code], TU3 recomp read):
 1. PreState and FillPhysOut had no Skitching entry. Skitching's deck prediction is vtable `0x82327398` slot 6
    (`82D34DA8`); added to `pre_state::predicts_deck` and `publication::has_output_owner`. Test
    `every_supported_state_has_a_deck_prediction_and_an_output_owner`.
@@ -1226,7 +1226,7 @@ PredictFutureOfDeck; state=Skitching"). After that fix, session 4: "skitching so
 6. Leaving sub-mode 0 writes `908 = 864 = 836` and `948 = 0` (`82D49580`); ported (`SkitchSubMode::left_zero`).
 
 Checked and NOT changed: "tows fast" (1345 bit 0x40) is rewritten every tick in `82D48148` (r29 = 0, set to 1 only
-when 832 >= 3.0, `Hash_1F85F500908C5E17` = 3.0), as ours does; the research agent's "sticky" reading was wrong.
+when 832 >= 3.0, `Hash_1F85F500908C5E17` = 3.0), as ours does; the earlier "sticky" reading in research was wrong.
 
 **Verification.** Headless `a_skater_latches_onto_a_traffic_car_rides_and_lets_go` now asserts that each gripping
 hand's target is on its own shoulder's side of the bumper and that sub-mode 1 keeps both hands on for at least a second
@@ -1243,7 +1243,7 @@ stick, as ours does (`skitch_state.rs`, `calculate_tilt(.., input.steering, None
 
 **Problem.** Session 4: "i had to try like repeatedly to grab the car". Session 5: "Skitching works better but seems to push you off sometimes.", "Additionally skitching sounds incorrect when your riding behind the vehicle", "one of the vehicles forced me off even though it was barely moving in a straight line."
 
-**Latch limits** [code + image, research b140, main checked]. `82D39D98` re-runs CanGrabSpline (`82E08DB8`) with its
+**Latch limits** [code + image, research b140, verified]. `82D39D98` re-runs CanGrabSpline (`82E08DB8`) with its
 own limits: margin `0x82165A10` = 0.0, angles `0x8209918C` = 60 and `0x82099190` = 40 degrees (r17 / r16, times the
 degree constant `0x8206D110`). Ours reused the query's 0.25 / 60 / 30, rejecting cars near the spline ends.
 New `SkitchQuerySettings::latch_margin` / `latch_angle_a_degrees` / `latch_angle_b_degrees` and
@@ -1252,7 +1252,7 @@ New `SkitchQuerySettings::latch_margin` / `latch_angle_a_degrees` / `latch_angle
 (retail: the line's crossing of the box's x = 0 plane, ours the closest chord point), +2668 height, the query's box vs
 sphere test.
 
-**Hand grab sound** [code + data, research b141, main checked]. The packer `sub_827A1B78` sets record `+152` bit
+**Hand grab sound** [code + data, research b141, verified]. The packer `sub_827A1B78` sets record `+152` bit
 `0x100` while the state is 104 (`0x827A29EC`); the bridge `sub_824B0DA8` copies it to audio state `+744`; its only
 reader `sub_824EC488` (HandGrabs, local player only) starts the `aud_splicer` `handgrab` pair (Skate_Collisions
 0x3C5, Skate_Metal 0x1D0, checked in the vault dump) on the eEQChain bus of `CCDFABBAEEA33EAE` (= 2 in
@@ -1272,7 +1272,7 @@ and `reach` so the next session shows which. Open.
 
 **Problem.** Session 6: "There were times that I was stuck on the side edge of the car skitching and couldn't move away from it and recenter myself by shifting to the center of the car, this also happened while going straight and not just in turns or curves." The log shows the along position at -1.0 to -1.3 of the half length for seconds, sub-mode 2 -> 1 with the stick at 1.00 and the position unchanged.
 
-**Root cause** [code, main read `82D48C98`]. At `82D48FA8..82D49034` (r22 = 1, r25 = 0) r28 = active (|924| > 0.01 or the
+**Root cause** [code, checked `82D48C98`]. At `82D48FA8..82D49034` (r22 = 1, r25 = 0) r28 = active (|924| > 0.01 or the
 event 1000 != 0); with r28 set the chain clears 1344 bits 0x02 (edge latched) and 0x01 (snapped), only an idle hand keeps
 them (r27, read at `82D492D4`, `82D493D0`, `82D49478`). Ours cleared them only while idle and unlatched, so once a hand
 latched the edge in sub-mode 2 it stayed snapped there (`target = 900` every tick) and the stick could not move it.
@@ -1285,7 +1285,7 @@ release, and no hand-off releases in sub-mode 1 after the per-mode writes.
 
 **Problem.** Session 7: "I did however hear a noise like the collision for the player and the car were colliding or something as i was skitching the whole time. It started when I grabbed the car and stopped only when I let go or was flung off." The log: 54 body-poster arm hits (regions 2 / 3, material 100) and 46 BodySlide posts in a 14 s tow; headless, the upper arms (parts 5 / 9) touched the car every tick.
 
-**Root cause** [code + data, research b143, main checked the install]. The exporter builds each car's chassis mesh
+**Root cause** [code + data, research b143, verified the install]. The exporter builds each car's chassis mesh
 (`recipes/<recipe>/glb/collision`) but the model entry the game loads copied only the grab and grind splines: the
 installed `vehicles.json` had the mesh on 17 of 18 recipes and on 0 of 18 models, so every car collided as its bounds
 box. The box's rear face stands vertical behind the bumper, between a skitcher's hands and shoulders. Retail has no
@@ -1324,7 +1324,7 @@ end of Animation to the end of `CueSet`, so other Update systems can land in it.
   (`bank_load`) and first-play file reads (`file_read`), those over 1 ms, largest first (`game_audio/hitch_parts.rs`).
 - Test `read_ahead_gives_the_same_clip_bytes`.
 
-**Change (step 2, speech).** Research `speech-stream-start` [code, recomp reference, main checked our side]: retail's
+**Change (step 2, speech).** Research `speech-stream-start` [code, recomp reference, verified our side]: retail's
 start (`sub_82C5DC80`) takes the stream in the same update (active, speaking byte, interrupt rules, queued requests
 wait, stop works) and leaves the data to the library's stream player; the game code has no ready check for normal
 lines (only scripted dialogue holds a stream, `sub_824A4EE8` / `sub_82C5E7C8`). So the port keeps every logical step
@@ -1357,7 +1357,7 @@ lines but they really didn't talk much while i was playing".
 bumper arbitration (`82598FE0`, ported in `skate-core/src/input/controller.rs`) always dropped bit 28 when both bumpers
 were held, also while skitching.
 
-**Root cause / change** [code, main read the recomp]. Retail's caller `825999F0` reads the skater's current state
+**Root cause / change** [code, checked the recomp]. Retail's caller `825999F0` reads the skater's current state
 (`*(*(x+28)+16)`) and passes `state == 502` (off-board pushing) and `state == 104` (skitching) to `825992D8`; in those
 states both bumpers held keep the one pressed first. `PlayerControls::update_for_physics` now sets both flags from
 `physical.state.state_16` before the controller update. Test `both_bumpers_keep_the_first_only_in_states_502_and_104`.
@@ -1367,7 +1367,7 @@ states both bumpers held keep the one pressed first. `PlayerControls::update_for
 **Problem** [code]. The grab point and the hands' grip points were taken on the straight chord between the record's
 ends (`skitch_state.rs`, NOT RETAIL YET note), so on a curved bumper they missed the curve sideways and in height.
 
-**Retail** [code, research b148 (Ghidra + recomp asm), main checked the offsets in the pseudocode]. `82D2D550` looks a
+**Retail** [code, research b148 (Ghidra + recomp asm), verified the offsets in the pseudocode]. `82D2D550` looks a
 point up by a signed position `t` along the record from the middle of its ends: at or past +-half (`+180`) the ends
 (`+64` / `+80`); otherwise u = t + half (reverse bit `+200` 0x20: half - t); the geometry's points (`+196` -> `+48`,
 count `+68`) are walked first to last, each segment counting its length projected onto the first -> last direction
@@ -1390,7 +1390,7 @@ the re-oriented held copy (ends swapped, +112 negated, reverse bit toggled), the
 **Problem** [code]. The latch (`82D39D98`) timed each candidate edge from the point of its chord closest to the skater's
 centre of mass (`ground_runtime/skitch.rs`).
 
-**Retail** [code, research b149, main checked the formula in the pseudocode]. Both edge ends (swapped so the second has
+**Retail** [code, research b149, verified the formula in the pseudocode]. Both edge ends (swapped so the second has
 the larger box-local x) go into the query box's frame; the point is where the edge crosses the box's local x = 0 plane,
 the skater's centreline: t = l1.x / (l1.x - l2.x), unclamped, no fallback (a parallel edge gives NaN, and the time's
 fsel turns it into 0). The query's segment test (`82ADD910`) is against a sphere of radius |extents| at the box
@@ -1399,7 +1399,7 @@ centre (`82ADD6A8`), which ours already does.
 **Change.** `latch` takes that crossing (`bounds.frame`: right, up, forward, centre). Tests: the skitch latch tests and
 the headless tow `a_skater_latches_onto_a_traffic_car_rides_and_lets_go`.
 
-`+2668` [code, research b150, main checked the store in the recomp]: P.y minus Processed+176 .y, the effective board
+`+2668` [code, research b150, verified the store in the recomp]: P.y minus Processed+176 .y, the effective board
 transform's row 3 (the deck position, written only by `82C013F0`; ours `BoardToolkit::effective[3]`), set for every
 gated candidate before the time gate. `query` now takes the deck and writes it (`LatchDecision::height`). Test
 `the_latch_height_is_the_crossing_above_the_deck`.
@@ -1411,7 +1411,7 @@ gated candidate before the time gate. `query` now takes the deck and writes it (
   factor (`328B9F46`) into the max acceleration and the pull-over approach factor (`75822921`) into the planning
   deceleration; every car of a spec pulled away alike; the cap was `lane x (1 + 0.2 held)`; the hit brake faded as
   the car slowed (`accel = -speed` each step).
-- **Retail [code + data] (main re-read `82C3FF38` and `82C3FA08`):** at spawn (`82C3CDD0`) each car draws its max
+- **Retail [code + data] (re-read `82C3FF38` and `82C3FA08`):** at spawn (`82C3CDD0`) each car draws its max
   acceleration uniformly in [spec+52, spec+56] in 1 % steps (2.0..5.0 default, 2.5..6.0 sports / taxi / truck), a
   speed style from the driver's normal / slow / fast chances (default 0.8 / 0.1 / 0.1: slow `1 - spec+24`, fast
   `1 + spec+32`) and the held bonus spec+28 behind the driver's `D0BA2E02` roll (1.0 in every stock driver). The
@@ -1437,7 +1437,7 @@ gated candidate before the time gate. `query` now takes the deck and writes it (
   deceleration and a hard-brake "dilemma zone" that let a car run an amber light, a 0.5 m stop margin, a 2 m minimum
   gap matched to the lead's speed, a lead search `look_ahead + speed + 2 + 10` m and the query window from
   `v^2 / (2 x 3.0)`.
-- **Retail [code + data] (main re-read in the recomp asm: `82C376E8` window `vt+100 + vt+92 >= d` around the query
+- **Retail [code + data] (re-read in the recomp asm: `82C376E8` window `vt+100 + vt+92 >= d` around the query
   `82E11E90`, `cmpwi r3,0` = any answer but Go stops; `82C41120` lead window `gap <= v + standoff` and bit 0x04;
   b163 for the spawn stores):** at spawn `+3660 = s x spec Hash_2ACE3FEE16D6F7A2` (0.5 default, 0.25 family / sports /
   taxi / truck, 0.35 minivan) and `+3664 = s x Hash_73A1989BB90C93BA` (0.5, family 0.6), s = the car's size along z.
@@ -1453,13 +1453,13 @@ gated candidate before the time gate. `query` now takes the deck and writes it (
 - **NOT RETAIL YET / open:** s = our model length (full length per b163 section 1, medium; one hook on `82E0BE68`
   would settle it, and the pull-over approach uses half the length, so one of the two is off by 2x); the query's own
   Approach test reads `+3660` (`entry_speed < speed && vt+100 <= remaining`, confirmed 2026-10-29, research
-  `.local/research/b696-traffic-exit-room.md`); an engine safeguard keeps a car out of its lead's bumper when a fixed
+  research b696); an engine safeguard keeps a car out of its lead's bumper when a fixed
   step overshoots.
 - **Ported 2026-10-29 (b696, asm read):** the query's connector room check compares the full `+3664` (length x
   `Hash_73A1989B`, strict `>`, `82E11E90`), not the engine `min_gap` 2.0; the lane-change gate reads `+3752` = the
   gap to the lead alone (`IsRequiredToChangeLane` `82C39F78`), so an obstacle inside h no longer refuses a lane
   change (it did in ours). Open: what `car+4396 == 1` means, the zone lookup `82E147C8`.
-- **Checked 2026-10-29 (research `.local/research/b688-car-following-gaps.md`, asm read):** the lead standoff is
+- **Checked 2026-10-29 (research b688, asm read):** the lead standoff is
   always half of `+3664` (`82C38390` -> `82C41120`), as ours; the lane occupancy adds `s + +3664` per car
   (`82C34430`), which supports `s` = the full length. `82E14F50` has no range: the lead is the previous node of the
   lane's list sorted by distance to the lane end, and only the `82C41120` window limits it, the same result as ours
@@ -1476,9 +1476,9 @@ gated candidate before the time gate. `query` now takes the deck and writes it (
 
 ## Skitching: the car is drawn on the ticks the skater met it (2026-10-18)
 
-- **Problem:** laptop session 2026-10-18 22:01, the user, skitching: "it does jitter a tiny bit and struggle to stay
-  with the car at high speeds".
-- **Root cause [code, research `.local/research/b285-skitch-view-jitter.md`, main-checked]:** traffic moves after
+- **Problem:** laptop session 2026-10-18 22:01, the user, skitching: it jitters slightly and struggles to stay
+  with the car at high speeds.
+- **Root cause [code, research b285, verified]:** traffic moves after
   Physics (`drive_traffic` in the chain after `step_population`, `living_world/mod.rs:867`, `vehicles.rs:1239`), and
   the skater's solve reads the car proxies and grab splines from `CarMotion::curr` before Physics, so the skater of
   tick N met the car of tick N-1. The skater and camera are drawn between their snapshots N-1 and N, the car between
@@ -1501,7 +1501,7 @@ Detail moved out of the code comments of `crates/skate-game/src/living_world/veh
 
 Traffic cars (doc 26, milestone V3): turns the population's vehicle spawn / despawn records into visible cars that drive their lanes.
 
-- **Entity** per spawn record: [`TrafficCar`] (stable `LivingWorldId`, entity / model keys, palette ids and colours, engine record) + `Transform` + #32's [`TrafficAudio`](crate::world_audio::TrafficAudio). [`TrafficState`] keeps the follower cars (`skate_core::living_world::traffic::follow`) and the id -> entity map.
+- **Entity** per spawn record: [`TrafficCar`] (stable `LivingWorldId`, entity / model keys, palette ids and colours, engine record) + `Transform` + #32's `TrafficAudio`. [`TrafficState`] keeps the follower cars (`skate_core::living_world::traffic::follow`) and the id -> entity map.
 - **Motion** (`FixedUpdate`, after the population step): one follower step per 60 Hz world tick, the signal clock ticked once per world tick (retail ticks its 4 controllers by 1/60 s per world tick, `sub_826B2C18`); a car spawned at tick `s` steps from tick `s + 1`. Lane state goes back to the population (`LivingWorld::update_lane`, `update_position`) so the census cull and the placement test see the real cars. A car at a dead end leaves (despawn, reason External).
 - **Look** (`Update`): the car's GLB (`private/living_world/vehicles/<recipe>.glb`, or a mod's path from [`VehicleOverrides`]) as a scene, drawn with the glTF materials on render layers 0 and 28 like mod graphics; the `vehicle_chassis` and `vehicle_glass` materials run the retail car programs ([`super::vehicle_material`]: paint rule below, lighting, glass) with the material rows of `vehicles.json` `materials`; the six wheel bones spin with the distance driven over the model's wheel radius (`wheel_hint`, `Hash_FD7A66142F16B9CC`, equal to the wheel bone height [data, V0]). Drivers are part of the body mesh [data, V0]; no vehicle lights exist [data].
 - **Collision**: one kinematic box per car from the GLB bounds (`mesh_bounds`), infinite mass, the car's velocity, joined to the skater solve through `physics::network::Proxies` like the NPC skaters. Solid contact only; bails and roof behaviour are V5.
@@ -1516,7 +1516,7 @@ Moddability: [`VehicleOverrides`] (model per entity, GLB per model, colour per p
 
 ### Vehicle hits
 
-The skater's body hit a car (`sub_82C3C150`, actor branch): a contact ahead of the car (ours: along its velocity; retail's axis is the car's vtable +24, inferred forward) latches the hit brake on the follower car. Logs `VEHICLE_HIT`. Every contact also goes to the car alarm rule as a [`VehicleImpact`](crate::world_audio::VehicleImpact) (relative speed at the contact; the rule sets a parked car's alarm off).
+The skater's body hit a car (`sub_82C3C150`, actor branch): a contact ahead of the car (ours: along its velocity; retail's axis is the car's vtable +24, inferred forward) latches the hit brake on the follower car. Logs `VEHICLE_HIT`. Every contact also goes to the car alarm rule as a `VehicleImpact` (relative speed at the contact; the rule sets a parked car's alarm off).
 
 ### Car look-ahead
 
@@ -1637,7 +1637,7 @@ Detail moved out of the code comments of `crates/skate-game/src/physics/skitch_s
 
 ### Skitching state 104
 
-PhysicsSkitching 104 (TU3 vtable `0x82327398`; doc 26h "Skitching step 4e"). Enter `82D47278` + reset `82D47318`, Exit `82B61BB8` (empty), Update `82D477C0`, publication `82D4C078`. The maths lives in `skate_core::riding::skitching` (frame, sub-mode, hold, shimmy, target, spring); `physics/skitch_state.rs` composes it in retail order (`.local/research/npc/b50-skitch-prestep-update.md` section 1, b51 sections 1-3). Always on in the game (`ground_runtime::skitch::latch_enabled`, set by `LivingWorldPlugin`). The grab point and the hands' grip points are the record's spline at an along position (`82D2D550`, research b148), the chord only while no geometry is published. NOT RETAIL YET: the sub-mode's hard event comes from the shimmy state.
+PhysicsSkitching 104 (TU3 vtable `0x82327398`; doc 26h "Skitching step 4e"). Enter `82D47278` + reset `82D47318`, Exit `82B61BB8` (empty), Update `82D477C0`, publication `82D4C078`. The maths lives in `skate_core::riding::skitching` (frame, sub-mode, hold, shimmy, target, spring); `physics/skitch_state.rs` composes it in retail order (research b50 section 1, b51 sections 1-3). Always on in the game (`ground_runtime::skitch::latch_enabled`, set by `LivingWorldPlugin`). The grab point and the hands' grip points are the record's spline at an along position (`82D2D550`, research b148), the chord only while no geometry is published. NOT RETAIL YET: the sub-mode's hard event comes from the shimmy state.
 
 ### Skitch board compose
 
@@ -1673,7 +1673,7 @@ Retail reference (TU3, addresses are evidence only; behaviour re-implemented, no
 - junction query `sub_82E11E90` (+ `sub_82E11C78`, `sub_82E11980`), leader `sub_82E14EE0`;
 - signals `sub_826B1540` (build), `sub_82E156D8` (phases), `sub_82E158D8` (tick), `sub_826B2C18` (manager), `sub_826B3C88` (green wave).
 
-Multiplayer seams (no networking): everything is a pure function of the roads, the signal clock's tick count and the cars' snapshots; ids are retail ids; iteration is sorted; the only randomness (the unused random connector branch) takes an explicit [`Rng`](super::rng::Rng). A client can rebuild the lights from the host's tick count ([`SignalClock::ticks`]).
+Multiplayer seams (no networking): everything is a pure function of the roads, the signal clock's tick count and the cars' snapshots; ids are retail ids; iteration is sorted; the only randomness (the unused random connector branch) takes an explicit `Rng`. A client can rebuild the lights from the host's tick count ([`SignalClock::ticks`]).
 
 Moddability: durations are data ([`SignalTimings`] from the `trafficlights` record), the connector choice is a parameter ([`ConnectorChoice`] plus the load function), the lights can be held for a car ([`SignalClock::request_green`], retail's priority vehicle), and the graph is plain input records a mod can write ([`RoadInput`]).
 
@@ -1685,7 +1685,7 @@ Detail moved out of the code comments of `crates/skate-core/src/riding/skitching
 
 Skitching (physical state 104, held to a car's grab spline): the tow / ride-height spring
 (`sub_82D4B500`, board force tag 6). Retail (TU3, evidence only; re-implemented;
-`.local/research/npc/b27-skitch-state.md`, main checked the vault keys and the constants):
+research b27, verified the vault keys and the constants):
 a velocity-target spring along the hold axis `n` (state+784), not a position pin:
 ```text
 cd    = clamp(n . state+624, 0.5, 1.0)
@@ -1701,7 +1701,7 @@ The state fields (+624, +832, +848, +852, +856) come from the skitch frame step 
 
 ### Skitch sub-mode writes
 
-`82D49AB8` before its hold step (`82D49D70`), after the shimmy chain (TU3 call order in the state update: `82D49580`, `82D48C98`, `82D49AB8`). Retail (evidence only; re-implemented; main read the switch on 1324):
+`82D49AB8` before its hold step (`82D49D70`), after the shimmy chain (TU3 call order in the state update: `82D49580`, `82D48C98`, `82D49AB8`). Retail (evidence only; re-implemented; checked the switch on 1324):
 - 0: `904 = clamp(864, -928, 928)`;
 - 1: both hands grip again (`1328 = 1332 = 0`) every tick;
 - 2: the edge point `e = +-932` (sign of 836, + only for 836 > 0) latches into 900 once (1344 bit 0x02), a snapped hand (bit 0x01) takes it as 864; 960 counts while the car's along acceleration 868 pushes outward past 50 (both 868 and 836 non-zero, same sign), else 0; the hand on the outer side lets go (836 > 0: hand A off, B on; else A on, B off);
@@ -1737,7 +1737,7 @@ Detail moved out of the code comments of `crates/skate-game/src/graph_host/motio
 
 ### Skitch graph nodes
 
-The skitch motion graph nodes (doc 26h "Skitching step 4h"). Retail (TU3, evidence only; re-implemented; `.local/research/npc/b60-skitch-graph-nodes.md`, b58 part 2; main read the `anim_skitching/default` record):
+The skitch motion graph nodes (doc 26h "Skitching step 4h"). Retail (TU3, evidence only; re-implemented; research b60, b58 part 2; checked the `anim_skitching/default` record):
 - the behaviours bind `anim_skitching/default` (`8289D550`): +0 a PointNegGraphData8 (the absorb curve over the closing rate, ground+284), then six floats at +80..+100 in the schema's fixed layout (read with `tools/claude-skills/aems-port/tools/vault_layout.py 07D39B41AACEE50F`): +80 0.1, +84 0.25, +88 0.85, +92 0.05, +96 0.83 (`LongSkitchIntoReachTime`), +100 0.121;
 - SkitchingBehaviour (`82BBC390`) each update: "Crouch" = ground+280 + rec+100, "PushSpeed" = ground+308, "absorbspeed" toward graph(ground+284) by at most 0.04;
 - EnterSkitchingBehaviour (`82BBC538`): "Crouch" the same way (its "reachspeed" is not ported yet);
@@ -1752,7 +1752,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/tra
 
 ### Traffic horn
 
-The traffic horn (V4, doc 26h "Traffic: the horn"). Retail (TU3, evidence only; re-implemented; `.local/research/npc/b36-traffic-v4-driver.md` sections 2, 4, 5 and 8, `b41-v4-obstacles-corridor.md` section 3, `b44-horn-honker.md`; main re-read the honk receiver `sub_82E3C3D0`):
+The traffic horn (V4, doc 26h "Traffic: the horn"). Retail (TU3, evidence only; re-implemented; research b36 sections 2, 4, 5 and 8, `b41-v4-obstacles-corridor.md` section 3, `b44-horn-honker.md`; re-read the honk receiver `sub_82E3C3D0`):
 - every driving-state update sets the limiter kind `+4392` (0 free, 1 behind a lead that waits itself, 2 stop point, 3 behind any other lead, 4 obstacle from the look-ahead, 5 junction wait); the nearest limit wins. The junction answer is stored in the same field (1 signal, 2 approach, 3 yield, 4 blocked, 5 flagged yield), so a car queued behind one waiting at a red light is "behind a waiting lead" and never gets the blocked horn;
 - blocked timer `+3704` (`sub_82C41120`): no lead or not inside the standoff behind it -> 0; inside it with kind 3 and slower than `honk_approach_speed_kmh` -> `+= dt`;
 - obstacle timer `+3708` (`sub_82C412D8`): no obstacle -> 0; kind 4, not inside a lead's standoff and slow -> `+= dt`; otherwise it holds;
@@ -1765,7 +1765,7 @@ Detail moved out of the code comments of `crates/skate-core/src/riding/skitching
 
 ### Skitch frame step
 
-The skitch frame step (`sub_82D48148`, state 104). Retail (TU3, evidence only; re-implemented; `.local/research/npc/b32-skitch-frame.md` section 1, `b47-skitch-frame-transforms.md` section 1; main checked the constants in b32 and the query side of b47):
+The skitch frame step (`sub_82D48148`, state 104). Retail (TU3, evidence only; re-implemented; research b32 section 1, `b47-skitch-frame-transforms.md` section 1; verified the constants in b32 and the query side of b47):
 - re-orient: when the board points against the spline direction the endpoints swap and the direction flips;
 - frame history 64 <- 128 <- 192 <- new (row0 spline direction, row1 up, row2 `normalize(d x n)`, row3 the endpoints' midpoint; all three = new on the first frame after a reset);
 - the skater's along-axis coordinate `836` in the previous frame (128) and its rate `840`; the axis point `A = prev.row3 + 836 prev.row0` (b47 corrects b32: the previous frame directly);
@@ -1778,7 +1778,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/tra
 
 ### Traffic skater scan
 
-A traffic car slowing for a skater coming up BEHIND it, so they can catch it (and skitch). Retail (TU3, evidence only; re-implemented; `.local/research/npc/b63-traffic-skater-scan.md`, main checked the scan's constants, the quad B builder and the planner's vault hashes):
+A traffic car slowing for a skater coming up BEHIND it, so they can catch it (and skitch). Retail (TU3, evidence only; re-implemented; research b63, verified the scan's constants, the quad B builder and the planner's vault hashes):
 - the per-car tick (`sub_82C3D918`) runs the skater scan `sub_82C414A8` after the look-ahead: nothing while a skater holds the car (`+4402` bit 0x02); else every actor of the skater list (index order) that is not skitching (state 104), whose distance `|p - car| - 0.5 x size` is under the range (`Hash_33466832D8178EAF`, 40 m) and that lies in the rear zone (quad B, `+3520`) writes the distance (`+3760`) and its speed (`+3756`); one facing the car's way also sets `+4403` bit 0x10 (and bit 0x08 from a skater byte). Last match wins; 0x10 is never cleared inside the loop;
 - the speed planner `sub_82C3FA08`, only while the limiter kind is free: with 0x10 set and both speeds above `Hash_D20826F15FB15A2E` (20 km/h) the acceleration cap becomes 0, and the car brakes toward the skater's speed minus `Hash_256A412E350A2659` (20 km/h): `(max(vs - m, 0)^2 - v^2) / (2 D + 0.001)`, D = `Hash_3AB7FC7CF7A17C81` (20 m) when the release grace is over and the skater is in range (FAR), D = `Hash_F682D359CDBC4D12` (5 m) when bit 0x08 is set and the skater is within `Hash_D49FC49019181EE5` (20 m) (NEAR, overwrites FAR, not gated by the grace);
 - the release edge `sub_82C34B30`, once per traffic step after every car: a car let go this step gets the grace `Hash_4727CF785EF735C8` (2.5 s), otherwise the grace drops by the step and sits at -1 once negative.
@@ -1789,7 +1789,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/tra
 
 ### Traffic manoeuvres
 
-The traffic manoeuvre decider (retail TU3, evidence only; re-implemented; `.local/research/npc/b69-traffic-manoeuvres.md` with the b71 to b74 extensions; main checked the overtake hash before the first roll, the driver block at `[car+4116]` (schema offsets) and the bit roller):
+The traffic manoeuvre decider (retail TU3, evidence only; re-implemented; research b69 with the b71 to b74 extensions; verified the overtake hash before the first roll, the driver block at `[car+4116]` (schema offsets) and the bit roller):
 - `sub_82C3D830` first: a pending pull-over is cancelled while a skater holds the car (unless the car has the "pulls over while held" trait), outside junction state 2: the spot is released, the timer reset;
 - `sub_82C41CD0`, only while no manoeuvre is pending: (1) the overtake roll (`Hash_9366C67755A24D89`, 0 in every stock record, one draw every call); (2) the lane timer (`+3632`, + dt per tick) past the spec's period (`[spec+48]` = `Hash_90AB56A5DDCF2A3A`, 10 s, sports 5, truck 8) resets and rolls "go" (driver +28 `Hash_52CF2CF3...`: 0.1, taxi 0.4, others 0) and "least loaded" (driver +24 `Hash_7C6B48BD...`); on a road that allows lane changes the adjacent lane (random, one draw, or the least loaded) must pass the gap check (`82E14928`); (3) when the timer fired and no lane change started: the pull-over roll (`Hash_559BA807...`, 0.02, taxi 0.04; 0 while held without the trait) on a road that allows it, on the outer lane, with a spot at least the approach length ahead (`82E14CF8`), which is reserved.
 
@@ -1801,7 +1801,7 @@ Detail moved out of the code comments of `crates/skate-game/src/physics/ground_r
 
 ### Skitch query
 
-The riding skater's skitch query (`sub_82D39BB8` / `sub_82D39D98`, doc 26h "Skitching step 3"; `.local/research/npc/b33-skitch-wiring.md` section 2, main read the call site, the box flag and the limits):
+The riding skater's skitch query (`sub_82D39BB8` / `sub_82D39D98`, doc 26h "Skitching step 3"; research b33 section 2, checked the call site, the box flag and the limits):
 - the ground update runs it instead of `82D749D0` (the grab owner's invalidate) while Processed `+2476` bit 22 is set (`82D37C88` branches between the two);
 - the box: `82D2E250(frame +192, offset, extents, out, true)` ([`skitch_bounds`]);
 - when the owner's validated results are ready (`+12836` bit 0x40) the latch walks them: endpoints oriented by the box's right axis, CanGrabSpline (`82E08DB8`), the re-grab cooldown, the time to the spline `max(0, (dot(P - pos, fwd) - reach) / max(dot(vSkater - vCar, fwd), 0.5))`, a bind (`82585DD8` + vcall +44) per candidate, and a latch on the first one under `latch_time` (state +2729 / +2560 / +2564);
@@ -1813,7 +1813,7 @@ Detail moved out of the code comments of `crates/skate-core/src/riding/skitching
 
 ### Skitch shimmy
 
-The along-the-bumper offset chain (`sub_82D48C98`): where on the grab edge the skater holds and how the hand shimmies. Retail (TU3, evidence only; re-implemented; `.local/research/npc/b30-skitch-pull-release.md` section 4, `b31-skitch-submode-hold.md` section 2):
+The along-the-bumper offset chain (`sub_82D48C98`): where on the grab edge the skater holds and how the hand shimmies. Retail (TU3, evidence only; re-implemented; research b30 section 4, `b31-skitch-submode-hold.md` section 2):
 - the car's along acceleration is low-passed (`868 = 0.9 * 868 + 0.1 a`), a hard event (`1000`) is its sign past 40, and the excess over a dead-band curve (`880`) pushes the hand;
 - the stick pushes the hand at 10 (`876`); with neither a velocity servo damps it to rest (`884`);
 - the velocity `892` integrates the total (`888`), capped at 1 (or the stick gain while an event opposes the stick) and unbounded in the event's direction; the hand target `864` moves by it, clamped to the edge range (+-932), and snaps onto the latched edge point 900 when it crosses it. The acceleration `a` is the caller's (its derivation from the frame history is open after b47's frame layout).
@@ -1824,7 +1824,7 @@ Detail moved out of the code comments of `crates/skate-core/src/riding/skitching
 
 ### Skitch hold step
 
-The skitch hold step and release (`sub_82D49D70`, the release bits of `82D49580`, the tail `82D4AFB8`, reset `82D47318`). Retail (TU3, evidence only; re-implemented; `.local/research/npc/b53-skitch-hold-step.md`, b51 section 2, b52 section 3; main checked the 1344 masks in `82D49580`):
+The skitch hold step and release (`sub_82D49D70`, the release bits of `82D49580`, the tail `82D4AFB8`, reset `82D47318`). Retail (TU3, evidence only; re-implemented; research b53, b51 section 2, b52 section 3; verified the 1344 masks in `82D49580`):
 - the hand's along target 904 ratchets with the stick while 1344 bit 0x08 is set (`max` / `min` with the clamped position for a stick past +-0.5, else follows it); the bit clears once the skater rests near the posed hand (|rate 840| < 0.02, |836 - 908| < 0.1) and sets again when the hand is 0.2 m off or after 2 s;
 - the posed hand 908 chases 904: `912 = clamp(0.25 (904 - 908), 912 +- 0.03)`, `908 += 912` (per 1/60 tick);
 - release bits (1344): sub-mode 0 clears 0x60, 1 sets 0x40 (pull in), 2 / 3 set 0x20 (push off); the 2 -> 4 switch clears both, 3 -> 4 keeps 0x20; 0x08 is set on every switch but 3 -> 4;
@@ -1836,7 +1836,7 @@ Detail moved out of the code comments of `crates/skate-core/src/riding/skitching
 
 ### Skitch target and impulses
 
-The skitch hold target (`sub_82D4B8C0` / `82D4BAC0` / `82D4BC58` / `82D4BCF8`) and the release impulses (`82D4B1D0` / `82D4B378`). Retail (TU3, evidence only; re-implemented; `.local/research/npc/b52-skitch-target-impulses.md` sections 1-2; main checked the impulse vault keys):
+The skitch hold target (`sub_82D4B8C0` / `82D4BAC0` / `82D4BC58` / `82D4BCF8`) and the release impulses (`82D4B1D0` / `82D4B378`). Retail (TU3, evidence only; re-implemented; research b52 sections 1-2; verified the impulse vault keys):
 - the hold target point `736 = 576 + 864 * 528.row0` (the side-shifted previous frame at the hand's along coordinate 864); `784` = the horizontal unit direction skater -> 736; `952` = the yaw from the direction to the current grab point (836) to 784;
 - `at` = yaw from the skater's facing to 784, `as` = yaw from the facing to the side direction 624; `940 = tows fast ? wrap(at - as) : -as`;
 - the yaw correction `V = up' * sin(clamp(at, +-180 deg/s * dt)) * max(g1(992), g3 * g2(832))` (`up'` = up flipped to y >= 0), applied by `82C07328` only while towing fast and not releasing;
@@ -1848,7 +1848,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/tra
 
 ### Lane change passage
 
-A traffic car's lane-change passage (retail TU3, evidence only; re-implemented; `.local/research/npc/b69-traffic-manoeuvres.md` "b71 / b72 extensions"; main checked the progress step 82C3C3C0 and the road-network values 1.3 / 10 in the exported tables):
+A traffic car's lane-change passage (retail TU3, evidence only; re-implemented; research b69 "b71 / b72 extensions"; verified the progress step 82C3C3C0 and the road-network values 1.3 / 10 in the exported tables):
 - enter `sub_82C3A9E0`: from distance d0 on the source lane to d1 = d0 + ext x the spec's passage factor (`Hash_328B9F4685A14018`, `+3692`) + speed (one second of travel) on the target lane;
 - `sub_82C3F540`: a cubic Hermite curve between the two lane points (`82E14860`), tangents = the lane direction x (d1 - d0) x the road network's tangent scale (`Hash_D2C11CC10C9E0E49`, 1.3);
 - `sub_82E10C88`: an arc-length table of `Hash_E35079BDD5BAE286` (10) chords; its total is the passage length;
@@ -1862,7 +1862,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/tra
 
 ### Traffic obstacles ahead
 
-What a traffic car sees ahead (V4, doc 26h "Traffic: obstacles ahead"). Retail (TU3, evidence only; re-implemented; `.local/research/npc/b36-traffic-v4-driver.md`, `b41-v4-obstacles-corridor.md`, main checked the characteristics / driver values and the 0.68 s constant):
+What a traffic car sees ahead (V4, doc 26h "Traffic: obstacles ahead"). Retail (TU3, evidence only; re-implemented; research b36, `b41-v4-obstacles-corridor.md`, verified the characteristics / driver values and the 0.68 s constant):
 - the traffic manager refills two obstacle lists every frame (`sub_826B2EE0`): skaters (radius 0, "soft") and world actors (peds radius 0.5 x their size, soft; cars radius 0.5 x their smallest extent, hard);
 - each car builds a look-ahead quad (`sub_82C400A8`): from the car centre (half width x (1 + `E88C`, 0.0)) to the front bumper, widened on the turning side by half width x (1 + `02A6` (2.0) x speed ratio), then both front corners pushed `speed + standoff` further along their side edges;
 - a record is in the way when its circle touches the quad's side / front edges or its centre is inside (`sub_82C41BD0`, `sub_82C41A90`); its free distance is `|pos - car| - radius - 0.68 x speed` (`0x82099764`); below 20 km/h soft records count only for drivers that opt in (`+4401` bit 0x08, every stock driver does);
@@ -1870,8 +1870,8 @@ What a traffic car sees ahead (V4, doc 26h "Traffic: obstacles ahead"). Retail (
 
 ## On foot on a car roof (2026-10-27)
 
-- **Problem:** the user: "for some reason I autobail when jumping ontop of a car with no skateboard, which is incorrect." Log game-20261027-073605 13:59:48: BipedAir -> WipeoutGround, `WIPEOUT_REASONS [(32, 0.0)] vehicle_contact=true vehicle_force=0.9`.
-- **Retail [code, research b648 `.local/research/b648-onfoot-car-bail.md`]:** wipeout 32 is retail's rule: `82BEBEA8` sets the extra errors (parts 24 / 25 minus their targets), `82BD9FB0` copies them in partial ragdoll, `82D2F748` requests a wipeout when either error's vertical part or residual passes 0.2 (`0x82099280`), with no vehicle filter. The on-foot launch / requery arc (`82D6CA58`, `82D6E798`) goes through `82E099A0` over the pools of `82764CF8` mask 7: the static map and the two dynamic island pools (world +0x5580 / +0x5584), where physics islands are added (`82768878`, `82768918`). That cars are among those islands is inferred (medium).
+- **Problem:** the user auto-bailed when jumping on top of a car without a skateboard, which is wrong. Log game-20261027-073605 13:59:48: BipedAir -> WipeoutGround, `WIPEOUT_REASONS [(32, 0.0)] vehicle_contact=true vehicle_force=0.9`.
+- **Retail [code, research b648]:** wipeout 32 is retail's rule: `82BEBEA8` sets the extra errors (parts 24 / 25 minus their targets), `82BD9FB0` copies them in partial ragdoll, `82D2F748` requests a wipeout when either error's vertical part or residual passes 0.2 (`0x82099280`), with no vehicle filter. The on-foot launch / requery arc (`82D6CA58`, `82D6E798`) goes through `82E099A0` over the pools of `82764CF8` mask 7: the static map and the two dynamic island pools (world +0x5580 / +0x5584), where physics islands are added (`82768878`, `82768918`). That cars are among those islands is inferred (medium).
 - **Cause in ours [code]:** `GamePhysics::biped_world` was the map plus the prop world only, so the on-foot arc planned the landing on the street under the roof; parts 24 / 25 then met the car (groups 20 and 8 collide) and the error passed 0.2.
 - **Change:** `living_world::vehicles::publish_on_foot_solids` (after `push_vehicle_proxies`) puts the car proxies (contact group 8) in `GamePhysics::on_foot_vehicles`; `BipedWorld::vehicles` and `StaticScene` answer them with the Ground pool (lines, the trajectory, nearby triangles), after the map's own solids. Only the on-foot queries see them (the camera, board air and foot IK keep their geometry). Mod key `living_world.on_foot_vehicle_ground` (default on).
 - **Verification:** `biped_lines_land_on_a_car_roof_when_cars_are_on_foot_ground`. Not play-tested. Open: the reason-32 bails at 14:00:03 / 14:00:09 without a car (other geometry); whether retail carries a moving car's velocity into the on-foot landing.
@@ -1882,7 +1882,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/tra
 
 ### Stop spots
 
-Road-side stop spots for pulling over and the lane-change gap check (retail TU3, evidence only; re-implemented; `.local/research/npc/b69-traffic-manoeuvres.md` "b71 extension", main checked the passage step 82C3C3C0):
+Road-side stop spots for pulling over and the lane-change gap check (retail TU3, evidence only; re-implemented; research b69 "b71 extension", verified the passage step 82C3C3C0):
 - `sub_82E151D0` / `sub_82E15368` keep one (car, stop distance) pair per pulling-over car on a road, sorted by stop distance, far end first; only other cars' spot searches read them;
 - `sub_82E14CF8` searches a spot up to 0.75 x the road length: the middle of the road when nothing is reserved, else the middle of the first gap (walking from the far end) longer than the car plus 5 m and beyond d + 1.5 x the car's length + speed; the gap behind the last reservation is never tried;
 - `sub_82E14928` checks a lane-change gap: not near either road end, and one second of travel plus the lengths clear of the cars ahead and behind on the target lane.
@@ -1895,7 +1895,7 @@ Detail moved out of the code comments of `crates/skate-core/src/riding/skitching
 
 ### Skitch hands
 
-The skitch hands (`sub_82D4A378`): where each hand grips the grab edge, when a hand lets go, and the hand IK weights. Retail (TU3, evidence only; re-implemented; `.local/research/npc/b59-skitch-hand-targets.md`; main checked the IK write path against ours):
+The skitch hands (`sub_82D4A378`): where each hand grips the grab edge, when a hand lets go, and the hand IK weights. Retail (TU3, evidence only; re-implemented; research b59; verified the IK write path against ours):
 - sub-mode 0 clears the hand-off flags (1328 / 1332); a lean yaw (940) outside -60..35 / -35..60 degrees sets them;
 - 988 follows the world grab height: `clamp(988 + 0.1 ((c M).y - S(908).y), 0, 0.8)`, `c = (0, grab y, grab z)`;
 - each hand's spline parameter is the posed hand (908) plus its part's skeleton-local x minus the anchor's x, clamped to the range (x / z mirrored by Processed 2476 bit 2); a shoulder part farther than 0.9 + 0.7 m (through the skeleton and the car's last-frame motion) from its spline point lets that hand go;
@@ -1908,7 +1908,7 @@ Detail moved out of the code comments of `crates/skate-core/src/riding/skitching
 
 ### Skitch lean
 
-The skitch lean (`sub_82D4A0C0`): the skater leans toward the hold target. Retail (TU3, evidence only; re-implemented; `.local/research/npc/b58-skitch-lean-outputs.md` part 1, b51 section 2):
+The skitch lean (`sub_82D4A0C0`): the skater leans toward the hold target. Retail (TU3, evidence only; re-implemented; research b58 part 1, b51 section 2):
 - `T = sign(940) * graph(|940| in degrees) in radians`, 0 while Processed 2488 bit 0x00800000 is set;
 - `944 += clamp((T - 944) * 0.25, -2 deg, +2 deg)` per update;
 - above 2 degrees the board offset's orientation becomes a rotation of 944 about Y for 15 updates (Skeleton+15696, +16389 = 1, +16392 = 15; the height channel is not touched).

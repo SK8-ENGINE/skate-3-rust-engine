@@ -6,12 +6,12 @@ Part of doc 26, the living world (index: [26-living-world.md](26-living-world.md
 
 Pedestrian spawn records become visible, animated peds with footstep audio.
 
-What retail does, checked in the code and data for this milestone (TU3):
+What retail does, checked in the code and data for this milestone (TU3, title update 3):
 - The entity inside the rolled category: `sub_826B8B88` draws `sub_826BB058` (world RNG u32 x 2^-32 as f32,
   `0x822F88F4`) and takes `trunc(draw x 100) % count` (`0x820ED57C` = 100) of the category's `entities` array
   (`sub_8269B040`); an empty list spawns nothing [code]. The model's tint pair comes from one rand `r`:
   `tints_a[r % na]`, `tints_b[r % nb]` (`sub_827B4170`) [code].
-- `PedestrianSkeletonPres.abin`: 462 VBR clips, a 50-bone rig with trajectory and 10 parts; the clips carry the
+- `PedestrianSkeletonPres.abin`: 462 VBR (variable bit rate) clips, a 50-bone rig with trajectory and 10 parts; the clips carry the
   first 6 parts (bones 0..=26), additive over the `PEDESTRIAN_RIG_TPOSE` pose record; fingers, face and twist
   helpers have no clip data [data]. Clip attributes `LEFTTOEDOWN` / `RIGHTTOEDOWN` / `LEFTHEELDOWN` /
   `RIGHTHEELDOWN` (phase windows) and `BODYFALLTYPE` (values) are the foot plants and body falls the ped audio
@@ -133,11 +133,11 @@ SunJay, Dumbad, RenderWareGavin, Tuukkas); recomp: skate3recomp / rexglue / Xeni
 Plan line for doc 26: "peds M3 navigation: done (NavPower navmesh decoded, retail NoRoad wander, avoidance;
 crosswalk rule as mod option since retail never uses it)". Open-questions additions: items 1-5 below.
 
-Player memory agrees with the code (user, 2026-10-05): "I don't remember them using crosswalks in the retail game".
+Player memory agrees with the code (user, 2026-10-05): they do not remember peds using crosswalks in the retail game.
 
 ## Peds standing on their heads in the left turn, 2026-10-05
 
-**Problem.** First play of the living world: the pedestrians "look like they hurt" (user). Twisted bodies.
+**Problem.** First play of the living world: the pedestrians looked to the user as if they were hurt. Twisted bodies.
 
 **Root cause.** The left turn plays `StandTurnR180` mirrored. `PedAnimPlayer::pose` mirrored the bare clip
 delta (before adding the `PEDESTRIAN_RIG_TPOSE` reference) with `pose_mirror::mirror` in trajectory mode 1. That
@@ -177,9 +177,9 @@ user looks again.
 
 ## Peds rendered warped (bone frames twisted 90 degrees), 2026-10-05
 
-**Problem.** After the left-turn fix the user still saw warped peds: "Peds look bad still. they are warped and not
-quite right. we need to relook at the retail code and see what we are doing wrong. Honestly the recomp doesn't do
-the best job of rendering them either, but ours is considerably worse at the moment." / "they look terrible".
+**Problem.** After the left-turn fix the user still saw warped peds and asked to
+re-read the retail code for what we do wrong; the recomp does not render them perfectly either, but ours was
+considerably worse.
 Offline renders showed the same on every model and in every pose, the reference pose included: pinched waist,
 wide bowed hips, twisted shoulders and arms.
 
@@ -226,7 +226,7 @@ local `tools/claude-skills/living-world/tools/render_glb.py` (`--bone-basis auto
   every bone, a 30 degree bend on the leg turns only the leg (30 degrees, torso 0); the pre-fix path gives 90.
 - `ped_glb_bind_frames_are_the_rig_reference_frames` (skate-data, data-gated): all ped GLBs, every animated bone,
   bind frame vs reference frame under 2 degrees; the skater basis is at least 45 degrees off.
-- Renders `.local/research/npc/fix10-out/before.png` / `after.png` (reference, mid walk, into stop, idle on
+- Local renders (reference, mid walk, into stop, idle on
   `male_adult_1`, `female_adult_1`, `male_jock_2`).
 
 **Open.** The final palette multiply in retail's ped renderer was not traced to an address. Tints are still not
@@ -234,10 +234,9 @@ drawn (separate item). Clip quality vs the recomp should be judged by the user i
 
 ## Peds walking in place at fixed spots, one standing on a wall top, 2026-10-05
 
-**Problem.** User: "a bunch of them got stuck walking over some type of border and seem to still have pathing
-issues." / "it just looks like a seam or perhaps an error in the navmesh at that spot? hard to tell, they just get
-lined up and start walking in place in specific spots. Its shown in several videos" / "there is also a random woman
-floating at the end of this one which also shows the people walking in place issue". Video: at the DownTown ramp
+**Problem.** The user reported that a group of peds got stuck walking over some kind of border and still had
+pathing problems: they lined up and walked in place at specific spots, which looked like a seam or a navmesh error
+(shown in several videos); one video also ends with a woman floating, next to the same walking-in-place problem. Video: at the DownTown ramp
 with the long blue rail (player near [-254, 41, 100]) a woman stands animating on the top edge of the tall wall for
 8+ s.
 
@@ -307,12 +306,12 @@ avoidance are not decoded; 1-polygon islands are still valid spawn points if a c
 
 ## Ped clothes drawn in their mask colours (looked like mixed outfits), 2026-10-05
 
-**Problem.** User: "after further review some of the ped models are still not right." / "they aren't squished
-anymore though" / "The three women at the start of this video are definitely not wearing the right clothes". The
+**Problem.** The user found some ped models still not right, though no longer squished; the three women at the
+start of their video were clearly not wearing the right clothes. The
 women (log readout: `female_granny_1`, `female_teenager_3`, `female_skater_1`) wore a dark red / brown coat or top
 with bright blue shorts, skirt or trousers; `male_teenager_1` and `female_business_3` (later in the same video) wore
-the same flat red top and blue trousers. User on `female_business_3`: "Im pretty sure this npc isn't being rendered
-corectly".
+the same flat red top and blue trousers. The user on `female_business_3`: this ped is most likely not rendered
+correctly.
 
 **Root cause.** Not mixed parts: every ped recipe holds one body (`Rostral`) and at most one `Hair` part, one mesh per
 LOD [data, all 51 recipes], and each ped in the video matches its own GLB. The red and blue are the atlas's tint
@@ -363,13 +362,13 @@ OK. Not seen in game yet. Setup: old exports work through the `Rostral_` fallbac
 the exact material types.
 
 **Separate items, not this cause.** `female_business_3` has no `Hair` part (her ponytail is in the body mesh and
-renders with it offline); her flat, washed-out head in the video is not a missing part; since the retail ped material (2026-10-25) her whole mesh uses it, and the check on 2026-10-29 found nothing wrong (`.local/research/ped-flat-head-stiff-walk.md`).
+renders with it offline); her flat, washed-out head in the video is not a missing part; since the retail ped material (2026-10-25) her whole mesh uses it, and the check on 2026-10-29 found nothing wrong (a local research note).
 `male_teenager_1`'s grey shoulder patch is the sleeve trim, a non-mask region of his atlas (the same in the GLB);
 his stiff arms-out walk is gone: a pose-dump render mid walk (2026-10-29) shows arms down and the same stride as `male_teenager_2`; his rig matches the other peds.
 
 ## Peds floating in the air all over the map (2026-10-06)
 
-User: "There were MANY floating peds during my last play session. Not on geometry that is visible, literally floating int he air." / "IT IS NOT JUST ON PROPS GOD DAMNIT, IT IS ALL OVER THE PLACE".
+The user reported many floating peds in their last play session, not on any visible geometry but in mid-air, and not only on props but all over the map.
 
 - **Cause:** the ped render height (fix 17) took the first hit of a line from one NavPower agent height (1.6 m) above the navmesh down to 1.6 m below. Any collision within 1.6 m overhead (awnings, ledges, signs, invisible collision) won, so the ped was drawn standing on it. Video 2026-10-06 10-00-44 at 49 s and 51 s.
 - **Change:** the upward search is the NavPower step height (agent block [2], 0.2 m [data]); NavPower keeps its polygons within one step of the walkable floor. Downward stays one agent height. Not retail yet: retail's own ped render placement is not decoded.
@@ -380,9 +379,9 @@ User: "There were MANY floating peds during my last play session. Not on geometr
 
 ## An ended approach drops its route (2026-10-17)
 
-Problem (laptop session 2026-10-17; user: "There were lots of peds stuck at random points where they were walking into
-a wall or just wandering around in a small circle."): peds stood against something 3 to 12 m short of their target
-with speed about 0; #111 kept one target for 20 s. Research b177 (`.local/research/b177-ped-obstacle-giveup.md`).
+Problem (laptop session 2026-10-17; user: many peds were stuck at random points, walking into
+a wall or wandering in a small circle): peds stood against something 3 to 12 m short of their target
+with speed about 0; #111 kept one target for 20 s. Research b177.
 
 Root cause [code, ours]: ApproachWantTarget gives the nav a one-point route (`peds.rs`, the approach arm) and sets no
 chase goal, and the "no brain move" arm only dropped a route when a chase goal had been set. So when the approach
@@ -403,7 +402,7 @@ Answered 2026-10-19 (next section, b190): NavPower's path follower has no progre
 ## Peds pinned against the prop they want to use (2026-10-19)
 
 Problem: "peds stuck walking into walls" (USER-ASKS 68, PR #52 next item 1). The newest laptop session
-(`second-pc/HAILS-ROGLAPTOP/game-20261019-001947`, after the 2026-10-17 route fix) still has walking peds standing
+(laptop session game-20261019-001947, after the 2026-10-17 route fix) still has walking peds standing
 still, now nearly all inside a prop plugin on their way to its waypoint: ped #563 55 s and #573 25 s in
 `waypoint_newspaperbox`, #578 in `waypoint_sit`, each `blocked` 1 to 3 s. `PED_BLOCKED` names the prop itself: #573 at
 (-261.19, 539.74), 1.045 m from its waypoint, pressing into `prop_DT_NewspaperBoxReclaimedBlack_1004` at (-261.80,
@@ -453,11 +452,11 @@ RETAIL fallbacks. Open: the cut record's -1 / 15.0 (hard block or a cost), the s
 not checked against its seat geometry).
 ## Peds slide along walls instead of standing pinned (2026-10-19)
 - **Problem:** peds walking into a wall or street furniture at a shallow angle stood pinned (laptop sessions; asks 84,
-  item 1 of the #52 list). User: "no I don't really see peds stuck against a wall in retail."
-- **Retail** ([trace] own scripted recomp run, `.local/research/b325-wall-stuck-recomp-results.md`): at two of our
+  item 1 of the #52 list). The user does not see peds stuck against a wall in retail.
+- **Retail** ([trace] own scripted recomp run, research b325): at two of our
   worst spots, 15 peds over ~8.5 min of game time, the still-timer obstacle chain (`82E97118` -> `82EA17E8`, b315)
   never fired once: retail peds do not get pinned, so no unstick rule is needed. ([code] Ghidra + recomp, b311 /
-  `.local/research/b331-ped-slide-port-plan.md`) The mover `82EA5C40` runs up to 10 sub-steps of `82EA4C20`: a move
+  research b331) The mover `82EA5C40` runs up to 10 sub-steps of `82EA4C20`: a move
   that hits a boundary edge is placed on the hit point and its velocity projected onto the edge, however small the
   rest; head-on the projection is 0 and the ped stands on the edge. No progress ratio.
 - **Change:** `peds.rs` body step: the `progressed` test (a slide under 25 % of the wanted step counted as refused)
@@ -471,14 +470,14 @@ not checked against its seat geometry).
 ## Peds keep their target and re-path to it, as retail (2026-10-19)
 - **Problem:** our stuck watch (0.3 m in 2 s), the yield patience (3 s) and the host's refused-step patience gave a
   ped's target up and planned away from it. Retail never gives up a walking ped's target for lack of progress.
-- **Retail** ([code] research `.local/research/b332-ped-stuck-watch-parity.md`, b336; b190, b313-b315; [trace] b325):
+- **Retail** ([code] research b332, b336; b190, b313-b315; [trace] b325):
   retail never gives a walking ped's target up. The bot's still timer (`82E97118`, 0.13 m / 0.5 s, re-requests the
   same destination `82E957F8`) runs in bot mode 4 only, not for walking peds (b336);
   an invalid path is re-requested every tick and only a failed request ends it (then the bot picks a new target).
   The walking path step `82EA0808` has no neighbour handling at all (b336: every callee read), so our yield, sidestep
   and push are ours; what keeps retail walking peds apart (acceleration writer, character-layer collision) is not read; the 2.0 s "detour home" of
   `82EA4408` belongs to the bot's mode-0 controller (no path: a standing ped pushed off its spot), not walking peds
-  (`.local/research/b335-ped-crowd-detour.md`).
+  (research b335).
 - **Change:** `PedNav::repath` (same target, a route's index kept; no path: drop the corners and skip the long fan, so
   a new target is picked). The stuck watch re-paths after 0.5 s within 0.13 m, once per spell (OURS on walking peds,
   with the still timer's values). The yield (`yield_patience` 2.0 s, NOT RETAIL: the wait is ours, b335) and the host's refused steps re-path instead of dropping the
@@ -494,13 +493,13 @@ not checked against its seat geometry).
 
 ## Peds walking in place next to a dropped prop (2026-10-19)
 
-**Problem.** Laptop session 2026-10-19 18:04, user: "Every now and again I see one just walking in place for a moment
-before stopping and changing course", and later "they were not next to the prop always". The log: `PED_BLOCKED` with
+**Problem.** Laptop session 2026-10-19 18:04, user: now and then one walks in place for a moment
+before stopping and changing course, and later, they were not always next to the prop. The log: `PED_BLOCKED` with
 small dropped hand props (a pop can, a purse, a water bottle, a phone, a coffee cup, 0.3 to 0.8 m away; 4 of 5 were the
 ped's own just-released prop) and one ped stuck about 29 s against a garbage can (0.64 m from its centre), each step
 going about 0.03 m toward it.
 
-**Retail (research b349) [code].** A ped's hand prop is an ordinary DMO. While it is in the hand its obstacle-off word
+**Retail (research b349) [code].** A ped's hand prop is an ordinary DMO (dynamic prop). While it is in the hand its obstacle-off word
 (component +0x109C, set by the attach slot `82C56B00`, cleared by the release `82C56C70`) keeps it out of the cuts
 (`82C48648`); from the release frame on it is a normal DMO cut (half extents at least 0.2 m, `82C477B0`) for every ped,
 the dropper too. Retail peds re-plan on the cut mesh, snap their destination out of a cut within 0.5 m and slide along
@@ -521,11 +520,11 @@ cut `82C477B0`, following the dropper for 2 s, would show it).
 
 ## Ped material: the retail shadow side (2026-10-25, USER-ASKS 352)
 
-**Problem.** The user (2026-10-16): "the lighting of peds in the recomp are much better and smoother ours in the rust
-engine are rough and blocky feeling dark patches", "mainly on the shadowed side". Cause 1 (DXT1 normal maps read as
+**Problem.** The user (2026-10-16): ped lighting in the recomp is much smoother; ours shows rough, blocky
+dark patches, mainly on the shadowed side. Cause 1 (DXT1 normal maps read as
 two-channel, doc 26g "Ped normal maps") was fixed and play-tested ("the shadows look much better"); this is cause 2.
 
-**Retail [code, shader microcode; data, vault; research b614, `.local/research/b614-ped-character-sh-fill.md`].** The
+**Retail [code, shader microcode; data, vault; research b614].** The
 ped body program `livingworld_stamp_defaultPS` (material types `pedestrian_high_stamp` / `pedestrian_low`, TU3
 `shaders_final.big`) has no spherical harmonics fill, no ambient cube and no environment map: its constant table has
 `m_params` rows 0..6, the light direction, the eye, the shadow matrices and the colorize pair, and no `i_shmult` (the
@@ -562,7 +561,7 @@ parts vary with view angle and roughness, so normal-map detail showed on the sha
 replay suites (fade).
 
 **Open.** The hair program `defaulthair_defaultPS` and the second specular lobe (colour 0.005 for peds) are not
-ported; the CSM / world-shadow combine of the program (`g_CSMSelfBias.w`) is partly decoded; the ped ground shadow
+ported; the CSM (cascaded shadow map) / world-shadow combine of the program (`g_CSMSelfBias.w`) is partly decoded; the ped ground shadow
 layer (cause 3 of the todo) is separate.
 
 ## Ped speed rows: brisk walks and slow / fast chase runs (2026-10-29)
@@ -570,7 +569,7 @@ layer (cause 3 of the todo) is separate.
 Problem: every moving ped walked the one walk cycle or ran the one chase run cycle. Retail has a brisk walk, a slow
 and a fast chase run, and some ped types (female, bum, zombie) run differently.
 
-Root cause (research `.local/research/b682-ped-motion-intents.md`, checked at the source): one poster, `sub_82E29D98`,
+Root cause (research b682, checked at the source): one poster, `sub_82E29D98`,
 picks the locomotion state and its cycle tier from a speed. Each `livingworld_entity_animation` set has a speed row
 table (field `Hash_9C9A4F2CB1CC45DE`, 8 words a row: float threshold, then string-pool offsets of the state, the tier
 intent and 5 turn-compatible previous states, offset 8 = empty) [data, resolved from `skatercollections.bin`]. A speed
@@ -600,7 +599,7 @@ Verification: tests `the_speed_rows_pick_state_and_tier_after_the_bump`,
 (setup), the data-gated `every_census_entity_resolves_a_look_and_animation` (7 default rows, female ends in a Slow run,
 the three tier clips resolve in the stock set).
 
-The run's own clips (research `.local/research/b684-ped-run-tired-graph.md`, same day): Idle or Walk into a run plays
+The run's own clips (research b684, same day): Idle or Walk into a run plays
 `Stand2ChaseRun` (0.25, out at 0.1 into the tier cycle; `Locomotion::RunStart`), a turn while running plays
 `ChaseRunTurnR45..R180` (0.15, left mirrored, at the run cycle's branch window, out at 0.1;
 `RunTurnLeft` / `RunTurnRight`; the wander now posts run turns instead of stopping to pivot), a stop plays
@@ -618,7 +617,7 @@ brain's `chase_resting` (Begin sets, End clears), states `TiredInto` / `TiredCyc
 `TiredBranchInfo` is not decoded, the run cycle's own branch windows stand in. Test
 `a_rest_after_a_run_plays_the_tired_clips_then_walks_on`; the three clips are the shared `NPC_TIRED_*` of all sets.
 
-Shuffle (research `.local/research/b686-ped-shuffle-strafe.md`, same day): a speed in the Shuffle row (from 1.0; in the
+Shuffle (research b686, same day): a speed in the Shuffle row (from 1.0; in the
 stock data only TargetWaypoint's 1.0 near a plugin point, `moveontowaypoint.xml`, `brain.rs` TargetWaypoint) shuffles:
 `Stand2Shuffle` (0.25, out at 0.1) from Idle / Walk / ChaseRun, `FwdShuffleCyc` (0.1), `ShuffleTurnR45..R180` (0.15,
 left mirrored, out at 0.1), out through `Shuffle2Stand` (0.15) to Idle, `Stand2Walk` to a walk, `Stand2ChaseRun` to a
@@ -638,7 +637,7 @@ through `Strafe2ChaseRun` [data]. Ours: `PedBrain::strafe_target`, `anim::strafe
 `PedBrainSettings::strafe`), `PedAnimPlayer::strafe` and the Strafe states; the caller steps toward the block point
 and turns by the clips (no face pivot); a set without `Stand2Strafe` keeps the old walk and pivot. Tests
 `the_strafe_turns_to_the_target_then_steps_by_angle`, `a_strafing_ped_steps_turns_and_leaves_without_a_stand_clip`.
-Read 2026-10-29 (research `.local/research/b695-strafe-leftovers.md`): `sub_82E2AB18` is the target minus the ped in 3D
+Read 2026-10-29 (research b695): `sub_82E2AB18` is the target minus the ped in 3D
 (not flattened), so a chasee above or below changes the turn size; ours now takes the size from the 3D dot and the
 side from the flat cross. `sub_82E2A6B0` steps toward the first path node more than 0.1 m away (3D), not the goal;
 ours now uses the first nav corner past `node_reach` (`StrafeRules`, 0.1), else the block point. BlockChasee Begin
@@ -662,9 +661,9 @@ Pedestrians, body tier (doc 26, peds milestone M2): turns the population's pedes
 - **Navigation** (milestone M3): the district's NavPower navmesh (`private/living_world/ navmesh.bin`, [`PedData::nav`]) and retail's `NoRoadWander` goal (`skate_core::living_world::peds::wander`: probe fans 40 m / 10 m, A* + funnel corners, re-target on arrival), ped-to-ped avoidance and separation, every step kept on walkable polygons. Retail ambient peds never use crosswalks (the road branch of `Pedestrian.xml` is unreachable in TU3); [`PedNavSettings::crosswalk`] = `WalkSignal` is a mod option that waits for the walk light of the shared traffic signal clock.
 - **Dynamic obstacles** (fix 11, retail DynamicObject NavPower obstacles, see `skate_core::living_world::peds::obstacles`): [`PedObstacles`] holds every prop (the physics' prop bodies at their current pose, so a prop the player moved counts where it lies) and every mod body. At rest they are cut out of the walkable area (re-cut after moving more than a quarter of the smallest half extent, no cut while moving faster than 0.4 m/s or carried); targets inside a cut do not fit, paths bend round cuts, and a body is never stepped into ([`NavObstacles::resolve_step`]). Rules: [`LivingWorldSettings::ped_obstacles`] (`sdk.world.set_tuning("living_world", {ped_obstacles = {...}})`).
 - **Skinning**: the GLB's 39 joints bind to the 50-bone rig by name (all match, data test); bones the clips do not carry (fingers, face) follow their rig parent with the GLB's bind offset. The skin matrix is `bone global x inverse(GLB bind)` with NO extra bone-local basis: the ped GLBs keep the retail model's bind frames, which are the rig's reference frames (data test `ped_glb_bind_frames_are_the_rig_reference_frames`), so the reference pose skins to the bind mesh. The skater's `render_basis` (its GLBs bake a matching basis into the bind) twisted every ped bone 90 degrees about its own axis (torso -90, legs +90 at the hips): the pinched waist / warped peds of fix10. [`ped_bone_basis`] picks the basis per model from its bind frames, so a mod GLB written the skater way still works.
-- **Draw fade** (retail `sub_827C1188`, `skate_core::living_world::peds::fade`): opaque up to the model's first distance pair (45 m [data]) from the camera, gone at 55 m, plus a 1 s spawn fade in; the opacity goes into [`NpcFade::alpha`](super::npc_skaters::NpcFade) and is drawn by the shared NPC fade; at 0 the ped's scene is hidden. This is what keeps the census cull (70 m, a pure distance test) out of sight, as in retail.
+- **Draw fade** (retail `sub_827C1188`, `skate_core::living_world::peds::fade`): opaque up to the model's first distance pair (45 m [data]) from the camera, gone at 55 m, plus a 1 s spawn fade in; the opacity goes into `NpcFade::alpha` and is drawn by the shared NPC fade; at 0 the ped's scene is hidden. This is what keeps the census cull (70 m, a pure distance test) out of sight, as in retail.
 - **LOD** (placeholder, the LOD pick is not decoded): `LOD0` within 45 m, `LOD1` beyond 55 m, hysteresis between; with the fade above `LOD1` only shows while fading.
-- **Audio**: [`PedAudio`](crate::world_audio::PedAudio) with the model's voice, the clip's `LEFTTOEDOWN` / `RIGHTTOEDOWN` windows as `feet_down` and `BODYFALLTYPE` as `body_fall`, so #32's ped footsteps and body falls play.
+- **Audio**: `PedAudio` with the model's voice, the clip's `LEFTTOEDOWN` / `RIGHTTOEDOWN` windows as `feet_down` and `BODYFALLTYPE` as `body_fall`, so #32's ped footsteps and body falls play.
 - **Events** for engine systems and the planned `sdk.living_world`: [`PedEvent`].
 
 Moddability: [`PedLooks`] (category entity lists, entity -> model / animation set, recipe -> GLB path) is the one place overrides go; restoring `PedLooks::default()` undoes a mod (new spawns use retail looks again). Multiplayer: nothing here decides a spawn; a client rebuilds the same ped from the same `SpawnRecord` and tick.
@@ -679,7 +678,7 @@ The local skater meets a near ped's body in its own solve (`ped_body::push_ped_p
 
 ### Takedown contact handling
 
-A takedown under way (AttemptTakeDownTargetable / WaitForTakedownDecision, both not interruptable and without a Colliding transition, `pedestrian_attempttakedowntargetable.xml`): retail's contact callback `82E38FB8` only stores the reaction, the touch of the target decides the takedown (`826A4BE8`) and success drops the stored reaction (`826A4E50`), so the attacker never falls from its own lunge (b317). A contact by anyone else during the attempt is stored too and plays when the graph next reaches Colliding, after a failed takedown (`826A5068` leaves it stored; b326).
+A takedown under way (AttemptTakeDownTargetable / WaitForTakedownDecision, both not interruptible and without a Colliding transition, `pedestrian_attempttakedowntargetable.xml`): retail's contact callback `82E38FB8` only stores the reaction, the touch of the target decides the takedown (`826A4BE8`) and success drops the stored reaction (`826A4E50`), so the attacker never falls from its own lunge (b317). A contact by anyone else during the attempt is stored too and plays when the graph next reaches Colliding, after a failed takedown (`826A5068` leaves it stored; b326).
 
 ### Edge slide step
 
@@ -719,7 +718,7 @@ The DMO's plugin check (`82C56DB0`, b136 / b137): moved more than its type's max
 
 ### Seated peds avoid an approaching skater
 
-(2026-10-24, USER-ASKS 326; research b229, b583; user 2026-10-18: "they get up in reaction to you coming at them".)
+(2026-10-24, USER-ASKS 326; research b229, b583; user 2026-10-18: they get up in reaction to the player coming at them.)
 
 - **Problem:** a seated ped only reacted to its seat moving or to a hit; retail peds on a bench flinch or jump up
   when a skater comes at them.
@@ -761,7 +760,7 @@ The DMO's plugin check (`82C56DB0`, b136 / b137): moved more than its type's max
 
 ### Standing peds dodge an approaching skater
 
-2026-10-29 (research `.local/research/b683-ped-dodge-gaps.md`, checked at the source): retail runs the same
+2026-10-29 (research b683, checked at the source): retail runs the same
 SkaterAvoidance decision (`82E2E538` -> `82E2E738` -> `82E2E890`) for every ped, not only seated ones. The motion
 graph's `Avoid` state is entered from Walk, Idle, Converse, Shuffle and Strafe, never from ChaseRun
 (`motiongraph_*.xml`), so a running ped does not dodge [data]. Jump: `AvoidJumpForward` / `AvoidJumpLeft` / mirrored
@@ -779,7 +778,7 @@ clips resolve in all 12 stock sets (data-gated `living_world_ped_data_loads_from
 `a_standing_ped_jumps_or_steps_from_walk_and_idle_only`. No game-side harness runs ped minds, so the trigger itself
 is checked in game.
 
-The Jump's mood post (research `.local/research/b685-skateravoid-post-and-movers.md`, asm checked): after a Jump only,
+The Jump's mood post (research b685, asm checked): after a Jump only,
 `sub_82E2E890` posts category 3 (`skateravoid`) into the dodging ped's own store (interface `0x8269A960`, through
 `sub_82E3DA40`): position the ped, instigator the mover, second the ped; the two 1.0 floats are vision-test scales,
 not the magnitude [code]. Ours: `PedMind::avoid_post`, posted by the mood step on the next think through the same
@@ -838,7 +837,7 @@ A walking ped that stays within `stuck_distance` (0.13 m) for `stuck_seconds` (0
 
 NOT RETAIL (ours): seconds a yielding ped waits before it re-paths to the same target. Keeping the target is retail's outcome; the 2.0 s is borrowed from the bot's mode-0 (no path) controller `82EA4408`, which walking path peds never run (b335). Retail's walking path step `82EA0808` has no neighbour handling at all (b336): our yield, sidestep and push are ours; what keeps retail walking peds apart is not read yet.
 
-2026-10-29 (research `.local/research/b689-ped-pathing-gaps.md`, gates checked in the recomp asm): the candidate is
+2026-10-29 (research b689, gates checked in the recomp asm): the candidate is
 the Pedestrian nav modifier's sensor `sub_82E2D3F8` (ped+2704, vtable `0x8232BA8C`, b337). Its classifier
 `sub_82E2D4E0` acts only within 3.0 m of height (`0x82063B08`); a mover faster than 5 m/s (speed squared against
 25.0, `0x8209994C`) goes through `sub_82E2D660` to the same Jump / Step pair as SkaterAvoidance (`sub_82E2DDB8`); a
@@ -878,7 +877,7 @@ Retail [code, TU3, research b698, re-read 2026-10-30]: the path controller's ste
 
 Ours: in the step resolver, for a moving (uncut) body only, the step is replaced by a tangential step of `(|dot(d, t)| + 0.7 x |dot(d, n)|) x step length`, the push cancelling the inward part as in retail's sum; the result is still face-clamped and step-checked. Cut props keep the face clamp (retail routes round cuts on the mesh). Mod keys `ped_obstacles.contact_slide` (0.7, 0 = off) and `contact_slide_dot` (-0.3). Deterministic (no RNG; first blocker in id order).
 
-Speed tests (research b717 / b718, main re-read the recomp's compare `skate3_recomp.100.cpp` 24926-24937 / 25077-25081 and the constant 0x8209975C = 0.5, 2026-10-30): `S` = the ped's path speed (`settings+0` x agent `+0x14C` x `+0x144`; 2.0 m/s for walking peds in the trace, 1.0 on some legs); `dir` = the unit direction to the steer target (`ctrl+0x30`) when the ped's speed (a true length) is at most `0.5 x S`, else its velocity direction; the slide needs `dot(dir, n) < -0.3` and the avoider's own velocity along `dir` below `0.5 x S` (strict). When that fails the ped is only pushed out (no slide, no stop in this function). The slide only runs while the ped follows a path (controller mode 2); a held ped (mode 3) gets the push and then brakes. Ours: [`NavObstacles::resolve_step_contact`] with [`Contact`] (the ped's velocity and next corner, `peds.rs`); without it the step direction stands in. Mod keys `ped_obstacles.contact_slow_fraction` (0.5) and `contact_max_speed` (2.0).
+Speed tests (research b717 / b718, re-read the recomp's compare `skate3_recomp.100.cpp` 24926-24937 / 25077-25081 and the constant 0x8209975C = 0.5, 2026-10-30): `S` = the ped's path speed (`settings+0` x agent `+0x14C` x `+0x144`; 2.0 m/s for walking peds in the trace, 1.0 on some legs); `dir` = the unit direction to the steer target (`ctrl+0x30`) when the ped's speed (a true length) is at most `0.5 x S`, else its velocity direction; the slide needs `dot(dir, n) < -0.3` and the avoider's own velocity along `dir` below `0.5 x S` (strict). When that fails the ped is only pushed out (no slide, no stop in this function). The slide only runs while the ped follows a path (controller mode 2); a held ped (mode 3) gets the push and then brakes. Ours: [`NavObstacles::resolve_step_contact`] with [`Contact`] (the ped's velocity and next corner, `peds.rs`); without it the step direction stands in. Mod keys `ped_obstacles.contact_slow_fraction` (0.5) and `contact_max_speed` (2.0).
 
 Open: run / flee path speeds (not traced, so 2.0 for every ped); the mode 3 hold is not modelled. The dead-centre side assumes retail (x, y) maps to our (x, -z).
 
@@ -892,7 +891,7 @@ Ours ([`NavObstacles::side_step`], used by `PedNav::step_avoiding`): the ped's v
 
 Avoider radius (b699 round 2, `82C477B0` re-read 2026-10-30): retail gives every moving avoider the extents `{a, 0.2a, 0.2a}` with `a = 1.3 x 0.25` (`0x820C6D98`, `0x82099280`), so 0.455 m whatever the box; keys `avoider_extent` (0.25) and `avoider_extent_tail` (0.2), times `avoid_scale`. The third extent is the research agent's reading of the vector code.
 
-Pull-back (b699 round 2, constants dumped 2026-10-30): retail sums the steering terms of `82E9FD78` without an acceleration clamp; `82EA0808` integrates `v += a dt` and clamps the speed. The velocity returns to the path through the path-turn term `82E9DF70` (lateral `perp x min(angle / 5 deg, 1) x A_turn`, `0x822F9374` = 11.459 per radian; boosted above 10 deg, `0x822F9368` / `0x822F936C` = 4.5837; only below 120 deg, `0x822F9370`), not a separate fade. Runtime values (research b716, the skate3recomp hooks PEDSET / PEDTURN, `.local/research/b705/fire_trace.tsv`, main re-checked the trace): every walking ped has `A_turn` (`settings+0x2C`) 40 m/s^2 and `settings+0x08` 0.35; `82E9DF70` returns an acceleration (speed term plus turn term) whose turn is capped by the sideways speed over the controller step `f1` (1 / 30 s) and by the centripetal limit `|v|^2 / (2 x 0.35)`: 308 of 6788 at-speed samples sit exactly on that limit (5.714 at 2 m/s), 8 above it. So the turn removes the side-step's lateral velocity within one controller step and it settles near `a x f1` (about 0.13 m/s at 3.9 m/s^2) while an avoider is predicted. Ours: [`NavObstacles::path_turn`] runs every tick after the side-step's push (`PedNav::step_avoiding`), replacing the fade; our 60 Hz tick halves the lateral velocity per tick when nothing pushes (gone in about 0.1 s, retail in one 1 / 30 s step). The corner and target-approach boosts of the same term are left out (our path follower turns corners itself). Mod keys `ped_obstacles.path_turn_accel` (40), `path_turn_full_deg` (5), `path_turn_boost_deg` (10), `path_turn_boost_rate` (4.5837), `path_turn_boost_max` (5), `path_turn_max_deg` (120), `path_turn_radius` (0.35), `controller_step` (1 / 30). The crossing give-way gives zero force (recomp `sub_82E9CBD0` zeroes the output first); it never applies to skaters or props.
+Pull-back (b699 round 2, constants dumped 2026-10-30): retail sums the steering terms of `82E9FD78` without an acceleration clamp; `82EA0808` integrates `v += a dt` and clamps the speed. The velocity returns to the path through the path-turn term `82E9DF70` (lateral `perp x min(angle / 5 deg, 1) x A_turn`, `0x822F9374` = 11.459 per radian; boosted above 10 deg, `0x822F9368` / `0x822F936C` = 4.5837; only below 120 deg, `0x822F9370`), not a separate fade. Runtime values (research b716, the skate3recomp hooks PEDSET / PEDTURN, research b705/fire_trace.tsv`, main re-checked the trace): every walking ped has `A_turn` (`settings+0x2C`) 40 m/s^2 and `settings+0x08` 0.35; `82E9DF70` returns an acceleration (speed term plus turn term) whose turn is capped by the sideways speed over the controller step `f1` (1 / 30 s) and by the centripetal limit `|v|^2 / (2 x 0.35)`: 308 of 6788 at-speed samples sit exactly on that limit (5.714 at 2 m/s), 8 above it. So the turn removes the side-step's lateral velocity within one controller step and it settles near `a x f1` (about 0.13 m/s at 3.9 m/s^2) while an avoider is predicted. Ours: [`NavObstacles::path_turn`] runs every tick after the side-step's push (`PedNav::step_avoiding`), replacing the fade; our 60 Hz tick halves the lateral velocity per tick when nothing pushes (gone in about 0.1 s, retail in one 1 / 30 s step). The corner and target-approach boosts of the same term are left out (our path follower turns corners itself). Mod keys `ped_obstacles.path_turn_accel` (40), `path_turn_full_deg` (5), `path_turn_boost_deg` (10), `path_turn_boost_rate` (4.5837), `path_turn_boost_max` (5), `path_turn_max_deg` (120), `path_turn_radius` (0.35), `controller_step` (1 / 30). The crossing give-way gives zero force (recomp `sub_82E9CBD0` zeroes the output first); it never applies to skaters or props.
 
 Braking (`82E9FC20` / `82E9F9F0`, research b716): within the goal radius of its steer target (retail sets it per path leg: 2.0, 0.75 and 0.31 m seen) a ped brakes when a moving body ahead along its velocity is closer than the stopping distance `v^2 / (2 x 80)` (a ray against 1.225 m plus the body's avoider extents; bodies moving away at a quarter of the ped's speed or more are left out); braking skips the side-step and stops the ped within one step. Ours: [`NavObstacles::brakes`] in `PedNav::step_avoiding` (2.0 m goal radius for every leg, the stop through the yield); keys `ped_obstacles.brake_decel` (80, 0 = off), `brake_goal_radius` (2.0), `brake_body_radius` (1.225), `brake_away_fraction` (0.25). At walking speed it fires only within about 2.5 cm of contact.
 
@@ -960,7 +959,7 @@ A contact on a knocked-down ped ([code] `sub_82E38FB8` sets `c+8` unless `c+9`; 
 
 ### Ped pose and mirror
 
-The local pose (one SQT per rig bone, reference added, trajectory zeroed) at the player's time plus `ahead` seconds (render interpolation; no state change).
+The local pose (one SQT, scale / quaternion rotation / translation, per rig bone, reference added, trajectory zeroed) at the player's time plus `ahead` seconds (render interpolation; no state change).
 
 Each layer is made a full pose (clip delta added onto the reference) BEFORE it is mirrored: `pose_mirror::mirror` with trajectory mode 1 is a full-pose operation (it multiplies the root's children by the literal 180 degree quaternion that the rig's reference hips carry), so mirroring a bare delta turned the whole body upside down in the mirrored left turn. The reference is symmetric under it (the export: every bone within 7 degrees), so a zero delta mirrors to the reference. Blending the full poses equals blending the deltas and then adding (the add is a left multiply / affine map, which nlerp and lerp commute with).
 

@@ -54,7 +54,7 @@ gamepad backend). It extends #24 instead of opening another input PR. Todos: `co
   slot on disconnect.
 - Log: `Controller N: identified as <summary>` when a slot's identity changes (the existing SDL connect line stays).
 - Esc menu: EXTRAS → a read-only "Controller" row listing every connected slot's summary, e.g.
-  `0: Xbox One Elite 2 Controller [Xbox Elite] 045e:0b22, SDL via XInput#0, paddles 0 of 4` — the "paddles 0 of 4" is
+  `0: Xbox One Elite 2 Controller [Xbox Elite] 045e:0b22, SDL via XInput#0, paddles 0 of 4`: the "paddles 0 of 4" is
   exactly the troubleshooting case in gotchas (SDL's XInput driver hides the Elite paddles).
 - Mods (read-only): `sdk.input.controller(slot)` (default: the slot gameplay reads), `sdk.input.controllers()`,
   `sdk.engine.read('input').controllers`, snapshot field `controllers`; capability `controllers = 1`. JSON names are
@@ -87,11 +87,11 @@ gamepad backend). It extends #24 instead of opening another input PR. Todos: `co
   feeds the same pad state with and without a kind through the production collect/publish path and compares every
   mapped action and the published tick input bit for bit. The subtype passed to `xbox::convert` is unchanged for both
   backends (SDL constant 1; XInput from `XInputGetCapabilities`).
-- Kind mapping: `controller_kind::tests` — every `SDL_GamepadType`, every XInput subtype, the VID/PID table, user
+- Kind mapping: `controller_kind::tests`: every `SDL_GamepadType`, every XInput subtype, the VID/PID table, user
   model overrides, Elite refinement, the XInput+Ex path, stable JSON names, settings id parsing.
 - Action meanings: `skate-core` `gameplay_map::tests` drive each ID exactly as `override_actions` does
   (`values[id-64] = value`) through the retail Derived controller update and all listener producers (riding, trick,
-  off-board, gestures, manual, grind, wipeout) and assert the intents in the table — including the combinations (bail
+  off-board, gestures, manual, grind, wipeout) and assert the intents in the table, including the combinations (bail
   = both stick clicks + both triggers full; LB over RB; bumpers block D-pad gestures; B blocks the off-board sprint).
 - Docs: `input::action_docs` tests check the GENERAL_API.md table rows and both Lua `action_ids` tables against
   `ACTIONS`.
@@ -124,7 +124,7 @@ Detail moved out of the code comments of `crates/skate-core/src/rumble.rs`; each
 
 ### Rumble
 
-Controller rumble, ported from the TU3 rumble controller (research `.local/research/rumble.md`, constants main-checked in the TU3 image): each pad keeps channels of {low, high, decay}; a start overwrites its channel (`sub_82694D38`); every tick (`sub_82695010`) sums the channels per motor, caps the sum at `max + (1 - max) * headroom`, then decays each channel and drops it below the threshold; the device curve (`sub_8296D480`) turns the level into a motor speed. Retail's values are [`RumbleTuning::RETAIL`]; a mod can replace them. Engine-independent and deterministic (plain f32, retail's order of operations).
+Controller rumble, ported from the TU3 rumble controller (a local research note, constants verified in the TU3 image): each pad keeps channels of {low, high, decay}; a start overwrites its channel (`sub_82694D38`); every tick (`sub_82695010`) sums the channels per motor, caps the sum at `max + (1 - max) * headroom`, then decays each channel and drops it below the threshold; the device curve (`sub_8296D480`) turns the level into a motor speed. Retail's values are [`RumbleTuning::RETAIL`]; a mod can replace them. Engine-independent and deterministic (plain f32, retail's order of operations).
 
 ### Rumble device curve
 
@@ -132,4 +132,4 @@ The device curve: a motor level (0..1) as a 16-bit motor speed. `wireless` = ret
 
 ### Rumble on pads
 
-Controller rumble on the pads: the TU3 rumble controller (`skate_core::rumble`) ticked at retail's 60 Hz whatever the frame rate, gated by Game Settings > Control > Vibration (settings +163), sent through the pad backend (`input::platform::set_rumble`). Who starts a rumble: switching Vibration on plays retail's test rumble (0.5 / 0.5, rate 5.0, `sub_8260DF40`) on the active pad; mods start and stop channels (`sdk.input.rumble` / `sdk.input.stop_rumble`, capability `input_rumble`). NOT PORTED YET: retail's gameplay rumble (the posters `sub_82BB8CF0` 0.5 / 0.5 / 1.2 and the per-item channels of `sub_8259E3D0`, events not identified; research `.local/research/rumble.md`).
+Controller rumble on the pads: the TU3 rumble controller (`skate_core::rumble`) ticked at retail's 60 Hz whatever the frame rate, gated by Game Settings > Control > Vibration (settings +163), sent through the pad backend (`input::platform::set_rumble`). Who starts a rumble: switching Vibration on plays retail's test rumble (0.5 / 0.5, rate 5.0, `sub_8260DF40`) on the active pad; mods start and stop channels (`sdk.input.rumble` / `sdk.input.stop_rumble`, capability `input_rumble`). NOT PORTED YET: retail's gameplay rumble (the posters `sub_82BB8CF0` 0.5 / 0.5 / 1.2 and the per-item channels of `sub_8259E3D0`, events not identified; a local research note).

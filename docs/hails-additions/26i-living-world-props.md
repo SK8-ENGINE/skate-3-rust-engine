@@ -45,9 +45,9 @@ check by the user: sprint past the Aletown bins (they should stay put), then hol
 
 ## Moving a held prop: every stick direction goes forward, skater inside the prop, grab flicker, 2026-10-05
 
-**Problem.** User sessions 13:20 and 14:46 (fix13 in the build): "no matter what direction on my stick I pushed I
-went one direction", "No matter what direction I push or pull an object it just goes forward. that includes to the
-sides", "Grabbing objects warps you inside of it instead of grabbing the edge of it". The 14:46 log also shows the
+**Problem.** User sessions 13:20 and 14:46 (fix13 in the build): whatever direction the stick was pushed, the player
+went one way; a pushed or pulled object always moved forward, sideways pushes included; and grabbing an object
+warped the player inside it instead of to its edge. The 14:46 log also shows the
 physical state flipping BipedGround <-> OffBoardPushing every tick for 6 ticks at 20:47:32Z.
 
 **Root cause (direction).** fix13's Move Object path (`biped_ground::update`, state 502 with a held prop) drives the
@@ -78,8 +78,8 @@ it was dropped the tick after every grab and re-grabbed the tick after that whil
   still keeps the feet on the ground. Labelled NOT RETAIL YET in the code: it loses the 0.3 m step-up of the
   target contact while dragging.
 - `prop_carry.rs`: the hold distance is at least the box's extent toward the skater plus `grip_reach` (new carry
-  tuning, 0.35 m, NOT RETAIL YET: engine value; retail's grab offset probably comes from the DMO characteristics and
-  the MovingObjectNew / MVOBJ hand positions, UpdateObjectGrabbing 0x821BCDB4, IsGrabbingDMO 0x820B757C). The
+  tuning, 0.35 m, NOT RETAIL YET: engine value; retail's grab offset probably comes from the DMO (dynamic prop) characteristics and
+  the MovingObjectNew / MVOBJ (Move Object clip) hand positions, UpdateObjectGrabbing 0x821BCDB4, IsGrabbingDMO 0x820B757C). The
   auto-drop limit is `MAX_HOLD_DISTANCE` plus that extent, so it is measured from the near face like the grab.
 - Mods: `sdk.world.set_tuning('carry', {grip_reach = ...})` (finite, >= 0; reset on mod disable like the other carry
   fields), shown by `sdk.engine.inspect(..., 'world_tuning:carry')`; `sdk/skate.lua`, `api.lua` updated.
@@ -110,8 +110,8 @@ look at the held-body depenetration in `prop_dynamics.rs` come next.
 
 ## Board stuck inside a prop, 2026-10-05
 
-**Problem.** User's first play: "Interacting with this bench near aletown spawn broke the framerate, also its hitbox
-seems a bit off ... The framerate returned when I called back my board, so it may have been stuck inside the bench".
+**Problem.** User's first play: interacting with a bench near the Aletown spawn broke the frame rate and its hitbox
+seemed off; the frame rate returned when the board was called back, so it may have been stuck inside the bench.
 
 **Root cause (confidence: high for the cost, medium for how the board got in).** The bug is in #15's original code
 (`physics/prop_dynamics.rs`, `push_from_skater`). Each prop's contact box is the AABB of its template's render
@@ -166,8 +166,8 @@ cheaper but needs proof that query order is unchanged).
 
 ## Dragged props sinking through the floor, 2026-10-07
 
-**Problem.** User: "the shit with them falling through the ground is SO annoying. its a top priority fix". Earlier:
-"Dragged props sink through the floor and pull back toward their start spot". Props moved with Move Object (RB:
+**Problem.** The user made props falling through the ground a top priority fix. Earlier:
+dragged props sink through the floor and pull back toward their start spot. Props moved with Move Object (RB:
 bench, bin, rail, vending machine) fell through the floor and kept sinking; peds then ignored them (a moving prop is
 never cut into the navmesh, see "Peds walking through props").
 
@@ -220,9 +220,9 @@ data-gated `downtown_dragged_props_rest_on_the_floor` (the session's prop ids on
 `HELD_PROP` lines will show it if it remains. Retail Move Object object transform (82D463D8 and callers) to decode.
 Placement mode (`carry_to_pose`) snaps the orientation and is unaffected.
 
-**Update (2026-10-07, late).** User on the interim: "props should still be able to tip.. they do in retail", then
-"we should try to solve how retail handles the whole system as the source of truth, because its not a problem in
-the original game". The yaw-only held rule is rejected and will be removed. Retail [code]: every held tick
+**Update (2026-10-07, late).** The user on the interim: props should still be able to tip, as they do in retail, and
+how retail handles the whole system is the source of truth to solve, since the problem does not exist in
+the original game. The yaw-only held rule is rejected and will be removed. Retail [code]: every held tick
 82D45318 sends the held DMO a bounded command through the player DMO interface (vtable slot 9): a horizontal
 linear term and a yaw term only (vertical gain 0, no pitch or roll), from two controllers on the velocity error
 against the DMO velocity (gains [20, 0, 40, 0.1], 82D4E118; linear clamp 20, rate 4 per tick, yaw clamp 6.0),
@@ -302,8 +302,8 @@ change does not touch.
 
 **Slot 9 applied (2026-10-08, later).** Problem: with the command applied as a plain velocity add and the
 controller accumulating without bound, a full push overshot (4.1 m/s for a 3 m/s target) and tipped every prop;
-the user: dragged props sink ("its not a problem in the original game") and "props should still be able to tip..
-they do in retail" (from obstacles, not from every push).
+the user: dragged props sink (not a problem in the original game) and props should still be able to tip, as
+they do in retail (from obstacles, not from every push).
 
 Root causes [code, TU3 recomp, read for this change]:
 1. Anti-windup missed in the port. 82D45318 stores the clamped and slewed sent command (+672) back over the linear
@@ -543,7 +543,7 @@ for Skeleton+15872); per prop type record+272 and grab splines need the DMO data
 
 ## Move Object step 1: props' authored grab splines in the export (2026-10-09)
 
-**Retail [data] (`.local/research/npc/b48-prop-grab-splines-port-map.md`, `b54-dmo-grab-provider.md`; main checked the
+**Retail [data] (research b48, `b54-dmo-grab-provider.md`; verified the
 GRABDATA header against parkassets and the per-template link below).** DMO templates carry authored grab splines (RW4
 GRABDATA): 102 of the 136 worlddmo templates have one section. In a multi-template worlddmo arena the section sits
 between the template's EB0001 model and the next template's model (the retail link `*(R+136)` is not decoded; the
@@ -561,7 +561,7 @@ equal the whole-file parse (main's run, 2026-10-09). The game does not read the 
 
 ## Move Object step 2: props in the grab scene (opt-in, 2026-10-09)
 
-**Retail [code] (`.local/research/npc/b54-dmo-grab-provider.md`; main checked `82C4BE80` emits type-2 records).** In
+**Retail [code] (research b54; verified `82C4BE80` emits type-2 records).** In
 single-player worlds the world-object provider (`82C4BE80` box / `82C4BB08` radius, scene `+4084`, query mode bit 0x04)
 answers props: disabled gate, a sphere around the object (radius + 15 m), per spline byte +68 > 1 and +70 != 0, a
 segment hit, the assembly chain, then a type-2 record with the object's matrix and a vector (vtable +120), then
@@ -587,7 +587,7 @@ offboard tests pass). Needs a setup refresh (or the next one) for the export fie
 **Problem.** Props carried by a stand-in edge (the box face toward the skater, top edge, grip clamped by an engine "hand
 half spread") even when the prop has authored grab splines (step 1) that are already in the grab scene (step 2).
 
-**Retail [code] (`.local/research/npc/b62-move-object-record.md`, main checked).**
+**Retail [code] (research b62, verified).**
 - Record choice `82D4D150` is our `best_spline` (mode 0: from the skater position). Mode 1 (the held update's path B
   re-grab) skips records whose descriptor (+188 kind, +192 id) equals the held one.
 - `82D444A0(state, full)`: `full` (enter `82D442D0`, path B) copies the record's reversed bit (+200 bit 0x20) into
@@ -627,7 +627,7 @@ keeps the binding). Not play-tested yet.
 
 ## Move Object step 3b: the rebind block, re-grab and hand points (opt-in, 2026-10-09)
 
-**Retail [code] (`.local/research/npc/b64-move-object-regrab.md`; main checked the 0.5 hand factor at 82D45DAC and
+**Retail [code] (research b64; verified the 0.5 hand factor at 82D45DAC and
 that `82D43B20` is the getter of `96ECC98838ECCC11`, our `anchor_reach`).** Each tick of the held update `82D44A10`:
 the collision timer +1176 counts 1/60 steps while Player+2484 bit 26 is set (else 0) and a push latch (+1200 bit 0x02)
 sets once |Player+736|^2 > 0.04. The rebind block needs the hand flag, the timer at most 0.4 s and the latch clear;
@@ -653,7 +653,7 @@ latch, snap vs blend, anchor seed); skate-game prop / carry / skitch / living_wo
 
 ## Move Object step 3c: the hand IK (opt-in, 2026-10-10)
 
-**Retail [code + data] (decoded by main in the TU3 recomp, 82D46610 at 82D469C8..82D46C9C; consumer 82D45008 from
+**Retail [code + data] (decoded in the TU3 recomp, 82D46610 at 82D469C8..82D46C9C; consumer 82D45008 from
 research b64).** The held update's hand IK bit (+1200 0x40) is set in 82D46610, never cleared there; only 82D444A0
 full (a grab, or a path B re-grab) clears it (0xC0). The set needs all three:
 - the enter value +1180 (`5E35DB02BE697A58`, 0.7216) above 0;
@@ -759,8 +759,8 @@ mechanism is not traced.
 
 ### Play test 5 (laptop, 2026-10-17): the bench seat is shoved on the way down
 
-**Problem.** User: "I could grind the taller back of the seat but I couldnt grind the bench seat itself. I tried 3x in a
-row and each time it pushed the bench" (prop_DT_benchReclaimedMetal_1009, session game-20261017-133408). The seat
+**Problem.** The user could grind the taller back of the seat but not the bench seat itself; three tries in a
+row each pushed the bench (prop_DT_benchReclaimedMetal_1009, session game-20261017-133408). The seat
 rail took (`GRIND_RAIL`), the state went GrindFiveO -> Nonspecific 16 ms later (`selector::check_for_grind`: the grind
 candidate was gone), and `PED_OBSTACLE` showed the bench moving 0.11 m at 2.21 m/s on the entry frame (and already at
 0.78 m/s before the rail was taken on the second try).
@@ -814,9 +814,9 @@ No behaviour change.
 ## Grab: the carry binds the record the Ground decision qualified (2026-10-18)
 
 - **Report:** laptop sessions game-20261018-120611 and game-20261018-125543 (DownTown, the dumpsters near -212, 10.8,
-  452), the user's words: "I could only grab/move the yellow one, the smaller blue one couldnt be grabbed and the large
-  blue dumpster couldnt be grabbed. they could all be bumped to sort of move". A failed grab left no log line.
-- **Root cause (research b224 / b226, main checked the lines):** two grab paths ran side by side. The Ground decision
+  452), the user could grab and move only the yellow one, not the smaller blue one or the large
+  blue dumpster; all of them moved a little when bumped. A failed grab left no log line.
+- **Root cause (research b224 / b226, verified the lines):** two grab paths ran side by side. The Ground decision
   (`biped_ground/grab.rs`, retail `82D324B0`) already runs retail's validated set: the query of up to 5 records over
   all props in range (`82D74200`), 3 lines per record (`82D744F8` / `82D74740`), the nearest record (`82D4D150` mode
   0) and `82E08DB8` at bone 23. But the carry (`prop_carry.rs` `candidate`) picked its own target: the nearest prop
@@ -845,10 +845,10 @@ No behaviour change.
 
 ## Opt-in: Visualize Grabs (2026-10-18)
 
-- **Ask:** the user, 2026-10-18: "add an opt in to the overlay guide called 'visualize grabs' which when enabled shows a
-  visual que when you are in range of a grabbable item, whether its a prop/object or a skitchable vehicle spot, have it
-  trigger additional logging for grabbing and its availability to the player", and "create a new indicator the old
-  one we were using was shit" (the old carry HUD, `prop_carry_hud.rs`, was removed earlier).
+- **Ask:** the user, 2026-10-18: an opt-in in the guide overlay, Visualize Grabs, that shows a
+  visual cue when the player is in range of a grabbable item (a prop or a skitchable vehicle spot) and
+  turns on extra logging for grabbing and its availability, with a new indicator replacing the old
+  one (the old carry HUD, `prop_carry_hud.rs`, was removed earlier).
 - **What it shows** (PC overlay, Opt-Ins, **Visualize Grabs**; `SKATE_VISUALIZE_GRABS=1` for a run; off by default,
   saved with the other opt-ins): every grab record in range as an amber line along its spline chord with a dot at
   each end; the record a grab takes now in green, with a thick line, a ring pulsing around its middle and an arrow
@@ -867,7 +867,7 @@ No behaviour change.
 
 ## Carry: the skater's turn eases in over the first half second (2026-10-18)
 
-Problem (user, asks 15 / 16): prop grab controls "not like retail". Research b240 to b245 (`.local/research/`) checked
+Problem (user, asks 15 / 16): prop grab controls "not like retail". Research b240 to b245 checked
 every part of the held update against the retail code. The stick frame (the latched grab edge), the right stick's yaw
 about the prop's centre, the braking to a stop and the held friction pair already match retail; the user confirmed in
 game that the left stick slides the prop the way it is pushed (2026-10-18: "it slides right. it follows the direction
@@ -890,8 +890,8 @@ yaw sign convention of 8296EC98 (ours keeps the edge frame's sense); 82BDF268's 
 
 ## Grab: no prop could be grabbed, the grab scene held 2 of 786 props (2026-10-18)
 
-Problem (laptop session game-20261018-152526, user): "I was trying to grab objects, but nothing happened. I also
-turned on the opt-in to see and visualize grabbing objects, but I couldn't see anything." 57 PROP_GRAB_MISS lines,
+Problem (laptop session game-20261018-152526, user): grabbing objects did nothing, and with
+the grab visualisation opt-in on nothing showed either. 57 PROP_GRAB_MISS lines,
 all "decision no record qualified"; every GRAB_VIEW line "in_range=0", also 0.89 m from a bench.
 
 Root cause: the grab-scene ids pack the prop as `PROP_GRAB_TAG | id << 6 | spline`, and `grab_object_of` skipped
@@ -946,7 +946,7 @@ ready; a "skitching" mode in GRAB_VIEW. Tests `a_held_grab_shows_the_owner_list_
 
 - **Problem:** laptop session 2026-10-18 22:01, the user: carrying, the right stick should pivot on retail's anchor,
   not spin the prop in place; dumpsters "feel too light".
-- **Retail [code] (research `.local/research/b284-carry-pivot-and-weight.md`):** the command turns the prop about its
+- **Retail [code] (research b284):** the command turns the prop about its
   own centre of mass; the only turn term in the linear target is the lever coupling fwd += 0.25 x lever x yaw rate
   (`sub_82D45318`, constant -0.25 at 0x8208ED00); 82D9CC78 adds the linear command at the centre with no mass factor,
   82D9CCF0 replaces the angular one with the yaw command; no data anchor. "Around the player" is the skater walking
@@ -954,7 +954,7 @@ ready; a "skitching" mode in GRAB_VIEW. Tests `a_held_grab_shows_the_owner_list_
   set at the grab (82D444A0): speed scale from the mass (curve 57D37D696363167E, 1.0 up to 91 kg, 0.51 from 200 kg)
   and yaw gain from the yaw inertia (curve EABFCC79873A2859, 2.0 down to 0.66 at 800); clamps, slew and gains are
   the same for every prop.
-- **Ours:** the command matches (main-checked `move_object.rs:206` coupling -0.25, `:236-245` the two curves,
+- **Ours:** the command matches (verified `move_object.rs:206` coupling -0.25, `:236-245` the two curves,
   `:475-487` the targets; mass from the DMO data `Hash_E5778CDD4576D890`, `prop_dynamics.rs:599`; `held_body`
   `prop_dynamics.rs:1850-1862`). No formula change. Likely gaps, not yet proved: the skater follow not keeping up with
   the prop's turn (so the prop looks like it spins in place), or a dumpster with no DMO type block falling back to
@@ -966,8 +966,8 @@ ready; a "skitching" mode in GRAB_VIEW. Tests `a_held_grab_shows_the_owner_list_
   DMO's for multi-body dumpsters; the skater-side weight (82D46610, 82BDF268) is not decoded.
 
 ## Better Object Mover (PC overlay, not retail; user 2026-10-20)
-- Ask: "we should add an extra option for "Better object mover" which allows you to move all objects when enabled (not
-  retail) or just the current objects (retail option)"; scope (user): every prop (static world stays).
+- Ask: an extra option, "Better object mover", that lets the player move all objects when enabled (not
+  retail) or only the current ones (retail option); scope (user): every prop (static world stays).
 - Retail moves only props whose template has authored grab splines (DownTown: 691 of 786). The in-game grab starts
   only from the Ground decision qualifying an authored record (Move Object enter), so the other props cannot be moved.
 - Change: PC overlay Extras > Objects "Better Object Mover" (Retail / On, saved). On: props without authored splines

@@ -37,7 +37,7 @@ copy. Without `known_copies` (all other callers) behaviour is unchanged.
 
 Why identical: identical stored bytes (same section table, sizes and
 compressed payload) decode to identical data, and the loader already kept the
-first copy; the returned list is still built in ATOC order from the first
+first copy; the returned list is still built in ATOC order (the stream's index table) from the first
 copies.
 
 ### Verification
@@ -166,8 +166,8 @@ rebuild is cheap, so none was added.
 
 ## Export speed pass (2026-10-24, USER-ASKS 305)
 
-User: "run an optimization pass over our scripts that extract assets with the goal of making it faster while not
-introducing any new issues into the export process."
+The user asked for an optimisation pass over the asset extraction scripts: faster, without
+introducing any new issues into the export process.
 
 **Measured first.** A full fresh setup of the disc (no DLC) into a scratch base on K:, with the native RefPack DLL and
 the dev game exe the launcher's refresh uses, every progress line timestamped (`tools/dev-bench/setup_bench.py`: also
@@ -200,7 +200,7 @@ between two runs of the unchanged pipeline (a second baseline): 40 files that ar
 their temporary sources). The other 18,828 are byte-identical, including all audio and every menu movie texture.
 
 **Second pass (2026-10-24, USER-ASKS 308 / 309):**
-- **One core budget** (user: "uses 75% of the cores leaving headroom for the user"): `setup_budget.cores()` = 75% of
+- **One core budget** (the user asked for 75% of the cores, leaving headroom for the user): `setup_budget.cores()` = 75% of
   the CPUs the process may run on (`os.process_cpu_count`), `SKATE_SETUP_CORES` overrides. Every pool derives from it:
   map jobs up to 3 (half the budget, memory permitting), the customiser's worker processes a quarter (1..8), the
   threads inside a map job what is left over 3 jobs, audio decodes a quarter (they run beside the maps), archive
@@ -287,7 +287,7 @@ the workers next (it changes the customiser fingerprint, so every install redoes
 
 **Customiser worker share on two machines (2026-10-24, USER-ASKS 316, 324):**
 - **Laptop** (Ryzen 9 8945HS, 8 cores / 16 threads, 31 GB, NVMe; budget 12, 3 map workers, customiser default 3;
-  pipeline 5b16a77b, before ddf2231a; `second-pc/HAILS-ROGLAPTOP/setup-bench-20261024-1325`): 30f19a4e -> 5b16a77b
+  pipeline 5b16a77b, before ddf2231a; laptop run setup-bench-20261024-1325): 30f19a4e -> 5b16a77b
   178.4 / 180.5 s -> 136.2 / 136.9 s (-24%). Customiser workers 3: 136.2, 136.9, 134.8, 136.3 s; 6: 117.4, 124.7 s
   (-11%): the maps end at about 103 s and the customiser (roster ends about 131 s) runs on alone with 3 workers
   while 9 cores of the budget are idle. Same 18,868 files; only the 41 run-to-run files differ.
@@ -408,8 +408,8 @@ Full fresh setup, same machine and source, before → after:
 
 ## Refresh Game Files: setup window opened only after a full file check (2026-10-15)
 
-**Problem.** After Extras > Refresh Game Files the setup window took a while to open (user, 2026-10-15: "I clicked
-it, it took a while and then it eventually opened").
+**Problem.** After Extras > Refresh Game Files the setup window took a while to open (reported by the user,
+2026-10-15).
 
 **Root cause.** `tools/setup.py` ran `damaged()` (`asset_pipeline/group_receipts.py`) before creating its window, only
 to list the groups in its label. `damaged()` re-reads and SHA-256 hashes every installed output file of every group
@@ -464,7 +464,7 @@ The slowest hold is the native audio runtime's first start (~40 s on an HDD with
 
 ### The setup window (2026-10-27, ask 385)
 
-**Problem.** The setup / update window showed a long paragraph (asset version list, reuse notes, where to keep the game data) and its button even when nothing had to be picked; the user: "can we make this screen less cluttered and just look better? it reads like shit."
+**Problem.** The setup / update window showed a long paragraph (asset version list, reuse notes, where to keep the game data) and its button even when nothing had to be picked; the user asked for a less cluttered, better-looking screen.
 
 **Change** (`tools/setup.py`, `tools/asset_pipeline/install.py`; ours, setup is not a retail screen). Title "Updating game files" / "Set up Skate 3 Rust Engine", one lead line (what is converted, or what to pick), one grey note, one status line over a thin progress bar; the file button shows only when a file must be picked, and again after an error; window 700 x 320. The conversion itself is unchanged.
 
@@ -622,7 +622,7 @@ The native audio runtime's first start (`native::begin_early`, called from `main
 - Cold (hard disk), 2 interleaved pairs: 46.3 / 47.7 s and 36.5 / 46.7 s. Cold runs vary by 10 s and more (Windows' launch prefetch, the disk); one "on" run had the renderer's start stall for 15 s while the audio thread read (the exe's own pages competing for the disk). The hard-disk floor is the file count: the 1,642 small WAV files alone cost about 12 s of seeks whatever the order.
 - Laptop (NVMe SSD, University, 2026-11-03 05:46 note): warm, 3 interleaved pairs, game shown ON 9.92 s vs OFF 10.58 s (-0.66 s), first frame 8.07 vs 8.74 s; cold (`COLD=1`), 2 pairs, 10.17 vs 12.72 s (-2.55 s), the audio start done before the skater loads instead of after the first frame. Fingerprint `177dff29d1413d84` in every run; the tests as on the desktop (175 pass, 9 need private trace data).
 
-**Open.** A cold start on a hard disk needs fewer files: done next, [one file per sound bank](#one-file-per-sound-bank). `world::spawn`'s prepare (1.2 to 1.9 s warm) could run on a thread like a map change does, but its asset handles would then interleave with the other Startup systems' assets (a different asset id order), so it stays where it is until that is shown not to change rendering.
+**Open.** A cold start on a hard disk needs fewer files: done next, [one file per sound bank](#one-file-per-sound-bank-2026-11-03-user-asks-472). `world::spawn`'s prepare (1.2 to 1.9 s warm) could run on a thread like a map change does, but its asset handles would then interleave with the other Startup systems' assets (a different asset id order), so it stays where it is until that is shown not to change rendering.
 
 ## One file per sound bank (2026-11-03, USER-ASKS 472)
 

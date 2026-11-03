@@ -7,7 +7,7 @@ collision). This change does not touch collision, so it neither needs nor confli
 
 Retail collision archives hold clustered meshes with no surface on any triangle: 12-triangle boxes. PR #25 found
 they were invisible walls and drops them from solid collision, but that only throws them away. They are the
-collision shapes of the maps' **named trigger volumes**: SkateSchool's tutorial areas and map-wide DMO reset box,
+collision shapes of the maps' **named trigger volumes**: SkateSchool's tutorial areas and map-wide DMO (dynamic prop) reset box,
 the MegaPark and Maloof teleport prompts, DownTown's session spots. The engine had no notion of trigger volumes at
 all, so nothing (engine or mod) could react to the player entering one.
 
@@ -16,7 +16,7 @@ all, so nothing (engine or mod) could react to the player entering one.
 Reference: the TU3 build through skate3recomp (by @mchughalex, built on the rexglue SDK), the converted disc data
 read in place, and guarded hook runs of the recomp. Addresses are TU3; no game code or data is copied.
 
-**Data.** Each volume is an item of a `0x00EB0019` volume-set record in an RW4 simulation arena (ATOC processor
+**Data.** Each volume is an item of a `0x00EB0019` volume-set record in an RW4 (RenderWare 4) simulation arena (ATOC processor
 `0xAB329A6A`) of the district's `cSim_*.xsf` streams (fixup `82962538`, stream-in `82C9AFD8`). Item (240 bytes):
 matrix +0, bounds +64/+80, **link GUID** +176, **instance id** +184 (the id challenge scripts address,
 `0x2C701706xxxxxxxx`), **group word** +216, +220 the index of a `0x00EB000A` link record, +224 the name
@@ -122,7 +122,7 @@ The converter never read the `0x00EB0019` records, and the engine had no trigger
   forgotten silently; removed bodies exit).
 - `skate-data::trigger_volumes`: the format (serde), validation (unique ids, 64-bit hex ids, orthonormal axes,
   finite values, ≤ 4096 volumes), `TriggerGroup::tracks_bodies` (Challenge only), and `load_for_map`:
-  `<Map>.triggers` next to the package wins over an embedded **`TVOL`** extension (schema 1, same JSON) so custom
+  `<Map>.triggers` next to the package wins over an embedded **`TVOL`** extension (our trigger volume tag in the `.skate` file) (schema 1, same JSON) so custom
   maps can ship volumes either way; neither = no volumes. `skate_world::validate_runtime` accepts and validates
   `TVOL`.
 - `skate-game::trigger_volumes`: resources `TriggerVolumes` (map volumes in file order = retail registration
@@ -160,8 +160,8 @@ reset area (answer 4), not as a player reset, and the engine has no tutorial cha
 behaviour is attached. It is exposed as data so a mod or a later port can act on it.
 
 ### Not ported (follow-ups)
-- NPC skaters: the engine has none. Remote multiplayer skaters (expected to be tracked in retail) are not
-  registered yet; a multiplayer system can do it through `TriggerBodies` with each remote's feet, head and hips.
+- NPC skaters (the living world, doc 26c) and remote multiplayer skaters (expected to be tracked in retail) are not
+  registered as trigger bodies yet; a multiplayer system can do it through `TriggerBodies` with each remote's feet, head and hips.
 - Challenge packages (`missions.big`) and their streaming: they belong to a challenge system the engine does not
   have. Their volumes can be exported with the same reader when one exists.
 

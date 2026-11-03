@@ -64,11 +64,11 @@ change moves every map's startup position, so all maps must be checked.
 New `tools/asset_pipeline/map_starts.py` resolves each district's start from
 the game's own data, in priority order:
 
-1. **`world` row start locator** — field `Hash_3735C5C12E8E7AE1` in
+1. **`world` row start locator**: field `Hash_3735C5C12E8E7AE1` in
    `skatercollections` names the start locator of each skate park
    (`dist_megapark` → `Z_MegaPark_SkatePark`, etc.).
 2. **Chosen `fe_locations` row** for districts with several authored
-   locations and no single start (`DEFAULT_LOCATIONS`, a project choice —
+   locations and no single start (`DEFAULT_LOCATIONS`, a project choice;
    see below).
 3. **The district's only `fe_locations` row** (BlackBoxPark, SkateSchool).
 
@@ -127,9 +127,9 @@ Previous University spawn was a fixed point next to Super-Ultra Mega-Park,
 ## Files
 
 - `tools/asset_pipeline/map_starts.py` (new)
-- `tools/asset_pipeline/install.py` — computes starts before conversion;
+- `tools/asset_pipeline/install.py`: computes starts before conversion;
   `convert_map` uses them.
-- `tools/asset_pipeline/map_writer.py` — `ground_spawn`, `GROUND_*`
+- `tools/asset_pipeline/map_writer.py`: `ground_spawn`, `GROUND_*`
   constants, `SpawnSelector` changes, `spawn_point` no longer prunes by
   distance for non-University districts, `write(..., prepared_heading=)`.
 - `tools/asset_pipeline/test_map_writer.py`, `tools/asset_pipeline/test_map_starts.py`.

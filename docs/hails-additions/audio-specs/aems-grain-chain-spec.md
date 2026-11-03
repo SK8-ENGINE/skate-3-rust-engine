@@ -1,8 +1,8 @@
 # Board grain bus chain (`sub_824C8878`): spec for the native port
 
 Scope: the four per-player bus chains of `SFXObj_SkateBoard` (2 trucks × players A/B) and everything the owner posts
-to them per frame — FrequencyShiftSsb, graph 3 (clip / wobble / shelf), the graph-1 level ramp, the gain wobbles, the
-graph-2 sends. Extends `grain-player-spec.md` §3.1–3.2 (read that first). Written 2026-10-02 from the TU3 lifted asm
+to them per frame: FrequencyShiftSsb, graph 3 (clip / wobble / shelf), the graph-1 level ramp, the gain wobbles, the
+graph-2 sends. Extends `grain-player-spec.md` §3.1–3.2 (read that first). Written 2026-10-02 from the TU3 (title update 3) lifted asm
 (`tools/recomp-code-search/fn.sh`), image constants (`img.py` (local tool)) and vault fields (`find_field.py`).
 Port: `crates/skate-audio/src/dsp/fss.rs`, `dsp/shelf.rs`, `grain/chain.rs`, `grain/bed.rs` (work copy until merged).
 
@@ -114,7 +114,7 @@ Init (`sub_824C59C8`): e 0, gains 1, envelope reset (done → the first frame dr
 - ramp = kmh ≥ 70 ? 1 : kmh ≥ 42 ? (kmh − 42)/28 : 0. g3 = fma(value, ramp, 1); g1 = g3 × level.
 - Post loop: trucks 0, 1 × players A, B: if g3 ≠ last posted → last = g3, then (if the chain exists) graph-1 Gai0
   = g1, graph-3 Gai0 = g3. The compare value is per player, so **truck 1's chains never get a wobble** [TR], and a
-  rebuilt chain keeps Gai0 1.0 until the next change (below 42 km/h: never — the held level is lost on a rebind).
+  rebuilt chain keeps Gai0 1.0 until the next change (below 42 km/h: never; the held level is lost on a rebind).
 - Non-local owners: `+1592`, `+1748`, `+1560` = 1.0, nothing posted.
 
 ### 4.5 Vault (class `6E878344774A7999`, `default`, read by `sub_824CA938`) [V]
@@ -157,7 +157,7 @@ Init (`sub_824C59C8`): e 0, gains 1, envelope reset (done → the first frame dr
 - Retail (`chain_check.py` (local script), session `dsp_20261002_185826`, owner 40C33020):
   graph-3 send = model exactly (median error 0.0000 over 189 posts, 4 chains); graph-1 Gai0 / graph-3 Gai0 = 1
   below 52 km/h and = the level ramp above 53 km/h (|Δ| ≤ 1e-4); max |g3 − 1| / ramp = 0.290 (A, cap 0.30) and
-  0.240 (B, cap 0.25) — graph 3 `0x40C118A0` ↔ graph 1 `0x40C79BF0` is A, `0x40C11C20` ↔ `0x40C7A180` is B;
+  0.240 (B, cap 0.25); graph 3 `0x40C118A0` ↔ graph 1 `0x40C79BF0` is A, `0x40C11C20` ↔ `0x40C7A180` is B;
   only truck 0's two graph-3 Gai0 ever change (the other graph 3s log only their default).
 - Expected manual / trick effect: A × 0.65 (−3.7 dB, records) and A +150 Hz (FSS), B silent (I = 0): probe
   30 km/h manual −38.21 dBFS (= old chain), centroid 1375 → 1502 Hz. High speed (send 3, level 0.45..0.87):
@@ -174,20 +174,20 @@ Init (`sub_824C59C8`): e 0, gains 1, envelope reset (done → the first frame dr
 - Release fold of a torn-down chain's env send (Sub0 deltas into the env bus) is not modelled; the dry fold is.
 - The high-speed level jump (+5.7 dB) is the mechanism's result; not compared with a retail capture (the capture
   also holds wind, rattle and rocket at those speeds).
-- Trick latch only evaluated while the manual latch is clear (§4.1) — the existing `board::Latches` updates both.
+- Trick latch only evaluated while the manual latch is clear (§4.1); the existing `board::Latches` updates both.
 
 ## 8. Sources & credits
 Retail behaviour read from the skate3recomp TU3 lifted code (reference only), image constants from the PoC's dumped
 image, vault values from the converted collections; trace hooks in skate3recomp `src/research/hooks_audio.cpp`
 (GREC / GAIN / SEND / MOD). Prior notes: upstream PR #4 (chain shape), `grain-player-spec.md`.
 
-## 9. Listening reports 2026-10-02 (rolling busy / rough, rolling in the air) — evidence
+## 9. Listening reports 2026-10-02 (rolling busy / rough, rolling in the air): evidence
 Local tools: `air_check.py`, `surface_vs_retail.py`, `spectrum_compare.py`,
 `transients.py`, `seams_rate.py`, `trucks_sounding.py`, `capture_windows.py`, `landing_ratio.py`; renders of the user
 logs 200832 / 201324 / 203746 / 204047 in `e2e/` (main-repo `e2e_render`, old chain).
 - **Air**: in all 48 air windows (> 0.2 s) of the four logs the bed's records are 0 from 100 ms after takeoff (MixMap
   F0 on PlayerPhysics.in2 → C[Player] −10000 mB); retail (dsp session) A 0.06 → 0 in ≈ 80 ms. What keeps sounding in
-  the air is the rocket `x_jet_rolling` (≈ 0.06–0.10) and the wheel spin: retail does the same — jet grains keep
+  the air is the rocket `x_jet_rolling` (≈ 0.06–0.10) and the wheel spin: retail does the same; jet grains keep
   starting inside air windows with send 0.10–0.14 (0.09–0.12 before takeoff), SenseOfSpeed level(5) is not
   wheel-gated (E74 has no F0 term). No change.
 - **Surface (a)**: our tag = retail material + 1 at the same world position (WPPOS, same frame): 13 of 14 shared 10 m
@@ -200,7 +200,7 @@ logs 200832 / 201324 / 203746 / 204047 in `e2e/` (main-repo `e2e_render`, old ch
   music/ambience). Retail-only parts left: this chain (A allpass, B −10 Hz FSS, env send level(13) ≈ 0.079,
   graph 3 above 46 km/h). Capture-level ratios (landing over bed) are not usable (capture/trace alignment).
 
-## 10. Listening test 8 (seams "too rough / too often / faster") — evidence
+## 10. Listening test 8 (seams "too rough / too often / faster"): evidence
 Local tools (`seam_stats.py`, `block_gain.py`, `retail_seams.py`, `retail_by_pattern.py`,
 `retail_timeline.py`, `crossings.py`, `dataflow.py`, renders `e2e-before/-after/-off`).
 - Cause outside the chain: Class_Seams' sample index = table(w10) + table(w8) + soft + `send_random_0_to_9a/b/c`. Those

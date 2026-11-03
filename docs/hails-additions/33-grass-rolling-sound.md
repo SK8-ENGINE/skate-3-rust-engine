@@ -22,10 +22,10 @@ stand-in grain: tags 8, 10, 70 (rolling surfaces 8, 7) `concrete_aggregate_hard`
 ## Findings
 
 1. **[verified] The stand-in grain did not play in the user's run.** Stderr log
-   `.local/versions/hails-additions/logs/game-20261008-161024.stderr.log`: `native rolling layers true` (22:10:30.90), so
+   of session game-20261008-161024: `native rolling layers true` (22:10:30.90), so
    the bed takes its binds from the owner routing (`player::rolling`, port of `sub_824C5CA8`); `grain_for` was only the
-   fallback when the Class_rolling banks are missing. On the grass ride (state log
-   `.local/audio-state-logs/state_20261008_161024.tsv`, last segment, ms 23.8 to 26.7 s, 169 rows with all wheels on tag 8
+   fallback when the Class_rolling banks are missing. On the grass ride (audio state log
+   state_20261008_161024, last segment, ms 23.8 to 26.7 s, 169 rows with all wheels on tag 8
    around (-573, 10, -308), 8 to 12 m/s) the log has no `grain bind` between 22:21:41.906 and the jump at 22:21:45.086.
    That "tag 8 is grass" rests on the user's report of where they rode plus the tag at that spot **[unverified: no
    material name table checked]**.
@@ -37,7 +37,7 @@ stand-in grain: tags 8, 10, 70 (rolling surfaces 8, 7) `concrete_aggregate_hard`
    0. Which of these voices were audible and how loud is **[unverified]**: the session logs posts, not voice gains.
 3. **[verified] Why layer 5 posts there.** The state log's `seam0` / `seam3` are 1 on all 169 grass rows (0 on the tag 4
    concrete rows). Our `rolling.rs` (`Rolling::process`, the `pattern == 1` block) posts layer 5 on wheel 0's pattern 1,
-   as retail `sub_824C9F68` (`.local/audio-re/board-layers/f_824C9F68.txt`: `lwz r28,636(r11)`, `cmpwi cr6,r28,1`, post
+   as retail `sub_824C9F68` (local disassembly dump of `f_824C9F68`: `lwz r28,636(r11)`, `cmpwi cr6,r28,1`, post
    `sub_824C4C18(r29, 5, 3)`; no surface test). The pattern comes from the wheel-line hit tag: retail loop at
    `loc_82C07A18` (skate3recomp generated `skate3_recomp.75.cpp`) stores `rlwinm r6,r7,20,28,31` = (tag >> 12) & 0xF,
    exactly our `board_ground.rs` `seam_patterns[i] = (hit.surface_tag >> 12) & 0xF`. That retail's audio state `+636`
@@ -52,7 +52,7 @@ stand-in grain: tags 8, 10, 70 (rolling surfaces 8, 7) `concrete_aggregate_hard`
    2026-10-08 against the extracted banks and the install MixMap) gives PatchBank_SpiderCracks the same per-voice gains
    on surface 8 (tag 8) as on surface 3 (tag 1): max 0.226 / 0.277 / 0.355 at 8 / 20 / 35 km/h. So with these inputs
    our port is audible on grass, against the user's verdict.
-5. **[verified, but NOT grass at Ghetto Spot] Retail trace.** In `.local/recomp/sessions/localtest_20261003_102703`
+5. **[verified, but NOT grass at Ghetto Spot] Retail trace.** In recomp session localtest_20261003_102703
    (scripted run at the University spawn, around (412, 136, -712)), SEAMPAT lines show wheel 0 material 7 with pattern 1,
    and POST lines from `824C9FE8` (layer 5) at 61418.4 and 78906.4 ms, at 0.21 m/s at the first post. That session has no
    GAIN / SEND lines, so audibility is unknown, and that material 7 there is grass is **[unverified]**. It does not show

@@ -33,7 +33,7 @@ objects later). Pure rules in `skate-core::living_world` (no ECS, no I/O), reade
 a minimal Bevy plugin in `skate-game::living_world` that emits spawn / despawn decisions as messages. No bodies or
 rendering yet (later milestones consume the messages).
 
-What retail does, checked in the code for this milestone (tags [code] / [data]; addresses TU3):
+What retail does, checked in the code for this milestone (tags [code] / [data]; addresses TU3, title update 3):
 - **Census tick** `sub_826B71F0` runs one living-world type per console tick in rotation (peds 0, vehicles 1, DMOs
   2, props 3), each a cull pass then a spawn pass [code]. So each census kind gets a pass every 4 ticks.
 - **Census circle**: the `livingworld_census_ranges` sets lerped by the player's speed `|v| x 3.6` km/h
@@ -52,7 +52,7 @@ What retail does, checked in the code for this milestone (tags [code] / [data]; 
   no spawn (DownTown traffic weights sum to 0.875) [code, data]. Ped pool 31 [code].
 - **Free Play** (mode 3): `sub_826B7010` clamps `+336` / `+332` to 0..1 as the ped / vehicle density; below 1.19e-7
   the whole kind is culled at once [code]; the ped clear is guarded by a zombie query, the vehicle clear is not, so
-  in zombie mode "No" traffic still removes the cars (research b551, main read the asm 2026-10-23; ours used to skip
+  in zombie mode "No" traffic still removes the cars (research b551, checked the asm 2026-10-23; ours used to skip
   both, now `census_pass` follows `cull_in_zombie`, test `free_play_zero_in_zombie_mode_clears_cars_not_peds`).
   A.I. Skaters `+340` off: no spawns (`sub_8245C548`) and the per-skater checks despawn every ambient NPC
   (`sub_8245A9B8`, the `r25` gate) [code]; retail keeps and still spawns the up to 3 requested ("Call Skater")
@@ -88,8 +88,8 @@ Change:
   `LivingWorldSpawn` / `LivingWorldDespawn`. `SKATE_LIVING_WORLD=0` turns it off, `SKATE_LIVING_WORLD_DEBUG=1`
   logs a summary every 5 s.
 
-Multiplayer seams (user, 2026-10-04: "build everything with multiplayer support, just dont add the multiplayer
-yet, we can have it ready for that to be added however."): a decision is a pure function of (config, seed, tick,
+Multiplayer seams (user's decision, 2026-10-04: build everything with multiplayer support, without adding
+multiplayer yet, so it is ready to be added later): a decision is a pure function of (config, seed, tick,
 observers, slot budget); it runs in one place (`NetRole` Standalone / Host; a Client never decides and mirrors
 records with `PopulationState::apply_records`). The core takes a list of observers (culls use all of them; the
 spawn pass rotates through them; one observer = retail). Every entity has a stable `LivingWorldId` (kind + serial,
@@ -125,8 +125,8 @@ Verification (milestone 2):
 
 ## NPCs vanishing in view (leave fade, census centre), 2026-10-05
 
-**Problem.** The user: "They also (peds and skaters) keep dissapearing randomly while still in sight, which i
-don't remember happening often in retail."
+**Problem.** The user reported that peds and skaters kept disappearing at random while still in sight, which
+they do not remember happening often in retail.
 
 **Root cause.** (1) Replay NPC skaters were removed on the spot at the end of a line with no branch, a
 placeholder, often in plain view. (2) The census circle centre moved along the horizontal velocity; retail uses
@@ -143,7 +143,7 @@ the 3-D velocity, so on slopes our cull circle sat higher or lower than retail's
   passes `duration - 1 s`; `sub_8246EE30` sets that duration to `clamp(5 s + rest of the current line, 1.5 s,
   7.9 s)`; `sub_8246EF78` cancels the fade (`+1872 = FLT_MAX`) when the state ends. Retail skaters therefore
   fade for 0.8 s and are removed at opacity 0.2, never popping out at full opacity.
-- Census centre: `sub_826B7530` normalises the 3-D velocity (see `.local/research/npc/fix1-cull.md`).
+- Census centre: `sub_826B7530` normalises the 3-D velocity (see a local research note).
 
 **Change.** New `skate_core::living_world::leave_fade` (`LeaveFadeConfig { fade_seconds: 1.0, despawn_alpha: 0.2
 }` as data-driven retail defaults in `SkaterConfig::leave_fade`, `LeaveFade`, `frames_to_line_end`). The replay
@@ -225,8 +225,8 @@ when beyond), the census gate on the focus skater (`+52` vfunc 4, `+1904` bit 0x
 
 ## NPC draw distance (QoL, not retail)
 
-**Problem.** User request, 2026-10-05: "Lets add an option in the settings to extend the distance of culling (non
-retail QoL feature". Decisions: one option "NPC draw distance" in the graphics settings, Retail (default) / 1.5x /
+**Problem.** User request, 2026-10-05: a settings option to extend the culling distance (a non-retail
+QoL feature). Decisions: one option "NPC draw distance" in the graphics settings, Retail (default) / 1.5x /
 2x / 3x, for peds, NPC skaters and cars together, keeping the density (caps scale with the covered area, so 2x
 range = up to 4x NPCs). Retail has no such option; this is an engine QoL setting, not a retail claim.
 User request, 2026-10-07: a step so no peds spawn; decision (user): a "None" step on this option, first in the
@@ -378,7 +378,7 @@ deck 500 m off; every ped and car stays within cull range of the player and noth
 
 ## Opt-in switches in the PC overlay, 2026-10-11
 
-User: "anything opt in should be added as a setting to the guide overlay that can be toggled on and off if they arent already".
+The user's decision: every opt-in gets a setting in the guide overlay that toggles it on and off, where it does not have one yet.
 
 - **Problem:** the living world features still being tested (zombie mode, NPC skater physics, skitching, prop
   grab) could only be turned on with environment variables (`SKATE_ZOMBIE=1`, `SKATE_NPC_SIM=1`,
@@ -397,8 +397,8 @@ User: "anything opt in should be added as a setting to the guide overlay that ca
   mode is retail's cheat; this row stands in until the cheat screen exists.
 - **Verification:** tests `choices_round_trip_and_default_off`, `mod_reset_restores_the_players_choice`; the
   overlay row lists in `graphics_menu` tests include rows 40 to 43.
-- **Toggle events (2026-10-18):** laptop session 2026-10-18 22:01, the user: "when opt ins are toggled on/off should
-  be logged event, especially during trace all." Every opt-in switch now also logs one event line,
+- **Toggle events (2026-10-18):** laptop session 2026-10-18 22:01, the user asked that toggling an opt-in on or off
+  is logged as an event, especially during trace all. Every opt-in switch now also logs one event line,
   `OPT_IN_CHANGED <name> <old> -> <new> by <player|mod>` (`opt_ins::opt_in_changed_line`): the living world ones
   (`zombie`, `npc_physics`, `visualize_grabs`) from `log_opt_ins` with the source (`mod` when the value in effect
   differs from the player's choice), and the overlay's `better_water`, `more_audible_world` and `decode_speech` at
@@ -415,7 +415,7 @@ User: "anything opt in should be added as a setting to the guide overlay that ca
   example `SKATE_LIVING_WORLD=0`, `SKATE3_RETAIL_MENUS=0`, `SKATE_PRESENT_MODE`, `SKATE3_INPUT=xinput`), not opt-ins.
   Test: `pages_put_headers_in_front_of_their_groups`, `sections_expose_only_real_rows_and_all_maps` (no opt-in outside
   the Opt-Ins section), `physics_threads_default_single_and_load_saved`.
-- **Fly Cam opt-in (2026-10-27, user: "Make it so the Fly cam is an opt in toggle in the overlay guide."):** a
+- **Fly Cam opt-in (2026-10-27, user: make the Fly cam an opt-in toggle in the guide overlay):** a
   "Fly Cam" row under the Debug header (off by default, saved as `fly_cam` in `settings/graphics.json`). The debug fly
   cam's chord (D-pad Right + R3, `debug_cam.rs`) works only while it is on; switching it off while flying leaves the fly
   cam. Before, the chord was always live. Tests: `sections_expose_only_real_rows_and_all_maps`,
@@ -494,7 +494,7 @@ NPC draw distance (QoL, not retail; `skate_core::living_world::draw_distance`): 
 
 ### Census focus
 
-The census focus of one player: the player's character, not the board (retail `sub_826BDB50` -> `sub_826BE7D0` / `sub_826BE870` read the focused skater's `+52` component position and its velocity [code], `.local/research/npc/fix3-pedcull.md`). `position` / `velocity` are the skater's physical centre of mass and its velocity, valid on board, walking, in the air and in a bail; the deck stays wherever the board was left. Non-finite values pass through: the census skips such a focus (`population.rs` guard).
+The census focus of one player: the player's character, not the board (retail `sub_826BDB50` -> `sub_826BE7D0` / `sub_826BE870` read the focused skater's `+52` component position and its velocity [code], a local research note). `position` / `velocity` are the skater's physical centre of mass and its velocity, valid on board, walking, in the air and in a bail; the deck stays wherever the board was left. Non-finite values pass through: the census skips such a focus (`population.rs` guard).
 
 ## Code reference: living_world/draw_distance.rs
 
@@ -616,7 +616,7 @@ Test descriptions moved out of the code comments of `crates/skate-data/tests/liv
 
 Data-gated checks of the living-world population data on the user's own export. Skips (passes with a note) when no data is configured. `SKATE3_ASSET_ROOT`: converted assets (one root, or several joined like PATH); reads `private/living_world/{tables.json, census.json, <District>.census.bin, skater_profiles.json, skater_paths/*.bin}`.
 
-The expected values are the shipped Skate 3 data the research measured (labels in `.claude/notes/npc-livingworld-re.md` §1 and doc 26); they are asserted, not embedded in the engine.
+The expected values are the shipped Skate 3 data the research measured (labels in the local living world research note, §1, and doc 26); they are asserted, not embedded in the engine.
 
 ### Test exported line jitter
 

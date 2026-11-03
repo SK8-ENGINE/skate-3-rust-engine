@@ -1,7 +1,7 @@
-# Off-board footsteps, clothing and hands-on-deck — retail spec (2026-10-02)
+# Off-board footsteps, clothing and hands-on-deck: retail spec (2026-10-02)
 
 Retail's `SFXObj_OffBoard` (controller `0x40010090`), `SFXObj_Clothing` (`0x40010060`) and the
-Contacts owner's hand-on-deck sounds, read from the TU3 recompilation (`tools/recomp-code-search/fn.sh`;
+Contacts owner's hand-on-deck sounds, read from the TU3 (title update 3) recompilation (`tools/recomp-code-search/fn.sh`;
 local asm dumps, local tools `keys.py` (resolve the
 lis/ori vault keys of a dump against a collection) and `surfaces.py` (per-material footstep fields)).
 Port: `crates/skate-audio/src/player/{footsteps,clothing,step_on}.rs` (work copy until integrated).
@@ -31,8 +31,8 @@ Gate: `[owner+28]` record present and its `+52` active. Then:
 2. Curve words (`sub_82481E10(16, x = rec+16, y = rec+80, v)`: v < x0 → y0; v ≥ x15 → y15; else
    the first i with v < x[i]: dx = x[i] − x[i−1] > 0 ? (y[i] − y[i−1]) / dx × (v − x[i−1]) + y[i−1]
    (fmadds) : y[i]; stored with `fctiwz`):
-   `+408` = walk(`+212` |COM v|) — curve `C3CD069BB1B16B58`; `+416` = xz(`+284`), `+412` = xz(`+288`) —
-   `CF844597AB96EAF8`; `+424` = vertical(`+292`), `+420` = vertical(`+296`) — `236311604A3C1FB5`.
+   `+408` = walk(`+212` |COM v|): curve `C3CD069BB1B16B58`; `+416` = xz(`+284`), `+412` = xz(`+288`):
+   `CF844597AB96EAF8`; `+424` = vertical(`+292`), `+420` = vertical(`+296`): `236311604A3C1FB5`.
    (Points in `FootstepTuning::default`: walk 0 → 0, 2.0 → 205, 5.13 → 355, 6.03 → 409, ≥ 7.35 → ~512;
    xz ≈ 512..529 above 0.3 m/s; vertical 2 below 0.5 m/s, 0 from 1 to 9.3, 3.5..8.3 above 9.45.)
 3. Copies: `+52` = state `+724` (foot A down), `+53` = 0, `+236` = `+725` (foot B), `+237` = 0.
@@ -40,7 +40,7 @@ Gate: `[owner+28]` record present and its `+52` active. Then:
    else if `+238` → `+468` = 10. Both counters then decrement (when > 0).
 5. Poster `sub_824E9FD8`; if on foot: walking voices `sub_824E9D10`; jump voices `sub_824E9678(on
    foot, footplant ended)`; `sub_824EBA08` (remote players only: sends message 0x2056/294 on leaving
-   foot — not modelled); stores `+404` on foot, `+460` = `+768`, `+54/+55/+238/+239` = this frame's
+   foot: not modelled); stores `+404` on foot, `+460` = `+768`, `+54/+55/+238/+239` = this frame's
    copies; splash `sub_824EBB58` (§2.5, not ported).
 
 ### 2.1 Poster `sub_824E9FD8`
@@ -61,7 +61,7 @@ Gate: `[owner+28]` record present and its `+52` active. Then:
      [0, 1, 0, dt, 1, 1]); then surface layer 1 the same way (gain R+0, no override). Layer 0 = −1
      skips layer 1.
   2. step layers 0 and 1: (bank, id) = `sub_82493690(mode, material, step code +740, layer)`; the
-     slot floats are not touched (the constructor's open EQ, gain 1 — `sub_824D7CE8`); apply; start.
+     slot floats are not touched (the constructor's open EQ, gain 1, `sub_824D7CE8`); apply; start.
 - Holder layout (`sub_824D7CE8`): +0 packet, +8 env level (f32), +12 azimuth (int), slots at
   +24 + 40k: +0 sound, +4 HPF 0, +8 LPF 96000, +12 PI20 96000, +16 gain 1.0, +20 Q 3.0, +24 slot
   gain 1.0, +28 channels 6, +32 graph, +36 node list.
@@ -128,9 +128,9 @@ Gate: `[owner+28]` record present and its `+52` active. Then:
    else block [slot gain × level, pitch(1) / 4096, 0, dt, 1, 1].
 2. `sub_824EA9C8`: walking foley `+432`, `+428`: [level(3) / 32767, pitch(1) / 4096, raw(0) ×
    360/65535, dt, local, 1]; dead → freed. `sub_824EAC38`: `+440`, `+436` at level(12).
-3. `sub_824E9AB8`: take-off `+444` at level(9) (dead: **kept**, not freed — it gates w11 and the
+3. `sub_824E9AB8`: take-off `+444` at level(9) (dead: **kept**, not freed; it gates w11 and the
    apex), apex `+448` at level(10) (dead → freed).
-4. `sub_824EBE78`: the splash sounds (levels 13/14/15) — not ported.
+4. `sub_824EBE78`: the splash sounds (levels 13/14/15): not ported.
 
 ### 2.5 FootStep SubMix (`sub_82494188`, per foot slot)
 Mono graph: `Sub0 → HI20 → LI20 → PI20 → Sen0 (→ env bus input `[[0x830CFDEC]+52]`) → Pn21 (1 → 6) →
@@ -160,7 +160,7 @@ only with state `+224` clear): stop `+484`, Skate_Collisions id `35D3B06292CDA10
 | `+288` / `+284` | max(\|x\|, \|z\|) Skeleton `+240` / `+224` | `foot_physical.output.world_velocity[1]` / `[0]` ✓ |
 | `+296` / `+292` | \|Skeleton `+308`\| / \|`+324`\| = \|y\| of the **angular** velocity (body `+48`) of assembly parts 20 / 16 | ✓ (2026-10-02) \|`skeleton.bodies()[20/16]` angular_velocity.y\| |
 | `+740` step code | `sub_827729B8` (§3.1); Skeleton `+144` / `+160` = physical pose translations of toe parts 15 / 19 (Skeleton 9024 / 9280) | ✓ `StepCode` over `skeleton.record.pose[15/19][3].y` |
-| `+796` | Interaction+0 AudibleFootStepStrength | `animation_input.extra.footstep_strength` (engine comment: held 2.5–4; retail walking is < 2 → w13 = 1 — check a real-play log) |
+| `+796` | Interaction+0 AudibleFootStepStrength | `animation_input.extra.footstep_strength` (engine comment: held 2.5–4; retail walking is < 2 → w13 = 1; check a real-play log) |
 | `+300` landing bucket | §3.2 | `LandingBucket` helper over `p.reckoning.vector_16[1]`, `p.filtered_state_0 == 7` |
 | `+304` jump bucket | `sub_82772D30`: jump strength vs `468752B0BEE65CDB` = [0.45, 0.75] | `animation_input.extra.jump_strength` (host writes 0 today) |
 | `+768` | rec+156 bit 7 = Air 448 (FootPlant) | Air 448 (FootPlantManager; check `p.air`) |
@@ -194,7 +194,7 @@ Ring of 4 COM vy (Reckoning+20); a = |min(0, r0..r3)| (fsel chain); a > 3.45 →
   `FootIkState.frames[2].board` / `frames[3].board` (hand limbs, parts 3 / 7: the animated target
   relative to the animated board; updated only while the limb is on the deck or blending) strictly
   inside (DeckWidth/2 + p.x, 0 + p.y, DeckFrontEndSize + DeckMidLength/2 + p.z) with p =
-  `physics_skeleton` `A28E50D30B0506A4` = (0.03, 0.03, 0) — the same test as 600/601 (toes, pad
+  `physics_skeleton` `A28E50D30B0506A4` = (0.03, 0.03, 0): the same test as 600/601 (toes, pad
   `FootOnDeckPadding`).
 - Packed record bits 0x2 / 0x4 of +148 → bridge `+688` / `+689`; both cleared when on foot (category
   500) without the board in hand (OffBoard 311).

@@ -18,7 +18,7 @@ Machine for all numbers: Windows 11, i7-14700KF (20 cores / 28 threads), Python 
 
 ### Problem
 
-The user: "the ingame fps counter is not the best". A session felt "super stuttery when I try to do tricks"
+The user found the in-game fps counter lacking. A session felt very stuttery during tricks
 (2026-10-02) and nothing could measure it:
 - The on-screen counter (`fps_overlay.rs`) showed `FPS: N` = frames / seconds over 0.5 s windows. An average
   hides a hitch: 167 frames of 3 ms plus one 200 ms frame read **240 FPS** (unit test
@@ -90,8 +90,8 @@ Diagnostics only; nothing in retail Skate 3 to match. The proof obligation is th
 
 ### `FRAME_HITCH` log line (2026-10-08)
 
-Problem: the user reported "considerable frametime lags while flipping in the air on large jumps", then
-"yes on every large jump when flipping" (session 2026-10-07 13:09, spillway after the observatory). The
+Problem: the user reported considerable frame-time lag while flipping in the air on large jumps, then
+confirmed it happened on every large jump when flipping (session 2026-10-07 13:09, spillway after the observatory). The
 game log had no frame times (the counter only drew the overlay, `SKATE_FRAME_LOG` was off), so the hitch
 could not be placed or attributed afterwards.
 
@@ -130,7 +130,7 @@ Measurements so far (headless, 2026-10-08, optimised test build):
 - So the player's physics, animation graphs, scoring and player audio are not the cause. Not measurable
   headlessly: the frame-side animation present / skinning, the camera, the HUD render and the renderer;
   the `FRAME_HITCH` line separates those in the next session.
-- **Log survey 2026-10-23 (research b552, `.local/research/b552-airborne-frame-hitch.md`):** 92 session logs
+- **Log survey 2026-10-23 (research b552):** 92 session logs
   (desktop and laptop, none malformed), 12,237 in-play hitch lines: 3.4 % airborne at every size threshold, no
   cluster at a trick start; in the 36 trace-all frames.tsv files about 2,600 flip landings show the same frame times
   in the last 0.5 s of air as on the approach (8.70 / 8.65 ms mean, p99 16.4 / 16.6 ms). So no session so far shows
@@ -139,7 +139,7 @@ Measurements so far (headless, 2026-10-08, optimised test build):
 - **Change (2026-10-23):** the line adds `map=`, `fixed_other` (fixed-step time outside the three fixed stages, where
   `modding::fixed` runs) and `update_other` (main-thread time outside the stages before `post_render`, so the CPU
   part of `post_render` plus gaps); `slowest=` considers both. `post_render` minus `wait_ms` is its CPU share.
-- **Transform propagation spikes (research b554, `.local/research/b554-transform-propagation.md`):** in the one
+- **Transform propagation spikes (research b554):** in the one
   desktop session with SYSTEM_TIMING (2026-10-20), 42 of 48 hitches of 25 ms or more share their second with a
   single `propagate_parent_transforms` run of at least half the hitch (median 29.5 ms, mean cost 0.36 ms per frame);
   none of 30 laptop logs shows it. Likely Bevy's parallel propagation (workers spin until all finish, the waiting
@@ -256,7 +256,7 @@ hash + cleanup 2.4–3.1 s. (`prepare` is dominated by stream decoding, which PR
    - DownTown write_map (same intermediate, A/B): 2 texture threads 18.1–18.6 s, 3 → 15.0 s, 6 → 12.8–12.9 s;
      main 18.6–19.3 s.
 2. **Movable props beside collision + write_map** (`install.convert_map`): the props only read the prepared
-   manifest and the DMO catalog and write their own folder, so they run on one background thread from the end of
+   manifest and the DMO (dynamic prop) catalog and write their own folder, so they run on one background thread from the end of
    `prepare`. `props` is now the time left waiting for them (0.0 s on DownTown). Error handling unchanged (a
    `CONTENT_ERRORS` failure still writes `<map>-availability.json` and the map still converts).
 
@@ -374,7 +374,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
     compares every linked file's size and modification time before publishing; a step that wrote one in place
     fails the refresh, the old installation stays published. `retained._write` (kept DLC side data) now swaps in a
     new file instead of writing in place.
-  - B (user's decision 2026-10-23: "do B too, skip the rehash when size and mtime match"): group receipts record
+  - B (user's decision 2026-10-23: do B too, skip the rehash when size and mtime match): group receipts record
     `mtime_ns` (`group_receipts.record`); `valid_group_receipt` trusts a file whose size and time both match and
     hashes the rest, adding the time to older entries. Accepted trade-off: a same-size change that keeps the
     modification time is not noticed. The Rust readers of `outputs` use only `size` (`asset_check.rs`, `setup.rs`).
@@ -483,7 +483,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   BlackBoxPark 56 MB / 1 MB (`LIFECYCLE_CHECK ... image_mb mesh_vertex_mb`). The 2026-10-23 switch's render frame
   (`prepare_assets<GpuImage>` 295 ms, `allocate_and_free_meshes` 197 ms) is that copy. The map images and meshes are
   `RENDER_WORLD` only, so extraction moves them (no clone on the main thread) and nothing is copied twice.
-- **Change (user 2026-10-24: "Lets upload in pieces after the switch", USER-ASKS 303):** the map switch's commit
+- **Change (user 2026-10-24: upload in pieces after the switch, USER-ASKS 303):** the map switch's commit
   (`PreparedScene::publish_sliced`) publishes the materials, buffers and entities at once but keeps the new map's
   meshes and textures in `MapAssets`; `map_render::upload_slices` (PreUpdate, after the transition) inserts them in
   staging order, meshes first, up to 64 MB a frame and at least one asset (`SKATE_MAP_UPLOAD_MB`, 0 = all at once as
@@ -532,7 +532,7 @@ approaching skater") and the camera slow-motion subject gate (doc 21 "Camera slo
 
   Within noise: the first before run is the outlier (without it 4.65 vs 4.71 ms). The switch frame was about 7 ms
   shorter after in every pair, likely the faster fade (the loading screen is up a shorter time) or noise; not
-  claimed as a gain. Every switch committed, no error lines. Main checked the medians from the sent frame logs.
+  claimed as a gain. Every switch committed, no error lines. Verified the medians from the sent frame logs.
 
 ## Build stamp for local builds (2026-10-24, USER-ASKS 328)
 
@@ -659,7 +659,7 @@ About 6 us per frame, 0.04 % of a 16.7 ms frame and inside the run-to-run spread
 
 Status: done (2026-10-08), committed 8f126813.
 
-Problem: after a trace-all session (University, 2026-10-08 09:58) the user said "ooooof the fps and lag on the trace all is ROUGH." The perf report showed every window at a 33.6 ms median (p95 about 34.6 ms) with the main schedule at about 9 ms, physics about 3 ms, render CPU about 3 ms and the GPU passes about 9.5 ms in total. The suspect was the per-pass GPU timestamp and pipeline statistics queries that `SKATE_PERF_GPU` adds (Bevy `RenderDiagnosticsPlugin`) on every pass of every frame.
+Problem: after a trace-all session (University, 2026-10-08 09:58) the user reported very poor fps and lag in the trace-all mode. The perf report showed every window at a 33.6 ms median (p95 about 34.6 ms) with the main schedule at about 9 ms, physics about 3 ms, render CPU about 3 ms and the GPU passes about 9.5 ms in total. The suspect was the per-pass GPU timestamp and pipeline statistics queries that `SKATE_PERF_GPU` adds (Bevy `RenderDiagnosticsPlugin`) on every pass of every frame.
 
 Root cause of the 33.6 ms: not the queries. The settings file every launcher version shares (`data/installations/<id>/settings/graphics.json`, written 2026-10-07 23:20) has `"fps": 30`, the graphics menu's FPS limit, and `graphics_menu::pace` sleeps every frame up to 1/30 s. The game runs with `PresentMode::AutoNoVsync`, so nothing else locks the frame rate. The session's frame log agrees: frame median 33.56 ms against a main thread median of 8.76 ms, and `AUDIO_TIMING frame=33.6 ms`. The missing ~24 ms per frame is the limiter's sleep. Turning Esc > GRAPHICS > FPS limit back to Off brings the frame rate back.
 
@@ -726,8 +726,8 @@ happen once on the laptop; not reproduced yet.
 
 ## Steam launcher: the game comes to the front, the console gets out of the way (2026-10-17)
 
-Problem (laptop, user): "the skate launcher prompt window regularly stays over the game and for some reason I cant
-click the game or prompt window to move them". The launcher console is maximised and in the foreground (`Focus()` /
+Problem (laptop, user): the launcher prompt window often stays over the game, and neither the game nor the
+prompt window can be clicked to move them. The launcher console is maximised and in the foreground (`Focus()` /
 `Focus-Console`, `ShowWindow` 3) right before the launch; the game starts as a child of that console
 (`Run-Bat` -> `cmd /c PLAY.bat`, no window of its own), so Windows' foreground lock could open it behind the console.
 A maximised window cannot be dragged, and a click into the console with QuickEdit on starts a text selection that
@@ -752,9 +752,9 @@ Not checked on the laptop yet: the result screen coming back after a game.
 
 ## Steam launcher: a real window, Refresh Game Files, first-time setup (2026-10-18)
 
-Problem (laptop notes 2026-10-18, user): "The steam skate launcher needs to be made into a real launcher.. the
-terminal window is still not working properly", and a Refresh Game Files option in the launcher, "so you don't have to
-launch the game to run it". Asked the same morning: entries greyed out until their config is set up; a hails-additions
+Problem (laptop notes 2026-10-18, user): the Steam launcher needs to become a real launcher, since the
+terminal window still does not work properly, and it needs a Refresh Game Files option, so the game need not be
+launched to run it. Asked the same morning: entries greyed out until their config is set up; a hails-additions
 version on the fork and one for upstream main, always there and rebuilt when newer; a first-time setup that installs
 the dependencies; a size cap for the build folders that clears old build caches before a build; and Tools options to
 clear all builds, one build or one build cache.
@@ -836,8 +836,8 @@ its session log, and the two refreshes of the day ended with exit code 1 and no 
 
 ## Steam launcher: A / Enter did nothing on the main page, no mouse (2026-10-18)
 
-Problem (laptop note launcher-no-select, user): "opened the skate launcher but I cant use A or B in it to select
-anything and I cant click any of the options either.." and "its reading the dpad inputs". The laptop's own XInput poll
+Problem (laptop note launcher-no-select, user): in the launcher neither A nor B selects
+anything and the options cannot be clicked, though it reads the d-pad. The laptop's own XInput poll
 read A / B / D-pad on pad 0 with the launcher in front, so the pad was fine.
 
 Root cause: in `Act()` the main page's grid branch (`if (IsMain(p)) p.Sel = GridMove(...)`) came before the "ok"
@@ -970,7 +970,7 @@ Left: the body clips and the per-map navmesh (about 60 ms), `load_for_map` (abou
 
 ## Low-end PCs: the GPU and graphics settings in the log (2026-10-17)
 
-Problem: a laptop session felt laggy at 100-150 fps (`.claude` todo low-end-pc-performance). Its log named the GPU
+Problem: a laptop session felt laggy at 100-150 fps (local todo low-end-pc-performance). Its log named the GPU
 (`AdapterInfo ... DiscreteGpu`) but not the framerate cap or the other graphics settings the run started with, and a
 hybrid laptop that Windows puts on the integrated GPU shows no sign of it beyond being slow.
 
@@ -1050,9 +1050,9 @@ against 24 and 37 for the default, run-to-run noise).
 Problem: the living world's map data (`load_for_map`, about 35 ms on the desktop) and the ped data
 (`load_ped_data`, about 79 ms) are FixedUpdate systems. Virtual time is paused while the startup loading screen is
 up and while a map switch publishes, so no fixed tick runs there: both loads landed in the first frame of play
-(research b226, `.local/research/b226-warmup-preload.md`; main checked `startup_loading.rs` and `map_transition.rs`).
+(research b226; verified `startup_loading.rs` and `map_transition.rs`).
 
-Change (plan b228, `.local/research/b228-loaders-behind-gate.md`, checked and extended by main):
+Change (plan b228, checked and extended):
 - The same loads run in PreUpdate after the map transition while the loading screen is up
   (`living_world::behind_loading_gate`: startup not done, or a map transition busy). Both are keyed by
   (map, generation), so the fixed copies on the first tick find the map loaded and do nothing.
@@ -1113,7 +1113,7 @@ Verification (desktop, DownTown, muted, no mods): the first frame of play went f
 
 Problem: with the NPC physics opt-in on, the first enabled fixed tick (the first frame of play) loaded three
 skater bodies for the simulated tier on the game thread: 483 ms of `npc_sim::simulate` on the desktop, 0.7 to 0.8 s
-on the laptop (research b215, `.local/research/b215-npc-pool-load.md`, option A1).
+on the laptop (research b215, option A1).
 
 Change (`living_world/npc_sim.rs`): the prewarm keeps its gate, spawn transform and count; the load runs on an
 `npc-pool-loader` thread with a released `npc_worker` copy of that tick's physics (the settings, collections and
@@ -1145,7 +1145,7 @@ itself is not play-tested yet.
 Problem: ped, car, NPC skater and hand prop models were loaded when the first of each spawned, in the first seconds
 of play: one run of about 115 ms each of `allocate_and_free_meshes` and `prepare_assets<GpuImage>` in the first
 visible second on the desktop, and peds and cars appearing a few frames after they spawned (research b226 item 3,
-plan b229 `.local/research/b229-glb-preload-set.md`, b231 `.local/research/b231-first-second-uploads.md`). The user
+plan b229, b231). The user
 chose the trade-off (2026-10-18, "yes"): about 120 models held for the map against that upload.
 
 Change (`living_world/preload.rs`):
@@ -1187,13 +1187,13 @@ missing stock car files each frame, so the loading screen waited the 30 s cap: b
   DownTown run: `AUDIO_AMBIENCE beds read ahead for DownTown: 6`, the zone change dt_less_busy -> dt_main logs no
   ambience / file_read hitch; the map-load frame keeps 15 ms of ambience (the first bed starts 1-2 frames after load).
 - **Open (b198):** other game-thread reads in the audio path (crossfade layouts once per map, world speech, mod
-  audio): listed in `.local/research/b198-ambience-prefetch.md`.
+  audio): listed in research b198.
 
 ## In-game Refresh Game Files ended with exit code 1 (2026-10-18)
 
 - **Report:** laptop sessions 2026-10-18 09:55 and 12:17: both refreshes ended with setup exit code 1; setup had
   published a new installation each time.
-- **Root cause (research b236, main checked the lines):** Refresh Game Files restarts the game with its arguments
+- **Root cause (research b236, verified the lines):** Refresh Game Files restarts the game with its arguments
   plus `--refresh-assets` (`setup.rs` `restart_with_refresh`); the restarted copy's setup step reads it and repoints
   the assets link, then the argument loop in `config.rs` had no case for it and returned "Unknown argument", so the
   game exited with code 1 right after a successful refresh. The crash report hid the reason (its filter drops lines
@@ -1209,7 +1209,7 @@ missing stock car files each frame, so the loading screen waited the 30 s cap: b
 Problem: `SYSTEM_TIMING` sums every schedule and the render app per frame and lists the top 16, so the fixed step's
 cost (b213: about 4-5 ms of a ~5-6 ms laptop step not split by system) could not be compared with `fixed_ms`.
 
-Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268 `.local/research/b268-fixed-timing-refresh.md`):
+Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268):
 - `SKATE_FIXED_TIMING=1`, also on under trace-all, extends the same layer: the fixed step is the span of
   `FixedMain::run_fixed_main` (one per step, single-threaded); while it is open, `system` and `system_commands` spans
   of the fixed schedules (membership read from `Schedules`, again whenever their system count changes) are summed.
@@ -1227,9 +1227,9 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268 `.local/r
 
 ## Launcher in a window; the launcher and the game come to the front; a steady splash (2026-10-19)
 
-- **Problem (user, 2026-10-19):** "the launcher should be windowed instead of full screen and should open itself to
-  the forefront. when it launches the game it should open it to the forefront as well acter the splash is done
-  loading." And: "the splash startup also currently resizes itself in a weird way based on the resolution settings".
+- **Problem (user, 2026-10-19):** the launcher should be windowed instead of full screen and open in the
+  foreground, and the game it launches should come to the foreground too once the splash is done
+  loading. Also, the startup splash resizes itself oddly depending on the resolution settings.
 - **Causes:**
   - The launcher form was borderless and maximized (`SkateLauncher.cs`), and maximized again after every job.
   - Windows only lets the foreground owner hand the foreground on. A window that Steam or a hidden launcher starts
@@ -1294,8 +1294,8 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268 `.local/r
 
 ## Launcher: screen and selection animations (2026-10-19)
 
-- **Ask:** the user: launcher menu animations when changing screens and clicking items, "doesn't need to be overdone,
-  but the snappiness of switching screens is a little jarring".
+- **Ask:** the user: launcher menu animations when changing screens and clicking items, not overdone,
+  since the instant screen switches are a little jarring.
 - **Change (`tools/steam-launcher/SkateLauncher.cs`):** a new screen slides in by 3% of the window width (from the right
   when opening, from the left when going back) and fades up from the backdrop over 180 ms, eased out. The top bar
   stays put. The selection ring grows from 1 to 3 px over 120 ms instead of snapping on. A screen counts as new when
@@ -1307,8 +1307,8 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268 `.local/r
 
 ## Start-up splash: out-of-date game files are named at once (2026-10-19)
 
-- **Ask (user, laptop session 2026-10-19 10:08):** "the refresh warning should show under the startup splash once
-  detected during the startup". The asset check ran about 24 s after the game window opened (it waits for the
+- **Ask (user, laptop session 2026-10-19 10:08):** the refresh warning should show under the startup splash once
+  detected during the startup. The asset check ran about 24 s after the game window opened (it waits for the
   loading screen so its thousands of reads do not slow the start on an HDD), so the user only noticed "central
   message HUD missing" / "ped chase alert textures missing" after playing.
 - **Change:** `asset_check::quick_check` (the feature files later builds added: the central message HUD, the chase
@@ -1318,10 +1318,8 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268 `.local/r
   game) to turn them on."), kept until the splash closes; the finished lines make room (two kept). Logged as
   `ASSET_CHECK start-up: ...`. The full check after loading is unchanged (it still offers the refresh in game, and
   out-of-date menus still force it).
-- **In game (user, 2026-10-19):** "add a warning to the bottom of the fps counter (when its shown) or in place of the
-  fps counter (when its not shown) that is a clear, easy to read red warning box in the same style as the fps
-  counter that warns an asset refresh is needed (use better wording)", then "not under, but below the fps counter
-  when shown". The frame-time counter and a red box share a top-left column (top right until 2026-10-23, when the HUD minimap took that corner) (`frame_timing` `spawn_overlay`): the
+- **In game (user, 2026-10-19):** a clear, easy to read red warning box in the fps counter's style that says an
+  asset refresh is needed, below the fps counter when it is shown and in its place when it is not. The frame-time counter and a red box share a top-left column (top right until 2026-10-23, when the HUD minimap took that corner) (`frame_timing` `spawn_overlay`): the
   box sits below the counter, and a hidden counter takes no room, so the box then sits in its place. Same padding and
   font as the counter (and its Simple-mode size), dark red, white text:
   `GAME FILES NEED A REFRESH` / `Off until then: <features>` / `Launcher: Tools > Refresh Game Files (or Esc >
@@ -1332,8 +1330,8 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268 `.local/r
   `systems_touch_only_their_own_state` (frame_timing; the box is written by `show` only). Not looked at on screen yet.
 
 ## Frame pacing: hitches counted against the expected frame, a cheaper fixed step (2026-10-19)
-- **Problem:** laptop session 2026-10-19 11:05 (user: "Hitches still seem to be fairly prevalent while testing but not
-  causing major hitches that stutter the game."): 567 `FRAME_HITCH` lines. The frame log shows frames alternating about
+- **Problem:** laptop session 2026-10-19 11:05 (user: hitches were still fairly common in testing, but
+  none large enough to stutter the game): 567 `FRAME_HITCH` lines. The frame log shows frames alternating about
   5 ms and 11 ms at ~124 fps: every other frame also runs the ~6 ms fixed physics step (60 Hz). 9,912 of the 9,918
   frames flagged as hitches were such normal one-step frames (2 x the median of all frames is ~11 ms).
 - **Hitch rule (ours, diagnostics only):** a hitch is now a frame longer than 2 x its EXPECTED time = the median of
@@ -1348,7 +1346,7 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268 `.local/r
   - The mods' Rapier world steps only while a mod is running or something a mod made exists
     (`Mods::needs_dynamics_step`, the same rule as the snapshot reader). Without mods it held only the static ground
     and the skater proxies, re-posed every tick. Not byte-identical for a mod's first contact ticks (Rapier's
-    carried-over contact state of the proxies); the user accepted that ("Allow it").
+    carried-over contact state of the proxies); the user accepted that.
   - Simulated NPC skaters no longer build the mods' per-tick contact frame (`player_physics::before_solve`,
     `after_solve`, `joint_loads`): only the player's is read (`player_physics::snapshot`), the builders take shared
     references and only fill `mod_contact_frame`, so physics is identical (research b327: ~0.2 to 0.35 ms a frame).
@@ -1364,7 +1362,7 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268 `.local/r
 - **Tests:** `fixed_step_frames_are_expected_not_hitches`, `alternating_fixed_step_frames_are_not_hitches`,
   `dynamics_step_only_with_something_a_mod_owns`; the trace-all test's report window is 1 ms now (a 20 ms window could
   close after its ~20 ms run: flaky).
-- **Open:** a measured after-profile; further exact candidates in `.local/research/b327-solve-speedup-candidates.md`
+- **Open:** a measured after-profile; further exact candidates in research b327
   (the `solve_queries` timer also covers the prop step and mod maps, so split it before optimising "queries").
 
 ## Code reference: frame_timing/hitch.rs

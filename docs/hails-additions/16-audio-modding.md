@@ -4,10 +4,10 @@ Status: IMPLEMENTED (2026-10-04) for the scope chosen on 2026-10-03: the content
 retail posts / globals / read-only MixMap (R3a), observe-only audio events (R5) and docs / examples (R6), on the audio
 modding PR (upstream #36, folded into #32 on 2026-10-04 together with #43), which builds on the rest of #32 (the native audio engine) and doc 15 (the world-object surface).
 Speech is included. Without audio mods the game sounds exactly as before: every phase was checked byte for byte
-against the headless end-to-end renders (below). The deferred items are built as code on the follow-up branch
-`audio/moddability-2` (2026-10-04, sections H–L): mod WAVs through the native mixer (H), tuning writes at run time
+against the headless end-to-end renders (below). The deferred items were built as follow-up work, which also landed in #32
+(2026-10-04, sections H–L): mod WAVs through the native mixer (H), tuning writes at run time
 (I), mod emitters and reverb zones as world-audio objects (J), declarative mute / replace / layer rules (K); each
-proven byte-identical without mods, with its open questions in L. The third pass on that branch (section M) builds
+proven byte-identical without mods, with its open questions in L. The third pass (section M) builds
 the rest of the "Later" list: content changes hot-swapped without a restart (L1), writable MixMap inputs (L2), own
 MixMap instances for world objects (L3), mod Csis projects (L4), a seedable audio random state (L5), `audio.json`
 hot reload while the mod runs (L7), offsets in the owner's axes and moving emitters.
@@ -247,8 +247,8 @@ Verification:
 - No-mod identity: the headless e2e bench (13 scripted scenarios and whole play sessions, the 60 Hz host and 300 fps;
   84 renders and voice logs) is byte-identical to the pre-PR build after every phase (R1, R2, R3, R5); the merge of the
   #32 work into this branch did not change it either, nor did the second merge (#32 at `cb71483` with
-  optimisation pass 2 and the world gaps — tazer, ped body falls, speech echo, main-cast speech, NPC loose-board
-  slide — plus upstream `main` `4488651`): the 84 outputs equal #32's own bench run of that tree. A data-gated test shows the merge path with an empty overlay
+  optimisation pass 2 and the world gaps (tazer, ped body falls, speech echo, main-cast speech, NPC loose-board
+  slide) plus upstream `main` `4488651`): the 84 outputs equal #32's own bench run of that tree. A data-gated test shows the merge path with an empty overlay
   reproduces the real install's manifest field for field.
 - R1: a restart mid-scenario plays bit for bit like a fresh runtime from that point; a mod replacing an emitter bank's
   samples changes the output and removing it restores retail exactly; preloaded mod banks survive map changes;
@@ -359,7 +359,7 @@ In-game log check (muted, the branch's own staged build, about 60–75 s each, n
 ## H. Mod WAVs through the native mixer (the default, capability `audio` = 3)
 
 Status: built on `audio/moddability-2` (2026-10-04, after the first modding cut, then PR #36; all now in #32). **Native is the default** (user decision
-2026-10-04, "Yes duh"; it was opt-in until then): every `sdk.audio.play` goes through the game's mixer unless the
+2026-10-04; it was opt-in until then): every `sdk.audio.play` goes through the game's mixer unless the
 sound says `native = false` (the Bevy voice, exactly as before).
 
 | `native` | routing |
@@ -433,7 +433,7 @@ bench: byte-identical to run `m2` (84 outputs).
 
 ## I. Tuning writes at run time (capability `audio_tuning` = 1)
 
-Status: built on `audio/moddability-2` (2026-10-04). Static tuning changes still go in `audio.json` `tuning` (B);
+Status: built 2026-10-04, landed in #32. Static tuning changes still go in `audio.json` `tuning` (B);
 this is for mods that change tuning while they run.
 
 ```lua
@@ -479,7 +479,7 @@ No-mod e2e bench: byte-identical to run `m2` (84 outputs).
 
 ## J. Mod emitters and reverb zones (capability `world_audio` = 2)
 
-Status: built on `audio/moddability-2` (2026-10-04). Two new kinds in the world-audio lifecycle (doc 15): keys,
+Status: built 2026-10-04, landed in #32. Two new kinds in the world-audio lifecycle (doc 15): keys,
 limits (48 objects per mod, 128 in all), cleanup and `read` work as for cars and peds.
 
 ```lua
@@ -502,8 +502,8 @@ sdk.world_audio.remove('cave')
   send, pan, pitch, low-pass, the patch as selector), redelivered every frame, released when the listener leaves.
   The bank must be in the audio (a retail bank, or one a content overlay adds with `add.banks`); an unknown bank is
   a command error.
-- **Emitter states (user decision 2026-10-04: "modding isn't in retails, so 'not like retail' isn't a thing. Yes
-  default to seperate slots."):** retail has 5 emitter states (`CSTATEMGR_Emitter`, the MixMap's 5 Emitter
+- **Emitter states (user decision 2026-10-04: retail has no modding, so "not like retail" does not apply; separate
+  slots are the default):** retail has 5 emitter states (`CSTATEMGR_Emitter`, the MixMap's 5 Emitter
   instances). **Default `"extra"`: published emitters take their own instances of the private MixMap (H)**, so the
   map's emitters keep all 5 and every mod emitter in reach plays (up to the 32 instances shared with native mod
   voices; beyond that the next waits for a free one), with the same words (the private instances equal retail's).
@@ -534,7 +534,7 @@ required fields at spawn). No-mod e2e bench: byte-identical to run `m2` (84 outp
 
 ## K. Mute / replace / layer rules (capability `audio_events` = 2, `audio_content` = 2)
 
-Status: built on `audio/moddability-2` (2026-10-04). Lua cannot run inside the audio pass (the posts happen in the
+Status: built 2026-10-04, landed in #32. Lua cannot run inside the audio pass (the posts happen in the
 middle of the game's audio frame), so changing a game sound is declarative: a mod states rules and the engine
 applies them at the post sites, the same frame.
 
@@ -586,8 +586,8 @@ per mod the `audio.json` rules, then the runtime ones, by key). 32 rules per mod
   evaluates a position before its words are read, as for every native mod voice): at most two game frames after
   the request. Each rule has a ring of 4 voices.
 
-**Where the rule's sound plays** (user decision 2026-10-04: "Yes it should be positional, and mods should allow them
-to choose where positionally that audio should appear."; until then it played centred). `play.at`:
+**Where the rule's sound plays** (user decision 2026-10-04: positional, and a mod chooses the position where that
+audio plays; until then it played centred). `play.at`:
 
 | `at` | position | fields |
 |---|---|---|
@@ -686,15 +686,15 @@ private-data env (61 data-gated, all passing; `SKATE3_ASSET_ROOT` for the rig te
 
 Decisions (the user, 2026-10-04; the six questions the first cut was built with, each answered):
 1. **Mod emitters get their own emitter instances by default** (J): `"mod_emitter_slots"` defaults to `"extra"`;
-   `"shared"` (retail's 5 with the map's emitters, first reached first served) stays selectable. The user: "modding
-   isn't in retails, so 'not like retail' isn't a thing. Yes default to seperate slots."
+   `"shared"` (retail's 5 with the map's emitters, first reached first served) stays selectable. The user's decision: retail
+   has no modding, so "not like retail" does not apply; separate slots are the default.
 2. **Mod WAVs go through the native mixer by default** (H; spec L6): no `native` field = native (a Bevy voice when the
    native audio is missing or its 24 voices are taken), `native = false` = the Bevy voice, `native = true` = native
-   only. The user: "Yes duh".
+   only. The user's decision.
 3. **Rule sounds are positional, and the mod chooses where** (K): by default at the owner of the game's sound,
    following it, with the owner's retail reach; `play.at` = `owner` (+ `offset`) / `world` (+ `position`) /
-   `centre`, `play.falloff` for the reach. The user: "Yes it should be positional, and mods should allow them to
-   choose where positionally that audio should appear."
+   `centre`, `play.falloff` for the reach. The user's decision: positional, and a mod
+   chooses the position where that audio plays.
 4. **Tuning patches are kept across map changes** (I), as built (globals are still restored at a map change).
 5. **A muted request is still an event row** (K), as built: a "custom pop" mod mutes `pop` and still sees the pops.
 6. **Empty / rules-only overlays don't restart the sound** (K), as built.
@@ -803,8 +803,8 @@ Global + 16 Traffic + 16 Pedestrian instances, Global inputs copied from the gam
 retail pools never see them. `world_sources::pre_in / post_in` take the MixMap and pool sizes (the game's host passes
 its own: unchanged). NPC skaters stay in retail's Player slot (open, M9 Q1).
 
-**The default for mods (user decision 2026-10-04, M9 Q2: "yes I agree it should match", after "modding isn't in
-retails, so 'not like retail' isn't a thing. Yes default to seperate slots."; capability `world_audio` = 4):** a
+**The default for mods (user decision 2026-10-04, M9 Q2: it should match the mod emitters, whose default is
+separate slots because "not like retail" does not apply to modding; capability `world_audio` = 4):** a
 mod's car or ped takes its own instance unless it asks otherwise, as its emitters do (J):
 
 | `slots` (spawn only; cars and peds) | instances | |
@@ -956,10 +956,10 @@ minimised by default or audible (15 s steps, 3 s gaps), edits / reverts the copy
 game after `AUTOTEST done` and tabulates the lines; a second pass with the mod disabled asserts retail (`Map audio
 DownTown: ["retail"]`, the retail crossfade bank, no overlay, the install's 9 Csis projects, no mod log line).
 
-Easier to follow (2026-10-04, after the user's audible run: "the autotest is stuck" ... "it got stuck after teleporting
-the camera"; the mod kept running, but the parked camera showed a still picture for steps 1-3, step 2 (F5) made no sound
-and nothing on screen showed progress; and "it keot playing the beep even though it said it stopped it", then "oh its
-because the camera was still there": the map emitter kept beeping while the camera stayed near it). Changes, still dev
+Easier to follow (2026-10-04, after the user's audible run: the user reported the autotest stuck after teleporting
+the camera; the mod kept running, but the parked camera showed a still picture for steps 1-3, step 2 (F5) made no sound
+and nothing on screen showed progress; and the beep kept playing after the runner said it stopped it, because the
+camera was still there: the map emitter kept beeping while the camera stayed near it). Changes, still dev
 mod + runner only:
 - Each step has an `audible` flag. Steps with something to hear run `autotest_step` s (15 s audible); the silent
   read-back checks (F5 global, Digit2 seed, Digit4 Csis, the hot swap) run `autotest_quiet_step` s (3 s, at most the
@@ -995,9 +995,9 @@ Fixed the same day (cc190888): `events_frame` takes the ids from the running pla
 
 1. **Own instances for NPC skaters** (L3): their host runs a whole skater's components and its own grain bed per
    Player-slot instance (the runtime has one NPC bed); left in retail's Player slot. Wanted?
-2. **Own-instance default for mod cars / peds**: answered 2026-10-04, the user: "yes I agree it should match"
-   (the mod emitters, own by default; before that: "modding isn't in retails, so 'not like retail' isn't a thing.
-   Yes default to seperate slots."). Own instances are the default for a mod's cars and peds, `slots = 'shared'`
+2. **Own-instance default for mod cars / peds**: answered 2026-10-04, the user agreed it should match
+   (the mod emitters, own by default; before that the user ruled that "not like retail" does not apply to modding,
+   so separate slots are the default). Own instances are the default for a mod's cars and peds, `slots = 'shared'`
    opts into retail's pools; a full private pool lets the nearest play and the rest wait (M3).
 3. **The restart fallback**: a mod replacing the MixMap file or a grain recording still restarts the sound. The bed
    could be rebuilt in place (a cut of the rolling only); worth it?
@@ -1352,7 +1352,7 @@ step.
 | **R3 posts / globals / mixmap / tuning** | 2.3 (a) + (b) + (f) | 2.5 | the shared-RNG note; tuning applied mid-session must not tear a pass (apply between passes) |
 | **R4 emitters, reverb zones, native mod WAVs** | 2.3 (c) + (d) | 2.5 | the emitter pool decision; mod bank lifetime vs runtime restart; pan / falloff matching retail emitters |
 | **R5 events + rules** | 2.3 (e) | 2.5 | choke-point cost (must be 0 without subscribers, proven); tag table correctness (each tag tested against a real post) |
-| **R6 examples, docs, proofs** | example mods (below); doc 16 "Audio modding" (+ doc 11 / 15 / PULL-REQUESTS rows); `make-mod` skill; SDK docs | 1.5 | — |
+| **R6 examples, docs, proofs** | example mods (below); doc 16 "Audio modding" (+ doc 11 / 15 / PULL-REQUESTS rows); `make-mod` skill; SDK docs | 1.5 | n/a |
 
 Total ≈ 14 days. A smaller cut (Q5) is **R0 + R1 + R2 + R3(a) + R5 (observe only) + R6** (≈ 9 days): every
 feature's *data* is moddable, retail sounds can be posted, and events can be seen. Tuning writes at run time, mod

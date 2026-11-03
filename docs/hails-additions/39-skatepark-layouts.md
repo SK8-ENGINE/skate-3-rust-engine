@@ -1,7 +1,7 @@
 # 39. skate.Park layouts: the Full / Basic worlds place their pieces
 
-Part of PR #52 (living world, item 9 of its list; asked by the user 2026-10-20: "i don't believe our skate.park entries
-load the maps properly. for instance the Stamium - Full has a bunch of placed objects to build it").
+Part of PR #52 (living world, item 9 of its list; asked by the user 2026-10-20: our Skate.Park entries do not seem to
+load the maps properly; for instance Stadium - Full has many placed objects that build it).
 
 ## Problem
 
@@ -12,7 +12,7 @@ and the Challenge Map could not reach the Full / Empty rows at all (setup kept o
 
 ## What retail does
 
-Research b424, b425, b429, b430, b431, b434 (`.local/research/`; addresses TU3):
+Research b424, b425, b429, b430, b431, b434 (addresses TU3, title update 3):
 
 - A world row names its layout in field `Hash_79B248E8469DC5DA` (`skatepark\MegaPark_Fullpark.park`, disc
   `miscload.big`; the DLC packs carry their own) [data]. The stream's own row names the Empty layout (0 pieces).
@@ -35,7 +35,7 @@ Setup (`tools/asset_pipeline/park_layout.py`, wired into the maps group in `inst
 - `parse` (the container, both record formats, the movable block), `recipe` (piece id -> RX2, `cap.*`), `Sources`
   (disc `miscload.big` + `parkassets.big`, then the DLC packs' BIGs; a later archive's row, model or texture replaces
   an earlier one), `world_layouts` (every world row's layout through its parents).
-- Each piece template is decoded with the DMO readers (`dynamic_props.template_meshes`: mesh, collision, grind
+- Each piece template is decoded with the DMO (dynamic prop) readers (`dynamic_props.template_meshes`: mesh, collision, grind
   splines) and its textures from `static/texture/<GUID>.rx2`; the placements are written by
   `dynamic_props.write_placements` (split out of the district prop export, unchanged output for props) as
   `private/park-layouts/<layout>.skate` + `.json` (instances with stable ids `<layout>#s<index>`, template, matrix,
@@ -58,18 +58,18 @@ Engine (`crates/skate-game/src/park_layout.rs`):
   near-vertical bit as 82C1E568, owner tag `PIECE_OWNER_TAG` below the moving-rail tags).
 - Render (`map_render.rs`): the pieces spawn as `ParkPiece` entities (never `PropInstance`).
 
-Park start (the user's retail video, 2026-10-21: "in retail you spawn at the top of the big ramp"):
+Park start (the user's retail video, 2026-10-21: in retail the player spawns at the top of the big ramp):
 - The `.park` editor tail's first matrix is the park's player start (b425 section 4 had it as "likely the saved editor
   camera or player start"): Stadium - Full (241.2, 37.1, -91.0) on top of the big ramp, the video's first frame and
   ours match. `park_layout.parse` reads it (`start`); `teleports.py` gives a park row its layout's start instead of
   its location's locator, except a location with its own artwork and locator (`startpark_progression`, ours: not
   traced for those). Test `test_the_editor_tail_holds_the_park_start`.
 - Tint: the recomp draws the pieces untinted (the deck beige), our port tinted as Skate 3's code and data give it
-  (b445; the deck's record (126, 100, 47)). The user (2026-10-21): "the shaders in ours are already better than the
-  recomp, the recomp is definitely not quite right"; decision "Keep the tints".
+  (b445; the deck's record (126, 100, 47)). The user (2026-10-21): our shaders are already better than the
+  recomp's, which are clearly not quite right; decision "Keep the tints".
 
-Park teleporters (research b438; the user, 2026-10-20: "you set them to the same 'channel' and then when a player
-gets close a little dialog appears on screen asking if they want to tp"):
+Park teleporters (research b438; the user, 2026-10-20: teleporters are set to the same channel, and when a player
+gets close a small dialog on screen asks whether to teleport):
 - The teleporter pieces have no model. The disc vault class `Hash_D01B99210BA7323C` gives each one a channel 0..3
   and a role, 0 start / 1 end (field `Hash_77B8CA7AC65C8504`) [data]. Per channel, retail takes the first placed
   start and end piece (8287B918 / 828687C0) and builds an ordinary teleport challenge (8286D6E8: title
@@ -187,10 +187,10 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
 
 ## The pieces fuse into one collision set: no catching on seams (2026-10-21, research b477 / b478)
 
-- **Problem (laptop session 2026-10-21, the user):** "going to stadium full, I tried skating down the big ramp and
-  bailed almost immediately from the cracks between the objects not connecting properly causing you to get stuck,
-  stop, bail, bump over the crack" and "backlot dlc map: ... tje cracks between surfaces often catch you or stop you
-  while skating". The log: 4 bails in 25 s down the Stadium ramp, 4 on BackLot's flat ground, all on layout pieces.
+- **Problem (laptop session 2026-10-21, the user):** in Stadium full, skating down the big ramp bailed
+  almost at once: the cracks between objects do not connect properly, so the skater gets stuck,
+  stops, bails or bumps over the crack; on the BackLot DLC map the cracks between surfaces often catch or stop the
+  skater. The log: 4 bails in 25 s down the Stadium ramp, 4 on BackLot's flat ground, all on layout pieces.
 - **Cause [data / code, b477]:** the seams are flush (0.1 to 1.5 mm), but each piece kept its own retail edge codes:
   its open borders are coded convex (0x60 = cosine -0.234), and nothing paired the edges two pieces share
   (`portable_parts` decoded the native codes over the welded pass). The trace shows the wheel contact mask dropping at
@@ -211,8 +211,8 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
 
 ## Back-to-back faces between pieces are removed; edges pair with the best neighbour (2026-10-21, USER-ASKS 221)
 
-- **Problem (laptop session 2026-10-21 21:38, the user):** "in the skate.park maps still lots of physics and collision
-  issues both at seams between objects and just in general around objects". The trace (`tools/dev-bench/park-catches.py`
+- **Problem (laptop session 2026-10-21 21:38, the user):** the Skate.Park maps still have many physics and collision
+  issues, both at seams between objects and around objects in general. The trace (`tools/dev-bench/park-catches.py`
   on `audio_state.tsv`): on Back Lot the wheels left the ground and the board rose 5 to 15 cm on flat ground exactly on
   the line where two `aa_PlazaPad_sm_Downtown` pads meet (x -151.77 and -139.77, 0.749 m high). Two dead stops (Back
   Lot into the foot of `ab_stairs_sm`, DownTown park into a bench / steep ramp toe) are real collisions, not seams.
@@ -237,7 +237,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
 - **Open:** retail skips static entries with flag bit 2 (`entry+0xB8 & 2`) when it builds the fused mesh (`827765C0`,
   checked; research b480): those keep their own per-piece collision. Which recipe column sets the bit (b480: record
   +0x10, likely `IgnoreFuser`, not proven) is open; our fuse takes every piece. The editor flow (b480,
-  `.local/research/b480-park-editor.md`) is partial.
+  research b480) is partial.
 
 ## IgnoreFuser pieces leave the fused set and the skater's world (2026-10-22, USER-ASKS 233)
 
@@ -251,7 +251,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
   - It is set on hedges, bushes and shrubs only (`hc_Hedge`, `hd_Shrub`, `he_Bush`).
   - Every spawned piece also gets a TerrainPool entry with its template's own collision (`82776238` -> `8276CB18`, b483).
   - The skater's ground query reads only island+0x5590. The island ctor `827632A8` stores it from r7, and `8275DCC8`
-    passes the container's GroundPool (+0x2C, the fused object) there for both islands (checked by main).
+    passes the container's GroundPool (+0x2C, the fused object) there for both islands (verified).
   - So IgnoreFuser pieces never touch the skater. Props (DMOs) do: a DmoGround task reads the TerrainPool (b484).
 - **Change:**
   - `park_layout.rs` `Pieces::unfused`: per piece, from the sidecar instance's `caps.IgnoreFuser` (setup already writes
@@ -275,8 +275,8 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
   Object pieces) fell through hedges and bushes.
 - **Retail:** the DmoGround task reads the TerrainPool with no filter, so props get every piece's own mesh, fused
   pieces included (research b485: `8277C5D8` -> `8277CAA0`, bbox test only; `82763EE0` kicks it with r8=0, the
-  GroundPool tasks with r8=1, checked by main). Both DMO jobs write into the world's one contact stream (island +0xC,
-  research b492; r4 = r5 = 0 on every `827771E8` kick checked by main). For an IgnoreFuser piece the TerrainPool read is
+  GroundPool tasks with r8=1, verified). Both DMO jobs write into the world's one contact stream (island +0xC,
+  research b492; r4 = r5 = 0 on every `827771E8` kick verified). For an IgnoreFuser piece the TerrainPool read is
   the only one, so props collide with its raw mesh.
 - **Change:** `skate_world::props_only_world` builds a world of the IgnoreFuser pieces (native edge codes, one query
   range per piece, layout order); `PropDynamics::set_props_only_world` stores it at load and both prop contact passes
@@ -298,8 +298,8 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
 
 ## Unpaired fused edges are not convex: no catch at ramp toes (2026-10-22, USER-ASKS 235 / 237)
 
-- **Problem (laptop session 2026-10-22 00:10, MegaPark full, the user):** "skate.park maps: the collision between
-  placed objects and the ground is not quite right and causes you to stop or slowdown when transitioning". The trace
+- **Problem (laptop session 2026-10-22 00:10, MegaPark full, the user):** in the Skate.Park maps the collision between
+  placed objects and the ground is not quite right and stops or slows the player when transitioning. The trace
   (`audio_state.tsv`): three catches rolling from the map floor onto a piece's toe (`da_minirampkicker_University`,
   `ac_ramp_md_University`, `cd_pipeflatbank_lrg_University`): speed 8.5 to 4.1 / 6.4 / 6.7 m/s in two frames, all
   wheels off, the board lifted 4 to 6 cm, no bail.
@@ -307,7 +307,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
   the piece entries to the builder), so it has no partner. Ours left such edges at the default flags: convex, cosine 1.
   Our wheel contact takes edge contacts on a convex edge within about 8 degrees of the face normal; a non-convex edge
   with cosine 1 is rejected (`ground.rs` thresholds, research b487).
-- **Retail [code, research b487, writer checked by main in the recomp]:** after pairing, `82AC2438` writes each edge
+- **Retail [code, research b487, writer verified in the recomp]:** after pairing, `82AC2438` writes each edge
   byte with `82AC2390`: the convex bit 0x20 only for a score below 1.0 (`8231A844`), 0x1A above the concave limit,
   0x9A (unmatched) with no neighbour. An unpaired edge keeps score 1.0, so retail writes it unmatched, not convex.
 - **Change:** `skate_world.rs` `fused_edge_features`: unpaired edges of the fused set get cosine 1 and no convex bit.
@@ -327,7 +327,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
 
 ## Fused edge bytes and vertex bits
 
-2026-10-22, research b488 (`.local/research/b488-fused-vertex-concave-bits.md`). Main checked every function and
+2026-10-22, research b488. Verified every function and
 constant below in Ghidra and the recomp asm.
 
 - **Problem:** our fused park path stored each paired edge's full cosine n1 . n2 and set vertex-disable bits only for
@@ -386,7 +386,7 @@ Asset-gated report tests in `skate_world.rs` (run with `-- --ignored --nocapture
   score in the sorted-table order (a tie keeps the old pair, a displaced triangle is re-paired only by a later one);
   leftovers get 0x9A (cosine 1, not convex: face contacts only, nothing to catch on); only the exact back-to-back cull
   (828755B8) removes faces and nothing welds edges or splits T-junctions. Ours matches (`skate_world.rs` cull, pairing
-  and `fused_edge_byte`, main checked the thresholds and the 0x9A path). So these edges are not faults in themselves:
+  and `fused_edge_byte`, verified the thresholds and the 0x9A path). So these edges are not faults in themselves:
   the audit now counts those where a user carries a convex code over 3 degrees, the only ones that can catch. Report of
   2026-10-23 (multi-user edges, of them convex over 3 degrees): Downtown_Fullpark 936 / 156, Downtown_Nightpark 3465 /
   734, Industrial 807 / 147, MegaPark 1078 / 317, Starter 161 / 37, ZenPlaza_Full 1494 / 255, backlot_full 1811 / 515,
@@ -397,7 +397,7 @@ Asset-gated report tests in `skate_world.rs` (run with `-- --ignored --nocapture
 
 ## Fused vertex order
 
-2026-10-22, #52 item 12 (USER-ASKS 251), research b496 / b497 / b498 (`.local/research/`). Main checked 82AC21D8,
+2026-10-22, #52 item 12 (USER-ASKS 251), research b496 / b497 / b498. Verified 82AC21D8,
 82AC4A40 / 82AC52D0 / 82AC5418 / 82AC6660 / 82AC6BD8 (the sort), 82AC0CE0 (merge test) and 8277E650 (unit iterator)
 in Ghidra and the recomp asm.
 
@@ -411,7 +411,7 @@ in Ghidra and the recomp asm.
   - Vertex ids are raw builder indices (piece, cluster, the cluster's vertex order). 82AC10E8 merges vertices whose
     squared distance is strictly below the weld squared; a merged vertex keeps the smallest raw index.
   - 82AC21D8 writes (vertex, triangle) for every builder triangle's three corners, collapsed ones included, and sorts
-    the table with EASTL quick_sort on the vertex only (unstable): introsort to 28 entries, depth 2 floor(log2 n),
+    the table with EASTL (EA's standard template library) quick_sort on the vertex only (unstable): introsort to 28 entries, depth 2 floor(log2 n),
     median of first / middle / last, two-sided partition, then insertion sort; heap sort when the depth runs out.
 - **Change:**
   - Setup (`dynamic_props.py` `decode_with_units`) records per collision triangle its unit `[type, half]` and each
@@ -435,14 +435,14 @@ in Ghidra and the recomp asm.
 ## Ground plane pass
 
 2026-10-22, laptop session (USER-ASKS 252: "Transitioning from the floor onto the placed ramps is still not right and
-you lose speed and/or get bumped up in the air sometimes"), research b502 / b503 / b505, recomp traces by main.
+you lose speed and/or get bumped up in the air sometimes"), research b502 / b503 / b505, recomp traces.
 
 - **Problem:** at every Stadium - Full floor-to-ramp drop (b502) the lead wheels reach a quarterpipe toe. The toe edge
   pairs with the piece's own underside, a convex knife (code 0, cosine -0.2337), so a wheel up to about 1 m before the
   toe gets a predicted edge contact whose normal leans back toward it and takes several m/s (b503).
 - **Retail [trace]:** hook WHLC (recomp `src/research/hooks_wheelc.cpp`) on a scripted roll into the toe at x 223.53
-  (`.local/recomp/traces/toe/`, 2327 lines, 0 malformed): the same toe edge is NOT convex with cosine 0.9993976
-  (code 11) and its edge contacts are rejected; only face contacts are taken. Table `.local/research/b505-toe-runtime-data.md`.
+  (recomp trace "toe", 2327 lines, 0 malformed): the same toe edge is NOT convex with cosine 0.9993976
+  (code 11) and its edge contacts are rejected; only face contacts are taken. Table research b505.
 - **Retail [code, b505]:** the fuser finalise 82876188 runs 82874248 between the pairing and the byte writer. For each
   ground plane (normal, d, optional box; at most 6) and each live triangle facing into it (normal component difference
   at most job +8) with v1 on it (|n . v1 - d| at most job +4), every paired edge with a score below job +12 calls
@@ -464,7 +464,7 @@ you lose speed and/or get bumped up in the air sometimes"), research b502 / b503
 
 ## Mesh floor pass
 
-2026-10-22, research b507 (`.local/research/b507-fuser-pass-82873EA0.md`; main checked the constant 0.005 at 82099920).
+2026-10-22, research b507 (research b507; verified the constant 0.005 at 82099920).
 
 - **Retail [code]:** the fuser finalise 82876188 runs 82873EA0 after the ground plane pass and before the edge bytes:
   the same idea for pieces that stand on another piece's flat top above the ground. Up-facing flat triangles

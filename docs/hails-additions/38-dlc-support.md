@@ -1,6 +1,6 @@
 # DLC support: the player's own Skate 3 DLC packages
 
-Part of upstream PR #52 (user, 2026-10-20: "dlc support is going into PR 52 with everything else"). Branch
+Part of upstream PR #52 (the user's decision, 2026-10-20: DLC support goes into PR 52 with everything else). Branch
 `world/replay`.
 
 ## Problem
@@ -13,14 +13,14 @@ player's own files, like the disc.
 
 ## What retail does
 
-- The packages are STFS (`LIVE`, content type 0x2 marketplace, title 0x454108E6), each holding one EB BIG v3 archive
+- The packages are STFS (the Xbox 360 package format; `LIVE`, content type 0x2 marketplace, title 0x454108E6), each holding one EB BIG v3 archive
   in the base game's formats [data, research b374].
 - The replay editor checks product `CCF0007` (the Skate.Create Upgrade Pack) at about 25 call sites through
   `82518AD0` (string at 0x822FD708); with it, the editor opens template 71 `replay2/replay_editor3.swf` instead of
   72 `replay2/replay_editor2.swf` (`826102A8`) [code, b410 / b411; main counted 7 of 32 call sites loading that
   string]. The Create package carries `DLC_PRODUCT,CCF0007` (`creator0_product00000000.unlock`), the movies
   `data/fe/source/screens/replay2/replay_editor3.*` and `replay_help2.*`, and its language tables with the channel
-  labels [data, main checked in the package].
+  labels [data, verified in the package].
 - Maps: see "Next: DLC maps" below (b374, b412).
 
 ## Change (so far)
@@ -67,7 +67,7 @@ player's own files, like the disc.
 
 - `retail_menu_stage.rs` `REPLAY_SCREENS`: the Create pack's screen (Replay3 / ReplayHelp2, `channels`) first, the
   base screen second; the first whose movie was exported and whose template is registered is opened. Tables read
-  from the disc's own executable (129 templates; TU3 has 133) lack Replay3 / ReplayHelp2, so those two are
+  from the disc's own executable (129 templates; TU3 (title update 3) has 133) lack Replay3 / ReplayHelp2, so those two are
   registered after the table's own (NOT RETAIL order; the ids only need to be unique). The stage sets
   `ReplayLookScreen` while the Create screen is shown.
 - `replay/editor.rs`: items 9..12 (brightness, contrast, saturation, tint), `CHANNELS` (label ids and items per
@@ -90,7 +90,7 @@ counts as owned on PC (user: look rows always on). Without the package: our own 
 
 ## Next: DLC maps (b412, Maloof Money Cup 2010 NYC first)
 
-Research `.local/research/b412-maloof-nyc-map-job.md` [data, from the user's package; main checked the
+Research b412 [data, from the user's package; verified the
 `map_starts.py` claim]: the Maloof NYC BIG has an authored start (`global_locators/DLC_BAM/DIST_MaloofMoneyCupDLC`,
 `Z_MaloofMCNYC_Start`) and a vault with a `world` row (WorldStream `DIST_MaloofMoneyCupDLC`, skybox
 `DIST_skyboxMaloofNYC`) and an `fe_locations` row. Changes: DLC vaults converted with the base schema into
@@ -100,7 +100,7 @@ its own vault's `.bin` (today it always uses the disc's `skatercollections.bin`)
 
 ## DLC map conversion (b415, Maloof NYC)
 
-[data, parsed in memory with the functions setup uses; code lines checked by main] The DLC district stream converts as
+[data, parsed in memory with the functions setup uses; code lines verified] The DLC district stream converts as
 it is: `DIST_MaloofMoneyCupDLC` loads every Sim / Pres / Tex record (160 / 266 / 59), 261 textures, 55 models (675
 meshes with material binding), 348 grind splines, 52 collision meshes, 160 arenas. `cSim_Global.xsf` is not needed
 (setup uses `load_district_stream`; the base BlackBoxPark has none either). What breaks: the maps group globs only
@@ -112,7 +112,7 @@ the DLC sky (`world/models/DIST_skyboxMaloofNYC*`), the authored start (b412).
 
 ## DLC maps in the map lists (b416, Maloof NYC)
 
-[data, from the Maloof vault with our readers; main checked `map_library.rs` and `challenge_map.rs`] The DLC only adds
+[data, from the Maloof vault with our readers; verified `map_library.rs` and `challenge_map.rs`] The DLC only adds
 rows: a `map_filter` `maloofmoneycupdlc` (title `ID_WORLD_MALOOFMONEYCUP_NYC`, Lua keeping `fe_locations` items in
 world `dist_maloofmoneycupdlc`), a `map_category`, three `map_listing` rows (Locations order 7 after the 7 disc
 folders), one `fe_locations` row (`ID_LOCATION_MALOOFMONEYCUP_NYC`, locator `Z_MaloofMCNYC_Start`) and the world's map
@@ -126,7 +126,7 @@ the fallback), merge every pack's language tables (not only the movie-carrying o
 
 ## DLC sky and map picture (b417, Maloof NYC)
 
-[data, sky.py's own functions run in memory on the merged rows; main checked `sky.py`] Sky: the DLC world row
+[data, sky.py's own functions run in memory on the merged rows; verified `sky.py`] Sky: the DLC world row
 resolves `sky_model` = `world/models/DIST_skyboxMaloofNYC` (+ `_Textures`), which sit in the Maloof BIG; the parsers
 work unchanged (2048x256 dome, 512x16 sun). `sky.py` today reads skies only from `miscload.big` and offers only worlds
 with a disc `worldDIST_*.big`. Changes: DLC vault rows into its collections, worlds from the map job list, each
@@ -138,7 +138,7 @@ BIGs' map images to the image export, and let the Challenge Map fall back to a l
 
 ## DLC map audio (b414, Maloof NYC)
 
-[data, from the user's package and disc with our readers; main checked the `ambience.rs` / `map_audio.rs` lines]
+[data, from the user's package and disc with our readers; verified the `ambience.rs` / `map_audio.rs` lines]
 Maloof NYC adds no sound banks and no ambience bed: `data/audio/DLC_Maloof.ems` (45 records, 14 sound ids, 11 already
 in base .ems files, one new type-6 PA row that is not played), its MAP_CLASS row lists only `DLC_Maloof.ems`, and its
 53 cSim cells' region layers point at base rows (ambience zone `skate_school`, emitter set `e_univ_chan_center`).
@@ -282,7 +282,7 @@ data. Open: no recomp trace confirms retail plays the SkateSchool bed there.
 - Unlock grants (research b458) [code + data]: the manager's list A (mgr+0x28) is the profile save (`82505150` /
   `82505000`); a fresh save (`82503AD0` -> `825046B0`) holds 7 characters and 37 gestures, no locations. List B is
   rebuilt from the content packages' `data\unlocks\*.unlock` lines (`KIND,name`, `82505220`) and never saved; the
-  location test asks both. In the user's packages (main checked): `presell.unlock` (Black Box Distribution Skate
+  location test asks both. In the user's packages (verified): `presell.unlock` (Black Box Distribution Skate
   Park) `LOCATIONS,dist_blackboxpark`, `unlckall_attrib.unlock` (Time is Money) `LOCATIONS,dist_maloof_street` /
   `dist_maloof_vert`: that is why both show in the user's video. `all_locations_unlock` is only cheat id 2, which no
   TU3 cheat code has. The hash is FNV-1 everywhere (`82503BD8` multiplies, then xors; recomp checked), not FNV-1a.
@@ -295,11 +295,11 @@ data. Open: no recomp trace confirms retail plays the SkateSchool bed there.
 
 ## Teleporters (disc and DLC maps)
 
-Problem: the DLC maps' teleporters (user: "there are several in the dlc maps that make it not only easier in some
-cases but also possible in others to reach the top of ramps") and the disc's (University to the Stadium and the other
+Problem: the DLC maps' teleporters (user: the DLC maps have several, which make the tops of ramps easier to reach in some
+cases and reachable at all in others) and the disc's (University to the Stadium and the other
 parks; user: include them) did nothing; the converter found no volumes for most of them.
 
-Root cause (research b420, main-verified on the files): a retail teleporter is a challenge of the `teleports` group,
+Root cause (research b420, verified on the files): a retail teleporter is a challenge of the `teleports` group,
 not part of the map's world stream. Its bank row (`data/db/challengebanks/*`) has the title; its local data vault
 (`data/db/challenge_local_data/<challenge>`) has TeleporterTrigger ("DISTRICT|volume|0xid" plus the volume's id) and
 TeleportExitLocation (target `world` row plus locator name); the volume sits in the challenge's hull
@@ -312,7 +312,7 @@ D-pad Up asks `Popup.ShowYesNoPopup(Title, "ID_PAUSEMENU_CONFIRM")` (options ID_
 `828556D8`) for one exit, a list for several; Yes takes exit 0. Returning to waiting resets the volume: no cooldown
 (user). An exit in the loaded world is placed at once (`82864038` -> skater `825926F8`, the actor-reset chain of
 `request_manual`); another world is the far path with its loading screen (`828646E0` compares the target world-file
-id 0x830B7B18 with the current one 0x830B7B10, main-verified in the recomp code).
+id 0x830B7B18 with the current one 0x830B7B10, verified in the recomp code).
 
 Change:
 - Setup (`tools/asset_pipeline/teleporters.py`, maps group): reads every challenge vault of the disc (`db.big`,
@@ -335,8 +335,8 @@ Change:
   through `SignUpPoster.GetTeleportTitle`, state 0 when it goes. A set exported before the movie keeps our text line
   (no set version bump, so no forced refresh), and without the stage the confirm is skipped. Verified on University:
   "Enter Stadium skate.Park" in the retail font with the logo glyph.
-- Arrival (research b455, 2026-10-21) [code; user fact 2026-10-21: "It did, i can confirm I landed from the teleport
-  on my board"]: the skater arrives on the board and at rest. The teleporter path `82D55280` passes IsOnBoard = 1
+- Arrival (research b455, 2026-10-21) [code; user fact 2026-10-21: the user confirmed landing from the teleport
+  on the board]: the skater arrives on the board and at rest. The teleporter path `82D55280` passes IsOnBoard = 1
   (`li r6,1` into the vt+36 call, recomp checked) through `828646E0` -> `82864038` -> skater vt+0x70, and the arrival
   state is 100 (on board); the player teleport `82DB8998` -> `82C0D680` zeroes every body's linear and angular
   velocity and nothing sets one afterwards. The Challenge Map menu passes IsOnBoard 0 (arrives on foot). Ours:
@@ -412,8 +412,8 @@ Not yet run end to end: the launcher's import followed by its automatic refresh 
 ## DLC location names in the menus (2026-10-21, laptop session)
 
 - **Problem:** the Challenge Map's Locations list showed `ID_WORLD_MALOOFMONEYCUP_NYC`, `ID_WORLD_DW_MEGACOMPOUND`,
-  `ID_LOCATION_SANITARIUMDLC` and `ID_LOCATION_ARTGALLERYDLC` instead of the names (the user: "the DLC map names are
-  not correct and are usimg their internal names").
+  `ID_LOCATION_SANITARIUMDLC` and `ID_LOCATION_ARTGALLERYDLC` instead of the names (the user: the DLC map names are
+  wrong and show their internal names).
 - **Cause [code]:** the menu export (`tools/prepare_menu_movies.py`) added DLC text only from the packs whose menu
   movies it exports (the Create pack, `dlc_archives`); the map packs carry no menu movie, so their text tables never
   reached the menus' language. The map lists read them by another path (`map_names.py`), so MAPS was right.
@@ -486,7 +486,7 @@ Not yet run end to end: the launcher's import followed by its automatic refresh 
 
 (2026-10-22, research b493 / b494)
 
-- **Retail [code, b493; main checked `82764AB0`]:** the fit-up ray's mask 7 reads bit 1 = the GroundPool (map and
+- **Retail [code, b493; verified `82764AB0`]:** the fit-up ray's mask 7 reads bit 1 = the GroundPool (map and
   fused park, container +0x2C), bit 2 = the DMOs (dynamic props, +0x5580), bit 4 = the vehicles (+0x5584, only when
   the island mode is 3: offline normal skating; Ghost / online have none). Bit 8 (the TerrainPool, so IgnoreFuser park
   pieces) is not in it; peds and the skater are never hit. Faces [code, b494]: one-sided winding test, no surface
@@ -607,13 +607,13 @@ The prompt is retail's action overlay (`actionoverlay2`, template 59 SignUpHUD, 
   `data/content/textures/vitextures.rx2` (16 textures): the fronts are 64x64 R5G6B5 bands, constant along u, black at
   both edges and bright in the middle (blue peaks at 107, 174, 231); the backgrounds 64x64 A8R8G8B8, darker, alpha 0
   at the edges. The passes use pixel shaders `spline_defaultPS` (front: rgb only, additive-style) and
-  `spline_darkenPS` (background: alpha-blend-style) [b536, shader decoded by hand]. Main verified the colour rows in
+  `spline_darkenPS` (background: alpha-blend-style) [b536, shader decoded by hand]. Verified the colour rows in
   the export and decoded all 16 textures (setup `write_textures`; the Xenos decoder now handles R5G6B5).
 - **Change (2026-10-22, colour):** setup exports `colours` (the `ribbon_spline_colour` rows) and every vitextures
   texture as PNG under `assets/private/visual-indicators/`; the engine draws each icon as two child meshes, the
   background texture alpha blended, then the front texture additive (sorted after it), both tinted and faded, UV u =
   spline parameter in segments, v = strip side. Installs without the textures keep the flat colour.
-- **Pass states and shader factors [code], research b536 (main verified the FNV-1 32 names: technique "darken"
+- **Pass states and shader factors [code], research b536 (verified the FNV-1 32 names: technique "darken"
   0x8DB32DC8 / "default" 0x2EA8FB98, `i_intensity` 0xF8CB054C, `i_clipvalues`, `i_diffuse`; the intensity fields
   031D / 1643 = 1.0 / 0.7 for smallarrow):** `82CE9080` / `82CF5A10`: background blend 0x07060706 = alpha blend,
   front 0x01010101 = additive, depth less-equal with test on and write off [inferred byte order], cull 4 [inferred
@@ -627,7 +627,7 @@ The prompt is retail's action overlay (`actionoverlay2`, template 59 SignUpHUD, 
   shader fades with per vertex, linear: min(sat((z - x0) / (x1 - x0)), 1 - sat((z - x2) / (x3' - x2))), a zero length a
   step; x3' = x3 * 10 when a global byte (`*(0x83083C5C)+0x34786`, unidentified) is set; the update hides the icon when
   the 3D camera distance exceeds x3'. Billboard: `827B0490` stores Spline +0x96A = spline table entry +0x30 (the
-  exported `kind`) & 1 (main checked the stores in the recomp: `clrlwi r11,r5,31` from `lwz r5,48(r4)`, and the read in
+  exported `kind`) & 1 (verified the stores in the recomp: `clrlwi r11,r5,31` from `lwz r5,48(r4)`, and the read in
   `827B1A00`); the teleport spline has kind 3 (on); kinds in the export: 2, 3, 8, 9. With it on, rows 0 and 2 come from
   the camera and row 1 keeps the icon's own up; off, the icon keeps the anchor matrix it was spawned with. Both callers
   of the spawn `827B14E0` pass a full matrix (Offset in the anchor's frame, as ours); the challenge request's path to
@@ -639,35 +639,35 @@ The prompt is retail's action overlay (`actionoverlay2`, template 59 SignUpHUD, 
   teleporter icon hides while another script's key is current (when that happens in free skate is unproven). Within a
   group `82D4F8A8` keeps enabled entries within 400 m of the query point and sorts them nearest first (`82D5E4C0`, main
   checked the call). The query point is the player (`827AAF10`: the sim focus object), not the camera. The x10 byte is
-  the renderer's +0x34786, written by the handler `8279EBA0` of message 0x4B6965CE (main checked the store and the id
+  the renderer's +0x34786, written by the handler `8279EBA0` of message 0x4B6965CE (verified the store and the id
   in the recomp), sent at world load with the `world` row's park bool 0x0C54AD24155E3220 (b443): x10 in park worlds.
 - **Change (2026-10-23):** the engine billboards only splines with kind bit 0 and keeps the anchor's up while doing so,
   otherwise keeps the anchor's rotation; hides past the fade's end on camera distance; keeps the nearest 22 icons
   within 400 m of the player (the camera when there is none). Park worlds (research b539): the park bool is the same on
   every `world` row of a stream, so it is a per-map fact; setup writes `park_maps` (the maps of the rows with the bool,
   DLC vaults merged: MegaPark, StartPark, DownTownSkatePark, IndustrialSkatePark, Zen, BackLotParkDLC,
-  DownTownSkateParkNightDLC; main checked all seven against the park layout sidecars) and `park_fade_scale` 10.0 in
+  DownTownSkateParkNightDLC; verified all seven against the park layout sidecars) and `park_fade_scale` 10.0 in
   visual-indicators.json; on those maps the engine scales only the fade end (smallarrow 100 m -> 1000 m, still within
   the 400 m cull).
 - **The current object [code], research b540 (2026-10-23):** manager+4 is the challenge manager (sim+0x148), stored
-  by its listener registration `82BCFFC8` (`stw r29,4(r30)`, main checked); vtable slot 4 `82C8CDC0` returns +0xC, the
+  by its listener registration `82BCFFC8` (`stw r29,4(r30)`, verified); vtable slot 4 `82C8CDC0` returns +0xC, the
   current challenge (null in free skate: every group walked). The icon this port draws comes from `82D53F70` ->
-  `82D4F0B0` into the group `82D52758` creates with key 0 through `82D4ECC8` (main checked) and the default flag 1,
+  `82D4F0B0` into the group `82D52758` creates with key 0 through `82D4ECC8` (verified) and the default flag 1,
   so it shows whatever challenge is current; only a game-mode gate (`82552750`, bit 4) creates or destroys that group.
   The stategraph's `CreateGroup(false)` groups are a second registration that hides while another challenge is
   current.
 - **The mode gate [code], research b541 (2026-10-23):** `82552750` returns 8 (sim vt[0] == 1), 0x10 (GameMode 2), 1
-  (front-end state 2), 2 (GameMode 0 / 3 / 7), else 4 (main checked the order and constants). GameMode is 0x830B7AE8
-  (`.claude` menu notes: 1 Career, 4 / 5 online); Free Play stores 3 (`82706B40`, main checked) and re-runs the mask.
+  (front-end state 2), 2 (GameMode 0 / 3 / 7), else 4 (verified the order and constants). GameMode is 0x830B7AE8
+  (local menu notes: 1 Career, 4 / 5 online); Free Play stores 3 (`82706B40`, verified) and re-runs the mask.
   So in Free Play the key 0 group does not exist: the icons a free skater sees come from each teleporter's stategraph
   `CreateGroup(false)` group, which hides while another challenge is current (no challenge is current in Free Play;
   b540 found teleport challenges load as ambient, never current).
 - **The stategraph's icon [code + data], research b542 (2026-10-23):** only its `challengeassetloadcomplete` handler
   touches the library, once: `CreateGroup(false)` then `AddLocationIndicator(group, self.Location,
   self.SignUpIndicator)`; nothing removes, disables or recolours it later (not on entering the volume, the prompt, the
-  teleport or a cooldown). The two fields are the ones setup reads (main checked: `Location` = F1C6D5FA4A23951E,
+  teleport or a cooldown). The two fields are the ones setup reads (verified: `Location` = F1C6D5FA4A23951E,
   `SignUpIndicator` = 284B07325D587CC4 by name hash). `AddLocationIndicator` (`82D502C8` -> `82D4F328` locator lookup
-  -> `82D4F2A8`, main checked its call to `82D4F0B0` with -1 colour / style) builds the same entry as the key 0 path:
+  -> `82D4F2A8`, verified its call to `82D4F0B0` with -1 colour / style) builds the same entry as the key 0 path:
   full anchor matrix, ribbon key, colour and style `default`. So in Free Play ours matches in anchor, key, colour,
   style and timing. Edge cases not modelled: retail dedupes per group (ours per locator, only matters if two
   teleporters share one), and a missing locator falls back to a fixed matrix (ours draws none); with a challenge

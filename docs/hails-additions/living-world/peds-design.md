@@ -1,7 +1,7 @@
 # Living world: pedestrians design (part of doc 26)
 
 Status: design, 2026-10-04; milestone M0 (data) is done (see `peds-data.md`).
-Evidence: `.claude/notes/peds-re.md` (this work) and `.claude/notes/npc-livingworld-re.md` (census, moods, chases,
+Evidence: the local peds research note (this work) and the local living world research note (census, moods, chases,
 speech). Tags in this doc: **(code)** from the retail code, **(data)** from the disc data, **(recomp)** observed in the
 recomp only. The retail code and data are the source of truth (user, 2026-10-04).
 
@@ -9,7 +9,7 @@ recomp only. The retail code and data are the source of truth (user, 2026-10-04)
 pedestrians". The milestones below are internal steps of that PR, not separate PRs. Parts marked **[shared]** are
 designed once for both peds and NPC skaters (`npc-skaters-design.md` covers the skater side).
 
-Moddability rule (CLAUDE.md, 2026-10-04): every value below comes from setup data as a default that a mod can
+Moddability rule (project rule, 2026-10-04): every value below comes from setup data as a default that a mod can
 override; every system has an engine-facing and a mod-facing entry point; mod disable cleans up.
 
 ## 1. Goals and non-goals

@@ -16,7 +16,7 @@ reload while the mod runs (the script keeps running), `add.projects` = the mod's
 sound plays at the owner of the game's sound by default, following it; `play.at` = `owner` (with an `offset`),
 `world` (a fixed `position`) or `centre`, `play.falloff` the reach; 3: `play.frame = 'owner'` puts the `offset`
 in the owner's axes (right, up, facing), and a rule sound at a published emitter follows it when it moves),
-`audio_tuning=1` (`sdk.audio.set_tuning / tuning / tuned`: player / world / bus / reverb tuning while the mod runs)
+`audio_tuning=1` (`sdk.audio.set_tuning / tuning / tuned`: player / world / bus / reverb tuning while the mod runs),
 `world_tuning=1` (`sdk.world.set_tuning / tuning`: living world draw distance and NPC / ped fades, dynamic prop
 tuning and collision boxes, prop carry buttons, grab range and held-prop move speeds while the mod runs),
 and `world_audio=4` (publishing cars, peds and skaters to the game's world audio; 2: `emitter` and `reverb_zone`
@@ -265,7 +265,7 @@ returns `{active, slots}`. Fields: `family` (`xbox360`, `xbox_one`,
 `guitar`, `unknown`), `name`, `vendor_id` / `product_id`, `backend` (`sdl` or
 `xinput`), `driver` (SDL device path, e.g. `XInput#0`), `xinput_subtype` and
 `wireless` (XInput only), `paddles` (reported by the driver) and
-`hardware_paddles` (the model has), `touchpad`, `misc_button`, `prompt_style`
+`hardware_paddles` (the paddles the model has), `touchpad`, `misc_button`, `prompt_style`
 (`xbox`, `playstation`, `nintendo`), `face_labels` (printed names of the South,
 East, West and North buttons) and `summary`. It is read-only and does not
 change gameplay input: the button layout is positional for every pad (the

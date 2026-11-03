@@ -1,8 +1,8 @@
-# Traffic audio — retail spec, port state, hook points (2026-10-03)
+# Traffic audio: retail spec, port state, hook points (2026-10-03)
 
 Port: `crates/skate-audio/src/world/traffic.rs` (+ `owners.rs`, `keys.rs`). The game host is
 `crates/skate-game/src/game_audio/world_sources.rs`. Harness: `crates/skate-audio/tests/world_sources.rs`.
-Read from the TU3 recompilation with `tools/recomp-code-search/fn.sh`; image constants come from `img.py` (local tool).
+Read from the TU3 (title update 3) recompilation with `tools/recomp-code-search/fn.sh`; image constants come from `img.py` (local tool).
 This is reference only and our own code.
 
 ## Objects (one set per Traffic MixMap instance; 4 instances in free skate)
@@ -11,7 +11,7 @@ This is reference only and our own code.
 | SFXObj_TrafficEngine (obj 4.0) | `0x822FCBA8` | `sub_824D6110` | `sub_824D6478` | `sub_824D5B20`, 18 words | `TRAFFIC_CAR` / `C00_heavy01` … `C08_family03` |
 | SFXObj_TrafficSkids (4.1) | `0x822FCC38` | `sub_824D7650` | `sub_824D76B8` | `sub_824D5D20`, 11 words | `TRAFFIC_SKID` / `Traffic_Skid` |
 | SFXObj_TrafficHorn (4.2) | `0x822FCBF0` | `sub_824D6E88` | `sub_824D6F98` | `sub_824D5C30` (horn) / `sub_824D0D58` (alarm), 9 words | `TRAFFIC_HORN` / `Traffic_Horn`, `c_car_alarm` / `car_alarms` |
-| SFXObj_TrafficWoosh (4.3) | — | — | — | — | No MixMap E record writes its outputs, so it is unused |
+| SFXObj_TrafficWoosh (4.3) | n/a | n/a | n/a | n/a | No MixMap E record writes its outputs, so it is unused |
 
 - Class handles are in the table at `0x8302EF00..` (engine `EF00`, horn `EF08`, skid `EF10`, alarm `EF20`). Their names are resolved by
   `sub_828E3250` from `0x8302D57C` and nearby entries.
@@ -159,8 +159,8 @@ over; the user ran into it on foot).
 - The alarm then sounded until the session ended (car_alarms stream 7 restarted every ~2.0 s, 33 voices, 256.0 –
   318.2 s, 64 s). The board positions show the user at the car the whole time (on foot beside it, skating along
   it, deck contacts at the car's own position): every contact restarted the 8 s, as the code says.
-- The user's words: "I found a taxi, so yeah, and I skitched on it too." / "it ended up parking on the side of the
-  road and when I ran into the car alarm went off".
+- The user's account: the user found a taxi and skitched on it; it ended up parked at the side of the
+  road, and when the user ran into it the car alarm went off.
 
 **Answered (hook `VEHHIT`, the recomp, 2026-10-04 session with a parked taxi).**
 - `m+48` is the relative velocity at the contact in m/s (the car's minus the other body's), not an impulse: a

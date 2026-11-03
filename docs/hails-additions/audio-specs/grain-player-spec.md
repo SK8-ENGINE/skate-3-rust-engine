@@ -8,7 +8,7 @@ current approximation (each `.grain` cut into 6 looped speed bands, `tools/asset
 Nothing here is code from PR #4/PR #1 or the recomp (no licence: read for understanding only). Constants, offsets,
 addresses and vault hashes are facts and are quoted. Companion specs: `aems-voice-graph-spec.md` (modules, buses, block
 clock), `aems-evaluator-spec.md` (patch programs, global RNG), `aems-reference.md`, `mixmap-spec.md` (MixMap; being
-written in parallel — the MixMap output ids used here are listed in §2.9 so the two can be joined).
+written in parallel; the MixMap output ids used here are listed in §2.9 so the two can be joined).
 
 ## 0. Confidence tags
 
@@ -48,7 +48,7 @@ script `tools/audio-file-inspect/grain_survey.py`):
 | x_jet_rolling | 112 | 12.152 | 48000 | 583305 | 123424, 65, 583305, 1 | 80 |
 
 There is no `metal_smooth_soft` and no wood_ply member, although the vault has a `wood_ply_soft.grain` collection
-(key `1258126B657708F0`) that no code path selects [V] — a cut asset.
+(key `1258126B657708F0`) that no code path selects [V]: a cut asset.
 
 ### 1.2 `.grain` layout [V, field roles C/T]
 
@@ -93,12 +93,12 @@ column 3 = 1 on a key (restartable) entry. A row whose sample count is negative 
   - b0 = 0xFF: 5 bytes, a raw big-endian u32 (no sign step).
 - **What it indexes:** sample position → (byte offset of the XMA entry, side-data offset). It does **not** index speed
   or grain segments. In every grain row 0 already covers the whole stream (`samples = num_samples`, key 1) [V], so
-  every in-range seek resolves to *"restart the decoder at byte 0/sample 0, decode 384 pre-roll samples… "* — in
+  every in-range seek resolves to *"restart the decoder at byte 0/sample 0, decode 384 pre-roll samples… "*. In
   practice: entry start 0, pre-roll used = min(target, 384), skip = target − pre-roll used; entry + pre-roll + skip =
   target. The side data (~1 byte per 2 KiB XMA packet) is for the hardware XMA decoder to locate packets [T].
 - **Port:** decode each grain once to PCM at its native rate (vgmstream at setup); a seek to t seconds is simply
   "read from frame ⌊rate × t⌋" (§2.6). The seek table only needs parsing to validate members. Keep the varint/column
-  reader (it is the same for `wheels.big` `.sek` tables) — our implementation in `grain_survey.py` reads all 14.
+  reader (it is the same for `wheels.big` `.sek` tables); our implementation in `grain_survey.py` reads all 14.
 
 ### 1.4 Which grain plays [T; surface table V]
 
@@ -141,7 +141,7 @@ Per board the owner (`SFXObj_SkateBoard`, constructor `sub_824C5058`) loads the 
 **Surface routing** (`sub_824C5CA8`, every frame, game thread) [T]: for the primary truck, then (local player only) the
 other truck, compare the new surface with the stored one. On a change away from a real surface it pulses owner MixMap
 input 0 (32767 for that frame, else 0). If the truck had a live sound it is stopped (Class_rolling released, or both
-grain players stopped) — except on the local player when the other truck has no live sound, in which case the sound
+grain players stopped), except on the local player when the other truck has no live sound, in which case the sound
 is **handed to the other truck** (the primary-truck index flips) instead of being stopped. Then, for a new surface
 ≠ 14, a sound starts **only if the other truck is not already on that surface**: grain surface → bind both players of
 that truck (§2.5); other surface → post its Class_rolling. So **one sounding truck per distinct surface**: normally
@@ -152,7 +152,7 @@ the oracle for golden vectors of this bookkeeping.
 ### 1.5 Per-surface tuning (grain-class vault `7AB23C11B6ADA2DE`) [V values; field roles T]
 
 `default` holds everything; members override a few fields. P0..P3 = position-curve control points (column 1 of rows
-3, 2, 1, 0 of the 4×4 matrix `A985FBAA9326718D`; column 0, unused by the code, holds 1, ~0.47, ~0.25, 0 — probably the
+3, 2, 1, 0 of the 4×4 matrix `A985FBAA9326718D`; column 0, unused by the code, holds 1, ~0.47, ~0.25, 0; probably the
 authoring curve's speed axis [I]).
 
 | collection | max km/h | P1 | P2 | turn cap | B slope gain / ramp km/h | A shift/slope | B base shift | notes |
@@ -192,7 +192,7 @@ to level 3.0; graph-1 level ramp 52 → 74 km/h down to a floor of 0.45; gain wo
 - Per board owner: 2 trucks × 2 **GrainPlayers** (A at owner+1176+8t, B at owner+1180+8t), both of a truck bound to
   the **same** grain file; A and B differ in GrainParams and in their per-frame record. Plus one rocket GrainPlayer in
   SenseOfSpeed (local player only). [T]
-- GrainPlayer (372-byte object; layout confirmed against the retail capture [C]): the record {gain, pitch, —,
+- GrainPlayer (372-byte object; layout confirmed against the retail capture [C]): the record {gain, pitch, n/a,
   position}; the 5 GrainParams; a hold flag; send target; bound flag; grain data/duration/stream/seek pointers; **two
   voice slots** {graph, state timer, start seconds, position at pick, state 1 attack / 2 sustain / 3 release}; the
   active-slot index; a scheduler instance; a 16-entry **recent-windows list** {start, end, next} plus used-head,
@@ -210,10 +210,10 @@ owner's slewed values (§2.7). Single-precision arithmetic throughout.
 2. t = clamp(v' × 3.6 / max_kmh, 0, 1).
 3. **Position A** = cubic Bézier in t with control points P0..P3:
    pos = (1−t)³·P0 + 3t(1−t)²·P1 + 3t²(1−t)·P2 + t³·P3. Not clamped (two members can leave [0,1] slightly).
-4. **Position B** = max(pos − 0.1, 0) — B always reads 0.1 (≈2 s of recording) behind A. Measured on retail: exactly
+4. **Position B** = max(pos − 0.1, 0): B always reads 0.1 (≈2 s of recording) behind A. Measured on retail: exactly
    −0.100 at every speed [C].
 5. **Pitch (A and B)** = MixMap pitch output 3 (cents → ×4096) / 4096. Retail medians: 3209 at rest, ~3500 at 1 m/s,
-   ~4080 from ~5 m/s up [C capture medians] — i.e. grains play ~22 % slow at a crawl, ~unity when rolling.
+   ~4080 from ~5 m/s up [C capture medians]: i.e. grains play ~22 % slow at a crawl, ~unity when rolling.
 6. **Gain A** = level(1)/32767 × (1 − max(I, Bk)) [× special_gain while "special"] [× seam envelope while active],
    where I = slewed turn intensity (+1164), Bk = slewed brake (+1168) (§2.7).
 7. **Gain B** = I × level(2)/32767 [× seam envelope]; plus, while the downhill slope level D (+1508) > 0:
@@ -231,11 +231,11 @@ Let L = attack + sustain + release (grain length, seconds of source at pitch 1),
 duration, pos = record position.
 
 1. Target T = (D − W) × pos; region = [T, T + W]. (So the region never runs off the end of the file for pos ≤ 1.)
-2. The recent list holds the windows played since the last reset, sorted by start. Its free gaps — from a sentinel
-   before 0 to the first window, between consecutive windows, and from the last window to D — are each clamped to
+2. The recent list holds the windows played since the last reset, sorted by start. Its free gaps (from a sentinel
+   before 0 to the first window, between consecutive windows, and from the last window to D) are each clamped to
    the region and **tiled with back-to-back windows of length L** starting at the gap's (clamped) start, while a whole
    window still fits (in single precision; the 4th 0.4-s window of a 1.6-s region does *not* fit because 1.2+0.4
-   rounds above 1.6) — at most 64 candidates.
+   rounds above 1.6); at most 64 candidates.
 3. If there is no candidate, or the list is full (the last inserted entry is index 15): **collapse** the list to just
    the most recent window and retry; if the region holds at most one window (⌊W/L⌋ ≤ 1) return T instead.
 4. Otherwise draw r from the **title-wide generator** (`sub_82A8AF10`, 6 words at `0x82FD7D74`, seeded at game init
@@ -263,12 +263,12 @@ So this is **per audio block, not per 32-ms evaluator tick and not per game fram
 
 1. **Drift test.** d = (position recorded at the active slot's pick) − (current record position). If |d| > drift
    threshold (0.05 ≈ 1 s of recording) and hold is clear and the active slot has a voice:
-   - if the other slot has a voice: release it (unless already releasing) — nothing new starts this block;
+   - if the other slot has a voice: release it (unless already releasing); nothing new starts this block;
    - else: release the active slot (unless releasing), pick (§2.3), start a voice in the other slot (§2.5) and make it
      active. (A fast speed change therefore cuts the current grain short with a normal release.)
 2. For each slot 0, 1 that has a voice:
    - post the record **gain** to the voice's Send (Sen0 parameter 0) and the record **pitch** to its Resample
-     (parameter 0) — every block, applied this block (phase 1 precedes the drain);
+     (parameter 0), every block, applied this block (phase 1 precedes the drain);
    - timer −= δ in attack/release; **timer −= δ × pitch in sustain** (fused multiply-subtract);
    - if timer < 0:
      - attack → sustain, timer = sustain;
@@ -327,7 +327,7 @@ The play command converts the start time into a frame at the stream's native rat
 > 0; else 0). With the single-entry seek table the decoder restarts at sample 0, decodes and discards up to 384 pre-roll
 samples and skips the rest, so output begins exactly at `frame`. Port: PCM decoded once at native rate; start reading at
 `frame`; play forward (no loop flag; a grain never reaches the end because T + W ≤ D at pos ≤ 1 and a grain lasts ≈ L,
-but a pitched or drifting grain may run past its window — let it). Resample converts to 48 kHz with ratio = native rate
+but a pitched or drifting grain may run past its window; let it). Resample converts to 48 kHz with ratio = native rate
 / 48000 × pitch, linear interpolation, no anti-alias filter (`aems-voice-graph-spec.md` §4.3).
 
 ### 2.7 Owner-side modulators [T unless noted]
@@ -346,7 +346,7 @@ Run in the owner's process (`sub_824C6A78`, before the MixMap evaluation) except
 - **Brake** Bk (+1168): while braking (state +336) against the direction of travel (cosine of velocity delta and
   velocity < 0, or undefined) slew toward 1, else toward 0, by 0.05 per frame.
 - **Slope** (`sub_824CA738`): with the primary truck on a grain surface, downhill level D = clamp(slope (state +712;
-  PR #4 docs call it the slope, the PoC field is named `pump_absorption_712` — meaning UNCERTAIN) /
+  PR #4 docs call it the slope, the PoC field is named `pump_absorption_712`; meaning UNCERTAIN) /
   −10, 0, 1), uphill U = clamp(slope / 10, 0, 1); posted as owner inputs 2/3 (×32767).
 - **Manual latch** (+1504): set while balancing (state +340); once set, cleared when wheel count (state +200) is 0 or 4.
   **Trick latch** (+1505): set while state +372 (an airborne-trick flag); cleared when both feet are back in the deck
@@ -355,7 +355,7 @@ Run in the owner's process (`sub_824C6A78`, before the MixMap evaluation) except
   pattern whose vault wobble (class `7242F32831ED3332`, patterns spidercrack … special_2) is not {1, 1}, **one** linear
   segment from 1 to a random gain in [low, high) (steps of 0.01) over a random duration in [ms_low, ms_high) ms (title
   RNG, `sub_824CA318`), then hold; it multiplies **both** gains A and B while active. **Correction 2026-10-02** (read in
-  the asm): not a random walk — the same pattern only advances the segment. In the vault only spidercrack has a wobble
+  the asm): not a random walk; the same pattern only advances the segment. In the vault only spidercrack has a wobble
   ≠ {1, 1} (0.8 → 0.6, 30 → 80 ms).
 
 ### 2.8 The rocket layer (`x_jet_rolling.grain`, SenseOfSpeed `sub_824E7980` / `sub_824E7CB0`) [T; timing V]
@@ -392,7 +392,7 @@ process (before this frame's evaluation, i.e. one frame old); records in update 
   zeroes I (B silent) and scales A by the special gain with a +150 Hz shift.
 - **Airborne**: nothing in the grain code stops the players on take-off; voices keep cycling and their level must come
   from MixMap level(1)/(2) (contact inputs). Whether the wheel material holds its last value in the air or becomes
-  "none" (→ surface 3, which would rebind asphalt_smooth on every jump) is **UNCERTAIN** — first thing to measure
+  "none" (→ surface 3, which would rebind asphalt_smooth on every jump) is **UNCERTAIN**: first thing to measure
   (§5.3, hook on routing). The trick latch only affects I/special.
 - **Bail / off board**: the board owner keeps running; the result depends on contact/material (UNCERTAIN).
 
@@ -480,12 +480,12 @@ always compares equal and its wobble is never posted (retail behaviour).
 
 **Next vectors** (needs the full runtime): copy PR #4's `crates/skate-data/examples/grain_repro.rs` (in
 PR #4's branch; not in the PoC worktree) into the PoC locally and log per block: slot states, timers, starts,
-picked positions, posted gain/pitch, the RNG words before each pick, and the 6-ch output RMS — for (a) constant
+picked positions, posted gain/pitch, the RNG words before each pick, and the 6-ch output RMS, for (a) constant
 speeds 2/4/6/8 m/s per surface, (b) a speed ramp crossing the drift threshold, (c) a surface change (stop + bind), (d)
 pitch 0.78 vs 1.0. Our port must match timers, state transitions, start seconds and posted values exactly (given the
 same RNG words), and the audio to ≤ 1e-5 FS per sample before the chain (decode differences aside).
 Also unit vectors for: modulators (push envelopes, turn slew, brake slew, slope, latches), chain values, wobble and
-send ramps — all pure functions in the PoC's `grain::board` / `grain::envelope` and `player_audio/components/board.rs`.
+send ramps: all pure functions in the PoC's `grain::board` / `grain::envelope` and `player_audio/components/board.rs`.
 
 ### 5.2 Retail evidence already in hand [V]
 
@@ -505,7 +505,7 @@ stream: per-member counts, starts/s and start-interval histograms (§2.4). Resul
 | GROUTE | after `sub_824C5CA8` (r3 owner) | owner +768/+772 surfaces, +1320/+1324, +1328/+1329, +1496/+1497, +1500, + audio state +620/+632 materials, +332 air, +341 grind, +684 soft |
 | GREC | after `sub_824C6BD8` (r3 owner) | the 4 players' records, owner +1028/+1032, +1152/+1156, +1164, +1168, +1456/+1464, +1508, state +204, +208 |
 | GCHAIN | after `sub_824C9058` | values posted per truck (read graph-1 FSS +52, HP/LP +52, Pan +52) |
-| — | `sub_824E7980`/`sub_824E7CB0` | rocket running flag, record |
+| n/a | `sub_824E7980`/`sub_824E7CB0` | rocket running flag, record |
 
 Use short scripted background recomp runs (never ask the user to replay): on one known surface,
 push to ~10, 20, 30, 45 km/h and coast 5 s each; a straight roll vs a carve; a manual; an ollie and a 1-s air; a grind;
@@ -523,10 +523,10 @@ distribution χ² consistent with uniform; airborne behaviour settled (§2.10).
 3. ~~Soft flag source (Motion+200 < 0.5)~~ **Settled 2026-10-02:** Motion+200 = Processed+2764 = the board
    profile's wheel hardness (`animation_phase_packet.rs` `wheel_hardness`, default 0.7 = hard).
 4. Hold flag (+36): any writer?
-5. GainFader curve code from the fade request (+28 rounded = 1 → square root) — confirm with a GTICK/fader dump.
+5. GainFader curve code from the fade request (+28 rounded = 1 → square root); confirm with a GTICK/fader dump.
 6. Exact block of the first tick after a game-thread bind vs a scheduler start (the 3-block capture fits both).
 7. Chain rebuild on bind: confirm the teardown/rebuild order and that histories reset.
-8. PR #4 notes that its capture's "GP ret" value was the window end, not the start — re-check with GPICK.
+8. PR #4 notes that its capture's "GP ret" value was the window end, not the start; re-check with GPICK.
 
 ---
 
@@ -534,12 +534,12 @@ distribution χ² consistent with uniform; airborne behaviour settled (§2.10).
 
 | source | author / owner | link | licence | contribution |
 |---|---|---|---|---|
-| Upstream PR #4 (`skate-audio-core/src/grain/*`, `skate-audio-formats/src/grain.rs`, `skate-data/src/audio/grains.rs`, `skate-game/.../board.rs`, `speed.rs`, `examples/grain_repro.rs`, docs `player-audio-retail-drivers.md` §3/§11, `wheel-audio-handoff-2026-09-17.md`, `engine-defects.md`) | andrewnakas (Andrew Nakas) | github.com/SK8-ENGINE/skate-3-rust-engine/pull/4 (fork github.com/andrewnakas/skate-3-rust-engine, commit 368a433; read from a local clone and a PoC worktree) | none — read only | Discovered that the bed is a granular player; recovered the GrainPlayer object, pick, scheduler, voice graph, bus chains, FSS module, board records, vault mapping, push envelopes, retail capture comparisons and transfer functions. Almost everything tagged [T]/[C] here is their finding, re-described. |
-| Upstream PR #1 (`mx/audio-engine-vehicles`) | andrewnakas | github.com/SK8-ENGINE/skate-3-rust-engine/pull/1 | none — read only | Earlier version of the same grain port and docs. |
-| skate3recomp (generated C++, audio-trace hooks) | mchughalex (recomp); trace hooks ours (local branch `audio-trace`) | github.com/mchughalex/skate3recomp | none stated — read only | Lifted code we read for §2.4 [R]; the retail trace used in §2.4/§5.2. Built on rexglue-sdk. |
-| Skate 3 (EA Black Box), TU3 image, disc `grains.big`, vault `skatercollections.vlt` | Electronic Arts | — | proprietary, owner's copy, never committed | The data measured in §1. |
+| Upstream PR #4 (`skate-audio-core/src/grain/*`, `skate-audio-formats/src/grain.rs`, `skate-data/src/audio/grains.rs`, `skate-game/.../board.rs`, `speed.rs`, `examples/grain_repro.rs`, docs `player-audio-retail-drivers.md` §3/§11, `wheel-audio-handoff-2026-09-17.md`, `engine-defects.md`) | andrewnakas (Andrew Nakas) | github.com/SK8-ENGINE/skate-3-rust-engine/pull/4 (fork github.com/andrewnakas/skate-3-rust-engine, commit 368a433; read from a local clone and a PoC worktree) | none, read only | Discovered that the bed is a granular player; recovered the GrainPlayer object, pick, scheduler, voice graph, bus chains, FSS module, board records, vault mapping, push envelopes, retail capture comparisons and transfer functions. Almost everything tagged [T]/[C] here is their finding, re-described. |
+| Upstream PR #1 (`mx/audio-engine-vehicles`) | andrewnakas | github.com/SK8-ENGINE/skate-3-rust-engine/pull/1 | none, read only | Earlier version of the same grain port and docs. |
+| skate3recomp (generated C++, audio-trace hooks) | mchughalex (recomp); trace hooks ours (local branch `audio-trace`) | github.com/mchughalex/skate3recomp | none stated, read only | Lifted code we read for §2.4 [R]; the retail trace used in §2.4/§5.2. Built on rexglue-sdk. |
+| Skate 3 (EA Black Box), TU3 image, disc `grains.big`, vault `skatercollections.vlt` | Electronic Arts | n/a | proprietary, owner's copy, never committed | The data measured in §1. |
 | vgmstream (`data/tools/vgmstream-cli`) | vgmstream contributors | github.com/vgmstream/vgmstream | ISC-style | EA-XMA decode for the RMS/centroid survey. |
-| Our notes `aems-voice-graph-spec.md`, `aems-evaluator-spec.md`, `aems-reference.md`, `rwaudio-prior-work.md` | this project | — | — | Module semantics (Resample, GainFader, Send, buses), block clock, RNG. |
+| Our notes `aems-voice-graph-spec.md`, `aems-evaluator-spec.md`, `aems-reference.md`, `rwaudio-prior-work.md` | this project | n/a | n/a | Module semantics (Resample, GainFader, Send, buses), block clock, RNG. |
 | CC0 prior art (nfsmw Snd9, tw2004) | dbalatoni13, mitsevox | see `rwaudio-prior-work.md` | CC0 | Checked: no GrainPlayer there; nothing used. |
 
 ## 8. Files

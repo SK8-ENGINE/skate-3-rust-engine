@@ -10,7 +10,7 @@ cost about 5 ms more than the frames between ticks. Retail ran a player and thre
 ## Root cause
 
 A CPU profile (Windows Performance Recorder, muted 60 s run at the PCU Library, top functions kept in
-`.local/research/profile-2026-10-15/top-functions.txt`) had `fmaf` at the top of our own code: the C runtime's
+a local data file) had `fmaf` at the top of our own code: the C runtime's
 **software** fused multiply-add. The physics ports use `f32::mul_add` throughout to match the console's `fmadds` bit
 for bit, and the build targeted baseline x86-64 without the FMA instruction set, so every `mul_add` was a function call
 into a software routine. The solver kernels that call it (`apply_impulse_changes`, `drive::solve`, `joint::solve`)
@@ -19,8 +19,8 @@ came next.
 Two smaller findings along the way:
 - The per-tick sync of an NPC worker (below) deep-copied the prop collision layer's template triangles, about 0.5 ms
   per NPC per tick; the instance list is shared behind an `Arc` now.
-- The mod bridge's per-frame JSON observation showed in the profile with the four dev mods loaded; separate todo
-  `.claude/todo/mod-json-cost.md`.
+- The mod bridge's per-frame JSON observation showed in the profile with the four dev mods loaded; separate local todo
+  (mod JSON cost).
 
 ## Change
 
@@ -256,7 +256,7 @@ Question: can assets be pre-loaded / loaded during play more cheaply? Measured p
 | DMO prop stream pass | 7401 | 0.01 ms | 28.7 ms (the census's first fill, once per map) |
 
 Audio banks and speech already load on their own threads (emitter prefetch, speech takes). Research inventory:
-`.local/research/in-play-loading.md`.
+a local research note.
 
 ### Ped tint cache
 The recoloured ped materials were cached by weak id, so when the last ped with a (source material, tint pair)
