@@ -120,6 +120,30 @@ def _in_order(work, items):
         return [future.result() for future in futures]
 
 
+# One file per sound bank (docs/hails-additions/08-setup-performance.md#one-file-per-sound-bank): the bank's WAVs
+# back to back after an index, so the game reads a bank with one open instead of one per sample.
+WAV_PACK_MAGIC = b'SKWAVPK1'
+
+
+def wav_pack(wavs: list[bytes]) -> tuple[bytes, list[tuple[int, int]]]:
+    """The pack bytes and each WAV's (offset, size) in it."""
+    at = 16 + 16 * len(wavs)
+    ranges = []
+    for data in wavs:
+        ranges.append((at, len(data)))
+        at += len(data)
+    head = WAV_PACK_MAGIC + struct.pack('<II', len(wavs), 0) + b''.join(struct.pack('<QQ', o, n) for o, n in ranges)
+    return head + b''.join(wavs), ranges
+
+
+def wav_pack_entries(data: bytes) -> list[bytes]:
+    """The WAVs of a pack, in order."""
+    if data[:8] != WAV_PACK_MAGIC:
+        raise ValueError('not a sound bank pack')
+    count = struct.unpack_from('<I', data, 8)[0]
+    return [data[o:o + n] for o, n in (struct.unpack_from('<QQ', data, 16 + 16 * i) for i in range(count))]
+
+
 def _wav_info(path: Path) -> dict:
     with wave.open(str(path)) as source:
         return {'channels': source.getnchannels(), 'sample_rate': source.getframerate(),
@@ -1320,14 +1344,23 @@ def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report,
         target_folder = output/'banks'/stem
         target_folder.mkdir(parents=True)
         samples = []
+        wavs = []
         for index in range(len(streams)):
             target = target_folder/f'{index:04d}.wav'
             shutil.move(folder/f'{index:04d}.snr.wav', target)
             samples.append({'file': f'banks/{stem}/{index:04d}.wav', **_wav_info(target)})
+            wavs.append(target.read_bytes())
+        # The game reads the pack; the loose WAVs stay for older engine versions sharing the install.
+        pack, ranges = wav_pack(wavs)
+        (output/'banks'/f'{stem}.pack').write_bytes(pack)
+        for sample, at in zip(samples, ranges):
+            sample['pack'] = list(at)
         # Retail's own layering/randomisation per sound (audio_formats.splc_patches).
         return stem, samples, splc_patches(data) if data[:4] == b'SPLC' else None
+    manifest['bank_packs'] = {}
     for stem, samples, patches in _in_order(decode_bank, order):
         manifest['banks'][stem] = samples
+        manifest['bank_packs'][stem] = f'banks/{stem}.pack'
         if patches is not None:
             manifest['patches'][stem] = patches
 

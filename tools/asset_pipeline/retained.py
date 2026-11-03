@@ -85,6 +85,7 @@ def _audio(old_audio,new_audio):
             new[section][key]=entry
             added+=1
             for file in _files_of(entry):_copy(old_audio/file,new_audio/file)
+            if section=='bank_packs' and isinstance(entry,str):_copy(old_audio/entry,new_audio/entry)
     if added:_write(new_audio/'audio_manifest.json',new,None)
     return added
 

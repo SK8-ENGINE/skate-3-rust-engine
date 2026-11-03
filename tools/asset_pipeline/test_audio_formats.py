@@ -4,6 +4,7 @@ import unittest
 
 import numpy
 
+from tools.asset_pipeline import audio_export
 from tools.asset_pipeline import audio_formats as audio
 
 
@@ -568,3 +569,17 @@ class SpliceTrees(unittest.TestCase):
             listed = splice_trees(archive, out, ['Skate_Collisions.bnk', 'water.abk', 'missing.bnk'])
             self.assertEqual(listed, {'Skate_Collisions': 'aems/Skate_Collisions.splc'})
             self.assertEqual((out/'aems/Skate_Collisions.splc').read_bytes(), bank[:60 + len(body)])
+
+
+class WavPack(unittest.TestCase):
+    # The pack lives in audio_export (only the audio group fingerprints it).
+    def test_round_trip(self):
+        wavs = [b'RIFF' + bytes(range(7)), b'', b'RIFFxyz']
+        data, ranges = audio_export.wav_pack(wavs)
+        self.assertEqual(audio_export.wav_pack_entries(data), wavs)
+        self.assertEqual([data[o:o + n] for o, n in ranges], wavs)
+        self.assertEqual(ranges[0][0], 16 + 16 * 3)
+
+    def test_rejects_other_files(self):
+        with self.assertRaises(ValueError):
+            audio_export.wav_pack_entries(b'RIFF0000')

@@ -17,6 +17,9 @@ const MANIFEST_VERSIONS: std::ops::RangeInclusive<u32> = 3..=5;
 #[derive(Debug, Deserialize)]
 pub(crate) struct Entry {
     pub file: String,
+    /// The sample's (offset, size) in its bank's pack (`Manifest::bank_packs`).
+    #[serde(default)]
+    pub pack: Option<[u64; 2]>,
     // Manifests also carry `seconds` (the sample length): read only by the removed measured
     // emitter relay, so it is ignored.
 }
@@ -344,6 +347,9 @@ struct Manifest {
     /// audio_export.frontend_sounds).
     #[serde(default)]
     frontend: FrontendJson,
+    /// Bank -> its pack: the bank's WAVs in one file (docs/hails-additions/08-setup-performance.md#one-file-per-sound-bank).
+    #[serde(default)]
+    bank_packs: BTreeMap<String, String>,
     // Audio content overlays only (`skate_mods::audio_merge`; never in an install's manifest).
     /// Bank → S10A slot → the loop start (frames) of a mod WAV.
     #[serde(default)]
@@ -887,12 +893,66 @@ pub(crate) fn wav_pcm(bytes: &[u8]) -> Option<skate_audio::mixer::Pcm> {
 /// A bank's decoded samples by S10A slot (None where a WAV is missing or unreadable).
 pub(crate) type BankPcm = Vec<Option<Arc<skate_audio::mixer::Pcm>>>;
 
-/// Read and decode the WAVs in order (`Library::bank_pcm` and `BankSource::load`).
-fn decode_wavs<'a>(files: impl Iterator<Item = &'a Path>) -> BankPcm {
-    let files: Vec<&Path> = files.collect();
+/// Where a sample's WAV bytes are: its own file, or a range of its bank's pack
+/// (docs/hails-additions/08-setup-performance.md#one-file-per-sound-bank).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum WavSource {
+    File(PathBuf),
+    Packed { pack: Arc<Path>, offset: u64, size: u64, file: PathBuf },
+}
+
+impl WavSource {
+    /// The WAV's bytes; a pack that cannot be read gives the loose file's.
+    pub(crate) fn read(&self) -> std::io::Result<Vec<u8>> {
+        match self {
+            Self::File(path) => std::fs::read(path),
+            Self::Packed { pack, offset, size, file } => read_range(pack, *offset, *size).or_else(|_| std::fs::read(file)),
+        }
+    }
+}
+
+fn read_range(path: &Path, offset: u64, size: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    if offset.checked_add(size).is_none_or(|end| end > f.metadata().map_or(0, |m| m.len())) {
+        return Err(std::io::ErrorKind::UnexpectedEof.into());
+    }
+    f.seek(SeekFrom::Start(offset))?;
+    let mut bytes = vec![0; size as usize];
+    f.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn pack_slice(data: &[u8], offset: u64, size: u64) -> Option<&[u8]> {
+    let start = usize::try_from(offset).ok()?;
+    data.get(start..start.checked_add(usize::try_from(size).ok()?)?)
+}
+
+/// Read and decode the WAVs in order (`Library::bank_pcm` and `BankSource::load`). A pack holding
+/// several of them is read once, whole.
+fn decode_wavs(files: &[WavSource]) -> BankPcm {
     #[cfg(test)]
     WAV_DECODES.with(|n| n.set(n.get() + files.len() as u64));
-    let one = |file: &Path| std::fs::read(file).ok().and_then(|bytes| wav_pcm(&bytes)).map(Arc::new);
+    let mut uses: HashMap<&Path, usize> = HashMap::new();
+    for f in files {
+        if let WavSource::Packed { pack, .. } = f {
+            *uses.entry(&**pack).or_default() += 1;
+        }
+    }
+    let whole: HashMap<&Path, Vec<u8>> =
+        uses.into_iter().filter(|&(_, n)| n > 1).filter_map(|(p, _)| Some((p, std::fs::read(p).ok()?))).collect();
+    let one = |file: &WavSource| {
+        let bytes = match file {
+            WavSource::Packed { pack, offset, size, file: loose } if whole.contains_key(&**pack) => {
+                match pack_slice(&whole[&**pack], *offset, *size) {
+                    Some(slice) => return wav_pcm(slice).map(Arc::new),
+                    None => std::fs::read(loose),
+                }
+            }
+            _ => file.read(),
+        };
+        bytes.ok().and_then(|bytes| wav_pcm(&bytes)).map(Arc::new)
+    };
     let workers = wav_read_workers().min(files.len());
     if workers <= 1 {
         return files.iter().map(|f| one(f)).collect();
@@ -901,6 +961,7 @@ fn decode_wavs<'a>(files: impl Iterator<Item = &'a Path>) -> BankPcm {
     // each slot keeps its file's result, so the bank is the same.
     let mut out: BankPcm = vec![None; files.len()];
     let chunk = files.len().div_ceil(workers);
+    let one = &one;
     std::thread::scope(|scope| {
         for (slots, names) in out.chunks_mut(chunk).zip(files.chunks(chunk)) {
             scope.spawn(move || {
@@ -955,14 +1016,14 @@ pub(crate) struct BankSource {
     stem: String,
     file: String,
     abk: PathBuf,
-    wavs: Vec<PathBuf>,
+    wavs: Vec<WavSource>,
     rebuild: Vec<(usize, Option<u32>)>,
 }
 
 impl BankSource {
     #[cfg(test)]
     pub(crate) fn for_test(root: PathBuf, stem: &str, file: &str, wavs: Vec<String>) -> Self {
-        Self { stem: stem.to_owned(), file: file.to_owned(), abk: root.join(file), wavs: wavs.iter().map(|w| root.join(w)).collect(), rebuild: Vec::new() }
+        Self { stem: stem.to_owned(), file: file.to_owned(), abk: root.join(file), wavs: wavs.iter().map(|w| WavSource::File(root.join(w))).collect(), rebuild: Vec::new() }
     }
 
     pub(crate) fn stem(&self) -> &str {
@@ -974,7 +1035,7 @@ impl BankSource {
     pub(crate) fn load(&self) -> Result<(skate_audio::formats::Bank, BankPcm), String> {
         let bytes = std::fs::read(&self.abk).map_err(|e| format!("{}: {e}", self.file))?;
         let mut bank = skate_audio::formats::Bank::parse(&self.stem, bytes).map_err(|e| e.to_string())?;
-        let pcm = decode_wavs(self.wavs.iter().map(PathBuf::as_path));
+        let pcm = decode_wavs(&self.wavs);
         for &(slot, loop_start) in &self.rebuild {
             if let (Some(entry), Some(Some(p))) = (bank.samples.get_mut(slot), pcm.get(slot)) {
                 entry.1 = Some(mod_header(entry.1, p, loop_start));
@@ -1002,12 +1063,14 @@ pub(crate) struct Library {
     stamps: HashMap<String, String>,
     /// Sample files read ahead off the game thread (`warm_bank`).
     warm: Warm,
+    /// Install sample file -> its range in its bank's pack (`WavSource::Packed`).
+    packed: HashMap<String, WavSource>,
 }
 
 /// Sample files read ahead on a worker thread when the scheduler picks a set (retail loads at the pick).
 #[derive(Default)]
 struct Warm {
-    jobs: Option<std::sync::mpsc::Sender<(String, PathBuf)>>,
+    jobs: Option<std::sync::mpsc::Sender<(String, WavSource)>>,
     /// File → its bytes (None: queued or being read). A dropped entry is never filled.
     ready: Arc<std::sync::Mutex<HashMap<String, Option<Vec<u8>>>>>,
 }
@@ -1017,7 +1080,7 @@ impl Warm {
         self.ready.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn request(&mut self, file: &str, path: PathBuf) {
+    fn request(&mut self, file: &str, path: WavSource) {
         {
             let mut ready = self.ready();
             if ready.contains_key(file) {
@@ -1027,14 +1090,14 @@ impl Warm {
         }
         let ready = self.ready.clone();
         let jobs = self.jobs.get_or_insert_with(|| {
-            let (tx, rx) = std::sync::mpsc::channel::<(String, PathBuf)>();
+            let (tx, rx) = std::sync::mpsc::channel::<(String, WavSource)>();
             let spawned = std::thread::Builder::new().name("audio-warm".into()).spawn(move || {
                 for (file, path) in rx {
                     let lock = || ready.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if !lock().contains_key(&file) {
                         continue;
                     }
-                    let bytes = std::fs::read(&path);
+                    let bytes = path.read();
                     let mut ready = lock();
                     match bytes {
                         Ok(b) => {
@@ -1512,7 +1575,8 @@ impl Library {
         if !overlays.is_empty() {
             info!("Game audio: content overlays {:?} ({} conflicts, {} warnings, {} rejected)", report.applied, report.conflicts.len(), report.warnings.len(), report.rejected.len());
         }
-        let mut library = Self { root, manifest, mods, loaded: HashMap::new(), failed: Default::default(), tuning_raw: raw, tuning_saved: TuningSaved::default(), stamps: HashMap::new(), warm: Warm::default() };
+        let mut library = Self { root, manifest, mods, loaded: HashMap::new(), failed: Default::default(), tuning_raw: raw, tuning_saved: TuningSaved::default(), stamps: HashMap::new(), warm: Warm::default(), packed: HashMap::new() };
+        library.packed = library.pack_sources();
         // The mod files' stamps as loaded (the hot swap compares them: a file edited later is new
         // content of the next library, `stamp`).
         for f in mod_files {
@@ -1535,7 +1599,7 @@ impl Library {
                 // Not read ahead (or still being read): read it here; a late result is dropped.
                 self.warm.forget(file);
                 let _span = super::hitch_parts::span(super::hitch_parts::FILE_READ);
-                std::fs::read(self.path(file))
+                self.wav_source(file).read()
             }
         };
         match read {
@@ -1570,9 +1634,9 @@ impl Library {
     /// Read a bank's sample files ahead on the worker (`Warm`): a location set entry's pick.
     pub(crate) fn warm_bank(&mut self, bank: &str) {
         let Some(entries) = self.manifest.banks.get(bank) else { return };
-        let files: Vec<(String, PathBuf)> = entries.iter()
+        let files: Vec<(String, WavSource)> = entries.iter()
             .filter(|e| !self.loaded.contains_key(&e.file) && !self.failed.contains(&e.file))
-            .map(|e| (e.file.clone(), self.path(&e.file))).collect();
+            .map(|e| (e.file.clone(), self.wav_source(&e.file))).collect();
         for (file, path) in files {
             self.warm.request(&file, path);
         }
@@ -1589,9 +1653,9 @@ impl Library {
 
     /// Read files ahead on the worker (`Warm`), skipping loaded and failed ones.
     pub(crate) fn warm_files<'a>(&mut self, files: impl IntoIterator<Item = &'a String>) {
-        let jobs: Vec<(String, PathBuf)> = files.into_iter()
+        let jobs: Vec<(String, WavSource)> = files.into_iter()
             .filter(|f| !self.loaded.contains_key(*f) && !self.failed.contains(*f))
-            .map(|f| (f.clone(), self.path(f))).collect();
+            .map(|f| (f.clone(), self.wav_source(f))).collect();
         for (file, path) in jobs {
             self.warm.request(&file, path);
         }
@@ -1728,7 +1792,33 @@ impl Library {
 
     /// Read a manifest-listed file (paths were validated at load).
     pub(crate) fn read(&self, file: &str) -> std::io::Result<Vec<u8>> {
-        std::fs::read(self.path(file))
+        self.wav_source(file).read()
+    }
+
+    /// Where a manifest file's bytes are: its bank's pack for an install sample, else [`Self::path`].
+    pub(crate) fn wav_source(&self, file: &str) -> WavSource {
+        self.packed.get(file).cloned().unwrap_or_else(|| WavSource::File(self.path(file)))
+    }
+
+    /// The packed install samples (entries a mod replaced carry no range and stay loose);
+    /// `SKATE_AUDIO_PACKS=0` reads the loose files instead.
+    fn pack_sources(&self) -> HashMap<String, WavSource> {
+        let mut out = HashMap::new();
+        if std::env::var("SKATE_AUDIO_PACKS").is_ok_and(|v| v == "0") {
+            return out;
+        }
+        for (stem, pack) in &self.manifest.bank_packs {
+            let Some(entries) = self.manifest.banks.get(stem).filter(|_| safe_relative(pack)) else { continue };
+            let pack: Arc<Path> = self.root.join(pack).into();
+            for e in entries {
+                if let Some([offset, size]) = e.pack
+                    && skate_mods::audio_merge::split_mod_ref(&e.file).is_none()
+                {
+                    out.insert(e.file.clone(), WavSource::Packed { pack: pack.clone(), offset, size, file: self.root.join(&e.file) });
+                }
+            }
+        }
+        out
     }
 
     /// A Splice bank for the native player: its patch tree and its samples (stream n = WAV n), or
@@ -1762,8 +1852,8 @@ impl Library {
     /// is missing or unreadable (the native runtime then plays silence of the right length).
     pub(crate) fn bank_pcm(&self, bank: &str) -> BankPcm {
         let Some(entries) = self.manifest.banks.get(bank) else { return Vec::new() };
-        let paths: Vec<PathBuf> = entries.iter().map(|e| self.path(&e.file)).collect();
-        decode_wavs(paths.iter().map(PathBuf::as_path))
+        let sources: Vec<WavSource> = entries.iter().map(|e| self.wav_source(&e.file)).collect();
+        decode_wavs(&sources)
     }
 
     /// What reading and decoding an AEMS bank needs, detached from the library so a background
@@ -1776,7 +1866,7 @@ impl Library {
             stem: stem.to_owned(),
             file: file.clone(),
             abk: self.path(file),
-            wavs: entries.iter().map(|e| self.path(&e.file)).collect(),
+            wavs: entries.iter().map(|e| self.wav_source(&e.file)).collect(),
             rebuild: entries.iter().enumerate().filter(|(_, e)| skate_mods::audio_merge::split_mod_ref(&e.file).is_some())
                 .map(|(i, _)| (i, loops.and_then(|l| l.get(&i.to_string()).copied()))).collect(),
         })
@@ -1892,7 +1982,7 @@ pub(crate) mod tests {
         assert_eq!(format!("{:?}", plain.manifest), format!("{:?}", merged.manifest));
         let (a, b) = (plain.bank_source("T").unwrap(), merged.bank_source("T").unwrap());
         assert_eq!(format!("{a:?}"), format!("{b:?}"), "same files, no header rebuilds");
-        assert_eq!(a.wavs[1], dir.join("private/audio").join("banks/T/1.wav"), "install files resolve under the audio folder as before");
+        assert_eq!(a.wavs[1], WavSource::File(dir.join("private/audio").join("banks/T/1.wav")), "install files resolve under the audio folder as before");
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2282,5 +2372,99 @@ pub(crate) mod tests {
         library.release_file(&mut assets, "ambience/a.wav");
         assert!(assets.get(clip.handle.id()).is_none() && !library.loaded.contains_key("ambience/a.wav"));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+
+    /// Pack the fixture's banks the way setup does (tools/asset_pipeline/audio_formats.py `wav_pack`).
+    fn pack_banks(dir: &Path) {
+        let audio = dir.join("private/audio");
+        let manifest_path = audio.join("audio_manifest.json");
+        let mut m: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+        let stems: Vec<String> = m["banks"].as_object().unwrap().keys().cloned().collect();
+        for stem in &stems {
+            let entries = m["banks"][stem].as_array_mut().unwrap();
+            let wavs: Vec<Vec<u8>> = entries.iter().map(|e| std::fs::read(audio.join(e["file"].as_str().unwrap())).unwrap()).collect();
+            let mut pack = b"SKWAVPK1".to_vec();
+            pack.extend((wavs.len() as u32).to_le_bytes());
+            pack.extend(0u32.to_le_bytes());
+            let mut at = 16 + 16 * wavs.len() as u64;
+            for (e, w) in entries.iter_mut().zip(&wavs) {
+                pack.extend(at.to_le_bytes());
+                pack.extend((w.len() as u64).to_le_bytes());
+                e["pack"] = serde_json::json!([at, w.len()]);
+                at += w.len() as u64;
+            }
+            wavs.iter().for_each(|w| pack.extend(w));
+            std::fs::write(audio.join(format!("banks/{stem}.pack")), pack).unwrap();
+            m["bank_packs"][stem] = serde_json::json!(format!("banks/{stem}.pack"));
+        }
+        std::fs::write(&manifest_path, m.to_string()).unwrap();
+    }
+
+    fn pcm_bits(pcm: &BankPcm) -> Vec<Option<(u32, Vec<Vec<u32>>)>> {
+        pcm.iter().map(|p| p.as_ref().map(|p| (p.rate, p.channels.iter().map(|c| c.iter().map(|v| v.to_bits()).collect()).collect()))).collect()
+    }
+
+    /// A packed bank decodes to the same PCM as its loose WAVs, read from the pack alone; a damaged
+    /// pack falls back to the loose files; a mod's replacement stays its own file.
+    #[test]
+    fn packed_banks_decode_the_same_as_loose_wavs() {
+        let (dir, mods) = content_fixture("packed");
+        let loose = Library::load(&dir).unwrap();
+        let (want_x, want_t) = (pcm_bits(&loose.bank_pcm("x")), loose.bank_source("T").unwrap().load().unwrap());
+        assert!(want_x.iter().all(Option::is_some));
+        pack_banks(&dir);
+        let audio = dir.join("private/audio");
+        let moved = dir.join("loose");
+        std::fs::rename(audio.join("banks/x"), &moved).unwrap();
+        std::fs::rename(audio.join("banks/T"), dir.join("loose_t")).unwrap();
+        let packed = Library::load(&dir).unwrap();
+        assert!(matches!(packed.wav_source("banks/x/1.wav"), WavSource::Packed { .. }));
+        assert!(matches!(packed.wav_source("ambience/bed.wav"), WavSource::File(_)), "only bank samples are packed");
+        assert_eq!(pcm_bits(&packed.bank_pcm("x")), want_x, "the whole bank from the pack");
+        let (bank, pcm) = packed.bank_source("T").unwrap().load().unwrap();
+        assert_eq!((format!("{bank:?}"), pcm_bits(&pcm)), (format!("{:?}", want_t.0), pcm_bits(&want_t.1)));
+        let one = packed.read("banks/T/1.wav").unwrap();
+        assert_eq!(one, test_wav(400, 48000, 400), "one sample read by its range");
+        // A damaged pack: the loose files answer.
+        std::fs::rename(&moved, audio.join("banks/x")).unwrap();
+        std::fs::write(audio.join("banks/x.pack"), b"SKWAVPK1").unwrap();
+        assert_eq!(pcm_bits(&packed.bank_pcm("x")), want_x, "loose fallback for the whole bank");
+        assert_eq!(packed.read("banks/x/0.wav").unwrap(), test_wav(100, 48000, 100), "loose fallback for one sample");
+        // A mod's replacement of slot 1 is read from the mod; slot 0 still from the pack.
+        std::fs::rename(dir.join("loose_t"), audio.join("banks/T")).unwrap();
+        std::fs::write(mods.join("audio/a.wav"), test_wav(50, 48000, 7)).unwrap();
+        let o = overlay(serde_json::json!({"version": 1, "replace": {"samples": {"T": {"1": "audio/a.wav"}}}}));
+        let (merged, _) = Library::load_with(&dir, &[OverlaySource { id: "dev.a", root: &mods, overlay: &o }]).unwrap();
+        let source = merged.bank_source("T").unwrap();
+        assert!(matches!(source.wavs[0], WavSource::Packed { .. }));
+        assert_eq!(source.wavs[1], WavSource::File(mods.join("audio/a.wav")));
+        let (_, pcm) = source.load().unwrap();
+        assert_eq!(pcm_bits(&pcm)[0], pcm_bits(&want_t.1)[0]);
+        assert_eq!(pcm[1].as_ref().unwrap().channels[0].len(), 50);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// On the install: every packed sample's bytes are its loose WAV's, and every bank decodes the same
+    /// from its pack as from its loose files (after a Refresh Game Files that wrote the packs).
+    #[test]
+    #[ignore = "needs the private install data"]
+    fn install_packs_hold_the_loose_wavs() {
+        let assets = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets"));
+        let Ok(mut library) = Library::load(assets) else { panic!("missing private data: no audio manifest") };
+        assert!(!library.packed.is_empty(), "missing private data: the install has no bank packs");
+        let stems: Vec<String> = library.manifest.bank_packs.keys().cloned().collect();
+        let mut packed = Vec::new();
+        for stem in &stems {
+            for e in &library.manifest.banks[stem] {
+                let WavSource::Packed { pack, offset, size, file } = &library.packed[&e.file] else { panic!("{} is not packed", e.file) };
+                assert_eq!(read_range(pack, *offset, *size).unwrap(), std::fs::read(file).unwrap(), "{}", e.file);
+            }
+            packed.push(pcm_bits(&library.bank_pcm(stem)));
+        }
+        let packs = std::mem::take(&mut library.packed);
+        let loose: Vec<_> = stems.iter().map(|stem| pcm_bits(&library.bank_pcm(stem))).collect();
+        assert!(loose == packed, "every bank decodes the same from its pack");
+        println!("{} banks, {} packed samples, identical", stems.len(), packs.len());
     }
 }
