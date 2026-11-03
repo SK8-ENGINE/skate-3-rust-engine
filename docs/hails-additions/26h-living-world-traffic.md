@@ -281,7 +281,7 @@ player's nearest irradiance probe `sh[0]` (eased over 0.35 s). Under that bridge
 3 to 5 times darker than retail's constant, so a car on the bridge darkened the bridge's baked shade below it.
 
 **Retail evidence.**
-- [code, shader microcode] `data/big/shaders_final.big`, read with `.claude/skills/living-world/tools/eb_big_extract.py`
+- [code, shader microcode] `data/big/shaders_final.big`, read with `tools/claude-skills/living-world/tools/eb_big_extract.py`
   and `xenos_disasm.py`. Every world receiver pixel shader samples one blurred shadow atlas (`shadowAtlasBlurred`,
   `CSM_Mat_Row0..2`, `g_CSMBlurBias`): `defaultenvironment_defaultPS`, `environmentdiffuse_defaultPS`,
   `baseterrain_defaultPS`, `baseenvironment*`, `decal*environment*`, `transparent*`, `building_*`, `advertisement`,
@@ -1738,7 +1738,7 @@ Detail moved out of the code comments of `crates/skate-game/src/graph_host/motio
 ### Skitch graph nodes
 
 The skitch motion graph nodes (doc 26h "Skitching step 4h"). Retail (TU3, evidence only; re-implemented; `.local/research/npc/b60-skitch-graph-nodes.md`, b58 part 2; main read the `anim_skitching/default` record):
-- the behaviours bind `anim_skitching/default` (`8289D550`): +0 a PointNegGraphData8 (the absorb curve over the closing rate, ground+284), then six floats at +80..+100 in the schema's fixed layout (read with `.claude/skills/aems-port/tools/vault_layout.py 07D39B41AACEE50F`): +80 0.1, +84 0.25, +88 0.85, +92 0.05, +96 0.83 (`LongSkitchIntoReachTime`), +100 0.121;
+- the behaviours bind `anim_skitching/default` (`8289D550`): +0 a PointNegGraphData8 (the absorb curve over the closing rate, ground+284), then six floats at +80..+100 in the schema's fixed layout (read with `tools/claude-skills/aems-port/tools/vault_layout.py 07D39B41AACEE50F`): +80 0.1, +84 0.25, +88 0.85, +92 0.05, +96 0.83 (`LongSkitchIntoReachTime`), +100 0.121;
 - SkitchingBehaviour (`82BBC390`) each update: "Crouch" = ground+280 + rec+100, "PushSpeed" = ground+308, "absorbspeed" toward graph(ground+284) by at most 0.04;
 - EnterSkitchingBehaviour (`82BBC538`): "Crouch" the same way (its "reachspeed" is not ported yet);
 - IsSkitchingWithAbsorb (`82BBBD00`): state 104 and graph(ground+284) > 0;

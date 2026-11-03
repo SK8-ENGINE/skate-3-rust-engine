@@ -218,7 +218,7 @@ fix); no setup re-run (the GLBs were right). Deterministic: the basis depends on
 **Files.** `crates/skate-game/src/living_world/peds.rs` (`reference_globals`, `ped_bone_basis`,
 `ped_joint_globals`, `PedPuppet::basis`, binding and pose), `crates/skate-game/src/living_world/peds_tests.rs`
 (new test; the dump writes the reference pose first), `crates/skate-data/tests/ped_anim_data.rs` (new data test),
-local `.claude/skills/living-world/tools/render_glb.py` (`--bone-basis auto|none|skater`, auto = engine rule).
+local `tools/claude-skills/living-world/tools/render_glb.py` (`--bone-basis auto|none|skater`, auto = engine rule).
 
 **Verification.**
 - `ped_skin_rests_in_the_reference_pose_and_never_twists_bones` (skate-game): rig frames with spine x up and leg
@@ -1063,7 +1063,7 @@ Test descriptions moved out of the code comments of `crates/skate-game/src/livin
 
 ### Ped pose dump
 
-Visual check helper (no window): with `SKATE_PED_POSE_DUMP=<file.json>` and the data roots, write native model-space matrices (all 50 rig bones, column-major) for `.claude/skills/living-world/tools/render_glb.py --pose`: for the `default` set and up to two more sets (with a model each), poses mid-blend into start / walk / stop / idle / both turns, mid walk, mid stop, idle and mid right / mirrored left turn. Each pose carries its label, set and model.
+Visual check helper (no window): with `SKATE_PED_POSE_DUMP=<file.json>` and the data roots, write native model-space matrices (all 50 rig bones, column-major) for `tools/claude-skills/living-world/tools/render_glb.py --pose`: for the `default` set and up to two more sets (with a model each), poses mid-blend into start / walk / stop / idle / both turns, mid walk, mid stop, idle and mid right / mirrored left turn. Each pose carries its label, set and model.
 
 ## Code reference: skate-data/tests/ped_nav_data.rs
 

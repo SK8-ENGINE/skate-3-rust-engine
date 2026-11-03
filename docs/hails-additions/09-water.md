@@ -1083,7 +1083,7 @@ body areas, `slow_pca`, `water_time`, tests), `retail_world.wgsl`, `retail_mater
 User (final living world todo, verbatim): "lets begin optimizing the better water opt in so its efficient but also
 looks clean and realistic but not out of place for the game itself".
 
-Method: `.local/research/water-look-bench.ps1` (release build of world/living-world b87342e6, `--teleport
+Method: `tools/dev-bench/water-look-bench.ps1` (release build of world/living-world b87342e6, `--teleport
 dist_downtown_canalplaza`, idle, muted, windowed 1280x800, FPS limit off through its own settings folder, trace-all
 with `SKATE_PERF_GPU_EVERY=1`; 60 s per run, first 25 s dropped; two rounds, the second in reverse order; RTX 4080
 SUPER). Each mode writes its own `settings/water-look.json`. Code map: research b250 (`.local/research/b250-better-water-cost.md`).
@@ -1230,8 +1230,8 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
   only through the lighting, and the waves barely tilt it (luma stdev 1.8 over the water vs the canal's 13 to 17).
   Third key `fountain_ripple` (frame-state row `fountain_ripple`): a gain on the basin normal's tilt (0..8). Better
   Water's `fountain_waves` goes 0.5 -> 1 and `fountain_tile` 4 -> 2 m (finer ripple).
-- **Matching [captures, `--verify` with dev mod `.local/poc-tests/fountain-mods`, `.local/poc-tests/fountain-capture.sh`,
-  stats `.local/poc-tests/crop-stats.py`]:** the camera 2.7 to 3.3 m over the water looking along it, water-only crops.
+- **Matching [captures, `--verify` with dev mod `tools/dev-bench/mods`, `tools/dev-bench/fountain-capture.sh`,
+  stats `tools/dev-bench/crop-stats.py`]:** the camera 2.7 to 3.3 m over the water looking along it, water-only crops.
 
   | | mean sRGB | blue - red | luma stdev |
   |---|---|---|---|
@@ -1258,7 +1258,7 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
   shading. A first version also gave every family 30 pixel the basin look (`fountain_body` colour and reflection
   share); the user then found the DownTown falls drawn as "incomplete and mispositioned" grey cards (ShareX
   skate3rust_OOOr6Nploq, a clip of 2026-10-27). Fly cam captures (`DEBUG_CAM_POSE` spots [-215.97, 5.62, 498.61] and
-  [-242.81, 2.55, 563.18], `.local/poc-tests/falls-capture.sh`): with Better Water off both falls are dark reflective
+  [-242.81, 2.55, 563.18], `tools/dev-bench/falls-capture.sh`): with Better Water off both falls are dark reflective
   water filling the opening, with it on a flat pale sheet. That part was taken out again. The dark band on the right of
   the large falls is there in both looks (map lighting, not the look layer).
 - **Verification:** `fountains_only_with_better_water_and_mods_can_set_them` (`water_look`), naga validation, the fly cam
@@ -1347,7 +1347,7 @@ Water body sizes for the water shader. Maps split one body of water into several
 - **Change (dev tool, not retail):** while the debug fly cam is on (D-pad right + R3; since 2026-10-27 only with the overlay's Opt-Ins > Debug > Fly Cam on, doc 26b), Y logs
   `DEBUG_CAM_POSE eye=[x, y, z] look=[x, y, z] fov=deg` read from the drawn gameplay camera (look = 10 m along the
   view; the first version logged the fly cam matrix, which did not match the drawn view). The values go straight into
-  `.local/poc-tests/falls-capture.sh` (muted `--verify` capture with the same camera).
+  `tools/dev-bench/falls-capture.sh` (muted `--verify` capture with the same camera).
 - **Files:** `crates/skate-game/src/debug_cam.rs`.
 
 ## Better Water settings file

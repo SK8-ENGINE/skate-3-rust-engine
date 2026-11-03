@@ -687,7 +687,7 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
   B Finished popup with a "Save to PC" row), the `{0:time}` format, the L3 icon missing next to Hide.
 
 ## Retail instant replay screen, step 2: help (Start) and hide / show (L3) (2026-10-20)
-- The replay movie's own SetState (read from its actions with `.claude/skills/retail-menus/tools/apt_dump.py`)
+- The replay movie's own SetState (read from its actions with `tools/claude-skills/retail-menus/tools/apt_dump.py`)
   names its states [data]: 999 kMovePlayHead, 1000 / 1001 kMoveStartMarker / kMoveEndMarker, 1002 / 1003
   kShowEditor / kHideEditor (the whole panel; the movie then shows its "Show" prompt), 18 / 19
   kStartPlaybackReplay / kStopPlaybackReplay, 20 kOnlineInstantReplayMode, 21 / 22 kShowToggle / kHideToggle (only

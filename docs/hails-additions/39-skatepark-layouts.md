@@ -134,7 +134,7 @@ Not retail (ours, the same outcome): a layout change reloads the map instead of 
 join the static pass, so under the 40-record cap they come before the props (retail queries them after the DMO
 provider; parks have few props).
 
-Recipe precedence across packs (checked 2026-10-21, `.local/tools/recipe-precedence.py`): the disc's `_000` and the packs'
+Recipe precedence across packs (checked 2026-10-21, `tools/dev-bench/recipe-precedence.py`): the disc's `_000` and the packs'
 `_005` / `_010` / `_012` / `_015` / `_017` static recipes share 664 of 682 piece ids and the dynamic `_000` / `_015` /
 `_017` share 140 of 141; no shared id has a different name, model (arena id) or cap row, so the load order cannot
 change a piece. Setup reads them disc first, then the packs.
@@ -212,12 +212,12 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
 ## Back-to-back faces between pieces are removed; edges pair with the best neighbour (2026-10-21, USER-ASKS 221)
 
 - **Problem (laptop session 2026-10-21 21:38, the user):** "in the skate.park maps still lots of physics and collision
-  issues both at seams between objects and just in general around objects". The trace (`.local/tools/park-catches.py`
+  issues both at seams between objects and just in general around objects". The trace (`tools/dev-bench/park-catches.py`
   on `audio_state.tsv`): on Back Lot the wheels left the ground and the board rose 5 to 15 cm on flat ground exactly on
   the line where two `aa_PlazaPad_sm_Downtown` pads meet (x -151.77 and -139.77, 0.749 m high). Two dead stops (Back
   Lot into the foot of `ab_stairs_sm`, DownTown park into a bench / steep ramp toe) are real collisions, not seams.
 - **Cause [data]:** each pad has its own side wall on the shared face, so after fusing the top seam edge is shared by
-  four triangles (two tops +Y, two walls +X / -X; `.local/tools/park-seam-edges.py`). Our pairing took the first
+  four triangles (two tops +Y, two walls +X / -X; `tools/dev-bench/park-seam-edges.py`). Our pairing took the first
   reversed edge it met, so a top could pair with a wall: a 90 degree convex lip under the wheels.
 - **Retail [code]:** `82876188` runs, before pairing, `828755B8`: two triangles of DIFFERENT pieces (triangle +0x14)
   sharing an opposite-wound edge whose score is above 2.99 (`822F90E8`) or below -0.99 (`822F8E60`) are faces lying

@@ -48,7 +48,7 @@ Two smaller findings along the way:
   two NPCs and the player, 240 ticks, every deck's position and velocity bit-equal between the serial order and the
   parallel workers. `the_player_is_bit_identical_with_a_simulated_npc_skater_in_the_same_world` still passes.
 - skate-game physics + living-world suites (258 passed), skate-core board world (23 passed).
-- Muted runs at the PCU Library (`.local/poc-tests/npcsim.sh`, `MAP=University TELEPORT=dist_university_library`,
+- Muted runs at the PCU Library (`tools/dev-bench/npcsim.sh`, `MAP=University TELEPORT=dist_university_library`,
   radius 150 m, four dev mods), new `FRAME_HITCH` phases `solve_queries / solve_contacts / solve_solver / solve_rest /
   solve_npc` and `NPC_SIM_STEPS`:
 
@@ -137,7 +137,7 @@ Goal: lower frame time with NPC skaters, peds and traffic around, with gameplay 
 - New per-second lines under `SKATE_SYSTEM_TIMING=1`: `LIVING_TIMING` (the living world's own spans, ms per frame),
   `PHYSICS_PHASES` (the physics phase timers, which `FRAME_HITCH` only prints on hitch frames) and `MATERIAL_EVENTS` (material
   assets added / modified per second per type).
-- Bench: `.local/perf-bench/lw_bench.sh` (release exe, University library, muted, player off the board, NPC Skater Physics
+- Bench: `tools/dev-bench/lw_bench.sh` (release exe, University library, muted, player off the board, NPC Skater Physics
   on, 150 s; marks a run DISTURBED when another game process runs at the same time) and `system_timing_summary.py`.
 
 ### Where the time goes (desktop, release, 2 NPC skaters, 15 peds)

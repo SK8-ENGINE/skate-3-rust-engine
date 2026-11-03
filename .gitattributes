@@ -4,3 +4,5 @@ sdk/examples/** text eol=lf
 sdk/examples/**/*.glb binary
 mods/*.zip binary
 sdk/examples/**/*.wav binary
+# Shell tools run in Git Bash, which needs LF line endings.
+tools/**/*.sh text eol=lf

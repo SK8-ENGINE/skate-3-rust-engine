@@ -104,7 +104,7 @@ cancels the fade), not to the line end.
   height > 1000 m) and the per-skater check `sub_8245A9B8` (fading state below opacity 0.2; character wanted
   elsewhere while over budget). [recomp] measured lives 13-28 s median, despawn distance median 115-123 m.
 - [data] 742 of 760 DownTown lines (406 / 423 Industrial, 484 / 508 University) have another line's start within
-  4 m of their end; median end-to-start distance 0.1 m (tool `.claude/skills/living-world/tools/line_ends.py`).
+  4 m of their end; median end-to-start distance 0.1 m (tool `tools/claude-skills/living-world/tools/line_ends.py`).
 
 **Change.** At the last node the cursor continues on the next line exactly like that: unused lines whose start
 lies within `ChainConfig::radius` (retail 4 m) of the end, at most 16 in id order (deterministic; retail walks a
@@ -630,7 +630,7 @@ DownTown baseline (radius 150 m, 150 s, player idle): 17 bails, 79 on/off-path s
 ### Verification
 - skate-core: `ai_record` (steering gate), `ai_controller` (respawn node), `path_follow` (lost radius / lane edges /
   speed gate / node advance / reattach / nearest node); living_world 290 passed.
-- Muted DownTown runs (`.local/poc-tests/npcsim.sh`, radius 150 m, up to 3 sims, player idle):
+- Muted DownTown runs (`tools/dev-bench/npcsim.sh`, radius 150 m, up to 3 sims, player idle):
 
 | build | length | bails | hitches over 100 ms (excl. the two load frames) |
 |---|---|---|---|
@@ -702,7 +702,7 @@ the user rarely saw one ride past (user: "the skaters seemed to crash as soon as
 - Crash fix (same day): `NpcSim::respawn_node` keeps its line; a walk-back hand back could chain the cursor to the next
   line during the respawn wait, and the old line's node index ran past the new line (`npc_avoid.rs:204`, index 103 of 70).
 
-**Verification.** Muted 90 to 150 s runs at the PCU Library (`.local/poc-tests/npcsim.sh`, `MAP=University
+**Verification.** Muted 90 to 150 s runs at the PCU Library (`tools/dev-bench/npcsim.sh`, `MAP=University
 TELEPORT=dist_university_library`, radius 150 m):
 
 | placement | bails | within 1 s of a placement |

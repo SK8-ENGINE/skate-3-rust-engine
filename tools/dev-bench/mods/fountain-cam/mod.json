@@ -1,0 +1,9 @@
+{
+  "id": "dev-fountain-cam",
+  "api": 2,
+  "name": "Fountain camera (dev)",
+  "version": "0.1.0",
+  "author": "Hails",
+  "description": "Dev only: Better Water on and a fixed camera for --verify captures of fountains and canals (SPOT edited per run).",
+  "entry": "main.lua"
+}

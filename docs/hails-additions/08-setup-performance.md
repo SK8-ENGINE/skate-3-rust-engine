@@ -170,7 +170,7 @@ User: "run an optimization pass over our scripts that extract assets with the go
 introducing any new issues into the export process."
 
 **Measured first.** A full fresh setup of the disc (no DLC) into a scratch base on K:, with the native RefPack DLL and
-the dev game exe the launcher's refresh uses, every progress line timestamped (`.local/perf-bench/setup_bench.py`: also
+the dev game exe the launcher's refresh uses, every progress line timestamped (`tools/dev-bench/setup_bench.py`: also
 a sha256 manifest of every installed file). Baseline 228.3 s. The stages before the maps ran one after another: the
 HUD and menu movies 31 s, audio 59 s (of it the bank decode loop 36 s, the ambience beds 10.5 s, the region read
 11 s), the living world 28 s; then maps beside the customiser 61 s, park layouts 17 s, the final validation 18 s.
@@ -337,7 +337,7 @@ the workers next (it changes the customiser fingerprint, so every install redoes
   (ddf2231a) slowed its maps. Not so: the steps before the maps, which run none of that code, took 7.7 to 8.2 s in
   the afternoon against 5.8 s in the morning, so the laptop itself ran about 35% slower. A same-session test of all
   three versions (below) settled it.
-- **Desktop pinned to 16 CPUs** (8 P-cores with hyperthreading, `.local/perf-bench/with_affinity.py 0xFFFF`) and
+- **Desktop pinned to 16 CPUs** (8 P-cores with hyperthreading, `tools/dev-bench/with_affinity.py 0xFFFF`) and
   `SKATE_SETUP_CORES=12` (the laptop's budget), two runs each:
 
 | version | total s | 10th map | library | roster |
@@ -510,7 +510,7 @@ machine); clips sharing a folder stay together in index order, so the result is 
 the per-file resolve and the inside-the-installation check stay. `pipeline-equivalence.json` gets the proven pair for
 the audio fingerprint, so existing installs do not redo their audio. `group_receipts.py` is in no fingerprint.
 
-**Verification** (bench `.local/perf-bench/setup_bench.py`, skill setup-bench; `--keep` added for refresh runs):
+**Verification** (bench `tools/dev-bench/setup_bench.py`, skill setup-bench; `--keep` added for refresh runs):
 
 | Run | Before | After |
 | --- | --- | --- |
@@ -595,7 +595,7 @@ session-marker `hud.json` hashes absolute archive paths (differs between ISO run
 
 **Problem.** The game took about 6.5 s from `main` to the game window on a warm start and 33 to 47 s on a cold one (desktop, install on a hard disk, University). The logged `STARTUP_LOADING done in` only counted from the app build, not the 2 s before it.
 
-**Measuring.** `STARTUP_STEP <ms since main> <step>` lines (`startup_loading::mark`): every start-up stage, the first frame, each loading hold's release, the audio start's phases, and "game shown"; they stop once the game shows. Bench: `.local/perf-bench/startup_bench.sh <exe> <out> [s]` (muted University start, the timeline; `TIMING=1` adds the first SYSTEM_TIMING line = the Startup systems; `COLD=1` first drops the install and the exe's folder from the Windows file cache with `evict.ps1`, which opens each file unbuffered: no admin needed).
+**Measuring.** `STARTUP_STEP <ms since main> <step>` lines (`startup_loading::mark`): every start-up stage, the first frame, each loading hold's release, the audio start's phases, and "game shown"; they stop once the game shows. Bench: `tools/dev-bench/startup_bench.sh <exe> <out> [s]` (muted University start, the timeline; `TIMING=1` adds the first SYSTEM_TIMING line = the Startup systems; `COLD=1` first drops the install and the exe's folder from the Windows file cache with `evict.ps1`, which opens each file unbuffered: no admin needed).
 
 **Where the time went.**
 - Warm (6.5 s): config + map 1.1 s (the map's fingerprint hash about 0.3 s of it), physics 0.7 s, skater 0.2 s, renderer 0.3 s, the Startup systems 3.1 s (`world::spawn` 1.2 to 1.9 s, `retail_menu_movies::load` 1.3 s, `scoring_hud::setup` 0.4 s), the first frames 1 s.

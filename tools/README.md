@@ -14,6 +14,7 @@ game; none of them contain game code or data. Default work folders are under `.l
 | [`audio-e2e/`](audio-e2e/README.md) | Scripted scenarios for the headless audio render and analysis of the renders (diffs, levels, voices, bus share). |
 | [`audio-bench/`](audio-bench/README.md) | Audio performance: hashed e2e bench runs, timing summaries, emitter bank memory. |
 | [`recomp-trace/`](recomp-trace/README.md) | **For use with the Skate 3 recomp's research hooks** ([`research-hooks` branch](https://github.com/Hailey-Ross/skate3recomp/tree/research-hooks)): read and analyse trace sessions. Reference only; you build the recomp and set up the paths yourself. |
+| [`dev-bench/`](dev-bench/README.md) | The benches and test runs behind the docs' numbers: frame time, start-up (cold file cache too), map switches, NPC runs, setup timing with output hashes, captures. |
 | [`regression-checks/`](regression-checks/README.md) | Map validation and collision counts, baked spawns, customiser outputs against your own baselines; a muted crash smoke test per map. |
 | [`setup-equivalence/`](setup-equivalence/README.md) | Prove a faster setup path gives identical bytes (district stream loader, native RefPack DLL). |
 | [`collision-inspect/`](collision-inspect/README.md) | Extract a district's collision for analysis: triangles, surfaces at a point, surface ids and flags, surfaceless meshes. |

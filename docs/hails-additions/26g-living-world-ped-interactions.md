@@ -1810,7 +1810,7 @@ Peds carried their hand props but never used them, so the phone ring, the call l
 - **Moddability:** new mod block `living_world.ped_nav {steer_rate, turn_edges, stall_seconds, stuck_distance,
   stuck_seconds, crosswalk}`, held in `LivingWorldSettings` (reset when the mod is disabled) and copied into the nav
   settings; before this no ped nav value (crosswalk rule included) was reachable from a mod.
-- **Tools:** `.claude/skills/recomp-research/tools/ped_face_rate.py` (PEDFACE) and `ped_turn_rate.py` (PEDXYZ);
+- **Tools:** `tools/claude-skills/recomp-research/tools/ped_face_rate.py` (PEDFACE) and `ped_turn_rate.py` (PEDXYZ);
   scripts `.local/recomp/scripts/pedface_pcu_library.txt` / `pedface_stand.txt`. Credit: the skate3recomp static
   recompilation and its research hooks.
 - **Verification:** `ped_nav_is_mod_reachable_and_reset_on_disable`; ped suites (see the commit). Not play-tested yet:

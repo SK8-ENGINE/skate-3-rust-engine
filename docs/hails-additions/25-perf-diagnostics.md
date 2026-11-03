@@ -65,7 +65,7 @@ the lows and the hitch count are what describe stutter; a mean cannot.
   wall_unix_s  frame  frame_ms  fixed_steps  fixed_ms  main_ms  hitch  median_ms
   ```
   `wall_unix_s` (UTC) lines rows up with `logs\game-*.stderr.log` and the audio state log; `hitch` is `HITCH` or
-  empty. Reading tool (fork-local): `.claude/skills/optimisation/tools/frame_log_summary.py`.
+  empty. Reading tool (fork-local): `tools/claude-skills/optimisation/tools/frame_log_summary.py`.
 - `graphics_menu.rs`: row 28 "Frame-time counter On/Off" in GRAPHICS (after the audio controls), saved as
   `frame_stats` in `settings/graphics.json`, **off by default** (old files load as off).
 - Moddability: `sdk.snapshot.frame` (read-only): `frame, ms, fixed_steps, main_ms, fixed_ms, hitch, window_s,
@@ -243,7 +243,7 @@ New module `tools/asset_pipeline/setup_budget.py` (its name matches no fingerpri
 
 ### Phase 5: inside one map
 
-Measured on DownTown with `main` (`.local/perf-bench/map_bench.py`, validation stubbed): extract 11.5 s (cold
+Measured on DownTown with `main` (a local script, not kept, validation stubbed): extract 11.5 s (cold
 disk) / 1.0 s (warm), prepare 122–128 s, collision archive 2.7 s, write_map 26.8–29.2 s, props 8.5–10.6 s,
 hash + cleanup 2.4–3.1 s. (`prepare` is dominated by stream decoding, which PR G #29 cuts; not part of this PR.)
 
@@ -273,7 +273,7 @@ Rejected, with numbers:
 
 ### Equivalence (byte-identical)
 
-- **Every district, every output.** `.local/perf-bench/all_maps.sh` converts each of the 10 districts with
+- **Every district, every output.** a local script (not kept) converts each of the 10 districts with
   `main`'s tools (`git archive main tools`) and with this branch, alternating per map, into the same scratch
   stage path (the WMET block embeds the stream path), and hashes every output: `maps/<map>.skate`,
   `maps/<map>.irradiance`, `native-props/<map>.skate/*`. **ALL IDENTICAL** (10/10 districts, 3–4 files each),
@@ -322,7 +322,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
 - Smoke runs (muted is not available on `main`; `SKATE_REPORT_CHILD=1`, `--verify`, University, a settings copy
   with the counter on): the overlay renders (screenshot), the log is written (v1 header, 480–2,047 rows), no
   panics or errors; `frame_log_summary.py` reads it; every row has `main_ms <= frame_ms`.
-- Full fresh setup into a scratch base (`.local/perf-bench/full_setup.py`, `default.xex`, 3 map workers), `main` vs
+- Full fresh setup into a scratch base (a local script, since replaced by `tools/dev-bench/setup_bench.py`, `default.xex`, 3 map workers), `main` vs
   branch, run back to back: total **445.6 → 434.6 s**; map stage 183.1 → 179.8 s (DownTown is the long pole and its
   `prepare` stream decode, cut by #29, dominates); customiser 228 → 234 s (unchanged code; runs after the maps on
   `main`). Both: 0 warnings. Single runs on a shared machine: the per-district A/B above is the reliable number.
@@ -361,7 +361,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   1. `damaged()` re-read and SHA-256'd every file of every group not being rebuilt, on every refresh (~7 GB);
   2. the new installation was then built by copying the previous one with `shutil.copy2`; only unchanged maps and
      complete character sets were hard-linked, so audio, stock, living world, park layouts ... were full copies.
-  Measured on a bench copy (`.local/setup-speed/refresh_bench.py`, fork-local), cold disk, first run: the audio
+  Measured on a bench copy (`tools/dev-bench/refresh_bench.py`, fork-local), cold disk, first run: the audio
   check alone 175 s, the copy 158 s, the hud rebuild 38 s.
 - **Change:**
   - A: the audio group's files (4.9 GB), when the refresh does not rebuild audio (just verified by `damaged()`), are
@@ -391,7 +391,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
 - **Tests:** `tools/test_setup_shared_links.py` (in-place write caught, replaced / removed files pass, `_write` leaves
   the old copy alone, receipt times: recorded, newer time hashed and caught, same size + time trusted, old entries
   hashed and stamped); setup recovery / customiser / versions tests 26 OK. On the real bench installation
-  (`.local/setup-speed/rehash_check.py`): untouched passes without hashing (9.5 s), one byte changed in a 29 MB audio
+  (`tools/dev-bench/rehash_check.py`): untouched passes without hashing (9.5 s), one byte changed in a 29 MB audio
   file is caught, the original bytes with a new time pass, the file is restored.
 - **Launcher (C):** a working-tree version's build stamp now hashes only the exe's inputs (crates, vendor, Cargo.*,
   .cargo, docs/images, maps), so a `tools\` edit no longer rebuilds the game (`tools/steam-launcher/launcher.ps1`).
@@ -419,7 +419,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   are the same and the bed starts in the same frame; only when the file is read moves. A map whose `.skate` AUDO tag
   names another district (known only after the load) reads the guess and its own beds as before.
 - **Not changed (decided with the user):** holding the overlay longer: both slow frames were already behind it.
-- **Verification:** muted run (`.local/tools/frame-time-run.ps1`, University, `SKATE_MAP_SWITCH=25:DownTown`): the
+- **Verification:** muted run (`tools/dev-bench/frame-time-run.ps1`, University, `SKATE_MAP_SWITCH=25:DownTown`): the
   read-ahead queued 6 beds 4.6 s before the commit (the same 6 the map keeps resident), no ambience file read at
   the commit, the slowest switch frame 282 ms (render wait 222 ms, emitter banks 50 ms). The disk cache was warm
   from the user's session, so the cold-disk gain is not measured yet. Test
@@ -447,7 +447,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   The data stays the files the content layer resolves; nothing new is hard-coded.
 - **Tests:** `map_read_ahead::tests` (a part goes only to its map and generation, once; peds only with the same nav
   rules); living_world, map_transition, retail_character and frame_timing tests.
-- **Open:** measure the commit frame in a switch run (`.local/tools/frame-time-run.ps1`, `SKATE_MAP_SWITCH`). The
+- **Open:** measure the commit frame in a switch run (`tools/dev-bench/frame-time-run.ps1`, `SKATE_MAP_SWITCH`). The
   emitter banks and the render upload: next two sections.
 
 ## Map switch: sound banks read during the load (2026-10-24, USER-ASKS 301)
@@ -474,7 +474,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   `emitters::tests::banks_read_ahead_for_the_spawn_are_the_first_frames_banks` (DownTown, data-gated: for spawn
   points across the district the queued banks are exactly the first frame's requests); the emitter, world source and
   installed map transition tests.
-- **Open:** measure the commit frame in a switch run (`.local/tools/frame-time-run.ps1`, `SKATE_MAP_SWITCH`).
+- **Open:** measure the commit frame in a switch run (`tools/dev-bench/frame-time-run.ps1`, `SKATE_MAP_SWITCH`).
 
 ## Map switch: the render upload (2026-10-24, USER-ASKS 301, 303)
 
@@ -497,7 +497,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   (installed transition test `upload_slices=`).
 - **Tests:** `map_render::tests::a_slice_takes_assets_in_order_up_to_the_budget_and_at_least_one`; the installed map
   transition test runs the slices to the end after each commit.
-- **Open:** a switch run to measure the render frames per slice (`.local/tools/frame-time-run.ps1`,
+- **Open:** a switch run to measure the render frames per slice (`tools/dev-bench/frame-time-run.ps1`,
   `SKATE_MAP_SWITCH`); the largest single texture array bounds a slice.
 
 ## Optimisation pass: the 2026-10-24 evening work (USER-ASKS 327)
@@ -569,7 +569,7 @@ approaching skater") and the camera slow-motion subject gate (doc 21 "Camera slo
   points; systems with no order between them run in one fixed order, which is one of the orders the multi-threaded
   executor already picks from frame to frame. Systems that use parallel iteration inside still do.
 - **What the pauses are (USER-ASKS 330):** a Chrome trace (`--trace <file> --trace-seconds 30`, 20 steps late in the
-  capture, `.local/perf-bench/tick_gaps.py`): of a 2.79 ms traced step, 0.365 ms has no system running on any thread.
+  capture, `tools/dev-bench/tick_gaps.py`): of a 2.79 ms traced step, 0.365 ms has no system running on any thread.
   No single cause: about 5 us at each hand-off between systems, plus about 20 us for each of the near-empty
   `FixedFirst`, `FixedPostUpdate` and `FixedLast` (Bevy's gizmo and message systems: the multi-threaded executor's
   start-up per schedule run). Trace-all itself does not cost the tick (plain frame log vs trace-all, tick frames:
@@ -671,7 +671,7 @@ Change (`crates/skate-game/src/performance.rs`):
 - Bevy smooths render diagnostics over about 0.1 s, so with every frame sampled the report already held roughly the newest frames; with one frame in 30 it holds the newest sampled frame. Readbacks in flight are collected on the next sampled frame, so values arrive up to one interval late.
 - Nothing else changes: frame log, audio state log, perf windows, render phase split and log lines are written by the same code as before.
 
-Measured (release build, same build and scene for every mode: University spawn, idle, muted, windowed 1280x800, FPS limit off through a separate settings folder, RTX 4080 SUPER, Vulkan; 60 s per run, first 25 s dropped; two rounds, the second in reverse order; tool `.local/research/traceall-gpu-bench.ps1`):
+Measured (release build, same build and scene for every mode: University spawn, idle, muted, windowed 1280x800, FPS limit off through a separate settings folder, RTX 4080 SUPER, Vulkan; 60 s per run, first 25 s dropped; two rounds, the second in reverse order; tool `tools/dev-bench/traceall-gpu-bench.ps1`):
 
 | Mode | Round 1 frame ms median / p95 | Round 2 frame ms median / p95 | Main ms median (r1 / r2) |
 |---|---|---|---|
@@ -930,7 +930,7 @@ Change:
   (start, a mod reload on the same map, a failed build) it builds it as before. The ground is ready on the same tick,
   from the same triangles, so mods see the same world.
 - Diagnostics: `SKATE_MAP_SWITCH=<seconds>:<map .skate path>` requests one map switch that long after start, for
-  unattended measurement (`.local/tools/map-switch-run.ps1` on the main PC).
+  unattended measurement (`tools/dev-bench/map-switch-run.ps1` on the main PC).
 
 Verification: `cargo test -p skate-dynamics a_ground_built_apart_is_the_same_as_set_ground` (raycast hits and a settled
 crate identical, built on another thread); `cargo test -p skate-game scripted_switch`; map switch University to
@@ -948,7 +948,7 @@ loading screen").
 ## Map switch: the ped data parses `tables.json` once (2026-10-17)
 
 Problem: after a map switch the first fixed tick loads the living world's ped data (`peds::load_ped_data`), 150.3 ms
-on the desktop (University -> DownTown, `.local/tools/map-switch-run.ps1`); on the laptop the same frame is longer.
+on the desktop (University -> DownTown, `tools/dev-bench/map-switch-run.ps1`); on the laptop the same frame is longer.
 New log line `PED_DATA_LOAD <map>: total (bodies, nav, graphs, tables, plugins, hand props)` showed where: the
 1.8 MB `private/living_world/tables.json` was read and parsed eleven times (the body tables, eight mood / chase /
 takedown / sight / conversation / sit / hand prop readers, the plugins and the hand props), about 7 ms each.

@@ -274,7 +274,7 @@ handlers decide the details above (integer results, the '.' rule, atoi-style str
   and the existing HUD tests unchanged.
 - `apt_vm::tests::retail_menu_movies_use_no_unknown_opcode` (skipped when no local data): runs every action stream
   of the 16 decoded movies (183 streams) with a stub host and executes every opcode they contain in isolation; no
-  "Unsupported APT opcode". Data: `python .claude/skills/recomp-research/tools/apt_actions_json.py
+  "Unsupported APT opcode". Data: `python tools/claude-skills/recomp-research/tools/apt_actions_json.py
   <fedata.big> .local/research/fe-menus/actions <movie paths>` (local only, never committed); the test reads
   `SKATE3_FE_ACTIONS` or `.local/research/fe-menus/actions`.
 
@@ -343,7 +343,7 @@ character id). Source paths are relative to `data/fe/` (`source/controls/button_
   reaches the loaded state; whether it waits forever or gives up was not traced) and with import cycles (each movie
   would wait for the other). Ours reports both and links nothing for them; no retail movie has either. The limits
   above are ours (safety).
-- Tool: `.claude/skills/recomp-research/tools/apt_actions_json.py` now also writes `imports`, `exports` and the
+- Tool: `tools/claude-skills/recomp-research/tools/apt_actions_json.py` now also writes `imports`, `exports` and the
   local character ids; the 4 libraries reached only through imports (image_renderer, menu_part_arrow,
   menu_part_glow, button_menu) were decoded as well (20 movies, local only, never committed).
 
@@ -1669,7 +1669,7 @@ set. Ours showed the gameplay world behind the menu.
 ### Verification
 - `cargo test -p skate-core animation::raw`; ignored data tests `crates/skate-data/tests/scene_clip.rs` (all 312
   decode, T-pose stands, upright ends) and `tests/trick_guide_checklist.rs` (217 trick rows, all with a clip); script
-  `.claude/skills/retail-menus/tools/check_trick_clips.sh`.
+  `tools/claude-skills/retail-menus/tools/check_trick_clips.sh`.
 - In game (default skater and a custom model): the set, the dome and the skater playing the noseblunt
   (screenshots `.local/research/menus-m6/demo/`); gameplay after the change unchanged (Downtown screenshot).
   Closing the guide in a run was not checked (injected keys arrive before the guide takes input); play test pending.

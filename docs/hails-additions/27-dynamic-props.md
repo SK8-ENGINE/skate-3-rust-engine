@@ -169,7 +169,7 @@ unique prop materials over BlackBoxPark, DownTown, Industrial, MaloofMoneyCup, U
 **What the retail shader does [code, shader microcode].** `shaders_final.big` holds `dynamicobject_defaultPS` /
 `defaultVS` plus `simplePS` / `simpleVS`, `skateparkPS`, `foregroundPS`, `highlightPS`, `ghostPS`,
 `ghostSkateparkPS`, `heatmapPS`, `shadowPS`. `dynamicobject_defaultPS` (2428 bytes, ps_3_0) read with
-`.claude/skills/living-world/tools/eb_big_extract.py` + `xenos_disasm.py`:
+`tools/claude-skills/living-world/tools/eb_big_extract.py` + `xenos_disasm.py`:
 - Samplers `i_diffuse`, `i_normal`, `i_detail`, `i_specular`; constants `g_vLightDir`, `g_vViewPos`,
   `g_envattributes`, `m_params`, `g_CSMSelfBias`, `CSM_Mat_Row0..2`, `WorldShadow_MatRow`; textures
   `shadowAtlasDepth`, `shadowWorld`. VS: `g_matVP`, `i_detailNormalUVScale`, `i_partArray`, `g_FogColour`, `g_FogK1`.
