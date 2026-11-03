@@ -347,6 +347,9 @@ propagation) keeps it on only while an entity on layer 29 is visible; off, the o
 `SKATE_MARKER_CAMERA_GATE=0` keeps it always on (`MARKER_CAMERA_GATE` log line). Desktop, timing readouts on, gate on vs
 off: render thread 1.82 vs 1.95 ms per frame, 2D graph 0.28 vs 0.37 ms, submit 0.40 vs 0.44 ms, frame p50 3.55 vs 3.72
 ms; the screenshot matches. Test `marker_camera_runs_only_while_its_layer_shows_something`; skate-game 991 pass.
+Plain, 3 interleaved pairs of 150 s (judged by frame p50, after the HUD skip lesson above): gate off vs on frame p50
+2.84 / 2.83 / 2.84 vs 2.77 / 2.73 / 2.73 ms, p90 4.93 / 4.91 / 4.99 vs 4.83 / 4.81 / 4.85 ms, p99 5.89 / 5.84 / 5.91 vs
+5.77 / 5.76 / 5.77 ms, main thread 2.28 / 2.26 / 2.27 vs 2.18 / 2.16 / 2.15 ms: about -0.1 ms everywhere, every pair.
 
 ## Where the frame goes now (2026-11-02 night, desktop)
 After the passes above (University library, muted, plain): frame p50 about 2.9 to 3.7 ms run to run, main thread
