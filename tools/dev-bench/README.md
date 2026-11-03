@@ -11,8 +11,9 @@ the shell scripts run in Git Bash, the `.ps1` scripts in Windows PowerShell 5.1,
 - One game at a time: every game-running script stops when a `skate3rust` (or recomp / RPCS3) process runs, or while
   the Steam launcher marks a player session (`.local/steam-launcher/PLAYING.txt`).
 - Runs are muted, use their own empty mods folder (`.local/dev-bench/empty-mods`) unless a script says otherwise, and
-  set `SKATE_REPORT_CHILD=1` so a timeout kill opens no crash-report window. Benches that change settings use their
-  own settings folder; none of them reads or writes your `settings/`.
+  set `SKATE_REPORT_CHILD=1` so a timeout kill opens no crash-report window (`frame-time-run.ps1` loads the checkout's
+  mods unless `-NoMods`). The benches that change settings (`traceall-gpu-bench.ps1`, `water-look-bench.ps1`) use
+  their own settings folder; the others run the game with the working folder's settings.
 - Shell scripts share `common.sh`: `REPO` (default: this checkout), `EXE` (default `bin/skate3rust.exe`), `DEPS`
   (the exe's DLL folder when the exe is a saved copy elsewhere), `RUN_DIR` (the game's working folder).
 - Compare like with like: the same build for before / after (most switches have an env var, named in the doc), runs
