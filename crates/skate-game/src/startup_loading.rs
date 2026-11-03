@@ -1,9 +1,33 @@
 //! The start's loading phase behind the splash: hidden window, holds via [`StartupLoading::hold`] / `release`.
 //! Details: docs/hails-additions/08-setup-performance.md#startup-loading-phase
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+
+/// The start of `main`, for the `STARTUP_STEP` timeline.
+static LAUNCH: OnceLock<Instant> = OnceLock::new();
+
+pub(crate) fn start_clock() {
+    LAUNCH.get_or_init(Instant::now);
+}
+
+/// Set once the game is shown: later marks (a map change's audio restart) print nothing.
+static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// One timeline line while the start runs (any thread): milliseconds since `main` started, then the step.
+pub(crate) fn mark(step: &str) {
+    if !SHOWN.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("STARTUP_STEP {} ms {step}", LAUNCH.get_or_init(Instant::now).elapsed().as_millis());
+    }
+}
+
+/// A start-up stage: the crash report's `REPORT_META stage=` line plus the timeline line.
+pub(crate) fn stage_meta(stage: &str) {
+    eprintln!("REPORT_META stage={stage}");
+    mark(stage);
+}
 
 /// What a loading step reads right now, shown on the splash (any thread). A no-op once the splash is gone, so bank
 /// loads during play pay one atomic load.
@@ -19,13 +43,14 @@ pub(crate) struct StartupLoading {
     holds: Vec<(String, String)>,
     started: Instant,
     done: bool,
+    first_frame: bool,
     /// Frames the splash stays up after the game's window was shown (see `hold_time`).
     splash_frames: u8,
 }
 
 impl StartupLoading {
     pub(crate) fn new() -> Self {
-        Self { holds: Vec::new(), started: Instant::now(), done: false, splash_frames: 0 }
+        Self { holds: Vec::new(), started: Instant::now(), done: false, first_frame: false, splash_frames: 0 }
     }
 
     /// Whether the hold `id` is still taken (tests, and holds that wait for another, `world_sources`).
@@ -42,7 +67,11 @@ impl StartupLoading {
     }
 
     pub(crate) fn release(&mut self, id: &str) {
+        let before = self.holds.len();
         self.holds.retain(|(h, _)| h != id);
+        if self.holds.len() != before {
+            mark(&format!("released {id}"));
+        }
     }
 
     /// The phase is over (every hold released, the game window shown).
@@ -90,6 +119,10 @@ fn hold_time(
     menu: Option<Res<crate::graphics_menu::Menu>>,
     mut window: Query<&mut Window, With<PrimaryWindow>>,
 ) {
+    if !loading.done && !loading.first_frame {
+        loading.first_frame = true;
+        mark("first frame");
+    }
     if loading.done {
         if loading.splash_frames > 0 {
             loading.splash_frames -= 1;
@@ -121,6 +154,8 @@ fn hold_time(
         time.unpause();
     }
     info!("STARTUP_LOADING done in {} ms", loading.started.elapsed().as_millis());
+    mark("game shown");
+    SHOWN.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[cfg(test)]

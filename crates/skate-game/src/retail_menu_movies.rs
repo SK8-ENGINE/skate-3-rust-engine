@@ -522,9 +522,29 @@ pub(crate) fn set_root(config: &crate::config::Config) -> std::path::PathBuf {
         .unwrap_or_else(|_| config.asset_root.join("private/menu-movies"))
 }
 
+type EarlyRead = (std::path::PathBuf, std::thread::JoinHandle<Result<RetailMenuMovies, String>>);
+static EARLY: std::sync::Mutex<Option<EarlyRead>> = std::sync::Mutex::new(None);
+
+/// Begin [`RetailMenuMovies::read`] on its own thread at the top of `main`; [`load`] takes the result at its old place
+/// (docs/hails-additions/08-setup-performance.md#menu-movies-read-begins-in-main). `SKATE_EARLY_MENU_MOVIES=0` off.
+pub(crate) fn begin_early(config: &crate::config::Config) {
+    if std::env::var("SKATE_EARLY_MENU_MOVIES").is_ok_and(|v| v == "0") {
+        return;
+    }
+    let root = set_root(config);
+    let read_root = root.clone();
+    if let Ok(handle) = std::thread::Builder::new().name("menu-movies-read".into()).spawn(move || RetailMenuMovies::read(&read_root)) {
+        if let Ok(mut early) = EARLY.lock() {
+            *early = Some((root, handle));
+        }
+    }
+}
+
 pub(crate) fn load(mut commands: Commands, config: Res<crate::config::Config>) {
     let root = set_root(&config);
-    let movies = RetailMenuMovies::read(&root).unwrap_or_else(|e| {
+    let early = EARLY.lock().ok().and_then(|mut e| e.take()).filter(|(r, _)| *r == root);
+    let read = early.and_then(|(_, handle)| handle.join().ok()).unwrap_or_else(|| RetailMenuMovies::read(&root));
+    let movies = read.unwrap_or_else(|e| {
         warn!("RETAIL_MENUS menu movies unavailable: {e}");
         RetailMenuMovies::default()
     });

@@ -294,6 +294,7 @@ impl Native {
                 mod_projects.push((file.clone(), library.stamp(file), token));
             }
         }
+        crate::startup_loading::mark("audio: projects");
         let mixmap = match &files.mixmap {
             Some(file) => {
                 crate::startup_loading::detail(|| format!("mix map {file}"));
@@ -311,6 +312,7 @@ impl Native {
                 None
             }
         };
+        crate::startup_loading::mark("audio: mix map");
         crate::startup_loading::detail(|| "rolling grain recordings".to_owned());
         let bed = if mixmap.is_some() { super::grain_bed::Bed::new(library) } else { None };
         let player = mixmap.as_ref().map(|_| {
@@ -341,6 +343,7 @@ impl Native {
             resident: Vec::new(),
             mod_projects,
         };
+        crate::startup_loading::mark("audio: grain bed");
         // The environment (reverb) network and the eEQChain buses (optional install data).
         let (presets, eq) = library.bus_tuning();
         if !presets.is_empty() || !eq.is_empty() {
@@ -361,7 +364,9 @@ impl Native {
             runtime.mixer.buses.submix.enabled = true;
         }
         native.ensure_bank(library, "emitter_utility")?;
+        crate::startup_loading::mark("audio: utility bank");
         native.load_player_banks(library);
+        crate::startup_loading::mark("audio: player banks");
         let mut runtime = native.shared.lock().map_err(|_| "audio lock poisoned")?;
         let utility = runtime.eval.class_id("c_emitter_utility").ok_or("no c_emitter_utility class")?;
         runtime.post(utility, &[]);
@@ -391,7 +396,9 @@ impl Native {
         drop(runtime);
         // The front-end sounds (the session marker's cellphone UI; sk8_menu).
         crate::startup_loading::detail(|| "front-end sounds".to_owned());
+        crate::startup_loading::mark("audio: boot utilities");
         native.frontend = super::frontend::FrontendHost::load(&native, library);
+        crate::startup_loading::mark("audio: front-end sounds");
         native.load_resident_banks(library);
         Ok(native)
     }
@@ -976,17 +983,56 @@ impl Launching {
     }
 }
 
+/// The first start begun at the top of `main` ([`begin_early`]): its inputs and the build thread.
+type Early = (std::path::PathBuf, WorldInstances, std::thread::JoinHandle<Result<Native, String>>);
+static EARLY: std::sync::Mutex<Option<Early>> = std::sync::Mutex::new(None);
+
+/// The first start's build: the install's library (no overlays) and the runtime, on the calling thread.
+fn build_first(root: &std::path::Path, instances: WorldInstances) -> Result<Native, String> {
+    crate::startup_loading::mark("audio: start thread");
+    let library = Library::load(root)?;
+    crate::startup_loading::mark("audio: library");
+    Native::start_from(&library, instances, 1)
+}
+
+fn spawn_first(root: std::path::PathBuf, instances: WorldInstances) -> Option<std::thread::JoinHandle<Result<Native, String>>> {
+    choose_dsp();
+    std::thread::Builder::new().name("audio-start".into()).spawn(move || build_first(&root, instances)).ok()
+}
+
+/// Begin the first start's build at the top of `main`, so its reads overlap the rest of the start
+/// (docs/hails-additions/08-setup-performance.md#audio-start-begins-in-main). [`begin_launch`] takes it when the inputs
+/// still match; else (or with mod overlays) it is dropped. `SKATE_EARLY_AUDIO=0` turns it off.
+pub(crate) fn begin_early(config: &crate::config::Config) {
+    if std::env::var("SKATE_EARLY_AUDIO").is_ok_and(|v| v == "0") || !Library::installed(&config.asset_root) {
+        return;
+    }
+    let instances = if super::AudioSettings::more_audible_world_at_start(config) { WorldInstances::MORE_AUDIBLE } else { WorldInstances::RETAIL };
+    if let Some(handle) = spawn_first(config.asset_root.clone(), instances) {
+        if let Ok(mut early) = EARLY.lock() {
+            *early = Some((config.asset_root.clone(), instances, handle));
+        }
+    }
+}
+
+/// The early build is not used (mod overlays are merged first): let it go.
+pub(super) fn drop_early() {
+    if let Ok(mut early) = EARLY.lock() {
+        early.take();
+    }
+}
+
 /// First audio start off the frame on its own thread (same `Library::load`); [`finish_launch`] spawns the stream.
 pub(super) fn begin_launch(world: &mut World) -> Option<Launching> {
     let settings = world.get_resource::<super::AudioSettings>()?;
     let instances = if settings.more_audible_world() { WorldInstances::MORE_AUDIBLE } else { WorldInstances::RETAIL };
     let projects = world.get_resource::<Library>()?.aems().projects.len();
     let root = world.get_resource::<crate::config::Config>()?.asset_root.clone();
-    choose_dsp();
-    let handle = std::thread::Builder::new()
-        .name("audio-start".into())
-        .spawn(move || Native::start_from(&Library::load(&root)?, instances, 1))
-        .ok()?;
+    let early = EARLY.lock().ok().and_then(|mut e| e.take());
+    let handle = match early {
+        Some((r, i, handle)) if r == root && i == instances => handle,
+        _ => spawn_first(root, instances)?,
+    };
     Some(Launching { handle, projects })
 }
 

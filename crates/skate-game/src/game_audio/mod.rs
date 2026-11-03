@@ -275,6 +275,13 @@ impl AudioSettings {
         }
         Self { saved, path, muted: config.mute, volume_overrides: RetailVolumeOverrides::default(), speech_decoded }
     }
+    /// [`Self::more_audible_world`] as `load` would give it, without `load`'s side effects (the migration write, the
+    /// stale mark): for the audio start begun in `main` (`native::begin_early`).
+    pub(crate) fn more_audible_world_at_start(config: &crate::config::Config) -> bool {
+        let path = config.asset_root.parent().unwrap_or(&config.asset_root).join("settings/audio.json");
+        let saved = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<SavedSettings>(&b).ok()).unwrap_or_default();
+        saved.more_audible_world || std::env::var("SKATE_AUDIO_MORE_AUDIBLE").is_ok_and(|v| v == "1")
+    }
     /// Linear master gain (0 when muted, and while the startup splash is up: the world loads and ticks behind it).
     pub(crate) fn master(&self) -> f32 {
         if self.muted || crate::splash::active() { 0.0 } else { self.saved.master as f32 / 100.0 }

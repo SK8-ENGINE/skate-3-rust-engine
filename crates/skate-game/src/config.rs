@@ -37,6 +37,8 @@ impl Config {
         };
         let mut difficulty_override = None;
         let mut explicit_map = false;
+        // The map file's fingerprint, hashed beside its load (`load_map`); None = hash it below.
+        let mut fingerprint = None;
         let mut args = std::env::args_os().skip(1);
         while let Some(arg) = args.next() {
             match arg.to_str() {
@@ -70,11 +72,13 @@ impl Config {
                 }
                 Some("--map") => {
                     let path = PathBuf::from(args.next().ok_or("--map requires a .skate file")?);
-                    config.map = Some(skate_data::skate_map::SkateMap::load(&path)?);
+                    let (map, hash) = load_map(&path)?;
+                    config.map = Some(map);
+                    fingerprint = Some(hash);
                     config.map_path = Some(path.canonicalize().map_err(|e| e.to_string())?);
                     explicit_map = true;
                 }
-                Some("--test-world") => { explicit_map = true; config.map = None; config.map_path = None; }
+                Some("--test-world") => { explicit_map = true; config.map = None; config.map_path = None; fingerprint = None; }
                 Some("--check-assets") => config.check_assets = true,
                 // Refresh Game Files restarts the game with this flag (`setup::restart_with_refresh`); the setup step
                 // in `asset_root` reads it before this loop. Rejecting it here made every in-game refresh end with exit
@@ -113,14 +117,19 @@ impl Config {
         };
         if !explicit_map {
             if let Some(path) = crate::map_library::default_map(&config.asset_root)? {
-                config.map = Some(skate_data::skate_map::SkateMap::load(&path)?);
+                let (map, hash) = load_map(&path)?;
+                config.map = Some(map);
+                fingerprint = Some(hash);
                 config.map_path = Some(path.canonicalize().map_err(|e| e.to_string())?);
             }
         }
         if config.validate_maps && (config.map.is_some() || config.check_assets) {
             return Err("--validate-maps reads maps from stdin; do not combine it with --map or --check-assets".into());
         }
-        config.map_fingerprint = map_fingerprint(config.map_path.as_deref())?;
+        config.map_fingerprint = match fingerprint {
+            Some(hash) if config.map_path.is_some() => hash,
+            _ => map_fingerprint(config.map_path.as_deref())?,
+        };
         if config.multiplayer.direct.is_some() && config.multiplayer.session==0 {return Err("Direct multiplayer requires --net-session (a nonzero number shared by both players)".into());}
         if let Some(id) = &config.teleport {
             let destinations = crate::teleport_menu::load(&config.asset_root)?;
@@ -151,6 +160,20 @@ impl Config {
 }
 
 /// Hash map bytes identically for startup and background map replacement.
+/// A map and its [`map_fingerprint`], the hash on a second thread while the map loads (the same file read twice; the
+/// hash alone took about half a second of the start).
+fn load_map(path: &std::path::Path) -> Result<(skate_data::skate_map::SkateMap, u64), String> {
+    std::thread::scope(|scope| {
+        let hash = std::thread::Builder::new().name("map-fingerprint".into()).spawn_scoped(scope, || map_fingerprint(Some(path)));
+        let map = skate_data::skate_map::SkateMap::load(path)?;
+        let hash = match hash {
+            Ok(handle) => handle.join().map_err(|_| "the map fingerprint thread panicked".to_owned())??,
+            Err(_) => map_fingerprint(Some(path))?,
+        };
+        Ok((map, hash))
+    })
+}
+
 pub(crate) fn map_fingerprint(path: Option<&std::path::Path>) -> Result<u64, String> {
     Ok(if let Some(path)=path {
             use std::io::Read;

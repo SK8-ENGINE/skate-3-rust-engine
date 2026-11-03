@@ -590,3 +590,36 @@ three customiser stage receipts that now hold file times (`catalog-complete.json
 separately. Pre-existing, seen during this pass: old customisation sets are never removed (each about 1.9 GB, partly
 hard-linked); the maps receipt records only `.skate`, so a damaged `.irradiance` or `.triggers` is not detected; the
 session-marker `hud.json` hashes absolute archive paths (differs between ISO runs).
+
+## Start-up pass (2026-11-03, USER-ASKS 471)
+
+**Problem.** The game took about 6.5 s from `main` to the game window on a warm start and 33 to 47 s on a cold one (desktop, install on a hard disk, University). The logged `STARTUP_LOADING done in` only counted from the app build, not the 2 s before it.
+
+**Measuring.** `STARTUP_STEP <ms since main> <step>` lines (`startup_loading::mark`): every start-up stage, the first frame, each loading hold's release, the audio start's phases, and "game shown"; they stop once the game shows. Bench: `.local/perf-bench/startup_bench.sh <exe> <out> [s]` (muted University start, the timeline; `TIMING=1` adds the first SYSTEM_TIMING line = the Startup systems; `COLD=1` first drops the install and the exe's folder from the Windows file cache with `evict.ps1`, which opens each file unbuffered: no admin needed).
+
+**Where the time went.**
+- Warm (6.5 s): config + map 1.1 s (the map's fingerprint hash about 0.3 s of it), physics 0.7 s, skater 0.2 s, renderer 0.3 s, the Startup systems 3.1 s (`world::spawn` 1.2 to 1.9 s, `retail_menu_movies::load` 1.3 s, `scoring_hud::setup` 0.4 s), the first frames 1 s.
+- Cold (33 to 47 s): every step reads scattered small files. The Startup systems 15 s (menu movies, the session marker HUD and the menus 9 to 11 s each, side by side), then the audio runtime's first start, which only began after the first frame: 11 to 25 s, most of it the player banks. Three of those banks are 1,642 WAV files (`Skate_Collisions` 1,101, `Skate_Metal` 430, `sk8_foley` 111; 39 MB), read one after another: about 12 s of disk seeks.
+
+### Audio start begins in main
+
+The native audio runtime's first start (`native::begin_early`, called from `main` right after the config and map) is built on its own thread from the top of the start instead of after the first frame. `begin_launch` takes that build when its inputs (asset root, world instance counts) match what it would use; otherwise, and when mods add audio overlays (merged first), it is dropped and the start runs as before. The build is the same function on the same inputs (`build_first`: `Library::load` + `Native::start_from`), so the runtime is the same; `AudioSettings::more_audible_world_at_start` reads the one setting it needs without `AudioSettings::load`'s side effects. `SKATE_EARLY_AUDIO=0` turns it off.
+
+### Menu movies read begins in main
+
+`RetailMenuMovies::read` (a pure read of the exported menu movies) runs on its own thread from `main`; `retail_menu_movies::load` takes the result at its old place when the folder matches, else reads as before. `SKATE_EARLY_MENU_MOVIES=0` turns it off.
+
+### Bank files read in parallel
+
+`decode_wavs` reads one bank's sample files on a few scoped threads (half the cores, 2 to 8; `SKATE_AUDIO_READ_THREADS`, 1 = one after another). Each slot keeps its own file's result, so the bank's PCM is the same; several reads in flight let the disk and the OS order them. Used by every bank load (the start, the prefetch worker, map changes).
+
+### Map fingerprint beside the map load
+
+`config::load_map` hashes the map file (`map_fingerprint`, the multiplayer check) on a second thread while the map loads, instead of after it. Same function, same file: the fingerprint is the same (`2479a7e1c4dbf39a` for University before and after).
+
+**Result (desktop, University).**
+- Warm, all four on vs off (`SKATE_EARLY_AUDIO=0 SKATE_EARLY_MENU_MOVIES=0 SKATE_AUDIO_READ_THREADS=1`), 3 interleaved pairs before the fingerprint change: game shown 6.62 / 6.70, 5.61 / 6.52, 5.72 / 6.47 s; first frame 0.6 to 0.75 s sooner. With the fingerprint change: 5.35 to 5.56 s (config stage 1.08 -> 0.81 s). About -1 s.
+- Cold (hard disk), 2 interleaved pairs: 46.3 / 47.7 s and 36.5 / 46.7 s. Cold runs vary by 10 s and more (Windows' launch prefetch, the disk); one "on" run had the renderer's start stall for 15 s while the audio thread read (the exe's own pages competing for the disk). The hard-disk floor is the file count: the 1,642 small WAV files alone cost about 12 s of seeks whatever the order.
+- Laptop (NVMe SSD, University, 2026-11-03 05:46 note): warm, 3 interleaved pairs, game shown ON 9.92 s vs OFF 10.58 s (-0.66 s), first frame 8.07 vs 8.74 s; cold (`COLD=1`), 2 pairs, 10.17 vs 12.72 s (-2.55 s), the audio start done before the skater loads instead of after the first frame. Fingerprint `177dff29d1413d84` in every run; the tests as on the desktop (175 pass, 9 need private trace data).
+
+**Open.** A cold start on a hard disk needs fewer files (one file per bank's samples, written by setup: a format change and a Refresh Game Files for everyone); not done without the user's go. `world::spawn`'s prepare (1.2 to 1.9 s warm) could run on a thread like a map change does, but its asset handles would then interleave with the other Startup systems' assets (a different asset id order), so it stays where it is until that is shown not to change rendering.

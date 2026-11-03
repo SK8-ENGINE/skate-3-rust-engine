@@ -268,6 +268,7 @@ pub(super) fn frame(world: &mut World) {
                 }
             }
             // Overlays found by the first scan are merged before the first start.
+            super::native::drop_early();
             let report = if overlays { rebuild(world) } else { None };
             let started = super::native::launch(world, None);
             super::seed::from_env(world);

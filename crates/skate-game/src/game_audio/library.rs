@@ -889,13 +889,38 @@ pub(crate) type BankPcm = Vec<Option<Arc<skate_audio::mixer::Pcm>>>;
 
 /// Read and decode the WAVs in order (`Library::bank_pcm` and `BankSource::load`).
 fn decode_wavs<'a>(files: impl Iterator<Item = &'a Path>) -> BankPcm {
-    files
-        .map(|file| {
-            #[cfg(test)]
-            WAV_DECODES.with(|n| n.set(n.get() + 1));
-            std::fs::read(file).ok().and_then(|bytes| wav_pcm(&bytes)).map(Arc::new)
+    let files: Vec<&Path> = files.collect();
+    #[cfg(test)]
+    WAV_DECODES.with(|n| n.set(n.get() + files.len() as u64));
+    let one = |file: &Path| std::fs::read(file).ok().and_then(|bytes| wav_pcm(&bytes)).map(Arc::new);
+    let workers = wav_read_workers().min(files.len());
+    if workers <= 1 {
+        return files.iter().map(|f| one(f)).collect();
+    }
+    // Several reads in flight let the disk order them (docs/hails-additions/08-setup-performance.md#bank-files-read-in-parallel);
+    // each slot keeps its file's result, so the bank is the same.
+    let mut out: BankPcm = vec![None; files.len()];
+    let chunk = files.len().div_ceil(workers);
+    std::thread::scope(|scope| {
+        for (slots, names) in out.chunks_mut(chunk).zip(files.chunks(chunk)) {
+            scope.spawn(move || {
+                for (slot, file) in slots.iter_mut().zip(names) {
+                    *slot = one(file);
+                }
+            });
+        }
+    });
+    out
+}
+
+/// Threads one bank's sample files are read on: half the cores, 2 to 8 (`SKATE_AUDIO_READ_THREADS` sets it; 1 = serial).
+fn wav_read_workers() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("SKATE_AUDIO_READ_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+            std::thread::available_parallelism().map_or(2, |n| n.get() / 2).clamp(2, 8)
         })
-        .collect()
+    })
 }
 
 /// The sample header a mod WAV gets in an AEMS bank: voices play by the header (frames, rate,
@@ -1384,6 +1409,11 @@ impl Library {
     /// The install's audio, no overlays.
     pub(crate) fn load(asset_root: &Path) -> Result<Self, String> {
         Self::load_with(asset_root, &[]).map(|(library, _)| library)
+    }
+
+    /// The install has an audio manifest (what [`Self::load`] reads first).
+    pub(crate) fn installed(asset_root: &Path) -> bool {
+        asset_root.join("private/audio/audio_manifest.json").is_file()
     }
 
     /// The install's audio with the running mods' content overlays merged over it, in the order
