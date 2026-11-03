@@ -3,10 +3,11 @@
 use super::*;
 
 #[test]
-#[ignore = "requires private stock graphs and Industrial (SKATE3_ASSET_ROOT, SKATE3_MAP=<maps/Industrial.skate>)"]
+#[ignore = "requires private stock graphs and Industrial (SKATE3_ASSET_ROOT, SKATE3_MAP=<any map in the install's maps folder>)"]
 fn skater_dropped_onto_the_industrial_sea_floor_respawns_with_reason_boundary() {
     let root = std::path::PathBuf::from(std::env::var_os("SKATE3_ASSET_ROOT").unwrap());
-    let map_path = std::path::PathBuf::from(std::env::var_os("SKATE3_MAP").unwrap());
+    let map_path = std::path::PathBuf::from(std::env::var_os("SKATE3_MAP").unwrap())
+        .with_file_name("Industrial.skate");
     let map = skate_data::skate_map::SkateMap::load(&map_path).unwrap();
     let assets = skate_data::GameAssets::load(&root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(&root, &assets).unwrap();

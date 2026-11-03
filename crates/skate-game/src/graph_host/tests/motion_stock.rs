@@ -145,9 +145,10 @@ fn stock_motion_factory_support_inventory() {
         counts[index] += 1;
     }
     assert_eq!(counts.iter().sum::<usize>(), binding.operations.len());
-    let output = std::path::PathBuf::from(
-        std::env::var_os("SKATE3_MOTION_INVENTORY").expect("Set SKATE3_MOTION_INVENTORY"),
-    );
+    // The checks above are the test; writing the inventory is optional (SKATE3_MOTION_INVENTORY = output file).
+    let Some(output) = std::env::var_os("SKATE3_MOTION_INVENTORY").map(std::path::PathBuf::from) else {
+        return;
+    };
     std::fs::write(&output, rows).unwrap();
     println!(
         "MotionGraph factory inventory: {} behaviors, {} conditions, {} hooks; {}",

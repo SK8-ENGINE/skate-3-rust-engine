@@ -162,7 +162,9 @@ fn xinput_identity_of_connected_pad() {
     for (slot, kind) in kinds.iter().enumerate() {
         println!("XInput slot {slot}: {:?}", kind.as_ref().map(ControllerKind::summary));
     }
-    assert!(kinds.iter().any(Option::is_some), "no XInput pad connected");
+    if kinds.iter().all(Option::is_none) {
+        test_skip!("no XInput pad connected");
+    }
 }
 
 #[test]

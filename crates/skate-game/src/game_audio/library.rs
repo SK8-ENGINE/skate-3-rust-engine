@@ -347,7 +347,7 @@ struct Manifest {
     /// audio_export.frontend_sounds).
     #[serde(default)]
     frontend: FrontendJson,
-    /// Bank -> its pack: the bank's WAVs in one file (docs/hails-additions/08-setup-performance.md#one-file-per-sound-bank).
+    /// Bank -> its pack: the bank's WAVs in one file (docs/hails-additions/08-setup-performance.md#one-file-per-sound-bank-2026-11-03-user-asks-472).
     #[serde(default)]
     bank_packs: BTreeMap<String, String>,
     // Audio content overlays only (`skate_mods::audio_merge`; never in an install's manifest).
@@ -894,7 +894,7 @@ pub(crate) fn wav_pcm(bytes: &[u8]) -> Option<skate_audio::mixer::Pcm> {
 pub(crate) type BankPcm = Vec<Option<Arc<skate_audio::mixer::Pcm>>>;
 
 /// Where a sample's WAV bytes are: its own file, or a range of its bank's pack
-/// (docs/hails-additions/08-setup-performance.md#one-file-per-sound-bank).
+/// (docs/hails-additions/08-setup-performance.md#one-file-per-sound-bank-2026-11-03-user-asks-472).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum WavSource {
     File(PathBuf),

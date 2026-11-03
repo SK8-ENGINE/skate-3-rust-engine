@@ -1,4 +1,4 @@
-# 35. The two known upstream test failures (2026-10-13)
+# 36. Known test failures and the data-gated runs (2026-10-13, updated 2026-11-03)
 
 Branch `fix/known-test-failures` (from `main` 2e166977). Both tests failed on upstream `main` and therefore on every
 branch built on it, so every PR listed them as "known failures". Both are test fixtures that contradict the code's
@@ -63,7 +63,7 @@ Climbing tests now build their clips from the stock skeleton (`install_fixture_c
 The 12 still failing:
 
 - **2 show a real bug, left failing:** `hybrid_climb...` and `climbing_with_a_dropped_board...`. After the mantle the motion graph is still in its paused jump state, so `flags_2484` bit 16 selects `BipedAir` on the first tick, the skater jumps 0.37 m and wipes out. The fixture clips could contribute, but the stale graph state does not depend on them. Fixing it needs a graph reset at the handoff, which does not exist yet.
-- **1 needs its map:** `skater_dropped_onto_the_industrial_sea_floor` fails on DownTown and passes with `SKATE3_MAP` = Industrial.
+- **1 needed its map:** `skater_dropped_onto_the_industrial_sea_floor` failed on DownTown and passed with `SKATE3_MAP` = Industrial. Fixed 2026-11-03: it loads `Industrial.skate` from the same `maps` folder as `SKATE3_MAP`.
 - **9 need files that are not here:** `SKATE_TEST_LIBRARY` / `SKATE_TEST_ASSETS`, `SKATE_TEST_CHARACTER`, `SKATE_CAC_TEST_LIBRARY`, `SKATE_ONLINE_TEST_GLB`, `SKATE3_MOTION_INVENTORY`, `SKATE3_INPUT_RECORDING`, and `private/custom/crouch-treflip.json` (three tests). These have not run.
 
 `xinput_identity_of_connected_pad` needs a connected controller; it passed in this run.
@@ -72,6 +72,37 @@ Two traps found on the way:
 
 - **A dead `assets` junction** in a worktree (it pointed at a deleted install) raised the count to 100, because many tests read `assets/` directly and ignore `SKATE3_ASSET_ROOT`. Check the junction first. That run also ended once in `0xc0000409` (`STATUS_STACK_BUFFER_OVERRUN`); it did not come back after repointing, and the cause was not found.
 - **A leaked process-wide flag:** `carry_direction_tests` turned `PROP_GRAB` on and left it on, so `downtown_dragged_props_rest_on_the_floor` failed whenever it ran later in the same process and passed alone. Tests now set it through `prop_grab_for_test`, which serialises them and restores it.
+
+### Re-run at the #52 head (2026-11-03)
+
+All suites at `c9c121c5` plus the sea-floor test change, on the desktop (debug profile, `SKATE_REPORT_CHILD=1`), with the map inputs of the run above but without the private audio exports:
+
+- skate-core lib 1284 passed; skate-game 995 passed, 236 ignored; skate-mods lib 107 passed.
+- `--ignored`: 215 passed, 21 failed of 236. The sea-floor test passes on the DownTown inputs now.
+- The 21: the 2 climbing handoff tests (the bug above); the same 9 that need local files; 9 audio tests that need the private recomp and state-log exports (`SKATE_AUDIO_STATE_LOGS`, `SKATE_RECOMP_SESSIONS`, `SKATE_WORLD_ONESHOTS`, `SKATE_NPC_GREC`, `SKATE_SPEECH_LEVELS`, `SKATE_MAINCAST_LINES`, the traffic gap runs), supplied in the run above; `xinput_identity_of_connected_pad` (no pad connected this time).
+- Setup and tools: `py -3.13 -m unittest discover -s tools -p "test_*.py"` (62 passed) and the `tools/asset_pipeline/test_*.py` modules by name (289 passed, 7 skipped): 351 passed. `discover -t .` does not work here (`tools` is not a package).
+- Second machine (the laptop, 2026-11-03, hails-additions de6cd82e = this head plus upstream #67): skate-core
+  1284, skate-game 997 (the 2 extra are #67's), skate-mods 107; `--ignored` the same failures plus the sea-floor test
+  (that build does not have the change; it passes there with `SKATE3_MAP` = Industrial); setup and tools 62 and 296
+  run, all passed. A bare `cargo test` needs cmake for `sdl3-sys`: on PATH, or `CMAKE` set to the copy
+  `scripts/Ensure-CMake.ps1` finds.
+
+### Skipped without private inputs
+
+Tests whose inputs only exist on the machine that recorded them (recomp sessions and exports, audio state logs,
+test libraries, an input recording, a captured clip, a connected pad) now print one `TEST_SKIPPED <module>: <what to
+set>` line and return instead of failing, so a run without them shows only real failures. The `test_skip!` macro
+(`crates/skate-game/src/main.rs`) also appends the line to the file named in `SKATE_TEST_SKIPS`. A missing
+installation still fails, as before.
+
+`tools/dev-bench/pr-tests.sh [out-dir]` runs every suite of the PR's tests table in order (skate-core, skate-game,
+skate-mods, the data-gated run with the installation's maps, the setup and tools tests), finds cmake, and prints one
+summary: the result lines, the skipped count and every failed test.
+
+Result with the skips (desktop, 2026-11-03, `pr-tests.sh`, the same inputs as the re-run above): skate-core 1284,
+skate-game 995 (236 ignored), skate-mods 107 passed; `--ignored` 234 passed, 2 failed (the two climbing handoff tests),
+18 skipped; setup and tools 62 and 296 run, all passed. `stock_motion_factory_support_inventory` now passes without
+`SKATE3_MOTION_INVENTORY` (its checks ran; that variable only names an optional output file).
 
 ## Open questions
 

@@ -19,6 +19,12 @@ the shell scripts run in Git Bash, the `.ps1` scripts in Windows PowerShell 5.1,
 - Compare like with like: the same build for before / after (most switches have an env var, named in the doc), runs
   interleaved (A B A B), and nothing else heavy on the machine. Drop runs another process disturbed.
 
+## Tests
+
+| Script | What it does |
+|---|---|
+| `pr-tests.sh [out-dir]` | Every suite of PR 52's tests table in order (skate-core, skate-game, skate-mods, the data-gated run with the installation's maps, setup and tools), then one summary: result lines, skipped tests (private inputs missing) and every failure. Finds cmake; `INSTALL`, `JOBS`, `PY`, `SKIP_IGNORED=1` in its header. |
+
 ## Frame time and play
 
 | Script | What it does |

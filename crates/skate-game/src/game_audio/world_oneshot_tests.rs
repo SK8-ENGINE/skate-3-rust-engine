@@ -37,6 +37,10 @@ struct Geometry {
     player: [f32; 3],
 }
 
+fn oneshots_unset() -> bool {
+    std::env::var_os("SKATE_WORLD_ONESHOTS").filter(|v| !v.is_empty()).is_none()
+}
+
 fn rows(session: &str) -> Vec<Row> {
     let Some(dir) = std::env::var_os("SKATE_WORLD_ONESHOTS").filter(|v| !v.is_empty()) else {
         panic!("missing private data: SKATE_WORLD_ONESHOTS (the world_oneshots.py --json exports)");
@@ -125,6 +129,9 @@ const BLOCK_SECONDS: f64 = skate_audio::BLOCK as f64 / skate_audio::MIX_RATE as 
 #[test]
 #[ignore = "needs the private install data and the recomp one-shot export"]
 fn tazer_bursts_follow_the_recomp() {
+    if oneshots_unset() {
+        test_skip!("set SKATE_WORLD_ONESHOTS (the world_oneshots.py --json exports)");
+    }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets"));
     let Ok(library) = Library::load(root) else { panic!("missing private data: no audio install") };
     let hold = library.world_tuning().ped_objects().tazer_seconds;
@@ -186,6 +193,9 @@ fn tazer_bursts_follow_the_recomp() {
 #[test]
 #[ignore = "needs the private install data and the recomp one-shot export"]
 fn body_falls_follow_the_recomp() {
+    if oneshots_unset() {
+        test_skip!("set SKATE_WORLD_ONESHOTS (the world_oneshots.py --json exports)");
+    }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets"));
     let Ok(library) = Library::load(root) else { panic!("missing private data: no audio install") };
     let tuning = library.world_tuning().ped_objects();

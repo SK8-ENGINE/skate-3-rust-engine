@@ -1,3 +1,20 @@
+/// A data-gated test whose private inputs are missing prints one `TEST_SKIPPED` line (also appended to the file in
+/// `SKATE_TEST_SKIPS` when set) and returns (docs/hails-additions/36-known-test-failures.md#skipped-without-private-inputs).
+#[cfg(test)]
+macro_rules! test_skip {
+    ($($why:tt)*) => {{
+        let line = format!("TEST_SKIPPED {}: {}", module_path!(), format_args!($($why)*));
+        eprintln!("{line}");
+        if let Some(path) = std::env::var_os("SKATE_TEST_SKIPS") {
+            use std::io::Write as _;
+            // One write per line, so parallel tests do not interleave inside a line.
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = f.write_all(format!("{line}\n").as_bytes());
+            }
+        }
+        return;
+    }};
+}
 mod frame_timing;
 mod system_timing;
 mod animation;

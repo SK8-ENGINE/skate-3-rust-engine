@@ -870,7 +870,8 @@ mod tests {
             asset::AssetPlugin, ecs::system::SystemState, gltf::GltfPlugin, image::ImagePlugin,
             mesh::MeshPlugin, scene::ScenePlugin,
         };
-        let directory = PathBuf::from(std::env::var("SKATE_TEST_LIBRARY").unwrap());
+        let Some(directory) = std::env::var_os("SKATE_TEST_LIBRARY") else { test_skip!("set SKATE_TEST_LIBRARY") };
+        let directory = PathBuf::from(directory);
         let banks = skate_data::animation_banks::AnimationBanks::load(Path::new(
             &std::env::var("SKATE_TEST_ASSETS").unwrap(),
         ))
@@ -1027,7 +1028,8 @@ mod tests {
             asset::AssetPlugin, gltf::GltfPlugin, image::ImagePlugin, mesh::MeshPlugin,
             scene::ScenePlugin,
         };
-        let source = PathBuf::from(std::env::var("SKATE_TEST_CHARACTER").unwrap());
+        let Some(source) = std::env::var_os("SKATE_TEST_CHARACTER") else { test_skip!("set SKATE_TEST_CHARACTER") };
+        let source = PathBuf::from(source);
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,

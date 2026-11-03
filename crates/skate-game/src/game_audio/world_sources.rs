@@ -1286,8 +1286,10 @@ mod tests {
     fn traffic_rpm_and_relative_speed_follow_the_recomp() {
         let base = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
         let Ok(library) = Library::load(&base.join("assets")) else { panic!("missing private data: no audio install") };
-        let sessions = std::env::var_os("SKATE_RECOMP_SESSIONS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
-        let Some(Ok(text)) = sessions.map(|s| std::fs::read_to_string(s.join("gapg1_20261003_152507/trace.tsv"))) else { panic!("missing private data: no gap run G1") };
+        let Some(sessions) = std::env::var_os("SKATE_RECOMP_SESSIONS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from) else {
+            test_skip!("set SKATE_RECOMP_SESSIONS (gap run G1)")
+        };
+        let Ok(text) = std::fs::read_to_string(sessions.join("gapg1_20261003_152507/trace.tsv")) else { panic!("missing private data: no gap run G1") };
         let v3 = |s: &str| -> [f32; 3] {
             let v: Vec<f32> = s.split(' ').filter_map(|x| x.parse().ok()).collect();
             [v[0], v[1], v[2]]

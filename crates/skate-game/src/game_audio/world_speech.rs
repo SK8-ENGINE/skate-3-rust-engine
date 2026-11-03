@@ -1300,6 +1300,9 @@ mod tests {
         let Ok(bytes) = std::fs::read(base.join("assets/private/audio/aems/MixMapSK8.mxb")) else { panic!("missing private data: no MixMap") };
         let mut rows = Vec::new();
         let levels = std::env::var_os("SKATE_SPEECH_LEVELS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+        if levels.is_none() {
+            test_skip!("set SKATE_SPEECH_LEVELS (speech_levels.py --json)");
+        }
         for s in ["163809", "164620", "180430"] {
             let Some(Ok(text)) = levels.as_ref().map(|d| std::fs::read_to_string(d.join(format!("levels_{s}.json")))) else { continue };
             let list: Vec<LevelRow> = serde_json::from_str(&text).unwrap();
@@ -1423,6 +1426,9 @@ mod tests {
         let Ok(library) = crate::game_audio::Library::load(root) else { panic!("missing private data: no audio install") };
         let Some((index_path, _)) = library.speech("maincast") else { panic!("missing private data: no main-cast index (stage_world_audio.py --maincast)") };
         let dir = std::env::var_os("SKATE_MAINCAST_LINES").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+        if dir.is_none() {
+            test_skip!("set SKATE_MAINCAST_LINES (maincast_reads.py --json)");
+        }
         let Some(Ok(text)) = dir.map(|d| std::fs::read_to_string(d.join("maincast_lines.json"))) else { panic!("missing private data: SKATE_MAINCAST_LINES (maincast_reads.py --json)") };
         let rows: Vec<CastRow> = serde_json::from_str(&text).unwrap();
         let json: IndexJson = serde_json::from_str(&std::fs::read_to_string(&index_path).unwrap()).unwrap();
