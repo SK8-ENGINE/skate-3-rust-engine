@@ -2983,6 +2983,30 @@ The graph op `SendChaseStateMessage` (`826A77A8`) posts {ped, state} for a playe
 - Open: retail's gates IVehicle vf+0x60 and the ped's vf+200 (not read); the non-flee branch (a ray test of the car's
   4 corners from 1.5 m up along the ped's heading, 4.0 x lookahead, 0.4 / 0.09 thresholds, "Avoid" event) is decoded
   in b656 but its consumer is not found, so the steer-around is not ported.
+- Play report 2026-11-04 (ask 497): with the opt-in on, peds flee cars from too far, e.g. running on a sidewalk next
+  to the road while cars pass. The dot is not normalised (metres times m/s), so a car within 10 m moving at road speed
+  passes the 3.0 threshold almost whatever its line; the unread gates above are the likely retail filter. The log
+  line now carries `car_at`, `dist`, `speed`, `dot` and `branch=away|toward`, so the next session shows which cases
+  fire.
+- The two gates [code, research b821, `.local/research/b821-vehicle-flee-gates.md`]: before the radius and dot tests
+  the modifier needs (A) the ped standing on a road triangle (ped `+0x24` vf200 `82E38960` -> road network manager
+  `0x830854C0` vf0x2C `826B3880` -> vf0x3C `826B3B18`, a point-in-triangle test on the road triangles) and (B) a
+  flagged car (IVehicle vtable `0x82322240` slot 0x60 = `82C34598`: `+4402` 0x02, held / skitched this frame, or
+  `+3424` 0x04, a player-held car that entered a junction on red). Plain traffic passing a ped on the sidewalk fails
+  both, so retail never flees it. A failed gate or test is not an early return: it branches to the steer-around at
+  `0x82E2C3C0` (this corrects b656's reading); only the enable byte returns early.
+- Change (2026-11-04): `object_flee::flees_vehicle_gated` checks both gates first; `think_peds` passes
+  `road_under(state.roads, ped)` for A and the car's `Car::held` (from `TrafficState`) for B. The entered-on-red half
+  of B is not ported (it is not ported anywhere yet). Mod keys `ped_brain.vehicle_flee_require_on_road` and
+  `vehicle_flee_require_flagged` (both true, retail). The "toward" direction stays the opt-in's choice (ask 401). Test
+  `only_a_ped_on_the_road_flees_a_held_car`.
+- The steer-around [code, research b822, `.local/research/b822-ped-vehicle-steer-around.md`]: `82E37518` runs the
+  modifier for cars within 4.0 m of the ped (the vehicle manager's query, so the 10 m flee test may in practice be
+  capped at 4 m: a reading, not proven). A close hit (t < 0.4, car speed squared > 0.09) queues Avoid + Jump + Back:
+  the ped jumps back (`AvoidJumpBack`). A far hit sets flags no reader was found for: no steer, no stop. Not ported:
+  it needs each car's 4 corner vectors (IVehicle iface+0xE30, writer not read); todo
+  `.claude/todo/living-world-ped-vehicle-steer-around.md`.
+- Open: who clears `+3424` 0x04; IVehicle vf0x20 is the car's velocity by its use (b822, medium).
 
 ## Greet and warn gestures, StopChannel on collision (2026-10-29, research b677)
 

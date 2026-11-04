@@ -2255,7 +2255,7 @@ pub(crate) fn think_peds(
     mut events: ResMut<bevy::ecs::message::Messages<PedEvent>>,
     mut cursor: Local<Option<bevy::ecs::message::MessageCursor<PedEvent>>>,
     mut touchers: Local<BTreeMap<u64, u64>>,
-    (mut traffic_events, cars, mut plugin_props, physics, linked_props, skater, mut scatter): (MessageReader<super::vehicles::TrafficEvent>, Query<(&super::vehicles::TrafficCar, &super::vehicles::CarMotion)>, ResMut<PedPluginProps>, Option<Res<crate::physics::GamePhysics>>, Query<&super::ped_hand_props::ReleasedHandProp>, Option<Res<crate::physics::SkaterRuntime>>, Local<(f32, Option<u64>, bool)>),
+    (mut traffic_events, cars, mut plugin_props, physics, linked_props, skater, mut scatter, traffic): (MessageReader<super::vehicles::TrafficEvent>, Query<(&super::vehicles::TrafficCar, &super::vehicles::CarMotion)>, ResMut<PedPluginProps>, Option<Res<crate::physics::GamePhysics>>, Query<&super::ped_hand_props::ReleasedHandProp>, Option<Res<crate::physics::SkaterRuntime>>, Local<(f32, Option<u64>, bool)>, Option<Res<super::vehicles::TrafficState>>),
 ) {
     let _span = super::timing::span(super::timing::THINK_PEDS);
     // A map change (b216; not the first map, whose key goes from none to some): the conversations, chase groups,
@@ -2342,8 +2342,13 @@ pub(crate) fn think_peds(
         Vec::new()
     };
     let vehicle_flee = settings.ped_brain.vehicle_flee;
-    let moving_cars: Vec<(u64, ([f32; 3], [f32; 3]))> =
-        if vehicle_flee.enabled { cars.iter().map(|(c, m)| (c.id.to_u64(), (m.curr.translation.to_array(), m.velocity.to_array()))).collect() } else { Vec::new() };
+    // Each car with its gate B flag (held / skitched this tick, `Car::held`; b821).
+    let held_car = |serial: u32| traffic.as_deref().and_then(|t| t.cars.binary_search_by_key(&serial, |c| c.key).ok().map(|i| t.cars[i].held)).unwrap_or(false);
+    let moving_cars: Vec<(u64, ([f32; 3], [f32; 3], bool))> = if vehicle_flee.enabled {
+        cars.iter().map(|(c, m)| (c.id.to_u64(), (m.curr.translation.to_array(), m.velocity.to_array(), held_car(c.id.serial)))).collect()
+    } else {
+        Vec::new()
+    };
     // Entity type and position of every id this tick (players are the `skater` type, props `prop`, cars their entity).
     let entities: BTreeMap<u64, (String, [f32; 3])> = list
         .iter()
@@ -2822,12 +2827,23 @@ pub(crate) fn think_peds(
             if fresh {
                 info!("PED_FLEE_OBJECT ped=#{} prop={} at [{:.2}, {:.2}, {:.2}] tick={tick}", ped.id.serial, prop & 0xFFFF_FFFF, at[0], at[1], at[2]);
             }
-        } else if let Some((car, _)) = moving_cars.iter().find(|(_, (p, v))| skate_core::living_world::peds::object_flee::flees_vehicle(at, *p, *v, &vehicle_flee)) {
+        } else if let Some((car, (cp, cv, _))) = (!moving_cars.is_empty())
+            // Gate A: the ped stands on a road triangle (ped vf200 -> road network vf0x3C, b821).
+            .then(|| state.roads.as_ref().is_some_and(|r| skate_core::living_world::traffic::spawn::road_under(r, at).is_some()))
+            .and_then(|on_road| moving_cars.iter().find(|(_, (p, v, held))| skate_core::living_world::peds::object_flee::flees_vehicle_gated(at, *p, *v, on_road, *held, &vehicle_flee)))
+        {
             // A car near the ped moving along the line between them (`82E2C0C8`, opt-in, W8).
             let fresh = mind.brain.wants.get("flee").is_none_or(|w| w.target != *car || !w.needs_addressing);
             mind.brain.flee_object(*car);
             if fresh {
-                info!("PED_FLEE_VEHICLE ped=#{} car={car} at [{:.2}, {:.2}, {:.2}] tick={tick}", ped.id.serial, at[0], at[1], at[2]);
+                let d = [cp[0] - at[0], cp[1] - at[1], cp[2] - at[2]];
+                let dot = d[0] * cv[0] + d[2] * cv[2];
+                info!(
+                    "PED_FLEE_VEHICLE ped=#{} car={car} at [{:.2}, {:.2}, {:.2}] car_at [{:.2}, {:.2}, {:.2}] dist={:.1} speed={:.1} dot={dot:.1} branch={} tick={tick}",
+                    ped.id.serial, at[0], at[1], at[2], cp[0], cp[1], cp[2],
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt(), (cv[0] * cv[0] + cv[2] * cv[2]).sqrt(),
+                    if dot > 0.0 { "away" } else { "toward" }
+                );
             }
         }
         let due = tick.saturating_sub(ped.spawn_tick);
@@ -3574,8 +3590,18 @@ pub(crate) fn think_peds(
         }
         // Flee movement: 15 m legs away from the threat, a new one within 2 m of the goal; the
         // leg goes to the nav as a one-point route (cleared when the flee ends).
-        let flee = settings.ped_brain.flee;
-        match (mind.brain.motion_intent, mind.brain.flee_from, data.nav.as_deref()) {
+        // A channel stop the brain asked for (Scatter's Begin, b824).
+        if let Some(fade) = mind.brain.channel_stop.take() {
+            body.player.channel_stop(fade);
+        }
+        // Scatter (b645): the threat is the local player, whatever the flee want says, and legs end within 3 m.
+        let scatter = mind.brain.scatter_threat;
+        let mut flee = settings.ped_brain.flee;
+        if scatter {
+            flee.arrival_radius = settings.ped_brain.values.scatter_arrival_radius;
+        }
+        let threat_id = if scatter { (!players.is_empty()).then_some(PLAYER_TARGET_BASE) } else { mind.brain.flee_from };
+        match (mind.brain.motion_intent, threat_id, data.nav.as_deref()) {
             (Some(skate_core::living_world::peds::brain::motion::FLEE), Some(threat), Some(mesh)) => {
                 // A new leg on arrival (82E2BC70) or when the bot is done short of the goal (82E2CB08, b697).
                 let bot_done = flee.releg_on_nav_done && body.nav.route_done;
@@ -3588,7 +3614,7 @@ pub(crate) fn think_peds(
                         }
                         body.nav.set_route(Some(skate_core::living_world::peds::PedRoute { points: vec![goal], looped: false }));
                         mind.flee_goal = Some(goal);
-                        info!("PED_FLEE ped=#{} from={} goal=[{:.1}, {:.1}, {:.1}] tick={tick}", ped.id.serial, threat, goal[0], goal[1], goal[2]);
+                        info!("PED_FLEE ped=#{} from={} scatter={scatter} goal=[{:.1}, {:.1}, {:.1}] tick={tick}", ped.id.serial, threat, goal[0], goal[1], goal[2]);
                     }
                 }
             }

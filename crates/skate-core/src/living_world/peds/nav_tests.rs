@@ -433,6 +433,34 @@ fn a_pinned_walking_ped_gives_up_and_plans_away_from_its_target() {
     assert!(next[2] < pos[2], "planned away from the old target: {next:?}");
 }
 
+/// b645: the path request (`82E957F8`) moves an off-mesh or unreachable target onto the nearest reachable point; with
+/// none in range the ped gets no corners and picks a new target, it never walks straight at the point (ask 496).
+#[test]
+fn an_unreachable_target_moves_onto_the_mesh_and_is_never_walked_at() {
+    // Two strips, x 0..5 and x 6..10 (a hole at 5..6).
+    let m = mesh(&grid(10, 1, 1.0, |i, _| (i != 5).then_some(AREA_DEFAULT)));
+    let pos = [0.5, 0.0, 0.5];
+    let dt = 1.0 / 30.0;
+    let walk = |p: &WanderParams, target: [f32; 3]| {
+        let mut nav = PedNav::default();
+        nav.set_route(Some(PedRoute { points: vec![target], looped: false }));
+        nav.step(&m, p, CrosswalkRule::Off, &NoSignals, 1, pos, 0.0, Locomotion::Walk, &[], dt);
+        nav
+    };
+    let p = WanderParams::default();
+    // Off the mesh, 1.2 m past the strip's end: the target becomes the edge point.
+    let nav = walk(&p, [-1.2, 0.0, 0.5]);
+    assert_eq!(nav.target, Some([0.0, 0.0, 0.5]));
+    assert_eq!(nav.corners.last(), Some(&[0.0, 0.0, 0.5]));
+    // On the other strip: the near edge of the ped's own strip.
+    let nav = walk(&p, [6.2, 0.0, 0.5]);
+    assert_eq!(nav.target, Some([5.0, 0.0, 0.5]));
+    // A mod range below the distance: no corners (no straight walk at the point), the short fan next.
+    let near = WanderParams { rewrite_range: 1.0, ..WanderParams::default() };
+    let nav = walk(&near, [-1.2, 0.0, 0.5]);
+    assert!(nav.corners.iter().all(|c| c[0] >= 0.0), "never a corner off the mesh: {:?}", nav.corners);
+}
+
 /// b277: the path goal is the nearest point the start can reach (retail `82933A48`, unbounded), not the peds' 0.5 m
 /// point query; B's plan acceptance (2.0 h / 1.0 v) then decides.
 #[test]
@@ -538,7 +566,7 @@ fn walk_back_start_snaps_from_an_obstacle_cut() {
 }
 
 /// b515 / b516: an approach goal with no path (another component) leaves the ped standing, asking again each update
-/// (retail bot mode 0), while a mod's plain route still walks straight at it (ours, unchanged).
+/// (retail bot mode 0), while a plain route walks to the nearest reachable point (the path request rewrite, b645).
 #[test]
 fn an_approach_goal_with_no_path_leaves_the_ped_standing() {
     // Two strips, x 0..5 and x 6..10 (a hole at 5..6).
@@ -559,7 +587,7 @@ fn an_approach_goal_with_no_path_leaves_the_ped_standing() {
     assert!((bodies[0].pos[0] - start[0]).hypot(bodies[0].pos[2] - start[2]) < 1e-3, "stood: {:?}", bodies[0].pos);
     assert!(planned >= 100, "asked again each update: {planned}");
     run(&m, &mut bodies[1..], 120, CrosswalkRule::Off, &lamp, |_, _| {});
-    assert!(bodies[1].pos[0] > 2.0, "a plain route walks straight at it: {:?}", bodies[1].pos);
+    assert!(bodies[1].pos[0] > 2.0, "a plain route walks to the reachable edge: {:?}", bodies[1].pos);
     // A new plain route clears the approach flag.
     bodies[0].nav.set_route(Some(PedRoute { points: vec![goal], looped: false }));
     assert!(!bodies[0].nav.hold_on_fail);

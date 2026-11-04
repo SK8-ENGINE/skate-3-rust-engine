@@ -61,7 +61,8 @@ ledge) were replaced by this.
   (design, place, angle, wear) and kept in `camcorder-sticker.txt` in the state folder. Worn: faded, scratched, grimy,
   chipped, one edge peeled up and folded back with old glue under it, and creased along the gasket edge and the
   bezel's lip it was pressed over. The set: an original "filmer" character on clear vinyl in the style of hand-drawn
-  riso character stickers, and parodies of skate brand stickers (Blickey, Spitball Wheels, Supremely Mid, Thrashed).
+  riso character stickers (die cut: the art's silhouette grown by a 6-unit vinyl margin, holes filled, its outer edge
+  traced and smoothed once per start, `FilmerCut`), and parodies of skate brand stickers (Blickey, Spitball Wheels, Supremely Mid, Thrashed).
 - **Game stickers replace the parody set:** PNGs in the state folder's `stickers\` folder are used instead when there
   are any (same place and angle, creases too). Finding the retail stickers and exporting them there is the
   living-world TODO `.claude/todo/living-world-stickers.md`; nothing from the game is committed.

@@ -78,12 +78,23 @@ pub struct VehicleFleeParams {
     pub away: bool,
     /// The car moving at the ped (dot < -`min_dot`).
     pub toward: bool,
+    /// Retail's gate A (ped vf200 `82E38960`, b821): only a ped standing on a road triangle flees.
+    pub require_on_road: bool,
+    /// Retail's gate B (IVehicle vf0x60 `82C34598`, b821): only a flagged car, held / skitched this frame (`+4402`
+    /// 0x02; the entered-on-red half, `+3424` 0x04, is not ported), makes a ped flee.
+    pub require_flagged: bool,
 }
 
 impl Default for VehicleFleeParams {
     fn default() -> Self {
-        Self { enabled: false, radius: 10.0, min_dot: 3.0, away: true, toward: true }
+        Self { enabled: false, radius: 10.0, min_dot: 3.0, away: true, toward: true, require_on_road: true, require_flagged: true }
     }
+}
+
+/// [`flees_vehicle`] behind retail's two gates: the ped on a road and the car flagged (`82E2C0C8`, b821). A car that
+/// fails a gate is steered round in retail (`0x82E2C3C0`, not ported), never fled.
+pub fn flees_vehicle_gated(ped: Vec3, car: Vec3, velocity: Vec3, ped_on_road: bool, car_flagged: bool, p: &VehicleFleeParams) -> bool {
+    (ped_on_road || !p.require_on_road) && (car_flagged || !p.require_flagged) && flees_vehicle(ped, car, velocity, p)
 }
 
 /// Whether a ped at `ped` flees a car at `car` moving with `velocity`.
@@ -137,5 +148,17 @@ mod tests {
         assert!(!flees_vehicle(ped, [0.0, 0.0, 10.0], [0.0, 0.0, -9.0], &on), "10 m is outside");
         assert!(!flees_vehicle(ped, [0.0, 0.0, 6.0], [0.0, 0.0, -5.0], &VehicleFleeParams::default()), "off by default");
         assert!(!flees_vehicle(ped, [0.0, 0.0, 6.0], [0.0, 0.0, -5.0], &VehicleFleeParams { toward: false, ..on }), "retail's direction only");
+    }
+
+    /// b821 (ask 497): a ped on the sidewalk, or any ped by a car nobody holds, never flees it.
+    #[test]
+    fn only_a_ped_on_the_road_flees_a_held_car() {
+        let on = VehicleFleeParams { enabled: true, ..Default::default() };
+        let (ped, car, v) = ([0.0, 0.0, 0.0], [0.0, 0.0, 6.0], [0.0, 0.0, -5.0]);
+        assert!(flees_vehicle_gated(ped, car, v, true, true, &on), "on the road, a skitched car");
+        assert!(!flees_vehicle_gated(ped, car, v, false, true, &on), "on the sidewalk");
+        assert!(!flees_vehicle_gated(ped, car, v, true, false, &on), "plain traffic driving past");
+        let loose = VehicleFleeParams { require_on_road: false, require_flagged: false, ..on };
+        assert!(flees_vehicle_gated(ped, car, v, false, false, &loose), "a mod can drop both gates");
     }
 }

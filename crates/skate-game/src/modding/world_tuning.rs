@@ -282,6 +282,7 @@ pub(crate) fn apply_living_world(s: &mut LivingWorldSettings, p: &LivingWorldPat
         w.stuck_distance = f.stuck_distance.unwrap_or(w.stuck_distance);
         w.stuck_seconds = f.stuck_seconds.unwrap_or(w.stuck_seconds);
         w.give_up_seconds = f.give_up_seconds.unwrap_or(w.give_up_seconds);
+        w.rewrite_range = f.rewrite_range.unwrap_or(w.rewrite_range);
         w.yield_patience = f.yield_patience.unwrap_or(w.yield_patience);
         use skate_core::living_world::peds::wander::CrosswalkRule;
         n.crosswalk = match f.crosswalk.as_deref() {
@@ -420,6 +421,8 @@ pub(crate) fn apply_living_world(s: &mut LivingWorldSettings, p: &LivingWorldPat
         b.values.unreachable_radius = f.unreachable_radius.unwrap_or(b.values.unreachable_radius);
         b.values.reach_snap_window = f.reach_snap_window.unwrap_or(b.values.reach_snap_window);
         b.values.scatter_seconds = f.scatter_seconds.unwrap_or(b.values.scatter_seconds);
+        b.values.scatter_arrival_radius = f.scatter_arrival_radius.unwrap_or(b.values.scatter_arrival_radius);
+        b.values.scatter_channel_fade = f.scatter_channel_fade.unwrap_or(b.values.scatter_channel_fade);
         b.scatter_hold = f.scatter_hold.unwrap_or(b.scatter_hold);
         b.values.reach_check_seconds = f.reach_check_seconds.unwrap_or(b.values.reach_check_seconds);
         b.values.warn_speech = f.warn_speech.unwrap_or(b.values.warn_speech);
@@ -434,6 +437,8 @@ pub(crate) fn apply_living_world(s: &mut LivingWorldSettings, p: &LivingWorldPat
         b.vehicle_flee.min_dot = f.vehicle_flee_min_dot.unwrap_or(b.vehicle_flee.min_dot);
         b.vehicle_flee.away = f.vehicle_flee_away.unwrap_or(b.vehicle_flee.away);
         b.vehicle_flee.toward = f.vehicle_flee_toward.unwrap_or(b.vehicle_flee.toward);
+        b.vehicle_flee.require_on_road = f.vehicle_flee_require_on_road.unwrap_or(b.vehicle_flee.require_on_road);
+        b.vehicle_flee.require_flagged = f.vehicle_flee_require_flagged.unwrap_or(b.vehicle_flee.require_flagged);
         b.flee.leg = f.flee_leg.unwrap_or(b.flee.leg);
         b.flee.arrival_radius = f.flee_arrival_radius.unwrap_or(b.flee.arrival_radius);
         b.flee.threat_speed_gate = f.flee_threat_speed_gate.unwrap_or(b.flee.threat_speed_gate);
@@ -688,7 +693,7 @@ pub(crate) fn read(world: &World, domain: &str) -> Value {
             let ped_obstacles = fields!(po; enabled, min_half_extent, moving_speed, recut_fraction, detour_margin, target_snap, step_height, held_is_obstacle, moving_solid, skaters, skater_half_extents, contact_slide, contact_slide_dot, avoid_horizon, avoid_ray_scale, avoid_accel, avoid_scale, avoid_head_on_dot, avoid_crossing_dot, avoider_extent, avoider_extent_tail, path_turn_accel, path_turn_full_deg, path_turn_boost_deg, path_turn_boost_rate, path_turn_boost_max, path_turn_max_deg, path_turn_radius, controller_step, contact_slow_fraction, contact_max_speed, brake_decel, brake_goal_radius, brake_body_radius, brake_away_fraction);
             let lc = &s.npc_simulated.controller;
             let npc_line_controller = fields!(lc; wipe_out, safe_slope, stuck_clear_distance, stuck_start_fraction, stuck_start_approach, reposition_ahead, reposition_past, remembered_window, reposition_interval, safe_jump_frames, safe_flag_frames, safe_run, stuck_clear_ticks, stuck_hold_ticks, stuck_gate_ticks, resnap_frames, stuck_limits);
-            let ped_brain = json!({"enabled": s.ped_brain.enabled, "mood": s.ped_brain.mood, "wander_speed": s.ped_brain.values.wander_speed, "warn_seconds": s.ped_brain.values.warn_seconds, "know_about_seconds": s.ped_brain.values.know_about_seconds, "mood_want_memory_seconds": s.ped_brain.values.mood_want_memory_seconds, "conversation_turn_seconds": s.ped_brain.values.conversation_turn_seconds, "conversation_gather_seconds": s.ped_brain.values.conversation_gather_seconds, "unreachable_radius": s.ped_brain.values.unreachable_radius, "reach_check_seconds": s.ped_brain.values.reach_check_seconds, "reach_snap_window": s.ped_brain.values.reach_snap_window, "scatter_seconds": s.ped_brain.values.scatter_seconds, "scatter_hold": s.ped_brain.scatter_hold, "run_from_honker_distance": s.ped_brain.run_from_honker.side_distance, "run_from_honker_speed": s.ped_brain.run_from_honker.run_speed, "warn_speech": s.ped_brain.values.warn_speech, "water_disables_seats": s.ped_brain.plugins.water_disables_seats, "water_max_depth": s.ped_brain.plugins.water_max_depth, "water_above": s.ped_brain.plugins.water_above});
+            let ped_brain = json!({"enabled": s.ped_brain.enabled, "mood": s.ped_brain.mood, "wander_speed": s.ped_brain.values.wander_speed, "warn_seconds": s.ped_brain.values.warn_seconds, "know_about_seconds": s.ped_brain.values.know_about_seconds, "mood_want_memory_seconds": s.ped_brain.values.mood_want_memory_seconds, "conversation_turn_seconds": s.ped_brain.values.conversation_turn_seconds, "conversation_gather_seconds": s.ped_brain.values.conversation_gather_seconds, "unreachable_radius": s.ped_brain.values.unreachable_radius, "reach_check_seconds": s.ped_brain.values.reach_check_seconds, "reach_snap_window": s.ped_brain.values.reach_snap_window, "scatter_seconds": s.ped_brain.values.scatter_seconds, "scatter_arrival_radius": s.ped_brain.values.scatter_arrival_radius, "scatter_channel_fade": s.ped_brain.values.scatter_channel_fade, "scatter_hold": s.ped_brain.scatter_hold, "run_from_honker_distance": s.ped_brain.run_from_honker.side_distance, "run_from_honker_speed": s.ped_brain.run_from_honker.run_speed, "warn_speech": s.ped_brain.values.warn_speech, "water_disables_seats": s.ped_brain.plugins.water_disables_seats, "water_max_depth": s.ped_brain.plugins.water_max_depth, "water_above": s.ped_brain.plugins.water_above});
             let npc_simulated = json!({"enabled": s.npc_simulated.enabled, "radius": s.npc_simulated.radius, "max": s.npc_simulated.max, "respawn_seconds": s.npc_simulated.respawn_seconds, "respawn_min": s.npc_simulated.respawn_min, "respawn_max": s.npc_simulated.respawn_max, "placement_hold_seconds": s.npc_simulated.placement_hold_seconds, "respawn_hold_seconds": s.npc_simulated.respawn_hold_seconds, "anticipation_distance": s.npc_simulated.signals.anticipation_distance, "anticipation_frames": s.npc_simulated.signals.anticipation_frames, "max_crossed_nodes": s.npc_simulated.signals.max_crossed_nodes, "walk_back": s.npc_simulated.walk_back, "walk_arrive_distance": s.npc_simulated.navmesh.arrive_h, "walk_stuck_ticks": s.npc_simulated.navmesh.stuck_waypoint_ticks, "board_yaw": s.npc_simulated.board_yaw_on, "board_yaw_dead_zone": s.npc_simulated.board_yaw.dead_zone, "manual_value": s.npc_simulated.signals.manual_value, "board_yaw_mag_scale": s.npc_simulated.board_yaw.mag_scale, "air_steer": s.npc_simulated.air_steer_on, "air_steer_dead_zone_deg": s.npc_simulated.air_steer.dead_zone_deg, "air_steer_full_deg": s.npc_simulated.air_steer.full_deg, "avoid_anchor_ticks": s.npc_simulated.ground_steer.avoid_anchor_ticks, "bump": s.npc_simulated.bump});
             let mut out = json!({
                 "npc_walk_back": npc_walk_back,
@@ -731,7 +736,7 @@ pub(crate) fn read(world: &World, domain: &str) -> Value {
                 let f = s.ped_brain.object_flee;
                 b.extend([("object_flee".into(), json!(f.enabled)), ("object_flee_radius".into(), json!(f.radius)), ("object_flee_min_speed".into(), json!(f.min_speed)), ("object_flee_lane_margin".into(), json!(f.lane_margin))]);
                 let v = s.ped_brain.vehicle_flee;
-                b.extend([("vehicle_flee".into(), json!(v.enabled)), ("vehicle_flee_radius".into(), json!(v.radius)), ("vehicle_flee_min_dot".into(), json!(v.min_dot)), ("vehicle_flee_away".into(), json!(v.away)), ("vehicle_flee_toward".into(), json!(v.toward))]);
+                b.extend([("vehicle_flee".into(), json!(v.enabled)), ("vehicle_flee_radius".into(), json!(v.radius)), ("vehicle_flee_min_dot".into(), json!(v.min_dot)), ("vehicle_flee_away".into(), json!(v.away)), ("vehicle_flee_toward".into(), json!(v.toward)), ("vehicle_flee_require_on_road".into(), json!(v.require_on_road)), ("vehicle_flee_require_flagged".into(), json!(v.require_flagged))]);
                 let l = s.ped_brain.flee;
                 b.extend([("flee_leg".into(), json!(l.leg)), ("flee_arrival_radius".into(), json!(l.arrival_radius)), ("flee_threat_speed_gate".into(), json!(l.threat_speed_gate)), ("flee_side_blend".into(), json!(l.side_blend)), ("flee_releg_on_nav_done".into(), json!(l.releg_on_nav_done))]);
             }

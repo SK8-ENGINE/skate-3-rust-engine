@@ -97,6 +97,31 @@ fn speech_ops_store_the_value_on_the_ped() {
     assert_eq!(h.brain.speech, Some(20));
 }
 
+/// b645 (ask 496): Scatter is the Flee intent with the scatter threat flag (the local player), cleared on End; a flee
+/// want's target is not taken over.
+#[test]
+fn scatter_flees_the_local_player_until_it_ends() {
+    let behaviors = ops(&[("Scatter", &[]), ("Wander", &[])]);
+    let mut brain = PedBrain::default();
+    brain.set_want("flee", 9);
+    let settings = BrainSettings::default();
+    let none = |_: u64| None;
+    let f = frame();
+    let mut h = BrainHost { behaviors: &behaviors, conditions: &[], brain: &mut brain, settings: &settings, position: [0.0; 3], heading: 0.0, skater: None, target_position: &none, chase: Default::default() };
+    // Wandering first leaves the 2.0 walk speed; Scatter's Update replaces it with the run speed (none here: the run
+    // fallback), b824.
+    h.update(1, [0; 6], &f);
+    assert_eq!(h.brain.speed_suggestion, Some(settings.wander_speed));
+    h.begin(0, [0; 6], &f);
+    assert_eq!((h.brain.motion_intent, h.brain.scatter_threat, h.brain.flee_from), (Some(motion::FLEE), true, None));
+    assert_eq!(h.brain.channel_stop, Some(0.2), "the upper-body channel stops with a 0.2 s fade");
+    h.update(0, [0; 6], &f);
+    assert_eq!(h.brain.speed_suggestion, None, "no walk speed carried into the flee");
+    h.end(0, [0; 6], &f);
+    assert!(!h.brain.scatter_threat);
+    assert_eq!(settings.scatter_arrival_radius, 3.0);
+}
+
 #[test]
 fn wander_and_flee_set_the_body_outputs() {
     let behaviors = ops(&[("Wander", &[]), ("Flee", &[]), ("SuggestVelocity", &[("linear", "3.0")])]);
@@ -188,7 +213,7 @@ fn simple_timers_follow_the_retail_timer_map() {
     brain.set_timer(0, 9.0);
     assert_eq!(brain.timer(0), 9.0);
     assert_eq!(timers::index("TargetUnreachableTimer"), 42);
-    assert_eq!(timers::index("nope"), 47);
+    assert_eq!((timers::index("ScatterTime"), timers::index("UnspawnTime"), timers::index("nope")), (46, 47, -1));
 }
 
 #[test]

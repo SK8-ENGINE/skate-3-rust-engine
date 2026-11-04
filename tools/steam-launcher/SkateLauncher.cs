@@ -1760,9 +1760,64 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
             }
         }
     }
+    static readonly PointF[] FilmerHead = { new PointF(-14, -56), new PointF(-2, -66), new PointF(12, -58), new PointF(12, -40), new PointF(0, -32), new PointF(-12, -38) };
+    static readonly PointF[] FilmerHoodie = { new PointF(-22, -30), new PointF(18, -32), new PointF(26, 10), new PointF(20, 16), new PointF(-22, 16), new PointF(-28, 6) };
+    static readonly PointF[] FilmerPants = { new PointF(-22, 14), new PointF(20, 14), new PointF(24, 64), new PointF(4, 66), new PointF(0, 30), new PointF(-6, 66), new PointF(-26, 64) };
+    static readonly PointF[] FilmerArm = { new PointF(12, -26), new PointF(24, -40), new PointF(30, -56), new PointF(22, -60), new PointF(14, -46), new PointF(6, -30) };
+    static PointF[] filmerCut;
+    // The filmer's die cut (USER-ASKS 494): the printed art's silhouette (fills, lines, camera, shoes) grown by a fixed
+    // vinyl margin, holes filled, its outer edge traced and smoothed, so the cut follows the art like a real die cut.
+    static PointF[] FilmerCut() {
+        if (filmerCut != null) return filmerCut;
+        const int K = 3, N = 120 * 2 * K;   // K pixels per unit over -120..120
+        const float Margin = 6;
+        var inside = new bool[N * N];
+        using (var bmp = new Bitmap(N, N, PixelFormat.Format32bppArgb)) {
+            using (var g = Graphics.FromImage(bmp)) {
+                g.Clear(Color.Transparent); g.SmoothingMode = SmoothingMode.None;
+                g.ScaleTransform(K, K); g.TranslateTransform(120, 120);
+                using (var b = new SolidBrush(Color.Black)) using (var pen = new Pen(Color.Black, 2 * Margin) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round }) {
+                    Action<GraphicsPath> grow = delegate(GraphicsPath p) { g.FillPath(b, p); g.DrawPath(pen, p); };
+                    foreach (var part in new[] { FilmerHead, FilmerHoodie, FilmerPants, FilmerArm })
+                        foreach (float ox in new[] { 0f, 2.5f }) using (var p = new GraphicsPath()) {
+                            var pts = Array.ConvertAll(part, q => new PointF(q.X + ox, q.Y + ox * 0.6f)); p.AddClosedCurve(pts, 0.4f); grow(p);
+                        }
+                    using (var p = new GraphicsPath()) { p.AddRectangle(new RectangleF(14, -70, 30, 18)); p.AddEllipse(38, -67, 10, 12); p.AddEllipse(-30, 62, 26, 12); p.AddEllipse(2, 62, 26, 12); grow(p); }
+                }
+            }
+            var px = Pixels(bmp);
+            // Outside = background reached from the border; everything else is the sticker (holes filled).
+            var outside = new bool[N * N]; var q2 = new Queue<int>();
+            for (int i = 0; i < N; i++) foreach (int s in new[] { i, (N - 1) * N + i, i * N, i * N + N - 1 }) if (!outside[s] && ((px[s] >> 24) & 255) == 0) { outside[s] = true; q2.Enqueue(s); }
+            while (q2.Count > 0) {
+                int c = q2.Dequeue(), x = c % N, y = c / N;
+                foreach (int n in new[] { x > 0 ? c - 1 : -1, x < N - 1 ? c + 1 : -1, y > 0 ? c - N : -1, y < N - 1 ? c + N : -1 })
+                    if (n >= 0 && !outside[n] && ((px[n] >> 24) & 255) == 0) { outside[n] = true; q2.Enqueue(n); }
+            }
+            for (int i = 0; i < N * N; i++) inside[i] = !outside[i];
+        }
+        // Moore-neighbour trace of the outer edge, clockwise from the topmost-left pixel.
+        int start = Array.IndexOf(inside, true);
+        int[] mx = { -1, -1, 0, 1, 1, 1, 0, -1 }, my = { 0, -1, -1, -1, 0, 1, 1, 1 };
+        var edge = new List<Point>();
+        int cx = start % N, cy = start / N, dir = 3;   // the scan resumes just past the pixel it came from (dir + 5)
+        do {
+            edge.Add(new Point(cx, cy));
+            int k;
+            for (k = 0; k < 8; k++) {
+                int d = (dir + 5 + k) % 8, nx = cx + mx[d], ny = cy + my[d];
+                if (nx >= 0 && ny >= 0 && nx < N && ny < N && inside[ny * N + nx]) { cx = nx; cy = ny; dir = d; break; }
+            }
+            if (k == 8 || edge.Count > N * 8) break;
+        } while (cx != start % N || cy != start / N);
+        var cut = new List<PointF>();
+        for (int i = 0; i < edge.Count; i += 2 * K) cut.Add(new PointF(edge[i].X / (float)K - 120, edge[i].Y / (float)K - 120));
+        filmerCut = cut.ToArray();
+        return filmerCut;
+    }
     static GraphicsPath StickerShape(int design) {
         var path = new GraphicsPath();
-        if (design == 0) { path.AddClosedCurve(new[] { new PointF(-6, -80), new PointF(22, -64), new PointF(40, -10), new PointF(30, 54), new PointF(34, 80), new PointF(-30, 82), new PointF(-30, 30), new PointF(-42, -24), new PointF(-30, -62) }, 0.5f); return path; }
+        if (design == 0) { path.AddClosedCurve(FilmerCut(), 0.5f); return path; }
         if (design == 1) { path.AddArc(-80, -56, 160, 70, 180, 180); path.AddLine(80, -21, 80, 40); path.AddLine(80, 40, -80, 40); path.CloseFigure(); return path; }
         if (design == 2) { path.AddEllipse(-72, -72, 144, 144); return path; }
         if (design == 3) { path.AddRectangle(new RectangleF(-80, -30, 160, 60)); return path; }
@@ -1788,10 +1843,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
                 var off = new PointF[pts.Length]; for (int i = 0; i < pts.Length; i++) off[i] = new PointF(pts[i].X + 2.5f, pts[i].Y + 1.5f);
                 using (var b = new SolidBrush(c)) g.FillClosedCurve(b, off, FillMode.Alternate, 0.4f);
             };
-            var head = new[] { new PointF(-14, -56), new PointF(-2, -66), new PointF(12, -58), new PointF(12, -40), new PointF(0, -32), new PointF(-12, -38) };
-            var hoodie = new[] { new PointF(-22, -30), new PointF(18, -32), new PointF(26, 10), new PointF(20, 16), new PointF(-22, 16), new PointF(-28, 6) };
-            var pants = new[] { new PointF(-22, 14), new PointF(20, 14), new PointF(24, 64), new PointF(4, 66), new PointF(0, 30), new PointF(-6, 66), new PointF(-26, 64) };
-            var arm = new[] { new PointF(12, -26), new PointF(24, -40), new PointF(30, -56), new PointF(22, -60), new PointF(14, -46), new PointF(6, -30) };
+            PointF[] head = FilmerHead, hoodie = FilmerHoodie, pants = FilmerPants, arm = FilmerArm;
             fill(Color.FromArgb(232, 196, 64), hoodie);
             fill(Color.FromArgb(150, 178, 214), pants);
             fill(Color.FromArgb(250, 240, 222), head);

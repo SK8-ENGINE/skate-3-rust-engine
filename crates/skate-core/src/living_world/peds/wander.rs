@@ -55,6 +55,10 @@ pub struct WanderParams {
     pub yield_distance: f32,
     /// NOT RETAIL: seconds a yielding ped waits before re-pathing to the same target: docs/hails-additions/26f-living-world-peds.md#ped-yield-patience
     pub yield_patience: f32,
+    /// How far an unreachable target moves to the nearest reachable navmesh point, the NavPower path request's
+    /// destination rewrite (`82E957F8` -> `82933E18`, range from bot settings `+0x40`; FLT_MAX in the flee request,
+    /// the wander value not read, b645): docs/hails-additions/26f-living-world-peds.md#unreachable-targets-move-onto-the-mesh
+    pub rewrite_range: f32,
 }
 
 impl Default for WanderParams {
@@ -77,6 +81,7 @@ impl Default for WanderParams {
             give_up_seconds: 2.0,
             yield_distance: 2.0,
             yield_patience: 2.0,
+            rewrite_range: f32::MAX,
         }
     }
 }
@@ -274,6 +279,16 @@ pub fn choose_target_clear(mesh: &NavMesh, params: &WanderParams, from: NavPoint
     (t, mesh.locate(t))
 }
 
+/// The NavPower path request (`82E957F8`): a destination that is off the mesh or not reachable from `here` moves to
+/// the nearest point of a reachable polygon (`82933E18` + `8292F9F0`), within `range`; None when there is none.
+fn request_path(mesh: &NavMesh, here: NavPoint, located: Option<NavPoint>, target: Vec3, range: f32) -> Option<(Vec3, Vec<Vec3>)> {
+    if let Some(c) = located.and_then(|to| mesh.find_path(here, to)) {
+        return Some((target, c));
+    }
+    let to = mesh.locate_nearest(target, here.poly, range)?;
+    mesh.find_path(here, to).map(|c| (to.position, c))
+}
+
 impl PedNav {
     pub fn set_route(&mut self, route: Option<PedRoute>) {
         self.route = route;
@@ -331,17 +346,22 @@ impl PedNav {
         self.next = 0;
         self.stall = None;
         self.holding = false;
-        self.corners = match located.and_then(|to| mesh.find_path(here, to)) {
-            Some(c) => c,
+        // An approach goal keeps its own rule (no path: stand and ask again, b515 / b516), so no rewrite for it.
+        let range = if self.hold_on_fail { 0.0 } else { params.rewrite_range };
+        self.corners = match request_path(mesh, here, located, target, range) {
+            Some((to, c)) => {
+                self.target = Some(to);
+                c
+            }
             None if self.hold_on_fail && self.route.is_some() => {
                 self.holding = true;
                 vec![here.position]
             }
             None => {
-                // No path (retail: a NavPower failure event 1-3 sets `+32`): go straight and
-                // take the short fan next time.
+                // No reachable point (retail: a NavPower failure event 1-3 sets `+32`, the bot is done): the ped stays
+                // put, arrives at once and picks a new target with the short fan next tick.
                 self.skip_long = true;
-                vec![target]
+                vec![here.position]
             }
         };
         if let Some(o) = obstacles {
@@ -356,13 +376,15 @@ impl PedNav {
     /// Re-path from `here` to the SAME target (retail re-requests the bot's destination, `82E957F8`; b315, b332): the
     /// target and a route's index stay. No path: the corners are dropped and the long fan skipped, so the arrival
     /// branch picks a new target (retail: a failed request ends the path, then the bot is done, b190).
-    pub fn repath(&mut self, mesh: &NavMesh, here: NavPoint, obstacles: Option<&NavObstacles>) {
+    pub fn repath(&mut self, mesh: &NavMesh, params: &WanderParams, here: NavPoint, obstacles: Option<&NavObstacles>) {
         let Some(target) = self.target else { return };
         self.repaths += 1;
         self.next = 0;
         self.stall = None;
-        match mesh.locate(target).and_then(|to| mesh.find_path(here, to)) {
-            Some(c) => {
+        let range = if self.hold_on_fail { 0.0 } else { params.rewrite_range };
+        match request_path(mesh, here, mesh.locate(target), target, range) {
+            Some((to, c)) => {
+                self.target = Some(to);
                 self.corners = c;
                 if let Some(o) = obstacles {
                     self.corners = o.detour(mesh, here.position, &self.corners, mesh.agent[1]);
@@ -449,7 +471,7 @@ impl PedNav {
             self.still_fired = false;
         }
         if std::mem::take(&mut self.repath_due) && !give_up {
-            self.repath(mesh, here, obstacles);
+            self.repath(mesh, params, here, obstacles);
         }
         // Arrival / no plan: choose the next target (the bot's state 1).
         let arrived = self.corners.is_empty() || (self.next + 1 >= self.corners.len() && self.corners.last().is_some_and(|c| dist_xz(*c, position) < params.corner_radius));

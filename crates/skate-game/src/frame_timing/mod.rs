@@ -242,6 +242,7 @@ impl FrameTiming {
             "low_01_ms": s.low_01_ms,
             "worst_ms": s.worst_ms,
             "hitches": self.hitches,
+            "session_s": self.now_s(),
         })
     }
 
@@ -318,7 +319,7 @@ impl Plugin for FrameTimingPlugin {
             .add_systems(RunFixedMainLoop, begin_fixed.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop))
             .add_systems(RunFixedMainLoop, end_fixed.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop))
             .add_systems(bevy::app::FixedFirst, count_fixed_step)
-            .add_systems(Last, (record, show, place_overlay).chain());
+            .add_systems(Last, (record, show, place_overlay, show_session_timer).chain());
         hitch::register(app);
         render_split::register(app);
     }
@@ -471,6 +472,48 @@ fn show(
     }
 }
 
+#[derive(Component)]
+struct SessionTimer;
+
+/// `h:mm:ss` since the game started (the session log's start).
+fn session_clock(seconds: f64) -> String {
+    let s = seconds.max(0.0) as u64;
+    format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+}
+
+/// The session timer (graphics menu "Session Timer", USER-ASKS 495): the time since the game started, bottom left,
+/// so a moment seen in play can be named in a report. Every full minute logs `SESSION_TIMER`, tying the shown time to
+/// the log's wall clock.
+fn show_session_timer(
+    timing: Res<FrameTiming>,
+    menu: Option<Res<crate::graphics_menu::Menu>>,
+    mut node: Query<&mut Node, With<SessionTimer>>,
+    mut text: Query<&mut Text, With<SessionTimer>>,
+    mut shown: Local<u64>,
+    mut logged: Local<u64>,
+) {
+    let now_s = timing.now_s();
+    let second = now_s as u64;
+    if second / 60 != *logged {
+        *logged = second / 60;
+        info!("SESSION_TIMER {}", session_clock((second / 60 * 60) as f64));
+    }
+    let visible = menu.as_ref().is_none_or(|m| m.session_timer_visible());
+    for mut n in &mut node {
+        let display = if visible { Display::Flex } else { Display::None };
+        if n.display != display {
+            n.display = display;
+        }
+    }
+    if !visible || second == *shown && second != 0 {
+        return;
+    }
+    *shown = second;
+    for mut t in &mut text {
+        t.0 = session_clock(now_s);
+    }
+}
+
 /// Moves the counter to the corner the menu picks (only when it changes).
 fn place_overlay(
     mut commands: Commands,
@@ -571,11 +614,28 @@ fn spawn_overlay(mut commands: Commands) {
         .with_children(|parent| {
             parent.spawn((RefreshWarningText, Text::new(""), TextFont { font_size: 14.0, ..default() }, TextColor(Color::WHITE)));
         });
+    commands.spawn((
+        Name::new("Session timer"),
+        SessionTimer,
+        Text::new("0:00:00"),
+        TextFont { font_size: 12.0, ..default() },
+        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
+        Node { position_type: PositionType::Absolute, bottom: px(8), left: px(8), padding: UiRect::axes(px(6), px(2)), ..default() },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+        GlobalZIndex(100),
+    ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_session_clock_reads_hours_minutes_seconds() {
+        assert_eq!(session_clock(0.0), "0:00:00");
+        assert_eq!(session_clock(59.9), "0:00:59");
+        assert_eq!(session_clock(3723.0), "1:02:03");
+    }
 
     #[test]
     fn window_drops_old_frames_and_counts_hitches() {

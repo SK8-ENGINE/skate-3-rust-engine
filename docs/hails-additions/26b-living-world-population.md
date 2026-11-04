@@ -632,3 +632,11 @@ Facing rules on the exported lines (fix 16, fix 23, fix 23 corrected). Every eig
 - Change: Graphics > "FPS Counter Position" (Top Left / Top Right, saved as `frame_stats_right` in
   `settings/graphics.json`, older files default to Top Left); `frame_timing` keeps a right corner node and moves the
   counter between the corners (`place_overlay`); the refresh warning stays top left. Tests: the graphics menu row tests.
+
+## Session Timer (2026-11-04, ask 495)
+- User ask: a small session timer on screen, so the moment something went wrong can be named in a report.
+- Change: Graphics > "Session Timer" (On / Off, saved as `session_timer` in `settings/graphics.json`, on by default,
+  older files default to On). `frame_timing::show_session_timer` draws `h:mm:ss` since the game started in a small box
+  in the bottom left corner, whether or not the FPS counter is on, and logs `SESSION_TIMER h:mm:00` at every full
+  minute, so a time read off the screen maps to the log's wall clock. Mods read it as `frame.session_s` in the
+  snapshot. Tests: `the_session_clock_reads_hours_minutes_seconds` and the graphics menu row tests.

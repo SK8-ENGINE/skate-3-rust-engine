@@ -53,6 +53,8 @@ struct GraphicsSettings {
     frame_stats_simple: bool,
     /// The counter in the top right corner (where it sat before 2026-10-23) instead of the top left (ask 404).
     frame_stats_right: bool,
+    /// The session timer, bottom left (time since the game started, for reports; USER-ASKS 495). On by default.
+    session_timer: bool,
     /// NPC draw distance multiplier (QoL, not retail): 1 = retail ranges.
     npc_draw_distance: f32,
     /// The opt-in living world features (`living_world::opt_ins`); all off by default.
@@ -93,6 +95,7 @@ impl Default for GraphicsSettings {
             frame_stats: false,
             frame_stats_simple: false,
             frame_stats_right: false,
+            session_timer: true,
             npc_draw_distance: skate_core::living_world::DrawDistance::RETAIL,
             opt_ins: Default::default(),
             extended_replays: false,
@@ -203,6 +206,10 @@ impl Menu {
     /// The counter sits in the top right corner (graphics menu row, saved).
     pub(crate) fn frame_stats_right(&self) -> bool {
         self.settings.frame_stats_right
+    }
+    /// The session timer shows (graphics menu row, saved).
+    pub(crate) fn session_timer_visible(&self) -> bool {
+        self.settings.session_timer
     }
     /// The overlay drew this frame (not hidden behind the customiser, travel or mod menus).
     /// Better Object Mover: every prop can be moved (not retail).
@@ -365,7 +372,7 @@ impl Menu {
             0 => (1000..1000 + self.maps.len()).collect(),
             1 if self.difficulty == Difficulty::Custom => std::iter::once(3).chain(300..337).chain([CAMERA_ANGLE_ROW,8,10]).collect(),
             1 => vec![3, CAMERA_ANGLE_ROW, 8, 10],
-            2 => vec![0, 1, 2, 13, 16, 17, 18, FRAME_STATS_ROW, FRAME_STATS_CORNER_ROW],
+            2 => vec![0, 1, 2, 13, 16, 17, 18, FRAME_STATS_ROW, FRAME_STATS_CORNER_ROW, SESSION_TIMER_ROW],
             // Quitting is the rail's Close Game; Refresh Game Files only while the game files are out of date.
             4 => [11, 14, 19].into_iter().chain((!crate::setup::stale_groups().is_empty()).then_some(REFRESH_ROW)).collect(),
             // Every opt-in (off by default or not retail) in one place, in row order (user 2026-10-25, USER-ASKS 336).
@@ -640,6 +647,9 @@ impl Menu {
             FRAME_STATS_CORNER_ROW => RowView::new(Kind::Enum { index: s.frame_stats_right as usize, count: 2, wrap: false },
                 "FPS Counter Position", if s.frame_stats_right { "Top Right" } else { "Top Left" },
                 "Which top corner the FPS counter sits in.").reset(),
+            SESSION_TIMER_ROW => RowView::new(Kind::Enum { index: s.session_timer as usize, count: 2, wrap: false },
+                "Session Timer", if s.session_timer { "On" } else { "Off" },
+                "A small clock in the bottom left corner: the time since the game started, to name when something happened in a report.").reset(),
             NPC_DRAW_DISTANCE_ROW => RowView::new(pick(&skate_core::living_world::DrawDistance::MENU_STEPS, &s.npc_draw_distance), "NPC Draw Distance",
                 draw_distance_label(s.npc_draw_distance), NPC_DRAW_DISTANCE_HINT).reset(),
             200..=263 => {
@@ -806,6 +816,7 @@ fn setup(
 /// GRAPHICS-section rows for the game_audio volume settings.
 const FRAME_STATS_ROW: usize = 28;
 const FRAME_STATS_CORNER_ROW: usize = 49;
+const SESSION_TIMER_ROW: usize = 58;
 /// The setup groups (`tools/asset_pipeline/versions.py`) by what the player knows them as.
 fn group_name(group: &str) -> &str {
     match group {
@@ -1234,7 +1245,7 @@ pub(crate) fn interact(
         info!("PC_OVERLAY now {:?} = {:?}", now.label, now.value);
     }
     if let Some(row) = saved_row {
-        if ((row < 3 || row == FRAME_STATS_ROW || row == FRAME_STATS_CORNER_ROW || row == NPC_DRAW_DISTANCE_ROW || row == EXTENDED_REPLAYS_ROW || row == REPLAY_LENGTH_ROW || row == BETTER_MOVER_ROW || row == DEBUG_MENUS_ROW || row == FLY_CAM_ROW || row == PHYSICS_THREADS_ROW || OPT_IN_ROWS.contains(&row)) && !menu.multiplayer && !menu.daylight && !day_action) || (day_action && row < 3) {
+        if ((row < 3 || row == FRAME_STATS_ROW || row == FRAME_STATS_CORNER_ROW || row == SESSION_TIMER_ROW || row == NPC_DRAW_DISTANCE_ROW || row == EXTENDED_REPLAYS_ROW || row == REPLAY_LENGTH_ROW || row == BETTER_MOVER_ROW || row == DEBUG_MENUS_ROW || row == FLY_CAM_ROW || row == PHYSICS_THREADS_ROW || OPT_IN_ROWS.contains(&row)) && !menu.multiplayer && !menu.daylight && !day_action) || (day_action && row < 3) {
             let save = (|| -> Result<(), String> {
                 std::fs::create_dir_all(menu.path.parent().unwrap()).map_err(|e| e.to_string())?;
                 std::fs::write(
@@ -1423,6 +1434,7 @@ fn run_row(menu: &mut Menu, row: usize, direction: i32, r: RowResources) {
             DEBUG_MENUS_ROW => menu.settings.debug_menus = !menu.settings.debug_menus,
             FLY_CAM_ROW => menu.settings.fly_cam = !menu.settings.fly_cam,
             FRAME_STATS_CORNER_ROW => menu.settings.frame_stats_right = !menu.settings.frame_stats_right,
+            SESSION_TIMER_ROW => menu.settings.session_timer = !menu.settings.session_timer,
             REPLAY_LENGTH_ROW => menu.settings.replay_seconds = cycle(REPLAY_LENGTHS, menu.settings.replay_seconds, direction),
             FRAME_STATS_ROW => {
                 // Off, Simple, Verbose (the original readout).
@@ -1489,6 +1501,7 @@ fn reset_row(menu: &mut Menu, row: usize, audio: &mut crate::game_audio::AudioSe
         2 => s.fps = defaults.fps,
         FRAME_STATS_ROW => (s.frame_stats, s.frame_stats_simple) = (defaults.frame_stats, defaults.frame_stats_simple),
         FRAME_STATS_CORNER_ROW => s.frame_stats_right = defaults.frame_stats_right,
+        SESSION_TIMER_ROW => s.session_timer = defaults.session_timer,
         EXTENDED_REPLAYS_ROW => s.extended_replays = defaults.extended_replays,
         BETTER_MOVER_ROW => s.better_object_mover = defaults.better_object_mover,
         PHYSICS_THREADS_ROW => s.physics_threads_multi = defaults.physics_threads_multi,
@@ -1758,7 +1771,7 @@ mod tests {
     fn pages_put_headers_in_front_of_their_groups() {
         let mut m = menu();
         m.select_section(2);
-        assert_eq!(m.page(), vec![900, 0, 1, 2, 901, 13, 902, 16, 17, 18, 903, FRAME_STATS_ROW, FRAME_STATS_CORNER_ROW]);
+        assert_eq!(m.page(), vec![900, 0, 1, 2, 901, 13, 902, 16, 17, 18, 903, FRAME_STATS_ROW, FRAME_STATS_CORNER_ROW, SESSION_TIMER_ROW]);
         m.select_section(5);
         assert_eq!(m.page(), vec![911, NPC_DRAW_DISTANCE_ROW, 914, BETTER_WATER_ROW, 902, MORE_AUDIBLE_ROW, SPEECH_ROW, 915, EXTENDED_REPLAYS_ROW,
             REPLAY_LENGTH_ROW, 916, BETTER_MOVER_ROW, 917, DEBUG_MENUS_ROW, FLY_CAM_ROW, 918, PHYSICS_THREADS_ROW, 913, 40, 41, 42, 43]);
@@ -1832,7 +1845,7 @@ mod tests {
             assert!(rows.contains(&menu.selected));
             assert!(rows.windows(2).all(|pair| pair[0] < pair[1]));
             // Audio, controller identity, and frame-time rows are spawned.
-            assert!(rows.iter().all(|id| *id < 20 || *id == FRAME_STATS_ROW || *id == FRAME_STATS_CORNER_ROW || *id == NPC_DRAW_DISTANCE_ROW || *id == MORE_AUDIBLE_ROW || *id == SPEECH_ROW || *id == BETTER_WATER_ROW || *id == EXTENDED_REPLAYS_ROW || *id == REPLAY_LENGTH_ROW || *id == BETTER_MOVER_ROW || *id == DEBUG_MENUS_ROW || *id == FLY_CAM_ROW || *id == PHYSICS_THREADS_ROW || OPT_IN_ROWS.contains(id) || *id >= 1000));
+            assert!(rows.iter().all(|id| *id < 20 || *id == FRAME_STATS_ROW || *id == FRAME_STATS_CORNER_ROW || *id == SESSION_TIMER_ROW || *id == NPC_DRAW_DISTANCE_ROW || *id == MORE_AUDIBLE_ROW || *id == SPEECH_ROW || *id == BETTER_WATER_ROW || *id == EXTENDED_REPLAYS_ROW || *id == REPLAY_LENGTH_ROW || *id == BETTER_MOVER_ROW || *id == DEBUG_MENUS_ROW || *id == FLY_CAM_ROW || *id == PHYSICS_THREADS_ROW || OPT_IN_ROWS.contains(id) || *id >= 1000));
         }
         menu.select_section(1);
         assert_eq!(menu.rows(),vec![3,CAMERA_ANGLE_ROW,8,10]);
@@ -1880,7 +1893,7 @@ mod tests {
         assert!(!SECTIONS.iter().any(|(name,_,_)| matches!(*name,"SESSION"|"WORLD")));
         menu.select_section(2);
         assert!(!menu.multiplayer && !menu.browser);
-        assert_eq!(menu.rows(), vec![0,1,2,13,16,17,18,FRAME_STATS_ROW,FRAME_STATS_CORNER_ROW]);
+        assert_eq!(menu.rows(), vec![0,1,2,13,16,17,18,FRAME_STATS_ROW,FRAME_STATS_CORNER_ROW,SESSION_TIMER_ROW]);
         menu.daylight = true;
         assert_eq!(menu.rows(), vec![0,1,2,3]);
     }

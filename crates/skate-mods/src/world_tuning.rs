@@ -280,6 +280,8 @@ pub struct PedBrainPatch {
     pub reach_snap_window: Option<f32>,
     /// The ped scatter alarm's length after the player's D-pad Down gesture, s (0..3600; 0 = off; retail 180).
     pub scatter_seconds: Option<f32>,
+    pub scatter_arrival_radius: Option<f32>,
+    pub scatter_channel_fade: Option<f32>,
     /// Hold the scatter alarm raised (ours; released, the retail timer runs out).
     pub scatter_hold: Option<bool>,
     pub reach_check_seconds: Option<f32>,
@@ -344,6 +346,10 @@ pub struct PedBrainPatch {
     pub vehicle_flee_min_dot: Option<f32>,
     pub vehicle_flee_away: Option<bool>,
     pub vehicle_flee_toward: Option<bool>,
+    /// Retail's gates before the flee test (`82E2C0C8`, b821): the ped stands on a road (`vehicle_flee_require_on_road`,
+    /// ped vf200) and the car is flagged, held / skitched (`vehicle_flee_require_flagged`, IVehicle vf0x60); both true.
+    pub vehicle_flee_require_on_road: Option<bool>,
+    pub vehicle_flee_require_flagged: Option<bool>,
     /// The flee leg (b8 / b650): `flee_leg` m away from the threat (15.0), a new leg within `flee_arrival_radius` m of
     /// the goal (2.0); a threat at least `flee_threat_speed_gate` m/s (1.0) bends the leg to the ped's side by
     /// `flee_side_blend` (0.5); 0..=100.
@@ -441,6 +447,8 @@ pub struct PedNavPatch {
     pub stuck_seconds: Option<f32>,
     pub give_up_seconds: Option<f32>,
     pub yield_patience: Option<f32>,
+    /// How far an unreachable wander / route target may move to the nearest reachable navmesh point (metres).
+    pub rewrite_range: Option<f32>,
     pub crosswalk: Option<String>,
 }
 
@@ -926,7 +934,7 @@ impl Merge for SkaterFadePatch {
 }
 impl Merge for PedNavPatch {
     fn merge(&mut self, b: &Self) {
-        merge_opts!(self, b; steer_rate, turn_edges, stall_seconds, stuck_distance, stuck_seconds, give_up_seconds, yield_patience, crosswalk);
+        merge_opts!(self, b; steer_rate, turn_edges, stall_seconds, stuck_distance, stuck_seconds, give_up_seconds, yield_patience, rewrite_range, crosswalk);
     }
 }
 
@@ -1097,7 +1105,7 @@ impl Merge for NpcSimulatedPatch {
 
 impl Merge for PedBrainPatch {
     fn merge(&mut self, b: &Self) {
-        merge_opts!(self, b; enabled, mood, wander_speed, warn_seconds, know_about_seconds, mood_want_memory_seconds, conversation_turn_seconds, conversation_gather_seconds, unreachable_radius, reach_check_seconds, reach_snap_window, scatter_seconds, scatter_hold, run_from_honker_distance, run_from_honker_speed, warn_speech, water_disables_seats, water_max_depth, water_above, attack_throw_speed, attack_throw_lead_seconds, attack_throw_jitter, attack_throw_lift, light_throw_speed, hand_prop_skater_contact, starting_hand_props, zombie_follow_distance, zombie_sprint_distance, zombie_ring_min, zombie_ring_max, zombie_sprint_speed, zombie_walk_speed, zombie_arrive_distance, trip_kind, trip_direction, skater_avoid_sense, skater_avoid_min_speed, skater_avoid_look_ahead, skater_avoid_radius, skater_avoid_jump_radius, skater_avoid_jump_speed, skater_avoid_sector, skater_avoid_period, skater_avoid_standing, object_flee, object_flee_radius, object_flee_min_speed, object_flee_lane_margin, vehicle_flee, vehicle_flee_radius, vehicle_flee_min_dot, vehicle_flee_away, vehicle_flee_toward, flee_leg, flee_arrival_radius, flee_threat_speed_gate, flee_side_blend, flee_releg_on_nav_done);
+        merge_opts!(self, b; enabled, mood, wander_speed, warn_seconds, know_about_seconds, mood_want_memory_seconds, conversation_turn_seconds, conversation_gather_seconds, unreachable_radius, reach_check_seconds, reach_snap_window, scatter_seconds, scatter_arrival_radius, scatter_channel_fade, scatter_hold, run_from_honker_distance, run_from_honker_speed, warn_speech, water_disables_seats, water_max_depth, water_above, attack_throw_speed, attack_throw_lead_seconds, attack_throw_jitter, attack_throw_lift, light_throw_speed, hand_prop_skater_contact, starting_hand_props, zombie_follow_distance, zombie_sprint_distance, zombie_ring_min, zombie_ring_max, zombie_sprint_speed, zombie_walk_speed, zombie_arrive_distance, trip_kind, trip_direction, skater_avoid_sense, skater_avoid_min_speed, skater_avoid_look_ahead, skater_avoid_radius, skater_avoid_jump_radius, skater_avoid_jump_speed, skater_avoid_sector, skater_avoid_period, skater_avoid_standing, object_flee, object_flee_radius, object_flee_min_speed, object_flee_lane_margin, vehicle_flee, vehicle_flee_radius, vehicle_flee_min_dot, vehicle_flee_away, vehicle_flee_toward, vehicle_flee_require_on_road, vehicle_flee_require_flagged, flee_leg, flee_arrival_radius, flee_threat_speed_gate, flee_side_blend, flee_releg_on_nav_done);
     }
 }
 
@@ -1277,6 +1285,7 @@ impl LivingWorldPatch {
                 n.steer_rate.is_none_or(|v| v.is_finite() && (0.0..=1000.0).contains(&v))
                     && n.turn_edges.is_none_or(|e| e.iter().all(|v| v.is_finite() && (0.0..=180.0).contains(v)) && e.windows(2).all(|w| w[0] <= w[1]))
                     && [n.stall_seconds, n.stuck_distance, n.stuck_seconds, n.give_up_seconds, n.yield_patience].into_iter().all(|v| v.is_none_or(|v| v.is_finite() && (0.0..=60.0).contains(&v)))
+                    && n.rewrite_range.is_none_or(|v| v.is_finite() && v >= 0.0)
                     && n.crosswalk.as_deref().is_none_or(|c| matches!(c, "off" | "walk_signal"))
             })
             && self.ped_body.as_ref().is_none_or(|b| {
@@ -1351,6 +1360,8 @@ impl LivingWorldPatch {
             && self.ped_brain.as_ref().is_none_or(|p| {
                 [p.wander_speed, p.warn_seconds, p.know_about_seconds, p.mood_want_memory_seconds, p.conversation_turn_seconds, p.conversation_gather_seconds, p.unreachable_radius, p.reach_check_seconds, p.reach_snap_window, p.run_from_honker_distance, p.run_from_honker_speed, p.attack_throw_speed, p.attack_throw_lead_seconds, p.attack_throw_jitter, p.attack_throw_lift, p.light_throw_speed, p.zombie_follow_distance, p.zombie_sprint_distance, p.zombie_ring_min, p.zombie_ring_max, p.zombie_sprint_speed, p.zombie_walk_speed, p.zombie_arrive_distance, p.skater_avoid_sense, p.skater_avoid_min_speed, p.skater_avoid_look_ahead, p.skater_avoid_radius, p.skater_avoid_jump_radius, p.skater_avoid_jump_speed, p.skater_avoid_sector, p.skater_avoid_period, p.object_flee_radius, p.object_flee_min_speed, p.object_flee_lane_margin, p.vehicle_flee_radius, p.vehicle_flee_min_dot].into_iter().all(|v| v.is_none_or(|v| v.is_finite() && (0.0..=100.0).contains(&v)))
                     && p.scatter_seconds.is_none_or(|v| v.is_finite() && (0.0..=3600.0).contains(&v))
+                    && p.scatter_arrival_radius.is_none_or(|v| v.is_finite() && (0.0..=100.0).contains(&v))
+                    && p.scatter_channel_fade.is_none_or(|v| v.is_finite() && (0.0..=10.0).contains(&v))
                     && p.warn_speech.is_none_or(|v| (0..=127).contains(&v))
                     && [p.flee_leg, p.flee_arrival_radius, p.flee_threat_speed_gate, p.flee_side_blend].into_iter().all(|v| v.is_none_or(|v| v.is_finite() && (0.0..=100.0).contains(&v)))
                     && [p.water_max_depth, p.water_above].into_iter().all(|v| v.is_none_or(|v| v.is_finite() && (0.0..=100.0).contains(&v)))
