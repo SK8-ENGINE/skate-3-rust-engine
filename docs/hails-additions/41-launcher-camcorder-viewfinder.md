@@ -34,20 +34,29 @@ ledge) were replaced by this.
   or the taskbar, which arrive as `None` / `TaskManagerClosing`) plays it backwards, then the window closes. A hidden
   close (self-update restart) skips it. Each open and close rolls its own swing time, wobble, screen-on delay and
   flicker (`Vary`).
+- **Standby around a game (no power-off):** when the game's window shows, the panel folds shut with the screen still
+  lit (REC and the tape counter stay up, no backlight fade), then hides and hands the game the foreground. When the
+  game exits it swings back open already lit, mid recording (no logo, no backlight coming on); the recording stops
+  (STBY, counter held) once it settles. Only the launcher's own start plays the power-on. Both swings use a shot of
+  the lit screen in place of the dark one (`Fold`, `Resume`, `LitFlip`); a close during either falls back to the
+  power-off.
 - **The screen is a mid-2000s HD camcorder's UI** (drawn at the screen's own pixels, smooth type): the status row
   (STBY / REC with its glowing dot while a job runs, an HDV 1080i badge, the tape counter that only runs while
   recording, a glossy battery), a blue HOME / title tab, glass panels, the list with an amber glossy selection bar,
   the selected row's info (READY / NOT AVAILABLE pills, what it does, what it records), the job screen (glossy
   progress bar for cargo's step count, counts, the first error or the newest log lines), text pages, the power-on
-  logo with the start check's step, A / B / START/STOP badges for the keys and the date and time stamp. Behind the
+  logo with the start check's step, A / B / START/STOP badges for the keys and the date and time stamp. With Play
+  selected the info panel ends in a small play prompt in the same badge style (a pulsing record dot, the START/STOP
+  badge, "to play"), not a big button. Behind the
   menus the camera points at a dimmed skate spot at dusk. The skateboard rides a lane along the bottom of the screen
   and pops an ollie now and then (its speed, place and rhythm rolled per start).
 - **Wear, rolled fresh at every start:** paint-marker scrawl in skate-session words ("SESH", "LAST TRY", "NO COMPLY",
   "SECURITY!!", "SKATE & ANNOY", ...), doodles (crown, star, arrow, X, smiley), scratch clusters, paint rubbed off
   along the edges, now and then gaff tape across a bottom corner. All of it stays on the **wear map**: the bezel minus
   keep-out zones over every UI element (glass, keys and their labels, print, grille, sensor). Tags and doodles also stay clear
-  of the sticker (a tag on the bottom strip moves to the sticker's roomier side) and shrink until their whole outline,
-  pen and smoothing included, fits; short words go to the small spot.
+  of the sticker (a tag on the bottom strip moves to the sticker's roomier side) and of each other (a gap around every
+  one drawn before), and shrink until their whole outline, pen and smoothing included, fits; short words go to the
+  small spot. A doodle whose rolled place is taken moves to the nearest free place in either spot, or is left out.
 - **The sticker:** one sticker slapped on the bezel's bottom strip years ago, picked once per user at the first start
   (design, place, angle, wear) and kept in `camcorder-sticker.txt` in the state folder. Worn: faded, scratched, grimy,
   chipped, one edge peeled up and folded back with old glue under it, and creased along the gasket edge and the
@@ -76,8 +85,10 @@ game runs (the launcher hides).
 
 - `SkateLauncher.exe --wear-test <out.txt> <out.png>`: one start's wear roll, checked: the same frame drawn twice is
   identical, every pixel the wear changes is on the wear map, no tag, doodle or tape crosses a keep-out zone, and no
-  tag or doodle sits under the sticker (each test start rolls its own sticker too).
-  Run 10 times as 10 separate starts: 10 of 10 PASS.
+  tag or doodle sits under the sticker or on another one (each test start rolls its own sticker too).
+  Run 30 times as 30 separate starts: 30 of 30 PASS.
+- `SkateLauncher.exe --standby-test <out.txt> <out.png>`: the game-start fold and the game-exit reopen, 7 frames each:
+  the screen's middle is lit on every frame with the panel up, and the fold ends with nothing drawn. PASS.
 - `SkateLauncher.exe --snapshot <out.png> <screen>[@<0..1>][#<seed>] [WxH]`: any screen, `@` a point in the power-on,
   `#` the sticker and wear from that seed (snapshots never write the sticker file).
 - Live window runs (screen captures of the window only): the swing open, the power-on screen, the menu, the close

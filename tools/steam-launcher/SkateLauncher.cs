@@ -282,7 +282,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
                 with.Save(png, ImageFormat.Png);
                 var kinds = new int[5]; foreach (var m in keep) kinds[m.Kind]++;
                 string tags = string.Join(", ", keep.FindAll(m => m.Kind == 0).ConvertAll(m => "\"" + m.Text + "\" on " + new[] { "bottom bezel", "left strip" }[m.Spot]).ToArray());
-                return (jitter > 0 ? "UNSTABLE (the same frame twice differs by " + jitter + " px:" + jitterAt + ")  " : "") + string.Format("{0}  changed {1} px, off the wear map (camera UI, glass, outside) {2} px, tags / doodles spilling over {3} px, not clear of the sticker " + unfit + "  ({4} tags, {5} doodles, {6} scratches, {7} worn edges, {8} tape)  {9}",
+                return (jitter > 0 ? "UNSTABLE (the same frame twice differs by " + jitter + " px:" + jitterAt + ")  " : "") + string.Format("{0}  changed {1} px, off the wear map (camera UI, glass, outside) {2} px, tags / doodles spilling over {3} px, not clear of the sticker or each other " + unfit + "  ({4} tags, {5} doodles, {6} scratches, {7} worn edges, {8} tape)  {9}",
                     stray == 0 && spill == 0 && unfit == 0 && changed > 0 && jitter == 0 ? "PASS" : "FAIL", changed, stray, spill, kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], tags) + (where.IsEmpty ? "" : "  bad pixels in " + where);
             }
         }
@@ -293,6 +293,45 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         System.Runtime.InteropServices.Marshal.Copy(data.Scan0, px, 0, px.Length);
         b.UnlockBits(data);
         return px;
+    }
+
+    // --standby-test <out.png>: the game-start fold and the game-exit reopen, 7 frames each (top row fold, bottom row
+    // reopen). PASS needs the screen lit on every frame with the panel up, and the fold to end with nothing drawn.
+    public string StandbyTest(string png) {
+        snapshotMode = true; snapPanel = -1; powerOnAt = 0; RefreshStatus(); pages.Push(MainPage());
+        int w = 1243, h = 699, n = 7; float tw = w / 3f, th = h / 3f;
+        var sb = new StringBuilder(); bool ok = true;
+        using (var sheet = new Bitmap((int)(tw * n), (int)(th * 2), PixelFormat.Format32bppPArgb)) using (var sg = Graphics.FromImage(sheet))
+        using (var bmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb)) using (var g = Graphics.FromImage(bmp)) {
+            sg.Clear(Color.FromArgb(40, 44, 52));
+            for (int row = 0; row < 2; row++) {
+                if (row == 0) { foldAt = 10; resumeAt = -1; } else { foldAt = -1; resumeAt = 20; }
+                litShot = true;
+                float start = row == 0 ? foldAt : resumeAt, span = row == 0 ? FoldTime : SwingTo + 0.05f;
+                for (int k = 0; k < n; k++) {
+                    fixedT = start + span * k / (n - 1);
+                    g.Clear(Color.Transparent); Render(g, w, h);
+                    float open = PanelOpen(fixedT);
+                    // the screen's middle: lit = the LCD's scene / OSD, not the dark glass
+                    int lit = 0, seen = 0; var px = Pixels(bmp);
+                    var sr = ToWin(ScreenR);
+                    for (int y = (int)(sr.Y + sr.Height * 0.3f); y < sr.Y + sr.Height * 0.7f; y += 3) for (int x = (int)(sr.X + sr.Width * 0.3f); x < sr.X + sr.Width * 0.7f; x += 3) {
+                        if (x < 0 || x >= w || y < 0 || y >= h) continue;
+                        int c = px[y * w + x]; if (((c >> 24) & 255) == 0) continue;
+                        seen++; if (((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255) > 90) lit++;
+                    }
+                    int drawn = 0; foreach (int c in px) if (((c >> 24) & 255) != 0) drawn++;
+                    bool up = open > 0.9f, litOk = !up || (seen > 0 && lit * 4 > seen);
+                    if (!litOk) ok = false;
+                    if (row == 0 && k == n - 1 && drawn > w * h / 50) ok = false;
+                    sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture, "{0} {1}: open {2:0.00}, screen lit {3}/{4}, drawn {5} px{6}\r\n", row == 0 ? "fold" : "reopen", k, open, lit, seen, drawn, litOk ? "" : "  DARK");
+                    sg.DrawImage(bmp, new RectangleF(k * tw, row * th, tw, th));
+                }
+            }
+            sheet.Save(png, ImageFormat.Png);
+        }
+        foldAt = resumeAt = -1; fixedT = -1;
+        return (ok ? "PASS" : "FAIL") + "\r\n" + sb;
     }
 
     public string Bench(int w, int h) {
@@ -858,6 +897,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     }
     void JobDone() {
         job = null;
+        if (!Visible || foldAt >= 0) Resume();
         if (!Visible) Show();
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Activate(); Native.Front(Handle);
@@ -886,8 +926,9 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
             IntPtr w;
             using (p) w = p.MainWindowHandle;
             if (w == IntPtr.Zero || w == gameWindow || !Native.IsWindowVisible(w)) continue;
-            gameWindow = w; Native.Front(w);
-            if (!jobHidGame) { jobHidGame = true; hidAt = DateTime.Now; Hide(); }
+            gameWindow = w;
+            if (jobHidGame && foldAt < 0) Native.Front(w);
+            if (!jobHidGame) { jobHidGame = true; hidAt = DateTime.Now; Fold(); }
             return;
         }
     }
@@ -912,6 +953,12 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         if (powerOffAt >= 0 && !poweredOff) {
             if ((float)clock.Elapsed.TotalSeconds - powerOffAt >= OffTime) { poweredOff = true; Close(); return; }
             Invalidate(); return;
+        }
+        if (Standby) {
+            float now = (float)clock.Elapsed.TotalSeconds;
+            if (foldAt >= 0 && now - foldAt >= FoldTime) { foldAt = -1; flipScale = -1; Hide(); Native.Front(gameWindow); }
+            else if (resumeAt >= 0 && now - resumeAt >= SwingTo + 0.05f) { resumeAt = -1; flipScale = -1; }
+            Invalidate();
         }
         if (closeAt >= 0) {
             int left = (int)Math.Ceiling((closeTime - DateTime.Now).TotalSeconds);
@@ -1134,8 +1181,18 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     // plain values.
     const float OnTotal = 1.2f, OffSpeed = 1.3f, OffTime = OnTotal / OffSpeed + 0.05f;
     float powerOnAt = -1, powerOffAt = -1, snapPanel = -1; bool poweredOff, snapshotMode; int snapSeed = 3;
+    // Standby (USER-ASKS 492): a game start folds the panel shut with the screen still lit (the camera goes on recording,
+    // no power-off), and the game's exit swings it back open still lit, mid recording; only after it settles does the
+    // recording stop. Both swing a shot of the lit screen (litShot).
+    float foldAt = -1, resumeAt = -1; bool litShot;
+    float FoldTime { get { return SwingTo / OffSpeed + 0.05f; } }
+    bool Standby { get { return foldAt >= 0 || resumeAt >= 0; } }
+    void Fold() { foldAt = (float)clock.Elapsed.TotalSeconds; Vary(new Random(), false); litShot = true; if (!tick.Enabled) tick.Start(); Invalidate(); }
+    void Resume() { foldAt = -1; resumeAt = (float)clock.Elapsed.TotalSeconds; Vary(new Random(), false); litShot = true; Invalidate(); }
     float Assembly(float t) {
         if (snapPanel >= 0) return snapPanel * OnTotal;
+        if (foldAt >= 0) return Math.Max(0, SwingTo - (t - foldAt) * OffSpeed);
+        if (resumeAt >= 0) return Math.Min(SwingTo, t - resumeAt);
         if (powerOffAt >= 0) return Math.Max(0, OnTotal - (t - powerOffAt) * OffSpeed);
         return powerOnAt < 0 ? 0 : Math.Min(OnTotal, t - powerOnAt);
     }
@@ -1152,12 +1209,13 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     // 0 = edge-on at the hinge, 1 = facing you (the wobble overshoots a little past flat, then settles).
     float PanelOpen(float t) { return BackOut(Clamp01((Assembly(t) - 0.08f) / (SwingTo - 0.08f)), vary[1]); }
     float ScreenLevel(float t) {
+        if (Standby) return 1;
         float level = Clamp01((Assembly(t) - SwingTo - 0.1f - vary[2]) / 0.25f);
         if (vary[3] >= 1 && level > 0 && level < 1) { int q = (int)(level * 6 + vary[4]); if (q % 3 == 1 && q < 3 * (int)vary[3] + 1) level *= 0.25f; }
         return level;
     }
     float WindowAlpha(float t) { return snapshotMode ? 1 : Clamp01(Assembly(t) / 0.06f); }
-    bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return powerOnAt < 0 || t - powerOnAt < OnTotal + 0.1f || powerOffAt >= 0; }
+    bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return powerOnAt < 0 || t - powerOnAt < OnTotal + 0.1f || powerOffAt >= 0 || Standby; }
 
     // The layered window: every frame is drawn into one bitmap and handed to Windows with its alpha (Native.Push).
     protected override CreateParams CreateParams { get { var cp = base.CreateParams; cp.ExStyle |= 0x80000; return cp; } }
@@ -1178,7 +1236,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     protected override void OnFormClosing(FormClosingEventArgs e) {
         if (Visible && !poweredOff && (e.CloseReason == CloseReason.UserClosing || e.CloseReason == CloseReason.None || e.CloseReason == CloseReason.TaskManagerClosing)) {
             e.Cancel = true;
-            if (powerOffAt < 0) { powerOffAt = (float)clock.Elapsed.TotalSeconds; Vary(new Random(), false); if (!tick.Enabled) tick.Start(); Invalidate(); }
+            if (powerOffAt < 0) { if (Standby) { foldAt = resumeAt = -1; flipScale = -1; } powerOffAt = (float)clock.Elapsed.TotalSeconds; Vary(new Random(), false); if (!tick.Enabled) tick.Start(); Invalidate(); }
             return;
         }
         base.OnFormClosing(e);
@@ -1196,6 +1254,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         hits.Clear(); promptHits.Clear();
         float t = fixedT >= 0 ? fixedT : (float)clock.Elapsed.TotalSeconds;
         devS = Math.Min(w / DevW, h / DevH); devX = (w - DevW * devS) / 2; devY = (h - DevH * devS) / 2;
+        if (litShot) { litShot = false; LitFlip(t); }
         EnsureFlip(t);
         var st = g.Save();
         g.TranslateTransform(devX, devY); g.ScaleTransform(devS, devS);
@@ -1303,13 +1362,21 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     // wobble past flat; darker while it is turned away.
     Bitmap flipScreen; Bitmap[] screenStrips; RectangleF[] screenInner; float flipScale = -1;
     const int Strips = 48;
-    Bitmap PanelShot(float t) {
+    Bitmap PanelShot(float t) { return PanelShot(t, 0); }
+    // The lit face for a standby fold / resume, kept until the swing ends (flipScale = -1 then brings the dark one back).
+    void LitFlip(float t) {
+        if (flipScreen != null) flipScreen.Dispose();
+        if (screenStrips != null) foreach (var s in screenStrips) s.Dispose();
+        flipScreen = PanelShot(t, 1); flipScale = devS;
+        screenStrips = Slice(flipScreen, out screenInner);
+    }
+    Bitmap PanelShot(float t, float level) {
         var shot = new Bitmap((int)Math.Ceiling(PanelR.Width * devS) + 2, (int)Math.Ceiling(PanelR.Height * devS) + 2, PixelFormat.Format32bppPArgb);
         var keep = new List<KeyValuePair<RectangleF, string>>(promptHits);
         using (var pg = Graphics.FromImage(shot)) {
             pg.SmoothingMode = SmoothingMode.AntiAlias; pg.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
             pg.ScaleTransform(devS, devS); pg.TranslateTransform(-PanelR.X, -PanelR.Y);
-            LcdPanel(pg, 0, t, false);
+            LcdPanel(pg, level, t, false);
         }
         promptHits.Clear(); promptHits.AddRange(keep);
         return shot;
@@ -1363,7 +1430,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     // off along the edges, now and then gaff tape across a bottom corner. All of it stays on the wear map: the bezel
     // minus keep-out zones over every UI element on it (glass, keys, labels, print, grille, sensor), so wear never
     // covers the panel's UI. Tags and doodles shrink until their whole outline fits the map.
-    class Mark { public int Spot, Kind, Seed; public float X, Y, Angle, Size; public string Text; public Color Ink; public bool Placed; }
+    class Mark { public int Spot, Kind, Seed; public float X, Y, Angle, Size; public string Text; public Color Ink; public bool Placed, Fitted, Skip; }
     readonly List<Mark> marks = new List<Mark>();
     static readonly string[] Scrawl = { "ONE MORE TRY", "LAST TRY", "FILM IT", "SEND IT", "SESH", "DIY OR DIE", "SKATE & ANNOY", "NO COMPLY", "KICKFLIP?", "SECURITY!!", "SK8", "LINE!!", "HOMIES", "RAD", "BUST", "FILMER", "1 MORE", "SLAMS", "GNAR", "POP!", "SK8!" };
     static readonly Color[] Markers = { Color.FromArgb(232, 246, 246, 240), Color.FromArgb(220, 204, 208, 214), Color.FromArgb(225, 236, 64, 54), Color.FromArgb(225, 250, 214, 60), Color.FromArgb(225, 250, 112, 172), Color.FromArgb(225, 96, 212, 232) };
@@ -1440,15 +1507,20 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     int notFit;   // tags / doodles that could not shrink clear of the sticker and the keep-outs (--wear-test fails on any)
     bool marksUnclipped;   // --wear-test: tags, doodles and tape drawn without the keep-outs, to find any that would cover UI
     void DrawMarks(Graphics g) {
+        using (var taken = new Region()) { taken.MakeEmpty(); DrawMarks(g, taken); }
+    }
+    // taken: what the tags and doodles drawn so far cover (plus a gap), so the next one stays off them.
+    void DrawMarks(Graphics g, Region taken) {
         foreach (var mk in marks) {
+            if (mk.Skip) continue;
             if (!mk.Placed && (mk.Kind == 0 || mk.Kind == 1)) { var a = SpotArea(mk.Spot); mk.X = a.X + a.Width / 2 + (mk.X - (TagAreas[mk.Spot].X + TagAreas[mk.Spot].Width / 2)) * a.Width / TagAreas[mk.Spot].Width; mk.Placed = true; }
             var rnd = new Random(mk.Seed);
             var ms = g.Save();
             if (!marksUnclipped || mk.Kind == 2 || mk.Kind == 3) using (var clip = WearMap()) g.SetClip(clip, CombineMode.Intersect);
             else using (var clip = PartOutline()) g.SetClip(clip, CombineMode.Intersect);
             g.TranslateTransform(mk.X, mk.Y); g.RotateTransform(mk.Angle);
-            if (mk.Kind == 0) MarkerTag(g, mk, rnd);
-            else if (mk.Kind == 1) Doodle(g, mk, rnd);
+            if (mk.Kind == 0) MarkerTag(g, mk, rnd, taken);
+            else if (mk.Kind == 1) Doodle(g, mk, rnd, taken);
             else if (mk.Kind == 2) using (var lite = new Pen(Color.FromArgb(70, 210, 214, 220), 1.1f)) using (var dark = new Pen(Color.FromArgb(50, 0, 0, 0), 1.1f)) {
                 int n = 5 + rnd.Next(8);
                 for (int i = 0; i < n; i++) {
@@ -1471,9 +1543,43 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         }
         return true;
     }
+    static readonly Graphics Probe = Graphics.FromImage(new Bitmap(1, 1));
+    static GraphicsPath World(GraphicsPath local, Mark mk, float widen) {
+        var p = (GraphicsPath)local.Clone();
+        using (var m = new Matrix()) { m.Translate(mk.X, mk.Y); m.Rotate(mk.Angle); p.Transform(m); }
+        if (widen > 0) using (var pen = new Pen(Color.Black, widen)) p.Widen(pen);
+        return p;
+    }
+    // On the map and off every tag / doodle already drawn.
+    static bool Clear(Region map, Region taken, GraphicsPath local, Mark mk) {
+        if (!Inside(map, local, mk)) return false;
+        using (var r = taken.Clone()) {
+            using (var fill = World(local, mk, 0)) using (var band = World(local, mk, 5)) { var own = new Region(fill); own.Union(band); r.Intersect(own); own.Dispose(); }
+            return r.IsEmpty(Probe);
+        }
+    }
+    static void Take(Region taken, GraphicsPath local, Mark mk) {
+        using (var fill = World(local, mk, 0)) using (var band = World(local, mk, 16)) { taken.Union(fill); taken.Union(band); }
+    }
+    static GraphicsPath Ring(float s) { var ring = new GraphicsPath(); float rr = s * 1.15f + 3; ring.AddEllipse(-rr, -rr, 2 * rr, 2 * rr); return ring; }
+    // A doodle whose rolled place is taken moves to the nearest free place in either spot, or is left out.
+    bool FindRoom(Region map, Region taken, Mark mk, float s) {
+        float x0 = mk.X, y0 = mk.Y;
+        var spots = new List<PointF>();
+        for (int spot = 0; spot < TagAreas.Length; spot++) {
+            var a = SpotArea(spot);
+            for (int ix = 1; ix <= 9; ix++) for (int iy = 3; iy <= 7; iy += 2) spots.Add(new PointF(a.X + a.Width * ix / 10f, a.Y + a.Height * iy / 10f));
+        }
+        spots.Sort((p, q) => ((p.X - x0) * (p.X - x0) + (p.Y - y0) * (p.Y - y0)).CompareTo((q.X - x0) * (q.X - x0) + (q.Y - y0) * (q.Y - y0)));
+        spots.Insert(0, new PointF(x0, y0));
+        using (var ring = Ring(s))
+            foreach (var p in spots) { mk.X = p.X; mk.Y = p.Y; if (Clear(map, taken, ring, mk)) return true; }
+        mk.X = x0; mk.Y = y0;
+        return false;
+    }
     // Paint-marker scrawl: the word in a hand font, sized to its spot (and shrunk until it fits the wear map), with the
     // paint worn through in places.
-    void MarkerTag(Graphics g, Mark mk, Random rnd) {
+    void MarkerTag(Graphics g, Mark mk, Random rnd, Region taken) {
         var area = SpotArea(mk.Spot);
         using (var path = new GraphicsPath()) {
             path.AddString(mk.Text, Hand, (int)FontStyle.Bold, area.Height * 0.7f, PointF.Empty, StringFormat.GenericTypographic);
@@ -1482,9 +1588,10 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
             using (var m = new Matrix()) { m.Scale(k, k); m.Translate(-b.X - b.Width / 2, -b.Y - b.Height / 2); path.Transform(m); }
             using (var map = TagMap())
             {
-                for (int tries = 0; tries < 12 && !Inside(map, path, mk); tries++) using (var m = new Matrix()) { m.Scale(0.9f, 0.9f); path.Transform(m); }
-                if (!Inside(map, path, mk)) notFit++;
+                for (int tries = 0; tries < 12 && !Clear(map, taken, path, mk); tries++) using (var m = new Matrix()) { m.Scale(0.9f, 0.9f); path.Transform(m); }
+                if (!Clear(map, taken, path, mk)) notFit++;
             }
+            Take(taken, path, mk);
             using (var br = new SolidBrush(mk.Ink)) g.FillPath(br, path);
             using (var pen = new Pen(Fade(mk.Ink, 120), 1.2f)) g.DrawPath(pen, path);
             var kept = g.Save();
@@ -1498,14 +1605,17 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         }
     }
     // A quick marker doodle: crown, star, arrow, X or smiley (shrunk until it fits the wear map, pen width included).
-    void Doodle(Graphics g, Mark mk, Random rnd) {
+    void Doodle(Graphics g, Mark mk, Random rnd, Region taken) {
         float s = mk.Size / 2;
-        using (var map = TagMap())
+        using (var map = TagMap()) {
+            if (!mk.Fitted) { mk.Fitted = true; if (!FindRoom(map, taken, mk, s * 0.7f)) { mk.Skip = true; return; } }
             for (int tries = 0; tries < 12; tries++) {
-                using (var ring = new GraphicsPath()) { float rr = s * 1.15f + 3; ring.AddEllipse(-rr, -rr, 2 * rr, 2 * rr); if (Inside(map, ring, mk)) break; }
+                using (var ring = Ring(s)) if (Clear(map, taken, ring, mk)) break;
                 s *= 0.88f;
                 if (tries == 11) notFit++;
             }
+            using (var ring = Ring(s)) Take(taken, ring, mk);
+        }
         using (var pen = new Pen(mk.Ink, Math.Max(2.4f, s * 0.12f))) {
             pen.LineJoin = LineJoin.Round; pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round;
             if (mk.Seed == 0) Wobble(g, pen, rnd, new PointF(-s, s * 0.6f), new PointF(-s, -s * 0.5f), new PointF(-s * 0.5f, s * 0.05f), new PointF(0, -s * 0.8f), new PointF(s * 0.5f, s * 0.05f), new PointF(s, -s * 0.5f), new PointF(s, s * 0.6f), new PointF(-s, s * 0.6f));
@@ -1765,7 +1875,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
             osdLogo = new Font("Segoe UI Light", H / 5.2f, GraphicsUnit.Pixel);
         }
         DateTime now = DateTime.Now;
-        bool rec = job != null;
+        bool rec = job != null || resumeAt >= 0;
         if (rec && !recOn) recSince = now;
         if (!rec && recOn) recTotal += now - recSince;
         recOn = rec;
@@ -1979,11 +2089,15 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
             Write(o, St("version"), osdBig, LcdInk, new RectangleF(x, y, w, vh), StringAlignment.Near, StringAlignment.Near, true); y += vh + 1;
             Write(o, St("version_status"), osdSmall, LcdInk, new RectangleF(x, y, w, sh * 2.2f), StringAlignment.Near, StringAlignment.Near, true); y += sh * 2.2f;
             string send = St("send");
-            Write(o, "Last session: " + St("last") + (send == "" || send == "off" ? "" : "   Send: " + send), osdSmall, LcdDim, new RectangleF(x, y, w, bottom - y - osdRow.Height - 6), StringAlignment.Near, StringAlignment.Near, true);
-            float pulse = 0.55f + 0.45f * (float)Math.Sin(t * 3.2);
-            var play = new RectangleF(x, bottom - osdRow.Height - 4, w, osdRow.Height + 4);
-            Gloss(o, play, play.Height / 2, Fade(Color.FromArgb(242, 74, 62), (int)(150 + 90 * pulse)), Fade(Color.FromArgb(160, 24, 18), (int)(150 + 90 * pulse)));
-            Write(o, "Press START/STOP to play", osdRow, Color.White, play, StringAlignment.Center, StringAlignment.Center, false);
+            float py = bottom - osdSmall.Height;
+            Write(o, "Last session: " + St("last") + (send == "" || send == "off" ? "" : "   Send: " + send), osdSmall, LcdDim, new RectangleF(x, y, w, py - 4 - y), StringAlignment.Near, StringAlignment.Near, true);
+            // The play prompt in the hint row's own style (USER-ASKS 493): a pulsing record dot, the key badge, the action.
+            using (var line = new Pen(Color.FromArgb(40, 255, 255, 255), 0.5f)) o.DrawLine(line, x, py - 2.5f, x + w, py - 2.5f);
+            float pulse = 0.55f + 0.45f * (float)Math.Sin(t * 3.2), d = osdSmall.Height * 0.5f, px = x;
+            using (var b = new SolidBrush(Color.FromArgb((int)(70 * pulse), RecRed))) o.FillEllipse(b, px - d * 0.3f, py + (osdSmall.Height - d) / 2 - d * 0.3f, d * 1.6f, d * 1.6f);
+            using (var b = new SolidBrush(Fade(RecRed, (int)(140 + 115 * pulse)))) o.FillEllipse(b, px, py + (osdSmall.Height - d) / 2, d, d);
+            px += d + 3;
+            Badge(o, ref px, py, "START/STOP", RecRed, "to play");
             return;
         }
         string name = it.Text.StartsWith("> ") ? it.Text.Substring(2) : it.Text;
@@ -2121,6 +2235,11 @@ static class SkateLauncher {
         if (argv.Length >= 3 && argv[0] == "--wear-test") {
             var form = new LauncherForm(new string[0]);
             File.AppendAllText(argv[1], form.WearTest(argv[2]) + Environment.NewLine);
+            return;
+        }
+        if (argv.Length >= 3 && argv[0] == "--standby-test") {
+            var form = new LauncherForm(new string[0]);
+            File.WriteAllText(argv[1], form.StandbyTest(argv[2]));
             return;
         }
         if (argv.Length >= 2 && argv[0] == "--bench") {
