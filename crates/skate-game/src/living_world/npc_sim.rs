@@ -176,6 +176,8 @@ pub(crate) struct NpcSim {
     takeoff_trace: u32,
     /// NPC_TAKEOFF already logged for this trick dispatch.
     takeoff_logged: bool,
+    /// The last GroundAnimation launch speed since the dispatch (`82D93618`), for NPC_TAKEOFF.
+    takeoff_launch: f32,
     /// `pc+944` / `pc+945` (centred, rejoining): written on ground ticks before the record (`sub_8246FA30` calls
     /// `sub_8246AA00` then `sub_8246DB50`), kept through the air.
     lane_flags: (bool, bool),
@@ -496,7 +498,7 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
     sim.handover_push = Some((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
     Ok(sim)
@@ -1674,6 +1676,7 @@ pub(crate) fn simulate(
                     info!("NPC_SKATER_SIM_TRICK #{} {} {} node {} state {:?}", npc.id.serial, npc.character, name.0, replay.cursor.node, state);
                     sim.takeoff_trace = 40;
                     sim.takeoff_logged = false;
+                    sim.takeoff_launch = f32::NAN;
                 }
                 // NPC_SKATER_DRAWN once a second: where the drawn body is (render pose joints) against the board, so a
                 // skater that vanishes on screen can be told apart from one that bails.
@@ -1705,6 +1708,11 @@ pub(crate) fn simulate(
                     // NPC_TAKEOFF: the first air tick after the dispatch, our deck speed against the recording's own
                     // speed at this node and the one before, and the nearest recorded jump's start speed, so a slow
                     // take-off shows whether ours lost speed or the recording slows down there too.
+                    let jump_out = &sim.body.runtime.ground_animation.jump;
+                    if state == PhysicalStateId::GroundAnimation && jump_out.active {
+                        let w = jump_out.velocity;
+                        sim.takeoff_launch = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt();
+                    }
                     if !sim.takeoff_logged && matches!(state, PhysicalStateId::KnownAir | PhysicalStateId::PhysicsAir) {
                         sim.takeoff_logged = true;
                         if let Some(line) = lines.get(&replay.cursor.line) {
@@ -1712,9 +1720,12 @@ pub(crate) fn simulate(
                             let rec = |i: usize| line.nodes.get(i).map_or(f32::NAN, |n| (n.step[0] * n.step[0] + n.step[1] * n.step[1] + n.step[2] * n.step[2]).sqrt() * 60.0);
                             let jump = (0..=node.min(line.nodes.len().saturating_sub(1))).rev().take(6).find_map(|i| line.nodes[i].jump.map(|j| (i, j)));
                             let (jump_node, jump_speed) = jump.and_then(|(i, j)| line.jumps.get(j as usize).map(|j| (i as i64, (j.start_velocity[0] * j.start_velocity[0] + j.start_velocity[1] * j.start_velocity[1] + j.start_velocity[2] * j.start_velocity[2]).sqrt()))).unwrap_or((-1, f32::NAN));
+                            // The GroundAnimation launch (`82D93618`), kept in the body until its next GroundAnimation tick;
+                            // `from` says whether this take-off came through GroundAnimation.
+                            let launch = sim.takeoff_launch;
                             info!(
-                                "NPC_TAKEOFF #{} {} {:?} node {node} speed {v:.2} recorded_here {:.2} recorded_before {:.2} jump_node {jump_node} jump_speed {jump_speed:.2}",
-                                npc.id.serial, npc.character, state, rec(node), node.checked_sub(1).map_or(f32::NAN, rec)
+                                "NPC_TAKEOFF #{} {} {:?} from {} node {node} speed {v:.2} launch {launch:.2} recorded_here {:.2} recorded_before {:.2} jump_node {jump_node} jump_speed {jump_speed:.2}",
+                                npc.id.serial, npc.character, state, sim.last_state.map_or("-".to_string(), |s| format!("{s:?}")), rec(node), node.checked_sub(1).map_or(f32::NAN, rec)
                             );
                         }
                     }
