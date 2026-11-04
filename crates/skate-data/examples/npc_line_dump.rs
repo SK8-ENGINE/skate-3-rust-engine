@@ -25,6 +25,45 @@ fn main() -> Result<(), String> {
         }
         return Ok(());
     }
+    // `gaps`: for every start-trick node that leads to an airborne node before the next start-trick node, the recorded
+    // frames from the trick node to the first airborne node, as a histogram (how early recordings pop after the trick).
+    if id == "gaps" {
+        let mut hist = std::collections::BTreeMap::<u32, u32>::new();
+        for p in &paths {
+            let line = skate_data::living_world::replay_line(&p.path);
+            for (i, n) in line.nodes.iter().enumerate() {
+                if n.event != 1 || n.flags & 4 != 0 {
+                    continue;
+                }
+                let mut frames = 0u32;
+                for m in &line.nodes[i..] {
+                    if m.flags & 4 != 0 {
+                        *hist.entry(frames.min(60)).or_default() += 1;
+                        break;
+                    }
+                    if frames > 0 && m.event == 1 {
+                        break;
+                    }
+                    frames += u32::from(m.frames);
+                }
+            }
+        }
+        for (f, c) in hist {
+            println!("{f:3} frames: {c}");
+        }
+        return Ok(());
+    }
+    // `jumpat:N`: the lines with a recorded jump at node N (to name the line of an NPC_TAKEOFF jump_node).
+    if let Some(at) = id.strip_prefix("jumpat:") {
+        let node: usize = at.parse().map_err(|e| format!("jumpat: {e}"))?;
+        for p in &paths {
+            let line = skate_data::living_world::replay_line(&p.path);
+            if line.nodes.get(node).is_some_and(|n| n.jump.is_some()) {
+                println!("{} nodes {}", hex(&p.path.id.0), line.nodes.len());
+            }
+        }
+        return Ok(());
+    }
     let path = paths.iter().find(|p| hex(&p.path.id.0) == id.to_ascii_lowercase()).ok_or(format!("No line {id}"))?;
     let line = skate_data::living_world::replay_line(&path.path);
     println!("line {} flags {} skill {} nodes {} jumps {}", id, line.flags, line.skill, line.nodes.len(), line.jumps.len());
