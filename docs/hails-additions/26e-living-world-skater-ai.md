@@ -805,6 +805,41 @@ keyed by the NPC skater's stable id.
   DownTown run: handovers push 5.4 / 6.4 / 7.1 m/s on their first held tick (start speed = push), a bail respawn at
   node 55 pushed 5.7 m/s after its 8-tick hold. Not play-tested yet.
 
+### Update 2026-11-03: no path projection during the hold
+
+- **Problem [log]:** our path projection kept running during the hold, so the cursor moved off the placed node and the
+  push read the wrong node's off-board bit and step. Four University respawns at node 62 (laptop session
+  game-20261101-101251) all logged `NPC_SKATER_PUSH ... node 64 none: left its place` and rode on at half the recorded
+  speed until they drifted 1 m off the line and bailed again. A DownTown session on 2026-11-03 showed it too: placed at
+  node 27, pushed from node 28. Research b807.
+- **Change:** the projection branch in `living_world/npc_sim.rs` also waits while the hold runs, as retail's hold
+  branch (`824701F8`) does. The cursor stays on the placed node, so the spawn push uses that node (retail `pc+0x330`),
+  and the projection starts from it once the hold ends.
+- The `NPC_SKATER_RESPAWN` line now gives the time since the bail (it always printed 0.00 s before).
+
+### Update 2026-11-03: the respawn at 5.0 s
+
+- **Problem [code + log]:** every bail -> respawn took 8.55 to 8.58 s, where retail places at 5.0 s. Ours waited for the
+  skater's own wipeout-end teleport. An NPC carries the externally-controlled bit (flags2472 bit 28), so its wipeout
+  auto-resets only after a hard-coded 8.0 s plus the 0.5 s `TeleportAutoResetFadeOutTime`
+  (`skate-core/src/player/wipeout_state/recovery.rs`); retail has the same 8.0 s rule (`82D3E980`). Research b810.
+- **Retail [code]:** the respawner `8246EA90` places the skater itself once t = ticks / 60 passes the delay (5.0 s,
+  clamped 1.5 to 7.9 s, below the 8.0 s reset), without looking at the wipeout. The placement `8246E558` queues the
+  skater's teleport (`825926F8`); the teleport request wins over every other physical state, WipeoutGround included,
+  which ends the wipeout (research b811). On board unless the node is an off-board one (node bit 3).
+- **Change:** `living_world/npc_sim.rs` places the bailed skater on the delay through the actor reply (the same
+  placement as the fallback before), on board from the node's off-board bit; the bail respawn and the stage-6 stuck
+  placement both use it. The wipeout-end teleport to the chosen node stays as a backstop, and a warning still fires if
+  a skater is not placed 10 s after the delay.
+- **Verification:** skate-game 995 passed, data-gated living_world 7 passed. Muted University idle runs, 300 s each,
+  player off the board: before, 3 respawns at 8.58 s, each pushing from its placed node (node 24, 6.7 m/s); after,
+  5 respawns at 5.00 to 5.02 s, 4 pushes from the placed node (the fifth came as the run ended), no wipeout within 1 s
+  of a placement, no late reset to an old checkpoint (the failure of the earlier 5 s attempt in doc 26c), 0 panics.
+  Not play-tested yet.
+- **Open:** retail's prepare step 1.0 s before the placement (world collision off: Player+0x510 bit 24, board group 2,
+  the skeleton's driven mode 1, `82BE3808`) is not ported; ours never sets that flag. Why a skater placed on a nose-down
+  node slides 0.23 m during the hold (retail's placement transform `82453AD0` not read yet).
+
 ## A dropped trick slot shows no trick pose (2026-10-17)
 - **Problem:** user (laptop session game-20261017-143646) said NPC ollies and landings look wrong. The log has 698
   trick slots: 465 played as recorded, 215 swapped by the profile pick, 18 dropped (`chosen none`, grabs on profiles

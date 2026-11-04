@@ -493,7 +493,7 @@ fn spawn_sim(
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
     let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
-    let v = place(&mut sim, target, hold_ticks)?;
+    let v = place(&mut sim, target, true, hold_ticks)?;
     sim.handover_push = Some((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
     Ok(sim)
 }
@@ -511,7 +511,12 @@ fn line_spawn(target: &ai_record::LineTarget) -> skate_core::physics::drive_fram
 }
 
 /// Place a simulated skater on its line with the teleport and the spawn push as velocity (engine handover, b109).
-fn place(sim: &mut NpcSim, target: &ai_record::LineTarget, hold_ticks: u32) -> Result<[f32; 3], String> {
+/// Retail's placement (`8246E558`) teleports on board unless the node is an off-board one (node bit 3).
+fn on_board_at(lines: &dyn skate_core::living_world::replay::LineSource, cursor: &skate_core::living_world::replay::LineCursor) -> bool {
+    lines.line(&cursor.line).and_then(|l| l.nodes.get(cursor.node as usize)).is_none_or(|n| n.flags & node_flags::OFF_BOARD == 0)
+}
+
+fn place(sim: &mut NpcSim, target: &ai_record::LineTarget, on_board: bool, hold_ticks: u32) -> Result<[f32; 3], String> {
     let spawn = line_spawn(target);
     let c = spawn.basis.columns;
     info!("NPC_SKATER_PLACE_FRAME up=[{:.2}, {:.2}, {:.2}] forward=[{:.2}, {:.2}, {:.2}] at [{:.2}, {:.2}, {:.2}]", c[1][0], c[1][1], c[1][2], c[2][0], c[2][1], c[2][2], spawn.translation.x, spawn.translation.y, spawn.translation.z);
@@ -524,7 +529,7 @@ fn place(sim: &mut NpcSim, target: &ai_record::LineTarget, hold_ticks: u32) -> R
     // the animated skeleton's root, so the skater was drawn where its pooled body was and vanished on screen.
     sim.placements_at_place = sim.body.runtime.placements();
     sim.pending_ticks = 0;
-    sim.body.runtime.place_by_reply(spawn_matrix(&spawn), true);
+    sim.body.runtime.place_by_reply(spawn_matrix(&spawn), on_board);
     sim.body.runtime.clear_respawn_destination();
     settle(sim, hold_ticks);
     sim.teleport_pending = true;
@@ -963,15 +968,18 @@ pub(crate) fn simulate(
                         skate_core::living_world::ai_controller::full_reset(&mut replay.avoid.controller);
                         settle(sim, rules.respawn_hold_ticks());
                         let len = lines.get(&replay.cursor.line).map_or(0, |l| l.nodes.len());
-                        info!("NPC_SKATER_RESPAWN #{} {} at line node {} of {len} (wipeout-end teleport after {:.2} s)", npc.id.serial, npc.character, replay.cursor.node, (rules.respawn_ticks().saturating_sub(left)) as f32 / 60.0);
+                        info!("NPC_SKATER_RESPAWN #{} {} at line node {} of {len} (wipeout-end teleport {:.2} s after the bail)", npc.id.serial, npc.character, replay.cursor.node, sim.bail_ticks as f32 / 60.0);
                         events.write(super::npc_skaters::NpcSkaterEvent::Respawned { id: npc.id, node: replay.cursor.node });
                         continue;
                     }
-                    // Fallback only: no wipeout-end teleport within the respawn delay plus 10 s (a wipeout that never
-                    // ends); place it with the line placement, logged so it shows up.
-                    if left == 0 {
+                    // Retail's respawner (`8246EA90`) places the skater itself once the bail time passes the delay
+                    // (t = ticks / 60 > 5.0 s), whatever its wipeout does: an AI skater's own auto reset only comes
+                    // after 8.0 s, so ours waited 8.57 s (b810). The placement teleport ends the wipeout (b811).
+                    if sim.bail_ticks > rules.respawn_ticks() || left == 0 {
                         sim.bail_alpha = 1.0;
-                        warn!("NPC_SKATER_RESPAWN #{} {}: no wipeout-end teleport, placing directly", npc.id.serial, npc.character);
+                        if left == 0 {
+                            warn!("NPC_SKATER_RESPAWN #{} {}: still not placed 10 s after the delay", npc.id.serial, npc.character);
+                        }
                         sim.body.runtime.clear_respawn_destination();
                         skate_core::living_world::ai_controller::full_reset(&mut replay.avoid.controller);
                         // The same skater placed again on its line, on the node (retail places its AI skater object
@@ -983,12 +991,12 @@ pub(crate) fn simulate(
                         // The new cursor counts its own frames: hold it there (the old target ran it 38 nodes ahead).
                         replay.follow_target = Some(replay.cursor.frames);
                         let Some(target) = replay.cursor.line_target(&*lines) else { continue };
-                        match place(sim, &target, rules.respawn_hold_ticks()) {
+                        match place(sim, &target, on_board_at(&*lines, &replay.cursor), rules.respawn_hold_ticks()) {
                             Ok(v) => {
                                 let len = lines.get(&replay.cursor.line).map_or(0, |l| l.nodes.len());
                                 info!(
-                                    "NPC_SKATER_RESPAWN #{} {} at line node {} of {len} (push [{:.1}, {:.1}, {:.1}] = {:.1} m/s, at [{:.1}, {:.1}, {:.1}], board up y {:.2}, node flags {:02X})",
-                                    npc.id.serial, npc.character, replay.cursor.node, v[0], v[1], v[2], (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(), target.position[0], target.position[1], target.position[2],
+                                    "NPC_SKATER_RESPAWN #{} {} at line node {} of {len} ({:.2} s after the bail; push [{:.1}, {:.1}, {:.1}] = {:.1} m/s, at [{:.1}, {:.1}, {:.1}], board up y {:.2}, node flags {:02X})",
+                                    npc.id.serial, npc.character, replay.cursor.node, sim.bail_ticks as f32 / 60.0, v[0], v[1], v[2], (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(), target.position[0], target.position[1], target.position[2],
                                     { let q = target.frame; 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]) },
                                     lines.get(&replay.cursor.line).and_then(|l| l.nodes.get(replay.cursor.node as usize)).map_or(0, |n| n.flags)
                                 );
@@ -1141,7 +1149,7 @@ pub(crate) fn simulate(
                         skate_core::living_world::ai_controller::full_reset(&mut replay.avoid.controller);
                         sim.follow = None;
                         if let Some(target) = replay.cursor.line_target(&*lines) {
-                            match place(sim, &target, rules.placement_hold_ticks()) {
+                            match place(sim, &target, on_board_at(&*lines, &replay.cursor), rules.placement_hold_ticks()) {
                                 Ok(_) => {
                                     info!("NPC_SKATER_STUCK #{} {} respawn at line node {node} (stage 6, from node {search_start})", npc.id.serial, npc.character);
                                     events.write(super::npc_skaters::NpcSkaterEvent::Respawned { id: npc.id, node });
@@ -1154,7 +1162,9 @@ pub(crate) fn simulate(
                     Some(line) => {
                         // During the bail the line waits (above): no projection, so the cursor and its trick events stay
                         // where the skater fell (it kept running before: node 6 -> 14 and a trick dispatched mid-bail).
-                        if sim.respawn_in.is_some() || sim.teleport_pending {
+                        // Nor during the placement hold: retail's hold branch (`824701F8`) runs no path branch, so the
+                        // cursor and the spawn push stay on the placed node (b807; ours ran 62 -> 64 and pushed from 64).
+                        if sim.respawn_in.is_some() || sim.teleport_pending || sim.hold_ticks > 0 {
                             (false, false, None)
                         } else {
                             let mut line = line;
