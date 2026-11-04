@@ -5,7 +5,7 @@ Status: in #52 with the rest of the fork launcher (`tools/steam-launcher`, `worl
 ## Problem
 
 The couch launcher looked like a generic dark console menu. The goal (USER-ASKS 484 to 490) is a launcher that feels
-like skate culture through the flip-out LCD panel of a mid-2000s HD skate camcorder, seen first-person: the window is
+like skate culture through the flip-out LCD panel of a mid-2000s HD camcorder, seen first-person: the window is
 only the screen and its bezel (no camera body), it swings open from the hinge at the start and shut at the close, and
 the panel looks like it has been through years of sessions. Earlier steps (an overlay, then the whole camera on a
 ledge) were replaced by this.
