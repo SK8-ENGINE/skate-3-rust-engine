@@ -10,6 +10,21 @@ fn main() -> Result<(), String> {
     let tiles = skate_data::aipath::parse_pack(&bytes).map_err(|e| e.to_string())?;
     let (paths, _) = skate_data::aipath::district_paths(&tiles).map_err(|e| e.to_string())?;
     let hex = |b: &[u8; 16]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+    // `near:x,z`: the lines whose first node lies within 3 m of the point (to name a line-end chain's next line).
+    if let Some(at) = id.strip_prefix("near:") {
+        let v: Vec<f32> = at.split(',').map(|s| s.parse().map_err(|e| format!("near: {e}"))).collect::<Result<_, _>>()?;
+        let [x, z] = v[..] else { return Err("near:x,z".into()) };
+        for p in &paths {
+            let line = skate_data::living_world::replay_line(&p.path);
+            if let Some(n) = line.nodes.first() {
+                let d = (n.position[0] - x).hypot(n.position[2] - z);
+                if d < 3.0 {
+                    println!("{} nodes {} first node at [{:.2}, {:.2}, {:.2}] ({d:.2} m)", hex(&p.path.id.0), line.nodes.len(), n.position[0], n.position[1], n.position[2]);
+                }
+            }
+        }
+        return Ok(());
+    }
     let path = paths.iter().find(|p| hex(&p.path.id.0) == id.to_ascii_lowercase()).ok_or(format!("No line {id}"))?;
     let line = skate_data::living_world::replay_line(&path.path);
     println!("line {} flags {} skill {} nodes {} jumps {}", id, line.flags, line.skill, line.nodes.len(), line.jumps.len());
