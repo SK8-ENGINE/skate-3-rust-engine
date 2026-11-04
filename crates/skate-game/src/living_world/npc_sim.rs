@@ -172,6 +172,8 @@ pub(crate) struct NpcSim {
     trace_ticks: u32,
     /// Ground ticks left of NPC_SKATER_REJOIN after a line end chain (research b731).
     chain_trace: u32,
+    /// Ticks left of NPC_TAKEOFF_TRACE after a trick dispatch (research b814: where the speed goes before a pop).
+    takeoff_trace: u32,
     /// `pc+944` / `pc+945` (centred, rejoining): written on ground ticks before the record (`sub_8246FA30` calls
     /// `sub_8246AA00` then `sub_8246DB50`), kept through the air.
     lane_flags: (bool, bool),
@@ -492,7 +494,7 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
     sim.handover_push = Some((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
     Ok(sim)
@@ -1668,6 +1670,7 @@ pub(crate) fn simulate(
                 // Logged after mode 4 so a dropped trick dispatch is not reported.
                 if let Some(name) = intents.iter().position(|x| x.0 == "Trick").and_then(|i| intents.get(i + 1)) {
                     info!("NPC_SKATER_SIM_TRICK #{} {} {} node {} state {:?}", npc.id.serial, npc.character, name.0, replay.cursor.node, state);
+                    sim.takeoff_trace = 40;
                 }
                 // NPC_SKATER_DRAWN once a second: where the drawn body is (render pose joints) against the board, so a
                 // skater that vanishes on screen can be told apart from one that bails.
@@ -1681,6 +1684,20 @@ pub(crate) fn simulate(
                     info!(
                         "NPC_SKATER_DRAWN #{} {} state {:?} deck [{:.1}, {:.1}, {:.1}] joints {} bad {bad} joint box [{:.1}, {:.1}, {:.1}]..[{:.1}, {:.1}, {:.1}]",
                         npc.id.serial, npc.character, state, deck.x, deck.y, deck.z, pose.len(), lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]
+                    );
+                }
+                if sim.takeoff_trace > 0 {
+                    sim.takeoff_trace -= 1;
+                    let (p, _) = projected_point(sim, state);
+                    let v = sim.last_deck.map_or(0.0, |q| ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt() * 60.0);
+                    let anim = &sim.body.runtime.animation;
+                    let ag = anim.action_controller.frame.current.and_then(|id| graphs.action.binding.states.get(id)).map_or("?", |s| s.name.as_str());
+                    let mg = anim.motion_controller.frame.current.and_then(|id| graphs.motion.binding.states.get(id)).map_or("?", |s| s.name.as_str());
+                    let processed = &sim.body.runtime.player_input.processed;
+                    let record = sim.body.runtime.ai_physics.as_ref().map(|a| a.record.flags);
+                    info!(
+                        "NPC_TAKEOFF_TRACE #{} t{} {:?} {v:.2} m/s node {} prepare_jump {} record {:08X} ag {ag} mg {mg}",
+                        npc.id.serial, 40 - sim.takeoff_trace, state, replay.cursor.node, processed.flags_2468 & (1 << 21) != 0, record.unwrap_or(0)
                     );
                 }
                 if sim.trace_ticks > 0 {
