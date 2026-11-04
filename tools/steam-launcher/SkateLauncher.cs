@@ -237,7 +237,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     }
 
     public string WearTest(string png) {
-        snapshotMode = true; snapPanel = 1; fixedT = 5; RefreshStatus(); pages.Push(MainPage());
+        snapshotMode = true; snapPanel = 1; fixedT = 5; snapSeed = new Random().Next(); RefreshStatus(); pages.Push(MainPage());
         int w = 1243, h = 699;
         Func<Bitmap> frame = delegate {
             var bmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
@@ -249,7 +249,9 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         int jitter = 0;
         string jitterAt = "";
         using (var x1 = frame()) using (var x2 = frame()) { int[] p1 = Pixels(x1), p2 = Pixels(x2); for (int i = 0; i < p1.Length; i++) if (p1[i] != p2[i]) { if (jitter < 3) jitterAt += string.Format(" ({0},{1}) {2:X8}/{3:X8}", i % w, i / w, p1[i], p2[i]); jitter++; } }
+        notFit = 0;
         using (var with = frame()) {
+            int unfit = notFit;
             marks.Clear(); var without = frame(); marks.AddRange(keep);
             marksUnclipped = true; var loose = frame(); marksUnclipped = false;
             using (var mask = new Bitmap(w, h, PixelFormat.Format32bppPArgb)) {
@@ -280,8 +282,8 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
                 with.Save(png, ImageFormat.Png);
                 var kinds = new int[5]; foreach (var m in keep) kinds[m.Kind]++;
                 string tags = string.Join(", ", keep.FindAll(m => m.Kind == 0).ConvertAll(m => "\"" + m.Text + "\" on " + new[] { "bottom bezel", "left strip" }[m.Spot]).ToArray());
-                return (jitter > 0 ? "UNSTABLE (the same frame twice differs by " + jitter + " px:" + jitterAt + ")  " : "") + string.Format("{0}  changed {1} px, off the wear map (camera UI, glass, outside) {2} px, tags / doodles spilling over {3} px  ({4} tags, {5} doodles, {6} scratches, {7} worn edges, {8} tape)  {9}",
-                    stray == 0 && spill == 0 && changed > 0 && jitter == 0 ? "PASS" : "FAIL", changed, stray, spill, kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], tags) + (where.IsEmpty ? "" : "  bad pixels in " + where);
+                return (jitter > 0 ? "UNSTABLE (the same frame twice differs by " + jitter + " px:" + jitterAt + ")  " : "") + string.Format("{0}  changed {1} px, off the wear map (camera UI, glass, outside) {2} px, tags / doodles spilling over {3} px, not clear of the sticker " + unfit + "  ({4} tags, {5} doodles, {6} scratches, {7} worn edges, {8} tape)  {9}",
+                    stray == 0 && spill == 0 && unfit == 0 && changed > 0 && jitter == 0 ? "PASS" : "FAIL", changed, stray, spill, kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], tags) + (where.IsEmpty ? "" : "  bad pixels in " + where);
             }
         }
     }
@@ -1361,9 +1363,9 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     // off along the edges, now and then gaff tape across a bottom corner. All of it stays on the wear map: the bezel
     // minus keep-out zones over every UI element on it (glass, keys, labels, print, grille, sensor), so wear never
     // covers the panel's UI. Tags and doodles shrink until their whole outline fits the map.
-    class Mark { public int Spot, Kind, Seed; public float X, Y, Angle, Size; public string Text; public Color Ink; }
+    class Mark { public int Spot, Kind, Seed; public float X, Y, Angle, Size; public string Text; public Color Ink; public bool Placed; }
     readonly List<Mark> marks = new List<Mark>();
-    static readonly string[] Scrawl = { "ONE MORE TRY", "LAST TRY", "FILM IT", "SEND IT", "SESH", "BAIL CREW", "DIY OR DIE", "SKATE & ANNOY", "NO COMPLY", "KICKFLIP?", "SECURITY!!", "SK8", "LINE!!", "HOMIES", "RAD", "BUST", "FILMER", "1 MORE", "SLAMS", "GNAR", "POP!", "SK8!" };
+    static readonly string[] Scrawl = { "ONE MORE TRY", "LAST TRY", "FILM IT", "SEND IT", "SESH", "DIY OR DIE", "SKATE & ANNOY", "NO COMPLY", "KICKFLIP?", "SECURITY!!", "SK8", "LINE!!", "HOMIES", "RAD", "BUST", "FILMER", "1 MORE", "SLAMS", "GNAR", "POP!", "SK8!" };
     static readonly Color[] Markers = { Color.FromArgb(232, 246, 246, 240), Color.FromArgb(220, 204, 208, 214), Color.FromArgb(225, 236, 64, 54), Color.FromArgb(225, 250, 214, 60), Color.FromArgb(225, 250, 112, 172), Color.FromArgb(225, 96, 212, 232) };
     // Spots for tags and doodles: the bottom strip between the print and DISPLAY, the left strip under POWER (the top
     // strip between the frame and the glass is too thin for a word).
@@ -1421,9 +1423,25 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         foreach (var k in KeepOut) r.Exclude(k);
         return r;
     }
+    // Where tags and doodles may go: the wear map minus the sticker, so a word never ends up half under it.
+    Region TagMap() {
+        var r = WearMap();
+        var at = StickerAt(StickerSpec());
+        using (var foot = new GraphicsPath()) { foot.AddEllipse(at.X - StickerReach, at.Y - StickerReach, 2 * StickerReach, 2 * StickerReach); r.Exclude(foot); }
+        return r;
+    }
+    // The bottom spot shares the strip with the sticker: a tag or doodle there moves to the side with more room.
+    RectangleF SpotArea(int spot) {
+        var a = TagAreas[spot];
+        if (spot != 0) return a;
+        float sx = StickerAt(StickerSpec()).X, left = sx - StickerReach - a.X, right = a.Right - (sx + StickerReach);
+        return left >= right ? new RectangleF(a.X, a.Y, Math.Max(20, left), a.Height) : new RectangleF(sx + StickerReach, a.Y, Math.Max(20, right), a.Height);
+    }
+    int notFit;   // tags / doodles that could not shrink clear of the sticker and the keep-outs (--wear-test fails on any)
     bool marksUnclipped;   // --wear-test: tags, doodles and tape drawn without the keep-outs, to find any that would cover UI
     void DrawMarks(Graphics g) {
         foreach (var mk in marks) {
+            if (!mk.Placed && (mk.Kind == 0 || mk.Kind == 1)) { var a = SpotArea(mk.Spot); mk.X = a.X + a.Width / 2 + (mk.X - (TagAreas[mk.Spot].X + TagAreas[mk.Spot].Width / 2)) * a.Width / TagAreas[mk.Spot].Width; mk.Placed = true; }
             var rnd = new Random(mk.Seed);
             var ms = g.Save();
             if (!marksUnclipped || mk.Kind == 2 || mk.Kind == 3) using (var clip = WearMap()) g.SetClip(clip, CombineMode.Intersect);
@@ -1456,14 +1474,17 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     // Paint-marker scrawl: the word in a hand font, sized to its spot (and shrunk until it fits the wear map), with the
     // paint worn through in places.
     void MarkerTag(Graphics g, Mark mk, Random rnd) {
-        var area = TagAreas[mk.Spot];
+        var area = SpotArea(mk.Spot);
         using (var path = new GraphicsPath()) {
             path.AddString(mk.Text, Hand, (int)FontStyle.Bold, area.Height * 0.7f, PointF.Empty, StringFormat.GenericTypographic);
             var b = path.GetBounds();
             float k = Math.Min(1, area.Width * 0.85f / Math.Max(1, b.Width));
             using (var m = new Matrix()) { m.Scale(k, k); m.Translate(-b.X - b.Width / 2, -b.Y - b.Height / 2); path.Transform(m); }
-            using (var map = WearMap())
+            using (var map = TagMap())
+            {
                 for (int tries = 0; tries < 12 && !Inside(map, path, mk); tries++) using (var m = new Matrix()) { m.Scale(0.9f, 0.9f); path.Transform(m); }
+                if (!Inside(map, path, mk)) notFit++;
+            }
             using (var br = new SolidBrush(mk.Ink)) g.FillPath(br, path);
             using (var pen = new Pen(Fade(mk.Ink, 120), 1.2f)) g.DrawPath(pen, path);
             var kept = g.Save();
@@ -1477,12 +1498,13 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         }
     }
     // A quick marker doodle: crown, star, arrow, X or smiley (shrunk until it fits the wear map, pen width included).
-    static void Doodle(Graphics g, Mark mk, Random rnd) {
+    void Doodle(Graphics g, Mark mk, Random rnd) {
         float s = mk.Size / 2;
-        using (var map = WearMap())
+        using (var map = TagMap())
             for (int tries = 0; tries < 12; tries++) {
                 using (var ring = new GraphicsPath()) { float rr = s * 1.15f + 3; ring.AddEllipse(-rr, -rr, 2 * rr, 2 * rr); if (Inside(map, ring, mk)) break; }
                 s *= 0.88f;
+                if (tries == 11) notFit++;
             }
         using (var pen = new Pen(mk.Ink, Math.Max(2.4f, s * 0.12f))) {
             pen.LineJoin = LineJoin.Round; pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round;
@@ -1554,8 +1576,10 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         return gameStickers.Length == 0 ? null : gameStickers[pick % gameStickers.Length];
     }
     // On the bezel's bottom strip, between the print and DISPLAY.
+    static PointF StickerAt(float[] s) { return new PointF(420 + s[2] * 200, 682 + s[3] * 4); }
+    const float StickerReach = 70;   // the sticker's footprint round its centre, kept clear of tags and doodles
     void PlaceSticker(Graphics g, float[] s) {
-        float cx = 420 + s[2] * 200, cy = 682 + s[3] * 4, scale = 0.68f;
+        float cx = StickerAt(s).X, cy = StickerAt(s).Y, scale = 0.68f;
         // The surface's ridges in the sticker's own space (the inverse of its placement).
         double ra = -s[4] * Math.PI / 180; float rc = (float)Math.Cos(ra), rs = (float)Math.Sin(ra);
         var local = Ridges().ConvertAll(seg => Array.ConvertAll(seg, q => { float dx = q.X - cx, dy = q.Y - cy; return new PointF((dx * rc - dy * rs) / scale, (dx * rs + dy * rc) / scale); }));

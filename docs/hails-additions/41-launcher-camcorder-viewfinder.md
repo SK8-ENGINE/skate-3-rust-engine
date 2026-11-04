@@ -45,8 +45,9 @@ ledge) were replaced by this.
 - **Wear, rolled fresh at every start:** paint-marker scrawl in skate-session words ("SESH", "LAST TRY", "NO COMPLY",
   "SECURITY!!", "SKATE & ANNOY", ...), doodles (crown, star, arrow, X, smiley), scratch clusters, paint rubbed off
   along the edges, now and then gaff tape across a bottom corner. All of it stays on the **wear map**: the bezel minus
-  keep-out zones over every UI element (glass, keys and their labels, print, grille, sensor). Tags and doodles shrink
-  until their whole outline, pen and smoothing included, fits the map; short words go to the small spot.
+  keep-out zones over every UI element (glass, keys and their labels, print, grille, sensor). Tags and doodles also stay clear
+  of the sticker (a tag on the bottom strip moves to the sticker's roomier side) and shrink until their whole outline,
+  pen and smoothing included, fits; short words go to the small spot.
 - **The sticker:** one sticker slapped on the bezel's bottom strip years ago, picked once per user at the first start
   (design, place, angle, wear) and kept in `camcorder-sticker.txt` in the state folder. Worn: faded, scratched, grimy,
   chipped, one edge peeled up and folded back with old glue under it, and creased along the gasket edge and the
@@ -74,7 +75,8 @@ game runs (the launcher hides).
 ## Verification
 
 - `SkateLauncher.exe --wear-test <out.txt> <out.png>`: one start's wear roll, checked: the same frame drawn twice is
-  identical, every pixel the wear changes is on the wear map, and no tag, doodle or tape crosses a keep-out zone.
+  identical, every pixel the wear changes is on the wear map, no tag, doodle or tape crosses a keep-out zone, and no
+  tag or doodle sits under the sticker (each test start rolls its own sticker too).
   Run 10 times as 10 separate starts: 10 of 10 PASS.
 - `SkateLauncher.exe --snapshot <out.png> <screen>[@<0..1>][#<seed>] [WxH]`: any screen, `@` a point in the power-on,
   `#` the sticker and wear from that seed (snapshots never write the sticker file).
