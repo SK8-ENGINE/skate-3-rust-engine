@@ -1,5 +1,5 @@
-// Couch launcher for Steam / Steam Link (see README.md): a full-screen window with a menu for the controller, the
-// keyboard or Steam's desktop layout. launcher.ps1 does the work (versions, builds, launching, session checks) and
+// Couch launcher for Steam / Steam Link (see README.md): a camcorder-shaped window (docs/hails-additions/41-...) with a
+// menu for the controller, the keyboard, the mouse or Steam's desktop layout. launcher.ps1 does the work (versions, builds, launching, session checks) and
 // this window shows its output; the entry and version lists come from launcher.ps1 too.
 //   D-pad / left stick = move, A = select, B = back. Arrows / Enter / Esc / Space (Steam's desktop layout) work too.
 //   SkateLauncher.exe <entry> [label] [@version]  runs an entry directly (one-click Steam shortcuts), shows the
@@ -10,9 +10,12 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 static class Native {
@@ -29,6 +32,26 @@ static class Native {
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] public static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr h);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr h, IntPtr dc);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
+    [StructLayout(LayoutKind.Sequential)] struct Pt { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] struct Sz { public int W, H; }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)] struct Blend { public byte Op, Flags, Alpha, Format; }
+    [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr h, IntPtr dst, ref Pt pos, ref Sz size, IntPtr src, ref Pt srcPos, int key, ref Blend b, int flags);
+    public static void DeleteHbitmap(IntPtr h) { DeleteObject(h); }
+    // Hands a frame with per-pixel alpha to a layered window (the camcorder's outline is its own alpha).
+    public static void Push(IntPtr hwnd, Bitmap bmp, int x, int y, byte alpha) {
+        IntPtr screen = GetDC(IntPtr.Zero), mem = CreateCompatibleDC(screen), hb = bmp.GetHbitmap(Color.FromArgb(0)), old = SelectObject(mem, hb);
+        var pos = new Pt { X = x, Y = y }; var size = new Sz { W = bmp.Width, H = bmp.Height }; var src = new Pt(); var bl = new Blend { Alpha = alpha, Format = 1 };
+        UpdateLayeredWindow(hwnd, screen, ref pos, ref size, mem, ref src, 0, ref bl, 2);
+        SelectObject(mem, old); DeleteObject(hb); DeleteDC(mem); ReleaseDC(IntPtr.Zero, screen);
+    }
 
     // Windows only lets the foreground owner hand the foreground on; a window Steam or a hidden launcher starts is
     // otherwise left behind the last active one. Joining the foreground thread's input for the call lifts that.
@@ -45,6 +68,7 @@ static class Native {
 // One menu row: greyed rows (On = false) can be selected to read why, but do nothing.
 class Item {
     public string Text, Hint; public bool On = true; public Action Run;
+    public string Info = ""; public string[] Records = new string[0];   // the play screen's detail panel
     public Item(string text, string hint, bool on, Action run) { Text = text; Hint = hint ?? ""; On = on; Run = run; }
 }
 class Page {
@@ -62,6 +86,14 @@ class BuildView {
     static readonly System.Text.RegularExpressions.Regex Bar = new System.Text.RegularExpressions.Regex(@"Building \[[^\]]*\]\s*(\d+)/(\d+)(?::\s*(.*))?");
     static readonly System.Text.RegularExpressions.Regex Compiling = new System.Text.RegularExpressions.Regex(@"Compiling (\S+) v");
     static readonly System.Text.RegularExpressions.Regex ErrStart = new System.Text.RegularExpressions.Regex(@"^error(\[E\d+\])?: ");
+    // Cargo waiting for another cargo (USER-ASKS 72: the laptop showed "0 crates compiled" while cargo printed "Blocking
+    // waiting for file lock on build directory"); and its index / download stages, which come before any build step.
+    static readonly System.Text.RegularExpressions.Regex Lock = new System.Text.RegularExpressions.Regex(@"Blocking waiting for file lock on (.+)$");
+    static readonly System.Text.RegularExpressions.Regex Stage = new System.Text.RegularExpressions.Regex(@"^(Updating|Downloading|Downloaded|Locking|Fetching)\b");
+    public string Waiting, WaitWho, StageText; public DateTime WaitSince;
+    // The fetch before a build (LAUNCHER_WAIT lines, USER-ASKS 72): shown as WAITING once it has lasted 5 s.
+    public string PreWait, LastPreWait; public DateTime PreWaitSince;
+    public bool FetchWaiting() { return PreWait != null && (DateTime.Now - PreWaitSince).TotalSeconds >= 5; }
     public bool Active, Ended, Ok; public string Name = "", Commit = "", LogPath, Now = "";
     public int Done, Total, Compiled, Warnings; public DateTime Start, End;
     public readonly List<string> Error = new List<string>(); bool inError; string couldNot;
@@ -81,18 +113,43 @@ class BuildView {
         if (raw.StartsWith("LAUNCHER_BUILD\tbegin\t")) {
             var f = raw.Split('\t');
             Close(); Active = true; Ended = false; Name = f.Length > 2 ? f[2] : ""; Commit = f.Length > 3 ? f[3] : ""; LogPath = f.Length > 4 ? f[4] : null;
-            Done = Total = Compiled = Warnings = 0; Error.Clear(); Tail.Clear(); inError = false; couldNot = null; Now = ""; Start = DateTime.Now;
+            Done = Total = Compiled = Warnings = 0; Error.Clear(); Tail.Clear(); inError = false; couldNot = null; Now = ""; Start = DateTime.Now; Waiting = null; WaitWho = null; StageText = null;
             try { if (LogPath != null) { Directory.CreateDirectory(Path.GetDirectoryName(LogPath)); file = new StreamWriter(LogPath, false, new UTF8Encoding(false)); } } catch { file = null; }
+            if (LastPreWait != null) { Note(LastPreWait); LastPreWait = null; }
             return true;
         }
-        if (raw.StartsWith("LAUNCHER_BUILD\tend\t")) { Active = false; Ended = true; End = DateTime.Now; Ok = raw.EndsWith("\t0"); if (file != null) file.Flush(); return true; }
+        if (raw.StartsWith("LAUNCHER_SELF\t")) return true;   // the start check's own markers (b522)
+        if (raw.StartsWith("LAUNCHER_WAIT\t")) {
+            var f = raw.Split('\t');
+            if (f.Length > 4 && f[1] == "begin") { PreWait = "fetching " + f[3] + " from " + f[4]; PreWaitSince = DateTime.Now; }
+            else if (f.Length > 3 && f[1] == "end" && PreWait != null) { LastPreWait = (f[3] == "0" ? "fetched" : "fetch failed,") + PreWait.Substring(8) + " in " + Clock(DateTime.Now - PreWaitSince); PreWait = null; }
+            return true;
+        }
+        // The log closes when the build ends, not when the job does: a game session follows a build in the same job, and
+        // an open log blocked the after-session send (laptop 2026-10-19).
+        if (raw.StartsWith("LAUNCHER_BUILD\tend\t")) { Active = false; Ended = true; End = DateTime.Now; Ok = raw.EndsWith("\t0"); Close(); return true; }
         if (!Active) return false;
+        // launcher.ps1 names who holds the build folder (BUILDING-<id>.txt or a cargo process) before cargo blocks.
+        if (raw.StartsWith("LAUNCHER_BUILD\twait\t")) {
+            var f = raw.Split('\t'); WaitWho = f.Length > 3 ? f[3] : null; Note("holder: " + WaitWho);
+            // "hold": launcher.ps1 itself waits (the version's exe is running), so the card shows it as a wait (b521 4c).
+            if (f.Length > 4 && f[4] == "hold") { if (Waiting == null) { WaitSince = DateTime.Now; Note("waiting: " + WaitWho); } Waiting = WaitWho; }
+            return true;
+        }
+        if (raw.StartsWith("LAUNCHER_BUILD\twaitend")) { EndWait(); return true; }
         string c = Clean(raw);
         var m = Bar.Match(c);
         if (m.Success) { Done = int.Parse(m.Groups[1].Value); Total = int.Parse(m.Groups[2].Value); if (m.Groups[3].Success) Now = m.Groups[3].Value.Trim(); }
         var cm = Compiling.Match(c);
         bool barOnly = m.Success && !cm.Success;
         if (file != null && !barOnly && c != "") { try { file.WriteLine(Ansi.Replace(raw, "").Replace("\r", "")); } catch { } }
+        var lk = Lock.Match(c);
+        if (lk.Success) {
+            if (Waiting == null) { WaitSince = DateTime.Now; Note("waiting: " + lk.Groups[1].Value.Trim() + (WaitWho != null ? ", " + WaitWho : "")); }
+            Waiting = "another build is using the " + lk.Groups[1].Value.Trim();
+        }
+        else if (m.Success || cm.Success) { EndWait(); StageText = null; }
+        else if (Stage.IsMatch(c)) { EndWait(); StageText = c; }
         if (cm.Success) { Compiled++; Now = cm.Groups[1].Value; }
         if (inError) {
             if (c == "" || Error.Count >= 40) inError = false; else Error.Add(c);
@@ -107,6 +164,9 @@ class BuildView {
         if (Error.Count > 0) return Error;
         var l = new List<string>(); if (couldNot != null) l.Add(couldNot); l.AddRange(Tail); return l;
     }
+    void EndWait() { if (Waiting != null) Note("waited " + Clock(DateTime.Now - WaitSince)); Waiting = null; }
+    // A launcher line in the build log, so a session note shows when, why and how long a build waited.
+    public void Note(string text) { if (file != null) { try { file.WriteLine("[launcher " + DateTime.Now.ToString("HH:mm:ss") + "] " + text); file.Flush(); } catch { } } }
     public static string Clock(TimeSpan t) { return ((int)t.TotalMinutes) + ":" + t.Seconds.ToString("00"); }
     public void Close() { if (file != null) { try { file.Dispose(); } catch { } file = null; } }
 }
@@ -121,26 +181,37 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     readonly Timer tick = new Timer();
     readonly List<string> log = new List<string>();
     readonly BuildView build = new BuildView(); bool dirty;
-    readonly string[] direct;
+    readonly string[] direct; readonly bool afterUpdate;
     Dictionary<string, string> status = new Dictionary<string, string>();
     Process job; string jobTitle; bool jobHidGame; IntPtr gameWindow; DateTime hidAt; int closeAt = -1; DateTime closeTime;
     string waitEntry, waitLabel, waitName;   // waiting for another game to close before starting
+    bool cancelArmed, cancelled, cancelledInFetch;  // B pressed once / twice while a build or its fetch waits
     ushort prevPad; int held; string lastAction = ""; bool lastFromPad; DateTime lastActionTime = DateTime.MinValue;
-    Font monoFont, titleFont, itemFont, smallFont, heroFont, markFont, markLight, playFont, iconFont, iconSmall, itemBold, smallBold;
+    Font monoFont, titleFont, itemFont, smallFont, heroFont, markFont, markLight, playFont, iconFont, iconSmall, itemBold, smallBold, bodyFont, splashMark, splashLight;
 
     public LauncherForm(string[] argv) {
-        direct = argv;
+        // --after-update: started by the previous exe after it updated itself (shows what changed), not a direct entry.
+        afterUpdate = Array.IndexOf(argv, "--after-update") >= 0;
+        sameMonitorFlag = Array.IndexOf(argv, "--same-monitor") >= 0;
+        direct = Array.FindAll(argv, a => a != "--after-update" && a != "--same-monitor");
         Text = "Skate launcher";
-        // A normal window: 70 % of the screen's work area at 16:10, centred, resizable (the layout scales with it).
-        var area = Screen.PrimaryScreen.WorkingArea;
-        int h = Math.Min(area.Height * 7 / 10, area.Width * 7 / 10 * 10 / 16);
-        StartPosition = FormStartPosition.CenterScreen; ClientSize = new Size(h * 16 / 10, h);
-        MinimumSize = new Size(800, 540);
+        // The LCD panel as its own window (no frame, its outline is the drawing's alpha): 62 % of the work area's height
+        // at the panel's shape, centred. On the main monitor, or with --same-monitor / the Tools setting on the monitor
+        // of the window it was started from.
+        var area = StartScreen().WorkingArea;
+        int h = Math.Min(area.Height * 62 / 100, area.Width * 62 / 100 * 760 / 1240);
+        FormBorderStyle = FormBorderStyle.None;
+        StartPosition = FormStartPosition.Manual; ClientSize = new Size(h * 1240 / 760, h);
+        Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
+        RollMarks(new Random());
         BackColor = Color.FromArgb(18, 20, 24); ForeColor = Color.White;
         DoubleBuffered = true; KeyPreview = true;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
-        tick.Interval = 16; tick.Tick += delegate { Poll(); };
-        Load += delegate { Start(); tick.Start(); };
+        tick.Interval = 16; tick.Tick += delegate { Poll(); if (needPresent) Present(); };
+        // The window paints first; the start check (launcher.ps1 pending: self update, session check) runs behind a card
+        // (it froze the start with no window during a slow self-update fetch; b522).
+        Load += delegate { tick.Start(); };
+        Shown += delegate { Start(); };
         Resize += delegate { MakeFonts(); Invalidate(); };
         MakeFonts();
     }
@@ -155,22 +226,122 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         smallFont = new Font("Segoe UI", h / 52f, GraphicsUnit.Pixel);
         monoFont = new Font("Consolas", h / 50f, GraphicsUnit.Pixel);
         smallBold = new Font("Segoe UI Semibold", h / 52f, GraphicsUnit.Pixel);
+        bodyFont = new Font("Segoe UI", h / 42f, GraphicsUnit.Pixel);
         markFont = new Font("Segoe UI Black", h / 30f, GraphicsUnit.Pixel);
         markLight = new Font("Segoe UI Light", h / 30f, GraphicsUnit.Pixel);
+        splashMark = new Font("Segoe UI Black", h / 11f, GraphicsUnit.Pixel);
+        splashLight = new Font("Segoe UI Light", h / 11f, GraphicsUnit.Pixel);
         playFont = new Font("Segoe UI Black", h / 26f, GraphicsUnit.Pixel);
         iconFont = new Font("Segoe MDL2 Assets", h / 26f, GraphicsUnit.Pixel);
         iconSmall = new Font("Segoe MDL2 Assets", h / 40f, GraphicsUnit.Pixel);
     }
 
+    public string WearTest(string png) {
+        snapshotMode = true; snapPanel = 1; fixedT = 5; RefreshStatus(); pages.Push(MainPage());
+        int w = 1243, h = 699;
+        Func<Bitmap> frame = delegate {
+            var bmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
+            using (var g = Graphics.FromImage(bmp)) { g.Clear(Color.Transparent); flipScale = -1; Render(g, w, h); }
+            return bmp;
+        };
+        var keep = new List<Mark>(marks);
+        frame().Dispose();   // the first frame builds the caches (fonts, scene, flip faces); compare later ones only
+        int jitter = 0;
+        string jitterAt = "";
+        using (var x1 = frame()) using (var x2 = frame()) { int[] p1 = Pixels(x1), p2 = Pixels(x2); for (int i = 0; i < p1.Length; i++) if (p1[i] != p2[i]) { if (jitter < 3) jitterAt += string.Format(" ({0},{1}) {2:X8}/{3:X8}", i % w, i / w, p1[i], p2[i]); jitter++; } }
+        using (var with = frame()) {
+            marks.Clear(); var without = frame(); marks.AddRange(keep);
+            marksUnclipped = true; var loose = frame(); marksUnclipped = false;
+            using (var mask = new Bitmap(w, h, PixelFormat.Format32bppPArgb)) {
+                using (var g = Graphics.FromImage(mask)) {
+                    g.TranslateTransform(devX, devY); g.ScaleTransform(devS, devS);
+                    using (var b = new SolidBrush(Color.White)) using (var o = WearMap()) g.FillRegion(b, o);
+                }
+                int[] a = Pixels(with), n = Pixels(without), l = Pixels(loose), mk = Pixels(mask);
+                int changed = 0, stray = 0, spill = 0;
+                var where = RectangleF.Empty;
+                for (int i = 0; i < a.Length; i++) {
+                    bool bad = false;
+                    if (a[i] != n[i]) { changed++; if ((mk[i] & 0xFFFFFF) != 0xFFFFFF) { stray++; bad = true; } }
+                    if (l[i] != a[i]) { spill++; bad = true; }
+                    if (bad) { var px = new RectangleF(i % w, i / w, 1, 1); where = where.IsEmpty ? px : RectangleF.Union(where, px); }
+                }
+                if (!where.IsEmpty) {
+                    // Where it went wrong: red = a mark off the camera or on the glass, yellow = a tag or doodle over its edge.
+                    var bad = new int[a.Length];
+                    for (int i = 0; i < a.Length; i++) bad[i] = l[i] != a[i] ? unchecked((int)0xFFFFD000) : (a[i] != n[i] && (mk[i] & 0xFFFFFF) != 0xFFFFFF) ? unchecked((int)0xFFFF2020) : unchecked((int)0x30000000);
+                    using (var bb = new Bitmap(w, h, PixelFormat.Format32bppPArgb)) {
+                        var d = bb.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
+                        System.Runtime.InteropServices.Marshal.Copy(bad, 0, d.Scan0, bad.Length); bb.UnlockBits(d);
+                        bb.Save(Path.ChangeExtension(png, ".bad.png"), ImageFormat.Png);
+                    }
+                }
+                without.Dispose(); loose.Dispose();
+                with.Save(png, ImageFormat.Png);
+                var kinds = new int[5]; foreach (var m in keep) kinds[m.Kind]++;
+                string tags = string.Join(", ", keep.FindAll(m => m.Kind == 0).ConvertAll(m => "\"" + m.Text + "\" on " + new[] { "bottom bezel", "left strip" }[m.Spot]).ToArray());
+                return (jitter > 0 ? "UNSTABLE (the same frame twice differs by " + jitter + " px:" + jitterAt + ")  " : "") + string.Format("{0}  changed {1} px, off the wear map (camera UI, glass, outside) {2} px, tags / doodles spilling over {3} px  ({4} tags, {5} doodles, {6} scratches, {7} worn edges, {8} tape)  {9}",
+                    stray == 0 && spill == 0 && changed > 0 && jitter == 0 ? "PASS" : "FAIL", changed, stray, spill, kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], tags) + (where.IsEmpty ? "" : "  bad pixels in " + where);
+            }
+        }
+    }
+    static int[] Pixels(Bitmap b) {
+        var data = b.LockBits(new Rectangle(0, 0, b.Width, b.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+        var px = new int[b.Width * b.Height];
+        System.Runtime.InteropServices.Marshal.Copy(data.Scan0, px, 0, px.Length);
+        b.UnlockBits(data);
+        return px;
+    }
+
+    public string Bench(int w, int h) {
+        snapshotMode = true; RefreshStatus(); pages.Push(MainPage());
+        var sb = new StringBuilder();
+        using (var bmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb)) using (var g = Graphics.FromImage(bmp)) {
+            foreach (float at in new[] { 0.3f, 0.5f, 0.65f, 0.9f, 1f }) {
+                snapPanel = at; flipScale = -1; Render(g, w, h);
+                var sw = Stopwatch.StartNew();
+                for (int i = 0; i < 20; i++) { g.Clear(Color.Transparent); Render(g, w, h); }
+                double ms = sw.Elapsed.TotalMilliseconds / 20;
+                sw.Restart();
+                for (int i = 0; i < 20; i++) { IntPtr hb = bmp.GetHbitmap(Color.FromArgb(0)); Native.DeleteHbitmap(hb); }
+                sb.AppendLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "assembly {0:0.00}: render {1:0.0} ms, GetHbitmap {2:0.0} ms", at, ms, sw.Elapsed.TotalMilliseconds / 20));
+            }
+        }
+        return sb.ToString();
+    }
+
     // Draws one screen into a PNG (the --snapshot mode): main, versions, tools or job (a sample build log).
-    public void Snapshot(string file, string screen) {
-        const int w = 1920, h = 1080;
+    public void Snapshot(string file, string screen, int w, int h) {
+        // "<screen>#7": the sticker from seed 7; "<screen>@0.4": 40 % through the power-on (the camera unfolding).
+        snapshotMode = true; snapPanel = 1;
+        int hash = screen.IndexOf('#');
+        if (hash > 0) { int.TryParse(screen.Substring(hash + 1), out snapSeed); screen = screen.Substring(0, hash); }
+        RollMarks(new Random(snapSeed));
+        int at = screen.IndexOf('@');
+        if (at > 0) { float.TryParse(screen.Substring(at + 1), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out snapPanel); screen = screen.Substring(0, at); }
         MakeFonts(h);
         RefreshStatus();
-        pages.Push(MainPage());
+        if (screen == "checking") { starting = true; selfFetching = true; startSince = DateTime.Now.AddSeconds(-7); }
+        else pages.Push(MainPage());
         if (screen == "versions") pages.Push(VersionPage());
         if (screen == "tools") pages.Push(EntryPage("Tools", "tools"));
-        if (screen == "play") pages.Push(EntryPage("Play: " + St("version"), "rust"));
+        if (screen == "setup") pages.Push(WizardPage());
+        if (screen == "play" || screen == "play-traceall") pages.Push(EntryPage("Play: " + St("version"), "rust"));
+        if (screen == "play-traceall") pages.Peek().Sel = Math.Min(1, pages.Peek().Items.Count - 1);
+        if (screen == "waiting") {
+            job = new Process(); jobTitle = "Update and build";
+            build.Feed("LAUNCHER_BUILD\tbegin\thails-additions\t94774ce\t");
+            build.Start = DateTime.Now.AddSeconds(-75);
+            build.Feed("LAUNCHER_BUILD\twait\tbuild\thails-additions is being built by the shell since 16:41 (pid 21412)");
+            build.Feed("    Blocking waiting for file lock on build directory");
+            build.WaitSince = DateTime.Now.AddSeconds(-72);
+        }
+        if (screen == "fetching") {
+            job = new Process(); jobTitle = "Update and build"; jobStart = DateTime.Now.AddSeconds(-44);
+            log.Add("  Checking hails-additions on origin...");
+            build.Feed("LAUNCHER_WAIT\tbegin\tfetch\thails-additions\torigin");
+            build.PreWaitSince = DateTime.Now.AddSeconds(-42);
+        }
         if (screen == "build" || screen == "failed") {
             job = new Process(); jobTitle = "Update and build";
             build.Feed("LAUNCHER_BUILD\tbegin\thails-additions\t94774ce\t");
@@ -183,10 +354,8 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
             foreach (var l in new[] { "Fetching hails-additions at 94774ce", "   Compiling bevy_render v0.18.1", "   Compiling skate-core v0.1.0", "warning: unused import: `skitch_enabled`", "   Compiling skate-game v0.1.0" }) log.Add(l);
         }
         using (var bmp = new Bitmap(w, h)) {
-            // A pushed page starts its fade-in on the first draw: draw once, end the animations, then draw the shot.
-            using (var g = Graphics.FromImage(bmp)) Render(g, w, h);
-            screenAt = selAt = -10f;
-            using (var g = Graphics.FromImage(bmp)) Render(g, w, h);
+            using (var g = Graphics.FromImage(bmp)) { Render(g, w, h); }
+
             bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
         }
     }
@@ -211,9 +380,38 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         }
     }
     static string Run(string args) { int c; return Run(args, out c); }
+    // The lists behind the main tiles (Versions, What to test, Recomp, RPCS3, Tools): each launcher.ps1 call is a new
+    // powershell.exe (1 to 2.5 s on the laptop, 2026-10-19), so they are fetched in the background at start and after
+    // every change (version picked, job finished) and the tiles open from memory. A tile pressed before its fetch is
+    // done waits only for the rest of it.
+    static readonly string[] Prefetched = { "entries", "versions", "notes", "status" };
+    static readonly Dictionary<string, Task<string>> cache = new Dictionary<string, Task<string>>();
+    static Task<string> Fetch(string args) {
+        lock (cache) {
+            Task<string> t;
+            if (!cache.TryGetValue(args, out t)) { t = Task.Run(() => Run(args)); cache[args] = t; }
+            return t;
+        }
+    }
+    static string Listed(string args) {
+        if (Array.IndexOf(Prefetched, args) < 0) return Run(args);
+        var t = Fetch(args);
+        try { return t.GetAwaiter().GetResult(); }
+        catch { lock (cache) { Task<string> c; if (cache.TryGetValue(args, out c) && c == t) cache.Remove(args); } throw; }
+    }
+    static void Prefetch() { foreach (var a in Prefetched) Fetch(a); }
+    // Waits for the prefetched lists off the window thread (a failed one is fetched again when read), so the menu is
+    // built from memory: waiting on them in the window froze it for seconds, and Windows offered to end it (USER-ASKS 436).
+    static void WaitListed() {
+        var all = new List<Task>();
+        foreach (var a in Prefetched) all.Add(Fetch(a));
+        try { Task.WaitAll(all.ToArray()); } catch { }
+    }
+    void WhenListed(Action then) { Task.Run((Action)WaitListed).ContinueWith(t => BeginInvoke(then)); }
+    static void ForgetCache() { lock (cache) cache.Clear(); }
     static List<string[]> Rows(string args, int min) {
         var rows = new List<string[]>();
-        foreach (var l in Run(args).Split('\n')) { var f = l.TrimEnd('\r').Split('\t'); if (f.Length >= min) rows.Add(f); }
+        foreach (var l in Listed(args).Split('\n')) { var f = l.TrimEnd('\r').Split('\t'); if (f.Length >= min) rows.Add(f); }
         return rows;
     }
     static string StateDir() {
@@ -222,30 +420,128 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         if (here.StartsWith(Path.Combine(repo, "tools") + "\\", StringComparison.OrdinalIgnoreCase)) return Path.Combine(repo, ".local", "steam-launcher");
         return here;
     }
+    bool sameMonitorFlag;
+    static string SameMonitorFile() { return Path.Combine(StateDir(), "open-on-launching-monitor.txt"); }
+    static bool SameMonitorSetting() { return File.Exists(SameMonitorFile()); }
+    Screen StartScreen() {
+        if (!sameMonitorFlag && !SameMonitorSetting()) return Screen.PrimaryScreen;
+        IntPtr fg = Native.GetForegroundWindow();
+        return fg != IntPtr.Zero ? Screen.FromHandle(fg) : Screen.FromPoint(Cursor.Position);
+    }
+    Item SameMonitorItem() {
+        Func<string> text = () => "Open on: " + (SameMonitorSetting() ? "the monitor it was started from" : "the main monitor");
+        Item item = null;
+        item = new Item(text(), "Where the launcher window opens. --same-monitor on the command line does the same for one start.", true, delegate {
+            try { if (SameMonitorSetting()) File.Delete(SameMonitorFile()); else File.WriteAllText(SameMonitorFile(), "on\n"); } catch { }
+            item.Text = text();
+        });
+        return item;
+    }
     static string LastSession() { string f = Path.Combine(StateDir(), "last_session.txt"); return File.Exists(f) ? File.ReadAllText(f).Trim() : "No session yet."; }
     static string VerArg(string v) { return string.IsNullOrEmpty(v) ? "" : " -Version " + v; }
     static string RunningGames() {
         string r = "";
-        foreach (var n in GameNames) if (Process.GetProcessesByName(n).Length > 0) r += (r == "" ? "" : ", ") + n + ".exe";
+        foreach (var n in GameNames) {
+            var found = Process.GetProcessesByName(n);
+            if (found.Length > 0) r += (r == "" ? "" : ", ") + n + ".exe";
+            foreach (var p in found) p.Dispose();
+        }
+        // A Refresh Game Files run (launcher.ps1 Refresh-GameFiles) is named instead of its exe (USER-ASKS 72).
+        string marker = Path.Combine(StateDir(), "REFRESHING.txt");
+        if (r != "" && File.Exists(marker)) { try { r = "Refresh game files (" + File.ReadAllText(marker).Trim() + ")"; } catch { } }
         return r;
     }
-    void RefreshStatus() {
+    // From the prefetched status when `cached` (just fetched with the lists), else a fresh run (after a share toggle).
+    void RefreshStatus() { RefreshStatus(false); }
+    void RefreshStatus(bool cached) {
+        if (!cached) lock (cache) cache.Remove("status");
         status.Clear();
         foreach (var r in Rows("status", 2)) status[r[0]] = r[1];
     }
     string St(string k) { string v; return status.TryGetValue(k, out v) ? v : ""; }
 
     // ---------- start ----------
+    // The launcher updated its own exe (launcher.ps1 wrote restart.txt): start the new one and wait for it hidden, so
+    // Steam keeps the process it started (its controller layout and "playing" state) until the new window closes.
+    bool RestartIfUpdated(bool showLast) {
+        string f = Path.Combine(StateDir(), "restart.txt");
+        if (!File.Exists(f)) return false;
+        try { File.Delete(f); } catch { }
+        string exe = Path.Combine(Here, "SkateLauncher.exe");
+        if (!File.Exists(exe)) return false;
+        var args = new List<string>(direct);
+        if (showLast) args.Add("--after-update");
+        if (sameMonitorFlag) args.Add("--same-monitor");
+        Process child;
+        SkateLauncher.ReleaseInstance();
+        try { child = Process.Start(new ProcessStartInfo(exe, string.Join(" ", args.ConvertAll(a => "\"" + a + "\"").ToArray())) { UseShellExecute = false }); } catch { return false; }
+        tick.Stop(); Hide();
+        child.EnableRaisingEvents = true;
+        child.Exited += delegate { BeginInvoke((Action)Close); };
+        if (child.HasExited) Close();
+        return true;
+    }
+    bool starting, skipArmed; DateTime startSince;
+    // The start check's process, whether its self-update fetch is done (LAUNCHER_SELF) and whether B skipped it.
+    readonly object startLock = new object(); Process startProc; volatile bool selfFetching, selfFetched, skipped;
+    // The start check's current step (LAUNCHER_STAGE lines), shown under the rolling board.
+    volatile string startStage;
+    const double SplashMinSeconds = 1.1;
     void Start() {
         Activate(); Native.Front(Handle);
-        int code; string pending = Run("pending", out code);
+        starting = true; startSince = DateTime.Now; selfFetching = selfFetched = skipped = skipArmed = false; startStage = null; Invalidate();
+        // The splash stays at least SplashMinSeconds, so a fast check does not flash it.
+        Task.Run(() => {
+            int code = RunPending(false);
+            // The menu's lists load behind the splash (not when an updated exe takes over, or in direct mode).
+            if (direct.Length == 0 && !File.Exists(Path.Combine(StateDir(), "restart.txt"))) { startStage = "Loading the menu"; Prefetch(); WaitListed(); }
+            int left = (int)((SplashMinSeconds - (DateTime.Now - startSince).TotalSeconds) * 1000);
+            if (left > 0) Task.Delay(left).Wait();
+            return code;
+        }).ContinueWith(t => BeginInvoke((Action)(() => FinishStart(t.IsFaulted ? 0 : t.Result))));
+    }
+    // launcher.ps1 pending; killed by B during the fetch, it runs again without the self update so the rest still happens.
+    int RunPending(bool noSelf) {
+        var psi = Ps("pending");
+        if (noSelf) psi.EnvironmentVariables["SKATE_LAUNCHER_NO_SELF"] = "1";
+        int code;
+        using (var p = Process.Start(psi)) {
+            lock (startLock) startProc = p;
+            p.StandardInput.Close();
+            string line;
+            while ((line = p.StandardOutput.ReadLine()) != null) {
+                if (line.StartsWith("LAUNCHER_SELF\tfetching")) selfFetching = true;
+                else if (line.StartsWith("LAUNCHER_SELF\tfetched")) selfFetched = true;
+                else if (line.StartsWith("LAUNCHER_STAGE\t")) startStage = line.Substring(15);
+            }
+            p.WaitForExit(); code = p.ExitCode;
+            lock (startLock) startProc = null;
+        }
+        return skipped && !noSelf ? RunPending(true) : code;
+    }
+    // B during the self-update fetch: the first press arms, the second kills the check (never after the fetch, when files copy).
+    bool CanSkip() { return starting && selfFetching && !selfFetched && !skipped && (DateTime.Now - startSince).TotalSeconds >= 3; }
+    void SkipPress() {
+        if (!CanSkip()) return;
+        if (!skipArmed) { skipArmed = true; dirty = true; return; }
+        lock (startLock) {
+            if (startProc == null || selfFetched) return;
+            skipped = true;
+            try { Process.Start(new ProcessStartInfo("taskkill.exe", "/T /F /PID " + startProc.Id) { CreateNoWindow = true, UseShellExecute = false }); } catch { }
+        }
+    }
+    void FinishStart(int code) {
+        starting = false;
+        if (RestartIfUpdated(code == 10)) return;
         string ent = "", lbl = "", ver = "";
         foreach (var a in direct) { if (a.StartsWith("@")) ver = a.Substring(1); else if (ent == "") ent = a; else if (lbl == "") lbl = a; }
         if (ent != "") { Direct(ent, lbl, ver); return; }
-        RefreshStatus();
+        Prefetch();
+        RefreshStatus(true);
         pages.Push(MainPage());
         if (St("setup_missing") != "") pages.Push(SetupPage());
-        if (code == 10) ShowText("Previous session (closed before its check)", LastSession(), null);
+        if (St("first_setup") != "") pages.Push(WizardPage());
+        if (code == 10 || afterUpdate) ShowText(LastSession().Contains("launcher update") || afterUpdate ? "Launcher updated" : "Previous session (closed before its check)", LastSession(), null);
         Invalidate();
     }
 
@@ -270,13 +566,13 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         p.OnBack = delegate { };
         var entries = Rows("entries", 7);
         p.Items.Add(new Item("Play: " + St("version"), "Our engine, the selected version (" + St("version_status") + ").", true, delegate { pages.Push(EntryPage("Play: " + St("version"), "rust")); }));
-        p.Items.Add(new Item("Choose version", "hails-additions, upstream main and the versions in versions.json.", true, delegate { pages.Push(VersionPage()); }));
-        p.Items.Add(new Item("What to test", "What this version changed and what to try in it.", true, delegate { ShowText("What to test", Run("notes"), null); }));
+        p.Items.Add(new Item("Versions", "Pick the build Play starts.", true, delegate { pages.Push(VersionPage()); }));
+        p.Items.Add(new Item("What to test", "What changed and what to try.", true, delegate { ShowText("What to test", Listed("notes"), null); }));
         bool recomp = entries.Exists(e => e[4] == "recomp"), retail = entries.Exists(e => e[4] == "retail");
-        p.Items.Add(new Item("Recomp", recomp ? "The recompiled retail game, with or without tracing." : "Not set up: add recomp_entries to config.json (see README.md).", recomp, delegate { pages.Push(EntryPage("Recomp", "recomp")); }));
-        p.Items.Add(new Item("Retail (RPCS3)", retail ? "The PS3 game in RPCS3." : "Not set up: add rpcs3 and rpcs3_entries to config.json (see README.md).", retail, delegate { pages.Push(EntryPage("Retail Skate 3 (RPCS3)", "retail")); }));
-        p.Items.Add(new Item("Tools", "Refresh game files, build, send logs, recomp update and save, first-time setup.", true, delegate { pages.Push(EntryPage("Tools", "tools")); }));
-        p.Items.Add(new Item("Last session", "The result of the last session: what was checked and sent.", true, delegate { ShowText("Last session", LastSession(), null); }));
+        p.Items.Add(new Item("Recomp", recomp ? "Recompiled retail, traced or not." : "Not set up (see README.md).", recomp, delegate { pages.Push(EntryPage("Recomp", "recomp")); }));
+        p.Items.Add(new Item("RPCS3", retail ? "The PS3 game in RPCS3." : "Not set up (see README.md).", retail, delegate { pages.Push(EntryPage("Retail Skate 3 (RPCS3)", "retail")); }));
+        p.Items.Add(new Item("Tools", "Game files, builds, logs, recomp, setup.", true, delegate { pages.Push(EntryPage("Tools", "tools")); }));
+        p.Items.Add(new Item("Last session", "What was checked and sent.", true, delegate { ShowText("Last session", LastSession(), null); }));
         p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }));
         return p;
     }
@@ -288,12 +584,65 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
             if (e[4] != group) continue;
             var row = e;
             bool on = row[5] == "1";
-            p.Items.Add(new Item(row[1], on ? row[2] : row[6], on, delegate {
+            var item = new Item(row[1], on ? row[2] : row[6], on, delegate {
                 if (row[3] == "1") pages.Push(LabelPage(row)); else Begin(row[0], "", row[1]);
-            }));
+            });
+            // The detail panel's text (launcher.ps1 entries columns 8 and 9; an older launcher.ps1 has neither).
+            if (row.Length > 7) item.Info = row[7];
+            if (row.Length > 8 && row[8] != "") item.Records = row[8].Split('|');
+            p.Items.Add(item);
         }
+        if (group == "rust" || group == "tools") p.Items.Add(ShareItem());
+        if (group == "tools") p.Items.Add(new Item("Opt-ins and settings", "The game's opt-ins and settings, the same ones as its Guide / F1 overlay.", true, delegate { pages.Push(GameSettingsPage("Opt-ins")); }));
+        if (group == "tools") p.Items.Add(SameMonitorItem());
+        if (group == "tools") p.Items.Add(new Item("Set up the launcher", "Game folder, space for builds, the Skate 3 disc, the recomp and RPCS3.", true, delegate { wiz = null; pages.Push(WizardPage()); }));
         if (group == "tools") p.Items.Add(new Item("Clear builds and build caches", "Frees disk space: everything, or one version's build cache or whole build. Asks before deleting.", true, delegate { pages.Push(ClearPage()); }));
         if (p.Items.Count == 0) p.Items.Add(new Item("Nothing here yet", "See README.md to set these up.", false, null));
+        return p;
+    }
+    // Tools > Opt-ins and settings (USER-ASKS 337): launcher.ps1 "game-settings" lists the game's saved opt-ins and settings
+    // (settings\*.json, the files the game's overlay writes); pressing a row steps it ("game-setting <key>"). Opt-ins
+    // first, the settings on their own page.
+    Page GameSettingsPage(string group) {
+        var p = new Page { Title = group == "Opt-ins" ? "Opt-ins" : "Settings" };
+        foreach (var r in Rows("game-settings", 5)) {
+            if (r[1] != group) continue;
+            var row = r; var item = new Item(row[2] + ": " + row[3], row[4], true, null);
+            item.Run = delegate {
+                int code; string o = Run("game-setting " + row[0], out code);
+                if (code != 0) { ShowText(row[2], o, null); return; }
+                foreach (var n in Rows("game-settings", 5)) if (n[0] == row[0]) { item.Text = n[2] + ": " + n[3]; }
+            };
+            p.Items.Add(item);
+        }
+        if (group == "Opt-ins") p.Items.Add(new Item("Settings", "Resolution, render scale, framerate cap, FPS counter, volumes and difficulty.", true, delegate { pages.Push(GameSettingsPage("Settings")); }));
+        if (p.Items.Count == 0) p.Items.Add(new Item("No game files yet", "Convert the game files first (Tools > setup).", false, null));
+        return p;
+    }
+    // docs/hails-additions/second-pc-testing.md#share-sessions-via-github
+    Item ShareItem() {
+        var item = new Item("", "", false, null);
+        item.Run = delegate {
+            if (St("share").StartsWith("on ")) { Run("share-off"); RefreshStatus(); ShowShare(item); }
+            else pages.Push(ConsentPage(item));
+        };
+        ShowShare(item);
+        return item;
+    }
+    void ShowShare(Item item) {
+        string s = St("share");
+        bool on = s.StartsWith("on ");
+        item.Text = s == "" ? "Share sessions via GitHub" : "Share sessions: " + (on ? "ON" : "OFF");
+        item.Hint = s == "" ? "Not in this launcher version." : on ? "After each session the logs are packed and a GitHub issue opens on " + s.Substring(3) + ". Press to turn off."
+            : s == "no repo" ? "This version has no GitHub repository to send to." : "Off. Press to read what is shared and turn it on.";
+        item.On = s != "" && s != "no repo";
+    }
+    Page ConsentPage(Item toggle) {
+        var p = new Page { Title = "Share sessions via GitHub" };
+        p.Items.Add(new Item("Turn it on", "After each session the launcher zips the new logs and opens a GitHub issue on the repository of the version you play, in your browser. You drag the zip in and press Submit; nothing is sent without that.", true,
+            delegate { Run("share-on"); RefreshStatus(); ShowShare(toggle); pages.Pop(); }));
+        p.Items.Add(new Item("Not now", "Sharing stays off.", true, delegate { pages.Pop(); }));
+        p.Items.Add(new Item("What is shared", "Game logs, trace folders and launcher build logs of this PC, with your Windows user name, home folder and PC name replaced. Not shared: saves, game files, recomp sound captures. Issues on public repositories are public. Turn it off here or in Tools at any time.", false, null));
         return p;
     }
     static string Gb(long bytes) { return (bytes / 1073741824.0).ToString("0.0") + " GB"; }
@@ -334,7 +683,8 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         foreach (var v in Rows("versions", 3)) {
             var row = v;
             p.Items.Add(new Item((row.Length > 3 && row[3] == "*" ? "> " : "") + row[1], row[2], true, delegate {
-                Run("version-set " + row[0]); RebuildMain(); pages.Pop(); }));
+                pages.Pop(); switching = true; Invalidate();
+                Task.Run(() => Run("version-set " + row[0])).ContinueWith(t => BeginInvoke((Action)RebuildMain)); }));
             if (row.Length > 3 && row[3] == "*") p.Sel = p.Items.Count - 1;
         }
         return p;
@@ -349,15 +699,125 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         p.Items.Add(new Item("Not now", "The Play entries stay greyed out until the tools are there.", true, delegate { pages.Pop(); }));
         return p;
     }
-    void RebuildMain() {
-        RefreshStatus();
-        var all = new List<Page>(pages); all.Reverse();
-        pages.Clear();
-        foreach (var pg in all) {
-            if (pg.Title == "Skate launcher" && pg.OnBack != null) { var m = MainPage(); m.Sel = Math.Min(pg.Sel, m.Items.Count - 1); pages.Push(m); }
-            else pages.Push(pg);
+
+    // First-time setup (USER-ASKS 461): where the game versions and builds go, the space they get, the Skate 3 disc, the
+    // recomp and RPCS3. launcher.ps1 "config-get" reads the values, "config-set" writes the changed ones to config.json.
+    Dictionary<string, string> wiz, wizStart;
+    static readonly int[] CapChoices = { 0, 50, 100, 150, 200, 300, 500 };
+    string W(string k) { string v; return wiz != null && wiz.TryGetValue(k, out v) ? v : ""; }
+    static string Or(string a, string b) { return a == "" ? b : a; }
+    static string Now(string v, string unset) { return "Now: " + Or(v, unset) + "\n\n"; }
+    static string FreeOn(string path) {
+        try {
+            string root = Path.GetPathRoot(Path.GetFullPath(path));
+            return "Free on " + root + ": " + (new DriveInfo(root).AvailableFreeSpace >> 30) + " GB.";
+        } catch { return ""; }
+    }
+    Page WizardPage() {
+        if (wiz == null) {
+            wiz = new Dictionary<string, string>();
+            foreach (var r in Rows("config-get", 2)) wiz[r[0]] = r[1];
+            if (W("storage_root") == "") wiz["storage_root"] = Or(W("target_root"), W("default_root"));
+            wizStart = new Dictionary<string, string>(wiz);
+        }
+        var p = new Page { Title = "Set up the launcher" };
+        string root = W("storage_root");
+        int cap; int.TryParse(W("build_cap_gb"), out cap);
+        p.Items.Add(new Item("Game folder", Now(root, "not set") + (W("standalone") == "1" ? "Where the launcher keeps the game versions and their builds" : "Where the launcher keeps the builds") + " (one version with its build takes about 15 to 45 GB). " + FreeOn(root), true, delegate { PickFolder("storage_root", "Choose the folder for the game versions and their builds"); }));
+        p.Items.Add(new Item("Space for builds", Now(cap > 0 ? cap + " GB" : "no limit", "") + "Press to change. Before a build would go over it, the launcher deletes the build cache of the version built longest ago. " + FreeOn(root), true, delegate {
+            int i = Array.IndexOf(CapChoices, cap);
+            wiz["build_cap_gb"] = CapChoices[(i + 1) % CapChoices.Length].ToString(); ReshowWizard();
+        }));
+        p.Items.Add(new Item("Skate 3 disc", Now(W("disc"), "not set") + "Your Xbox 360 Skate 3 ISO or default.xex. The first play converts the game files from it once.", true, delegate { PickFile("disc", "Choose your Skate 3 ISO or default.xex", "Skate 3 (*.iso, default.xex)|*.iso;default.xex|All files (*.*)|*.*"); }));
+        p.Items.Add(new Item("Skate 3 Recompiled", Now(W("recomp.working_dir"), "not set (optional)") + "The skate3recomp game folder (with skate3.exe). Adds the Recomp entries.", true, delegate { PickRecomp(); }));
+        p.Items.Add(new Item("RPCS3", Now(W("rpcs3.exe"), "not set (optional)") + "rpcs3.exe, to play retail Skate 3 (PS3) for comparison.", true, delegate { PickFile("rpcs3.exe", "Choose rpcs3.exe", "RPCS3 (rpcs3.exe)|rpcs3.exe|Programs (*.exe)|*.exe"); }));
+        p.Items.Add(new Item("RPCS3 Skate 3 game", Now(W("rpcs3.game"), "not set (optional)") + "The folder of your Skate 3 PS3 game (the one with PS3_GAME or EBOOT.BIN).", true, delegate { PickFolder("rpcs3.game", "Choose your Skate 3 PS3 game folder"); }));
+        p.Items.Add(new Item("Done", "Saves these settings. Change them later in Tools > Set up the launcher.", true, delegate { SaveWizard(); }));
+        p.Items.Add(new Item("Not now", "Saves nothing; this page opens again at the next start.", true, delegate { wiz = null; pages.Pop(); Invalidate(); }));
+        p.OnBack = delegate { wiz = null; pages.Pop(); Invalidate(); };
+        return p;
+    }
+    void ReshowWizard() {
+        int sel = pages.Peek().Sel; pages.Pop();
+        var p = WizardPage(); p.Sel = Math.Min(sel, p.Items.Count - 1); pages.Push(p); Invalidate();
+    }
+    void PickFolder(string key, string title) {
+        using (var d = new FolderBrowserDialog { Description = title, ShowNewFolderButton = true }) {
+            if (Directory.Exists(W(key))) d.SelectedPath = W(key);
+            if (d.ShowDialog(this) == DialogResult.OK) { wiz[key] = d.SelectedPath; ReshowWizard(); }
         }
     }
+    string AskFile(string current, string title, string filter) {
+        using (var d = new OpenFileDialog { Title = title, Filter = filter, CheckFileExists = true }) {
+            try { if (current != "" && Directory.Exists(Path.GetDirectoryName(current))) d.InitialDirectory = Path.GetDirectoryName(current); } catch { }
+            return d.ShowDialog(this) == DialogResult.OK ? d.FileName : null;
+        }
+    }
+    void PickFile(string key, string title, string filter) {
+        string f = AskFile(W(key), title, filter);
+        if (f != null) { wiz[key] = f; ReshowWizard(); }
+    }
+    // The recomp's game folder; skate3.exe is taken from it (or a folder under it), else asked for.
+    void PickRecomp() {
+        string dir;
+        using (var d = new FolderBrowserDialog { Description = "Choose your Skate 3 Recompiled game folder" }) {
+            if (Directory.Exists(W("recomp.working_dir"))) d.SelectedPath = W("recomp.working_dir");
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            dir = d.SelectedPath;
+        }
+        string exe = Path.Combine(dir, "skate3.exe");
+        if (!File.Exists(exe)) {
+            exe = null;
+            try { var found = Directory.GetFiles(dir, "skate3.exe", SearchOption.AllDirectories); if (found.Length > 0) exe = found[0]; } catch { }
+            if (exe == null) exe = AskFile(dir + "\\x", "Choose the recomp's skate3.exe", "skate3.exe|skate3.exe|Programs (*.exe)|*.exe");
+            if (exe == null) return;
+        }
+        wiz["recomp.working_dir"] = dir; wiz["recomp.exe"] = exe; ReshowWizard();
+    }
+    static string Js(string v) { return "\"" + v.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""; }
+    void SaveWizard() {
+        var parts = new List<string>();
+        foreach (var k in new[] { "disc", "recomp.exe", "recomp.working_dir", "rpcs3.exe", "rpcs3.game" })
+            if (W(k) != wizStart[k]) parts.Add(Js(k) + ": " + Js(W(k)));
+        if (W("build_cap_gb") != wizStart["build_cap_gb"]) parts.Add(Js("build_cap_gb") + ": " + W("build_cap_gb"));
+        string root = W("storage_root");
+        if (root != wizStart["storage_root"] && root != "") {
+            parts.Add(Js("storage_root") + ": " + Js(root));
+            parts.Add(Js("target_root") + ": " + Js(Path.Combine(root, "builds")));
+            parts.Add(Js("build_cap_dir") + ": " + Js(root));
+            if (W("standalone") == "1") parts.Add(Js("versions_root") + ": " + Js(Path.Combine(root, "versions")));
+        }
+        parts.Add(Js("first_setup_done") + ": true");
+        string file = Path.Combine(StateDir(), "config-set.json");
+        File.WriteAllText(file, "{" + string.Join(", ", parts.ToArray()) + "}", new UTF8Encoding(false));
+        string r = Run("config-set \"" + file + "\"");
+        wiz = null; pages.Pop();
+        if (r.Trim() != "saved") ShowText("Set up the launcher", "The settings could not be saved:\n\n" + r, null);
+        RebuildMain();
+        Invalidate();
+    }
+    void RebuildMain() {
+        // A version change or a finished job can change every list (entries, versions, notes): fetch them again.
+        // The menu is rebuilt when they are in (off the window thread; the newest request wins).
+        ForgetCache();
+        Prefetch();
+        int gen = ++rebuildGen;
+        WhenListed(delegate {
+            if (gen != rebuildGen) return;
+            switching = false;
+            RefreshStatus(true);
+            var all = new List<Page>(pages); all.Reverse();
+            pages.Clear();
+            foreach (var pg in all) {
+                if (pg.Title == "Skate launcher" && pg.OnBack != null) { var m = MainPage(); m.Sel = Math.Min(pg.Sel, m.Items.Count - 1); pages.Push(m); }
+                else pages.Push(pg);
+            }
+            Invalidate();
+        });
+    }
+    int rebuildGen;
+    // A version switch until the menu is rebuilt for it: Play waits for it (no start of the old version).
+    bool switching;
     void ShowText(string title, string body, Action back) { ShowText(title, body, back, null); }
     void ShowText(string title, string body, Action back, string mono) {
         var p = new Page { Title = title, Body = body, Mono = mono };
@@ -368,6 +828,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
 
     // ---------- jobs ----------
     void Begin(string entry, string label, string name) {
+        if (switching) return;
         string g = RunningGames();
         if (g != "" && !entry.StartsWith("tool-")) {
             waitEntry = entry; waitLabel = label; waitName = name;
@@ -378,8 +839,8 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         StartJob(entry + (label == "" ? "" : " " + label), name);
     }
     void StartJob(string args, string title) {
-        jobTitle = title; jobHidGame = false; gameWindow = IntPtr.Zero; jobStart = DateTime.Now;
-        build.Close(); build.LogPath = null; build.Ended = false; build.Active = false;
+        jobTitle = title; jobHidGame = false; cancelArmed = cancelled = cancelledInFetch = false; gameWindow = IntPtr.Zero; jobStart = DateTime.Now;
+        build.Close(); build.LogPath = null; build.Ended = false; build.Active = false; build.PreWait = null; build.LastPreWait = null;
         // Let the game take the foreground from us (Steam gives the foreground window its controller layout).
         Native.AllowSetForegroundWindow(-1);
         job = new Process { StartInfo = Ps(args + " -NoPrompt"), EnableRaisingEvents = true };
@@ -400,8 +861,11 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         Activate(); Native.Front(Handle);
         string text = LastSession();
         build.Close();
+        if (direct.Length == 0 && RestartIfUpdated(true)) return;
         string mono = null;
-        if (build.LogPath != null && build.Ended) {
+        if (cancelled && cancelledInFetch) text = "Cancelled after " + BuildView.Clock(DateTime.Now - build.PreWaitSince) + " while " + build.PreWait + ". Nothing was built or changed.";
+        else if (cancelled) text = "Build cancelled after " + BuildView.Clock(DateTime.Now - build.Start) + " (it was waiting for another build)." + (build.LogPath != null ? "\nBuild log: " + build.LogPath : "");
+        else if (build.LogPath != null && build.Ended) {
             string took = BuildView.Clock(build.End - build.Start);
             if (build.Ok) text += "\n\nBuilt " + build.Name + " at " + build.Commit + " in " + took + (build.Warnings > 0 ? ", " + build.Warnings + " warnings" : "") + ".\nBuild log: " + build.LogPath;
             else { text += "\n\nBuild failed after " + took + ". Build log: " + build.LogPath + "\n\nFirst error:"; mono = string.Join("\n", build.FirstError()); }
@@ -417,7 +881,8 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     void WatchGame() {
         if (job == null || (jobHidGame && (DateTime.Now - hidAt).TotalSeconds > 300)) return;
         foreach (var n in GameNames) foreach (var p in Process.GetProcessesByName(n)) {
-            IntPtr w = p.MainWindowHandle;
+            IntPtr w;
+            using (p) w = p.MainWindowHandle;
             if (w == IntPtr.Zero || w == gameWindow || !Native.IsWindowVisible(w)) continue;
             gameWindow = w; Native.Front(w);
             if (!jobHidGame) { jobHidGame = true; hidAt = DateTime.Now; Hide(); }
@@ -440,19 +905,32 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         }
         return 0;
     }
+    DateTime scannedAt;
     void Poll() {
+        if (powerOffAt >= 0 && !poweredOff) {
+            if ((float)clock.Elapsed.TotalSeconds - powerOffAt >= OffTime) { poweredOff = true; Close(); return; }
+            Invalidate(); return;
+        }
         if (closeAt >= 0) {
             int left = (int)Math.Ceiling((closeTime - DateTime.Now).TotalSeconds);
             if (left <= 0) { Close(); return; }
             if (left != closeAt) { closeAt = left; Invalidate(); }
         }
-        if (waitEntry != null && RunningGames() == "") { string e = waitEntry; waitEntry = null; pages.Pop(); Begin(e, waitLabel, waitName); }
-        WatchGame();
+        // Process scans 4 times a second, not every 16 ms frame: each one lists every process on the PC (USER-ASKS 436).
+        if ((DateTime.Now - scannedAt).TotalMilliseconds >= 250) {
+            scannedAt = DateTime.Now;
+            if (waitEntry != null && RunningGames() == "") { string e = waitEntry; waitEntry = null; pages.Pop(); Begin(e, waitLabel, waitName); }
+            WatchGame();
+        }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
         // The rolling boards and the Play glow: about 30 frames a second while the menu or a job shows.
-        if (Visible && ++frame % 2 == 0 && (job != null || (pages.Count > 0 && IsMain(pages.Peek())))) Invalidate();
+        if (Visible && ++frame % 2 == 0) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process, so the game's presses would
         // otherwise drive the menu behind it.
+        if (job != null && Form.ActiveForm == this && ((build.Waiting != null && !build.Ended) || build.FetchWaiting())) {
+            ushort jb = Pad(); if ((jb & ~prevPad & B) != 0) CancelPress(); prevPad = jb; return;
+        }
+        if (starting && Form.ActiveForm == this) { ushort sb = Pad(); if ((sb & ~prevPad & B) != 0) SkipPress(); prevPad = sb; return; }
         if (job != null || Form.ActiveForm != this) { prevPad = Pad(); return; }
         ushort b = Pad(), pressed = (ushort)(b & ~prevPad);
         if ((pressed & A) != 0) Act("ok", true);
@@ -465,7 +943,17 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         if (b != prevPad) held = 0;
         prevPad = b;
     }
+    // Cancelling a build that waits for another one: the first B arms, the second kills the job's process tree
+    // (powershell launcher.ps1 -> Build.ps1 -> cargo); a cargo that only waits on a lock loses nothing.
+    void CancelPress() {
+        if (job == null) return;
+        if (!cancelArmed) { cancelArmed = true; dirty = true; return; }
+        cancelled = true; cancelledInFetch = build.PreWait != null; build.Note("cancelled after " + BuildView.Clock(DateTime.Now - build.Start));
+        try { Process.Start(new ProcessStartInfo("taskkill.exe", "/T /F /PID " + job.Id) { CreateNoWindow = true, UseShellExecute = false }); } catch { }
+    }
     protected override bool ProcessCmdKey(ref Message msg, Keys key) {
+        if (job != null && ((build.Waiting != null && !build.Ended) || build.FetchWaiting()) && (key == Keys.Escape || key == Keys.Back)) { CancelPress(); return true; }
+        if (starting && (key == Keys.Escape || key == Keys.Back)) { SkipPress(); return true; }
         if (job == null) {
             switch (key) {
                 case Keys.Up: case Keys.W: Act("up", false); return true;
@@ -485,13 +973,38 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         foreach (var h in hits) if (h.Key.Contains(pt)) return h.Value;
         return -1;
     }
+    // The A / B prompts drawn last paint (Prompt), clickable like the buttons they show.
+    readonly List<KeyValuePair<RectangleF, string>> promptHits = new List<KeyValuePair<RectangleF, string>>();
+    string hoverPrompt;
+    string PromptAt(Point pt) {
+        foreach (var h in promptHits) if (h.Key.Contains(pt)) return h.Value;
+        return null;
+    }
+    // A clicked prompt does what its button does in the current state (ProcessCmdKey's Back / Enter).
+    void PromptPress(string key) {
+        if (key == "B") {
+            if (job != null && ((build.Waiting != null && !build.Ended) || build.FetchWaiting())) CancelPress();
+            else if (starting) SkipPress();
+            else if (job == null) Act("back", false);
+        }
+        else if (key == "A" && job == null) Act("ok", false);
+        // The camcorder's keys: MENU = back, the dial and the zoom rocker move, START/STOP plays, POWER closes.
+        else if (key == "MENU") PromptPress("B");
+        else if (job == null && (key == "U" || key == "D" || key == "L" || key == "R")) Act(key == "U" ? "up" : key == "D" ? "down" : key == "L" ? "left" : "right", false);
+        else if (key == "PLAY" && job == null && !starting && pages.Count > 0) { var p = pages.Peek(); if (IsMain(p) && p.Items.Count > 0) p.Sel = 0; Act("ok", false); }
+        else if (key == "POWER") Close();
+    }
     protected override void OnMouseMove(MouseEventArgs e) {
         base.OnMouseMove(e);
+        string over = PromptAt(e.Location);
+        if (over != hoverPrompt) { hoverPrompt = over; Cursor = over != null ? Cursors.Hand : Cursors.Default; Invalidate(); }
         int i = HitAt(e.Location);
         if (job == null && i >= 0 && pages.Count > 0 && pages.Peek().Sel != i) { pages.Peek().Sel = i; Invalidate(); }
     }
     protected override void OnMouseClick(MouseEventArgs e) {
         base.OnMouseClick(e);
+        string prompt = e.Button == MouseButtons.Left ? PromptAt(e.Location) : null;
+        if (prompt != null) { PromptPress(prompt); return; }
         if (job != null) return;
         if (e.Button == MouseButtons.Right) { Act("back", false); return; }
         if (e.Button != MouseButtons.Left) return;
@@ -514,8 +1027,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         } else if (p.Items.Count > 0) {
             // "ok" first: the main page's grid move used to swallow it, so A / Enter did nothing there (laptop 2026-10-18).
             if (a == "ok") { var it = p.Items[p.Sel]; if (it.On && it.Run != null) it.Run(); }
-            else if (IsMain(p)) p.Sel = GridMove(p.Sel, a, p.Items.Count);
-            else if (p.Cols > 0) p.Sel = PageGridMove(p.Sel, a, p.Items.Count, p.Cols);
+            // Every screen is one of the camcorder's menu lists (W / T on the zoom rocker step like the jog dial).
             else if (a == "up" || a == "left") p.Sel = (p.Sel - 1 + p.Items.Count) % p.Items.Count;
             else if (a == "down" || a == "right") p.Sel = (p.Sel + 1) % p.Items.Count;
         } else if (a == "ok" && p.Body != null) {
@@ -524,50 +1036,14 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         Invalidate();
     }
 
-    // The main page's grid: 0 = the hero's Play card, then tiles in rows of TileCols.
-    static int GridMove(int sel, string a, int count) {
-        if (a == "left") return Math.Max(0, sel - 1);
-        if (a == "right") return Math.Min(count - 1, sel + 1);
-        if (a == "down") return sel == 0 ? Math.Min(1, count - 1) : Math.Min(count - 1, sel + TileCols);
-        if (a == "up") return sel <= TileCols ? 0 : sel - TileCols;
-        return sel;
-    }
-
-    // A tile page's grid (Page.Cols wide): down onto a shorter last row lands on its last tile.
-    static int PageGridMove(int sel, string a, int count, int cols) {
-        if (a == "left") return Math.Max(0, sel - 1);
-        if (a == "right") return Math.Min(count - 1, sel + 1);
-        if (a == "down") return sel / cols < (count - 1) / cols ? Math.Min(count - 1, sel + cols) : sel;
-        if (a == "up") return sel >= cols ? sel - cols : sel;
-        return sel;
-    }
-
-    // ---------- drawing ----------
-    // A dark console-launcher look (big hero card, tiles, button prompts) with the splash's skateboard as the mark.
-    static readonly Color Bg1 = Color.FromArgb(16, 18, 24), Bg2 = Color.FromArgb(7, 8, 11);
-    static readonly Color Panel = Color.FromArgb(24, 28, 37), PanelHi = Color.FromArgb(33, 39, 52), Stroke = Color.FromArgb(44, 51, 67);
-    static readonly Color Ink = Color.FromArgb(242, 244, 248), Dim = Color.FromArgb(138, 147, 166), Faint = Color.FromArgb(78, 85, 100);
-    static readonly Color Accent = Color.FromArgb(255, 196, 0), Cool = Color.FromArgb(86, 146, 214);
+    // ---------- drawing helpers ----------
     readonly Stopwatch clock = Stopwatch.StartNew();
     DateTime jobStart;
-
-    protected override void OnPaint(PaintEventArgs ev) { Render(ev.Graphics, ClientSize.Width, ClientSize.Height); }
-
-    // Screen and selection animations (seconds on `clock`): short and eased out, so input never waits on them.
-    string screenKey = ""; int screenDepth, screenDir = 1, selIndex = -1; float screenAt = -1, selAt = -1, selEase = 1;
     static float Ease(float x) { x = Math.Max(0, Math.Min(1, x)); float r = 1 - x; return 1 - r * r * r; }
-    bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return t - screenAt < 0.2f || t - selAt < 0.14f; }
-    // The incoming screen fades up from the backdrop (the top bar stays).
-    static void Veil(Graphics g, int w, int h, float barH, float ease) {
-        if (ease >= 1) return;
-        var r = new RectangleF(0, barH + 1, w, h - barH - 1);
-        int a = (int)(255 * (1 - ease));
-        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(0, 0, w, h), Fade(Bg1, a), Fade(Bg2, a), 90f)) g.FillRectangle(b, r);
-    }
-
-    // The main page: item 0 is the hero's Play card, the rest tiles in rows of TileCols.
-    const int TileCols = 4;
     static bool IsMain(Page p) { return p.Title == "Skate launcher" && p.OnBack != null; }
+    // Every list page (no body text, not the main screen) is a grid of buttons two wide with the detail panel beside it
+    // (user 2026-10-21: the play screen's layout for the rest of the launcher).
+    static int GridCols(Page p) { return p.Cols > 0 ? p.Cols : (p.Body == null && !IsMain(p) ? 2 : 0); }
 
     static System.Drawing.Drawing2D.GraphicsPath Round(RectangleF r, float rad) {
         var path = new System.Drawing.Drawing2D.GraphicsPath();
@@ -629,330 +1105,1024 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         g.Restore(st);
     }
 
-    // Windows' own icon font (Segoe MDL2 Assets) per menu entry.
-    static string Glyph(string text) {
-        string t = text.ToLowerInvariant();
-        if (t.StartsWith("play")) return "";
-        if (t.StartsWith("choose version")) return "";
-        if (t.StartsWith("what to test")) return "";
-        if (t.StartsWith("recomp")) return "";
-        if (t.StartsWith("retail")) return "";
-        if (t.StartsWith("tools")) return "";
-        if (t.StartsWith("last session")) return "";
-        if (t.StartsWith("exit")) return "";
-        return "";
-    }
-
-    // A, B, X / Y badges like the controller's.
-    void Prompt(Graphics g, ref float x, float y, string key, Color c, string label) {
-        float d = smallFont.Height * 1.25f;
-        using (var b = new SolidBrush(c)) g.FillEllipse(b, x, y, d, d);
-        Write(g, key, smallBold, Color.FromArgb(16, 18, 24), new RectangleF(x, y, d, d), StringAlignment.Center, StringAlignment.Center, false);
-        x += d + d * 0.35f;
-        var size = g.MeasureString(label, smallFont);
-        Write(g, label, smallFont, Dim, new RectangleF(x, y, size.Width + 4, d), StringAlignment.Near, StringAlignment.Center, false);
-        x += size.Width + d;
-    }
-
     // Log lines as a TV can read them: no colour codes, only the text after the last carriage return.
     static readonly System.Text.RegularExpressions.Regex Ansi = new System.Text.RegularExpressions.Regex("\x1B\\[[0-9;?]*[A-Za-z]");
     static string Clean(string s) { s = Ansi.Replace(s ?? "", ""); int r = s.LastIndexOf('\r'); return (r >= 0 ? s.Substring(r + 1) : s).Trim(); }
 
-    void Render(Graphics g, int w, int h) {
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-        hits.Clear();
-        var all = new RectangleF(0, 0, w, h);
-        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(all, Bg1, Bg2, 90f)) g.FillRectangle(b, all);
-        // A soft glow behind the top left, like a lit backdrop.
-        using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
-            path.AddEllipse(-w * 0.25f, -h * 0.55f, w * 0.9f, h * 1.1f);
-            using (var pg = new System.Drawing.Drawing2D.PathGradientBrush(path)) {
-                pg.CenterColor = Color.FromArgb(40, Cool); pg.SurroundColors = new[] { Color.FromArgb(0, Cool) };
-                g.FillPath(pg, path);
-            }
-        }
-        float m = w * 0.045f, t = (float)clock.Elapsed.TotalSeconds;
-        float barH = h * 0.085f;
-        // Top bar: the board as the mark, the wordmark, the version chip.
-        Board(g, m, barH * 0.32f, barH * 1.3f);
-        float wx = m + barH * 1.45f;
-        var skate = g.MeasureString("SKATE", markFont);
-        Write(g, "SKATE", markFont, Ink, new RectangleF(wx, 0, skate.Width + 8, barH), StringAlignment.Near, StringAlignment.Center, false);
-        Write(g, "LAUNCHER", markLight, Dim, new RectangleF(wx + skate.Width * 0.92f, 0, w * 0.3f, barH), StringAlignment.Near, StringAlignment.Center, false);
-        string chip = St("version") == "" ? "" : St("version");
-        if (chip != "") {
-            var cs = g.MeasureString(chip, smallFont);
-            var cr = new RectangleF(w - m - cs.Width - smallFont.Height * 1.6f, barH * 0.28f, cs.Width + smallFont.Height * 1.6f, barH * 0.44f);
-            Card(g, cr, cr.Height / 2, PanelHi, Panel, Stroke, 1);
-            using (var dot = new SolidBrush(Accent)) g.FillEllipse(dot, cr.X + cr.Height * 0.35f, cr.Y + cr.Height * 0.38f, cr.Height * 0.24f, cr.Height * 0.24f);
-            Write(g, chip, smallFont, Ink, new RectangleF(cr.X + cr.Height * 0.7f, cr.Y, cr.Width - cr.Height * 0.7f, cr.Height), StringAlignment.Near, StringAlignment.Center, false);
-        }
-        float top = barH + h * 0.02f, bottom = h - h * 0.085f;
-        using (var pen = new Pen(Fade(Stroke, 160), 1)) g.DrawLine(pen, m, barH, w - m, barH);
+    // ---------- the camcorder's LCD panel (USER-ASKS 484, 486, 487, 490) ----------
+    // The window is only the flip-out LCD panel of a mid-2000s HD camcorder, seen first-person: the screen, its full
+    // bezel carrying the panel's own keys, and the hinge on the right edge where the camera body is. It swings open from
+    // edge-on at the start and shut at the close. Drawn in a 1240 x 760 unit space into a per-pixel-alpha (layered)
+    // window. Layout, keys, timings and the sticker: docs/hails-additions/41-launcher-camcorder-viewfinder.md.
+    const float DevW = 1240, DevH = 760;
+    static readonly RectangleF PanelR = new RectangleF(20, 20, 1172, 720), ScreenR = new RectangleF(172, 52, 990, 557);
+    static readonly Color Plastic = Color.FromArgb(54, 56, 62), PlasticHi = Color.FromArgb(100, 103, 112), PlasticDark = Color.FromArgb(24, 25, 29),
+        Print = Color.FromArgb(200, 202, 208), RecRed = Color.FromArgb(230, 40, 32);
+    static readonly Font UTiny = new Font("Tahoma", 13, GraphicsUnit.Pixel), USmall = new Font("Tahoma", 16, FontStyle.Bold, GraphicsUnit.Pixel),
+        UKey = new Font("Tahoma", 19, FontStyle.Bold, GraphicsUnit.Pixel), UModel = new Font("Tahoma", 18, FontStyle.Bold, GraphicsUnit.Pixel);
+    float devS = 1, devX, devY;   // units -> window pixels, from the last Render
+    RectangleF ToWin(RectangleF r) { return new RectangleF(devX + r.X * devS, devY + r.Y * devS, r.Width * devS, r.Height * devS); }
+    void Key(RectangleF unit, string key) { promptHits.Add(new KeyValuePair<RectangleF, string>(ToWin(unit), key)); }
+    static RectangleF Grow(RectangleF r, float d) { return new RectangleF(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d); }
+    static float Clamp01(float x) { return Math.Max(0, Math.Min(1, x)); }
 
-        // A screen change slides the new screen in a little and fades it up (user 2026-10-19: switching screens was
-        // "a little jarring"); a main-page refresh keeps its depth and title, so it does not animate.
-        string key = job != null ? "job" : pages.Count + "|" + (pages.Count > 0 ? pages.Peek().Title : "");
-        if (key != screenKey) {
-            int depth = job != null ? pages.Count + 1 : pages.Count;
-            screenDir = depth >= screenDepth ? 1 : -1;
-            screenKey = key; screenDepth = depth; screenAt = t;
-        }
-        float ease = Ease((t - screenAt) / 0.18f);
-        var content = g.Save();
-        g.TranslateTransform(screenDir * (1 - ease) * w * 0.03f, 0);
-        if (job != null) { RenderJob(g, w, h, m, top, bottom, t); g.Restore(content); Veil(g, w, h, barH, ease); return; }
-        if (pages.Count == 0) { g.Restore(content); return; }
-        var p = pages.Peek();
-        if (p.Sel != selIndex) { selIndex = p.Sel; selAt = t; }
-        selEase = Ease((t - selAt) / 0.12f);
-        if (IsMain(p)) RenderMain(g, p, w, h, m, top, bottom, t); else RenderPage(g, p, w, h, m, top, bottom);
-        g.Restore(content);
-        Veil(g, w, h, barH, ease);
-        // Footer: the selected entry's hint on the left, the button prompts on the right.
-        float fy = bottom + (h - bottom - smallFont.Height * 1.25f) / 2;
-        string hint = p.Items.Count > 0 ? p.Items[p.Sel].Hint : "";
-        if (closeAt >= 0) hint = "Closing in " + closeAt + " s (any button closes now)";
-        if (IsMain(p) || closeAt >= 0) Write(g, hint, smallFont, Dim, new RectangleF(m, fy, w * 0.55f, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Center, false);
-        float px = w - m - w * 0.2f;
-        if (p.Items.Count > 0) Prompt(g, ref px, fy, "A", Color.FromArgb(108, 196, 74), "Select");
-        Prompt(g, ref px, fy, "B", Color.FromArgb(228, 76, 70), "Back");
+    // Power, on one clock (Assembly, seconds 0..OnTotal): the panel swings out from edge-on and settles facing you with
+    // a little wobble, then the backlight comes on (sometimes with a flicker or two). Closing plays it backwards, a
+    // little faster. Every open and close rolls its own swing time, wobble, delay and flicker (Vary); snapshots use the
+    // plain values.
+    const float OnTotal = 1.2f, OffSpeed = 1.3f, OffTime = OnTotal / OffSpeed + 0.05f;
+    float powerOnAt = -1, powerOffAt = -1, snapPanel = -1; bool poweredOff, snapshotMode; int snapSeed = 3;
+    float Assembly(float t) {
+        if (snapPanel >= 0) return snapPanel * OnTotal;
+        if (powerOffAt >= 0) return Math.Max(0, OnTotal - (t - powerOffAt) * OffSpeed);
+        return powerOnAt < 0 ? 0 : Math.Min(OnTotal, t - powerOnAt);
     }
-
-    void RenderMain(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t) {
-        // Hero card: the selected version, the rolling board, the Play card.
-        var hero = new RectangleF(m, top, w - 2 * m, (bottom - top) * 0.47f);
-        Card(g, hero, h * 0.022f, Color.FromArgb(30, 38, 56), Color.FromArgb(17, 20, 28), Stroke, 1);
-        var clip = g.Save();
-        using (var path = Round(hero, h * 0.022f)) g.SetClip(path);
-        float boardLen = hero.Height * 0.95f, span = hero.Width + boardLen * 0.55f;
-        float bx = hero.X - boardLen + (hero.Width * 0.42f + t * hero.Width * 0.05f) % span;
-        using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
-            path.AddEllipse(hero.Right - hero.Width * 0.5f, hero.Y - hero.Height * 0.4f, hero.Width * 0.7f, hero.Height * 1.6f);
-            using (var pg = new System.Drawing.Drawing2D.PathGradientBrush(path)) {
-                pg.CenterColor = Color.FromArgb(34, Accent); pg.SurroundColors = new[] { Color.FromArgb(0, Accent) };
-                g.FillPath(pg, path);
-            }
-        }
-        // The ground line the board rolls on.
-        float ground = hero.Bottom - hero.Height * 0.1f;
-        using (var gp = new Pen(Color.FromArgb(40, 255, 255, 255), 1)) g.DrawLine(gp, hero.X, ground, hero.Right, ground);
-        // The wheels' bottom is 34 of the board's 180 units below its top.
-        Board(g, bx, ground - boardLen * 0.55f * 34f / 180f, boardLen * 0.55f);
-        g.Restore(clip);
-        float pad = hero.Height * 0.12f;
-        Write(g, "NOW SELECTED", smallBold, Accent, new RectangleF(hero.X + pad, hero.Y + pad, hero.Width * 0.6f, smallFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
-        Write(g, St("version"), heroFont, Ink, new RectangleF(hero.X + pad, hero.Y + pad + smallFont.Height * 1.2f, hero.Width * 0.62f, heroFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
-        float sy = hero.Y + pad + smallFont.Height * 1.3f + heroFont.Height * 1.15f;
-        Write(g, St("version_status"), itemFont, Dim, new RectangleF(hero.X + pad, sy, hero.Width * 0.6f, itemFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
-        string send = St("send");
-        Write(g, "Last session: " + St("last") + (send == "" || send == "off" ? "" : "     Send: " + send), smallFont, Faint, new RectangleF(hero.X + pad, sy + itemFont.Height * 1.3f, hero.Width * 0.6f, smallFont.Height * 2.4f), StringAlignment.Near, StringAlignment.Near, true);
-        // The Play card (item 0) on the right of the hero.
-        if (p.Items.Count > 0) {
-            bool sel = p.Sel == 0;
-            // Above the board's lane (ground line at 0.9 of the hero, the board about 0.1 of it tall), so the rolling
-            // board passes under the card instead of behind it (user 2026-10-18).
-            var pr = new RectangleF(hero.Right - pad - hero.Width * 0.26f, ground - hero.Height * 0.14f - hero.Height * 0.32f, hero.Width * 0.26f, hero.Height * 0.32f);
-            hits.Add(new KeyValuePair<RectangleF, int>(pr, 0));
-            if (sel) using (var glow = Round(new RectangleF(pr.X - 6, pr.Y - 6, pr.Width + 12, pr.Height + 12), pr.Height * 0.3f)) using (var gb = new SolidBrush(Fade(Accent, 60 + (int)(30 * Math.Sin(t * 3))))) g.FillPath(gb, glow);
-            Card(g, pr, pr.Height * 0.24f, sel ? Color.FromArgb(255, 210, 60) : Color.FromArgb(232, 178, 0), sel ? Accent : Color.FromArgb(200, 150, 0), Color.Empty, 0);
-            var ink = Color.FromArgb(20, 18, 10);
-            Write(g, "", iconFont, ink, new RectangleF(pr.X + pr.Height * 0.25f, pr.Y, pr.Height * 0.6f, pr.Height), StringAlignment.Near, StringAlignment.Center, false);
-            Write(g, "PLAY", playFont, ink, new RectangleF(pr.X + pr.Height * 0.85f, pr.Y, pr.Width - pr.Height, pr.Height), StringAlignment.Near, StringAlignment.Center, false);
-        }
-        // Tiles for everything else.
-        float gy = hero.Bottom + h * 0.03f, gap = w * 0.012f;
-        int n = p.Items.Count - 1, rows = Math.Max(1, (n + TileCols - 1) / TileCols);
-        float tw = (w - 2 * m - gap * (TileCols - 1)) / TileCols, th = Math.Min((bottom - gy - gap * (rows - 1)) / rows, h * 0.15f);
-        for (int i = 1; i < p.Items.Count; i++) {
-            var it = p.Items[i]; bool sel = i == p.Sel;
-            int k = i - 1; var r = new RectangleF(m + (k % TileCols) * (tw + gap), gy + (k / TileCols) * (th + gap), tw, th);
-            Tile(g, it, sel, r, true);
-            hits.Add(new KeyValuePair<RectangleF, int>(r, i));
-        }
+    static float BackOut(float x, float k) { x = Clamp01(x) - 1; return 1 + (k + 1) * x * x * x + k * x * x; }
+    readonly float[] vary = { 1, 0.6f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 150, 0, 6.5f };
+    void Vary(Random r) {
+        Func<double, double, float> u = delegate(double lo, double hi) { return (float)(lo + r.NextDouble() * (hi - lo)); };
+        vary[0] = u(0.85, 1.15); vary[1] = u(0.2, 1.2); vary[2] = u(-0.04, 0.06); vary[3] = r.Next(3); vary[4] = u(0, 1);
+        vary[17] = u(120, 190); vary[18] = u(0, 400); vary[19] = u(5.5, 8);
     }
-
-    void Tile(Graphics g, Item it, bool sel, RectangleF r, bool icon) {
-        float rad = r.Height * 0.16f;
-        // The selection ring grows out over a few frames instead of snapping on.
-        float ring = 1 + 2 * selEase;
-        if (sel) Card(g, new RectangleF(r.X - ring, r.Y - ring, r.Width + 2 * ring, r.Height + 2 * ring), rad + ring, it.On ? Accent : Faint, it.On ? Accent : Faint, Color.Empty, 0);
-        Card(g, r, rad, sel ? PanelHi : Panel, sel ? Panel : Color.FromArgb(20, 23, 31), sel ? Color.Empty : Stroke, sel ? 0 : 1);
-        var ink = it.On ? Ink : Faint;
-        float pad = r.Height * 0.2f, tx = r.X + pad;
-        if (icon) {
-            var ib = new RectangleF(r.X + pad, r.Y + (r.Height - r.Height * 0.5f) / 2, r.Height * 0.5f, r.Height * 0.5f);
-            Card(g, ib, ib.Height * 0.28f, Fade(it.On ? (sel ? Accent : Cool) : Faint, 50), Fade(it.On ? (sel ? Accent : Cool) : Faint, 25), Color.Empty, 0);
-            Write(g, Glyph(it.Text), iconSmall, it.On ? (sel ? Accent : Ink) : Faint, ib, StringAlignment.Center, StringAlignment.Center, false);
-            tx = ib.Right + pad * 0.8f;
-        }
-        float tw = r.Right - tx - pad;
-        string title = it.Text;
-        if (title.StartsWith("> ")) {
-            // The current choice (the version list marks it with "> "): an accent pill instead of the marker.
-            title = title.Substring(2);
-            var ps = g.MeasureString("CURRENT", smallBold);
-            var pill = new RectangleF(r.Right - pad - ps.Width - smallBold.Height * 0.9f, r.Y + r.Height * 0.16f + (itemBold.Height - smallBold.Height * 1.3f) / 2, ps.Width + smallBold.Height * 0.9f, smallBold.Height * 1.3f);
-            Card(g, pill, pill.Height / 2, Accent, Accent, Color.Empty, 0);
-            Write(g, "CURRENT", smallBold, Color.FromArgb(20, 18, 10), pill, StringAlignment.Center, StringAlignment.Center, false);
-            tw = pill.X - tx - pad * 0.5f;
-        }
-        float ty = r.Y + r.Height * 0.16f, hy = ty + itemBold.Height * 1.15f;
-        Write(g, title, itemBold, ink, new RectangleF(tx, ty, tw, itemBold.Height * 1.15f), StringAlignment.Near, StringAlignment.Near, false);
-        // At most two whole lines of the hint.
-        float hh = Math.Min(r.Bottom - hy - pad * 0.3f, smallFont.GetHeight(g) * 2.05f);
-        Write(g, it.Hint, smallFont, it.On ? Dim : Faint, new RectangleF(tx, hy, r.Right - tx - pad, hh), StringAlignment.Near, StringAlignment.Near, true);
+    float SwingTo { get { return 0.08f + 0.6f * vary[0]; } }
+    // 0 = edge-on at the hinge, 1 = facing you (the wobble overshoots a little past flat, then settles).
+    float PanelOpen(float t) { return BackOut(Clamp01((Assembly(t) - 0.08f) / (SwingTo - 0.08f)), vary[1]); }
+    float ScreenLevel(float t) {
+        float level = Clamp01((Assembly(t) - SwingTo - 0.1f - vary[2]) / 0.25f);
+        if (vary[3] >= 1 && level > 0 && level < 1) { int q = (int)(level * 6 + vary[4]); if (q % 3 == 1 && q < 3 * (int)vary[3] + 1) level *= 0.25f; }
+        return level;
     }
+    float WindowAlpha(float t) { return snapshotMode ? 1 : Clamp01(Assembly(t) / 0.06f); }
+    bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return powerOnAt < 0 || t - powerOnAt < OnTotal + 0.1f || powerOffAt >= 0; }
 
-    void RenderPage(Graphics g, Page p, int w, int h, float m, float top, float bottom) {
-        Write(g, p.Title, titleFont, Ink, new RectangleF(m, top, w - 2 * m, titleFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
-        float y = top + titleFont.Height * 1.5f;
-        if (p.Body != null) {
-            float bodyH = p.Items.Count > 0 ? (bottom - y) * 0.45f : bottom - y - h * 0.01f;
-            var br = new RectangleF(m, y, w - 2 * m, bodyH);
-            Card(g, br, h * 0.016f, Panel, Color.FromArgb(19, 22, 30), Stroke, 1);
-            float pad = h * 0.025f;
-            float bodyText = br.Height - 2 * pad;
-            if (p.Mono != null) bodyText = Math.Min(bodyText, g.MeasureString(p.Body, smallFont, (int)(br.Width - 2 * pad)).Height + smallFont.Height * 0.5f);
-            Write(g, p.Body, smallFont, Color.FromArgb(214, 218, 226), new RectangleF(br.X + pad, br.Y + pad, br.Width - 2 * pad, bodyText), StringAlignment.Near, StringAlignment.Near, true);
-            if (p.Mono != null) {
-                // A failed build's first error, fixed width so the ^^^ marks stay under the code.
-                var eb = new RectangleF(br.X + pad, br.Y + pad + bodyText, br.Width - 2 * pad, br.Height - 2 * pad - bodyText);
-                Card(g, eb, h * 0.01f, Color.FromArgb(40, 20, 22), Color.FromArgb(26, 14, 16), Color.FromArgb(120, 228, 76, 70), 1);
-                Write(g, p.Mono, monoFont, Color.FromArgb(236, 226, 226), new RectangleF(eb.X + pad * 0.6f, eb.Y + pad * 0.6f, eb.Width - 1.2f * pad, eb.Height - 1.2f * pad), StringAlignment.Near, StringAlignment.Near, true);
-            }
-            y = br.Bottom + h * 0.025f;
-        }
-        if (p.Items.Count == 0) return;
-        if (p.Cols > 0) {
-            // Tiles like the main screen's, Cols wide and as many rows as needed; rows scroll to keep the selected one.
-            float tgap = w * 0.012f, tw = (w - 2 * m - tgap * (p.Cols - 1)) / p.Cols, th = h * 0.15f;
-            int rows = (p.Items.Count + p.Cols - 1) / p.Cols;
-            int fitRows = Math.Max(1, (int)((bottom - y + tgap) / (th + tgap)));
-            int firstRow = Math.Max(0, Math.Min(p.Sel / p.Cols - fitRows / 2, rows - fitRows));
-            for (int i = firstRow * p.Cols; i < p.Items.Count && i < (firstRow + fitRows) * p.Cols; i++) {
-                int k = i - firstRow * p.Cols;
-                var r = new RectangleF(m + (k % p.Cols) * (tw + tgap), y + (k / p.Cols) * (th + tgap), tw, th);
-                Tile(g, p.Items[i], i == p.Sel, r, true);
-                hits.Add(new KeyValuePair<RectangleF, int>(r, i));
-            }
-            if (rows > fitRows)
-                Write(g, (p.Sel + 1) + " / " + p.Items.Count, smallFont, Faint, new RectangleF(m, top, w - 2 * m, titleFont.Height * 1.3f), StringAlignment.Far, StringAlignment.Center, false);
+    // The layered window: every frame is drawn into one bitmap and handed to Windows with its alpha (Native.Push).
+    protected override CreateParams CreateParams { get { var cp = base.CreateParams; cp.ExStyle |= 0x80000; return cp; } }
+    Bitmap frameBmp; bool needPresent = true;
+    protected override void OnInvalidated(InvalidateEventArgs e) { base.OnInvalidated(e); needPresent = true; }
+    protected override void OnPaint(PaintEventArgs e) { }
+    protected override void OnPaintBackground(PaintEventArgs e) { }
+    void Present() {
+        if (!IsHandleCreated || !Visible) return;
+        needPresent = false;
+        float t = (float)clock.Elapsed.TotalSeconds;
+        if (powerOnAt < 0) { powerOnAt = t; Vary(new Random()); }
+        int w = ClientSize.Width, h = ClientSize.Height;
+        if (frameBmp == null || frameBmp.Width != w || frameBmp.Height != h) { if (frameBmp != null) frameBmp.Dispose(); frameBmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb); }
+        using (var g = Graphics.FromImage(frameBmp)) { g.Clear(Color.Transparent); Render(g, w, h); }
+        Native.Push(Handle, frameBmp, Left, Top, (byte)(255 * WindowAlpha(t)));
+    }
+    protected override void OnFormClosing(FormClosingEventArgs e) {
+        if (Visible && !poweredOff && (e.CloseReason == CloseReason.UserClosing || e.CloseReason == CloseReason.None || e.CloseReason == CloseReason.TaskManagerClosing)) {
+            e.Cancel = true;
+            if (powerOffAt < 0) { powerOffAt = (float)clock.Elapsed.TotalSeconds; Vary(new Random()); if (!tick.Enabled) tick.Start(); Invalidate(); }
             return;
         }
-        // A scrolling list of cards: the selected one stays in view.
-        float ch = h * 0.095f, gap = h * 0.014f;
-        int fit = Math.Max(1, (int)((bottom - y + gap) / (ch + gap)));
-        int first = Math.Max(0, Math.Min(p.Sel - fit / 2, p.Items.Count - fit));
-        for (int i = first; i < p.Items.Count && i < first + fit; i++) {
-            var r = new RectangleF(m, y, w - 2 * m, ch);
-            Tile(g, p.Items[i], i == p.Sel, r, false);
-            hits.Add(new KeyValuePair<RectangleF, int>(r, i));
-            y += ch + gap;
-        }
-        if (first > 0 || first + fit < p.Items.Count)
-            Write(g, (p.Sel + 1) + " / " + p.Items.Count, smallFont, Faint, new RectangleF(m, top, w - 2 * m, titleFont.Height * 1.3f), StringAlignment.Far, StringAlignment.Center, false);
+        base.OnFormClosing(e);
+    }
+    // Drag the panel by its bezel.
+    protected override void OnMouseDown(MouseEventArgs e) {
+        base.OnMouseDown(e);
+        if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { Native.ReleaseCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
     }
 
-    // A build: the version and commit, cargo's own step count as a progress bar with the board riding its head, the
-    // crate being built, the warning count and, as soon as it appears, the first error.
-    void RenderBuild(Graphics g, int w, int h, RectangleF card, float pad, float t) {
-        Write(g, "BUILDING", smallBold, Accent, new RectangleF(card.X + pad, card.Y + pad, card.Width - 2 * pad, smallFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
-        Write(g, BuildView.Clock(DateTime.Now - build.Start), smallBold, Dim, new RectangleF(card.X + pad, card.Y + pad, card.Width - 2 * pad, smallFont.Height * 1.2f), StringAlignment.Far, StringAlignment.Near, false);
-        float y = card.Y + pad + smallFont.Height * 1.3f;
-        Write(g, build.Name, heroFont, Ink, new RectangleF(card.X + pad, y, card.Width - 2 * pad, heroFont.Height * 1.25f), StringAlignment.Near, StringAlignment.Near, false);
-        y += heroFont.Height * 1.2f;
-        Write(g, "at " + build.Commit, itemFont, Dim, new RectangleF(card.X + pad, y, card.Width - 2 * pad, itemFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
-        y += itemFont.Height * 2.2f;
-        float boardLen = card.Width * 0.12f;
-        var track = new RectangleF(card.X + pad, y + boardLen * 0.26f, card.Width - 2 * pad, h * 0.01f);
-        Card(g, track, track.Height / 2, Stroke, Stroke, Color.Empty, 0);
-        float head;
-        if (build.Total > 0) {
-            float k = Math.Min(1f, build.Done / (float)build.Total);
-            var fill = new RectangleF(track.X, track.Y, Math.Max(track.Height, track.Width * k), track.Height);
-            Card(g, fill, track.Height / 2, build.Ended && !build.Ok ? Color.FromArgb(228, 76, 70) : Accent, build.Ended && !build.Ok ? Color.FromArgb(228, 76, 70) : Accent, Color.Empty, 0);
-            head = fill.Right;
+    float fixedT = -1;   // --wear-test: every frame at the same moment, so only the marks differ
+    void Render(Graphics g, int w, int h) {
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        hits.Clear(); promptHits.Clear();
+        float t = fixedT >= 0 ? fixedT : (float)clock.Elapsed.TotalSeconds;
+        devS = Math.Min(w / DevW, h / DevH); devX = (w - DevW * devS) / 2; devY = (h - DevH * devS) / 2;
+        EnsureFlip(t);
+        var st = g.Save();
+        g.TranslateTransform(devX, devY); g.ScaleTransform(devS, devS);
+        float open = PanelOpen(t);
+        if (open > 0.01f) Hinge(g);
+        if (Math.Abs(open - 1) < 0.002f) LcdPanel(g, ScreenLevel(t), t, true); else FlipPanel(g, open, t);
+        g.Restore(st);
+    }
+
+    static void Cylinder(Graphics g, RectangleF r, float rad, bool upright) {
+        using (var path = Round(r, rad)) using (var b = new LinearGradientBrush(Grow(r, 1), PlasticDark, PlasticDark, upright ? 0f : 90f)) {
+            b.InterpolationColors = new ColorBlend { Colors = new[] { PlasticDark, PlasticHi, Plastic, PlasticDark }, Positions = new[] { 0f, 0.28f, 0.62f, 1f } };
+            g.FillPath(b, path);
+            using (var pen = new Pen(Color.FromArgb(160, 0, 0, 0), 2)) g.DrawPath(pen, path);
+        }
+    }
+    static void PrintAt(Graphics g, string s, Font f, Color c, float x, float y, float w, StringAlignment a) {
+        Write(g, s, f, c, new RectangleF(x, y, w, f.Height * 1.3f), a, StringAlignment.Near, false);
+    }
+    // A key on the bezel: lighter while the mouse is over it.
+    void HardKey(Graphics g, RectangleF r, string key, string label, float rad) {
+        bool over = hoverPrompt == key;
+        Card(g, r, rad, over ? Color.FromArgb(132, 136, 146) : Color.FromArgb(92, 95, 104), over ? Color.FromArgb(70, 72, 80) : Color.FromArgb(44, 46, 52), Color.FromArgb(170, 0, 0, 0), 2);
+        if (label != null) Write(g, label, UKey, Print, r, StringAlignment.Center, StringAlignment.Center, false);
+        Key(r, key);
+    }
+    // The hinge barrel on the right edge: where the panel meets the camera body (out of view).
+    static void Hinge(Graphics g) {
+        Cylinder(g, new RectangleF(1186, 150, 38, 460), 16, true);
+        using (var pen = new Pen(Color.FromArgb(110, 0, 0, 0), 2)) for (float y = 200; y < 600; y += 70) g.DrawLine(pen, 1188, y, 1222, y);
+    }
+
+    // The panel facing you: the moulded frame with a raised lip, the dark gasket round the glass, the screen, and the
+    // bezel: the backlight sensor on top, HOME, the T / W zoom rocker, SET, START/STOP and POWER down the
+    // left, the speaker grille, print, DISPLAY, the tape keys and the model print along the bottom; then its wear and\n    // its sticker.
+    void LcdPanel(Graphics g, float level, float t, bool live) {
+        using (var path = Round(PanelR, 34)) {
+            using (var b = new LinearGradientBrush(Grow(PanelR, 1), Color.FromArgb(76, 78, 86), Color.FromArgb(32, 33, 38), 90f)) g.FillPath(b, path);
+            using (var pen = new Pen(Color.FromArgb(210, 0, 0, 0), 3)) g.DrawPath(pen, path);
+        }
+        using (var path = Round(Grow(PanelR, -10), 26)) using (var pen = new Pen(Color.FromArgb(30, 255, 255, 255), 2)) g.DrawPath(pen, path);
+        PrintAt(g, "SK8-1000  HD", UModel, Print, 822, 700, 272, StringAlignment.Far);
+        using (var b = new SolidBrush(Color.FromArgb(14, 14, 16))) g.FillEllipse(b, 1144, 30, 12, 12);
+        using (var path = Round(Grow(ScreenR, 13), 10)) using (var b = new SolidBrush(Color.FromArgb(8, 8, 10))) g.FillPath(b, path);
+        if (level > 0) {
+            // The canvas is the screen's own pixels: copied 1:1 at whole-pixel coordinates (a half-pixel offset read a row
+            // and column from outside it, a flickering edge).
+            var lcd = LcdCanvas(t);
+            var st = g.Save();
+            var at = new PointF[] { new PointF(ScreenR.X, ScreenR.Y) };
+            g.TransformPoints(CoordinateSpace.Device, CoordinateSpace.World, at);
+            g.ResetTransform();
+            g.DrawImageUnscaled(lcd, (int)Math.Round(at[0].X), (int)Math.Round(at[0].Y));
+            g.Restore(st);
+            if (level < 1) using (var b = new SolidBrush(Color.FromArgb((int)(255 * (1 - level)), 6, 7, 9))) g.FillRectangle(b, ScreenR);
+        } else using (var b = new SolidBrush(Color.FromArgb(16, 17, 20))) g.FillRectangle(b, ScreenR);
+        using (var b = new SolidBrush(Color.FromArgb(14, 255, 255, 255))) g.FillPolygon(b, new[] { new PointF(ScreenR.X, ScreenR.Y), new PointF(ScreenR.X + ScreenR.Width * 0.42f, ScreenR.Y), new PointF(ScreenR.X, ScreenR.Y + ScreenR.Height * 0.55f) });
+        // Left strip: HOME (back), the zoom rocker (T up, W down), SET (select), START/STOP (play), POWER (close).
+        HardKey(g, new RectangleF(40, 70, 110, 48), "MENU", "HOME", 12);
+        PrintAt(g, "ZOOM", UTiny, Print, 30, 146, 130, StringAlignment.Center);
+        var rocker = new RectangleF(66, 168, 58, 172);
+        Card(g, rocker, 29, Color.FromArgb(92, 95, 104), Color.FromArgb(44, 46, 52), Color.FromArgb(170, 0, 0, 0), 2);
+        var tHalf = new RectangleF(rocker.X, rocker.Y, rocker.Width, rocker.Height / 2); var wHalf = new RectangleF(rocker.X, rocker.Y + rocker.Height / 2, rocker.Width, rocker.Height / 2);
+        if (hoverPrompt == "U") Card(g, tHalf, 29, Color.FromArgb(70, 255, 255, 255), Color.FromArgb(30, 255, 255, 255), Color.Empty, 0);
+        if (hoverPrompt == "D") Card(g, wHalf, 29, Color.FromArgb(70, 255, 255, 255), Color.FromArgb(30, 255, 255, 255), Color.Empty, 0);
+        using (var pen = new Pen(Color.FromArgb(150, 0, 0, 0), 2)) g.DrawLine(pen, rocker.X + 8, rocker.Y + rocker.Height / 2, rocker.Right - 8, rocker.Y + rocker.Height / 2);
+        Write(g, "T", UKey, Print, tHalf, StringAlignment.Center, StringAlignment.Center, false);
+        Write(g, "W", UKey, Print, wHalf, StringAlignment.Center, StringAlignment.Center, false);
+        Key(tHalf, "U"); Key(wHalf, "D");
+        HardKey(g, new RectangleF(40, 372, 110, 48), "A", "SET", 12);
+        PrintAt(g, "START/STOP", UTiny, Print, 30, 436, 130, StringAlignment.Center);
+        using (var b = new SolidBrush(Color.FromArgb(26, 27, 31))) g.FillEllipse(b, 39, 456, 112, 112);
+        bool overPlay = hoverPrompt == "PLAY";
+        using (var b = new LinearGradientBrush(new RectangleF(51, 468, 88, 88), overPlay ? Color.FromArgb(255, 120, 110) : Color.FromArgb(240, 70, 60), Color.FromArgb(150, 20, 16), 90f)) g.FillEllipse(b, 51, 468, 88, 88);
+        using (var b = new SolidBrush(Color.FromArgb(70, 255, 255, 255))) g.FillEllipse(b, 70, 478, 36, 20);
+        Key(new RectangleF(39, 456, 112, 112), "PLAY");
+        HardKey(g, new RectangleF(48, 588, 94, 36), "POWER", null, 10);
+        Write(g, "POWER", UTiny, Print, new RectangleF(48, 588, 94, 36), StringAlignment.Center, StringAlignment.Center, false);
+        // Bottom strip: speaker grille, print, DISPLAY and the tape keys (rewind, play, fast forward, stop).
+        using (var b = new SolidBrush(Color.FromArgb(150, 0, 0, 0))) for (int r = 0; r < 4; r++) for (int c = 0; c < 7; c++) g.FillEllipse(b, 188 + c * 12 + (r % 2) * 6, 642 + r * 12, 6, 6);
+        PrintAt(g, "16:9 WIDE LCD", UTiny, Print, 180, 700, 160, StringAlignment.Near);
+        HardKey(g, new RectangleF(716, 640, 84, 32), "DISPLAY", null, 8);
+        PrintAt(g, "DISPLAY", UTiny, Print, 716, 676, 84, StringAlignment.Center);
+        string[] keys = { "L", "A", "R", "MENU" }, names = { "REW", "PLAY", "FF", "STOP" };
+        for (int i = 0; i < 4; i++) {
+            var r = new RectangleF(826 + i * 66, 640, 56, 32);
+            HardKey(g, r, keys[i], null, 8);
+            TapeGlyph(g, i, r);
+            PrintAt(g, names[i], UTiny, Print, r.X - 6, 676, r.Width + 12, StringAlignment.Center);
+        }
+        DrawMarks(g);
+        PlaceSticker(g, StickerSpec());
+    }
+    static void TapeGlyph(Graphics g, int kind, RectangleF r) {
+        float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2, s = 8;
+        using (var b = new SolidBrush(Print)) {
+            if (kind == 0) { g.FillPolygon(b, new[] { new PointF(cx - 1, cy), new PointF(cx + 9, cy - s), new PointF(cx + 9, cy + s) }); g.FillPolygon(b, new[] { new PointF(cx - 11, cy), new PointF(cx - 1, cy - s), new PointF(cx - 1, cy + s) }); }
+            if (kind == 1) g.FillPolygon(b, new[] { new PointF(cx + 9, cy), new PointF(cx - 6, cy - s), new PointF(cx - 6, cy + s) });
+            if (kind == 2) { g.FillPolygon(b, new[] { new PointF(cx + 1, cy), new PointF(cx - 9, cy - s), new PointF(cx - 9, cy + s) }); g.FillPolygon(b, new[] { new PointF(cx + 11, cy), new PointF(cx + 1, cy - s), new PointF(cx + 1, cy + s) }); }
+            if (kind == 3) g.FillRectangle(b, cx - 7, cy - 7, 14, 14);
+        }
+    }
+    // Mid-swing: the panel (screen still dark) drawn into a bitmap once and swung on the hinge at its right edge, in
+    // vertical strips with perspective: the free edge recedes while it is edge-on, and comes a touch closer during the
+    // wobble past flat; darker while it is turned away.
+    Bitmap flipScreen; Bitmap[] screenStrips; RectangleF[] screenInner; float flipScale = -1;
+    const int Strips = 48;
+    Bitmap PanelShot(float t) {
+        var shot = new Bitmap((int)Math.Ceiling(PanelR.Width * devS) + 2, (int)Math.Ceiling(PanelR.Height * devS) + 2, PixelFormat.Format32bppPArgb);
+        var keep = new List<KeyValuePair<RectangleF, string>>(promptHits);
+        using (var pg = Graphics.FromImage(shot)) {
+            pg.SmoothingMode = SmoothingMode.AntiAlias; pg.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            pg.ScaleTransform(devS, devS); pg.TranslateTransform(-PanelR.X, -PanelR.Y);
+            LcdPanel(pg, 0, t, false);
+        }
+        promptHits.Clear(); promptHits.AddRange(keep);
+        return shot;
+    }
+    // A face cut into its vertical strips once, so each strip draws on its own (GDI+ prepares a whole image per call).
+    // Each strip carries one pixel of its neighbours on both sides, drawn over them, so the smoothing at its edges
+    // blends with real pixels and the strips meet without seams.
+    static Bitmap[] Slice(Bitmap shot, out RectangleF[] inner) {
+        var parts = new Bitmap[Strips]; inner = new RectangleF[Strips];
+        for (int i = 0; i < Strips; i++) {
+            int sx = i * shot.Width / Strips, sw = (i + 1) * shot.Width / Strips - sx;
+            int x0 = Math.Max(0, sx - 1), x1 = Math.Min(shot.Width, sx + sw + 1);
+            parts[i] = shot.Clone(new Rectangle(x0, 0, x1 - x0, shot.Height), PixelFormat.Format32bppPArgb);
+            inner[i] = new RectangleF(sx - x0, 0, sw, shot.Height);
+        }
+        return parts;
+    }
+    // The panel's face is drawn once per size, on the first (still invisible) frame: only the swing changes per frame.
+    void EnsureFlip(float t) {
+        if (flipScale == devS) return;
+        if (flipScreen != null) flipScreen.Dispose();
+        if (screenStrips != null) foreach (var s in screenStrips) s.Dispose();
+        flipScreen = PanelShot(t); flipScale = devS;
+        screenStrips = Slice(flipScreen, out screenInner);
+    }
+    void FlipPanel(Graphics g, float open, float t) {
+        if (open <= 0.01f) return;
+        double a = (1 - open) * Math.PI / 2;
+        float cos = (float)Math.Cos(a), sin = (float)Math.Sin(a), W = PanelR.Width, H = PanelR.Height, cy = PanelR.Y + H / 2, hx = PanelR.Right, dist = W * 2f;
+        Func<float, float> scale = delegate(float u) { return dist / (dist + 0.6f * u * W * sin); };
+        Func<float, float> xAt = delegate(float u) { return hx - u * W * cos * scale(u); };
+        var keepInterp = g.InterpolationMode; var keepOffset = g.PixelOffsetMode; var keepMode = g.CompositingQuality;
+        g.InterpolationMode = InterpolationMode.NearestNeighbor; g.PixelOffsetMode = PixelOffsetMode.HighSpeed; g.CompositingQuality = CompositingQuality.HighSpeed;
+        for (int i = 0; i < Strips; i++) {
+            float uL = 1 - (float)i / Strips, uR = 1 - (i + 1f) / Strips, sm = scale((uL + uR) / 2);
+            float xl = xAt(uL), xr = xAt(uR), top = cy - H / 2 * sm;
+            if (xr - xl < 0.05f) continue;
+            float kx = (xr - xl) / screenInner[i].Width;
+            g.DrawImage(screenStrips[i], new RectangleF(xl - screenInner[i].X * kx, top, screenStrips[i].Width * kx, H * sm));
+        }
+        g.InterpolationMode = keepInterp; g.PixelOffsetMode = keepOffset; g.CompositingQuality = keepMode;
+        int dark = (int)(170 * Math.Max(0, sin));
+        if (dark > 0) using (var b = new SolidBrush(Color.FromArgb(dark, 0, 0, 0))) {
+            float s1 = scale(1), x1 = xAt(1);
+            g.FillPolygon(b, new[] { new PointF(x1, cy - H / 2 * s1), new PointF(hx, PanelR.Y), new PointF(hx, PanelR.Bottom), new PointF(x1, cy + H / 2 * s1) });
+        }
+    }
+
+    // ---------- the panel's wear (USER-ASKS 489) ----------
+    // Rolled fresh at every start: paint-marker scrawl in skate-session words, doodles, scratch clusters, paint rubbed
+    // off along the edges, now and then gaff tape across a bottom corner. All of it stays on the wear map: the bezel
+    // minus keep-out zones over every UI element on it (glass, keys, labels, print, grille, sensor), so wear never
+    // covers the panel's UI. Tags and doodles shrink until their whole outline fits the map.
+    class Mark { public int Spot, Kind, Seed; public float X, Y, Angle, Size; public string Text; public Color Ink; }
+    readonly List<Mark> marks = new List<Mark>();
+    static readonly string[] Scrawl = { "ONE MORE TRY", "LAST TRY", "FILM IT", "SEND IT", "SESH", "BAIL CREW", "DIY OR DIE", "SKATE & ANNOY", "NO COMPLY", "KICKFLIP?", "SECURITY!!", "SK8", "LINE!!", "HOMIES", "RAD", "BUST", "FILMER", "1 MORE", "SLAMS", "GNAR", "POP!", "SK8!" };
+    static readonly Color[] Markers = { Color.FromArgb(232, 246, 246, 240), Color.FromArgb(220, 204, 208, 214), Color.FromArgb(225, 236, 64, 54), Color.FromArgb(225, 250, 214, 60), Color.FromArgb(225, 250, 112, 172), Color.FromArgb(225, 96, 212, 232) };
+    // Spots for tags and doodles: the bottom strip between the print and DISPLAY, the left strip under POWER (the top
+    // strip between the frame and the glass is too thin for a word).
+    static readonly RectangleF[] TagAreas = { new RectangleF(352, 630, 348, 104), new RectangleF(36, 640, 120, 90) };
+    static readonly int[] TagChars = { 12, 4 };
+    static readonly float[] TagTilt = { 5, 8 };
+    static readonly RectangleF[] KeepOut = {
+        Grow(ScreenR, 15), new RectangleF(950, 696, 150, 30), new RectangleF(1136, 22, 30, 28),
+        new RectangleF(34, 64, 122, 60), new RectangleF(30, 140, 130, 210), new RectangleF(34, 366, 122, 60),
+        new RectangleF(30, 430, 130, 144), new RectangleF(42, 582, 106, 48), new RectangleF(180, 634, 104, 64),
+        new RectangleF(176, 696, 170, 28), new RectangleF(710, 634, 96, 64), new RectangleF(820, 634, 272, 64),
+    };
+    static readonly FontFamily Hand = HandFamily();
+    static FontFamily HandFamily() {
+        foreach (var name in new[] { "Ink Free", "Segoe Print", "Comic Sans MS" }) foreach (var fam in FontFamily.Families) if (fam.Name == name) return fam;
+        return FontFamily.GenericSansSerif;
+    }
+    static string PickWord(Random r, int max) {
+        var fit = Array.FindAll(Scrawl, w => w.Length <= max);
+        return fit[r.Next(fit.Length)];
+    }
+    void RollMarks(Random r) {
+        marks.Clear();
+        Func<double, double, float> u = delegate(double lo, double hi) { return (float)(lo + r.NextDouble() * (hi - lo)); };
+        var free = new List<int> { 0, 1 };
+        int tags = 1 + r.Next(2);
+        for (int i = 0; i < tags; i++) {
+            int spot = free[r.Next(free.Count)]; free.Remove(spot);
+            var a = TagAreas[spot];
+            marks.Add(new Mark { Spot = spot, Kind = 0, X = a.X + a.Width * u(0.35, 0.65), Y = a.Y + a.Height * u(0.4, 0.6), Angle = TagTilt[spot] * u(-1, 1), Text = PickWord(r, TagChars[spot]), Ink = Markers[r.Next(Markers.Length)], Seed = r.Next() });
+        }
+        int doodles = 1 + r.Next(2);
+        for (int i = 0; i < doodles; i++) {
+            int spot = r.Next(2);
+            var a = TagAreas[spot];
+            marks.Add(new Mark { Spot = spot, Kind = 1, X = a.X + a.Width * u(0.1, 0.9), Y = a.Y + a.Height * u(0.3, 0.7), Angle = u(-20, 20), Size = Math.Min(a.Height * 0.7f, 46) * u(0.7, 1), Ink = Markers[r.Next(Markers.Length)], Seed = r.Next(5) });
+        }
+        int scratches = 3 + r.Next(4);
+        for (int i = 0; i < scratches; i++)
+            marks.Add(new Mark { Kind = 2, X = u(PanelR.X + 30, PanelR.Right - 40), Y = r.Next(2) == 0 ? u(PanelR.Y + 6, ScreenR.Y - 14) : u(ScreenR.Bottom + 16, PanelR.Bottom - 10), Angle = u(-30, 30), Size = u(30, 90), Seed = r.Next() });
+        int edges = 1 + r.Next(2);
+        for (int i = 0; i < edges; i++) {
+            int side = r.Next(3);
+            marks.Add(new Mark { Kind = 3, X = side == 2 ? PanelR.X + 3 : u(PanelR.X + 60, PanelR.Right - 340), Y = side == 0 ? PanelR.Y + 3 : side == 1 ? PanelR.Bottom - 3 : u(PanelR.Y + 60, PanelR.Bottom - 340), Angle = side == 2 ? 90 : 0, Size = u(120, 300), Seed = r.Next() });
+        }
+        if (r.Next(2) == 0) {
+            bool left = r.Next(2) == 0;
+            marks.Add(new Mark { Kind = 4, X = left ? PanelR.X + 26 : PanelR.Right - 26, Y = PanelR.Bottom - 26, Angle = (left ? 45 : -45) + u(-8, 8), Size = u(80, 110), Seed = r.Next() });
+        }
+    }
+    // The panel's outline, and the wear map: the outline minus every keep-out zone.
+    static GraphicsPath PartOutline() { return Round(PanelR, 34); }
+    static Region WearMap() {
+        var r = new Region(PartOutline());
+        foreach (var k in KeepOut) r.Exclude(k);
+        return r;
+    }
+    bool marksUnclipped;   // --wear-test: tags, doodles and tape drawn without the keep-outs, to find any that would cover UI
+    void DrawMarks(Graphics g) {
+        foreach (var mk in marks) {
+            var rnd = new Random(mk.Seed);
+            var ms = g.Save();
+            if (!marksUnclipped || mk.Kind == 2 || mk.Kind == 3) using (var clip = WearMap()) g.SetClip(clip, CombineMode.Intersect);
+            else using (var clip = PartOutline()) g.SetClip(clip, CombineMode.Intersect);
+            g.TranslateTransform(mk.X, mk.Y); g.RotateTransform(mk.Angle);
+            if (mk.Kind == 0) MarkerTag(g, mk, rnd);
+            else if (mk.Kind == 1) Doodle(g, mk, rnd);
+            else if (mk.Kind == 2) using (var lite = new Pen(Color.FromArgb(70, 210, 214, 220), 1.1f)) using (var dark = new Pen(Color.FromArgb(50, 0, 0, 0), 1.1f)) {
+                int n = 5 + rnd.Next(8);
+                for (int i = 0; i < n; i++) {
+                    float x0 = (float)(rnd.NextDouble() * mk.Size - mk.Size / 2), y0 = (float)(rnd.NextDouble() * 18 - 9), len = (float)(rnd.NextDouble() * mk.Size * 0.6 + 8), dy = (float)(rnd.NextDouble() * 6 - 3);
+                    g.DrawLine(dark, x0, y0 + 1, x0 + len, y0 + dy + 1); g.DrawLine(lite, x0, y0, x0 + len, y0 + dy);
+                }
+            }
+            else if (mk.Kind == 3) using (var rub = new Pen(Color.FromArgb(120, 128, 131, 140), 3)) {
+                for (int i = 0; i < 26; i++) { float x0 = (float)(rnd.NextDouble() * mk.Size), len = (float)(rnd.NextDouble() * 26 + 4), off = (float)(rnd.NextDouble() * 6 - 3); rub.Width = (float)(rnd.NextDouble() * 3 + 1); g.DrawLine(rub, x0, off, x0 + len, off + (float)(rnd.NextDouble() * 2 - 1)); }
+            }
+            else if (mk.Kind == 4) GaffTape(g, mk, rnd);
+            g.Restore(ms);
+        }
+    }
+    // Whether a mark's outline, widened by its pen and smoothing, lies wholly on the wear map.
+    static bool Inside(Region map, GraphicsPath local, Mark mk) {
+        using (var test = (GraphicsPath)local.Clone()) using (var m = new Matrix()) using (var pen = new Pen(Color.Black, 5)) {
+            m.Translate(mk.X, mk.Y); m.Rotate(mk.Angle); test.Transform(m); test.Widen(pen); test.Flatten();
+            foreach (var pt in test.PathPoints) if (!map.IsVisible(pt)) return false;
+        }
+        return true;
+    }
+    // Paint-marker scrawl: the word in a hand font, sized to its spot (and shrunk until it fits the wear map), with the
+    // paint worn through in places.
+    void MarkerTag(Graphics g, Mark mk, Random rnd) {
+        var area = TagAreas[mk.Spot];
+        using (var path = new GraphicsPath()) {
+            path.AddString(mk.Text, Hand, (int)FontStyle.Bold, area.Height * 0.7f, PointF.Empty, StringFormat.GenericTypographic);
+            var b = path.GetBounds();
+            float k = Math.Min(1, area.Width * 0.85f / Math.Max(1, b.Width));
+            using (var m = new Matrix()) { m.Scale(k, k); m.Translate(-b.X - b.Width / 2, -b.Y - b.Height / 2); path.Transform(m); }
+            using (var map = WearMap())
+                for (int tries = 0; tries < 12 && !Inside(map, path, mk); tries++) using (var m = new Matrix()) { m.Scale(0.9f, 0.9f); path.Transform(m); }
+            using (var br = new SolidBrush(mk.Ink)) g.FillPath(br, path);
+            using (var pen = new Pen(Fade(mk.Ink, 120), 1.2f)) g.DrawPath(pen, path);
+            var kept = g.Save();
+            g.SetClip(path, CombineMode.Intersect);
+            var nb = path.GetBounds();
+            using (var wear = new SolidBrush(Color.FromArgb(170, 50, 52, 58)))
+                for (int i = 0; i < 60; i++) g.FillEllipse(wear, nb.X + (float)rnd.NextDouble() * nb.Width, nb.Y + (float)rnd.NextDouble() * nb.Height, 1.5f + (float)rnd.NextDouble() * 3, 1 + (float)rnd.NextDouble() * 2);
+            using (var streak = new Pen(Color.FromArgb(90, 50, 52, 58), 1.6f))
+                for (int i = 0; i < 5; i++) { float y = nb.Y + (float)rnd.NextDouble() * nb.Height; g.DrawLine(streak, nb.X, y, nb.Right, y + (float)(rnd.NextDouble() * 4 - 2)); }
+            g.Restore(kept);
+        }
+    }
+    // A quick marker doodle: crown, star, arrow, X or smiley (shrunk until it fits the wear map, pen width included).
+    static void Doodle(Graphics g, Mark mk, Random rnd) {
+        float s = mk.Size / 2;
+        using (var map = WearMap())
+            for (int tries = 0; tries < 12; tries++) {
+                using (var ring = new GraphicsPath()) { float rr = s * 1.15f + 3; ring.AddEllipse(-rr, -rr, 2 * rr, 2 * rr); if (Inside(map, ring, mk)) break; }
+                s *= 0.88f;
+            }
+        using (var pen = new Pen(mk.Ink, Math.Max(2.4f, s * 0.12f))) {
+            pen.LineJoin = LineJoin.Round; pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round;
+            if (mk.Seed == 0) Wobble(g, pen, rnd, new PointF(-s, s * 0.6f), new PointF(-s, -s * 0.5f), new PointF(-s * 0.5f, s * 0.05f), new PointF(0, -s * 0.8f), new PointF(s * 0.5f, s * 0.05f), new PointF(s, -s * 0.5f), new PointF(s, s * 0.6f), new PointF(-s, s * 0.6f));
+            else if (mk.Seed == 1) { var pts = new PointF[11]; for (int i = 0; i <= 10; i++) { double a = -Math.PI / 2 + i * Math.PI / 5; float rr = i % 2 == 0 ? s : s * 0.42f; pts[i] = new PointF((float)Math.Cos(a) * rr, (float)Math.Sin(a) * rr); } Wobble(g, pen, rnd, pts); }
+            else if (mk.Seed == 2) { Wobble(g, pen, rnd, new PointF(-s, s * 0.2f), new PointF(-s * 0.2f, -s * 0.1f), new PointF(s, 0)); Wobble(g, pen, rnd, new PointF(s * 0.55f, -s * 0.45f), new PointF(s, 0), new PointF(s * 0.5f, s * 0.4f)); }
+            else if (mk.Seed == 3) { Wobble(g, pen, rnd, new PointF(-s * 0.7f, -s * 0.7f), new PointF(0, 0), new PointF(s * 0.7f, s * 0.7f)); Wobble(g, pen, rnd, new PointF(s * 0.7f, -s * 0.7f), new PointF(0, 0), new PointF(-s * 0.7f, s * 0.7f)); }
+            else { g.DrawEllipse(pen, -s, -s, 2 * s, 2 * s); g.DrawArc(pen, -s * 0.55f, -s * 0.3f, s * 1.1f, s * 0.95f, 20, 140); g.DrawLine(pen, -s * 0.35f, -s * 0.35f, -s * 0.35f, -s * 0.15f); g.DrawLine(pen, s * 0.35f, -s * 0.35f, s * 0.35f, -s * 0.15f); }
+        }
+    }
+    // A strip of matte gaff tape across a corner, torn at both ends, a little wrinkled (it wraps round the panel's edge).
+    static void GaffTape(Graphics g, Mark mk, Random rnd) {
+        float w = mk.Size, h = 46;
+        var pts = new List<PointF>();
+        for (int i = 0; i <= 8; i++) pts.Add(new PointF(-w / 2 + (float)(rnd.NextDouble() * 5 - 2.5), -h / 2 + i * h / 8));
+        for (int i = 8; i >= 0; i--) pts.Add(new PointF(w / 2 + (float)(rnd.NextDouble() * 5 - 2.5), -h / 2 + i * h / 8));
+        using (var b = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) { var sh = pts.ConvertAll(p => new PointF(p.X + 2, p.Y + 2)); g.FillPolygon(b, sh.ToArray()); }
+        using (var b = new LinearGradientBrush(new RectangleF(-w / 2 - 4, -h / 2 - 1, w + 8, h + 2), Color.FromArgb(78, 78, 82), Color.FromArgb(34, 34, 38), 90f)) g.FillPolygon(b, pts.ToArray());
+        using (var pen = new Pen(Color.FromArgb(50, 255, 255, 255), 1)) for (int i = 0; i < 4; i++) { float x = (float)(rnd.NextDouble() * w - w / 2); g.DrawLine(pen, x, -h / 2 + 4, x + (float)(rnd.NextDouble() * 10 - 5), h / 2 - 4); }
+        using (var pen = new Pen(Color.FromArgb(40, 255, 255, 255), 2)) g.DrawLine(pen, -w / 2 + 4, -h / 2 + 8, w / 2 - 4, -h / 2 + 8);
+    }
+    // The ridges and edges under the sticker (the gasket edge and the bezel's inner lip), so it shows creases where it
+    // was pressed over them.
+    static List<PointF[]> Ridges() {
+        return new List<PointF[]> {
+            new[] { new PointF(PanelR.X, ScreenR.Bottom + 13), new PointF(PanelR.Right, ScreenR.Bottom + 13) },
+            new[] { new PointF(PanelR.X, PanelR.Bottom - 10), new PointF(PanelR.Right, PanelR.Bottom - 10) },
+        };
+    }
+    static void Creases(Graphics g, List<PointF[]> ridges) {
+        using (var dark = new Pen(Color.FromArgb(100, 0, 0, 0), 2.4f)) using (var lite = new Pen(Color.FromArgb(90, 255, 255, 255), 1.5f))
+            foreach (var seg in ridges) {
+                float ex = seg[1].X - seg[0].X, ey = seg[1].Y - seg[0].Y, el = (float)Math.Sqrt(ex * ex + ey * ey);
+                if (el < 1) continue;
+                float ox = -ey / el * 1.8f, oy = ex / el * 1.8f;
+                g.DrawLine(dark, seg[0], seg[1]);
+                g.DrawLine(lite, seg[0].X + ox, seg[0].Y + oy, seg[1].X + ox, seg[1].Y + oy);
+            }
+    }
+
+    // ---------- the sticker (USER-ASKS 487) ----------
+    // One sticker slapped on the camera years ago, picked once per user at the first start and kept in
+    // camcorder-sticker.txt in the state folder: design, zone (0 bezel, 1 lens, 2 body print), place, angle, wear seed.
+    // Placeholders: PNGs in the state folder's stickers\ (the game's own stickers, once the asset export finds them:
+    // .claude/todo/living-world-stickers.md) replace the parody set below.
+    const int StickerCount = 5;
+    float[] sticker; Bitmap[] gameStickers;
+    float[] StickerSpec() {
+        if (sticker != null) return sticker;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        string f = Path.Combine(StateDir(), "camcorder-sticker.txt");
+        if (!snapshotMode) try {
+            if (File.Exists(f)) {
+                var parts = File.ReadAllText(f).Trim().Split(' ');
+                if (parts.Length == 6) return sticker = Array.ConvertAll(parts, x => float.Parse(x, inv));
+            }
+        } catch { }
+        var rnd = snapshotMode ? new Random(snapSeed) : new Random();
+        sticker = new float[] { rnd.Next(StickerCount), rnd.Next(3), (float)rnd.NextDouble(), (float)rnd.NextDouble(), (float)(rnd.NextDouble() * 40 - 20), rnd.Next(100000) };
+        if (!snapshotMode) try { Directory.CreateDirectory(StateDir()); File.WriteAllText(f, string.Join(" ", Array.ConvertAll(sticker, x => x.ToString(inv)))); } catch { }
+        return sticker;
+    }
+    Bitmap GameSticker(int pick) {
+        if (gameStickers == null) {
+            var list = new List<Bitmap>();
+            try { string dir = Path.Combine(StateDir(), "stickers"); if (Directory.Exists(dir)) foreach (var p in Directory.GetFiles(dir, "*.png")) try { list.Add(new Bitmap(p)); } catch { } } catch { }
+            gameStickers = list.ToArray();
+        }
+        return gameStickers.Length == 0 ? null : gameStickers[pick % gameStickers.Length];
+    }
+    // On the bezel's bottom strip, between the print and DISPLAY.
+    void PlaceSticker(Graphics g, float[] s) {
+        float cx = 420 + s[2] * 200, cy = 682 + s[3] * 4, scale = 0.68f;
+        // The surface's ridges in the sticker's own space (the inverse of its placement).
+        double ra = -s[4] * Math.PI / 180; float rc = (float)Math.Cos(ra), rs = (float)Math.Sin(ra);
+        var local = Ridges().ConvertAll(seg => Array.ConvertAll(seg, q => { float dx = q.X - cx, dy = q.Y - cy; return new PointF((dx * rc - dy * rs) / scale, (dx * rs + dy * rc) / scale); }));
+        var st = g.Save();
+        g.TranslateTransform(cx, cy); g.RotateTransform(s[4]); g.ScaleTransform(scale, scale);
+        var game = GameSticker((int)s[5]);
+        if (game != null) {
+            float k = 160f / Math.Max(game.Width, game.Height);
+            var rect = new RectangleF(-game.Width * k / 2, -game.Height * k / 2, game.Width * k, game.Height * k);
+            g.DrawImage(game, rect);
+            var cs = g.Save(); g.SetClip(rect, CombineMode.Intersect); Creases(g, local); g.Restore(cs);
+        } else DrawSticker(g, (int)s[0], (int)s[5], local);
+        g.Restore(st);
+    }
+    // A parody sticker around (0, 0), about 160 x 160 at most, aged: faded, scuffed, chipped, one edge peeling up.
+    static void DrawSticker(Graphics g, int design, int seed, List<PointF[]> ridges) {
+        var rnd = new Random(seed);
+        using (var shape = StickerShape(design)) {
+            // The peel: the part past a line near one edge has lifted and folded back over.
+            var bounds = shape.GetBounds();
+            double pa = rnd.NextDouble() * Math.PI * 2;
+            float nx = (float)Math.Cos(pa), ny = (float)Math.Sin(pa);
+            float reach = Math.Abs(nx) * bounds.Width / 2 + Math.Abs(ny) * bounds.Height / 2;
+            float dist = reach * (0.74f + 0.14f * (float)rnd.NextDouble());
+            var p = new PointF(nx * dist, ny * dist);
+            var dx = -ny; var dy = nx;
+            using (var half = new GraphicsPath()) {
+                half.AddPolygon(new[] { new PointF(p.X + dx * 400, p.Y + dy * 400), new PointF(p.X - dx * 400, p.Y - dy * 400), new PointF(p.X - dx * 400 + nx * 400, p.Y - dy * 400 + ny * 400), new PointF(p.X + dx * 400 + nx * 400, p.Y + dy * 400 + ny * 400) });
+                using (var kept = new Region(shape)) using (var lifted = new Region(shape)) {
+                    kept.Exclude(half); lifted.Intersect(half);
+                    var gs = g.Save();
+                    g.TranslateTransform(2, 3);
+                    using (var b = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillRegion(b, kept);
+                    g.Restore(gs);
+                    gs = g.Save();
+                    g.SetClip(kept, CombineMode.Intersect);
+                    StickerArt(g, design, rnd);
+                    // Wear: scratches, grime, chipped bits along the edge.
+                    using (var pen = new Pen(Color.FromArgb(110, 255, 255, 250), 1.2f)) for (int i = 0; i < 16; i++) { float x0 = (float)(rnd.NextDouble() * 160 - 80), y0 = (float)(rnd.NextDouble() * 160 - 80); g.DrawLine(pen, x0, y0, x0 + (float)(rnd.NextDouble() * 40 - 20), y0 + (float)(rnd.NextDouble() * 12 - 6)); }
+                    using (var b = new SolidBrush(Color.FromArgb(60, 60, 50, 30))) for (int i = 0; i < 40; i++) g.FillEllipse(b, (float)(rnd.NextDouble() * 160 - 80), (float)(rnd.NextDouble() * 160 - 80), 2.5f, 2.5f);
+                    using (var b = new SolidBrush(Color.FromArgb(30, 120, 110, 80))) g.FillRectangle(b, -90, -90, 180, 180);
+                    Creases(g, ridges);
+                    g.Restore(gs);
+                    using (var pen = new Pen(Color.FromArgb(120, 40, 40, 44), 3)) {
+                        for (int i = 0; i < 4; i++) {
+                            double ca = rnd.NextDouble() * Math.PI * 2;
+                            float ex = (float)Math.Cos(ca) * bounds.Width * 0.47f, ey = (float)Math.Sin(ca) * bounds.Height * 0.47f;
+                            var cs = g.Save(); g.SetClip(kept, CombineMode.Intersect);
+                            using (var b = new SolidBrush(Color.FromArgb(120, 46, 47, 52))) g.FillPolygon(b, new[] { new PointF(ex - 6, ey - 3), new PointF(ex + 5, ey - 5), new PointF(ex + 7, ey + 4), new PointF(ex - 3, ey + 7) });
+                            g.Restore(cs);
+                        }
+                    }
+                    // Old glue where it lifted, then the flap folded back over the line.
+                    using (var b = new SolidBrush(Color.FromArgb(60, 210, 196, 150))) g.FillRegion(b, lifted);
+                    float c2 = dx * dx - dy * dy, s2 = 2 * dx * dy;
+                    var m = new Matrix(c2, s2, s2, -c2, p.X - (c2 * p.X + s2 * p.Y), p.Y - (s2 * p.X - c2 * p.Y));
+                    gs = g.Save();
+                    g.MultiplyTransform(m);
+                    g.TranslateTransform(-nx * 3, -ny * 3);
+                    using (var b = new SolidBrush(Color.FromArgb(80, 0, 0, 0))) g.FillRegion(b, lifted);
+                    g.TranslateTransform(nx * 3, ny * 3);
+                    using (var b = new LinearGradientBrush(new RectangleF(-90, -90, 180, 180), Color.FromArgb(238, 234, 222), Color.FromArgb(196, 190, 176), (float)(pa * 180 / Math.PI))) g.FillRegion(b, lifted);
+                    g.Restore(gs);
+                    gs = g.Save(); g.SetClip(shape, CombineMode.Intersect);
+                    using (var pen = new Pen(Color.FromArgb(90, 0, 0, 0), 1.2f)) g.DrawLine(pen, p.X + dx * 120, p.Y + dy * 120, p.X - dx * 120, p.Y - dy * 120);
+                    g.Restore(gs);
+                }
+            }
+        }
+    }
+    static GraphicsPath StickerShape(int design) {
+        var path = new GraphicsPath();
+        if (design == 0) { path.AddClosedCurve(new[] { new PointF(-6, -80), new PointF(22, -64), new PointF(40, -10), new PointF(30, 54), new PointF(34, 80), new PointF(-30, 82), new PointF(-30, 30), new PointF(-42, -24), new PointF(-30, -62) }, 0.5f); return path; }
+        if (design == 1) { path.AddArc(-80, -56, 160, 70, 180, 180); path.AddLine(80, -21, 80, 40); path.AddLine(80, 40, -80, 40); path.CloseFigure(); return path; }
+        if (design == 2) { path.AddEllipse(-72, -72, 144, 144); return path; }
+        if (design == 3) { path.AddRectangle(new RectangleF(-80, -30, 160, 60)); return path; }
+        path.AddEllipse(-70, -70, 140, 140); return path;
+    }
+    // A wobbly hand-drawn line (the riso character sticker's look).
+    static void Wobble(Graphics g, Pen pen, Random rnd, params PointF[] pts) {
+        var w = new PointF[pts.Length];
+        for (int i = 0; i < pts.Length; i++) w[i] = new PointF(pts[i].X + (float)(rnd.NextDouble() * 2.4 - 1.2), pts[i].Y + (float)(rnd.NextDouble() * 2.4 - 1.2));
+        g.DrawCurve(pen, w, 0.5f);
+    }
+    static void FitText(Graphics g, string s, string family, FontStyle style, Color c, RectangleF r) {
+        float size = r.Height;
+        using (var probe = new Font(family, 100, style, GraphicsUnit.Pixel)) { var m = g.MeasureString(s, probe); size = Math.Min(r.Height * 100 / m.Height * 1.15f, r.Width * 100 / m.Width); }
+        using (var f = new Font(family, Math.Max(4, size), style, GraphicsUnit.Pixel)) Write(g, s, f, c, new RectangleF(r.X - 20, r.Y - size * 0.1f, r.Width + 40, r.Height + size * 0.3f), StringAlignment.Center, StringAlignment.Center, false);
+    }
+    static void StickerArt(Graphics g, int design, Random rnd) {
+        if (design == 0) {
+            // "The filmer": an original character on clear vinyl, purple hand-drawn lines, flat fills printed off the lines.
+            using (var b = new SolidBrush(Color.FromArgb(70, 255, 255, 255))) g.FillRectangle(b, -90, -90, 180, 180);
+            var line = Color.FromArgb(84, 58, 160);
+            Action<Color, PointF[]> fill = delegate(Color c, PointF[] pts) {
+                var off = new PointF[pts.Length]; for (int i = 0; i < pts.Length; i++) off[i] = new PointF(pts[i].X + 2.5f, pts[i].Y + 1.5f);
+                using (var b = new SolidBrush(c)) g.FillClosedCurve(b, off, FillMode.Alternate, 0.4f);
+            };
+            var head = new[] { new PointF(-14, -56), new PointF(-2, -66), new PointF(12, -58), new PointF(12, -40), new PointF(0, -32), new PointF(-12, -38) };
+            var hoodie = new[] { new PointF(-22, -30), new PointF(18, -32), new PointF(26, 10), new PointF(20, 16), new PointF(-22, 16), new PointF(-28, 6) };
+            var pants = new[] { new PointF(-22, 14), new PointF(20, 14), new PointF(24, 64), new PointF(4, 66), new PointF(0, 30), new PointF(-6, 66), new PointF(-26, 64) };
+            var arm = new[] { new PointF(12, -26), new PointF(24, -40), new PointF(30, -56), new PointF(22, -60), new PointF(14, -46), new PointF(6, -30) };
+            fill(Color.FromArgb(232, 196, 64), hoodie);
+            fill(Color.FromArgb(150, 178, 214), pants);
+            fill(Color.FromArgb(250, 240, 222), head);
+            fill(Color.FromArgb(232, 196, 64), arm);
+            using (var b = new SolidBrush(Color.FromArgb(170, 120, 170))) g.FillRectangle(b, -20, 6, 30, 12);
+            using (var b = new SolidBrush(Color.FromArgb(150, 196, 80))) { g.FillEllipse(b, -30, 62, 26, 12); g.FillEllipse(b, 2, 62, 26, 12); }
+            using (var b = new SolidBrush(Color.FromArgb(58, 58, 66))) g.FillRectangle(b, 14, -70, 30, 18);
+            using (var b = new SolidBrush(Color.FromArgb(120, 150, 200))) g.FillEllipse(b, 38, -67, 10, 12);
+            using (var pen = new Pen(line, 2.4f)) {
+                pen.LineJoin = LineJoin.Round;
+                Wobble(g, pen, rnd, head[0], head[1], head[2], head[3], head[4], head[5], head[0]);
+                Wobble(g, pen, rnd, new PointF(-14, -56), new PointF(-4, -68), new PointF(10, -62), new PointF(16, -58));
+                Wobble(g, pen, rnd, hoodie[0], hoodie[5], hoodie[4], hoodie[3], hoodie[2], hoodie[1]);
+                Wobble(g, pen, rnd, pants[0], pants[6], pants[5], pants[4], pants[3], pants[2], pants[1]);
+                Wobble(g, pen, rnd, arm[0], arm[1], arm[2], arm[3], arm[4], arm[5]);
+                g.DrawRectangle(pen, 14, -70, 30, 18);
+                Wobble(g, pen, rnd, new PointF(-2, -48), new PointF(2, -46), new PointF(4, -42));
+                Wobble(g, pen, rnd, new PointF(-6, -30), new PointF(-4, 0), new PointF(-2, 12));
+                g.DrawEllipse(pen, -30, 62, 26, 12); g.DrawEllipse(pen, 2, 62, 26, 12);
+            }
+            using (var pen = new Pen(Color.FromArgb(130, 255, 255, 255), 1.5f)) g.DrawPath(pen, StickerShape(0));
+            return;
+        }
+        var cream = Color.FromArgb(240, 234, 218);
+        using (var b = new SolidBrush(cream)) g.FillRectangle(b, -90, -90, 180, 180);
+        if (design == 1) {
+            // "BLICKEY": a workwear-tag parody, an arch-topped badge.
+            using (var inner = new GraphicsPath()) {
+                inner.AddArc(-72, -50, 144, 60, 180, 180); inner.AddLine(72, -20, 72, 33); inner.AddLine(72, 33, -72, 33); inner.CloseFigure();
+                using (var b = new SolidBrush(Color.FromArgb(150, 132, 88))) g.FillPath(b, inner);
+            }
+            FitText(g, "BLICKEY", "Arial Black", FontStyle.Regular, cream, new RectangleF(-64, -20, 128, 30));
+            FitText(g, "SINCE 1922 (PROBABLY)", "Tahoma", FontStyle.Bold, cream, new RectangleF(-56, 14, 112, 12));
+        } else if (design == 2) {
+            // "SPITBALL WHEELS": a round flame-head wheel badge parody.
+            using (var b = new SolidBrush(Color.FromArgb(214, 52, 38))) g.FillEllipse(b, -64, -64, 128, 128);
+            using (var b = new SolidBrush(Color.FromArgb(252, 196, 60)))
+                for (int i = 0; i < 9; i++) { double a = -Math.PI / 2 + (i - 4) * 0.28; g.FillPolygon(b, new[] { new PointF((float)Math.Cos(a - 0.12) * 26, (float)Math.Sin(a - 0.12) * 26 - 6), new PointF((float)Math.Cos(a) * 54, (float)Math.Sin(a) * 54 - 6), new PointF((float)Math.Cos(a + 0.12) * 26, (float)Math.Sin(a + 0.12) * 26 - 6) }); }
+            using (var b = new SolidBrush(cream)) g.FillEllipse(b, -24, -28, 48, 48);
+            using (var pen = new Pen(Color.FromArgb(40, 30, 30), 3)) { g.DrawEllipse(pen, -24, -28, 48, 48); g.DrawArc(pen, -10, -6, 20, 14, 10, 160); }
+            using (var b = new SolidBrush(Color.FromArgb(40, 30, 30))) { g.FillEllipse(b, -11, -14, 6, 8); g.FillEllipse(b, 5, -14, 6, 8); }
+            FitText(g, "SPITBALL WHEELS", "Arial Black", FontStyle.Regular, cream, new RectangleF(-54, 28, 108, 22));
+        } else if (design == 3) {
+            // "SUPREMELY MID": the box-logo parody.
+            using (var b = new SolidBrush(Color.FromArgb(222, 30, 36))) g.FillRectangle(b, -74, -24, 148, 48);
+            FitText(g, "Supremely Mid", "Arial", FontStyle.Bold | FontStyle.Italic, Color.White, new RectangleF(-68, -18, 136, 36));
         } else {
-            // No count yet (cargo prints its bar once the build plan is known): a sweeping segment.
-            float run = (t * 0.35f) % 1f, sx = track.X + run * track.Width * 1.3f - track.Width * 0.3f;
-            var seg = RectangleF.Intersect(track, new RectangleF(sx, track.Y, track.Width * 0.3f, track.Height));
-            if (seg.Width > 0) Card(g, seg, track.Height / 2, Accent, Accent, Color.Empty, 0);
-            head = seg.Width > 0 ? seg.Right : track.X;
-        }
-        var clip = g.Save(); g.SetClip(card);
-        Board(g, Rolling(track, boardLen, t), track.Y - boardLen * 0.21f, boardLen);
-        g.Restore(clip);
-        y = track.Bottom + h * 0.03f;
-        string count = build.Total > 0 ? build.Done + " / " + build.Total + " build steps" : build.Compiled + " crates compiled";
-        if (build.Ended) count = build.Ok ? "Built in " + BuildView.Clock(build.End - build.Start) : "Build failed";
-        Write(g, count, itemBold, build.Ended && !build.Ok ? Color.FromArgb(255, 120, 110) : Ink, new RectangleF(card.X + pad, y, card.Width * 0.5f, itemBold.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
-        if (build.Warnings > 0) {
-            string wtext = build.Warnings + (build.Warnings == 1 ? " warning" : " warnings");
-            var ws = g.MeasureString(wtext, smallBold);
-            var pill = new RectangleF(card.Right - pad - ws.Width - smallBold.Height, y + (itemBold.Height - smallBold.Height * 1.4f) / 2, ws.Width + smallBold.Height, smallBold.Height * 1.4f);
-            Card(g, pill, pill.Height / 2, Fade(Accent, 40), Fade(Accent, 40), Fade(Accent, 120), 1);
-            Write(g, wtext, smallBold, Accent, pill, StringAlignment.Center, StringAlignment.Center, false);
-        }
-        y += itemBold.Height * 1.4f;
-        if (build.Now != "" && !build.Ended) Write(g, "Now: " + build.Now, smallFont, Dim, new RectangleF(card.X + pad, y, card.Width - 2 * pad, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
-        y += smallFont.Height * 2f;
-        if (build.Error.Count > 0) {
-            var eb = new RectangleF(card.X + pad, y, card.Width - 2 * pad, card.Bottom - pad - y);
-            Card(g, eb, h * 0.012f, Color.FromArgb(40, 20, 22), Color.FromArgb(26, 14, 16), Color.FromArgb(120, 228, 76, 70), 1);
-            float ep = h * 0.016f;
-            Write(g, "First error", smallBold, Color.FromArgb(255, 120, 110), new RectangleF(eb.X + ep, eb.Y + ep, eb.Width - 2 * ep, smallBold.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
-            Write(g, string.Join("\n", build.Error), monoFont, Color.FromArgb(236, 226, 226), new RectangleF(eb.X + ep, eb.Y + ep + smallBold.Height * 1.5f, eb.Width - 2 * ep, eb.Height - 2 * ep - smallBold.Height * 1.5f), StringAlignment.Near, StringAlignment.Near, true);
+            // "THRASHED": the flame-lettering magazine parody on a black disc.
+            using (var b = new SolidBrush(Color.FromArgb(20, 20, 22))) g.FillEllipse(b, -62, -62, 124, 124);
+            using (var b = new SolidBrush(Color.FromArgb(240, 110, 30)))
+                for (int i = 0; i < 7; i++) { float x = -48 + i * 16; g.FillPolygon(b, new[] { new PointF(x - 7, 10), new PointF(x + 2, -30 - (i % 3) * 8), new PointF(x + 9, 10) }); }
+            FitText(g, "THRASHED", "Impact", FontStyle.Regular, Color.FromArgb(255, 226, 120), new RectangleF(-54, -12, 108, 30));
+            FitText(g, "SKATE AND REST", "Tahoma", FontStyle.Bold, cream, new RectangleF(-40, 22, 80, 12));
         }
     }
 
-    void RenderJob(Graphics g, int w, int h, float m, float top, float bottom, float t) {        var card = new RectangleF(w * 0.12f, top + (bottom - top) * 0.03f, w * 0.76f, (bottom - top) * 0.94f);
-        Card(g, card, h * 0.022f, Color.FromArgb(28, 34, 48), Color.FromArgb(16, 19, 26), Stroke, 1);
-        float pad = card.Height * 0.07f;
-        if (build.Active || build.Ended) { RenderBuild(g, w, h, card, pad, t); return; }
-        Write(g, "RUNNING", smallBold, Accent, new RectangleF(card.X + pad, card.Y + pad, card.Width - 2 * pad, smallFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
-        var el = DateTime.Now - jobStart;
-        Write(g, ((int)el.TotalMinutes) + ":" + el.Seconds.ToString("00"), smallBold, Dim, new RectangleF(card.X + pad, card.Y + pad, card.Width - 2 * pad, smallFont.Height * 1.2f), StringAlignment.Far, StringAlignment.Near, false);
-        Write(g, jobTitle, heroFont, Ink, new RectangleF(card.X + pad, card.Y + pad + smallFont.Height * 1.3f, card.Width - 2 * pad, heroFont.Height * 1.25f), StringAlignment.Near, StringAlignment.Near, false);
-        // The board rolling along the progress track.
-        float ty = card.Y + pad + smallFont.Height * 1.4f + heroFont.Height * 1.5f, boardLen = card.Width * 0.16f;
-        var track = new RectangleF(card.X + pad, ty + boardLen * 0.26f, card.Width - 2 * pad, h * 0.008f);
-        Card(g, track, track.Height / 2, Stroke, Stroke, Color.Empty, 0);
-        float run = (t * 0.35f) % 1f;
-        float sx = track.X + run * (track.Width + track.Width * 0.3f) - track.Width * 0.3f;
-        var seg = RectangleF.Intersect(track, new RectangleF(sx, track.Y, track.Width * 0.3f, track.Height));
-        if (seg.Width > 0) Card(g, seg, track.Height / 2, Accent, Accent, Color.Empty, 0);
-        var clip = g.Save(); g.SetClip(card);
-        Board(g, Rolling(track, boardLen, t), track.Y - boardLen * 0.21f, boardLen);
-        g.Restore(clip);
-        // The last line as the status, a few earlier ones below it.
-        var lines = new List<string>();
-        for (int i = log.Count - 1; i >= 0 && lines.Count < 9; i--) { string c = Clean(log[i]); if (c != "") lines.Add(c); }
-        float ly = track.Bottom + boardLen * 0.45f;
-        Write(g, lines.Count > 0 ? lines[0] : "Starting...", itemFont, Ink, new RectangleF(card.X + pad, ly, card.Width - 2 * pad, itemFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
-        ly += itemFont.Height * 1.6f;
-        var logBox = new RectangleF(card.X + pad, ly, card.Width - 2 * pad, card.Bottom - pad - ly);
-        Card(g, logBox, h * 0.012f, Color.FromArgb(12, 14, 19), Color.FromArgb(12, 14, 19), Fade(Stroke, 140), 1);
-        float lh = smallFont.Height * 1.15f, lp = h * 0.015f, yy = logBox.Bottom - lp - lh;
-        for (int i = 1; i < lines.Count && yy >= logBox.Y + lp; i++) {
-            Write(g, lines[i], smallFont, Fade(Dim, Math.Max(70, 255 - i * 22)), new RectangleF(logBox.X + lp, yy, logBox.Width - 2 * lp, lh), StringAlignment.Near, StringAlignment.Near, false);
-            yy -= lh;
+    // ---------- the LCD ----------
+    // The screen of a mid-2000s HD camcorder (USER-ASKS 488): smooth type, glossy translucent rounded panels, an amber
+    // selection bar with a sheen, the status row with its HDV badge, the board's lane and the date stamp. Drawn at the
+    // screen's own pixels in a 340-wide layout space (lcdW x lcdH) over the cached skate-spot scene.
+    Bitmap lcdBmp, sceneBmp; Font osdBig, osdRow, osdSmall, osdTiny, osdLogo; int osdFontH = -1;
+    bool recOn; DateTime recSince; TimeSpan recTotal;
+    int lcdW = 340, lcdH = 191;
+    static readonly Color LcdInk = Color.FromArgb(244, 246, 250), LcdDim = Color.FromArgb(168, 178, 196), LcdAmberHi = Color.FromArgb(255, 198, 88),
+        LcdAmberLo = Color.FromArgb(238, 124, 12), LcdAmber = Color.FromArgb(255, 172, 44), LcdGreen = Color.FromArgb(124, 220, 96), LcdRed = Color.FromArgb(255, 98, 86);
+    void LoHit(RectangleF lo, int index) {
+        var u = new RectangleF(ScreenR.X + lo.X * ScreenR.Width / lcdW, ScreenR.Y + lo.Y * ScreenR.Height / lcdH, lo.Width * ScreenR.Width / lcdW, lo.Height * ScreenR.Height / lcdH);
+        hits.Add(new KeyValuePair<RectangleF, int>(ToWin(u), index));
+    }
+    Bitmap LcdCanvas(float t) {
+        int Wp = Math.Max(200, (int)Math.Round(ScreenR.Width * devS)), Hp = Math.Max(112, (int)Math.Round(ScreenR.Height * devS));
+        if (lcdBmp == null || lcdBmp.Width != Wp || lcdBmp.Height != Hp) { if (lcdBmp != null) lcdBmp.Dispose(); lcdBmp = new Bitmap(Wp, Hp, PixelFormat.Format32bppPArgb); }
+        lcdW = 340; lcdH = (int)Math.Round(340f * Hp / Wp);
+        int W = lcdW, H = lcdH;
+        if (osdFontH != H) {
+            osdFontH = H;
+            osdBig = new Font("Segoe UI Semibold", H / 13.5f, GraphicsUnit.Pixel);
+            osdRow = new Font("Segoe UI Semibold", H / 17.5f, GraphicsUnit.Pixel);
+            osdSmall = new Font("Segoe UI", H / 21f, GraphicsUnit.Pixel);
+            osdTiny = new Font("Segoe UI Semibold", H / 29f, GraphicsUnit.Pixel);
+            osdLogo = new Font("Segoe UI Light", H / 5.2f, GraphicsUnit.Pixel);
+        }
+        DateTime now = DateTime.Now;
+        bool rec = job != null;
+        if (rec && !recOn) recSince = now;
+        if (!rec && recOn) recTotal += now - recSince;
+        recOn = rec;
+        using (var o = Graphics.FromImage(lcdBmp)) {
+            bool splash = starting && job == null && pages.Count == 0;
+            // Cleared first: the scene's edge pixels are not fully opaque, so the last frame showed through and built up.
+            o.Clear(Color.FromArgb(6, 8, 14));
+            if (!splash) o.DrawImageUnscaled(Scene(Wp, Hp), 0, 0);
+            o.ScaleTransform(Wp / (float)W, Hp / (float)H);
+            o.SmoothingMode = SmoothingMode.AntiAlias;
+            o.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            float foot = osdSmall.Height + 4, lane = 15, top = osdRow.Height + 7, bottom = H - foot - lane - 2;
+            if (splash) LcdSplash(o, W, H, t);
+            else {
+                LcdStatus(o, W, now);
+                if (job != null) LcdJob(o, W, top, bottom, t);
+                else if (pages.Count > 0) LcdPage(o, pages.Peek(), W, top, bottom, t);
+            }
+            LcdBoard(o, t, H - foot - 2, W);
+            LcdFoot(o, W, H, now, splash);
+        }
+        return lcdBmp;
+    }
+    // What the camera is pointed at: a skate spot at dusk (stairs with a handrail, a ledge), dimmed under the menus.
+    Bitmap Scene(int W, int H) {
+        if (sceneBmp != null && sceneBmp.Width == W && sceneBmp.Height == H) return sceneBmp;
+        if (sceneBmp != null) sceneBmp.Dispose();
+        sceneBmp = new Bitmap(W, H, PixelFormat.Format32bppPArgb);
+        using (var g = Graphics.FromImage(sceneBmp)) {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float hz = H * 0.62f;
+            using (var b = new LinearGradientBrush(new RectangleF(0, -1, W, hz + 2), Color.FromArgb(34, 46, 104), Color.FromArgb(222, 128, 78), 90f)) g.FillRectangle(b, 0, 0, W, hz);
+            using (var b = new SolidBrush(Color.FromArgb(200, 252, 210, 136))) g.FillEllipse(b, W * 0.68f, hz - H * 0.17f, H * 0.16f, H * 0.16f);
+            var rnd = new Random(5);
+            using (var b = new SolidBrush(Color.FromArgb(44, 34, 56))) for (float x = 0; x < W; ) { float bw = W * (0.024f + (float)rnd.NextDouble() * 0.045f), bh = H * (0.05f + (float)rnd.NextDouble() * 0.18f); g.FillRectangle(b, x, hz - bh, bw, bh); x += bw + 1; }
+            using (var b = new LinearGradientBrush(new RectangleF(0, hz - 1, W, H - hz + 2), Color.FromArgb(82, 68, 70), Color.FromArgb(30, 26, 30), 90f)) g.FillRectangle(b, 0, hz, W, H - hz);
+            float sx0 = W * 0.6f, sy0 = H * 0.7f, stepW = W * 0.08f, stepH = H * 0.06f;
+            var stairs = new List<PointF> { new PointF(sx0, H), new PointF(sx0, sy0) };
+            for (int i = 0; i < 5; i++) { stairs.Add(new PointF(sx0 + (i + 1) * stepW, sy0 + i * stepH)); stairs.Add(new PointF(sx0 + (i + 1) * stepW, sy0 + (i + 1) * stepH)); }
+            stairs.Add(new PointF(W, sy0 + 5 * stepH)); stairs.Add(new PointF(W, H));
+            using (var b = new SolidBrush(Color.FromArgb(54, 48, 54))) g.FillPolygon(b, stairs.ToArray());
+            float lw = Math.Max(1, H / 190f);
+            using (var pen = new Pen(Color.FromArgb(130, 222, 156, 112), lw)) for (int i = 0; i < 5; i++) g.DrawLine(pen, sx0 + i * stepW, sy0 + i * stepH, sx0 + (i + 1) * stepW, sy0 + i * stepH);
+            using (var b = new SolidBrush(Color.FromArgb(74, 68, 70))) g.FillRectangle(b, W * 0.05f, H * 0.74f, W * 0.3f, H * 0.07f);
+            using (var pen = new Pen(Color.FromArgb(150, 222, 156, 112), lw)) g.DrawLine(pen, W * 0.05f, H * 0.74f, W * 0.35f, H * 0.74f);
+            using (var pen = new Pen(Color.FromArgb(170, 176, 178, 190), lw * 1.4f)) { g.DrawLine(pen, sx0 + stepW * 0.5f, sy0 - H * 0.09f, W, sy0 - H * 0.09f + (W - sx0 - stepW * 0.5f) * stepH / stepW); for (int i = 0; i < 4; i++) { float px = sx0 + stepW * (0.5f + i * 1.2f); g.DrawLine(pen, px, sy0 - H * 0.09f + (px - sx0 - stepW * 0.5f) * stepH / stepW, px, sy0 + i * 1.2f * stepH); } }
+            using (var b = new SolidBrush(Color.FromArgb(86, 0, 0, 0))) g.FillRectangle(b, 0, 0, W, H);
+            using (var path = new GraphicsPath()) {
+                path.AddEllipse(-W * 0.2f, -H * 0.25f, W * 1.4f, H * 1.5f);
+                using (var outside = new Region(new RectangleF(0, 0, W, H))) { outside.Exclude(path); using (var b = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillRegion(b, outside); }
+            }
+        }
+        return sceneBmp;
+    }
+    static void ShadowText(Graphics g, string s, Font f, Color c, float x, float y) {
+        using (var sh = new SolidBrush(Color.FromArgb(170, 0, 0, 0))) g.DrawString(s, f, sh, x + 0.6f, y + 0.7f);
+        using (var b = new SolidBrush(c)) g.DrawString(s, f, b, x, y);
+    }
+    // A translucent glass panel with a fine light edge.
+    static void Glass(Graphics g, RectangleF r, float rad) {
+        using (var path = Round(r, rad)) {
+            using (var b = new LinearGradientBrush(Grow(r, 1), Color.FromArgb(196, 44, 54, 80), Color.FromArgb(222, 10, 13, 22), 90f)) g.FillPath(b, path);
+            using (var pen = new Pen(Color.FromArgb(76, 255, 255, 255), 0.6f)) g.DrawPath(pen, path);
+        }
+        using (var pen = new Pen(Color.FromArgb(46, 255, 255, 255), 0.6f)) g.DrawLine(pen, r.X + rad, r.Y + 1, r.Right - rad, r.Y + 1);
+    }
+    // A glossy bar: its gradient and a sheen over the top half.
+    static void Gloss(Graphics g, RectangleF r, float rad, Color top, Color bottom) {
+        using (var path = Round(r, rad)) using (var b = new LinearGradientBrush(Grow(r, 0.5f), top, bottom, 90f)) g.FillPath(b, path);
+        var sheen = new RectangleF(r.X + 0.8f, r.Y + 0.5f, r.Width - 1.6f, r.Height * 0.48f);
+        if (sheen.Width > 1 && sheen.Height > 0.5f)
+            using (var path = Round(sheen, rad * 0.8f)) using (var b = new LinearGradientBrush(Grow(sheen, 0.5f), Color.FromArgb(120, 255, 255, 255), Color.FromArgb(18, 255, 255, 255), 90f)) g.FillPath(b, path);
+    }
+    void Pill(Graphics g, string s, Color c, float x, float y) {
+        var size = g.MeasureString(s, osdTiny);
+        var r = new RectangleF(x, y, size.Width + 3, osdTiny.Height + 2);
+        using (var path = Round(r, r.Height / 2)) {
+            using (var b = new SolidBrush(Fade(c, 46))) g.FillPath(b, path);
+            using (var pen = new Pen(Fade(c, 200), 0.7f)) g.DrawPath(pen, path);
+        }
+        Write(g, s, osdTiny, c, r, StringAlignment.Center, StringAlignment.Center, false);
+    }
+    // Top row: STBY / REC with its glowing dot, the HDV badge, the tape counter (runs only while recording), the battery.
+    void LcdStatus(Graphics o, int W, DateTime now) {
+        TimeSpan tape = recTotal + (recOn ? now - recSince : TimeSpan.Zero);
+        float x = 5, y = 3, fh = osdRow.Height;
+        if (recOn) {
+            float d = fh * 0.46f, dy = y + (fh - d) / 2;
+            if (now.Millisecond < 650) {
+                using (var b = new SolidBrush(Color.FromArgb(80, RecRed))) o.FillEllipse(b, x - d * 0.35f, dy - d * 0.35f, d * 1.7f, d * 1.7f);
+                using (var b = new SolidBrush(RecRed)) o.FillEllipse(b, x, dy, d, d);
+            }
+            x += d + 3;
+        }
+        string mode = recOn ? "REC" : "STBY";
+        ShadowText(o, mode, osdRow, recOn ? LcdRed : LcdInk, x, y); x += o.MeasureString(mode, osdRow).Width + 3;
+        var hs = o.MeasureString("HDV 1080i", osdTiny);
+        var hb = new RectangleF(x, y + (fh - osdTiny.Height - 1) / 2, hs.Width + 2, osdTiny.Height + 1);
+        using (var path = Round(hb, 1.5f)) { using (var b = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) o.FillPath(b, path); using (var pen = new Pen(Color.FromArgb(210, 255, 255, 255), 0.7f)) o.DrawPath(pen, path); }
+        Write(o, "HDV 1080i", osdTiny, LcdInk, hb, StringAlignment.Center, StringAlignment.Center, false);
+        x += hb.Width + 6;
+        ShadowText(o, string.Format("{0}:{1:00}:{2:00}:{3:00}", (int)tape.TotalHours, tape.Minutes, tape.Seconds, tape.Milliseconds * 30 / 1000), osdRow, LcdInk, x, y);
+        string mins = "120 min";
+        var ms = o.MeasureString(mins, osdSmall);
+        float bw = fh * 1.2f, bh = fh * 0.52f, bx = W - 5 - ms.Width - bw - 3, by = y + (fh - bh) / 2;
+        var body = new RectangleF(bx, by, bw, bh);
+        using (var path = Round(body, 1.5f)) { using (var b = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) o.FillPath(b, path); using (var pen = new Pen(Color.FromArgb(220, 255, 255, 255), 0.8f)) o.DrawPath(pen, path); }
+        using (var b = new SolidBrush(Color.FromArgb(220, 255, 255, 255))) o.FillRectangle(b, bx + bw, by + bh * 0.3f, 1.4f, bh * 0.4f);
+        float seg = (bw - 2.4f) / 4;
+        for (int i = 0; i < 4; i++) Gloss(o, new RectangleF(bx + 1.2f + i * seg + 0.3f, by + 1.2f, seg - 0.6f, bh - 2.4f), 0.6f, Color.FromArgb(170, 240, 110), Color.FromArgb(66, 168, 40));
+        ShadowText(o, mins, osdSmall, LcdInk, W - 5 - ms.Width, y + (fh - osdSmall.Height) / 2);
+    }
+    // A controller key badge and its label, for the hint row.
+    void Badge(Graphics o, ref float x, float y, string key, Color c, string label) {
+        float d = osdSmall.Height * 0.9f;
+        var r = key.Length == 1 ? new RectangleF(x, y + (osdSmall.Height - d) / 2, d, d) : new RectangleF(x, y + (osdSmall.Height - d) / 2, o.MeasureString(key, osdTiny).Width + 3, d);
+        Gloss(o, r, d / 2, Mix(c, Color.White, 0.25f), Mix(c, Color.Black, 0.2f));
+        Write(o, key, osdTiny, Color.White, r, StringAlignment.Center, StringAlignment.Center, false);
+        x = r.Right + 2;
+        ShadowText(o, label, osdSmall, LcdInk, x, y);
+        x += o.MeasureString(label, osdSmall).Width + 5;
+    }
+    static Color Mix(Color a, Color b, float k) { return Color.FromArgb(a.A, (int)(a.R + (b.R - a.R) * k), (int)(a.G + (b.G - a.G) * k), (int)(a.B + (b.B - a.B) * k)); }
+    // Bottom: what the keys do now on the left, the date and time stamp on the right.
+    void LcdFoot(Graphics o, int W, int H, DateTime now, bool splash) {
+        float y = H - osdSmall.Height - 3, x = 5;
+        Color a = Color.FromArgb(92, 186, 72), b = Color.FromArgb(220, 70, 60);
+        bool cancel = job != null && ((build.Waiting != null && !build.Ended) || build.FetchWaiting());
+        if (closeAt >= 0) ShadowText(o, "Closing in " + closeAt + " s", osdSmall, LcdInk, x, y);
+        else if (cancel) Badge(o, ref x, y, "B", b, cancelArmed ? "Again to cancel" : "Cancel");
+        else if (splash) { if (CanSkip()) Badge(o, ref x, y, "B", b, skipArmed ? "Again to skip" : "Skip the check"); }
+        else if (job == null) {
+            Badge(o, ref x, y, "A", a, "Select");
+            if (pages.Count > 0 && IsMain(pages.Peek())) Badge(o, ref x, y, "START/STOP", RecRed, "Play");
+            else Badge(o, ref x, y, "B", b, "Back");
+        }
+        string stamp = now.ToString("MMM d yyyy   h:mm tt", System.Globalization.CultureInfo.InvariantCulture).ToUpperInvariant();
+        ShadowText(o, stamp, osdSmall, LcdInk, W - 5 - o.MeasureString(stamp, osdSmall).Width, y);
+    }
+    // The board rides a lane along the bottom of the screen and pops an ollie now and then (USER-ASKS 488).
+    void LcdBoard(Graphics o, float t, float ground, int W) {
+        const float len = 44;
+        float x = -len + (t * vary[17] * 0.25f + vary[18]) % (W + len);
+        float cycle = t % vary[19], jump = 0, tilt = 0;
+        if (cycle < 0.8f) { float q = cycle / 0.8f; jump = (float)Math.Sin(Math.PI * q) * 15; tilt = q < 0.25f ? -18 * q / 0.25f : -18 * (1 - (q - 0.25f) / 0.75f); }
+        using (var pen = new Pen(Color.FromArgb(46, 255, 255, 255), 0.6f)) o.DrawLine(pen, 5, ground + 0.5f, W - 5, ground + 0.5f);
+        using (var b = new SolidBrush(Color.FromArgb(Math.Max(0, (int)(110 * (1 - jump / 24))), 0, 0, 0))) o.FillEllipse(b, x + len * 0.1f + jump * 0.3f, ground - 1.2f, len * 0.8f - jump * 0.6f, 2.6f);
+        float y = ground - len * 34f / 180f - jump;
+        var st = o.Save();
+        float px = x + len / 2, py = y + len * 17f / 180f;
+        o.TranslateTransform(px, py); o.RotateTransform(tilt); o.TranslateTransform(-px, -py);
+        Board(o, x, y, len);
+        o.Restore(st);
+    }
+    // A menu screen: the title tab, the list with the amber selection bar, the selected row's info beside it; a text
+    // page shows its text in a glass box (and a build's first error under it).
+    void LcdPage(Graphics o, Page p, int W, float top, float bottom, float t) {
+        const float m = 5;
+        string title = IsMain(p) ? "HOME" : p.Title.TrimEnd(':', ' ');
+        var tab = new RectangleF(m, top, Math.Min(W - 2 * m, o.MeasureString(title, osdRow).Width + 10), osdRow.Height + 3);
+        Gloss(o, tab, tab.Height / 2, Color.FromArgb(240, 88, 152, 242), Color.FromArgb(240, 26, 74, 168));
+        Write(o, title, osdRow, Color.White, tab, StringAlignment.Center, StringAlignment.Center, false);
+        float y = tab.Bottom + 3;
+        if (p.Body != null) {
+            var br = new RectangleF(m, y, W - 2 * m, p.Items.Count > 0 ? (bottom - y) * 0.6f : bottom - y);
+            Glass(o, br, 5);
+            float textH = br.Height - 6;
+            if (p.Mono != null) textH = Math.Min(textH, o.MeasureString(p.Body, osdSmall, (int)(br.Width - 10)).Height + 2);
+            Write(o, p.Body, osdSmall, LcdInk, new RectangleF(br.X + 5, br.Y + 3, br.Width - 10, textH), StringAlignment.Near, StringAlignment.Near, true);
+            if (p.Mono != null) {
+                var eb = new RectangleF(br.X + 4, br.Y + 4 + textH, br.Width - 8, br.Bottom - 4 - (br.Y + 4 + textH));
+                if (eb.Height > osdSmall.Height) {
+                    using (var path = Round(eb, 3)) { using (var b = new SolidBrush(Color.FromArgb(190, 70, 14, 18))) o.FillPath(b, path); using (var pen = new Pen(Fade(LcdRed, 200), 0.7f)) o.DrawPath(pen, path); }
+                    Write(o, p.Mono, osdSmall, LcdInk, new RectangleF(eb.X + 4, eb.Y + 2, eb.Width - 8, eb.Height - 4), StringAlignment.Near, StringAlignment.Near, true);
+                }
+            }
+            y = br.Bottom + 3;
+        }
+        if (p.Items.Count == 0) return;
+        bool split = p.Body == null;
+        float listW = split ? (float)Math.Floor(W * 0.42f) : W - 2 * m, rowH = osdRow.Height + 4;
+        int fit = Math.Max(1, (int)((bottom - y - 5) / rowH));
+        int first = Math.Max(0, Math.Min(p.Sel - fit / 2, p.Items.Count - fit)), shown = Math.Min(fit, p.Items.Count - first);
+        var box = new RectangleF(m, y, listW, shown * rowH + 5);
+        Glass(o, box, 5);
+        for (int i = first; i < first + shown; i++) {
+            var it = p.Items[i]; bool sel = i == p.Sel;
+            var r = new RectangleF(box.X + 2.5f, box.Y + 2.5f + (i - first) * rowH, box.Width - 5, rowH);
+            if (sel) Gloss(o, r, 3, LcdAmberHi, LcdAmberLo);
+            string text = split ? ShortName(it.Text) : it.Text;
+            bool cur = text.StartsWith("> ");
+            if (cur) text = text.Substring(2);
+            Write(o, text, osdRow, sel ? Color.FromArgb(36, 22, 6) : it.On ? LcdInk : Color.FromArgb(120, 128, 144), new RectangleF(r.X + 5, r.Y, r.Width - (cur ? 14 : 7), r.Height), StringAlignment.Near, StringAlignment.Center, false);
+            if (cur) using (var b = new SolidBrush(sel ? Color.FromArgb(36, 22, 6) : LcdAmber)) o.FillEllipse(b, r.Right - 8, r.Y + rowH / 2 - 2, 4, 4);
+            LoHit(r, i);
+        }
+        using (var pen = new Pen(Color.FromArgb(200, 255, 255, 255), 1f)) {
+            float ax = box.Right - 9;
+            if (first > 0) o.DrawLines(pen, new[] { new PointF(ax, box.Y + 3), new PointF(ax + 3, box.Y + 0.5f), new PointF(ax + 6, box.Y + 3) });
+            if (first + shown < p.Items.Count) o.DrawLines(pen, new[] { new PointF(ax, box.Bottom - 3), new PointF(ax + 3, box.Bottom - 0.5f), new PointF(ax + 6, box.Bottom - 3) });
+        }
+        if (split) LcdInfo(o, p, new RectangleF(box.Right + 4, y, W - m - box.Right - 4, bottom - y), t);
+    }
+    void LcdInfo(Graphics o, Page p, RectangleF r, float t) {
+        Glass(o, r, 5);
+        float x = r.X + 6, w = r.Width - 12, y = r.Y + 4, bottom = r.Bottom - 4, sh = osdSmall.Height;
+        var it = p.Items[p.Sel];
+        if (IsMain(p) && p.Sel == 0) {
+            Write(o, "NOW SELECTED", osdTiny, LcdAmber, new RectangleF(x, y, w, osdTiny.Height + 2), StringAlignment.Near, StringAlignment.Near, false); y += osdTiny.Height + 1;
+            float vh = Math.Min(o.MeasureString(St("version"), osdBig, (int)w).Height, osdBig.Height * 2.2f);
+            Write(o, St("version"), osdBig, LcdInk, new RectangleF(x, y, w, vh), StringAlignment.Near, StringAlignment.Near, true); y += vh + 1;
+            Write(o, St("version_status"), osdSmall, LcdInk, new RectangleF(x, y, w, sh * 2.2f), StringAlignment.Near, StringAlignment.Near, true); y += sh * 2.2f;
+            string send = St("send");
+            Write(o, "Last session: " + St("last") + (send == "" || send == "off" ? "" : "   Send: " + send), osdSmall, LcdDim, new RectangleF(x, y, w, bottom - y - osdRow.Height - 6), StringAlignment.Near, StringAlignment.Near, true);
+            float pulse = 0.55f + 0.45f * (float)Math.Sin(t * 3.2);
+            var play = new RectangleF(x, bottom - osdRow.Height - 4, w, osdRow.Height + 4);
+            Gloss(o, play, play.Height / 2, Fade(Color.FromArgb(242, 74, 62), (int)(150 + 90 * pulse)), Fade(Color.FromArgb(160, 24, 18), (int)(150 + 90 * pulse)));
+            Write(o, "Press START/STOP to play", osdRow, Color.White, play, StringAlignment.Center, StringAlignment.Center, false);
+            return;
+        }
+        string name = it.Text.StartsWith("> ") ? it.Text.Substring(2) : it.Text;
+        float nh = Math.Min(o.MeasureString(name, osdRow, (int)w).Height, osdRow.Height * 2.2f);
+        Write(o, name, osdRow, LcdInk, new RectangleF(x, y, w, nh), StringAlignment.Near, StringAlignment.Near, true); y += nh + 2;
+        Pill(o, it.On ? "READY" : "NOT AVAILABLE", it.On ? LcdGreen : LcdRed, x, y); y += osdTiny.Height + 5;
+        string info = it.Info != "" ? it.Info : it.Hint;
+        if (info != "") {
+            float ih = Math.Min(o.MeasureString(info, osdSmall, (int)w).Height, bottom - y);
+            Write(o, info, osdSmall, LcdInk, new RectangleF(x, y, w, ih), StringAlignment.Near, StringAlignment.Near, true); y += ih + 2;
+        }
+        float nameW = w * 0.38f;
+        using (var line = new Pen(Color.FromArgb(40, 255, 255, 255), 0.5f))
+        foreach (var rec in it.Records) {
+            if (y + sh > bottom) { Write(o, "...", osdSmall, LcdDim, new RectangleF(x, y - 2, w, sh + 2), StringAlignment.Near, StringAlignment.Near, false); break; }
+            int cut = rec.IndexOf(": ");
+            string a = cut > 0 ? rec.Substring(0, cut) : rec, b = cut > 0 ? rec.Substring(cut + 2) : "";
+            if (a.StartsWith("#")) { Write(o, a.Substring(1).ToUpperInvariant() + (b != "" ? "  " + b : ""), osdTiny, LcdAmber, new RectangleF(x, y + 1, w, osdTiny.Height + 2), StringAlignment.Near, StringAlignment.Near, false); y += osdTiny.Height + 3; continue; }
+            float rh = Math.Min(Math.Max(o.MeasureString(a, osdSmall, (int)nameW).Height, o.MeasureString(b, osdSmall, (int)(w - nameW - 3)).Height), Math.Max(sh, bottom - y));
+            o.DrawLine(line, x, y, x + w, y);
+            Write(o, a, osdSmall, LcdInk, new RectangleF(x, y, nameW, rh), StringAlignment.Near, StringAlignment.Near, true);
+            Write(o, b, osdSmall, LcdDim, new RectangleF(x + nameW + 3, y, w - nameW - 3, rh), StringAlignment.Near, StringAlignment.Near, true);
+            y += rh + 1;
         }
     }
+    // A job (fetch, build): its name, the time, a glossy progress bar for cargo's step count, the counts, then the first
+    // error or the newest log lines.
+    void LcdJob(Graphics o, int W, float top, float bottom, float t) {
+        const float m = 5;
+        var card = new RectangleF(m, top, W - 2 * m, bottom - top);
+        Glass(o, card, 6);
+        float x = card.X + 6, w = card.Width - 12, y = card.Y + 4, sh = osdSmall.Height;
+        bool isBuild = build.Active || build.Ended, failed = build.Ended && !build.Ok, fetchWait = build.FetchWaiting();
+        float k = isBuild && build.Total > 0 ? Math.Min(1f, build.Done / (float)build.Total) : -1;
+        var el = DateTime.Now - (isBuild ? build.Start : fetchWait ? build.PreWaitSince : jobStart);
+        Write(o, isBuild ? build.Name : jobTitle, osdBig, LcdInk, new RectangleF(x, y, w * 0.78f, osdBig.Height + 2), StringAlignment.Near, StringAlignment.Near, false);
+        Write(o, BuildView.Clock(el), osdRow, LcdDim, new RectangleF(x, y + 1, w, osdBig.Height + 2), StringAlignment.Far, StringAlignment.Near, false);
+        y += osdBig.Height + 1;
+        if (isBuild) { Write(o, "at " + build.Commit, osdSmall, LcdDim, new RectangleF(x, y, w, sh + 2), StringAlignment.Near, StringAlignment.Near, false); y += sh + 2; }
+        var bar = new RectangleF(x, y, w, 6);
+        using (var path = Round(bar, 3)) { using (var b = new SolidBrush(Color.FromArgb(150, 0, 0, 0))) o.FillPath(b, path); using (var pen = new Pen(Color.FromArgb(60, 255, 255, 255), 0.6f)) o.DrawPath(pen, path); }
+        Color hi = failed ? Color.FromArgb(255, 130, 120) : LcdAmberHi, lo = failed ? Color.FromArgb(200, 40, 30) : LcdAmberLo;
+        if (k >= 0) { if (k > 0) Gloss(o, new RectangleF(bar.X, bar.Y, Math.Max(bar.Height, bar.Width * k), bar.Height), 3, hi, lo); }
+        else {
+            float run = (t * 0.45f) % 1f, segX = bar.X + run * bar.Width * 1.3f - bar.Width * 0.3f;
+            var seg = RectangleF.Intersect(bar, new RectangleF(segX, bar.Y, bar.Width * 0.3f, bar.Height));
+            if (seg.Width > 1) Gloss(o, seg, 3, hi, lo);
+        }
+        y += 10;
+        if (isBuild) {
+            string count = build.Total > 0 ? build.Done + " / " + build.Total + " build steps" : build.Compiled + " crates compiled";
+            if (!build.Ended && build.Waiting != null) count = "Waiting " + BuildView.Clock(DateTime.Now - build.WaitSince) + ": " + build.Waiting;
+            else if (!build.Ended && build.Total == 0 && build.Compiled == 0 && build.StageText != null) count = build.StageText;
+            if (build.Ended) count = build.Ok ? "Built in " + BuildView.Clock(build.End - build.Start) : "Build failed";
+            Write(o, count, osdRow, failed ? LcdRed : LcdInk, new RectangleF(x, y, w * 0.7f, osdRow.Height + 2), StringAlignment.Near, StringAlignment.Near, false);
+            if (build.Warnings > 0) { string wt = build.Warnings + (build.Warnings == 1 ? " warning" : " warnings"); Pill(o, wt, LcdAmber, x + w - o.MeasureString(wt, osdTiny).Width - 3, y + 1); }
+            y += osdRow.Height + 2;
+            string line = !build.Ended && build.Waiting != null ? (build.WaitWho ?? "Cargo does not say who; it continues by itself once that build ends.") : (build.Now != "" && !build.Ended ? "Now: " + build.Now : "");
+            if (line != "") { Write(o, line, osdSmall, LcdDim, new RectangleF(x, y, w, sh * 2.2f), StringAlignment.Near, StringAlignment.Near, true); y += sh * 2.2f; }
+            if (build.Error.Count > 0) {
+                var eb = new RectangleF(x, y, w, card.Bottom - 4 - y);
+                using (var path = Round(eb, 3)) { using (var b = new SolidBrush(Color.FromArgb(190, 70, 14, 18))) o.FillPath(b, path); using (var pen = new Pen(Fade(LcdRed, 200), 0.7f)) o.DrawPath(pen, path); }
+                Write(o, "First error\n" + string.Join("\n", build.Error), osdSmall, LcdInk, new RectangleF(eb.X + 4, eb.Y + 2, eb.Width - 8, eb.Height - 4), StringAlignment.Near, StringAlignment.Near, true);
+            }
+            return;
+        }
+        var lines = new List<string>();
+        for (int i = log.Count - 1; i >= 0 && lines.Count < 12; i--) { string c = Clean(log[i]); if (c != "") lines.Add(c); }
+        string status = fetchWait ? "Waiting " + BuildView.Clock(el) + ": " + build.PreWait : lines.Count > 0 ? lines[0] : "Starting...";
+        Write(o, status, osdRow, LcdInk, new RectangleF(x, y, w, osdRow.Height + 2), StringAlignment.Near, StringAlignment.Near, false); y += osdRow.Height + 2;
+        if (fetchWait) { Write(o, "git stops by itself if nothing arrives for 30 s; cancelling keeps the last fetched version.", osdSmall, LcdDim, new RectangleF(x, y, w, sh * 2.2f), StringAlignment.Near, StringAlignment.Near, true); y += sh * 2.2f; }
+        for (int i = 1; i < lines.Count && y + sh <= card.Bottom - 3; i++) { Write(o, lines[i], osdSmall, Fade(LcdDim, Math.Max(90, 255 - i * 22)), new RectangleF(x, y, w, sh + 1), StringAlignment.Near, StringAlignment.Near, false); y += sh; }
+    }
+    // Power-on screen: the logo, the model, then the start check's step with three pulsing dots.
+    void LcdSplash(Graphics o, int W, int H, float t) {
+        float since = (float)(DateTime.Now - startSince).TotalSeconds;
+        var ls = o.MeasureString("SKATE", osdLogo);
+        float lx = (W - ls.Width) / 2, ly = H * 0.16f;
+        Write(o, "SKATE", osdLogo, LcdInk, new RectangleF(lx, ly, ls.Width + 4, ls.Height), StringAlignment.Near, StringAlignment.Near, false);
+        Gloss(o, new RectangleF(lx + ls.Width - 2, ly + ls.Height * 0.22f, osdRow.Height * 1.4f, osdRow.Height), 3, Color.FromArgb(88, 152, 242), Color.FromArgb(26, 74, 168));
+        Write(o, "HD", osdRow, Color.White, new RectangleF(lx + ls.Width - 2, ly + ls.Height * 0.22f, osdRow.Height * 1.4f, osdRow.Height), StringAlignment.Center, StringAlignment.Center, false);
+        Write(o, "SK8-1000  HIGH DEFINITION", osdTiny, LcdDim, new RectangleF(0, ly + ls.Height * 0.95f, W, osdTiny.Height + 2), StringAlignment.Center, StringAlignment.Near, false);
+        string stage = skipped ? "Finishing the start" : (startStage ?? "Checking for a newer launcher");
+        Write(o, stage, osdRow, LcdInk, new RectangleF(0, H * 0.6f, W, osdRow.Height + 2), StringAlignment.Center, StringAlignment.Near, false);
+        for (int i = 0; i < 3; i++) {
+            float a = 0.35f + 0.65f * Math.Max(0, (float)Math.Sin(t * 4 - i * 0.7));
+            using (var b = new SolidBrush(Fade(LcdAmber, (int)(255 * a)))) o.FillEllipse(b, W / 2f - 8 + i * 7, H * 0.6f + osdRow.Height + 5, 3.4f, 3.4f);
+        }
+        if (since >= 3) ShadowText(o, BuildView.Clock(DateTime.Now - startSince), osdSmall, LcdDim, 5, 4);
+    }
+
+    // A play option's button label: the panel shows the full name, so the button drops the "Play + " / "Play with the "
+    // lead ("Play + trace all" -> "Trace all").
+    // Other long names get a short button label too, and a trailing " (...)" note (version names) goes to the panel only.
+    static readonly Dictionary<string, string> ShortLabels = new Dictionary<string, string> {
+        { "Update and build the selected version", "Update and build" },
+        { "Clear builds and build caches", "Clear builds" },
+        { "Send the logs now", "Send logs" },
+        { "Recomp: get the newest build", "Recomp: newest build" },
+        { "Recomp: get the main PC save", "Recomp: main PC save" },
+    };
+    static string ShortName(string name) {
+        string current = name.StartsWith("> ") ? "> " : "";
+        name = name.Substring(current.Length);
+        string label;
+        if (ShortLabels.TryGetValue(name, out label)) return current + label;
+        foreach (var lead in new[] { "Play + ", "Play with the ", "Play with " })
+            if (name.StartsWith(lead) && name.Length > lead.Length) return current + char.ToUpper(name[lead.Length]) + name.Substring(lead.Length + 1);
+        int note = name.IndexOf(" (");
+        if (note > 0 && name.EndsWith(")")) name = name.Substring(0, note);
+        return current + name;
+    }
+
 }
 
 static class SkateLauncher {
+    // One launcher per folder (laptop 2026-10-19: two windows were open by accident; one held its build log open and
+    // the after-session send failed). The self-update restart releases it before starting the new window.
+    public static System.Threading.Mutex Instance;
+    public static void ReleaseInstance() {
+        if (Instance == null) return;
+        try { Instance.ReleaseMutex(); } catch { }
+        Instance.Dispose(); Instance = null;
+    }
     [STAThread]
     static void Main(string[] argv) {
         Application.EnableVisualStyles();
-        // SkateLauncher.exe --snapshot <out.png> [main|versions|tools|job]: draws one screen at 1920x1080 and exits
-        // (checking the look without opening the window).
+        // SkateLauncher.exe --snapshot <out.png> [main|versions|tools|job|build|failed|waiting|fetching|checking] [<width>x<height>]: draws one screen (default
+        // 1920x1080; the window's own size to check the windowed layout) and exits (checking the look without the window).
+        // SkateLauncher.exe --bench <out.txt> [<width>x<height>]: times Render across the power-on and settled frames
+        // (ms per frame, plus the hand-over to the layered window) into out.txt.
+        // SkateLauncher.exe --wear-test <out.txt> <out.png>: one start's wear roll (as a real start rolls it), checked:
+        // every pixel the marks change lies on the camera's parts (never the LCD glass or off the camera), and no tag or
+        // doodle spills over its part. Appends PASS / FAIL with the counts to out.txt, saves the frame to out.png.
+        if (argv.Length >= 3 && argv[0] == "--wear-test") {
+            var form = new LauncherForm(new string[0]);
+            File.AppendAllText(argv[1], form.WearTest(argv[2]) + Environment.NewLine);
+            return;
+        }
+        if (argv.Length >= 2 && argv[0] == "--bench") {
+            var form = new LauncherForm(new string[0]);
+            int bw = 1243, bh = 777;
+            if (argv.Length > 2) { var wh = argv[2].Split('x'); bw = int.Parse(wh[0]); bh = int.Parse(wh[1]); }
+            File.WriteAllText(argv[1], form.Bench(bw, bh));
+            return;
+        }
         if (argv.Length >= 2 && argv[0] == "--snapshot") {
             var form = new LauncherForm(new string[0]);
-            form.Snapshot(argv[1], argv.Length > 2 ? argv[2] : "main");
+            int sw = 1920, sh = 1080;
+            if (argv.Length > 3) { var wh = argv[3].Split('x'); sw = int.Parse(wh[0]); sh = int.Parse(wh[1]); }
+            form.Snapshot(argv[1], argv.Length > 2 ? argv[2] : "main", sw, sh);
+            return;
+        }
+        string folder = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd('\\').ToLowerInvariant().Replace('\\', '/');
+        bool first;
+        Instance = new System.Threading.Mutex(true, "Local\\SkateLauncher-" + folder, out first);
+        if (!first) {
+            // Already running: bring its window to the front instead of opening a second one.
+            int me = Process.GetCurrentProcess().Id;
+            foreach (var name in new[] { "SkateLauncher", "SkateLauncher.old" })
+                foreach (var other in Process.GetProcessesByName(name))
+                    if (other.Id != me && other.MainWindowHandle != IntPtr.Zero && Native.IsWindowVisible(other.MainWindowHandle)) { Native.Front(other.MainWindowHandle); return; }
             return;
         }
         Application.Run(new LauncherForm(argv));
+        ReleaseInstance();
     }
 }

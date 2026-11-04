@@ -44,6 +44,9 @@ $Tools = @(
        Check = { if (Test-Path (Join-Path $env:WINDIR 'System32\vulkan-1.dll')) { 'vulkan-1.dll present' } } }
 )
 
+# Every version the launcher lists comes from a prebuilt release (launcher.ps1 sets SKATE_LAUNCHER_RELEASES=1): the
+# build tools are not needed, only Git (the launcher's own updates) and Vulkan.
+if ($env:SKATE_LAUNCHER_RELEASES -eq '1') { foreach ($t in $Tools) { if ($t.Id -in @('vs', 'llvm', 'python', 'rust')) { $t.Req = $false } } }
 function Tool-State($t) { try { $r = & $t.Check; if ($r) { return "$r".Trim() } } catch {}; return $null }
 # The required tools still missing, by name ('' = none). launcher.ps1 greys out the build entries while this says so.
 function Missing-Tools {
@@ -80,6 +83,7 @@ foreach ($t in $Tools) {
     "{0}`t{1}`t{2}`t{3}`t{4}" -f $t.Id, $t.Name, $(if ($s) { 1 } else { 0 }), $(if ($s) { $s } else { 'missing' }), $(if ($t.Req) { 1 } else { 0 })
 }
 if (-not $Install) { exit $(if (@($missing | Where-Object { $_.Req }).Count -eq 0) { 0 } else { 1 }) }
+if ($env:SKATE_LAUNCHER_RELEASES -eq '1') { $missing = @($missing | Where-Object { $_.Req }) }
 
 Write-Host ''
 if ($missing.Count -eq 0) { Write-Host '  Everything is installed.'; exit 0 }
@@ -103,6 +107,6 @@ if ($missing | Where-Object { $_.Id -eq 'vulkan' }) { Write-Host '  Vulkan is mi
 Refresh-Path
 Write-Host ''
 $left = @($Tools | Where-Object { $_.Req -and -not (Tool-State $_) })
-if ($left.Count -eq 0) { Write-Host '  All required tools are installed. Next: convert the game files (tools\setup-dev-assets.ps1 -Disc <your Skate 3 ISO>).'; exit 0 }
+if ($left.Count -eq 0) { Write-Host $(if ($env:SKATE_LAUNCHER_RELEASES -eq '1') { '  All required tools are installed. Next: Play.' } else { '  All required tools are installed. Next: convert the game files (tools\setup-dev-assets.ps1 -Disc <your Skate 3 ISO>).' }); exit 0 }
 Write-Host ("  Still missing: " + (($left | ForEach-Object { $_.Name }) -join ', '))
 exit 1
