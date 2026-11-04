@@ -1139,10 +1139,12 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     }
     static float BackOut(float x, float k) { x = Clamp01(x) - 1; return 1 + (k + 1) * x * x * x + k * x * x; }
     readonly float[] vary = { 1, 0.6f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 150, 0, 6.5f };
-    void Vary(Random r) {
+    // The board's speed, place and rhythm are rolled at the start only (boardToo): re-rolling them for the close made
+    // the board jump while the screen faded out.
+    void Vary(Random r, bool boardToo) {
         Func<double, double, float> u = delegate(double lo, double hi) { return (float)(lo + r.NextDouble() * (hi - lo)); };
         vary[0] = u(0.85, 1.15); vary[1] = u(0.2, 1.2); vary[2] = u(-0.04, 0.06); vary[3] = r.Next(3); vary[4] = u(0, 1);
-        vary[17] = u(120, 190); vary[18] = u(0, 400); vary[19] = u(5.5, 8);
+        if (boardToo) { vary[17] = u(120, 190); vary[18] = u(0, 400); vary[19] = u(5.5, 8); }
     }
     float SwingTo { get { return 0.08f + 0.6f * vary[0]; } }
     // 0 = edge-on at the hinge, 1 = facing you (the wobble overshoots a little past flat, then settles).
@@ -1165,7 +1167,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
         if (!IsHandleCreated || !Visible) return;
         needPresent = false;
         float t = (float)clock.Elapsed.TotalSeconds;
-        if (powerOnAt < 0) { powerOnAt = t; Vary(new Random()); }
+        if (powerOnAt < 0) { powerOnAt = t; Vary(new Random(), true); }
         int w = ClientSize.Width, h = ClientSize.Height;
         if (frameBmp == null || frameBmp.Width != w || frameBmp.Height != h) { if (frameBmp != null) frameBmp.Dispose(); frameBmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb); }
         using (var g = Graphics.FromImage(frameBmp)) { g.Clear(Color.Transparent); Render(g, w, h); }
@@ -1174,7 +1176,7 @@ class LauncherForm : Form {    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0
     protected override void OnFormClosing(FormClosingEventArgs e) {
         if (Visible && !poweredOff && (e.CloseReason == CloseReason.UserClosing || e.CloseReason == CloseReason.None || e.CloseReason == CloseReason.TaskManagerClosing)) {
             e.Cancel = true;
-            if (powerOffAt < 0) { powerOffAt = (float)clock.Elapsed.TotalSeconds; Vary(new Random()); if (!tick.Enabled) tick.Start(); Invalidate(); }
+            if (powerOffAt < 0) { powerOffAt = (float)clock.Elapsed.TotalSeconds; Vary(new Random(), false); if (!tick.Enabled) tick.Start(); Invalidate(); }
             return;
         }
         base.OnFormClosing(e);
