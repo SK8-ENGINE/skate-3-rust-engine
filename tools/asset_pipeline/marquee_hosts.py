@@ -1,7 +1,7 @@
 """Challenge hosts (the standing pros) from the retail challenge bank.
 
-Retail (research b129, b96): the challenge manager (`sub_82553DD0` -> `sub_825543E0`) walks each challenge
-record's `tGlobalSpawnCharacterInfo` array (field 555C505A36C3353A, 40-byte elements: +0 class key
+Retail (research b129, b96, b828): the challenge system's CharacterManager (`sub_82553DD0`, its vtable 822FEC10 slot
+22, -> `sub_825543E0`) walks each challenge record's `tGlobalSpawnCharacterInfo` array (field 555C505A36C3353A, 40-byte elements: +0 class key
 `livingworld_entities`, +8 entity key, +24 locator name pointer, +28 flag) and places the host at the named
 locator: `sub_8296EA10` hashes the raw name, the LocationManager registry finds the record and `sub_82911008`
 returns its +48 vector (matrix row 3). A name the registry does not hold stays in a pending list (`sub_82557228`),

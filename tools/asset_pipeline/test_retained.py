@@ -62,7 +62,7 @@ class RetainedTest(unittest.TestCase):
 
     def test_a_kept_map_keeps_its_side_data_and_the_new_run_wins(self):
         counts=carry(self.old,self.new,{'SanitariumDLC'})
-        self.assertEqual(counts,{'teleporters':1,'teleports':1,'park layouts':2,'collection rows':1,'unlocks':1,'audio entries':4})
+        self.assertEqual(counts,{'teleporters':1,'teleports':1,'challenges':0,'park layouts':2,'collection rows':1,'unlocks':1,'audio entries':4})
         new=self.new
         self.assertEqual([t['id'] for t in read(new/'teleporters.json')['teleporters']],['tele_dt','tele_san'])
         self.assertTrue(read(new/'teleporters.json')['teleporters'][0]['new'],'the new run wrote it: kept as is')

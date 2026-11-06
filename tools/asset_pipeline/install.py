@@ -716,6 +716,7 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                         named={}
                         report(f'Map names unavailable ({error}); the lists show file names')
                     # Teleporters (teleporters.py, research b420 / b421): the disc's and the packs' teleport challenges per map.
+                    bigs=[]
                     try:
                         from .teleporters import export as write_teleporters
                         bigs=dlc_packages.extract_bigs(dlc_folder,work/'dlc',lambda paths:any(p.lower().startswith(('data/db/challenge','data/content/missions/')) for p in paths)) if dlc_jobs else []
@@ -725,6 +726,14 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                     except CONTENT_ERRORS as error:
                         (stage/'assets/private/teleporters.json').unlink(missing_ok=True)
                         note(private/'map-status'/'teleporters-availability.json','Teleporters',error,report=report)
+                    # Challenges (challenges.py, doc 42): own the spot volumes, start and owned / killed it points per challenge.
+                    try:
+                        from .challenges import export as write_challenges
+                        write_challenges(game_root,dlc_vaults,bigs,work/'challenges',stage/'assets/private/challenges.json',text if named else None,report)
+                        (private/'map-status'/'challenges-availability.json').unlink(missing_ok=True)
+                    except CONTENT_ERRORS as error:
+                        (stage/'assets/private/challenges.json').unlink(missing_ok=True)
+                        note(private/'map-status'/'challenges-availability.json','Challenges',error,report=report)
                     # Challenge visual indicators (visual_indicators.py, research b532 / b533): the teleporters' floating icons.
                     try:
                         from .visual_indicators import export as write_indicators

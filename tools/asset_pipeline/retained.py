@@ -110,6 +110,7 @@ def carry(old_private,new_private,maps,report=lambda _:None):
     counts={
         'teleporters':_rows(old_private/'teleporters.json',new_private/'teleporters.json','teleporters',maps,1),
         'teleports':_rows(old_private/'teleports.json',new_private/'teleports.json','destinations',maps,2),
+        'challenges':_rows(old_private/'challenges.json',new_private/'challenges.json','challenges',maps,1),
         'park layouts':_park_layouts(old_private/'park-layouts',new_private/'park-layouts',maps),
         'collection rows':sum(_copy(f,new_private/'stock/dlc'/f.name)
                               for f in sorted((old_private/'stock/dlc').glob('*')) if f.is_file()),
