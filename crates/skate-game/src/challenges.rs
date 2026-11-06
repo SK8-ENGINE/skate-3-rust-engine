@@ -204,6 +204,12 @@ fn update(
     let volume_event = |id: &str, enter: bool| {
         u64::from_str_radix(id, 16).ok().map(|volume| if enter { Event::TriggerEnter { volume } } else { Event::TriggerExit { volume } })
     };
+    let ours = [&run.challenge.boundary, &run.challenge.scoring, &run.challenge.spot];
+    for (id, verb) in exited.iter().map(|i| (i, "exit")).chain(entered.iter().map(|i| (i, "enter"))) {
+        if let Some(v) = ours.iter().find(|v| v.id == *id) {
+            info!("SKATE_CHALLENGE {} {verb} {}", run.challenge.id, v.name);
+        }
+    }
     for id in &exited {
         if let Some(e) = volume_event(id, false) {
             commands.extend(run.ots.handle(e));
@@ -244,6 +250,8 @@ fn update(
         i += 1;
         match command {
             Command::Teleport => {
+                info!("SKATE_CHALLENGE {} teleport to {} {:?} from {feet:?}", run.challenge.id, run.challenge.start.locator,
+                    &run.challenge.start.matrix[3][..3]);
                 if let Err(e) = skater.travel_ex(run.challenge.start.matrix, None, true) {
                     warn!("SKATE_CHALLENGE teleport {e}");
                 }
