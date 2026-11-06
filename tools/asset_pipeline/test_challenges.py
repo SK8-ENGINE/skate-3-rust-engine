@@ -46,9 +46,9 @@ class ChallengeData(unittest.TestCase):
             old.mkdir()
             new.mkdir()
             rows = [{'id': 'ots_dwtn_01', 'map': 'DownTown'}, {'id': 'ots_dlc_01', 'map': 'DlcMap'}]
-            (old / 'challenges.json').write_text(json.dumps({'format': 'skate3rust-challenges', 'version': 1,
+            (old / 'challenges.json').write_text(json.dumps({'format': 'skate3rust.challenges', 'version': 1,
                                                              'challenges': rows}), encoding='utf-8')
-            (new / 'challenges.json').write_text(json.dumps({'format': 'skate3rust-challenges', 'version': 1,
+            (new / 'challenges.json').write_text(json.dumps({'format': 'skate3rust.challenges', 'version': 1,
                                                              'challenges': rows[:1]}), encoding='utf-8')
             counts = carry(old, new, {'DlcMap'})
             self.assertEqual(counts['challenges'], 1)

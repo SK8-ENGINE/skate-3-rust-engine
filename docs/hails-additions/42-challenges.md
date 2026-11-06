@@ -1,7 +1,7 @@
 # 42. Challenges (own the spot first)
 
 Branch `world/challenges` (from `world/replay`; becomes its own upstream PR once #52 has landed). Status: research done,
-setup export and the challenge HUD movies landed; the engine side (runner, timers, objectives, HUD, completion) is next.
+setup export, the challenge HUD movies and the own the spot state machine (skate-core) landed; the engine side (runner, timers, objectives, HUD, completion) is next.
 
 ## Problem
 
@@ -30,7 +30,7 @@ and the retail values as data; no retail Lua interpreter. Mods add challenges th
 
 ## Change: the setup export (`tools/asset_pipeline/challenges.py`)
 
-Writes `assets/private/challenges.json` (format `skate3rust-challenges`, version 1) for the families in `FAMILIES`
+Writes `assets/private/challenges.json` (format `skate3rust.challenges`, version 1) for the families in `FAMILIES`
 (today `own_the_spots`), from the disc and the DLC packs:
 
 | Field | Source |
@@ -60,12 +60,33 @@ Details:
 `challenge/ownthespot`, `challenge/killedit` (FE templates per research b834; the banners per b836 / b837).
 The three earlier movies (trickdisplay, hudcentral, hudminimap) come out byte-identical to an installed copy.
 
+## Change: the own the spot state machine (`crates/skate-core/src/challenges/`)
+
+Engine independent (no ECS), deterministic, plain data: `ots::Ots` takes engine events (HUD loaded, trigger enter /
+exit, all objectives complete / not enough points with the points, wipeout / over, discovery exit, highlight reel
+complete, abandon / terminate / restart) and returns commands (HUD show / update, timer HUD, messages, teleport, reset
+trigger volumes, reset objectives, evaluation on / off, point requirement, high score, play reel, complete with a
+`Completion`). It follows the retail graph (research b838) and runner rules (b832):
+- a state change is queued and applied after the message; the new state's enter runs then; current state handlers
+  run before the global ones;
+- timers (`challenges::timers`) hold trunc(seconds * 60) ticks and lose one per 60 Hz tick;
+- the target is the owned score until the personal best reaches it, then the killed it score, then the personal
+  best; a win completes the challenge only when that tier moves up, otherwise the challenge loops back to the start;
+- not enough points resets the objectives and freezes scoring 0.5 s (no fail); a bail pauses scoring and resets on
+  wipeout over; leaving the boundary starts the out-of-bounds countdown (expiry abandons), coming back cancels it;
+- the killed it / owned it banner timers read the two display times crossed, as retail does;
+- `Record` keeps the best completion, which only moves up (retail 82C1D878).
+Not ported yet: SimulPlay, online scores, the intro presentation, highlight groups. Open: where the bank keeps the
+two display times and the out-of-bounds time (not under those names' hashes; the family row has unnamed floats 10,
+100 and 250).
+
 ## Files
 
 - `tools/asset_pipeline/challenges.py` (new), `tools/asset_pipeline/test_challenges.py` (new)
 - `tools/asset_pipeline/install.py` (the export step, after teleporters)
 - `tools/asset_pipeline/map_volumes.py` (`strict`), `tools/asset_pipeline/retained.py`, `test_retained.py`
 - `tools/prepare_hud.py` (the six challenge movies)
+- `crates/skate-core/src/challenges/` (mod, timers, ots, ots/tests), `crates/skate-core/src/lib.rs`
 
 ## Verification
 

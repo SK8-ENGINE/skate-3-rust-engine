@@ -18,7 +18,7 @@ from .teleporters import _sources, parse_trigger, LOCAL, BANKS, MISSIONS
 from .teleports import cstring, label_of, location_records
 from .vlt import hash64
 
-FORMAT = 'skate3rust-challenges'
+FORMAT = 'skate3rust.challenges'
 VERSION = 1
 FAMILIES = ('own_the_spots',)
 CHALLENGE = 'Hash_A4F35B159D7432B5'  # challenge_global_data
