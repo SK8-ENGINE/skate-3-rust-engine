@@ -57,7 +57,14 @@ def font_mapping(collections: Path, cache: AssetCache) -> dict:
 MOVIES = (("data/fe/source/screens/hud2/trickdisplay2", "trickdisplay.json"),
           ("data/fe/source/screens/hud2/hudcentral", "hudcentral.json"),
           # The HUD minimap's frame (template 53 MiniMap, research b568); the map picture is drawn by the engine.
-          ("data/fe/source/screens/hud2/hudminimap", "hudminimap.json"))
+          ("data/fe/source/screens/hud2/hudminimap", "hudminimap.json"),
+          # Challenge HUD components and the own the spot banners (doc 42, research b834 / b836 / b837).
+          ("data/fe/source/screens/hud2/hudtimer", "hudtimer.json"),
+          ("data/fe/source/screens/hud2/hudcountdown", "hudcountdown.json"),
+          ("data/fe/source/screens/hud2/hudobjective2", "hudobjective2.json"),
+          ("data/fe/source/screens/hud2/dpo", "dpo.json"),
+          ("data/fe/source/screens/challenge/ownthespot", "ownthespot.json"),
+          ("data/fe/source/screens/challenge/killedit", "killedit.json"))
 
 
 def prepare(game: Path, output: Path, collections: Path):

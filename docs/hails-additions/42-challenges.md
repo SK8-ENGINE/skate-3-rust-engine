@@ -1,7 +1,7 @@
 # 42. Challenges (own the spot first)
 
 Branch `world/challenges` (from `world/replay`; becomes its own upstream PR once #52 has landed). Status: research done,
-setup export landed; the engine side (runner, timers, objectives, HUD, completion) is next.
+setup export and the challenge HUD movies landed; the engine side (runner, timers, objectives, HUD, completion) is next.
 
 ## Problem
 
@@ -53,11 +53,19 @@ Details:
 - Result on the disc: 16 own the spots on 3 maps; `ots_ind_01` is left out (no StartLocation, a leftover beside
   `ots_indu_01..05`). Export time 0.9 s; two runs give identical output.
 
+## Change: the challenge HUD movies (`tools/prepare_hud.py`)
+
+`MOVIES` gained the own the spot HUD components and banners, written beside the existing HUD movies as
+`private/hud/runtime/<file>`: `hud2/hudtimer`, `hud2/hudcountdown`, `hud2/hudobjective2`, `hud2/dpo`,
+`challenge/ownthespot`, `challenge/killedit` (FE templates per research b834; the banners per b836 / b837).
+The three earlier movies (trickdisplay, hudcentral, hudminimap) come out byte-identical to an installed copy.
+
 ## Files
 
 - `tools/asset_pipeline/challenges.py` (new), `tools/asset_pipeline/test_challenges.py` (new)
 - `tools/asset_pipeline/install.py` (the export step, after teleporters)
 - `tools/asset_pipeline/map_volumes.py` (`strict`), `tools/asset_pipeline/retained.py`, `test_retained.py`
+- `tools/prepare_hud.py` (the six challenge movies)
 
 ## Verification
 
