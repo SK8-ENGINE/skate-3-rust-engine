@@ -62,6 +62,15 @@ pub(crate) enum StatEvent {
     /// The air ended landed with this many body flips (82773C00, |P+0x2674|).
     BodyFlips(u32),
 }
+/// One banked sequence: its score and whether it ended in a bail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BankedSequence {
+    pub score: i32,
+    pub wiped_out: bool,
+}
+
+const BANKED_CAP: usize = 16;
+
 pub(crate) struct Runtime {
     pub data: ScoringData,
     pub(crate) stat_events: Vec<StatEvent>,
@@ -95,6 +104,7 @@ pub(crate) struct Runtime {
     revert_id: Option<usize>,
     sequence_active: bool,
     sequence_score: f32,
+    banked: Vec<BankedSequence>,
     trick_name: String,
     display_base: String,
     display_spin_degrees: i32,
@@ -150,6 +160,7 @@ impl Runtime {
             revert_id: None,
             sequence_active: false,
             sequence_score: 0.,
+            banked: Vec::new(),
             trick_name: String::new(),
             display_base: String::new(), display_spin_degrees: 0,
             trick_seq: 0,
@@ -176,6 +187,10 @@ impl Runtime {
     }
     pub(crate) fn sequence_score(&self) -> f32 {
         self.sequence_score
+    }
+    /// The sequences banked since the last call (retail cMsgSequenceComplete, research b841; challenges.rs).
+    pub(crate) fn take_banked(&mut self) -> Vec<BankedSequence> {
+        std::mem::take(&mut self.banked)
     }
     pub(crate) fn sequence_active(&self) -> bool {
         self.sequence_active
@@ -780,6 +795,9 @@ impl Runtime {
             self.sequence_score =
                 self.session
                     .publish_sequence(&self.data.session_rules(), 1., bailout, true);
+            if self.banked.len() < BANKED_CAP {
+                self.banked.push(BankedSequence { score: self.sequence_score as i32, wiped_out: bailout });
+            }
             bevy::log::info!(target: "scoring", "SCORING_BANK tick={} state={} raw={} applied_multiplier={} reward={} next_multiplier={} line={} line_expired={} bail={} teleport={}", f.tick, f.state, raw_reward, applied_multiplier, self.sequence_score, self.session.combo.multiplier, self.session.holder.snapshot.line, self.session.line.expired, bailout, f.teleported);
             if !bailout
                 && !f.teleported

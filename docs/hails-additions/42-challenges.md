@@ -38,8 +38,10 @@ Writes `assets/private/challenges.json` (format `skate3rust.challenges`, version
 | `id`, `family`, `map`, `district` | bank row key, parent chain, the boundary's district |
 | `title_id`, `title`, `description_id` | bank row text ids (resolved title when the text tables are available) |
 | `boundary` | OTSTriggerBoundary (bank) -> the volume in the hull |
-| `spot` | OTSScoringBoundary (local data) -> the volume in the hull |
+| `scoring` | OTSScoringBoundary (local data) -> the volume in the hull |
+| `spot` | the spot objective's completion condition (Lua text in the bank, `ObjectiveTrigger.EnteredVolume("<id>", "DISTRICT\|name")`, research b840) -> the volume in the hull: a line must pass through it to count |
 | `start` | StartLocation (local data) -> the 0x00EB0009 locator in the hull, else the district's global locators |
+| `location`, `sign_up_radius`, `discovery_radius` | Location (the challenge locator, global locators) and the family's GlobalActivateRadius (10 m sign-up sphere) / DiscoveryActivateRadius (100 m: leaving it abandons a run, research b843) |
 | `owned_points`, `killed_points` | PointRequirement of the ObjectivesOwned / ObjectivesKilledIt groups |
 
 Details:
@@ -80,6 +82,25 @@ Not ported yet: SimulPlay, online scores, the intro presentation, highlight grou
 two display times and the out-of-bounds time (not under those names' hashes; the family row has unnamed floats 10,
 100 and 250).
 
+## Change: own the spot in play (`crates/skate-game/src/challenges.rs`)
+
+- Loads `private/challenges.json` once; on each map, a run started with `SKATE_CHALLENGE=<id>` (dev start until the
+  retail sign-up flow is ported) arms the challenge's three volumes, starts `ots::Ots` with the session's best score,
+  and each frame feeds it the player's trigger enter / exit events, the banked sequences and 60 Hz timer ticks.
+- Points (retail rule, research b841): retail posts `cMsgSequenceComplete` (SequenceScore, Wipedout,
+  UsedSessionMarker) when a sequence ends. Our scoring runtime now queues every banked sequence
+  (`scoring_runtime::BankedSequence`, at the bank point beside `SCORING_BANK`); a sequence counts only when scoring
+  is on, it did not end in a bail, and the player entered the spot volume during it; the spot clears after every
+  sequence (activation mode 5). The group total against the current target gives all objectives complete or not
+  enough points.
+- Commands: teleport to the start locator (`travel_ex`, on board), objectives reset / evaluation / requirement, the
+  completion recorded per challenge for the session (the tier only moves up). HUD commands are logged until the
+  HUD movies run; the HUD counts as loaded at once and the highlight reel completes at once.
+- Leaving the discovery sphere (distance from the challenge locator > `discovery_radius`, checked every frame as
+  retail 8255BEB8 does) sends exit discovery, which abandons the run.
+- Placeholders, not retail values: the out-of-bounds time (10 s; the family's 10 / 100 / 250 floats are radii) and both banner times (3 s), until the bank fields
+  are located.
+
 ## Files
 
 - `tools/asset_pipeline/challenges.py` (new), `tools/asset_pipeline/test_challenges.py` (new)
@@ -87,6 +108,7 @@ two display times and the out-of-bounds time (not under those names' hashes; the
 - `tools/asset_pipeline/map_volumes.py` (`strict`), `tools/asset_pipeline/retained.py`, `test_retained.py`
 - `tools/prepare_hud.py` (the six challenge movies)
 - `crates/skate-core/src/challenges/` (mod, timers, ots, ots/tests), `crates/skate-core/src/lib.rs`
+- `crates/skate-game/src/challenges.rs` (new), `scoring_runtime.rs` (banked sequences), `main.rs`, `app.rs`
 
 ## Verification
 

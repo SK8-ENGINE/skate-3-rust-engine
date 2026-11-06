@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.asset_pipeline.challenges import CHALLENGE, GROUP, POINTS, chain, group_points
+from tools.asset_pipeline.challenges import CHALLENGE, ENTERED, GROUP, POINTS, chain, group_points
 from tools.asset_pipeline.retained import carry
 from tools.asset_pipeline.vlt import hash64
 
@@ -39,6 +39,14 @@ class ChallengeData(unittest.TestCase):
         self.assertEqual(group_points(rows, refspec(GROUP, 0x0D9EECD4FCD859B4)), 1500)
         self.assertIsNone(group_points(rows, refspec(GROUP, 1)))
         self.assertIsNone(group_points(rows, None))
+
+    def test_spot_condition_names_its_volume(self):
+        text = ('do\n\treturn ObjectiveTrigger.EnteredVolume("2446202983646982", '
+                '"DIST_DownTown|ots_a_spotvolume_01" );\nend;')
+        match = ENTERED.search(text)
+        self.assertEqual((match.group(1), match.group(2), match.group(3)),
+                         ('2446202983646982', 'DIST_DownTown', 'ots_a_spotvolume_01'))
+        self.assertEqual('%016x' % int(match.group(1)), '0008b0cf03e38706')
 
     def test_kept_dlc_map_keeps_its_challenges(self):
         with tempfile.TemporaryDirectory() as folder:

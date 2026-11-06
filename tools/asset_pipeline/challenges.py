@@ -10,6 +10,7 @@ Only the families in FAMILIES are exported. A challenge whose volumes or start d
 reported. Output: assets/private/challenges.json.
 """
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -35,6 +36,11 @@ START = _field('StartLocation')
 OWNED = _field('ObjectivesOwned')
 KILLED = _field('ObjectivesKilledIt')
 POINTS = _field('PointRequirement')
+OBJECTIVES = _field('Objectives')
+DEFINITION = 'Hash_E13D9C326E4D98D5'  # tObjectiveDefinition: completion condition text offset, description offset
+ENTERED = re.compile(r'EnteredVolume\(\s*"(\d+)"\s*,\s*"([^"|]+)\|([^"]+)"')
+SIGN_UP_RADIUS = _field('GlobalActivateRadius')
+DISCOVERY_RADIUS = _field('DiscoveryActivateRadius')
 TITLE = 'Hash_E2A50788B6C20C92'
 DESCRIPTION = 'Hash_6B0BD2BAE508B742'
 
@@ -62,6 +68,42 @@ def group_points(rows_by_hash, value):
         row = rows_by_hash.get(('Hash_%016X' % cls, key))
         if row and POINTS in row['fields']:
             return struct.unpack('>i', bytes.fromhex(row['fields'][POINTS]['data']))[0]
+    return None
+
+
+def location_field(fields):
+    """The bank row's Location (tLocationID), under its name or its hash."""
+    return fields.get('Location') or fields.get(_field('Location'))
+
+
+def radius(fields, key):
+    value = fields.get(key)
+    return struct.unpack('>f', bytes.fromhex(value['data'][:8]))[0] if value and value.get('data') else None
+
+
+def refs(value):
+    """(class, key hash) of each RefSpec array item."""
+    out = []
+    for item in ((value or {}).get('array') or {}).get('items') or []:
+        raw = bytes.fromhex(item)
+        if len(raw) >= 16:
+            out.append(('Hash_%016X' % struct.unpack_from('>Q', raw, 0)[0], struct.unpack_from('>Q', raw, 8)[0]))
+    return out
+
+
+def spot_volume(rows_by_hash, owned, binary):
+    """(district, volume name, instance id) the owned group's spot objective completes on: its completion condition
+    is Lua text in the bank (research b840) calling ObjectiveTrigger.EnteredVolume("<id>", "DISTRICT|name")."""
+    for group in refs(owned):
+        row = rows_by_hash.get(group)
+        for objective in refs((row or {}).get('fields', {}).get(OBJECTIVES)):
+            definition = (rows_by_hash.get(objective) or {}).get('fields', {}).get(DEFINITION)
+            if not definition:
+                continue
+            text = cstring(binary, struct.unpack_from('>I', bytes.fromhex(definition['data']), 0)[0]).decode('utf-8')
+            match = ENTERED.search(text)
+            if match:
+                return match.group(2), match.group(3), int(match.group(1))
     return None
 
 
@@ -150,8 +192,12 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             folder = work / 'hulls' / MISSIONS / key
             if not folder.is_dir():
                 hull_archive.extract_entries(entries, work / 'hulls')
-            boundary, spot = volume_of(folder, boundary_id), volume_of(folder, spot_id)
-            if boundary is None or spot is None:
+            target = spot_volume(rows_by_hash, fields.get(OWNED), bank_binary)
+            if target is None:
+                raise ValueError('no spot objective volume')
+            boundary, scoring = volume_of(folder, boundary_id), volume_of(folder, spot_id)
+            spot = volume_of(folder, target[2])
+            if boundary is None or scoring is None or spot is None:
                 raise ValueError('hull lacks a volume')
             starts = [r['matrix'] for _, _, arena in stream_arenas(folder) for r in location_records(arena)
                       if r['locator'] == start_name]
@@ -159,6 +205,19 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
                 starts = global_locators().get((district.casefold(), start_name), [])
             if len({json.dumps(m) for m in starts}) != 1:
                 raise ValueError(f'start locator {start_name}: {len(starts)} records')
+            location = location_field(fields)
+            if not location:
+                raise ValueError('no Location')
+            location_name = cstring(bank_binary, int(location['data'], 16)).decode('utf-8')
+            places = global_locators().get((district.casefold(), location_name), [])
+            if not places:
+                places = [r['matrix'] for _, _, arena in stream_arenas(folder) for r in location_records(arena)
+                          if r['locator'] == location_name]
+            if len({json.dumps(m) for m in places}) != 1:
+                raise ValueError(f'location {location_name}: {len(places)} records')
+            sign_up, discovery = radius(fields, SIGN_UP_RADIUS), radius(fields, DISCOVERY_RADIUS)
+            if sign_up is None or discovery is None:
+                raise ValueError('no activation radii')
             owned = group_points(rows_by_hash, fields.get(OWNED))
             killed = group_points(rows_by_hash, fields.get(KILLED))
             if owned is None or killed is None:
@@ -172,8 +231,11 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             title_id=title_id, title=text.get(title_id) if title_id else None,
             description_id=(fields.get(DESCRIPTION) or {}).get('data') or None,
             boundary=dict(name=boundary_name, id='%016x' % boundary_id, volume=boundary),
-            spot=dict(name=spot_name, id='%016x' % spot_id, volume=spot),
+            scoring=dict(name=spot_name, id='%016x' % spot_id, volume=scoring),
+            spot=dict(name=target[1], id='%016x' % target[2], volume=spot),
             start=dict(locator=start_name, matrix=starts[0]),
+            location=dict(locator=location_name, matrix=places[0]),
+            sign_up_radius=sign_up, discovery_radius=discovery,
             owned_points=owned, killed_points=killed))
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
