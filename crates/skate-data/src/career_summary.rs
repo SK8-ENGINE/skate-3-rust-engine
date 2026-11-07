@@ -73,6 +73,48 @@ pub fn summary_rows(c: &Collections) -> Vec<SummaryRow> {
     rows
 }
 
+const TAB_CLASS: &str = "Hash_B5D4474F18223090";
+const TAB_TITLE: &str = "Hash_AA753A536859233D";
+const TAB_LIST: &str = "Hash_C83BB50EC9A5A801";
+const TAB_ORDER: &str = "Hash_804F77ACECCF24CB";
+const TAB_KINDS: &str = "Hash_17E926A1AA38ACC4";
+
+/// A reward summary tab (progression_reward_tabs, research b873 §4): the unlock kinds it lists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RewardTab {
+    pub key: String,
+    pub title: String,
+    /// IsCategoryShownAsList.
+    pub list: bool,
+    pub order: i16,
+    pub kinds: Vec<u32>,
+}
+
+/// Every titled reward tab, sorted by order then key.
+pub fn reward_tabs(c: &Collections) -> Vec<RewardTab> {
+    let mut tabs: Vec<RewardTab> = c
+        .entries()
+        .iter()
+        .filter(|e| key_hash(&e.class_name) == key_hash(TAB_CLASS))
+        .filter_map(|e| {
+            let field = |name: &str| c.field(TAB_CLASS, &e.key, name).ok();
+            let title = field(TAB_TITLE).map(|f| f.data.clone()).filter(|t| !t.is_empty() && t != "None")?;
+            Some(RewardTab {
+                key: e.key.clone(),
+                title,
+                list: c.boolean(TAB_CLASS, &e.key, TAB_LIST).unwrap_or(false),
+                order: field(TAB_ORDER).and_then(|f| u16::from_str_radix(f.data.get(0..4)?, 16).ok()).unwrap_or(0) as i16,
+                kinds: field(TAB_KINDS)
+                    .and_then(|f| f.array.as_ref())
+                    .map(|a| a.items.iter().filter_map(|i| u32::from_str_radix(i.get(0..8)?, 16).ok()).collect())
+                    .unwrap_or_default(),
+            })
+        })
+        .collect();
+    tabs.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.key.cmp(&b.key)));
+    tabs
+}
+
 const TIER_CLASS: &str = "Hash_939D7B12889CCF21";
 const TIER_BIT: &str = "Hash_4632B6D0D476D3AB";
 const TIER_KIND: &str = "Hash_5F64C810E0CBABD3";

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::hud_challenge::{ChallengeHudState, Component, DpoSlot, ObjectiveRow};
 use skate_core::challenges::ots::{Command, Event, HudComponent, Ots, Params, TargetText};
 use skate_core::challenges::Completion;
+use skate_core::challenges::poster::{Outcome, Poster, PosterView, Title, BEAT_SCORE};
 use skate_data::trigger_volumes::TriggerVolumeRecord;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -38,6 +39,13 @@ pub(crate) struct Challenge {
     pub title_id: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
+    /// The sign-up poster's description id, its "%d" argument and IsObjectivesEnabled (research b947).
+    #[serde(default)]
+    pub description_id: Option<String>,
+    #[serde(default)]
+    pub description_arg: i64,
+    #[serde(default)]
+    pub objectives_enabled: bool,
     pub boundary: Volume,
     pub scoring: Volume,
     pub spot: Volume,
@@ -96,6 +104,29 @@ const OWN_THE_SPOT_TYPE: i32 = 9;
 /// The action overlay state of a challenge's sign-up (82665E88, research b849): one own the spot (eChallengeTypes 9)
 /// shows the OTS state 5 ("Activate Spot"), any other challenge the Challenge state 1. An export from before the
 /// type keys on the family.
+/// What the sign-up poster shows for `c` (research b947): the description with its argument, killable and the owned /
+/// killed board sales from the career's progression export (827CDA70, 825BF2C0; the co-op bonus is online only), and
+/// own the spot's objective titles (8264D130, type 9: beat the owned / killed point requirement). No teammates or
+/// co-op offline, so Start is the only option.
+fn poster_view(c: &Challenge, saved: &crate::challenge_records::Saved, progression: Option<&skate_core::career::Progression>) -> PosterView {
+    let rewards = progression.and_then(|p| p.challenge_rewards.get(&c.id));
+    PosterView {
+        challenge_id: c.id.clone(),
+        title_id: c.title_id.clone().or_else(|| c.title.clone()),
+        description: c.description_id.clone().map(|id| Title { id, arg: Some(c.description_arg) }),
+        objectives_enabled: c.objectives_enabled,
+        objectives_owned: vec![Title { id: BEAT_SCORE.into(), arg: Some(c.owned_points as i64) }],
+        objectives_killed: if c.killed_points > 0 { vec![Title { id: BEAT_SCORE.into(), arg: Some(c.killed_points as i64) }] } else { Vec::new() },
+        killable: progression.is_some_and(|p| p.killable.contains(&c.id)),
+        owned: saved.completion.as_deref() == Some("owned"),
+        killed: saved.completion.as_deref() == Some("killed"),
+        rewards: rewards.map_or((0, 0, 0), |r| (r.owned.sales as i32, r.killed.sales as i32, 0)),
+        rewards_shown: rewards.is_some(),
+        can_sign_up: true,
+        ..PosterView::default()
+    }
+}
+
 pub(crate) fn sign_up_state(c: &Challenge) -> i32 {
     let ots = c.challenge_type.map_or(c.family == "own_the_spots", |t| t == OWN_THE_SPOT_TYPE);
     if ots { 5 } else { 1 }
@@ -461,8 +492,22 @@ fn sign_up(
     lines: Query<Entity, With<SignUpLine>>,
     mut entered: MessageReader<crate::trigger_volumes::TriggerEntered>,
     time: Res<Time>,
+    mut poster: ResMut<crate::poster_host::PosterScreen>,
+    career: Option<Res<crate::career::CareerState>>,
 ) {
-    let gameplay = crate::graphics_menu::gameplay_active(menu) && !replay.active;
+    // The poster's answer (825ED410): A starts the challenge (825EE188 -> 82D52B60), B cancels the pending sign-up.
+    match poster.outcome.take() {
+        Some(Outcome::Start(id)) => {
+            info!("SKATE_CHALLENGE sign-up {id} (poster)");
+            signed.write(ChallengeSignUp { body: crate::trigger_volumes::PLAYER.into(), challenge: id });
+        }
+        Some(Outcome::Cancel) => {
+            info!("SKATE_CHALLENGE sign-up cancelled (poster)");
+            challenges.prompt_age = 0.;
+        }
+        _ => {}
+    }
+    let gameplay = crate::graphics_menu::gameplay_active(menu) && !replay.active && poster.poster.is_none();
     let feet = crate::trigger_volumes::player_points(&skater)[0];
     let boundaries: Vec<String> = entered.read().filter(|e| e.body == crate::trigger_volumes::PLAYER).map(|e| e.volume.clone()).collect();
     if !boundaries.is_empty() {
@@ -529,6 +574,11 @@ fn sign_up(
     }
     if pressed {
         match near.as_slice() {
+            // One challenge: the sign-up poster first (b932, b935), with the stage and the screens switch.
+            [c] if poster.available => {
+                info!("SKATE_CHALLENGE poster {}", c.id);
+                poster.poster = Some(Poster::new(poster_view(c, &challenges.records.get(&c.id), career.as_ref().and_then(|c| c.data.as_ref()).map(|d| &d.progression))));
+            }
             [c] => {
                 info!("SKATE_CHALLENGE sign-up {}", c.id);
                 signed.write(ChallengeSignUp { body: crate::trigger_volumes::PLAYER.into(), challenge: c.id.clone() });
@@ -591,6 +641,7 @@ fn update(
     config: Res<crate::config::Config>,
     pad: Option<Res<crate::input::ControllerInput>>,
     physics: Option<Res<crate::physics::GamePhysics>>,
+    mut end_dialog: ResMut<crate::end_dialog_host::EndDialogScreen>,
 ) {
     use crate::ui_audio::SessionMarkerAction;
     let marker_flags: Vec<bool> = markers.read().filter_map(|m| match m.action {
@@ -644,7 +695,8 @@ fn update(
             pump_user: skater.ground.pumping.intentional_pumping != 0,
             grind_rail: (400..=405).contains(&skater.physical_state_id())
                 .then_some(skater.player_input.grind.rail_owner).flatten()
-                .and_then(|owner| physics.as_ref().and_then(|p| p.rail_guids(owner))) };
+                .and_then(|owner| physics.as_ref().and_then(|p| p.rail_guids(owner))),
+            end_choice: end_dialog.choice.take() };
         let actions = if std::mem::take(&mut challenges.mods.abort) { tutorial.abandon() } else { tutorial.step(&input) };
         let mut finished = false;
         for action in actions {
@@ -652,6 +704,19 @@ fn update(
                 crate::tutorial_run::Action::Teleport { matrix, offboard } => {
                     if let Err(e) = skater.travel_ex(matrix, None, !offboard) {
                         warn!("SKATE_TUTORIAL teleport {e}");
+                    }
+                }
+                crate::tutorial_run::Action::OpenEndDialog => {
+                    let d = &mut end_dialog;
+                    d.dialog.passed = true;
+                    d.dialog.killed = false;
+                    d.title = tutorial.data.title_id.clone();
+                    if d.available {
+                        info!("SKATE_CHALLENGE end dialog {:?} options {:?}", d.movie(), d.dialog.slots);
+                        d.open = true;
+                    } else {
+                        info!("SKATE_CHALLENGE end dialog NOT RETAIL YET (no movie): continue");
+                        d.choice = Some(skate_core::challenges::end_dialog::Action::Continue);
                     }
                 }
                 crate::tutorial_run::Action::Finished(completion) => {
@@ -662,6 +727,9 @@ fn update(
         }
         if !finished {
             challenges.tutorial = Some(tutorial);
+        } else if end_dialog.open {
+            end_dialog.open = false;
+            end_dialog.dialog.close(false);
         }
     }
     let mut commands = std::mem::take(&mut challenges.pending);
@@ -848,6 +916,8 @@ fn switch_off(
 
 pub(crate) fn install(app: &mut App) {
     app.init_resource::<Challenges>()
+        .init_resource::<crate::end_dialog_host::EndDialogScreen>()
+        .init_resource::<crate::poster_host::PosterScreen>()
         .init_resource::<ChallengeHudState>()
         .add_message::<ChallengeSignUp>()
         .add_systems(PreUpdate, arm.after(crate::map_transition::MapTransitionSet).run_if(opted_in))
@@ -885,6 +955,7 @@ mod tests {
                       "half_extents": [1., 1., 1.], "fatness": 0.}})).unwrap() };
         let m = |x: f32| Start { locator: "l".into(), matrix: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [x, 0., 0., 1.]] };
         Challenge { id: id.into(), family: "own_the_spots".into(), map: "DownTown".into(), title_id: None, title: None,
+            description_id: None, description_arg: 0, objectives_enabled: false,
             boundary: v.clone(), scoring: v.clone(), spot: v, start: m(0.), location: m(x), sign_up_radius: radius,
             discovery_radius: 100., owned_points: 1000, killed_points: 1500,
             challenge_type: Some(9), out_of_bounds_time: None, owned_display_time: None, killed_display_time: None,

@@ -79,6 +79,16 @@ MENU_ROOTS = (
     # The loading screen (template 131 TipsLoader, FE screen 52, host object TipsLoader; research b581). Optional for
     # the engine like the action overlay: a set without it keeps the progress overlay, so the set version stays.
     'source/screens/main/tiploader',
+    # The career reward presentation (FE 64 summary, 65 milestone card, 66 teammate card) and the challenge end
+    # dialogs (research b899; doc 43 Reward presentation). Optional for the engine like the action overlay.
+    'source/screens/unlock/unlockoverlay',
+    'source/screens/unlock/unlock_milestone',
+    'source/screens/unlock/unlock_teammate',
+    'source/screens/hudcomponents/endchallengeoptions',
+    'source/screens/hudcomponents/endchallenge_small',
+    'source/screens/hudcomponents/challengefailed_small',
+    # The sign-up poster and lot list (FE 0x1B, template 23; research b932, b935).
+    'source/screens/challenge/challenge_signup',
     'source/screens/main3dhud',
     'source/helper/screenmanager',
     'source/helper/screentransitionmanager',

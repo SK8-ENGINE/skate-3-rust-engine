@@ -209,6 +209,11 @@ pub struct FrontEnd<'a> {
     pub challenge_map: crate::challenge_map_host::ChallengeMapHost,
     /// The Skate Profile screen (offline_profile_host).
     pub offline_profile: crate::offline_profile_host::OfflineProfileHost,
+    pub reward_summary: crate::reward_summary_host::RewardSummaryHost,
+    /// The end dialog's natives while it shows (`None`: not open).
+    pub end_dialog: Option<crate::end_dialog_host::EndDialogHost>,
+    /// The sign-up poster while it shows (FE 0x1B page 0).
+    pub poster: Option<crate::poster_host::PosterHost>,
     /// The Extras screen (extras_host).
     pub extras: crate::extras_host::ExtrasHost,
     /// The text viewer FE 3's `tos` object (extras_host).
@@ -252,6 +257,9 @@ impl<'a> FrontEnd<'a> {
             replay_menu: Default::default(),
             challenge_map: Default::default(),
             offline_profile: Default::default(),
+            reward_summary: Default::default(),
+            end_dialog: None,
+            poster: None,
             extras: Default::default(),
             tos: Default::default(),
             credits: Default::default(),
@@ -267,7 +275,7 @@ impl<'a> FrontEnd<'a> {
 
 impl crate::apt_stage::StageNatives for FrontEnd<'_> {
     fn objects(&self) -> Vec<String> {
-        ["Game", "CoreMenu", "Audio", "FELanguage", "FETrickTutorial", "FEChallengeMap", "FEReplayMenu", "HUDComponents", "Popup", "Progression", "Stats", "SignUpPoster", "tos", "FECredits", "SkaterSpawner", "FreeSkateOption", "TipsLoader"]
+        ["Game", "CoreMenu", "Audio", "FELanguage", "FETrickTutorial", "FEChallengeMap", "FEReplayMenu", "HUDComponents", "Popup", "Progression", "Stats", "SignUpPoster", "tos", "FECredits", "SkaterSpawner", "FreeSkateOption", "TipsLoader", "FERewardSummary", "Mission"]
             .map(String::from)
             .to_vec()
     }
@@ -288,6 +296,19 @@ impl crate::apt_stage::StageNatives for FrontEnd<'_> {
         }
         if let Some(value) = self.image_slots.call(object, method, &args) {
             return Ok(value);
+        }
+        if let Some(value) = self.reward_summary.call(vm, object, method, &args)? {
+            return Ok(value);
+        }
+        if let Some(host) = self.poster.as_mut() {
+            if let Some(value) = host.call(vm, self.language, &self.numbers, object, method, &args)? {
+                return Ok(value);
+            }
+        }
+        if let Some(host) = self.end_dialog.as_ref() {
+            if let Some(value) = host.call(vm, self.language, object, method, &args)? {
+                return Ok(value);
+            }
         }
         if let Some(value) = self.challenge_map.call(vm, self.registry, self.context, self.language, object, method, &args)? {
             return Ok(value);

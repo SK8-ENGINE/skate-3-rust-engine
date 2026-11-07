@@ -639,6 +639,7 @@ impl Stage {
                 continue;
             }
             let Some(movie) = source.movie(&load.key) else {
+                bevy::log::warn!("APT stage: no movie {} for a loadClip (keys are case sensitive)", load.key);
                 self.notify(load.loader, "onLoadError", vec![Value::Object(load.target)], natives)?;
                 continue;
             };

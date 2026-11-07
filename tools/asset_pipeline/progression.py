@@ -25,6 +25,7 @@ REWARD_KIND = 'Hash_3DBC2F9C0083DF86'    # eUNLOCK_CATEGORY, inherited from pare
 REWARD_NAME = 'Hash_8915E3FCB76529BA'    # the unlock id
 REWARD_TITLE = 'Hash_AA753A536859233D'
 REWARD_IMAGE = 'Hash_786255B8FF426A3D'
+REWARD_DESCRIPTION = 'Hash_EC2ED691DF1C9F4C'
 OWNED_REWARD = 'Hash_047ED7FFBB024AB8'   # tObservatoryProgressionReward: u32 money, u32 sales, u32 ptr, u32 count
 KILLED_REWARD = 'Hash_67699C4B88712759'
 ONLINE_BONUS = 'Hash_2E4824C81FDAE87C'   # u32 bonus sales (online only)
@@ -229,6 +230,7 @@ def progression(rows, known=None):
                 'name': _text(fields.get(REWARD_NAME), names),
                 'title': _text(fields.get(REWARD_TITLE), names),
                 'image': _text(fields.get(REWARD_IMAGE), names),
+                'description': _text(fields.get(REWARD_DESCRIPTION), names),
             }
     return {'groups': groups, 'actions': actions, 'rewards': rewards}
 

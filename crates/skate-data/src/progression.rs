@@ -15,6 +15,15 @@ pub struct Loaded {
     pub graphs: BTreeMap<String, Graph>,
     /// reward id -> (unlock kind, unlock name)
     pub rewards: BTreeMap<String, (u32, String)>,
+    /// reward id -> the reward summary's text (title id, image, description id).
+    pub reward_text: BTreeMap<String, RewardText>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RewardText {
+    pub title: String,
+    pub image: String,
+    pub description: String,
 }
 
 fn s(v: &Value, key: &str) -> Result<String, String> {
@@ -195,6 +204,8 @@ pub fn parse_value(root: &Value) -> Result<Loaded, String> {
         let kind = r.get("kind").and_then(Value::as_u64).unwrap_or(0) as u32;
         let name = r.get("name").and_then(Value::as_str).unwrap_or_default();
         out.rewards.insert(id.clone(), (kind, name.to_owned()));
+        let text = |key: &str| r.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
+        out.reward_text.insert(id.clone(), RewardText { title: text("title"), image: text("image"), description: text("description") });
     }
     for (id, g) in root.get("graphs").and_then(Value::as_object).into_iter().flatten() {
         let mut graph = Graph::default();
@@ -256,6 +267,7 @@ mod tests {
         assert!(l.progression.actions["starting_action"].record_fired);
         assert_eq!(l.progression.challenge_rewards["ots_a"].killed.sales, 2_500);
         assert_eq!(l.rewards["pcu"], (0, "pcu_training".to_owned()));
+        assert_eq!(l.reward_text["pcu"].description, "", "older exports have no description");
         let init = &l.graphs["milestone_1"].states["initial"];
         assert_eq!(init.events, [Event { kind: "NIS".into(), args: [Some("06_CoachIntro".into()), None], mask: 0 }]);
         assert_eq!(init.on["stateenter"][0], Op::UnlockReward { reward: "pcu".into(), big: true });

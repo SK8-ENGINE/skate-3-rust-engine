@@ -87,6 +87,8 @@ pub(crate) struct Inputs<'a> {
     pub pump_user: bool,
     /// The rail being ground: [spline id, type signature].
     pub grind_rail: Option<[u64; 2]>,
+    /// The end dialog's pick (end_dialog_host.rs), taken while the run waits in its end options.
+    pub end_choice: Option<skate_core::challenges::end_dialog::Action>,
 }
 
 /// Off board = on foot (500 biped ground / air, 502 pushing off board); wipeout = 300 (b864 §2.2 / §2.3 in our
@@ -100,6 +102,8 @@ fn off_board(state: u32) -> bool {
 pub(crate) enum Action {
     Teleport { matrix: [[f32; 4]; 4], offboard: bool },
     Finished(Completion),
+    /// Show the end dialog (retail FrontEnd.OpenContinueRetryDialog); tutorials open it as passed (b920).
+    OpenEndDialog,
 }
 
 pub(crate) struct TutorialRun {
@@ -108,6 +112,11 @@ pub(crate) struct TutorialRun {
     objectives: Option<DataObjectives>,
     evaluating: bool,
     awaiting_teleport: bool,
+    /// The end dialog shows; its pick feeds HudContinue / HudRetry.
+    end_open: bool,
+    /// Test runs (`SKATE_VERIFY_TUTORIAL_PASS=1`): the objectives count as done once they evaluate, so the end
+    /// dialog and the career's reward chain can be checked without playing.
+    force_pass: bool,
     started: bool,
     was_off_board: bool,
     last_state: u32,
@@ -119,7 +128,8 @@ impl TutorialRun {
         let params = Params { intro: data.presentation.intro > 0, outro: data.presentation.outro > 0,
             restart: data.presentation.restart > 0, ignore_initial_reposition: data.ignore_initial_reposition,
             spawn_offboard: data.spawn_offboard };
-        Self { data, machine: Tutorial::new(params), objectives: None, evaluating: false, awaiting_teleport: false, started: false,
+        Self { data, machine: Tutorial::new(params), objectives: None, evaluating: false, awaiting_teleport: false, end_open: false,
+            force_pass: std::env::var("SKATE_VERIFY_TUTORIAL_PASS").is_ok_and(|v| v == "1"), started: false,
             was_off_board: false, last_state: 0, trick_groups }
     }
 
@@ -131,7 +141,16 @@ impl TutorialRun {
         for e in objectives.handle(message) {
             match e {
                 GroupEvent::AllComplete => events.push(Event::AllObjectivesComplete),
-                GroupEvent::Failed(i) => events.push(Event::ObjectiveFailed(i)),
+                // objectivefailed comes only from a failure row on an active objective (82C6E4B0, research b940);
+                // fail-all and fail-on-exit post none. NOT RETAIL YET: the row's presentation (the tip) is not shown.
+                GroupEvent::FailureCondition { objective, row } => {
+                    info!("SKATE_TUTORIAL {} objective {objective} failure row {row} (tip presentation NOT RETAIL YET)", self.data.id);
+                    events.push(Event::ObjectiveFailed(objective));
+                }
+                // A hint row plays its presentation only; no message to the tutorial graph (82C755B8, research b942).
+                GroupEvent::Hint { objective, row } => {
+                    info!("SKATE_TUTORIAL {} objective {objective} hint row {row} (tip presentation NOT RETAIL YET)", self.data.id);
+                }
                 _ => {}
             }
         }
@@ -201,6 +220,19 @@ impl TutorialRun {
             self.awaiting_teleport = false;
             events.push(Event::TeleportFinished);
         }
+        if self.force_pass && self.evaluating {
+            self.force_pass = false;
+            info!("SKATE_TUTORIAL {} objectives passed by SKATE_VERIFY_TUTORIAL_PASS", self.data.id);
+            events.push(Event::AllObjectivesComplete);
+        }
+        if let Some(choice) = input.end_choice.filter(|_| self.end_open) {
+            use skate_core::challenges::end_dialog::Action as Pick;
+            match choice {
+                Pick::Continue => { self.end_open = false; events.push(Event::HudContinue) }
+                Pick::Retry { .. } => { self.end_open = false; events.push(Event::HudRetry) }
+                Pick::ChangeDifficulty | Pick::Nothing => {}
+            }
+        }
         for e in events {
             commands.extend(self.machine.handle(e));
         }
@@ -251,8 +283,9 @@ impl TutorialRun {
                         }
                     }
                     Command::OpenEndOptions => {
-                        info!("SKATE_TUTORIAL {id} end options NOT RETAIL YET: continue");
-                        replies.push(Event::HudContinue);
+                        info!("SKATE_TUTORIAL {id} end options");
+                        self.end_open = true;
+                        actions.push(Action::OpenEndDialog);
                     }
                     Command::Complete(c) => {
                         info!("SKATE_TUTORIAL {id} complete {c:?}");
@@ -294,12 +327,13 @@ mod tests {
             presentation: PresentationCounts { intro: 2, outro: 0, restart: 3 },
             objectives: vec![ObjectiveData { key: "tut_test_0".into(), activation: 0, triggers: gate, points_valid: None,
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.IsInVolume",
-                    "args": [{"lit": "1"}, {"lit": "DIST_SkateSchool|tut_test_gate_01"}]}}]}) }],
+                    "args": [{"lit": "1"}, {"lit": "DIST_SkateSchool|tut_test_gate_01"}]}}]}),
+                failures: Vec::new(), failure_first: false, hints: Vec::new() }],
         }
     }
 
     fn input<'a>(volumes: &'a [(String, u64)], entered: &'a [u64], pending: bool, ticks: u32, distance: f32) -> Inputs<'a> {
-        Inputs { volumes, entered, exited: &[], banked: &[], ticks, teleport_pending: pending, distance, state_id: 100, in_sequence: false, markers: &[], tricks: &[], right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pushes: 0, pump_acceleration: 0.0, pump_user: false, grind_rail: None }
+        Inputs { volumes, entered, exited: &[], banked: &[], ticks, teleport_pending: pending, distance, state_id: 100, in_sequence: false, markers: &[], tricks: &[], right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pushes: 0, pump_acceleration: 0.0, pump_user: false, grind_rail: None, end_choice: None }
     }
 
     #[test]
@@ -311,6 +345,13 @@ mod tests {
         assert!(run.step(&input(&volumes, &[], true, 0, 0.0)).is_empty(), "waits for the arrival");
         assert!(run.step(&input(&volumes, &[], false, 1, 0.0)).is_empty(), "arrived, objective running");
         let mut done = run.step(&input(&volumes, &[9], false, 1, 0.0));
+        for _ in 0..240 {
+            done.extend(run.step(&input(&volumes, &[], false, 1, 0.0)));
+        }
+        assert_eq!(done, [Action::OpenEndDialog], "waits in the end dialog");
+        let mut pick = input(&volumes, &[], false, 1, 0.0);
+        pick.end_choice = Some(skate_core::challenges::end_dialog::Action::Continue);
+        let mut done = run.step(&pick);
         for _ in 0..240 {
             done.extend(run.step(&input(&volumes, &[], false, 1, 0.0)));
         }

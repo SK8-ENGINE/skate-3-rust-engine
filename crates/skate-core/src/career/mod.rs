@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 pub mod achievements;
 pub mod graph;
 pub mod milestones;
+pub mod presentation;
 pub mod profile;
 pub mod team;
 pub mod unlocks;
@@ -233,6 +234,8 @@ pub struct Career {
     pub active: std::collections::BTreeSet<String>,
     /// Deferred presentation events (DeferEventsAndChangeState), played FIFO when the presentation releases.
     pub deferred: std::collections::VecDeque<graph::Event>,
+    /// This result's cash and board sales for the reward summary, cleared when it closes.
+    pub summary: presentation::Totals,
 }
 
 /// Earned but not presented yet: the reward summary's milestone (+0x04) and teammate (+0x18) counts, cleared when
@@ -440,6 +443,7 @@ impl Career {
         for (tier, r) in &paid {
             money += r.money;
             if *tier == Completion::Owned { owned_sales += r.sales } else { killed_sales += r.sales }
+            self.summary.add(*tier == Completion::Killed, r.money, r.sales);
             out.push(Effect::Paid { challenge: challenge.to_owned(), tier: *tier, money: r.money, sales: r.sales,
                 rewards: r.rewards.clone() });
         }

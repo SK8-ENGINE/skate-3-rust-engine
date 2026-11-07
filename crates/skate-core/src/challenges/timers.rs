@@ -1,5 +1,6 @@
-//! Retail challenge timers (`ChallengeTimer`, research b832): a countdown holds trunc(seconds * 60) ticks, loses one
-//! tick per update and expires when it reaches zero or below. Ticks run at a fixed 60 Hz, independent of frame rate.
+//! Retail challenge timers (`ChallengeTimer`, research b832): a countdown holds trunc(seconds * 60) ticks. Each update
+//! first expires a countdown at zero or below, else takes one tick off (82D57960, research b958), so an N-tick countdown
+//! expires on update N + 1. Ticks run at a fixed 60 Hz, independent of frame rate.
 
 pub const TICKS_PER_SECOND: f32 = 60.0;
 
@@ -36,13 +37,12 @@ impl Timers {
     pub fn tick(&mut self) -> Vec<TimerId> {
         let mut expired = Vec::new();
         self.countdowns.retain_mut(|(id, left)| {
-            *left -= 1;
             if *left <= 0 {
                 expired.push(*id);
-                false
-            } else {
-                true
+                return false;
             }
+            *left -= 1;
+            true
         });
         expired
     }
@@ -53,14 +53,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_half_second_countdown_expires_on_its_thirtieth_tick() {
+    fn a_half_second_countdown_expires_on_its_thirty_first_tick() {
         let mut timers = Timers::default();
         let id = timers.add_countdown(0.5);
-        for _ in 0..29 {
+        for _ in 0..30 {
             assert!(timers.tick().is_empty());
         }
+        assert_eq!(timers.remaining(id), Some(0), "at zero it still waits one update (82D57960)");
         assert_eq!(timers.tick(), vec![id]);
         assert_eq!(timers.remaining(id), None);
+        let zero = timers.add_countdown(0.0);
+        assert_eq!(timers.tick(), vec![zero], "a zero-tick countdown expires on the next update");
     }
 
     #[test]

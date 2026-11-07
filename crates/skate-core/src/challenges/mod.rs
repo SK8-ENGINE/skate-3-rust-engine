@@ -2,7 +2,10 @@
 //! machines re-implemented from the retail state graphs (docs/hails-additions/42-challenges.md).
 
 pub mod api;
+pub mod end_dialog;
+pub mod lots;
 pub mod objectives;
+pub mod poster;
 pub mod predicate;
 pub mod tutorial;
 pub mod ots;

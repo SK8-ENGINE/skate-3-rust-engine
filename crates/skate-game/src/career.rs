@@ -35,6 +35,34 @@ pub(crate) struct CareerProfile {
     pub generation: u64,
 }
 
+/// What the reward summary and card screens show (`reward_summary_host.rs`), rebuilt when a screen chain opens.
+#[derive(Resource, Default)]
+pub(crate) struct RewardScreens {
+    pub view: skate_core::career::presentation::SummaryView,
+    pub generation: u64,
+    /// The screen the stage shows (screen, card index); `accepted`: the stage took A on it.
+    pub open: Option<(skate_core::career::presentation::Screen, u32)>,
+    pub accepted: bool,
+    /// The stage has every reward movie; without it each screen is accepted the frame it opens.
+    pub available: bool,
+}
+
+fn summary_view(state: &CareerState, data: &Loaded) -> skate_core::career::presentation::SummaryView {
+    use skate_core::career::presentation::{Card, SummaryView};
+    let c = &state.career;
+    let card = |r: &str| data.reward_text.get(r).map(|t| Card { title: t.title.clone(), image: t.image.clone(),
+        description: t.description.clone() }).unwrap_or_else(|| Card { title: r.to_owned(), ..Default::default() });
+    let mut view = SummaryView::build(&state.reward_tabs, &c.unlocks.summary_other, &c.unlocks.summary_big,
+        |r| data.rewards.get(r).map(|(kind, _)| *kind), card);
+    let facts = skate_core::career::milestones::facts(c, &data.progression);
+    view.totals = c.summary;
+    view.total_cash = c.counters.money;
+    view.total_sales = c.counters.board_sales();
+    view.prev_milestone = facts[2];
+    view.next_milestone = facts[3];
+    view
+}
+
 /// Tier and achievement rows, and the profile's achievements (own file, kept across a new career).
 #[derive(Default)]
 pub(crate) struct Awards {
@@ -125,6 +153,7 @@ fn graph_names(graphs: &std::collections::BTreeMap<String, skate_core::career::g
 pub(crate) struct CareerState {
     pub awards: Awards,
     pub summary: Vec<skate_data::career_summary::SummaryRow>,
+    pub reward_tabs: Vec<skate_core::career::presentation::Tab>,
     pub data: Option<Loaded>,
     pub career: Career,
     pub file: CareerFile,
@@ -133,6 +162,7 @@ pub(crate) struct CareerState {
     pub loading: Option<std::thread::JoinHandle<Result<Prepared, String>>>,
     pub waiting: Vec<ChallengeResult>,
     pub discovered: Vec<String>,
+    pub presentation: skate_core::career::presentation::Presentation,
     /// The setup export as read, before mod overlays.
     pub base: Option<serde_json::Value>,
     /// Running mods (id, content fingerprint) last synced, and their progression overlays in mod id order.
@@ -290,6 +320,7 @@ pub(crate) struct Prepared {
     old_challenges: Option<String>,
     path: PathBuf,
     summary: Vec<skate_data::career_summary::SummaryRow>,
+    reward_tabs: Vec<skate_core::career::presentation::Tab>,
     tiers: std::collections::BTreeMap<String, skate_core::career::team::TierRow>,
     rows: std::collections::BTreeMap<String, skate_core::career::achievements::AchievementRow>,
     achievements: skate_data::career_save::AchievementsFile,
@@ -304,12 +335,15 @@ fn read(asset_root: PathBuf) -> Result<Prepared, String> {
     let path = root.join("settings/profiles/local/career.json");
     let existing = std::fs::read_to_string(&path).ok().and_then(|t| CareerFile::parse(&t).ok());
     let old_challenges = existing.is_none().then(|| std::fs::read_to_string(root.join("settings/challenges.json")).ok()).flatten();
-    let (mut summary, mut tiers, mut rows) = Default::default();
+    let (mut summary, mut tiers, mut rows, mut reward_tabs) = Default::default();
     match skate_data::collections::Collections::load(&asset_root) {
         Ok(c) => {
             use skate_data::career_summary as cs;
             let (tier_names, achievement_names) = graph_names(&data.graphs);
             summary = cs::summary_rows(&c);
+            reward_tabs = cs::reward_tabs(&c).into_iter()
+                .map(|t| skate_core::career::presentation::Tab { id: t.key, title: t.title, list: t.list, kinds: t.kinds })
+                .collect();
             tiers = cs::tier_rows(&c, &tier_names);
             rows = cs::achievement_rows(&c, &achievement_names);
         }
@@ -318,7 +352,7 @@ fn read(asset_root: PathBuf) -> Result<Prepared, String> {
     let achievements_path = root.join("settings/profiles/local/achievements.json");
     let achievements = std::fs::read_to_string(&achievements_path).ok()
         .and_then(|t| skate_data::career_save::AchievementsFile::parse(&t).ok()).unwrap_or_default();
-    Ok(Prepared { base, data, existing, old_challenges, path, summary, tiers, rows, achievements, achievements_path })
+    Ok(Prepared { base, data, existing, old_challenges, path, summary, reward_tabs, tiers, rows, achievements, achievements_path })
 }
 
 /// The export with the running mods' overlays merged (b887 §8): each mod's overlay is kept only if the data still
@@ -352,7 +386,7 @@ fn rebuild(state: &mut CareerState, data: &mut Loaded) {
 
 /// The read career into the state: import, adopt, clean up, defaults, load replay, start.
 fn apply(state: &mut CareerState, p: Prepared) {
-    let Prepared { base, mut data, existing, old_challenges, path, summary, tiers, rows, achievements, achievements_path } = p;
+    let Prepared { base, mut data, existing, old_challenges, path, summary, reward_tabs, tiers, rows, achievements, achievements_path } = p;
     state.base = Some(base);
     if !state.overlays.is_empty() {
         rebuild(state, &mut data);
@@ -366,6 +400,7 @@ fn apply(state: &mut CareerState, p: Prepared) {
     }
     state.path = Some(path);
     state.summary = summary;
+    state.reward_tabs = reward_tabs;
     state.awards.tiers = tiers;
     state.awards.rows = rows;
     state.awards.achievements.granted = achievements.granted.clone();
@@ -407,20 +442,53 @@ fn publish_facts(career: &Career, data: &Loaded, menus: &mut crate::retail_menus
     }
 }
 
-/// NOT RETAIL YET: retail shows the reward summary and milestone / teammate cards and clears the pending counts when
-/// they close (b893); without those screens the earned rewards count as presented at the end of the frame.
-fn present_stub(career: &mut Career, awards: &mut Awards) -> bool {
-    let p = career.pending;
-    let summary = !career.unlocks.summary_big.is_empty() || !career.unlocks.summary_other.is_empty();
-    if p.milestones == 0 && p.teammates == 0 && career.deferred.is_empty() && !summary {
-        return false;
+/// The reward presentation (docs/hails-additions/43-career.md#change-the-reward-presentation-careerpresentationrs):
+/// the stage shows each screen and reports A (`RewardScreens`). NOT RETAIL YET: without the movies each screen is
+/// accepted the frame it opens.
+fn present(state: &mut CareerState, data: &Loaded, screens: &mut RewardScreens, runner_idle: bool) -> bool {
+    use skate_core::career::presentation::Out;
+    let unlocks = &state.career.unlocks;
+    let summary = !state.career.summary.is_empty() || !unlocks.summary_big.is_empty() || !unlocks.summary_other.is_empty();
+    let mut out = if runner_idle { state.presentation.runner_idle(summary) } else { Vec::new() };
+    if std::mem::take(&mut screens.accepted) && screens.open.is_some() {
+        out.extend(state.presentation.accept(state.career.pending));
     }
-    let (big, other) = career.unlocks.take_summary();
-    info!("SKATE_CAREER NOT RETAIL YET summary/cards milestones={} teammates={} deferred={} big={big:?} other={other:?}",
-        p.milestones, p.teammates, career.deferred.len());
-    career.pending = Default::default();
-    awards.play(std::mem::take(&mut career.deferred));
-    true
+    let mut i = 0;
+    while i < out.len() {
+        let o = out[i];
+        i += 1;
+        match o {
+            Out::Open(screen, index) => {
+                if index == 0 {
+                    screens.view = summary_view(state, data);
+                    screens.generation += 1;
+                }
+                info!("SKATE_CAREER presentation open {screen:?} {index} big={:?} other={:?} totals={:?} pending={:?}{}",
+                      state.career.unlocks.summary_big, state.career.unlocks.summary_other, state.career.summary,
+                      state.career.pending, if screens.available { "" } else { " NOT RETAIL YET (no movie, accepted at once)" });
+                if screens.available {
+                    screens.open = Some((screen, index));
+                } else {
+                    out.extend(state.presentation.accept(state.career.pending));
+                }
+            }
+            Out::Close(_) => {
+                screens.open = None;
+                info!("SKATE_CAREER presentation {o:?}");
+            }
+            Out::ClearOthers => {
+                state.career.unlocks.summary_other.clear();
+                state.career.summary = Default::default();
+            }
+            Out::ClearCards => {
+                state.career.unlocks.summary_big.clear();
+                state.career.pending = Default::default();
+            }
+            Out::PlayDeferred => state.awards.play(std::mem::take(&mut state.career.deferred)),
+            Out::Started | Out::Done => info!("SKATE_CAREER presentation {o:?}"),
+        }
+    }
+    i > 0
 }
 
 /// Skip the career start (b887 U1, user ok 2026-11-06): each crossbar gate challenge with no status yet completes as
@@ -515,7 +583,7 @@ fn publish_gate(career: &Career, challenges: &mut crate::challenges::Challenges)
 fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut results: MessageReader<ChallengeResult>,
           mut discovered: MessageReader<ChallengeDiscovered>,
           menus: Option<ResMut<crate::retail_menus::RetailMenus>>, mut profile: ResMut<CareerProfile>,
-          challenges: Option<ResMut<crate::challenges::Challenges>>) {
+          challenges: Option<ResMut<crate::challenges::Challenges>>, mut screens: ResMut<RewardScreens>) {
     let state: &mut CareerState = &mut res;
     if !state.tried {
         state.tried = true;
@@ -556,6 +624,7 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
     for r in std::mem::take(&mut state.waiting) {
         let effects = state.career.challenge_result(&r.challenge, r.completion, &data.progression);
         state.career.settle_active(&r.challenge, r.completion, r.reactivate);
+        state.presentation.result(r.completion != Completion::Abandoned, false);
         apply_effects(state, &data, effects);
         changed = true;
     }
@@ -565,7 +634,8 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
         settle(&mut state.career, &mut state.awards, &data, requests);
         changed = true;
     }
-    changed |= present_stub(&mut state.career, &mut state.awards);
+    let runner_idle = challenges.as_ref().is_none_or(|c| c.run.is_none() && c.tutorial.is_none());
+    changed |= present(state, &data, &mut screens, runner_idle);
     if let Some(mut menus) = menus.filter(|_| changed || first) {
         publish_facts(&state.career, &data, &mut menus);
     }
@@ -600,6 +670,7 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
 pub(crate) fn install(app: &mut App) {
     app.init_resource::<CareerState>()
         .init_resource::<CareerProfile>()
+        .init_resource::<RewardScreens>()
         .add_message::<ChallengeResult>()
         .add_message::<ChallengeDiscovered>()
         .add_systems(Update, update.after(crate::challenges::CareerResultSet).run_if(crate::challenges::opted_in));

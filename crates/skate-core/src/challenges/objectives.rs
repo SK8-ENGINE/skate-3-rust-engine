@@ -87,6 +87,8 @@ pub const LIST_MAX: usize = 32;
 pub struct Definition {
     pub activation: Activation,
     pub mask: [bool; MASK_BYTES],
+    /// EvaluateFailureBeforeCompletionObjectives (82C752A8, research b940): failures are checked before completion.
+    pub failure_first: bool,
 }
 
 /// What a condition may read about its objective.
@@ -133,6 +135,14 @@ pub trait Conditions {
     fn points_valid(&mut self, _i: usize, _objective: &Objective, _ctx: Context) -> bool {
         false
     }
+    /// The objective's failure rows (FailureObjectivesWithEvents, 82C75490): the first row whose predicate holds.
+    fn failure(&mut self, _i: usize, _objective: &Objective, _ctx: Context) -> Option<usize> {
+        None
+    }
+    /// The objective's hint rows (HintObjectives, 82C755B8): the first row whose predicate holds (research b942).
+    fn hint(&mut self, _i: usize, _objective: &Objective, _ctx: Context) -> Option<usize> {
+        None
+    }
 }
 
 struct Completion<'a>(&'a mut dyn FnMut(usize, &Objective) -> bool);
@@ -149,6 +159,12 @@ pub enum Event {
     Activated(usize),
     Completed(usize),
     Failed(usize),
+    /// A failure row held on an active objective (objectivefailed with its row index, 82C6E4B0); the objective stays
+    /// active (research b940).
+    FailureCondition { objective: usize, row: usize },
+    /// A hint row held on an active objective that did not complete: its presentation plays, nothing else changes
+    /// (82C755B8, research b942).
+    Hint { objective: usize, row: usize },
     LeftScoringBoundary(usize),
     AllComplete,
 }
@@ -166,6 +182,8 @@ pub struct Group {
     pub objectives: Vec<Objective>,
     /// The points requirement (group `+0x4C`: the challenge's owned or killed points).
     pub requirement: i32,
+    /// Hint rows run (group `+0x219`; MakeObjectives and CreateObjectiveGroup set it, research b942).
+    pub hints: bool,
     inside: Vec<u64>,
     all_reported: bool,
 }
@@ -174,7 +192,7 @@ impl Group {
     pub fn new(definitions: impl IntoIterator<Item = Definition>) -> Self {
         let objectives = definitions.into_iter()
             .map(|definition| Objective { definition, state: State::Inactive, records: Records::default(), points: 0 }).collect();
-        Self { objectives, requirement: 0, inside: Vec::new(), all_reported: false }
+        Self { objectives, requirement: 0, hints: true, inside: Vec::new(), all_reported: false }
     }
 
     /// GetGroupAccumulatedPoints (82C65188).
@@ -224,13 +242,14 @@ impl Group {
         }
     }
 
-    /// Flow.ResetObjective (the full reset, 82C73EB8): every record cleared; an active or finished objective goes
-    /// back to waiting for its activation.
-    pub fn reset(&mut self, i: usize) {
+    /// ResetObjective (82C6F4D0 -> 82C73EB8; research b936): every record cleared. With `reactivate` (the binding's
+    /// 4th argument; Flow.ResetObjective 82C63200 passes it) an active or finished objective goes back to waiting for
+    /// its activation (82C75740); without it (the tutorial graph's objectivefailed) the state is kept.
+    pub fn reset(&mut self, i: usize, reactivate: bool) {
         let Some(o) = self.objectives.get_mut(i) else { return };
         o.records = Records::default();
         o.points = 0;
-        if o.state != State::Inactive {
+        if reactivate && o.state != State::Inactive {
             o.state = if o.definition.activation == Activation::Immediate { State::Active } else { State::Armed };
         }
         self.all_reported = false;
@@ -382,13 +401,39 @@ impl Group {
         for i in 0..self.objectives.len() {
             let ctx = self.context(false, false);
             let o = &self.objectives[i];
-            if o.state == State::Active && o.definition.mask[byte] && conditions.completion(i, o, ctx) {
+            if o.state != State::Active || !o.definition.mask[byte] {
+                continue;
+            }
+            // 82C752A8: completion first unless the row asks for failures first; hints, then failures, run only when
+            // the objective did not complete; a fired failure ends the pass for this objective (research b940, b942).
+            if o.definition.failure_first {
+                self.hint(i, ctx, conditions, out);
+                if let Some(row) = conditions.failure(i, &self.objectives[i], ctx) {
+                    out.push(Event::FailureCondition { objective: i, row });
+                    continue;
+                }
+            }
+            let o = &self.objectives[i];
+            if conditions.completion(i, o, ctx) {
                 self.objectives[i].state = State::Complete;
                 out.push(Event::Completed(i));
                 completed.push(i);
+            } else if !o.definition.failure_first {
+                self.hint(i, ctx, conditions, out);
+                if let Some(row) = conditions.failure(i, &self.objectives[i], ctx) {
+                    out.push(Event::FailureCondition { objective: i, row });
+                }
             }
         }
         completed
+    }
+
+    fn hint(&self, i: usize, ctx: Context, conditions: &mut dyn Conditions, out: &mut Vec<Event>) {
+        if self.hints {
+            if let Some(row) = conditions.hint(i, &self.objectives[i], ctx) {
+                out.push(Event::Hint { objective: i, row });
+            }
+        }
     }
 
     /// The points step of a clean sequence (82C6F2B8 / 82C75690): objective points += the sequence score when its
@@ -416,7 +461,7 @@ mod tests {
         for &b in bytes {
             mask[b] = true;
         }
-        Definition { activation, mask }
+        Definition { activation, mask, failure_first: false }
     }
 
     /// Own the spot as retail's rows build it (b840 / b841): a spot objective (mode 5, byte 1, completion = spot
@@ -448,6 +493,65 @@ mod tests {
         let out = g.handle_with(Message::SequenceComplete { score: 1200, clean: true }, &mut Ots);
         assert_eq!(out, [Event::Completed(0), Event::Completed(1), Event::AllComplete]);
         assert_eq!((g.objectives[0].points, g.accumulated()), (1200, 1200));
+    }
+
+    /// Completion, failure and hint answers per call, for the order tests.
+    #[derive(Default)]
+    struct Fails {
+        complete: bool,
+        fail: Option<usize>,
+        failure_checks: usize,
+        hint: Option<usize>,
+    }
+
+    impl Conditions for Fails {
+        fn completion(&mut self, _i: usize, _o: &Objective, _ctx: Context) -> bool {
+            self.complete
+        }
+        fn failure(&mut self, _i: usize, _o: &Objective, _ctx: Context) -> Option<usize> {
+            self.failure_checks += 1;
+            self.fail
+        }
+        fn hint(&mut self, _i: usize, _o: &Objective, _ctx: Context) -> Option<usize> {
+            self.hint
+        }
+    }
+
+    #[test]
+    fn hint_rows_play_before_failures_and_only_while_not_complete() {
+        let mut g = Group::new([def(Activation::Immediate, &[2])]);
+        g.activate_all(&mut Vec::new());
+        let enter = Message::TriggerEnter { volume: 1 };
+        let mut c = Fails { hint: Some(2), fail: Some(0), ..Fails::default() };
+        assert_eq!(g.handle_with(enter.clone(), &mut c), [Event::Hint { objective: 0, row: 2 }, Event::FailureCondition { objective: 0, row: 0 }]);
+        assert_eq!(g.status(0), Some(State::Active), "a hint changes no state");
+        g.hints = false;
+        let mut c = Fails { hint: Some(2), ..Fails::default() };
+        assert!(g.handle_with(enter.clone(), &mut c).is_empty(), "group +0x219 off: no hints");
+        g.hints = true;
+        let mut c = Fails { complete: true, hint: Some(1), ..Fails::default() };
+        assert_eq!(g.handle_with(enter, &mut c), [Event::Completed(0), Event::AllComplete], "no hint on the completing pass");
+    }
+
+    #[test]
+    fn failure_rows_fire_on_active_objectives_in_retail_order() {
+        let mut g = Group::new([def(Activation::Immediate, &[2])]);
+        g.activate_all(&mut Vec::new());
+        let enter = Message::TriggerEnter { volume: 1 };
+        let mut c = Fails { complete: false, fail: Some(1), ..Fails::default() };
+        assert_eq!(g.handle_with(enter.clone(), &mut c), [Event::FailureCondition { objective: 0, row: 1 }]);
+        assert_eq!(g.status(0), Some(State::Active), "a failure row keeps the objective active");
+        let mut c = Fails { complete: true, fail: Some(0), ..Fails::default() };
+        assert_eq!(g.handle_with(Message::TriggerEnter { volume: 2 }, &mut c), [Event::Completed(0), Event::AllComplete]);
+        assert_eq!(c.failure_checks, 0, "completion first: a completed objective is not checked for failures");
+
+        let mut first = def(Activation::Immediate, &[2]);
+        first.failure_first = true;
+        let mut g = Group::new([first]);
+        g.activate_all(&mut Vec::new());
+        let mut c = Fails { complete: true, fail: Some(0), ..Fails::default() };
+        assert_eq!(g.handle_with(enter, &mut c), [Event::FailureCondition { objective: 0, row: 0 }]);
+        assert_eq!(g.status(0), Some(State::Active), "failure first: a fired failure skips completion");
     }
 
     #[test]

@@ -72,14 +72,14 @@ pub enum FlowCommand {
 /// The functions this API answers (last name segment). A group whose programs call anything else does not run:
 /// an unported call errors, and an erroring completion condition defaults to true (retail), so it would complete
 /// at once.
-pub const PORTED: [&str; 40] = ["EnteredVolume", "IsInVolume", "IsSequenceNewlyCompletePoints", "GetGroupAccumulatedPoints",
+pub const PORTED: [&str; 43] = ["EnteredVolume", "IsInVolume", "IsSequenceNewlyCompletePoints", "GetGroupAccumulatedPoints",
     "GetGroupPointsRequirement", "GetAccumulatedPoints", "ActivateObjective", "DeactivateObjective", "ResetObjective",
     "GetObjectiveStatus", "GetTotalNumCompletedObjectives", "IsInSequence", "SequenceCompleted", "IsWipingOut",
     "IsOffBoard", "WentOffBoard", "WentOnBoard", "JustUsedSessionMarker", "JustSetSessionMarker", "SetFractionValue",
     "DidSpecificTrick", "DidSpecificTrickGroup", "DidSpecificTrickThisFrame", "DidSpecificTrickGroupThisFrame",
     "GetNumTricksDoneInTrickGroup", "IsGrinding", "IsOnBoard", "IsOnGround", "AirCompleted", "IsInAir",
     "GetRawRightStickYValue", "IsLeftTriggerHeld", "IsRightTriggerHeld", "TailManualTime", "NoseManualTime",
-    "ManualTime", "GetNumPushes", "GetPumpingAcceleration", "IsLastPumpUserControlled", "IsGrindingGUID"];
+    "ManualTime", "IsManualing", "IsNoseManualing", "IsTailManualing", "GetNumPushes", "GetPumpingAcceleration", "IsLastPumpUserControlled", "IsGrindingGUID"];
 
 fn name_arg(args: &[Value]) -> Result<&str, Error> {
     match args.first() {
@@ -170,6 +170,11 @@ impl Api for ObjectiveApi<'_> {
             "TailManualTime" => num_f(self.skater.manual.filter(|m| m.0).map_or(0.0, |m| m.1)),
             "NoseManualTime" => num_f(self.skater.manual.filter(|m| !m.0).map_or(0.0, |m| m.1)),
             "ManualTime" => num_f(self.skater.manual.map_or(0.0, |m| m.1)),
+            // 82C64230 / 82C643F0 / 82C645F0 (research b894, b953): the manual distance is above 0, the nose / tail bit
+            // picks the side. Ours measures the manual's time, so the first held tick differs [inferred].
+            "IsManualing" => Value::Bool(self.skater.manual.is_some_and(|m| m.1 > 0.0)),
+            "IsNoseManualing" => Value::Bool(self.skater.manual.is_some_and(|m| !m.0 && m.1 > 0.0)),
+            "IsTailManualing" => Value::Bool(self.skater.manual.is_some_and(|m| m.0 && m.1 > 0.0)),
             "GetNumPushes" => num(self.objective.records.pushes as i32),
             // The current pump controller values [inferred: retail keeps the last pump's per objective].
             "GetPumpingAcceleration" => num_f(self.skater.pump_acceleration),
@@ -219,7 +224,7 @@ mod tests {
 
     fn spot(entered: &[u64]) -> Objective {
         let records = Records { entered_in_sequence: entered.iter().copied().collect(), ..Default::default() };
-        Objective { definition: Definition { activation: Activation::Sequence, mask: [false; MASK_BYTES] },
+        Objective { definition: Definition { activation: Activation::Sequence, mask: [false; MASK_BYTES], failure_first: false },
             state: State::Active, records, points: 0 }
     }
 

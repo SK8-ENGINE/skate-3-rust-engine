@@ -547,6 +547,11 @@ impl Vm {
             return Ok(value);
         }
         if matches!(&self.objects[object].kind, ObjectKind::Native(n) if n == "Math") {
+            // Math.random(): [0, 1) from the seeded script generator (endchallenge_small picks its title comment with
+            // it; without it the title read "undefined", laptop run 2026-11-07).
+            if method == "random" {
+                return Ok(Value::Number(self.next_random() as f64 / (u32::MAX as f64 + 1.0)));
+            }
             if let Some(value) = math(method, &args) {
                 return Ok(value);
             }
@@ -1253,6 +1258,15 @@ mod tests {
         }
         fn call(&mut self, _: &mut Vm, _: usize, _: &str, _: Vec<Value>) -> Result<Value, String> {
             Ok(Value::Undefined)
+        }
+    }
+    #[test]
+    fn math_random_is_a_unit_fraction() {
+        let mut vm = Vm::new();
+        let Value::Object(math) = vm.get(vm.global, "Math") else { panic!("no Math") };
+        for _ in 0..100 {
+            let Value::Number(x) = vm.call_method(math, "random", vec![], &mut Stub(vec![])).unwrap() else { panic!("not a number") };
+            assert!((0.0..1.0).contains(&x), "{x}");
         }
     }
     fn op(opcode: u8) -> Instruction {

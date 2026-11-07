@@ -91,6 +91,54 @@ run from `challenges.rs` (`ChallengeResult` message): pay order, fired actions, 
 answered at once and logged NOT RETAIL YET; every request and effect is logged as `SKATE_CAREER ...`; the file saves on
 a short-lived thread after each change. Compiles; its tests and a verify run are still to do.
 
+## Change: the reward presentation (`career/presentation.rs`)
+
+Retail order after an offline challenge pass (research b893, b899; constructor 827CC3B8 and 827CF570 / 827CD150 /
+827CD298 read in the recomp code):
+1. The pay step marks the summary (C+0x34). Nothing opens while the challenge runner still runs.
+2. Once it is idle: with summary content (money, sales or other rows) the presentation start message is sent and the
+   summary (FE 64) opens. Without content the deferred events play and the end messages go out; the milestone and
+   teammate counts stay pending.
+3. The summary's accept closes it and clears its other rows. With pending milestones or teammates the card chain
+   runs: one milestone card (FE 65) per accept, then one teammate card (FE 66) per teammate; otherwise it releases.
+4. Release: the counts clear, the deferred events play oldest first, the end messages go out.
+5. Cards that could not run are kept for the next location message (827CCFA0 sets C+0x35 on the sub-object at C+4;
+   the constructor stores vtable 0x823117B0 there and 827CCFA0 is its slot 3, checked 2026-11-07). Who calls
+   827CCFA0 is not known yet, so `Presentation::left` has no caller.
+Failures and online passes show nothing. Deferred events from grants outside a challenge wait for the next release,
+as in retail.
+
+`Presentation` (skate-core, engine free) is the state machine; `career.rs` `present` drives it each frame with the
+runner idle test (no challenge or tutorial running) and names the open screen in `RewardScreens`. The menu stage
+(`retail_menu_stage.rs`) opens that movie (templates RewardSummary 105, MilestoneUnlock 107, TeammateUnlock 108;
+each new card opens its movie again), shows it after its intro, and turns A (AptNext) into `accepted`, which the
+career passes to `Presentation::accept` (retail 82650738 / 826504E0). Logged `SKATE_CAREER presentation open <screen>
+<index>` and `RETAIL_MENUS open <template> <index>`. NOT RETAIL YET: the stage side is behind
+`SKATE_RETAIL_END_SCREENS=1` until the screens are seen drawing (the end dialog was not, laptop 2026-11-07); without
+it, or without the movies (sets exported before them), each screen is accepted the frame it opens; gameplay is not suspended under the cards (FE 65 / 66 suspend it in
+retail's screen table); the teammate card offers only Continue (create / preset choices are M6).
+
+Summary data: each pass adds its owned / killed cash and board sales to `Career.summary` (retail summary +0x3C..+0x4C;
+online sales stay 0), cleared when the summary closes. When a screen chain opens, `career.rs` builds a `SummaryView`
+(skate-core) into the `RewardScreens` resource: the tabs that hold at least one of the result's other rewards with
+their rows, the milestone cards (big list), the totals, total cash and board sales, and the previous / next board
+sale milestone (the crossbar's start / goal). `reward_summary_host.rs` answers the movie's FERewardSummary natives from
+it (b873 §4 table). GetUnlocksInCategory takes the tab index or id; its three columns are title, image and an online
+flag (false offline) [inferred from the movie's UNLOCKDATA_DESC / ICON / ONLINE indices].
+
+Reward tabs (progression_reward_tabs, read at runtime from the installed collections by
+`skate-data/career_summary.rs` `reward_tabs`; mods change them through collection overrides): title, list flag
+(Bool 0xC83BB50EC9A5A801), order (Int16 0x804F77ACECCF24CB) and unlock kinds (array 0x17E926A1AA38ACC4). Stock
+[data]: characters 1, challenges 12, gear 6 / 5, locations 0, skate park 7 / 9. Reward rows now also export their
+description text id (0xEC2ED691DF1C9F4C) in `progression.json` (`skate-data` `Loaded.reward_text`).
+
+Movies: setup exports `unlock/unlockoverlay`, `unlock_milestone`, `unlock_teammate` and `hudcomponents/endchallengeoptions`,
+`endchallenge_small`, `challengefailed_small` (all in fedata.big) with the other menu movies.
+
+Verification: skate-core `career::presentation` tests (summary, cards, release order; no summary keeps the cards;
+failures and online show nothing; cards on the next arrival; tabs with rewards only); `reward_summary_host` tests
+(natives answer from the view; milestone info columns).
+
 ## Change: the progression export (`tools/asset_pipeline/progression.py`)
 
 Setup writes `assets/private/progression.json` (`skate3rust.progression` v1) after the challenges export:
@@ -139,8 +187,8 @@ message. Tests on hand-built bytecode
   count - pending - still armed. `facts()` gives GetProgressionData's six numbers, which `career.rs` writes into the
   crossbar's progression facts. `dots()` gives GetMilestoneDotData.
 - `Career.pending` counts MilestoneEarned / UnlockTeammate requests (retail's reward summary +0x04 / +0x18) and saves
-  in `career.json` `rewards`. NOT RETAIL YET: without the reward summary and card screens, the earned rewards count
-  as presented at the end of the frame (logged `SKATE_CAREER NOT RETAIL YET summary/cards`), so the index moves then.
+  in `career.json` `rewards`. They clear when the reward presentation's card chain ends (see
+  [Reward presentation](#change-the-reward-presentation-careerpresentationrs)), so the index moves then.
   Between photo_univ_05 done and its graph arming the milestones, the index reads the full count (retail too).
 - Skate Profile: the summary rows (class progression_summary_group) are read at runtime from the installed
   collections (`skate-data/career_summary.rs`; no setup change). `allmilestones` / `allchallenges` are the overall

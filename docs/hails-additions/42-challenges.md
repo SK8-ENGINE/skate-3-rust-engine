@@ -77,7 +77,8 @@ trigger volumes, reset objectives, evaluation on / off, point requirement, high 
 `Completion`). It follows the retail graph (research b838) and runner rules (b832):
 - a state change is queued and applied after the message; the new state's enter runs then; current state handlers
   run before the global ones;
-- timers (`challenges::timers`) hold trunc(seconds * 60) ticks and lose one per 60 Hz tick;
+- timers (`challenges::timers`) hold trunc(seconds * 60) ticks; each 60 Hz tick first expires a timer at zero or
+  below, else takes one tick off, so an N-tick timer expires on tick N + 1 (82D57960, research b956 / b958);
 - the target is the owned score until the personal best reaches it, then the killed it score, then the personal
   best; a win completes the challenge only when that tier moves up, otherwise the challenge loops back to the start;
 - not enough points resets the objectives and freezes scoring 0.5 s (no fail); a bail pauses scoring and resets on
@@ -284,7 +285,7 @@ first pass, PointsValid adding the line's score to an objective that just comple
 completed, then the per-sequence reset; a bail or a session-marker line is not evaluated. Its result becomes the state
 machine's AllObjectivesComplete / NotEnoughPoints. An export without objectives, or a row whose program does not load,
 keeps the native check. Which group retail swaps in for the killed it target is not read: the owned rows run for
-both [inferred; the two sets have the same shape]. Failure and hint texts still to translate; local-table fields (the shared
+both [inferred; the two sets have the same shape]. Failure and hint rows: see the tutorials section; local-table fields (the shared
 world-script variables of three Hall of Meat rows and one park tutorial) translate as indexes the engine cannot answer
 yet, so those conditions give their default. Side effects a condition
 has on its group (Flow, Reset, fraction counters) still need a command path from the API into `objectives.rs`.
@@ -335,6 +336,17 @@ and `SKATE_REPORT_CHILD=1`) so a test run never covers what the user has open. N
   tutorial HUD and the end options are answered at once. A tutorial whose rows call an API function that is not
   ported does not run (logged with the missing names): an unported call errors and an erroring completion
   condition counts as complete in retail, so it would finish at once.
+- Failure and hint rows (research b938, b940, b942): the export adds per objective `failures` (FailureObjectivesWithEvents)
+  and `hints` (HintObjectives), each row its key, its condition program (none when it does not translate: never fires,
+  retail's default false) and its presentation count, plus `failure_first` (EvaluateFailureBeforeCompletionObjectives).
+  Per evaluation of an active objective (82C752A8): completion first; only when it did not complete, the hint rows
+  (first true row plays its presentation, nothing else changes; on only when the group's hint flag is set, which
+  MakeObjectives always sets) and then the failure rows (first true row: objectivefailed with the row, the objective
+  stays active). With `failure_first`: hints, failures, then completion only when no failure fired. Both kinds share
+  the objective's `vars` with its completion. A group whose failure or hint rows need an unported API drops that kind
+  only (logged NOT RETAIL YET). Code: `objectives.rs` (`Conditions::failure` / `hint`, `Group::hints`,
+  `Event::FailureCondition` / `Hint`), `challenge_objectives.rs` (`side_rows`). NOT RETAIL YET: the rows' tip
+  presentations are logged (`SKATE_TUTORIAL <id> objective <i> failure row <r>` / `hint row <r>`), not shown.
 
 ## Change: install and refresh fixes (laptop runs 2026-11-06)
 
@@ -347,6 +359,88 @@ and `SKATE_REPORT_CHILD=1`) so a test run never covers what the user has open. N
 - Trigger checks skip the ticks while the player's teleport is in flight (`trigger_volumes.rs`). Retail moves the
   entity within the frame; ours moves a tick or two later, so a challenge start entered and left the spot volumes from
   the sign-up point, about 45 m from the start locator (laptop point tests: the start locator is outside both).
+
+## Change: own the lot export (`tools/asset_pipeline/challenges.py` `own_the_lots`; research b905, b916, b922)
+
+`challenges.json` gains `own_the_lots`: every challenge_global_data row whose inherited ChallengeType is 0x34 and
+whose child list (RefSpec array 0xABE749C80E8ADBCE; retail reads the key at bytes 8..15 and looks it up in
+challenge_global_data, getter 8255B100) is not empty; DebugOnly lots (0xFD40E4A31027C984) are left out. Per lot: id,
+source, map, district, title / description ids, the sign-up locator (Location, from the district's global locators)
+and the children in disc order, each with its FreeskateActivityType (0x85D6B2C6AE61DD8B, inherited: 0 accumulation,
+1 gap, 2 tag, 3 simultaneous trick, 4 survival, 5 group trick list) and title id. The engine sorts children by type
+for the lot list (screen 0x1B); the key name does not tell the type (otl_indu_03_simul_01 is a gap). Disc export:
+12 lots (10 career lots, otl_bbx_01, otl_mmcp_01), all with a sign-up location. Engine rules in skate-core
+`challenges/lots.rs`: `owned` (every listed activity has a status) and `list` (stable sort by type, a header text id
+before each type from `default_headers`, our list of table 8302CAB8's offline column, mod-replaceable; unknown types
+show `#Invalid OTL Header`); tests `list_groups_by_type_keeping_disc_order`, `owned_needs_every_listed_activity`. Not
+ported yet: the running lot, the lot list screen and MoreActivities.
+
+## Change: the end dialog (`challenges/end_dialog.rs`; research b920, b923)
+
+Retail's offline end dialog is FE screen 4 (vtable 82302750), opened when a challenge graph calls
+FrontEnd.OpenContinueRetryDialog (82854360): tutorials, lot activities and the objectives_shared families (films,
+follow the leader, photos). Own the spot never opens it (b929: ownthespot_shared_mlui has no such call and no
+hudcontinue / hudretry handler; its end_options only picks complete or restart, as `ots.rs` does). Rules ported to skate-core `EndDialog` (engine free):
+- Four option slots, after a reset [10 Continue_Retry, 11 Retry_Quit, 12, 12] (825ECD18); graphs overwrite them
+  with SetEndChallengeOption (82855548). 10 resolves to Continue on a pass and Retry on a failure, 11 to Retry / Quit
+  (825ECF80). The count is the slots before the first 12 (825BC6A0).
+- Movie (init 825F0CE8): a failure shows challengefailed_small (template 36); a pass with two or more result rows, or
+  with the challenge's force flag (Bool 0x03B86F8338D5EC92, false in all shipped data), shows endchallengeoptions
+  (33); otherwise endchallenge_small (34).
+- Keys (825F12E8): A slot 0, B slot 1, X slot 2, Y slot 3, with no count check. Continue, Quit and MoreActivities
+  close and post hudcontinue after the outro; Retry / Rematch post hudretry, after a pass behind the rematch confirm
+  popup 217; ChangeDifficulty pushes FE 45 (825F13F8).
+- Close (825F0F98) resets the slots unless the dialog was left for a settings screen.
+- Lot activities (b923): pass with MoreActivities [10, 11, 18, 12], without [10, 11, 12, 12]; fail with both
+  [10, 11, 18, 19], without MoreActivities [10, 11, 19, 12].
+Option text ids (table 8221EB28) are `default_texts`, our data. Tests: `default_slots_resolve_by_result`,
+`lot_activity_slots_and_reset`, `movie_choice`.
+
+In play (tutorials): the run's end options emit `OpenEndDialog` (opened as passed, b920) and wait; `challenges.rs`
+opens `EndDialogScreen`, the menu stage (`retail_menu_stage.rs`, `END_DIALOGS`) opens endchallenge_small or
+challengefailed_small, shows it after its intro and maps Apt keys 2 / 3 / 5 / 4 to slots 0..3 (825F12E8). The pick
+goes back to the run as HudContinue / HudRetry. `end_dialog_host.rs` answers Mission.GetNumEndMissionOptions /
+GetEndMissionOptionText ("#" + text id) / GetWinState / Results_GetKilledIt / GetTitle and
+HUDComponents.Results_GetNumPlayers (0: our families write no result rows, b925). Logged `SKATE_CHALLENGE end dialog`
+and `RETAIL_MENUS end dialog slot <n>`. Test runs: `SKATE_VERIFY_TUTORIAL_PASS=1` (with `SKATE_VERIFY_TUTORIAL`) completes the objectives once they evaluate, so the dialog and the career's reward chain run unplayed; `SKATE3_RETAIL_MENUS_KEYS` presses through them. Laptop runs 2026-11-07: the dialog draws (endchallenge_small; its movie path must match the exported key's case, the
+stage's lookup is case sensitive), its buttons read the localised option texts (text natives answer `#` + the
+localised text), its title comment comes from the movie's own `Math.random()` pick, and A picks Continue and completes
+the tutorial. NOT RETAIL YET: the stage side is still behind `SKATE_RETAIL_END_SCREENS=1`; without it, or without the
+movies, the run continues at once; Retry after a
+pass skips the rematch confirm popup 217; retry's fade and music restart (b923 §3) and ChangeDifficulty (FE 45) are
+not ported. Own the spot has no dialog in retail either (b929).
+
+## Change: the sign-up poster (`challenges/poster.rs`)
+
+Research b932, b935, b939. Retail shows a poster before a single challenge starts: FE screen 0x1B (the lot list's
+screen) on page 0, template 23 SignUp_Poster, movie `challenge/challenge_signup`, movie state 20 (a lot row gets
+state 10, the lot list). A on it starts the challenge (825EE188 -> 82D52B60); B closes it and cancels the pending
+sign-up (82D52C98). Retry and the pause restart never show it, and an activity picked on the lot list (a chained
+start) skips it (b939). Rules in skate-core `Poster` (engine free):
+- The CIC menu (825C1E88): Start first, then Pick Teammates when career teammates are usable, then Sign Up Co-op
+  when the challenge is co-op capable; `#NO OPTION` alone when the team gate (825EE7A8) fails.
+  SetCICMenuOptionIndex stores 2 for entry 1 without teammates (index 2 always means co-op).
+- Keys (825ED410): A on Start (gate passed) starts, B cancels; the first accepted press locks the poster.
+Tests: `options_follow_the_team_and_coop_flags`, `entry_one_without_teammates_is_coop`,
+`a_starts_b_cancels_and_the_first_press_locks`, and the host's `natives_answer_from_the_view`.
+
+In play: one challenge in reach plus D-pad Up opens `PosterScreen` (`challenges.rs` `sign_up`) instead of starting at
+once; the menu stage opens the movie, shows it after its load / intro call (or the same 30-update fallback as the end
+dialog), posts state 20, sends A / B to `PosterScreen::press` and every other key to the movie. `poster_host.rs`
+answers SignUpPoster.GetSignUpTitle / GetSignUpDescription / CanSignUpToChallenge / GetCICMenuOptions /
+SetCICMenuOptionIndex / GetCICMenuOptionIndex / IsCompetitorChallenge / GetCompetitors, the poster's Mission natives
+(owned, killed, killable, rewards, teammates, competitors) and HUDComponents.SignUp_GetNumObjectives /
+SignUp_GetObjectiveTitle. Logged `SKATE_CHALLENGE poster <id>`, `RETAIL_MENUS show poster`, `RETAIL_MENUS poster key`.
+Data (research b947): the export adds `description_arg` (Int8 0x0AF3F024F18EAB9D, the description's one "%d"
+argument) and `objectives_enabled` (Bool 0x858D73CD6085C8EC) next to `description_id`; killable (827CDA70: type 0x13
+or a non-empty ObjectivesKilledIt) and the owned / killed board sales (OwnedItReward / KilledItReward +4) come from
+the career's `progression.json` (`killable`, `challenge_rewards`); own the spot objective titles are
+`ID_OBJECTIVE_BEAT_SCORE` with the owned / killed point requirement (8264D130, type 9). Arguments are printed as
+plain decimals before substitution [the substitution itself inferred]. NOT RETAIL YET: behind
+`SKATE_RETAIL_END_SCREENS=1` like the end dialog; the co-op bonus is online only (0 here); the killed objective row
+is shown when the killed points are above 0 [inferred stand-in for a non-empty ObjectivesKilledIt]; no teammates or
+co-op offline, so Start is the only option. Several challenges in reach keep our pick
+popup; the map's Sign Up is not ported yet (retail's arrival path skips the poster, b913).
 
 ## Files
 

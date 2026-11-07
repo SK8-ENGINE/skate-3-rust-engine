@@ -136,6 +136,35 @@ const VIDEO_CALIBRATION_ROW: &str = "ID_GAMESETTINGS_VIDEO_CALIBRATION";
 const TRICK_GUIDE_ITEM: &str = "TrickGuide";
 /// AptNext (A) key index.
 const APT_NEXT: u32 = 2;
+/// The reward presentation screens (FE 64 / 65 / 66; research b899 §1): movie key, path, template, in
+/// `presentation::Screen` order.
+const REWARD_SCREENS: [(&str, &str, &str); 3] = [
+    ("source/screens/unlock/unlockoverlay", "unlock/unlockoverlay.swf", "RewardSummary"),
+    ("source/screens/unlock/unlock_milestone", "unlock/unlock_milestone.swf", "MilestoneUnlock"),
+    ("source/screens/unlock/unlock_teammate", "unlock/unlock_teammate.swf", "TeammateUnlock"),
+];
+/// The end dialog movies (FE 4, init 825F0CE8; research b920 / b925), in `end_dialog::Movie` order: options table,
+/// small, failed.
+/// Paths match the exported keys' case: the stage's movie lookup is case sensitive (laptop 2026-11-07: with
+/// `hudComponents/` the load failed and the dialog never constructed).
+const END_DIALOGS: [(&str, &str, &str); 3] = [
+    ("source/screens/hudcomponents/endchallengeoptions", "hudcomponents/endchallengeoptions.swf", "EndChallengeOptions"),
+    ("source/screens/hudcomponents/endchallenge_small", "hudcomponents/endchallenge_small.swf", "EndChallengeOptions_Small"),
+    ("source/screens/hudcomponents/challengefailed_small", "hudcomponents/challengefailed_small.swf", "EndChallengeOptionsFail_Small"),
+];
+/// The sign-up poster (FE 0x1B page 0, template 23; research b932, b935): movie key, path, template.
+const POSTER: (&str, &str, &str) = ("source/screens/challenge/challenge_signup", "challenge/challenge_signup.swf", "SignUp_Poster");
+/// `SKATE_RETAIL_END_SCREENS=1`: the end dialog and reward screens open on the stage. Off by default until they are
+/// seen drawing (laptop run 2026-11-07: logged as shown, nothing drawn); off = the old continue / accept at once.
+pub(crate) fn screens_switch() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("SKATE_RETAIL_END_SCREENS").is_ok_and(|v| v == "1"))
+}
+
+/// Stage updates after which an opened end dialog / reward screen is shown even without its load or intro call.
+const SHOW_FALLBACK_FRAMES: u32 = 30;
+/// Pad keys to end dialog slots (825F12E8): Apt key indices 2 (A) / 3 (B) / 5 (X) / 4 (Y) to slots 0 / 1 / 2 / 3.
+const END_DIALOG_KEYS: [(u32, usize); 4] = [(2, 0), (3, 1), (5, 2), (4, 3)];
 /// The fader bit screen changes hold (sub_825E6B30 / sub_825E6BF8 bit 0).
 const FADE_SCREEN: u32 = 0;
 /// The fader bit the player skater swap holds (0x89 state 82706938: 825E6B30 bit 7, b562).
@@ -201,6 +230,26 @@ struct MenuStage {
     /// The Skate Profile screen's AS id and host (offline_profile_host), and the mod generation its data was built for.
     offline_profile_id: i32,
     offline_profile: crate::offline_profile_host::OfflineProfileHost,
+    /// The reward summary host and the RewardScreens generation its view was copied at.
+    reward_summary: crate::reward_summary_host::RewardSummaryHost,
+    reward_generation: u64,
+    /// Each reward screen's AS id when its movie was exported and its template registered.
+    reward_ids: [Option<i32>; 3],
+    /// The reward screen open on the stage (screen index, card index) and whether its intro completed.
+    reward_open: Option<(usize, u32)>,
+    reward_shown: bool,
+    /// The end dialog movies' AS ids, and the one open with whether its intro completed.
+    end_ids: [Option<i32>; 3],
+    end_open: Option<usize>,
+    end_shown: bool,
+    /// Updates since the end dialog / reward screen opened (the show fallback for movies that report no intro).
+    end_frames: u32,
+    reward_frames: u32,
+    /// The sign-up poster's AS id, whether it is open / shown, and updates since it opened.
+    poster_id: Option<i32>,
+    poster_open: bool,
+    poster_shown: bool,
+    poster_frames: u32,
     profile_generation: (u64, u64),
     /// The Extras screen's AS id and host (extras_host), the cheat table, and the text entry FE 46 opens next.
     extras_id: i32,
@@ -264,8 +313,9 @@ struct MenuStage {
     apt_keys: Vec<AptKey>,
     pads: [FeInput; 4],
     repeat: RepeatRule,
-    /// `SKATE3_RETAIL_MENUS_KEYS`: key indices to inject, one per frame, while the pause menu takes input; `_` is a
-    /// frame without a key (lets a screen load before the next key, e.g. `15,15,2,_x60,13`: `_xN` = N frames).
+    /// `SKATE3_RETAIL_MENUS_KEYS`: key indices to inject, one per frame, while the pause menu, the end dialog or a reward
+    /// screen takes input; `_` is a frame without a key (lets a screen load before the next key, e.g.
+    /// `15,15,2,_x60,13`: `_xN` = N frames).
     injected: std::collections::VecDeque<Option<u32>>,
 }
 
@@ -675,6 +725,24 @@ fn setup(
                 challenge_map: Default::default(),
                 offline_profile_id: as_id(OFFLINE_PROFILE),
                 offline_profile: Default::default(),
+                reward_summary: Default::default(),
+                reward_generation: 0,
+                reward_ids: REWARD_SCREENS.map(|(movie, _, template)| {
+                    templates.iter().position(|n| n == template).filter(|_| movies.movies.contains_key(movie)).map(|i| 600 + i as i32)
+                }),
+                reward_open: None,
+                reward_shown: false,
+                end_ids: END_DIALOGS.map(|(movie, _, template)| {
+                    templates.iter().position(|n| n == template).filter(|_| movies.movies.contains_key(movie)).map(|i| 600 + i as i32)
+                }),
+                end_open: None,
+                end_shown: false,
+                end_frames: 0,
+                reward_frames: 0,
+                poster_id: templates.iter().position(|n| n == POSTER.2).filter(|_| movies.movies.contains_key(POSTER.0)).map(|i| 600 + i as i32),
+                poster_open: false,
+                poster_shown: false,
+                poster_frames: 0,
                 profile_generation: (0, 0),
                 extras_id: as_id(EXTRAS),
                 extras: Default::default(),
@@ -756,7 +824,7 @@ fn update(
     mut warned: Local<bool>,
     skater: Option<Res<crate::physics::SkaterRuntime>>,
     // Mods' Trick Guide and Skate Profile layers (one parameter: the system is at Bevy's 16).
-    (guide_mods, profile_mods, credits_mods, config, mut loading_mods, career, career_profile): (
+    (guide_mods, profile_mods, credits_mods, config, mut loading_mods, career, career_profile, mut reward_screens, mut end_screen, mut poster_screen): (
         Res<crate::trick_guide_host::TrickGuideMods>,
         Res<crate::offline_profile_host::ProfileMods>,
         Res<crate::extras_host::CreditsMods>,
@@ -764,6 +832,9 @@ fn update(
         ResMut<crate::tips_loader_host::LoadingMods>,
         Option<Res<crate::career_stats_host::CareerStatsHost>>,
         Option<Res<crate::career::CareerProfile>>,
+        Option<ResMut<crate::career::RewardScreens>>,
+        Option<ResMut<crate::end_dialog_host::EndDialogScreen>>,
+        Option<ResMut<crate::poster_host::PosterScreen>>,
     ),
     // The Trick Guide's demo and the text entry's keyboard (one parameter: the system is at Bevy's 16).
     (mut demo, mut text_entry, mut marquee): (ResMut<crate::trick_guide_scene::TrickGuideDemo>, ResMut<crate::extras_host::TextEntryView>, ResMut<crate::marquee_preview::MarqueeView>),
@@ -858,6 +929,31 @@ fn update(
     fe.image_slots = std::mem::take(&mut ms.image_slots);
     fe.challenge_map.open = map.is_some() && ms.stack.top(Layer::Main) == map;
     fe.offline_profile = std::mem::take(&mut ms.offline_profile);
+    fe.reward_summary = std::mem::take(&mut ms.reward_summary);
+    if let Some(e) = end_screen.as_mut() {
+        let available = screens_switch() && ms.end_ids[1].is_some() && ms.end_ids[2].is_some();
+        if e.available != available {
+            e.available = available;
+        }
+        fe.end_dialog = e.open.then(|| crate::end_dialog_host::EndDialogHost { dialog: e.dialog.clone(), title: e.title.clone() });
+    }
+    if let Some(p) = poster_screen.as_mut() {
+        let available = screens_switch() && ms.poster_id.is_some();
+        if p.available != available {
+            p.available = available;
+        }
+        fe.poster = p.poster.clone().map(|poster| crate::poster_host::PosterHost { poster });
+    }
+    if let Some(r) = reward_screens.as_mut() {
+        if r.generation != ms.reward_generation {
+            ms.reward_generation = r.generation;
+            fe.reward_summary.view = r.view.clone();
+        }
+        let available = screens_switch() && ms.reward_ids.iter().all(Option::is_some);
+        if r.available != available {
+            r.available = available;
+        }
+    }
     // The career or mods changed the profile pages: rebuild them; an open screen shows its tab's page again.
     let profile_generation = (profile_mods.generation, career_profile.as_ref().map_or(0, |p| p.generation));
     if profile_generation != ms.profile_generation {
@@ -936,17 +1032,102 @@ fn update(
                 (None, false) => {}
             }
         }
+        // The reward presentation (docs/hails-additions/43-career.md#change-the-reward-presentation-careerpresentationrs):
+        // the career names the open screen; each change closes the last movie and opens the next (a new card opens
+        // its movie again), shown once its intro completed.
+        let wanted = reward_screens.as_ref().and_then(|r| r.open).map(|(s, i)| (s as usize, i));
+        if wanted != ms.reward_open {
+            if let Some(id) = ms.reward_open.and_then(|(s, _)| ms.reward_ids[s]) {
+                close(&mut ms.stage, id, &mut fe)?;
+            }
+            if let Some((s, i)) = wanted.filter(|(s, _)| ms.reward_ids[*s].is_some()) {
+                info!("RETAIL_MENUS open {} {i}", REWARD_SCREENS[s].2);
+                open_screen(&mut ms.stage, REWARD_SCREENS[s].1, REWARD_SCREENS[s].2, &mut fe)?;
+            }
+            ms.reward_open = wanted;
+            ms.reward_shown = false;
+            ms.reward_frames = 0;
+        }
+        // The end dialog (FE 4): opened while the run waits in its end options, closed once a pick was made.
+        let wanted_end = end_screen.as_ref().filter(|e| e.open).map(|e| e.movie() as usize);
+        if wanted_end != ms.end_open {
+            if let Some(id) = ms.end_open.and_then(|m| ms.end_ids[m]) {
+                close(&mut ms.stage, id, &mut fe)?;
+            }
+            if let Some(m) = wanted_end.filter(|m| ms.end_ids[*m].is_some()) {
+                info!("RETAIL_MENUS open {} (FE 4)", END_DIALOGS[m].2);
+                open_screen(&mut ms.stage, END_DIALOGS[m].1, END_DIALOGS[m].2, &mut fe)?;
+            }
+            ms.end_open = wanted_end;
+            ms.end_shown = false;
+            ms.end_frames = 0;
+        }
+        // The sign-up poster: opened while the sign-up waits on it, closed on its A / B.
+        let wanted_poster = poster_screen.as_ref().is_some_and(|p| p.poster.is_some());
+        if let Some(id) = ms.poster_id.filter(|_| wanted_poster != ms.poster_open) {
+            if wanted_poster {
+                info!("RETAIL_MENUS open {} (FE 0x1B)", POSTER.2);
+                open_screen(&mut ms.stage, POSTER.1, POSTER.2, &mut fe)?;
+            } else {
+                close(&mut ms.stage, id, &mut fe)?;
+            }
+            ms.poster_open = wanted_poster;
+            ms.poster_shown = false;
+            ms.poster_frames = 0;
+        }
         let auto =ms.auto_open && time.elapsed_secs() > 4.0;
         ms.auto_open &= !auto;
         if auto {
             fired.insert(0, (APT_START, 0));
         }
-        if ms.stack.input_target().is_some() {
+        if ms.stack.input_target().is_some() || ms.end_open.is_some() || ms.reward_open.is_some() || ms.poster_open {
             fired.extend(ms.injected.pop_front().flatten().map(|k| (k, 0)));
         }
         for (key, controller) in fired {
             // Session log: every key the menus took, by retail's Apt key name (the user's play tests).
             info!("RETAIL_MENUS key {} pad {controller} screen {:?}", ms.apt_keys.get(key as usize).map_or("?", |k| k.name.as_str()), ms.stack.input_target().and_then(|t| backdrop.id(t)));
+            // A / B / X / Y on the shown end dialog pick its slot's option (825F12E8).
+            if let (Some(_), Some(slot)) = (ms.end_open, END_DIALOG_KEYS.iter().find(|(k, _)| *k == key).map(|(_, s)| *s)) {
+                if ms.end_shown {
+                    if let Some(action) = end_screen.as_mut().and_then(|e| e.press(slot)) {
+                        info!("RETAIL_MENUS end dialog slot {slot}: {action:?}");
+                    }
+                }
+                continue;
+            }
+            // A / B on the shown poster start or cancel (825ED410); other keys reach its movie (the option picker).
+            if let (true, Some(id)) = (ms.poster_open, ms.poster_id) {
+                if ms.poster_shown {
+                    if let (Some(p), Some(host)) = (poster_screen.as_mut(), fe.poster.as_ref()) {
+                        if p.poster.is_some() {
+                            p.poster = Some(host.poster.clone());
+                        }
+                    }
+                    match poster_screen.as_mut().and_then(|p| p.press(key as u8)) {
+                        Some(outcome) => {
+                            info!("RETAIL_MENUS poster key {key}: {outcome:?}");
+                            fe.poster = None;
+                        }
+                        None => {
+                            ms.stage.call_path(
+                                "_global.ScreenManager.UpdateInput",
+                                vec![Value::Text(id.to_string()), Value::Text(key.to_string()), Value::Text(controller.to_string())],
+                                &mut fe,
+                            )?;
+                        }
+                    }
+                }
+                continue;
+            }
+            // A on an open reward screen goes to the presentation (C++ 82650738 / 826504E0, b899), once it shows.
+            if key == APT_NEXT && ms.reward_open.is_some() {
+                if ms.reward_shown {
+                    if let Some(r) = reward_screens.as_mut() {
+                        r.accepted = true;
+                    }
+                }
+                continue;
+            }
             // sub_825EC0E8 step 2: while the popup list has entries, every key goes to the popup host only; its C++
             // handler (vt+40) returns 0, so the movie's UpdateInput gets the key once the host is ready (+49).
             if let Some((_, request)) = ms.popups.shown() {
@@ -1649,6 +1830,40 @@ fn update(
                 ms.signup_shown = wanted;
             }
         }
+        // Shown after its intro, or on load, or after SHOW_FALLBACK_FRAMES updates: the hudComponents dialogs report
+        // neither (laptop run 2026-11-07: logged open, never drawn).
+        if let Some(id) = ms.end_open.and_then(|m| ms.end_ids[m]) {
+            ms.end_frames += 1;
+            let loaded = take_call(&mut fe, &format!("Game.OnScreenLoaded({id})"));
+            let intro = take_call(&mut fe, &format!("Game.OnScreenIntroComplete({id})"));
+            if !ms.end_shown && (loaded || intro || ms.end_frames > SHOW_FALLBACK_FRAMES) {
+                info!("RETAIL_MENUS show end dialog {id} (loaded {loaded}, intro {intro}, frames {})", ms.end_frames);
+                ms.end_shown = true;
+                ms.stage.call_path("_global.ScreenManager.ShowScreen", vec![Value::Text(id.to_string()), Value::Text("true".into())], &mut fe)?;
+            }
+        }
+        if let Some(id) = ms.poster_id.filter(|_| ms.poster_open) {
+            ms.poster_frames += 1;
+            let loaded = take_call(&mut fe, &format!("Game.OnScreenLoaded({id})"));
+            let intro = take_call(&mut fe, &format!("Game.OnScreenIntroComplete({id})"));
+            if !ms.poster_shown && (loaded || intro || ms.poster_frames > SHOW_FALLBACK_FRAMES) {
+                info!("RETAIL_MENUS show poster {id} (loaded {loaded}, intro {intro}, frames {})", ms.poster_frames);
+                ms.poster_shown = true;
+                ms.stage.call_path("_global.ScreenManager.ShowScreen", vec![Value::Text(id.to_string()), Value::Text("true".into())], &mut fe)?;
+                // b935: a single challenge posts the poster state (a lot row would post 10, the lot list).
+                set_state(&mut ms.stage, id, skate_core::challenges::poster::STATE_SIGN_UP, &mut fe)?;
+            }
+        }
+        if let Some(id) = ms.reward_open.and_then(|(s, _)| ms.reward_ids[s]) {
+            ms.reward_frames += 1;
+            let loaded = take_call(&mut fe, &format!("Game.OnScreenLoaded({id})"));
+            let intro = take_call(&mut fe, &format!("Game.OnScreenIntroComplete({id})"));
+            if !ms.reward_shown && (loaded || intro || ms.reward_frames > SHOW_FALLBACK_FRAMES) {
+                info!("RETAIL_MENUS show reward screen {id} (loaded {loaded}, intro {intro}, frames {})", ms.reward_frames);
+                ms.reward_shown = true;
+                ms.stage.call_path("_global.ScreenManager.ShowScreen", vec![Value::Text(id.to_string()), Value::Text("true".into())], &mut fe)?;
+            }
+        }
         // The instant replay screen after this frame's movie update: shown once its intro completed, then told what
         // changed in the replay.
         if let Some(replay_id) = ms.replay_id.filter(|_| fe.replay_menu.open) {
@@ -2006,6 +2221,13 @@ fn update(
     fe.challenge_map.markers = if fe.challenge_map.open { fe.challenge_map.state.markers(fe.registry, fe.context) } else { Vec::new() };
     ms.challenge_map = std::mem::take(&mut fe.challenge_map);
     ms.offline_profile = std::mem::take(&mut fe.offline_profile);
+    ms.reward_summary = std::mem::take(&mut fe.reward_summary);
+    // The movie's SetCICMenuOptionIndex calls this frame stay with the open poster.
+    if let (Some(p), Some(host)) = (poster_screen.as_mut(), fe.poster.take()) {
+        if p.poster.is_some() {
+            p.poster = Some(host.poster);
+        }
+    }
     ms.extras = std::mem::take(&mut fe.extras);
     ms.tos = std::mem::take(&mut fe.tos);
     ms.credits = std::mem::take(&mut fe.credits);

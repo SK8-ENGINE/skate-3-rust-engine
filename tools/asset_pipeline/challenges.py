@@ -40,6 +40,13 @@ OWNED = _field('ObjectivesOwned')
 KILLED = _field('ObjectivesKilledIt')
 POINTS = _field('PointRequirement')
 OBJECTIVES = _field('Objectives')
+# Failure conditions (research b938 / b940): FailureObjectivesWithEvents rows (each a Lua predicate plus its own
+# PresentationEvents, played when it fires); EvaluateFailureBeforeCompletionObjectives orders the checks.
+FAILURES_WITH_EVENTS = 'Hash_B69AF085F7A6D275'
+PRESENTATION_EVENTS = 'Hash_BD96B775B855E129'
+FAILURE_FIRST = 'Hash_B053106604767956'
+# HintObjectives (82C755B8, research b942): the same row shape as the failure rows.
+HINTS = 'Hash_ECAEB8E619A68AF3'
 DEFINITION = 'Hash_E13D9C326E4D98D5'  # tObjectiveDefinition: completion condition text offset, description offset
 POINTS_VALID = 'Hash_41CBF3F0889DE6B3'  # hash64("PointsValid"), tCompiledLua: text offset first (b840)
 TRIGGERS = 'Hash_D4965ED3BD43EC44'  # tObjectiveTriggers: bytes 0..13 = listens to message kind N (b840)
@@ -58,6 +65,12 @@ SIGN_UP_RADIUS = _field('GlobalActivateRadius')
 DISCOVERY_RADIUS = _field('DiscoveryActivateRadius')
 PARAMS = 'Hash_46A56ADDF284C381'     # the challenge parameters (local data and framework rows)
 FRAMEWORK = 'data/db/challenge_local_data_framework'
+# Own the lots (research b905 / b916 / b922): ChallengeType 0x34 rows, their child list (RefSpec array, key at bytes
+# 8..15, looked up in challenge_global_data) and each child's FreeskateActivityType (eFreeskateType, inherited).
+LOT_TYPE = 0x34
+LOT_CHILDREN = 'Hash_ABE749C80E8ADBCE'
+ACTIVITY_TYPE = 'Hash_85D6B2C6AE61DD8B'
+DEBUG_ONLY = 'Hash_FD40E4A31027C984'
 OUT_OF_BOUNDS_TIME = _field('OutOfBoundsTime')
 OWNED_TIME = _field('OwnedItHUDDisplayTime')
 KILLED_TIME = _field('KilledItHUDDisplayTime')
@@ -65,6 +78,10 @@ RETURN_MESSAGE = _field('CentralMessageHALIDReturnToChallengeArea')
 CHALLENGE_TYPE = _field('ChallengeType')  # eChallengeTypes (own the spot 9)
 TITLE = 'Hash_E2A50788B6C20C92'
 DESCRIPTION = 'Hash_6B0BD2BAE508B742'
+# The sign-up poster (research b947): the description's one "%d" argument (Int8, default 0) and IsObjectivesEnabled
+# (Bool, default false).
+DESCRIPTION_ARG = 'Hash_0AF3F024F18EAB9D'
+OBJECTIVES_ENABLED = 'Hash_858D73CD6085C8EC'
 
 
 def chain(rows, cls, key):
@@ -184,8 +201,29 @@ def objective_rows(rows_by_hash, objectives, binary, binary_of=None):
             # The text offset points into the bank the found row came from (family rows sit in the main bank).
             source = (binary_of or (lambda _row: None))(found[1]) or binary
             entry['points_valid'] = translate(lua_text(source, found[0]))
+        failures = inherited_field(rows_by_hash, objective, FAILURES_WITH_EVENTS)
+        entry['failures'] = [failure_row(rows_by_hash, ref, binary, binary_of) for ref in refs(failures[0] if failures else None)]
+        first = inherited_field(rows_by_hash, objective, FAILURE_FIRST)
+        entry['failure_first'] = bool(first and first[0].get('data', '00')[:2] == '01')
+        hints = inherited_field(rows_by_hash, objective, HINTS)
+        entry['hints'] = [failure_row(rows_by_hash, ref, binary, binary_of) for ref in refs(hints[0] if hints else None)]
         out.append(entry)
     return out
+
+
+def failure_row(rows_by_hash, ref, binary, binary_of=None):
+    """A failure row (b940): its key, its predicate as an exported program (None when the translator cannot take it:
+    the engine then never fires it) and how many presentation events it plays."""
+    from .objective_lua import translate, LuaSyntaxError
+    row = rows_by_hash.get(ref) or {}
+    fields = row.get('fields', {})
+    source = (binary_of or (lambda _row: None))(row) or binary
+    try:
+        condition = translate(lua_text(source, fields.get(DEFINITION)))
+    except LuaSyntaxError:
+        condition = None
+    events = ((fields.get(PRESENTATION_EVENTS) or {}).get('array') or {}).get('items') or []
+    return {'key': row.get('key') or 'Hash_%016X' % ref[1], 'condition': condition, 'presentation': len(events)}
 
 
 def inherited_field(rows_by_hash, ref, name):
@@ -201,6 +239,46 @@ def inherited_field(rows_by_hash, ref, name):
         parent = row.get('parent')
         ref = (ref[0], key_hash(parent)) if parent else None
     return None
+
+
+def _u32(value):
+    return int(value['data'][:8], 16) if value and value.get('data') else None
+
+
+def own_the_lots(rows, rows_by_hash, origin, global_locators, text, skipped):
+    """Each own the lot row (b922): its children in disc order with their activity type, title / description ids and
+    the sign-up locator; DebugOnly lots are left out. The engine sorts the children by type (screen 0x1B)."""
+    names = {h: row['key'].casefold() for (c, h), row in rows_by_hash.items() if c == CHALLENGE}
+    lots = []
+    for (cls, key) in sorted(rows):
+        if cls != CHALLENGE:
+            continue
+        fields, _ = chain(rows, cls, key)
+        children = [names.get(k, 'Hash_%016X' % k) for c, k in refs(rows[cls, key][1].get(LOT_CHILDREN))]
+        if _u32(fields.get(CHALLENGE_TYPE)) != LOT_TYPE or not children:
+            continue
+        if (fields.get(DEBUG_ONLY) or {}).get('data', '00')[:2] == '01':
+            continue
+        source, bank_binary = origin[cls, key]
+        world = int((fields.get(WORLD) or {}).get('data', '0' * 16)[:16], 16)
+        district = next((d for d, _ in global_locators() if hash64(d) == world), None)
+        location = None
+        if location_field(fields) and district:
+            name = cstring(bank_binary, int(location_field(fields)['data'], 16)).decode('utf-8')
+            found = global_locators().get((district, name), [])
+            if len({json.dumps(m) for m in found}) == 1:
+                location = dict(locator=name, matrix=found[0])
+        if location is None:
+            skipped.append(f'{key} (own the lot sign-up location)')
+        title_id = (fields.get(TITLE) or {}).get('data') or None
+        lots.append(dict(
+            id=key, source=source, map=label_of(district) if district else None, district=district,
+            title_id=title_id, title=text.get(title_id) if title_id else None,
+            description_id=(fields.get(DESCRIPTION) or {}).get('data') or None, location=location,
+            children=[dict(id=child, activity_type=_u32(chain(rows, cls, child)[0].get(ACTIVITY_TYPE)),
+                           title_id=(chain(rows, cls, child)[0].get(TITLE) or {}).get('data') or None)
+                      for child in children]))
+    return lots
 
 
 def lua_text(binary, field):
@@ -398,6 +476,8 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             id=key, family=family, source=source, map=label_of(district), district=district,
             title_id=title_id, title=text.get(title_id) if title_id else None,
             description_id=(fields.get(DESCRIPTION) or {}).get('data') or None,
+            description_arg=int(((fields.get(DESCRIPTION_ARG) or {}).get('data') or '00')[:2], 16),
+            objectives_enabled=((fields.get(OBJECTIVES_ENABLED) or {}).get('data') or '00')[:2] == '01',
             boundary=dict(name=boundary_name, id='%016x' % boundary_id, volume=boundary),
             scoring=dict(name=spot_name, id='%016x' % spot_id, volume=scoring),
             spot=dict(name=target[1], id='%016x' % target[2], volume=spot),
@@ -408,10 +488,11 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             objectives=dict(owned=objective_programs(rows_by_hash, fields.get(OWNED), bank_binary, binary_of),
                             killed=objective_programs(rows_by_hash, fields.get(KILLED), bank_binary, binary_of)),
             challenge_type=int(fields[CHALLENGE_TYPE]['data'], 16) if CHALLENGE_TYPE in fields else None, **params))
+    lots = own_the_lots(rows, rows_by_hash, origin, global_locators, text, skipped)
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps({'format': FORMAT, 'version': VERSION, 'challenges': result, 'tutorials': tutorials},
-                                 indent=1), encoding='utf-8')
+    output.write_text(json.dumps({'format': FORMAT, 'version': VERSION, 'challenges': result, 'tutorials': tutorials,
+                                  'own_the_lots': lots}, indent=1), encoding='utf-8')
     report(f'Challenges: {len(result)} ({", ".join(FAMILIES)}) on {len({c["map"] for c in result})} maps, '
-           f'{len(tutorials)} tutorials' + (f'; left out: {", ".join(skipped)}' if skipped else ''))
+           f'{len(tutorials)} tutorials, {len(lots)} own the lots' + (f'; left out: {", ".join(skipped)}' if skipped else ''))
     return result

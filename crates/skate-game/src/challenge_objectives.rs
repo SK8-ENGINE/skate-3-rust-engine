@@ -20,6 +20,24 @@ pub(crate) struct ObjectiveData {
     pub triggers: Vec<bool>,
     #[serde(default)]
     pub activation: u32,
+    /// Failure rows in order (FailureObjectivesWithEvents, research b940); an untranslatable row has no condition.
+    #[serde(default)]
+    pub failures: Vec<FailureData>,
+    #[serde(default)]
+    pub failure_first: bool,
+    /// Hint rows in order (HintObjectives, research b942), the same row shape as the failures.
+    #[serde(default)]
+    pub hints: Vec<FailureData>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct FailureData {
+    pub key: String,
+    #[serde(default)]
+    pub condition: Option<serde_json::Value>,
+    /// How many presentation events the row plays when it fires.
+    #[serde(default)]
+    pub presentation: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -44,6 +62,10 @@ fn activation(mode: u32) -> Activation {
 pub(crate) struct DataObjectives {
     group: Group,
     programs: Vec<(Program, Option<Program>)>,
+    /// Per objective: its failure rows' programs by row index (None: the row never fires).
+    failures: Vec<Vec<Option<Program>>>,
+    /// Per objective: its hint rows' programs by row index (None: the row never fires).
+    hints: Vec<Vec<Option<Program>>>,
     names: Names,
     vars: Vec<Vec<Value>>,
     globals: Vec<Value>,
@@ -68,6 +90,8 @@ fn trick_key(name: &str) -> u64 {
 
 struct Eval<'a> {
     programs: &'a [(Program, Option<Program>)],
+    failures: &'a [Vec<Option<Program>>],
+    hints: &'a [Vec<Option<Program>>],
     names: &'a Names,
     vars: &'a mut [Vec<Value>],
     globals: &'a mut [Value],
@@ -103,6 +127,48 @@ impl Conditions for Eval<'_> {
         let programs = self.programs;
         programs[i].1.as_ref().is_some_and(|p| self.run(p, i, o, ctx, false))
     }
+    /// 82C75490: the rows in order, the first that holds wins (later rows do not run; they share the objective's vars).
+    fn failure(&mut self, i: usize, o: &Objective, ctx: Context) -> Option<usize> {
+        let failures = self.failures;
+        self.first_row(failures.get(i)?, i, o, ctx)
+    }
+    /// 82C755B8: the same walk over the hint rows (research b942).
+    fn hint(&mut self, i: usize, o: &Objective, ctx: Context) -> Option<usize> {
+        let hints = self.hints;
+        self.first_row(hints.get(i)?, i, o, ctx)
+    }
+}
+
+impl Eval<'_> {
+    fn first_row(&mut self, rows: &[Option<Program>], i: usize, o: &Objective, ctx: Context) -> Option<usize> {
+        rows.iter().enumerate().find_map(|(row, p)| p.as_ref().filter(|p| self.run(p, i, o, ctx, false)).map(|_| row))
+    }
+}
+
+/// Compiles one kind of side rows (failures, hints) after the group's own API check: a row that does not load, or that
+/// needs an unported API, drops that kind for this group only (the group still runs from data).
+fn side_rows<'a>(id: &str, kind: &str, lists: impl Iterator<Item = &'a [FailureData]>, names: &mut Names) -> Vec<Vec<Option<Program>>> {
+    let before = names.api.len();
+    let mut error = None;
+    let mut out: Vec<Vec<Option<Program>>> = lists
+        .map(|rows| {
+            rows.iter()
+                .map(|f| match f.condition.as_ref().map(|c| program(c, names)).transpose() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        error.get_or_insert(format!("{} ({e})", f.key));
+                        None
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let unported: Vec<String> = names.api[before..].iter().filter(|n| !skate_core::challenges::api::ported(n)).cloned().collect();
+    if error.is_some() || !unported.is_empty() {
+        info!("SKATE_CHALLENGE {id} {kind} rows NOT RETAIL YET: {error:?} unported API {unported:?}");
+        out.iter_mut().for_each(Vec::clear);
+    }
+    out
 }
 
 /// What a banked sequence did to the group.
@@ -139,17 +205,21 @@ impl DataObjectives {
             for (i, on) in r.triggers.iter().take(MASK_BYTES).enumerate() {
                 mask[i] = *on;
             }
-            Definition { activation: activation(r.activation), mask }
+            Definition { activation: activation(r.activation), mask, failure_first: r.failure_first }
         }));
         let unported: Vec<&String> = names.api.iter().filter(|n| !skate_core::challenges::api::ported(n)).collect();
         if !unported.is_empty() {
             info!("SKATE_CHALLENGE {id} objectives NOT RETAIL YET: unported API {unported:?}");
             return None;
         }
+        let failures = side_rows(id, "failure", rows.iter().map(|r| r.failures.as_slice()), &mut names);
+        let hints = side_rows(id, "hint", rows.iter().map(|r| r.hints.as_slice()), &mut names);
+        let count = |l: &[Vec<Option<Program>>]| l.iter().map(Vec::len).sum::<usize>();
         let vars = vec![vec![Value::Nil; names.vars.len()]; rows.len()];
         let globals = vec![Value::Nil; names.globals.len()];
-        info!("SKATE_CHALLENGE {id} objectives from data: {} rows, api {:?}", rows.len(), names.api);
-        Some(Self { group, programs, names, vars, globals, volumes, inside: Vec::new(), skater: SkaterFacts::default(), fraction: None,
+        info!("SKATE_CHALLENGE {id} objectives from data: {} rows, {} failure rows, {} hint rows, api {:?}", rows.len(),
+            count(&failures), count(&hints), names.api);
+        Some(Self { group, programs, failures, hints, names, vars, globals, volumes, inside: Vec::new(), skater: SkaterFacts::default(), fraction: None,
             trick_groups, tricks_this_frame: Vec::new() })
     }
 
@@ -160,7 +230,7 @@ impl DataObjectives {
             _ => {}
         }
         let statuses = self.group.objectives.iter().map(|o| o.state).collect();
-        let mut eval = Eval { programs: &self.programs, names: &self.names, vars: &mut self.vars, globals: &mut self.globals,
+        let mut eval = Eval { programs: &self.programs, failures: &self.failures, hints: &self.hints, names: &self.names, vars: &mut self.vars, globals: &mut self.globals,
             volumes: &self.volumes, inside: &self.inside, statuses, flow: Vec::new(), skater: self.skater,
             tricks_this_frame: &self.tricks_this_frame, trick_groups: &self.trick_groups };
         let mut events = self.group.handle_with(message, &mut eval);
@@ -168,7 +238,7 @@ impl DataObjectives {
             match command {
                 FlowCommand::Activate(i) => self.group.activate(i, &mut events),
                 FlowCommand::Deactivate(i) => self.group.deactivate(i),
-                FlowCommand::Reset(i) => self.group.reset(i),
+                FlowCommand::Reset(i) => self.group.reset(i, true),
                 FlowCommand::Fraction(n, d) => self.fraction = Some((n, d)),
             }
         }
@@ -197,9 +267,9 @@ impl DataObjectives {
         self.handle(Message::SequenceBegin);
     }
 
-    /// Flow.ResetObjective from the graph (objectivefailed re-arms that objective).
+    /// The graph's ResetObjective(group, i, true, false) on objectivefailed: progress cleared, state kept (b936).
     pub(crate) fn reset_one(&mut self, i: usize) {
-        self.group.reset(i);
+        self.group.reset(i, false);
     }
 
     pub(crate) fn enter(&mut self, volume: u64) {
@@ -238,11 +308,12 @@ mod tests {
             ObjectiveData { key: "ots_a_0".into(), activation: 5, triggers: spot_triggers,
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.EnteredVolume",
                     "args": [{"lit": "1"}, {"lit": "DIST_DownTown|ots_a_spotvolume_01"}]}}]}),
-                points_valid: Some(serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectivePoints.IsSequenceNewlyCompletePoints", "args": []}}]})) },
+                points_valid: Some(serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectivePoints.IsSequenceNewlyCompletePoints", "args": []}}]})),
+                failures: Vec::new(), failure_first: false, hints: Vec::new() },
             ObjectiveData { key: "global_points_objective".into(), activation: 0, triggers: points_triggers,
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"cmp": "ge", "args": [
                     {"api": "GetGroupAccumulatedPoints", "args": []}, {"api": "GetGroupPointsRequirement", "args": []}]}}]}),
-                points_valid: None },
+                points_valid: None, failures: Vec::new(), failure_first: false, hints: Vec::new() },
         ]
     }
 

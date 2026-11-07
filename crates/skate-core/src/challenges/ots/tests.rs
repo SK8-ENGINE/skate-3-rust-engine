@@ -29,6 +29,12 @@ fn ticks(ots: &mut Ots, seconds: f32) -> Vec<Command> {
     (0..Timers::ticks(seconds)).flat_map(|_| ots.tick()).collect()
 }
 
+/// Runs until a timer of `seconds` started now has expired: retail expires it on the update after its last tick
+/// (82D57960, research b958).
+fn expire(ots: &mut Ots, seconds: f32) -> Vec<Command> {
+    (0..=Timers::ticks(seconds)).flat_map(|_| ots.tick()).collect()
+}
+
 #[test]
 fn first_target_is_the_owned_score() {
     let mut ots = running(0);
@@ -56,7 +62,7 @@ fn killing_it_completes_as_killed_and_reads_the_display_times_crossed() {
     let mut ots = running(0);
     ots.handle(Event::AllObjectivesComplete { points: 1500 });
     // The treatment timer uses OwnedItHUDDisplayTime (3 s) for killed it, the reel wait KilledItHUDDisplayTime (5 s).
-    let hidden = ticks(&mut ots, 3.0);
+    let hidden = expire(&mut ots, 3.0);
     assert!(hidden.contains(&Command::ShowHud(HudComponent::KilledIt, false)));
     assert!(!hidden.contains(&Command::PlayHighlightReel));
     assert!(ticks(&mut ots, 2.0).contains(&Command::PlayHighlightReel));
@@ -82,7 +88,7 @@ fn out_of_bounds_expiry_abandons() {
     let out = ots.handle(Event::TriggerExit { volume: BOUNDARY });
     assert!(out.contains(&Command::ReturnToAreaMessage));
     assert!(out.contains(&Command::StartTimerHud { ticks: 600 }));
-    let out = ticks(&mut ots, 10.0);
+    let out = expire(&mut ots, 10.0);
     assert_eq!(out.last(), Some(&Command::Complete(Completion::Abandoned)));
 }
 
@@ -109,8 +115,8 @@ fn not_enough_points_freezes_scoring_half_a_second() {
     let out = ots.handle(Event::NotEnoughPoints { points: 400 });
     assert!(out.contains(&Command::SetHighScore(400)));
     assert!(out.ends_with(&[Command::ResetObjectives, Command::Evaluation(false)]));
-    assert!(ticks(&mut ots, 0.49).is_empty());
-    assert!(ticks(&mut ots, 0.02).contains(&Command::Evaluation(true)));
+    assert!(ticks(&mut ots, 0.5).is_empty(), "30 updates: the timer is at zero, not expired yet");
+    assert!(ots.tick().contains(&Command::Evaluation(true)));
     assert_eq!(ots.state(), State::ChallengeRunning);
 }
 
