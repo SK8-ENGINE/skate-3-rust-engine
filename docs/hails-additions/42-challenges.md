@@ -385,8 +385,16 @@ read like the teleporter triggers; the last one is the finish) and `Gates` -> `c
 IndicatorType; presentation only). Each row merges its parent chain inside its own vault. Per race: map, title /
 description ids, radii, ChallengeType, `competitors` and `online_competitors` from the bank row (tCompetitorInfo: a
 text offset into the bank .bin naming an `ai_characters` row, e.g. `reynolds_race`, and a kind: 0 that character, 1
-a random pick from a pool, unused by races; research b987, all ten races resolve),
-and per heat: the start locator (hull, else the district's global locators), TimeLimit, TimeLimitWarning,
+a random pick from a pool, unused by races; research b987, all ten races resolve; `skater_profiles.json` now also
+carries `ai_characters`: each racer key with its own AI profile (RefSpec 0x1540C7101EAEF5A6, e.g. `reynolds_race`)
+and its look (RefSpec 0x4B60FF565334CCD6, e.g. `andrew_reynolds`), b993; a racer must use that profile, not its
+look's `aiprofile`, which is `default` for most pros),
+and per heat: the start locator (hull, else the district's global locators) with its `slots`: the locator record's
+child matrices (+0x60 count, +0x64 table, stride 0x70; `teleports.py` `locator_slots`), 6 hand-placed starts on
+every disc race. Retail places competitor n on child n (`82910EB0`; RepositionAI(id, StartLocation, id) in
+setup_heat), the player is competitor 0 and AI racer k takes the k-th entry of the shuffled character list
+(SpawnAIAtLocation 8284A248; research b989, b992). Slot 0 is not always the locator itself (9 to 22 m away on the
+indu races), so the race start uses the slots, not the locator matrix. Then TimeLimit, TimeLimitWarning,
 KilledItTime, AIPathIndexOverride and the AI path filter (tRoundPaths: path names, the all-paths flag at +0x320, the
 value at +0x324), with each leg's EndTimeBonus, splits and gates as volumes from the hull.
 
@@ -445,6 +453,22 @@ Moddability: every time, the place needed and the split volumes are data (`Param
 Multiplayer: the machine is pure events -> commands; the authority runs it. Tests in `race_run.rs`: killed it, owned
 it, behind an AI loses but keeps the best time, the time limit's last 30 s then fail, skipped / backward splits, leg
 change, best time and retry, abandon. Not wired into the game yet (AI racers, HUD, records).
+
+## Change: races in play (`race_host.rs`)
+
+First game wiring of a race, player only (b978 port step 4): `crates/skate-game/src/race_host.rs` reads `races`
+from `challenges.json` and starts `SKATE_RACE=<id>` on that race's map (behind the Career and Challenges opt-in, like
+`SKATE_CHALLENGE`). It arms the split trigger volumes, teleports the player to start slot 0 (b989 / b992), feeds the
+player's trigger entries and 60 Hz ticks to the race run, updates the tracker from the player's position, shows the
+challenge timer for the last TimeLimitWarning seconds and the owned it / killed it banners, writes ID_RACE_FINISHED
+or ID_MISSION_CHALLENGE_FAILED as a central message, keeps the best time (`best_time` in `settings/challenges.json`,
+a new optional field) and the completion, and sends the result to the career. Not yet: AI racers (b987 / b993),
+sign-up from the map, the 3-2-1 HUD, DPO lines, leaderboard, gates and the results screen (b995 / b997; results
+continue at once, as the end dialog does without its movie). A completed race leaves the career's active list:
+race_shared's `complete` calls CompleteChallenge with no re-activate flag (`CALL 5 3 1`, two arguments; research
+b998), as films, follow the leader, hall of meat and contests do; only own the spot (true) and tutorials
+(Persistent) pass one. Test: `race_host::tests` (a disc-shaped row loads, run parameters, slot 0,
+course from the split centres).
 
 ## Change: the end dialog (`challenges/end_dialog.rs`; research b920, b923)
 

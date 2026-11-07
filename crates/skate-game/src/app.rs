@@ -213,6 +213,7 @@ pub(crate) fn build(
     crate::teleport_menu::install(&mut app);
     crate::teleporters::install(&mut app);
     crate::challenges::install(&mut app);
+    crate::race_host::install(&mut app);
     crate::career::install(&mut app);
     crate::visual_indicators::install(&mut app);
     app.add_plugins(crate::updater::UpdaterPlugin);

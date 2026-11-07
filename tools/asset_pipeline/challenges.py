@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from .teleporters import _sources, parse_trigger, LOCAL, BANKS, MISSIONS
-from .teleports import cstring, label_of, location_records
+from .teleports import cstring, label_of, location_records, locator_slots
 from .vlt import hash64
 
 FORMAT = 'skate3rust.challenges'
@@ -462,7 +462,9 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
                 found = global_locators().get((district.casefold(), name), [])
             if len({json.dumps(m) for m in found}) != 1:
                 raise ValueError(f'start locator {name}: {len(found)} records')
-            return dict(locator=name, matrix=found[0])
+            # The racers' start slots (b989 / b992): child n of the locator is competitor n's start (the player 0).
+            slots = next((s for _, _, arena in stream_arenas(folder) for s in [locator_slots(arena, name)] if s), [])
+            return dict(locator=name, matrix=found[0], slots=slots)
 
         params = merged((PARAMS, hash64(key)))
         heats = []

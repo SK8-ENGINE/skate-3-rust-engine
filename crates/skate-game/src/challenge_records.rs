@@ -22,6 +22,9 @@ pub(crate) struct Saved {
     pub high_score: i32,
     #[serde(default)]
     pub discovery: u32,
+    /// A race's best time in seconds (retail SetHighScore with the f32 time, race_shared cleanup_heat; research b982).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub best_time: Option<f32>,
 }
 
 impl Saved {
@@ -139,7 +142,7 @@ mod tests {
             s.discovery = SEEN_INTRO;
         }));
         assert!(!records.update("ots_dwtn_01", |s| s.discovery = SEEN_INTRO), "no change, no save");
-        records.entries.insert("some_mod.spot".into(), Saved { completion: Some("killed".into()), high_score: 9, discovery: DISCOVERED });
+        records.entries.insert("some_mod.spot".into(), Saved { completion: Some("killed".into()), high_score: 9, discovery: DISCOVERED, best_time: None });
         assert!(write(&path, &records.bytes().unwrap()));
         let back = Records::load(path);
         std::fs::remove_dir_all(&dir).unwrap();

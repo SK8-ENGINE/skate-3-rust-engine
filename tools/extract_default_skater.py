@@ -200,10 +200,11 @@ def assert_recipe(parsed: dict[str, Any], manifest: dict[str, Any]) -> None:
     body = parsed["body_mods"]
     if len(body) != 19:
         raise RuntimeError(f"Expected 19 body modifiers, found {len(body)}")
-    if abs(body[0] - preset["body_mods"]["skinniness"]) > 1.0e-7:
-        raise RuntimeError("Fallback skinniness changed")
-    if abs(body[1] - preset["body_mods"]["fatness"]) > 1.0e-7:
+    # Recipe morph order = the morph table's target_order (8253CA60): 0 fat, 1 thin, then the face (research b994).
+    if abs(body[0] - preset["body_mods"]["fatness"]) > 1.0e-7:
         raise RuntimeError("Fallback fatness changed")
+    if abs(body[1] - preset["body_mods"]["skinniness"]) > 1.0e-7:
+        raise RuntimeError("Fallback skinniness changed")
     expected_face = preset["body_mods"]["face_fields"]
     if any(abs(value - expected_face) > 1.0e-7 for value in body[2:]):
         raise RuntimeError("Fallback face/body modifier baseline changed")

@@ -55,7 +55,11 @@ VERSION = 1
 
 DATABASE_FILES = ('skaterschema.bin', 'skaterschema.vlt', 'skatercollections.bin', 'skatercollections.vlt',
                   'skaterschema_summaryreport.txt', 'skatercollections_summaryreport.txt')
-PROFILE_CLASSES = ('ai_skater', 'ai_skater_profiles', 'characters_marquee')
+PROFILE_CLASSES = ('ai_skater', 'ai_skater_profiles', 'characters_marquee', 'ai_characters')
+# ai_characters (challenge racers, research b993): its own AI profile (RefSpec at +0, read by SpawnAIAtLocation
+# 8284A248) and its look (optional RefSpec into characters_marquee).
+AI_CHARACTER_PROFILE = 'Hash_1540C7101EAEF5A6'
+AI_CHARACTER_LOOK = 'Hash_4B60FF565334CCD6'
 
 # characters_marquee fields (skaterschema.vlt). Layout (size 20): +0 recipe, +4 display name id, +8, +9,
 # +12 voice / cast id, +16, +17; the rest are optional attributes. Names from the notes
@@ -391,7 +395,15 @@ def profiles(collections: list[dict]) -> tuple[dict, list[str]]:
         'ai_skater_profiles': {k: {'parent': v['parent'], 'fields': v['fields']} for k, v in sorted(ai_profiles.items())},
         'characters': characters,
         'free_roam_pool': sorted(k for k, c in characters.items() if c['free_roam_pool']),
+        'ai_characters': {},
     }
+    for key, row in sorted(tables['ai_characters'].items()):
+        def ref(name):
+            value = row['fields'].get(_field_name(row['raw'], name) or '')
+            return value.get('key') if isinstance(value, dict) else None
+        # A few retail rows name a profile that does not exist (brown_skate, ip_sammy, johnson); kept as data.
+        profile, look = ref(AI_CHARACTER_PROFILE), ref(AI_CHARACTER_LOOK)
+        doc['ai_characters'][key] = {'parent': row['parent'], 'profile': profile, 'look': look, 'fields': row['fields']}
     return doc, warnings
 
 

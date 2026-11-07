@@ -64,6 +64,25 @@ def location_records(raw):
     return result
 
 
+def locator_slots(raw, name):
+    """The child slot matrices of the location record `name` (+0x60 count, +0x64 table offset from the section start,
+    stride 0x70, matrix first; research b989), or None when the record is not here."""
+    for base, _, size, _, _, kind in sections(raw):
+        if kind != 0xEB0009:
+            continue
+        count, _, _, start, _ = struct.unpack_from('>5I', raw, base)
+        for index in range(count):
+            at = base + start + index * 128
+            pointer = struct.unpack_from('>I', raw, at + 104)[0]
+            if cstring(raw, base + pointer, base + size).decode('utf-8') != name:
+                continue
+            children, table = struct.unpack_from('>II', raw, at + 96)
+            if children and not (0 < table and table + children * 0x70 <= size):
+                raise ValueError(f'Invalid slot table of {name}')
+            return [matrix(raw, base + table + i * 0x70).tolist() for i in range(children)]
+    return None
+
+
 _PARK_SOURCES = {}
 
 
