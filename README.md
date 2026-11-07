@@ -97,6 +97,14 @@ driver on the host. On macOS the renderer runs Vulkan through MoltenVK with
 non-bindless materials; the shell disables MoltenVK fast-math, which otherwise
 corrupts customiser skaters. No devenv, direnv, or system SDK override is needed.
 
+On Linux, `skate-install` (inside the shell) builds a release package and links
+it as `skate-play` in the checkout. Run `./skate-play/bin/skate-play [args]` from
+the checkout root without `nix develop`: it resolves assets like `skate-assets`
+and keeps mods beside the installation's settings (`SKATE3_MODS` overrides).
+The link is a Nix GC root, so garbage collection keeps the game and its runtime
+libraries but not the build toolchain; the GPU driver comes from the host.
+Rerun `skate-install` after pulling changes.
+
 When switching from a different compiler, an existing SDL CMake cache may reject
 the change. Run `cargo clean -p sdl3-sys` once inside the shell, then `skate-build`;
 the rest of the Rust build cache can stay.
