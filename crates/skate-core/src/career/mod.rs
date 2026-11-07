@@ -331,7 +331,7 @@ impl Career {
                     out.push(graph::Request::BrandTier(tier));
                 }
                 graph::Request::ActivateChallenge(id) => {
-                    self.active.insert(id.clone());
+                    self.activate(&id);
                     out.push(graph::Request::ActivateChallenge(id));
                 }
                 graph::Request::DeactivateChallenge(id) => {
@@ -339,7 +339,9 @@ impl Career {
                     out.push(graph::Request::DeactivateChallenge(id));
                 }
                 graph::Request::ActivateGroup(group) => {
-                    self.active.extend(data.groups.get(&group).into_iter().flatten().cloned());
+                    for id in data.groups.get(&group).into_iter().flatten() {
+                        self.activate(id);
+                    }
                     out.push(graph::Request::ActivateGroup(group));
                 }
                 other => out.push(other),
@@ -389,6 +391,29 @@ impl Career {
             vec![Effect::ActionFired { action: action.to_owned(), graph: data.actions.get(action).and_then(|a| a.graph.clone()) }]
         } else {
             Vec::new()
+        }
+    }
+
+    /// Retail Activate(key, force 0) (82C1D7D0 via career vt+0x14, research b846 / b908): a key that is already
+    /// active or completed is skipped. Graph activations and discovery (b910) both come through here.
+    pub fn activate(&mut self, id: &str) -> bool {
+        if self.active.contains(id) || self.status.get(id).is_some_and(|c| *c != Completion::Abandoned) {
+            return false;
+        }
+        self.active.insert(id.to_owned())
+    }
+
+    /// The active list after a result (CompleteChallenge 8283FD00, research b918, checked): an owned / killed result
+    /// always takes the key off the list (82C1D878); with `reactivate` (own the spot passes it on every result,
+    /// tutorials pass their Persistent field, every other family nothing) it goes straight back in, forced, so an
+    /// owned spot stays signable for killed it. Abandoned changes nothing.
+    pub fn settle_active(&mut self, challenge: &str, result: Completion, reactivate: bool) {
+        if result == Completion::Abandoned {
+            return;
+        }
+        self.active.remove(challenge);
+        if reactivate {
+            self.active.insert(challenge.to_owned());
         }
     }
 
@@ -509,6 +534,30 @@ mod tests {
                 owned: reward(10_000, &["park_piece"]), killed: reward(2_500, &[]) })]),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_result_drops_the_key_unless_the_family_reactivates_it() {
+        let mut c = Career::default();
+        for id in ["ots", "race", "quit"] {
+            c.active.insert(id.into());
+        }
+        c.settle_active("ots", Completion::Owned, true);
+        c.settle_active("race", Completion::Owned, false);
+        c.settle_active("quit", Completion::Abandoned, false);
+        assert_eq!(c.active.iter().map(String::as_str).collect::<Vec<_>>(), ["ots", "quit"]);
+    }
+
+    #[test]
+    fn activation_skips_completed_challenges() {
+        let mut c = Career::default();
+        c.status.insert("done".into(), Completion::Owned);
+        c.status.insert("quit".into(), Completion::Abandoned);
+        assert!(!c.activate("done"));
+        assert!(c.activate("quit"));
+        assert!(c.activate("new"));
+        assert!(!c.activate("new"));
+        assert_eq!(c.active.iter().map(String::as_str).collect::<Vec<_>>(), ["new", "quit"]);
     }
 
     #[test]

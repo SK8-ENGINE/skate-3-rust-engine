@@ -82,6 +82,19 @@ class ProgressionLua(unittest.TestCase):
         self.assertEqual(ops, [{'op': 'if', 'cond': {'flag_false': 'Seen'}, 'else': [], 'then': [
             {'op': 'show_yes_no', 'title': 'ID_T', 'description': 'ID_D', 'reply': ['hudyes', 'hudno']}]}])
 
+    def test_set_discovery_status_reads_the_enum_value(self):
+        # Discovery.SetDiscoveryStatus("ots_dwgh_01", Discovery.eDiscoveryStatus.Discovered) (Danny Way pack, b912).
+        p = Proto()
+        p.code.append(abx('GETGLOBAL', 5, p.const('Discovery')))
+        p.code.append(abc('GETTABLE', 5, 5, p.rk('SetDiscoveryStatus')))
+        p.code.append(abx('LOADK', 6, p.const('ots_dwgh_01')))
+        p.code.append(abx('GETGLOBAL', 7, p.const('Discovery')))
+        p.code.append(abc('GETTABLE', 7, 7, p.rk('eDiscoveryStatus')))
+        p.code.append(abc('GETTABLE', 7, 7, p.rk('Discovered')))
+        p.code.append(abc('CALL', 5, 3, 1))
+        self.assertEqual(translate_handler(p.proto()),
+                         [{'op': 'set_discovery', 'challenge': 'ots_dwgh_01', 'status': 'Discovered'}])
+
     def test_unknown_calls_fail_the_export(self):
         p = Proto()
         p.call('Mystery.DoThing', 'x')

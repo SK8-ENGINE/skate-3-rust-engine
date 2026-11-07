@@ -103,6 +103,7 @@ fn op(v: &Value) -> Result<Op, String> {
         "unlock_teammate" => Op::UnlockTeammate,
         "milestone_earned" => Op::MilestoneEarned,
         "allow_discovery" => Op::AllowDiscovery,
+        "set_discovery" => Op::SetDiscovery { challenge: s(v, "challenge")?, status: s(v, "status")? },
         "hide_screen" => Op::HideScreen,
         "unhide_screen" => Op::UnhideScreen,
         "show_101" => Op::Show101 { title: s(v, "title")?, description: s(v, "description")? },

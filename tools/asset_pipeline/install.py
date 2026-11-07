@@ -719,7 +719,7 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                     bigs=[]
                     try:
                         from .teleporters import export as write_teleporters
-                        bigs=dlc_packages.extract_bigs(dlc_folder,work/'dlc',lambda paths:any(p.lower().startswith(('data/db/challenge','data/content/missions/')) for p in paths)) if dlc_jobs else []
+                        bigs=dlc_packages.extract_bigs(dlc_folder,work/'dlc',lambda paths:any(p.lower().startswith(('data/db/challenge','data/db/progressionbanks/','data/content/missions/')) for p in paths))
                         write_teleporters(game_root,converted,dlc_vaults,bigs,work/'teleporters',stage/'assets/private/teleporters.json',text if named else None,report)
                         # A success clears an older failure's note (it was copied forward and reported again at every refresh).
                         (private/'map-status'/'teleporters-availability.json').unlink(missing_ok=True)

@@ -11,6 +11,7 @@ FORMAT = 'skate3rust.progression'
 VERSION = 1
 
 PROGRESSION = 'data/db/progressionbanks/main'
+PROGRESSION_BANKS = 'data/db/progressionbanks/'   # main on the disc, dlc_<pack> in the packs (research b912)
 GROUP_CLASS = 'Hash_C04CEAAE6645A838'     # progression_group
 ACTION_CLASS = 'Hash_A5970491380FF1BE'    # progression_action
 REWARD_CLASS = 'Hash_9A821DB88551C7C1'    # progression_rewards
@@ -286,12 +287,17 @@ def export(game_root, dlc_bigs, work, output, report=print):
             stem.with_suffix(suffix).write_bytes(archive.read(entry))
         return convert(schema / 'data/db/skaterschema', stem, names_txt)['collections'], vault(stem)[1]
 
-    progression_rows, bank_rows, binaries = None, {}, {}
-    for index, (_, archive) in enumerate(_sources(game_root, dlc_bigs)):
+    # Every progression bank: the disc's main first, then each pack's (dlc_mmcn and so on), the first copy of a bank
+    # kept. Graph handlers point into their own bank's .bin, so each bank is translated on its own and then merged.
+    progression_banks, bank_rows, binaries = {}, {}, {}
+    for index, (source, archive) in enumerate(_sources(game_root, dlc_bigs)):
         entries = {e.path.replace('\\', '/').lower(): e for e in archive.entries}
-        if progression_rows is None and PROGRESSION + '.vlt' in entries and PROGRESSION + '.bin' in entries:
-            progression_rows, progression_binary = read(archive, entries[PROGRESSION + '.vlt'], entries[PROGRESSION + '.bin'],
-                                                        'progression')
+        for path in sorted((p for p in entries if p.startswith(PROGRESSION_BANKS) and p.endswith('.vlt')
+                            and p[:-4] + '.bin' in entries), key=lambda p: (p != PROGRESSION + '.vlt', p)):
+            name = Path(path).stem
+            if name not in progression_banks:
+                rows, binary = read(archive, entries[path], entries[path[:-4] + '.bin'], f'progression/{len(progression_banks)}')
+                progression_banks[name] = (source, rows, binary)
         for path, entry in entries.items():
             if path.startswith(BANKS) and path.endswith('.vlt') and path[:-4] + '.bin' in entries:
                 rows, binary = read(archive, entry, entries[path[:-4] + '.bin'], f'banks/{index}-{len(binaries)}')
@@ -300,14 +306,27 @@ def export(game_root, dlc_bigs, work, output, report=print):
                     if key not in bank_rows:
                         bank_rows[key] = (row['parent'], row['fields'])
                         binaries[key] = binary
-    if progression_rows is None:
+    if 'main' not in progression_banks:
         raise ValueError('no progression bank')
     known = {}
     for (cls, key), _ in bank_rows.items():
         if cls == CHALLENGE_CLASS:
             known[int(key[5:], 16) if key.startswith('hash_') else hash64(key)] = key
-    data = progression(progression_rows, known)
-    known.update(_names(progression_rows))
+    for _, rows, _ in progression_banks.values():
+        known.update(_names(rows))
+    data = {'groups': {}, 'actions': {}, 'rewards': {}}
+    all_graphs, from_bank = {}, {}
+    for name, (source, rows, binary) in progression_banks.items():
+        part = progression(rows, known)
+        part['graphs'] = graphs(rows, binary)
+        for kind in ('groups', 'actions', 'rewards', 'graphs'):
+            target = all_graphs if kind == 'graphs' else data[kind]
+            for key, value in part[kind].items():
+                if key not in target:
+                    target[key] = value
+                    if name != 'main':
+                        from_bank[key] = name
+        report(f"Progression bank {name} ({source}): {len(part['actions'])} actions, {len(part['graphs'])} graphs")
     rewards, kills = {}, []
     for (cls, key) in bank_rows:
         if cls != CHALLENGE_CLASS:
@@ -321,7 +340,10 @@ def export(game_root, dlc_bigs, work, output, report=print):
     data['challenge_rewards'] = rewards
     data['killable'] = sorted(kills)
     data['career'] = {'milestone_parent': 'milestone_actions', 'crossbar_gates': ['film_skpk_univ_01', 'photo_univ_05']}
-    data['graphs'] = graphs(progression_rows, progression_binary)
+    data['graphs'] = all_graphs
+    # Which pack bank a key came from (keys of the disc's main bank are not listed); the engine ignores it.
+    data['banks'] = {name: source for name, (source, _, _) in progression_banks.items()}
+    data['from_bank'] = from_bank
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'format': FORMAT, 'version': VERSION, **data}, indent=1), encoding='utf-8')

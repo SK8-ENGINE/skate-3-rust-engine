@@ -455,6 +455,7 @@ fn sign_up(
     input: Res<crate::input::ControllerInput>,
     mut popups: ResMut<crate::popup_host::PopupMods>,
     mut signed: MessageWriter<ChallengeSignUp>,
+    mut discovered: MessageWriter<crate::career::ChallengeDiscovered>,
     menu: Option<Res<crate::graphics_menu::Menu>>,
     replay: Res<crate::replay::Replay>,
     lines: Query<Entity, With<SignUpLine>>,
@@ -467,7 +468,7 @@ fn sign_up(
     if !boundaries.is_empty() {
         let found: Vec<String> = challenges
             .on_map(map.path.as_deref())
-            .filter(|c| boundaries.contains(&c.boundary.id) && challenges.available(&c.id))
+            .filter(|c| boundaries.contains(&c.boundary.id) && challenges.mods.enabled(&c.id))
             .filter(|c| challenges.records.get(&c.id).discovery == crate::challenge_records::NOT_DISCOVERED)
             .map(|c| c.id.clone())
             .collect();
@@ -475,6 +476,7 @@ fn sign_up(
             info!("SKATE_CHALLENGE discovered {id}");
             challenges.records.update(id, |s| s.discovery = crate::challenge_records::DISCOVERED);
             challenges.mods.event(serde_json::json!({"name": "challenge_discovered", "challenge": id}));
+            discovered.write(crate::career::ChallengeDiscovered { challenge: id.clone() });
         }
         if !found.is_empty() {
             challenges.records.save_in_background();
@@ -653,7 +655,7 @@ fn update(
                     }
                 }
                 crate::tutorial_run::Action::Finished(completion) => {
-                    career.write(crate::career::ChallengeResult { challenge: tutorial.data.id.clone(), completion });
+                    career.write(crate::career::ChallengeResult { challenge: tutorial.data.id.clone(), completion, reactivate: false });
                     finished = true;
                 }
             }
@@ -791,7 +793,7 @@ fn update(
             record.completion.unwrap_or(Completion::Abandoned), record.high_score);
         mod_events.push(serde_json::json!({"name": "challenge_ended", "challenge": id, "points": best,
             "completion": completion_name(completion)}));
-        career.write(crate::career::ChallengeResult { challenge: id.clone(), completion });
+        career.write(crate::career::ChallengeResult { challenge: id.clone(), completion, reactivate: true });
         *hud = ChallengeHudState::default();
         challenges.run = None;
     }

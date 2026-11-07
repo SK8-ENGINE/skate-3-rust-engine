@@ -263,6 +263,12 @@ class _Walk:
             if args[0][0] == 'k':
                 return [{'op': 'teleport', 'locator': args[0][1], 'district': _value(args[1]), 'flag': flag}]
             return [{'op': 'teleport_to_challenge', 'challenge': _challenge_of(args[0]), 'flag': flag}]
+        if fn == 'Discovery.SetDiscoveryStatus':
+            # SetDiscoveryStatus(challenge, Discovery.eDiscoveryStatus.<status>) (Danny Way pack: ots_dwgh_01).
+            status = args[1]
+            if status[0] != 'field' or status[2][0] != 'k':
+                raise TranslateError(f'call {fn} status {status!r}')
+            return [{'op': 'set_discovery', 'challenge': _value(args[0]), 'status': status[2][1]}]
         if fn not in CALLS:
             raise TranslateError(f'call {fn}')
         name, fields = CALLS[fn]

@@ -51,6 +51,8 @@ pub enum Op {
     UnlockTeammate,
     MilestoneEarned,
     AllowDiscovery,
+    /// Discovery.SetDiscoveryStatus(challenge, eDiscoveryStatus.<status>).
+    SetDiscovery { challenge: String, status: String },
     HideScreen,
     UnhideScreen,
     Show101 { title: String, description: String },
@@ -99,6 +101,7 @@ pub enum Request {
     UnlockTeammate,
     MilestoneEarned,
     AllowDiscovery,
+    SetDiscovery { challenge: String, status: String },
     HideScreen,
     UnhideScreen,
     /// Presentation the host answers with the reply message (M1 answers at once, logged NOT RETAIL YET).
@@ -247,6 +250,7 @@ impl Runner {
                 Op::UnlockTeammate => out.push(Request::UnlockTeammate),
                 Op::MilestoneEarned => out.push(Request::MilestoneEarned),
                 Op::AllowDiscovery => out.push(Request::AllowDiscovery),
+                Op::SetDiscovery { challenge, status } => out.push(Request::SetDiscovery { challenge: challenge.clone(), status: status.clone() }),
                 Op::HideScreen => out.push(Request::HideScreen),
                 Op::UnhideScreen => out.push(Request::UnhideScreen),
                 Op::Show101 { title, description } => out.push(Request::Show101 { title: title.clone(), description: description.clone() }),

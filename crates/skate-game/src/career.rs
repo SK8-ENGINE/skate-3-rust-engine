@@ -16,6 +16,15 @@ use std::path::PathBuf;
 pub(crate) struct ChallengeResult {
     pub challenge: String,
     pub completion: Completion,
+    /// CompleteChallenge's re-activate flag (research b918): own the spot true, tutorials their Persistent field.
+    pub reactivate: bool,
+}
+
+/// The player discovered a challenge (written by `challenges.rs`): retail activates it in the career (8255BD38,
+/// research b910), so discovery opens the sign-up gate rather than waiting for it.
+#[derive(Message, Clone, Debug, PartialEq)]
+pub(crate) struct ChallengeDiscovered {
+    pub challenge: String,
 }
 
 /// The Skate Profile progression page built from the career; the menu stage layers mods on top when `generation`
@@ -36,6 +45,8 @@ pub(crate) struct Awards {
     pub path: Option<PathBuf>,
     /// sdk.career events for the mods (newest 64 kept).
     pub events: Vec<serde_json::Value>,
+    /// Discovery statuses the graphs set (Discovery.SetDiscoveryStatus), applied to the challenge records.
+    pub discovery: Vec<(String, String)>,
 }
 
 impl Awards {
@@ -121,6 +132,7 @@ pub(crate) struct CareerState {
     pub tried: bool,
     pub loading: Option<std::thread::JoinHandle<Result<Prepared, String>>>,
     pub waiting: Vec<ChallengeResult>,
+    pub discovered: Vec<String>,
     /// The setup export as read, before mod overlays.
     pub base: Option<serde_json::Value>,
     /// Running mods (id, content fingerprint) last synced, and their progression overlays in mod id order.
@@ -217,6 +229,7 @@ fn settle(career: &mut Career, awards: &mut Awards, data: &Loaded, mut requests:
             match &r {
                 Request::UnlockReward { reward, big } => grant_reward(career, awards, data, reward, *big),
                 Request::GrantAchievement(name) => awards.grant(name),
+                Request::SetDiscovery { challenge, status } => awards.discovery.push((challenge.clone(), status.clone())),
                 Request::MilestoneEarned => awards.event(serde_json::json!({"name": "career_milestone"})),
                 Request::UnlockTeammate => awards.event(serde_json::json!({"name": "career_teammate"})),
                 Request::BrandTier(tier) => awards.event(serde_json::json!({"name": "career_tier", "tier": tier})),
@@ -428,6 +441,7 @@ pub(crate) fn skip_start(state: &mut CareerState, data: &Loaded) -> usize {
         }
         info!("SKATE_CAREER skip start: {gate} owned (armed first: {waiting:?})");
         let effects = state.career.challenge_result(gate, Completion::Owned, &data.progression);
+        state.career.settle_active(gate, Completion::Owned, false);
         apply_effects(state, data, effects);
     }
     gates.len()
@@ -497,7 +511,9 @@ fn publish_gate(career: &Career, challenges: &mut crate::challenges::Challenges)
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut results: MessageReader<ChallengeResult>,
+          mut discovered: MessageReader<ChallengeDiscovered>,
           menus: Option<ResMut<crate::retail_menus::RetailMenus>>, mut profile: ResMut<CareerProfile>,
           challenges: Option<ResMut<crate::challenges::Challenges>>) {
     let state: &mut CareerState = &mut res;
@@ -508,6 +524,7 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
     }
     // Results that arrive while the career loads wait for it (none are lost).
     state.waiting.extend(results.read().cloned());
+    state.discovered.extend(discovered.read().map(|d| d.challenge.clone()));
     let mut first = false;
     if state.loading.as_ref().is_some_and(|h| h.is_finished()) {
         match state.loading.take().map(|h| h.join()) {
@@ -522,6 +539,7 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
     let Some(mut data) = state.data.take() else {
         if state.loading.is_none() {
             state.waiting.clear();
+            state.discovered.clear();
         }
         return;
     };
@@ -529,8 +547,15 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
         rebuild(state, &mut data);
     }
     let mut changed = false;
+    for id in std::mem::take(&mut state.discovered) {
+        if state.career.activate(&id) {
+            info!("SKATE_CAREER activated {id} (discovered)");
+            changed = true;
+        }
+    }
     for r in std::mem::take(&mut state.waiting) {
         let effects = state.career.challenge_result(&r.challenge, r.completion, &data.progression);
+        state.career.settle_active(&r.challenge, r.completion, r.reactivate);
         apply_effects(state, &data, effects);
         changed = true;
     }
@@ -544,10 +569,25 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
     if let Some(mut menus) = menus.filter(|_| changed || first) {
         publish_facts(&state.career, &data, &mut menus);
     }
+    let mut challenges = challenges;
+    if let Some(challenges) = challenges.as_deref_mut() {
+        for (id, status) in std::mem::take(&mut state.awards.discovery) {
+            let value = match status.as_str() {
+                "Discovered" => crate::challenge_records::DISCOVERED,
+                "Undiscovered" | "NotDiscovered" => crate::challenge_records::NOT_DISCOVERED,
+                other => {
+                    warn!("SKATE_CAREER unknown discovery status {other} for {id}");
+                    continue;
+                }
+            };
+            info!("SKATE_CAREER discovery {id} = {status}");
+            challenges.records.update(&id, |s| s.discovery = value);
+        }
+    }
     if changed || first {
         publish_profile(&state, &data, &mut profile);
-        if let Some(mut challenges) = challenges {
-            publish_gate(&state.career, &mut challenges);
+        if let Some(challenges) = challenges.as_deref_mut() {
+            publish_gate(&state.career, challenges);
         }
     }
     state.data = Some(data);
@@ -561,5 +601,6 @@ pub(crate) fn install(app: &mut App) {
     app.init_resource::<CareerState>()
         .init_resource::<CareerProfile>()
         .add_message::<ChallengeResult>()
+        .add_message::<ChallengeDiscovered>()
         .add_systems(Update, update.after(crate::challenges::CareerResultSet).run_if(crate::challenges::opted_in));
 }

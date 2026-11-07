@@ -103,6 +103,20 @@ Setup writes `assets/private/progression.json` (`skate3rust.progression` v1) aft
 Names stay strings (stable ids for the engine and mods); references into the challenge banks resolve through the
 challenge keys. The graphs follow in step 7 (translated handlers).
 
+DLC progression banks (2026-11-07, research b912): retail mounts one progression bank per pack (`progressionbanks/
+dlc_<pack>` beside the disc's `main`); the export used to read only `main`. It now reads every bank, the disc's `main`
+first, then each pack's, translates each bank's graphs against its own `.bin` and merges them (the first copy of a key
+wins). `banks` names each bank's source and `from_bank` lists the keys a pack added (the engine ignores both). Install
+now copies a pack's BIG when it holds a progression bank too, and no longer only when some pack has map jobs. With the
+user's four packs: `main` 204 actions / 181 graphs, `dlc_mmcn` (Maloof) 16 / 13, `dlc_play` 22 / 19, `dlc_dwgh` (Danny
+Way) 35 / 30, `dlc_player1` 7 / 4; 231 keys from packs. A pack's starting action (`mmcn_starting_action`, record
+fired, no conditions) arms itself like the disc's `starting_action`, so the Maloof chain (street contest, then both
+photos, then both lots) runs with no engine change. [data]
+- New graph call: `Discovery.SetDiscoveryStatus(challenge, Discovery.eDiscoveryStatus.<status>)` (only in the Danny Way
+  bank, `ots_dwgh_01`) translates to `set_discovery`; the career writes the challenge's discovery record. [data]
+- Check tools: `.local/tools/progression-export-check.py` (export with the packs into a work folder) and
+  `progression-call-scan.py` (lists every handler call the translator cannot translate).
+
 ## Change: the graph translator (`tools/asset_pipeline/progression_lua.py`)
 
 Each progression handler is a compiled Lua 5.1 chunk (little-endian, 4-byte floats; research b889). The translator
@@ -203,8 +217,20 @@ defaults, load replay, start). Challenge results that arrive meanwhile wait and 
   entries that only existed through it (armed / fired actions, queued or running graphs, tiers) are dropped.
 - Challenge activation: the career keeps the activated set (graphs' ActivateChallenge / ActivateGroup minus
   DeactivateChallenge; `career.json` `active`) and, while gating is on (`unlock_all` off), only those challenges can
-  be discovered or signed up for (`challenges.rs` `available`). Gating stays off by default, so every challenge is
+  be signed up for (`challenges.rs` `available`). Gating stays off by default, so every challenge is
   available as before. Mods: `career_activate_challenge` / `career_activate_group`.
+- Activation follows retail Activate(key, force 0) (82C1D7D0, research b846 / b908): a key already active or already
+  completed is skipped (`Career::activate`). [code]
+- Discovery activates (research b910, verified by main: ctor 8255B290 stores the career object at +0x6180, handler
+  8255BD38 calls its vt+0x14 = Activate): riding into a challenge's boundary marks it discovered and activates it
+  (`ChallengeDiscovered`, `career.rs`), so discovery no longer waits for the gate; only the mod switch hides a
+  challenge from discovery. [code]
+- Completion and the active list (research b918, verified by main: 8283FD00 calls career vt+0x14 with r5 = 1): an
+  owned / killed result always takes the key off the active list; CompleteChallenge's flag puts it straight back
+  (forced). Own the spot passes it on every result, tutorials pass their row's Persistent (true only on the park
+  tutorials), every other family passes nothing. Ours: `Career::settle_active` after the result, with
+  `ChallengeResult::reactivate` (own the spot true; tutorials false until Persistent is exported, right for the 12
+  school tutorials; skip start false). [code + data]
 
 ## Verification
 
