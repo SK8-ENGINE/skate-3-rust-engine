@@ -82,6 +82,23 @@ DESCRIPTION = 'Hash_6B0BD2BAE508B742'
 # (Bool, default false).
 DESCRIPTION_ARG = 'Hash_0AF3F024F18EAB9D'
 OBJECTIVES_ENABLED = 'Hash_858D73CD6085C8EC'
+# Races (research b979): params row RaceHeats -> challenge_race_heats -> challenge_race_legs (split triggers, gates
+# -> challenge_race_gates), all inside the race's local vault; competitors on the bank row.
+RACES = 'races'
+RACE_HEATS = _field('RaceHeats')
+LEGS = _field('Legs')
+SPLITS = _field('SplitTimeTriggers')
+GATES = 'Hash_819849159B9E26AD'
+GATE_VOLUME = 'Hash_013BDB7AF1756799'
+GATE_INDICATOR = 'Hash_B1BF3FF96CC7F6AD'
+TIME_LIMIT = 'Hash_F89BFDFC88990F17'
+TIME_LIMIT_WARNING = 'Hash_270125BF89FBBFDE'
+KILLED_IT_TIME = _field('KilledItTime')
+AI_PATH_INDEX_OVERRIDE = 'Hash_A2D9488ABA12559C'
+AI_PATHS = 'Hash_0D46945C37C9C237'  # tRoundPaths: 200 u32 text offsets, u32 all paths (+0x320), u32 (+0x324)
+END_TIME_BONUS = 'Hash_5FB1236FD2CB7556'
+COMPETITORS = _field('Competitors')
+ONLINE_COMPETITORS = 'Hash_598056F37D38D27A'
 
 
 def chain(rows, cls, key):
@@ -401,7 +418,114 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             presentation={name: count(field) for name, field in PRESENTATION.items()},
             objectives=objective_rows(rows_by_hash, refs(fields.get(OBJECTIVES)), bank_binary, binary_of))
 
-    result, tutorials, skipped = [], [], []
+    def race(key, fields, bank_binary):
+        """A race row (b979): heats with their legs (split triggers in order, the last = the finish; gates), times,
+        AI path filter and start; competitors from the bank row."""
+        if key not in local:
+            raise ValueError('no local data vault')
+        if key not in hulls:
+            raise ValueError('no hull')  # race_ind_01: a leftover beside race_indu_01..03
+        _, archive, vlt_entry, bin_entry = local[key]
+        data, binary = read_vault(archive, vlt_entry, bin_entry, 'local')
+        by_hash = {(r['class'], key_hash(r['key'])): r for r in data['collections']}
+        folder = work / 'hulls' / MISSIONS / key
+        if not folder.is_dir():
+            hulls[key][0].extract_entries(hulls[key][1], work / 'hulls')
+        world = int((fields.get(WORLD) or {}).get('data', '0' * 16)[:16], 16)
+        district = next((d for d, _ in global_locators() if hash64(d) == world), None)
+
+        def merged(ref):
+            out, seen = {}, set()
+            while ref and ref not in seen and ref in by_hash:
+                seen.add(ref)
+                row = by_hash[ref]
+                for name, value in row['fields'].items():
+                    out.setdefault(name, value)
+                ref = (ref[0], key_hash(row['parent'])) if row.get('parent') else None
+            return out
+
+        def i32(f, name, default=None):
+            value = f.get(name)
+            return struct.unpack('>i', bytes.fromhex(value['data'][:8]))[0] if value and value.get('data') else default
+
+        def trigger(raw):
+            dist, name, instance = parse_trigger(raw, binary)
+            volume = volume_of(folder, instance)
+            if volume is None:
+                raise ValueError(f'hull lacks volume {name}')
+            return dict(name=name, id='%016x' % instance, volume=volume)
+
+        def start_of(name):
+            found = [r['matrix'] for _, _, arena in stream_arenas(folder) for r in location_records(arena)
+                     if r['locator'] == name]
+            if not found and district:
+                found = global_locators().get((district.casefold(), name), [])
+            if len({json.dumps(m) for m in found}) != 1:
+                raise ValueError(f'start locator {name}: {len(found)} records')
+            return dict(locator=name, matrix=found[0])
+
+        params = merged((PARAMS, hash64(key)))
+        heats = []
+        for heat_ref in refs(params.get(RACE_HEATS)):
+            heat = merged(heat_ref)
+            if START not in heat:
+                raise ValueError('heat without StartLocation')
+            paths = bytes.fromhex((heat.get(AI_PATHS) or {}).get('data') or '')
+            names = []
+            if len(paths) >= 0x328:
+                for offset in struct.unpack_from('>200I', paths, 0):
+                    name = cstring(binary, offset).decode('utf-8') if offset else ''
+                    if name:
+                        names.append(name)
+            legs = []
+            for leg_ref in refs(heat.get(LEGS)):
+                leg = merged(leg_ref)
+                splits = [trigger(bytes.fromhex(item)) for item in ((leg.get(SPLITS) or {}).get('array') or {}).get('items') or []]
+                if not splits:
+                    raise ValueError('leg without split triggers')
+                gates = []
+                for gate_ref in refs(leg.get(GATES)):
+                    gate = merged(gate_ref)
+                    raw = bytes.fromhex((gate.get(GATE_VOLUME) or {}).get('data') or '')
+                    _, name, instance = parse_trigger(raw, binary)
+                    gates.append(dict(name=name, id='%016x' % instance, volume=volume_of(folder, instance),
+                                      indicator=_u32(gate.get(GATE_INDICATOR))))
+                legs.append(dict(end_time_bonus=i32(leg, END_TIME_BONUS, 0), splits=splits, gates=gates))
+            if not legs:
+                raise ValueError('heat without legs')
+            heats.append(dict(
+                key='%016x' % heat_ref[1],
+                start=start_of(cstring(binary, int(heat[START]['data'][:8], 16)).decode('utf-8')),
+                time_limit=i32(heat, TIME_LIMIT), time_limit_warning=i32(heat, TIME_LIMIT_WARNING),
+                killed_it_time=radius(heat, KILLED_IT_TIME),
+                ai_path_index_override=i32(heat, AI_PATH_INDEX_OVERRIDE, -1),
+                ai_paths=dict(names=names,
+                              all_paths=struct.unpack_from('>I', paths, 0x320)[0] == 1 if len(paths) >= 0x328 else True,
+                              param=struct.unpack_from('>I', paths, 0x324)[0] if len(paths) >= 0x328 else 0),
+                legs=legs))
+        if not heats:
+            raise ValueError('no RaceHeats')
+
+        def competitors(field):
+            """tCompetitorInfo (b987): a text offset into the bank .bin naming an ai_characters row, and the kind
+            (0 that character, 1 a random pick from a pool; races use 0)."""
+            out = []
+            for item in ((fields.get(field) or {}).get('array') or {}).get('items') or []:
+                offset, kind = struct.unpack_from('>II', bytes.fromhex(item), 0)
+                out.append(dict(character=cstring(bank_binary, offset).decode('utf-8'), kind=kind))
+            return out
+
+        title_id = (fields.get(TITLE) or {}).get('data') or None
+        return dict(
+            id=key, family=RACES, map=label_of(district) if district else None, district=district,
+            title_id=title_id, title=text.get(title_id) if title_id else None,
+            description_id=(fields.get(DESCRIPTION) or {}).get('data') or None,
+            description_arg=int(((fields.get(DESCRIPTION_ARG) or {}).get('data') or '00')[:2], 16),
+            sign_up_radius=radius(fields, SIGN_UP_RADIUS), discovery_radius=radius(fields, DISCOVERY_RADIUS),
+            challenge_type=_u32(fields.get(CHALLENGE_TYPE)),
+            competitors=competitors(COMPETITORS), online_competitors=competitors(ONLINE_COMPETITORS), heats=heats)
+
+    result, tutorials, races, skipped = [], [], [], []
     for (cls, key), (parent, _) in sorted(rows.items()):
         if cls != CHALLENGE or key.endswith('_ol'):
             continue
@@ -410,6 +534,12 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             try:
                 tutorials.append(tutorial(key, fields, origin[cls, key][1]))
             except (KeyError, ValueError, StopIteration) as error:
+                skipped.append(f'{key} ({error})')
+            continue
+        if RACES in walked[1:]:
+            try:
+                races.append(race(key, fields, origin[cls, key][1]))
+            except (KeyError, ValueError, StopIteration, struct.error) as error:
                 skipped.append(f'{key} ({error})')
             continue
         family = next((f for f in FAMILIES if f in walked[1:]), None)
@@ -492,7 +622,8 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'format': FORMAT, 'version': VERSION, 'challenges': result, 'tutorials': tutorials,
-                                  'own_the_lots': lots}, indent=1), encoding='utf-8')
+                                  'own_the_lots': lots, 'races': races}, indent=1), encoding='utf-8')
     report(f'Challenges: {len(result)} ({", ".join(FAMILIES)}) on {len({c["map"] for c in result})} maps, '
-           f'{len(tutorials)} tutorials, {len(lots)} own the lots' + (f'; left out: {", ".join(skipped)}' if skipped else ''))
+           f'{len(tutorials)} tutorials, {len(lots)} own the lots, {len(races)} races'
+           + (f'; left out: {", ".join(skipped)}' if skipped else ''))
     return result

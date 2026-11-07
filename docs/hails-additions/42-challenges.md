@@ -375,6 +375,77 @@ before each type from `default_headers`, our list of table 8302CAB8's offline co
 show `#Invalid OTL Header`); tests `list_groups_by_type_keeping_disc_order`, `owned_needs_every_listed_activity`. Not
 ported yet: the running lot, the lot list screen and MoreActivities.
 
+## Change: the race export (`tools/asset_pipeline/challenges.py` `race`; research b978, b979)
+
+`challenges.json` gains `races`: every bank row under the `races` family (ChallengeType 0x13), its race data read from
+its local vault [data]. The chain (b979 §1): the params row (class 0x46A56ADDF284C381, key = hash64 of the challenge
+key) `RaceHeats` -> `challenge_race_heats` rows (0xE933655B7553D1DE; the course build `sub_8255FDF0` looks the heat up
+in that class [code]) -> `Legs` -> `challenge_race_legs` rows: `SplitTimeTriggers` (16-byte trigger instance items,
+read like the teleporter triggers; the last one is the finish) and `Gates` -> `challenge_race_gates` (GateVolume,
+IndicatorType; presentation only). Each row merges its parent chain inside its own vault. Per race: map, title /
+description ids, radii, ChallengeType, `competitors` and `online_competitors` from the bank row (tCompetitorInfo: a
+text offset into the bank .bin naming an `ai_characters` row, e.g. `reynolds_race`, and a kind: 0 that character, 1
+a random pick from a pool, unused by races; research b987, all ten races resolve),
+and per heat: the start locator (hull, else the district's global locators), TimeLimit, TimeLimitWarning,
+KilledItTime, AIPathIndexOverride and the AI path filter (tRoundPaths: path names, the all-paths flag at +0x320, the
+value at +0x324), with each leg's EndTimeBonus, splits and gates as volumes from the hull.
+
+Disc export (2026-11-07): 10 races (race_dwtn_01..03, race_indu_01..03, race_univ_01..04), each 1 heat and 1 leg;
+split / gate counts, times, competitor counts and AI path lists match b979 §2, and every split and gate volume
+resolves in its hull. Left out: the `_ol` online rows (as for the other families) and race_ind_01 (no hull, a
+leftover). The engine does not read `races` yet; the tracker, AI racers and race machine follow (b978 port order).
+Moddability: a mod can add a race from its own volumes and locators in the same shape; times, competitors and path
+filters are data.
+
+## Change: the race tracker (`crates/skate-core/src/challenges/race.rs`)
+
+The retail race tracker (research b973, b975) [code]: per heat a course of legs, each a polyline from the leg start
+(the race start, then the previous leg's last point) through the centres of its split trigger volumes (`sub_82560BC8`;
+the volume point is the box centre in world space, `sub_82DD8510`, which is our exported `shape.center`). Every tick
+(`sub_82560170`) each racer's estimated time to finish = remaining distance / 9 m/s (the image constant 1/9 at
+0x822F9118; no speed input, no smoothing; 0 once finished). The remaining distance (`sub_82560790`): from the racer's
+split count g, the first point t > g whose projection along its incoming segment (`sub_82560A88`) is not behind the
+racer, plus the polyline length from t to the leg end (`sub_825608B8`), plus the whole length of every later leg;
+points past the leg end count 0 and a segment no longer than 1e-6 has no direction. Rank (`sub_8255FB38`): finished
+racers first by their previous rank (finish order holds), then active racers by ETA, then disconnected ones; retail's
+sort is unstable, ours keeps the join order on ties (our choice, so every peer ranks the same). Gap = ETA minus the
+leader's, plus this racer's timer minus the leader's finish time once the leader finished.
+
+Moddability: `RaceTuning` (reference speed, epsilon, the 1 s leaderboard refresh) defaults to the retail values and a
+race can replace them; a course is built from any volume points. Multiplayer: the tracker is pure data keyed by stable
+racer ids, deterministic and frame-rate independent; the authority runs it. Tests in `race.rs` (ETA at 9 m/s,
+projection skip, later legs, zero-length segment, rank classes, gap). Not wired into the game yet.
+
+## Change: the race run (`crates/skate-core/src/challenges/race_run.rs`)
+
+The race challenge machine from the retail graph `race_shared` (research b876, b982), player first: opponents only
+report their finishes (`OpponentFinished`). Flow: setup_heat (teleport to the start, tracker reset, leaderboard) ->
+countdown (CountdownDelay 1.5 s, then the 3.0 s 3-2-1 HUD when Include321) -> run_heat (count-up race time; with a
+time limit a hidden TimeLimit - TimeLimitWarning timer, then the HUD timer for the last TimeLimitWarning seconds) ->
+the finish or time up -> killed_it (3.0 s EndRoundTimer, banner) -> cleanup_heat (best time, result banner Owned
+3.1 / Killed 3.3 / lose 2.0 s) -> results (Continue completes, Retry runs the heat again). Pause restart re-runs the
+heat; abandon completes as Abandoned. Splits count in leg order and may be skipped (any later split index), never
+backwards; the split loop has no break, so a volume listed twice counts as its later index (b985); a leg's last split
+moves to the next leg, the last leg's last split is the finish. At a leg end before the last, a heat with a time limit
+and a leg EndTimeBonus above 0 rebuilds the heat timer as the time left plus the bonus (b985; 0 on every disc row;
+what the bonus does while only the hidden warning timer runs is not read, ours then skips it). Races have no out of
+bounds. When AI racers come: an AI's time-limit expiry also ends the heat in single player (b985 corrected b982).
+
+Result: first place (PlaceHigherToWin, 1 on every row) in time owns it; also under the heat's KilledItTime kills it;
+placing behind an AI skater or running out of time loses (Abandoned). This is how retail plays (USER-ASKS 516,
+TrueTrophies Skate 3 walkthrough) and the graph's rule [data, b984]: in a normal race the finish does not set
+PlayerWon (that write at `run_heat.triggerentercollision` pc 385-391 runs only for FollowMe races; Lua 5.1 `EQ 0`
+then `JMP`); `end_heat` pc 213-244 sets it only when the local player is in places 1..PlaceHigherToWin of the
+standings (score = racers - finish position) with a time above 0, and `killed_it` clears KilledIt without it. The
+game mode test (`Challenge.GetGameMode` 828401D0) gives SinglePlayer in career, so this path runs. The best time is written on any finish, won or not, when there is no stored best (under
+1 s) or the new time beats it [data, b982]. Our records keep `high_score: i32` (`challenge_records.rs`); races need a
+time field when the run is wired in.
+
+Moddability: every time, the place needed and the split volumes are data (`Params`, defaults the graph constants).
+Multiplayer: the machine is pure events -> commands; the authority runs it. Tests in `race_run.rs`: killed it, owned
+it, behind an AI loses but keeps the best time, the time limit's last 30 s then fail, skipped / backward splits, leg
+change, best time and retry, abandon. Not wired into the game yet (AI racers, HUD, records).
+
 ## Change: the end dialog (`challenges/end_dialog.rs`; research b920, b923)
 
 Retail's offline end dialog is FE screen 4 (vtable 82302750), opened when a challenge graph calls
