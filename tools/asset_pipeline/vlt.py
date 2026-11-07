@@ -40,6 +40,14 @@ def take(data, at, size):
         raise ValueError(f'Truncated AttribSys record at {at:#x}, size {size}')
     return data[at:at+size]
 
+def field_bytes(data, at, size, is_array):
+    """A field's legacy `data` bytes. An array's value is its header plus elements, so an empty array stored last in
+    the .bin (8-byte header, nothing after it) is shorter than the element size: read what is there (seven retail
+    challenge local vaults end that way, research b876 / b877)."""
+    if is_array and at >= 0 and at + size > len(data):
+        return take(data, at, len(data) - at)
+    return take(data, at, size)
+
 def unpack(fmt,data,at):
     return struct.unpack('>'+fmt,take(data,at,struct.calcsize('>'+fmt)))
 
@@ -148,7 +156,7 @@ def convert(schema_stem, collections_stem, names):
                 if raw.isascii(): lookup[hash64(raw)]=raw
                 out[name(fkey)]={'type':t,'data':raw}
             else:
-                raw=take(data,pos,length)
+                raw=field_bytes(data,pos,length,bool(flags&1))
                 out[name(fkey)]={'type':t,'data':raw.hex().upper()}
                 if flags&1:
                     # Keep the legacy data field unchanged for existing

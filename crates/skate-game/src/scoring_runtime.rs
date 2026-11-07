@@ -105,6 +105,11 @@ pub(crate) struct Runtime {
     sequence_active: bool,
     sequence_score: f32,
     banked: Vec<BankedSequence>,
+    /// Keys (hash of the scoring_trick row) of the tricks announced since the last take (retail's trick-done message
+    /// 0x92CC9BBD, research b865; the challenge objectives read them). Capped so nothing grows without a reader.
+    announced: Vec<u64>,
+    /// The manual held now: (tail, seconds held).
+    manual: Option<(bool, f32)>,
     trick_name: String,
     display_base: String,
     display_spin_degrees: i32,
@@ -161,6 +166,8 @@ impl Runtime {
             sequence_active: false,
             sequence_score: 0.,
             banked: Vec::new(),
+            announced: Vec::new(),
+            manual: None,
             trick_name: String::new(),
             display_base: String::new(), display_spin_degrees: 0,
             trick_seq: 0,
@@ -191,6 +198,12 @@ impl Runtime {
     /// The sequences banked since the last call (retail cMsgSequenceComplete, research b841; challenges.rs).
     pub(crate) fn take_banked(&mut self) -> Vec<BankedSequence> {
         std::mem::take(&mut self.banked)
+    }
+    pub(crate) fn manual(&self) -> Option<(bool, f32)> {
+        self.manual
+    }
+    pub(crate) fn take_announced(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.announced)
     }
     pub(crate) fn sequence_active(&self) -> bool {
         self.sequence_active
@@ -378,6 +391,9 @@ impl Runtime {
                     .ok_or("Missing announced scorable")?;
                 self.trick_name = d.label.clone();
                 self.display_id = Some(c.scorable.id);
+                if self.announced.len() < 64 {
+                    self.announced.push(skate_data::attrib_hash::hash(d.identifier));
+                }
                 if self.collector == Collector::Air {
                     self.air_display_started = true;
                 }
@@ -455,6 +471,9 @@ impl Runtime {
             self.bail_seq = self.bail_seq.saturating_add(1);
         }
         self.was_bailing = bailing;
+        // The manual being held (catalog 2 nose / 3 tail) and for how long: the objective Manual.* reads.
+        self.manual = self.carriers.iter().flatten().find(|c| matches!(c.scorable.id, 2 | 3))
+            .map(|c| (c.scorable.id == 3, f.tick.saturating_sub(c.start_tick) as f32 / 60.0));
         self.new_trick = false;
         self.modified_trick = false;
         self.close_tricks = false;

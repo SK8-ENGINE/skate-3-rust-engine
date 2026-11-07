@@ -120,8 +120,15 @@ pub(crate) fn build(
                 primary_window: Some(Window {
                     title: config.multiplayer.title.clone().unwrap_or_else(||"Skate 3 Rust Engine".into()),
                     resolution: (1280, 800).into(),
-                    // Hidden until the start is done (`startup_loading`); the splash shows meanwhile.
-                    visible: false,
+                    // Hidden until the start is done (`startup_loading`); the splash shows meanwhile. Test runs with
+                    // `SKATE_BACKGROUND_WINDOW=1` stay behind every other window and never take the focus.
+                    visible: crate::startup_loading::background_window(),
+                    focused: !crate::startup_loading::background_window(),
+                    window_level: if crate::startup_loading::background_window() {
+                        bevy::window::WindowLevel::AlwaysOnBottom
+                    } else {
+                        bevy::window::WindowLevel::Normal
+                    },
                     ..default()
                 }),
                 ..default()
@@ -206,6 +213,7 @@ pub(crate) fn build(
     crate::teleport_menu::install(&mut app);
     crate::teleporters::install(&mut app);
     crate::challenges::install(&mut app);
+    crate::career::install(&mut app);
     crate::visual_indicators::install(&mut app);
     app.add_plugins(crate::updater::UpdaterPlugin);
     app.add_plugins(crate::multiplayer::MultiplayerPlugin);

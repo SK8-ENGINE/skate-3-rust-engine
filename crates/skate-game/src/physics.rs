@@ -1196,6 +1196,11 @@ pub(crate) fn advance(
 }
 
 impl GamePhysics {
+    /// A static rail's [spline id, type signature] from a grind owner (Grind.IsGrindingGUID compares them).
+    pub(crate) fn rail_guids(&self, owner: u64) -> Option<[u64; 2]> {
+        self.grind_world.spline_guids(owner)
+    }
+
     fn finish_skater(&mut self, skater: &mut SkaterRuntime) -> Result<(), String> {
         //Skateboard::UpdatePostPhysics82C02158 prepares the wall probe for
         //the next StartBoard, using this input phase's cached deck toolkit.

@@ -1774,7 +1774,7 @@ mod tests {
         assert_eq!(m.page(), vec![900, 0, 1, 2, 901, 13, 902, 16, 17, 18, 903, FRAME_STATS_ROW, FRAME_STATS_CORNER_ROW, SESSION_TIMER_ROW]);
         m.select_section(5);
         assert_eq!(m.page(), vec![911, NPC_DRAW_DISTANCE_ROW, 914, BETTER_WATER_ROW, 902, MORE_AUDIBLE_ROW, SPEECH_ROW, 915, EXTENDED_REPLAYS_ROW,
-            REPLAY_LENGTH_ROW, 916, BETTER_MOVER_ROW, 917, DEBUG_MENUS_ROW, FLY_CAM_ROW, 918, PHYSICS_THREADS_ROW, 913, 40, 41, 42, 43]);
+            REPLAY_LENGTH_ROW, 916, BETTER_MOVER_ROW, 917, DEBUG_MENUS_ROW, FLY_CAM_ROW, 918, PHYSICS_THREADS_ROW, 913, 40, 41, 42, 43, 44]);
         m.select_section(1);
         assert_eq!(m.page(), vec![904, 3, 906, CAMERA_ANGLE_ROW, 907, 8, 10]);
         m.select_section(4);

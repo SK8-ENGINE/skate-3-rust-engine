@@ -1,0 +1,316 @@
+//! Tutorials in play (research b858; doc 42 "Tutorials"): the `tutorials` state machine
+//! (`skate_core::challenges::tutorial`) driven by the frame's inputs, its objectives from the exported rows
+//! (`challenge_objectives.rs`). Presentation, the tutorial HUD and the end-of-run dialog are answered at once and
+//! logged NOT RETAIL YET until they are ported; a tutorial whose objectives call unported API functions does not run.
+use crate::challenge_objectives::{DataObjectives, ObjectiveData};
+use crate::challenges::Start;
+use bevy::prelude::*;
+use serde::Deserialize;
+use skate_core::challenges::objectives::{Event as GroupEvent, Message};
+use skate_core::challenges::tutorial::{Command, Event, Params, Tutorial};
+use skate_core::challenges::Completion;
+use std::path::Path;
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct PresentationCounts {
+    #[serde(default)]
+    pub intro: usize,
+    #[serde(default)]
+    pub outro: usize,
+    #[serde(default)]
+    pub restart: usize,
+}
+
+/// One tutorial row as `challenges.py` exports it (`tutorials` in challenges.json).
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct TutorialData {
+    pub id: String,
+    pub map: String,
+    #[serde(default)]
+    pub title_id: Option<String>,
+    pub start: Start,
+    pub location: Start,
+    pub sign_up_radius: f32,
+    #[serde(default)]
+    pub spawn_offboard: bool,
+    #[serde(default)]
+    pub ignore_initial_reposition: Option<bool>,
+    #[serde(default)]
+    pub presentation: PresentationCounts,
+    #[serde(default)]
+    pub objectives: Vec<ObjectiveData>,
+}
+
+#[derive(Deserialize)]
+struct File {
+    #[serde(default)]
+    tutorials: Vec<TutorialData>,
+}
+
+/// The tutorials of the challenges export (none in an export from before them).
+pub(crate) fn load(assets: &Path) -> Vec<TutorialData> {
+    std::fs::read(assets.join("private/challenges.json")).ok()
+        .and_then(|b| serde_json::from_slice::<File>(&b).ok()).map(|f| f.tutorials).unwrap_or_default()
+}
+
+/// What the frame brings the run.
+pub(crate) struct Inputs<'a> {
+    /// Every trigger volume of the map as (name, id), for the objectives' `DISTRICT|name` arguments.
+    pub volumes: &'a [(String, u64)],
+    pub entered: &'a [u64],
+    pub exited: &'a [u64],
+    /// Banked sequences as (score, wiped out or session marker).
+    pub banked: &'a [(i32, bool)],
+    pub ticks: u32,
+    pub teleport_pending: bool,
+    /// The player's distance from the row's start locator.
+    pub distance: f32,
+    /// The player's physical state id and whether a sequence is running (scoring).
+    pub state_id: u32,
+    pub in_sequence: bool,
+    /// Session marker this frame: true = used (Go To Marker, cMsgUseMarker), false = set (Place Marker, cMsgSetMarker).
+    pub markers: &'a [bool],
+    /// Trick keys announced this frame (retail's trick-done message, b865).
+    pub tricks: &'a [u64],
+    /// The player's raw right stick Y and triggers (Input.*).
+    pub right_stick_y: f32,
+    pub triggers: [f32; 2],
+    /// The manual held now: (tail, seconds).
+    pub manual: Option<(bool, f32)>,
+    /// New push contacts this frame (the skater-pushed message).
+    pub pushes: u32,
+    /// The ground pump controller: acceleration and whether the player drove it.
+    pub pump_acceleration: f32,
+    pub pump_user: bool,
+    /// The rail being ground: [spline id, type signature].
+    pub grind_rail: Option<[u64; 2]>,
+}
+
+/// Off board = on foot (500 biped ground / air, 502 pushing off board); wipeout = 300 (b864 §2.2 / §2.3 in our
+/// state ids).
+fn off_board(state: u32) -> bool {
+    matches!(state, 500 | 501 | 502)
+}
+
+/// What the game must do for the run.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Action {
+    Teleport { matrix: [[f32; 4]; 4], offboard: bool },
+    Finished(Completion),
+}
+
+pub(crate) struct TutorialRun {
+    pub data: TutorialData,
+    machine: Tutorial,
+    objectives: Option<DataObjectives>,
+    evaluating: bool,
+    awaiting_teleport: bool,
+    started: bool,
+    was_off_board: bool,
+    last_state: u32,
+    trick_groups: crate::challenge_objectives::TrickGroups,
+}
+
+impl TutorialRun {
+    pub(crate) fn new(data: TutorialData, trick_groups: crate::challenge_objectives::TrickGroups) -> Self {
+        let params = Params { intro: data.presentation.intro > 0, outro: data.presentation.outro > 0,
+            restart: data.presentation.restart > 0, ignore_initial_reposition: data.ignore_initial_reposition,
+            spawn_offboard: data.spawn_offboard };
+        Self { data, machine: Tutorial::new(params), objectives: None, evaluating: false, awaiting_teleport: false, started: false,
+            was_off_board: false, last_state: 0, trick_groups }
+    }
+
+    fn feed(&mut self, message: Message, events: &mut Vec<Event>) {
+        if !self.evaluating {
+            return;
+        }
+        let Some(objectives) = self.objectives.as_mut() else { return };
+        for e in objectives.handle(message) {
+            match e {
+                GroupEvent::AllComplete => events.push(Event::AllObjectivesComplete),
+                GroupEvent::Failed(i) => events.push(Event::ObjectiveFailed(i)),
+                _ => {}
+            }
+        }
+    }
+
+    /// One frame: inputs to the objectives, timers, then every command and its immediate reply.
+    pub(crate) fn step(&mut self, input: &Inputs) -> Vec<Action> {
+        let mut actions = Vec::new();
+        let mut commands = Vec::new();
+        self.machine.set_distance(input.distance);
+        if !self.started {
+            self.started = true;
+            commands.extend(self.machine.start());
+        }
+        let off = off_board(input.state_id);
+        let in_air = |s: u32| (200..=202).contains(&s);
+        let air_completed = in_air(self.last_state) && !in_air(input.state_id) && input.state_id != 300;
+        self.last_state = input.state_id;
+        if let Some(o) = self.objectives.as_mut() {
+            o.skater = skate_core::challenges::api::SkaterFacts {
+                in_sequence: input.in_sequence,
+                sequence_completed: input.banked.iter().any(|(_, dirty)| !dirty),
+                wiping_out: input.state_id == 300,
+                off_board: off,
+                went_off_board: off && !self.was_off_board,
+                went_on_board: !off && self.was_off_board,
+                grinding: (400..=405).contains(&input.state_id),
+                on_board: !off && input.state_id != 300 && input.state_id < 700,
+                on_ground: (100..=105).contains(&input.state_id),
+                air_completed,
+                in_air: in_air(input.state_id),
+                right_stick_y: input.right_stick_y,
+                triggers: input.triggers,
+                manual: input.manual,
+                pump_acceleration: input.pump_acceleration,
+                last_pump_user: input.pump_user,
+                grind_rail: input.grind_rail,
+            };
+            o.tricks_this_frame = input.tricks.to_vec();
+        }
+        self.was_off_board = off;
+        let mut events = Vec::new();
+        for &v in input.exited {
+            self.feed(Message::TriggerExit { volume: v }, &mut events);
+        }
+        for &v in input.entered {
+            self.feed(Message::TriggerEnter { volume: v }, &mut events);
+        }
+        if air_completed {
+            self.feed(Message::AirCompleted, &mut events);
+        }
+        for _ in 0..input.pushes {
+            self.feed(Message::SkaterPushed, &mut events);
+        }
+        for &key in input.tricks {
+            self.feed(Message::TrickDone { key }, &mut events);
+        }
+        for &used in input.markers {
+            self.feed(if used { Message::MarkerUsed } else { Message::MarkerSet }, &mut events);
+        }
+        for &(score, dirty) in input.banked {
+            self.feed(Message::SequenceComplete { score, clean: !dirty }, &mut events);
+            self.feed(Message::SequenceBegin, &mut events);
+        }
+        self.feed(Message::Tick { gated: false }, &mut events);
+        if self.awaiting_teleport && !input.teleport_pending {
+            self.awaiting_teleport = false;
+            events.push(Event::TeleportFinished);
+        }
+        for e in events {
+            commands.extend(self.machine.handle(e));
+        }
+        for _ in 0..input.ticks {
+            commands.extend(self.machine.tick());
+        }
+        let id = self.data.id.clone();
+        let mut guard = 0;
+        while !commands.is_empty() && guard < 64 {
+            guard += 1;
+            let mut replies = Vec::new();
+            for c in std::mem::take(&mut commands) {
+                match c {
+                    Command::CreateHud => {
+                        info!("SKATE_TUTORIAL {id} HUD NOT RETAIL YET: loaded at once");
+                        replies.push(Event::HudLoaded);
+                    }
+                    Command::MakeObjectives => {
+                        self.objectives = DataObjectives::new(&id, &self.data.objectives, input.volumes.to_vec(), self.trick_groups.clone());
+                        if self.objectives.is_none() {
+                            info!("SKATE_TUTORIAL {id} cannot run its objectives: abandoned");
+                            replies.push(Event::Abandon);
+                        }
+                    }
+                    Command::Evaluation(on) => self.evaluating = on,
+                    Command::StartPresentation(p) => {
+                        info!("SKATE_TUTORIAL {id} presentation {p:?} NOT RETAIL YET: finished at once");
+                        replies.push(Event::PresentationFinished(p));
+                    }
+                    Command::LoadAssets => replies.push(Event::AssetLoadComplete),
+                    Command::Reposition { offboard } => {
+                        actions.push(Action::Teleport { matrix: self.data.start.matrix, offboard });
+                        self.awaiting_teleport = true;
+                    }
+                    Command::ResetObjectives => {
+                        if let Some(o) = self.objectives.as_mut() {
+                            o.reset_only();
+                        }
+                    }
+                    Command::ActivateStartObjectives => {
+                        if let Some(o) = self.objectives.as_mut() {
+                            o.activate_first();
+                        }
+                    }
+                    Command::ResetObjective(i) => {
+                        if let Some(o) = self.objectives.as_mut() {
+                            o.reset_one(i);
+                        }
+                    }
+                    Command::OpenEndOptions => {
+                        info!("SKATE_TUTORIAL {id} end options NOT RETAIL YET: continue");
+                        replies.push(Event::HudContinue);
+                    }
+                    Command::Complete(c) => {
+                        info!("SKATE_TUTORIAL {id} complete {c:?}");
+                        actions.push(Action::Finished(c));
+                    }
+                    other => info!("SKATE_TUTORIAL {id} {other:?}"),
+                }
+            }
+            for e in replies {
+                commands.extend(self.machine.handle(e));
+            }
+        }
+        actions
+    }
+
+    pub(crate) fn abandon(&mut self) -> Vec<Action> {
+        let mut out = Vec::new();
+        for c in self.machine.handle(Event::Abandon) {
+            if let Command::Complete(r) = c {
+                out.push(Action::Finished(r));
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn data() -> TutorialData {
+        let mut gate = vec![false; 14];
+        gate[12] = true;
+        let m = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [50., 0., 0., 1.]];
+        TutorialData {
+            id: "tut_test".into(), map: "SkateSchool".into(), title_id: None,
+            start: Start { locator: "s".into(), matrix: m }, location: Start { locator: "l".into(), matrix: m },
+            sign_up_radius: 4.0, spawn_offboard: true, ignore_initial_reposition: None,
+            presentation: PresentationCounts { intro: 2, outro: 0, restart: 3 },
+            objectives: vec![ObjectiveData { key: "tut_test_0".into(), activation: 0, triggers: gate, points_valid: None,
+                condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.IsInVolume",
+                    "args": [{"lit": "1"}, {"lit": "DIST_SkateSchool|tut_test_gate_01"}]}}]}) }],
+        }
+    }
+
+    fn input<'a>(volumes: &'a [(String, u64)], entered: &'a [u64], pending: bool, ticks: u32, distance: f32) -> Inputs<'a> {
+        Inputs { volumes, entered, exited: &[], banked: &[], ticks, teleport_pending: pending, distance, state_id: 100, in_sequence: false, markers: &[], tricks: &[], right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pushes: 0, pump_acceleration: 0.0, pump_user: false, grind_rail: None }
+    }
+
+    #[test]
+    fn a_tutorial_teleports_runs_its_objective_and_finishes_owned() {
+        let volumes = vec![("tut_test_gate_01".to_owned(), 9)];
+        let mut run = TutorialRun::new(data(), Default::default());
+        let actions = run.step(&input(&volumes, &[], false, 0, 30.0));
+        assert!(matches!(actions.as_slice(), [Action::Teleport { offboard: true, .. }]), "{actions:?}");
+        assert!(run.step(&input(&volumes, &[], true, 0, 0.0)).is_empty(), "waits for the arrival");
+        assert!(run.step(&input(&volumes, &[], false, 1, 0.0)).is_empty(), "arrived, objective running");
+        let mut done = run.step(&input(&volumes, &[9], false, 1, 0.0));
+        for _ in 0..240 {
+            done.extend(run.step(&input(&volumes, &[], false, 1, 0.0)));
+        }
+        assert_eq!(done, [Action::Finished(Completion::Owned)]);
+    }
+}

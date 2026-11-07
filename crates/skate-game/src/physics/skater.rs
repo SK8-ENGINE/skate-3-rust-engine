@@ -251,6 +251,12 @@ impl SkaterRuntime {
         Ok(())
     }
 
+    /// The player's physical state id (`PhysicalStateId`: 100s ground, 200s air, 300 wipeout, 400s grinds, 500s on
+    /// foot, 600s plants, 700s special).
+    pub(crate) fn physical_state_id(&self) -> u32 {
+        self.player_input.physical.state.identifier_8
+    }
+
     /// A teleport is in flight: a host request, a reply not yet published, or a 702 reset not yet applied (b471).
     pub(crate) fn teleport_pending(&self) -> bool {
         self.player_input.pending_teleport().is_some()

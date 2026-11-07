@@ -4,7 +4,10 @@ A retail challenge is a row of the challenge bank (`data/db/challengebanks/main`
 inherits its family's defaults through its parent chain (`ots_dwtn_01` < `own_the_spots`). Per challenge:
 - the bank row: OTSTriggerBoundary (the challenge boundary volume), ObjectivesOwned / ObjectivesKilledIt (RefSpecs to
   challenge_objectives_group rows whose PointRequirement is the owned it / killed it score), title and description ids;
-- the local data vault (`data/db/challenge_local_data/<key>`): OTSScoringBoundary (the spot) and StartLocation;
+- the local data vault (`data/db/challenge_local_data/<key>`): OTSScoringBoundary (the spot) and StartLocation; its
+  row (class challenge parameters) inherits from the framework vault (`data/db/challenge_local_data_framework`,
+  family row, then `default`): OutOfBoundsTime, the owned it / killed it banner times and the return to area
+  message id (research b847);
 - the hull (`data/content/missions/<key>/`): the volumes and the start locator (0x00EB0009 records, research b835).
 Only the families in FAMILIES are exported. A challenge whose volumes or start do not resolve is left out and
 reported. Output: assets/private/challenges.json.
@@ -38,9 +41,26 @@ KILLED = _field('ObjectivesKilledIt')
 POINTS = _field('PointRequirement')
 OBJECTIVES = _field('Objectives')
 DEFINITION = 'Hash_E13D9C326E4D98D5'  # tObjectiveDefinition: completion condition text offset, description offset
+POINTS_VALID = 'Hash_41CBF3F0889DE6B3'  # hash64("PointsValid"), tCompiledLua: text offset first (b840)
+TRIGGERS = 'Hash_D4965ED3BD43EC44'  # tObjectiveTriggers: bytes 0..13 = listens to message kind N (b840)
+ACTIVATION_MODE = 'Hash_D7332063BE5CC0EB'  # eTriggerActivationMode u32 (0 at once, 2 / 3 volume, 4 wipeout, 5 sequence)
+# Tutorials (research b858): the family row, the local data fields the `tutorials` graph reads, and the row's world.
+TUTORIAL = 'tutorial'
+SPAWN_OFFBOARD = _field('SpawnOffboard')
+PRESENTATION = {'intro': _field('IntroPresentationEvents'), 'outro': _field('OutroPresentationEvents'),
+                'restart': _field('RestartPresentationEvents')}
+IGNORE_REPOSITION = _field('IgnoreInitialTutorialReposition')
+WORLD = 'Hash_7565CD2A80E93A5E'  # ClassRefSpec_world, key first (dist_skateschool for the school rows)
 ENTERED = re.compile(r'EnteredVolume\(\s*"(\d+)"\s*,\s*"([^"|]+)\|([^"]+)"')
 SIGN_UP_RADIUS = _field('GlobalActivateRadius')
 DISCOVERY_RADIUS = _field('DiscoveryActivateRadius')
+PARAMS = 'Hash_46A56ADDF284C381'     # the challenge parameters (local data and framework rows)
+FRAMEWORK = 'data/db/challenge_local_data_framework'
+OUT_OF_BOUNDS_TIME = _field('OutOfBoundsTime')
+OWNED_TIME = _field('OwnedItHUDDisplayTime')
+KILLED_TIME = _field('KilledItHUDDisplayTime')
+RETURN_MESSAGE = _field('CentralMessageHALIDReturnToChallengeArea')
+CHALLENGE_TYPE = _field('ChallengeType')  # eChallengeTypes (own the spot 9)
 TITLE = 'Hash_E2A50788B6C20C92'
 DESCRIPTION = 'Hash_6B0BD2BAE508B742'
 
@@ -55,6 +75,28 @@ def chain(rows, cls, key):
             fields.setdefault(name, value)
         key = parent.casefold()
     return fields, walked
+
+
+def key_hash(key):
+    """A row key as its 64-bit hash (`Hash_<16 hex>` when its string is not in names.txt)."""
+    return int(key[5:], 16) if key.startswith('Hash_') else hash64(key)
+
+
+def parameters(row, framework):
+    """The challenge parameters: the local row's fields, then its framework parents' (`framework`: hash ->
+    (parent key, fields))."""
+    fields, seen, parent = dict(row['fields']), set(), row['parent']
+    while parent and key_hash(parent) not in seen and key_hash(parent) in framework:
+        seen.add(key_hash(parent))
+        parent, own = framework[key_hash(parent)]
+        for name, value in own.items():
+            fields.setdefault(name, value)
+    out_of_bounds = fields.get(OUT_OF_BOUNDS_TIME)
+    message = fields.get(RETURN_MESSAGE)
+    return dict(
+        out_of_bounds_time=struct.unpack('>i', bytes.fromhex(out_of_bounds['data']))[0] if out_of_bounds else None,
+        owned_display_time=radius(fields, OWNED_TIME), killed_display_time=radius(fields, KILLED_TIME),
+        return_to_area_message=(message or {}).get('data') or None)
 
 
 def group_points(rows_by_hash, value):
@@ -107,6 +149,65 @@ def spot_volume(rows_by_hash, owned, binary):
     return None
 
 
+def objective_programs(rows_by_hash, group, binary, binary_of=None):
+    """Each objective of the group as {key, condition}: its completion condition translated from the bank's Lua text
+    into the engine's data form (objective_lua.py; the port never runs retail Lua)."""
+    out = []
+    for group_ref in refs(group):
+        row = rows_by_hash.get(group_ref)
+        out.extend(objective_rows(rows_by_hash, refs((row or {}).get('fields', {}).get(OBJECTIVES)), binary, binary_of))
+    return out
+
+
+def objective_rows(rows_by_hash, objectives, binary, binary_of=None):
+    """The objective rows `objectives` = [(class, key hash)] as exported programs (a tutorial lists them directly on
+    its challenge row, own the spot through objective groups)."""
+    from .objective_lua import translate
+    out = []
+    for objective in objectives:
+        objective_row = rows_by_hash.get(objective) or {}
+        fields = objective_row.get('fields', {})
+        entry = {'key': objective_row.get('key') or 'Hash_%016X' % objective[1],
+                 'condition': translate(lua_text(binary, fields.get(DEFINITION)))}
+        # tObjectiveTriggers bytes 0..13 (which messages evaluate it) and eTriggerActivationMode (b840 §1, b864).
+        triggers = inherited_field(rows_by_hash, objective, TRIGGERS)
+        raw = bytes.fromhex(triggers[0]['data']) if triggers and triggers[0].get('data') else b''
+        entry['triggers'] = [bool(raw[i]) if i < len(raw) else False for i in range(14)]
+        mode = inherited_field(rows_by_hash, objective, ACTIVATION_MODE)
+        entry['activation'] = struct.unpack('>I', bytes.fromhex(mode[0]['data'])[:4])[0] if mode and mode[0].get('data') else 0
+        # PointsValid (b840): the gate on adding points to this objective, inherited from the family rows
+        # (ots_*_0 take IsSequenceNewlyCompletePoints from own_the_spots); absent = retail's default false.
+        found = inherited_field(rows_by_hash, objective, POINTS_VALID)
+        if found and found[0].get('data'):
+            # The text offset points into the bank the found row came from (family rows sit in the main bank).
+            source = (binary_of or (lambda _row: None))(found[1]) or binary
+            entry['points_valid'] = translate(lua_text(source, found[0]))
+        out.append(entry)
+    return out
+
+
+def inherited_field(rows_by_hash, ref, name):
+    """(field, row) of the row `ref` = (class hash, key hash), else of its parent rows (same class)."""
+    seen = set()
+    while ref and ref not in seen:
+        seen.add(ref)
+        row = rows_by_hash.get(ref)
+        if not row:
+            return None
+        if name in row.get('fields', {}):
+            return row['fields'][name], row
+        parent = row.get('parent')
+        ref = (ref[0], key_hash(parent)) if parent else None
+    return None
+
+
+def lua_text(binary, field):
+    """A tCompiledLua / tObjectiveDefinition field's text: its first u32 is the offset of the source in the bank .bin."""
+    if not field or not field.get('data'):
+        return ''
+    return cstring(binary, struct.unpack_from('>I', bytes.fromhex(field['data']), 0)[0]).decode('utf-8')
+
+
 def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=print):
     """Writes `output` (challenges.json) and returns its challenges."""
     from .vlt import convert, vault
@@ -116,9 +217,11 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
     text = text or {}
     names = (Path(__file__).resolve().parent / 'names.txt').read_text(encoding='utf-8').splitlines()
 
-    local, banks, hulls = {}, [], {}
+    local, banks, hulls, frameworks = {}, [], {}, []
     for source, archive in _sources(game_root, dlc_bigs):
         entries = {e.path.replace('\\', '/').lower(): e for e in archive.entries}
+        if FRAMEWORK + '.vlt' in entries and FRAMEWORK + '.bin' in entries:
+            frameworks.append((archive, entries[FRAMEWORK + '.vlt'], entries[FRAMEWORK + '.bin']))
         for path, entry in entries.items():
             if path.startswith(LOCAL) and path.endswith('.vlt') and path[:-4] + '.bin' in entries:
                 local.setdefault(path[len(LOCAL):-4], (source, archive, entry, entries[path[:-4] + '.bin']))
@@ -152,6 +255,16 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             rows_by_hash[row['class'], hashed] = row
             origin[key] = (source, binary)
 
+    def binary_of(row):
+        return origin.get((row['class'], row['key'].casefold()), (None, None))[1]
+
+    framework = {}
+    for index, (archive, vlt_entry, bin_entry) in enumerate(frameworks):
+        data, _ = read_vault(archive, vlt_entry, bin_entry, f'framework/{index}')
+        for row in data['collections']:
+            if row['class'] == PARAMS:
+                framework.setdefault(key_hash(row['key']), (row['parent'], row['fields']))
+
     cache = {}
 
     def global_locators():
@@ -163,11 +276,61 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
     def volume_of(folder, instance):
         return next((v for v in district_volumes(folder, strict=False) if v['instance_id'] == '%016x' % instance), None)
 
-    result, skipped = [], []
+    def tutorial(key, fields, bank_binary):
+        """A tutorial row (b858): start and sign-up locators, the local parameters, its objective rows."""
+        if key not in local:
+            raise ValueError('no local data vault')
+        _, archive, vlt_entry, bin_entry = local[key]
+        data, binary = read_vault(archive, vlt_entry, bin_entry, 'local')
+        own_row = next((r for r in data['collections'] if r['key'].casefold() == key), None)
+        own = (own_row or {}).get('fields', {})
+        world = int((fields.get(WORLD) or {}).get('data', '0' * 16)[:16], 16)
+        district = next((d for d, _ in global_locators() if hash64(d) == world), None)
+        if district is None:
+            raise ValueError('no district for the row world')
+        folder = work / 'hulls' / MISSIONS / key
+        if key in hulls and not folder.is_dir():
+            hulls[key][0].extract_entries(hulls[key][1], work / 'hulls')
+
+        def place(name):
+            found = global_locators().get((district, name), [])
+            if not found and folder.is_dir():
+                found = [r['matrix'] for _, _, arena in stream_arenas(folder) for r in location_records(arena) if r['locator'] == name]
+            if len({json.dumps(m) for m in found}) != 1:
+                raise ValueError(f'locator {name}: {len(found)} records')
+            return dict(locator=name, matrix=found[0])
+
+        location = location_field(fields)
+        if not location:
+            raise ValueError('no Location')
+        sign_up = place(cstring(bank_binary, int(location['data'], 16)).decode('utf-8'))
+        start = place(cstring(binary, int(own[START]['data'], 16)).decode('utf-8')) if START in own else sign_up
+        count = lambda field: len(((own.get(field) or {}).get('array') or {}).get('items') or [])
+        ignore = own.get(IGNORE_REPOSITION) or fields.get(IGNORE_REPOSITION)
+        radius_up = radius(fields, SIGN_UP_RADIUS)
+        title_id = (fields.get(TITLE) or {}).get('data') or None
+        return dict(
+            id=key, family=TUTORIAL, map=label_of(district), district=district,
+            title_id=title_id, title=text.get(title_id) if title_id else None,
+            description_id=(fields.get(DESCRIPTION) or {}).get('data') or None,
+            start=start, location=sign_up, sign_up_radius=radius_up or 4.0,
+            discovery_radius=radius(fields, DISCOVERY_RADIUS) or radius_up or 4.0,
+            spawn_offboard=bool(own.get(SPAWN_OFFBOARD, {}).get('data', '00')[:2] == '01'),
+            ignore_initial_reposition=None if ignore is None else ignore.get('data', '00')[:2] == '01',
+            presentation={name: count(field) for name, field in PRESENTATION.items()},
+            objectives=objective_rows(rows_by_hash, refs(fields.get(OBJECTIVES)), bank_binary, binary_of))
+
+    result, tutorials, skipped = [], [], []
     for (cls, key), (parent, _) in sorted(rows.items()):
         if cls != CHALLENGE or key.endswith('_ol'):
             continue
         fields, walked = chain(rows, cls, key)
+        if TUTORIAL in walked[1:]:
+            try:
+                tutorials.append(tutorial(key, fields, origin[cls, key][1]))
+            except (KeyError, ValueError, StopIteration) as error:
+                skipped.append(f'{key} ({error})')
+            continue
         family = next((f for f in FAMILIES if f in walked[1:]), None)
         if family is None or key in FAMILIES:
             continue
@@ -181,7 +344,9 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
                 raise ValueError('no local data vault')
             _, archive, vlt_entry, bin_entry = local[key]
             data, binary = read_vault(archive, vlt_entry, bin_entry, 'local')
-            own = next(r for r in data['collections'] if SCORING_BOUNDARY in r['fields'])['fields']
+            own_row = next(r for r in data['collections'] if SCORING_BOUNDARY in r['fields'])
+            own = own_row['fields']
+            params = parameters(own_row, framework)
             _, spot_name, spot_id = parse_trigger(bytes.fromhex(own[SCORING_BOUNDARY]['data']), binary)
             if START not in own:
                 raise ValueError('no StartLocation')  # ots_ind_01: a leftover beside ots_indu_01..05
@@ -236,11 +401,14 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             start=dict(locator=start_name, matrix=starts[0]),
             location=dict(locator=location_name, matrix=places[0]),
             sign_up_radius=sign_up, discovery_radius=discovery,
-            owned_points=owned, killed_points=killed))
+            owned_points=owned, killed_points=killed,
+            objectives=dict(owned=objective_programs(rows_by_hash, fields.get(OWNED), bank_binary, binary_of),
+                            killed=objective_programs(rows_by_hash, fields.get(KILLED), bank_binary, binary_of)),
+            challenge_type=int(fields[CHALLENGE_TYPE]['data'], 16) if CHALLENGE_TYPE in fields else None, **params))
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps({'format': FORMAT, 'version': VERSION, 'challenges': result}, indent=1),
-                      encoding='utf-8')
-    report(f'Challenges: {len(result)} ({", ".join(FAMILIES)}) on {len({c["map"] for c in result})} maps'
-           + (f'; left out: {", ".join(skipped)}' if skipped else ''))
+    output.write_text(json.dumps({'format': FORMAT, 'version': VERSION, 'challenges': result, 'tutorials': tutorials},
+                                 indent=1), encoding='utf-8')
+    report(f'Challenges: {len(result)} ({", ".join(FAMILIES)}) on {len({c["map"] for c in result})} maps, '
+           f'{len(tutorials)} tutorials' + (f'; left out: {", ".join(skipped)}' if skipped else ''))
     return result

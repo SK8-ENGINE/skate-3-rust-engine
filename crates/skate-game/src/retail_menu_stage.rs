@@ -201,7 +201,7 @@ struct MenuStage {
     /// The Skate Profile screen's AS id and host (offline_profile_host), and the mod generation its data was built for.
     offline_profile_id: i32,
     offline_profile: crate::offline_profile_host::OfflineProfileHost,
-    profile_generation: u64,
+    profile_generation: (u64, u64),
     /// The Extras screen's AS id and host (extras_host), the cheat table, and the text entry FE 46 opens next.
     extras_id: i32,
     extras: crate::extras_host::ExtrasHost,
@@ -259,7 +259,7 @@ struct MenuStage {
     popup_dirty: bool,
     /// The action overlay's AS id (None when the set lacks the movie) and the title it shows now.
     signup_id: Option<i32>,
-    signup_shown: Option<String>,
+    signup_shown: Option<(i32, String)>,
     /// Retail Apt keys in key-table order (input.cfg expressions).
     apt_keys: Vec<AptKey>,
     pads: [FeInput; 4],
@@ -281,6 +281,13 @@ pub(crate) fn enabled() -> bool {
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct RetailPause(pub bool);
 
+/// The stage's per-frame systems; prompts that write `PopupMods` run before it.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct MenuStageSet;
+
+/// The fe sound the sign-up prompt plays when it appears (any prompt kind: the component is shared).
+pub(crate) const SIGNUP_SHOW_SOUND: &str = "object_r1_options";
+
 pub(crate) struct RetailMenuStagePlugin;
 impl Plugin for RetailMenuStagePlugin {
     fn build(&self, app: &mut App) {
@@ -297,7 +304,7 @@ impl Plugin for RetailMenuStagePlugin {
         if !enabled() {
             return;
         }
-        app.add_systems(PostStartup, setup).add_systems(Update, (update, restart_failed_stage, render).chain());
+        app.add_systems(PostStartup, setup).add_systems(Update, (update, restart_failed_stage, render).chain().in_set(MenuStageSet));
     }
 }
 
@@ -668,7 +675,7 @@ fn setup(
                 challenge_map: Default::default(),
                 offline_profile_id: as_id(OFFLINE_PROFILE),
                 offline_profile: Default::default(),
-                profile_generation: 0,
+                profile_generation: (0, 0),
                 extras_id: as_id(EXTRAS),
                 extras: Default::default(),
                 cheats: Default::default(),
@@ -749,13 +756,14 @@ fn update(
     mut warned: Local<bool>,
     skater: Option<Res<crate::physics::SkaterRuntime>>,
     // Mods' Trick Guide and Skate Profile layers (one parameter: the system is at Bevy's 16).
-    (guide_mods, profile_mods, credits_mods, config, mut loading_mods, career): (
+    (guide_mods, profile_mods, credits_mods, config, mut loading_mods, career, career_profile): (
         Res<crate::trick_guide_host::TrickGuideMods>,
         Res<crate::offline_profile_host::ProfileMods>,
         Res<crate::extras_host::CreditsMods>,
         Res<crate::config::Config>,
         ResMut<crate::tips_loader_host::LoadingMods>,
         Option<Res<crate::career_stats_host::CareerStatsHost>>,
+        Option<Res<crate::career::CareerProfile>>,
     ),
     // The Trick Guide's demo and the text entry's keyboard (one parameter: the system is at Bevy's 16).
     (mut demo, mut text_entry, mut marquee): (ResMut<crate::trick_guide_scene::TrickGuideDemo>, ResMut<crate::extras_host::TextEntryView>, ResMut<crate::marquee_preview::MarqueeView>),
@@ -850,10 +858,12 @@ fn update(
     fe.image_slots = std::mem::take(&mut ms.image_slots);
     fe.challenge_map.open = map.is_some() && ms.stack.top(Layer::Main) == map;
     fe.offline_profile = std::mem::take(&mut ms.offline_profile);
-    // Mods changed the profile pages: rebuild them; an open screen shows its tab's page again.
-    if profile_mods.generation != ms.profile_generation {
-        ms.profile_generation = profile_mods.generation;
-        fe.offline_profile.data = profile_mods.apply(&Default::default());
+    // The career or mods changed the profile pages: rebuild them; an open screen shows its tab's page again.
+    let profile_generation = (profile_mods.generation, career_profile.as_ref().map_or(0, |p| p.generation));
+    if profile_generation != ms.profile_generation {
+        ms.profile_generation = profile_generation;
+        let base = career_profile.as_ref().map(|p| p.data.clone()).unwrap_or_default();
+        fe.offline_profile.data = profile_mods.apply(&base);
         if profile.is_some_and(|p| ms.stack.top(Layer::Main) == Some(p)) {
             let p = &mut fe.offline_profile;
             p.states.extend(p.screen.refresh(&p.rules));
@@ -1623,15 +1633,20 @@ fn update(
         if std::mem::take(&mut ms.popup_dirty) {
             show_popup(&mut ms.stage, &ms.popups, &ms.popup_ids, &mut fe, &mut sounds)?;
         }
-        // The teleporter prompt (teleporters.rs): state 2 with the title when it appears or changes, 0 when it goes.
+        // The sign-up prompt (teleporters.rs state 2, challenges.rs state 1) with the title when it appears or
+        // changes, 0 when it goes.
         if let Some(signup) = ms.signup_id {
-            if popup_mods.signup_title != ms.signup_shown {
-                let title = popup_mods.signup_title.clone();
-                fe.signup_title = title.clone();
-                let state = if title.is_some() { 2 } else { 0 };
+            let wanted = popup_mods.signup_title.clone().map(|t| (popup_mods.signup_state, t));
+            if wanted != ms.signup_shown {
+                // The prompt component's show (82665CD0, research b854) plays this each time it appears.
+                if ms.signup_shown.is_none() && wanted.is_some() {
+                    sounds.write(FrontendSound::named(SIGNUP_SHOW_SOUND));
+                }
+                fe.signup_title = wanted.as_ref().map(|(_, t)| t.clone());
+                let state = wanted.as_ref().map_or(0, |(s, _)| *s);
                 set_state(&mut ms.stage, signup, state, &mut fe)?;
-                info!("RETAIL_MENUS signup state {state} title={title:?}");
-                ms.signup_shown = title;
+                info!("RETAIL_MENUS signup state {state} title={:?}", fe.signup_title);
+                ms.signup_shown = wanted;
             }
         }
         // The instant replay screen after this frame's movie update: shown once its intro completed, then told what

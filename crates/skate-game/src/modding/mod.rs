@@ -18,6 +18,8 @@ mod camera_stream;
 pub(crate) use participation::{player_suspended, peer_suspended};
 mod session;
 mod volumes;
+mod career;
+mod challenges;
 mod minimap;
 mod world_audio;
 pub(crate) mod world_tuning;
@@ -537,11 +539,14 @@ fn audio_reloads(world: &mut World, mods: &mut Mods) {
 
 /// Audio content overlays follow the running mods (`game_audio::AudioContent`): a mod that
 /// starts, changes, stops or fails changes the set, and the audio restarts once at the next pass.
+/// The career's progression overlays follow the same set.
 fn sync_audio_content(world: &mut World, mods: &Mods) {
-    let Some(mut content) = world.get_resource_mut::<crate::game_audio::AudioContent>() else { return };
-    let content = content.bypass_change_detection();
-    content.scanned = true;
-    content.sync(mods.manager.packages.iter().filter(|(_, p)| p.running()).map(|(id, p)| (id.as_str(), p.root.as_path(), p.content_fingerprint())));
+    if let Some(mut content) = world.get_resource_mut::<crate::game_audio::AudioContent>() {
+        let content = content.bypass_change_detection();
+        content.scanned = true;
+        content.sync(mods.manager.packages.iter().filter(|(_, p)| p.running()).map(|(id, p)| (id.as_str(), p.root.as_path(), p.content_fingerprint())));
+    }
+    career::sync_content(world, mods);
 }
 
 fn camera_position(world: &mut World) -> Option<[f32; 3]> {
@@ -638,6 +643,8 @@ fn snapshot_ro(world: &World, mods: &mut Mods, camera: Option<[f32; 3]>) -> serd
         "detach_pending": mods.detach_pending.is_some(),
         "map": {"name": map.name, "generation": map.generation},
         "triggers": triggers::snapshot(world),
+        "challenges": challenges::snapshot(world),
+        "career": career::snapshot(world),
         "menus": crate::retail_menus::snapshot(world),
         "tick": physics.ticks,
         "keys": keys,
@@ -679,6 +686,8 @@ fn fixed(world: &mut World) {
         }
         // Enter/exit events of this tick's trigger update, before on_fixed_update.
         bevy::log::tracing::info_span!("mods.triggers").in_scope(|| triggers::dispatch(world, &mut mods));
+        challenges::dispatch(world, &mut mods);
+        career::dispatch(world, &mut mods);
         let ids: Vec<_> = mods
             .manager
             .packages
@@ -929,6 +938,8 @@ fn clear_runtime(world: &mut World, mods: &mut Mods) {
     volumes::clear(world, mods);
     minimap::clear(world, mods);
     triggers::clear(world);
+    challenges::clear(world);
+    career::clear(world);
     capture::clear(world);
     clear_camera_angle(world, None);
     clear_water_look(world, None);
@@ -973,6 +984,8 @@ fn apply(world: &mut World, mods: &mut Mods) {
         volumes::clear_owner(world, mods, id);
         minimap::clear_owner(world, mods, id);
         triggers::clear_owner(world, id);
+        challenges::clear_owner(world, id);
+        career::clear_owner(world, id);
         capture::clear_owner(world, id);
         clear_camera_angle(world, Some(id));
         clear_water_look(world, Some(id));
@@ -1057,6 +1070,8 @@ fn apply(world: &mut World, mods: &mut Mods) {
             volumes::clear_owner(world, mods, &id);
             minimap::clear_owner(world, mods, &id);
             triggers::clear_owner(world, &id);
+            challenges::clear_owner(world, &id);
+            career::clear_owner(world, &id);
             capture::clear_owner(world, &id);
             clear_camera_angle(world, Some(&id));
             clear_water_look(world, Some(&id));
@@ -1094,6 +1109,8 @@ fn apply(world: &mut World, mods: &mut Mods) {
             volumes::clear_owner(world, mods, &id);
             minimap::clear_owner(world, mods, &id);
             triggers::clear_owner(world, &id);
+            challenges::clear_owner(world, &id);
+            career::clear_owner(world, &id);
             capture::clear_owner(world, &id);
             clear_camera_angle(world, Some(&id));
             clear_water_look(world, Some(&id));
@@ -1608,6 +1625,20 @@ fn apply_one(
         Command::TriggerTrack { key, options } => triggers::track(world, mods, id, key, options)?,
         Command::TriggerUntrack { key } => triggers::untrack(world, id, &key),
         Command::TriggerConfigure { options } => triggers::configure(world, id, options)?,
+        Command::ChallengeStart { id: challenge } => challenges::start(world, &challenge)?,
+        Command::ChallengeAbort {} => challenges::abort(world)?,
+        Command::ChallengeEnable { id: challenge, enabled } => challenges::enable(world, id, &challenge, enabled)?,
+        Command::ChallengeConfigure { id: challenge, options } => challenges::configure(world, id, challenge, options)?,
+        Command::CareerAddSales { amount, reason } => career::add_sales(world, id, amount, reason)?,
+        Command::CareerAddMoney { amount } => career::add_money(world, id, amount)?,
+        Command::CareerArmAction { id: action } => career::arm_action(world, id, &action)?,
+        Command::CareerSetFlag { name, value } => career::set_flag(world, id, &name, value)?,
+        Command::CareerGrantAchievement { name } => career::grant_achievement(world, id, &name)?,
+        Command::CareerGrantUnlock { category, name } => career::grant_unlock(world, id, category, &name)?,
+        Command::CareerGrantReward { id: reward, big } => career::grant_reward(world, id, &reward, big)?,
+        Command::CareerSkipStart {} => career::skip_start(world, id)?,
+        Command::CareerActivateChallenge { id: challenge } => career::activate(world, id, &challenge, false)?,
+        Command::CareerActivateGroup { id: group } => career::activate(world, id, &group, true)?,
         Command::CameraCapture { key, options } => { capture::set(world, id, key, options)?; }
         c @ (Command::MenuCategory { .. } | Command::MenuItem { .. } | Command::MenuSetting { .. } | Command::MenuHide { .. }
             | Command::MenuHandle { .. } | Command::MenuUnhandle { .. } | Command::MenuSetValue { .. }) => {

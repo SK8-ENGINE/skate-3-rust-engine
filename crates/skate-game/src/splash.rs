@@ -212,7 +212,9 @@ fn wide(s: &str) -> Vec<u16> {
 
 /// Show the splash (once per process; nothing with `SKATE_NO_SPLASH=1`).
 pub(crate) fn show() {
-    if std::env::var("SKATE_NO_SPLASH").is_ok_and(|v| v == "1") || WINDOW.load(Ordering::Relaxed) != 0 {
+    if std::env::var("SKATE_NO_SPLASH").is_ok_and(|v| v == "1") || crate::startup_loading::background_window()
+        || WINDOW.load(Ordering::Relaxed) != 0
+    {
         return;
     }
     if let Ok(mut t) = TEXT.lock() {

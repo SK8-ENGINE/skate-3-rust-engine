@@ -63,14 +63,41 @@ pub struct StatRow {
     pub value: StatValue,
 }
 
-/// What the pages show. NOT RETAIL YET: the engine has no career, challenge or stats records, so the defaults are
-/// empty (bars at 0 / 0, no rows) until a career system or a mod (`sdk.menus.profile`) fills them.
+/// A milestone summary row (825B0380, 8 slots): [title, icon, sales, threshold, skater / park / challenge icon
+/// flags, locked].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MilestoneRow {
+    pub title: String,
+    pub icon: String,
+    pub sales: f64,
+    pub threshold: f64,
+    pub flags: [bool; 3],
+    pub locked: bool,
+}
+
+/// A challenge summary row (825B06C8, 6 slots): [title, icon, total, done, killable, killed].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChallengeRow {
+    pub title: String,
+    pub icon: String,
+    pub total: f64,
+    pub done: f64,
+    pub killable: f64,
+    pub killed: f64,
+}
+
+/// What the pages show: the career fills the progression page (career::profile), stats come from career stats,
+/// and mods (`sdk.menus.profile`) layer on top.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProfileData {
     pub career: ProfileOverall,
     pub challenges: ProfileOverall,
     pub stats: Vec<StatRow>,
     pub personal_bests: Vec<StatRow>,
+    pub milestone_rows: Vec<MilestoneRow>,
+    pub challenge_rows: Vec<ChallengeRow>,
+    /// GetMilestoneDotData: (percent, board sales) per milestone.
+    pub dots: Vec<(f64, f64)>,
 }
 
 /// The keys the screen's C++ handler reads.

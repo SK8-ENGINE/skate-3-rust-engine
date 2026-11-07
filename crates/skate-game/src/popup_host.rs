@@ -15,9 +15,11 @@ pub(crate) struct PopupMods {
     pub engine_choices: Vec<(String, i32)>,
     /// Whether the retail menu stage is up to show them (else the caller decides without a popup).
     pub stage_ready: bool,
-    /// The teleporter prompt's title while it shows (teleporters.rs), drawn by the action overlay movie
-    /// (`actionoverlay2`, state 2); `signup_ready`: the stage opened that movie (else the caller draws its own line).
+    /// The sign-up prompt's title while it shows, drawn by the action overlay movie (`actionoverlay2`) in
+    /// `signup_state`: 2 Teleport (teleporters.rs), 1 Challenge (challenges.rs; teleporters claim it first);
+    /// `signup_ready`: the stage opened that movie (else the caller draws its own line).
     pub signup_title: Option<String>,
+    pub signup_state: i32,
     pub signup_ready: bool,
 }
 

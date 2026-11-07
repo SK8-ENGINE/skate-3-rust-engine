@@ -147,8 +147,8 @@ pub fn location_maps(entries: &[Collection], world_maps: &BTreeMap<String, Strin
 
 const LOCATION_ICON: &str = "Hash_786255B8FF426A3D";
 const LOCATION_WORLD: &str = "Hash_7565CD2A80E93A5E";
-const ICON_CLASS: &str = "Hash_F788504A8D922CED";
-const ICON_NAME: &str = "Hash_FCFE787CCF2F775E";
+pub(crate) const ICON_CLASS: &str = "Hash_F788504A8D922CED";
+pub(crate) const ICON_NAME: &str = "Hash_FCFE787CCF2F775E";
 const WORLD_OFFSET: &str = "Hash_B88A4034D63E905E";
 const WORLD_MAP_INFO: &str = "Hash_20BBC594CD2FAEF8";
 
@@ -229,7 +229,7 @@ pub fn location_markers(collections: &crate::collections::Collections) -> BTreeM
 }
 
 /// A `Hash_XXXXXXXXXXXXXXXX` key, or `hash(name)` for a readable one.
-fn key_hash(key: &str) -> u64 {
+pub(crate) fn key_hash(key: &str) -> u64 {
     key.strip_prefix("Hash_").and_then(|h| u64::from_str_radix(h, 16).ok()).unwrap_or_else(|| hash(key))
 }
 

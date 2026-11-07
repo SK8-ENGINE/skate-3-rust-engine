@@ -235,7 +235,7 @@ fn arm(
 
 /// The local skater's prompt: inside / outside from the trigger events, D-pad Up asks, the popup's choice confirms.
 #[allow(clippy::too_many_arguments)]
-fn prompt(
+pub(crate) fn prompt(
     mut commands: Commands,
     mut teleporters: ResMut<Teleporters>,
     map: Res<crate::map_transition::CurrentMap>,
@@ -295,6 +295,7 @@ fn prompt(
     }
     // The prompt: retail's action overlay (state 2 with the title) when the stage has it, else our text line.
     let shown = show && !pressed;
+    popups.signup_state = 2;
     popups.signup_title = shown.then(|| current.as_ref().map(|t| t.title.clone().or_else(|| t.title_id.clone())
         .unwrap_or_else(|| t.id.clone()))).flatten();
     let line = lines.iter().next();
@@ -311,7 +312,7 @@ fn prompt(
 }
 
 #[derive(Component)]
-struct PromptLine;
+pub(crate) struct PromptLine;
 
 /// Move the skater for a confirmed teleporter: placed at once on this map, through the map transition otherwise.
 fn apply(

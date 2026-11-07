@@ -37,15 +37,30 @@ impl OfflineProfileHost {
             ("Stats", "GetCareerProfileSelectedTab") => Value::Number(self.screen.tab as f64),
             ("Stats", "GetStatsChunk") => rows(vm, &self.data.stats)?,
             ("Stats", "GetPersonalBestChunk") => rows(vm, &self.data.personal_bests)?,
-            ("Progression", "GetOverallCareerData") => overall(vm, &self.data.career)?,
-            ("Progression", "GetOverallChallengeData") => overall(vm, &self.data.challenges)?,
-            // NOT RETAIL YET: no career milestones or summary groups exist in the engine, so the lists are empty. The
-            // movie's layouts (its own constants): summary groups = [milestones (SUMMARY_GROUP_MILESTONES 0),
-            // challenges (_CHALLENGES 1)], each a list of groups; dots = a list of [percent (DOT_DATA_PERCENT 0),
-            // boards (DOT_DATA_BOARDS 1)].
-            ("Progression", "GetMilestoneDotData") => Value::Object(vm.array(Vec::new())?),
+            ("Progression", "GetOverallCareerData") => overall(vm, &self.data.career, false)?,
+            ("Progression", "GetOverallChallengeData") => overall(vm, &self.data.challenges, true)?,
+            // Dots: [percent (DOT_DATA_PERCENT 0), boards (DOT_DATA_BOARDS 1)]; summary groups: [milestones
+            // (SUMMARY_GROUP_MILESTONES 0), challenges (_CHALLENGES 1)] (b895 §A).
+            ("Progression", "GetMilestoneDotData") => {
+                let mut dots = Vec::with_capacity(self.data.dots.len());
+                for &(percent, boards) in &self.data.dots {
+                    dots.push(Value::Object(vm.array(vec![Value::Number(percent), Value::Number(boards)])?));
+                }
+                Value::Object(vm.array(dots)?)
+            }
             ("Progression", "GetSummaryGroupData") => {
-                let groups = vec![Value::Object(vm.array(Vec::new())?), Value::Object(vm.array(Vec::new())?)];
+                let mut milestones = Vec::with_capacity(self.data.milestone_rows.len());
+                for r in &self.data.milestone_rows {
+                    let [skater, park, challenge] = r.flags.map(Value::Bool);
+                    milestones.push(Value::Object(vm.array(vec![Value::Text(r.title.clone()), Value::Text(r.icon.clone()),
+                        Value::Number(r.sales), Value::Number(r.threshold), skater, park, challenge, Value::Bool(r.locked)])?));
+                }
+                let mut challenges = Vec::with_capacity(self.data.challenge_rows.len());
+                for r in &self.data.challenge_rows {
+                    challenges.push(Value::Object(vm.array(vec![Value::Text(r.title.clone()), Value::Text(r.icon.clone()),
+                        Value::Number(r.total), Value::Number(r.done), Value::Number(r.killable), Value::Number(r.killed)])?));
+                }
+                let groups = vec![Value::Object(vm.array(milestones)?), Value::Object(vm.array(challenges)?)];
                 Value::Object(vm.array(groups)?)
             }
             _ => return Ok(None),
@@ -53,9 +68,10 @@ impl OfflineProfileHost {
     }
 }
 
-/// [title, icon, current, total] (the movie clamps current to total).
-fn overall(vm: &mut Vm, o: &ProfileOverall) -> Result<Value, String> {
-    let items = vec![Value::Text(o.title.clone()), Value::Text(o.icon.clone()), Value::Number(o.current), Value::Number(o.total)];
+/// Career [title, icon, current, total]; challenges [title, icon, total, current] (b895 §A).
+fn overall(vm: &mut Vm, o: &ProfileOverall, total_first: bool) -> Result<Value, String> {
+    let (a, b) = if total_first { (o.total, o.current) } else { (o.current, o.total) };
+    let items = vec![Value::Text(o.title.clone()), Value::Text(o.icon.clone()), Value::Number(a), Value::Number(b)];
     Ok(Value::Object(vm.array(items)?))
 }
 
@@ -190,5 +206,17 @@ mod tests {
         assert_eq!(data.stats[0].value, StatValue::Number(42.0));
         mods.clear();
         assert_eq!(mods.apply(&ProfileData::default()), ProfileData::default());
+    }
+
+    #[test]
+    fn challenge_bar_sends_total_before_current() {
+        let mut vm = Vm::new();
+        let bar = ProfileOverall { current: 3.0, total: 10.0, ..ProfileOverall::default() };
+        let slots = |vm: &mut Vm, total_first| match overall(vm, &bar, total_first).unwrap() {
+            Value::Object(id) => (vm.get(id, "2"), vm.get(id, "3")),
+            _ => panic!("not an array"),
+        };
+        assert_eq!(slots(&mut vm, false), (Value::Number(3.0), Value::Number(10.0)));
+        assert_eq!(slots(&mut vm, true), (Value::Number(10.0), Value::Number(3.0)));
     }
 }

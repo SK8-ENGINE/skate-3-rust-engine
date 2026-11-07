@@ -15,11 +15,17 @@ pub(crate) struct CentralMessage {
     pub style: i32,
     pub audio_hook: i32,
     pub seconds: Option<f32>,
+    /// Retail's second, "modified" slot (ShowModifiedCentralMessage 82850770, research b852): its own clip
+    /// (`mcModifiedMessage`: lower, smaller, no sound, gone at once on hide), shown beside a normal message.
+    pub modified: bool,
 }
 
 impl CentralMessage {
     pub(crate) fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into(), style: 0, audio_hook: 0, seconds: None }
+        Self { text: text.into(), style: 0, audio_hook: 0, seconds: None, modified: false }
+    }
+    pub(crate) fn modified(text: impl Into<String>) -> Self {
+        Self { modified: true, ..Self::new(text) }
     }
 }
 
@@ -30,13 +36,15 @@ pub(crate) const DISPLAY_SECONDS: f32 = 180.0 / 30.0;
 
 /// `ScreenManager` colours the movie reads (`source/helper/screenmanager`: `mColour_OffWhite` 0xFFFDEC,
 /// `mColour_Red` 9904651); that movie runs on the front-end stage, not here.
-const SCREEN_MANAGER_COLOURS: [(&str, f64); 2] = [("mColour_OffWhite", 16776940.0), ("mColour_Red", 9904651.0)];
+pub(crate) const SCREEN_MANAGER_COLOURS: [(&str, f64); 2] = [("mColour_OffWhite", 16776940.0), ("mColour_Red", 9904651.0)];
 
 pub struct Bindings {
     pub movie: Movie,
     text: String,
     style: i32,
     audio_hook: i32,
+    modified_text: String,
+    modified_style: i32,
     /// `Audio.PlaySound` names the movie asked for since the last update (`fe` record names).
     pub sounds: Vec<String>,
     random: u32,
@@ -48,6 +56,8 @@ pub struct Runtime {
     controller: usize,
     /// The shown message's time on screen and its limit (retail `+0xBC` / `+0xC0`); `None` = nothing up.
     shown: Option<(f32, f32)>,
+    /// The same for the modified slot (retail `+0x164`).
+    modified: Option<(f32, f32)>,
 }
 
 fn array(vm: &mut Vm, values: impl IntoIterator<Item = Value>) -> Result<Value, String> {
@@ -93,6 +103,9 @@ impl Host for Bindings {
             ("HUDComponents", "Central_GetMessageData") => {
                 array(vm, [Value::Text(self.text.clone()), Value::Number(self.style as f64)])
             }
+            // Retail 8265D728: text, style and two zeros (no format arguments on this path).
+            ("HUDComponents", "Central_GetModifiedMessageData") => array(vm, [Value::Text(self.modified_text.clone()),
+                Value::Number(self.modified_style as f64), Value::Number(0.0), Value::Number(0.0)]),
             ("HUDComponents", "Central_GetAudioHook") => Ok(Value::Number(self.audio_hook as f64)),
             ("Audio", "PlaySound") => {
                 if let Some(Value::Text(name)) = args.first() {
@@ -135,6 +148,8 @@ impl Runtime {
             text: String::new(),
             style: 0,
             audio_hook: 0,
+            modified_text: String::new(),
+            modified_style: 0,
             sounds: Vec::new(),
             random: 0x9e3779b9,
         };
@@ -153,7 +168,7 @@ impl Runtime {
         }
         vm.begin_update();
         bindings.movie.initialize(&mut vm)?;
-        let mut runtime = Self { vm, bindings, controller: usize::MAX, shown: None };
+        let mut runtime = Self { vm, bindings, controller: usize::MAX, shown: None, modified: None };
         runtime.drain()?;
         let Value::Object(controller) = runtime.vm.get(runtime.bindings.movie.root, "screen") else {
             return Err("Central HUD controller was not constructed".into());
@@ -180,14 +195,25 @@ impl Runtime {
     /// Retail `82663F38` then the screen event 4 (`SetState(4)`). Retail stores the formatted, localised text
     /// (the id is looked up, `8290C8A8`), so a language id the movie knows goes in as its text ("ZAP!"); anything
     /// else as written. It restarts the timer.
+    /// The modified slot: retail 826640F0 then the screen event 10 (its own timer; 11 hides it).
     pub fn show(&mut self, message: &CentralMessage) -> Result<(), String> {
         let known = self.bindings.movie.text_assets.language.contains_key(&message.text);
-        self.bindings.text = if known { self.bindings.movie.text_assets.localize(&message.text) } else { format!("#{}", message.text) };
-        self.shown = Some((0.0, message.seconds.unwrap_or(DISPLAY_SECONDS)));
-        self.bindings.style = message.style;
-        self.bindings.audio_hook = message.audio_hook;
+        let text = if known { self.bindings.movie.text_assets.localize(&message.text) } else { format!("#{}", message.text) };
+        let timer = Some((0.0, message.seconds.unwrap_or(DISPLAY_SECONDS)));
+        let state = if message.modified {
+            self.bindings.modified_text = text;
+            self.bindings.modified_style = message.style;
+            self.modified = timer;
+            10.0
+        } else {
+            self.bindings.text = text;
+            self.bindings.style = message.style;
+            self.bindings.audio_hook = message.audio_hook;
+            self.shown = timer;
+            4.0
+        };
         self.vm.begin_update();
-        self.vm.call_method(self.controller, "SetState", vec![Value::Number(4.0)], &mut self.bindings)?;
+        self.vm.call_method(self.controller, "SetState", vec![Value::Number(state)], &mut self.bindings)?;
         self.drain()
     }
 
@@ -196,24 +222,35 @@ impl Runtime {
         &self.bindings.text
     }
 
-    /// Whether a message is up (shown and not yet hidden).
+    /// The text of the modified slot.
+    pub fn modified_text(&self) -> &str {
+        &self.bindings.modified_text
+    }
+
+    /// Whether a message is up in either slot (shown and not yet hidden).
     pub fn showing(&self) -> bool {
-        self.shown.is_some()
+        self.shown.is_some() || self.modified.is_some()
     }
 
     /// Retail's central HUD update (`82664550`): `dt` seconds more on screen; at the limit the screen event 5
     /// (`SetState(5)`: the movie's `HideMessage`, which plays the outro). True when it hid the message now.
+    /// The modified slot counts on its own and hides with the screen event 11. True when either hid now.
     pub fn tick(&mut self, dt: f32) -> Result<bool, String> {
-        let Some((t, limit)) = self.shown.as_mut() else { return Ok(false) };
-        *t += dt;
-        if *t < *limit {
-            return Ok(false);
+        let mut hid = false;
+        for (modified, state) in [(false, 5.0), (true, 11.0)] {
+            let timer = if modified { &mut self.modified } else { &mut self.shown };
+            let Some((t, limit)) = timer.as_mut() else { continue };
+            *t += dt;
+            if *t < *limit {
+                continue;
+            }
+            *timer = None;
+            self.vm.begin_update();
+            self.vm.call_method(self.controller, "SetState", vec![Value::Number(state)], &mut self.bindings)?;
+            self.drain()?;
+            hid = true;
         }
-        self.shown = None;
-        self.vm.begin_update();
-        self.vm.call_method(self.controller, "SetState", vec![Value::Number(5.0)], &mut self.bindings)?;
-        self.drain()?;
-        Ok(true)
+        Ok(hid)
     }
 
     /// One frame of the movie's timelines (intro / idle / outro of the message clip).
@@ -254,6 +291,13 @@ mod tests {
         for _ in 0..60 {
             hud.update().unwrap();
         }
+        // The modified slot (b852): beside a normal message, no sound, its own 6 s.
+        hud.show(&CentralMessage::new("ID_CHASE_TAZER_1")).unwrap();
+        hud.bindings.sounds.clear();
+        hud.show(&CentralMessage::modified("ID_CHASE_TAZER_1")).unwrap();
+        assert_eq!(hud.modified_text(), "ZAP!");
+        assert!(hud.bindings.sounds.is_empty(), "kAUDIOHOOK_NONE");
+        assert!(hud.tick(DISPLAY_SECONDS).unwrap() && !hud.showing(), "both slots hide at 6 s");
         // Plain text from a mod stays as written.
         hud.show(&CentralMessage::new("Nice line")).unwrap();
         assert_eq!(hud.message_text(), "#Nice line");

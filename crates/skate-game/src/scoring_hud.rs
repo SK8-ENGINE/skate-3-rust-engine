@@ -1,5 +1,5 @@
 //! Original APT HUD rendered independently of the world's resolution scale.
-use crate::{apt_scene, config::Config, hud_central, hud_minimap, hud_runtime, physics::SkaterRuntime};
+use crate::{apt_scene, config::Config, hud_central, hud_challenge, hud_minimap, hud_runtime, physics::SkaterRuntime};
 use bevy::{
     asset::{RenderAssetUsages, embedded_asset},
     camera::{RenderTarget, ScalingMode, visibility::RenderLayers},
@@ -83,7 +83,24 @@ struct Hud {
     central: Option<Central>,
     /// The minimap frame (`hud2/hudminimap`); `None` in an install from before it was converted.
     minimap: Option<MiniMap>,
+    /// The challenge HUD components and banners that are installed (hud_challenge.rs).
+    challenge: Vec<ChallengeMovie>,
 }
+/// One challenge HUD movie and its draw slots.
+struct ChallengeMovie {
+    runtime: hud_challenge::Runtime,
+    source: serde_json::Value,
+    shapes: apt_scene::Shapes,
+    sounds: Vec<String>,
+    slots: Vec<Slot>,
+    failed: bool,
+    /// Updates since it was hidden, so its outro still draws (`None` while shown or before it ever showed).
+    hidden_for: Option<u32>,
+}
+/// Updates a hidden challenge movie keeps drawing for its outro (2 s at 30 a second).
+const CHALLENGE_OUTRO_UPDATES: u32 = 60;
+/// Below the central messages, above the minimap.
+const CHALLENGE_Z: f32 = 29.5;
 /// The minimap frame movie and its draw slots.
 struct MiniMap {
     runtime: hud_minimap::Runtime,
@@ -267,6 +284,35 @@ fn setup(
                 }
             },
         };
+        let mut challenge = Vec::new();
+        let sounds = frontend_sounds(&config.asset_root);
+        for component in hud_challenge::Component::ALL {
+            let Ok(bytes) = std::fs::read(root.join("runtime").join(component.file())) else {
+                info!("Challenge HUD {component:?} not installed: Refresh Game Files adds it");
+                continue;
+            };
+            // Optional: a component that does not load leaves the rest of the HUD running.
+            match (|| -> Result<ChallengeMovie, String> {
+                let source: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+                let runtime = hud_challenge::Runtime::load(component, &source, &sounds)?;
+                let shapes: apt_scene::Shapes = serde_json::from_value(source["shapes"].clone()).map_err(|e| e.to_string())?;
+                Ok(ChallengeMovie { runtime, source, shapes, sounds: sounds.clone(), slots: Vec::new(), failed: false, hidden_for: None })
+            })() {
+                Ok(m) => {
+                    for texture in m.shapes.values().flatten().filter_map(|s| s.texture.as_ref()) {
+                        files.insert(texture.rgba.clone(), [texture.width, texture.height]);
+                    }
+                    for font in m.runtime.bindings.movie.text_assets.fonts.values() {
+                        files.insert(font.texture.clone(), font.size);
+                        if let Some(fg) = &font.foreground {
+                            files.insert(fg.texture.clone(), fg.size);
+                        }
+                    }
+                    challenge.push(m);
+                }
+                Err(error) => error!("Challenge HUD {component:?} could not load: {error}"),
+            }
+        }
         let mut textures = BTreeMap::new();
         for (path, size) in files {
             let bytes = std::fs::read(root.join(&path)).map_err(|e| format!("HUD {path}: {e}"))?;
@@ -317,6 +363,7 @@ fn setup(
             failed: false,
             central,
             minimap,
+            challenge,
         })
     })();
     match result {
@@ -526,6 +573,19 @@ fn reset(
             hud.failed = true;
         }
     }
+    for m in hud.challenge.iter_mut() {
+        match hud_challenge::Runtime::load(m.runtime.component, &m.source, &m.sounds) {
+            Ok(runtime) => {
+                m.runtime = runtime;
+                m.failed = false;
+                m.hidden_for = None;
+            }
+            Err(error) => {
+                error!("Challenge HUD {:?} reset: {error}", m.runtime.component);
+                m.failed = true;
+            }
+        }
+    }
     if let Some(central) = hud.central.as_mut() {
         match hud_central::Runtime::load(&central.source, &central.sounds) {
             Ok(runtime) => {
@@ -546,19 +606,44 @@ fn advance(
     mut messages: MessageReader<hud_central::CentralMessage>,
     mut sounds: MessageWriter<crate::ui_audio::FrontendSound>,
     time: Res<Time>,
+    challenge: Res<hud_challenge::ChallengeHudState>,
 ) {
     let Some(mut hud) = hud else {
         messages.clear();
         return;
     };
     if hud.generation == map.generation {
+        for m in hud.challenge.iter_mut().filter(|m| !m.failed) {
+            let was = m.runtime.shown();
+            let result = m.runtime.sync(&challenge).and_then(|_| m.runtime.update());
+            let now = m.runtime.shown();
+            if was != now {
+                info!("HUD_CHALLENGE {:?} {}", m.runtime.component, if now { "shown" } else { "hidden" });
+            }
+            m.hidden_for = match (now, m.hidden_for, was) {
+                (true, _, _) => None,
+                (false, _, true) => Some(0),
+                (false, Some(n), false) => Some(n + 1),
+                (false, None, false) => None,
+            };
+            for name in m.runtime.bindings.sounds.drain(..) {
+                sounds.write(crate::ui_audio::FrontendSound::named(&name));
+            }
+            if let Err(error) = result {
+                error!("Challenge HUD {:?} stopped: {error}", m.runtime.component);
+                m.failed = true;
+            }
+        }
+    }
+    if hud.generation == map.generation {
         if let Some(central) = hud.central.as_mut().filter(|c| !c.failed) {
             let result = (|| -> Result<(), String> {
                 for message in messages.read() {
                     central.runtime.show(message)?;
                     info!(
-                        "HUD_CENTRAL message {:?} text={:?} style={} audio_hook={} seconds={:.1}",
-                        message.text, central.runtime.message_text(), message.style, message.audio_hook,
+                        "HUD_CENTRAL message {:?} text={:?} style={} audio_hook={} modified={} seconds={:.1}",
+                        message.text, if message.modified { central.runtime.modified_text() } else { central.runtime.message_text() },
+                        message.style, message.audio_hook, message.modified,
                         message.seconds.unwrap_or(hud_central::DISPLAY_SECONDS)
                     );
                 }
@@ -721,6 +806,21 @@ fn render_hud(
         }
         _ => Vec::new(),
     };
+    let challenge_draws: Vec<Vec<apt_scene::Draw>> = hud
+        .challenge
+        .iter_mut()
+        .map(|m| {
+            let drawn = m.runtime.shown() || m.hidden_for.is_some_and(|n| n < CHALLENGE_OUTRO_UPDATES);
+            if m.failed || hidden || !drawn {
+                return Vec::new();
+            }
+            apt_scene::draw(&m.runtime.bindings.movie, &m.runtime.vm, &m.shapes).unwrap_or_else(|error| {
+                error!("Challenge HUD {:?} geometry: {error}", m.runtime.component);
+                m.failed = true;
+                Vec::new()
+            })
+        })
+        .collect();
     let mut minimap_draws = minimap_draws;
     if !minimap_draws.is_empty() {
         // The icon groups in order (826656F8 -> 8268CB40), then the needle on top (82665848).
@@ -752,6 +852,10 @@ fn render_hud(
     if let Some(m) = hud.minimap.as_mut() {
         let textures = &hud.textures;
         render_draws(&mut commands, &mut meshes, &mut materials, &mut m.slots, &minimap_draws, |t| textures.get(t).cloned(), MINIMAP_Z, true);
+    }
+    for (i, (m, draws)) in hud.challenge.iter_mut().zip(&challenge_draws).enumerate() {
+        let textures = &hud.textures;
+        render_draws(&mut commands, &mut meshes, &mut materials, &mut m.slots, draws, |t| textures.get(t).cloned(), CHALLENGE_Z + i as f32 * 0.05, true);
     }
 }
 fn hud_position(v: &apt_scene::Vertex) -> [f32; 3] {

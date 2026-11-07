@@ -22,14 +22,17 @@ def contained(root, relative):
     return path
 
 
+# prepare_hud.MOVIES after trickdisplay: optional, so a cache from before a movie was added still installs.
+OPTIONAL_MOVIES = ("hudcentral.json", "hudminimap.json", "hudtimer.json", "hudcountdown.json", "hudobjective2.json",
+                   "dpo.json", "ownthespot.json", "killedit.json", "hudtutorial.json")
+
+
 def runtime_files(root, marker=False):
     files = movie_files(root, "hud.json" if marker else "runtime/trickdisplay.json", marker)
-    # The central message HUD (prepare_hud.MOVIES): optional, so a cache from before it still installs.
-    if not marker and (root / "runtime/hudcentral.json").is_file():
-        files.update(movie_files(root, "runtime/hudcentral.json", False))
-    # The minimap's frame (prepare_hud.MOVIES), optional in the same way.
-    if not marker and (root / "runtime/hudminimap.json").is_file():
-        files.update(movie_files(root, "runtime/hudminimap.json", False))
+    if not marker:
+        for name in OPTIONAL_MOVIES:
+            if (root / "runtime" / name).is_file():
+                files.update(movie_files(root, f"runtime/{name}", False))
     return files
 
 

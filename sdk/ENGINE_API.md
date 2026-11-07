@@ -176,6 +176,64 @@ Release it with `sdk.camera.clear_capture(key)`.
 including replication. Camera captures and volumes are local, mod-owned resources
 and are cleared when their mod stops or the world changes.
 
+## Challenges (`sdk.challenges`, capability `challenges` 1)
+
+The retail challenges (own the spot so far) as the engine runs them. They only
+run while the player has the **Challenges** opt-in on (Graphics overlay,
+Opt-Ins, or `SKATE_CHALLENGES=1`); `sdk.challenges.on()` says whether it is.
+
+    sdk.challenges.list()     -- this map's challenges: {id, family, map, title_id, title,
+                              --   position, enabled, owned_points, killed_points,
+                              --   completion="owned"|"killed"|nil, high_score, discovery=0|1|2}
+    sdk.challenges.get(id)    -- one of them, or nil
+    sdk.challenges.run()      -- the run going: {id, points, requirement, personal_best,
+                              --   out_of_bounds=seconds left outside the area or nil}, or nil
+    sdk.challenges.start(id)  -- sign the player up, as D-pad Up at its marker does
+    sdk.challenges.abort()    -- end the run going (abandoned)
+    sdk.challenges.set_enabled(id, false)  -- hide its sign-up and discovery until the mod stops
+    sdk.challenges.configure(id, {owned_points=, killed_points=, out_of_bounds_time=,
+                                  owned_display_time=, killed_display_time=})
+                              -- override setup values from the next start; nil options clear
+
+Events in `on_event`: `challenge_discovered`, `challenge_started`
+(`{challenge=id}`), `challenge_personal_best` (`{challenge, points}`),
+`challenge_ended` (`{challenge, points, completion="abandoned"|"owned"|"killed"}`).
+Discovery is 0 not discovered, 1 discovered, 2 intro seen (retail's statuses).
+Everything a mod hid or overrode is undone when it stops; a run already going
+keeps the values it started with. Details:
+`docs/hails-additions/42-challenges.md#mod-entry`.
+
+## Career (`sdk.career`, capability `career` 1)
+
+The career that runs with the Challenges opt-in: board sales, money, milestones,
+the progression actions, flags, the team and achievements.
+
+    sdk.career.on()           -- false without the opt-in or the progression data
+    sdk.career.get()          -- {board_sales, money, money_earned,
+                              --   milestone={index, count, start, goal, thresholds, pending},
+                              --   armed, fired, flags, team={members, tiers}, achievements,
+                              --   unlocks={{kind, name, new}}, unlock_all, active (activated challenges),
+                              --   graph={id, state} or nil, queue}
+    sdk.career.add_sales(amount, reason)  -- board sales (counted as bonus sales), runs the checks
+    sdk.career.add_money(amount)          -- money, runs the checks
+    sdk.career.arm_action(id)             -- arm a progression action (fires at once if it holds)
+    sdk.career.set_flag(name, value)      -- "<mod id>:<name>" unless the career has that flag
+    sdk.career.grant_achievement(name)    -- an existing, enabled achievement row, once
+    sdk.career.grant_unlock(category, name)  -- an unlock by retail kind 0..12 and name
+    sdk.career.grant_reward(id, big)      -- a progression reward row (its unlock + the reward summary)
+    sdk.career.skip_start()               -- complete the career start's gate challenges (as owned),
+                                          --   so the crossbar shows board sales (also SKATE_CAREER_SKIP_START=1)
+    sdk.career.activate_challenge(id)     -- make a challenge available while gating is on
+    sdk.career.activate_group(id)         -- every challenge of a progression group
+
+Events in `on_event`: `career_paid` (`{challenge, tier, money, sales, rewards}`),
+`career_action_fired` (`{action, graph}`), `career_milestone`, `career_teammate`,
+`career_tier` (`{tier}`), `career_achievement` (`{achievement}`),
+`career_unlock` (`{kind, unlock, reward}`).
+Career changes stay when the mod stops (the graphs they fired cannot be undone);
+the mod's own flags go. Amounts are capped at 10,000,000 per call. Details:
+`docs/hails-additions/43-career.md`.
+
 ## Multiplayer names
 
 Edit **Your name** in the Multiplayer menu. Names are saved to

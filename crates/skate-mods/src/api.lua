@@ -596,6 +596,45 @@ function sdk.triggers.track(key, options) submit{kind="trigger_track",key=key,op
 function sdk.triggers.untrack(key) submit{kind="trigger_untrack",key=key} end
 function sdk.triggers.configure(options) submit{kind="trigger_configure",options=non_empty(options)} end
 
+-- Challenges (own the spot): the current map's challenges with their saved records, the run going, start / abort,
+-- hiding a challenge's sign-up, and per-mod value overrides (undone when the mod stops). Events arrive in on_event:
+-- {name="challenge_discovered"|"challenge_started"|"challenge_ended"|"challenge_personal_best", challenge=id, ...}.
+-- docs/hails-additions/42-challenges.md "Mod entry".
+sdk.challenges = { version = 1 }
+local function challenge_snapshot() return as_table(sdk.snapshot.challenges) or {} end
+-- false while the player has the Challenges opt-in off (nothing runs then; start fails).
+function sdk.challenges.on() return challenge_snapshot().on == true end
+function sdk.challenges.list() return as_table(challenge_snapshot().list) or {} end
+function sdk.challenges.get(id)
+    for _, c in ipairs(sdk.challenges.list()) do
+        if c.id == id then return c end
+    end
+end
+function sdk.challenges.run() return as_table(challenge_snapshot().run) end
+function sdk.challenges.start(id) submit{kind="challenge_start",id=id} end
+function sdk.challenges.abort() submit{kind="challenge_abort"} end
+function sdk.challenges.set_enabled(id, enabled) submit{kind="challenge_enable",id=id,enabled=enabled ~= false} end
+function sdk.challenges.configure(id, options) submit{kind="challenge_configure",id=id,options=non_empty(options)} end
+
+-- Career (with the Challenges opt-in): board sales, money, milestones, armed actions, flags, team and achievements.
+-- Changes stay with the career when the mod stops; flags a mod sets go under "<mod id>:<name>" unless the career
+-- already has that flag. Events in on_event: {name="career_paid"|"career_action_fired"|"career_milestone"|
+-- "career_teammate"|"career_tier"|"career_achievement", ...}. docs/hails-additions/43-career.md.
+sdk.career = { version = 1 }
+local function career_snapshot() return as_table(sdk.snapshot.career) or {} end
+function sdk.career.on() return career_snapshot().on == true end
+function sdk.career.get() return career_snapshot() end
+function sdk.career.add_sales(amount, reason) submit{kind="career_add_sales",amount=amount,reason=reason} end
+function sdk.career.add_money(amount) submit{kind="career_add_money",amount=amount} end
+function sdk.career.arm_action(id) submit{kind="career_arm_action",id=id} end
+function sdk.career.set_flag(name, value) submit{kind="career_set_flag",name=name,value=value ~= false} end
+function sdk.career.grant_achievement(name) submit{kind="career_grant_achievement",name=name} end
+function sdk.career.grant_unlock(category, name) submit{kind="career_grant_unlock",category=category,name=name} end
+function sdk.career.grant_reward(id, big) submit{kind="career_grant_reward",id=id,big=big == true} end
+function sdk.career.skip_start() submit{kind="career_skip_start"} end
+function sdk.career.activate_challenge(id) submit{kind="career_activate_challenge",id=id} end
+function sdk.career.activate_group(id) submit{kind="career_activate_group",id=id} end
+
 sdk.input = {}
 -- Mapped gameplay action IDs by stable key (retail input.cfg GP_* order, see
 -- sdk/GENERAL_API.md). Accepted wherever an action ID is.

@@ -40,11 +40,11 @@ $work = Join-Path $out 'work'
 New-Item -ItemType Directory -Force $work | Out-Null
 Get-ChildItem $work -File | Remove-Item -Force
 
-# A throwaway worktree at the base: every source patch is applied there first, so a conflict shows up here, not on
-# the second PC. One folder, reused; removed again at the end.
-$stage = Join-Path $Repo '.local\patch-stage'
-if (Test-Path $stage) { Git $Repo worktree remove --force $stage | Out-Null }
-Git $Repo worktree add -q --detach $stage $baseSha | Out-Null
+# Every source patch is applied to a temporary index at the base first, so a conflict shows up here, not on the second
+# PC. Index only: no checkout (a worktree checkout froze the PC during a game, 2026-11-06).
+$stageIndex = Join-Path $work 'stage-index'
+function StageGit { $env:GIT_INDEX_FILE = $stageIndex; try { Git $Repo @args } finally { Remove-Item Env:\GIT_INDEX_FILE } }
+StageGit read-tree $baseSha | Out-Null
 $sources = @()
 try {
     $i = 0
@@ -77,18 +77,20 @@ try {
         $sources += "source=$s branch=$branch head=$head from=$from unpushed_commits=$unpushed files=$changed"
         if ((Get-Item $patch).Length -gt 0) {
             $ErrorActionPreference = 'Continue'
-            $msg = & git.exe -C $stage apply --index --3way --binary $patch 2>&1
+            $env:GIT_INDEX_FILE = $stageIndex
+            $msg = & git.exe -C $Repo apply --cached --3way --binary $patch 2>&1
             $code = $LASTEXITCODE
+            Remove-Item Env:\GIT_INDEX_FILE
             $ErrorActionPreference = 'Stop'
             if ($code -ne 0) { throw "The work in $s does not apply to $Base (merge hails-additions into it first):`n$(($msg | Out-String).Trim())" }
         }
         $i++
     }
     $final = Join-Path $work 'hails-local.patch'
-    Git $stage diff --cached --binary "--output=$final" $baseSha | Out-Null
-    $files = @(Git $stage diff --cached --name-status $baseSha)
+    StageGit diff --cached --binary "--output=$final" $baseSha | Out-Null
+    $files = @(StageGit diff --cached --name-status $baseSha)
 } finally {
-    Git $Repo worktree remove --force $stage | Out-Null
+    Remove-Item $stageIndex -Force -ErrorAction SilentlyContinue
 }
 
 # Publish: the patch and its description replace the old ones together (patch.txt last, the second PC reads it first).

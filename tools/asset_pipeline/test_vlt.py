@@ -1,7 +1,7 @@
 """Synthetic fixtures for the binary array layout; contains no game data."""
 import struct
 import unittest
-from .vlt import array_items, array_text_items
+from .vlt import array_items, array_text_items, field_bytes
 
 
 class ArrayLayoutTests(unittest.TestCase):
@@ -25,6 +25,14 @@ class ArrayLayoutTests(unittest.TestCase):
         self.assertEqual(array_items(struct.pack('>4H', 0, 0, 4, 0), 0, 4, 2)['items'], [])
         raw = struct.pack('>4H2I', 2, 2, 4, 0, 0x1234, 0)
         self.assertEqual(array_items(raw, 0, 4, 2)['items'], ['00001234', '00000000'])
+
+    def test_an_empty_array_at_the_end_of_the_data_reads_its_header_only(self):
+        header = struct.pack('>4H', 0, 0, 24, 0)
+        raw = bytes(8) + header
+        self.assertEqual(field_bytes(raw, 8, 24, True), header)
+        self.assertEqual(array_items(raw, 8, 24, 3)['items'], [])
+        with self.assertRaises(ValueError):
+            field_bytes(raw, 8, 24, False)
 
     def test_invalid_header_or_truncated_capacity_fails(self):
         for raw in [struct.pack('>4H', 1, 2, 4, 0), struct.pack('>4H', 1, 1, 8, 0),

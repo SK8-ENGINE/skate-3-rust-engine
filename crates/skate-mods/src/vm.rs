@@ -156,8 +156,37 @@ impl TriggerShapeOptions {
     }
 }
 
+/// A mod's change to one challenge's values (`sdk.challenges.configure`): unset fields keep the setup data's value.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ChallengeOptions {
+    pub owned_points: Option<i32>,
+    pub killed_points: Option<i32>,
+    pub out_of_bounds_time: Option<i32>,
+    pub owned_display_time: Option<f32>,
+    pub killed_display_time: Option<f32>,
+}
+
+impl ChallengeOptions {
+    pub fn validate(&self) -> bool {
+        let points = |p: Option<i32>| p.is_none_or(|p| (0..=10_000_000).contains(&p));
+        let seconds = |t: Option<f32>| t.is_none_or(|t| t.is_finite() && (0.0..=600.0).contains(&t));
+        points(self.owned_points) && points(self.killed_points)
+            && self.out_of_bounds_time.is_none_or(|t| (0..=600).contains(&t))
+            && seconds(self.owned_display_time) && seconds(self.killed_display_time)
+    }
+}
+
 fn valid_trigger_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
+}
+
+/// One call's cap on mod board sales or money (retail's highest milestone is 1,000,000).
+const MAX_CAREER_AMOUNT: u64 = 10_000_000;
+
+/// Career action, flag and achievement ids: retail keys keep their case (`Hash_..` rows).
+fn valid_career_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -742,6 +771,54 @@ pub enum Command {
         #[serde(default)]
         options: Option<TriggerShapeOptions>,
     },
+    ChallengeStart {
+        id: String,
+    },
+    ChallengeAbort {},
+    ChallengeEnable {
+        id: String,
+        enabled: bool,
+    },
+    ChallengeConfigure {
+        id: String,
+        #[serde(default)]
+        options: Option<ChallengeOptions>,
+    },
+    CareerAddSales {
+        amount: u64,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    CareerAddMoney {
+        amount: u64,
+    },
+    CareerArmAction {
+        id: String,
+    },
+    CareerSetFlag {
+        name: String,
+        value: bool,
+    },
+    CareerGrantAchievement {
+        name: String,
+    },
+    /// `category`: the retail unlock kind 0..12 (`kind` is the command tag).
+    CareerGrantUnlock {
+        category: u32,
+        name: String,
+    },
+    CareerGrantReward {
+        id: String,
+        #[serde(default)]
+        big: bool,
+    },
+    CareerSkipStart {},
+    CareerActivateChallenge {
+        id: String,
+    },
+    CareerActivateGroup {
+        id: String,
+    },
     CameraCapture {
         key: String,
         options: CaptureOptions,
@@ -1127,6 +1204,20 @@ impl Command {
             }
             Self::TriggerRemove { key } | Self::TriggerUntrack { key } => crate::schema::valid_id(key),
             Self::TriggerEnable { id, .. } => valid_trigger_id(id),
+            Self::ChallengeStart { id } | Self::ChallengeEnable { id, .. } => crate::schema::valid_id(id),
+            Self::ChallengeAbort {} => true,
+            Self::CareerAddSales { amount, reason } => {
+                *amount <= MAX_CAREER_AMOUNT && reason.as_ref().is_none_or(|r| r.len() <= 128)
+            }
+            Self::CareerAddMoney { amount } => *amount <= MAX_CAREER_AMOUNT,
+            Self::CareerArmAction { id: name } | Self::CareerSetFlag { name, .. } | Self::CareerGrantAchievement { name }
+            | Self::CareerGrantReward { id: name, .. } | Self::CareerActivateChallenge { id: name }
+            | Self::CareerActivateGroup { id: name } => valid_career_id(name),
+            Self::CareerGrantUnlock { category, name } => *category < 13 && valid_career_id(name),
+            Self::CareerSkipStart {} => true,
+            Self::ChallengeConfigure { id, options } => {
+                crate::schema::valid_id(id) && options.as_ref().is_none_or(ChallengeOptions::validate)
+            }
             Self::TriggerTrack { key, options } => {
                 crate::schema::valid_id(key) && options.as_ref().is_none_or(TriggerTrackOptions::validate)
             }
@@ -1273,6 +1364,20 @@ fn command_kind(command: &Command) -> &'static str {
         Command::TriggerTrack { .. } => "trigger_track",
         Command::TriggerUntrack { .. } => "trigger_untrack",
         Command::TriggerConfigure { .. } => "trigger_configure",
+        Command::ChallengeStart { .. } => "challenge_start",
+        Command::ChallengeAbort { .. } => "challenge_abort",
+        Command::ChallengeEnable { .. } => "challenge_enable",
+        Command::ChallengeConfigure { .. } => "challenge_configure",
+        Command::CareerAddSales { .. } => "career_add_sales",
+        Command::CareerAddMoney { .. } => "career_add_money",
+        Command::CareerArmAction { .. } => "career_arm_action",
+        Command::CareerSetFlag { .. } => "career_set_flag",
+        Command::CareerGrantAchievement { .. } => "career_grant_achievement",
+        Command::CareerGrantUnlock { .. } => "career_grant_unlock",
+        Command::CareerGrantReward { .. } => "career_grant_reward",
+        Command::CareerSkipStart { .. } => "career_skip_start",
+        Command::CareerActivateChallenge { .. } => "career_activate_challenge",
+        Command::CareerActivateGroup { .. } => "career_activate_group",
         Command::CameraCapture { .. } => "camera_capture",
         Command::MenuCategory { .. } => "menu_category",
         Command::MenuItem { .. } => "menu_item",
@@ -1371,6 +1476,8 @@ fn default_snapshot() -> Value {
         },
         "volumes": {},
         "triggers": {"volumes": [], "bodies": {}},
+        "challenges": {"on": false, "list": [], "run": Value::Null},
+        "career": {"on": false},
         "attach": Value::Null,
         "detach_error": Value::Null,
         "detach_pending": false,
@@ -1554,6 +1661,8 @@ impl Vm {
             capabilities.set("session", 1)?;
             capabilities.set("volumes", 1)?;
             capabilities.set("triggers", 1)?;
+            capabilities.set("challenges", 1)?;
+            capabilities.set("career", 1)?;
             capabilities.set("capture", 1)?;
             capabilities.set("multiplayer_debug", 1)?;
             // 2 (2026-10-04, audio/moddability-2): the `emitter` and `reverb_zone` kinds.

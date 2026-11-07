@@ -23,7 +23,7 @@ struct Asset {
 pub(crate) struct StaticProvider {
     primitives: Vec<Primitive>,
     metadata: Vec<spline::PrimitiveMetadata>,
-    #[cfg(test)]
+    /// Per rail: [spline id, type signature] (the challenge objectives' IsGrindingGUID compares against them).
     rail_guids: Vec<[u64; 2]>,
     assets: Vec<Asset>,
     #[cfg(test)]
@@ -37,10 +37,10 @@ impl StaticProvider {
     /// Missing provenance is an explicit conversion prerequisite, not a ray miss.
     pub fn new(map: Option<&SkateMap>) -> Result<Self, String> {
         let Some(map) = map else {
-            return Ok(Self { primitives: vec![], metadata: vec![], #[cfg(test)] rail_guids: vec![], assets: vec![], #[cfg(test)] source_for_primitive: vec![], #[cfg(test)] source_rail_indices: vec![] });
+            return Ok(Self { primitives: vec![], metadata: vec![], rail_guids: vec![], assets: vec![], #[cfg(test)] source_for_primitive: vec![], #[cfg(test)] source_rail_indices: vec![] });
         };
         if map.rails.is_empty() {
-            return Ok(Self { primitives: vec![], metadata: vec![], #[cfg(test)] rail_guids: vec![], assets: vec![], #[cfg(test)] source_for_primitive: vec![], #[cfg(test)] source_rail_indices: vec![] });
+            return Ok(Self { primitives: vec![], metadata: vec![], rail_guids: vec![], assets: vec![], #[cfg(test)] source_for_primitive: vec![], #[cfg(test)] source_rail_indices: vec![] });
         }
         if map.rails.iter().all(|rail| rail.native.is_none()) { return Self::authored(&map.rails); }
         let mut metadata = map.extensions.iter().filter(|e| e.tag == *b"WMET");
@@ -62,7 +62,6 @@ impl StaticProvider {
         let mut source_for_primitive = Vec::with_capacity(primitives.len());
         #[cfg(test)]
         let mut source_rail_indices = Vec::with_capacity(primitives.len());
-        #[cfg(test)]
         let mut rail_guids = Vec::with_capacity(map.rails.len());
         let mut ordinal = 0;
         for (rail, (record, package_rail)) in records.iter().zip(&map.rails).enumerate() {
@@ -80,7 +79,6 @@ impl StaticProvider {
             let count = (last-first)/144+1;
             let spline_id = ((word(header) as u64)<<32)|word(header+4) as u64;
             let type_signature = ((word(header+8) as u64)<<32)|word(header+12) as u64;
-            #[cfg(test)]
             rail_guids.push([spline_id, type_signature]);
             if parse_id(record, "spline_id")? != spline_id || number(record, "segment_count")? != count as u64
                 || parse_id(record, "type_signature")? != type_signature
@@ -113,14 +111,13 @@ impl StaticProvider {
             let tree = Octree::new(bounds, indices.iter().map(|&i| spatial_bounds[i]).collect())?;
             Ok(Asset { #[cfg(test)] source: _source, bounds, indices, tree })
         }).collect::<Result<_, String>>()?;
-        Ok(Self { primitives, metadata, #[cfg(test)] rail_guids, assets, #[cfg(test)] source_for_primitive, #[cfg(test)] source_rail_indices })
+        Ok(Self { primitives, metadata, rail_guids, assets, #[cfg(test)] source_for_primitive, #[cfg(test)] source_rail_indices })
     }
 
     /// Explicit host-authored polylines have no retail source section identity.
     pub fn authored(rails: &[skate_data::skate_map::Rail]) -> Result<Self, String> {
         let bytes = spline::build_rails(rails)?;
         let (primitives, metadata) = spline::decoded_from_blob(&bytes)?;
-        #[cfg(test)]
         let rail_guids = (0..rails.len()).map(|i| {
             let at = 16 + i * 32;
             [u64::from_be_bytes(bytes[at..at+8].try_into().unwrap()),
@@ -141,7 +138,7 @@ impl StaticProvider {
         } else { vec![] };
         #[cfg(test)]
         let source_rail_indices = primitives.iter().map(|p| p.owner - 1).collect();
-        Ok(Self { #[cfg(test)] source_for_primitive: vec![0; primitives.len()], primitives, metadata, #[cfg(test)] rail_guids, assets, #[cfg(test)] source_rail_indices })
+        Ok(Self { #[cfg(test)] source_for_primitive: vec![0; primitives.len()], primitives, metadata, rail_guids, assets, #[cfg(test)] source_rail_indices })
     }
 
     /// Placed skate.Park pieces' rails (b431: 82858290 -> 82868860 -> 82C1F098), in the static pass (NOT RETAIL order).
@@ -177,7 +174,6 @@ impl StaticProvider {
     }
 
     /// Resolve contact's map-local header handle without confusing it with GUID.
-    #[cfg(test)]
     pub fn spline_guids(&self, owner: u64) -> Option<[u64; 2]> {
         let rail = usize::try_from(owner.checked_sub(1)?).ok()?;
         self.rail_guids.get(rail).copied()

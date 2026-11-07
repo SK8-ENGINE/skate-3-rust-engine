@@ -1,0 +1,10 @@
+{
+  "id": "dev-career-test",
+  "api": 2,
+  "name": "Career Test (dev)",
+  "version": "0.1.0",
+  "author": "Hails",
+  "description": "Dev only, for branch world/challenges (doc 43): with the Challenges opt-in, skips the career start, adds 15,000 board sales and logs CAREER_TEST lines (milestone index before / after, events). Disabling it removes its flag.",
+  "entry": "main.lua",
+  "enabled_by_default": false
+}

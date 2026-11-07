@@ -69,3 +69,30 @@ mod tests {
         assert_eq!(Timers::ticks(1.5), 90);
     }
 }
+
+/// Below this many seconds the HUD timer draws red, flashes and ticks (retail 0x821963E4, research b845).
+pub const LOW_TIME_SECONDS: f32 = 10.0;
+
+/// The HUD timer element's text and colour flag for `ticks` left (retail 82663940, research b845): the time rounded
+/// up to whole seconds, at least 0, as `M:SS` from a minute up and bare seconds below (the digit padding below a
+/// minute is not proven); the flag is 0 (red) under [`LOW_TIME_SECONDS`].
+pub fn hud_text(ticks: i32) -> (String, i32) {
+    let seconds = ticks as f32 / TICKS_PER_SECOND;
+    let whole = seconds.max(0.0).ceil() as i32;
+    let text = if whole >= 60 { format!("{}:{:02}", whole / 60, whole % 60) } else { whole.to_string() };
+    (text, i32::from(seconds >= LOW_TIME_SECONDS))
+}
+
+#[cfg(test)]
+mod hud_text_tests {
+    use super::*;
+
+    #[test]
+    fn the_hud_time_rounds_up_and_turns_red_under_ten_seconds() {
+        assert_eq!(hud_text(600), ("10".into(), 1));
+        assert_eq!(hud_text(599), ("10".into(), 0));
+        assert_eq!(hud_text(61), ("2".into(), 0));
+        assert_eq!(hud_text(-5), ("0".into(), 0));
+        assert_eq!(hud_text(90 * 60), ("1:30".into(), 1));
+    }
+}

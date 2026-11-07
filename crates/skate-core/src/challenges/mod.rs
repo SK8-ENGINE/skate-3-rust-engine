@@ -1,6 +1,10 @@
 //! Retail challenges, engine independent: the result tiers, the challenge timers and the per-family state
 //! machines re-implemented from the retail state graphs (docs/hails-additions/42-challenges.md).
 
+pub mod api;
+pub mod objectives;
+pub mod predicate;
+pub mod tutorial;
 pub mod ots;
 pub mod timers;
 

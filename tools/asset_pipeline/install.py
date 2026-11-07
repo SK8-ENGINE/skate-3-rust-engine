@@ -734,6 +734,14 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                     except CONTENT_ERRORS as error:
                         (stage/'assets/private/challenges.json').unlink(missing_ok=True)
                         note(private/'map-status'/'challenges-availability.json','Challenges',error,report=report)
+                    # Career progression (progression.py, research b887): groups, actions, rewards, challenge rewards.
+                    try:
+                        from .progression import export as write_progression
+                        write_progression(game_root,bigs,work/'progression',stage/'assets/private/progression.json',report)
+                        (private/'map-status'/'progression-availability.json').unlink(missing_ok=True)
+                    except CONTENT_ERRORS as error:
+                        (stage/'assets/private/progression.json').unlink(missing_ok=True)
+                        note(private/'map-status'/'progression-availability.json','Progression',error,report=report)
                     # Challenge visual indicators (visual_indicators.py, research b532 / b533): the teleporters' floating icons.
                     try:
                         from .visual_indicators import export as write_indicators

@@ -64,7 +64,9 @@ MOVIES = (("data/fe/source/screens/hud2/trickdisplay2", "trickdisplay.json"),
           ("data/fe/source/screens/hud2/hudobjective2", "hudobjective2.json"),
           ("data/fe/source/screens/hud2/dpo", "dpo.json"),
           ("data/fe/source/screens/challenge/ownthespot", "ownthespot.json"),
-          ("data/fe/source/screens/challenge/killedit", "killedit.json"))
+          ("data/fe/source/screens/challenge/killedit", "killedit.json"),
+          # The tutorials' TutorialInstructionHUD (HUD component 17, research b866).
+          ("data/fe/source/screens/hud2/hudtutorial", "hudtutorial.json"))
 
 
 def prepare(game: Path, output: Path, collections: Path):

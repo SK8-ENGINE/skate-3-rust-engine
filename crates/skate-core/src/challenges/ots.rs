@@ -152,6 +152,11 @@ impl Ots {
         self.state
     }
 
+    /// The out-of-bounds countdown's remaining ticks while it runs (the HUD timer element reads it, research b845).
+    pub fn out_of_bounds_ticks(&self) -> Option<i32> {
+        self.out_of_bounds.and_then(|id| self.timers.remaining(id))
+    }
+
     pub fn personal_best(&self) -> i32 {
         self.personal_best
     }

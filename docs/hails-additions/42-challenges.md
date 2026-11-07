@@ -55,6 +55,12 @@ Details:
 - Result on the disc: 16 own the spots on 3 maps; `ots_ind_01` is left out (no StartLocation, a leftover beside
   `ots_indu_01..05`). Export time 0.9 s; two runs give identical output.
 
+Challenge parameters (research b847): the local data row (class `Hash_46A56ADDF284C381`) inherits from the
+framework vault `data/db/challenge_local_data_framework` (family row, e.g. own_the_spots `BF65AB4C87F0A118`, then
+`316A03931530B5E6`, then `default`). Exported per challenge: `challenge_type` (the bank's eChallengeTypes, own the spot 9; picks the sign-up overlay state), `out_of_bounds_time` (Int32 seconds),
+`owned_display_time` / `killed_display_time` (the banner times), `return_to_area_message` (a text id). All 16 own
+the spots: 5, 3.1, 3.3, `ID_CHALLENGE_MODIFIEDCENTRALMESSAGE_OTS_LEFTAREA`.
+
 ## Change: the challenge HUD movies (`tools/prepare_hud.py`)
 
 `MOVIES` gained the own the spot HUD components and banners, written beside the existing HUD movies as
@@ -78,14 +84,13 @@ trigger volumes, reset objectives, evaluation on / off, point requirement, high 
   wipeout over; leaving the boundary starts the out-of-bounds countdown (expiry abandons), coming back cancels it;
 - the killed it / owned it banner timers read the two display times crossed, as retail does;
 - `Record` keeps the best completion, which only moves up (retail 82C1D878).
-Not ported yet: SimulPlay, online scores, the intro presentation, highlight groups. Open: where the bank keeps the
-two display times and the out-of-bounds time (not under those names' hashes; the family row has unnamed floats 10,
-100 and 250).
+Not ported yet: SimulPlay, online scores, the intro presentation, highlight groups. The two display times and the
+out-of-bounds time are challenge parameters, not bank fields (see the export section; research b847).
 
 ## Change: own the spot in play (`crates/skate-game/src/challenges.rs`)
 
-- Loads `private/challenges.json` once; on each map, a run started with `SKATE_CHALLENGE=<id>` (dev start until the
-  retail sign-up flow is ported) arms the challenge's three volumes, starts `ots::Ots` with the session's best score,
+- Loads `private/challenges.json` once; on each map, a run started from the sign-up (below) or with
+  `SKATE_CHALLENGE=<id>` (dev start) arms the challenge's three volumes, starts `ots::Ots` with the session's best score,
   and each frame feeds it the player's trigger enter / exit events, the banked sequences and 60 Hz timer ticks.
 - Points (retail rule, research b841): retail posts `cMsgSequenceComplete` (SequenceScore, Wipedout,
   UsedSessionMarker) when a sequence ends. Our scoring runtime now queues every banked sequence
@@ -94,21 +99,271 @@ two display times and the out-of-bounds time (not under those names' hashes; the
   sequence (activation mode 5). The group total against the current target gives all objectives complete or not
   enough points.
 - Commands: teleport to the start locator (`travel_ex`, on board), objectives reset / evaluation / requirement, the
-  completion recorded per challenge for the session (the tier only moves up). HUD commands are logged until the
-  HUD movies run; the HUD counts as loaded at once and the highlight reel completes at once.
+  completion recorded per challenge for the session (the tier only moves up), the HUD (below). The HUD counts as
+  loaded at once and the highlight reel completes at once.
 - Leaving the discovery sphere (distance from the challenge locator > `discovery_radius`, checked every frame as
   retail 8255BEB8 does) sends exit discovery, which abandons the run.
-- Placeholders, not retail values: the out-of-bounds time (10 s; the family's 10 / 100 / 250 floats are radii) and both banner times (3 s), until the bank fields
-  are located.
+- The out-of-bounds time and the banner times come from the export's challenge parameters (own the spot: 5 s,
+  3.1 s owned it, 3.3 s killed it); an export from before them uses the framework `default` row's values, which
+  are the same.
+
+## Change: the sign-up (`challenges.rs` `sign_up`)
+
+Retail (research b842 / b843, corrected by b848 / b849): the challenge system shows a challenge's sign-up inside the
+`GlobalActivateRadius` sphere (10 m for own the spot) around its `Location` locator. The "signup" HUD element's mode
+picks the action overlay (`hud2/actionoverlay2`) state (82665E88): mode 0 (challenge sign-up) with one challenge of
+`eChallengeTypes` 9 (own the spot; the family row's `ChallengeType` is 9) gives the OTS state 5 (its `ots_intro`,
+"Activate Spot"), any other challenge list the Challenge state 1 ("Sign up", the title, the `DPad_Up_hud` glyph);
+mode 1 is not a challenge: it is the grabbed object's actions (HUD `UpdateObjectGrabbing`, 82773788; its press
+826660F0 plays `sp_upright_object` and posts 0x905C8249 = `cMsgUprightDMO`), shown as state 4; mode 2 the teleporter
+(state 2, then a confirm popup). The challenge element is the SignUpManager's (82D52758, HUD
+`cChallengeSignUpManager-DPadUp`): its list is the challenges whose 10 m sphere holds the player (82D53B38); the
+D-pad Up press (826660F0 mode 0 -> 82D52D68) signs up with no popup and no sound, and an own the spot then starts
+(82D52B60). Research b850.
+- Not ported: several challenges in range (retail lists up to 4 in a pick popup; ours takes the nearest, own the
+  spot spheres do not overlap on the disc maps), the Disabled state (mode 3, a listener refusing), the 15-frame
+  re-press delay, the sign-up lock message 0x7949DAC1 (name unresolved).
+- Ours: with no run going and gameplay up, the nearest challenge whose sphere holds the skater's feet shows the
+  prompt: `PopupMods.signup_state` (`sign_up_state`: 5 for own the spot, else 1) and its title (text id) for the
+  stage, which sends the overlay `SetScreenState`; teleporters now send their state 2 the same way and keep the overlay when both apply. D-pad Up
+  (not with the session marker modifier) writes `ChallengeSignUp { body, challenge }` (a serialisable message; the
+  authority starts the run), which starts it as `SKATE_CHALLENGE` does. Without the stage, a text line shows.
+- Order: the sign-up runs after the teleporter prompt and before the menu stage (`MenuStageSet`), so the stage reads
+  one frame's final prompt.
+- `--verify` runs: `SKATE_VERIFY_CHALLENGE=<id>` places the skater at the challenge's locator and presses for them
+  once the prompt has shown 30 frames.
+- Several challenges in range (research b851, checked by main in 826660F0): retail lists every challenge whose sphere
+  holds the player, create-a-spot (eChallengeTypes 35) last in query order and the others before them in reverse
+  order (82D29C38). The overlay then shows the Challenge state 1 with `ID_SIGNUP_MULTIPLIESIGNUP_SIGNUPHUD`
+  ("Multiple Challenges", 82665DA0), and D-pad Up opens a popup (82D0A8D0): that title, an empty body (`#`), up to 4
+  entries labelled by each challenge's Title id (create-a-spot: `#CreateASpot Needs A Name!`), cancelable; a pick
+  signs up for that challenge (82D52D68, no second confirm), B starts nothing; no sound on the press path.
+- The prompt's show and the re-press delay (research b854, checked by main in Ghidra): the prompt component's show
+  (82665CD0) plays the fe sound `object_r1_options` (hash 0xFD2DC6E9E25D123D) every time the prompt appears, any
+  prompt kind (the component is shared, so the teleporter prompt too), and sets a 15-tick delay (+0x7C) during which a
+  press is ignored; hide (82665D48) clears it. Ours: the menu stage plays the sound when a sign-up state appears
+  (`SIGNUP_SHOW_SOUND`), and `REPRESS_DELAY_SECONDS` (15 at 30 a second) holds the challenge press. Not ported:
+  retail's early press also blocks further presses until an input bit 0x10000 arrives (probably the release; not
+  traced), the teleporter prompt's delay, and the Disabled state (mode 3, overlay state 6, `ID_MESSAGE_PLEASE_WAIT`,
+  D-pad Up does nothing): the gate 82D53058 asks registered listeners (research b856, not yet checked by main):
+  16 challenge-system managers, 10 of which always say yes (the teleport manager too); the vetoes are the
+  presentation director (a challenge presentation playing or queued), the Hall of Meat manager (two skater flags),
+  BEManager (a screen layer, a central HUD flag and two globals), the living world manager (an unidentified world
+  system), a game mode sub-object and probably the progression manager (a queued progression event). None checks a
+  running challenge, air / off board, online or the replay. A port: a veto list where systems (and mods, through
+  `sdk.challenges`) register "not now" answers by stable id, plus the separate show / hide owner hook.
+  Ours: `in_sign_up` returns that list (query order = the exported list order, since retail's sphere slot order is not
+  traced), `pick_popup` builds the request as an engine popup (`engine:challenge.pick`), and the pick is resolved by
+  the challenge id offered at that entry (retail reads its live list by index, which could change while the popup is
+  open). Without the menu stage the first entry starts. None of the 16 exported own the spots overlap (nearest pair
+  over 40 m apart), so this matters for other families and mod challenges.
+
+## Change: the challenge HUD in play (`hud_challenge.rs`, `scoring_hud.rs`)
+
+Retail (research b844 / b845): the HUD component movies only read. Their `HUDComponents.*` natives return fields of
+named HUD elements (`timer`, `dpo`, `objective`) that the graph's HUD2 bindings write; each element sends its movie
+SetState 1 when it shows and 2 when it hides (vtable +0x34 / +0x38), and its update state on refresh.
+- `ChallengeHudState` (a serialisable resource: shown components, timer text and colour flag, two DPO slots,
+  objective rows) is what the elements hold. challenges.rs writes it from the run's commands: `ShowHud`,
+  `StartTimerHud` (shows the timer), `UpdateHud` (DPO 0 = score / target titled `ID_COMMON_TARGET`, DPO 1 = score /
+  personal best titled `ID_DPO_PERSONALBEST`, objective row 0 = `ID_CHALLENGE_OBJECTIVE_BEAT_OWNSPOT` /
+  `_BEAT_KILLSPOT` / `_BEAT_PERSONALSCORE`), and the new personal best central message
+  (`ID_LEADERBOARD_NEW_PERSONAL_BEST`, green). The end of a run or a map change clears it.
+- The timer element (82663940): the out-of-bounds countdown's remaining time rounded up, at least 0, `M:SS` from a
+  minute up and bare seconds below; the colour flag drops to 0 (red) under 10 s (0x821963E4); under 10 s each new
+  second sends SetState 4 (flash) and plays the `timer_end` front-end sound (event 0xAABBE111A2855FF0 =
+  hash64("timer_end"), research b848), rising back sends 5.
+- `hud_challenge::Runtime` runs each movie on its own APT VM (like the central HUD) and answers its natives from the
+  state: `Timer_GetData`, `DPO_GetParams` (5 items per DPO) / `DPO_IsUsingTwoDPOs`, the `Objective_*` set (own the
+  spot has no activity line), `FELanguage`, `Mission.IsInSkateParkTutorial`, `Audio.PlaySound` (front-end sounds,
+  e.g. the banners' `challenge_ots` / `killedit_intro`), `Render.SetEffect`, `Mission.SetKilledItShakeActivation`
+  (recorded; the shake is not ported). `sync` turns a state change into the movie's SetState: show -> 1 then its
+  refresh state (objective: 100 first), hide -> 2, a change of what it reads while shown -> its refresh state
+  (timer / dpo / objective 3).
+- The scoring HUD loads every installed one (optional, like the minimap), resets them per map, syncs and updates
+  them each frame and draws a shown movie, and a hidden one for 2 s of outro, between the minimap and the central
+  messages.
+- The personal best message is green: `HUD2.eMessageColour` is White 0, Red 1, Green 2 (registered by 8284DC78,
+  research b847), and the colour goes through 82850618 as the style, so style 2 (the movie's celebratory style).
+- Leaving the boundary shows the challenge's `CentralMessageHALIDReturnToChallengeArea` (own the spot:
+  `ID_CHALLENGE_MODIFIEDCENTRALMESSAGE_OTS_LEFTAREA`, "Deactivating Spot in", with the 5 s timer beside it). Retail
+  hashes the id at run time with the language label hash (x33 from 0xFFFFFFFF, 826640F0) and shows it in the
+  modified message slot (`ShowModifiedCentralMessage` 82850770: a second slot beside the normal message, screen
+  event 10, hidden after 6 s by event 11).
+- The modified slot (research b852, `hud_central.rs`): `CentralMessage::modified` shows it with screen event 10, its
+  own 6 s timer hides it with 11, and `Central_GetModifiedMessageData` answers text, style, 0, 0. The movie's
+  `mcModifiedMessage` clip places it (lower and smaller than the normal one, no sound, gone at once on hide) and, like
+  every style 0 / 1 message, plays the green banner's outro. Own the spot never clears it early: returning to the
+  area leaves it up its 6 s. Not ported: ClearModifiedCentralMessage (event 88; nothing in own the spot calls it).
+- NOT RETAIL YET: the refresh cadence (retail refreshes the timer every 5th element tick; ours refreshes
+  on any change of what the movie reads, which shows the same text).
+
+## Change: the records kept across sessions (`challenge_records.rs`)
+
+Retail (research b846): the career save's `Observatory::ChallengeStatusData` (v3; writer 82C1CF98, reader 82C1D260)
+keeps per challenge the Owned and Killed key lists (exclusive, upgrade only, 82C1D878; Abandoned never stored) and a
+key -> f32 high score map (`GetHighScore` 827D0F98 gives 0 with no entry; `SetHighScore` 827D1108 writes as told,
+the graph compares first); `cChallengeDiscoveryManager` (v1) keeps key -> status (NotDiscovered 0, Discovered 1, set
+by the engine when the player comes near, 8255BD38; SeenIntro 2, set by the graph). Keys are a 64-bit hash of the
+challenge name.
+- Ours: `settings/challenges.json` beside the install (`skate3rust.challenge-records` v1), keyed by our challenge
+  id string: `completion` ("owned" / "killed"), `high_score`, `discovery`. Loaded with the challenges; the run starts
+  with the saved high score and skips the intro when SeenIntro; `SetHighScore`, `MarkIntroSeen`, the completion and a
+  first discovery (entering the challenge's boundary volume, as retail's 8255BD38 does on cMsgTriggerEnterCollision;
+  research b850: every challenge boundary on the map is armed for it)
+  change it, and each change saves at once on a short-lived thread (atomic `.part` then rename, like
+  `career-stats.json`). A missing or bad file loads as no records.
+- Mods: string ids, so a mod's challenges keep their own records; records of challenges not loaded (a disabled mod)
+  stay in the file. Multiplayer: records are per player; the authority applies completions, each client saves its
+  own player's.
+- Not ported: the active / ever activated / flagged lists (+0x04 / +0x60 / +0x34; their readers are not traced), the
+  progression unlock counts (82C1C698 / 82C1CA48).
+
+## Change: the Challenges opt-in (`living_world/opt_ins.rs`)
+
+The challenges are off by default on hails-additions until they are finished: a **Challenges** row in the Graphics
+overlay's Opt-Ins (saved with the other opt-ins), or `SKATE_CHALLENGES=1` for a run (`SKATE_CHALLENGE=<id>` and
+`SKATE_VERIFY_CHALLENGE=<id>` turn it on too). While it is off nothing arms, no prompt shows and nothing is
+discovered or saved; switching it off mid-run drops the run, its HUD and the prompt, and switching it on arms the map
+again. The session log shows `OPT_IN_CHANGED challenges ...` like the other opt-ins. Not retail: an opt-in of ours.
+
+## Change: the mod entry (`modding/challenges.rs`, `sdk.challenges`)
+
+Lua SDK API 2, capability `challenges` 1 (reference: `sdk/ENGINE_API.md` "Challenges"): the map's challenges with
+their saved records, the run going, `start` (the same sign-up message the D-pad press sends), `abort` (retail's
+Abandon event), `set_enabled` (hides a challenge's sign-up and discovery) and `configure` (per-mod overrides of the
+setup values: owned / killed points, out of bounds time, the owned / killed banner times; applied at the next start in
+mod id order). Events: discovered, started, personal best, ended. Every hide and override belongs to one mod and goes
+when it stops. Multiplayer: the commands act on the local player's challenge; records stay per player.
+
+## Decision: objectives as data, not Lua
+
+Retail keeps each objective's completion condition as a small Lua predicate (`ObjectiveDefinition`, 1,606 rows, 681
+distinct scripts; research b860) calling a native objective API (research b864, b863, b865). The port does not run
+retail Lua: setup translates each predicate into a data expression the Rust objective runtime evaluates against the
+same API, as the challenge state graphs are rewritten in Rust (decided 2026-11-06). Mods write objectives in the same
+data form.
+
+The group runtime (`crates/skate-core/src/challenges/objectives.rs`): objective states (inactive 1, armed 2, active 4,
+complete 8, failed 0x10), activation modes 0 / volume (2, 3) / wipeout (4) / sequence (5), the records conditions
+read (entered volumes since activation, refilled with the volumes the player is in; entered this sequence; tricks done
+while active; session marker used / set, cleared by the next group tick after its evaluation pass, research
+b894; 32 entries each, oldest dropped), the
+`ObjectiveTriggers` mask byte per message (b864) with the second pass (byte 4) after a completion, the per-sequence
+and per-wipeout resets, Flow (activate / deactivate / reset / status) and Reset (reset all / fail all). The condition
+is a callback until the translated predicate form lands (research b867). Not wired into play yet. The translated form
+(`crates/skate-core/src/challenges/predicate.rs`, research b867): values (nil, boolean, number, string, list),
+expressions and statements for the subset the 3,795 parseable retail scripts use (if chains, locals, `vars`, globals,
+and / or returning operands with short-circuit, comparisons and + / -, numeric for, API calls by resolved index),
+evaluated with Lua 5.1 semantics on 32-bit float numbers (retail's Lua build, research b869); an error, a non-boolean
+or no result gives the condition's default (completion conditions true, PointsValid / failure / hint false, set by
+kind in 82C726E8), and writes made before an error stay. So a completion script with a retail syntax error or the
+`DidSpecificTrickgroup` typo completes on its first evaluation, as in retail. `InitVar` is retail's `InitVars` prelude (one line of Lua in the XEX: set the field only when it is nil;
+research b871). An objective's `vars` survive Flow.ResetObjective and are cleared only on the group's restart paths
+(82C6F430 / 82C6D460) and teardown.
+
+The translator (`tools/asset_pipeline/objective_lua.py`, tests `test_objective_lua.py` on synthetic scripts only):
+a tokenizer and recursive-descent parser for the subset, emitting a versioned JSON tree (`skate3rust.objective-program`
+v1) with names kept as strings for the game to resolve; `InitVars(vars, "name", value)` becomes `init_var`; known enum
+paths become numbers (b869 values), others stay named; a syntax error becomes a program that errors when run (retail
+never compiles it and returns the default). Checked locally against the user's bank (counts only, nothing kept): 1,712
+of the 1,714 completion texts translate, 1 is empty, and the one failure is `hom_indu_05_0`, a real retail syntax error.
+The export writes each challenge's `objectives` ({owned, killed}: per objective row its key and translated
+`condition`; `objective_programs`, test in `test_challenges.py`), plus each objective's `points_valid` program (field
+hash64("PointsValid"), inherited from the family rows and read from the bank the defining row came from; absent =
+retail's default false). The loader `crates/skate-data/src/objective_program.rs` turns a program into the evaluator's
+form, interning API, `vars` and global names (tests). The export also writes each row's `triggers` (tObjectiveTriggers
+bytes 0..13) and `activation` (eTriggerActivationMode), inherited.
+
+In play (`crates/skate-game/src/challenge_objectives.rs`): a running own the spot builds its objective group from the
+owned rows (activation, trigger bytes, completion and PointsValid programs) and evaluates them through the objective
+API (`crates/skate-core/src/challenges/api.rs`: EnteredVolume, IsSequenceNewlyCompletePoints,
+GetGroupAccumulatedPoints, GetGroupPointsRequirement, GetAccumulatedPoints; matched by the last name segment; any
+other call errors, so its condition gives the default). The group follows b841's order on each banked line: the
+first pass, PointsValid adding the line's score to an objective that just completed, the second pass when something
+completed, then the per-sequence reset; a bail or a session-marker line is not evaluated. Its result becomes the state
+machine's AllObjectivesComplete / NotEnoughPoints. An export without objectives, or a row whose program does not load,
+keeps the native check. Which group retail swaps in for the killed it target is not read: the owned rows run for
+both [inferred; the two sets have the same shape]. Failure and hint texts still to translate; local-table fields (the shared
+world-script variables of three Hall of Meat rows and one park tutorial) translate as indexes the engine cannot answer
+yet, so those conditions give their default. Side effects a condition
+has on its group (Flow, Reset, fraction counters) still need a command path from the API into `objectives.rs`.
+
+## Change: empty arrays at the end of a vault (`tools/asset_pipeline/vlt.py`)
+
+Seven retail challenge local vaults (hom_dwtn_05_sp, hom_indu_03 / 04 / 05, street_indu_02, vert_indu_02 / 03) failed
+to convert with "Truncated AttribSys record": each ends with an empty array field (an 8-byte header, capacity 0) as the
+last value in the .bin, and the converter's legacy `data` read took the element size after it. `field_bytes` reads
+only the bytes that exist for an array field; every vault that converted before gives the same output (only reads
+that raised change), and the seven now convert (1 to 13 rows each). Test: `test_vlt.py`. Setup-bench proof of
+identical output for the full setup is still to run (not while the user plays).
+
+## Change: background test windows (`startup_loading.rs`, `app.rs`, `splash.rs`)
+
+`SKATE_BACKGROUND_WINDOW=1` opens the game window without taking focus: created hidden-to-inactive at the bottom of the
+window order (`WindowLevel::AlwaysOnBottom`), never focused, no splash. Automated `--verify` runs use it (with `--mute`
+and `SKATE_REPORT_CHILD=1`) so a test run never covers what the user has open. Not a player setting.
+
+## Change: tutorials (research b858; in progress)
+
+- State machine `crates/skate-core/src/challenges/tutorial.rs` from the retail `tutorials` graph (b858 §1): make the
+  HUD, objectives, intro presentation, setup, asset load, running (reposition beyond 10 m unless the row says
+  `IgnoreInitialTutorialReposition` false, which always repositions; no row sets it), results (3.5 s), outro, end
+  options (continue / retry), restart, cleanup. Results are Owned or Abandoned only; a failed objective re-arms.
+- Export: `challenges.json` gets a `tutorials` list (`challenges.py` `tutorial`): start and sign-up locators, map
+  from the row's world (`dist_skateschool` = hash64 of the district), SpawnOffboard, IgnoreInitialTutorialReposition,
+  intro / outro / restart presentation counts, and the objective rows the challenge row lists directly.
+- In play (`crates/skate-game/src/tutorial_run.rs`, stepped from `challenges.rs`): started by a sign-up with the
+  tutorial's id (or `SKATE_VERIFY_TUTORIAL=<id>` in verify runs); the objectives use the map's trigger volumes by
+  name; Flow.ActivateObjective / DeactivateObjective / ResetObjective / GetObjectiveStatus and
+  GetTotalNumCompletedObjectives are ported (changes applied after the message [inferred timing]), and the skater
+  reads of b864 §2.2 / §2.3 in our state ids: IsInSequence (scoring), SequenceCompleted (a clean banked line this
+  frame), IsWipingOut (state 300), IsOffBoard / WentOffBoard / WentOnBoard (states 500..502 and their frame edges),
+  JustUsedSessionMarker / JustSetSessionMarker (Go To Marker / Place Marker as the group's marker messages), and
+  SetFractionValue (kept for the HUD), and the trick reads of b863 (DidSpecificTrick / Group / ThisFrame variants,
+  GetNumTricksDoneInTrickGroup): the scoring runtime records each announced trick's key (hash of its scoring_trick
+  row; retail's trick-done message), the objectives keep them while active, and the trick groups are read from the
+  stock collections (`challenge_trick_group`, a group's own list joined with its descendants'; checked: 87 groups,
+  `fliptricks` reaches `kickflip`, `smithgrind` matches nothing as in retail); retail's
+  `DidSpecificTrickgroup` typo stays unported. Also, from Ghidra reads of the binding tables (2026-11-06):
+  IsInAir, IsOnBoard, IsOnGround, AirCompleted (states, the air-end edge and its group message), Input.GetRawRightStickYValue
+  and IsLeft/RightTriggerHeld (threshold <= trigger, 82C63310 / 82C63430), Manual.Tail/Nose/ManualTime (the open
+  manual carrier's seconds held), GetNumPushes (push contacts as the skater-pushed message, objective +0x4C0),
+  GetPumpingAcceleration / IsLastPumpUserControlled (the ground pump controller) and Grind.IsGrindingGUID (the
+  current rail's [spline id, type signature], kept by the grind provider; the argument is a decimal id). The start
+  activates the first objective [inferred]. The result goes to the career. NOT RETAIL YET: presentation, the
+  tutorial HUD and the end options are answered at once. A tutorial whose rows call an API function that is not
+  ported does not run (logged with the missing names): an unported call errors and an erroring completion
+  condition counts as complete in retail, so it would finish at once.
+
+## Change: install and refresh fixes (laptop runs 2026-11-06)
+
+- `tools/install_prepared_hud.py` copied only the trick display, central message and minimap movies into the
+  install, so the six challenge movies never arrived ("Challenge HUD ... not installed"). It now installs every
+  optional movie `prepare_hud.MOVIES` exports (`OPTIONAL_MOVIES`, kept in step by a test).
+- Refresh Game Files never rewrote `challenges.json` or `progression.json` on an existing install: they are written
+  by the maps group's `post_maps` step, whose fingerprint did not include their exporters. `versions.py` now lists
+  `challenges.py`, `objective_lua.py`, `progression.py` and `progression_lua.py` under `maps`.
+- Trigger checks skip the ticks while the player's teleport is in flight (`trigger_volumes.rs`). Retail moves the
+  entity within the frame; ours moves a tick or two later, so a challenge start entered and left the spot volumes from
+  the sign-up point, about 45 m from the start locator (laptop point tests: the start locator is outside both).
 
 ## Files
 
-- `tools/asset_pipeline/challenges.py` (new), `tools/asset_pipeline/test_challenges.py` (new)
+- `tools/asset_pipeline/vlt.py` (`field_bytes`), `tools/asset_pipeline/test_vlt.py`
+- `tools/asset_pipeline/challenges.py` (new), `tools/asset_pipeline/test_challenges.py` (new),
+  `tools/asset_pipeline/objective_lua.py` (new), `tools/asset_pipeline/test_objective_lua.py` (new)
 - `tools/asset_pipeline/install.py` (the export step, after teleporters)
 - `tools/asset_pipeline/map_volumes.py` (`strict`), `tools/asset_pipeline/retained.py`, `test_retained.py`
 - `tools/prepare_hud.py` (the six challenge movies)
-- `crates/skate-core/src/challenges/` (mod, timers, ots, ots/tests), `crates/skate-core/src/lib.rs`
+- `crates/skate-core/src/challenges/` (mod, timers, ots, ots/tests, objectives, predicate), `crates/skate-core/src/lib.rs`
 - `crates/skate-game/src/challenges.rs` (new), `scoring_runtime.rs` (banked sequences), `main.rs`, `app.rs`
+- `crates/skate-game/src/challenge_records.rs` (new), `crates/skate-game/src/hud_challenge.rs` (new), `scoring_hud.rs` (hosting), `hud_central.rs` (colours shared)
+- `crates/skate-game/src/startup_loading.rs`, `app.rs`, `splash.rs` (`SKATE_BACKGROUND_WINDOW`)
+- `crates/skate-game/src/modding/challenges.rs` (new), `modding/mod.rs`, `crates/skate-mods/src/vm.rs`, `api.lua`,
+  `tests/engine_api.rs`, `sdk/ENGINE_API.md`; `crates/skate-game/src/living_world/opt_ins.rs` (the opt-in)
+- `crates/skate-game/src/popup_host.rs` (`signup_state`), `retail_menu_stage.rs` (overlay state per prompt,
+  `MenuStageSet`), `teleporters.rs` (state 2, prompt order), `apt_stage.rs` (overlay test for both states)
 
 ## Verification
 
@@ -119,14 +374,16 @@ two display times and the out-of-bounds time (not under those names' hashes; the
 
 ## Moddability
 
-Challenge ids are the retail key strings, so a mod can override one challenge's values or add its own challenge with
-its own volumes, start and points through the content layer; the engine side will expose the same fields to the Lua
-SDK API 2 and remove a mod's challenges when it is disabled.
+Challenge ids are the retail key strings. Mods read, start, abort, hide and re-tune challenges through
+`sdk.challenges` (see "the mod entry"); adding a whole new challenge (own volumes, start, points) is still open.
 
 ## Open questions
 
-- Who opens the owned it / killed it screens (FE templates 26 / 27): not found statically; a recomp trace on
-  OpenScreen during an own-the-spot win is planned.
-- The display time fields and the remaining unnamed bank fields.
+- Who opens the owned it / killed it screens (FE templates 26 / 27): not found statically; ours shows the banner
+  movies through the OwnedIt / KilledIt components. A recomp trace on OpenScreen during an own-the-spot win is planned.
+- The timer text below a minute (the format's digit bytes are 0 in the static image).
 - Box versus stored bounds for the trigger test (`ots_indu_02`).
-- Per-challenge high score layout in the retail save.
+- The sign-up gate: the owner (+4) that decides show or hide, what each veto's condition means (b856 open list).
+- The multi pick: retail's sphere slot order, the element list's capacity, the input mode pushed while the popup is up
+  (826DB498 with 3), and whether the Sk8Popup movie draws the title (b851 open items).
+- What the retail flagged list (+0x34) means; what the Challenge Map and the sign-up marker read from the record.

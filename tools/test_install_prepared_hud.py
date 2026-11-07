@@ -64,6 +64,20 @@ class HudInstallationTests(unittest.TestCase):
         (self.score / "runtime/hudminimap.json").write_text(json.dumps(minimap))
         self.assertIn(str(Path("private/hud/runtime/hudminimap.json")), self.run_install())
 
+    def test_challenge_movies_install(self):
+        for name in ("hudtimer.json", "ownthespot.json", "killedit.json"):
+            (self.score / "runtime" / name).write_text(json.dumps(self.score_json))
+        files = self.run_install()
+        for name in ("hudtimer.json", "ownthespot.json", "killedit.json"):
+            self.assertIn(str(Path("private/hud/runtime") / name), files)
+
+    def test_optional_movies_match_prepare_hud(self):
+        import re
+        source = (Path(__file__).parent / "prepare_hud.py").read_text(encoding="utf-8")
+        exported = re.findall(r'"([a-z0-9_]+\.json)"\)', source.split("MOVIES = ", 1)[1].split("\n\n", 1)[0])
+        from install_prepared_hud import OPTIONAL_MOVIES
+        self.assertEqual(tuple(exported[1:]), OPTIONAL_MOVIES)
+
     def test_differing_existing_file_requires_replace(self):
         self.run_install()
         target = self.assets / "private/hud/atlas.rgba"

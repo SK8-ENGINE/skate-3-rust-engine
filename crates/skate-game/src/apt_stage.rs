@@ -1776,24 +1776,44 @@ traces (last 40): {:?}", game.calls, &traces[traces.len().saturating_sub(40)..])
     /// `mButtonImage = "DPad_Up"` and button_item2's constructor applies it after its child's construct (b452).
     #[test]
     fn the_teleport_prompt_shows_its_dpad_up_glyph() {
-        let Some(root) = crate::apt_imports::test_menu_set() else {
-            return;
-        };
+        let Some(prompts) = overlay_prompts(2) else { return };
+        assert!(prompts.iter().any(|p| p == "prompt/DPad_Up"), "prompts drawn: {prompts:?}");
+    }
+
+    /// The challenge sign-up (Challenge state 1, challenges.rs): the movie sets `DPad_Up_hud` itself.
+    #[test]
+    fn the_challenge_sign_up_shows_a_dpad_up_glyph() {
+        let Some(prompts) = overlay_prompts(1) else { return };
+        assert!(prompts.iter().any(|p| p.starts_with("prompt/DPad_Up")), "prompts drawn: {prompts:?}");
+    }
+
+    /// The own the spot sign-up (OTS state 5, "Activate Spot"): it runs (its intro and text) without a binding the
+    /// stage does not answer.
+    #[test]
+    fn the_own_the_spot_sign_up_runs() {
+        let Some(prompts) = overlay_prompts(5) else { return };
+        eprintln!("OTS sign-up prompts {prompts:?}");
+    }
+
+    /// The action overlay's prompt textures after `SetScreenState(state)` (None without the movies).
+    fn overlay_prompts(state: i32) -> Option<Vec<String>> {
+        let root = crate::apt_imports::test_menu_set()?;
         let set = crate::retail_menu_movies::RetailMenuMovies::read(&root).unwrap();
         let movies = set.movies.clone();
         if !movies.contains_key("source/screens/hud2/actionoverlay2") {
-            return;
+            return None;
         }
         let registry = crate::crossbar_host::test_registry();
         let context = skate_core::menus::MenuContext::new("FreePlay");
         let language = movies.get("source/screens/main/core_menu").map(|m| m.text_assets.language.clone()).unwrap_or_default();
         let mut game = crate::crossbar_host::FrontEnd::new(&registry, &context, &language);
+        game.signup_title = Some("Own the spot".into());
         let mut stage = Stage::new(&game).unwrap();
         stage.load_root("source/screens/main", &movies, &mut game).unwrap();
         for _ in 0..4 {
             stage.update(16.0, &movies, &mut game).unwrap();
         }
-        for (value, name) in ["Off", "Challenge", "Teleport"].iter().enumerate() {
+        for (value, name) in ["Off", "Challenge", "Teleport", "PressStart", "DMOGrab", "OTS", "Disabled"].iter().enumerate() {
             let global = stage.vm.global;
             stage.vm.set(global, format!("kActionOverlayState_{name}"), Value::Number(value as f64)).unwrap();
         }
@@ -1803,14 +1823,14 @@ traces (last 40): {:?}", game.calls, &traces[traces.len().saturating_sub(40)..])
         for _ in 0..30 {
             stage.update(16.0, &movies, &mut game).unwrap();
         }
-        stage.call_path("_global.ScreenManager.SetScreenState", vec![Value::Text("600".into()), Value::Text("2".into())], &mut game).unwrap();
+        stage.call_path("_global.ScreenManager.SetScreenState", vec![Value::Text("600".into()), Value::Text(state.to_string())], &mut game).unwrap();
         for _ in 0..60 {
             stage.update(16.0, &movies, &mut game).unwrap();
         }
         let draws = stage.draw(|key, movie| set.scene(key, movie)).unwrap();
-        let prompts: Vec<&str> = draws.iter().filter(|d| d.texture.starts_with("prompt/")).map(|d| d.texture.as_str()).collect();
-        eprintln!("TELEPORT_PROMPT draws {} prompts {prompts:?}", draws.len());
-        assert!(prompts.contains(&"prompt/DPad_Up"), "prompts drawn: {prompts:?}; unhandled: {:?}", stage.unhandled());
+        let prompts: Vec<String> = draws.iter().filter(|d| d.texture.starts_with("prompt/")).map(|d| d.texture.clone()).collect();
+        eprintln!("SIGNUP_PROMPT state {state} draws {} prompts {prompts:?} unhandled {:?}", draws.len(), stage.unhandled());
+        Some(prompts)
     }
 
     fn retail_screen_manager(close: bool) {

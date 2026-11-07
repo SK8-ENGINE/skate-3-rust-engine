@@ -143,9 +143,11 @@ fn hold_time(
         return;
     }
     loading.done = true;
-    for mut w in &mut window {
-        w.visible = true;
-        w.focused = true;
+    if !background_window() {
+        for mut w in &mut window {
+            w.visible = true;
+            w.focused = true;
+        }
     }
     // The splash goes a few frames later, once the window is up and focused: closing it first left the foreground
     // to whatever window was behind it, and Windows then refused the game's focus request.
@@ -175,4 +177,10 @@ mod tests {
         l.release("mods");
         assert_eq!(l.step(), None);
     }
+}
+
+/// `SKATE_BACKGROUND_WINDOW=1` (muted test runs while someone plays on the desktop): the game window is created shown
+/// but inactive and at the bottom of the window order, is never focused, and the splash is skipped.
+pub(crate) fn background_window() -> bool {
+    std::env::var("SKATE_BACKGROUND_WINDOW").is_ok_and(|v| v == "1")
 }
