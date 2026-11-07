@@ -35,7 +35,7 @@ impl OptIn {
             OptIn::NpcPhysics => "NPC Skater Physics",
             OptIn::VisualizeGrabs => "Visualize Grabs",
             OptIn::VehicleFlee => "Ped Vehicle Flee",
-            OptIn::Challenges => "Challenges",
+            OptIn::Challenges => "Career and Challenges",
         }
     }
     /// The overlay's status line for the row (what it does and that it is still being tested).
@@ -45,7 +45,7 @@ impl OptIn {
             OptIn::NpcPhysics => "NPC skaters near you run full skater physics and bail (still being tested).",
             OptIn::VisualizeGrabs => "Shows the props and car spots in grab range (green = grab now) and logs grab availability.",
             OptIn::VehicleFlee => "Peds run from a car within 10 m that drives toward or away from them (still being tested).",
-            OptIn::Challenges => "Own the spot challenges: discovery, the D-pad Up sign-up, runs, their HUD and saved records (still being built).",
+            OptIn::Challenges => "Career mode, the Skate 101 tutorials and own the spot challenges: discovery, the D-pad Up sign-up, runs, their HUD and saved records (still being built).",
         }
     }
     fn env_on(self) -> bool {
