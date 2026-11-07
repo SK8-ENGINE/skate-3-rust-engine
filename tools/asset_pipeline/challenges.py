@@ -47,6 +47,8 @@ ACTIVATION_MODE = 'Hash_D7332063BE5CC0EB'  # eTriggerActivationMode u32 (0 at on
 # Tutorials (research b858): the family row, the local data fields the `tutorials` graph reads, and the row's world.
 TUTORIAL = 'tutorial'
 SPAWN_OFFBOARD = _field('SpawnOffboard')
+# CompleteChallenge's re-activate flag for tutorials (research b918 / b919): true only on tut_skpk_01..05.
+PERSISTENT = _field('Persistent')
 PRESENTATION = {'intro': _field('IntroPresentationEvents'), 'outro': _field('OutroPresentationEvents'),
                 'restart': _field('RestartPresentationEvents')}
 IGNORE_REPOSITION = _field('IgnoreInitialTutorialReposition')
@@ -316,6 +318,7 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             start=start, location=sign_up, sign_up_radius=radius_up or 4.0,
             discovery_radius=radius(fields, DISCOVERY_RADIUS) or radius_up or 4.0,
             spawn_offboard=bool(own.get(SPAWN_OFFBOARD, {}).get('data', '00')[:2] == '01'),
+            persistent=own.get(PERSISTENT, {}).get('data', '00')[:2] == '01',
             ignore_initial_reposition=None if ignore is None else ignore.get('data', '00')[:2] == '01',
             presentation={name: count(field) for name, field in PRESENTATION.items()},
             objectives=objective_rows(rows_by_hash, refs(fields.get(OBJECTIVES)), bank_binary, binary_of))

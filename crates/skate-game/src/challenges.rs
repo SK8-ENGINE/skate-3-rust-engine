@@ -655,7 +655,7 @@ fn update(
                     }
                 }
                 crate::tutorial_run::Action::Finished(completion) => {
-                    career.write(crate::career::ChallengeResult { challenge: tutorial.data.id.clone(), completion, reactivate: false });
+                    career.write(crate::career::ChallengeResult { challenge: tutorial.data.id.clone(), completion, reactivate: tutorial.data.persistent });
                     finished = true;
                 }
             }

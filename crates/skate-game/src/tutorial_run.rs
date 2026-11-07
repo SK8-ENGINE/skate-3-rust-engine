@@ -33,6 +33,9 @@ pub(crate) struct TutorialData {
     pub sign_up_radius: f32,
     #[serde(default)]
     pub spawn_offboard: bool,
+    /// Stays signable after a result (CompleteChallenge re-activate flag, research b918 / b919).
+    #[serde(default)]
+    pub persistent: bool,
     #[serde(default)]
     pub ignore_initial_reposition: Option<bool>,
     #[serde(default)]
@@ -287,7 +290,7 @@ mod tests {
         TutorialData {
             id: "tut_test".into(), map: "SkateSchool".into(), title_id: None,
             start: Start { locator: "s".into(), matrix: m }, location: Start { locator: "l".into(), matrix: m },
-            sign_up_radius: 4.0, spawn_offboard: true, ignore_initial_reposition: None,
+            sign_up_radius: 4.0, spawn_offboard: true, persistent: false, ignore_initial_reposition: None,
             presentation: PresentationCounts { intro: 2, outro: 0, restart: 3 },
             objectives: vec![ObjectiveData { key: "tut_test_0".into(), activation: 0, triggers: gate, points_valid: None,
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.IsInVolume",

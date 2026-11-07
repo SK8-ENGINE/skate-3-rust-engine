@@ -229,8 +229,8 @@ defaults, load replay, start). Challenge results that arrive meanwhile wait and 
   owned / killed result always takes the key off the active list; CompleteChallenge's flag puts it straight back
   (forced). Own the spot passes it on every result, tutorials pass their row's Persistent (true only on the park
   tutorials), every other family passes nothing. Ours: `Career::settle_active` after the result, with
-  `ChallengeResult::reactivate` (own the spot true; tutorials false until Persistent is exported, right for the 12
-  school tutorials; skip start false). [code + data]
+  `ChallengeResult::reactivate` (own the spot true; tutorials their exported `persistent`, local data field Persistent,
+  true only on tut_skpk_01..05, research b919; skip start false). [code + data]
 
 ## Verification
 
