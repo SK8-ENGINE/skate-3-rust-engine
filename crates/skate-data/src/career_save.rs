@@ -75,6 +75,16 @@ pub struct TeamFile {
     pub extra: Map<String, Value>,
 }
 
+/// The profile's new career flags (retail ProfileBackEnd::ProfileData +0x68 / +0x6C, research b1001): `pending` = the
+/// first challenge is still to be queued (set for a new career, absent = false for a career saved before it).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BootFile {
+    #[serde(default)]
+    pub pending: bool,
+    #[serde(default)]
+    pub progress: u32,
+}
+
 /// One granted unlock (retail kind, name) and whether its menu has not shown it yet.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct UnlockEntry {
@@ -138,6 +148,8 @@ pub struct CareerFile {
     /// Challenges the career activated (gating).
     #[serde(default)]
     pub active: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_default_boot")]
+    pub boot: BootFile,
     /// Career flags: absent = unset (retail nil), so a flag never set is not `false` (research b889).
     #[serde(default)]
     pub flags: BTreeMap<String, bool>,
@@ -152,7 +164,7 @@ impl Default for CareerFile {
     fn default() -> Self {
         Self { format: FORMAT.into(), version: VERSION, challenges: BTreeMap::new(), counters: Counters::default(),
             actions: Actions::default(), rewards: Rewards::default(), team: TeamFile::default(), unlocks: Vec::new(), active: Vec::new(), flags: BTreeMap::new(),
-            imported: None,
+            imported: None, boot: BootFile::default(),
             extra: Map::new() }
     }
 }
@@ -235,4 +247,18 @@ mod tests {
         assert_eq!(file.flags.get("A"), Some(&false));
         assert_eq!(file.flags.get("B"), None);
     }
+
+    #[test]
+    fn a_career_saved_before_the_boot_flags_is_not_pending() {
+        let file = CareerFile::parse(r#"{"format":"skate3rust.career","version":1}"#).unwrap();
+        assert!(!file.boot.pending);
+        let mut fresh = CareerFile::default();
+        fresh.boot.pending = true;
+        let back = CareerFile::parse(&fresh.to_json()).unwrap();
+        assert!(back.boot.pending);
+    }
+}
+
+fn is_default_boot(b: &BootFile) -> bool {
+    *b == BootFile::default()
 }

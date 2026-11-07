@@ -280,6 +280,25 @@ defaults, load replay, start). Challenge results that arrive meanwhile wait and 
   `ChallengeResult::reactivate` (own the spot true; tutorials their exported `persistent`, local data field Persistent,
   true only on tut_skpk_01..05, research b919; skip start false). [code + data]
 
+## Change: the first challenge of a new career (`career/boot.rs`)
+
+Retail's new career flags live in the profile save (ProfileBackEnd::ProfileData v5: +0x68 "new career pending",
++0x6C boot progress, written by 825007E8, read by 82500108; research b1001). The profile reset (825009F0) sets
+pending; the first world load then queues one challenge by the world it loaded and clears it (827CF960, research
+b976 / b1000): the skate school (`dist_skateschool`) starts `tut_sksc_01`, any other world `ftl_univ_02`, through
+the runner's deferred start. Ours: `career.json` gains `boot { pending, progress }` (absent in a career saved before
+it = not pending, so existing careers are untouched); a new career sets pending; `career.rs`
+`queue_first_challenge` signs up for the challenge `FirstChallenge::pick` gives on the first map load and clears the
+flag (the sign-up starts it when it is on that map; follow the leader is not ported yet, so on other maps only the
+flag clears, as retail clears it either way). The rule is data (`FirstChallenge`, retail defaults) a mod can replace.
+The rest of the boot flow (welcome, intro movie, team name, forced logo pick, first teammate, Coach Frank) is mapped in
+research b1000 / b1001 and not ported yet. FE 49 "Marketing" owns the skip-intro path 825F2C98 (career wipe, teleport,
+photo_univ_05); no player path opens it, so `SKATE_CAREER_SKIP_START` stays a developer / mod option. A new
+profile's settings follow the reset 824FFAB0 (research b1008): difficulty Normal (+0xB4 = 1) and camera Low (+0xBC
+= 0), so `Difficulty` and `CameraAngle` default to those (they were Easy and High); a saved setting is kept.
+Vibration (ours off by the user's decision) and units (retail Imperial, Metric on PAL; ours Metric) stay as they are. Tests:
+`career::boot` (the rule), `career_save` (old careers are not pending, the flag round-trips).
+
 ## Verification
 
 - `python -m unittest tools.asset_pipeline.test_progression tools.asset_pipeline.test_progression_lua`: OK.

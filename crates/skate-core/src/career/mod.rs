@@ -5,6 +5,7 @@ use crate::challenges::Completion;
 use std::collections::BTreeMap;
 
 pub mod achievements;
+pub mod boot;
 pub mod graph;
 pub mod milestones;
 pub mod presentation;

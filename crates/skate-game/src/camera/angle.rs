@@ -20,11 +20,11 @@ use skate_mods::presentation::CameraShotTuning;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum CameraAngle {
-    /// Graph type 0.
-    Low,
-    /// Graph type 1. The engine's default: retail asks at first boot instead (boot flow
-    /// "Choose your camera:"), so there is no shipped default to copy.
+    /// Graph type 0. A new profile's camera (profile reset 824FFAB0 writes 0; research b1008); the boot flow's
+    /// "Choose your camera:" then lets the player pick.
     #[default]
+    Low,
+    /// Graph type 1.
     High,
 }
 
@@ -242,7 +242,7 @@ mod tests {
         // Default_cameragraph: CameraLow = IsCameraTypeActive type 0, CameraHigh = type 1.
         assert_eq!(CameraAngle::Low.graph_type(), 0);
         assert_eq!(CameraAngle::High.graph_type(), 1);
-        assert_eq!(CameraAngle::default(), CameraAngle::High);
+        assert_eq!(CameraAngle::default(), CameraAngle::Low);
     }
 
     #[test]
@@ -250,12 +250,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("skate-camera-angle-{}", std::process::id()));
         let root = dir.join("assets");
         let mut s = CameraAngleSettings::load(&root);
-        assert_eq!(s.selected, CameraAngle::High, "a missing file is the default");
-        s.selected = CameraAngle::Low;
+        assert_eq!(s.selected, CameraAngle::Low, "a missing file is the default");
+        s.selected = CameraAngle::High;
         s.save().unwrap();
-        assert_eq!(CameraAngleSettings::load(&root).selected, CameraAngle::Low);
-        std::fs::write(CameraAngleSettings::path(&root), br#"{"angle":"sideways"}"#).unwrap();
         assert_eq!(CameraAngleSettings::load(&root).selected, CameraAngle::High);
+        std::fs::write(CameraAngleSettings::path(&root), br#"{"angle":"sideways"}"#).unwrap();
+        assert_eq!(CameraAngleSettings::load(&root).selected, CameraAngle::Low);
         let _ = std::fs::remove_dir_all(dir);
     }
 

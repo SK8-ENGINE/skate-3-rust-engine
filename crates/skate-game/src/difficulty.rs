@@ -8,8 +8,9 @@ pub(crate) const NATIVE_MODES: [&str; 5] = ["easy", "normal", "hardcore", "motor
 #[serde(rename_all = "lowercase")]
 #[repr(u32)]
 pub(crate) enum Difficulty {
-    #[default]
     Easy = 0,
+    /// A new profile's difficulty (profile reset 824FFAB0 writes 1; research b1008).
+    #[default]
     Normal = 1,
     Hardcore = 2,
     Motorized = 3,

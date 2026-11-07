@@ -170,6 +170,8 @@ pub(crate) struct CareerState {
     pub overlays: Vec<(String, Vec<serde_json::Value>)>,
     pub overlays_changed: bool,
     pub dirty: bool,
+    /// The new career's world -> first challenge rule (data; a mod can replace it).
+    pub first_challenge: skate_core::career::boot::FirstChallenge,
 }
 
 fn completion_text(c: Completion) -> Option<&'static str> {
@@ -393,6 +395,10 @@ fn apply(state: &mut CareerState, p: Prepared) {
     }
     let new_career = existing.is_none();
     state.file = existing.unwrap_or_default();
+    if new_career {
+        // The profile reset sets "new career pending" (825009F0, research b976).
+        state.file.boot.pending = true;
+    }
     if let Some(old) = old_challenges {
         if let Ok(n) = state.file.import_challenge_records(&old, "settings/challenges.json") {
             info!("SKATE_CAREER imported {n} challenge records (statuses only, no pay)");
@@ -667,11 +673,36 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
     }
 }
 
+/// A new career's first world load queues its first challenge by the world and clears the pending flag (827CF960,
+/// research b976 / b1000). Signing up starts it when the challenge is on that map (the tutorial on the skate school);
+/// a challenge not ported yet is ignored there, as retail clears the flag either way.
+fn queue_first_challenge(
+    mut state: ResMut<CareerState>,
+    map: Res<crate::map_transition::CurrentMap>,
+    mut seen: Local<Option<u64>>,
+    mut signed: MessageWriter<crate::challenges::ChallengeSignUp>,
+) {
+    if *seen == Some(map.generation) || state.data.is_none() || !state.file.boot.pending {
+        return;
+    }
+    *seen = Some(map.generation);
+    let worlds = skate_data::challenge_map::LocationRules::default();
+    let world = worlds.0.iter()
+        .find(|(label, _)| map.path.as_deref().is_some_and(|p| crate::teleport_menu::same_map(p, label)))
+        .map(|(_, district)| district.as_str());
+    let challenge = state.first_challenge.pick(world).to_owned();
+    info!("SKATE_CAREER new career: first challenge {challenge} (world {world:?})");
+    signed.write(crate::challenges::ChallengeSignUp { body: crate::trigger_volumes::PLAYER.into(), challenge });
+    state.file.boot.pending = false;
+    state.save_in_background();
+}
+
 pub(crate) fn install(app: &mut App) {
     app.init_resource::<CareerState>()
         .init_resource::<CareerProfile>()
         .init_resource::<RewardScreens>()
         .add_message::<ChallengeResult>()
         .add_message::<ChallengeDiscovered>()
-        .add_systems(Update, update.after(crate::challenges::CareerResultSet).run_if(crate::challenges::opted_in));
+        .add_systems(Update, update.after(crate::challenges::CareerResultSet).run_if(crate::challenges::opted_in))
+        .add_systems(Update, queue_first_challenge.after(update).run_if(crate::challenges::opted_in));
 }

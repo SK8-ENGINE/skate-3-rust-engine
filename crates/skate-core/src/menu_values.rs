@@ -183,10 +183,12 @@ pub fn retail_default(id: &str) -> Option<SettingValue> {
         | "ID_GAMESETTINGS_SKATEFEED_INCOMING_MESSAGE"
         | "ID_GAMESETTINGS_SKATEFEED_OUTGOING_MESSAGE"
         | "ID_GAMESETTINGS_SKATEFEED_STATUS_MESSAGE"
-        | "ID_GAMESETTINGS_DIFFICULTY_OPTIONS" => SettingValue::Int(1),
+        | "ID_GAMESETTINGS_DIFFICULTY_OPTIONS"
+        // Units +168: the reset writes 1 (Imperial) and only a PAL console switches it to Metric (research b1008); the
+        // disc's movies are the NTSC versions.
+        | "ID_GAMESETTINGS_UNITS_TOGGLE" => SettingValue::Int(1),
         "ID_GAMESETTINGS_SUBTITLE_TOGGLE"
         | "ID_GAMESETTINGS_CAM_MAN_TOGGLE"
-        | "ID_GAMESETTINGS_UNITS_TOGGLE"
         | "ID_GAMESETTINGS_HOM_MODE_OPTIONS"
         | "ID_GAMESETTINGS_CAMERA_ANGLE_TOGGLE"
         | "ID_GAMESETTINGS_OFFBOARD_Y_AXIS_TOGGLE"
