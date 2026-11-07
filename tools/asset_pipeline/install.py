@@ -128,7 +128,12 @@ def unpack_zip(archive,destination):
             if (info.external_attr>>16)&0o170000==0o120000:raise RuntimeError('Tool archive contains a symbolic link')
         z.extractall(destination)
 
-def dependency(cache,name,url,sha,report):
+def dependency(cache,name,url,sha,report,windows=os.name=='nt'):
+    # Pinned tool downloads are Windows-only.
+    if not windows:
+        executable=shutil.which(name)
+        if executable is None:raise RuntimeError(f'Missing tool: {name} is not on PATH (run setup inside `nix develop`)')
+        return Path(executable)
     folder=cache/name
     marker=folder/'.complete'
     if not marker.is_file():
