@@ -125,6 +125,35 @@ pub fn format_string_custom(format: &NumberFormat, template: &str, list: &str) -
     )
 }
 
+/// The challenge description path (825C2018 -> 8290C9A0, research b977 §1.4): the arguments go to the placeholders in
+/// ascending index order, one per index present (8290CBD8), so `{1:TEAMMATE}` with one argument takes it. `d` / `i`
+/// format an integer, `f` a float, a registered type through `typed` (TEAMMATE 824FEAB8), anything else the text.
+pub fn format_typed(format: &NumberFormat, template: &str, args: &[String], typed: impl Fn(&str, &str) -> Option<String>) -> String {
+    let chars: Vec<char> = template.chars().collect();
+    let mut indices: Vec<usize> = (0..chars.len()).filter(|&i| chars[i] == '{').filter_map(|i| placeholder(&chars, i).map(|p| p.0)).collect();
+    indices.sort_unstable();
+    indices.dedup();
+    let by_index: BTreeMap<usize, &String> = indices.into_iter().zip(args).collect();
+    substitute(
+        template,
+        |index, kind, precision| {
+            let a = by_index.get(&index)?;
+            Some(match kind {
+                "d" | "i" => format.int(c_atoi(a)),
+                "f" => format.float(a.trim().parse::<f64>().unwrap_or(0.0), precision.unwrap_or(3)),
+                _ => typed(kind, a).unwrap_or_else(|| (*a).clone()),
+            })
+        },
+        false,
+    )
+}
+
+/// The TEAMMATE type (824FEAB8): teammate v's name while 0 < v <= the names given, else `unknown`.
+pub fn teammate_text(arg: &str, names: &[String], unknown: &str) -> String {
+    let v = c_atoi(arg);
+    usize::try_from(v).ok().filter(|&v| v > 0).and_then(|v| names.get(v - 1)).cloned().unwrap_or_else(|| unknown.to_owned())
+}
+
 fn c_atoi(s: &str) -> i64 {
     let s = s.trim_start();
     let (neg, digits) = match s.as_bytes().first() {
@@ -192,6 +221,16 @@ mod tests {
         assert_eq!(number_string(&f, &Arg::Number(1.5), Some(2)), "1.50");
         assert_eq!(f.float(9.999, 2), "10.00");
         assert_eq!(number_string(&f, &Arg::Undefined, None), "");
+    }
+
+    #[test]
+    fn challenge_descriptions_name_the_teammate() {
+        let names = vec!["Gerry".to_string(), "Sal".to_string()];
+        let f = NumberFormat::default();
+        let typed = |kind: &str, a: &str| (kind == "TEAMMATE").then(|| teammate_text(a, &names, "Unknown"));
+        assert_eq!(format_typed(&f, "Shoot {1:TEAMMATE}", &["2".into()], typed), "Shoot Sal");
+        assert_eq!(format_typed(&f, "Shoot {0:TEAMMATE}", &["3".into()], typed), "Shoot Unknown");
+        assert_eq!(format_typed(&f, "Beat {0:d}", &["12000".into()], typed), format!("Beat {}", f.int(12000)));
     }
 
     #[test]

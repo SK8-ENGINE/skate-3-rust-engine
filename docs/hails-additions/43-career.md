@@ -254,8 +254,29 @@ defaults, load replay, start). Challenge results that arrive meanwhile wait and 
   screen. `CareerState::apply_preset(n, key)` writes the look into slot n with source `preset {id}` (retail 8257DC48 ->
   827D5288). Mods: `sdk.career.set_teammate_preset(n, key)`; the snapshot lists `presets` {key, id, name_text}. A
   preset look is engine-owned and stays when the mod stops.
+- Teammates in the world (research b977): retail has no teammate spawner. The four characters_marquee rows
+  `teammate_01`..`04` sit in the normal free-roam pool, and the pool predicate 82461550 keeps one only while its save
+  skater slot is filled (the unlocked flag check there is dead code in TU3). Ours: `skater_characters` keeps those rows
+  with their slot (`teammate_index`, data), `SkaterWorld::eligible` drops them from the pool pick, the pool and a call
+  request while the slot is empty, and the population tick takes the filled slots from `SaveSlotLooks`, which the
+  career publishes from `cac.json` whenever a look changes (no map reload). A teammate on a line wears its slot's
+  look: `living_world/npc_outfits.rs` assembles the customiser profile from the customiser's parts under one
+  container (materials, tattoos, morphs) and binds it to the stock skeleton like any NPC look. Lines, tricks and voice
+  come from the rows' own data (AI profile `teammate_default`, voices 100..103).
+- FE 62 (Spawn Skater) lists a teammates group (key 1, `ID_CIC_TEAMMATES`, 82559EB8) after You: each joined teammate
+  whose slot has a look, labelled with its name, for Call Skater. Playing as a teammate (Free Play) is not offered
+  yet: the player model does not wear a slot look.
+- Test hooks for scripted checks: `SKATE_TEAMMATE_PRESET=<n>:<preset key>[,...]` gives teammate n a preset's look at
+  career load (saved in `cac.json`); `SKATE_CALL_SKATER=<key>[,...]` calls those skaters once per loaded world as FE 62
+  Call Skater would (log lines `SKATE_CAREER teammate preset`, `LIVING_WORLD call skater`, `LIVING_WORLD teammate look
+  bound`).
+- `{N:TEAMMATE}` (824FEAB8): the sign-up poster's description goes through the typed path (825C2018 -> 8290C9A0):
+  the argument goes to the lowest placeholder index present (8290CBD8), and the TEAMMATE type shows teammate v's name
+  while 0 < v < the member count, else `ID_COMMON_UNKNOWN` (`fe_language::format_typed`, `teammate_text`). Used by
+  the anywhere photo / film challenges (argument 1..4).
 - Not in yet: the random start logo and the logo rows (backlog 14), the keyboards that rename (13), mod-added preset
-  rows, and spawning teammates by their look (4).
+  rows, the leave fade on outfit looks (the fade drives the stock and ped materials, not the customiser's), and the
+  PLAYER text type.
 - `career/achievements.rs`: a grant needs an existing, enabled row (class 9CB9012080F727B9: platform id, enabled
   gate) and happens once. Sites: the GrantAchievement op, the GrantAchievement presentation event, and the load replay
   (827CE7B0): the actions with one board sales condition whose graph grants an achievement, granted at load once

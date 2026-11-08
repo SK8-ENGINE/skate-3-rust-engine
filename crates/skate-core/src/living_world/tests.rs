@@ -132,9 +132,9 @@ fn skater_data() -> SkaterData {
         }
     }
     let characters = (0..8)
-        .map(|i| SkaterCharacter { key: format!("pro_{i}"), pro_index: Some(i), capabilities: [true; 3], community: false })
+        .map(|i| SkaterCharacter { key: format!("pro_{i}"), pro_index: Some(i), capabilities: [true; 3], community: false, save_slot: None })
         .collect();
-    SkaterData { lines, characters }
+    SkaterData { lines, characters, ..Default::default() }
 }
 
 // ---------------------------------------------------------------- census circle
@@ -1080,4 +1080,15 @@ fn a_new_world_continues_the_serials_so_ids_never_repeat_in_a_session() {
     assert!(new.iter().all(|s| *s > max_old), "{new:?} repeats {old:?}");
     // A fresh world (the first map) still starts at 1.
     assert_eq!(spawns(&LivingWorld::new(config(), 42).step(&inputs), Kind::Pedestrian)[0].id.serial, 1);
+}
+
+#[test]
+fn a_teammate_joins_the_pool_only_while_its_save_slot_has_a_look() {
+    use crate::living_world::skaters::{SkaterCharacter, SkaterData, SkaterWorld};
+    let teammate = SkaterCharacter { key: "teammate_02".into(), pro_index: Some(51), capabilities: [true; 3], community: false, save_slot: Some(2) };
+    let pro = SkaterCharacter { save_slot: None, key: "pro".into(), ..teammate.clone() };
+    let mut data = SkaterData { characters: vec![teammate.clone(), pro.clone()], ..Default::default() };
+    assert!(!data.eligible(&teammate) && data.eligible(&pro));
+    data.filled_slots.insert(2);
+    assert!(data.eligible(&teammate));
 }

@@ -15,6 +15,7 @@ use std::path::Path;
 pub(crate) mod timing;
 pub(crate) mod dmo_stream;
 pub(crate) mod npc_avoid;
+pub(crate) mod npc_outfits;
 pub(crate) mod npc_sim;
 pub(crate) mod npc_skaters;
 pub(crate) mod opt_ins;
@@ -501,7 +502,7 @@ pub(crate) fn load_data(asset_root: &Path, district: &str) -> LoadedData {
     let mut npc = npc_skaters::NpcData::default();
     let skaters = (|| {
         let profiles = std::fs::read(dir.join("skater_profiles.json")).ok()?;
-        let characters = skate_data::living_world::skater_characters(&profiles, &[]).ok()?;
+        let characters = skate_data::living_world::skater_characters(&profiles).ok()?;
         npc.voices = npc_voices(&profiles);
         npc.records = npc_records(&profiles);
         npc.tricks = std::sync::Arc::new(skate_data::living_world::skater_trick_profiles(&profiles).unwrap_or_default());
@@ -510,7 +511,7 @@ pub(crate) fn load_data(asset_root: &Path, district: &str) -> LoadedData {
         let (paths, _) = skate_data::aipath::district_paths(&tiles).ok()?;
         let lines = skate_data::living_world::skater_lines(paths.iter().map(|p| &p.path));
         npc.lines = std::sync::Arc::new(paths.iter().filter(|p| p.path.id.is_ambient()).map(|p| (p.path.id.0, skate_data::living_world::replay_line(&p.path))).collect());
-        Some(SkaterData { lines, characters })
+        Some(SkaterData { lines, characters, ..Default::default() })
     })();
     status.insert(
         0,
@@ -771,12 +772,18 @@ pub(crate) fn step_population(
     mut state: ResMut<PopulationState>,
     mut spawns: MessageWriter<LivingWorldSpawn>,
     mut despawns: MessageWriter<LivingWorldDespawn>,
+    slot_looks: Option<Res<npc_skaters::SaveSlotLooks>>,
 ) {
     let _span = timing::span(timing::POPULATION);
     if settings.net_role == NetRole::Client {
         return;
     }
     let state = &mut *state;
+    if let (Some(skaters), Some(slot_looks)) = (state.skaters.as_mut(), slot_looks.as_ref()) {
+        if !skaters.filled_slots.iter().eq(slot_looks.0.keys()) {
+            skaters.filled_slots = slot_looks.0.keys().copied().collect();
+        }
+    }
     let mut config = state.data_config.clone();
     settings.apply(&mut config);
     state.world.config = config;
@@ -854,7 +861,7 @@ impl Plugin for LivingWorldPlugin {
             .add_message::<crate::extras_host::CheatChanged>()
             .add_systems(Update, (apply_cheats, log_zombie_mode).chain())
             .add_message::<crate::spawn_skater_host::SpawnSkaterRequest>()
-            .add_systems(Update, apply_called_skaters)
+            .add_systems(Update, (apply_called_skaters, call_from_env))
             .add_systems(Update, (opt_ins::log_opt_ins, crate::physics::grab_view::visualize_grabs))
             .init_resource::<preload::LivingWorldPreload>()
             .add_systems(Startup, preload::take_models_hold)
@@ -870,6 +877,21 @@ impl Plugin for LivingWorldPlugin {
 /// The Extras cheat code (`zombie`, retail id 5) toggles zombie mode for the session (b304: retail keeps it on the
 /// simulation, not in the profile; medium confidence), through the same flag `SKATE_ZOMBIE`, the overlay opt-in and mods
 /// write.
+/// Test hook: `SKATE_CALL_SKATER=<key>[,<key>]` calls those skaters once per loaded world, as FE 62 Call Skater
+/// would (scripted checks, e.g. a teammate stand-in `teammate_01` once its save slot has a look).
+fn call_from_env(map: Res<crate::map_transition::CurrentMap>, mut population: ResMut<PopulationState>, mut done: Local<Option<u64>>) {
+    let installed = population.loaded_for.as_ref().is_some_and(|(_, g)| *g == map.generation);
+    if *done == Some(map.generation) || !installed || population.skaters.is_none() {
+        return;
+    }
+    *done = Some(map.generation);
+    let Ok(keys) = std::env::var("SKATE_CALL_SKATER") else { return };
+    for key in keys.split(',').map(str::trim).filter(|k| !k.is_empty()) {
+        let outcome = population.world.call_skater(key);
+        info!("LIVING_WORLD call skater {key} (SKATE_CALL_SKATER): {outcome:?}");
+    }
+}
+
 /// FE 62 Call Skater: calls and dismisses go to the population's companion slots (host-side; research b563).
 fn apply_called_skaters(mut requests: MessageReader<crate::spawn_skater_host::SpawnSkaterRequest>, mut population: ResMut<PopulationState>) {
     use skate_core::spawn_skater::{Action, Skater};

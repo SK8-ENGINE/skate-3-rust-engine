@@ -2,7 +2,7 @@
 //! `challenges::poster`. Details: docs/hails-additions/42-challenges.md#change-the-sign-up-poster-challengesposterrs
 use crate::apt_vm::{Value, Vm};
 use bevy::prelude::Resource;
-use crate::fe_language::{format_string, template, Arg, NumberFormat};
+use crate::fe_language::{format_string, format_typed, teammate_text, template, Arg, NumberFormat};
 use skate_core::challenges::poster::{Outcome, Poster, Title};
 use std::collections::BTreeMap;
 
@@ -33,6 +33,8 @@ impl PosterScreen {
 #[derive(Clone, Default)]
 pub struct PosterHost {
     pub poster: Poster,
+    /// Names for the TEAMMATE text type (`CareerProfile::teammates`).
+    pub teammates: Vec<String>,
 }
 
 /// The localised text as a literal (`#` + text): the movies show text natives as is (laptop run 2026-11-07 showed `#`
@@ -48,6 +50,19 @@ fn title(t: Option<&Title>, language: &BTreeMap<String, String>, numbers: &Numbe
         Some(Title { id, arg: Some(n) }) => Value::Text(format!("#{}", format_string(numbers, template(language, id), &[Arg::Text(n.to_string())]))),
         Some(Title { id, arg: None }) => text(Some(id), language),
         None => Value::Text(String::new()),
+    }
+}
+
+/// The description through the typed path (825C2018 -> 8290C9A0): its argument names a teammate on the anywhere
+/// photo / film challenges (`{N:TEAMMATE}`, b977).
+fn description(t: Option<&Title>, language: &BTreeMap<String, String>, numbers: &NumberFormat, teammates: &[String]) -> Value {
+    match t {
+        Some(Title { id, arg: Some(n) }) => {
+            let unknown = template(language, "ID_COMMON_UNKNOWN");
+            let typed = |kind: &str, a: &str| (kind == "TEAMMATE").then(|| teammate_text(a, teammates, unknown));
+            Value::Text(format!("#{}", format_typed(numbers, template(language, id), &[n.to_string()], typed)))
+        }
+        other => title(other, language, numbers),
     }
 }
 
@@ -73,7 +88,7 @@ impl PosterHost {
         let objectives = |killed: bool| if killed { &view.objectives_killed } else { &view.objectives_owned };
         Ok(Some(match (object, method) {
             ("SignUpPoster", "GetSignUpTitle") | ("HUDComponents", "SignUp_GetChallengeTitle") => text(view.title_id.as_deref(), language),
-            ("SignUpPoster", "GetSignUpDescription") => title(view.description.as_ref(), language, numbers),
+            ("SignUpPoster", "GetSignUpDescription") => description(view.description.as_ref(), language, numbers, &self.teammates),
             ("SignUpPoster", "CanSignUpToChallenge") => Value::Bool(view.can_sign_up),
             ("SignUpPoster", "GetCICMenuOptions") => {
                 let items = self.poster.option_texts().into_iter().map(|t| if t.starts_with('#') { Value::Text(t) } else { text(Some(&t), language) }).collect();
@@ -124,7 +139,7 @@ mod tests {
             objectives_owned: vec![Title { id: "ID_OBJ_A".into(), arg: None }, Title { id: "ID_OBJECTIVE_BEAT_SCORE".into(), arg: Some(1000) }],
             ..PosterView::default()
         };
-        let mut host = PosterHost { poster: Poster::new(view) };
+        let mut host = PosterHost { poster: Poster::new(view), teammates: Vec::new() };
         let mut vm = Vm::new();
         let language = BTreeMap::from([("ID_OBJECTIVE_BEAT_SCORE".to_string(), "Beat {0:i}".to_string())]);
         let numbers = NumberFormat::default();

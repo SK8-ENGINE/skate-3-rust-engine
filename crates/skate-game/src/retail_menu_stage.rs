@@ -942,7 +942,8 @@ fn update(
         if p.available != available {
             p.available = available;
         }
-        fe.poster = p.poster.clone().map(|poster| crate::poster_host::PosterHost { poster });
+        let teammates = career_profile.as_ref().map(|c| c.teammates.clone()).unwrap_or_default();
+        fe.poster = p.poster.clone().map(|poster| crate::poster_host::PosterHost { poster, teammates });
     }
     if let Some(r) = reward_screens.as_mut() {
         if r.generation != ms.reward_generation {
@@ -1501,7 +1502,15 @@ fn update(
                     // The living world owns the called skaters and the pool Call Skater lists from.
                     let callable = crate::spawn_skater_host::callable(&config.asset_root);
                     let companions = population.as_ref().map(|p| p.world.companions().iter().map(|c| skate_core::spawn_skater::Skater::Character(c.key.clone())).collect()).unwrap_or_default();
-                    let groups = crate::spawn_skater_host::groups(characters.as_deref(), &callable);
+                    let names = career_profile.as_ref().map(|c| c.teammates.clone()).unwrap_or_default();
+                    let teammates: Vec<(String, String)> = population.as_ref().and_then(|p| p.skaters.as_ref()).map(|s| {
+                        names.iter().enumerate().filter_map(|(i, name)| {
+                            let n = i as u32 + 1;
+                            let c = s.characters.iter().find(|c| c.save_slot == Some(n) && s.filled_slots.contains(&n))?;
+                            Some((c.key.clone(), name.clone()))
+                        }).collect()
+                    }).unwrap_or_default();
+                    let groups = crate::spawn_skater_host::groups(characters.as_deref(), &callable, &teammates);
                     let s = &mut fe.spawn_skater;
                     s.screen = skate_core::spawn_skater::SpawnSkater::open(ms.spawn_skater_mode, &groups, companions);
                     info!("RETAIL_MENUS open SpawnSkater (FE {i}) mode {} rows {}", s.screen.mode.code(), s.screen.rows().len());

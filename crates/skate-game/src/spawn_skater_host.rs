@@ -66,7 +66,7 @@ impl SpawnSkaterHost {
 pub fn callable(asset_root: &std::path::Path) -> Vec<String> {
     std::fs::read(asset_root.join("private/living_world/skater_profiles.json"))
         .ok()
-        .and_then(|b| skate_data::living_world::skater_characters(&b, &[]).ok())
+        .and_then(|b| skate_data::living_world::skater_characters(&b).ok())
         .map(|c| c.into_iter().map(|c| c.key).collect())
         .unwrap_or_default()
 }
@@ -81,7 +81,9 @@ pub struct SpawnSkaterRequest(pub Action);
 /// no such group; its teammates and community groups have no source here yet). Retail headers (b544).
 /// Call Skater lists only pros that are `callable` (in the living world's skater pool; retail mode 100 keeps pro-class
 /// records with attribute 0xCABC362B1B05CA19, b544; pool membership stands in for the attribute, NOT RETAIL YET).
-pub fn groups(characters: Option<&crate::custom_models::CustomModels>, callable: &[String]) -> Vec<Group> {
+/// `teammates`: (character key, name) of each joined teammate whose save slot has a look, in member order: FE 62's
+/// teammates group (key 1, 82559EB8; b977). Listed for Call Skater only (the companion wears the slot's look).
+pub fn groups(characters: Option<&crate::custom_models::CustomModels>, callable: &[String], teammates: &[(String, String)]) -> Vec<Group> {
     use skate_core::spawn_skater::{Entry, Mode, Skater};
     let group = |id: &str, header: &str, modes: &[Mode]| Group { id: id.into(), header: header.into(), modes: modes.to_vec(), entries: Vec::new() };
     // NOT RETAIL YET: the You row's label (82558BD0's vt+0xC) is not read.
@@ -89,6 +91,8 @@ pub fn groups(characters: Option<&crate::custom_models::CustomModels>, callable:
     you.entries.push(Entry { skater: Skater::Own, label: "#You".into() });
     let mut pros = group("pros", "ID_CIC_PRO_SKATERS", &[Mode::Freeskate]);
     let mut call = group("pros_call", "ID_CIC_PRO_SKATERS", &[Mode::SkateWith]);
+    let mut team = group("teammates", "ID_CIC_TEAMMATES", &[Mode::SkateWith]);
+    team.entries.extend(teammates.iter().map(|(key, name)| Entry { skater: Skater::Character(key.clone()), label: format!("#{name}") }));
     let mut ip = group("ip", "ID_CIC_IP_SKATERS", &[Mode::Freeskate]);
     let mut own = group("custom", "#Custom", &[Mode::Freeskate]);
     for (id, name, native) in characters.into_iter().flat_map(|c| c.roster()) {
@@ -103,5 +107,20 @@ pub fn groups(characters: Option<&crate::custom_models::CustomModels>, callable:
             None => own.entries.push(entry),
         }
     }
-    vec![you, call, pros, ip, own]
+    vec![you, team, call, pros, ip, own]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn teammates_with_a_look_are_listed_after_you_for_call_skater() {
+        let groups = groups(None, &[], &[("teammate_02".into(), "Gerry".into())]);
+        assert_eq!(groups.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(), ["you", "teammates", "pros_call", "pros", "ip", "custom"]);
+        let team = &groups[1];
+        assert_eq!((team.header.as_str(), team.modes.as_slice()), ("ID_CIC_TEAMMATES", &[skate_core::spawn_skater::Mode::SkateWith][..]));
+        assert_eq!(team.entries[0].label, "#Gerry");
+        assert_eq!(team.entries[0].skater, skate_core::spawn_skater::Skater::Character("teammate_02".into()));
+    }
 }

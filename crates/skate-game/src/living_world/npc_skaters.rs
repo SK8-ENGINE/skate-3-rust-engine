@@ -138,6 +138,11 @@ impl Default for NpcFade {
 #[derive(Resource, Default)]
 pub(crate) struct NpcSkaterIndex(pub BTreeMap<LivingWorldId, Entity>);
 
+/// Looks of the save skater slots 1.. (the career's `cac.json`): a teammate stand-in whose slot has one joins the pool
+/// (`SkaterData::filled_slots`) and wears it, assembled from the customiser's parts. Written by the career.
+#[derive(Resource, Default, Clone, PartialEq)]
+pub(crate) struct SaveSlotLooks(pub BTreeMap<u32, serde_json::Value>);
+
 /// Mod / engine look overrides: character key -> GLB asset path. Empty = retail looks.
 #[derive(Resource, Default, Clone)]
 pub(crate) struct NpcSkaterLooks(pub BTreeMap<String, String>);
@@ -1482,9 +1487,9 @@ pub(crate) fn push_proxies(
 /// The look and the puppet pose of one NPC (render side).
 #[derive(Component, Default)]
 pub(crate) struct NpcPuppet {
-    scene: Option<Entity>,
-    bindings: Option<crate::animation::AnimationStatus>,
-    style: &'static str,
+    pub(crate) scene: Option<Entity>,
+    pub(crate) bindings: Option<crate::animation::AnimationStatus>,
+    pub(crate) style: &'static str,
 }
 
 impl NpcPuppet {
@@ -1511,7 +1516,7 @@ pub(crate) fn present_looks(
     looks: Res<NpcSkaterLooks>,
     models: Res<crate::custom_models::CustomModels>,
     skater: Res<crate::physics::SkaterRuntime>,
-    mut npcs: Query<(Entity, &NpcSkater, Option<&mut NpcPuppet>)>,
+    mut npcs: Query<(Entity, &NpcSkater, Option<&mut NpcPuppet>), Without<super::npc_outfits::NpcOutfit>>,
     skins: Query<(Entity, &bevy::mesh::skinning::SkinnedMesh)>,
     nodes: Query<(&Name, &Transform)>,
     parents: Query<&ChildOf>,
@@ -2148,6 +2153,7 @@ pub(crate) fn install(app: &mut App) {
         .init_resource::<super::npc_sim::NpcSimPool>()
         .init_resource::<NpcValidLines>()
         .init_resource::<NpcSkaterLooks>()
+        .init_resource::<SaveSlotLooks>()
         .init_resource::<super::npc_avoid::AvoidTrack>()
         .add_message::<NpcSkaterEvent>()
         // After the ped data load: avoid and simulate read its navmesh, and unordered they saw the old map's (or
@@ -2157,7 +2163,7 @@ pub(crate) fn install(app: &mut App) {
             FixedUpdate,
             push_proxies.after(crate::multiplayer::prepare).after(crate::app::SimulationSet::Controls).before(crate::app::SimulationSet::Physics),
         )
-        .add_systems(Update, (present_looks, present_pose, present_fade::<StandardMaterial>, present_fade::<super::ped_material::PedMaterial>).chain().after(crate::app::FrameSet::Animation));
+        .add_systems(Update, (super::npc_outfits::present_outfits, present_looks, present_pose, present_fade::<StandardMaterial>, present_fade::<super::ped_material::PedMaterial>).chain().after(crate::app::FrameSet::Animation));
 }
 
 #[cfg(test)]

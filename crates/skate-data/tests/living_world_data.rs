@@ -150,7 +150,7 @@ fn skater_trick_profiles_hold_ollies_and_flips_for_every_pool_character() {
     }
     let d = &t.profiles["default"];
     assert!(!d.regular.is_empty() && !d.nollie.is_empty());
-    for c in living_world::skater_characters(&bytes, &[]).unwrap() {
+    for c in living_world::skater_characters(&bytes).unwrap() {
         let p = t.for_character(&c.key).unwrap_or_else(|| panic!("{} has no profile", c.key));
         assert!(!p.regular.is_empty(), "{}", c.key);
     }
@@ -162,9 +162,11 @@ fn skater_pool_and_lines_load() {
         eprintln!("skipped: set SKATE3_ASSET_ROOT to an export with skater_profiles.json and skater_paths");
         return;
     };
-    let chars = living_world::skater_characters(&std::fs::read(profiles).unwrap(), &[]).unwrap();
-    // 42-character pool [data] minus the 4 teammates nobody recruited yet.
-    assert_eq!(chars.len(), 38, "{:?}", chars.iter().map(|c| &c.key).collect::<Vec<_>>());
+    let chars = living_world::skater_characters(&std::fs::read(profiles).unwrap()).unwrap();
+    // 42-character pool [data]; the 4 teammates carry save slots 1..4 (the pool takes them only with a look).
+    assert_eq!(chars.len(), 42, "{:?}", chars.iter().map(|c| &c.key).collect::<Vec<_>>());
+    let slots: Vec<_> = chars.iter().filter_map(|c| c.save_slot.map(|s| (c.key.as_str(), s))).collect();
+    assert_eq!(slots, [("teammate_01", 1), ("teammate_02", 2), ("teammate_03", 3), ("teammate_04", 4)]);
     let mut total = 0;
     for entry in std::fs::read_dir(paths).unwrap() {
         let path = entry.unwrap().path();

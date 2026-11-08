@@ -50,12 +50,12 @@ fn data() -> LoadedData {
             (id(i as u32), ReplayLine { id: id(i as u32), flags: 4, skill: 0, nodes, jumps: vec![], groups: vec![] })
         })
         .collect();
-    let characters = (0..6).map(|i| SkaterCharacter { key: format!("pro_{i}"), pro_index: Some(i), capabilities: [true; 3], community: false }).collect();
+    let characters = (0..6).map(|i| SkaterCharacter { key: format!("pro_{i}"), pro_index: Some(i), capabilities: [true; 3], community: false, save_slot: None }).collect();
     let voices = (0..6).map(|i| (format!("pro_{i}"), 10 + i)).collect();
     LoadedData {
         config,
         census: None,
-        skaters: Some(SkaterData { lines, characters }),
+        skaters: Some(SkaterData { lines, characters, ..Default::default() }),
         roads: None,
         vehicles: None,
         // Two characters carry a stance-table record (regular / goofy); the rest are unmapped.

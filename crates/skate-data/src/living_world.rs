@@ -160,16 +160,18 @@ impl LivingWorldTables {
     }
 }
 
-/// Free-roam pool characters from `skater_profiles.json`. Characters that need a recruited
-/// teammate binding (`needs = recruited_save_slot`) are left out unless `bound` names them.
-pub fn skater_characters(json: &[u8], bound: &[&str]) -> Result<Vec<SkaterCharacter>, LivingWorldError> {
+/// Free-roam pool characters from `skater_profiles.json`. A teammate stand-in (`needs = recruited_save_slot`) carries
+/// its save slot (`teammate_index`); the pool takes it only while that slot has a look (`SkaterWorld::eligible`).
+pub fn skater_characters(json: &[u8]) -> Result<Vec<SkaterCharacter>, LivingWorldError> {
     let doc: Value = serde_json::from_slice(json).map_err(|e| LivingWorldError::Profiles(e.to_string()))?;
     let pool = doc["free_roam_pool"].as_array().ok_or_else(|| LivingWorldError::Profiles("no free_roam_pool".into()))?;
     let chars = &doc["characters"];
     let mut out = Vec::new();
     for key in pool.iter().filter_map(Value::as_str) {
         let c = &chars[key];
-        if c["needs"].as_str() == Some("recruited_save_slot") && !bound.contains(&key) {
+        let save_slot = (c["needs"].as_str() == Some("recruited_save_slot"))
+            .then(|| c["teammate_index"].as_u64().filter(|&n| n > 0).map(|n| n as u32));
+        if save_slot == Some(None) {
             continue;
         }
         // The runtime AI profile's line capability bytes +0x31 / +0x30 / +0x32 (`sub_8245FFD8`, b675), against line
@@ -181,6 +183,7 @@ pub fn skater_characters(json: &[u8], bound: &[&str]) -> Result<Vec<SkaterCharac
             pro_index: c["pro_index"].as_u64().map(|p| p as u32),
             capabilities: [capability("Hash_E01079D1A094B0C0"), capability("Hash_AACEBDA7CA734319"), capability("Hash_C36E34B4C619E868")],
             community: c["community"].as_bool().unwrap_or(false),
+            save_slot: save_slot.flatten(),
         });
     }
     Ok(out)

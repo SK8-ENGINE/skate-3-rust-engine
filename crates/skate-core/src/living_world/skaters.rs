@@ -33,12 +33,22 @@ pub struct SkaterCharacter {
     /// names not decoded).
     pub capabilities: [bool; 3],
     pub community: bool,
+    /// A teammate stand-in: it joins the pool only while this save skater slot has a look (82461550, b977).
+    pub save_slot: Option<u32>,
 }
 
 /// What the game provides about lines and characters (the loaded tiles, the roster).
 pub trait SkaterWorld {
     fn lines(&self) -> &[SkaterLine];
     fn characters(&self) -> &[SkaterCharacter];
+    /// Whether save skater slot n has a look (the teammate gate; none filled by default).
+    fn slot_filled(&self, _slot: u32) -> bool {
+        false
+    }
+    /// The pool predicate's gate (82461550): a teammate row only while its slot is filled.
+    fn eligible(&self, character: &SkaterCharacter) -> bool {
+        character.save_slot.is_none_or(|s| self.slot_filled(s))
+    }
     /// Whether a character may ride a line (`sub_82456970`, used by the spawn `sub_8245C018` / `sub_8245B068`, the
     /// branches and the line-end search; b159 / b675): the line's allowed-skater bit for the character's pro index
     /// AND a capability bit matching a line flag bit. NOT RETAIL YET: the controller exclusion (ctrl+0xA0) is not read.
@@ -53,6 +63,8 @@ pub trait SkaterWorld {
 pub struct SkaterData {
     pub lines: Vec<SkaterLine>,
     pub characters: Vec<SkaterCharacter>,
+    /// Save skater slots with a look (the game keeps it current from the career's look store).
+    pub filled_slots: std::collections::BTreeSet<u32>,
 }
 
 impl SkaterWorld for SkaterData {
@@ -61,6 +73,9 @@ impl SkaterWorld for SkaterData {
     }
     fn characters(&self) -> &[SkaterCharacter] {
         &self.characters
+    }
+    fn slot_filled(&self, slot: u32) -> bool {
+        self.filled_slots.contains(&slot)
     }
 }
 
@@ -228,8 +243,8 @@ pub(crate) fn tick(cfg: &SkaterConfig, st: &mut KindState, pool: &mut Vec<String
 fn pool_update(cfg: &SkaterConfig, st: &mut KindState, pool: &mut Vec<String>, companions: &[Companion], world: &dyn SkaterWorld, online: bool, reference: Vec3) {
     let lines = candidate_lines(cfg, world, st, reference, cfg.spawn_inner);
     let in_use: Vec<String> = st.live.values().filter_map(|l| line_of(&l.choice).map(|x| x.1.to_string())).collect();
-    pool.retain(|k| world.characters().iter().any(|c| &c.key == k));
-    let requested = companions.iter().find(|c| c.serial.is_none() && !pool.contains(&c.key) && world.characters().iter().any(|w| w.key == c.key));
+    pool.retain(|k| world.characters().iter().any(|c| &c.key == k && world.eligible(c)));
+    let requested = companions.iter().find(|c| c.serial.is_none() && !pool.contains(&c.key) && world.characters().iter().any(|w| w.key == c.key && world.eligible(w)));
     if let Some(c) = requested {
         if pool.len() >= cfg.pool_size as usize {
             let Some(i) = pool.iter().position(|k| !in_use.contains(k) && !companions.iter().any(|c| &c.key == k)) else { return };
@@ -255,7 +270,7 @@ fn pool_update(cfg: &SkaterConfig, st: &mut KindState, pool: &mut Vec<String>, c
         .characters()
         .iter()
         .enumerate()
-        .filter(|(_, c)| !pool.contains(&c.key) && (allow_community || !c.community))
+        .filter(|(_, c)| !pool.contains(&c.key) && (allow_community || !c.community) && world.eligible(c))
         .map(|(i, _)| i)
         .collect();
     let mut scorer = CharacterScorer { world, lines: &lines };

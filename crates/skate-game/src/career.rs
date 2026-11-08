@@ -33,6 +33,8 @@ pub(crate) struct ChallengeDiscovered {
 pub(crate) struct CareerProfile {
     pub data: skate_core::offline_profile::ProfileData,
     pub generation: u64,
+    /// The names the TEAMMATE text type can show (824FEAB8: teammate v while v < the member count).
+    pub teammates: Vec<String>,
 }
 
 /// What the reward summary and card screens show (`reward_summary_host.rs`), rebuilt when a screen chain opens.
@@ -207,6 +209,8 @@ pub(crate) struct CareerState {
     /// Saved skater looks (`cac.json`, retail's CAC record): teammate n's look and spawn gate.
     pub looks: skate_data::cac_save::CacFile,
     pub looks_path: Option<PathBuf>,
+    /// Bumped on every look change; the living world re-reads the looks when it moves.
+    pub looks_generation: u64,
     /// Teammate presets (b986), by id; the list screen sorts them by localised name.
     pub presets: Vec<Preset>,
 }
@@ -291,7 +295,8 @@ impl CareerState {
         f.active = c.active.iter().cloned().collect();
     }
 
-    pub(crate) fn save_looks(&self) {
+    pub(crate) fn save_looks(&mut self) {
+        self.looks_generation += 1;
         if let Some(path) = self.looks_path.clone() {
             write_in_background(path, self.looks.to_json());
         }
@@ -460,6 +465,7 @@ fn apply(state: &mut CareerState, p: Prepared) {
     let Prepared { base, mut data, existing, old_challenges, path, summary, reward_tabs, tiers, rows, achievements, achievements_path, looks, looks_path, presets } = p;
     state.presets = presets;
     state.looks = looks;
+    state.looks_generation += 1;
     state.looks_path = Some(looks_path);
     state.base = Some(base);
     if !state.overlays.is_empty() {
@@ -503,6 +509,12 @@ fn apply(state: &mut CareerState, p: Prepared) {
     settle(&mut s.career, &mut s.awards, &data, requests);
     if std::env::var_os("SKATE_CAREER_SKIP_START").is_some_and(|v| v == "1") {
         skip_start(state, &data);
+    }
+    // Test hook: SKATE_TEAMMATE_PRESET=<n>:<preset key>[,...] gives teammate n that preset's look (saved in cac.json).
+    for pair in std::env::var("SKATE_TEAMMATE_PRESET").unwrap_or_default().split(',').filter(|p| !p.is_empty()) {
+        let result = pair.split_once(':').ok_or_else(|| "expected <n>:<key>".to_owned())
+            .and_then(|(n, key)| state.apply_preset(n.trim().parse().map_err(|_| format!("bad teammate {n:?}"))?, key.trim()));
+        info!("SKATE_CAREER teammate preset {pair} (SKATE_TEAMMATE_PRESET): {result:?}");
     }
     state.data = Some(data);
     state.capture();
@@ -645,6 +657,8 @@ fn publish_profile(state: &CareerState, data: &Loaded, profile: &mut CareerProfi
     let mut page = std::mem::take(&mut profile.data);
     skate_core::career::profile::fill(&mut page, &groups, [&overall[0], &overall[1]], &state.career, &data.progression);
     profile.data = page;
+    let team = &state.career.team;
+    profile.teammates = team.teammates.iter().take(team.count() - 1).map(|t| t.name.clone()).collect();
     profile.generation += 1;
 }
 
@@ -745,6 +759,18 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
     }
 }
 
+/// The looks of save skater slots 1.. for the living world (teammate stand-ins join the pool and wear them, b977).
+fn publish_slot_looks(state: Res<CareerState>, looks: Option<ResMut<crate::living_world::npc_skaters::SaveSlotLooks>>, mut seen: Local<Option<u64>>) {
+    let Some(mut looks) = looks else { return };
+    if *seen == Some(state.looks_generation) {
+        return;
+    }
+    *seen = Some(state.looks_generation);
+    looks.0 = state.looks.slots.iter().enumerate().skip(1)
+        .filter_map(|(i, s)| s.as_ref().map(|l| (i as u32, serde_json::Value::Object(l.profile.clone())))).collect();
+    info!("SKATE_CAREER teammate looks in slots {:?}", looks.0.keys().collect::<Vec<_>>());
+}
+
 /// A new career's first world load queues its first challenge by the world and clears the pending flag (827CF960,
 /// research b976 / b1000). Signing up starts it when the challenge is on that map (the tutorial on the skate school);
 /// a challenge not ported yet is ignored there, as retail clears the flag either way.
@@ -776,7 +802,8 @@ pub(crate) fn install(app: &mut App) {
         .add_message::<ChallengeResult>()
         .add_message::<ChallengeDiscovered>()
         .add_systems(Update, update.after(crate::challenges::CareerResultSet).run_if(crate::challenges::opted_in))
-        .add_systems(Update, queue_first_challenge.after(update).run_if(crate::challenges::opted_in));
+        .add_systems(Update, queue_first_challenge.after(update).run_if(crate::challenges::opted_in))
+        .add_systems(Update, publish_slot_looks.after(update).run_if(crate::challenges::opted_in));
 }
 
 #[cfg(test)]
