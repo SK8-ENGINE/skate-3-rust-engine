@@ -412,6 +412,10 @@ pub(crate) struct PopulationState {
     pub spawned: u64,
     pub despawned: u64,
     last_report: u64,
+    /// Decisions made outside the tick (challenge AI skaters), sent with the next step's records.
+    pending: Vec<Decision>,
+    /// The lines challenge AI skaters may ride (sorted; the challenge's path filter, b972), while a challenge runs.
+    pub scripted_lines: Option<std::sync::Arc<Vec<[u8; 16]>>>,
 }
 
 impl Default for PopulationState {
@@ -429,11 +433,31 @@ impl Default for PopulationState {
             spawned: 0,
             despawned: 0,
             last_report: 0,
+            pending: Vec::new(),
+            scripted_lines: None,
         }
     }
 }
 
 impl PopulationState {
+    /// A challenge AI skater (AI.SpawnAIAtLocation; the race host): spawned through the next step's records.
+    pub(crate) fn spawn_scripted(&mut self, line: [u8; 16], character: &str, slot: u8, position: [f32; 3], heading: f32) -> Option<LivingWorldId> {
+        let d = self.world.spawn_scripted(line, character, slot, position, heading);
+        let id = match &d {
+            Decision::Spawn(s) => Some(s.id),
+            Decision::Despawn(_) => None,
+        };
+        self.pending.push(d);
+        id
+    }
+
+    /// AI.UnspawnAI.
+    pub(crate) fn despawn_scripted(&mut self, id: LivingWorldId) {
+        if let Some(d) = self.world.despawn_scripted(id) {
+            self.pending.push(d);
+        }
+    }
+
     /// A new world: fresh population (seeded), new data.
     pub(crate) fn install(&mut self, map: &str, generation: u64, settings: &LivingWorldSettings, data: LoadedData) {
         let seed = if settings.seed != 0 { settings.seed } else { skate_core::living_world::rng::derive(0x5345_4544, &[name_hash(map), generation]) };
@@ -474,6 +498,26 @@ pub(crate) struct LoadedData {
     pub vehicles: Option<skate_core::living_world::VehicleCatalog>,
     pub npc: npc_skaters::NpcData,
     pub status: String,
+}
+
+/// A challenge's AI lines (`challenge_paths/<set>.bin`, e.g. `ch_race_dwtn_02`; doc 42 "race AI racers"), as replay
+/// lines by id. None when the set is not exported.
+pub(crate) fn challenge_lines(asset_root: &Path, set: &str) -> Option<std::collections::BTreeMap<[u8; 16], skate_core::living_world::replay::ReplayLine>> {
+    let pack = std::fs::read(asset_root.join("private/living_world/challenge_paths").join(format!("{set}.bin"))).ok()?;
+    let tiles = skate_data::aipath::parse_pack(&pack).ok()?;
+    let (paths, _) = skate_data::aipath::district_paths(&tiles).ok()?;
+    Some(paths.iter().map(|p| (p.path.id.0, skate_data::living_world::replay_line(&p.path))).collect())
+}
+
+/// Add or drop lines the NPC skaters can ride (a challenge's set while it runs).
+pub(crate) fn merge_npc_lines(state: &mut PopulationState, add: &std::collections::BTreeMap<[u8; 16], skate_core::living_world::replay::ReplayLine>, keep: bool) {
+    let mut lines = (*state.npc.lines).clone();
+    if keep {
+        lines.extend(add.iter().map(|(k, v)| (*k, v.clone())));
+    } else {
+        lines.retain(|k, _| !add.contains_key(k));
+    }
+    state.npc.lines = std::sync::Arc::new(lines);
 }
 
 /// Read the export for a district (map name = district name for the retail cities).
@@ -797,11 +841,12 @@ pub(crate) fn step_population(
         zombie: settings.zombie,
         free_play: settings.free_play,
         player_slots: observers.player_slots.max(1),
-        scripted_skaters: 0,
+        scripted_skaters: state.world.scripted_count(),
         ambient_skater_override: None,
         world_ready: true,
     };
-    let decisions = state.world.advance(time.delta_secs_f64(), &inputs);
+    let mut decisions = std::mem::take(&mut state.pending);
+    decisions.extend(state.world.advance(time.delta_secs_f64(), &inputs));
     for d in decisions {
         match d {
             Decision::Spawn(s) => {

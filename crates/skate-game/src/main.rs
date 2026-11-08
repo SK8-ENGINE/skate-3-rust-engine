@@ -109,6 +109,7 @@ mod challenge_objectives;
 mod tutorial_run;
 mod challenge_records;
 mod challenges;
+mod race_ai_host;
 mod race_host;
 mod visual_indicators;
 mod challenge_map;

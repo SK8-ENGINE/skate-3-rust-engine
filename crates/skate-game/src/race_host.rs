@@ -1,6 +1,6 @@
 //! Races in play, player first: a race from `private/challenges.json` `races` runs through
-//! `skate_core::challenges::race_run` with the race tracker. Start: `SKATE_RACE=<id>` on that race's map. No AI
-//! racers, race HUD movies or sign-up yet. Details: docs/hails-additions/42-challenges.md#change-races-in-play-race_hostrs
+//! `skate_core::challenges::race_run` with the race tracker and its AI racers (`race_ai_host`). Start:
+//! `SKATE_RACE=<id>` on that race's map. No race HUD movies or sign-up yet. Details: docs/hails-additions/42-challenges.md#change-races-in-play-race_hostrs
 use crate::challenges::{Start, Volume};
 use crate::hud_challenge::{ChallengeHudState, Component};
 use bevy::prelude::*;
@@ -19,7 +19,7 @@ pub(crate) struct StartSlots {
 }
 
 impl StartSlots {
-    fn slot(&self, n: usize) -> [[f32; 4]; 4] {
+    pub(crate) fn slot(&self, n: usize) -> [[f32; 4]; 4] {
         self.slots.get(n).copied().unwrap_or(self.start.matrix)
     }
 }
@@ -45,6 +45,17 @@ pub(crate) struct Race {
     pub id: String,
     pub map: String,
     pub heats: Vec<Heat>,
+    /// The single player competitors (b987): ai_characters rows; kind 1 (a random pick from a pool) is not used by
+    /// any disc race and is skipped.
+    #[serde(default)]
+    pub competitors: Vec<CompetitorRow>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct CompetitorRow {
+    pub character: String,
+    #[serde(default)]
+    pub kind: u32,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +96,7 @@ pub(crate) struct RaceState {
     pub race: Race,
     pub run: RaceRun,
     pub tracker: RaceTracker,
+    pub ai: Option<crate::race_ai_host::RaceAi>,
     tick_carry: f32,
 }
 
@@ -108,7 +120,8 @@ fn tracker_for(heat: &Heat, tuning: RaceTuning) -> RaceTracker {
     tracker
 }
 
-fn start(races: &mut Races, volumes: &mut crate::trigger_volumes::TriggerVolumes, best: f32, race: Race) -> Vec<Command> {
+fn start(races: &mut Races, volumes: &mut crate::trigger_volumes::TriggerVolumes, best: f32, race: Race, assets: &std::path::Path, seed: u64)
+    -> Vec<Command> {
     let p = match params(&race) {
         Ok(p) => p,
         Err(e) => {
@@ -124,9 +137,11 @@ fn start(races: &mut Races, volumes: &mut crate::trigger_volumes::TriggerVolumes
     info!("SKATE_RACE start {} splits={:?} limit={} killed_it={} best={best}", race.id,
         p.splits.iter().map(Vec::len).collect::<Vec<_>>(), p.time_limit, p.killed_it_time);
     let tracker = tracker_for(&race.heats[0], RaceTuning::default());
+    let names: Vec<String> = race.competitors.iter().filter(|c| c.kind == 0).map(|c| c.character.clone()).collect();
+    let ai = crate::race_ai_host::RaceAi::load(assets, &race.id, &names, seed);
     let mut run = RaceRun::new(p, best);
     let commands = run.start();
-    races.run = Some(RaceState { race, run, tracker, tick_carry: 0.0 });
+    races.run = Some(RaceState { race, run, tracker, ai, tick_carry: 0.0 });
     commands
 }
 
@@ -139,6 +154,7 @@ fn arm(
     mut volumes: ResMut<crate::trigger_volumes::TriggerVolumes>,
     mut hud: ResMut<ChallengeHudState>,
     mut skater: ResMut<crate::physics::SkaterRuntime>,
+    mut population: Option<ResMut<crate::living_world::PopulationState>>,
 ) {
     if races.generation == Some(map.generation) {
         return;
@@ -164,8 +180,10 @@ fn arm(
         return;
     };
     let best = challenges.records.get(&race.id).best_time.unwrap_or(0.0);
-    let commands = start(&mut races, &mut volumes, best, race);
-    apply(&mut races, &mut challenges, &mut skater, &mut hud, None, commands);
+    // The line-up shuffle follows the session's population seed (one authority picks it; b987 §3).
+    let seed = population.as_ref().map_or(0, |p| skate_core::living_world::rng::derive(p.world.seed(), &[map.generation]));
+    let commands = start(&mut races, &mut volumes, best, race, &config.asset_root, seed);
+    apply(&mut races, &mut challenges, &mut skater, &mut hud, None, population.as_deref_mut(), commands);
 }
 
 fn update(
@@ -177,6 +195,14 @@ fn update(
     mut entered: MessageReader<crate::trigger_volumes::TriggerEntered>,
     mut career: MessageWriter<crate::career::ChallengeResult>,
     time: Res<Time>,
+    (mut population, index, transforms, mut clocks, volumes, mut commands_ecs): (
+        Option<ResMut<crate::living_world::PopulationState>>,
+        Option<Res<crate::living_world::npc_skaters::NpcSkaterIndex>>,
+        Query<&Transform>,
+        Query<&mut crate::living_world::npc_skaters::NpcRaceClock>,
+        Res<crate::trigger_volumes::TriggerVolumes>,
+        Commands,
+    ),
 ) {
     let entered: Vec<u64> = entered.read().filter(|e| e.body == crate::trigger_volumes::PLAYER)
         .filter_map(|e| u64::from_str_radix(&e.volume, 16).ok()).collect();
@@ -195,9 +221,21 @@ fn update(
     if ticked {
         let feet = crate::trigger_volumes::player_points(&skater)[0];
         let elapsed = state.run.elapsed();
-        state.tracker.update(|_| Some(feet), |_| elapsed);
+        let mut positions = match (state.ai.as_ref(), index.as_deref()) {
+            (Some(ai), Some(index)) => ai.positions(index, &transforms),
+            _ => Default::default(),
+        };
+        positions.insert(PLAYER, feet);
+        state.tracker.update(|id| positions.get(&id).copied(), |_| elapsed);
+        if let (Some(ai), Some(index), Some(pop)) = (state.ai.as_mut(), index.as_deref(), population.as_deref()) {
+            let finished = ai.step(&state.race.heats[0], &volumes, &positions, &mut state.tracker, PLAYER, elapsed, pop.world.tick(), index,
+                &mut clocks, &mut commands_ecs);
+            for _ in 0..finished {
+                commands.extend(state.run.handle(Event::OpponentFinished));
+            }
+        }
     }
-    let messages = apply(&mut races, &mut challenges, &mut skater, &mut hud, Some(&mut career), commands);
+    let messages = apply(&mut races, &mut challenges, &mut skater, &mut hud, Some(&mut career), population.as_deref_mut(), commands);
     for m in messages {
         central.write(m);
     }
@@ -219,6 +257,7 @@ fn apply(
     skater: &mut crate::physics::SkaterRuntime,
     hud: &mut ChallengeHudState,
     mut career: Option<&mut MessageWriter<crate::career::ChallengeResult>>,
+    mut population: Option<&mut crate::living_world::PopulationState>,
     mut commands: Vec<Command>,
 ) -> Vec<crate::hud_central::CentralMessage> {
     let mut messages = Vec::new();
@@ -236,8 +275,26 @@ fn apply(
                 if let Err(e) = skater.travel_ex(slot, None, true) {
                     warn!("SKATE_RACE teleport {e}");
                 }
+                if let (Some(ai), Some(pop)) = (state.ai.as_mut(), population.as_deref_mut()) {
+                    ai.place(&state.race.heats[0], pop);
+                }
             }
-            Command::RaceReset => state.tracker = tracker_for(&state.race.heats[0], state.tracker.tuning),
+            Command::RaceReset => {
+                state.tracker = tracker_for(&state.race.heats[0], state.tracker.tuning);
+                if let Some(ai) = state.ai.as_ref() {
+                    ai.add_to(&mut state.tracker);
+                }
+            }
+            Command::RaceStart => {
+                if let Some(ai) = state.ai.as_mut() {
+                    ai.go();
+                }
+            }
+            Command::RaceStop => {
+                if let Some(ai) = state.ai.as_mut() {
+                    ai.stop();
+                }
+            }
             Command::RaceSetProgress { leg, split } => {
                 info!("SKATE_RACE {id} split leg={leg} split={split}");
                 state.tracker.set_progress(PLAYER, leg, split);
@@ -280,6 +337,11 @@ fn apply(
             career.write(crate::career::ChallengeResult { challenge: id, completion, reactivate: false });
         }
         *hud = ChallengeHudState::default();
+        if let (Some(mut run), Some(pop)) = (races.run.take(), population.as_deref_mut()) {
+            if let Some(ai) = run.ai.as_mut() {
+                ai.remove(pop);
+            }
+        }
         races.run = None;
     }
     if changed {

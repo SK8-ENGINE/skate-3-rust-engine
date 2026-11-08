@@ -186,6 +186,9 @@ pub struct LivingWorld {
     pub(crate) skaters: KindState,
     pub(crate) skater_pool: Vec<String>,
     pub(crate) companions: Vec<super::skaters::Companion>,
+    /// Challenge AI skaters (retail kind 3, AI.SpawnAIAtLocation): ids from the skater serials, kept apart from the
+    /// ambient roster so its kill switch and culling leave them alone; the challenge owns their lifetime.
+    pub(crate) scripted: BTreeMap<u32, Live>,
     pub(crate) peds: KindState,
     pub(crate) vehicles: KindState,
 }
@@ -210,6 +213,7 @@ impl LivingWorld {
             skaters: KindState::new(Kind::Skater, seed),
             skater_pool: Vec::new(),
             companions: Vec::new(),
+            scripted: BTreeMap::new(),
             peds: KindState::new(Kind::Pedestrian, seed),
             vehicles: KindState::new(Kind::Vehicle, seed),
         }
@@ -329,8 +333,38 @@ impl LivingWorld {
 
     /// A new world (map change): empty rosters, initial populate armed again. Serials keep
     /// counting so an id never repeats within a session.
+    /// Spawn a challenge AI skater on `line` (its start) as competitor `slot`: a spawn decision like an ambient
+    /// one, so the game builds the rider the same way. Counted by `scripted_count` (the ambient skaters stop while
+    /// one rides, `TickInputs::scripted_skaters`).
+    pub fn spawn_scripted(&mut self, line: [u8; 16], character: &str, slot: u8, position: Vec3, heading: f32) -> Decision {
+        let choice = SpawnChoice::Skater { line, character: character.to_owned(), slot };
+        let record = self.skaters.spawn(self.seed, self.tick, position, heading, false, choice);
+        if let Some(live) = self.skaters.live.remove(&record.id.serial) {
+            self.scripted.insert(record.id.serial, live);
+        }
+        Decision::Spawn(record)
+    }
+
+    /// Remove a challenge AI skater (AI.UnspawnAI).
+    pub fn despawn_scripted(&mut self, id: LivingWorldId) -> Option<Decision> {
+        let live = self.scripted.remove(&id.serial).filter(|l| l.id == id)?;
+        Some(Decision::Despawn(DespawnRecord { id: live.id, tick: self.tick, reason: DespawnReason::External }))
+    }
+
+    /// Whether `id` is a challenge AI skater.
+    pub fn is_scripted(&self, id: LivingWorldId) -> bool {
+        self.scripted.get(&id.serial).is_some_and(|l| l.id == id)
+    }
+
+    /// Challenge AI skaters alive.
+    pub fn scripted_count(&self) -> u32 {
+        self.scripted.len() as u32
+    }
+
     pub fn reset_world(&mut self) -> Vec<Decision> {
-        let out = self.despawn_all(None, DespawnReason::External);
+        let mut out = self.despawn_all(None, DespawnReason::External);
+        let ids: Vec<LivingWorldId> = self.scripted.values().map(|l| l.id).collect();
+        out.extend(ids.into_iter().filter_map(|id| self.despawn_scripted(id)));
         for k in Kind::ALL {
             self.state_mut(k).initial_pending = true;
         }

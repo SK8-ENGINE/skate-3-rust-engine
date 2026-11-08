@@ -470,6 +470,49 @@ b998), as films, follow the leader, hall of meat and contests do; only own the s
 (Persistent) pass one. Test: `race_host::tests` (a disc-shaped row loads, run parameters, slot 0,
 course from the split centres).
 
+## Change: race AI racers (`challenges/race_ai.rs`)
+
+The AI side of a race (b978 port steps 5-6), in progress. Done so far:
+- Setup exports every challenge family's AI lines (research b969): `data/content/aipaths/AIPATH_Challenge_<set>.rx2`
+  in `miscload.big` are RW4 arenas holding AIPATHDATA, the same objects as the city tiles, so they go through the
+  same reader into `private/living_world/challenge_paths/<set>.bin` + `index.json` (the pack and index layout of
+  `skater_paths`; the index's `districts` are the sets, e.g. `ch_race_dwtn_02`). 59 sets on the disc: the 10 race sets
+  (8 to 51 lines, flags 7 / 0x47, as b969 counted) and the follow the leader, contest, film, photo and 1-up sets.
+  `tools/asset_pipeline/living_world_skaters.py` `challenge_line_sets`; the existing outputs do not change.
+- `crates/skate-core/src/challenges/race_ai.rs`: the line-up (82566740 + setup_code, b987 / b992: the player is id 0,
+  AI ids 1.. take the row's competitors after a forward Fisher-Yates, at most 6 racers), the per-racer state the graph
+  drives (PinAI / UnpinAI, StartLapPaths leg, StartPath, finish), the leg part of the line test (82456970, b972: flag
+  bit 9 + leg keeps a line off that leg; no retail line sets it) and the race rubber band (8246F0F0, b969:
+  `d = ETA(player) - ETA(racer)` ramps 0 at 2 s to 1 at 5 s, negative when the racer is ahead, the player flag caps it
+  at -1) with the speed shape (82470830: `s + 0.3 s shape + 0.125 s factor`). The tunables are data (`BandTuning`).
+  Tests: `race_ai::tests`.
+- In play (`crates/skate-game/src/race_ai_host.rs`, driven by `race_host.rs`): a race with competitors loads its set
+  `ch_<race id>` and the racers' looks (ai_characters `look` -> characters_marquee) and shuffles the line-up from the
+  session's population seed. The run's commands carry race_shared's AI calls: TeleportToStart places each racer at
+  its start slot on the line starting within 4 m (`replay::choose_line_from`, b972 §4; the racers placed before it
+  count as riders, so the branch score's crowding term spreads neighbouring slots over the lines) and pins it (a
+  racer already out is replaced, RepositionAI). Racers ride only their set: the set's ids are their line filter at
+  branches and line ends (`NpcLineFilter`, the challenge path filter of b972 §3; without it a racer took no line at
+  its first line end and left, laptop run 2026-11-07). Clock and filter are attached when the racer spawns. Racers
+  skip the ambient leave fade at a dead end (8246EA90 is the ambient skater's leave; a racer takes its set's next
+  line instead [inferred]). RaceReset adds them to the tracker (AddPlayerToRace), RaceStart lets them go
+  (UnpinAI + StartPath), RaceStop pins them, the end removes them (UnspawnAI) and their lines. Racers are the living
+  world's challenge AI skaters (`LivingWorld::spawn_scripted`, retail kind 3): spawned through the normal records,
+  kept apart from the ambient roster and its culling, and while one rides the ambient skaters stop
+  (`TickInputs::scripted_skaters`, 8245C4A8). Every world tick their positions feed the tracker (ETA, rank), a split
+  volume containing a racer moves its progress, the finish calls FinishPlayer and the run's OpponentFinished (so
+  finishing behind one loses, b984), and the band adds or removes cursor frames (`NpcRaceClock`; held frames while
+  pinned).
+- NOT RETAIL YET: racers stay in the replay tier (retail racers are full skaters), so a racer starts on its line's
+  first node, not on its own slot (retail RepositionAI puts it on the slot and it joins the line; race_dwtn_02 has 3
+  line starts for 5 slots, so racers share starts); a racer that branches onto a side line with no set line
+  starting within 4 m of its end stops there: retail's line search falls back to the nearest valid start at any
+  distance (`82458968` mode 1, b972 §4) and the full skater rides over, which the replay tier cannot (desktop run
+  2026-11-08: racer 3 stopped 12 s in at a race_dwtn_02 line end 41.6 m from the nearest start; racers 1, 2, 4, 5
+  finished in 64.62 to 70.72 s); a racer's tricks and
+  capabilities come from its look's profile, not its race profile (b993 §1.2); racers use no gate ribbons, speech or
+  leaderboard yet (item 6).
+
 ## Change: the end dialog (`challenges/end_dialog.rs`; research b920, b923)
 
 Retail's offline end dialog is FE screen 4 (vtable 82302750), opened when a challenge graph calls

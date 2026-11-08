@@ -30,6 +30,12 @@ Outputs (under ``<assets>/private/living_world/``):
     its id (32 hex digits): tiles, node count, flags, allowed-skater mask,
     start node, bbox. The id is the stable key a content overlay patches.
 
+``challenge_paths/<line set>.bin`` + ``challenge_paths/index.json``
+    The challenge AI lines (research b969; races, follow the leader, contests, films, photos):
+    ``data/content/aipaths/AIPATH_Challenge_<set>.rx2`` in ``miscload.big`` (RW4 arenas holding AIPATHDATA,
+    e.g. set ``ch_race_indu_01``), in the same pack
+    and index layout as ``skater_paths`` (one pack per set; the index's ``districts`` are the sets).
+
 ``skater_profiles.json``
     The resolved vault rows (inheritance applied) of ``ai_skater``,
     ``ai_skater_profiles`` and ``characters_marquee``, keyed by record name,
@@ -202,6 +208,22 @@ def district_tiles(game_root: Path, work: Path):
                 for blob in arena_objects(asset.data):
                     yield district, Path(name).stem, asset.record.asset_id, blob
             stream.unlink()
+
+
+CHALLENGE_PATHS = 'data/content/aipaths/AIPATH_Challenge_'
+
+
+def challenge_line_sets(game_root: Path):
+    """Yield (line set, file stem, 0, AIPATHDATA blob) for the challenge line files in miscload.big (b969)."""
+    from tools.owned_game.big import BigArchive
+    big = BigArchive(game_root/'data/big/miscload.big')
+    for entry in sorted(big.entries, key=lambda e: e.path):
+        path = entry.path.replace('\\', '/')
+        if not (path.startswith(CHALLENGE_PATHS) and path.endswith('.rx2')):
+            continue
+        stem = Path(path).stem
+        for blob in arena_objects(big.read(entry)):
+            yield stem.removeprefix('AIPATH_Challenge_'), stem, 0, blob
 
 
 def export_paths(tiles, output: Path) -> tuple[dict, list[str]]:
@@ -438,6 +460,11 @@ def export(ctx) -> dict:
     report('Exporting NPC skater lines')
     index, warnings = export_paths(district_tiles(game_root, work), output/'skater_paths')
 
+    report('Exporting challenge AI lines')
+    challenge_index, challenge_warnings = export_paths(challenge_line_sets(game_root), output/'challenge_paths')
+    # Challenge lines carry their location's tag (park tags too), not only the city tags.
+    warnings += [w for w in challenge_warnings if 'has tag' not in w]
+
     report('Exporting NPC skater characters and profiles')
     collections = _get(ctx, 'collections')
     if collections is None:
@@ -458,6 +485,7 @@ def export(ctx) -> dict:
         'characters': len(doc['characters']),
         'profiles': len(doc['ai_skater_profiles']),
         'free_roam_pool': len(doc['free_roam_pool']),
+        'challenge_paths': {name: len(d['paths']) for name, d in challenge_index['districts'].items()},
         'outputs': sorted(str(p.relative_to(private)).replace('\\', '/') for p in output.rglob('*') if p.is_file()),
         'sha256': {str(p.relative_to(private)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                    for p in sorted(output.rglob('*')) if p.is_file()},

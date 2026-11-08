@@ -12,7 +12,11 @@ param(
     # What to test, shown before the game starts in the second PC's launcher (\n for new lines).
     [string]$Notes = '',
     # What the patch applies to.
-    [string]$Base = 'origin/hails-additions'
+    [string]$Base = 'origin/hails-additions',
+    # The compile gate's build folder (reused; never on the repo drive).
+    [string]$CheckTarget = 'K:\VS-Code Output\skate3rust\patchcheck',
+    # Send without the compile gate (patch.txt then says checked=SKIPPED). Only when asked.
+    [switch]$SkipCheck
 )
 $ErrorActionPreference = 'Stop'
 # The main checkout (where .local lives), also when this script runs from one of its worktrees.
@@ -93,6 +97,44 @@ try {
     Remove-Item $stageIndex -Force -ErrorAction SilentlyContinue
 }
 
+# Compile gate (laptop write-up of patch 2026-11-07 19:18, user request): the patch is checked exactly as the second PC
+# gets it, the base plus only the patch files, in one reused check worktree (.local\wt-patchcheck; updating it rewrites
+# only the files that differ) with its own build folder, `cargo check` at Idle priority. A failure stops the send.
+function CheckCargo([string]$Dir, [string]$Log, [string[]]$CargoArgs) {
+    $env:CARGO_TARGET_DIR = $CheckTarget
+    try {
+        $p = Start-Process cargo -ArgumentList $CargoArgs -WorkingDirectory $Dir -NoNewWindow -PassThru `
+            -RedirectStandardError $Log -RedirectStandardOutput "$Log.out"
+        # Windows PowerShell 5.1 reports no ExitCode unless the handle is read while the process runs.
+        $null = $p.Handle
+        try { $p.PriorityClass = 'Idle' } catch { }
+        $p.WaitForExit()
+        return $p.ExitCode
+    } finally { Remove-Item Env:\CARGO_TARGET_DIR -ErrorAction SilentlyContinue }
+}
+$checked = 'checked=SKIPPED (-SkipCheck)'
+if (-not $SkipCheck) {
+    $checkDir = Join-Path $Repo '.local\wt-patchcheck'
+    if (-not (Test-Path (Join-Path $checkDir '.git'))) { Git $Repo worktree add --detach $checkDir $baseSha | Out-Null }
+    Git $checkDir checkout -q --detach -f $baseSha | Out-Null
+    Git $checkDir clean -q -fd | Out-Null
+    if ((Get-Item $final).Length -gt 0) { Git $checkDir apply --binary $final | Out-Null }
+    $runs = @(
+        @('check', '--locked', '-j', '4', '-p', 'skate-core', '-p', 'skate-data', '--lib', '--tests'),
+        @('check', '--locked', '-j', '4', '-p', 'skate-game', '--bin', 'skate3rust'),
+        @('check', '--locked', '-j', '4', '-p', 'skate-game', '--bin', 'skate3rust', '--profile', 'test'))
+    $n = 0
+    foreach ($run in $runs) {
+        $log = Join-Path $work ("check-{0}.log" -f $n++)
+        Write-Host "Compile gate: cargo $($run -join ' ')"
+        if ((CheckCargo $checkDir $log $run) -ne 0) {
+            $errors = Get-Content $log | Select-String -Pattern '^error' -Context 0, 6 | Select-Object -First 4 | Out-String
+            throw "Not sent: the patch does not compile (cargo $($run -join ' ')).`n$errors"
+        }
+    }
+    $checked = "checked=cargo check ok $((Get-Date).ToString('HH:mm')) (skate-core, skate-data lib + tests; skate-game skate3rust + tests)"
+}
+
 # Publish: the patch and its description replace the old ones together (patch.txt last, the second PC reads it first).
 $hash = (Get-FileHash $final -Algorithm SHA256).Hash
 Copy-Item $final (Join-Path $out 'hails-local.patch') -Force
@@ -107,7 +149,7 @@ if ($touched.Count -gt 0) {
     $Notes = "FORCES REFRESH GAME FILES: this patch changes asset / menu versions ($($touched -join ', ')); the first launch may restart into Refresh Game Files, so run the refresh after the prebuild.`n" + $Notes
 }
 $text = @("base=$baseSha", "base_subject=$subject", "created=$((Get-Date).ToString('yyyy-MM-dd HH:mm'))",
-    "files=$($files.Count)", "sha256=$hash", "notes=$($Notes -replace "`r?`n", '\n')") + $sources
+    "files=$($files.Count)", "sha256=$hash", $checked, "notes=$($Notes -replace "`r?`n", '\n')") + $sources
 [IO.File]::WriteAllLines((Join-Path $out 'patch.txt'), [string[]]$text, (New-Object Text.UTF8Encoding $false))
 # The second PC's scripts travel with it until they are on hails-additions.
 $tools = Join-Path $out 'tools'

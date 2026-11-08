@@ -787,12 +787,18 @@ pub fn choose_branch(lines: &dyn LineSource, current: &ReplayLine, node: u32, gr
 
 /// The next line at the end of `current` (8246D3C0 -> 8246C7F8, candidates 82458968 mode 1): docs/hails-additions/26c-living-world-npc-skaters.md#choose-next-line
 pub fn choose_next_line(lines: &dyn LineSource, current: &ReplayLine, ctx: &BranchContext) -> Option<([u8; 16], u32)> {
+    // A simulated skater searches from its body point (`82467FC8`), the replay tier from the node it reached (b701).
+    let end = ctx.body.map_or(current.nodes.last()?.position, |b| b.point);
+    choose_line_from(lines, end, ctx)
+}
+
+/// The line search of `8246C7F8` from a point: a challenge racer's first line from its start slot (research b972 §4:
+/// the valid line starting within the radius with the lowest branch score, else the mode 1 fallback; no random).
+pub fn choose_line_from(lines: &dyn LineSource, end: Vec3, ctx: &BranchContext) -> Option<([u8; 16], u32)> {
     let radius = ctx.chain.radius;
     if !(radius > 0.0) || ctx.chain.max_candidates == 0 {
         return None;
     }
-    // A simulated skater searches from its body point (`82467FC8`), the replay tier from the node it reached (b701).
-    let end = ctx.body.map_or(current.nodes.last()?.position, |b| b.point);
     let r2 = radius * radius;
     let mut candidates: Vec<&ReplayLine> = Vec::new();
     // The fallback's nearest valid and nearest invalid start at any distance (first in order on a tie).

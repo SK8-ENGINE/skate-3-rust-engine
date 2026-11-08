@@ -1129,6 +1129,11 @@ $r" }
         'tool-recomp-getsave' { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Recomp-Script) -GetSave; $r = "Recomp save: exit code $LASTEXITCODE" + $(if ($LASTEXITCODE -eq 0) { ' (done)' } else { ' - see above' }) }
         'tool-refresh' { $r = Refresh-GameFiles $Ver }
     }
+    # A failed build or refresh ends the command line run with exit code 1, so a script stops instead of carrying on
+    # with a stale build or export (laptop write-up 2026-11-07 19:18).
+    if ($Key -in @('tool-build', 'tool-refresh') -and $r -match '^Build failed|could not be built|\(exit code [1-9]\d*\)\.$|^Refresh game files: exit code [1-9]') {
+        $script:ToolFailed = $true
+    }
     Save-Result "$stamp  $Key [$($Ver.id)]`r`n$r"
     Write-Host ''
     Write-Host "  $r"
@@ -1419,7 +1424,7 @@ if ($Entry -eq 'game-setting') {
 if ($Entry -eq 'share-on') { Share-Run (Version-Dir (Get-Version '')) @('-Consent'); exit 0 }
 if ($Entry -eq 'share-off') { Share-Run (Version-Dir (Get-Version '')) @('-Revoke'); exit 0 }
 if ($Entry -eq 'list') { $Entries.Keys | ForEach-Object { '{0,-20} {1}' -f $_, $Entries[$_].Name }; exit 0 }
-if ($Entry) { Launch $Entry $Label; exit 0 }
+if ($Entry) { Launch $Entry $Label; if ($script:ToolFailed) { exit 1 }; exit 0 }
 
 # No entry: open the window (the menu lives in SkateLauncher.exe now).
 $exe = Join-Path $Here 'SkateLauncher.exe'

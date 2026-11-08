@@ -8,6 +8,7 @@ pub mod objectives;
 pub mod poster;
 pub mod predicate;
 pub mod race;
+pub mod race_ai;
 pub mod race_run;
 pub mod tutorial;
 pub mod ots;

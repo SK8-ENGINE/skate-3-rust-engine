@@ -171,6 +171,10 @@ COLLECTIONS = [
     {'class': 'characters_marquee', 'key': 'ambient_skater_01', 'parent': 'default', 'fields': {
         lws.MARQUEE_FIELDS['recipe']: field('EA::Reflection::Text', 'ai_skater_01'),
         lws.MARQUEE_FIELDS['layout_8']: field('EA::Reflection::Bool', '01')}},
+    # A race competitor (b993): its own AI profile and the look it wears.
+    {'class': 'ai_characters', 'key': 'cole_race', 'parent': '', 'fields': {
+        lws.AI_CHARACTER_PROFILE: field('Attrib::RefSpec', refspec('ai_skater_profiles', 'chris_cole')),
+        lws.AI_CHARACTER_LOOK: field('Attrib::RefSpec', refspec('characters_marquee', 'chris_cole'))}},
 ]
 
 
@@ -182,6 +186,8 @@ class Profiles(unittest.TestCase):
         self.assertEqual(self.warnings, [])
         self.assertEqual(self.doc['ai_skater']['default']['fields']['Hash_281F55D7BB965ADC'], 10.0)
         self.assertEqual(self.doc['ai_skater']['default']['fields']['Hash_D77533A1AAD7F117'], 45)
+        racer = self.doc['ai_characters']['cole_race']
+        self.assertEqual((racer['profile'], racer['look']), ('chris_cole', 'chris_cole'))
 
     def test_profiles_inherit_and_decode_trick_tables(self):
         cole = self.doc['ai_skater_profiles']['chris_cole']['fields']

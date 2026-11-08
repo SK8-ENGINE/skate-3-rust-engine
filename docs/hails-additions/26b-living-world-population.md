@@ -16,7 +16,8 @@ Part of doc 26, the living world (index: [26-living-world.md](26-living-world.md
     LODs, all parts and textures). Format details: [`living-world/peds-data.md`](living-world/peds-data.md).
   - `skater_paths/<District>.bin` (the retail line blobs unchanged in a small container, deduplicated by line id like
     retail's path manager), `skater_paths/index.json`, `skater_profiles.json` (193 profiles, 87 characters, the
-    42-character pool). Format details: [`living-world/skaters-data.md`](living-world/skaters-data.md).
+    42-character pool), `challenge_paths/<set>.bin` + `index.json` (the challenges' AI lines in the same layout, one
+    pack per line set; doc 42 "race AI racers"). Format details: [`living-world/skaters-data.md`](living-world/skaters-data.md).
 - **`skate-data::aipath`**: the line format, the pack container and the per-district dedupe.
 - **`native_roster`**: the NPC pool (`npc_pool`) and teammate binding (`bind_teammates`): the disc has no look for
   `teammate_NN` (retail reads it from the save), so a recruited teammate binds to a customiser look in

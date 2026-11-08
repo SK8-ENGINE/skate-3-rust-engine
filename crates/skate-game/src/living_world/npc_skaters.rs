@@ -134,6 +134,19 @@ impl Default for NpcFade {
     }
 }
 
+/// A challenge AI racer's clock (race_ai_host): frames it was held (PinAI) and frames the rubber band added or took
+/// away; the cursor's target frame is the spawn clock minus `held` plus `extra`.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct NpcRaceClock {
+    pub held: u64,
+    pub extra: i64,
+}
+
+/// The lines a challenge AI skater may take at a branch or line end (its challenge's set, sorted), instead of the
+/// lines valid for its character.
+#[derive(Component, Clone, Debug)]
+pub(crate) struct NpcLineFilter(pub Arc<Vec<[u8; 16]>>);
+
 /// LivingWorldId -> entity.
 #[derive(Resource, Default)]
 pub(crate) struct NpcSkaterIndex(pub BTreeMap<LivingWorldId, Entity>);
@@ -1058,6 +1071,13 @@ pub(crate) fn apply_records(
                 npc,
             ))
             .id();
+        // A challenge AI skater gets its clock (pin, band; it stays in the replay tier) and its line filter at once.
+        if state.world.is_scripted(s.id) {
+            commands.entity(e).insert(NpcRaceClock::default());
+            if let Some(lines) = &state.scripted_lines {
+                commands.entity(e).insert(NpcLineFilter(lines.clone()));
+            }
+        }
         index.0.insert(s.id, e);
         events.write(NpcSkaterEvent::Spawned { id: s.id, character: character.clone(), line: *line });
         info!(
@@ -1110,7 +1130,7 @@ pub(crate) fn advance(
     observers: Res<LivingWorldObservers>,
     mut state: ResMut<PopulationState>,
     mut index: ResMut<NpcSkaterIndex>,
-    mut npcs: Query<(Entity, &NpcSkater, &mut NpcReplay, &mut Transform, &mut NpcSkaterAudio, &mut NpcFade, Option<&super::npc_sim::NpcSim>)>,
+    mut npcs: Query<(Entity, &NpcSkater, &mut NpcReplay, &mut Transform, &mut NpcSkaterAudio, &mut NpcFade, Option<&super::npc_sim::NpcSim>, Option<&NpcRaceClock>, Option<&NpcLineFilter>)>,
     physics: Option<Res<crate::physics::GamePhysics>>,
     mut despawns: MessageWriter<LivingWorldDespawn>,
     mut events: MessageWriter<NpcSkaterEvent>,
@@ -1156,8 +1176,11 @@ pub(crate) fn advance(
             }
         }
     }
-    for (e, npc, mut replay, mut transform, mut audio, mut fade, sim) in sorted {
-        let elapsed = tick.saturating_sub(npc.spawn_tick) * FRAMES_PER_TICK;
+    for (e, npc, mut replay, mut transform, mut audio, mut fade, sim, race, filter) in sorted {
+        let mut elapsed = tick.saturating_sub(npc.spawn_tick) * FRAMES_PER_TICK;
+        if let Some(clock) = race {
+            elapsed = elapsed.saturating_sub(clock.held).saturating_add_signed(clock.extra);
+        }
         // The obstacle avoider holds the cursor back (`npc_avoid`); the fade keeps the spawn clock.
         let target = replay.follow_target.unwrap_or_else(|| elapsed.saturating_sub(replay.avoid.held_frames()));
         out.clear();
@@ -1171,7 +1194,7 @@ pub(crate) fn advance(
         replay.cursor.fakie_settings = chain.fakie;
         // A simulated skater holds at a dead end (host and client alike, from the replicated `follow_target`).
         replay.cursor.hold_at_end = replay.follow_target.is_some();
-        let valid_lines = valid.get(&npc.character).map(Vec::as_slice);
+        let valid_lines = filter.map(|f| f.0.as_slice()).or_else(|| valid.get(&npc.character).map(Vec::as_slice));
         // The NPC's trick tables (disc profile, mod overrides), read at its trick slots.
         let trick_profile = npc_trick_profile(&state.npc.tricks, &settings.skater_trick_profiles, &npc.character);
         // A simulated skater's line end chains in `npc_sim::simulate` on its trigger tick (b701 / b712).
@@ -1241,7 +1264,11 @@ pub(crate) fn advance(
             }
         }
         // Spawn fade in (825926F8), leave fade at a dead end (8246EA90 / 8245A9B8): docs/hails-additions/26c-living-world-npc-skaters.md#npc-fade
-        fade.fade.update(&replay.cursor, &*lines, &fade_cfg);
+        // A challenge racer never takes the ambient leave fade: its path filter gives it the next line of its set at a
+        // line end (b972 §3; laptop run 2026-11-07: a racer faded out at its first dead end before the race was half run).
+        if race.is_none() {
+            fade.fade.update(&replay.cursor, &*lines, &fade_cfg);
+        }
         // A bailed simulated skater fades out before its respawn (b715).
         let alpha = fade.fade.alpha(elapsed, &fade_cfg) * sim.map_or(1.0, |s| s.bail_alpha);
         if fade.alpha != alpha {

@@ -1,4 +1,4 @@
-﻿//! Simulated NPC skaters: full physics skaters driven by their AI record, taken over from the replay tier.
+//! Simulated NPC skaters: full physics skaters driven by their AI record, taken over from the replay tier.
 //! Details: docs/hails-additions/26e-living-world-skater-ai.md#simulated-npc-skaters-model
 
 use super::npc_skaters::{NpcReplay, NpcSkater};
@@ -642,7 +642,7 @@ fn log_skater_contact(job: &Job, s: &mut NpcSim) {
 
 fn run_steps(
     physics: &mut GamePhysics,
-    npcs: &mut Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>)>,
+    npcs: &mut Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Has<super::npc_skaters::NpcRaceClock>)>,
     bump: Option<(&skate_net::packed::BodyState, &crate::physics::network::Schema)>,
     graphs: &crate::graph_runtime::StockGraphs,
     workers: &mut Vec<Box<GamePhysics>>,
@@ -669,14 +669,14 @@ fn run_steps(
     let t_sync = std::time::Instant::now();
     // Every simulated NPC's body from its last step (the others' proxies in each solve), in id order.
     let mut bodies: Vec<(super::LivingWorldId, Entity, skate_net::packed::BodyState)> =
-        if bump.is_some() { npcs.iter().filter_map(|(e, n, _, sim)| sim.and_then(|s| s.last_body.clone()).map(|b| (n.id, e, b))).collect() } else { Vec::new() };
+        if bump.is_some() { npcs.iter().filter_map(|(e, n, _, sim, _)| sim.and_then(|s| s.last_body.clone()).map(|b| (n.id, e, b))).collect() } else { Vec::new() };
     bodies.sort_by_key(|x| x.0);
     let mut work: Vec<(&Job, Mut<NpcSim>, &mut Box<GamePhysics>)> = Vec::with_capacity(jobs.len());
     {
         let mut by_entity: std::collections::BTreeMap<Entity, Mut<NpcSim>> = npcs
             .iter_mut()
             .filter(|n| jobs.iter().any(|j| j.entity == n.0))
-            .filter_map(|(e, _, _, sim)| sim.map(|sim| (e, sim)))
+            .filter_map(|(e, _, _, sim, _)| sim.map(|sim| (e, sim)))
             .collect();
         for (job, worker) in jobs.iter().zip(workers.iter_mut()) {
             if let Some(mut sim) = by_entity.remove(&job.entity) {
@@ -778,7 +778,7 @@ pub(crate) fn simulate(
     physics: Option<ResMut<GamePhysics>>,
     peds: Option<Res<super::peds::PedData>>,
     (player, net, map): (Res<crate::physics::SkaterRuntime>, Option<Res<crate::multiplayer::Multiplayer>>, Option<Res<crate::map_transition::CurrentMap>>),
-    mut npcs: Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>)>,
+    mut npcs: Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Has<super::npc_skaters::NpcRaceClock>)>,
     mut events: MessageWriter<super::npc_skaters::NpcSkaterEvent>,
     mut calls: Local<u64>,
     mut pool: ResMut<NpcSimPool>,
@@ -873,7 +873,7 @@ pub(crate) fn simulate(
     players.clear();
     players.extend(observers.observers.iter().map(|o| o.position));
     order.clear();
-    order.extend(npcs.iter().map(|(_, n, r, _)| (n.id, r.cursor.line, r.cursor.node)));
+    order.extend(npcs.iter().map(|(_, n, r, _, _)| (n.id, r.cursor.line, r.cursor.node)));
     order.sort_by_key(|x| x.0);
     let line_chain = skate_core::living_world::replay::ChainConfig { fallback: true, ..state.world.config.skaters.line_chain };
     let mut sorted: Vec<_> = npcs.iter_mut().collect();
@@ -883,7 +883,7 @@ pub(crate) fn simulate(
     if let Err(error) = physics.refresh_grab_props() {
         warn!("NPC_SKATER_SIM grab scene refresh failed: {error}");
     }
-    for (e, npc, mut replay, sim) in sorted {
+    for (e, npc, mut replay, sim, race_rider) in sorted {
         let Some(target) = replay.cursor.line_target(&*lines) else { continue };
         let distance = nearest(&observers, target.position);
         match sim {
@@ -1771,6 +1771,10 @@ pub(crate) fn simulate(
                     Some("off")
                 } else if settings.net_role == NetRole::Client {
                     Some("client")
+                } else if race_rider {
+                    // NOT RETAIL YET: challenge racers stay in the replay tier (their pin and band run on the cursor
+                    // clock, race_ai_host); retail racers are full skaters.
+                    Some("race rider")
                 } else if count >= rules.max {
                     Some("at max")
                 } else if distance > rules.radius && !(rules.walk_back && replay.avoid.last.mode == skate_core::living_world::avoid::AvoidMode::StepOff) {

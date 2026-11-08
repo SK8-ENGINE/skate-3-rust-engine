@@ -1092,3 +1092,20 @@ fn a_teammate_joins_the_pool_only_while_its_save_slot_has_a_look() {
     data.filled_slots.insert(2);
     assert!(data.eligible(&teammate));
 }
+
+#[test]
+fn a_challenge_ai_skater_spawns_through_the_records_and_only_the_challenge_removes_it() {
+    let mut world = LivingWorld::new(config(), 42);
+    let line = [7u8; 16];
+    let d = world.spawn_scripted(line, "reynolds_race", 1, [1.0, 0.0, 2.0], 0.5);
+    let crate::living_world::Decision::Spawn(record) = &d else { panic!("{d:?}") };
+    assert_eq!(record.choice, crate::living_world::SpawnChoice::Skater { line, character: "reynolds_race".into(), slot: 1 });
+    assert_eq!((world.scripted_count(), world.count(Kind::Skater)), (1, 0), "kept apart from the ambient roster");
+    let id = record.id;
+    assert!(matches!(world.despawn_scripted(id), Some(crate::living_world::Decision::Despawn(_))));
+    assert_eq!(world.scripted_count(), 0);
+    assert!(world.despawn_scripted(id).is_none());
+    let again = world.spawn_scripted(line, "reynolds_race", 1, [0.0; 3], 0.0);
+    let crate::living_world::Decision::Spawn(r2) = &again else { panic!() };
+    assert!(r2.id.serial > id.serial, "serials never repeat");
+}
