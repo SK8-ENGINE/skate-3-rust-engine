@@ -1720,6 +1720,12 @@ pub(crate) trait FadeMaterial: Material + Clone {
     fn fade_base(&self) -> f32;
     /// Blend the copy at `alpha` (the base alpha times the fade).
     fn set_fade(&mut self, alpha: f32);
+    /// The source draws opaque: its fade is the output alpha alone, not times its texture's alpha (opaque retail
+    /// textures keep other data in alpha; without this, clothes and boards vanished while skin showed). Sent as a
+    /// negative tag value (vendor/README.md "Fade alpha in MeshTag").
+    fn fade_opaque(&self) -> bool {
+        false
+    }
 }
 
 impl FadeMaterial for StandardMaterial {
@@ -1729,6 +1735,9 @@ impl FadeMaterial for StandardMaterial {
     fn set_fade(&mut self, alpha: f32) {
         self.alpha_mode = AlphaMode::Blend;
         self.base_color.set_alpha(alpha);
+    }
+    fn fade_opaque(&self) -> bool {
+        matches!(self.alpha_mode, AlphaMode::Opaque)
     }
 }
 
@@ -1757,7 +1766,7 @@ pub(crate) fn fade_tag(alpha: f32) -> u32 {
 pub(crate) struct NpcFadeMaterials<M: FadeMaterial = StandardMaterial> {
     /// Mesh entity and its own (shared) material, put back at alpha 1.
     pub originals: Vec<(Entity, Handle<M>)>,
-    /// Source material -> its blended copy and the source's own base alpha.
+    /// Source material -> its blended copy and the source's own base alpha (negative when the source is opaque).
     pub copies: BTreeMap<AssetId<M>, (Handle<M>, f32)>,
     /// Alpha the copies were last set to (NaN = not yet).
     pub alpha: f32,
@@ -1814,9 +1823,11 @@ pub(crate) fn present_fade<M: FadeMaterial>(
                     let _event = super::timing::event(super::timing::EV_FADE_COPY);
                     let mut blended = source.clone();
                     let base = source.fade_base();
+                    // Signed: negative = opaque source, so the tag below says "the fade alone".
+                    let signed = if source.fade_opaque() { -base } else { base };
                     blended.set_fade(base * alpha);
                     let h = materials.add(blended);
-                    state.copies.insert(current, (h.clone(), base));
+                    state.copies.insert(current, (h.clone(), signed));
                     h
                 }
             };

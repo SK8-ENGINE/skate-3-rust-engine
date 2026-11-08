@@ -53,7 +53,7 @@ struct GraphicsSettings {
     frame_stats_simple: bool,
     /// The counter in the top right corner (where it sat before 2026-10-23) instead of the top left (ask 404).
     frame_stats_right: bool,
-    /// The session timer, bottom left (time since the game started, for reports; USER-ASKS 495). On by default.
+    /// The session timer, under the frame-time counter (time since the game started, for reports; USER-ASKS 495). On by default.
     session_timer: bool,
     /// NPC draw distance multiplier (QoL, not retail): 1 = retail ranges.
     npc_draw_distance: f32,
@@ -649,7 +649,7 @@ impl Menu {
                 "Which top corner the FPS counter sits in.").reset(),
             SESSION_TIMER_ROW => RowView::new(Kind::Enum { index: s.session_timer as usize, count: 2, wrap: false },
                 "Session Timer", if s.session_timer { "On" } else { "Off" },
-                "A small clock in the bottom left corner: the time since the game started, to name when something happened in a report.").reset(),
+                "A clock under the frame-time counter: the time since the game started, to name when something happened in a report.").reset(),
             NPC_DRAW_DISTANCE_ROW => RowView::new(pick(&skate_core::living_world::DrawDistance::MENU_STEPS, &s.npc_draw_distance), "NPC Draw Distance",
                 draw_distance_label(s.npc_draw_distance), NPC_DRAW_DISTANCE_HINT).reset(),
             200..=263 => {

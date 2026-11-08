@@ -93,11 +93,18 @@ fn pbr_input_from_standard_material(
 #endif
 
     // skate3rust: an NPC / ped fade passes its alpha per instance in MeshTag (vendor/README.md "Fade alpha in MeshTag").
+    // A negative value = the source material was opaque: the output alpha is the fade alone, not times the texture's
+    // alpha (retail's fade is the output alpha; opaque textures keep other data in alpha).
+    var fade_alone = -1.0;
 #ifndef MESHLET_MESH_MATERIAL_PASS
 #ifdef VERTEX_OUTPUT_INSTANCE_INDEX
     let fade_tag = mesh[in.instance_index].tag;
     if fade_tag != 0u {
-        base_color.a = bitcast<f32>(fade_tag ^ 0x80000000u);
+        let fade = bitcast<f32>(fade_tag ^ 0x80000000u);
+        base_color.a = abs(fade);
+        if fade < 0.0 {
+            fade_alone = -fade;
+        }
     }
 #endif
 #endif
@@ -245,6 +252,10 @@ pbr_input.material.uv_transform = uv_transform;
 
     }
 #endif // VERTEX_UVS
+
+    if fade_alone >= 0.0 {
+        pbr_input.material.base_color.a = fade_alone;
+    }
 
     pbr_input.material.flags = flags;
 

@@ -456,6 +456,9 @@ fn living_world_npc_skaters_fade_in_from_transparent_with_blended_copies() {
     let (nid, e) = npc.expect("an NPC spawned");
     let spawn_tick = a.world().get::<NpcSkater>(e).unwrap().spawn_tick;
     let mesh = a.world_mut().spawn((MeshMaterial3d(shared.clone()), ChildOf(e))).id();
+    // A cut-out part (hair, decals): keeps fade x texture alpha, so its tag stays positive.
+    let cutout = a.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { alpha_mode: AlphaMode::Mask(0.5), ..default() });
+    let cutout_mesh = a.world_mut().spawn((MeshMaterial3d(cutout.clone()), ChildOf(e))).id();
     let first = *a.world().get::<NpcFade>(e).unwrap();
     assert!(first.alpha < 0.05, "starts transparent: {}", first.alpha);
     for _ in 0..90 {
@@ -469,9 +472,14 @@ fn living_world_npc_skaters_fade_in_from_transparent_with_blended_copies() {
             let mats = a.world().resource::<Assets<StandardMaterial>>();
             let m = mats.get(&used).unwrap();
             assert_eq!(m.alpha_mode, AlphaMode::Blend);
-            // The alpha rides in the mesh's MeshTag: the exact f32 the copy's base_color alpha held before (base 1).
+            // The alpha rides in the mesh's MeshTag (base 1). An opaque source sends it negated: the shaders then draw the
+            // fade alone, not times the texture's alpha (-0.0 is sent as +0.0, the same blend).
+            let alpha = f.alpha.clamp(0.0, 1.0);
+            let opaque = if alpha == 0.0 { 0.0f32 } else { -alpha };
             let tag = a.world().get::<bevy::mesh::MeshTag>(mesh).expect("fading mesh has a tag").0;
-            assert_eq!(f32::from_bits(tag ^ 0x8000_0000).to_bits(), (1.0f32 * f.alpha.clamp(0.0, 1.0)).to_bits(), "tick {tick}");
+            assert_eq!(f32::from_bits(tag ^ 0x8000_0000).to_bits(), opaque.to_bits(), "tick {tick}");
+            let cut = a.world().get::<bevy::mesh::MeshTag>(cutout_mesh).expect("fading cut-out has a tag").0;
+            assert_eq!(f32::from_bits(cut ^ 0x8000_0000).to_bits(), alpha.to_bits(), "cut-out tick {tick}");
             assert_eq!(mats.get(&shared).unwrap().alpha_mode, AlphaMode::Opaque);
             assert!(a.world().get::<NpcFadeMaterials>(e).is_some());
         } else {

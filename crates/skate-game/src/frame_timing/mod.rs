@@ -475,23 +475,42 @@ fn show(
 #[derive(Component)]
 struct SessionTimer;
 
+/// The session timer's font: this share of the window's height (UI pixels already carry the DPI scale), at least the
+/// minimum.
+const SESSION_TIMER_FONT_SHARE: f32 = 0.024;
+const SESSION_TIMER_MIN_FONT: f32 = 14.0;
+
+fn session_timer_font(window_height: f32) -> f32 {
+    (window_height * SESSION_TIMER_FONT_SHARE).round().max(SESSION_TIMER_MIN_FONT)
+}
+
 /// `h:mm:ss` since the game started (the session log's start).
 fn session_clock(seconds: f64) -> String {
     let s = seconds.max(0.0) as u64;
     format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
 }
 
-/// The session timer (graphics menu "Session Timer", USER-ASKS 495): the time since the game started, bottom left,
+/// The session timer (graphics menu "Session Timer", USER-ASKS 495): the time since the game started, attached to the FPS overlay,
 /// so a moment seen in play can be named in a report. Every full minute logs `SESSION_TIMER`, tying the shown time to
 /// the log's wall clock.
 fn show_session_timer(
     timing: Res<FrameTiming>,
     menu: Option<Res<crate::graphics_menu::Menu>>,
     mut node: Query<&mut Node, With<SessionTimer>>,
-    mut text: Query<&mut Text, With<SessionTimer>>,
+    mut text: Query<(&mut Text, &mut TextFont), With<SessionTimer>>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut shown: Local<u64>,
     mut logged: Local<u64>,
 ) {
+    // Readable on any screen: the font follows the window height (DPI is in the UI scale already).
+    if let Ok(w) = window.single() {
+        let size = session_timer_font(w.height());
+        for (_, mut font) in &mut text {
+            if font.font_size != size {
+                font.font_size = size;
+            }
+        }
+    }
     let now_s = timing.now_s();
     let second = now_s as u64;
     if second / 60 != *logged {
@@ -509,7 +528,7 @@ fn show_session_timer(
         return;
     }
     *shown = second;
-    for mut t in &mut text {
+    for (mut t, _) in &mut text {
         t.0 = session_clock(now_s);
     }
 }
@@ -519,14 +538,21 @@ fn place_overlay(
     mut commands: Commands,
     menu: Option<Res<crate::graphics_menu::Menu>>,
     overlay: Query<(Entity, &ChildOf), With<FrameOverlay>>,
+    timer: Query<(Entity, &ChildOf), With<SessionTimer>>,
     corners: Query<(Entity, &FrameCorner)>,
 ) {
     let right = menu.as_ref().is_some_and(|m| m.frame_stats_right());
     let Some((corner, _)) = corners.iter().find(|(_, c)| c.right == right) else { return };
     for (e, parent) in &overlay {
         if parent.parent() != corner {
-            // First in the left column, above the warning.
+            // First in the column, above the warning.
             commands.entity(corner).insert_children(0, &[e]);
+        }
+    }
+    // The session timer stays attached to the counter: right under it, in the same corner.
+    for (e, parent) in &timer {
+        if parent.parent() != corner {
+            commands.entity(corner).insert_children(1, &[e]);
         }
     }
 }
@@ -597,6 +623,18 @@ fn spawn_overlay(mut commands: Commands) {
                     }
                 });
         });
+    // Attached to the FPS overlay: directly under it in its corner (place_overlay), sized from the window
+    // (show_session_timer).
+    commands.spawn((
+        Name::new("Session timer"),
+        SessionTimer,
+        Text::new("0:00:00"),
+        TextFont { font_size: SESSION_TIMER_MIN_FONT, ..default() },
+        TextColor(Color::WHITE),
+        Node { padding: UiRect::axes(px(10), px(4)), ..default() },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+        ChildOf(corner),
+    ));
     // Same box style as the counter, in red, hidden until the asset check publishes something to refresh.
     commands
         .spawn((
@@ -614,16 +652,6 @@ fn spawn_overlay(mut commands: Commands) {
         .with_children(|parent| {
             parent.spawn((RefreshWarningText, Text::new(""), TextFont { font_size: 14.0, ..default() }, TextColor(Color::WHITE)));
         });
-    commands.spawn((
-        Name::new("Session timer"),
-        SessionTimer,
-        Text::new("0:00:00"),
-        TextFont { font_size: 12.0, ..default() },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
-        Node { position_type: PositionType::Absolute, bottom: px(8), left: px(8), padding: UiRect::axes(px(6), px(2)), ..default() },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
-        GlobalZIndex(100),
-    ));
 }
 
 #[cfg(test)]
