@@ -596,6 +596,25 @@ fn restart_cursor(replay: &mut super::npc_skaters::NpcReplay, lines: &dyn skate_
     }));
 }
 
+/// A racer's line end that chained beyond the search radius: the nearest line starts (id, distance, height step), to
+/// see whether the race set lacks the line that carries the course on (docs/hails-additions/42-challenges.md).
+fn log_far_chain(lines: &dyn skate_core::living_world::replay::LineSource, npc: &super::npc_skaters::NpcSkater, at: [f32; 3], to: &[u8; 16], radius: f32) {
+    let d = |p: [f32; 3]| ((p[0] - at[0]).powi(2) + (p[1] - at[1]).powi(2) + (p[2] - at[2]).powi(2)).sqrt();
+    let chosen = lines.line(to).and_then(|l| l.nodes.first()).map_or(f32::NAN, |n| d(n.position));
+    if !(chosen > radius) {
+        return;
+    }
+    let mut starts: Vec<(f32, f32, String)> = Vec::new();
+    lines.for_each_line(&mut |l| {
+        if let Some(n) = l.nodes.first() {
+            starts.push((d(n.position), n.position[1] - at[1], l.id.iter().map(|b| format!("{b:02x}")).collect()));
+        }
+    });
+    starts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let near: Vec<String> = starts.iter().take(4).map(|(dist, dy, id)| format!("{id} {dist:.1} m dy {dy:+.1}")).collect();
+    info!("NPC_SKATER_CHAIN_FAR #{} {} chained {chosen:.1} m (radius {radius:.1}) from [{:.1}, {:.1}, {:.1}]; nearest starts: {}", npc.id.serial, npc.character, at[0], at[1], at[2], near.join(", "));
+}
+
 /// Buffers the simulated skaters' line end reuses across ticks ([`simulate`]).
 #[derive(Default)]
 pub(crate) struct ChainScratch {
@@ -642,7 +661,7 @@ fn log_skater_contact(job: &Job, s: &mut NpcSim) {
 
 fn run_steps(
     physics: &mut GamePhysics,
-    npcs: &mut Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Has<super::npc_skaters::NpcRaceClock>)>,
+    npcs: &mut Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Option<&super::npc_skaters::NpcRaceClock>)>,
     bump: Option<(&skate_net::packed::BodyState, &crate::physics::network::Schema)>,
     graphs: &crate::graph_runtime::StockGraphs,
     workers: &mut Vec<Box<GamePhysics>>,
@@ -778,7 +797,7 @@ pub(crate) fn simulate(
     physics: Option<ResMut<GamePhysics>>,
     peds: Option<Res<super::peds::PedData>>,
     (player, net, map): (Res<crate::physics::SkaterRuntime>, Option<Res<crate::multiplayer::Multiplayer>>, Option<Res<crate::map_transition::CurrentMap>>),
-    mut npcs: Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Has<super::npc_skaters::NpcRaceClock>)>,
+    mut npcs: Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Option<&super::npc_skaters::NpcRaceClock>)>,
     mut events: MessageWriter<super::npc_skaters::NpcSkaterEvent>,
     mut calls: Local<u64>,
     mut pool: ResMut<NpcSimPool>,
@@ -802,8 +821,13 @@ pub(crate) fn simulate(
         workers.clear();
     }
     // Load the skaters once per map, up front (the first enabled tick, i.e. the map start), so a switch to physics
-    // later takes a loaded one instead of reading it from disk mid-ride.
-    if rules.enabled && pool.prewarmed_for.is_none() && settings.net_role != NetRole::Client {
+    // later takes a loaded one instead of reading it from disk mid-ride. Challenge racers ride over the ambient cap:
+    // placed racers still without a body top the pool up on the loader thread during the countdown (laptop
+    // 2026-11-08: two on-demand loads at the release froze the game 410 ms).
+    pool.poll_load();
+    let racers_waiting = npcs.iter().filter(|n| n.4.is_some() && n.3.is_none()).count();
+    let top_up = pool.prewarmed_for == Some(generation) && pool.loading.is_none() && racers_waiting > pool.bodies.len();
+    if rules.enabled && (pool.prewarmed_for.is_none() || top_up) && settings.net_role != NetRole::Client {
         pool.prewarmed_for = Some(generation);
         let at = observers.observers.first().map_or([0.0; 3], |o| o.position);
         let spawn = skate_core::physics::drive_frames::RetailAffineTransform {
@@ -811,7 +835,9 @@ pub(crate) fn simulate(
             translation: skate_core::math::Vector3::new(at[0], at[1] + 50.0, at[2]),
         };
         let t0 = std::time::Instant::now();
-        let have = pool.bodies.len() + npcs.iter().filter(|n| n.3.is_some()).count();
+        let in_use = npcs.iter().filter(|n| n.3.is_some()).count();
+        let want = if top_up { in_use + racers_waiting } else { rules.max as usize };
+        let have = pool.bodies.len() + in_use;
         // On a loader thread with a worker copy of this tick's physics (the settings, collections and grind world a
         // load reads; `npc_worker`), the same spawn and the same shared source: the bodies are the ones a load here
         // gives, in the same order, and `finish_load` joins before any use.
@@ -821,7 +847,7 @@ pub(crate) fn simulate(
         });
         let job = loader.map_err(|e| e.to_string()).and_then(|mut worker| {
             let (asset_root, graphs, difficulty, mut source) = (config.asset_root.clone(), graphs.clone(), config.difficulty.profile_key().to_string(), pool.source.clone());
-            let count = rules.max.saturating_sub(have);
+            let count = want.saturating_sub(have);
             std::thread::Builder::new()
                 .name("npc-pool-loader".into())
                 .spawn(move || {
@@ -849,7 +875,7 @@ pub(crate) fn simulate(
             Err(error) => {
                 // No loader thread: load here, as before.
                 warn!("NPC_SKATER_SIM pool: no loader thread ({error}); loading on the game thread");
-                for _ in have..rules.max {
+                for _ in have..want {
                     match load_body(&mut physics, &config, &graphs, spawn, &mut pool.source) {
                         Ok(pooled) => pool.bodies.push(pooled),
                         Err(error) => {
@@ -883,7 +909,7 @@ pub(crate) fn simulate(
     if let Err(error) = physics.refresh_grab_props() {
         warn!("NPC_SKATER_SIM grab scene refresh failed: {error}");
     }
-    for (e, npc, mut replay, sim, race_rider) in sorted {
+    for (e, npc, mut replay, sim, race) in sorted {
         let Some(target) = replay.cursor.line_target(&*lines) else { continue };
         let distance = nearest(&observers, target.position);
         match sim {
@@ -894,7 +920,8 @@ pub(crate) fn simulate(
                 // until it is clear; handing it back while still blocked restarted the sim the next frame, every
                 // frame (session game-20261013-183803: 12 restarts in one second at 79 m, ~75 ms each).
                 let blocked = rules.walk_back && replay.avoid.last.mode == skate_core::living_world::avoid::AvoidMode::StepOff;
-                let too_far = distance > rules.radius * 1.1 && !blocked;
+                // A released challenge racer is a full skater at any distance (retail races its AI as full skaters).
+                let too_far = distance > rules.radius * 1.1 && !blocked && race.is_none();
                 // Not at a line end: retail keeps the skater and looks for the next line every tick (the line end
                 // below; b118).
                 if (!rules.enabled || too_far) && settled {
@@ -1219,6 +1246,9 @@ pub(crate) fn simulate(
                                         }
                                     }
                                     info!("NPC_SKATER_CHAIN #{} {} line end: next line at node {node} (A {}+{:.2})", npc.id.serial, npc.character, f.a.0, f.a.1);
+                                    if race.is_some() {
+                                        log_far_chain(&*lines, npc, pos, &to, line_chain.radius);
+                                    }
                                     if let Some(next) = lines.get(&to) {
                                         line = next;
                                     }
@@ -1369,8 +1399,13 @@ pub(crate) fn simulate(
                 // Spawn push (824701F8 hold branch, 82C04168): once on the hold's last tick near the placed node (b178).
                 if !sim.teleport_pending && sim.hold_ticks > 0 {
                     let at = projected_point(sim, state_now).0;
+                    // A pinned racer settles on its slot while it waits; the push test measures from where it stands at
+                    // the release (laptop run C: 0.3 to 0.6 m of settling refused every start push).
+                    if race.is_some_and(|c| !c.moving) {
+                        sim.placed_at = Some(at);
+                    }
                     let placed = *sim.placed_at.get_or_insert(at);
-                    if sim.hold_ticks == 1 {
+                    if sim.hold_ticks == 1 && !race.is_some_and(|c| !c.moving) {
                         if let Some(line) = lines.get(&replay.cursor.line) {
                             let node = &line.nodes[replay.cursor.node as usize];
                             if node.flags & node_flags::OFF_BOARD == 0 {
@@ -1585,7 +1620,8 @@ pub(crate) fn simulate(
                         let (node, into) = (replay.cursor.node, replay.cursor.frame_in_segment);
                         let input = ai_push::PushInput {
                             speed: (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt(),
-                            target: avoid.last.shape_speed(ai_push::target_speed(target.step, off_line, t), false),
+                            // A racer's rubber band scales the line speed before the min / max clamp (82470830, b969).
+                            target: avoid.last.shape_speed(ai_push::target_speed(target.step, off_line, t) * race.map_or(1.0, |c| c.speed_scale()), false),
                             category: sim.slot.category,
                             stuck_stage: replay.avoid.controller.sub_mode,
                             against_forward: ai_push::against_line(forward, riding_fakie, along),
@@ -1635,8 +1671,9 @@ pub(crate) fn simulate(
                 }
                 let held = sim.hold_ticks > 0;
                 if sim.hold_ticks > 0 {
-                    // The hold counts once the placement has landed (retail places at once).
-                    if !sim.teleport_pending {
+                    // The hold counts once the placement has landed (retail places at once), and not while a racer is
+                    // pinned (PinAI): its last tick, with the spawn push, comes after the release.
+                    if !sim.teleport_pending && !race.is_some_and(|c| !c.moving) {
                         sim.hold_ticks -= 1;
                     }
                     skate_core::living_world::ai_signals::drop_trick_dispatch(&mut intents);
@@ -1771,16 +1808,21 @@ pub(crate) fn simulate(
                     Some("off")
                 } else if settings.net_role == NetRole::Client {
                     Some("client")
-                } else if race_rider {
-                    // NOT RETAIL YET: challenge racers stay in the replay tier (their pin and band run on the cursor
-                    // clock, race_ai_host); retail racers are full skaters.
-                    Some("race rider")
-                } else if count >= rules.max {
+                } else if race.is_some_and(|c| !c.moving && c.start.is_none()) {
+                    // A challenge racer is a full skater at any distance and over the ambient cap (race_ai_host; ambient
+                    // skaters stop while racers ride); a pinned one is placed at its start slot below.
+                    Some("race rider pinned")
+                } else if count >= rules.max && race.is_none() {
                     Some("at max")
-                } else if distance > rules.radius && !(rules.walk_back && replay.avoid.last.mode == skate_core::living_world::avoid::AvoidMode::StepOff) {
+                } else if race.is_none() && distance > rules.radius &&!(rules.walk_back && replay.avoid.last.mode == skate_core::living_world::avoid::AvoidMode::StepOff) {
                     // Retail simulates every ambient skater: one a prop blocks (mode 7) is simulated at any distance so
                     // it can step off and walk round (controller B); our distance switch is an engine cost choice.
                     Some("too far")
+                } else if race.is_some_and(|c| !c.moving) {
+                    // Its body comes from the loader thread's top-up (above), not a load here.
+                    pool.poll_load();
+                    // spawn_sim joins a running load, so the wait covers the whole load, not only an empty pool.
+                    pool.loading.is_some().then_some("race rider waiting for a loaded body")
                 } else if flags & (node_flags::AIRBORNE | node_flags::OFF_BOARD) != 0 || replay.cursor.current_trick() >= 0 {
                     Some("in the air, off board or in a trick")
                 } else if replay.cursor.frame_in_segment != 0 {
@@ -1803,6 +1845,14 @@ pub(crate) fn simulate(
                     continue;
                 }
                 // One hold tick at a handover: retail's order (placed at rest, pushed, then steered) without a visible stop.
+                // A pinned racer: at its slot facing the slot heading, pushed along its line on release (PinAI, b972 §4).
+                let target = match race.and_then(|c| (!c.moving).then_some(c.start).flatten()) {
+                    Some((at, heading)) => {
+                        let (s, c) = (heading * 0.5).sin_cos();
+                        ai_record::LineTarget { position: at, frame: [0.0, s, 0.0, c], step: target.step }
+                    }
+                    None => target,
+                };
                 match spawn_sim(&mut physics, &config, &graphs, &target, &mut pool, HANDOVER_HOLD_TICKS) {
                     Ok(sim) => {
                         let why = if replay.avoid.last.mode == skate_core::living_world::avoid::AvoidMode::StepOff { ", blocked by a prop (mode 7)" } else { "" };

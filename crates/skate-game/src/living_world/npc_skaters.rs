@@ -135,11 +135,23 @@ impl Default for NpcFade {
 }
 
 /// A challenge AI racer's clock (race_ai_host): frames it was held (PinAI) and frames the rubber band added or took
-/// away; the cursor's target frame is the spawn clock minus `held` plus `extra`.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// away; the cursor's target frame is the spawn clock minus `held` plus `extra` (replay tier). `moving` = released
+/// (UnpinAI); `scale` = the speed shape's multiplier for the band (`race_ai::shaped_speed` of 1), which the physics
+/// tier applies to its push speed (0 = not set yet).
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct NpcRaceClock {
     pub held: u64,
     pub extra: i64,
+    pub moving: bool,
+    pub scale: f32,
+    /// The racer's start slot (position, heading): it is placed there as a full skater and held while pinned (b972 §4).
+    pub start: Option<([f32; 3], f32)>,
+}
+
+impl NpcRaceClock {
+    pub(crate) fn speed_scale(&self) -> f32 {
+        if self.scale > 0.0 { self.scale } else { 1.0 }
+    }
 }
 
 /// The lines a challenge AI skater may take at a branch or line end (its challenge's set, sorted), instead of the
@@ -1073,7 +1085,8 @@ pub(crate) fn apply_records(
             .id();
         // A challenge AI skater gets its clock (pin, band; it stays in the replay tier) and its line filter at once.
         if state.world.is_scripted(s.id) {
-            commands.entity(e).insert(NpcRaceClock::default());
+            commands.entity(e).insert(NpcRaceClock { start: Some((s.position, s.heading)), ..Default::default() });
+            info!("NPC_SKATER_SPAWN #{} race start slot at [{:.1}, {:.1}, {:.1}]", s.id.serial, s.position[0], s.position[1], s.position[2]);
             if let Some(lines) = &state.scripted_lines {
                 commands.entity(e).insert(NpcLineFilter(lines.clone()));
             }

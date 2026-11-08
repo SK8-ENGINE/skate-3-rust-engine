@@ -503,13 +503,30 @@ The AI side of a race (b978 port steps 5-6), in progress. Done so far:
   volume containing a racer moves its progress, the finish calls FinishPlayer and the run's OpponentFinished (so
   finishing behind one loses, b984), and the band adds or removes cursor frames (`NpcRaceClock`; held frames while
   pinned).
-- NOT RETAIL YET: racers stay in the replay tier (retail racers are full skaters), so a racer starts on its line's
-  first node, not on its own slot (retail RepositionAI puts it on the slot and it joins the line; race_dwtn_02 has 3
-  line starts for 5 slots, so racers share starts); a racer that branches onto a side line with no set line
-  starting within 4 m of its end stops there: retail's line search falls back to the nearest valid start at any
-  distance (`82458968` mode 1, b972 §4) and the full skater rides over, which the replay tier cannot (desktop run
-  2026-11-08: racer 3 stopped 12 s in at a race_dwtn_02 line end 41.6 m from the nearest start; racers 1, 2, 4, 5
-  finished in 64.62 to 70.72 s); a racer's tricks and
+- Racers as full skaters: a racer is spawned at its own start slot (setup_heat's RepositionAI; `NpcRaceClock::start`
+  = slot position and heading) on the line whose start lies nearest it, and switches to the physics tier there at once,
+  placed facing the slot heading. While pinned (PinAI) its placement hold does not count down, so it stands still with
+  no path following or stuck watch; on release the hold's last tick gives the spawn push along its line's node 0 step.
+  The push test's "left its place" anchor follows a pinned racer, so the settling on its slot (0.3 to 0.6 m, laptop
+  run C) does not refuse the start push.
+  Two racers may share a line (race_dwtn_02: 3 line starts, 5 slots) but never a point. Racers ride over the ambient
+  cap, so placed racers without a body top up the loaded-body pool on the loader thread during the countdown and wait
+  for it ("race rider waiting for a loaded body"); before, the two bodies over the pool size loaded on the game thread
+  at the release (laptop 2026-11-08: 206 + 196 ms, a 410 ms frame). A released racer is a full skater at any distance
+  and is never handed back for distance (retail races its AI as full skaters). There the line-end fallback of the physics tier
+  applies (`82458968` mode 1: no set line within 4 m -> the nearest valid start at any distance, b972 §4), and the
+  band moves the push speed instead of the cursor clock: the race host sets `NpcRaceClock::scale` =
+  `shaped_speed(1, 0, factor)` (k2 = 0.125, the shape term `[pc+4]+0x34` unread and 0), the push target is the line
+  speed times it before the avoid clamp (`82470830`, b969). Splits and finishes test the racer's deck position
+  (`NpcSim::deck_position`), not its line sample.
+- Laptop race_dwtn_02 runs 2026-11-08 (unattended, player still): base replay-tier racers 4/5 finished (64.85 to
+  70.93 s); physics-tier racers with own slots, start push and loader-thread bodies 4/5 (66.35 to 73.67 s), worst
+  frame during the race 19.7 ms. OPEN: line `..00` ends at node 26 (about [376, 67, -9.5], after the node 17 jump)
+  with no line of any kind starting within 10 m (`NPC_SKATER_CHAIN_FAR`: the nearest are ambient lines 10.5 m away
+  and 5 m higher), so a racer that reaches that end chains to an unreachable start, goes lost and bails; whether
+  retail's racers take a junction branch before it is not checked yet.
+- NOT RETAIL YET: before the physics tier, a racer that branched onto a side line with no set line starting within 4 m of its end stopped
+  there (desktop run 2026-11-08: racer 3 at a race_dwtn_02 line end 41.6 m from the nearest start); a racer's tricks and
   capabilities come from its look's profile, not its race profile (b993 §1.2); racers use no gate ribbons, speech or
   leaderboard yet (item 6).
 

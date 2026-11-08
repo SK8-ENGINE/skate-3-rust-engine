@@ -2,6 +2,7 @@
 //! the racers (race_shared's AI calls); every world tick their positions feed the tracker, their split and finish
 //! volumes their progress, and the rubber band their cursor clock. Racers ride their race's challenge lines.
 //! Details: docs/hails-additions/42-challenges.md#change-race-ai-racers-challengesrace_airs
+use crate::living_world::npc_sim::NpcSim;
 use crate::living_world::npc_skaters::{NpcRaceClock, NpcSkaterIndex, FRAMES_PER_TICK};
 use crate::living_world::PopulationState;
 use crate::race_host::Heat;
@@ -92,8 +93,8 @@ impl RaceAi {
             };
             placed.push((line, 0));
             in_use.push(line);
-            let at = self.lines[&line].nodes.first().map_or(point, |n| n.position);
-            r.npc = population.spawn_scripted(line, &r.look, r.ai.id as u8, at, heading(&slot));
+            // Repositioned to its own slot (setup_heat), not the line start: two racers can share a line.
+            r.npc = population.spawn_scripted(line, &r.look, r.ai.id as u8, point, heading(&slot));
             r.ai = RacerAi::new(r.ai.id);
             r.ai.pinned = true;
             r.ai.start_lap_paths(1);
@@ -129,9 +130,13 @@ impl RaceAi {
         population.scripted_lines = None;
     }
 
-    pub(crate) fn positions(&self, index: &NpcSkaterIndex, transforms: &Query<&Transform>) -> BTreeMap<u32, [f32; 3]> {
+    /// Each racer's position: its physics body's deck when simulated, else its line sample.
+    pub(crate) fn positions(&self, index: &NpcSkaterIndex, bodies: &Query<(&Transform, Option<&NpcSim>)>) -> BTreeMap<u32, [f32; 3]> {
         self.racers.iter()
-            .filter_map(|r| Some((r.ai.id, transforms.get(*index.0.get(&r.npc?)?).ok()?.translation.to_array())))
+            .filter_map(|r| {
+                let (t, sim) = bodies.get(*index.0.get(&r.npc?)?).ok()?;
+                Some((r.ai.id, sim.map_or(t.translation.to_array(), NpcSim::deck_position)))
+            })
             .collect()
     }
 
@@ -150,8 +155,11 @@ impl RaceAi {
             let frames = (ticks * FRAMES_PER_TICK) as f32;
             match clocks.get_mut(entity) {
                 Ok(mut clock) => {
+                    clock.moving = r.ai.moving();
+                    clock.scale = 1.0;
                     if r.ai.moving() {
                         let factor = race_ai::eta_band(player_eta, tracker.eta(r.ai.id), false, &self.band);
+                        clock.scale = race_ai::shaped_speed(1.0, 0.0, factor, &self.band);
                         r.carry += frames * self.band.band_gain * factor;
                         let whole = r.carry.trunc();
                         r.carry -= whole;

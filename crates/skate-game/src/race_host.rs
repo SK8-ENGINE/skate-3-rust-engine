@@ -198,7 +198,7 @@ fn update(
     (mut population, index, transforms, mut clocks, volumes, mut commands_ecs): (
         Option<ResMut<crate::living_world::PopulationState>>,
         Option<Res<crate::living_world::npc_skaters::NpcSkaterIndex>>,
-        Query<&Transform>,
+        Query<(&Transform, Option<&crate::living_world::npc_sim::NpcSim>)>,
         Query<&mut crate::living_world::npc_skaters::NpcRaceClock>,
         Res<crate::trigger_volumes::TriggerVolumes>,
         Commands,
