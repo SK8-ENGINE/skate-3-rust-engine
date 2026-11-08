@@ -23,6 +23,9 @@ pub struct TeleportOptions {
     /// Fit the arrival height onto the ground below as retail teleports do (default true; false = exactly here).
     #[serde(default)]
     pub ground_fit: Option<bool>,
+    /// Arrive on the board (default true); false = standing off it, so an idle skater stays where it lands.
+    #[serde(default)]
+    pub on_board: Option<bool>,
 }
 
 impl TeleportOptions {

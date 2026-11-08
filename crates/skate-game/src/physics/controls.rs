@@ -299,13 +299,20 @@ mod offboard_tests;
 mod bail_tests;
 
 /// `SKATE_TEST_STEP_OFF=<tick>`: the player presses the off-board toggle once at that tick, so an idle test run stays at
-/// its teleport spot. Unset in play.
+/// its teleport spot. `SKATE_PLAYER_ON_FOOT=1` without it presses at tick 30 (the map spawn is built on the board),
+/// unless a placement already put the player off the board. Unset in play.
 fn step_off_for_test(intents: &mut Vec<RidingIntent>) {
     use std::sync::{atomic::{AtomicU32, Ordering}, OnceLock};
     static AT: OnceLock<Option<u32>> = OnceLock::new();
     static TICK: AtomicU32 = AtomicU32::new(0);
-    let Some(at) = *AT.get_or_init(|| std::env::var("SKATE_TEST_STEP_OFF").ok().and_then(|v| v.parse().ok())) else { return };
+    let at = *AT.get_or_init(|| {
+        std::env::var("SKATE_TEST_STEP_OFF").ok().and_then(|v| v.parse().ok()).or(crate::physics::skater::player_on_foot().then_some(30))
+    });
+    let Some(at) = at else { return };
     if crate::physics::log_actor() != "player" {
+        return;
+    }
+    if crate::physics::skater::PLACED_ON_FOOT.load(Ordering::Relaxed) {
         return;
     }
     if TICK.fetch_add(1, Ordering::Relaxed) == at {

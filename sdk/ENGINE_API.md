@@ -41,10 +41,11 @@ end}
 
 ## Native player movement and session authority
 
-`sdk.player.teleport({position={x,y,z}, heading=radians, velocity={x,y,z}, ground_fit=true})`
+`sdk.player.teleport({position={x,y,z}, heading=radians, velocity={x,y,z}, ground_fit=true, on_board=true})`
 uses native player travel. Heading defaults to zero; velocity is optional. `ground_fit` (default true) puts the
 arrival onto the ground below as Skate 3's teleports do (a ray from 0.75 m above, landing 0.15 m over the hit);
-false places the skater exactly at `position`. This
+false places the skater exactly at `position`. `on_board` (default true) set to false lands the skater standing off
+the board, so an idle skater stays where it lands (a held start for test runs or a scene). This
 only moves the local skater. Coordinates are bounded to +/-100000 and velocity
 components to +/-200. Invalid commands fail validation.
 

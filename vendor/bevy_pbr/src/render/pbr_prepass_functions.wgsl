@@ -32,8 +32,13 @@ fn prepass_alpha_discard(in: VertexOutput) {
 #endif  // BINDLESS
     // skate3rust: the fade alpha in MeshTag, as in pbr_fragment.wgsl (vendor/README.md "Fade alpha in MeshTag").
     let fade_tag = mesh[in.instance_index].tag;
+    var fade_alone = -1.0;
     if fade_tag != 0u {
-        output_color.a = bitcast<f32>(fade_tag ^ 0x80000000u);
+        let fade = bitcast<f32>(fade_tag ^ 0x80000000u);
+        output_color.a = abs(fade);
+        if fade < 0.0 {
+            fade_alone = -fade;
+        }
     }
 
 #ifdef VERTEX_UVS
@@ -64,6 +69,9 @@ fn prepass_alpha_discard(in: VertexOutput) {
         );
     }
 #endif // VERTEX_UVS
+    if fade_alone >= 0.0 {
+        output_color.a = fade_alone;
+    }
 
     let alpha_mode = flags & pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
     if alpha_mode == pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK {

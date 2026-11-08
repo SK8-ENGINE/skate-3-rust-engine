@@ -509,7 +509,9 @@ The AI side of a race (b978 port steps 5-6), in progress. Done so far:
   no path following or stuck watch; on release the hold's last tick gives the spawn push along its line's node 0 step.
   The push test's "left its place" anchor follows a pinned racer, so the settling on its slot (0.3 to 0.6 m, laptop
   run C) does not refuse the start push.
-  Two racers may share a line (race_dwtn_02: 3 line starts, 5 slots) but never a point. Racers ride over the ambient
+  The slot placement lands onto the ground like a travel (`SkaterRuntime::fit_next_arrival`, retail fit-up `82598428`,
+  b475): race_dwtn_02's slots are authored 1.8 m above the ground, and the racers dropped in from there before the
+  push (laptop F1 burst 2026-11-08). Two racers may share a line (race_dwtn_02: 3 line starts, 5 slots) but never a point. Racers ride over the ambient
   cap, so placed racers without a body top up the loaded-body pool on the loader thread during the countdown and wait
   for it ("race rider waiting for a loaded body"); before, the two bodies over the pool size loaded on the game thread
   at the release (laptop 2026-11-08: 206 + 196 ms, a 410 ms frame). A released racer is a full skater at any distance
@@ -519,7 +521,12 @@ The AI side of a race (b978 port steps 5-6), in progress. Done so far:
   `shaped_speed(1, 0, factor)` (k2 = 0.125, the shape term `[pc+4]+0x34` unread and 0), the push target is the line
   speed times it before the avoid clamp (`82470830`, b969). Splits and finishes test the racer's deck position
   (`NpcSim::deck_position`), not its line sample.
-- Laptop race_dwtn_02 runs 2026-11-08 (unattended, player still): base replay-tier racers 4/5 finished (64.85 to
+- Test runs: `SKATE_PLAYER_ON_FOOT=1` keeps the player standing off the board: every placement (`SkaterRuntime::travel_fit`:
+  race slot, teleporters, challenges, menus, mods) lands off the board, and the map spawn (built on the board) gets one
+  off-board press at tick 30 unless a placement already put the player off it (`controls::step_off_for_test`). Before
+  it the unattended runs' player rolled away on the board (all 2026-11-08 laptop runs), which moves the branch scores'
+  player distance. Mods: `sdk.player.teleport{on_board = false}` (sdk/ENGINE_API.md).
+- Laptop race_dwtn_02 runs 2026-11-08 (unattended, player drifting on the board): base replay-tier racers 4/5 finished (64.85 to
   70.93 s); physics-tier racers with own slots, start push and loader-thread bodies 4/5 (66.35 to 73.67 s), worst
   frame during the race 19.7 ms. OPEN: line `..00` ends at node 26 (about [376, 67, -9.5], after the node 17 jump)
   with no line of any kind starting within 10 m (`NPC_SKATER_CHAIN_FAR`: the nearest are ambient lines 10.5 m away

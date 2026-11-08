@@ -209,9 +209,9 @@ fn replay_branch_taken_only_when_it_scores_lower_and_mirrors_on_a_client() {
     let (c1, ev1) = run(&[[0.0, 0.0, 9.0]], &[]);
     assert_eq!(c1.line, id(1));
     assert!(!ev1.iter().any(|e| matches!(e, CursorEvent::Branch(_))));
-    // Target in use by another skater: skipped.
+    // Target ridden by another skater: still a candidate (b715: `8246BEE0` -> `82458860` has no in-use test).
     let (c2, _) = run(&players, &[id(2)]);
-    assert_eq!(c2.line, id(1));
+    assert_eq!(c2.line, id(2));
     // A client mirrors the host's records without scoring and ends in the same state.
     let mut m = LineCursor::spawn(&ls, id(1), 0);
     let mut mev = Vec::new();

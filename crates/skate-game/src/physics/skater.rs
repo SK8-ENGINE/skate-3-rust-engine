@@ -159,6 +159,17 @@ pub(crate) struct SkaterRuntime {
     pub board_possession_live: super::offboard::board_manager::runtime::LiveState,
 }
 
+/// `SKATE_PLAYER_ON_FOOT=1` (test runs): the player stands off the board, at the map spawn and after every placement,
+/// so an unattended run stays where it was put. Mods get the same with `sdk.player.teleport{on_board = false}`.
+pub(crate) fn player_on_foot() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("SKATE_PLAYER_ON_FOOT").is_ok_and(|v| v == "1"))
+}
+
+/// Set once a placement put the player off the board for `SKATE_PLAYER_ON_FOOT`; the map spawn's step-off press
+/// (`controls::step_off_for_test`) is then skipped, so it cannot toggle the player back onto the board.
+pub(crate) static PLACED_ON_FOOT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl SkaterRuntime {
     /// A pooled body becoming a new NPC: retail builds a new actor and PhysicalPlayer per NPC (`82590DC0` ->
     /// `82DB18A0`, b295). Re-runs the load-time initialisers of the per-actor parts the placement does not route
@@ -240,6 +251,13 @@ impl SkaterRuntime {
         on_board: bool,
         fit: skate_core::physics::teleport_ground_fit::GroundFit,
     ) -> Result<(), String> {
+        // `SKATE_PLAYER_ON_FOOT=1`: every placement of the player lands off the board (test runs stand still).
+        let on_board = if on_board && player_on_foot() && crate::physics::log_actor() == "player" {
+            PLACED_ON_FOOT.store(true, std::sync::atomic::Ordering::Relaxed);
+            false
+        } else {
+            on_board
+        };
         // One move, retail's actor reply (825926F8 -> 82DB8998, b471); the host teleport it used to add on top was a
         // second reset a tick earlier. A request while one is in flight is refused so two cannot stack.
         if self.teleport_pending() {
@@ -277,6 +295,13 @@ impl SkaterRuntime {
     /// skeleton's root, unlike the host teleport (which left a placed skater drawn where its body was before).
     pub(crate) fn place_by_reply(&mut self, transform: [[f32; 4]; 4], on_board: bool) {
         self.teleport_state.request_manual(transform, on_board);
+    }
+
+    /// The next actor-reply placement lands onto the ground below, as a travel does (retail teleport fit-up `82598428`,
+    /// b475): a race's RepositionAI to a start slot authored above the ground (race_dwtn_02: slots 1.8 m up).
+    pub(crate) fn fit_next_arrival(&mut self) {
+        let fit = self.ground_fit;
+        self.player_input.set_arrival_ground_fit(Some(fit));
     }
     pub fn load(
         asset_root: &Path,

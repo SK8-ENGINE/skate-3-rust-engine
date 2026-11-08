@@ -1077,7 +1077,7 @@ pub(crate) fn apply_records(
                 Transform::from_translation(at).with_rotation(Quat::from_rotation_y(s.heading)),
                 Visibility::Inherited,
                 NpcReplay { cursor, branches: Vec::new(), tricks: Vec::new(), last: sample, previous: None, avoid: Default::default(), follow_target: None, body_gate: None },
-                NpcFade { alpha: state.world.config.skaters.leave_fade.fade_in_alpha(0), ..NpcFade::default() },
+                NpcFade { alpha: if state.world.is_scripted(s.id) { 1.0 } else { state.world.config.skaters.leave_fade.fade_in_alpha(0) }, ..NpcFade::default() },
                 NpcSkaterAudio { list_order: u32::from(*slot), voice: npc.voice, ..Default::default() },
                 NpcStanceTrack::new(npc.stance),
                 npc,
@@ -1245,11 +1245,24 @@ pub(crate) fn advance(
         for ev in out.drain(..) {
             match ev {
                 CursorEvent::Node { line, node, event, flags } => {
+                    // A racer at a junction: was the body gate open, and where could it go (the race_dwtn_02 dead end
+                    // at node 26 of line ..00 / ..02: docs/hails-additions/42-challenges.md).
+                    if race.is_some() {
+                        if let Some(group) = lines.get(&line).and_then(|l| l.group_at(node)) {
+                            let hex = |id: &[u8; 16]| id.iter().map(|b| format!("{b:02x}")).collect::<String>();
+                            let targets: Vec<String> = group.branches.iter().map(|b| format!("{}@{}", hex(&b.target), b.target_node)).collect();
+                            let gate = replay.body_gate.as_ref().map_or("none (replay tier)".to_string(), |g| format!("may_branch {}", g.may_branch));
+                            info!("NPC_RACE_JUNCTION #{} {} line {} node {node}: gate {gate}; targets {}", npc.id.serial, npc.character, hex(&line), targets.join(", "));
+                        }
+                    }
                     if event != 0 {
                         events.write(NpcSkaterEvent::Node { id: npc.id, line, node, event, flags });
                     }
                 }
                 CursorEvent::Branch(record) => {
+                    if race.is_some() {
+                        info!("NPC_RACE_JUNCTION #{} {} branched at node {} -> node {}", npc.id.serial, npc.character, record.from_node, record.to_node);
+                    }
                     if !mirror {
                         replay.branches.push(record.clone());
                     }
@@ -1282,8 +1295,11 @@ pub(crate) fn advance(
         if race.is_none() {
             fade.fade.update(&replay.cursor, &*lines, &fade_cfg);
         }
-        // A bailed simulated skater fades out before its respawn (b715).
-        let alpha = fade.fade.alpha(elapsed, &fade_cfg) * sim.map_or(1.0, |s| s.bail_alpha);
+        // A bailed simulated skater fades out before its respawn (b715). A challenge racer shows whole from its spawn on
+        // its slot: no spawn fade-in (its clock is held while pinned, so the fade-in ran only after the start; laptop
+        // 2026-11-08: see-through racers until several pushes into the race).
+        let spawn_fade = if race.is_some() { 1.0 } else { fade.fade.alpha(elapsed, &fade_cfg) };
+        let alpha = spawn_fade * sim.map_or(1.0, |s| s.bail_alpha);
         if fade.alpha != alpha {
             fade.alpha = alpha;
         }
@@ -1765,6 +1781,12 @@ pub(crate) trait FadeMaterial: Material + Clone {
     fn fade_base(&self) -> f32;
     /// Blend the copy at `alpha` (the base alpha times the fade).
     fn set_fade(&mut self, alpha: f32);
+    /// The source draws opaque: its fade is the output alpha alone, not times its texture's alpha (opaque retail
+    /// textures keep other data in alpha; without this, clothes and boards vanished while skin showed). Sent as a
+    /// negative tag value (vendor/README.md "Fade alpha in MeshTag").
+    fn fade_opaque(&self) -> bool {
+        false
+    }
 }
 
 impl FadeMaterial for StandardMaterial {
@@ -1774,6 +1796,9 @@ impl FadeMaterial for StandardMaterial {
     fn set_fade(&mut self, alpha: f32) {
         self.alpha_mode = AlphaMode::Blend;
         self.base_color.set_alpha(alpha);
+    }
+    fn fade_opaque(&self) -> bool {
+        matches!(self.alpha_mode, AlphaMode::Opaque)
     }
 }
 
@@ -1802,7 +1827,7 @@ pub(crate) fn fade_tag(alpha: f32) -> u32 {
 pub(crate) struct NpcFadeMaterials<M: FadeMaterial = StandardMaterial> {
     /// Mesh entity and its own (shared) material, put back at alpha 1.
     pub originals: Vec<(Entity, Handle<M>)>,
-    /// Source material -> its blended copy and the source's own base alpha.
+    /// Source material -> its blended copy and the source's own base alpha (negative when the source is opaque).
     pub copies: BTreeMap<AssetId<M>, (Handle<M>, f32)>,
     /// Alpha the copies were last set to (NaN = not yet).
     pub alpha: f32,
@@ -1859,9 +1884,11 @@ pub(crate) fn present_fade<M: FadeMaterial>(
                     let _event = super::timing::event(super::timing::EV_FADE_COPY);
                     let mut blended = source.clone();
                     let base = source.fade_base();
+                    // Signed: negative = opaque source, so the tag below says "the fade alone".
+                    let signed = if source.fade_opaque() { -base } else { base };
                     blended.set_fade(base * alpha);
                     let h = materials.add(blended);
-                    state.copies.insert(current, (h.clone(), base));
+                    state.copies.insert(current, (h.clone(), signed));
                     h
                 }
             };

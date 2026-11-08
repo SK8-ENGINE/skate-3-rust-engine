@@ -107,7 +107,11 @@ every frame, which made Bevy rebuild that material's bind group each frame; the
 value is the same f32 the copy held, so drawing and the blended shadow's discard
 are unchanged. Meshes without a `MeshTag` (tag 0) are untouched; nothing else in
 the game sets one, so a mod or feature that wants `MeshTag` must use another
-encoding or stop the fade from owning it. Doc:
+encoding or stop the fade from owning it. A negative value marks an opaque source
+material (2026-11-08): the shaders use its absolute value as the alpha and, after the
+base colour texture, set the alpha to it again instead of fade x texture alpha (opaque
+retail textures keep other data in alpha; clothes and boards vanished during fades
+while skin showed). The ped shader only ever gets positive values. Doc:
 `docs/hails-additions/34-physics-performance.md#fades-meshtag`.
 
 ## Serial specialization check

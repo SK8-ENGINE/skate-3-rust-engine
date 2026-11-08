@@ -229,6 +229,12 @@ Change:
   PBR fragment and prepass discard (`vendor/README.md` "Fade alpha in MeshTag"). PedMaterial has no prepass fragment
   shader, so its shadow pass never read the alpha (`prepass/mod.rs` `fragment_required`); StandardMaterial's blended
   shadows discard below 0.05 alpha, so the prepass gets the same substitution.
+- Opaque sources (2026-11-08, ask 540): a StandardMaterial that drew opaque sends its fade negated
+  (`FadeMaterial::fade_opaque`); both PBR shaders take the absolute value and, after the base colour texture, set the
+  alpha to the fade alone. Before, the blended copy multiplied the fade by the texture's alpha, which opaque retail
+  textures use for other data: during a fade an NPC skater's clothes and board vanished and only skin (head, hands)
+  showed (laptop burst 2026-11-08, race_indu_01). Retail's fade is the output alpha (`i_params.x`), so the outcome now
+  matches. Mask / blend sources keep fade x texture alpha (cut-outs).
 - Bevy copies the tag into the mesh uniform on both the CPU and the GPU preprocessing path and re-extracts on
   `Changed<MeshTag>` / removal.
 

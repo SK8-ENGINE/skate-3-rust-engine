@@ -760,7 +760,9 @@ pub fn choose_branch(lines: &dyn LineSource, current: &ReplayLine, node: u32, gr
     let mut best: Option<(usize, i64)> = None;
     let mut candidates: Vec<(&ReplayLine, u32)> = vec![(current, node)];
     for b in &group.branches {
-        if b.target == current.id || ctx.in_use.contains(&b.target) || !ctx.valid(&b.target) {
+        // No in-use skip: `8246BEE0` tests a target only with `82458860` (path-kind filter, 0x200 object overlap; the
+        // recomp trace of b715 has caller lr 8246C0AC), as the line end; the crowd term still counts riders near it.
+        if b.target == current.id || !ctx.valid(&b.target) {
             continue;
         }
         if let Some(l) = lines.line(&b.target) {

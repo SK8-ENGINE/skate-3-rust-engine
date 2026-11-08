@@ -321,7 +321,14 @@ pub(crate) struct NpcSimPool {
     /// The first enabled tick's load, on its own thread (b215: 0.5 to 0.8 s on the game thread in the first frame of
     /// play); joined before anything takes from or adds to `bodies`, so their order is the one a load here gives.
     loading: Option<std::thread::JoinHandle<PoolLoad>>,
+    /// `simulate` calls so far, and per NPC entity the call before which it may not switch to physics again after a
+    /// physics error (laptop 2026-11-08: two racers re-switched and failed every tick, 1900 errors, a 1.5 s frame).
+    calls: u64,
+    retry_after: std::collections::HashMap<Entity, u64>,
 }
+
+/// Fixed ticks an NPC stays in the replay tier after a physics error before it may switch again.
+const RETRY_AFTER_ERROR_TICKS: u64 = 120;
 
 /// What the pool loader thread hands back: the bodies in load order, the shared source, and its log lines.
 struct PoolLoad {
@@ -485,6 +492,7 @@ fn spawn_sim(
     target: &ai_record::LineTarget,
     pool: &mut NpcSimPool,
     hold_ticks: u32,
+    fit_to_ground: bool,
 ) -> Result<NpcSim, String> {
     let spawn = line_spawn(target);
     pool.finish_load();
@@ -500,6 +508,9 @@ fn spawn_sim(
     };
     let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
+    if fit_to_ground {
+        sim.body.runtime.fit_next_arrival();
+    }
     sim.handover_push = Some((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
     Ok(sim)
 }
@@ -770,7 +781,13 @@ fn run_steps(
             // Back to the pool like a hand-back (the next placement resets it as a fresh body, b299). Dropping it made
             // the next switch load a new body on the game thread: ~200 ms hitches (laptop 2026-10-19, KnownAir errors).
             let entity = job.entity;
-            commands.queue(move |world: &mut World| pool_from(world, entity));
+            commands.queue(move |world: &mut World| {
+                pool_from(world, entity);
+                if let Some(mut pool) = world.get_resource_mut::<NpcSimPool>() {
+                    let until = pool.calls + RETRY_AFTER_ERROR_TICKS;
+                    pool.retry_after.insert(entity, until);
+                }
+            });
             *count -= 1;
         }
     }
@@ -810,6 +827,9 @@ pub(crate) fn simulate(
     }
     let rules = settings.npc_simulated;
     *calls += 1;
+    pool.calls = *calls;
+    let now = *calls;
+    pool.retry_after.retain(|_, until| *until > now);
     // A new map: the pooled bodies (the reset despawn put the simulated ones back already, `apply_records` runs
     // first) and the workers belong to the old world. The animation source is map independent and stays.
     let generation = map.as_ref().map_or(0, |m| m.generation);
@@ -817,6 +837,7 @@ pub(crate) fn simulate(
         info!("NPC_SKATER_SIM pool: map changed (generation {generation}); dropping {} loaded skaters", pool.bodies.len());
         pool.loading = None;
         pool.bodies.clear();
+        pool.retry_after.clear();
         pool.prewarmed_for = None;
         workers.clear();
     }
@@ -1806,6 +1827,8 @@ pub(crate) fn simulate(
                 let flags = line.nodes[replay.cursor.node as usize].flags;
                 let wait = if !rules.enabled {
                     Some("off")
+                } else if pool.retry_after.contains_key(&e) {
+                    Some("after a physics error")
                 } else if settings.net_role == NetRole::Client {
                     Some("client")
                 } else if race.is_some_and(|c| !c.moving && c.start.is_none()) {
@@ -1846,6 +1869,7 @@ pub(crate) fn simulate(
                 }
                 // One hold tick at a handover: retail's order (placed at rest, pushed, then steered) without a visible stop.
                 // A pinned racer: at its slot facing the slot heading, pushed along its line on release (PinAI, b972 §4).
+                let at_slot = race.is_some_and(|c| !c.moving && c.start.is_some());
                 let target = match race.and_then(|c| (!c.moving).then_some(c.start).flatten()) {
                     Some((at, heading)) => {
                         let (s, c) = (heading * 0.5).sin_cos();
@@ -1853,7 +1877,7 @@ pub(crate) fn simulate(
                     }
                     None => target,
                 };
-                match spawn_sim(&mut physics, &config, &graphs, &target, &mut pool, HANDOVER_HOLD_TICKS) {
+                match spawn_sim(&mut physics, &config, &graphs, &target, &mut pool, HANDOVER_HOLD_TICKS, at_slot) {
                     Ok(sim) => {
                         let why = if replay.avoid.last.mode == skate_core::living_world::avoid::AvoidMode::StepOff { ", blocked by a prop (mode 7)" } else { "" };
                         let push = sim.handover_push.unwrap_or(0.0);
