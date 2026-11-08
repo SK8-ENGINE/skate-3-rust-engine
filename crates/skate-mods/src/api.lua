@@ -619,7 +619,8 @@ function sdk.challenges.configure(id, options) submit{kind="challenge_configure"
 -- Career (with the Challenges opt-in): board sales, money, milestones, armed actions, flags, team and achievements.
 -- Changes stay with the career when the mod stops; flags a mod sets go under "<mod id>:<name>" unless the career
 -- already has that flag. Events in on_event: {name="career_paid"|"career_action_fired"|"career_milestone"|
--- "career_teammate"|"career_tier"|"career_achievement", ...}. docs/hails-additions/43-career.md.
+-- "career_teammate"|"career_tier"|"career_achievement"|"career_team_name"|"career_teammate_name"|"career_teammate_look", ...}.
+-- docs/hails-additions/43-career.md.
 sdk.career = { version = 1 }
 local function career_snapshot() return as_table(sdk.snapshot.career) or {} end
 function sdk.career.on() return career_snapshot().on == true end
@@ -634,6 +635,10 @@ function sdk.career.grant_reward(id, big) submit{kind="career_grant_reward",id=i
 function sdk.career.skip_start() submit{kind="career_skip_start"} end
 function sdk.career.activate_challenge(id) submit{kind="career_activate_challenge",id=id} end
 function sdk.career.activate_group(id) submit{kind="career_activate_group",id=id} end
+function sdk.career.set_team_name(name) submit{kind="career_team_name",name=name} end
+function sdk.career.set_teammate_name(n, name) submit{kind="career_teammate_name",n=n,name=name} end
+function sdk.career.set_teammate_preset(n, id) submit{kind="career_teammate_preset",n=n,id=id} end
+function sdk.career.set_teammate_look(n, profile) submit{kind="career_teammate_look",n=n,profile=profile} end
 
 sdk.input = {}
 -- Mapped gameplay action IDs by stable key (retail input.cfg GP_* order, see

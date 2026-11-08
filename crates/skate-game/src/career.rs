@@ -109,6 +109,38 @@ impl Awards {
     }
 }
 
+/// A teammate preset row and its look read from `SavedRecipe<id>.bin`.
+pub(crate) struct Preset {
+    pub row: skate_data::teammate_presets::PresetRow,
+    pub profile: serde_json::Map<String, serde_json::Value>,
+}
+
+fn read_presets(asset_root: &std::path::Path, c: &skate_data::collections::Collections) -> Vec<Preset> {
+    use skate_data::teammate_presets as tp;
+    let names = tp::morph_order(c);
+    tp::preset_rows(c).into_iter().filter_map(|row| match tp::load_profile(asset_root, &row, &names) {
+        Ok(profile) => Some(Preset { row, profile }),
+        Err(e) => {
+            warn!("SKATE_CAREER preset {} left out: {e}", row.key);
+            None
+        }
+    }).collect()
+}
+
+impl CareerState {
+    /// Teammate n gets preset `key`'s look (retail 8257DC48 -> 827D5288 copies it into slot n).
+    pub(crate) fn apply_preset(&mut self, n: usize, key: &str) -> Result<(), String> {
+        if self.career.team.teammate_mut(n).is_none() {
+            return Err(format!("no teammate {n}"));
+        }
+        let preset = self.presets.iter().find(|p| p.row.key == key).ok_or(format!("no preset {key:?}"))?;
+        self.looks.set(n, Some(skate_data::cac_save::SlotLook { source: skate_data::cac_save::LookSource::Preset { id: key.to_owned() },
+            profile: preset.profile.clone(), extra: Default::default() }));
+        self.save_looks();
+        Ok(())
+    }
+}
+
 fn write_in_background(path: PathBuf, text: String) {
     std::thread::spawn(move || {
         if let Some(dir) = path.parent() {
@@ -172,6 +204,11 @@ pub(crate) struct CareerState {
     pub dirty: bool,
     /// The new career's world -> first challenge rule (data; a mod can replace it).
     pub first_challenge: skate_core::career::boot::FirstChallenge,
+    /// Saved skater looks (`cac.json`, retail's CAC record): teammate n's look and spawn gate.
+    pub looks: skate_data::cac_save::CacFile,
+    pub looks_path: Option<PathBuf>,
+    /// Teammate presets (b986), by id; the list screen sorts them by localised name.
+    pub presets: Vec<Preset>,
 }
 
 fn completion_text(c: Completion) -> Option<&'static str> {
@@ -207,8 +244,15 @@ impl CareerState {
         c.runner.flags = f.flags.clone();
         c.pending.milestones = f.rewards.milestones_pending;
         c.pending.teammates = f.rewards.teammates_pending;
-        for (i, joined) in f.team.members.iter().enumerate().take(5) {
-            c.team.members[i] = *joined || i == 0;
+        if let Some(name) = &f.team.name {
+            c.team.name = skate_core::career::team::clip_name(name);
+        }
+        c.team.logo = f.team.logo.clone();
+        for (i, t) in c.team.teammates.iter_mut().enumerate() {
+            match f.team.teammates.get(i) {
+                Some(saved) => (t.joined, t.name) = (saved.joined, skate_core::career::team::clip_name(&saved.name)),
+                None => t.joined = f.team.members.get(i + 1).copied().unwrap_or(false),
+            }
         }
         c.team.tiers = f.team.tiers.iter().cloned().collect();
         c.unlocks.granted = f.unlocks.iter().map(|u| ((u.kind, u.name.clone()), u.new)).collect();
@@ -234,11 +278,23 @@ impl CareerState {
         f.flags = c.runner.flags.clone();
         f.rewards.milestones_pending = c.pending.milestones;
         f.rewards.teammates_pending = c.pending.teammates;
-        f.team.members = c.team.members.to_vec();
+        f.team.name = Some(c.team.name.clone());
+        f.team.logo = c.team.logo.clone();
+        f.team.teammates.resize_with(c.team.teammates.len(), Default::default);
+        for (saved, t) in f.team.teammates.iter_mut().zip(&c.team.teammates) {
+            (saved.joined, saved.name) = (t.joined, t.name.clone());
+        }
+        f.team.members = c.team.members();
         f.team.tiers = c.team.tiers.iter().cloned().collect();
         f.unlocks = c.unlocks.granted.iter().map(|((kind, name), new)| skate_data::career_save::UnlockEntry {
             kind: *kind, name: name.clone(), new: *new, ..Default::default() }).collect();
         f.active = c.active.iter().cloned().collect();
+    }
+
+    pub(crate) fn save_looks(&self) {
+        if let Some(path) = self.looks_path.clone() {
+            write_in_background(path, self.looks.to_json());
+        }
     }
 
     fn save_in_background(&self) {
@@ -327,6 +383,9 @@ pub(crate) struct Prepared {
     rows: std::collections::BTreeMap<String, skate_core::career::achievements::AchievementRow>,
     achievements: skate_data::career_save::AchievementsFile,
     achievements_path: PathBuf,
+    looks: skate_data::cac_save::CacFile,
+    looks_path: PathBuf,
+    presets: Vec<Preset>,
 }
 
 fn read(asset_root: PathBuf) -> Result<Prepared, String> {
@@ -337,7 +396,7 @@ fn read(asset_root: PathBuf) -> Result<Prepared, String> {
     let path = root.join("settings/profiles/local/career.json");
     let existing = std::fs::read_to_string(&path).ok().and_then(|t| CareerFile::parse(&t).ok());
     let old_challenges = existing.is_none().then(|| std::fs::read_to_string(root.join("settings/challenges.json")).ok()).flatten();
-    let (mut summary, mut tiers, mut rows, mut reward_tabs) = Default::default();
+    let (mut summary, mut tiers, mut rows, mut reward_tabs, mut presets) = Default::default();
     match skate_data::collections::Collections::load(&asset_root) {
         Ok(c) => {
             use skate_data::career_summary as cs;
@@ -348,13 +407,23 @@ fn read(asset_root: PathBuf) -> Result<Prepared, String> {
                 .collect();
             tiers = cs::tier_rows(&c, &tier_names);
             rows = cs::achievement_rows(&c, &achievement_names);
+            presets = read_presets(&asset_root, &c);
         }
         Err(e) => info!("SKATE_CAREER no summary, tier or achievement rows ({e})"),
     }
     let achievements_path = root.join("settings/profiles/local/achievements.json");
     let achievements = std::fs::read_to_string(&achievements_path).ok()
         .and_then(|t| skate_data::career_save::AchievementsFile::parse(&t).ok()).unwrap_or_default();
-    Ok(Prepared { base, data, existing, old_challenges, path, summary, reward_tabs, tiers, rows, achievements, achievements_path })
+    let looks_path = root.join("settings/profiles/local/cac.json");
+    let looks = match std::fs::read_to_string(&looks_path) {
+        Ok(t) => skate_data::cac_save::CacFile::parse(&t).unwrap_or_else(|e| {
+            warn!("SKATE_CAREER cac.json unreadable, kept as cac.json.bad; looks start empty ({e})");
+            let _ = std::fs::copy(&looks_path, looks_path.with_extension("json.bad"));
+            Default::default()
+        }),
+        Err(_) => Default::default(),
+    };
+    Ok(Prepared { base, data, existing, old_challenges, path, summary, reward_tabs, tiers, rows, achievements, achievements_path, looks, looks_path, presets })
 }
 
 /// The export with the running mods' overlays merged (b887 §8): each mod's overlay is kept only if the data still
@@ -388,7 +457,10 @@ fn rebuild(state: &mut CareerState, data: &mut Loaded) {
 
 /// The read career into the state: import, adopt, clean up, defaults, load replay, start.
 fn apply(state: &mut CareerState, p: Prepared) {
-    let Prepared { base, mut data, existing, old_challenges, path, summary, reward_tabs, tiers, rows, achievements, achievements_path } = p;
+    let Prepared { base, mut data, existing, old_challenges, path, summary, reward_tabs, tiers, rows, achievements, achievements_path, looks, looks_path, presets } = p;
+    state.presets = presets;
+    state.looks = looks;
+    state.looks_path = Some(looks_path);
     state.base = Some(base);
     if !state.overlays.is_empty() {
         rebuild(state, &mut data);
@@ -705,4 +777,30 @@ pub(crate) fn install(app: &mut App) {
         .add_message::<ChallengeDiscovered>()
         .add_systems(Update, update.after(crate::challenges::CareerResultSet).run_if(crate::challenges::opted_in))
         .add_systems(Update, queue_first_challenge.after(update).run_if(crate::challenges::opted_in));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn team_record_round_trips_and_old_saves_keep_their_joined_members() {
+        let mut state = CareerState::default();
+        state.file.team.members = vec![true, true, false, false, false];
+        state.adopt();
+        assert_eq!(state.career.team.members(), [true, true, false, false, false]);
+        assert_eq!(state.career.team.name, "MyTeamName");
+
+        state.career.team.name = "Shred Co".into();
+        state.career.team.teammate_mut(2).unwrap().name = "Gerry".into();
+        state.capture();
+        let text = state.file.to_json();
+        let mut again = CareerState::default();
+        again.file = CareerFile::parse(&text).unwrap();
+        again.adopt();
+        assert_eq!(again.career.team.name, "Shred Co");
+        assert_eq!(again.career.team.teammates[1].name, "Gerry");
+        assert_eq!(again.career.team.teammates[1].character, "teammate_02");
+        assert_eq!(again.career.team.members(), [true, true, false, false, false]);
+    }
 }

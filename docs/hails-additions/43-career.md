@@ -225,6 +225,37 @@ defaults, load replay, start). Challenge results that arrive meanwhile wait and 
   share an unlock, as in retail. UnlockTeammate: the first member 1..4 not in yet joins, its
   `040N_team_photo_teammate_N` tier is set and the pending teammate count goes up; nothing at five. Default-unlocked
   tiers are set on every load [inferred b870]. Saved in `career.json` `team` as tier ids.
+- The team record (research b980, the team reset 827CACF8, save 827CAFE0 / load 827CB0E0): team name, logo id and
+  teammates 1..4 with joined flag, name and character key. A new team is retail's reset: name `MyTeamName`, every
+  teammate `Teammate`, keys `teammate_01`..`teammate_04` (the living world rows), only the player joined, no logo
+  (None = the fallback logo). Retail keeps a teammate's joined flag one record after its name and key; ours sits on
+  the teammate it describes, with the same outcome while teammates join in order. Names hold 16 characters (retail
+  char[17]). The defaults are data (`TeamDefaults`), so a mod can replace them.
+- `career.json` `team` gains `name`, `logo` and `teammates` [{joined, name}] (retail saves name and flag, not the key;
+  the key is rebuilt from the defaults on load, as retail rebuilds it on every reset). `members` is still written for
+  older builds and read when `teammates` is absent, so an older career keeps its joined teammates.
+- Saved looks (research b983, b988): retail saves teammate looks in their own "CAC" record next to the career
+  record, five slots (0 = the player), and a slot with a look is teammate n's spawn gate (b977). Ours:
+  `settings/profiles/local/cac.json` (`skate3rust.cac` v1, `crates/skate-data/src/cac_save.rs`), five slots, each
+  `{source: preset {id} | custom | mod {id}, profile}` where `profile` is a customiser profile (the
+  `settings/character.json` form). The player's own look stays in `settings/character.json`. An unreadable slot loads
+  empty (retail resets a slot whose read fails); an unreadable file is kept as `cac.json.bad`. Retail parts the
+  customiser does not apply yet (the 13 tint records, stamps) ride along as extra profile keys.
+- Mods: `sdk.career.set_teammate_look(n, profile)` (nil clears), event `career_teammate_look {n, set}`, the snapshot's
+  teammates carry `look` (its source). A mod's looks go when the mod stops, so that teammate's gate closes.
+- Teammate presets (research b986, b988, b990, b994; `crates/skate-data/src/teammate_presets.rs`): the leaf rows of
+  vault class progression_preset_teammate (`preset00`..`preset09`, ids 0..9, names `ID_TEAMMATE_PRESET_01`..`10`;
+  `default` is a parent, so not a preset, 828DA0D8), each naming `data/cacrecipes/SavedRecipe<id>.bin`. Read at career
+  load from the installed collections and recipe files (no setup step), off the main thread. A recipe becomes a
+  customiser profile: gender, first asset + material per slot, truck / wheel, the four gestures, the 19 morph floats by
+  the morph table's `target_order` (read from the same collections, b994 / b996), and the 13 tint records and tattoo
+  records kept raw as `retail_tints` / `retail_tattoos` (their customiser mapping is open, b990). The stamp tail is not
+  read yet (units open, b996). Retail lists the presets sorted by localised name; `sorted_by` does that for the list
+  screen. `CareerState::apply_preset(n, key)` writes the look into slot n with source `preset {id}` (retail 8257DC48 ->
+  827D5288). Mods: `sdk.career.set_teammate_preset(n, key)`; the snapshot lists `presets` {key, id, name_text}. A
+  preset look is engine-owned and stays when the mod stops.
+- Not in yet: the random start logo and the logo rows (backlog 14), the keyboards that rename (13), mod-added preset
+  rows, and spawning teammates by their look (4).
 - `career/achievements.rs`: a grant needs an existing, enabled row (class 9CB9012080F727B9: platform id, enabled
   gate) and happens once. Sites: the GrantAchievement op, the GrantAchievement presentation event, and the load replay
   (827CE7B0): the actions with one board sales condition whose graph grants an achievement, granted at load once
@@ -242,6 +273,9 @@ defaults, load replay, start). Challenge results that arrive meanwhile wait and 
   actions, flags, team, achievements, running graph and queue) and commands `career_add_sales`, `career_add_money`,
   `career_arm_action`, `career_set_flag`, `career_grant_achievement` (`crates/skate-game/src/modding/career.rs`,
   capability `career` 1, `sdk/ENGINE_API.md` "Career").
+- Team names: `sdk.career.set_team_name(name)` and `set_teammate_name(n, name)` (16 characters kept, empty allowed),
+  events `career_team_name` / `career_teammate_name`; the snapshot's `team` carries name, logo and teammates
+  {joined, name, character}. Names stay with the career when the mod stops.
 - Mod board sales go into the bonus counter (online only in retail, 0 offline), so they count in board sales and
   run the same checks as a challenge payout; money runs the money checks.
 - When a mod stops, the career changes that work without it stay (board sales, money, retail actions and

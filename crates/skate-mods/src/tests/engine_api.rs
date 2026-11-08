@@ -137,13 +137,21 @@ fn career_wrappers_read_the_snapshot_and_emit_commands() {
         sdk.career.skip_start()
         sdk.career.activate_challenge('ots_dwtn_01')
         sdk.career.activate_group('ots')
+        sdk.career.set_team_name('Shred Co')
+        sdk.career.set_teammate_name(2, 'Gerry')
+        sdk.career.set_teammate_look(3, {gender='female'})
+        sdk.career.set_teammate_preset(4, 'preset07')
       end}
     "#).unwrap();
     let manifest:Manifest=serde_json::from_value(json!({"id":"tests.career", "api":2,"name":"Career","version":"1.0.0","author":"test","description":"Career wrappers","entry":"main.lua"})).unwrap();
     let snapshot=json!({"career":{"on":true,"board_sales":15000}});
     let mut vm=Vm::new(&root,&manifest,&BTreeMap::new(),&snapshot).unwrap();
     let commands=vm.call("on_load",json!({}),&snapshot).unwrap();
-    assert_eq!(commands.len(),10);
+    assert_eq!(commands.len(),14);
+    assert!(matches!(&commands[13],Command::CareerTeammatePreset{n:4,id} if id=="preset07"));
+    assert!(matches!(&commands[12],Command::CareerTeammateLook{n:3,profile:Some(p)} if p["gender"]=="female"));
+    assert!(matches!(&commands[10],Command::CareerTeamName{name} if name=="Shred Co"));
+    assert!(matches!(&commands[11],Command::CareerTeammateName{n:2,name} if name=="Gerry"));
     assert!(matches!(&commands[8],Command::CareerActivateChallenge{id} if id=="ots_dwtn_01"));
     assert!(matches!(&commands[9],Command::CareerActivateGroup{id} if id=="ots"));
     assert!(commands.iter().all(Command::validate));
@@ -161,4 +169,6 @@ fn career_wrappers_read_the_snapshot_and_emit_commands() {
     assert!(!too_much.validate());
     let bad_id:Command=serde_json::from_value(json!({"kind":"career_set_flag","name":"a:b","value":true})).unwrap();
     assert!(!bad_id.validate());
+    let bad_teammate:Command=serde_json::from_value(json!({"kind":"career_teammate_name","n":0,"name":"x"})).unwrap();
+    assert!(!bad_teammate.validate());
 }

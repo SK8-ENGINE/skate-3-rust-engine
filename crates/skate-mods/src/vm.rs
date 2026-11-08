@@ -189,6 +189,11 @@ fn valid_career_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
+/// Team / teammate names: the engine keeps 16 characters; empty is allowed (retail's team keyboard allows it).
+fn valid_team_name(name: &str) -> bool {
+    name.len() <= 64 && !name.chars().any(char::is_control)
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VolumeOptions {
@@ -819,6 +824,25 @@ pub enum Command {
     CareerActivateGroup {
         id: String,
     },
+    CareerTeamName {
+        name: String,
+    },
+    /// Teammate `n` (1-based).
+    CareerTeammateName {
+        n: u32,
+        name: String,
+    },
+    /// Teammate `n`'s look from a preset row key.
+    CareerTeammatePreset {
+        n: u32,
+        id: String,
+    },
+    /// Teammate `n`'s look: a customiser profile; absent clears it.
+    CareerTeammateLook {
+        n: u32,
+        #[serde(default)]
+        profile: Option<serde_json::Map<String, Value>>,
+    },
     CameraCapture {
         key: String,
         options: CaptureOptions,
@@ -1215,6 +1239,12 @@ impl Command {
             | Self::CareerActivateGroup { id: name } => valid_career_id(name),
             Self::CareerGrantUnlock { category, name } => *category < 13 && valid_career_id(name),
             Self::CareerSkipStart {} => true,
+            Self::CareerTeamName { name } => valid_team_name(name),
+            Self::CareerTeammateName { n, name } => (1..=16).contains(n) && valid_team_name(name),
+            Self::CareerTeammatePreset { n, id } => (1..=16).contains(n) && valid_career_id(id),
+            Self::CareerTeammateLook { n, profile } => {
+                (1..=16).contains(n) && profile.as_ref().is_none_or(|p| serde_json::to_vec(p).is_ok_and(|v| v.len() <= 65536))
+            }
             Self::ChallengeConfigure { id, options } => {
                 crate::schema::valid_id(id) && options.as_ref().is_none_or(ChallengeOptions::validate)
             }
@@ -1378,6 +1408,10 @@ fn command_kind(command: &Command) -> &'static str {
         Command::CareerSkipStart { .. } => "career_skip_start",
         Command::CareerActivateChallenge { .. } => "career_activate_challenge",
         Command::CareerActivateGroup { .. } => "career_activate_group",
+        Command::CareerTeamName { .. } => "career_team_name",
+        Command::CareerTeammateName { .. } => "career_teammate_name",
+        Command::CareerTeammateLook { .. } => "career_teammate_look",
+        Command::CareerTeammatePreset { .. } => "career_teammate_preset",
         Command::CameraCapture { .. } => "camera_capture",
         Command::MenuCategory { .. } => "menu_category",
         Command::MenuItem { .. } => "menu_item",

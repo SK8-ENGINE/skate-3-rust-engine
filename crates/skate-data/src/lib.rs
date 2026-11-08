@@ -27,6 +27,8 @@ pub mod xex;
 pub mod ocean_pca;
 pub mod aipath;
 pub mod career_save;
+pub mod cac_save;
+pub mod teammate_presets;
 pub mod career_summary;
 pub mod objective_program;
 pub mod progression;

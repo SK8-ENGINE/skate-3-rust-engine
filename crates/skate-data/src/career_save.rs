@@ -64,13 +64,31 @@ pub struct Rewards {
     pub extra: Map<String, Value>,
 }
 
-/// The team (b870): members joined (0 = the player) and the brand tier ids set.
+/// The team (b870, b980): name, logo, teammates 1.. and the brand tier ids set. `members` (joined flags, 0 = the
+/// player) is still written for older builds and read when `teammates` is absent.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TeamFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teammates: Vec<TeammateFile>,
     #[serde(default)]
     pub members: Vec<bool>,
     #[serde(default)]
     pub tiers: Vec<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+/// Teammate n's saved record (retail saves name + joined flag, not the character key).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TeammateFile {
+    #[serde(default)]
+    pub joined: bool,
+    #[serde(default)]
+    pub name: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

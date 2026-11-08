@@ -1639,6 +1639,10 @@ fn apply_one(
         Command::CareerSkipStart {} => career::skip_start(world, id)?,
         Command::CareerActivateChallenge { id: challenge } => career::activate(world, id, &challenge, false)?,
         Command::CareerActivateGroup { id: group } => career::activate(world, id, &group, true)?,
+        Command::CareerTeamName { name } => career::team_name(world, id, None, &name)?,
+        Command::CareerTeammateName { n, name } => career::team_name(world, id, Some(n as usize), &name)?,
+        Command::CareerTeammatePreset { n, id: preset } => career::teammate_preset(world, id, n as usize, &preset)?,
+        Command::CareerTeammateLook { n, profile } => career::teammate_look(world, id, n as usize, profile)?,
         Command::CameraCapture { key, options } => { capture::set(world, id, key, options)?; }
         c @ (Command::MenuCategory { .. } | Command::MenuItem { .. } | Command::MenuSetting { .. } | Command::MenuHide { .. }
             | Command::MenuHandle { .. } | Command::MenuUnhandle { .. } | Command::MenuSetValue { .. }) => {

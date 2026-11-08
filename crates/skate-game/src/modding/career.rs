@@ -23,9 +23,13 @@ pub(super) fn snapshot(world: &World) -> Value {
         "armed": c.tracker.armed,
         "fired": c.tracker.fired,
         "flags": c.runner.flags,
-        "team": {"members": c.team.members, "tiers": c.team.tiers},
+        "team": {"name": c.team.name, "logo": c.team.logo, "members": c.team.members(), "tiers": c.team.tiers,
+            "teammates": c.team.teammates.iter().enumerate().map(|(i, t)| json!({"joined": t.joined, "name": t.name,
+                "character": t.character, "look": state.looks.look(i + 1).map(|l| &l.source)}))
+                .collect::<Vec<_>>()},
         "unlocks": c.unlocks.granted.iter().map(|((kind, name), new)| json!({"kind": kind, "name": name, "new": new})).collect::<Vec<_>>(),
         "unlock_all": c.unlocks.unlock_all,
+        "presets": state.presets.iter().map(|p| json!({"key": p.row.key, "id": p.row.id, "name_text": p.row.name_text})).collect::<Vec<_>>(),
         "active": c.active,
         "achievements": state.awards.achievements.granted.keys().collect::<Vec<_>>(),
         "graph": c.runner.running.as_ref().map(|r| json!({"id": r.graph, "state": r.state})),
@@ -153,6 +157,54 @@ pub(super) fn skip_start(world: &mut World, owner: &str) -> Result<(), String> {
     })
 }
 
+/// The team's name (`n` None) or teammate n's; kept to 16 characters.
+pub(super) fn team_name(world: &mut World, owner: &str, n: Option<usize>, name: &str) -> Result<(), String> {
+    change(world, |state, _| {
+        let name = skate_core::career::team::clip_name(name);
+        let event = match n {
+            None => {
+                state.career.team.name.clone_from(&name);
+                json!({"name": "career_team_name", "team_name": name})
+            }
+            Some(n) => {
+                state.career.team.teammate_mut(n).ok_or(format!("no teammate {n}"))?.name.clone_from(&name);
+                json!({"name": "career_teammate_name", "n": n, "teammate_name": name})
+            }
+        };
+        info!("SKATE_CAREER mod {owner} team_name {n:?} {name:?}");
+        state.awards.event(event);
+        Ok(())
+    })
+}
+
+/// Teammate n gets a preset's look (an engine-owned look: it stays when the mod stops).
+pub(super) fn teammate_preset(world: &mut World, owner: &str, n: usize, key: &str) -> Result<(), String> {
+    change(world, |state, _| {
+        state.apply_preset(n, key)?;
+        info!("SKATE_CAREER mod {owner} teammate_preset {n} {key}");
+        state.awards.event(json!({"name": "career_teammate_look", "n": n, "set": true, "preset": key}));
+        Ok(())
+    })
+}
+
+/// Teammate n's look from a mod (None clears it). Mod looks go when the mod stops (`clear_owner`).
+pub(super) fn teammate_look(world: &mut World, owner: &str, n: usize, profile: Option<serde_json::Map<String, Value>>)
+    -> Result<(), String> {
+    change(world, |state, _| {
+        if state.career.team.teammate_mut(n).is_none() {
+            return Err(format!("no teammate {n}"));
+        }
+        use skate_data::cac_save::{LookSource, SlotLook};
+        let set = profile.as_ref().is_some_and(|p| !p.is_empty());
+        state.looks.set(n, profile.map(|profile| SlotLook { source: LookSource::Mod { id: owner.to_owned() }, profile,
+            extra: Default::default() }));
+        info!("SKATE_CAREER mod {owner} teammate_look {n} set={set}");
+        state.awards.event(json!({"name": "career_teammate_look", "n": n, "set": set}));
+        state.save_looks();
+        Ok(())
+    })
+}
+
 /// The running mods' progression overlays (`progression/*.json`, b887 §8), in mod id order; read again only when
 /// the set of running mods or their content changes. The career rebuilds its data on its next update.
 pub(super) fn sync_content(world: &mut World, mods: &Mods) {
@@ -186,6 +238,11 @@ pub(super) fn clear(world: &mut World) {
     let Some(mut state) = world.get_resource_mut::<CareerState>() else { return };
     let before = state.career.runner.flags.len();
     state.career.runner.flags.retain(|k, _| !k.contains(':'));
+    let owners: Vec<String> = state.looks.slots.iter().flatten()
+        .filter_map(|l| match &l.source { skate_data::cac_save::LookSource::Mod { id } => Some(id.clone()), _ => None }).collect();
+    if owners.iter().fold(false, |any, id| !state.looks.clear_mod(id).is_empty() || any) {
+        state.save_looks();
+    }
     if state.career.runner.flags.len() != before {
         state.dirty = true;
     }
@@ -197,6 +254,9 @@ pub(super) fn clear_owner(world: &mut World, owner: &str) {
     let prefix = format!("{owner}:");
     let before = state.career.runner.flags.len();
     state.career.runner.flags.retain(|k, _| !k.starts_with(&prefix));
+    if !state.looks.clear_mod(owner).is_empty() {
+        state.save_looks();
+    }
     if state.career.runner.flags.len() != before {
         state.dirty = true;
     }

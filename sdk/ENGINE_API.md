@@ -211,8 +211,11 @@ the progression actions, flags, the team and achievements.
     sdk.career.on()           -- false without the opt-in or the progression data
     sdk.career.get()          -- {board_sales, money, money_earned,
                               --   milestone={index, count, start, goal, thresholds, pending},
-                              --   armed, fired, flags, team={members, tiers}, achievements,
+                              --   armed, fired, flags, achievements,
+                              --   team={name, logo, members, tiers,
+                              --     teammates={{joined, name, character, look={kind, id} or nil}}},
                               --   unlocks={{kind, name, new}}, unlock_all, active (activated challenges),
+                              --   presets={{key, id, name_text}} (teammate presets),
                               --   graph={id, state} or nil, queue}
     sdk.career.add_sales(amount, reason)  -- board sales (counted as bonus sales), runs the checks
     sdk.career.add_money(amount)          -- money, runs the checks
@@ -225,11 +228,17 @@ the progression actions, flags, the team and achievements.
                                           --   so the crossbar shows board sales (also SKATE_CAREER_SKIP_START=1)
     sdk.career.activate_challenge(id)     -- make a challenge available while gating is on
     sdk.career.activate_group(id)         -- every challenge of a progression group
+    sdk.career.set_team_name(name)        -- the team's name (16 characters kept; empty allowed)
+    sdk.career.set_teammate_name(n, name) -- teammate n's name (1-based)
+    sdk.career.set_teammate_preset(n, key)   -- teammate n's look from a preset row (get().presets)
+    sdk.career.set_teammate_look(n, profile) -- teammate n's look (a settings/character.json style
+                                          --   table; nil clears); removed when the mod stops
 
 Events in `on_event`: `career_paid` (`{challenge, tier, money, sales, rewards}`),
 `career_action_fired` (`{action, graph}`), `career_milestone`, `career_teammate`,
 `career_tier` (`{tier}`), `career_achievement` (`{achievement}`),
-`career_unlock` (`{kind, unlock, reward}`).
+`career_unlock` (`{kind, unlock, reward}`), `career_team_name` (`{team_name}`),
+`career_teammate_name` (`{n, teammate_name}`), `career_teammate_look` (`{n, set}`).
 Career changes stay when the mod stops (the graphs they fired cannot be undone);
 the mod's own flags go. Amounts are capped at 10,000,000 per call. Details:
 `docs/hails-additions/43-career.md`.
