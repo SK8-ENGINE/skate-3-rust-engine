@@ -46,6 +46,8 @@ pub(crate) struct Autopilot {
     restart_in: u32,
     /// Held at its spot (a race before GO): the body is pinned, the brain does not ride.
     hold: bool,
+    /// The player's deck last tick, to see a teleport (a jump of more than `TELEPORT_JUMP` in one tick).
+    last_deck: Option<[f32; 3]>,
 }
 
 impl Autopilot {
@@ -104,6 +106,16 @@ pub(crate) fn engage(
             info!("AUTOPILOT_RESULT {result} brain={}", autopilot.character);
             // The race's lines go with it: pick up an ambient line again.
             autopilot.restart_in = RESTART_TICKS;
+        }
+    }
+    // Any teleport (--teleport, the teleport menu, a challenge start): pick a line again where the player arrived.
+    let deck = physics.board.bodies()[skate_core::physics::board::BodyId::Deck.index()].rates.position;
+    let deck = [deck.x, deck.y, deck.z];
+    if let Some(last) = autopilot.last_deck.replace(deck) {
+        let moved = ((deck[0] - last[0]).powi(2) + (deck[1] - last[1]).powi(2) + (deck[2] - last[2]).powi(2)).sqrt();
+        if moved > TELEPORT_JUMP && autopilot.npc.is_some() && autopilot.restart_in == 0 {
+            autopilot.restart_in = RESTART_TICKS;
+            info!("AUTOPILOT the player moved {moved:.1} m in a tick (a teleport): picking a line again there");
         }
     }
     if autopilot.restart_in > 0 {
@@ -200,6 +212,8 @@ pub(crate) fn engage(
 const PICK_RADIUS: f32 = 30.0;
 /// Ticks between a race start's slot teleport and engaging there again.
 const RESTART_TICKS: u32 = 10;
+/// More than this (m) in one tick is a teleport, not riding (14 m/s is 0.23 m per tick).
+const TELEPORT_JUMP: f32 = 10.0;
 
 /// OURS (not retail; retail starts AI skaters at a line start): the line and node nearest `position`, a node whose
 /// recorded direction points away from `forward` counting 10 m farther, within `radius`.
@@ -296,6 +310,9 @@ pub(crate) fn possess_out(
         let deck = sim.deck_position();
         npc_sim::swap_player(&mut sim, &mut physics, &mut skater, &mut controls, &mut camera);
         autopilot.swapped = false;
+        // The brain's own moves (a bail respawn) are not teleports.
+        let p = physics.board.bodies()[skate_core::physics::board::BodyId::Deck.index()].rates.position;
+        autopilot.last_deck = Some([p.x, p.y, p.z]);
         *calls += 1;
         // Every 2 s: where the brain has the player (logs must diagnose).
         if *calls % 120 == 1 {

@@ -739,6 +739,18 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
   only its flat part across the line (`ai_record::sideways_position_step`): it steers onto the line but never carries
   the board along or up it. Desktop 3 min after: Industrial 5.20 m/s, 3 bails, none from the air, no switch lost;
   DownTown 7.14 m/s, 0 bails. One flat pushless rise left (Industrial, 3.3 -> 5.5 m/s in 7 ticks, on the path).
+- Races (ours, 9ecd94c7): on every race start (`TeleportToStart`, counted in `Races::placements`) the brain lets go
+  of the player, waits 10 ticks for the slot teleport to land and engages again at slot 0, picking only the race's own
+  lines (`PopulationState::scripted_lines`, the AI racers' set); it is held at its slot (`NpcRaceClock` not moving)
+  until `RaceStart` (`Races::started`) and races with no rubber band (it is not one of the AI racers). Splits and the
+  finish fire from the player's own body as always. At the end it logs `AUTOPILOT_RESULT race=<id>
+  completion=<..> time=<s> place=<n> brain=<look>` and goes back to an ambient line (the race's lines leave with it).
+  Dev: `SKATE_CHALLENGES=1 SKATE_RACE=<id> SKATE_AUTOPILOT=1` on the race's map. Not run yet in a race (the desktop
+  install had no challenges export; refreshed 2026-11-09).
+- Teleports (ours): the player's deck moving more than 10 m between the brain's step and the next tick (any teleport
+  outside the brain: `--teleport`, the teleport menu) restarts the brain where the player arrived; the brain's own
+  bail respawns do not count. Before, the laptop's Mega-Park run (autopilot-megapark-20261109-0733) engaged 11 ms
+  before `--teleport` landed, found itself 315 m from its line and walked for 108 s until a bail respawn put it back.
 - Dev: `SKATE_AUTOPILOT=1` engages at the start, `SKATE_AUTOPILOT_CHARACTER=<look>` picks the brain's character
   (default danny_way), `SKATE_AUTOPILOT_LINE=<32 hex digits>` the start line; any pad input releases the player.
   `AUTOPILOT` log lines: engaged / released and every 2 s position, speed, state, line and node.
