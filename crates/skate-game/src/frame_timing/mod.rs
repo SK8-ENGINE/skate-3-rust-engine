@@ -275,6 +275,9 @@ struct FrameLogSink(log::FrameLog);
 
 #[derive(Component)]
 struct FrameOverlay;
+/// The counter and, centred under it, the session timer: moved between the corners as one.
+#[derive(Component)]
+struct FrameStack;
 /// The two top corners the counter can sit in (graphics menu "FPS Counter Position"); the warning stays left.
 #[derive(Component)]
 struct FrameCorner {
@@ -537,22 +540,15 @@ fn show_session_timer(
 fn place_overlay(
     mut commands: Commands,
     menu: Option<Res<crate::graphics_menu::Menu>>,
-    overlay: Query<(Entity, &ChildOf), With<FrameOverlay>>,
-    timer: Query<(Entity, &ChildOf), With<SessionTimer>>,
+    stack: Query<(Entity, &ChildOf), With<FrameStack>>,
     corners: Query<(Entity, &FrameCorner)>,
 ) {
     let right = menu.as_ref().is_some_and(|m| m.frame_stats_right());
     let Some((corner, _)) = corners.iter().find(|(_, c)| c.right == right) else { return };
-    for (e, parent) in &overlay {
+    for (e, parent) in &stack {
         if parent.parent() != corner {
             // First in the column, above the warning.
             commands.entity(corner).insert_children(0, &[e]);
-        }
-    }
-    // The session timer stays attached to the counter: right under it, in the same corner.
-    for (e, parent) in &timer {
-        if parent.parent() != corner {
-            commands.entity(corner).insert_children(1, &[e]);
         }
     }
 }
@@ -584,6 +580,15 @@ fn spawn_overlay(mut commands: Commands) {
         GlobalZIndex(100),
         FrameCorner { right: true },
     ));
+    // The counter with the session timer centred under it (place_overlay moves the pair between the corners).
+    let stack = commands
+        .spawn((
+            Name::new("Frame-time stack"),
+            FrameStack,
+            Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(6), ..default() },
+            ChildOf(corner),
+        ))
+        .id();
     commands
         .spawn((
             Name::new("Frame-time overlay"),
@@ -596,7 +601,7 @@ fn spawn_overlay(mut commands: Commands) {
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
-            ChildOf(corner),
+            ChildOf(stack),
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -623,8 +628,7 @@ fn spawn_overlay(mut commands: Commands) {
                     }
                 });
         });
-    // Attached to the FPS overlay: directly under it in its corner (place_overlay), sized from the window
-    // (show_session_timer).
+    // Attached to the FPS overlay: centred under it (the stack), sized from the window (show_session_timer).
     commands.spawn((
         Name::new("Session timer"),
         SessionTimer,
@@ -633,7 +637,7 @@ fn spawn_overlay(mut commands: Commands) {
         TextColor(Color::WHITE),
         Node { padding: UiRect::axes(px(10), px(4)), ..default() },
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
-        ChildOf(corner),
+        ChildOf(stack),
     ));
     // Same box style as the counter, in red, hidden until the asset check publishes something to refresh.
     commands
