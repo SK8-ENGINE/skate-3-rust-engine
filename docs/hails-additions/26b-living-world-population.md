@@ -639,8 +639,9 @@ Facing rules on the exported lines (fix 16, fix 23, fix 23 corrected). Every eig
   named in a report.
 - Change: Graphics > "Session Timer" (On / Off, saved as `session_timer` in `settings/graphics.json`, on by default,
   older files default to On). `frame_timing::show_session_timer` draws `h:mm:ss` since the game started in a box
-  attached to the FPS overlay: directly under the frame-time counter in its corner (`place_overlay` moves both when the
-  counter's corner changes), shown whether or not the counter is on. Its font is 2.4 % of the window height, at least
+  attached to the FPS overlay: centred under the frame-time counter in its corner (both sit in one column, the
+  `FrameStack`, which `place_overlay` moves when the counter's corner changes; centred since 2026-11-08 evening), shown
+  whether or not the counter is on. Its font is 2.4 % of the window height, at least
   14 (UI pixels carry the DPI scale, so it follows window size and DPI). Before 2026-11-08 it was a fixed 12 px box in
   the bottom left corner, unreadable on a 2878x1738 laptop window (ask 539). It logs `SESSION_TIMER h:mm:00` at every full
   minute, so a time read off the screen maps to the log's wall clock. Mods read it as `frame.session_s` in the
