@@ -231,6 +231,7 @@ pub(crate) fn build(
     app.add_plugins(crate::ui_audio::UiAudioPlugin);
     app.add_plugins(crate::game_audio::GameAudioPlugin);
     app.add_plugins(crate::living_world::LivingWorldPlugin);
+    app.add_plugins(crate::autopilot::AutopilotPlugin);
     app.add_systems(Last, crate::crash_context::sample);
     app.add_systems(Startup, warn_integrated_gpu);
     if crate::trace_all::on() || std::env::var_os("SKATE_GPU_TIMING").is_some_and(|v| v != "0") {

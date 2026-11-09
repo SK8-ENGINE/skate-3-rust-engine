@@ -411,11 +411,26 @@ fn spawn_matrix(spawn: &skate_core::physics::drive_frames::RetailAffineTransform
 
 /// Move a simulated skater's loaded body into the pool (its entity goes back to replay or is despawned).
 pub(crate) fn pool_from(world: &mut World, e: Entity) {
+    // The autopilot's NPC holds the player's own body while `simulate` runs: it never goes to the pool.
+    if world.get::<crate::autopilot::Possessed>(e).is_some() && world.get_resource::<crate::autopilot::Autopilot>().is_some_and(|a| a.holds_player()) {
+        warn!("NPC_SKATER_SIM the autopilot's skater keeps its body (it is the player's)");
+        return;
+    }
     let body = world.get_entity_mut(e).ok().and_then(|mut entity| entity.take::<NpcSim>()).map(|sim| (sim.context, sim.body));
     if let (Some(body), Some(mut pool)) = (body, world.get_resource_mut::<NpcSimPool>()) {
         pool.finish_load();
         pool.bodies.push(body);
     }
+}
+
+/// The autopilot's swap (`autopilot::possess_in` / `possess_out`): the player's physics context, runtime, controls and
+/// camera trade places with a possessed NPC's body, so `simulate` runs the brain and its step on the player.
+pub(crate) fn swap_player(sim: &mut NpcSim, physics: &mut GamePhysics, runtime: &mut crate::physics::SkaterRuntime,
+    controls: &mut crate::physics::PlayerControls, camera: &mut crate::camera::CameraRuntime) {
+    physics.swap_player_context(&mut sim.context);
+    std::mem::swap(runtime, &mut *sim.body.runtime);
+    std::mem::swap(controls, &mut *sim.body.controls);
+    std::mem::swap(camera, &mut *sim.body.camera);
 }
 
 impl NpcSim {

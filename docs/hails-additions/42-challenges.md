@@ -687,6 +687,34 @@ is shown when the killed points are above 0 [inferred stand-in for a non-empty O
 co-op offline, so Start is the only option. Several challenges in reach keep our pick
 popup; the map's Sign Up is not ported yet (retail's arrival path skips the poster, b913).
 
+## Change: player autopilot (`autopilot.rs`; ours, not retail, 2026-11-08)
+
+- Why: a testing aid for challenges and the career (the brain attempts a challenge and the result is logged), and a mod
+  surface (scripted sequences). Retail has no player autopilot; the brain it runs IS retail's NPC skater AI (doc 26e).
+- How: the brain does not press pad buttons; it gives a body the AI record (`SkaterRuntime::ai_physics`), its trick
+  signals (`PlayerControls` intents) and `ai_driven`, all on the player's own types. The autopilot spawns a scripted NPC
+  skater (`Possessed`) and `possess_in` / `possess_out` (around `npc_sim::simulate`) swap the player's physics context,
+  runtime, controls and camera into its `NpcSim` and back (`npc_sim::swap_player`, `GamePhysics::swap_player_context`),
+  so the brain and its step run unchanged on the player; scoring, challenges, career and camera see a normal player.
+  The player's own controls and physics step stand down while it drives; one arming tick avoids a double step.
+- Start (ours): the nearest node of any line within 30 m, a node heading away from the player counting 10 m farther,
+  never the last two nodes; the NPC is pinned at the player's spot like a racer at its slot (it takes a body at once, at
+  any distance) and released once it holds the player. Retail starts AI skaters at a line start.
+- Guards: the possessed NPC's body never goes to the pool while it holds the player's (`pool_from`); prop ownership
+  stays with the main physics during the swap, so the autopilot pushes no props (NPC steps never do); the possessed NPC
+  is hidden and silent (the player is drawn and heard); it does not avoid its own body, and other NPCs avoid the player,
+  not its hidden line sample (`npc_avoid`).
+- Dev: `SKATE_AUTOPILOT=1` engages at the start, `SKATE_AUTOPILOT_CHARACTER=<look>` picks the brain's character
+  (default danny_way), `SKATE_AUTOPILOT_LINE=<32 hex digits>` the start line; any pad input releases the player.
+  `AUTOPILOT` log lines: engaged / released and every 2 s position, speed, state, line and node.
+- Verified (desktop, DownTown, 60 s): it walks to the line, then rides six lines in a row with airs, no bails; before the
+  avoid fix it slowed for its own body (31 avoid entries naming the player), after it none. A stop at a turn (speed
+  5.4 -> 0.5 m/s while it left and rejoined the path) is the retail brain's own.
+- Next (`.claude/todo/player-autopilot.md`): races as a racer, free-roam line lists, the smarter challenge-aware layer
+  (ours), `sdk.player.autopilot`.
+- Tests: `autopilot::tests::the_pick_is_the_nearest_node_heading_the_players_way`,
+  `autopilot::tests::a_line_id_parses_from_32_hex_digits`.
+
 ## Files
 
 - `tools/asset_pipeline/vlt.py` (`field_bytes`), `tools/asset_pipeline/test_vlt.py`

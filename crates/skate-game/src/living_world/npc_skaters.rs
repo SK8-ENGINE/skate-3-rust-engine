@@ -2225,7 +2225,7 @@ pub(crate) fn install(app: &mut App) {
         .add_message::<NpcSkaterEvent>()
         // After the ped data load: avoid and simulate read its navmesh, and unordered they saw the old map's (or
         // none) on a map's first tick depending on which the executor ran first.
-        .add_systems(FixedUpdate, (apply_records, super::npc_avoid::avoid, advance, super::npc_sim::simulate, super::npc_sim::reactions, track_stance, log_backwards, log_readout).chain().after(super::step_population).after(super::peds::load_ped_data).distributive_run_if(crate::replay::world_live))
+        .add_systems(FixedUpdate, (crate::autopilot::engage, apply_records, super::npc_avoid::avoid, advance, crate::autopilot::possess_in, super::npc_sim::simulate, crate::autopilot::possess_out, super::npc_sim::reactions, track_stance, log_backwards, log_readout).chain().after(super::step_population).after(super::peds::load_ped_data).distributive_run_if(crate::replay::world_live))
         .add_systems(
             FixedUpdate,
             push_proxies.after(crate::multiplayer::prepare).after(crate::app::SimulationSet::Controls).before(crate::app::SimulationSet::Physics),

@@ -100,7 +100,7 @@ pub(crate) fn avoid(
     time: Res<Time>,
     peds: Query<(&Pedestrian, &PedBody)>,
     cars: Query<(&TrafficCar, &CarMotion)>,
-    mut npcs: Query<(&NpcSkater, &mut NpcReplay)>,
+    mut npcs: Query<(&NpcSkater, &mut NpcReplay, Has<crate::autopilot::Possessed>)>,
     mut events: MessageWriter<NpcSkaterEvent>,
 ) {
     let _span = super::timing::span(super::timing::NPC_AVOID);
@@ -169,7 +169,8 @@ pub(crate) fn avoid(
             obstacles.push(circle(PLAYER_ID_BASE + i as u64, ObstacleKind::Skater, o.position, o.velocity, SKATER_SIZE, 1.8));
         }
         // Other NPC skaters (their last sample).
-        let mut list: Vec<_> = npcs.iter().filter_map(|(n, r)| r.last.as_ref().map(|l| (n.id, l.position, l.velocity))).collect();
+        // The autopilot's NPC is the player's body (in the players above); its line sample is no obstacle.
+        let mut list: Vec<_> = npcs.iter().filter(|(_, _, possessed)| !possessed).filter_map(|(n, r, _)| r.last.as_ref().map(|l| (n.id, l.position, l.velocity))).collect();
         list.sort_by_key(|x| x.0);
         for (id, p, v) in list {
             obstacles.push(circle(id.to_u64(), ObstacleKind::Skater, p, v, SKATER_SIZE, 1.8));
@@ -179,8 +180,8 @@ pub(crate) fn avoid(
     track.tick = tick;
     let lines = super::npc_skaters::npc_lines(&state);
     let mut sorted: Vec<_> = npcs.iter_mut().collect();
-    sorted.sort_by_key(|(n, _)| n.id);
-    for (npc, mut replay) in sorted {
+    sorted.sort_by_key(|(n, _, _)| n.id);
+    for (npc, mut replay, possessed) in sorted {
         let replay = &mut *replay;
         let a = &mut replay.avoid;
         a.previous_offset = a.offset;
@@ -197,7 +198,8 @@ pub(crate) fn avoid(
         };
         let riding = !replay.cursor.finished && node.flags & (node_flags::AIRBORNE | node_flags::OFF_BOARD) == 0 && replay.cursor.current_trick() < 0;
         let me_id = npc.id.to_u64();
-        let near: Vec<Obstacle> = obstacles.iter().filter(|o| o.id != me_id).copied().collect();
+        // The autopilot's NPC does not avoid the local player (observer 0): that is its own body.
+        let near: Vec<Obstacle> = obstacles.iter().filter(|o| o.id != me_id && !(possessed && o.id == PLAYER_ID_BASE)).copied().collect();
         let speed = length(sample.velocity);
         let forward = if speed > 1e-3 { sample.velocity.map(|c| c / speed) } else { [0.0, 0.0, 1.0] };
         let here = project_on_line(line, replay.cursor.node, sample.position, 1.0);

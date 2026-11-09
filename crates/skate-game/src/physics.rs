@@ -1031,6 +1031,14 @@ impl GamePhysics {
         context.riding.ground.previous_velocities.fill(v);
     }
 
+    /// The autopilot's swap of the player's context with a possessed NPC's (`npc_sim::swap_player`): as
+    /// [`Self::swap_skater_context`], but prop ownership stays here, so the player's body steps as an NPC (NPC steps
+    /// never move props) while the shared prop state is only changed outside the NPC phase.
+    pub(crate) fn swap_player_context(&mut self, context: &mut SkaterPhysicsContext) {
+        self.swap_skater_context(context);
+        std::mem::swap(&mut self.owns_props, &mut context.owns_props);
+    }
+
     pub(crate) fn swap_skater_context(&mut self, context: &mut SkaterPhysicsContext) {
         std::mem::swap(&mut self.clock, &mut context.clock);
         std::mem::swap(&mut self.board, &mut context.board);
@@ -1147,8 +1155,13 @@ pub(crate) fn advance(
     mut exit: MessageWriter<AppExit>,
     mut performance: Option<ResMut<crate::performance::Performance>>,
     mods: Option<Res<crate::modding::Mods>>,
+    autopilot: Option<Res<crate::autopilot::Autopilot>>,
 ) {
     if physics.failed {
+        return;
+    }
+    // The autopilot's brain steps the player inside the NPC phase (`autopilot.rs`).
+    if crate::autopilot::driving(autopilot.as_deref()) {
         return;
     }
     if mods

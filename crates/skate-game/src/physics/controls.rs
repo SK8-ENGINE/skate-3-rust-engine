@@ -59,7 +59,11 @@ pub(super) fn sample(
     skater: Res<SkaterRuntime>,
     camera: Res<crate::camera::CameraRuntime>,
     mut player: ResMut<PlayerControls>,
+    autopilot: Option<Res<crate::autopilot::Autopilot>>,
 ) {
+    if crate::autopilot::driving(autopilot.as_deref()) {
+        return;
+    }
     let mut map = input.0.actions();
     player
         .update_for_physics(&mut map, &physics, &skater, &camera)
