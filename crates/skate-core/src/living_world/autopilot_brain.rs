@@ -17,16 +17,20 @@ pub struct JumpRules {
     /// line instead of jumping slow...
     pub switch_frames: u32,
     pub switch_share: f32,
-    /// ...one whose node is 1 m to this far ahead (m), at most `switch_side` to the side (under the brain's 6 m lost
-    /// radius), this close in height (m) and heading its way.
-    pub switch_ahead: f32,
+    /// ...but not closer than this (frames): at the takeoff itself it is too late to leave.
+    pub switch_min_frames: u32,
+    /// ...for a node 1 m or more ahead, within `switch_reach` (m, under the brain's 6 m lost radius; 12 m ahead lost it
+    /// at once on the laptop), at most `switch_side` to the side, this close in height (m), heading its way, and whose
+    /// recorded speed is at most `switch_speed_ratio` x its own (at least 3 m/s).
+    pub switch_reach: f32,
     pub switch_side: f32,
     pub switch_height: f32,
+    pub switch_speed_ratio: f32,
 }
 
 impl Default for JumpRules {
     fn default() -> Self {
-        Self { look_ahead_frames: 240, push_until_frames: 12, arc_speed_share: 1.0, switch_frames: 45, switch_share: 0.85, switch_ahead: 12.0, switch_side: 4.0, switch_height: 2.5 }
+        Self { look_ahead_frames: 240, push_until_frames: 12, arc_speed_share: 1.0, switch_frames: 45, switch_share: 0.85, switch_min_frames: 15, switch_reach: 5.0, switch_side: 4.0, switch_height: 2.5, switch_speed_ratio: 1.5 }
     }
 }
 
@@ -77,7 +81,7 @@ pub fn keeps_arc(flat_speed: f32, jump: &ReplayJump, rules: &JumpRules) -> bool 
 
 /// Too slow for the jump just ahead: time to leave the line.
 pub fn should_switch(speed: f32, jump: Option<JumpAhead>, rules: &JumpRules) -> bool {
-    jump.is_some_and(|j| j.frames <= rules.switch_frames && speed < j.speed * rules.switch_share)
+    jump.is_some_and(|j| (rules.switch_min_frames..=rules.switch_frames).contains(&j.frames) && speed < j.speed * rules.switch_share)
 }
 
 /// The closest node (side distance first) of another line that is ahead of the skater, heading its way (within 45
@@ -92,10 +96,14 @@ pub fn switch_line(lines: &dyn LineSource, from: [u8; 16], position: [f32; 3], f
             let d = [n.position[0] - position[0], n.position[1] - position[1], n.position[2] - position[2]];
             let ahead = d[0] * forward[0] + d[2] * forward[2];
             let side = (d[0] * forward[2] - d[2] * forward[0]).abs();
-            if !(1.0..=rules.switch_ahead).contains(&ahead) || side > rules.switch_side || d[1].abs() > rules.switch_height {
+            let dist = d[0].hypot(d[2]);
+            if ahead < 1.0 || dist > rules.switch_reach || side > rules.switch_side || d[1].abs() > rules.switch_height {
                 continue;
             }
-            let dist = side + 0.25 * ahead;
+            let recorded = n.step[0].hypot(n.step[1]).hypot(n.step[2]) * super::ai_record::FRAMES_PER_SECOND;
+            if recorded > speed.max(3.0) * rules.switch_speed_ratio {
+                continue;
+            }
             let run = n.step[0].hypot(n.step[2]);
             if run < 1e-4 || (n.step[0] * forward[0] + n.step[2] * forward[2]) / run < 0.7 {
                 continue;
@@ -161,6 +169,7 @@ mod tests {
         assert!(should_switch(7.0, Some(JumpAhead { frames: 40, speed: 10.0 }), &rules));
         assert!(!should_switch(7.0, Some(JumpAhead { frames: 60, speed: 10.0 }), &rules), "still time to push");
         assert!(!should_switch(9.0, Some(JumpAhead { frames: 40, speed: 10.0 }), &rules));
+        assert!(!should_switch(7.0, Some(JumpAhead { frames: 10, speed: 10.0 }), &rules), "too late to leave");
         let mut lines = std::collections::BTreeMap::new();
         for l in [straight(1, 0.0, Some(4), 10.0), straight(2, 2.0, Some(5), 12.0), straight(3, -4.0, None, 0.0), straight(4, 1.0, None, 0.0)] {
             lines.insert(l.id, l);

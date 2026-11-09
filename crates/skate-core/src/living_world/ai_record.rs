@@ -91,6 +91,22 @@ pub fn without_speed_pull(record: &mut ExternalPhysicsInput) {
     record.flags &= !(1 << 28);
 }
 
+/// OURS (the player autopilot): the position step (bit 30, up to 0.02 m per tick toward the line) keeps only its part
+/// across the line, flat: it steers the board onto the line but never carries it along or up the line (it moved a
+/// stopped autopilot 3 m up a 20 % slope with no push, laptop autopilot-jumps-20261109-0029 run 2).
+pub fn sideways_position_step(record: &mut ExternalPhysicsInput, deck: Vec3) {
+    if record.flags & (1 << 30) == 0 {
+        return;
+    }
+    let f = |i: usize| -> Vec3 { let w = record.vectors[i].map(f32::from_bits); [w[0], w[1], w[2]] };
+    let (target, along) = (f(3), f(2));
+    let run = along[0].hypot(along[2]);
+    let d = [target[0] - deck[0], 0.0, target[2] - deck[2]];
+    let k = if run > 1e-5 { (d[0] * along[0] + d[2] * along[2]) / (run * run) } else { 0.0 };
+    let side = [d[0] - along[0] * k, 0.0, d[2] - along[2] * k];
+    record.vectors[3] = words([deck[0] + side[0], deck[1], deck[2] + side[2]], 1.0);
+}
+
 /// `sub_8246DB50` when it skips `sub_8246DE38`: the zeroed record with the -1 splat at +128 and the
 /// flag word seeded with `pc+922 << 25`, bits 31..26 cleared. No steer bit, so the physics board path
 /// does not run and the skater coasts on its own physics until the projection commits again.
@@ -345,5 +361,15 @@ mod tests {
         assert_eq!(r.vectors[3], [0; 4], "no target position");
         assert_eq!(r.vectors[8].map(f32::from_bits), [-1.0; 4]);
         assert_eq!(without_steering(&walking).flags, 0);
+    }
+
+    #[test]
+    fn the_autopilots_position_step_only_steers_across_the_line() {
+        let target = LineTarget { position: [3.0, 2.0, 5.0], step: [0.0, 0.0, 0.1], frame: [0.0, 0.0, 0.0, 1.0] };
+        let mut r = build(&target, [0.0, 0.0, 1.0], &SteerState::default());
+        r.flags |= 1 << 30;
+        sideways_position_step(&mut r, [1.0, 0.0, 0.0]);
+        let p = r.vectors[3].map(f32::from_bits);
+        assert!((p[0] - 3.0).abs() < 1e-5 && p[1] == 0.0 && p[2].abs() < 1e-5, "{p:?}");
     }
 }

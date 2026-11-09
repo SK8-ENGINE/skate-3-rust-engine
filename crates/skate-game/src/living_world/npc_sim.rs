@@ -1442,6 +1442,7 @@ pub(crate) fn simulate(
                 }
                 if sim.own_speed {
                     ai_record::without_speed_pull(&mut record);
+                    ai_record::sideways_position_step(&mut record, GamePhysics::context_deck_position(&sim.context));
                 }
                 sim.body.runtime.ai_physics = Some(crate::physics::AiPhysicsSource { record, fresh: true, cursor });
                 // NPC_SKATER_SPEED: the deck body's speed changed by 2 m/s within half a second (a line per skater per
@@ -1712,7 +1713,7 @@ pub(crate) fn simulate(
                             if !autopilot_brain::trick_cuts_push(input.speed, jump, &rules) {
                                 input.trick_frames = None;
                             }
-                            if autopilot_brain::should_switch(input.speed, jump, &rules) && !sim.approach.switch_tried {
+                            if state_now == PhysicalStateId::PhysicsGround && autopilot_brain::should_switch(input.speed, jump, &rules) && !sim.approach.switch_tried {
                                 sim.approach.switch_tried = true;
                                 let at = GamePhysics::context_deck_position(&sim.context);
                                 let fwd = if w[0].hypot(w[2]) > 0.5 { let f = w[0].hypot(w[2]); [w[0] / f, 0.0, w[2] / f] } else { facing };

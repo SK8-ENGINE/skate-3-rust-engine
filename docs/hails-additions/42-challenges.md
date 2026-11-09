@@ -731,6 +731,14 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
   6.16 m/s, with the push to takeoff speed and the arc rule 6.38 m/s, with the switch at 45 frames 6.46 m/s (3 bails,
   1 from the air, 4 switch decisions, 2 switched). Deciding at 90 frames with a 20 m radius switched 11 times, left the
   path (LOST) twice as often and fell to 5.05 m/s; with the 4 m side limit at 90 frames 4.90 m/s: kept at 45.
+  Laptop (autopilot-jumps-20261109-0029, against 9a93bbe1): bails 13 -> 8 and air bails 6 -> 3 over the three maps at
+  the same speed; but 3 of 17 switches were lost at once (the new node 8 to 11 m away), one switch came at the takeoff,
+  one mid-grind onto an 11 m/s uphill line, and a stopped autopilot climbed 3 m up a 20 % slope with no push. Now a
+  switch needs the node within 5 m in all (under the 6 m lost radius), 15 to 45 frames before the jump, riding
+  (PhysicsGround), and a recorded speed at most 1.5 x its own (at least 3 m/s); and the record's position step keeps
+  only its flat part across the line (`ai_record::sideways_position_step`): it steers onto the line but never carries
+  the board along or up it. Desktop 3 min after: Industrial 5.20 m/s, 3 bails, none from the air, no switch lost;
+  DownTown 7.14 m/s, 0 bails. One flat pushless rise left (Industrial, 3.3 -> 5.5 m/s in 7 ticks, on the path).
 - Dev: `SKATE_AUTOPILOT=1` engages at the start, `SKATE_AUTOPILOT_CHARACTER=<look>` picks the brain's character
   (default danny_way), `SKATE_AUTOPILOT_LINE=<32 hex digits>` the start line; any pad input releases the player.
   `AUTOPILOT` log lines: engaged / released and every 2 s position, speed, state, line and node.
@@ -744,7 +752,7 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
   the challenge-aware layer, `sdk.player.autopilot` (the `JumpRules` there too).
 - Tests: `autopilot::tests::the_pick_is_the_nearest_node_heading_the_players_way`,
   `autopilot::tests::a_line_id_parses_from_32_hex_digits`, skate-core `ai_record` (the record without the speed step),
-  skate-core `autopilot_brain` (push target, trick cut, arc rule, line switch).
+  skate-core `autopilot_brain` (push target, trick cut, arc rule, line switch), `ai_record` (the sideways position step).
 
 ## Files
 
