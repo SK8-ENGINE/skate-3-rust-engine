@@ -704,16 +704,24 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
   stays with the main physics during the swap, so the autopilot pushes no props (NPC steps never do); the possessed NPC
   is hidden and silent (the player is drawn and heard); it does not avoid its own body, and other NPCs avoid the player,
   not its hidden line sample (`npc_avoid`).
+- Speed (ours): the record's velocity step (flag bit 28, `82C05868`, up to 0.2 m/s per tick toward the recorded
+  skater's velocity) is dropped for the autopilot (`ai_record::without_speed_pull`); position and facing still steer.
+  With it the player gained speed uphill with no push (user, desktop Industrial runs: 2.4 m/s over 12 ticks on a 12 %
+  rise, no push); without it every ground speed-up in a 3 min Industrial run has push ticks or a downhill, at the same
+  pace (843 m at 6.0 m/s vs 908 m at 6.1 m/s). `NPC_SKATER_SPEED` now counts the push ticks in its window.
 - Dev: `SKATE_AUTOPILOT=1` engages at the start, `SKATE_AUTOPILOT_CHARACTER=<look>` picks the brain's character
   (default danny_way), `SKATE_AUTOPILOT_LINE=<32 hex digits>` the start line; any pad input releases the player.
   `AUTOPILOT` log lines: engaged / released and every 2 s position, speed, state, line and node.
 - Verified (desktop, DownTown, 60 s): it walks to the line, then rides six lines in a row with airs, no bails; before the
   avoid fix it slowed for its own body (31 avoid entries naming the player), after it none. A stop at a turn (speed
   5.4 -> 0.5 m/s while it left and rejoined the path) is the retail brain's own.
-- Next (`.claude/todo/player-autopilot.md`): races as a racer, free-roam line lists, the smarter challenge-aware layer
+- Laptop (autopilot-20261108-2053, the pull still on): DownTown 722 m over 15 lines, Industrial 262 m over 8, University
+  336 m over 7 (the given line's fallback works); no panics, the player visible and followed by the camera; wedged on a
+  curb lip (~28 s) and against a planter ledge (~14 s, then a bail), bails from the air, one bail from a car.
+- Next (`.claude/todo/player-autopilot.md`): the smarter layer for wedging, jumps and traffic; races as a racer, free-roam line lists, the smarter challenge-aware layer
   (ours), `sdk.player.autopilot`.
 - Tests: `autopilot::tests::the_pick_is_the_nearest_node_heading_the_players_way`,
-  `autopilot::tests::a_line_id_parses_from_32_hex_digits`.
+  `autopilot::tests::a_line_id_parses_from_32_hex_digits`, skate-core `ai_record` (the record without the speed step).
 
 ## Files
 

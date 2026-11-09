@@ -217,6 +217,7 @@ pub(crate) fn possess_in(
     if !clock.moving {
         clock.moving = true;
     }
+    sim.own_speed = true;
     // One arming tick: from the next tick the player's own step stands down (else the player steps twice once).
     if !autopilot.driving {
         autopilot.driving = true;

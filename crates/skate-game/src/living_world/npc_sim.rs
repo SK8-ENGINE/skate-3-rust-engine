@@ -142,6 +142,10 @@ pub(crate) struct NpcSim {
     last_node: Option<u32>,
     /// The PathController posted its push last tick (`pc+926`; the log names a push's start once).
     pushing: bool,
+    /// The player autopilot's skater: its record steers without pulling the speed (`ai_record::without_speed_pull`, ours).
+    pub(crate) own_speed: bool,
+    /// Ticks with a push in the NPC_SKATER_SPEED window.
+    push_ticks: u32,
     /// Controller B while it is the active controller (`brain+104`), with the line and node it walks back to.
     walker: Option<Walker>,
     /// Retail's path projection (cursor A / B) on the line it was started for.
@@ -521,7 +525,7 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
     if fit_to_ground {
         sim.body.runtime.fit_next_arrival();
@@ -1411,6 +1415,9 @@ pub(crate) fn simulate(
                     }
                     cursor = Some(crate::physics::AiRecordCursor { node, frame_in_segment, ext_node: ai_record::trajectory_node(line, node, frame_in_segment), has_trajectory: jump.is_some(), lands_node: node.saturating_sub(1) });
                 }
+                if sim.own_speed {
+                    ai_record::without_speed_pull(&mut record);
+                }
                 sim.body.runtime.ai_physics = Some(crate::physics::AiPhysicsSource { record, fresh: true, cursor });
                 // NPC_SKATER_SPEED: the deck body's speed changed by 2 m/s within half a second (a line per skater per
                 // half second at most): with the recorded speed the board path pulls toward (`82C05EC0`, b338) and the
@@ -1420,14 +1427,15 @@ pub(crate) fn simulate(
                     let now_speed = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt();
                     let (start, ticks, cooldown) = sim.speed_watch;
                     let (start, ticks) = if ticks == 0 || ticks >= 30 { (now_speed, 1) } else { (start, ticks + 1) };
+                    sim.push_ticks = if ticks == 1 { 0 } else { sim.push_ticks } + u32::from(sim.pushing);
                     let cooldown = cooldown.saturating_sub(1);
                     sim.speed_watch = (start, ticks, cooldown);
                     if cooldown == 0 && (now_speed - start).abs() >= 2.0 {
                         let flat = (w[0] * w[0] + w[2] * w[2]).sqrt();
                         let grade = if flat > 0.1 { w[1] / flat * 100.0 } else { 0.0 };
                         info!(
-                            "NPC_SKATER_SPEED #{} {} node {} state {:?} speed {start:.1} -> {now_speed:.1} m/s over {ticks} ticks (recorded {speed:.1} m/s, slope {grade:.0} %, on_path {on_path}, hold {})",
-                            npc.id.serial, npc.character, replay.cursor.node, state_now, sim.hold_ticks
+                            "NPC_SKATER_SPEED #{} {} node {} state {:?} speed {start:.1} -> {now_speed:.1} m/s over {ticks} ticks (recorded {speed:.1} m/s, slope {grade:.0} %, on_path {on_path}, hold {}, push ticks {}, speed pull {})",
+                            npc.id.serial, npc.character, replay.cursor.node, state_now, sim.hold_ticks, sim.push_ticks, !sim.own_speed
                         );
                         sim.speed_watch = (now_speed, 1, 30);
                     }

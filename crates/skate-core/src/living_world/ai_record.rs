@@ -84,6 +84,13 @@ pub fn build(target: &LineTarget, forward: Vec3, state: &SteerState) -> External
     ExternalPhysicsInput { vectors, flags: state.flags() }
 }
 
+/// OURS (the player autopilot, not retail): the record keeps steering (position and facing) but drops the velocity
+/// step (flag bit 28, `82C05868`: up to 0.2 m/s per tick toward the recorded skater's velocity, which gave the
+/// autopilot speed uphill with no push). Speed then comes from physics and pushes only.
+pub fn without_speed_pull(record: &mut ExternalPhysicsInput) {
+    record.flags &= !(1 << 28);
+}
+
 /// `sub_8246DB50` when it skips `sub_8246DE38`: the zeroed record with the -1 splat at +128 and the
 /// flag word seeded with `pc+922 << 25`, bits 31..26 cleared. No steer bit, so the physics board path
 /// does not run and the skater coasts on its own physics until the projection commits again.
@@ -317,6 +324,11 @@ mod tests {
         // Clamped at 99.9 m/s.
         let r = build(&LineTarget { step: [0.0, 0.0, 10.0], ..t }, [0.0, 0.0, 1.0], &SteerState::default());
         assert!((SteerTarget::from_words(&r.vectors, r.flags).velocity.z - MAX_SPEED).abs() < 1e-3);
+        // The autopilot's record steers without the velocity step.
+        let mut held = r;
+        without_speed_pull(&mut held);
+        assert_eq!(held.flags, r.flags & !(1 << 28));
+        assert!(r.flags & (1 << 28) != 0 && held.flags & (1 << 30) != 0);
     }
 
     #[test]
