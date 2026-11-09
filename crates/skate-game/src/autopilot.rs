@@ -40,6 +40,12 @@ pub(crate) struct Autopilot {
     quiet: bool,
     /// The line to start on instead of the nearest (dev: SKATE_AUTOPILOT_LINE=<32 hex digits>).
     pub line: Option<[u8; 16]>,
+    /// Race starts seen (`Races::placements`): a new one restarts the brain at the start slot, on the race's lines.
+    race_placements: u32,
+    /// Ticks to wait before engaging again, so the start slot teleport lands first.
+    restart_in: u32,
+    /// Held at its spot (a race before GO): the body is pinned, the brain does not ride.
+    hold: bool,
 }
 
 impl Autopilot {
@@ -78,11 +84,42 @@ pub(crate) fn engage(
     skater: Option<ResMut<SkaterRuntime>>,
     controls: Option<ResMut<PlayerControls>>,
     input: Option<Res<crate::input::PublishedTickInput>>,
+    races: Option<ResMut<crate::race_host::Races>>,
     mut possessed: Query<(Has<Possessed>, &mut crate::living_world::npc_skaters::NpcReplay)>,
 ) {
     let (Some(mut autopilot), Some(mut population), Some(index), Some(physics), Some(mut skater), Some(mut controls), Some(input)) =
         (autopilot, population, index, physics, skater, controls, input) else { return };
     if !autopilot.requested && autopilot.npc.is_none() {
+        return;
+    }
+    // Races (ours): the brain restarts at the start slot on every race start, waits for GO, and logs the result.
+    if let Some(mut races) = races {
+        autopilot.hold = races.run.is_some() && !races.started;
+        if races.placements != autopilot.race_placements {
+            autopilot.race_placements = races.placements;
+            autopilot.restart_in = RESTART_TICKS;
+            info!("AUTOPILOT race start: restarting at the start slot");
+        }
+        if let Some(result) = races.result.take() {
+            info!("AUTOPILOT_RESULT {result} brain={}", autopilot.character);
+            // The race's lines go with it: pick up an ambient line again.
+            autopilot.restart_in = RESTART_TICKS;
+        }
+    }
+    if autopilot.restart_in > 0 {
+        if autopilot.swapped {
+            return;
+        }
+        if let Some(id) = autopilot.npc.take() {
+            population.despawn_scripted(id);
+            autopilot.start = None;
+            autopilot.driving = false;
+            controls.ai_driven = false;
+            controls.action_intents.clear();
+            controls.named_intents.clear();
+            skater.ai_physics = None;
+        }
+        autopilot.restart_in -= 1;
         return;
     }
     let pad = input.0.actions().values().iter().any(|v| v.abs() > 0.3);
@@ -104,6 +141,9 @@ pub(crate) fn engage(
             let heading = if speed > 0.5 { velocity[0].atan2(velocity[2]) } else { player_heading(&physics) };
             let forward = [heading.sin(), 0.0, heading.cos()];
             let lines = crate::living_world::npc_skaters::npc_lines(&population);
+            // In a challenge with its own lines (a race) only those count, as for its AI racers.
+            let scripted = population.scripted_lines.clone();
+            let allowed = |id: &[u8; 16]| scripted.as_ref().is_none_or(|s| s.contains(id));
             let given = autopilot.line.filter(|l| {
                 let known = lines.contains_key(l);
                 if !known {
@@ -113,7 +153,7 @@ pub(crate) fn engage(
             });
             let pick = match given {
                 Some(l) => nearest_node(lines.get(&l).into_iter(), position, forward, f32::INFINITY),
-                None => nearest_node(lines.values(), position, forward, PICK_RADIUS),
+                None => nearest_node(lines.values().filter(|l| allowed(&l.id)), position, forward, PICK_RADIUS),
             };
             let Some((line, node)) = pick else {
                 if !autopilot.waiting_logged {
@@ -158,6 +198,8 @@ pub(crate) fn engage(
 
 /// How far from the player a line may be to pick it up (ours: the nearest node of any line).
 const PICK_RADIUS: f32 = 30.0;
+/// Ticks between a race start's slot teleport and engaging there again.
+const RESTART_TICKS: u32 = 10;
 
 /// OURS (not retail; retail starts AI skaters at a line start): the line and node nearest `position`, a node whose
 /// recorded direction points away from `forward` counting 10 m farther, within `radius`.
@@ -214,8 +256,8 @@ pub(crate) fn possess_in(
     let (Some(mut autopilot), Some(mut physics), Some(mut skater), Some(mut controls), Some(mut camera)) =
         (autopilot, physics, skater, controls, camera) else { return };
     let Ok((mut sim, mut clock)) = sims.single_mut() else { return };
-    if !clock.moving {
-        clock.moving = true;
+    if clock.moving == autopilot.hold {
+        clock.moving = !autopilot.hold;
     }
     sim.own_speed = true;
     // One arming tick: from the next tick the player's own step stands down (else the player steps twice once).

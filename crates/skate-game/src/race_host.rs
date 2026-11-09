@@ -105,6 +105,8 @@ pub(crate) struct RaceState {
     player_name: String,
     /// Seconds since the leaderboard rows were last refreshed.
     leaderboard_age: f32,
+    /// The results screen's time and place, for the autopilot's result line.
+    results: String,
 }
 
 #[derive(Resource, Default)]
@@ -113,6 +115,11 @@ pub(crate) struct Races {
     loaded: bool,
     generation: Option<u64>,
     pub run: Option<RaceState>,
+    /// For the player autopilot (`autopilot.rs`): starts placed (TeleportToStart), the heat running (RaceStart to
+    /// RaceStop), and the last finished race's result line.
+    pub placements: u32,
+    pub started: bool,
+    pub result: Option<String>,
 }
 
 const PLAYER: u32 = 0;
@@ -149,7 +156,7 @@ fn start(races: &mut Races, volumes: &mut crate::trigger_volumes::TriggerVolumes
     let mut run = RaceRun::new(p, best);
     let commands = run.start();
     let player_name = crate::multiplayer::local_player_name(assets);
-    races.run = Some(RaceState { race, run, tracker, ai, tick_carry: 0.0, player_name, leaderboard_age: 0.0 });
+    races.run = Some(RaceState { race, run, tracker, ai, tick_carry: 0.0, player_name, leaderboard_age: 0.0, results: String::new() });
     commands
 }
 
@@ -332,6 +339,7 @@ fn apply(
                 if let Err(e) = skater.travel_ex(slot, None, true) {
                     warn!("SKATE_RACE teleport {e}");
                 }
+                races.placements += 1;
                 if let (Some(ai), Some(pop)) = (state.ai.as_mut(), population.as_deref_mut()) {
                     ai.place(&state.race.heats[0], pop);
                 }
@@ -343,11 +351,13 @@ fn apply(
                 }
             }
             Command::RaceStart => {
+                races.started = true;
                 if let Some(ai) = state.ai.as_mut() {
                     ai.go();
                 }
             }
             Command::RaceStop => {
+                races.started = false;
                 if let Some(ai) = state.ai.as_mut() {
                     ai.stop();
                 }
@@ -416,6 +426,7 @@ fn apply(
             // The results screen is not ported: Continue at once (as the end dialog does without its movie).
             Command::Results { time, place } => {
                 info!("SKATE_RACE {id} results time={time:?} place={place:?}: continue");
+                state.results = format!("time={} place={}", time.map_or("none".into(), |t| format!("{t:.2}")), place.map_or("none".into(), |p| p.to_string()));
                 commands.extend(state.run.handle(Event::Continue));
             }
             Command::Complete(c) => finished = Some(c),
@@ -430,6 +441,9 @@ fn apply(
             s.set_record(r);
         });
         info!("SKATE_RACE end {id} completion={completion:?} best_time={:?}", challenges.records.get(&id).best_time);
+        races.started = false;
+        races.result = Some(format!("race={id} completion={} {}", crate::challenges::completion_name(completion),
+            races.run.as_ref().map_or(String::new(), |r| r.results.clone())));
         challenges.mods.event(serde_json::json!({"name": "challenge_ended", "challenge": id,
             "completion": crate::challenges::completion_name(completion)}));
         if let Some(career) = career.as_mut() {
