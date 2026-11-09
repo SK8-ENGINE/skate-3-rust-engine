@@ -709,6 +709,11 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
   With it the player gained speed uphill with no push (user, desktop Industrial runs: 2.4 m/s over 12 ticks on a 12 %
   rise, no push); without it every ground speed-up in a 3 min Industrial run has push ticks or a downhill, at the same
   pace (843 m at 6.0 m/s vs 908 m at 6.1 m/s). `NPC_SKATER_SPEED` now counts the push ticks in its window.
+  The laptop recheck (autopilot-speed-20261108-2133) left three more launches, now off for the autopilot too: the spawn
+  push after the handover and after every bail respawn (0 to 4.6 to 6.9 m/s in a few ticks; it now pushes off,
+  `NPC_SKATER_PUSH ... none: the autopilot pushes off`) and the recorded jump arc (`with_trajectory`: the recorded
+  skater's launch speed, 4.5 -> 10.4 m/s going up); its jumps use its own ollie physics. Desktop DownTown 3 min after:
+  926 m at 6.2 m/s over 14 lines, 4 bails.
 - Dev: `SKATE_AUTOPILOT=1` engages at the start, `SKATE_AUTOPILOT_CHARACTER=<look>` picks the brain's character
   (default danny_way), `SKATE_AUTOPILOT_LINE=<32 hex digits>` the start line; any pad input releases the player.
   `AUTOPILOT` log lines: engaged / released and every 2 s position, speed, state, line and node.

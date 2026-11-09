@@ -1409,7 +1409,8 @@ pub(crate) fn simulate(
                 let mut cursor = None;
                 if let Some(line) = lines.get(&replay.cursor.line) {
                     let (node, frame_in_segment) = (replay.cursor.node, replay.cursor.frame_in_segment);
-                    let jump = ai_record::current_trajectory(line, node, frame_in_segment);
+                    // OURS: the autopilot jumps with its own physics (the recorded arc sets the recorded skater's launch speed).
+                    let jump = ai_record::current_trajectory(line, node, frame_in_segment).filter(|_| !sim.own_speed);
                     if let Some(jump) = jump {
                         ai_record::with_trajectory(&mut record, jump, ai_record::lands_in_grind(line, node.saturating_sub(1)));
                     }
@@ -1454,14 +1455,15 @@ pub(crate) fn simulate(
                             let node = &line.nodes[replay.cursor.node as usize];
                             if node.flags & node_flags::OFF_BOARD == 0 {
                                 let moved = (at[0] - placed[0]).hypot(at[2] - placed[2]);
-                                let push = ai_record::spawn_push(at, placed, target.step, replay.cursor.node == 0, false);
+                                // OURS: the autopilot's skater gets no launch; it pushes off with its own pushes.
+                                let push = ai_record::spawn_push(at, placed, target.step, replay.cursor.node == 0, false).filter(|_| !sim.own_speed);
                                 if let Some(v) = push {
                                     GamePhysics::push_context_velocity(&mut sim.context, v);
                                 }
                                 info!(
                                     "NPC_SKATER_PUSH #{} {} node {} {} (moved {moved:.3} m since the hold started)",
                                     npc.id.serial, npc.character, replay.cursor.node,
-                                    push.map_or("none: left its place".to_string(), |v| format!("{:.1} m/s", (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()))
+                                    push.map_or(if sim.own_speed { "none: the autopilot pushes off".to_string() } else { "none: left its place".to_string() }, |v| format!("{:.1} m/s", (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()))
                                 );
                             }
                         }
