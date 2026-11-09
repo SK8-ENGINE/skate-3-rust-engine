@@ -20,6 +20,13 @@ pub struct Params {
     pub include_321: bool,
     pub countdown_delay: f32,
     pub countdown_time: f32,
+    /// Seconds GO stays on the countdown HUD after the start. NOT RETAIL YET: when retail hides hudcountdown after GO
+    /// is not decoded (b995 item 4); a default the export or a mod can replace.
+    pub go_display_time: f32,
+    /// RacePassTimerUpdate's period (run_heat, re-armed; b982 @384-481): the position DPO follows the standings.
+    pub pass_refresh_time: f32,
+    /// Racers in the heat with the player (NumCompetitors, the position DPO's "of N").
+    pub competitors: u32,
     pub end_round_time: f32,
     pub owned_display_time: f32,
     pub killed_display_time: f32,
@@ -40,6 +47,9 @@ impl Params {
             include_321: true,
             countdown_delay: 1.5,
             countdown_time: 3.0,
+            go_display_time: 1.0,
+            pass_refresh_time: 1.5,
+            competitors: 1,
             end_round_time: 3.0,
             owned_display_time: 3.1,
             killed_display_time: 3.3,
@@ -90,6 +100,14 @@ pub enum Command {
     RemoveGates,
     StartCountdownHud { ticks: i32 },
     StartTimerHud { ticks: i32 },
+    /// setup_heat DPO 1 (when the heat has a KilledItTime): ID_CHALLENGE_RACE_KILLED_IT_TIME, icon KilledIt, Time.
+    DpoKilledItTime(f32),
+    /// setup_heat DPO 2: ID_DPO_POSITION, Ints, (1, of).
+    DpoPosition { of: u32 },
+    /// run_heat RacePassTimerUpdate (every `pass_refresh_time`): the host puts the player's place in the position DPO.
+    RacePassTimerUpdate,
+    /// cleanup_heat: the DPOs go with the leaderboard.
+    DpoHide,
     Leaderboard(bool),
     RaceFinishedMessage,
     TimeUpMessage,
@@ -119,6 +137,8 @@ pub struct RaceRun {
     warning: Option<TimerId>,
     limit: Option<TimerId>,
     countdown: Option<TimerId>,
+    /// RacePassTimerUpdate's re-armed timer while racing.
+    pass: Option<TimerId>,
     end_round: Option<TimerId>,
     banner: Option<TimerId>,
 }
@@ -143,6 +163,7 @@ impl RaceRun {
             warning: None,
             limit: None,
             countdown: None,
+            pass: None,
             end_round: None,
             banner: None,
         }
@@ -150,6 +171,19 @@ impl RaceRun {
 
     pub fn state(&self) -> State {
         self.state
+    }
+
+    pub fn params(&self) -> &Params {
+        &self.params
+    }
+
+    /// Ticks left on the 3-2-1 HUD countdown (AddHUDCountdownTimer, b995 item 4), while it runs: the HUD's
+    /// `Countdown_GetCountdownTime` reads its whole seconds. `None` before it starts (the CountdownDelay) and after it.
+    pub fn countdown_hud_ticks(&self) -> Option<i32> {
+        if self.state != State::Countdown || !self.countdown_hud {
+            return None;
+        }
+        self.countdown.and_then(|id| self.timers.remaining(id))
     }
 
     pub fn best_time(&self) -> f32 {
@@ -222,7 +256,12 @@ impl RaceRun {
                 (self.leg, self.split, self.elapsed_ticks, self.next_place) = (0, 0, 0, 1);
                 (self.racing, self.countdown_hud, self.time, self.place, self.result) = (false, false, None, None, Flow::Lose);
                 (self.warning, self.limit, self.countdown, self.end_round, self.banner) = (None, None, None, None, None);
+                self.pass = None;
                 out.extend([Command::TeleportToStart, Command::RaceReset, Command::Leaderboard(true)]);
+                if self.params.killed_it_time > 0.0 {
+                    out.push(Command::DpoKilledItTime(self.params.killed_it_time));
+                }
+                out.push(Command::DpoPosition { of: self.params.competitors });
                 self.enter(State::Countdown, out);
             }
             State::Countdown => {
@@ -236,6 +275,7 @@ impl RaceRun {
             State::RunHeat => {
                 self.racing = true;
                 out.push(Command::RaceStart);
+                self.pass = Some(self.timers.add_countdown(self.params.pass_refresh_time));
                 let p = &self.params;
                 if p.time_limit > 0.0 {
                     if p.time_limit_warning < p.time_limit {
@@ -260,7 +300,7 @@ impl RaceRun {
                 self.end_round = Some(self.timers.add_countdown(self.params.end_round_time));
             }
             State::CleanupHeat => {
-                out.extend([Command::RemoveGates, Command::Leaderboard(false)]);
+                out.extend([Command::RemoveGates, Command::Leaderboard(false), Command::DpoHide]);
                 let display = match self.result {
                     Flow::Kill => self.params.killed_display_time,
                     Flow::Win => self.params.owned_display_time,
@@ -347,11 +387,17 @@ impl RaceRun {
         } else if Some(id) == self.banner {
             self.banner = None;
             self.enter(State::Results, out);
+        } else if Some(id) == self.pass {
+            self.pass = None;
+            if self.racing {
+                out.push(Command::RacePassTimerUpdate);
+                self.pass = Some(self.timers.add_countdown(self.params.pass_refresh_time));
+            }
         }
     }
 
     fn drop_heat_timers(&mut self) {
-        for id in [self.warning.take(), self.limit.take()].into_iter().flatten() {
+        for id in [self.warning.take(), self.limit.take(), self.pass.take()].into_iter().flatten() {
             self.timers.remove(id);
         }
     }
@@ -378,6 +424,42 @@ mod tests {
 
     fn expire(run: &mut RaceRun, seconds: f32) -> Vec<Command> {
         (0..=Timers::ticks(seconds)).flat_map(|_| run.tick()).collect()
+    }
+
+    #[test]
+    fn setup_heat_sets_the_two_dpos_and_racing_refreshes_the_position_every_one_and_a_half_seconds() {
+        let mut p = params();
+        p.competitors = 5;
+        let mut run = RaceRun::new(p, 0.0);
+        let setup = run.start();
+        assert!(setup.contains(&Command::DpoKilledItTime(10.0)), "{setup:?}");
+        assert!(setup.contains(&Command::DpoPosition { of: 5 }));
+        expire(&mut run, 1.5);
+        expire(&mut run, 3.0);
+        assert_eq!(run.state(), State::RunHeat);
+        let passes = (0..(60 * 4)).flat_map(|_| run.tick()).filter(|c| *c == Command::RacePassTimerUpdate).count();
+        assert_eq!(passes, 2, "4 s of racing: updates at about 1.5 and 3.0 s");
+        let mut none = params();
+        none.killed_it_time = 0.0;
+        let setup = RaceRun::new(none, 0.0).start();
+        assert!(!setup.iter().any(|c| matches!(c, Command::DpoKilledItTime(_))), "no KilledItTime, no DPO 1");
+    }
+
+    #[test]
+    fn the_hud_countdown_reads_its_ticks_only_while_it_runs() {
+        let mut run = RaceRun::new(params(), 0.0);
+        run.start();
+        assert_eq!(run.countdown_hud_ticks(), None, "not during the countdown delay");
+        expire(&mut run, 1.5);
+        let start = run.countdown_hud_ticks().expect("the 3 s HUD countdown runs");
+        assert!((178..=180).contains(&start), "{start}");
+        for _ in 0..60 {
+            run.tick();
+        }
+        assert_eq!(run.countdown_hud_ticks(), Some(start - 60), "one tick per update");
+        expire(&mut run, 3.0);
+        assert_eq!(run.state(), State::RunHeat);
+        assert_eq!(run.countdown_hud_ticks(), None, "over at the start");
     }
 
     fn racing(best: f32) -> RaceRun {

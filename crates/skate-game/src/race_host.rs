@@ -2,11 +2,12 @@
 //! `skate_core::challenges::race_run` with the race tracker and its AI racers (`race_ai_host`). Start:
 //! `SKATE_RACE=<id>` on that race's map. No race HUD movies or sign-up yet. Details: docs/hails-additions/42-challenges.md#change-races-in-play-race_hostrs
 use crate::challenges::{Start, Volume};
-use crate::hud_challenge::{ChallengeHudState, Component};
+use crate::hud_challenge::{ChallengeHudState, Component, DpoSlot, DpoValue, LeaderboardHud, LeaderboardRow, LEADERBOARD_NO_VARIANT, LEADERBOARD_RANK_NAME_TIME};
+use skate_core::challenges::dpo::{self, DpoFormat};
 use bevy::prelude::*;
 use serde::Deserialize;
 use skate_core::challenges::race::{Course, RaceTracker, RaceTuning};
-use skate_core::challenges::race_run::{Banner, Command, Event, Params, RaceRun};
+use skate_core::challenges::race_run::{Banner, Command, Event, Params, RaceRun, State};
 use skate_core::challenges::timers::TICKS_PER_SECOND;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -89,6 +90,8 @@ pub(crate) fn params(race: &Race) -> Result<Params, String> {
     let mut p = Params::new(splits, heat.time_limit.unwrap_or(0) as f32, heat.time_limit_warning.unwrap_or(0) as f32,
         heat.killed_it_time.unwrap_or(0.0));
     p.end_time_bonus = heat.legs.iter().map(|l| l.end_time_bonus as f32).collect();
+    // The AI competitors (kind 0, as `start` spawns them) and the player.
+    p.competitors = race.competitors.iter().filter(|c| c.kind == 0).count() as u32 + 1;
     Ok(p)
 }
 
@@ -98,6 +101,10 @@ pub(crate) struct RaceState {
     pub tracker: RaceTracker,
     pub ai: Option<crate::race_ai_host::RaceAi>,
     tick_carry: f32,
+    /// The local player's leaderboard name (`settings/player.json`).
+    player_name: String,
+    /// Seconds since the leaderboard rows were last refreshed.
+    leaderboard_age: f32,
 }
 
 #[derive(Resource, Default)]
@@ -141,7 +148,8 @@ fn start(races: &mut Races, volumes: &mut crate::trigger_volumes::TriggerVolumes
     let ai = crate::race_ai_host::RaceAi::load(assets, &race.id, &names, seed);
     let mut run = RaceRun::new(p, best);
     let commands = run.start();
-    races.run = Some(RaceState { race, run, tracker, ai, tick_carry: 0.0 });
+    let player_name = crate::multiplayer::local_player_name(assets);
+    races.run = Some(RaceState { race, run, tracker, ai, tick_carry: 0.0, player_name, leaderboard_age: 0.0 });
     commands
 }
 
@@ -247,6 +255,55 @@ fn update(
                 hud.timer_flag = flag;
             }
         }
+        countdown_hud(&state.run, &mut hud);
+    }
+    if let Some(state) = races.run.as_mut() {
+        state.leaderboard_age += time.delta_secs();
+        if hud.is_shown(Component::Leaderboard) && state.leaderboard_age >= state.tracker.tuning.hud_refresh_seconds {
+            state.leaderboard_age = 0.0;
+            leaderboard_rows(&state.tracker, &mut hud);
+        }
+    }
+}
+
+/// The tracker's standings into the leaderboard rows: rank, and the finish time once finished, else the gap to the
+/// leader (82560170 pushes rank and gap, b973 §6). NOT RETAIL YET: the row's time text (data-block native 8265E510's
+/// sprintf) is not decoded; it uses the DPO time text (b997 §4).
+fn leaderboard_rows(tracker: &RaceTracker, hud: &mut ChallengeHudState) {
+    let mut next = hud.leaderboard.rows.clone();
+    for row in &mut next {
+        let Some(r) = tracker.racer(row.id) else { continue };
+        if r.rank > 0 {
+            row.rank = r.rank;
+        }
+        let score = r.finish_time.unwrap_or(r.gap);
+        row.score = score;
+        row.score_text = skate_core::challenges::dpo::time_text(score);
+    }
+    if next != hud.leaderboard.rows {
+        hud.leaderboard.rows = next;
+    }
+}
+
+/// The 3-2-1-GO (b995 item 4): the whole seconds left on the run's HUD countdown, GO (0) from the start until
+/// `go_display_time` into the race, then hidden. Writes only on a change.
+fn countdown_hud(run: &RaceRun, hud: &mut ChallengeHudState) {
+    let seconds = match run.countdown_hud_ticks() {
+        Some(ticks) => Some((ticks.max(0) + TICKS_PER_SECOND as i32 - 1) / TICKS_PER_SECOND as i32),
+        None if hud.is_shown(Component::Countdown) && run.state() == State::RunHeat && run.elapsed() < run.params().go_display_time => Some(0),
+        None => None,
+    };
+    match seconds {
+        Some(s) => {
+            if hud.countdown != s {
+                hud.countdown = s;
+            }
+            if !hud.is_shown(Component::Countdown) {
+                hud.show(Component::Countdown, true);
+            }
+        }
+        None if hud.is_shown(Component::Countdown) => hud.show(Component::Countdown, false),
+        None => {}
     }
 }
 
@@ -304,12 +361,54 @@ fn apply(
                 state.tracker.finish(PLAYER, time);
             }
             Command::StartTimerHud { .. } => hud.show(Component::Timer, true),
+            // setup_heat's DPOs (b995 items 2a / 2b): the KilledIt time first when the heat has one, then the position.
+            Command::DpoKilledItTime(t) => {
+                hud.dpo[0] = DpoSlot { title: "ID_CHALLENGE_RACE_KILLED_IT_TIME".into(), icon: dpo::icon::KILLED_IT,
+                    value: Some(DpoValue { format: DpoFormat::Time.value(), numerator: 0.0, denominator: t }), ..Default::default() };
+                hud.two_dpos = true;
+            }
+            Command::DpoPosition { of } => {
+                let slot = usize::from(hud.two_dpos);
+                hud.dpo[slot] = DpoSlot { title: "ID_DPO_POSITION".into(), icon: dpo::icon::CHALLENGE,
+                    value: Some(DpoValue { format: DpoFormat::Ints.value(), numerator: 1.0, denominator: of as f32 }), ..Default::default() };
+                hud.show(Component::Dpo, true);
+            }
+            Command::RacePassTimerUpdate => {
+                let place = state.tracker.rank(PLAYER);
+                let slot = usize::from(hud.two_dpos);
+                if let Some(v) = hud.dpo[slot].value.as_mut().filter(|_| place > 0) {
+                    if v.numerator != place as f32 {
+                        v.numerator = place as f32;
+                    }
+                }
+            }
+            Command::DpoHide => {
+                hud.show(Component::Dpo, false);
+                hud.two_dpos = false;
+            }
             Command::RaceFinishedMessage => messages.push(crate::hud_central::CentralMessage::new(RACE_FINISHED)),
             Command::TimeUpMessage => messages.push(crate::hud_central::CentralMessage::new(CHALLENGE_FAILED)),
             Command::Banner(Banner::OwnedIt, shown) => hud.show(Component::OwnedIt, shown),
             Command::Banner(Banner::KilledIt, shown) => hud.show(Component::KilledIt, shown),
             Command::Banner(Banner::Failed, _) => {}
-            Command::RemoveGates | Command::Leaderboard(false) => hud.show(Component::Timer, false),
+            Command::RemoveGates => hud.show(Component::Timer, false),
+            Command::Leaderboard(false) => {
+                hud.show(Component::Timer, false);
+                hud.show(Component::Leaderboard, false);
+            }
+            // setup_heat: the standings, one row per racer, shown until cleanup_heat (b995 item 1).
+            Command::Leaderboard(true) => {
+                let mut rows = vec![LeaderboardRow { id: PLAYER, rank: 1, score: -1.0, name: format!("#{}", state.player_name), highlight: true,
+                    ..Default::default() }];
+                if let Some(ai) = state.ai.as_ref() {
+                    rows.extend(ai.racers.iter().map(|r| LeaderboardRow { id: r.ai.id, rank: r.ai.id as i32 + 1, score: -1.0,
+                        name: r.name_id.clone(), ..Default::default() }));
+                }
+                hud.leaderboard = LeaderboardHud { layout: LEADERBOARD_RANK_NAME_TIME, title: String::new(),
+                    variant: LEADERBOARD_NO_VARIANT.into(), rows };
+                hud.show(Component::Leaderboard, true);
+                state.leaderboard_age = 0.0;
+            }
             Command::SetBestTime(t) => {
                 info!("SKATE_RACE {id} best time {t:.2}");
                 changed |= challenges.records.update(&id, |s| s.best_time = Some(t));
@@ -379,5 +478,24 @@ mod tests {
         assert_eq!(race.heats[0].start.slot(3)[3], [5.0, 0.0, 0.0, 1.0], "past the slots: the locator");
         let tracker = tracker_for(&race.heats[0], RaceTuning::default());
         assert_eq!(tracker.course.legs[0].points, vec![[6.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+    }
+
+    /// The countdown HUD shows 3, 2, 1 while the run's HUD countdown runs, GO (0) from the start for the GO display time,
+    /// then hides; nothing during the countdown delay.
+    #[test]
+    fn the_countdown_hud_counts_three_two_one_go_then_hides() {
+        let mut run = RaceRun::new(Params::new(vec![vec![1]], 120.0, 30.0, 0.0), 0.0);
+        run.start();
+        let mut hud = ChallengeHudState::default();
+        let mut seen = Vec::new();
+        for _ in 0..(60 * 7) {
+            run.tick();
+            countdown_hud(&run, &mut hud);
+            let now = hud.is_shown(Component::Countdown).then_some(hud.countdown);
+            if seen.last() != Some(&now) {
+                seen.push(now);
+            }
+        }
+        assert_eq!(seen, vec![None, Some(3), Some(2), Some(1), Some(0), None]);
     }
 }

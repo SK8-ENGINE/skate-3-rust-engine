@@ -192,8 +192,8 @@ pub(crate) fn objective_text(text: TargetText) -> &'static str {
 
 fn hud_component(c: HudComponent) -> Option<Component> {
     match c {
-        // Own the spot never starts the countdown (b844).
-        HudComponent::Countdown => None,
+        // Races start it (b995 item 4); own the spot never does (b844).
+        HudComponent::Countdown => Some(Component::Countdown),
         HudComponent::Timer => Some(Component::Timer),
         HudComponent::Objective => Some(Component::Objective),
         HudComponent::Dpo => Some(Component::Dpo),
@@ -204,8 +204,8 @@ fn hud_component(c: HudComponent) -> Option<Component> {
 
 /// `UpdateHud`: DPO 0 = score / target, DPO 1 = score / personal best, objective row 0 = the target text (b845).
 pub(crate) fn update_hud(hud: &mut ChallengeHudState, score: i32, target: i32, personal_best: i32, text: TargetText) {
-    hud.dpo[0] = DpoSlot { numerator: score.to_string(), denominator: target.to_string(), title: DPO_TARGET_TITLE.into(), highlight: hud.dpo[0].highlight };
-    hud.dpo[1] = DpoSlot { numerator: score.to_string(), denominator: personal_best.to_string(), title: DPO_PERSONAL_BEST_TITLE.into(), highlight: hud.dpo[1].highlight };
+    hud.dpo[0] = DpoSlot { numerator: score.to_string(), denominator: target.to_string(), title: DPO_TARGET_TITLE.into(), highlight: hud.dpo[0].highlight, ..Default::default() };
+    hud.dpo[1] = DpoSlot { numerator: score.to_string(), denominator: personal_best.to_string(), title: DPO_PERSONAL_BEST_TITLE.into(), highlight: hud.dpo[1].highlight, ..Default::default() };
     hud.two_dpos = true;
     hud.objectives = vec![ObjectiveRow { state: 3, kind: 0, title: objective_text(text).into(), value: String::new() }];
 }

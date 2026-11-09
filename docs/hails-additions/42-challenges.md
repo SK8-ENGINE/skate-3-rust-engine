@@ -462,13 +462,96 @@ from `challenges.json` and starts `SKATE_RACE=<id>` on that race's map (behind t
 player's trigger entries and 60 Hz ticks to the race run, updates the tracker from the player's position, shows the
 challenge timer for the last TimeLimitWarning seconds and the owned it / killed it banners, writes ID_RACE_FINISHED
 or ID_MISSION_CHALLENGE_FAILED as a central message, keeps the best time (`best_time` in `settings/challenges.json`,
-a new optional field) and the completion, and sends the result to the career. Not yet: AI racers (b987 / b993),
-sign-up from the map, the 3-2-1 HUD, DPO lines, leaderboard, gates and the results screen (b995 / b997; results
+a new optional field) and the completion, and sends the result to the career. Not yet: sign-up from the map, DPO
+lines, leaderboard, gates and the results screen (b995 / b997; results
 continue at once, as the end dialog does without its movie). A completed race leaves the career's active list:
 race_shared's `complete` calls CompleteChallenge with no re-activate flag (`CALL 5 3 1`, two arguments; research
 b998), as films, follow the leader, hall of meat and contests do; only own the spot (true) and tutorials
 (Persistent) pass one. Test: `race_host::tests` (a disc-shaped row loads, run parameters, slot 0,
 course from the split centres).
+
+### The 3-2-1-GO countdown (2026-11-08, b995 item 4)
+
+- Retail [data, code]: after CountdownDelay (1.5 s) race_shared starts AddHUDCountdownTimer(3.0) and HUD2.StartCountdown
+  (82850468: the `countdown` element visible, with the timer id) when Include321 is set. The movie `hud2/hudcountdown`
+  (read from the disc movie 2026-11-08) has two states: SetState(2) = ShowCountdown, which reads
+  `HUDComponents.Countdown_GetCountdownTime` ("#%d" of the seconds left, 8265D910), shows the number frame for "#3",
+  "#2", "#1" and GO for anything else, and plays FE_SOUND_CHALLENGE_COUNT_3/2/1/GO (STAD_* when
+  `Countdown_IsInStadium`); SetState(1) = HideCountdown.
+- Ours: `RaceRun::countdown_hud_ticks` gives the HUD countdown's ticks while it runs; `race_host::countdown_hud` turns
+  them into whole seconds (`ChallengeHudState::countdown`) and shows `Component::Countdown`; at the start it shows 0
+  (GO) and hides after `Params::go_display_time`. `hud_challenge` sends SetState(2) on each new value and SetState(1) to
+  hide; `Countdown_IsInStadium` answers false (races are not stadium events).
+- NOT RETAIL YET: when retail hides hudcountdown after GO is not decoded; `go_display_time` = 1.0 s is ours (data a
+  mod can change).
+- ShowCountdown (disc movie, read 2026-11-08): `mcNumber.gotoAndStop(r)` on the frame labels "#3" (frame 0), "#2" (10),
+  "#1" (20); for "#0" `mcNumber.gotoAndStop(FELanguage.GetLanguage())` on the language label ("English" 30, "Spanish"
+  40, ...); then `mcCountdownText.gotoAndPlay("intro")` and the sound. Our movie runtime matched labels exactly, so
+  "english" missed "English" and GO stayed on the 1 frame; labels now match without case, as AS2's do (`apt_movie.rs`,
+  every movie).
+- Laptop run H (2026-11-08): the count timing was right (shown 3 s, GO 1 s), but the screen showed the "1" picture for
+  3 and 2 and nothing for 1, while the same movie from a fresh export draws 3, 2, 1, Go! (data-gated test below). Open:
+  whether the laptop install's hudcountdown json and its texture files disagree (prepare_hud is incremental).
+- Tests: `race_run::tests::the_hud_countdown_reads_its_ticks_only_while_it_runs`,
+  `race_host::tests::the_countdown_hud_counts_three_two_one_go_then_hides`, data-gated
+  `hud_challenge::tests::the_countdown_shows_each_number_frame` (SKATE_SCORING_HUD_ROOT=<private/hud>: number frames 0 /
+  10 / 20, GO on a language frame, a different picture for each).
+
+### The leaderboard (2026-11-08, b995 item 1, b997 section 4)
+
+- Retail [data]: race_shared shows the LeaderboardHUD component (`hud2/leaderboardhud`) at setup_heat and hides it at
+  cleanup_heat; the tracker pushes rank and gap (finish time once finished) every 30 ticks [code b973 §6].
+- The movie (read from the disc movie 2026-11-08 with `.local/tools/apt_dump.py`): SetState 1 = Show(true), 2 =
+  Show(false), 3 = SetupScreen, 4 / 5 = RefreshAll, 6 = UpdateVOIPIcons. SetupScreen reads
+  `HUDComponents.Leaderboard_GetSetupDataBlock` [players, top-team players, layout, (unread), is teams, online mission,
+  show players] and `Leaderboard_GetLeaderboardNameBlock` (names in data order). RefreshAll reads
+  `Leaderboard_GetLeaderboardDataBlock`, `playerStructItems` (8, set in the movie) items per row: rank (drawn "#" +
+  rank), score, score text, highlight, turn, team, row slot (the `player_<n>` clip), sort id; `SetPlayerScore` shows
+  the score text when the score is 0 or more, else "--". The movie sets its own constants (eLeaderBoardHUD_RankNameTime
+  4, MAX_PLAYERS_AVAILABLE 8). `FELeaderboard.GetVoipStatus` is only read in online missions; `Mission.GetTitle` gives
+  the title label.
+- Ours: `hud_challenge::Component::Leaderboard` (own sync: 3, 1, 4 to show, 4 on a change, 2 to hide),
+  `ChallengeHudState::leaderboard` (`LeaderboardHud { layout, title, rows }`, `LeaderboardRow { id, rank, score,
+  score_text, name, highlight }`, serialisable, stable racer ids), the natives above; `race_host` builds the rows at
+  `Leaderboard(true)` (the player as a `#name` literal from settings/player.json, each AI racer by its look's `name_id`
+  from skater_profiles.json, e.g. ID_COMMON_DANNY_WAY) and refreshes rank and time from `RaceTracker` every
+  `RaceTuning::hud_refresh_seconds`. Export: `tools/prepare_hud.py` adds `leaderboardhud.json` and
+  `tools/install_prepared_hud.py` installs it (a Refresh Game Files brings it to an install).
+- The DPO sits above the leaderboard: the leaderboard movie writes `_global.LeaderboardHUD_Height` and the DPO movie's
+  SetupDPO (run on its SetState 1) moves up by it when it is over 163 [data, both disc movies]. Retail runs all HUD
+  movies on one `_global`; ours run each on its own VM, so `hud_challenge::SHARED_GLOBALS` names the value and its
+  writer, the writer movies update first and the value is copied to the others before each movie updates.
+- Setup block item 3 is the variant line under the title (HUD2 SetVariantString; hidden for "#Unknown" /
+  ID_COMMON_UNKNOWN or a throwdown) [data movie, code b882 8265DBC8]. `LeaderboardHud::variant`, default
+  `LEADERBOARD_NO_VARIANT` (hidden).
+- Solid units (draws with no texture, e.g. the row backers) sample a plain white texture in the HUD renderer, and a draw
+  whose texture is not loaded takes no slot (race run K panicked indexing past the slots).
+- NOT RETAIL YET / open: the row time text (8265E510's sprintf) is not decoded, ours is the DPO time text (M:SS.hh) of
+  the gap or finish time; the title (Mission.GetTitle) is empty, the race's title id is not in our export; which
+  variant string races set (if any) is not traced, ours hides the line; the row slot is rank - 1.
+- Test: data-gated `hud_challenge::tests::the_leaderboard_shows_ranks_names_and_times`.
+
+### The DPO: killed it time and position (2026-11-08, b995 items 2a / 2b, b997 sections 1 and 2)
+
+- Retail [data b982, code b997]: setup_heat sets DPO 1 when the heat has a KilledItTime (DPOSetTitle
+  ID_CHALLENGE_RACE_KILLED_IT_TIME, DPOSetIcon KilledIt = 1, DPOSetFormatType Time = 2, DPOSetParams(0, KilledItTime);
+  the dpo movie switches to its countdown mode on that title) and DPO 2 = ID_DPO_POSITION, Ints = 0, (1,
+  NumCompetitors). run_heat's RacePassTimerUpdate (every 1.5 s, re-armed) puts the local place in DPO 2. The formatter
+  `8266AF68`: numerator Ints / Points / Players a plain integer, Distance ID_COMMON_DISTANCE, Time the time text;
+  denominator Ints ID_COMMON_NUMBER, Points ID_DPO_STR_POINTS, Players ID_DPO_STR_FINISHED, Distance
+  ID_COMMON_DISTANCE, Time the time text. The movie shows "#" + numerator and the denominator as given; it never draws
+  the icon (item 3).
+- Ours: `skate_core::challenges::dpo` (DpoFormat with the retail values, `icon`, `numerator` / `denominator`,
+  `time_text` as M:SS.hh); race_run emits `DpoKilledItTime`, `DpoPosition { of }` (Params.competitors = AI racers + 1),
+  `RacePassTimerUpdate` (Params.pass_refresh_time 1.5) and `DpoHide` at cleanup_heat; `race_host` fills
+  `DpoSlot { title, icon, value: DpoValue { format, numerator, denominator } }` and the place from
+  `RaceTracker::rank`; `hud_challenge::dpo_texts` turns a value into the texts through the movie's language
+  (`fe_language::format_string`). Own the spot still writes its texts directly (no value).
+- NOT RETAIL YET / open: the time text's digit counts are filled at runtime and were not read (M:SS.hh is what the
+  separators give, b997 medium confidence); without a KilledItTime the position DPO is the only one, in slot 1 of
+  retail's two or slot 0 of one, is open (b995 2b); ours shows it as the single DPO.
+- Tests: `dpo::tests` (position texts, time text), `race_run::tests::setup_heat_sets_the_two_dpos_and_racing_refreshes_the_position_every_one_and_a_half_seconds`,
+  `hud_challenge::tests::dpo_values_become_the_movie_texts_through_the_language`.
 
 ## Change: race AI racers (`challenges/race_ai.rs`)
 

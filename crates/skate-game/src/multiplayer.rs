@@ -728,6 +728,11 @@ fn player_name_path(asset_root: &std::path::Path) -> std::path::PathBuf {
         .join("settings/player.json")
 }
 
+/// The local player's name (`settings/player.json`, "Player" when unset): the race leaderboard's own row.
+pub(crate) fn local_player_name(asset_root: &std::path::Path) -> String {
+    load_player_name(&player_name_path(asset_root))
+}
+
 fn load_player_name(path: &std::path::Path) -> String {
     let Ok(bytes) = std::fs::read(path) else {
         return "Player".into();

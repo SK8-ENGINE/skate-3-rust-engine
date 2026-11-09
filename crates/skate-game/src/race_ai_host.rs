@@ -18,6 +18,8 @@ pub(crate) struct Racer {
     /// The ai_characters row and the look (characters_marquee key) the NPC wears.
     pub row: String,
     pub look: String,
+    /// The look's display name text id (`characters.<look>.name_id`, e.g. ID_COMMON_DANNY_WAY): the leaderboard name.
+    pub name_id: String,
     pub npc: Option<LivingWorldId>,
     leg: usize,
     split: usize,
@@ -31,12 +33,16 @@ pub(crate) struct RaceAi {
     last_tick: Option<u64>,
 }
 
-/// ai_characters row -> its look (the characters_marquee key), from the export (`skater_profiles.json`).
-fn looks(asset_root: &std::path::Path) -> BTreeMap<String, String> {
+/// ai_characters row -> its look (the characters_marquee key) and the look's display name id, from the export
+/// (`skater_profiles.json`).
+fn looks(asset_root: &std::path::Path) -> BTreeMap<String, (String, String)> {
     let Ok(bytes) = std::fs::read(asset_root.join("private/living_world/skater_profiles.json")) else { return BTreeMap::new() };
     let Ok(doc) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return BTreeMap::new() };
     doc["ai_characters"].as_object().into_iter().flatten()
-        .filter_map(|(k, v)| v["look"].as_str().map(|l| (k.clone(), l.to_owned()))).collect()
+        .filter_map(|(k, v)| v["look"].as_str().map(|l| {
+            let name = doc["characters"][l]["name_id"].as_str().unwrap_or(l).to_owned();
+            (k.clone(), (l.to_owned(), name))
+        })).collect()
 }
 
 fn heading(m: &[[f32; 4]; 4]) -> f32 {
@@ -60,8 +66,8 @@ impl RaceAi {
         let racers = race_ai::lineup(competitors, true, || rng.next_u32()).into_iter()
             .filter_map(|c| {
                 let row = c.character?;
-                let look = looks.get(&row).cloned().unwrap_or_else(|| row.clone());
-                Some(Racer { ai: RacerAi::new(c.id), row, look, npc: None, leg: 0, split: 0, carry: 0.0 })
+                let (look, name_id) = looks.get(&row).cloned().unwrap_or_else(|| (row.clone(), row.clone()));
+                Some(Racer { ai: RacerAi::new(c.id), row, look, name_id, npc: None, leg: 0, split: 0, carry: 0.0 })
             })
             .collect::<Vec<_>>();
         info!("SKATE_RACE {race}: {} AI racers {:?} on {} lines", racers.len(),

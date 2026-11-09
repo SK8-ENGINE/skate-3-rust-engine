@@ -332,6 +332,14 @@ fn setup(
             );
             textures.insert(path, images.add(image));
         }
+        // Solid units (texture "": the colour alone, e.g. the leaderboard's row backers) sample plain white.
+        textures.insert(String::new(), images.add(Image::new(
+            Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            TextureDimension::D2,
+            vec![255; 4],
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::RENDER_WORLD,
+        )));
         // The needle and icon textures from the menu movie set's minimap icons (manifest `images`: texture/<name>).
         if minimap.is_some() {
             let set = crate::retail_menu_movies::set_root(&config);
@@ -613,7 +621,15 @@ fn advance(
         return;
     };
     if hud.generation == map.generation {
-        for m in hud.challenge.iter_mut().filter(|m| !m.failed) {
+        // Writers of shared globals first, each copied on at once: the DPO reads the leaderboard's height in SetupDPO.
+        let mut order: Vec<usize> = (0..hud.challenge.len()).collect();
+        order.sort_by_key(|&i| !hud_challenge::SHARED_GLOBALS.iter().any(|(w, _)| *w == hud.challenge[i].runtime.component));
+        for i in order {
+            share_globals(&mut hud.challenge);
+            let m = &mut hud.challenge[i];
+            if m.failed {
+                continue;
+            }
             let was = m.runtime.shown();
             let result = m.runtime.sync(&challenge).and_then(|_| m.runtime.update());
             let now = m.runtime.shown();
@@ -634,6 +650,7 @@ fn advance(
                 m.failed = true;
             }
         }
+        share_globals(&mut hud.challenge);
     }
     if hud.generation == map.generation {
         if let Some(central) = hud.central.as_mut().filter(|c| !c.failed) {
@@ -962,8 +979,11 @@ fn apply_draws_with(
     z_base: f32,
     gamma: bool,
 ) {
-    for (index, draw) in draws.iter().enumerate() {
+    // Slots fill in draw order; a draw without a loaded texture takes no slot.
+    let mut index = 0;
+    for draw in draws {
         let Some(texture) = texture_of(&draw.texture) else {
+            warn_missing_texture(&draw.texture);
             continue;
         };
         let material = hud_material(draw, texture, gamma);
@@ -1004,11 +1024,30 @@ fn apply_draws_with(
             }
             set_visibility(commands, slot, Visibility::Visible);
         }
+        index += 1;
     }
-    for slot in &mut slots[draws.len()..] {
+    for slot in &mut slots[index..] {
         set_visibility(commands, slot, Visibility::Hidden);
     }
 }
+/// Copies each shared `_global` value from its writer movie to the other challenge movies (`SHARED_GLOBALS`).
+fn share_globals(movies: &mut [ChallengeMovie]) {
+    for &(writer, key) in hud_challenge::SHARED_GLOBALS {
+        let value = movies.iter().find(|m| m.runtime.component == writer).and_then(|m| m.runtime.shared_global(key));
+        for m in movies.iter_mut().filter(|m| m.runtime.component != writer) {
+            m.runtime.set_shared_global(key, value.clone().unwrap_or_default());
+        }
+    }
+}
+
+/// Once per texture: a HUD draw names a texture the HUD did not load.
+fn warn_missing_texture(texture: &str) {
+    static SEEN: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
+    if SEEN.lock().unwrap_or_else(|e| e.into_inner()).insert(texture.to_owned()) {
+        warn!("HUD draw without a loaded texture: {texture}");
+    }
+}
+
 fn set_visibility(commands: &mut Commands, slot: &mut Slot, visibility: Visibility) {
     if slot.visibility != Some(visibility) {
         commands.entity(slot.entity).insert(visibility);
@@ -1262,6 +1301,21 @@ mod draw_tests {
     }
     fn pct(sorted: &[f64], p: f64) -> f64 {
         sorted[((sorted.len() - 1) as f64 * p).round() as usize]
+    }
+
+    /// A draw whose texture is not loaded takes no slot: the draws after it fill the slots in order (race run K
+    /// panicked indexing past the slots) and leftover slots hide.
+    #[test]
+    fn draws_without_a_texture_take_no_slot() {
+        let draw = |t: &str| apt_scene::Draw { texture: t.into(), vertices: vec![apt_scene::Vertex { position: [0.0; 2], uv: [0.0; 2] }; 3],
+            multiply: [1.0; 4], add: [0.0; 4], fill: apt_scene::Fill::TextureClamped };
+        let mut app = rig(false, &["a".to_owned()]);
+        app.world_mut().resource_mut::<Rig>().draws = vec![draw("a"), draw("a"), draw("a")];
+        app.update();
+        app.world_mut().resource_mut::<Rig>().draws = vec![draw("missing"), draw("a"), draw("missing"), draw("a")];
+        app.update();
+        let shown: Vec<_> = snapshot(&app).iter().map(|s| s.contains("vis=Some(Visible)")).collect();
+        assert_eq!(shown, [true, true, false]);
     }
 
     /// Scripted airs: the new HUD writer leaves every slot identical to the old one; prints churn and cost.

@@ -63,6 +63,8 @@ MOVIES = (("data/fe/source/screens/hud2/trickdisplay2", "trickdisplay.json"),
           ("data/fe/source/screens/hud2/hudcountdown", "hudcountdown.json"),
           ("data/fe/source/screens/hud2/hudobjective2", "hudobjective2.json"),
           ("data/fe/source/screens/hud2/dpo", "dpo.json"),
+          # The race leaderboard (HUD component LeaderboardHUD, research b882 / b995 item 1).
+          ("data/fe/source/screens/hud2/leaderboardhud", "leaderboardhud.json"),
           ("data/fe/source/screens/challenge/ownthespot", "ownthespot.json"),
           ("data/fe/source/screens/challenge/killedit", "killedit.json"),
           # The tutorials' TutorialInstructionHUD (HUD component 17, research b866).

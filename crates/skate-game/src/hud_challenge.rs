@@ -18,10 +18,15 @@ pub(crate) enum Component {
     Dpo,
     OwnedIt,
     KilledIt,
+    /// The 3-2-1-GO before a race (`hud2/hudcountdown`, b995 item 4).
+    Countdown,
+    /// The race standings (`hud2/leaderboardhud`, b995 item 1).
+    Leaderboard,
 }
 
 impl Component {
-    pub const ALL: [Component; 5] = [Component::Timer, Component::Objective, Component::Dpo, Component::OwnedIt, Component::KilledIt];
+    pub const ALL: [Component; 7] = [Component::Timer, Component::Objective, Component::Dpo, Component::OwnedIt, Component::KilledIt,
+        Component::Countdown, Component::Leaderboard];
 
     /// The converted movie (`private/hud/runtime/<file>`, tools/prepare_hud.py).
     pub fn file(self) -> &'static str {
@@ -31,6 +36,8 @@ impl Component {
             Component::Dpo => "dpo.json",
             Component::OwnedIt => "ownthespot.json",
             Component::KilledIt => "killedit.json",
+            Component::Countdown => "hudcountdown.json",
+            Component::Leaderboard => "leaderboardhud.json",
         }
     }
 
@@ -39,7 +46,7 @@ impl Component {
     fn refresh_state(self) -> Option<f64> {
         match self {
             Component::Timer | Component::Dpo | Component::Objective => Some(3.0),
-            Component::OwnedIt | Component::KilledIt => None,
+            Component::OwnedIt | Component::KilledIt | Component::Countdown | Component::Leaderboard => None,
         }
     }
 }
@@ -55,6 +62,21 @@ pub(crate) struct DpoSlot {
     pub denominator: String,
     pub title: String,
     pub highlight: i32,
+    /// `DPOSetIcon` (item 3, eDPOIcon; the movie does not draw it, b997 section 1).
+    #[serde(default)]
+    pub icon: u8,
+    /// `DPOSetFormatType` + `DPOSetParams`: when set, the texts come from these values (formatter 8266AF68) instead of
+    /// `numerator` / `denominator`.
+    #[serde(default)]
+    pub value: Option<DpoValue>,
+}
+
+/// A DPO's format (eDPOFormat value) and its two numbers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DpoValue {
+    pub format: u8,
+    pub numerator: f32,
+    pub denominator: f32,
 }
 
 /// One objective row (`Objective_GetObjective*`): state 0 fail, 1 success, 2 inactive, 3 active, 4 disabled; kind
@@ -78,7 +100,46 @@ pub(crate) struct ChallengeHudState {
     pub dpo: [DpoSlot; 2],
     pub two_dpos: bool,
     pub objectives: Vec<ObjectiveRow>,
+    /// Whole seconds left on the race countdown (`Countdown_GetCountdownTime` "#%d"; 0 draws GO).
+    #[serde(default)]
+    pub countdown: i32,
+    #[serde(default)]
+    pub leaderboard: LeaderboardHud,
 }
+
+/// The variant text id the leaderboard movie treats as "no variant".
+pub(crate) const LEADERBOARD_NO_VARIANT: &str = "ID_COMMON_UNKNOWN";
+
+/// The leaderboard movie's data (`Leaderboard_Get*Block`, b995 item 1; layouts read from the disc movie 2026-11-08).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct LeaderboardHud {
+    /// eLeaderBoardHUD layout (the movie's own values: RankNameTime 4 for races).
+    pub layout: i32,
+    /// `Mission.GetTitle` (a text id or literal).
+    pub title: String,
+    /// The variant line under the title (setup block item 3, HUD2 SetVariantString); the movie hides it for
+    /// [`LEADERBOARD_NO_VARIANT`] ("#Unknown" too).
+    pub variant: String,
+    /// One row per racer, in data order (stable racer ids).
+    pub rows: Vec<LeaderboardRow>,
+}
+
+/// One racer row: the 8 data-block items (rank, score, score text, highlight, turn, team, row slot, sort id) and its name.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct LeaderboardRow {
+    pub id: u32,
+    pub rank: i32,
+    /// Below 0 the movie shows "--" instead of `score_text`.
+    pub score: f32,
+    pub score_text: String,
+    /// A text id (localized by the movie's language) or a `#literal`.
+    pub name: String,
+    /// The local player's row.
+    pub highlight: bool,
+}
+
+/// The race layout (`eLeaderBoardHUD_RankNameTime`, set to 4 in leaderboardhud's init).
+pub(crate) const LEADERBOARD_RANK_NAME_TIME: i32 = 4;
 
 impl ChallengeHudState {
     pub fn show(&mut self, component: Component, shown: bool) {
@@ -99,8 +160,24 @@ impl ChallengeHudState {
             Component::Dpo => format!("{:?}|{}", self.dpo, self.two_dpos),
             Component::Objective => format!("{:?}", self.objectives),
             Component::OwnedIt | Component::KilledIt => String::new(),
+            Component::Countdown => self.countdown.to_string(),
+            Component::Leaderboard => format!("{:?}", self.leaderboard),
         }
     }
+}
+
+/// A DPO's numerator and denominator text: its values through the retail formatter (skate-core `dpo`, templates
+/// localized and filled like FELanguage), else the texts as written.
+fn dpo_texts(slot: &DpoSlot, localize: impl Fn(&str) -> String) -> (String, String) {
+    use skate_core::challenges::dpo::{self, DpoFormat, DpoText};
+    let Some(v) = slot.value else { return (slot.numerator.clone(), slot.denominator.clone()) };
+    let format = DpoFormat::from_value(v.format).unwrap_or_default();
+    let fill = |t: DpoText| match t {
+        DpoText::Plain(s) => s,
+        DpoText::Template { id, value } => crate::fe_language::format_string(
+            &crate::fe_language::NumberFormat::default(), &localize(id), &[crate::fe_language::Arg::Number(value)]),
+    };
+    (fill(dpo::numerator(format, v.numerator)), fill(dpo::denominator(format, v.denominator)))
 }
 
 fn array(vm: &mut Vm, values: impl IntoIterator<Item = Value>) -> Result<Value, String> {
@@ -158,13 +235,45 @@ impl Host for Bindings {
             ("global", "ASSetPropFlags") => Ok(Value::Undefined),
             ("HUDComponents", "Timer_GetData") => array(vm, [Value::Text(s.timer_text.clone()), Value::Number(s.timer_flag as f64)]),
             ("HUDComponents", "DPO_IsUsingTwoDPOs") => Ok(Value::Bool(s.two_dpos)),
+            // hudcountdown's ShowCountdown: "#3" / "#2" / "#1" pick the number frame, anything else GO (8265D910 "#%d").
+            ("HUDComponents", "Countdown_GetCountdownTime") => Ok(Value::Text(format!("#{}", s.countdown))),
+            // The stadium voice set (FE_SOUND_CHALLENGE_STAD_*) is for contests in a stadium; races use COUNT_*.
+            ("HUDComponents", "Countdown_IsInStadium") => Ok(Value::Bool(false)),
+            // leaderboardhud SetupScreen: [players, top team players, layout, -, is teams, online mission, show players].
+            ("HUDComponents", "Leaderboard_GetSetupDataBlock") => {
+                let l = &s.leaderboard;
+                array(vm, [Value::Number(l.rows.len() as f64), Value::Number(0.0), Value::Number(l.layout as f64), Value::Text(l.variant.clone()),
+                    Value::Bool(false), Value::Bool(false), Value::Bool(true)])
+            }
+            ("HUDComponents", "Leaderboard_GetLeaderboardNameBlock") => {
+                let names: Vec<Value> = s.leaderboard.rows.iter().map(|r| Value::Text(self.movie.text_assets.localize(&r.name))).collect();
+                array(vm, names)
+            }
+            // RefreshAll: per row (playerStructItems 8) rank, score, score text, highlight, turn, team, row slot (the
+            // `player_<n>` clip, by rank), sort id.
+            ("HUDComponents", "Leaderboard_GetLeaderboardDataBlock") => {
+                let items: Vec<Value> = s.leaderboard.rows.iter().flat_map(|r| {
+                    let slot = (r.rank - 1).clamp(0, 7);
+                    [Value::Number(r.rank as f64), Value::Number(r.score as f64), Value::Text(r.score_text.clone()),
+                        Value::Bool(r.highlight), Value::Number(0.0), Value::Number(0.0), Value::Number(slot as f64), Value::Number(r.id as f64)]
+                }).collect();
+                array(vm, items)
+            }
+            ("Mission", "GetTitle") => Ok(Value::Text(self.movie.text_assets.localize(&s.leaderboard.title))),
+            // Voice chat status per row: only read in online missions.
+            ("FELeaderboard", "GetVoipStatus") => {
+                let n = s.leaderboard.rows.len();
+                array(vm, (0..n).map(|_| Value::Number(0.0)))
+            }
             ("HUDComponents", "DPO_GetParams") => {
                 let slots = if s.two_dpos { &s.dpo[..] } else { &s.dpo[..1] };
+                let text = &self.movie.text_assets;
                 let items: Vec<Value> = slots
                     .iter()
                     .flat_map(|d| {
-                        [Value::Text(d.numerator.clone()), Value::Text(d.denominator.clone()), Value::Text(d.title.clone()),
-                            Value::Number(0.0), Value::Number(d.highlight as f64)]
+                        let (numerator, denominator) = dpo_texts(d, |id| text.localize(id));
+                        [Value::Text(numerator), Value::Text(denominator), Value::Text(d.title.clone()),
+                            Value::Number(d.icon as f64), Value::Number(d.highlight as f64)]
                     })
                     .collect();
                 array(vm, items)
@@ -220,11 +329,30 @@ pub struct Runtime {
     low: bool,
 }
 
+/// `_global` values one HUD movie writes and another reads. Retail runs every HUD movie on one `_global`; ours each run
+/// on their own VM, so these are copied from the writer to the others after each update. The DPO moves up by the
+/// leaderboard's height (doc 42, "The leaderboard").
+pub(crate) const SHARED_GLOBALS: &[(Component, &str)] = &[(Component::Leaderboard, "LeaderboardHUD_Height")];
+
 impl Runtime {
+    /// A plain `_global` value (objects belong to this VM and are never shared).
+    pub fn shared_global(&self, key: &str) -> Option<Value> {
+        self.vm.objects.get(self.vm.global)?.fields.get(key).filter(|v| !matches!(v, Value::Object(_))).cloned()
+    }
+
+    pub fn set_shared_global(&mut self, key: &str, value: Value) {
+        let global = self.vm.global;
+        if let Some(o) = self.vm.objects.get_mut(global) {
+            if o.fields.get(key) != Some(&value) {
+                o.fields.insert(key.to_owned(), value);
+            }
+        }
+    }
+
     /// `sounds`: the `fe` record names, registered as `FE_SOUND_<NAME>` like the front end's RegisterAudioEnum.
     pub fn load(component: Component, json: &serde_json::Value, sounds: &[String]) -> Result<Self, String> {
         let mut vm = Vm::new();
-        for name in ["MovieClip", "FELanguage", "HUDComponents", "Math", "Audio", "Mission", "ScreenManager", "Render"] {
+        for name in ["MovieClip", "FELanguage", "HUDComponents", "Math", "Audio", "Mission", "ScreenManager", "Render", "FELeaderboard"] {
             let object = vm.object(ObjectKind::Native(name.into()));
             let prototype = vm.object(ObjectKind::Plain);
             vm.set(object, "prototype", Value::Object(prototype))?;
@@ -294,6 +422,33 @@ impl Runtime {
         let changed = read != self.read;
         self.bindings.state = state.clone();
         self.read = read;
+        // hudcountdown has its own states: 2 = ShowCountdown (one per new second, the number and its sound), 1 =
+        // HideCountdown (the movie's SetState, read from the disc movie 2026-11-08).
+        // leaderboardhud: 3 = SetupScreen then 1 = Show(true) to show, 4 = RefreshAll on a change, 2 = Show(false).
+        if self.component == Component::Leaderboard {
+            if shown && !self.shown {
+                self.shown = true;
+                self.set_state(3.0)?;
+                self.set_state(1.0)?;
+                self.set_state(4.0)?;
+            } else if shown && changed {
+                self.set_state(4.0)?;
+            } else if !shown && self.shown {
+                self.shown = false;
+                self.set_state(2.0)?;
+            }
+            return Ok(());
+        }
+        if self.component == Component::Countdown {
+            if shown && (!self.shown || changed) {
+                self.shown = true;
+                self.set_state(2.0)?;
+            } else if !shown && self.shown {
+                self.shown = false;
+                self.set_state(1.0)?;
+            }
+            return Ok(());
+        }
         if shown && !self.shown {
             self.shown = true;
             if self.component == Component::Objective {
@@ -346,6 +501,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dpo_values_become_the_movie_texts_through_the_language() {
+        let language = |id: &str| match id {
+            "ID_COMMON_NUMBER" => "{0:d}".to_string(),
+            other => other.to_string(),
+        };
+        let position = DpoSlot { value: Some(DpoValue { format: 0, numerator: 3.0, denominator: 5.0 }), ..Default::default() };
+        assert_eq!(dpo_texts(&position, language), ("3".to_string(), "5".to_string()));
+        let killed = DpoSlot { value: Some(DpoValue { format: 2, numerator: 0.0, denominator: 65.0 }), ..Default::default() };
+        assert_eq!(dpo_texts(&killed, language), ("0:00.00".to_string(), "1:05.00".to_string()));
+        let written = DpoSlot { numerator: "120".into(), denominator: "1000".into(), ..Default::default() };
+        assert_eq!(dpo_texts(&written, language), ("120".to_string(), "1000".to_string()), "own the spot writes its texts");
+    }
+
+    #[test]
     fn showing_and_hiding_tracks_each_component() {
         let mut s = ChallengeHudState::default();
         s.show(Component::Dpo, true);
@@ -380,7 +549,7 @@ mod tests {
             let mut hud = Runtime::load(component, &json, &["challenge_ots".to_owned(), "killedit_intro".to_owned()]).unwrap();
             state.show(component, true);
             state.timer_text = "0:10".into();
-            state.dpo[0] = DpoSlot { numerator: "0".into(), denominator: "1000".into(), title: "ID_CHALLENGE_OBJECTIVE_BEAT_OWNSPOT".into(), highlight: 1 };
+            state.dpo[0] = DpoSlot { numerator: "0".into(), denominator: "1000".into(), title: "ID_CHALLENGE_OBJECTIVE_BEAT_OWNSPOT".into(), highlight: 1, ..Default::default() };
             state.objectives = vec![ObjectiveRow { state: 3, kind: 0, title: "ID_CHALLENGE_OBJECTIVE_BEAT_OWNSPOT".into(), value: String::new() }];
             hud.sync(&state).unwrap();
             for _ in 0..30 {
@@ -408,6 +577,97 @@ mod tests {
                 hud.update().unwrap();
             }
             assert!(!hud.shown());
+        }
+    }
+
+    /// leaderboardhud with three race rows: shown, set up and refreshed without an unanswered binding, the ranks, names
+    /// and times in its text fields.
+    #[test]
+    #[ignore = "requires the converted challenge HUD movies (SKATE_SCORING_HUD_ROOT=<private/hud>)"]
+    fn the_leaderboard_shows_ranks_names_and_times() {
+        let root = std::path::PathBuf::from(std::env::var_os("SKATE_SCORING_HUD_ROOT").unwrap());
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("runtime").join(Component::Leaderboard.file())).unwrap()).unwrap();
+        let mut hud = Runtime::load(Component::Leaderboard, &json, &[]).unwrap();
+        let mut state = ChallengeHudState::default();
+        let row = |id: u32, rank: i32, score: f32, name: &str, highlight: bool| LeaderboardRow {
+            id, rank, score, score_text: skate_core::challenges::dpo::time_text(score), name: name.into(), highlight };
+        state.leaderboard = LeaderboardHud { layout: LEADERBOARD_RANK_NAME_TIME, title: String::new(), variant: LEADERBOARD_NO_VARIANT.into(), rows: vec![
+            row(0, 2, 1.5, "#Player", true), row(1, 1, 0.0, "ID_COMMON_DANNY_WAY", false), row(2, 3, 4.25, "ID_COMMON_MIKE_CARROLL", false)] };
+        state.show(Component::Leaderboard, true);
+        hud.sync(&state).unwrap();
+        for _ in 0..30 {
+            hud.update().unwrap();
+        }
+        state.leaderboard.rows[0].score = 2.0;
+        state.leaderboard.rows[0].score_text = "0:02.00".into();
+        hud.sync(&state).unwrap();
+        for _ in 0..10 {
+            hud.update().unwrap();
+        }
+        let texts: Vec<String> = hud.vm.objects.iter().filter_map(|o| match o.fields.get("text") {
+            Some(Value::Text(t)) if !t.is_empty() => Some(t.clone()),
+            _ => None,
+        }).collect();
+        eprintln!("LEADERBOARD texts {texts:?}");
+        let height = hud.shared_global("LeaderboardHUD_Height");
+        eprintln!("LEADERBOARD height {height:?}");
+        assert!(height.as_ref().is_some_and(|h| h.number() > 0.0), "the DPO moves up by this: {height:?}");
+        assert!(!texts.iter().any(|t| t == "0" || t == LEADERBOARD_NO_VARIANT), "no variant line: {texts:?}");
+        for want in ["Player", "0:02.00", "0:04.25"] {
+            assert!(texts.iter().any(|t| t.contains(want)), "{want} in {texts:?}");
+        }
+        assert!(texts.iter().any(|t| t.contains('2')), "a rank in {texts:?}");
+        state.show(Component::Leaderboard, false);
+        hud.sync(&state).unwrap();
+        assert!(!hud.shown());
+    }
+
+    /// hudcountdown: each new value shows its number frame ("#3" frame 0, "#2" 10, "#1" 20; GO on the language label)
+    /// with its count sound.
+    #[test]
+    #[ignore = "requires the converted challenge HUD movies (SKATE_SCORING_HUD_ROOT=<private/hud>)"]
+    fn the_countdown_shows_each_number_frame() {
+        let root = std::path::PathBuf::from(std::env::var_os("SKATE_SCORING_HUD_ROOT").unwrap());
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("runtime").join(Component::Countdown.file())).unwrap()).unwrap();
+        let sounds: Vec<String> = ["3", "2", "1", "go"].iter().map(|n| format!("challenge_count_{n}")).collect();
+        let mut hud = Runtime::load(Component::Countdown, &json, &sounds).unwrap();
+        let mut state = ChallengeHudState::default();
+        state.show(Component::Countdown, true);
+        let (mut frames, mut textures) = (Vec::new(), Vec::new());
+        for n in [3, 2, 1, 0] {
+            state.countdown = n;
+            hud.sync(&state).unwrap();
+            for _ in 0..6 {
+                hud.update().unwrap();
+            }
+            let path = ["hudcountdown", "mScreen", "mcCountdownText", "mcNumber"];
+            let mut at = Value::Object(hud.vm.global);
+            for key in path {
+                at = match at {
+                    Value::Object(o) => hud.vm.get(o, key),
+                    _ => Value::Undefined,
+                };
+            }
+            let frame = match at {
+                Value::Object(o) => hud.bindings.movie.instances.get(&o).map(|i| i.frame),
+                _ => None,
+            };
+            eprintln!("COUNTDOWN {n}: mcNumber frame {frame:?} sounds {:?}", hud.bindings.sounds);
+            // The drawn picture: one texture per number (the install's json and texture files must agree).
+            let shapes: crate::apt_scene::Shapes = serde_json::from_value(json["shapes"].clone()).unwrap();
+            let drawn: Vec<String> = crate::apt_scene::draw(&hud.bindings.movie, &hud.vm, &shapes).unwrap()
+                .into_iter().filter(|d| !d.texture.is_empty()).map(|d| d.texture).collect();
+            eprintln!("  DRAW {drawn:?}");
+            textures.push(drawn);
+            frames.push(frame);
+        }
+        assert_eq!(&frames[..3], &[Some(0), Some(10), Some(20)], "#3 / #2 / #1 frames");
+        assert!(frames[3].is_some_and(|f| f >= 30), "GO on a language frame: {frames:?}");
+        for (i, a) in textures.iter().enumerate() {
+            assert!(!a.is_empty(), "value {i} draws nothing");
+            assert!(textures[i + 1..].iter().all(|b| b != a), "3, 2, 1 and GO draw different pictures: {textures:?}");
         }
     }
 }

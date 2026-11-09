@@ -24,7 +24,7 @@ def contained(root, relative):
 
 # prepare_hud.MOVIES after trickdisplay: optional, so a cache from before a movie was added still installs.
 OPTIONAL_MOVIES = ("hudcentral.json", "hudminimap.json", "hudtimer.json", "hudcountdown.json", "hudobjective2.json",
-                   "dpo.json", "ownthespot.json", "killedit.json", "hudtutorial.json")
+                   "dpo.json", "leaderboardhud.json", "ownthespot.json", "killedit.json", "hudtutorial.json")
 
 
 def runtime_files(root, marker=False):
