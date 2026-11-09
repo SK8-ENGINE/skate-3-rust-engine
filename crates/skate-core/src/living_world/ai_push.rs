@@ -160,6 +160,28 @@ pub fn push(input: &PushInput, s: &PushSettings) -> Option<[(&'static str, f32);
     Some([(if right { "RightPush" } else { "LeftPush" }, 1.0), ("NewPush", 1.0), ("Pushing", 1.0)])
 }
 
+/// Why [`push`] gave no push for `input` (for logs), or `None` when it pushes.
+pub fn no_push_reason(input: &PushInput, s: &PushSettings) -> Option<&'static str> {
+    if push(input, s).is_some() {
+        return None;
+    }
+    Some(if !s.enabled {
+        "disabled"
+    } else if input.speed >= input.target {
+        "at target"
+    } else if NO_PUSH_CATEGORIES.contains(&input.category) {
+        "trick category"
+    } else if input.stuck_stage == NO_PUSH_STUCK_STAGE {
+        "stuck"
+    } else if input.against_forward {
+        "against the line"
+    } else if input.heading_error.abs() >= s.max_heading_error {
+        "heading"
+    } else {
+        "reduced factor"
+    })
+}
+
 /// The brake writer's values (`sub_8246B810`, research b347; data-driven, mod-tunable through `npc_push`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BrakeSettings {

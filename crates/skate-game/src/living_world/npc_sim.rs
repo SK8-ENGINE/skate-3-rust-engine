@@ -5,7 +5,7 @@ use super::npc_skaters::{NpcReplay, NpcSkater};
 use super::{LivingWorldObservers, LivingWorldSettings, NetRole, PopulationState};
 use crate::physics::{GamePhysics, PlayerControls, SkaterPhysicsContext, SkaterRuntime};
 use bevy::prelude::*;
-use skate_core::living_world::ai_record;
+use skate_core::living_world::{ai_record, autopilot_brain};
 use skate_core::living_world::replay::node_flags;
 use skate_core::player::state::PhysicalStateId;
 
@@ -127,6 +127,20 @@ pub(crate) fn backwards_line(id: super::LivingWorldId, character: &str, sim: &Np
     ))
 }
 
+/// Ticks the autopilot spent below the next jump's takeoff speed, how many of them pushed, and why the others did not.
+#[derive(Default)]
+struct Approach {
+    need: f32,
+    below: u32,
+    pushing: u32,
+    reasons: std::collections::BTreeMap<&'static str, u32>,
+    arc: bool,
+    /// A switch was looked for before this jump (once per jump).
+    switch_tried: bool,
+    /// The line and node to switch to on the next tick.
+    switch: Option<([u8; 16], u32)>,
+}
+
 /// A simulated NPC skater's own physics and runtime.
 #[derive(Component)]
 pub(crate) struct NpcSim {
@@ -144,6 +158,8 @@ pub(crate) struct NpcSim {
     pushing: bool,
     /// The player autopilot's skater: its record steers without pulling the speed (`ai_record::without_speed_pull`, ours).
     pub(crate) own_speed: bool,
+    /// The autopilot's approach to the next recorded jump, for its takeoff log (ours).
+    approach: Approach,
     /// Ticks with a push in the NPC_SKATER_SPEED window.
     push_ticks: u32,
     /// Controller B while it is the active controller (`brain+104`), with the line and node it walks back to.
@@ -525,7 +541,7 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
     if fit_to_ground {
         sim.body.runtime.fit_next_arrival();
@@ -1381,6 +1397,10 @@ pub(crate) fn simulate(
                         }
                     }
                 }
+                // OURS: the autopilot's line switch decided last tick.
+                if let Some((line, node)) = sim.approach.switch.take() {
+                    restart_cursor(replay, &*lines, line, node);
+                }
                 let avoid = &replay.avoid;
                 // Retail steers to B of this tick (frame, position, displacement). Before 2026-10-17 ours used the
                 // replay cursor from the top of the tick, which never moves back: after a rejoin behind it the target
@@ -1409,8 +1429,12 @@ pub(crate) fn simulate(
                 let mut cursor = None;
                 if let Some(line) = lines.get(&replay.cursor.line) {
                     let (node, frame_in_segment) = (replay.cursor.node, replay.cursor.frame_in_segment);
-                    // OURS: the autopilot jumps with its own physics (the recorded arc sets the recorded skater's launch speed).
-                    let jump = ai_record::current_trajectory(line, node, frame_in_segment).filter(|_| !sim.own_speed);
+                    // OURS: the autopilot takes the recorded arc only at or above its takeoff speed, so it never adds speed.
+                    let flat = { let w = GamePhysics::context_deck_velocity(&sim.context); w[0].hypot(w[2]) };
+                    let jump = ai_record::current_trajectory(line, node, frame_in_segment).filter(|j| !sim.own_speed || autopilot_brain::keeps_arc(flat, j, &autopilot_brain::JumpRules::default()));
+                    if sim.own_speed && ai_record::current_trajectory(line, node, frame_in_segment).is_some() {
+                        sim.approach.arc = jump.is_some();
+                    }
                     if let Some(jump) = jump {
                         ai_record::with_trajectory(&mut record, jump, ai_record::lands_in_grind(line, node.saturating_sub(1)));
                     }
@@ -1645,6 +1669,8 @@ pub(crate) fn simulate(
                         }
                     }
                 }
+                // OURS: the autopilot leaves a line whose next jump it is too slow for (taken after the push block).
+                let mut switch_to = None;
                 // The push below the line's speed (`sub_8246BAA8` -> `sub_8246B4C8`, b341): ground ticks on the board,
                 // not in a hold or skitching, like the ground steer above.
                 {
@@ -1664,7 +1690,7 @@ pub(crate) fn simulate(
                         let w = GamePhysics::context_deck_velocity(&sim.context);
                         let near = off_line <= t.look_ahead_distance;
                         let (node, into) = (replay.cursor.node, replay.cursor.frame_in_segment);
-                        let input = ai_push::PushInput {
+                        let mut input = ai_push::PushInput {
                             speed: (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt(),
                             // A racer's rubber band scales the line speed before the min / max clamp (82470830, b969).
                             target: avoid.last.shape_speed(ai_push::target_speed(target.step, off_line, t) * race.map_or(1.0, |c| c.speed_scale()), false),
@@ -1678,6 +1704,34 @@ pub(crate) fn simulate(
                             mirrored: sim.body.runtime.animation.stance().1,
                             fakie: sim.body.runtime.animation.stance().0,
                         };
+                        // OURS: the autopilot pushes to the next recorded jump's takeoff speed (it has no speed pull).
+                        if sim.own_speed {
+                            let rules = autopilot_brain::JumpRules::default();
+                            let jump = autopilot_brain::jump_ahead(line, node, into, &rules);
+                            input.target = autopilot_brain::push_target(input.target, jump);
+                            if !autopilot_brain::trick_cuts_push(input.speed, jump, &rules) {
+                                input.trick_frames = None;
+                            }
+                            if autopilot_brain::should_switch(input.speed, jump, &rules) && !sim.approach.switch_tried {
+                                sim.approach.switch_tried = true;
+                                let at = GamePhysics::context_deck_position(&sim.context);
+                                let fwd = if w[0].hypot(w[2]) > 0.5 { let f = w[0].hypot(w[2]); [w[0] / f, 0.0, w[2] / f] } else { facing };
+                                switch_to = autopilot_brain::switch_line(&*lines, replay.cursor.line, at, fwd, input.speed, &rules);
+                                info!(
+                                    "AUTOPILOT_SWITCH {:.1} m/s for a {:.1} m/s jump in {} frames at node {node}: {}",
+                                    input.speed, jump.map_or(0.0, |j| j.speed), jump.map_or(0, |j| j.frames),
+                                    switch_to.map_or("no line to take; trying it".to_string(), |(l, n)| format!("to line {} node {n}", l.iter().map(|b| format!("{b:02x}")).collect::<String>()))
+                                );
+                            }
+                            if let Some(j) = jump.filter(|j| input.speed < j.speed) {
+                                sim.approach.need = j.speed;
+                                sim.approach.below += 1;
+                                match ai_push::no_push_reason(&input, t) {
+                                    None => sim.approach.pushing += 1,
+                                    Some(r) => *sim.approach.reasons.entry(r).or_default() += 1,
+                                }
+                            }
+                        }
                         // At or above the target retail brakes instead (only far above it, `sub_8246B810`).
                         if let Some((key, magnitude)) = ai_push::brake(&input, replay.cursor.node >= 1, &rules.brake, t) {
                             intents.push((key.to_string(), magnitude));
@@ -1695,6 +1749,9 @@ pub(crate) fn simulate(
                     } else {
                         sim.pushing = false;
                     }
+                }
+                if switch_to.is_some() {
+                    sim.approach = Approach { switch: switch_to, ..Default::default() };
                 }
                 skate_core::living_world::ai_signals::apply_skitch_mode(
                     &mut intents,
@@ -1810,6 +1867,11 @@ pub(crate) fn simulate(
                                 "NPC_TAKEOFF #{} {} {:?} from {} node {node} speed {v:.2} launch {launch:.2} recorded_here {:.2} recorded_before {:.2} jump_node {jump_node} jump_speed {jump_speed:.2}",
                                 npc.id.serial, npc.character, state, sim.last_state.map_or("-".to_string(), |s| format!("{s:?}")), rec(node), node.checked_sub(1).map_or(f32::NAN, rec)
                             );
+                            if sim.own_speed {
+                                let a = std::mem::take(&mut sim.approach);
+                                let flat = { let w = GamePhysics::context_deck_velocity(&sim.context); w[0].hypot(w[2]) };
+                                info!("AUTOPILOT_JUMP node {node} flat {flat:.2} need {:.2} arc {} below {} ticks, pushing {}, no push {:?}, switch tried {}", a.need, a.arc, a.below, a.pushing, a.reasons, a.switch_tried);
+                            }
                         }
                     }
                 }

@@ -714,6 +714,23 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
   `NPC_SKATER_PUSH ... none: the autopilot pushes off`) and the recorded jump arc (`with_trajectory`: the recorded
   skater's launch speed, 4.5 -> 10.4 m/s going up); its jumps use its own ollie physics. Desktop DownTown 3 min after:
   926 m at 6.2 m/s over 14 lines, 4 bails.
+- Jumps (ours, `skate-core` `living_world::autopilot_brain`, rules in `JumpRules`): the laptop recheck of the change
+  above (autopilot-launch-20261108-2158) showed 0 pushless ground rises, but more bails, mostly from the air (DownTown 4
+  -> 6, 1 -> 3 from the air; Industrial 2 -> 5), with takeoffs 2 to 4 m/s under the recorded jump speed: retail stops
+  pushing 40 frames before a trick and its NPCs get the rest from the speed pull. Now, within 240 recorded frames of a
+  jump, the autopilot pushes toward that jump's recorded flat takeoff speed and keeps pushing until 12 frames before it
+  (`jump_ahead`, `push_target`, `trick_cuts_push`); the recorded arc is used again only when its own flat speed is at
+  or above the recorded takeoff speed, so the arc never adds speed (`keeps_arc`). 45 frames before a jump and under
+  85 % of its takeoff speed, it switches to another line whose node is 1 to 12 m ahead, at most 4 m to the side (the
+  brain's lost radius is 6 m), within 2.5 m of height, heading its way within 45 degrees and whose own next jump its
+  speed can make (`should_switch`, `switch_line`), on the next tick through the brain's own cursor restart; with no
+  such line it tries the jump. A push adds about 2 m/s per push at walking speed but little above 8 m/s, so jumps
+  recorded at 10 to 12 m/s (built from hills) are out of reach on the flat. Logs: `AUTOPILOT_JUMP` at every takeoff
+  (flat speed, the needed speed, arc used, approach ticks below it, ticks pushing, why the others did not push),
+  `AUTOPILOT_SWITCH` per switch decision. Desktop DownTown 3 min (the runs repeat tick for tick): before 3 bails at
+  6.16 m/s, with the push to takeoff speed and the arc rule 6.38 m/s, with the switch at 45 frames 6.46 m/s (3 bails,
+  1 from the air, 4 switch decisions, 2 switched). Deciding at 90 frames with a 20 m radius switched 11 times, left the
+  path (LOST) twice as often and fell to 5.05 m/s; with the 4 m side limit at 90 frames 4.90 m/s: kept at 45.
 - Dev: `SKATE_AUTOPILOT=1` engages at the start, `SKATE_AUTOPILOT_CHARACTER=<look>` picks the brain's character
   (default danny_way), `SKATE_AUTOPILOT_LINE=<32 hex digits>` the start line; any pad input releases the player.
   `AUTOPILOT` log lines: engaged / released and every 2 s position, speed, state, line and node.
@@ -723,10 +740,11 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
 - Laptop (autopilot-20261108-2053, the pull still on): DownTown 722 m over 15 lines, Industrial 262 m over 8, University
   336 m over 7 (the given line's fallback works); no panics, the player visible and followed by the camera; wedged on a
   curb lip (~28 s) and against a planter ledge (~14 s, then a bail), bails from the air, one bail from a car.
-- Next (`.claude/todo/player-autopilot.md`): the smarter layer for wedging, jumps and traffic; races as a racer, free-roam line lists, the smarter challenge-aware layer
-  (ours), `sdk.player.autopilot`.
+- Next (`.claude/todo/player-autopilot.md`): wedge / crawl recovery, traffic, races as a racer, free-roam line lists,
+  the challenge-aware layer, `sdk.player.autopilot` (the `JumpRules` there too).
 - Tests: `autopilot::tests::the_pick_is_the_nearest_node_heading_the_players_way`,
-  `autopilot::tests::a_line_id_parses_from_32_hex_digits`, skate-core `ai_record` (the record without the speed step).
+  `autopilot::tests::a_line_id_parses_from_32_hex_digits`, skate-core `ai_record` (the record without the speed step),
+  skate-core `autopilot_brain` (push target, trick cut, arc rule, line switch).
 
 ## Files
 
