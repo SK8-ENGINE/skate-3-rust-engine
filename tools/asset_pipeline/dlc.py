@@ -145,6 +145,23 @@ def unlocks(dlc: Path | None) -> list[dict]:
     return result
 
 
+def map_district(folder: str) -> str:
+    """A DLC stream folder's map name (the `.skate` file and the living world's district key): the folder without a
+    leading `DIST_` (`DIST_SanitariumDLC` -> `SanitariumDLC`, `DLC_DW_MegaCompund` as is)."""
+    return folder[5:] if folder.lower().startswith('dist_') else folder
+
+
+def district_bigs(dlc: Path | None, work: Path) -> list[tuple[str, Path, str]]:
+    """(map name, extracted BIG, stream folder) for every whole-map district in the player's DLC packs, for the
+    exports that read a district's `cSim_*` streams (the living world's lines, census, roads)."""
+    from tools.owned_game.big import BigArchive
+    out = []
+    for big in extract_bigs(dlc, work, wanted=lambda paths: bool(stream_districts(paths))):
+        for folder in stream_districts([e.path for e in BigArchive(big).entries]):
+            out.append((map_district(folder), big, folder))
+    return out
+
+
 def extract_bigs(dlc: Path | None, work: Path, wanted=None) -> list[Path]:
     """Copies each package's BIG archives to `work/<package file>/<big>` (kept while the size matches) and returns
     their paths. `wanted(entry_paths)` sees the BIG's entry list (read from its index) and limits which are copied."""

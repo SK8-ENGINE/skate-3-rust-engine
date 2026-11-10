@@ -151,7 +151,7 @@ pub(super) fn set_teleporter(world: &mut World, owner: &str, key: String, option
         let at = options.indicator_position.or_else(|| volumes_center(world, &volume)).unwrap_or_default();
         crate::visual_indicators::Placement { key, locator: String::new(),
             matrix: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [at[0], at[1], at[2], 1.]],
-            style: options.indicator_style.clone(), colour: options.indicator_colour.clone() }
+            style: options.indicator_style.clone(), colour: options.indicator_colour.clone(), always: false, fit: None }
     });
     let teleporter = crate::teleporters::Teleporter { id: key, map, volume_id: volume, volume: None, title_id: None,
         title: options.title, exits, layout: None, indicator };

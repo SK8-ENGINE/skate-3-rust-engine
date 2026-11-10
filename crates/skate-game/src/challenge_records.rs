@@ -105,7 +105,8 @@ impl Records {
     /// Writes the file on a short-lived thread (atomic: `.part`, then rename), so play never waits on the disk.
     pub fn save_in_background(&self) {
         if let (Some(path), Some(bytes)) = (self.path.clone(), self.bytes()) {
-            let spawned = std::thread::Builder::new().name("challenge-records-save".into()).spawn(move || write(&path, &bytes));
+            let writing = crate::save_tag::Writing::begin();
+            let spawned = std::thread::Builder::new().name("challenge-records-save".into()).spawn(move || { let _writing = writing; write(&path, &bytes) });
             if spawned.is_err() {
                 bevy::log::warn!("SKATE_CHALLENGES could not start the record save");
             }

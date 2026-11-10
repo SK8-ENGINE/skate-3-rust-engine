@@ -20,6 +20,32 @@ impl Default for RaceTuning {
     }
 }
 
+/// The race's minimap gate icons (race_shared countdown / gate hit, research `.local/research/race-gate-indicators.md`;
+/// retail defaults, data-driven): every gate of the leg is added with `Map.AddRaceGate` (icon `race_gate`), the finish
+/// with `Map.AddRaceCheckPoint` (`race_spotgate`); after each gate hit only the next `max_icons` gates show
+/// (`MaxMiniMapIcons` 3, which is also the group's draw cap).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GateIcons {
+    pub gate: String,
+    pub checkpoint: String,
+    pub max_icons: usize,
+}
+
+impl Default for GateIcons {
+    fn default() -> Self {
+        Self { gate: "race_gate".into(), checkpoint: "race_spotgate".into(), max_icons: 3 }
+    }
+}
+
+/// The gates whose minimap icons show: the `max_icons` after the furthest one passed (`passed` = how many of the leg's
+/// gates, in order, lie behind; a skipped gate counts as passed once a later one is hit). The finish shows once the
+/// window has room for it (ours: retail's nearest-three draw cap, applied in course order).
+pub fn visible_gates(passed: usize, total: usize, max_icons: usize) -> (std::ops::Range<usize>, bool) {
+    let start = passed.min(total);
+    let end = (start + max_icons).min(total);
+    (start..end, end - start < max_icons)
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Leg {
     /// Point 0 = the leg start, then one point per split trigger (the volume's centre), the last = the finish.
@@ -213,6 +239,15 @@ impl RaceTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_minimap_shows_the_next_three_gates_then_the_finish() {
+        assert_eq!(visible_gates(0, 13, 3), (0..3, false));
+        assert_eq!(visible_gates(5, 13, 3), (5..8, false));
+        assert_eq!(visible_gates(11, 13, 3), (11..13, true));
+        assert_eq!(visible_gates(13, 13, 3), (13..13, true));
+        assert_eq!(GateIcons::default().max_icons, 3);
+    }
 
     fn straight() -> RaceTracker {
         let course = Course::new([0.0; 3], &[vec![[9.0, 0.0, 0.0], [18.0, 0.0, 0.0], [27.0, 0.0, 0.0]]]);

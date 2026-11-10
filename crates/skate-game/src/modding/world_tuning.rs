@@ -383,6 +383,7 @@ pub(crate) fn apply_living_world(s: &mut LivingWorldSettings, p: &LivingWorldPat
         t.downhill_slope = f.push_downhill_slope.unwrap_or(t.downhill_slope);
         t.max_heading_error = f.push_max_heading_deg.map_or(t.max_heading_error, f32::to_radians);
         t.right_foot = f.push_right_foot.map(Some).unwrap_or(t.right_foot);
+        t.auto_pump = f.auto_pump.unwrap_or(t.auto_pump);
         let b = &mut n.brake;
         b.enabled = f.brake.unwrap_or(b.enabled);
         b.factor = f.brake_factor.unwrap_or(b.factor);

@@ -350,18 +350,20 @@ def census_chain(doc: dict, census_record: str) -> dict:
 
 # ---------------------------------------------------------------- district streams
 
-def district_assets(game_root: Path, work: Path, districts=CITY_DISTRICTS):
+def district_assets(game_root: Path, work: Path, districts=CITY_DISTRICTS, dlc_bigs=()):
     """Yield (district, tile stream name, asset id, processor id, data) for every asset of the
-    districts' ``cSim_*`` streams; copies stored in several cells are read once."""
+    districts' ``cSim_*`` streams, then of the DLC maps in `dlc_bigs` ((map name, BIG, stream folder),
+    `dlc.district_bigs`); copies stored in several cells are read once."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'vendor/university/tools/vanilla_map_extraction/tools'))
     from skate3_streams import read_atoc, read_sfil
     from tools.owned_game.big import BigArchive
-    for district in districts:
-        archive = game_root/'data/content'/f'worldDIST_{district}.big'
+    sources = [(d, game_root/'data/content'/f'worldDIST_{d}.big', None) for d in districts] + list(dlc_bigs)
+    for district, archive, stream_folder in sources:
         if not archive.is_file():
             continue
         big = BigArchive(archive)
-        index = next((e for e in big.entries if e.path.endswith('_Sim.xst')), None)
+        prefix = f'data/content/world/stream/{stream_folder}/'.lower() if stream_folder else ''
+        index = next((e for e in big.entries if e.path.lower().startswith(prefix) and e.path.endswith('_Sim.xst')), None)
         if index is None:
             continue
         folder = work/'living_world_streams'/district
@@ -372,7 +374,7 @@ def district_assets(game_root: Path, work: Path, districts=CITY_DISTRICTS):
         seen = set()
         for entry in sorted(big.entries, key=lambda e: e.path):
             name = Path(entry.path).name
-            if not (name.startswith('cSim_') and name.endswith('.xsf')):
+            if not (entry.path.lower().startswith(prefix) and name.startswith('cSim_') and name.endswith('.xsf')):
                 continue
             stream = folder/name
             stream.write_bytes(big.read(entry))
@@ -864,7 +866,7 @@ def export(ctx) -> dict:
     navmesh: dict[str, dict] = {}
     from . import living_world_navmesh
     nav_graphs: dict[str, list] = {}
-    for district, tile, asset_id, processor, data in district_assets(game_root, work):
+    for district, tile, asset_id, processor, data in district_assets(game_root, work, dlc_bigs=_get(ctx, 'dlc_bigs') or ()):
         if processor == REGION_PROCESSOR:
             for layer in region_layers(data):
                 if layer['layer'] in CENSUS_LAYERS:
@@ -983,8 +985,14 @@ def export_group(ctx) -> dict:
     records the group as unavailable and the world runs empty."""
     from . import living_world_skaters
     game_root, private, work, report = _paths(ctx)
+    # The DLC maps' districts (their lines, census and roads; the player's DLC folder, `dlc`).
+    dlc_bigs = _get(ctx, 'dlc_bigs')
+    if dlc_bigs is None:
+        from . import dlc as dlc_packages
+        folder = _get(ctx, 'dlc')
+        dlc_bigs = dlc_packages.district_bigs(Path(folder), work/'dlc') if folder else []
     context = {'game_root': game_root, 'private': private, 'work': work, 'report': report,
-               'collections': _get(ctx, 'collections')}
+               'collections': _get(ctx, 'collections'), 'dlc_bigs': dlc_bigs}
     peds = export(context)
     skaters = living_world_skaters.export(context)
     output = private/'living_world'

@@ -180,7 +180,7 @@ fn dpo_texts(slot: &DpoSlot, localize: impl Fn(&str) -> String) -> (String, Stri
     (fill(dpo::numerator(format, v.numerator)), fill(dpo::denominator(format, v.denominator)))
 }
 
-fn array(vm: &mut Vm, values: impl IntoIterator<Item = Value>) -> Result<Value, String> {
+pub(crate) fn array(vm: &mut Vm, values: impl IntoIterator<Item = Value>) -> Result<Value, String> {
     let object = vm.object(ObjectKind::Plain);
     let mut n = 0;
     for value in values {

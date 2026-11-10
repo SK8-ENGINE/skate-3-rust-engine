@@ -83,6 +83,7 @@ mod text_entry_ui;
 mod image_renderer_host;
 mod retail_menu_movies;
 mod retail_menu_stage;
+mod save_tag;
 mod rumble;
 mod asset_check;
 mod startup_loading;

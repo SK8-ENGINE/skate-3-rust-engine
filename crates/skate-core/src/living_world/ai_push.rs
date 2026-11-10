@@ -33,6 +33,10 @@ pub struct PushSettings {
     pub min_target: f32,
     /// A fixed foot for every push (mod override: `Some(true)` = `RightPush`); `None` = retail's stance rule.
     pub right_foot: Option<bool>,
+    /// OURS, opt-in (off = retail): NPC skaters pump down slopes through the player's auto pump intents
+    /// ([`super::autopilot_brain::pump_magnitude`]); retail AI never posts them (research npc-auto-pump). The player
+    /// autopilot always pumps.
+    pub auto_pump: bool,
 }
 
 impl Default for PushSettings {
@@ -51,6 +55,7 @@ impl Default for PushSettings {
             off_line_distance: 2.0,
             min_target: 4.0,
             right_foot: None,
+            auto_pump: false,
         }
     }
 }

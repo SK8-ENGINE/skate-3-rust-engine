@@ -91,6 +91,18 @@ SPLITS = _field('SplitTimeTriggers')
 GATES = 'Hash_819849159B9E26AD'
 GATE_VOLUME = 'Hash_013BDB7AF1756799'
 GATE_INDICATOR = 'Hash_B1BF3FF96CC7F6AD'
+# Race gate presentation (research race-gate-indicators.md): the gate's ribbon (tSplineBankObject = a ribbon_indicator
+# RefSpec + a ribbon_spline_colour RefSpec), Time_Bonus, gate audio; the race's skipable flag, minimap icon cap, grey
+# icon and the grey / final / leg finish ribbons (absent rows: the game's retail defaults).
+GATE_RIBBON = 'Hash_E02F0BA9F04FFF16'
+GATE_TIME_BONUS = 'Hash_881D391E8B51AFE5'
+GATE_AUDIO = 'Hash_DC41AFD60FDAD913'
+RACE_SKIPABLE = 'Hash_94CAC0A22ABC4647'
+RACE_MAX_MINIMAP_ICONS = 'Hash_F9B0D8DD44ADA713'
+RACE_GREY_ICON = 'Hash_21236A5259312838'
+RACE_GREY_RIBBON = 'Hash_EF0F24D18958E86A'
+RACE_FINAL_RIBBON = 'Hash_9FCEC885B237766D'
+RACE_LEG_FINISH_RIBBON = 'Hash_753B2FE8A30EADEA'
 TIME_LIMIT = 'Hash_F89BFDFC88990F17'
 TIME_LIMIT_WARNING = 'Hash_270125BF89FBBFDE'
 KILLED_IT_TIME = _field('KilledItTime')
@@ -468,6 +480,23 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
 
         params = merged((PARAMS, hash64(key)))
         heats = []
+
+        def ribbon(value):
+            """A tSplineBankObject: {indicator, colour} row names (Hash_<16 hex> when the row is not in the database)."""
+            raw = bytes.fromhex((value or {}).get('data') or ((((value or {}).get('array') or {}).get('items') or [''])[0]) or '')
+            if len(raw) < 48:
+                return None
+            indicator, colour = struct.unpack_from('>Q', raw, 8)[0], struct.unpack_from('>Q', raw, 32)[0]
+            name = lambda h: ribbon_names.get(h, 'Hash_%016X' % h) if h else None
+            return dict(indicator=name(indicator), colour=name(colour)) if indicator else None
+
+        def flag(f, field):
+            value = (f.get(field) or {}).get('data')
+            return bool(int(value[:2], 16)) if value else None
+
+        def refspec_name(value):
+            raw = bytes.fromhex((value or {}).get('data') or '')
+            return icon_names.get(struct.unpack_from('>Q', raw, 8)[0]) if len(raw) >= 16 else None
         for heat_ref in refs(params.get(RACE_HEATS)):
             heat = merged(heat_ref)
             if START not in heat:
@@ -491,7 +520,8 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
                     raw = bytes.fromhex((gate.get(GATE_VOLUME) or {}).get('data') or '')
                     _, name, instance = parse_trigger(raw, binary)
                     gates.append(dict(name=name, id='%016x' % instance, volume=volume_of(folder, instance),
-                                      indicator=_u32(gate.get(GATE_INDICATOR))))
+                                      indicator=_u32(gate.get(GATE_INDICATOR)), ribbon=ribbon(gate.get(GATE_RIBBON)),
+                                      time_bonus=i32(gate, GATE_TIME_BONUS, 0), audio=_u32(gate.get(GATE_AUDIO))))
                 legs.append(dict(end_time_bonus=i32(leg, END_TIME_BONUS, 0), splits=splits, gates=gates))
             if not legs:
                 raise ValueError('heat without legs')
@@ -525,8 +555,15 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             description_arg=int(((fields.get(DESCRIPTION_ARG) or {}).get('data') or '00')[:2], 16),
             sign_up_radius=radius(fields, SIGN_UP_RADIUS), discovery_radius=radius(fields, DISCOVERY_RADIUS),
             challenge_type=_u32(fields.get(CHALLENGE_TYPE)),
-            competitors=competitors(COMPETITORS), online_competitors=competitors(ONLINE_COMPETITORS), heats=heats)
+            competitors=competitors(COMPETITORS), online_competitors=competitors(ONLINE_COMPETITORS), heats=heats,
+            gates=dict(skipable=flag(params, RACE_SKIPABLE), max_minimap_icons=i32(params, RACE_MAX_MINIMAP_ICONS),
+                       grey_icon=refspec_name(params.get(RACE_GREY_ICON)), grey_ribbon=ribbon(params.get(RACE_GREY_RIBBON)),
+                       final_ribbon=ribbon(params.get(RACE_FINAL_RIBBON)),
+                       leg_finish_ribbon=ribbon(params.get(RACE_LEG_FINISH_RIBBON))))
 
+    class_of = lambda name: 'Hash_%016X' % hash64(name)
+    ribbon_names = {hash64(k): k for (c, k) in rows if c in (class_of('ribbon_indicator'), class_of('ribbon_spline_colour'))}
+    icon_names = {hash64(k): k for (c, k) in rows if c == class_of('fe_map_icons')}
     result, tutorials, races, skipped = [], [], [], []
     for (cls, key), (parent, _) in sorted(rows.items()):
         if cls != CHALLENGE or key.endswith('_ol'):

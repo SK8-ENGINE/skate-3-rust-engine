@@ -17,12 +17,14 @@ pub(crate) struct EndDialogScreen {
     pub choice: Option<Action>,
     /// The stage has both small dialog movies; without them the run continues at once.
     pub available: bool,
+    /// The results table (a race's RACE_TIMES, skate-core `challenges::results`); None for families without one.
+    pub results: Option<skate_core::challenges::results::ResultsView>,
 }
 
 impl EndDialogScreen {
-    /// Our families write no result rows (b925): a pass shows the small dialog, a failure the failed one.
+    /// A failure shows the failed dialog; a pass the table with two or more result rows, else the small one (b920).
     pub fn movie(&self) -> Movie {
-        self.dialog.movie(0, false)
+        self.dialog.movie(self.results.as_ref().map_or(0, |r| r.rows.len()), false)
     }
 
     /// A face button on the open dialog: the slot's action, or None for an empty slot.
@@ -43,6 +45,7 @@ impl EndDialogScreen {
 pub struct EndDialogHost {
     pub dialog: EndDialog,
     pub title: Option<String>,
+    pub results: Option<skate_core::challenges::results::ResultsView>,
 }
 
 impl EndDialogHost {
@@ -50,7 +53,14 @@ impl EndDialogHost {
     /// 2026-11-07 showed `#` + id as the raw id).
     pub fn call(&self, vm: &mut Vm, language: &BTreeMap<String, String>, object: &str, method: &str, args: &[Value])
         -> Result<Option<Value>, String> {
-        let _ = vm;
+        if method.starts_with("Results_") {
+            bevy::log::info!("END_DIALOG native {object}.{method}({args:?})");
+        }
+        // The table movie reads these class statics right after this call, while it loads (laptop race-results3b:
+        // the natives run before the dialog shows).
+        if method == "Results_GetNumPlayers" {
+            results_enums(vm);
+        }
         let literal = |id: &str| Value::Text(format!("#{}", crate::fe_language::template(language, id)));
         Ok(Some(match (object, method) {
             ("Mission", "GetNumEndMissionOptions") => Value::Number(self.dialog.count() as f64),
@@ -66,10 +76,58 @@ impl EndDialogHost {
             ("Mission", "GetWinState") => Value::Bool(self.dialog.passed),
             ("Mission", "Results_GetKilledIt") => Value::Bool(self.dialog.killed),
             ("Mission", "GetTitle") => literal(self.title.as_deref().unwrap_or("ID_FREESKATE_LOBBY")),
-            ("HUDComponents", "Results_GetNumPlayers") => Value::Number(0.0),
+            // The results table (8265E8C0 / 8265E950 / 8265F598, research race-results-rows.md).
+            ("HUDComponents", "Results_GetNumPlayers") => Value::Number(self.results.as_ref().map_or(0, |r| r.rows.len()) as f64),
+            ("HUDComponents", "Results_GetLayoutType") => Value::Number(self.results.as_ref().map_or(0, |r| r.layout) as f64),
+            ("HUDComponents", "Results_GetSelfRank") => Value::Number(self.results.as_ref().map_or(0, |r| r.self_rank()) as f64),
+            ("HUDComponents", "Results_GetThrowdownType") | ("HUDComponents", "Results_GetLeaderboardType") => Value::Number(0.0),
+            ("HUDComponents", "Results_GetLeaderboardColTitle") => {
+                let c = match args.first() {
+                    Some(Value::Number(n)) if *n >= 0.0 => *n as usize,
+                    _ => usize::MAX,
+                };
+                literal(self.results.as_ref().and_then(|r| r.columns.get(c)).map_or("", String::as_str))
+            }
+            ("HUDComponents", "Results_GetLeaderboardDataBlock") => {
+                use skate_core::challenges::results::Cell;
+                let cells = self.results.as_ref().map(|r| r.data_block()).unwrap_or_default();
+                // The movie reads one row even when there are none (b925: a placeholder).
+                let cells = if cells.is_empty() { vec![Cell::Number(0.0), Cell::Text(String::new()), Cell::Number(0.0), Cell::Text(String::new()),
+                    Cell::Text(String::new()), Cell::Bool(false), Cell::Number(0.0), Cell::Text(String::new())] } else { cells };
+                let values = cells.into_iter().map(|c| match c {
+                    Cell::Number(n) => Value::Number(n as f64),
+                    Cell::Bool(b) => Value::Bool(b),
+                    Cell::Text(t) if t.starts_with("ID_") => literal(&t),
+                    Cell::Text(t) => Value::Text(format!("#{t}")),
+                });
+                crate::hud_challenge::array(vm, values)?
+            }
             _ => return Ok(None),
         }))
     }
+}
+
+/// The results table's class statics, which retail's native code sets and the movie only reads (828534B0 registers
+/// the eResultsLBType values; research b925 / race-results-rows.md): `STRUCT_ITEMS` (8 data block items per row) and
+/// `eResultsLBType_<name>` (0 PlaceNameInt .. 8, 15 PlaceNameStringTime).
+pub fn results_enums(vm: &mut Vm) {
+    const LAYOUTS: [&str; 9] = ["PlaceNameInt", "BestTrickFloat", "BestTrickInt", "DeathRace", "BestTrickNonElimFloat",
+        "BestTrickNonElimInt", "PlaceNameScoreTime", "PlaceNameString", "TeamChallengeResults"];
+    let class = match vm.get(vm.global, "endchallengeoptions") {
+        Value::Object(class) => class,
+        other => {
+            bevy::log::info!("END_DIALOG results enums NOT set: _global.endchallengeoptions is {other:?}");
+            return;
+        }
+    };
+    let mut values: Vec<(String, f64)> = vec![("STRUCT_ITEMS".into(), 8.0), ("eResultsLBType_PlaceNameStringTime".into(), 15.0)];
+    values.extend(LAYOUTS.iter().enumerate().map(|(i, n)| (format!("eResultsLBType_{n}"), i as f64)));
+    for (key, n) in values {
+        if let Err(e) = vm.set(class, key.clone(), Value::Number(n)) {
+            bevy::log::warn!("END_DIALOG endchallengeoptions.{key}: {e}");
+        }
+    }
+    bevy::log::info!("END_DIALOG results enums set on endchallengeoptions (STRUCT_ITEMS 8, DeathRace 3)");
 }
 
 #[cfg(test)]
@@ -78,7 +136,7 @@ mod tests {
 
     #[test]
     fn natives_follow_the_slots() {
-        let host = EndDialogHost { dialog: EndDialog { passed: true, ..Default::default() }, title: None };
+        let host = EndDialogHost { dialog: EndDialog { passed: true, ..Default::default() }, title: None, results: None };
         let mut vm = Vm::new();
         let language = BTreeMap::from([("ID_COMMON_RETRY".to_string(), "Retry".to_string())]);
         let call = |vm: &mut Vm, m: &str, args: &[Value]| host.call(vm, &language, "Mission", m, args).unwrap().unwrap();

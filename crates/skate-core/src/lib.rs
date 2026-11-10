@@ -23,6 +23,7 @@ pub mod fe_stack;
 pub mod menus;
 pub mod challenge_map;
 pub mod career;
+pub mod presentation;
 pub mod challenges;
 pub mod cheats;
 pub mod credits;

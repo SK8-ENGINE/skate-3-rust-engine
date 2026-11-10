@@ -86,10 +86,11 @@ pub fn should_switch(speed: f32, jump: Option<JumpAhead>, rules: &JumpRules) -> 
 
 /// The closest node (side distance first) of another line that is ahead of the skater, heading its way (within 45
 /// degrees), and whose own next jump (if any) this speed can make; `forward` is the flat unit direction of travel.
-pub fn switch_line(lines: &dyn LineSource, from: [u8; 16], position: [f32; 3], forward: [f32; 3], speed: f32, rules: &JumpRules) -> Option<([u8; 16], u32)> {
+/// `only`: the challenge's own lines while one runs (a race never leaves its course).
+pub fn switch_line(lines: &dyn LineSource, from: [u8; 16], position: [f32; 3], forward: [f32; 3], speed: f32, only: Option<&[[u8; 16]]>, rules: &JumpRules) -> Option<([u8; 16], u32)> {
     let mut best: Option<(f32, [u8; 16], u32)> = None;
     lines.for_each_line(&mut |line| {
-        if line.id == from {
+        if line.id == from || only.is_some_and(|o| !o.contains(&line.id)) {
             return;
         }
         for (i, n) in line.nodes.iter().enumerate().take(line.nodes.len().saturating_sub(2)) {
@@ -117,6 +118,72 @@ pub fn switch_line(lines: &dyn LineSource, from: [u8; 16], position: [f32; 3], f
         }
     });
     best.map(|(_, line, node)| (line, node))
+}
+
+/// The autopilot's brake (ours: retail brakes only past ~3.3x the line's speed and its NPCs slow down through the speed
+/// pull, which the autopilot has not): the slowest recorded speed within `look_ahead_frames` of the line, so it slows
+/// before a slow section instead of arriving too fast; it brakes above `factor`'s inverse x that speed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrakeRules {
+    pub look_ahead_frames: u32,
+    /// Retail's brake factor for the autopilot (`BrakeSettings::factor`; retail 0.3): 0.8 brakes above 1.25x.
+    pub factor: f32,
+}
+
+impl Default for BrakeRules {
+    fn default() -> Self {
+        Self { look_ahead_frames: 60, factor: 0.8 }
+    }
+}
+
+/// The slowest recorded speed (m/s) from the cursor through `rules.look_ahead_frames` of the line.
+pub fn approach_speed(line: &ReplayLine, node: u32, into: u32, rules: &BrakeRules) -> Option<f32> {
+    let speed = |n: &super::replay::ReplayNode| n.step[0].hypot(n.step[1]).hypot(n.step[2]) * super::ai_record::FRAMES_PER_SECOND;
+    let mut slowest = line.nodes.get(node as usize).map(speed)?;
+    let mut ahead = -i64::from(into);
+    for n in line.nodes.iter().skip(node as usize + 1) {
+        ahead += i64::from(n.frames);
+        if ahead > i64::from(rules.look_ahead_frames) {
+            break;
+        }
+        slowest = slowest.min(speed(n));
+    }
+    Some(slowest)
+}
+
+/// The autopilot gets up from a bail like a player hitting reset (ours): back on its line this long after the bail,
+/// not after the NPC skaters' 5 s lie (they keep theirs; user, 2026-11-09).
+pub const BAIL_RESET_SECONDS: f32 = 2.0;
+
+/// Pumping down a slope (ours: retail AI never pumps; the player's auto pump gesture, `AutoPumpAngle` 0 and
+/// `AutoPumpMag` held, so the stock crouch node crouches and pumps as it does for a player).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PumpRules {
+    /// The line's slope (rise over run) at or below which it pumps.
+    pub slope: f32,
+    /// At least this fast (m/s).
+    pub min_speed: f32,
+    /// Ticks the stick is held forward per pump, then released (a new pump needs the magnitude to rise again).
+    pub hold_ticks: u32,
+    pub release_ticks: u32,
+}
+
+impl Default for PumpRules {
+    fn default() -> Self {
+        Self { slope: -0.04, min_speed: 1.5, hold_ticks: 40, release_ticks: 10 }
+    }
+}
+
+/// This tick's `AutoPumpMag` (with `AutoPumpAngle` 0), or `None` when it does not pump; `cycle` counts the ticks of
+/// the current pumping stretch (reset when it stops).
+pub fn pump_magnitude(cycle: &mut u32, slope: f32, speed: f32, pushing: bool, rules: &PumpRules) -> Option<f32> {
+    if slope > rules.slope || speed < rules.min_speed || pushing {
+        *cycle = 0;
+        return None;
+    }
+    let t = *cycle % (rules.hold_ticks + rules.release_ticks).max(1);
+    *cycle += 1;
+    Some(if t < rules.hold_ticks { 1.0 } else { 0.0 })
 }
 
 #[cfg(test)]
@@ -176,8 +243,31 @@ mod tests {
         }
         lines.get_mut(&[4; 16]).unwrap().nodes.iter_mut().for_each(|n| n.step = [0.0, 0.0, -4.0 / 30.0]);
         // Line 2 is nearer but jumps at 12 m/s; line 4 runs the other way; line 3 has no jump.
-        assert_eq!(switch_line(&lines, [1; 16], [0.0, 0.0, 6.0], [0.0, 0.0, 1.0], 7.0, &rules), Some(([3; 16], 2)));
-        assert_eq!(switch_line(&lines, [1; 16], [0.0, 0.0, 6.0], [0.0, 0.0, 1.0], 11.0, &rules), Some(([2; 16], 2)));
+        assert_eq!(switch_line(&lines, [1; 16], [0.0, 0.0, 6.0], [0.0, 0.0, 1.0], 7.0, None, &rules), Some(([3; 16], 2)));
+        assert_eq!(switch_line(&lines, [1; 16], [0.0, 0.0, 6.0], [0.0, 0.0, 1.0], 11.0, None, &rules), Some(([2; 16], 2)));
+        // In a race only the race's own lines: here line 2 alone, too fast at 7 m/s, so none.
+        assert_eq!(switch_line(&lines, [1; 16], [0.0, 0.0, 6.0], [0.0, 0.0, 1.0], 7.0, Some(&[[1; 16], [2; 16]]), &rules), None);
+    }
+
+    #[test]
+    fn it_pumps_down_slopes_in_hold_release_cycles_and_not_while_pushing() {
+        let rules = PumpRules::default();
+        let mut cycle = 0;
+        assert_eq!(pump_magnitude(&mut cycle, 0.0, 5.0, false, &rules), None, "flat");
+        let seq: Vec<f32> = (0..51).filter_map(|_| pump_magnitude(&mut cycle, -0.2, 5.0, false, &rules)).collect();
+        assert_eq!((seq[0], seq[39], seq[40], seq[49], seq[50]), (1.0, 1.0, 0.0, 0.0, 1.0));
+        assert_eq!(pump_magnitude(&mut cycle, -0.2, 5.0, true, &rules), None, "pushing");
+        assert_eq!(cycle, 0);
+        assert_eq!(pump_magnitude(&mut cycle, -0.2, 1.0, false, &rules), None, "too slow");
+    }
+
+    #[test]
+    fn the_approach_speed_is_the_slowest_recorded_speed_just_ahead() {
+        let mut l = straight(1, 0.0, None, 0.0);
+        l.nodes[3].step = [0.0, 0.0, 0.05];
+        let rules = BrakeRules::default();
+        assert!((approach_speed(&l, 1, 0, &rules).unwrap() - 3.0).abs() < 1e-4, "node 3 is 60 frames ahead");
+        assert!((approach_speed(&l, 4, 0, &rules).unwrap() - 8.0).abs() < 1e-4);
     }
 
     #[test]

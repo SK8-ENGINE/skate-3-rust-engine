@@ -104,7 +104,7 @@ def environment(game_root, stage, work, report, log, converted=None, game_exe=No
     attempt('backdrops',lambda assets:write_backdrops(game_root,assets,converted))
 
 
-def livingworld(game_root, stage, work, report, log, converted=None):
+def livingworld(game_root, stage, work, report, log, converted=None, dlc=None):
     """Optional living world (pedestrians + NPC skaters): on failure the world runs empty and
     setup reports it (living_world-availability.json)."""
     private=stage/"assets/private"
@@ -115,7 +115,7 @@ def livingworld(game_root, stage, work, report, log, converted=None):
     try:
         if (private/'living_world').exists():shutil.rmtree(private/'living_world')
         # Own vault conversion (with the summary-report record names), not core's `converted`.
-        result=export_group({'game_root':game_root,'private':private,'work':work/'living_world','report':report})
+        result=export_group({'game_root':game_root,'private':private,'work':work/'living_world','report':report,'dlc':dlc})
         for warning in result['peds']['warnings']+result['skaters'].get('warnings',[]):log.write(f'living world: {warning}\n')
     except CONTENT_ERRORS as error:
         if (private/'living_world').exists():shutil.rmtree(private/'living_world')

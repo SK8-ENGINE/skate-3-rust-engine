@@ -144,7 +144,9 @@ impl CareerState {
 }
 
 fn write_in_background(path: PathBuf, text: String) {
+    let writing = crate::save_tag::Writing::begin();
     std::thread::spawn(move || {
+        let _writing = writing;
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }

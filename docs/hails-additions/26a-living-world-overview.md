@@ -169,7 +169,7 @@ Domains:
 
 ### AI skater push fields
 
-AI skaters push while slower than their line (retail on): below `push_factor` x the line's speed (0..=1, retail 0.97), each reducing condition multiplies by `push_reduce` (0..=1, retail 0.3), faster than `push_fast_speed` m/s reduces (0..=100, retail 11), a slope under `push_downhill_slope` reduces (-10..=10, retail -0.22), no push from `push_max_heading_deg` off the line (0..=180, retail 40); `push_right_foot` picks RightPush (default) or LeftPush.
+AI skaters push while slower than their line (retail on): below `push_factor` x the line's speed (0..=1, retail 0.97), each reducing condition multiplies by `push_reduce` (0..=1, retail 0.3), faster than `push_fast_speed` m/s reduces (0..=100, retail 11), a slope under `push_downhill_slope` reduces (-10..=10, retail -0.22), no push from `push_max_heading_deg` off the line (0..=180, retail 40); `push_right_foot` picks RightPush (default) or LeftPush. `auto_pump` (ours, off = retail): NPC skaters pump down slopes with the player's auto pump intents (doc 26c "DLC map lines and opt-in pumping").
 
 ### Ped behaviour fields
 

@@ -176,10 +176,10 @@ def run(args,log,report):
             log.write(line);log.flush()
         if process.wait():raise RuntimeError('Conversion failed. See '+str(log.name))
 
-def run_stage(name,game_root,stage,work,log,report):
+def run_stage(name,game_root,stage,work,log,report,dlc=None):
     """An in-process stage function in its own process (stage_job.py): its `REPORT` lines go to `report`, the rest to
-    the log, as when it ran here."""
-    child=spawn(task(TOOLS/'asset_pipeline/stage_job.py',name,'--game',game_root,'--stage',stage,'--work',work),
+    the log, as when it ran here. `dlc`: the player's DLC folder (the living world reads the DLC maps' districts)."""
+    child=spawn(task(TOOLS/'asset_pipeline/stage_job.py',name,'--game',game_root,'--stage',stage,'--work',work,*(('--dlc',dlc) if dlc else ())),
                 stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
     with child as process:
         for line in process.stdout:
@@ -420,8 +420,9 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
     # Only packs that carry map streams change the maps group (b415): a menu-only pack never reconverts the maps.
     dlc_maps_identity=dlc_packages.signature(dlc_folder,dlc_packages.has_maps) if dlc_identity else ''
     if dlc_maps_identity:
-        # The map packs also carry their worlds' skies and audio (b414 / b417).
-        for group in ('maps','environment','audio'):
+        # The map packs also carry their worlds' skies and audio (b414 / b417), and their AI skater lines, census and
+        # roads (the living world; Sanatorium, Danny Way, Maloof and Art Gallery have lines).
+        for group in ('maps','environment','audio','livingworld'):
             target_versions[group]=target_versions[group]+'+dlc:'+dlc_maps_identity
     groups=changed_groups(previous[1].get('pipelines',{}),target_versions) if previous else set(GROUPS)
     source=str((iso if iso is not None else game_root).resolve())
@@ -649,7 +650,7 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
             # runs beside the audio's); the props below read its tables, so it is joined first.
             living_job=None
             if 'livingworld' in groups:
-                living_job=Background(lambda:run_stage('livingworld',game_root,stage,work,log,report),'livingworld')
+                living_job=Background(lambda:run_stage('livingworld',game_root,stage,work,log,report,dlc_folder if dlc_maps_identity else None),'livingworld')
             if 'audio' in groups:
                 exports.audio(game_root,stage,work,report,log,base/'tools',dlc_jobs,dlc_vaults)
             if living_job is not None:living_job.join()

@@ -192,6 +192,8 @@ const MENU_Z: f32 = 50.0;
 #[derive(Resource)]
 struct MenuStage {
     stage: Stage,
+    /// The autosave layer's save tag while a save write is in flight (`save_tag`, b948).
+    save_tag: crate::save_tag::SaveTag,
     crossbar: CrossbarState,
     rules: CrossbarRules,
     language: BTreeMap<String, String>,
@@ -470,6 +472,16 @@ fn load_tag(stage: &mut Stage, on: bool, fe: &mut FrontEnd) {
     }
 }
 
+/// The autosave layer's save tag (`825DF4F8`, b948): `Save_EnableTag("false", "false")` in game (FE not open, no
+/// variant; the args' meaning is open), `Save_HideTag()`. A menu set without the layer has neither; saving goes on.
+fn save_tag(stage: &mut Stage, on: bool, fe: &mut FrontEnd) {
+    let (path, args) = if on { ("_global.Save_EnableTag", vec![Value::Text("false".into()), Value::Text("false".into())]) } else { ("_global.Save_HideTag", Vec::new()) };
+    match stage.call_path(path, args, fe) {
+        Ok(_) => info!("RETAIL_MENUS {path}"),
+        Err(e) => debug!("RETAIL_MENUS {path}: {e}"),
+    }
+}
+
 /// The Apt keys: names from the menu tables' key table, expressions from the install's stock input.cfg.
 fn apt_keys(assets: &std::path::Path) -> Vec<AptKey> {
     let names: Vec<String> = std::fs::read_to_string(assets.join(crate::retail_menus::TABLES))
@@ -691,6 +703,7 @@ fn setup(
                 .position(|r| movies.movies.contains_key(r.movie) && templates.iter().any(|n| n == r.template))
                 .unwrap_or(usize::MAX);
             commands.insert_resource(MenuStage {
+                save_tag: Default::default(),
                 stage,
                 crossbar: CrossbarState::default(),
                 rules: CrossbarRules::default(),
@@ -935,7 +948,7 @@ fn update(
         if e.available != available {
             e.available = available;
         }
-        fe.end_dialog = e.open.then(|| crate::end_dialog_host::EndDialogHost { dialog: e.dialog.clone(), title: e.title.clone() });
+        fe.end_dialog = e.open.then(|| crate::end_dialog_host::EndDialogHost { dialog: e.dialog.clone(), title: e.title.clone(), results: e.results.clone() });
     }
     if let Some(p) = poster_screen.as_mut() {
         let available = screens_switch() && ms.poster_id.is_some();
@@ -1769,6 +1782,13 @@ fn update(
             info!("RETAIL_MENUS fade {}", if ms.fade.alpha == 1.0 { "black" } else { "clear" });
         }
         ms.stage.update(time.delta_secs() * 1000.0, &movies.movies, &mut fe)?;
+        if let Some(show) = ms.save_tag.step(crate::save_tag::saving(), time.delta_secs()) {
+            save_tag(&mut ms.stage, show, &mut fe);
+            // Hiding the save tag re-shows the load tag while a load is still up (825DF4F8).
+            if !show && fe.tips_loader.open {
+                load_tag(&mut ms.stage, true, &mut fe);
+            }
+        }
         // Settings loaded (vt+108 sub_8260C010): SetScreenState(1) builds the rows; intro complete = ready.
         if let Some(o) = options.filter(|o| ms.stack.top(Layer::Main) == Some(*o)) {
             let loaded = format!("Game.OnScreenLoaded({options_id})");

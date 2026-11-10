@@ -9,11 +9,12 @@ if __name__=='__main__':
     p=argparse.ArgumentParser()
     p.add_argument('name',choices=['livingworld','customiser'])
     for name in ('game','stage','work'):p.add_argument('--'+name,type=Path,required=True)
+    p.add_argument('--dlc',type=Path,default=None)
     a=p.parse_args()
     from tools.asset_pipeline import asset_exports
     report=lambda text:print('REPORT '+text,flush=True)
     if a.name=='customiser':
         from tools.asset_pipeline.customiser_setup import prepare
         prepare(a.game,a.stage/'assets',report)
-    else:getattr(asset_exports,a.name)(a.game,a.stage,a.work,report,sys.stdout)
+    else:asset_exports.livingworld(a.game,a.stage,a.work,report,sys.stdout,dlc=a.dlc)
     sys.stdout.flush()

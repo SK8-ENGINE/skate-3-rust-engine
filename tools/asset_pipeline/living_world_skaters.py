@@ -177,16 +177,18 @@ def read_pack(data: bytes) -> list[tuple[int, str, bytes]]:
     return out
 
 
-def district_tiles(game_root: Path, work: Path):
-    """Yield (district, tile stream name, asset id, AIPATHDATA blob) for every city tile.
-    Asset copies stored in several cells are read once (same rule as the region export)."""
+def district_tiles(game_root: Path, work: Path, dlc_bigs=()):
+    """Yield (district, tile stream name, asset id, AIPATHDATA blob) for every city tile, and for the DLC maps in
+    `dlc_bigs` ((map name, BIG, stream folder), `dlc.district_bigs`: Sanatorium, Danny Way, Maloof, Art Gallery carry
+    lines). Asset copies stored in several cells are read once (same rule as the region export)."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'vendor/university/tools/vanilla_map_extraction/tools'))
     from skate3_streams import read_atoc, read_sfil
     from tools.owned_game.big import BigArchive
-    for archive in sorted((game_root/'data/content').glob('worldDIST_*.big')):
-        district = archive.stem.removeprefix('worldDIST_')
+    sources = [(a.stem.removeprefix('worldDIST_'), a, None) for a in sorted((game_root/'data/content').glob('worldDIST_*.big'))]
+    for district, archive, stream_folder in sources + list(dlc_bigs):
         big = BigArchive(archive)
-        index = next((e for e in big.entries if e.path.endswith('_Sim.xst')), None)
+        prefix = f'data/content/world/stream/{stream_folder}/'.lower() if stream_folder else ''
+        index = next((e for e in big.entries if e.path.lower().startswith(prefix) and e.path.endswith('_Sim.xst')), None)
         if index is None:
             continue
         folder = work/'skater_paths'/district
@@ -197,7 +199,7 @@ def district_tiles(game_root: Path, work: Path):
         seen = set()
         for entry in sorted(big.entries, key=lambda e: e.path):
             name = Path(entry.path).name
-            if not (name.startswith('cSim_') and name.endswith('.xsf')):
+            if not (entry.path.lower().startswith(prefix) and name.startswith('cSim_') and name.endswith('.xsf')):
                 continue
             stream = folder/name
             stream.write_bytes(big.read(entry))
@@ -458,7 +460,9 @@ def export(ctx) -> dict:
     work.mkdir(parents=True, exist_ok=True)
 
     report('Exporting NPC skater lines')
-    index, warnings = export_paths(district_tiles(game_root, work), output/'skater_paths')
+    index, warnings = export_paths(district_tiles(game_root, work, _get(ctx, 'dlc_bigs') or ()), output/'skater_paths')
+    # DLC map lines carry their park's tag (e.g. `artg`), as challenge lines do.
+    warnings = [w for w in warnings if 'has tag' not in w or w.split('/')[0] in CITY_TAGS.values()]
 
     report('Exporting challenge AI lines')
     challenge_index, challenge_warnings = export_paths(challenge_line_sets(game_root), output/'challenge_paths')

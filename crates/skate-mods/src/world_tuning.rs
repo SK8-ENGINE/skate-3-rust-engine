@@ -207,6 +207,8 @@ pub struct NpcSimulatedPatch {
     pub push_downhill_slope: Option<f32>,
     pub push_max_heading_deg: Option<f32>,
     pub push_right_foot: Option<bool>,
+    /// OURS, opt-in (retail off): NPC skaters pump down slopes with the player's auto pump intents.
+    pub auto_pump: Option<bool>,
     /// AI skaters brake far above their line's speed (retail on): when speed x `brake_factor` (0..=1, retail 0.3)
     /// beats the line's speed, ramping to full over `brake_ramp` m/s (0..=100, retail 0.1).
     pub brake: Option<bool>,
@@ -1099,7 +1101,7 @@ impl Merge for FreePlayPatch {
 
 impl Merge for NpcSimulatedPatch {
     fn merge(&mut self, b: &Self) {
-        merge_opts!(self, b; enabled, radius, max, respawn_seconds, respawn_min, respawn_max, placement_hold_seconds, respawn_hold_seconds, anticipation_distance, anticipation_frames, max_crossed_nodes, walk_back, walk_arrive_distance, walk_stuck_ticks, board_yaw, board_yaw_dead_zone, board_yaw_mag_scale, air_steer, air_steer_dead_zone_deg, air_steer_full_deg, avoid_anchor_ticks, manual_value, bump, reactions, reaction_radius, push, push_factor, push_reduce, push_fast_speed, push_downhill_slope, push_max_heading_deg, push_right_foot, brake, brake_factor, brake_ramp);
+        merge_opts!(self, b; enabled, radius, max, respawn_seconds, respawn_min, respawn_max, placement_hold_seconds, respawn_hold_seconds, anticipation_distance, anticipation_frames, max_crossed_nodes, walk_back, walk_arrive_distance, walk_stuck_ticks, board_yaw, board_yaw_dead_zone, board_yaw_mag_scale, air_steer, air_steer_dead_zone_deg, air_steer_full_deg, avoid_anchor_ticks, manual_value, bump, reactions, reaction_radius, push, push_factor, push_reduce, push_fast_speed, push_downhill_slope, push_max_heading_deg, push_right_foot, auto_pump, brake, brake_factor, brake_ramp);
     }
 }
 

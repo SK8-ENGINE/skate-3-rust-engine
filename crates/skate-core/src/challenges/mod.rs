@@ -11,6 +11,7 @@ pub mod predicate;
 pub mod race;
 pub mod race_ai;
 pub mod race_run;
+pub mod results;
 pub mod tutorial;
 pub mod ots;
 pub mod timers;

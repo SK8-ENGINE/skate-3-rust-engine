@@ -1002,6 +1002,16 @@ impl Vm {
                         host.property_changed(self, scope.this, &k)?;
                     }
                 }
+                // DefineLocal2 (0x41): declares a local without a value (undefined), keeping one already there; outside a
+                // function it declares the variable on `this` (the reward summary movie uses it; laptop race-results2).
+                0x41 => {
+                    let k = pop(&mut stack)?.text();
+                    if scope.local_definitions {
+                        scope.locals.entry(k).or_insert(Value::Undefined);
+                    } else if matches!(self.get(scope.this, &k), Value::Undefined) {
+                        self.set(scope.this, &k, Value::Undefined)?;
+                    }
+                }
                 0x3a => {
                     let k = pop(&mut stack)?.text();
                     let o = pop(&mut stack)?;

@@ -127,6 +127,10 @@ pub(crate) fn backwards_line(id: super::LivingWorldId, character: &str, sim: &Np
     ))
 }
 
+/// A racer's standing start after GO, ticks (2 s at 60 Hz): no spawn push, no speed pull (ours, from the user's account
+/// of retail: the racers took off from standstill to 6 m/s in 0.3 s).
+const RACE_START_TICKS: u32 = 120;
+
 /// Ticks the autopilot spent below the next jump's takeoff speed, how many of them pushed, and why the others did not.
 #[derive(Default)]
 struct Approach {
@@ -158,6 +162,15 @@ pub(crate) struct NpcSim {
     pushing: bool,
     /// The player autopilot's skater: its record steers without pulling the speed (`ai_record::without_speed_pull`, ours).
     pub(crate) own_speed: bool,
+    /// A racer was pinned at its start slot last tick; ticks left of its standing start after GO (no launch, no speed
+    /// pull: it pushes off; the user's account of retail, 2026-11-09).
+    was_pinned: bool,
+    start_ticks: u32,
+    /// Ticks of the current pumping stretch, and pumping ticks in the speed log's window (ours).
+    pump_cycle: u32,
+    /// Braking last tick (for the brake log).
+    braking: bool,
+    pump_ticks: u32,
     /// The autopilot's approach to the next recorded jump, for its takeoff log (ours).
     approach: Approach,
     /// Ticks with a push in the NPC_SKATER_SPEED window.
@@ -470,6 +483,11 @@ impl NpcSim {
 
     /// The skater's animation root in the world (the frame its render pose is relative to).
     /// The deck's world position (the simulated board).
+    /// Bailed and waiting for its respawn.
+    pub(crate) fn bailed(&self) -> bool {
+        self.respawn_in.is_some()
+    }
+
     pub(crate) fn deck_position(&self) -> [f32; 3] {
         let t = GamePhysics::context_deck(&self.context).translation;
         [t.x, t.y, t.z]
@@ -541,7 +559,7 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, was_pinned: false, start_ticks: 0, braking: false, pump_cycle: 0, pump_ticks: 0, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
     if fit_to_ground {
         sim.body.runtime.fit_next_arrival();
@@ -707,7 +725,7 @@ fn log_skater_contact(job: &Job, s: &mut NpcSim) {
 
 fn run_steps(
     physics: &mut GamePhysics,
-    npcs: &mut Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Option<&super::npc_skaters::NpcRaceClock>)>,
+    npcs: &mut Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Option<&super::npc_skaters::NpcRaceClock>, Option<&super::npc_skaters::NpcLineFilter>)>,
     bump: Option<(&skate_net::packed::BodyState, &crate::physics::network::Schema)>,
     graphs: &crate::graph_runtime::StockGraphs,
     workers: &mut Vec<Box<GamePhysics>>,
@@ -734,14 +752,14 @@ fn run_steps(
     let t_sync = std::time::Instant::now();
     // Every simulated NPC's body from its last step (the others' proxies in each solve), in id order.
     let mut bodies: Vec<(super::LivingWorldId, Entity, skate_net::packed::BodyState)> =
-        if bump.is_some() { npcs.iter().filter_map(|(e, n, _, sim, _)| sim.and_then(|s| s.last_body.clone()).map(|b| (n.id, e, b))).collect() } else { Vec::new() };
+        if bump.is_some() { npcs.iter().filter_map(|(e, n, _, sim, _, _)| sim.and_then(|s| s.last_body.clone()).map(|b| (n.id, e, b))).collect() } else { Vec::new() };
     bodies.sort_by_key(|x| x.0);
     let mut work: Vec<(&Job, Mut<NpcSim>, &mut Box<GamePhysics>)> = Vec::with_capacity(jobs.len());
     {
         let mut by_entity: std::collections::BTreeMap<Entity, Mut<NpcSim>> = npcs
             .iter_mut()
             .filter(|n| jobs.iter().any(|j| j.entity == n.0))
-            .filter_map(|(e, _, _, sim, _)| sim.map(|sim| (e, sim)))
+            .filter_map(|(e, _, _, sim, _, _)| sim.map(|sim| (e, sim)))
             .collect();
         for (job, worker) in jobs.iter().zip(workers.iter_mut()) {
             if let Some(mut sim) = by_entity.remove(&job.entity) {
@@ -849,7 +867,7 @@ pub(crate) fn simulate(
     physics: Option<ResMut<GamePhysics>>,
     peds: Option<Res<super::peds::PedData>>,
     (player, net, map): (Res<crate::physics::SkaterRuntime>, Option<Res<crate::multiplayer::Multiplayer>>, Option<Res<crate::map_transition::CurrentMap>>),
-    mut npcs: Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Option<&super::npc_skaters::NpcRaceClock>)>,
+    mut npcs: Query<(Entity, &NpcSkater, &mut NpcReplay, Option<&mut NpcSim>, Option<&super::npc_skaters::NpcRaceClock>, Option<&super::npc_skaters::NpcLineFilter>)>,
     mut events: MessageWriter<super::npc_skaters::NpcSkaterEvent>,
     mut calls: Local<u64>,
     mut pool: ResMut<NpcSimPool>,
@@ -955,22 +973,31 @@ pub(crate) fn simulate(
     players.clear();
     players.extend(observers.observers.iter().map(|o| o.position));
     order.clear();
-    order.extend(npcs.iter().map(|(_, n, r, _, _)| (n.id, r.cursor.line, r.cursor.node)));
+    order.extend(npcs.iter().map(|(_, n, r, _, _, _)| (n.id, r.cursor.line, r.cursor.node)));
     order.sort_by_key(|x| x.0);
     let line_chain = skate_core::living_world::replay::ChainConfig { fallback: true, ..state.world.config.skaters.line_chain };
     let mut sorted: Vec<_> = npcs.iter_mut().collect();
     sorted.sort_by_key(|n| n.1.id);
+    // A running challenge's own lines (a race): the autopilot's line switch stays on them.
+    let scripted_lines = state.scripted_lines.clone();
     let mut jobs: Vec<Job> = Vec::new();
     // The grab scene's props, once for the whole NPC phase (each NPC step refreshed it before, with the same props).
     if let Err(error) = physics.refresh_grab_props() {
         warn!("NPC_SKATER_SIM grab scene refresh failed: {error}");
     }
-    for (e, npc, mut replay, sim, race) in sorted {
+    for (e, npc, mut replay, sim, race, filter) in sorted {
         let Some(target) = replay.cursor.line_target(&*lines) else { continue };
         let distance = nearest(&observers, target.position);
         match sim {
             Some(mut sim) => {
                 let state_now = sim.body.runtime.player_state.current();
+                // A racer let go at GO from its start slot: a standing start for its first 2 s (no launch, no speed pull).
+                let pinned_now = race.is_some_and(|c| !c.moving);
+                if sim.was_pinned && race.is_some() && !pinned_now {
+                    sim.start_ticks = RACE_START_TICKS;
+                    info!("NPC_SKATER_RACE_START #{} {}: pushes off from its slot (no launch, no speed pull for {} s)", npc.id.serial, npc.character, RACE_START_TICKS / 60);
+                }
+                sim.was_pinned = pinned_now;
                 let settled = matches!(state_now, PhysicalStateId::PhysicsGround | PhysicalStateId::SlideGround);
                 // A skater simulated because a prop blocks it (mode 7, allowed at any distance below) stays simulated
                 // until it is clear; handing it back while still blocked restarted the sim the next frame, every
@@ -1064,7 +1091,8 @@ pub(crate) fn simulate(
                     // Retail's respawner (`8246EA90`) places the skater itself once the bail time passes the delay
                     // (t = ticks / 60 > 5.0 s), whatever its wipeout does: an AI skater's own auto reset only comes
                     // after 8.0 s, so ours waited 8.57 s (b810). The placement teleport ends the wipeout (b811).
-                    if sim.bail_ticks > rules.respawn_ticks() || left == 0 {
+                    let reset_ticks = if sim.own_speed { (autopilot_brain::BAIL_RESET_SECONDS * 60.0) as u32 } else { rules.respawn_ticks() };
+                    if sim.bail_ticks > reset_ticks || left == 0 {
                         sim.bail_alpha = 1.0;
                         if left == 0 {
                             warn!("NPC_SKATER_RESPAWN #{} {}: still not placed 10 s after the delay", npc.id.serial, npc.character);
@@ -1292,7 +1320,7 @@ pub(crate) fn simulate(
                                 super::npc_skaters::fill_others(order, npc.id, others, in_use);
                                 let profile = super::npc_skaters::npc_trick_profile(&state.npc.tricks, &settings.skater_trick_profiles, &npc.character);
                                 let tricks = skate_core::living_world::npc_tricks::TrickContext { mode: settings.npc_tricks.mode, params: settings.npc_tricks.params, profile: profile.as_deref(), seed: npc.seed, slot_tricks: state.npc.tricks.slot_tricks_for(&npc.character) };
-                                let ctx = skate_core::living_world::replay::BranchContext { position: pos, forward: heading, speed: speed.abs(), players, others, in_use, preferred_skill: -1, online: observers.online, chain: line_chain, tricks, body: replay.body_gate, valid_lines: valid.as_ref().and_then(|v| v.per_character.get(&npc.character)).map(Vec::as_slice) };
+                                let ctx = skate_core::living_world::replay::BranchContext { position: pos, forward: heading, speed: speed.abs(), players, others, in_use, preferred_skill: -1, online: observers.online, chain: line_chain, tricks, body: replay.body_gate, valid_lines: filter.map(|f| f.0.as_slice()).or_else(|| valid.as_ref().and_then(|v| v.per_character.get(&npc.character)).map(Vec::as_slice)) };
                                 out.clear();
                                 if let Some((to, node)) = replay.cursor.line_end_chain(&*lines, &ctx, out) {
                                     for ev in out.drain(..) {
@@ -1345,7 +1373,9 @@ pub(crate) fn simulate(
                             }
                             // Lost (`sub_82468DD8`): the same one-shot reposition request mode 7 raises (`ctrl+941`); the
                             // next tick hands the skater to controller B, which walks it back (b115).
-                            if f.lost && rules.walk_back && sim.walker.is_none() {
+                            // OURS: the autopilot pushes off from its race slot and steers onto its line; retail's player slot can lie past the
+                            // 4.5 m line-start lost radius, and the walk-back had it run on foot at GO (laptop race-gates, University).
+                            if f.lost && rules.walk_back && sim.walker.is_none() && !(sim.own_speed && sim.start_ticks > 0) {
                                 if !was_lost {
                                     info!("NPC_SKATER_LOST #{} {} at node {} ({:.1} m from the path, {speed:.1} m/s) at=[{:.1}, {:.1}, {:.1}]", npc.id.serial, npc.character, f.search_start, f.dist, pos[0], pos[1], pos[2]);
                                 }
@@ -1440,6 +1470,10 @@ pub(crate) fn simulate(
                     }
                     cursor = Some(crate::physics::AiRecordCursor { node, frame_in_segment, ext_node: ai_record::trajectory_node(line, node, frame_in_segment), has_trajectory: jump.is_some(), lands_node: node.saturating_sub(1) });
                 }
+                if sim.start_ticks > 0 {
+                    sim.start_ticks -= 1;
+                    ai_record::without_speed_pull(&mut record);
+                }
                 if sim.own_speed {
                     ai_record::without_speed_pull(&mut record);
                     ai_record::sideways_position_step(&mut record, GamePhysics::context_deck_position(&sim.context));
@@ -1454,14 +1488,17 @@ pub(crate) fn simulate(
                     let (start, ticks, cooldown) = sim.speed_watch;
                     let (start, ticks) = if ticks == 0 || ticks >= 30 { (now_speed, 1) } else { (start, ticks + 1) };
                     sim.push_ticks = if ticks == 1 { 0 } else { sim.push_ticks } + u32::from(sim.pushing);
+                    if ticks == 1 {
+                        sim.pump_ticks = 0;
+                    }
                     let cooldown = cooldown.saturating_sub(1);
                     sim.speed_watch = (start, ticks, cooldown);
                     if cooldown == 0 && (now_speed - start).abs() >= 2.0 {
                         let flat = (w[0] * w[0] + w[2] * w[2]).sqrt();
                         let grade = if flat > 0.1 { w[1] / flat * 100.0 } else { 0.0 };
                         info!(
-                            "NPC_SKATER_SPEED #{} {} node {} state {:?} speed {start:.1} -> {now_speed:.1} m/s over {ticks} ticks (recorded {speed:.1} m/s, slope {grade:.0} %, on_path {on_path}, hold {}, push ticks {}, speed pull {})",
-                            npc.id.serial, npc.character, replay.cursor.node, state_now, sim.hold_ticks, sim.push_ticks, !sim.own_speed
+                            "NPC_SKATER_SPEED #{} {} node {} state {:?} speed {start:.1} -> {now_speed:.1} m/s over {ticks} ticks (recorded {speed:.1} m/s, slope {grade:.0} %, on_path {on_path}, hold {}, push ticks {}, pump ticks {}, speed pull {})",
+                            npc.id.serial, npc.character, replay.cursor.node, state_now, sim.hold_ticks, sim.push_ticks, sim.pump_ticks, !sim.own_speed
                         );
                         sim.speed_watch = (now_speed, 1, 30);
                     }
@@ -1474,6 +1511,7 @@ pub(crate) fn simulate(
                     if race.is_some_and(|c| !c.moving) {
                         sim.placed_at = Some(at);
                     }
+                    let race_start = sim.start_ticks > 0;
                     let placed = *sim.placed_at.get_or_insert(at);
                     if sim.hold_ticks == 1 && !race.is_some_and(|c| !c.moving) {
                         if let Some(line) = lines.get(&replay.cursor.line) {
@@ -1481,14 +1519,14 @@ pub(crate) fn simulate(
                             if node.flags & node_flags::OFF_BOARD == 0 {
                                 let moved = (at[0] - placed[0]).hypot(at[2] - placed[2]);
                                 // OURS: the autopilot's skater gets no launch; it pushes off with its own pushes.
-                                let push = ai_record::spawn_push(at, placed, target.step, replay.cursor.node == 0, false).filter(|_| !sim.own_speed);
+                                let push = ai_record::spawn_push(at, placed, target.step, replay.cursor.node == 0, false).filter(|_| !sim.own_speed && !race_start);
                                 if let Some(v) = push {
                                     GamePhysics::push_context_velocity(&mut sim.context, v);
                                 }
                                 info!(
                                     "NPC_SKATER_PUSH #{} {} node {} {} (moved {moved:.3} m since the hold started)",
                                     npc.id.serial, npc.character, replay.cursor.node,
-                                    push.map_or(if sim.own_speed { "none: the autopilot pushes off".to_string() } else { "none: left its place".to_string() }, |v| format!("{:.1} m/s", (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()))
+                                    push.map_or(if sim.own_speed { "none: the autopilot pushes off".to_string() } else if race_start { "none: a racer pushes off at GO".to_string() } else { "none: left its place".to_string() }, |v| format!("{:.1} m/s", (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()))
                                 );
                             }
                         }
@@ -1717,7 +1755,7 @@ pub(crate) fn simulate(
                                 sim.approach.switch_tried = true;
                                 let at = GamePhysics::context_deck_position(&sim.context);
                                 let fwd = if w[0].hypot(w[2]) > 0.5 { let f = w[0].hypot(w[2]); [w[0] / f, 0.0, w[2] / f] } else { facing };
-                                switch_to = autopilot_brain::switch_line(&*lines, replay.cursor.line, at, fwd, input.speed, &rules);
+                                switch_to = autopilot_brain::switch_line(&*lines, replay.cursor.line, at, fwd, input.speed, scripted_lines.as_deref().map(Vec::as_slice), &rules);
                                 info!(
                                     "AUTOPILOT_SWITCH {:.1} m/s for a {:.1} m/s jump in {} frames at node {node}: {}",
                                     input.speed, jump.map_or(0.0, |j| j.speed), jump.map_or(0, |j| j.frames),
@@ -1733,8 +1771,22 @@ pub(crate) fn simulate(
                                 }
                             }
                         }
-                        // At or above the target retail brakes instead (only far above it, `sub_8246B810`).
-                        if let Some((key, magnitude)) = ai_push::brake(&input, replay.cursor.node >= 1, &rules.brake, t) {
+                        // At or above the target retail brakes instead (only far above it, `sub_8246B810`). OURS: the
+                        // autopilot brakes above 1.25x the slowest recorded speed just ahead (not below a jump's need).
+                        let brake_input = if sim.own_speed {
+                            let b = autopilot_brain::BrakeRules::default();
+                            let need = autopilot_brain::jump_ahead(line, node, into, &autopilot_brain::JumpRules::default()).map_or(0.0, |j| j.speed);
+                            let ahead = autopilot_brain::approach_speed(line, node, into, &b).unwrap_or(input.target);
+                            (ai_push::PushInput { target: ahead.max(need), ..input }, ai_push::BrakeSettings { factor: b.factor, ..rules.brake })
+                        } else {
+                            (input, rules.brake)
+                        };
+                        let brake = ai_push::brake(&brake_input.0, replay.cursor.node >= 1, &brake_input.1, t);
+                        if sim.own_speed && brake.is_some() && !sim.braking {
+                            info!("NPC_SKATER_BRAKE #{} {} node {node} speed {:.1} m/s for {:.1} m/s ahead", npc.id.serial, npc.character, input.speed, brake_input.0.target);
+                        }
+                        sim.braking = brake.is_some();
+                        if let Some((key, magnitude)) = brake {
                             intents.push((key.to_string(), magnitude));
                         }
                         if let Some(push) = ai_push::push(&input, t) {
@@ -1747,8 +1799,29 @@ pub(crate) fn simulate(
                         } else {
                             sim.pushing = false;
                         }
+                        // OURS: pumping down slopes (the autopilot always, NPCs when `auto_pump` is on).
+                        // Only while slower than the line (pumping into a slow section wedged it on curbs).
+                        // The slope it actually rides (its velocity), not only the recorded line's: pumping uphill or on the
+                        // flat gains nothing (user, 2026-11-09). Both must point down.
+                        let flat = w[0].hypot(w[2]);
+                        let motion = if flat > 0.5 { w[1] / flat } else { 0.0 };
+                        let slope = input.slope.max(motion);
+                        let pump = if (sim.own_speed || t.auto_pump) && input.speed < input.target {
+                            autopilot_brain::pump_magnitude(&mut sim.pump_cycle, slope, input.speed, sim.pushing, &autopilot_brain::PumpRules::default())
+                        } else {
+                            None
+                        };
+                        if pump.is_some() && sim.pump_cycle == 1 {
+                            info!("NPC_SKATER_PUMP #{} {} node {node} speed {:.1} m/s line slope {:.2} motion slope {motion:.2}", npc.id.serial, npc.character, input.speed, input.slope);
+                        }
+                        if let Some(m) = pump {
+                            intents.push(("AutoPumpAngle".to_string(), 0.0));
+                            intents.push(("AutoPumpMag".to_string(), m));
+                            sim.pump_ticks += u32::from(m > 0.0);
+                        }
                     } else {
                         sim.pushing = false;
+                        sim.pump_cycle = 0;
                     }
                 }
                 if switch_to.is_some() {

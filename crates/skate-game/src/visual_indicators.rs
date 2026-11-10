@@ -149,6 +149,47 @@ pub(crate) struct Placement {
     /// A `ribbon_spline_colour` row (mods; retail teleporters use `default`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colour: Option<String>,
+    /// Drawn even when the indicator row is disabled: race gates (`AddTriggerIndicator`, research
+    /// race-gate-ribbon-anchor.md; their row 0x624E29026A97C02E has Enabled = 0).
+    #[serde(default)]
+    pub always: bool,
+    /// Fit to a trigger box with these half extents (race gates, `827AF330`): no indicator offset, the spline scaled
+    /// per axis to the box (`fit_scale`); the matrix is the box frame (centre, axes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<[f32; 3]>,
+}
+
+/// The spline's extent (max - min of its curve) per axis.
+fn spline_size(spline: &Spline) -> Vec3 {
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for c in &spline.segments {
+        for k in 0..=16 {
+            let t = k as f32 / 16.0;
+            let p = Vec3::from(c[0]) * t * t * t + Vec3::from(c[1]) * t * t + Vec3::from(c[2]) * t + Vec3::from(c[3]);
+            (lo, hi) = (lo.min(p), hi.max(p));
+        }
+    }
+    if lo.x > hi.x { Vec3::ZERO } else { hi - lo }
+}
+
+/// `827AF330`: the scale that fits a spline of `size` to a box of `half` extents (2 he / size per axis; a flat spline,
+/// size z 0, takes the x scale for z). Research race-gate-ribbon-anchor.md section 2.
+pub(crate) fn fit_scale(size: Vec3, half: [f32; 3]) -> Vec3 {
+    let axis = |h: f32, s: f32| if s > 1e-6 { 2.0 * h / s } else { 1.0 };
+    let x = axis(half[0], size.x);
+    Vec3::new(x, axis(half[1], size.y), if size.z > 1e-6 { 2.0 * half[2] / size.z } else { x })
+}
+
+/// The running race's gate ribbons (set by `race_host`; empty outside a race).
+#[derive(Resource, Default)]
+pub(crate) struct RaceIndicators(pub Vec<Placement>);
+
+/// A row name as given, or a `Hash_<16 hex>` name matched to its readable key by the attrib hash.
+fn resolve<'a, V>(rows: &'a HashMap<String, V>, name: &str) -> Option<(&'a String, &'a V)> {
+    rows.get_key_value(name).or_else(|| {
+        let h = u64::from_str_radix(name.strip_prefix("Hash_")?, 16).ok()?;
+        rows.iter().find(|(k, _)| skate_data::attrib_hash::hash(k) == h)
+    })
 }
 
 #[derive(Resource, Default)]
@@ -177,7 +218,7 @@ pub(crate) struct IndicatorMarker {
 pub(crate) struct IndicatorPass;
 
 pub(crate) fn install(app: &mut App) {
-    app.init_resource::<VisualIndicators>().add_systems(Update, (sync, face_camera, companion_trails).chain());
+    app.init_resource::<VisualIndicators>().init_resource::<RaceIndicators>().add_systems(Update, (sync, face_camera, companion_trails).chain());
 }
 
 fn load(assets: &Path) -> Result<File, String> {
@@ -283,6 +324,7 @@ fn sync(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     markers: Query<Entity, With<IndicatorMarker>>,
+    race: Option<Res<RaceIndicators>>,
 ) {
     if !state.loaded {
         state.loaded = true;
@@ -300,7 +342,8 @@ fn sync(
         }
     }
     let armed = teleporters.armed(map.path.as_deref());
-    let wanted = wanted(&armed.iter().filter_map(|t| t.indicator.as_ref()).collect::<Vec<_>>());
+    let mut wanted = wanted(&armed.iter().filter_map(|t| t.indicator.as_ref()).collect::<Vec<_>>());
+    wanted.extend(race.iter().flat_map(|r| r.0.iter().cloned()));
     if wanted == state.shown {
         return;
     }
@@ -309,7 +352,7 @@ fn sync(
     }
     let mut spawned = 0;
     for placement in &wanted {
-        let Some(indicator) = state.indicators.get(&placement.key).filter(|i| i.enabled).cloned() else { continue };
+        let Some(indicator) = resolve(&state.indicators, &placement.key).map(|(_, i)| i).filter(|i| i.enabled || placement.always).cloned() else { continue };
         let Some(spline_id) = indicator.spline.clone() else { continue };
         let billboard = state.splines.get(&spline_id).is_some_and(|s| s.kind & 1 == 1);
         let style_key = placement.style.clone().or(indicator.style.clone()).unwrap_or_default();
@@ -328,10 +371,14 @@ fn sync(
         };
         // Retail's two passes (b535 `827AFC80`, b536 `82CE9080`): the background texture alpha blended, then the
         // front one additive; depth test, no depth write, no cull. Materials per icon as the fade is per icon.
-        let passes = pass_materials(&state, placement.colour.as_deref().unwrap_or(DEFAULT_COLOUR), &server, &mut materials);
-        let root = commands.spawn((IndicatorMarker { billboard, style, passes: passes.clone() },
-            Transform::from_translation(position(&placement.matrix, indicator.offset)).with_rotation(anchor_rotation(&placement.matrix)),
-            Visibility::Hidden)).id();
+        let colour = placement.colour.as_deref().and_then(|c| resolve(&state.colours, c)).map_or(DEFAULT_COLOUR.to_string(), |(k, _)| k.clone());
+        let passes = pass_materials(&state, &colour, &server, &mut materials);
+        let transform = match placement.fit {
+            Some(half) => Transform::from_translation(position(&placement.matrix, [0.0; 3])).with_rotation(anchor_rotation(&placement.matrix))
+                .with_scale(state.splines.get(&spline_id).map_or(Vec3::ONE, |s| fit_scale(spline_size(s), half))),
+            None => Transform::from_translation(position(&placement.matrix, indicator.offset)).with_rotation(anchor_rotation(&placement.matrix)),
+        };
+        let root = commands.spawn((IndicatorMarker { billboard, style, passes: passes.clone() }, transform, Visibility::Hidden)).id();
         for (material, ..) in passes {
             commands.spawn((IndicatorPass, Mesh3d(mesh.clone()), MeshMaterial3d(material), Transform::default(), ChildOf(root)));
         }
@@ -536,7 +583,7 @@ mod tests {
     fn placement(locator: &str, x: f32) -> Placement {
         let mut matrix = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
         matrix[3] = [x, 0.0, 0.0, 1.0];
-        Placement { key: "teleport".into(), locator: locator.into(), matrix, style: None, colour: None }
+        Placement { key: "teleport".into(), locator: locator.into(), matrix, style: None, colour: None, always: false, fit: None }
     }
 
     #[test]
@@ -615,6 +662,15 @@ mod tests {
         assert!((q * Vec3::Y - tilted * Vec3::Y).length() < 1e-5);
         assert!((q * Vec3::Z).dot(tilted * Vec3::Y).abs() < 1e-5);
         assert!(billboard(Quat::IDENTITY, Vec3::Y).is_none());
+    }
+
+    #[test]
+    fn a_gate_ribbon_fits_its_box() {
+        // race_dwtn_01 gate 1 (half 3.9 x 3.5 x 1.6) and a flat arch spline 10 x 4.4 m (research worked example).
+        let s = fit_scale(Vec3::new(10.04, 4.41, 0.0), [3.9, 3.5, 1.6]);
+        assert!((s.x - 0.777).abs() < 0.01 && (s.y - 1.587).abs() < 0.01 && s.z == s.x, "{s:?}");
+        let spline = Spline { segments: vec![[[0.0; 3], [0.0; 3], [2.0, 4.0, 0.0], [-1.0, 0.0, 0.0]]], kind: 0 };
+        assert_eq!(spline_size(&spline), Vec3::new(2.0, 4.0, 0.0));
     }
 
     #[test]

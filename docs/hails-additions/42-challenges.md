@@ -529,7 +529,87 @@ course from the split centres).
 - NOT RETAIL YET / open: the row time text (8265E510's sprintf) is not decoded, ours is the DPO time text (M:SS.hh) of
   the gap or finish time; the title (Mission.GetTitle) is empty, the race's title id is not in our export; which
   variant string races set (if any) is not traced, ours hides the line; the row slot is rank - 1.
+- Row times (retail as the user describes it, 2026-11-09): the leader's row shows the running race time, every other
+  racer still riding its gap behind the leader, a finished racer its finish time (`race_host::row_time`). Before, the
+  leader showed its own gap, 0:00.00. Gaps carry a leading `+` [code].
+- Row text [code, research `.local/research/autopilot-open-questions.md` Q2, recomp checked]: the data block is
+  `8265DFD8` (`8265E510` is the name block, not the time); a finished row (row byte +0x3B) shows its time
+  (`sub_8265DDF8` flag 0), an unfinished rank-1 row copies a fixed string (read as "--" at 0x821F4B5C, not the race
+  time), other rows their gap with a forced `+` sign (flag 1); a value of about 0 reads `ID_RACE_LEADER`. Ours follows
+  the user's account for the leader (the running race time); open: which layout races set and what the leader string
+  is in a real race.
+- The Killed It banner reads "KILLED" [data]: `killedit` has three text fields, all `ID_CELEBRATE_KILLED` = "KILLED"
+  in the disc's string table, and none of its nine bitmaps holds "IT" (checked 2026-11-09).
 - Test: data-gated `hud_challenge::tests::the_leaderboard_shows_ranks_names_and_times`.
+
+### Minimap race gates (2026-11-09; research `.local/research/race-gate-indicators.md`, [code] 82849B78 / 82849C88 / 8254E408, [graph] race_shared)
+
+- Retail: at the countdown every gate of the leg goes on the minimap (`Map.AddRaceGate`, fe_map_icons `race_gate` =
+  `mini_gate`) and the finish (`Map.AddRaceCheckPoint`, `race_spotgate` = `mini_spotracegate`), all in MiniMapManager
+  group C (+0x438), at the volume's world (x, z), angle 0, scale 1, no tint; after each gate hit only the next
+  `MaxMiniMapIcons` (3) gates show, which is also the group's draw cap. Every career race is skipable, so there is no
+  "next full / after-next grey" styling (that branch is for non-skipable races; corrects b876 / b995).
+- Ours: the export's per-leg `gates` (in course order) join the race's trigger volumes; the race host counts the
+  furthest gate entered (`gates_passed`, a skipped gate counts as passed) and keeps a `race` minimap group of the
+  window `skate_core::challenges::race::visible_gates` (the next `GateIcons::max_icons` gates; the finish once the
+  window has room, ours for the nearest-three cap); the group goes at `RemoveGates` and at the race end. Icon records and
+  `max_icons` are data (`GateIcons`, retail defaults) and read through the same fe_map_icons lookup as mod icons.
+- Fix found on the way: the minimap loaded only the needle and `mini_skater`, so any other icon (race gates, mod
+  icons naming another record) drew nothing; it now loads every `mini_*` texture of the menu movie set (31).
+- Verified on the desktop: race_dwtn_01, `RACE_MINIMAP gates passed 0 of 13: 3 icons`, then 1 of 13; the screenshot
+  shows the gate icons on the minimap rim (the next gates are beyond its 71 m radius).
+- Open: whether 82DD8510 gives the volume's origin or box centre (ours: the box centre); the ribbons (anchor native
+  `AddTriggerIndicator` not decoded yet).
+
+### Race gate ribbons (2026-11-09; research `.local/research/race-gate-ribbon-anchor.md`, [code] 82D50418 / 827A9F48 / 827AF330, [graph] race_shared)
+
+- Retail: at the countdown race_shared calls `VisualIndicators.AddTriggerIndicator(group, gate volume, IndicatorType,
+  RibbonInstance)` (82D50418) for every gate of the leg, then for the finish (the last split) with
+  `RaceFinalGateRibbon` (red, one leg) or `RaceLegFinishGateRibbon` (green). Entries are keyed by volume id, so a finish
+  listed as a gate replaces the gate's ribbon (last add wins). The ribbon sits in the box frame (centre, axes) and is
+  scaled per axis to the box (2 x half extent / spline size; a flat spline takes the x scale for z, `827AF330`), with no
+  indicator offset; the indicator row's Enabled flag is not read; its style is the row's own (`default`). Gates are
+  type 2 (RaceNextGate). Passed gates keep their ribbon (it is only removed for gates with a Time_Bonus, 0 on every
+  disc gate); everything goes at cleanup / retry (DeleteGroup).
+- Ours: the export adds per gate `ribbon {indicator, colour}` (RibbonInstance, two RefSpecs), `time_bonus`, `audio`,
+  and per race `gates {skipable, max_minimap_icons, grey_icon, grey_ribbon, final_ribbon, leg_finish_ribbon}` (null
+  when the race vault leaves it to the framework; the game uses retail defaults). `race_host::gate_ribbons` fills
+  `visual_indicators::RaceIndicators` at ShowGates (every gate of the leg, then the finish replacing a gate on its
+  volume) and clears it at RemoveGates / the race end; `Placement { always, fit }` draws a disabled row and fits the
+  spline to the box (`fit_scale`); `Hash_` row names resolve through the attrib hash.
+- Open: whether the strip builder (827B0BA8) recentres the spline (the ribbon height on the box); what reads flag bits
+  29 / 30 (next gate / finish may look different in retail).
+
+### Race results table (2026-11-09; research `.local/research/race-results-rows.md`, b925; [code] 8265E950 / 828534B0, [graph] build_results / end_heat)
+
+- Retail: build_results writes every competitor (finish order from end_heat's RoundStandings; an unfinished AI gets
+  the count-up time plus Race.GetEstimatedTimeToFinish, an unfinished player DNF), title
+  `ID_CHALLENGE_COMMON_RACE_TIMES`, layout eResultsLBType DeathRace (3; b982 / b995 said PlaceNameScoreTime 6, wrong),
+  columns rank / name / time, status PASS / WON (within PlaceHigherToWin) / LOSE; slots Continue_Retry, Retry_Quit,
+  ChangeDifficulty after a loss or exit. The movie: a lost race shows challengefailed_small (no table), a won race with
+  2+ rows endchallengeoptions (the table).
+- Ours: skate-core `challenges::results` (`race_results`, `ResultsView`, the 8-item data block, `ResultsRules` with the
+  retail ids as data); race_host builds it at `Results`, opens the end dialog (`SKATE_RETAIL_END_SCREENS=1`) and turns
+  the player's choice into Continue / Retry; with the autopilot driving it continues after 3 s. end_dialog_host answers
+  Results_GetNumPlayers / LayoutType / LeaderboardDataBlock / SelfRank / LeaderboardColTitle / ThrowdownType /
+  LeaderboardType. The table movie reads `endchallengeoptions.STRUCT_ITEMS` and `eResultsLBType_*` that retail's
+  native code sets on the class: the stage sets them before ShowScreen (the first laptop run showed an empty table).
+- Verified: lost races show "Didn't cut it." with Quit / Retry / Change Difficulty (laptop race-results, 7 runs); the
+  table after a win is NOT verified yet (statics fix pending a laptop rerun).
+
+### Save tag (2026-11-09; b948 / b957 S4)
+
+- The autosave layer's corner tag (`_global.Save_EnableTag("false", "false")` / `Save_HideTag`, 825DF4F8): shown while
+  any background save write runs (career, challenge records, career stats hold a `save_tag::Writing` guard), hidden
+  when none does and it has been up 3.0 s (`SaveTag::min_seconds`, data); hiding re-shows the load tag during a load.
+  When saves happen is unchanged (b957 S1-S3 open). Verified on the desktop: shown / hidden 3.0 s apart at a race end.
+
+### Presentation runtime core (2026-11-09; b964 §2 R4-R11, port step 2)
+
+- skate-core `presentation`: `Manager` with retail's queue (start now when idle, else queue in 8 slots; skip a group
+  equal to the playing one with an empty queue or to the last queued; drop when full), events in order with mask skips,
+  a finish message per group, skip = stop the running event + undo the run ones in reverse, `remove_owner`. Events are
+  the career's `graph::Event` (type by name); the game's `Handlers` come next (registry, tutorial / career wiring).
 
 ### The DPO: killed it time and position (2026-11-08, b995 items 2a / 2b, b997 sections 1 and 2)
 
@@ -751,6 +831,28 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
   outside the brain: `--teleport`, the teleport menu) restarts the brain where the player arrived; the brain's own
   bail respawns do not count. Before, the laptop's Mega-Park run (autopilot-megapark-20261109-0733) engaged 11 ms
   before `--teleport` landed, found itself 315 m from its line and walked for 108 s until a bail respawn put it back.
+- Race fixes (2026-11-09, laptop autopilot-races-20261109-0812 and desktop runs): a line switch only picks the
+  race's own lines (`switch_line` gets `PopulationState::scripted_lines`); a simulated skater's branch and line-end
+  choice now honours its challenge line filter (`NpcLineFilter`; before, the simulated path used only the per-character
+  lines and chained the autopilot off the course); the autopilot's line clock is held while it waits at its slot (as
+  the AI racers' `NpcRaceClock::held`), so at GO its line has not run 30 m ahead. `AUTOPILOT_RESULT` gains
+  `outcome=won|lost|time up` (the record's completion is 0 for a lost race too; retail has no lost value). Desktop
+  after: race_dwtn_01 2nd in 109.47 s (Busenitz 90.07 s), race_univ_01 3rd in 89.73 s (Haslam 71.32 s, Drehobl
+  77.17 s), both on the race lines to the finish.
+- Learning from bails (ours): two bails on one line within 60 s and the autopilot leaves that line for the nearest
+  other line (`AUTOPILOT bailed <n> times on line ... leaving it`); not in a race; a teleport or race start clears it.
+  It came from Danny Way's map, where it respawned onto the mega ramp lines at a standstill and bailed 9 times in 2 min.
+- Pumping: the autopilot pumps down slopes (doc 26c "DLC map lines and opt-in pumping").
+- Wedges (ours): moved less than 3 m in 6 s while riding (not bailed, not held at a start) and it gives the spot up
+  (`AUTOPILOT wedged: ...`): outside a race the line joins the avoided lines, and it picks the nearest other line; in a
+  race it picks the nearest node of the course again. For the curb lip and planter ledge wedges of the laptop runs.
+- Direction (2026-11-09): the autopilot is meant to play like a capable but imperfect player that still makes
+  mistakes (it is a test aid); it is not tuned to dodge cars.
+- Line lists in free roam (ours, a test aid): `SKATE_AUTOPILOT_LINES=<id>,<id>,...` starts on the first line; when
+  the brain leaves the current line (line end, branch, re-pick) the player is teleported to the next line's node 0 and
+  the brain engages there; the list loops (`AUTOPILOT_LINES left <id>: line <k> of <n> <id> at its start [...]`). Not
+  in a challenge with its own lines. Desktop DownTown 160 s with three lines: two full loops; line `...68a2` wedges at
+  nodes 30-35 every pass (a repeatable spot for the wedge rule).
 - Dev: `SKATE_AUTOPILOT=1` engages at the start, `SKATE_AUTOPILOT_CHARACTER=<look>` picks the brain's character
   (default danny_way), `SKATE_AUTOPILOT_LINE=<32 hex digits>` the start line; any pad input releases the player.
   `AUTOPILOT` log lines: engaged / released and every 2 s position, speed, state, line and node.

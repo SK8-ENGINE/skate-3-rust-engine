@@ -114,7 +114,8 @@ const MINIMAP_Z: f32 = 29.0;
 /// texture key here and its centre: the movie's needle clip `mNorth` (b568). The texture lives in the menu movie set.
 const NEEDLE_TEXTURE: &str = "minimap:north_pointer";
 /// The minimap icon pack's textures the HUD loads (menu set `texture/<name>`), keyed `minimap:<name>`.
-const MINIMAP_TEXTURES: [&str; 2] = ["north_pointer", "mini_skater"];
+/// The needle; every `mini_*` icon texture of the set loads too (race gates, called skaters, mod icons).
+const MINIMAP_TEXTURES: [&str; 1] = ["north_pointer"];
 /// The pointer quad in map units (+-16 x +-100, 0x8232F9C0..0x8232F9FF; b571), scaled like the icons.
 const NEEDLE_UNITS: [f32; 2] = [32.0, 200.0];
 
@@ -344,7 +345,10 @@ fn setup(
         if minimap.is_some() {
             let set = crate::retail_menu_movies::set_root(&config);
             let manifest = std::fs::read(set.join("manifest.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).unwrap_or_default();
-            for name in MINIMAP_TEXTURES {
+            let icons: Vec<String> = manifest["images"].as_object().map_or_else(Vec::new, |m| {
+                m.keys().filter_map(|k| k.strip_prefix("texture/")).filter(|n| n.starts_with("mini_")).map(str::to_owned).collect()
+            });
+            for name in MINIMAP_TEXTURES.iter().map(|n| n.to_string()).chain(icons) {
                 let e = &manifest["images"][format!("texture/{name}")];
                 match (e["rgba"].as_str(), e["width"].as_u64(), e["height"].as_u64()) {
                     (Some(rgba), Some(w), Some(h)) => match std::fs::read(set.join(rgba)) {

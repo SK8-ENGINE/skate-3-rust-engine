@@ -99,7 +99,8 @@ impl CareerStatsHost {
     fn save_in_background(&mut self) {
         if let (Some(path), Some(text)) = (self.path.clone(), self.snapshot()) {
             self.dirty = false;
-            if std::thread::Builder::new().name("career-stats-save".into()).spawn(move || write(&path, &text)).is_err() {
+            let writing = crate::save_tag::Writing::begin();
+            if std::thread::Builder::new().name("career-stats-save".into()).spawn(move || { let _writing = writing; write(&path, &text) }).is_err() {
                 self.dirty = true;
             }
         }

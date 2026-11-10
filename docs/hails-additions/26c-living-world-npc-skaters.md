@@ -806,6 +806,26 @@ riding mode. `824660A0` writes `pc+922` every call (not a one-way latch).
 - **Open:** only simulated NPCs (NPC Skater Physics opt-in) have a skeleton solve; replayed NPC skaters' contacts are
   not logged. The player's own side of the contact is not logged separately.
 
+## DLC map lines and opt-in pumping (2026-11-09)
+
+- DLC map lines [data]: the DLC map packs carry AI skater lines in the same `cSim_*` region arenas as the city
+  districts (AIPATHDATA, RW type 0x00EB0014): Art Gallery (`DIST_AGPark`, 59 lines), Danny Way's Hawaiian Dream
+  (`DLC_DW_MegaCompund`, 32), Sanatorium (`DIST_SanitariumDLC`, 41), Maloof Money Cup (`DIST_MaloofMoneyCupDLC`, 28);
+  BackLot, DownTown Skatepark Night and Zen have none, and no base disc park (Stadium / MegaPark included) has any.
+  The export read only the disc's `worldDIST_*.big`, so these maps had no NPC skaters (laptop
+  autopilot-races-20261109-0812, spot1). Now `dlc.district_bigs` lists each DLC map's stream folder and the line,
+  census and road readers (`living_world_skaters.district_tiles`, `living_world.district_assets`) read them too; the
+  district key is the map name (the folder without `DIST_`). Setup passes its DLC folder to the living world stage
+  (`stage_job.py --dlc`), and the livingworld group's fingerprint follows the DLC map packs. The DLC maps have no
+  census layers on the disc (no peds / car census there); NPC skaters spawn from their lines.
+- Pumping [code, research `.local/research/npc-auto-pump.md`]: retail AI skaters never post `AutoPumpAngle` /
+  `AutoPumpMag`; only the player's pad listener does (`sub_825999F0`, from the left stick), and an AI crouches only where
+  its line's node is flagged crouched (`sub_824696B8`). OURS, opt-in (`npc_simulated.auto_pump`, off = retail): an NPC
+  skater on the ground going down a line slope of -0.04 or steeper at 1.5 m/s or more, not pushing, posts
+  `AutoPumpAngle` 0 and `AutoPumpMag` 1 for 40 ticks then 0 for 10 (`autopilot_brain::pump_magnitude`, `PumpRules`), so
+  the stock crouch node crouches and pumps as for a player. The player autopilot always pumps. `NPC_SKATER_SPEED`
+  counts `pump ticks` next to `push ticks`.
+
 ## Code reference: living_world/npc_skaters.rs
 
 Detail moved out of the code comments of `crates/skate-game/src/living_world/npc_skaters.rs`; each comment there links its section here.
