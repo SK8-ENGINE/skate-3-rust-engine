@@ -420,17 +420,76 @@ impl Movie {
         // keep the field height here.
         vm.set(id, "_height", Value::Number((bounds[3] - bounds[1]) as f64))?;
         let autosize = vm.get(id, "autoSize").text();
-        vm.set(
-            id,
-            "_width",
-            Value::Number(
-                if autosize == "left" || autosize == "right" || autosize == "center" {
-                    width
-                } else {
-                    bounds[2] - bounds[0]
-                } as f64,
-            ),
-        )?;
+        let autosized = autosize == "left" || autosize == "right" || autosize == "center";
+        vm.set(id, "_width", Value::Number(if autosized { width } else { bounds[2] - bounds[0] } as f64))?;
+        if autosized {
+            self.resize_parents(vm, id)?;
+        }
+        Ok(())
+    }
+
+    /// A clip's bounds from its live children (the bounds walk 82E59C28; clip-depth children left out): an autosized
+    /// text field counts with its measured width, anchored by its autoSize side.
+    fn live_bounds(&self, vm: &Vm, id: usize, depth: usize) -> Option<[f32; 4]> {
+        if depth > 16 {
+            return None;
+        }
+        let instance = self.instances.get(&id)?;
+        let c = self.characters.get(&instance.character)?;
+        if c.text.is_some() {
+            let b = c.bounds?;
+            let w = vm.get(id, "_width").number() as f32;
+            if !w.is_finite() {
+                return Some(b);
+            }
+            return Some(match vm.get(id, "autoSize").text().as_str() {
+                "left" => [b[0], b[1], b[0] + w, b[3]],
+                "right" => [b[2] - w, b[1], b[2], b[3]],
+                "center" => {
+                    let m = (b[0] + b[2]) / 2.0;
+                    [m - w / 2.0, b[1], m + w / 2.0, b[3]]
+                }
+                _ => b,
+            });
+        }
+        if let Some(b) = c.bounds {
+            return Some(b);
+        }
+        let mut out: Option<[f32; 4]> = None;
+        for &child in instance.children.values() {
+            let Some(p) = self.instances.get(&child).and_then(|i| i.placement.as_ref()) else { continue };
+            if p.clip_depth >= 0 {
+                continue;
+            }
+            let Some(b) = self.live_bounds(vm, child, depth + 1) else { continue };
+            let m = p.matrix;
+            for (x, y) in [(b[0], b[1]), (b[2], b[1]), (b[0], b[3]), (b[2], b[3])] {
+                let (tx, ty) = (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]);
+                out = Some(match out {
+                    Some(o) => [o[0].min(tx), o[1].min(ty), o[2].max(tx), o[3].max(ty)],
+                    None => [tx, ty, tx, ty],
+                });
+            }
+        }
+        out.filter(|o| o.iter().all(|v| v.is_finite()))
+    }
+
+    /// An autosized field changed width: the `_width` / `_height` of the sprites holding it follow (the table's
+    /// header cells justify by their clip's `_width`; docs/hails-additions/42-challenges.md#results-table-header-widths).
+    fn resize_parents(&self, vm: &mut Vm, id: usize) -> Result<(), String> {
+        let mut child = id;
+        for _ in 0..16 {
+            let Some((&parent, instance)) = self.instances.iter().find(|(_, i)| i.children.values().any(|&c| c == child)) else { break };
+            if self.characters.get(&instance.character).is_none_or(|c| c.text.is_some() || c.bounds.is_some()) {
+                break;
+            }
+            let Some(b) = self.live_bounds(vm, parent, 0) else { break };
+            let scale = |k: &str| Some(vm.get(parent, k).number() as f32).filter(|v| v.is_finite()).unwrap_or(100.0) / 100.0;
+            let (sx, sy) = (scale("_xscale"), scale("_yscale"));
+            vm.set(parent, "_width", Value::Number(((b[2] - b[0]) * sx) as f64))?;
+            vm.set(parent, "_height", Value::Number(((b[3] - b[1]) * sy) as f64))?;
+            child = parent;
+        }
         Ok(())
     }
     /// Queues every handler of `events` whose flags include `event` (record order, as the

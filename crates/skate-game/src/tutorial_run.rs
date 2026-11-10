@@ -1,14 +1,17 @@
 //! Tutorials in play (research b858; doc 42 "Tutorials"): the `tutorials` state machine
 //! (`skate_core::challenges::tutorial`) driven by the frame's inputs, its objectives from the exported rows
-//! (`challenge_objectives.rs`). Presentation, the tutorial HUD and the end-of-run dialog are answered at once and
-//! logged NOT RETAIL YET until they are ported; a tutorial whose objectives call unported API functions does not run.
+//! (`challenge_objectives.rs`). The intro / outro / restart groups and the failure / hint rows' tips play on the
+//! presentation manager (`presentation_run.rs`; doc 42 "Tutorial presentation"); the tutorial HUD is answered at once
+//! and logged NOT RETAIL YET; a tutorial whose objectives call unported API functions does not run.
 use crate::challenge_objectives::{DataObjectives, ObjectiveData};
 use crate::challenges::Start;
+use crate::presentation_run::Presenter;
 use bevy::prelude::*;
 use serde::Deserialize;
 use skate_core::challenges::objectives::{Event as GroupEvent, Message};
-use skate_core::challenges::tutorial::{Command, Event, Params, Tutorial};
+use skate_core::challenges::tutorial::{Command, Event, Params, Presentation, Tutorial};
 use skate_core::challenges::Completion;
+use skate_core::presentation::{Group, Out, Started};
 use std::path::Path;
 
 /// The tutorial's intro / outro / restart presentation events (lists, or counts from an older export).
@@ -122,6 +125,10 @@ pub(crate) struct TutorialRun {
     was_off_board: bool,
     last_state: u32,
     trick_groups: crate::challenge_objectives::TrickGroups,
+    /// The tutorial's groups on the manager whose finish the state machine waits for.
+    waiting: Vec<(String, Presentation)>,
+    /// Failure / hint row tips fired this frame, started before the frame's events reach the state machine.
+    tips: Vec<(String, Vec<skate_core::presentation::Event>)>,
 }
 
 impl TutorialRun {
@@ -131,7 +138,26 @@ impl TutorialRun {
             spawn_offboard: data.spawn_offboard };
         Self { data, machine: Tutorial::new(params), objectives: None, evaluating: false, awaiting_teleport: false, end_open: false,
             force_pass: std::env::var("SKATE_VERIFY_TUTORIAL_PASS").is_ok_and(|v| v == "1"), started: false,
-            was_off_board: false, last_state: 0, trick_groups }
+            was_off_board: false, last_state: 0, trick_groups, waiting: Vec::new(), tips: Vec::new() }
+    }
+
+    /// Adds one of this tutorial's groups to the manager (owner = the tutorial id). `None` = nothing to wait for: no
+    /// events (an export with counts only) or the queue was full.
+    fn start_group(&self, slot: &str, events: Vec<skate_core::presentation::Event>, presenter: &mut Presenter) -> Option<String> {
+        if events.is_empty() {
+            return None;
+        }
+        let id = format!("{}/{slot}", self.data.id);
+        let started = presenter.manager.start(Group { id: id.clone(), owner: self.data.id.clone(), events });
+        info!("SKATE_TUTORIAL {} presentation {id} {started:?}", self.data.id);
+        // Skipped = the same group already plays or is last in the queue: its finish is the one to wait for.
+        (started != Started::Dropped).then_some(id)
+    }
+
+    fn row_tip(&mut self, kind: &str, objective: usize, row: usize) {
+        let rows = self.data.objectives.get(objective).map(|o| if kind == "failure" { &o.failures } else { &o.hints });
+        let events = rows.and_then(|r| r.get(row)).map(|r| r.presentation.events()).unwrap_or_default();
+        self.tips.push((format!("obj{objective}/{kind}{row}"), events));
     }
 
     fn feed(&mut self, message: Message, events: &mut Vec<Event>) {
@@ -143,14 +169,16 @@ impl TutorialRun {
             match e {
                 GroupEvent::AllComplete => events.push(Event::AllObjectivesComplete),
                 // objectivefailed comes only from a failure row on an active objective (82C6E4B0, research b940);
-                // fail-all and fail-on-exit post none. NOT RETAIL YET: the row's presentation (the tip) is not shown.
+                // fail-all and fail-on-exit post none. The row's tip group is queued first.
                 GroupEvent::FailureCondition { objective, row } => {
-                    info!("SKATE_TUTORIAL {} objective {objective} failure row {row} (tip presentation NOT RETAIL YET)", self.data.id);
+                    info!("SKATE_TUTORIAL {} objective {objective} failure row {row}", self.data.id);
+                    self.row_tip("failure", objective, row);
                     events.push(Event::ObjectiveFailed(objective));
                 }
                 // A hint row plays its presentation only; no message to the tutorial graph (82C755B8, research b942).
                 GroupEvent::Hint { objective, row } => {
-                    info!("SKATE_TUTORIAL {} objective {objective} hint row {row} (tip presentation NOT RETAIL YET)", self.data.id);
+                    info!("SKATE_TUTORIAL {} objective {objective} hint row {row}", self.data.id);
+                    self.row_tip("hint", objective, row);
                 }
                 _ => {}
             }
@@ -158,7 +186,7 @@ impl TutorialRun {
     }
 
     /// One frame: inputs to the objectives, timers, then every command and its immediate reply.
-    pub(crate) fn step(&mut self, input: &Inputs) -> Vec<Action> {
+    pub(crate) fn step(&mut self, input: &Inputs, presenter: &mut Presenter) -> Vec<Action> {
         let mut actions = Vec::new();
         let mut commands = Vec::new();
         self.machine.set_distance(input.distance);
@@ -234,6 +262,9 @@ impl TutorialRun {
                 Pick::ChangeDifficulty | Pick::Nothing => {}
             }
         }
+        for (slot, list) in std::mem::take(&mut self.tips) {
+            self.start_group(&slot, list, presenter);
+        }
         for e in events {
             commands.extend(self.machine.handle(e));
         }
@@ -242,73 +273,105 @@ impl TutorialRun {
         }
         let id = self.data.id.clone();
         let mut guard = 0;
-        while !commands.is_empty() && guard < 64 {
-            guard += 1;
-            let mut replies = Vec::new();
-            for c in std::mem::take(&mut commands) {
-                match c {
-                    Command::CreateHud => {
-                        info!("SKATE_TUTORIAL {id} HUD NOT RETAIL YET: loaded at once");
-                        replies.push(Event::HudLoaded);
-                    }
-                    Command::MakeObjectives => {
-                        self.objectives = DataObjectives::new(&id, &self.data.objectives, input.volumes.to_vec(), self.trick_groups.clone());
-                        if self.objectives.is_none() {
-                            info!("SKATE_TUTORIAL {id} cannot run its objectives: abandoned");
-                            replies.push(Event::Abandon);
+        // The manager runs once per frame on the frame's game time; a group a reply starts gets zero-time passes so
+        // instant groups finish in the frame they start, as retail's events with no wait do.
+        let mut dt = input.ticks as f32 / skate_core::challenges::timers::TICKS_PER_SECOND;
+        for _pass in 0..8 {
+            while !commands.is_empty() && guard < 64 {
+                guard += 1;
+                let mut replies = Vec::new();
+                for c in std::mem::take(&mut commands) {
+                    match c {
+                        Command::CreateHud => {
+                            info!("SKATE_TUTORIAL {id} HUD NOT RETAIL YET: loaded at once");
+                            replies.push(Event::HudLoaded);
                         }
-                    }
-                    Command::Evaluation(on) => self.evaluating = on,
-                    Command::StartPresentation(p) => {
-                        info!("SKATE_TUTORIAL {id} presentation {p:?} NOT RETAIL YET: finished at once");
-                        replies.push(Event::PresentationFinished(p));
-                    }
-                    Command::LoadAssets => replies.push(Event::AssetLoadComplete),
-                    Command::Reposition { offboard } => {
-                        actions.push(Action::Teleport { matrix: self.data.start.matrix, offboard });
-                        self.awaiting_teleport = true;
-                    }
-                    Command::ResetObjectives => {
-                        if let Some(o) = self.objectives.as_mut() {
-                            o.reset_only();
+                        Command::MakeObjectives => {
+                            self.objectives = DataObjectives::new(&id, &self.data.objectives, input.volumes.to_vec(), self.trick_groups.clone());
+                            if self.objectives.is_none() {
+                                info!("SKATE_TUTORIAL {id} cannot run its objectives: abandoned");
+                                replies.push(Event::Abandon);
+                            }
                         }
-                    }
-                    Command::ActivateStartObjectives => {
-                        if let Some(o) = self.objectives.as_mut() {
-                            o.activate_first();
+                        Command::Evaluation(on) => self.evaluating = on,
+                        Command::StartPresentation(p) => {
+                            let (slot, list) = match p {
+                                Presentation::Intro => ("intro", &self.data.presentation.intro),
+                                Presentation::Outro => ("outro", &self.data.presentation.outro),
+                                Presentation::Restart => ("restart", &self.data.presentation.restart),
+                            };
+                            match self.start_group(slot, list.events(), presenter) {
+                                Some(group) => self.waiting.push((group, p)),
+                                None => replies.push(Event::PresentationFinished(p)),
+                            }
                         }
-                    }
-                    Command::ResetObjective(i) => {
-                        if let Some(o) = self.objectives.as_mut() {
-                            o.reset_one(i);
+                        Command::LoadAssets => replies.push(Event::AssetLoadComplete),
+                        Command::Reposition { offboard } => {
+                            actions.push(Action::Teleport { matrix: self.data.start.matrix, offboard });
+                            self.awaiting_teleport = true;
                         }
+                        Command::ResetObjectives => {
+                            if let Some(o) = self.objectives.as_mut() {
+                                o.reset_only();
+                            }
+                        }
+                        Command::ActivateStartObjectives => {
+                            if let Some(o) = self.objectives.as_mut() {
+                                o.activate_first();
+                            }
+                        }
+                        Command::ResetObjective(i) => {
+                            if let Some(o) = self.objectives.as_mut() {
+                                o.reset_one(i);
+                            }
+                        }
+                        Command::OpenEndOptions => {
+                            info!("SKATE_TUTORIAL {id} end options");
+                            self.end_open = true;
+                            actions.push(Action::OpenEndDialog);
+                        }
+                        Command::Complete(c) => {
+                            info!("SKATE_TUTORIAL {id} complete {c:?}");
+                            self.cleanup(presenter);
+                            actions.push(Action::Finished(c));
+                        }
+                        other => info!("SKATE_TUTORIAL {id} {other:?}"),
                     }
-                    Command::OpenEndOptions => {
-                        info!("SKATE_TUTORIAL {id} end options");
-                        self.end_open = true;
-                        actions.push(Action::OpenEndDialog);
-                    }
-                    Command::Complete(c) => {
-                        info!("SKATE_TUTORIAL {id} complete {c:?}");
-                        actions.push(Action::Finished(c));
-                    }
-                    other => info!("SKATE_TUTORIAL {id} {other:?}"),
+                }
+                for e in replies {
+                    commands.extend(self.machine.handle(e));
                 }
             }
-            for e in replies {
-                commands.extend(self.machine.handle(e));
+            for out in presenter.update(std::mem::take(&mut dt)) {
+                if let Out::GroupFinished(group) = out {
+                    if let Some(i) = self.waiting.iter().position(|(w, _)| *w == group) {
+                        let (_, p) = self.waiting.remove(i);
+                        commands.extend(self.machine.handle(Event::PresentationFinished(p)));
+                    }
+                }
+            }
+            if commands.is_empty() {
+                break;
             }
         }
         actions
     }
 
-    pub(crate) fn abandon(&mut self) -> Vec<Action> {
+    /// The tutorial's groups leave the manager (retail's challenge cleanup, 82DBA8F8): the running event stops.
+    fn cleanup(&mut self, presenter: &mut Presenter) {
+        presenter.manager.remove_owner(&self.data.id, &mut presenter.handlers);
+        self.waiting.clear();
+        self.tips.clear();
+    }
+
+    pub(crate) fn abandon(&mut self, presenter: &mut Presenter) -> Vec<Action> {
         let mut out = Vec::new();
         for c in self.machine.handle(Event::Abandon) {
             if let Command::Complete(r) = c {
                 out.push(Action::Finished(r));
             }
         }
+        self.cleanup(presenter);
         out
     }
 }
@@ -316,7 +379,7 @@ impl TutorialRun {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::challenge_objectives::EventList;
+    use crate::challenge_objectives::{EventList, EventRow};
 
     fn data() -> TutorialData {
         let mut gate = vec![false; 14];
@@ -342,21 +405,46 @@ mod tests {
     fn a_tutorial_teleports_runs_its_objective_and_finishes_owned() {
         let volumes = vec![("tut_test_gate_01".to_owned(), 9)];
         let mut run = TutorialRun::new(data(), Default::default());
-        let actions = run.step(&input(&volumes, &[], false, 0, 30.0));
+        let mut p = Presenter::default();
+        let actions = run.step(&input(&volumes, &[], false, 0, 30.0), &mut p);
         assert!(matches!(actions.as_slice(), [Action::Teleport { offboard: true, .. }]), "{actions:?}");
-        assert!(run.step(&input(&volumes, &[], true, 0, 0.0)).is_empty(), "waits for the arrival");
-        assert!(run.step(&input(&volumes, &[], false, 1, 0.0)).is_empty(), "arrived, objective running");
-        let mut done = run.step(&input(&volumes, &[9], false, 1, 0.0));
+        assert!(run.step(&input(&volumes, &[], true, 0, 0.0), &mut p).is_empty(), "waits for the arrival");
+        assert!(run.step(&input(&volumes, &[], false, 1, 0.0), &mut p).is_empty(), "arrived, objective running");
+        let mut done = run.step(&input(&volumes, &[9], false, 1, 0.0), &mut p);
         for _ in 0..240 {
-            done.extend(run.step(&input(&volumes, &[], false, 1, 0.0)));
+            done.extend(run.step(&input(&volumes, &[], false, 1, 0.0), &mut p));
         }
         assert_eq!(done, [Action::OpenEndDialog], "waits in the end dialog");
         let mut pick = input(&volumes, &[], false, 1, 0.0);
         pick.end_choice = Some(skate_core::challenges::end_dialog::Action::Continue);
-        let mut done = run.step(&pick);
+        let mut done = run.step(&pick, &mut p);
         for _ in 0..240 {
-            done.extend(run.step(&input(&volumes, &[], false, 1, 0.0)));
+            done.extend(run.step(&input(&volumes, &[], false, 1, 0.0), &mut p));
         }
         assert_eq!(done, [Action::Finished(Completion::Owned)]);
+    }
+
+    #[test]
+    fn the_intro_plays_on_the_manager_before_the_teleport_and_cleanup_removes_it() {
+        let volumes = vec![("tut_test_gate_01".to_owned(), 9)];
+        let mut d = data();
+        d.presentation.intro = EventList::Events(vec![EventRow { kind: "Wait".into(), args: [Some("1".into()), None], mask: 0 }]);
+        let mut run = TutorialRun::new(d, Default::default());
+        let mut p = Presenter::default();
+        assert!(run.step(&input(&volumes, &[], false, 0, 30.0), &mut p).is_empty());
+        assert_eq!(p.manager.playing(), Some("tut_test/intro"));
+        for _ in 0..50 {
+            assert!(run.step(&input(&volumes, &[], false, 1, 30.0), &mut p).is_empty(), "the intro holds the start");
+        }
+        let mut actions = Vec::new();
+        for _ in 0..20 {
+            actions.extend(run.step(&input(&volumes, &[], false, 1, 30.0), &mut p));
+        }
+        assert!(matches!(actions.as_slice(), [Action::Teleport { .. }]), "{actions:?}");
+        assert_eq!(p.manager.playing(), None);
+        p.manager.start(Group { id: "tut_test/obj0/hint0".into(), owner: "tut_test".into(),
+            events: vec![skate_core::presentation::Event { kind: "Wait".into(), args: [Some("9".into()), None], mask: 0 }] });
+        run.abandon(&mut p);
+        assert_eq!(p.manager.playing(), None, "the tutorial's groups leave with it");
     }
 }

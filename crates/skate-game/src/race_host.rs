@@ -666,6 +666,10 @@ fn apply(
                     &skate_core::challenges::results::ResultsRules::default());
                 let passed = place.is_some_and(|p| p <= place_to_win()) && time.is_some();
                 info!("SKATE_RACE {id} results table: {} rows, self rank {}, passed {passed}", view.rows.len(), view.self_rank());
+                for r in &state.tracker.racers {
+                    let located = r.id == PLAYER || state.ai.as_ref().is_some_and(|ai| ai.racers.iter().any(|a| a.ai.id == r.id && a.npc.is_some()));
+                    info!("SKATE_RACE {id} standing racer {} leg {} split {} eta {:.2} finish {:?} rank {} npc {located}", r.id, r.leg, r.split, r.eta, r.finish_time, r.rank);
+                }
                 state.end_results = Some((view, passed));
             }
             Command::Complete(c) => finished = Some(c),

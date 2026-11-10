@@ -24,6 +24,8 @@ pub(crate) struct Racer {
     leg: usize,
     split: usize,
     carry: f32,
+    /// Logged once: past the finish point's plane without being in the finish volume.
+    past_finish_logged: bool,
 }
 
 pub(crate) struct RaceAi {
@@ -67,7 +69,7 @@ impl RaceAi {
             .filter_map(|c| {
                 let row = c.character?;
                 let (look, name_id) = looks.get(&row).cloned().unwrap_or_else(|| (row.clone(), row.clone()));
-                Some(Racer { ai: RacerAi::new(c.id), row, look, name_id, npc: None, leg: 0, split: 0, carry: 0.0 })
+                Some(Racer { ai: RacerAi::new(c.id), row, look, name_id, npc: None, leg: 0, split: 0, carry: 0.0, past_finish_logged: false })
             })
             .collect::<Vec<_>>();
         info!("SKATE_RACE {race}: {} AI racers {:?} on {} lines", racers.len(),
@@ -183,6 +185,11 @@ impl RaceAi {
             }
             let Some(&p) = positions.get(&r.ai.id) else { continue };
             let Some(leg) = heat.legs.get(r.leg) else { continue };
+            if !r.past_finish_logged && r.leg + 1 == heat.legs.len() && r.split + 1 == leg.splits.len() && tracker.eta(r.ai.id) <= 0.0 {
+                r.past_finish_logged = true;
+                let finish = leg.splits.last().and_then(|v| volumes.get(&v.id));
+                info!("SKATE_RACE racer {} ({}) past the finish point outside its volume: at {p:?}, volume {:?}", r.ai.id, r.row, finish.map(|v| &v.shape));
+            }
             let hit = leg.splits.iter().enumerate().skip(r.split)
                 .filter(|(_, v)| volumes.get(&v.id).is_some_and(|tv| tv.shape.contains_point(p)))
                 .map(|(i, _)| i + 1).last();

@@ -24,6 +24,7 @@ pub mod menus;
 pub mod challenge_map;
 pub mod career;
 pub mod presentation;
+pub mod presentation_fade;
 pub mod challenges;
 pub mod cheats;
 pub mod credits;

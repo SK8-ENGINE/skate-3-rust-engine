@@ -602,7 +602,7 @@ course from the split centres).
   outside the movie's display tree, so `attachMovie` into them was unhandled and nothing drew. Fix: such a clip joins
   its movie's display tree as an empty sprite on the first `attachMovie` into it, with any empty clips between it and
   the movie (nested empty clips; which one the last unhandled call hit is not confirmed) (`Movie::adopt_empty`, standard AS2,
-  NOT RETAIL YET); holder clips that only get a movie loaded into them (main, screenmanager, main3dhud) are unchanged. Verified by the laptop (results-table-test3, 2026-11-09 19:15): the stage test builds 4 rows with rank / name / time cells; apt_ 46 and retail_ 126 tests pass. In game: race-results6 had no win in 12 runs; `SKATE_RACE_PLACE_TO_WIN=<n>` (test switch, `race_host::place_to_win`, retail 1) lets any place up to n win so the won dialog can be checked. Seen in game (laptop race-results7, 2026-11-09 20:11, race_indu_01 with the switch): the title, the Rank / Name / Time headers, one row per racer in finish order with M:SS.hh times, the player's row highlighted, A Continue / B Retry. Fixed after it: the player's name showed `#Player` (an already literal cell got a second `#`). Open: the Rank header starts just outside the panel's left edge (not compared with retail yet); a 23 to 30 ms hitch when the dialog opens. The switch only changes the dialog's pass (`race_results` + `passed`), not the race graph's result: a forced win ends `completion=Abandoned` with no pay and no reward screen. Laptop event-args-probe (20:40, a real win, race_indu_01 80.15 s): the player's row reads `Player` (fixed). Open: Darren Navarrette, still riding, showed the player's time 1:20.15 (elapsed + an ETA of 0: his remaining course distance measured 0, or a real near tie; not checked).
+  NOT RETAIL YET); holder clips that only get a movie loaded into them (main, screenmanager, main3dhud) are unchanged. Verified by the laptop (results-table-test3, 2026-11-09 19:15): the stage test builds 4 rows with rank / name / time cells; apt_ 46 and retail_ 126 tests pass. In game: race-results6 had no win in 12 runs; `SKATE_RACE_PLACE_TO_WIN=<n>` (test switch, `race_host::place_to_win`, retail 1) lets any place up to n win so the won dialog can be checked. Seen in game (laptop race-results7, 2026-11-09 20:11, race_indu_01 with the switch): the title, the Rank / Name / Time headers, one row per racer in finish order with M:SS.hh times, the player's row highlighted, A Continue / B Retry. Fixed after it: the player's name showed `#Player` (an already literal cell got a second `#`). Fixed after it: the Rank header started outside the panel (next section). Open: a 23 to 30 ms hitch when the dialog opens. The switch only changes the dialog's pass (`race_results` + `passed`), not the race graph's result: a forced win ends `completion=Abandoned` with no pay and no reward screen. Laptop event-args-probe (20:40, a real win, race_indu_01 80.15 s): the player's row reads `Player` (fixed). Open: Darren Navarrette, still riding (no finish line for him in the log), showed the player's time 1:20.15 = the frozen race time + an estimate of 0, while Lizard King's 1:31.60 is the same time + his estimate. An estimate stays 0 when the racer's position is never found (no spawned NPC) or his remaining distance measures 0; the results now log every racer's leg, split, estimate, finish and whether its NPC exists (`SKATE_RACE <race> standing racer ...`) to tell which. Laptop results-headers (2026-11-10 00:40, 3 runs, all the same): Navarrette `leg 0 split 13 eta 0.00 finish None npc true`, so he is found and has passed split 13 of 14; the estimate measures to the finish point (`Course::remaining`, sub_82560790) and is 0 once he is past that point's plane. He is past the finish point but was never inside the finish volume (the AI tests one point, the deck position, per update). The AI now logs once `SKATE_RACE racer <id> past the finish point outside its volume: at <pos>, volume <box>` to show how he misses it. Same runs: the dialog-open hitch (28 ms) names `slowest=animation`. Laptop finish-volume (2026-11-10 00:03): the player lost this run (89.85, 3rd); Lizard King (74.58) and Navarrette (82.98) both finished through their finish volumes and no `past the finish point` line was logged, so the case did not come up; the line stays in for the next won run. Pause menu (verify path) unchanged after the header-width change.
 
 ### Save tag (2026-11-09; b948 / b957 S4)
 
@@ -628,7 +628,7 @@ course from the split centres).
 - Moddability: `set_mod(mod, type, handler)` adds a type or overrides a retail one while the mod is on; `remove_mod`
   drops them and the engine handler is back (run `Manager::remove_owner` first so the mod's running events stop).
   Ported hosts replace stubs with `set_engine`.
-- Not wired yet: the tutorial / career wiring (step 4) is the first caller. Tests: `presentation_run` (3: every type
+- Wired to the tutorials (step 4, next section); the career is next. Tests: `presentation_run` (3: every type
   handled and unknown ones finish, Wait holds its seconds, a mod override and its removal).
 
 ### Presentation event export (2026-11-09; b964 §5 step 1, b943)
@@ -637,8 +637,8 @@ course from the split centres).
   (the row's own fields, args from its local data binary) and every failure / hint row's `presentation` (args from the
   row's own bank binary), each `{type, args: [arg1, arg2], mask}` through `progression.presentation_events` (b892 / b874
   type table). The engine reads both forms (`challenge_objectives::EventList`: a list, or a count from an older install),
-  so tutorials keep loading before a Refresh Game Files. Expected rows: b943's per-row table (masks all 0). Not played
-  yet: step 4 hands them to the presentation manager.
+  so tutorials keep loading before a Refresh Game Files. Expected rows: b943's per-row table (masks all 0). Played by
+  the presentation manager since step 4 (next section).
 - `decoded_events` reads the arguments from the row's binaries in turn (tutorial: local vault, then bank; failure /
   hint row: its own bank binary, then the tutorial's) and keeps the count with a `challenges:` stderr line when none
   fits. The first version raised instead and the export skipped the tutorial (laptop presentation-export 2026-11-09:
@@ -650,6 +650,82 @@ course from the split centres).
   arguments are in the tutorial's local vault binary (`tut_sksc_01`, `tut_sksc_01_startlocator`, `8191`); the first
   string follows the .bin's 8-byte header, so `progression._cstr` now also accepts offset 8 (`BIN_DATA_START`).
   Verified (laptop presentation-export3, 2026-11-09 20:54): 0 counts left, 314 lists, 658 masks all 0, unittests 14 OK; numeric arguments stay strings ("8191", "5360"; retail atoi / atof them in the handlers).
+
+### Results table header widths (2026-11-09)
+
+- Symptom (laptop event-args-probe, race_indu_01): the Rank header started outside the panel and the Time header sat
+  left of its column; Name was right.
+- Cause [code: source/controls/table, the header loop after SetColHeaders]: each header cell is a `Header Text` clip
+  `col_N` holding `headerText` with `autoSize = "left"`; the table places it by justify with the CLIP's `_width`:
+  right `colXLoc + (colWidthMax - _width) - 2`, center `colXLoc + (colWidthMax - _width) / 2`, left `colXLoc`. Our
+  clip `_width` was the static frame-0 bounds (the authored field box, 104), not the autosized text, so right / center
+  headers moved left by the difference (Rank -33.9 instead of 0, Time 434 instead of 504).
+- Change (`apt_movie.rs`): when an autosized field is measured, the sprites holding it get `_width` / `_height` from
+  their live children (`live_bounds`: the bounds walk 82E59C28 over the display list, clip-depth children left out;
+  an autosized field counts with its measured width anchored at its autoSize side), times their scale.
+- Verification: the data-gated `retail_end_dialog_results_table_builds_its_rows` now checks each header clip's `_width`
+  equals its text's (fails without the change: 104 vs 33.6 to 43.5); apt_ 46 and retail_ 126 pass.
+
+### Tutorial presentation (2026-11-09; b964 §5 step 4)
+
+- One manager per game (`presentation_run::Presenter` in `Challenges`, retail's PresentationManager singleton). A
+  tutorial's StartPresentation (intro / outro / restart) adds the exported list as group `<tutorial>/<slot>`, owner the
+  tutorial id; the state machine gets PresentationFinished when the manager reports that group finished, so a Wait in
+  the intro now holds the teleport. A list with no events (an export with counts only) or a dropped group (queue full)
+  finishes at once.
+- A failure row queues its tip group `<tutorial>/obj<N>/failure<R>` before ObjectiveFailed reaches the state machine
+  (so the restart group queues behind it); a hint row queues `.../hint<R>` only (82C755B8, b942).
+- The manager runs once per frame on the frame's game time (the tutorial's 60 Hz ticks), plus zero-time passes so an
+  instant group finishes in the frame it starts. Completion and abandon remove the tutorial's groups (82DBA8F8): the
+  running event stops, queued ones go unplayed.
+- NOT RETAIL YET: every type but Wait, FadeIn and FadeOut is still a logged stub done at once (callouts, NIS,
+  teleports); the manager runs only while a tutorial runs. Tests: `tutorial_run` (the intro holds the teleport for its Wait, abandon removes
+  the tutorial's groups; the existing run test with count-only lists).
+
+<a id="presentation-fade"></a>
+
+### Presentation fade (2026-11-10; b900 §1, b902, b964 §5 step 5)
+
+- Retail [code b900 / b902]: FadeIn / FadeOut events (8257B040) start a slot of the owner's fade object (+0x214;
+  82D5BEB0) with arg1 seconds (lenient float 82AE9028). The object's update (82D5BB80) takes a fixed 1/60 s off each
+  active slot per tick and posts the overlay alpha: FadeIn remaining / total (1 to 0), FadeOut elapsed / total (0 to
+  1), flash a 0 to 1 to 0 triangle split at 0.5. A FadeOut that reaches 0 holds black (alpha 1) and posts
+  cMsgEffectFinished(2); a FadeOut while held finishes at once; a FadeIn clears a held FadeOut. Other modes count 5
+  ticks after 0, cancel (overlay off), and post their finish on the next tick. The event is done on the finish
+  message for its own mode; undo cancels every slot (82D5C010); stop does nothing.
+- Ours: `skate_core::presentation_fade::Fade` (slots, `start`, `tick`, `cancel_all`, `reset`; `FadeParams` step 1/60,
+  end ticks 5, flash split 0.5 as mod-replaceable defaults). `presentation_run::Presenter` owns one shared
+  `FadeHost` (whole 60 Hz ticks from the frame time, last alpha, finishes seen); `FadeHandler` registers for FadeIn and
+  FadeOut; `Presenter::update` steps the fade, then the manager; `Presenter::fade_alpha` gives the alpha.
+- NOT RETAIL YET: the alpha is not drawn. Who draws it and whether it reads as black is open (b904: the subscriber is
+  a post_fx colour matrix blend whose dumped target is a warm tint). Retail's tick cadence (per 60 Hz tick or per
+  frame) is open; ours is frame-rate independent at 60 Hz.
+- Tests: `presentation_fade` (FadeOut linear and held, second FadeOut at once, FadeIn clears held; FadeIn finishes
+  six ticks after 0; flash; cancel and reset), `presentation_run` (a FadeOut group finishes when black, a FadeIn
+  clears it, the lenient float).
+- Laptop presentation-fade (2026-11-10 02:12): build OK, presentation_fade 4, presentation 4, tutorial 2 pass. The
+  exported tutorial lists have no FadeIn / FadeOut event (most used: ShowTutorialCalloutHUD 172, SpeechNoWait 138,
+  HideTutorialCalloutHUD 53, SFX 52, Wait 48, NIS 22, SetSimRate 22, TeleportLocalPlayer 19, RestoreSimRate 19), so
+  no fade played in game; tut_sksc_01 with pass unchanged (Owned, no group stuck).
+
+<a id="tutorial-callout"></a>
+
+### Tutorial callout (2026-11-10; b945 §2, b866 §1, b964 §5 step 6)
+
+- Retail [code b945]: ShowTutorialCalloutHUD (type 20) writes the tutorialinstruction component's instruction
+  (82D29B60): no key = a text-only tip (always marked changed), with a key only a new key or text changes it; the
+  component becomes visible. HideTutorialCalloutHUD (21, 82578A80) writes key `none`, text `#` and makes it
+  invisible. The component update (82667A70) sends hudtutorial's SetState: text only 12 on first show, 11 while shown,
+  13 for `#` or after its shown timer reaches 10000; gesture mode 10, 11 for `none` / `tutorial_none`, hide for
+  `clear` / `tutorial_clear`; 77 on a stance change.
+- Ours, step 1: `skate_core::challenges::callout` (`Instruction` show / hide with a revision instead of the changed
+  flag, `Panel::update` giving the states in order, plus the generic HUD show 246 / hide 236 when the visible byte
+  changes; `CalloutParams.text_timeout` 10 s as a mod-replaceable default).
+- NOT RETAIL YET / open: the 10000 timer read as milliseconds [inferred]; the movie component, its natives
+  (GetTutorialHalText, GetTutorialGesturesButtons from scoring_trick then scoring_tutorial records,
+  PlayerStance_IsRegular) and the Show / Hide handlers are the next step, so tips are still logged stubs in game.
+- Tests: `challenges::callout` (gesture tip once and repeat no-op, stance 77; text tip 12 / 11 / timeout 13 / `#`;
+  hide, clear stays cleared, none).
 
 ### The DPO: killed it time and position (2026-11-08, b995 items 2a / 2b, b997 sections 1 and 2)
 

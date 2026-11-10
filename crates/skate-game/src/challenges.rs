@@ -362,6 +362,8 @@ pub(crate) struct Challenges {
     pub tutorials: Vec<crate::tutorial_run::TutorialData>,
     pub tutorial: Option<crate::tutorial_run::TutorialRun>,
     tutorial_carry: f32,
+    /// The presentation manager and its handlers (tutorials now; the career and mods next; doc 42).
+    pub presentation: crate::presentation_run::Presenter,
     verify_tutorial: Option<String>,
     /// The challenge trick groups (b863), read from the stock collections when the first tutorial starts.
     trick_groups: Option<crate::challenge_objectives::TrickGroups>,
@@ -697,7 +699,7 @@ fn update(
                 .then_some(skater.player_input.grind.rail_owner).flatten()
                 .and_then(|owner| physics.as_ref().and_then(|p| p.rail_guids(owner))),
             end_choice: end_dialog.choice.take() };
-        let actions = if std::mem::take(&mut challenges.mods.abort) { tutorial.abandon() } else { tutorial.step(&input) };
+        let actions = if std::mem::take(&mut challenges.mods.abort) { tutorial.abandon(&mut challenges.presentation) } else { tutorial.step(&input, &mut challenges.presentation) };
         let mut finished = false;
         for action in actions {
             match action {

@@ -2070,5 +2070,20 @@ traces (last 40): {:?}", game.calls, &traces[traces.len().saturating_sub(40)..])
         eprintln!("cell texts: {texts:?}");
         assert!(clips.iter().any(|n| n.starts_with("row_")), "no row clips: {clips:?}");
         assert!(texts.iter().any(|t| t.contains("Chris Haslam")), "no racer name in the cells: {texts:?}");
+        // Header cells (col_N holding an autosized headerText) justify by the clip's _width: it must be the text's.
+        let headers: Vec<(String, f64, f64, f64)> = level
+            .movie
+            .instances
+            .keys()
+            .filter_map(|c| match stage.vm.get(*c, "headerText") {
+                Value::Object(t) => Some((stage.vm.get(t, "text").text(), stage.vm.get(*c, "_width").number(), stage.vm.get(t, "_width").number(), stage.vm.get(*c, "_x").number())),
+                _ => None,
+            })
+            .collect();
+        eprintln!("headers (text, clip _width, text _width, _x): {headers:?}");
+        assert!(!headers.is_empty(), "no header cells");
+        for (text, clip, field, _) in &headers {
+            assert!((clip - field).abs() < 2.0, "header {text}: clip _width {clip} vs its text {field}");
+        }
     }
 }
