@@ -458,6 +458,13 @@ const AUTOPILOT_DIALOG_SECONDS: f32 = 3.0;
 /// C.PlaceHigherToWin: the places that win the race (retail 1; end_heat@213-244).
 const PLACE_TO_WIN: u32 = 1;
 
+/// The place that wins: retail 1; `SKATE_RACE_PLACE_TO_WIN=<n>` (a test switch) lets any place up to n win, so the won
+/// end dialog and its results table can be checked without a won race.
+fn place_to_win() -> u32 {
+    static PLACE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *PLACE.get_or_init(|| std::env::var("SKATE_RACE_PLACE_TO_WIN").ok().and_then(|v| v.trim().parse().ok()).filter(|n| *n >= 1).unwrap_or(PLACE_TO_WIN))
+}
+
 /// end_heat's RoundStandings input: the player and every AI racer, with finish times and estimates (names: the
 /// player's leaderboard name, the racers' name ids).
 fn standings(state: &RaceState) -> Vec<skate_core::challenges::results::Standing> {
@@ -655,9 +662,9 @@ fn apply(
                 // build_results (research race-results-rows.md): every racer, finish order, then the end dialog
                 // (opened by `update`; without the dialog movies the run continues at once).
                 let standings = standings(state);
-                let view = skate_core::challenges::results::race_results(&standings, state.run.elapsed(), false, PLACE_TO_WIN,
+                let view = skate_core::challenges::results::race_results(&standings, state.run.elapsed(), false, place_to_win(),
                     &skate_core::challenges::results::ResultsRules::default());
-                let passed = place.is_some_and(|p| p <= PLACE_TO_WIN) && time.is_some();
+                let passed = place.is_some_and(|p| p <= place_to_win()) && time.is_some();
                 info!("SKATE_RACE {id} results table: {} rows, self rank {}, passed {passed}", view.rows.len(), view.self_rank());
                 state.end_results = Some((view, passed));
             }

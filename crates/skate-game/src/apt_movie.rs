@@ -702,6 +702,58 @@ impl Movie {
         Ok(Some(child))
     }
 
+    /// A createEmptyMovieClip clip under one of this movie's clips joins the display tree as an empty sprite (same
+    /// script object, its depth as a script depth), so clips can be attached into it and it draws (the table control
+    /// builds its rows this way: row_N empty clips holding attached cells). Standard AS2; NOT RETAIL YET.
+    pub fn adopt_empty(&mut self, vm: &mut Vm, id: usize, parent: usize, depth: i32) -> Result<bool, String> {
+        if self.instances.contains_key(&id) || !self.instances.contains_key(&parent) {
+            return Ok(self.instances.contains_key(&id));
+        }
+        const EMPTY: &str = "__createEmptyMovieClip";
+        let character = match self.linkage.get(EMPTY) {
+            Some(c) => *c,
+            None => {
+                let c = self.fresh_character();
+                let empty = Character { id: c, type_name: "sprite".into(), frames: vec![Frame { controls: Vec::new() }], text: None, bounds: None };
+                self.states.insert(c, display_states(&empty)?);
+                self.characters.insert(c, empty);
+                self.linkage.insert(EMPTY.into(), c);
+                c
+            }
+        };
+        let name = vm.get(id, "_name").text();
+        // Scale / rotation the script set before the clip joined keep their values.
+        let set: Vec<&str> = ["_xscale", "_yscale", "_rotation"].into_iter().filter(|k| vm.get(id, k) != Value::Undefined).collect();
+        if set.is_empty() {
+            seed_scale(vm, id, &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0])?;
+        }
+        self.instances.insert(id, Instance {
+            character,
+            frame: 0,
+            playing: false,
+            children: BTreeMap::new(),
+            placement: Some(Placement {
+                character,
+                matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                color: [255, 255, 255, 255, 0, 0, 0, 0],
+                ratio: 0.0,
+                name,
+                clip_depth: -1,
+                blend_mode: 0,
+                clip_actions: Vec::new(),
+            }),
+        });
+        let key = depth.saturating_add(SCRIPT_DEPTH);
+        self.instances.get_mut(&parent).unwrap().children.insert(key, id);
+        self.attached.insert(id);
+        // Its position is the script's (_x / _y), never a timeline's.
+        self.script_moved.insert(id);
+        for k in set {
+            self.transform_changed(vm, id, k)?;
+        }
+        Ok(true)
+    }
+
     pub fn method(
         &mut self,
         vm: &mut Vm,

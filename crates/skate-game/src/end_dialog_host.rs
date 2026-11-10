@@ -98,6 +98,8 @@ impl EndDialogHost {
                     Cell::Number(n) => Value::Number(n as f64),
                     Cell::Bool(b) => Value::Bool(b),
                     Cell::Text(t) if t.starts_with("ID_") => literal(&t),
+                    // Already a literal (the player's `#name`): as is, else the movie shows the `#`.
+                    Cell::Text(t) if t.starts_with('#') => Value::Text(t),
                     Cell::Text(t) => Value::Text(format!("#{t}")),
                 });
                 crate::hud_challenge::array(vm, values)?

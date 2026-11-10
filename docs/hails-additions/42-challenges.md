@@ -596,6 +596,13 @@ course from the split centres).
   native code sets on the class: the stage sets them before ShowScreen (the first laptop run showed an empty table).
 - Verified: lost races show "Didn't cut it." with Quit / Retry / Change Difficulty (laptop race-results, 7 runs); the
   table after a win is NOT verified yet (statics fix pending a laptop rerun).
+- Empty table after a win (laptop race-results5 and the stage test `retail_end_dialog_results_table_builds_its_rows`,
+  2026-11-09): the statics arrive in time, but the table control (`source/controls/table`) builds each row as a
+  `createEmptyMovieClip` clip (`row_N`) and attaches its cells (`col_N`) into it; our empty clips were script objects
+  outside the movie's display tree, so `attachMovie` into them was unhandled and nothing drew. Fix: such a clip joins
+  its movie's display tree as an empty sprite on the first `attachMovie` into it, with any empty clips between it and
+  the movie (nested empty clips; which one the last unhandled call hit is not confirmed) (`Movie::adopt_empty`, standard AS2,
+  NOT RETAIL YET); holder clips that only get a movie loaded into them (main, screenmanager, main3dhud) are unchanged. Verified by the laptop (results-table-test3, 2026-11-09 19:15): the stage test builds 4 rows with rank / name / time cells; apt_ 46 and retail_ 126 tests pass. In game: race-results6 had no win in 12 runs; `SKATE_RACE_PLACE_TO_WIN=<n>` (test switch, `race_host::place_to_win`, retail 1) lets any place up to n win so the won dialog can be checked. Seen in game (laptop race-results7, 2026-11-09 20:11, race_indu_01 with the switch): the title, the Rank / Name / Time headers, one row per racer in finish order with M:SS.hh times, the player's row highlighted, A Continue / B Retry. Fixed after it: the player's name showed `#Player` (an already literal cell got a second `#`). Open: the Rank header starts just outside the panel's left edge (not compared with retail yet); a 23 to 30 ms hitch when the dialog opens. The switch only changes the dialog's pass (`race_results` + `passed`), not the race graph's result: a forced win ends `completion=Abandoned` with no pay and no reward screen. Laptop event-args-probe (20:40, a real win, race_indu_01 80.15 s): the player's row reads `Player` (fixed). Open: Darren Navarrette, still riding, showed the player's time 1:20.15 (elapsed + an ETA of 0: his remaining course distance measured 0, or a real near tie; not checked).
 
 ### Save tag (2026-11-09; b948 / b957 S4)
 
@@ -610,6 +617,39 @@ course from the split centres).
   equal to the playing one with an empty queue or to the last queued; drop when full), events in order with mask skips,
   a finish message per group, skip = stop the running event + undo the run ones in reverse, `remove_owner`. Events are
   the career's `graph::Event` (type by name); the game's `Handlers` come next (registry, tutorial / career wiring).
+
+### Presentation handler registry (2026-11-09; b964 §3, port step 3)
+
+- skate-game `presentation_run::Registry` implements the manager's `Handlers` by type name: all 73 retail types
+  (skate-core `presentation::EVENT_TYPES`, the export's order, b874) have a handler, so no group stalls on an unported
+  type. `Wait` (type 4, 8257C820) is ported: arg1 seconds of game time [code b900]. The rest are logged stubs, done at
+  once (`PRESENTATION stub <type>`); NOT RETAIL YET for the waiting types (NIS, FMV, Speech, Teleport, Fade, which retail
+  holds until their end message). An unknown name logs and finishes.
+- Moddability: `set_mod(mod, type, handler)` adds a type or overrides a retail one while the mod is on; `remove_mod`
+  drops them and the engine handler is back (run `Manager::remove_owner` first so the mod's running events stop).
+  Ported hosts replace stubs with `set_engine`.
+- Not wired yet: the tutorial / career wiring (step 4) is the first caller. Tests: `presentation_run` (3: every type
+  handled and unknown ones finish, Wait holds its seconds, a mod override and its removal).
+
+### Presentation event export (2026-11-09; b964 §5 step 1, b943)
+
+- `challenges.py` now writes the events themselves, not their count: tutorial `presentation.intro / outro / restart`
+  (the row's own fields, args from its local data binary) and every failure / hint row's `presentation` (args from the
+  row's own bank binary), each `{type, args: [arg1, arg2], mask}` through `progression.presentation_events` (b892 / b874
+  type table). The engine reads both forms (`challenge_objectives::EventList`: a list, or a count from an older install),
+  so tutorials keep loading before a Refresh Game Files. Expected rows: b943's per-row table (masks all 0). Not played
+  yet: step 4 hands them to the presentation manager.
+- `decoded_events` reads the arguments from the row's binaries in turn (tutorial: local vault, then bank; failure /
+  hint row: its own bank binary, then the tutorial's) and keeps the count with a `challenges:` stderr line when none
+  fits. The first version raised instead and the export skipped the tutorial (laptop presentation-export 2026-11-09:
+  1 of 12 tutorials left). Laptop presentation-export2 (2026-11-09 20:24): 12 tutorials / 94 objectives / 16
+  challenges back; every failure / hint row decodes (tut_sksc_08's rows match b943; b943's sixth row tut_sksc_08_3 is
+  not in tut_sksc_08, a b943 table error); all 599 masks 0; SpeechNoWait's id arrives as the string "5360". Open: the 22
+  tutorial intro / restart lists decode from neither the local vault nor the bank binary and stay counts;
+  `SKATE_EXPORT_EVENT_DEBUG=1` dumps their records and the bytes at each offset. Laptop event-args-probe (20:41): the
+  arguments are in the tutorial's local vault binary (`tut_sksc_01`, `tut_sksc_01_startlocator`, `8191`); the first
+  string follows the .bin's 8-byte header, so `progression._cstr` now also accepts offset 8 (`BIN_DATA_START`).
+  Verified (laptop presentation-export3, 2026-11-09 20:54): 0 counts left, 314 lists, 658 masks all 0, unittests 14 OK; numeric arguments stay strings ("8191", "5360"; retail atoi / atof them in the handlers).
 
 ### The DPO: killed it time and position (2026-11-08, b995 items 2a / 2b, b997 sections 1 and 2)
 

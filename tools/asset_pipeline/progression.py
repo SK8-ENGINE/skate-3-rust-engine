@@ -138,8 +138,13 @@ EVENT_TYPES = (
 assert len(EVENT_TYPES) == 73
 
 
+# A vault .bin's strings follow its 8-byte header: the first one starts at 8 with header bytes before it (laptop
+# event-args-probe 2026-11-09: tutorial intro / restart arguments such as `tut_sksc_01` at offset 8).
+BIN_DATA_START = 8
+
+
 def _cstr(binary, offset):
-    if offset >= len(binary) or (offset and binary[offset - 1] != 0):
+    if offset >= len(binary) or (offset and offset != BIN_DATA_START and binary[offset - 1] != 0):
         raise ValueError('presentation event argument is not a string start: %#x' % offset)
     end = binary.index(b'\0', offset)
     return binary[offset:end].decode('ascii') or None

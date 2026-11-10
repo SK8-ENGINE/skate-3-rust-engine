@@ -7,6 +7,26 @@ use std::collections::VecDeque;
 
 pub use crate::career::graph::Event;
 
+/// Retail's presentation event type names by index (b874, type table 830CA8A0; same order as the export's
+/// `tools/asset_pipeline/progression.py` EVENT_TYPES). Events carry the name; the index only maps exported rows.
+pub const EVENT_TYPES: [&str; 73] = [
+    "FadeIn", "FadeOut", "Speech", "SpeechNoWait", "Wait", "NIS", "PinLocalPlayer", "UnpinLocalPlayer",
+    "TeleportLocalPlayer", "ShowHUD", "HideHUD", "EnableSetSessionMarker", "DisableSetSessionMarker",
+    "EnableUseSessionMarker", "DisableUseSessionMarker", "ShowMiniMap", "HideMiniMap", "EnableHOMEffect",
+    "DisableHOMEffect", "Replay", "ShowTutorialCalloutHUD", "HideTutorialCalloutHUD", "ModifiedCentralMessage",
+    "CentralMessage", "ModifiedCustomCentralMessage", "CustomCentralMessage", "CompleteChallenge", "RevertChallenge",
+    "GrantAchievement", "PreloadNIS", "TeleportLocalToBreadCrumb", "SetDynamicHullState", "ClearDMOsWithinVolume",
+    "IncrementPointsPoolPoints", "AddGlobalDemoTime", "FixSkaterInAir", "UnfixSkaterInAir", "ShowTrickAnalyzer",
+    "HideTrickAnalyzer", "ShowPumpMeter", "HidePumpMeter", "ShowManualMeter", "HideManualMeter",
+    "EvaluateObjectivesWhileSimPaused", "StopEvaluatingObjectivesWhileSimPaused", "PauseSim", "UnpauseSim",
+    "SetSimRate", "RestoreSimRate", "ActivateMinimalScoringHUD", "DeactivateMinimalScoringHUD",
+    "EnableInputRestriction", "ClearInputRestrictions", "ShowObjectDropperUI", "HideObjectDropperUI",
+    "ClearObjectDropperInputFilters", "AddAllObjectDropperInputFilters", "RemoveObjectDropperInputFilter",
+    "WorldScriptCommand", "WorldScriptCommandAndWait", "DisableObjectDropper", "EnableObjectDropper",
+    "ExecuteProgressionStategraph", "ExecuteProgressionStategraphAndWait", "FMV", "SFX", "AddIcon", "RemoveIcon",
+    "ShowMapTutorial", "HideObjectDropperCursor", "ForceGrindLengthDisplay", "ForceBailTimeDisplay", "None",
+];
+
 /// A group's stable id: its owner plus a slot (`tut_sksc_08/intro`, `career/<graph>/<state>`, `mod:<id>/...`).
 pub type GroupId = String;
 

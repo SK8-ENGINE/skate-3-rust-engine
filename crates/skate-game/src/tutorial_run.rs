@@ -11,14 +11,15 @@ use skate_core::challenges::tutorial::{Command, Event, Params, Tutorial};
 use skate_core::challenges::Completion;
 use std::path::Path;
 
+/// The tutorial's intro / outro / restart presentation events (lists, or counts from an older export).
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct PresentationCounts {
     #[serde(default)]
-    pub intro: usize,
+    pub intro: crate::challenge_objectives::EventList,
     #[serde(default)]
-    pub outro: usize,
+    pub outro: crate::challenge_objectives::EventList,
     #[serde(default)]
-    pub restart: usize,
+    pub restart: crate::challenge_objectives::EventList,
 }
 
 /// One tutorial row as `challenges.py` exports it (`tutorials` in challenges.json).
@@ -125,8 +126,8 @@ pub(crate) struct TutorialRun {
 
 impl TutorialRun {
     pub(crate) fn new(data: TutorialData, trick_groups: crate::challenge_objectives::TrickGroups) -> Self {
-        let params = Params { intro: data.presentation.intro > 0, outro: data.presentation.outro > 0,
-            restart: data.presentation.restart > 0, ignore_initial_reposition: data.ignore_initial_reposition,
+        let params = Params { intro: !data.presentation.intro.is_empty(), outro: !data.presentation.outro.is_empty(),
+            restart: !data.presentation.restart.is_empty(), ignore_initial_reposition: data.ignore_initial_reposition,
             spawn_offboard: data.spawn_offboard };
         Self { data, machine: Tutorial::new(params), objectives: None, evaluating: false, awaiting_teleport: false, end_open: false,
             force_pass: std::env::var("SKATE_VERIFY_TUTORIAL_PASS").is_ok_and(|v| v == "1"), started: false,
@@ -315,6 +316,7 @@ impl TutorialRun {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::challenge_objectives::EventList;
 
     fn data() -> TutorialData {
         let mut gate = vec![false; 14];
@@ -324,7 +326,7 @@ mod tests {
             id: "tut_test".into(), map: "SkateSchool".into(), title_id: None,
             start: Start { locator: "s".into(), matrix: m }, location: Start { locator: "l".into(), matrix: m },
             sign_up_radius: 4.0, spawn_offboard: true, persistent: false, ignore_initial_reposition: None,
-            presentation: PresentationCounts { intro: 2, outro: 0, restart: 3 },
+            presentation: PresentationCounts { intro: EventList::Count(2), outro: EventList::Count(0), restart: EventList::Count(3) },
             objectives: vec![ObjectiveData { key: "tut_test_0".into(), activation: 0, triggers: gate, points_valid: None,
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.IsInVolume",
                     "args": [{"lit": "1"}, {"lit": "DIST_SkateSchool|tut_test_gate_01"}]}}]}),

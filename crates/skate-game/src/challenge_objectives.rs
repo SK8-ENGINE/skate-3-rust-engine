@@ -35,9 +35,55 @@ pub(crate) struct FailureData {
     pub key: String,
     #[serde(default)]
     pub condition: Option<serde_json::Value>,
-    /// How many presentation events the row plays when it fires.
+    /// The presentation events the row plays when it fires.
     #[serde(default)]
-    pub presentation: u32,
+    pub presentation: EventList,
+}
+
+/// One exported presentation event (`progression.presentation_events`: 16-byte records, research b892 / b943).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct EventRow {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub args: [Option<String>; 2],
+    #[serde(default)]
+    pub mask: u32,
+}
+
+/// A row's presentation events; an export from before the event lists has only their count.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum EventList {
+    Count(usize),
+    Events(Vec<EventRow>),
+}
+
+impl Default for EventList {
+    fn default() -> Self {
+        Self::Count(0)
+    }
+}
+
+impl EventList {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Count(n) => *n,
+            Self::Events(e) => e.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The events for the presentation manager (none from a count-only export).
+    pub fn events(&self) -> Vec<skate_core::presentation::Event> {
+        match self {
+            Self::Count(_) => Vec::new(),
+            Self::Events(e) => e.iter().map(|r| skate_core::presentation::Event { kind: r.kind.clone(), args: r.args.clone(), mask: r.mask }).collect(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

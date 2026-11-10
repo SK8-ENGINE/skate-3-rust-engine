@@ -181,6 +181,24 @@ impl Bindings<'_> {
                     Some(Value::Object(o)) => Some(*o),
                     _ => None,
                 };
+                // Into a createEmptyMovieClip clip under a movie's clip: it joins that movie's display tree first,
+                // with any empty clips between it and the movie.
+                if self.level_of(object).is_none() {
+                    let mut chain = Vec::new();
+                    let mut current = object;
+                    while let Some(&(parent, depth)) = self.state.dynamic.get(&current).filter(|_| chain.len() < 32) {
+                        chain.push((current, parent, depth));
+                        if self.level_of(parent).is_some() {
+                            break;
+                        }
+                        current = parent;
+                    }
+                    if let Some(level) = chain.last().and_then(|(_, parent, _)| self.level_of(*parent)) {
+                        for (clip, parent, depth) in chain.into_iter().rev() {
+                            self.state.levels[level].movie.adopt_empty(vm, clip, parent, depth)?;
+                        }
+                    }
+                }
                 if let Some(level) = self.level_of(object) {
                     let movie = &mut self.state.levels[level].movie;
                     let before = movie.immediate.len();
@@ -1985,5 +2003,72 @@ traces (last 40): {:?}", game.calls, &traces[traces.len().saturating_sub(40)..])
         }
         eprintln!("after close: {:?}", game.calls);
         assert!(game.calls.iter().any(|c| c == "Game.OnScreenOutroComplete(600)"), "{:?}", game.calls);
+    }
+
+    /// The won race's results table (endchallengeoptions, template 33): the table control builds one row clip per
+    /// racer from the Results natives (laptop race-results5: the panel showed no rows). Data-gated.
+    #[test]
+    fn retail_end_dialog_results_table_builds_its_rows() {
+        use skate_core::challenges::results::{race_results, ResultsRules, Standing};
+        let Some(root) = crate::apt_imports::test_menu_set() else {
+            return;
+        };
+        let set = crate::retail_menu_movies::RetailMenuMovies::read(&root).unwrap();
+        let movies = set.movies.clone();
+        if !movies.contains_key("source/screens/hudcomponents/endchallengeoptions") {
+            eprintln!("skipped: menu set without endchallengeoptions");
+            return;
+        }
+        let assets = crate::apt_imports::main_checkout().join("assets");
+        let (data, loaded) = crate::retail_menus::read(&assets);
+        if !loaded {
+            eprintln!("skipped: no menu tables");
+            return;
+        }
+        let registry = crate::retail_menus::RetailMenus::new(data, true).registry;
+        let context = skate_core::menus::MenuContext::new("FreePlay");
+        let language = movies.get("source/screens/main/core_menu").map(|m| m.text_assets.language.clone()).unwrap_or_default();
+        let mut game = crate::crossbar_host::FrontEnd::new(&registry, &context, &language);
+        let racer = |id: u32, name: &str, local: bool, finish: f32| Standing { id, name: name.into(), local, finish: Some(finish), eta: 0.0 };
+        let standings = [racer(0, "Player", true, 70.5), racer(1, "Chris Haslam", false, 71.2), racer(2, "Andrew Reynolds", false, 72.0), racer(3, "Dan Drehobl", false, 74.9)];
+        let view = race_results(&standings, 75.0, false, 1, &ResultsRules::default());
+        let mut dialog = skate_core::challenges::end_dialog::EndDialog::default();
+        dialog.passed = true;
+        game.end_dialog = Some(crate::end_dialog_host::EndDialogHost { dialog, title: None, results: Some(view) });
+        let mut stage = Stage::new(&game).unwrap();
+        stage.load_root("source/screens/main", &movies, &mut game).unwrap();
+        for _ in 0..4 {
+            stage.update(16.0, &movies, &mut game).unwrap();
+        }
+        stage.call_path("_global.ScreenManager.RegisterTemplate", vec![Value::Text("EndChallengeOptions".into())], &mut game).unwrap();
+        let args = ["source/screens/hudcomponents/endchallengeoptions.swf", "screen", "0", "EndChallengeOptions"].map(|a| Value::Text(a.into())).to_vec();
+        stage.call_path("_global.ScreenManager.OpenScreen", args, &mut game).unwrap();
+        for frame in 0..90 {
+            if let Err(e) = stage.update(16.0, &movies, &mut game) {
+                let traces = stage.take_traces();
+                panic!("frame {frame}: {e}\ncalls: {:?}\ntraces (last 40): {:?}", game.calls, &traces[traces.len().saturating_sub(40)..]);
+            }
+        }
+        eprintln!("game calls: {:?}", game.calls);
+        eprintln!("unhandled: {:?}", stage.unhandled());
+        let traces = stage.take_traces();
+        eprintln!("traces (last 40): {:?}", &traces[traces.len().saturating_sub(40)..]);
+        let level = stage.levels().iter().find(|l| l.key.ends_with("endchallengeoptions")).expect("endchallengeoptions loaded");
+        // Rows are createEmptyMovieClip clips (row_N), cells attachMovie clips (col_N).
+        let clips: Vec<String> = level.movie.instances.keys().map(|c| stage.vm.get(*c, "_name").text()).filter(|n| n.starts_with("row_") || n.starts_with("col_")).collect();
+        eprintln!("table clips: {clips:?}");
+        let texts: Vec<String> = level
+            .movie
+            .instances
+            .keys()
+            .filter_map(|c| match stage.vm.get(*c, "sizingText") {
+                // Update writes each cell's text into its sizing field (and mText.SetTitle).
+                Value::Object(t) => Some(stage.vm.get(t, "text").text()),
+                _ => None,
+            })
+            .collect();
+        eprintln!("cell texts: {texts:?}");
+        assert!(clips.iter().any(|n| n.starts_with("row_")), "no row clips: {clips:?}");
+        assert!(texts.iter().any(|t| t.contains("Chris Haslam")), "no racer name in the cells: {texts:?}");
     }
 }

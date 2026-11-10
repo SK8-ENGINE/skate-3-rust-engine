@@ -13,6 +13,7 @@ Only the families in FAMILIES are exported. A challenge whose volumes or start d
 reported. Output: assets/private/challenges.json.
 """
 import json
+import os
 import re
 import struct
 import sys
@@ -240,9 +241,36 @@ def objective_rows(rows_by_hash, objectives, binary, binary_of=None):
     return out
 
 
+def decoded_events(field, *binaries):
+    """A presentation event list (`progression.presentation_events`) with its string arguments read from the first of
+    `binaries` they decode in; when none fits, the event count as before (a row is never dropped over its events)."""
+    from .progression import presentation_events
+    for binary in binaries:
+        if binary is None:
+            continue
+        try:
+            return presentation_events(field, binary)
+        except (ValueError, IndexError, struct.error):
+            continue
+    items = ((field or {}).get('array') or {}).get('items') or []
+    if items:
+        print(f'challenges: {len(items)} presentation events kept as a count (arguments not decodable)', file=sys.stderr)
+        if os.environ.get('SKATE_EXPORT_EVENT_DEBUG'):
+            # Where the arguments point (research aid): each record, and the bytes at each offset in every candidate.
+            for item in items:
+                kind, arg1, arg2, mask = struct.unpack('>IIII', bytes.fromhex(item)[:16])
+                print(f'  record {item} type {kind} mask {mask}', file=sys.stderr)
+                for name, offset in (('arg1', arg1), ('arg2', arg2)):
+                    for i, binary in enumerate(b for b in binaries if b is not None):
+                        around = binary[max(offset - 1, 0):offset + 24] if offset < len(binary) else b'(past end)'
+                        print(f'    {name} {offset:#x} in binary {i} (len {len(binary):#x}): {around!r}', file=sys.stderr)
+    return len(items)
+
+
 def failure_row(rows_by_hash, ref, binary, binary_of=None):
     """A failure row (b940): its key, its predicate as an exported program (None when the translator cannot take it:
-    the engine then never fires it) and how many presentation events it plays."""
+    the engine then never fires it) and the presentation events it plays (b943: {type, args, mask}, args from the row's
+    own bank binary)."""
     from .objective_lua import translate, LuaSyntaxError
     row = rows_by_hash.get(ref) or {}
     fields = row.get('fields', {})
@@ -251,8 +279,8 @@ def failure_row(rows_by_hash, ref, binary, binary_of=None):
         condition = translate(lua_text(source, fields.get(DEFINITION)))
     except LuaSyntaxError:
         condition = None
-    events = ((fields.get(PRESENTATION_EVENTS) or {}).get('array') or {}).get('items') or []
-    return {'key': row.get('key') or 'Hash_%016X' % ref[1], 'condition': condition, 'presentation': len(events)}
+    events = decoded_events(fields.get(PRESENTATION_EVENTS), source, binary)
+    return {'key': row.get('key') or 'Hash_%016X' % ref[1], 'condition': condition, 'presentation': events}
 
 
 def inherited_field(rows_by_hash, ref, name):
@@ -414,7 +442,6 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             raise ValueError('no Location')
         sign_up = place(cstring(bank_binary, int(location['data'], 16)).decode('utf-8'))
         start = place(cstring(binary, int(own[START]['data'], 16)).decode('utf-8')) if START in own else sign_up
-        count = lambda field: len(((own.get(field) or {}).get('array') or {}).get('items') or [])
         ignore = own.get(IGNORE_REPOSITION) or fields.get(IGNORE_REPOSITION)
         radius_up = radius(fields, SIGN_UP_RADIUS)
         title_id = (fields.get(TITLE) or {}).get('data') or None
@@ -427,7 +454,7 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             spawn_offboard=bool(own.get(SPAWN_OFFBOARD, {}).get('data', '00')[:2] == '01'),
             persistent=own.get(PERSISTENT, {}).get('data', '00')[:2] == '01',
             ignore_initial_reposition=None if ignore is None else ignore.get('data', '00')[:2] == '01',
-            presentation={name: count(field) for name, field in PRESENTATION.items()},
+            presentation={name: decoded_events(own.get(field), binary, bank_binary) for name, field in PRESENTATION.items()},
             objectives=objective_rows(rows_by_hash, refs(fields.get(OBJECTIVES)), bank_binary, binary_of))
 
     def race(key, fields, bank_binary):
