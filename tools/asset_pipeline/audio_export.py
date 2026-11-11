@@ -1397,6 +1397,16 @@ def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report,
                           events=MAIN_CAST_EVENTS)
             entry['audio'] = 'speech/maincast'
         manifest.setdefault('speech', {})['maincast'] = entry
+    nis = audio_root/'english'/'nis.big'
+    if nis.is_file():
+        # Presentation speech (tutorial coach lines and the career's NIS lines), not ped speech: always decoded.
+        report('Decoding presentation speech')
+        from .world_audio import decode_nis, nis_index
+        index = nis_index(nis)
+        (output/'speech').mkdir(parents=True, exist_ok=True)
+        (output/'speech'/'nis.json').write_text(json.dumps(index), encoding='utf-8')
+        decode_nis(nis, index, output/'speech'/'nis', work/'speech_nis', vgmstream, _decode, log)
+        manifest.setdefault('speech', {})['nis'] = {'index': 'speech/nis.json', 'audio': 'speech/nis'}
     announcer = audio_root/'english'/'announcerspeech.big'
     if announcer.is_file():
         report('Indexing announcer speech')

@@ -192,6 +192,11 @@ pub struct MenuTables {
     /// The career stats rows in index order (65 in TU3). Empty in tables extracted before they were added.
     #[serde(default)]
     pub career_stats: Vec<StatRow>,
+    /// The eSk8Characters speaker names in id order (104; TU3 0x82232694, the Speech presentation handler's map,
+    /// research b874 / doc 42 "Presentation speech"): `SkateCoach` = 31. Empty in tables extracted before they were
+    /// added.
+    #[serde(default)]
+    pub speakers: Vec<String>,
     /// Table addresses in this build (diagnostics only).
     pub addresses: std::collections::BTreeMap<String, String>,
 }
@@ -861,6 +866,34 @@ fn trick_guide(img: &Image) -> Result<(u32, u32, u32, TrickGuideTables), String>
     Ok((categories_at, gestures_at, buttons_at, TrickGuideTables { categories, gestures, buttons }))
 }
 
+// ---------------------------------------------------------------- speakers
+
+/// The last speaker name; the names after it in the block are other strings.
+const LAST_SPEAKER: &str = "Teammate4";
+const SPEAKER_COUNT: usize = 104;
+
+/// The speaker names: a block of NUL-terminated names, each starting on a 4-byte boundary, beginning "Player",
+/// "Fairfax" and ending with "Teammate4" (104 names).
+fn speakers(img: &Image) -> Result<(u32, Vec<String>), String> {
+    let data = &img.image.image;
+    let start = find(data, b"Player\0\0Fairfax\0").ok_or("speaker names not found")?;
+    let mut names = Vec::new();
+    let mut at = start;
+    while names.len() < SPEAKER_COUNT + 8 {
+        let name = img.cstr(img.image.base_address + at as u32).filter(|n| !n.is_empty()).ok_or("speaker names end early")?;
+        at = (at + name.len() + 1 + 3) & !3;
+        let last = name == LAST_SPEAKER;
+        names.push(name);
+        if last {
+            break;
+        }
+    }
+    if names.len() != SPEAKER_COUNT || names.last().map(String::as_str) != Some(LAST_SPEAKER) {
+        return Err(format!("speaker names: {} found", names.len()));
+    }
+    Ok((img.image.base_address + start as u32, names))
+}
+
 pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
     let img = Image { image };
     let (rows_at, settings_rows, settings_screens) = settings(&img)?;
@@ -873,6 +906,7 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
     let (sub_options_at, sub_options) = sub_options(&img)?;
     let (trick_categories_at, gestures_at, buttons_at, trick_guide) = trick_guide(&img)?;
     let (stats_at, career_stats) = career_stats(&img)?;
+    let (speakers_at, speakers) = speakers(&img)?;
     if modes.is_empty() {
         return Err("no per-mode crossbar menus found".into());
     }
@@ -890,6 +924,7 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
         ("trick_guide_gestures", gestures_at),
         ("trick_guide_buttons", buttons_at),
         ("career_stats", stats_at),
+        ("speakers", speakers_at),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), hex(v)))
@@ -909,6 +944,7 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
         sub_options,
         trick_guide,
         career_stats,
+        speakers,
         addresses,
     })
 }

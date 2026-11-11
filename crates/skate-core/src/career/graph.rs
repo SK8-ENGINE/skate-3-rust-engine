@@ -13,9 +13,11 @@ pub const STATE_ENTER: &str = "stateenter";
 pub enum EventMode {
     /// ChangeState: no presentation events.
     None,
-    /// ExecuteEventsAndChangeState: the state's events play, the state changes when they finish.
+    /// ExecuteEventsAndChangeState (827D16F0): the state's events play as a group and the state changes in the group's
+    /// finish callback (827D1420); a state without events changes at once.
     Execute,
-    /// DeferEventsAndChangeState: the events go to the deferred list (played later, FIFO), the state changes at once.
+    /// DeferEventsAndChangeState (827D1970): the events go to the deferred list (played later, FIFO), the state changes
+    /// at once.
     Defer,
 }
 
@@ -111,8 +113,9 @@ pub enum Request {
     UnloadCareerPhoto(String),
     Teleport { locator: String, district: String },
     TeleportToChallenge(String),
-    /// A state's presentation events (Execute plays them now, Defer queues them for later).
-    Events { graph: String, state: String, mode: EventMode },
+    /// A state's presentation events (Execute plays them now, Defer queues them for later). For Execute the graph waits
+    /// in `state` until the host calls [`Runner::events_finished`], then enters `target`.
+    Events { graph: String, state: String, mode: EventMode, target: String },
     GraphStarted(String),
     GraphEnded(String),
 }
@@ -122,6 +125,8 @@ pub struct Running {
     pub graph: String,
     pub state: String,
     pub picked: Option<String>,
+    /// ExecuteEventsAndChangeState's target while the state's events play.
+    pub waiting: Option<String>,
     pub request: Option<u32>,
 }
 
@@ -161,7 +166,7 @@ impl Runner {
     fn begin(&mut self, graph: &str, graphs: &BTreeMap<String, Graph>, view: &dyn CareerView, out: &mut Vec<Request>) {
         out.push(Request::GraphStarted(graph.to_owned()));
         // A graph without states never ends and blocks the queue, as in retail (b890; unreachable in retail data).
-        self.running = Some(Running { graph: graph.to_owned(), state: INITIAL.into(), picked: None, request: None });
+        self.running = Some(Running { graph: graph.to_owned(), state: INITIAL.into(), picked: None, waiting: None, request: None });
         if graphs.get(graph).is_some_and(|g| g.states.contains_key(INITIAL)) {
             self.deliver(STATE_ENTER, None, graphs, view, out);
         }
@@ -185,8 +190,24 @@ impl Runner {
                     out: &mut Vec<Request>) {
         let Some(run) = self.running.as_mut() else { return };
         if mode != EventMode::None {
-            out.push(Request::Events { graph: run.graph.clone(), state: run.state.clone(), mode });
+            out.push(Request::Events { graph: run.graph.clone(), state: run.state.clone(), mode, target: state.to_owned() });
         }
+        let has_events = graphs.get(&run.graph).and_then(|g| g.states.get(&run.state)).is_some_and(|s| !s.events.is_empty());
+        if mode == EventMode::Execute && has_events {
+            run.waiting = Some(state.to_owned());
+            return;
+        }
+        self.enter(state, graphs, view, out);
+    }
+
+    /// The Execute group finished (its callback 827D1420): the waiting state change happens now.
+    pub fn events_finished(&mut self, graphs: &BTreeMap<String, Graph>, view: &dyn CareerView, out: &mut Vec<Request>) {
+        let Some(target) = self.running.as_mut().and_then(|r| r.waiting.take()) else { return };
+        self.enter(&target, graphs, view, out);
+    }
+
+    fn enter(&mut self, state: &str, graphs: &BTreeMap<String, Graph>, view: &dyn CareerView, out: &mut Vec<Request>) {
+        let Some(run) = self.running.as_mut() else { return };
         run.state = state.to_owned();
         let graph = run.graph.clone();
         self.deliver(STATE_ENTER, None, graphs, view, out);
@@ -289,6 +310,32 @@ mod tests {
     }
 
     #[test]
+    fn execute_waits_for_the_states_events_and_a_state_without_events_changes_at_once() {
+        let mut initial = state(&[(STATE_ENTER, vec![Op::ChangeState { state: COMPLETE.into(), events: EventMode::Execute }])]);
+        initial.events = vec![Event { kind: "Wait".into(), args: [Some("1".into()), None], mask: 0 }];
+        let complete = state(&[(STATE_ENTER, vec![Op::SetFlag { name: "Done".into(), value: true }])]);
+        let graphs = BTreeMap::from([("g".to_owned(), Graph { states: BTreeMap::from([
+            (INITIAL.to_owned(), initial), (COMPLETE.to_owned(), complete.clone())]) })]);
+        let mut r = Runner::default();
+        let mut out = Vec::new();
+        r.start("g", &graphs, &NoCareer, &mut out);
+        assert!(out.contains(&Request::Events { graph: "g".into(), state: INITIAL.into(), mode: EventMode::Execute, target: COMPLETE.into() }));
+        assert_eq!(r.running.as_ref().map(|x| (x.state.as_str(), x.waiting.as_deref())), Some((INITIAL, Some(COMPLETE))), "holds the state");
+        assert_eq!(r.flags.get("Done"), None);
+        out.clear();
+        r.events_finished(&graphs, &NoCareer, &mut out);
+        assert_eq!(r.flags.get("Done"), Some(&true));
+        assert_eq!(out, [Request::GraphEnded("g".into())]);
+        // The same op on a state without events: the change happens in the same call.
+        let quiet = BTreeMap::from([("q".to_owned(), Graph { states: BTreeMap::from([
+            (INITIAL.to_owned(), state(&[(STATE_ENTER, vec![Op::ChangeState { state: COMPLETE.into(), events: EventMode::Execute }])])),
+            (COMPLETE.to_owned(), complete)]) })]);
+        let mut r = Runner::default();
+        r.start("q", &quiet, &NoCareer, &mut out);
+        assert!(r.running.is_none() && r.flags.get("Done") == Some(&true));
+    }
+
+    #[test]
     fn a_milestone_graph_runs_to_complete_and_ends() {
         let graphs = BTreeMap::from([("m1".to_owned(), milestone())]);
         let mut r = Runner::default();
@@ -299,7 +346,7 @@ mod tests {
             Request::UnlockReward { reward: "milestone_01".into(), big: true },
             Request::MilestoneEarned,
             Request::UnlockTeammate,
-            Request::Events { graph: "m1".into(), state: INITIAL.into(), mode: EventMode::Defer },
+            Request::Events { graph: "m1".into(), state: INITIAL.into(), mode: EventMode::Defer, target: COMPLETE.into() },
             Request::GraphEnded("m1".into())]);
         assert_eq!(r.flags.get("Done"), Some(&true), "complete's stateenter ops run before the end");
         assert!(r.running.is_none());

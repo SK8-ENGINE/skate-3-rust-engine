@@ -29,6 +29,9 @@ pub(crate) struct CameraRuntime {
     /// Native message order, including End followed by Begin in one graph tick.
     /// The simulation schedule drains these after advance.
     pub simulation_rate_requests: Vec<SimulationRateRequest>,
+    /// The presentation sim controller's rate (SetSimRate), posted every frame while set (8256E4F0); applied with
+    /// the camera's, unlogged.
+    pub presentation_rate_requests: Vec<SimulationRateRequest>,
     pub manual_cam: ManualCam,
     pub manual_cam_settings: ManualCamSettings,
     /// Game Settings > Control > offboard X / Y axis (settings +193 / +192): retail's camera config +24 / +25,
@@ -73,6 +76,7 @@ impl CameraRuntime {
             trajectories: core::array::from_fn(|_| TrajectoryResult::new()), frame: None,
             latest_subject: None,
             simulation_rate_requests: Vec::new(),
+            presentation_rate_requests: Vec::new(),
             manual_cam: ManualCam::default(),
             manual_cam_settings: settings::manual_cam_settings(&data)?,
             invert_look: [false; 2],

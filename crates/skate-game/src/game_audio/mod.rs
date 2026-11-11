@@ -48,6 +48,9 @@ mod voices;
 pub(crate) mod world_bridge;
 mod world_sources;
 mod world_speech;
+mod nis_speech;
+pub(crate) mod music;
+pub(crate) mod music_caption;
 
 use bevy::{audio::Volume, prelude::*};
 use serde::{Deserialize, Serialize};
@@ -473,6 +476,14 @@ impl Plugin for GameAudioPlugin {
             .add_plugins(npc_skaters::register)
             .add_plugins(prop_sounds::register)
             .add_plugins(world_speech::register)
+            .add_systems(Update, nis_speech::frame)
+            .init_resource::<music::Music>()
+            .add_message::<music::MusicTrackStarted>()
+            .add_systems(Update, music::frame)
+            .init_resource::<music_caption::MusicCaptionStyle>()
+            .init_resource::<music_caption::PendingCaption>()
+            .init_resource::<crate::ui_fonts::FallbackFonts>()
+            .add_systems(Update, (crate::ui_fonts::install, music_caption::show.after(music::frame)).chain())
             .add_plugins(world_bridge::register)
             .add_plugins(car_alarm::register)
             .add_systems(

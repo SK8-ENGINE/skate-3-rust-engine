@@ -32,6 +32,10 @@ mod apt_text;
 mod apt_scene;
 mod apt_imports;
 mod hud_challenge;
+mod hud_imports;
+mod music_pack;
+mod music_playlist;
+mod ui_fonts;
 mod hud_central;
 mod hud_runtime;
 mod scoring_runtime;
@@ -165,6 +169,9 @@ fn main() -> bevy::app::AppExit {
     if let Some(code) = extract_ocean_pca() { std::process::exit(code); }
     // Setup tool mode: `--extract-menu-tables <default.xex> <menu-tables.json>`.
     if let Some(code) = extract_menu_tables() { std::process::exit(code); }
+    if let Some(code) = pack_music() { std::process::exit(code); }
+    if let Some(code) = pack_music_folder() { std::process::exit(code); }
+    if let Some(code) = music_tools() { std::process::exit(code); }
     // Launcher mode: `--update-game-files [--assets <dir>]` checks the game files and refreshes them if needed.
     if let Some(code) = setup::update_game_files() { std::process::exit(code); }
     if let Some(code) = crash_report::entry() { std::process::exit(code); }
@@ -339,6 +346,174 @@ fn extract_ocean_pca() -> Option<i32> {
             Some(1)
         }
     }
+}
+
+/// Packs setup's decoded music segments (`<dir>/1.wav` .. `<dir>/<count>.wav`, vgmstream's subsong order) into a
+/// FLAC music bank (skate_audio::music::bank; doc 11 "Music banks"). Runs before any game initialization.
+fn pack_music() -> Option<i32> {
+    let mut args = std::env::args_os().skip(1);
+    if args.next()? != "--pack-music" {
+        return None;
+    }
+    let (Some(dir), Some(count), Some(out), None) = (args.next(), args.next(), args.next(), args.next()) else {
+        eprintln!("Usage: skate3rust --pack-music <segment dir> <count> <out.bank>");
+        return Some(2);
+    };
+    let Some(count) = count.to_str().and_then(|c| c.parse::<u32>().ok()) else {
+        eprintln!("Music pack: the count must be a number");
+        return Some(2);
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let segments = (1..=count).map(|i| {
+        let path = dir.join(format!("{i}.wav"));
+        std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
+            .and_then(|b| skate_audio::music::bank::wav16(&b).map_err(|e| format!("{}: {e}", path.display())))
+    });
+    let result = std::fs::File::create(&out).map_err(|e| e.to_string()).and_then(|f| {
+        let mut f = std::io::BufWriter::new(f);
+        skate_audio::music::bank::write_bank(&mut f, count, segments, &[])
+    });
+    match result {
+        Ok(entries) => {
+            let seconds: f32 = entries.iter().map(|e| e.seconds()).sum();
+            println!("MUSIC_BANK_READY {} segments {:.0} s", entries.len(), seconds);
+            Some(0)
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(&out);
+            eprintln!("Music pack failed: {error}");
+            Some(1)
+        }
+    }
+}
+
+/// Packs a folder of the player's own music (most formats: MP3, AAC / M4A, ALAC, Ogg Vorbis, FLAC, WAV, AIFF; one
+/// track per file, sorted by name; names from the tags, else `Artist - Title.ext`) into a music bank with its track
+/// table, each track cut into 10 s segments (doc 11 "Music banks", mod music). Runs before any game initialization.
+fn pack_music_folder() -> Option<i32> {
+    use skate_audio::music::bank::{write_bank, Track};
+    let mut args = std::env::args_os().skip(1);
+    if args.next()? != "--pack-music-folder" {
+        return None;
+    }
+    let (Some(dir), Some(out), None) = (args.next(), args.next(), args.next()) else {
+        eprintln!("Usage: skate3rust --pack-music-folder <folder of music files> <out.bank>");
+        return Some(2);
+    };
+    println!("{}", music_pack::NOTICE);
+    let mut files: Vec<std::path::PathBuf> = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| music_pack::is_music_file(p)).collect(),
+        Err(e) => {
+            eprintln!("Music pack: {}: {e}", std::path::Path::new(&dir).display());
+            return Some(1);
+        }
+    };
+    files.sort();
+    // First pass: each file's segment count and names (the bank's index comes first); unreadable files are skipped.
+    let mut tracks = Vec::new();
+    let mut readable = Vec::new();
+    let mut first = 0u32;
+    for path in &files {
+        let mut count = 0u32;
+        match music_pack::decode(path, |_| { count += 1; Ok(()) }) {
+            Ok(info) if count > 0 => {
+                tracks.push(Track { first, count, name: info.title, artist: info.artist });
+                readable.push(path.clone());
+                first += count;
+            }
+            Ok(_) => eprintln!("skipped {}: no audio", path.display()),
+            Err(e) => eprintln!("skipped {}: {e}", path.display()),
+        }
+    }
+    if tracks.is_empty() {
+        eprintln!("Music pack: no readable music files in {}", std::path::Path::new(&dir).display());
+        return Some(1);
+    }
+    // Second pass: decode on a thread, segments through a small channel into the bank writer.
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Result<skate_audio::music::bank::Segment, String>>(4);
+    let decoder = std::thread::spawn(move || {
+        for path in readable {
+            let send = |s| tx.send(Ok(s)).map_err(|_| "stopped".to_string());
+            if let Err(e) = music_pack::decode(&path, send) {
+                let _ = tx.send(Err(format!("{}: {e}", path.display())));
+                return;
+            }
+        }
+    });
+    let result = std::fs::File::create(&out).map_err(|e| e.to_string())
+        .and_then(|f| write_bank(&mut std::io::BufWriter::new(f), first, rx, &tracks));
+    let _ = decoder.join();
+    match result {
+        Ok(entries) => {
+            let seconds: f32 = entries.iter().map(|e| e.seconds()).sum();
+            for t in &tracks {
+                println!("track {:?} by {:?}: {} segments", t.name, t.artist, t.count);
+            }
+            println!("MUSIC_BANK_READY {} tracks {} segments {:.0} s", tracks.len(), entries.len(), seconds);
+            Some(0)
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(&out);
+            eprintln!("Music pack failed: {error}");
+            Some(1)
+        }
+    }
+}
+
+/// The music bank and playlist tools (doc 11 "Music banks"): `--music-bank-info <bank>` lists a bank's tracks;
+/// `--music-playlist <out.json> <name> [--shuffle] <bank>...` writes a playlist of every track of the banks.
+fn music_tools() -> Option<i32> {
+    let mut args = std::env::args_os().skip(1);
+    let command = args.next()?;
+    if command == "--music-bank-info" {
+        let (Some(path), None) = (args.next(), args.next()) else {
+            eprintln!("Usage: skate3rust --music-bank-info <bank>");
+            return Some(2);
+        };
+        return Some(match music_playlist::read_bank(std::path::Path::new(&path)) {
+            Ok(bank) => {
+                let seconds: f32 = bank.entries.iter().map(|e| e.seconds()).sum();
+                println!("{}: {} tracks, {} segments, {:.0} s", std::path::Path::new(&path).display(), bank.tracks.len(), bank.entries.len(), seconds);
+                for line in music_playlist::describe(&bank) {
+                    println!("{line}");
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        });
+    }
+    if command != "--music-playlist" {
+        return None;
+    }
+    let rest: Vec<std::ffi::OsString> = args.collect();
+    let shuffle = rest.iter().any(|a| a == "--shuffle");
+    let rest: Vec<&std::ffi::OsString> = rest.iter().filter(|a| *a != "--shuffle").collect();
+    let [out, name, banks @ ..] = rest.as_slice() else {
+        eprintln!("Usage: skate3rust --music-playlist <out.json> <name> [--shuffle] <bank>...");
+        return Some(2);
+    };
+    if banks.is_empty() {
+        eprintln!("Usage: skate3rust --music-playlist <out.json> <name> [--shuffle] <bank>...");
+        return Some(2);
+    }
+    let out = std::path::PathBuf::from(out);
+    let banks: Vec<std::path::PathBuf> = banks.iter().map(std::path::PathBuf::from).collect();
+    let result = music_playlist::from_banks(&out, &name.to_string_lossy(), shuffle, &banks)
+        .and_then(|p| serde_json::to_string_pretty(&p).map_err(|e| e.to_string()).map(|j| (p, j)))
+        .and_then(|(p, j)| std::fs::write(&out, j).map_err(|e| e.to_string()).map(|()| p));
+    Some(match result {
+        Ok(p) => {
+            println!("MUSIC_PLAYLIST_READY {} tracks -> {}", p.tracks.len(), out.display());
+            0
+        }
+        Err(e) => {
+            eprintln!("Music playlist failed: {e}");
+            1
+        }
+    })
 }
 
 /// Writes the retail front-end menu tables for setup (see

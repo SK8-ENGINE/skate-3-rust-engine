@@ -79,6 +79,8 @@ pub(crate) struct Inputs<'a> {
     pub markers: &'a [bool],
     /// Trick keys announced this frame (retail's trick-done message, b865).
     pub tricks: &'a [u64],
+    /// Trick keys announced this frame (retail's began list, b865 §2: BeganTrick).
+    pub began: &'a [u64],
     /// The player's raw right stick Y and triggers (Input.*).
     pub right_stick_y: f32,
     pub triggers: [f32; 2],
@@ -91,6 +93,9 @@ pub(crate) struct Inputs<'a> {
     pub pump_user: bool,
     /// The rail being ground: [spline id, type signature].
     pub grind_rail: Option<[u64; 2]>,
+    /// ObjectiveAir.GetTimeToGrind and the board adjust now (b1013).
+    pub time_to_grind: f32,
+    pub board_adjust: u32,
     /// The end dialog's pick (end_dialog_host.rs), taken while the run waits in its end options.
     pub end_choice: Option<skate_core::challenges::end_dialog::Action>,
 }
@@ -108,6 +113,8 @@ pub(crate) enum Action {
     Finished(Completion),
     /// Show the end dialog (retail FrontEnd.OpenContinueRetryDialog); tutorials open it as passed (b920).
     OpenEndDialog,
+    /// HUD2 show / hide of one of the tutorial's HUD components (ObjectiveHUD, OwnedItHUD; b858 make_hud).
+    ShowHud(skate_core::challenges::tutorial::Hud, bool),
 }
 
 pub(crate) struct TutorialRun {
@@ -217,8 +224,11 @@ impl TutorialRun {
                 pump_acceleration: input.pump_acceleration,
                 last_pump_user: input.pump_user,
                 grind_rail: input.grind_rail,
+                time_to_grind: input.time_to_grind,
+                board_adjust: input.board_adjust,
             };
             o.tricks_this_frame = input.tricks.to_vec();
+            o.tricks_began = input.began.to_vec();
         }
         self.was_off_board = off;
         let mut events = Vec::new();
@@ -330,6 +340,10 @@ impl TutorialRun {
                             self.end_open = true;
                             actions.push(Action::OpenEndDialog);
                         }
+                        Command::ShowHud(hud, shown) => {
+                            info!("SKATE_TUTORIAL {id} ShowHud({hud:?}, {shown})");
+                            actions.push(Action::ShowHud(hud, shown));
+                        }
                         Command::Complete(c) => {
                             info!("SKATE_TUTORIAL {id} complete {c:?}");
                             self.cleanup(presenter);
@@ -360,6 +374,8 @@ impl TutorialRun {
     /// The tutorial's groups leave the manager (retail's challenge cleanup, 82DBA8F8): the running event stops.
     fn cleanup(&mut self, presenter: &mut Presenter) {
         presenter.manager.remove_owner(&self.data.id, &mut presenter.handlers);
+        presenter.reset_callout();
+        presenter.reset_sim();
         self.waiting.clear();
         self.tips.clear();
     }
@@ -398,7 +414,29 @@ mod tests {
     }
 
     fn input<'a>(volumes: &'a [(String, u64)], entered: &'a [u64], pending: bool, ticks: u32, distance: f32) -> Inputs<'a> {
-        Inputs { volumes, entered, exited: &[], banked: &[], ticks, teleport_pending: pending, distance, state_id: 100, in_sequence: false, markers: &[], tricks: &[], right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pushes: 0, pump_acceleration: 0.0, pump_user: false, grind_rail: None, end_choice: None }
+        Inputs { volumes, entered, exited: &[], banked: &[], ticks, teleport_pending: pending, distance, state_id: 100, in_sequence: false, markers: &[], tricks: &[], began: &[], right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pushes: 0, pump_acceleration: 0.0, pump_user: false, grind_rail: None, time_to_grind: skate_core::challenges::api::NO_GRIND_TIME, board_adjust: 0, end_choice: None }
+    }
+
+    /// One step without the HUD actions (checked on their own below).
+    fn step(run: &mut TutorialRun, input: &Inputs, p: &mut Presenter) -> Vec<Action> {
+        run.step(input, p).into_iter().filter(|a| !matches!(a, Action::ShowHud(..))).collect()
+    }
+
+    #[test]
+    fn the_objective_hud_shows_on_arrival_and_the_owned_it_banner_at_the_end() {
+        use skate_core::challenges::tutorial::Hud;
+        let volumes = vec![("tut_test_gate_01".to_owned(), 9)];
+        let mut run = TutorialRun::new(data(), Default::default());
+        let mut p = Presenter::default();
+        let mut all = run.step(&input(&volumes, &[], false, 0, 30.0), &mut p);
+        all.extend(run.step(&input(&volumes, &[], true, 0, 0.0), &mut p));
+        all.extend(run.step(&input(&volumes, &[], false, 1, 0.0), &mut p));
+        assert!(all.contains(&Action::ShowHud(Hud::Objective, true)), "{all:?}");
+        let mut done = run.step(&input(&volumes, &[9], false, 1, 0.0), &mut p);
+        for _ in 0..240 {
+            done.extend(run.step(&input(&volumes, &[], false, 1, 0.0), &mut p));
+        }
+        assert!(done.contains(&Action::ShowHud(Hud::OwnedIt, true)), "{done:?}");
     }
 
     #[test]
@@ -406,20 +444,20 @@ mod tests {
         let volumes = vec![("tut_test_gate_01".to_owned(), 9)];
         let mut run = TutorialRun::new(data(), Default::default());
         let mut p = Presenter::default();
-        let actions = run.step(&input(&volumes, &[], false, 0, 30.0), &mut p);
+        let actions = step(&mut run, &input(&volumes, &[], false, 0, 30.0), &mut p);
         assert!(matches!(actions.as_slice(), [Action::Teleport { offboard: true, .. }]), "{actions:?}");
-        assert!(run.step(&input(&volumes, &[], true, 0, 0.0), &mut p).is_empty(), "waits for the arrival");
-        assert!(run.step(&input(&volumes, &[], false, 1, 0.0), &mut p).is_empty(), "arrived, objective running");
-        let mut done = run.step(&input(&volumes, &[9], false, 1, 0.0), &mut p);
+        assert!(step(&mut run, &input(&volumes, &[], true, 0, 0.0), &mut p).is_empty(), "waits for the arrival");
+        assert!(step(&mut run, &input(&volumes, &[], false, 1, 0.0), &mut p).is_empty(), "arrived, objective running");
+        let mut done = step(&mut run, &input(&volumes, &[9], false, 1, 0.0), &mut p);
         for _ in 0..240 {
-            done.extend(run.step(&input(&volumes, &[], false, 1, 0.0), &mut p));
+            done.extend(step(&mut run, &input(&volumes, &[], false, 1, 0.0), &mut p));
         }
         assert_eq!(done, [Action::OpenEndDialog], "waits in the end dialog");
         let mut pick = input(&volumes, &[], false, 1, 0.0);
         pick.end_choice = Some(skate_core::challenges::end_dialog::Action::Continue);
-        let mut done = run.step(&pick, &mut p);
+        let mut done = step(&mut run, &pick, &mut p);
         for _ in 0..240 {
-            done.extend(run.step(&input(&volumes, &[], false, 1, 0.0), &mut p));
+            done.extend(step(&mut run, &input(&volumes, &[], false, 1, 0.0), &mut p));
         }
         assert_eq!(done, [Action::Finished(Completion::Owned)]);
     }
@@ -431,14 +469,14 @@ mod tests {
         d.presentation.intro = EventList::Events(vec![EventRow { kind: "Wait".into(), args: [Some("1".into()), None], mask: 0 }]);
         let mut run = TutorialRun::new(d, Default::default());
         let mut p = Presenter::default();
-        assert!(run.step(&input(&volumes, &[], false, 0, 30.0), &mut p).is_empty());
+        assert!(step(&mut run, &input(&volumes, &[], false, 0, 30.0), &mut p).is_empty());
         assert_eq!(p.manager.playing(), Some("tut_test/intro"));
         for _ in 0..50 {
-            assert!(run.step(&input(&volumes, &[], false, 1, 30.0), &mut p).is_empty(), "the intro holds the start");
+            assert!(step(&mut run, &input(&volumes, &[], false, 1, 30.0), &mut p).is_empty(), "the intro holds the start");
         }
         let mut actions = Vec::new();
         for _ in 0..20 {
-            actions.extend(run.step(&input(&volumes, &[], false, 1, 30.0), &mut p));
+            actions.extend(step(&mut run, &input(&volumes, &[], false, 1, 30.0), &mut p));
         }
         assert!(matches!(actions.as_slice(), [Action::Teleport { .. }]), "{actions:?}");
         assert_eq!(p.manager.playing(), None);

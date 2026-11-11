@@ -246,6 +246,8 @@ pub const SPEECH_BANK: usize = 1 << 22;
 pub const MAIN_CAST_BANK: usize = SPEECH_BANK + 1;
 /// The announcer's takes (`announcerspeech.big`), slots over its own index.
 pub const ANNOUNCER_BANK: usize = SPEECH_BANK + 2;
+/// The presentation speech lines (nis.big, the Speech events; one line at a time).
+pub const NIS_BANK: usize = SPEECH_BANK + 3;
 
 /// (clip, take) → mixer slot of [`SPEECH_BANK`].
 #[derive(Clone, Debug, Default)]

@@ -652,7 +652,7 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
             if 'livingworld' in groups:
                 living_job=Background(lambda:run_stage('livingworld',game_root,stage,work,log,report,dlc_folder if dlc_maps_identity else None),'livingworld')
             if 'audio' in groups:
-                exports.audio(game_root,stage,work,report,log,base/'tools',dlc_jobs,dlc_vaults)
+                exports.audio(game_root,stage,work,report,log,base/'tools',dlc_jobs,dlc_vaults,game_exe)
             if living_job is not None:living_job.join()
             # The hand props live in private/living_world (the livingworld group's folder) but read the maps' DMO
             # catalog: a livingworld-only refresh prepares the catalog itself, or it would publish without them.

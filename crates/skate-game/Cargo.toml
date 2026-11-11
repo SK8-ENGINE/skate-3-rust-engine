@@ -35,6 +35,9 @@ image = { version = "=0.25.10", default-features = false, features = ["png", "jp
 skate-mods = { path = "../skate-mods" }
 skate-dynamics = { path = "../skate-dynamics" }
 skate-audio = { path = "../skate-audio" }
+# The music packer's converter (--pack-music-folder, doc 11 "Music banks"): the player's own files in most formats,
+# decoded in pure Rust (MP3, AAC / M4A, ALAC, Ogg Vorbis, FLAC, WAV, AIFF, MKV / WebM audio).
+symphonia = { version = "=0.5.4", default-features = false, features = ["mp3", "aac", "isomp4", "alac", "flac", "ogg", "vorbis", "wav", "pcm", "adpcm", "mkv", "aiff"] }
 gltf = { version = "=1.4.1", default-features = true }
 # SDL3 gamepad input for every platform, built from source and statically linked.
 sdl3 = { version = "=0.20.0", features = ["build-from-source-static"] }

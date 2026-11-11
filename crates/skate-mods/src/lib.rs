@@ -25,7 +25,7 @@ pub use model::model_shape_file;
 pub use query::{with_host, DynamicsHost, RaycastFilter, RaycastOptions};
 pub use schema::{Manifest, Setting, SettingValue};
 pub use vm::{
-    CaptureOptions, ChallengeOptions, Command, TeleportOptions, TeleporterExit, TeleporterOptions, TriggerBoxOptions, TriggerShapeOptions,
+    CaptureOptions, ChallengeOptions, Command, MusicCaptionOptions, TeleportOptions, TeleporterExit, TeleporterOptions, TriggerBoxOptions, TriggerShapeOptions,
     TriggerTrackOptions, VolumeOptions, MinimapIconOptions,
 };
 

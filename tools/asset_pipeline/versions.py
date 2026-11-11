@@ -30,7 +30,7 @@ SOURCES = {
              'asset_pipeline/progression_lua.py', 'asset_pipeline/visual_indicators.py', 'asset_pipeline/park_layout.py', 'asset_pipeline/dynamic_props.py', 'asset_pipeline/hand_props.py',
              'asset_pipeline/environment.py', 'asset_pipeline/irradiance.py',
              'asset_pipeline/retail_material.py', 'asset_pipeline/backdrop.py', 'asset_pipeline/sky.py'),
-    'audio': ('asset_pipeline/optional_content.py', 'asset_pipeline/audio_export.py', 'asset_pipeline/audio_formats.py',
+    'audio': ('asset_pipeline/optional_content.py', 'asset_pipeline/audio_export.py', 'asset_pipeline/audio_formats.py', 'asset_pipeline/music_export.py',
               'asset_pipeline/world_audio.py'),
     # Living world (peds + NPC skaters + vehicles): the exporters, the vault reader and names, the region-layer
     # parser (audio_formats.region_layers / region_key) and the district stream reader.

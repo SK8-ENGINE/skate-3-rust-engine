@@ -79,6 +79,9 @@ pub(super) fn advance(
         }
         if !physics.network_active { physics.clock.apply(request)?; }
     }
+    for request in camera.presentation_rate_requests.drain(..) {
+        if !physics.network_active { physics.clock.apply(request)?; }
+    }
     if physics.network_active { physics.clock = super::clock::SimulationClock::default(); }
     if physics.ticks == 0 {
         player_state::initialize(physics, skater)?;

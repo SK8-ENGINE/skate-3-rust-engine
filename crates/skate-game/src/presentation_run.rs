@@ -5,16 +5,31 @@
 #![allow(dead_code)] // set_engine / set_mod: the ported hosts and the mod API are the next callers
 use bevy::log::info;
 use skate_core::presentation::{Event, Handlers, Manager, Out, EVENT_TYPES};
+use skate_core::challenges::callout::{Instruction, Panel};
 use skate_core::presentation_fade::{Fade, FadeMode, FadeMsg};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-/// The game's one presentation manager (retail's PresentationManager singleton) with its handlers and the fade
-/// object the FadeIn / FadeOut handlers share.
+/// The game's one presentation manager (retail's PresentationManager singleton) with its handlers and the hosts
+/// they share. One resource for every owner (tutorials, the career, mods); updated once a frame.
+#[derive(bevy::prelude::Resource)]
 pub struct Presenter {
     pub manager: Manager,
     pub handlers: Registry,
     pub fade: Arc<Mutex<FadeHost>>,
+    pub callout: Arc<Mutex<CalloutHost>>,
+    pub sim: Arc<Mutex<SimControl>>,
+    /// Achievement names the GrantAchievement events asked for, for the career to grant.
+    pub grants: Arc<Mutex<Vec<String>>>,
+    /// The presentation speech lines (nis.big export) and the speaker names, loaded at startup.
+    pub speech: Arc<Mutex<SpeechLines>>,
+    /// Lines the Speech events started, for the audio side to play.
+    pub speech_out: Arc<Mutex<Vec<SpeechPlay>>>,
+    /// Groups that finished or were removed (`presentationeventgroupfinished`), for owners that wait on a group
+    /// (the career's Execute); the newest 64 kept.
+    finished: Vec<String>,
+    /// A tutorial already ran the update this frame (with its zero-time passes).
+    driven: bool,
 }
 
 impl Default for Presenter {
@@ -23,7 +38,20 @@ impl Default for Presenter {
         let mut handlers = Registry::default();
         handlers.set_engine("FadeIn", Box::new(FadeHandler { host: fade.clone(), mode: FadeMode::In }));
         handlers.set_engine("FadeOut", Box::new(FadeHandler { host: fade.clone(), mode: FadeMode::Out }));
-        Self { manager: Manager::default(), handlers, fade }
+        let callout = Arc::new(Mutex::new(CalloutHost::default()));
+        handlers.set_engine("ShowTutorialCalloutHUD", Box::new(CalloutHandler { host: callout.clone(), show: true }));
+        handlers.set_engine("HideTutorialCalloutHUD", Box::new(CalloutHandler { host: callout.clone(), show: false }));
+        let sim = Arc::new(Mutex::new(SimControl::default()));
+        handlers.set_engine("SetSimRate", Box::new(SimRateHandler { host: sim.clone(), set: true }));
+        handlers.set_engine("RestoreSimRate", Box::new(SimRateHandler { host: sim.clone(), set: false }));
+        let grants = Arc::new(Mutex::new(Vec::new()));
+        handlers.set_engine("GrantAchievement", Box::new(GrantHandler { grants: grants.clone() }));
+        let speech = Arc::new(Mutex::new(SpeechLines::default()));
+        let speech_out = Arc::new(Mutex::new(Vec::new()));
+        for (kind, wait) in [("Speech", true), ("SpeechNoWait", false)] {
+            handlers.set_engine(kind, Box::new(SpeechHandler { lines: speech.clone(), out: speech_out.clone(), wait, left: 0.0 }));
+        }
+        Self { manager: Manager::default(), handlers, fade, callout, sim, grants, speech, speech_out, finished: Vec::new(), driven: false }
     }
 }
 
@@ -33,7 +61,53 @@ impl Presenter {
         if let Ok(mut f) = self.fade.lock() {
             f.advance(dt);
         }
-        self.manager.update(dt, &mut self.handlers)
+        if let Ok(mut s) = self.speech.lock() {
+            s.playing = (s.playing - dt).max(0.0);
+        }
+        let out = self.manager.update(dt, &mut self.handlers);
+        self.driven = true;
+        for o in &out {
+            let (Out::GroupFinished(id) | Out::GroupRemoved(id)) = o;
+            self.finished.push(id.clone());
+        }
+        let over = self.finished.len().saturating_sub(64);
+        self.finished.drain(..over);
+        if let Ok(mut c) = self.callout.lock() {
+            c.update(dt);
+        }
+        out
+    }
+
+    /// Whether `group` finished or was removed since the last ask (each id is reported once).
+    pub fn take_finished(&mut self, group: &str) -> bool {
+        let found = self.finished.iter().position(|g| g == group);
+        found.map(|i| self.finished.remove(i)).is_some()
+    }
+
+    pub fn take_grants(&self) -> Vec<String> {
+        self.grants.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default()
+    }
+
+    /// The sim controller's timestep while a SetSimRate holds (posted every frame), else None.
+    pub fn sim_timestep(&self) -> Option<f32> {
+        self.sim.lock().ok().and_then(|s| (s.timestep > 0.0).then_some(s.timestep))
+    }
+
+    /// Controller reset (8256E460, the challenge's cleanup): the rate goes back to normal.
+    pub fn reset_sim(&mut self) {
+        if let Ok(mut s) = self.sim.lock() {
+            s.restore();
+        }
+    }
+
+    /// The tutorial ended: the callout hides (its instruction goes back to the reset state, 82D29B18).
+    pub fn reset_callout(&mut self) {
+        if let Ok(mut c) = self.callout.lock() {
+            c.instruction.hide();
+            c.update(0.0);
+            let visible = c.instruction.visible;
+            c.instruction = Instruction { revision: c.instruction.revision.wrapping_add(1), visible, ..Instruction::default() };
+        }
     }
 
     /// The fade overlay alpha (0 clear, 1 covered). Not drawn yet: the look is open (research b904).
@@ -101,6 +175,272 @@ impl Handler for FadeHandler {
     fn undo(&mut self, _event: &Event) {
         if let Ok(mut h) = self.host.lock() {
             h.fade.cancel_all();
+        }
+    }
+}
+
+/// The once-a-frame update for every group, unless a tutorial already ran it this frame.
+pub fn tick(mut presenter: bevy::prelude::ResMut<Presenter>, time: bevy::prelude::Res<bevy::prelude::Time>) {
+    if !presenter.driven {
+        presenter.update(time.delta_secs());
+    }
+    presenter.driven = false;
+}
+
+/// Startup: the presentation speech lines from the install (none without the export: Speech events then only log).
+pub fn load_speech(presenter: bevy::prelude::Res<Presenter>, config: bevy::prelude::Res<crate::config::Config>) {
+    let lines = SpeechLines::load(&config.asset_root);
+    info!("PRESENTATION speech: {} speakers, {} lines", lines.speakers.len(), lines.lines.len());
+    if let Ok(mut s) = presenter.speech.lock() {
+        *s = lines;
+    }
+}
+
+/// The nis.big export (`private/audio/speech/nis.json`, decoded lines in `speech/nis/<file>.wav`) by (character,
+/// speech id), and the eSk8Characters speaker names (`menu-tables.json` speakers). Data a mod can replace.
+#[derive(Default)]
+pub struct SpeechLines {
+    pub speakers: Vec<String>,
+    /// A line's takes in nisresident.big's file-table order (824A5A08).
+    pub lines: BTreeMap<(u32, u32), Vec<String>>,
+    pub audio: std::path::PathBuf,
+    /// Per line: the take order this pass and the cursor (82482130).
+    picks: BTreeMap<(u32, u32), (Vec<usize>, usize)>,
+    /// The shuffle's random source (retail: the global PRNG 82A8AF10; ours seeded, so runs repeat).
+    rng: u32,
+    /// Seconds left of the line playing now (one stream: a request meanwhile does not play, b1014).
+    pub playing: f32,
+}
+
+impl SpeechLines {
+    pub fn load(asset_root: &std::path::Path) -> Self {
+        let speakers = std::fs::read_to_string(asset_root.join(crate::retail_menus::TABLES)).ok()
+            .and_then(|t| skate_data::menu_tables::MenuTables::from_json(&t).ok())
+            .map(|t| t.speakers).unwrap_or_default();
+        let audio = asset_root.join("private/audio/speech/nis");
+        let mut lines: BTreeMap<(u32, u32), Vec<String>> = BTreeMap::new();
+        let index = std::fs::read_to_string(asset_root.join("private/audio/speech/nis.json")).ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+        for l in index.as_ref().and_then(|i| i["lines"].as_array()).into_iter().flatten() {
+            let (Some(c), Some(id), Some(file)) = (l["character"].as_u64(), l["id"].as_u64(), l["file"].as_str()) else { continue };
+            lines.entry((c as u32, id as u32)).or_default().push(file.to_owned());
+        }
+        Self { speakers, lines, audio, picks: BTreeMap::new(), rng: 0x9E37_79B9, playing: 0.0 }
+    }
+
+    fn random(&mut self) -> u32 {
+        if self.rng == 0 {
+            self.rng = 0x9E37_79B9;
+        }
+        self.rng ^= self.rng << 13;
+        self.rng ^= self.rng >> 17;
+        self.rng ^= self.rng << 5;
+        self.rng
+    }
+
+    /// 82482130: takes play round-robin; at the start of each pass a line with more than 2 takes is shuffled with
+    /// count / 2 swaps of random pairs (824821C0), so 2 takes alternate in file order.
+    pub fn pick(&mut self, line: (u32, u32)) -> Option<String> {
+        let count = self.lines.get(&line)?.len();
+        if count == 0 {
+            return None;
+        }
+        let (mut order, cursor) = self.picks.remove(&line).unwrap_or_else(|| ((0..count).collect(), 0));
+        if cursor == 0 && count > 2 {
+            for _ in 0..count / 2 {
+                let (a, b) = (self.random() as usize % count, self.random() as usize % count);
+                order.swap(a, b);
+            }
+        }
+        let take = order[cursor];
+        self.picks.insert(line, (order, (cursor + 1) % count));
+        self.lines.get(&line).map(|t| t[take].clone())
+    }
+
+    /// 8257C308: the speaker name's eSk8Characters id (exact name).
+    pub fn character(&self, speaker: &str) -> Option<u32> {
+        self.speakers.iter().position(|s| s == speaker).map(|i| i as u32)
+    }
+}
+
+/// A line a Speech event started.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpeechPlay {
+    pub file: std::path::PathBuf,
+    pub character: u32,
+    pub id: u32,
+    pub seconds: f32,
+}
+
+/// Seconds of a 16-bit PCM wav from its header (byte rate) and size; None if unreadable.
+fn wav_seconds(path: &std::path::Path) -> Option<f32> {
+    use std::io::Read;
+    let mut head = [0u8; 44];
+    let mut f = std::fs::File::open(path).ok()?;
+    f.read_exact(&mut head).ok()?;
+    let rate = u32::from_le_bytes(head[28..32].try_into().ok()?);
+    let len = f.metadata().ok()?.len();
+    (rate > 0 && &head[0..4] == b"RIFF").then(|| (len.saturating_sub(44)) as f32 / rate as f32)
+}
+
+/// Speech (2) / SpeechNoWait (3), 8257C308 (b874): arg1 the speaker (eSk8Characters name), arg2 the speech id (atoi).
+/// Speech holds its group until the line ends or 10.0 s (821963E4), SpeechNoWait finishes at once.
+/// The take: `SpeechLines::pick` (b1014). NOT RETAIL YET: the Unknown speaker's AudioCharacterOverride attribute;
+/// Coach Frank's quit line (31 / 5706) queued after the current line.
+pub struct SpeechHandler {
+    lines: Arc<Mutex<SpeechLines>>,
+    out: Arc<Mutex<Vec<SpeechPlay>>>,
+    wait: bool,
+    left: f32,
+}
+
+/// Speech's own limit (821963E4).
+pub const SPEECH_TIMEOUT: f32 = 10.0;
+
+impl Handler for SpeechHandler {
+    fn start(&mut self, event: &Event) {
+        self.left = 0.0;
+        let speaker = event.args[0].as_deref().unwrap_or("");
+        let id = event.args[1].as_deref().map(lenient_float).unwrap_or(0.0) as u32;
+        let Ok(mut lines) = self.lines.lock() else { return };
+        let Some(character) = lines.character(speaker) else {
+            info!("PRESENTATION {} {speaker} {id}: unknown speaker (no speaker table?)", event.kind);
+            return;
+        };
+        // A line already playing: the request ends at once (Started + Ended on the next update, b1014).
+        if lines.playing > 0.0 {
+            info!("PRESENTATION {} {speaker} ({character}) {id}: a line is playing, not played", event.kind);
+            return;
+        }
+        let Some(file) = lines.pick((character, id)) else {
+            info!("PRESENTATION {} {speaker} ({character}) {id}: no line in the export", event.kind);
+            return;
+        };
+        let path = lines.audio.join(format!("{file}.wav"));
+        let seconds = wav_seconds(&path).unwrap_or(0.0);
+        info!("PRESENTATION {} {speaker} ({character}) {id}: {file} {seconds:.2} s", event.kind);
+        lines.playing = seconds;
+        if self.wait {
+            self.left = seconds.min(SPEECH_TIMEOUT);
+        }
+        if let Ok(mut out) = self.out.lock() {
+            out.push(SpeechPlay { file: path, character, id, seconds });
+        }
+    }
+    fn update(&mut self, _event: &Event, dt: f32) {
+        self.left -= dt;
+    }
+    fn is_done(&mut self, _event: &Event) -> bool {
+        self.left <= 0.0
+    }
+    fn stop(&mut self, _event: &Event) {
+        self.left = 0.0;
+    }
+}
+
+/// GrantAchievement: the career grants the named achievement (done at once).
+pub struct GrantHandler {
+    grants: Arc<Mutex<Vec<String>>>,
+}
+
+impl Handler for GrantHandler {
+    fn start(&mut self, event: &Event) {
+        if let (Some(name), Ok(mut g)) = (event.args[0].clone(), self.grants.lock()) {
+            g.push(name);
+        }
+    }
+}
+
+/// The presentation sim controller (owner +0x1C8, research b900 §5, b902 §2): its rate as a timestep (0 = not set).
+/// FixSkaterInAir, PauseSim, input restrictions and objective evaluation while paused are not ported (logged stubs).
+#[derive(Default)]
+pub struct SimControl {
+    pub timestep: f32,
+}
+
+impl SimControl {
+    /// vt+0x80: +0x14 = 0, so the controller stops posting and the sim returns to 1/60 about 2 ticks later.
+    pub fn restore(&mut self) {
+        if self.timestep > 0.0 {
+            info!("PRESENTATION RestoreSimRate (timestep {:.4} -> normal)", self.timestep);
+        }
+        self.timestep = 0.0;
+    }
+}
+
+/// SetSimRate (47, 8282A2F8 via the handler): timestep 1 / atof(arg1), arg1 a tick rate ("30" = 30 ticks a second,
+/// half speed against 60); undo restores. RestoreSimRate (48). Both done at once; the handlers' stop (82579B90)
+/// restores the rate.
+pub struct SimRateHandler {
+    host: Arc<Mutex<SimControl>>,
+    set: bool,
+}
+
+impl Handler for SimRateHandler {
+    fn start(&mut self, event: &Event) {
+        let Ok(mut s) = self.host.lock() else { return };
+        if !self.set {
+            s.restore();
+            return;
+        }
+        let rate = event.args[0].as_deref().map(lenient_float).unwrap_or(0.0);
+        if rate > 0.0 {
+            s.timestep = 1.0 / rate;
+            info!("PRESENTATION SetSimRate {rate} (timestep {:.4})", s.timestep);
+        } else {
+            info!("PRESENTATION SetSimRate {:?}: not a rate, ignored", event.args[0]);
+        }
+    }
+    fn undo(&mut self, _event: &Event) {
+        if self.set {
+            if let Ok(mut s) = self.host.lock() {
+                s.restore();
+            }
+        }
+    }
+    fn stop(&mut self, _event: &Event) {
+        if let Ok(mut s) = self.host.lock() {
+            s.restore();
+        }
+    }
+}
+
+/// The tutorial callout's instruction and HUD component (skate-core `challenges::callout`); the states it produced
+/// wait in `states` until the challenge HUD takes them.
+#[derive(Default)]
+pub struct CalloutHost {
+    pub instruction: Instruction,
+    pub panel: Panel,
+    /// PlayerStance_IsRegular is false (the gestures re-place on a change, state 77).
+    pub goofy: bool,
+    pub states: Vec<i32>,
+}
+
+impl CalloutHost {
+    pub fn update(&mut self, dt: f32) {
+        let states = self.panel.update(&self.instruction, dt, !self.goofy);
+        for s in &states {
+            info!("PRESENTATION callout state {s} key {} text {}", self.instruction.key, self.instruction.text);
+        }
+        self.states.extend(states);
+    }
+}
+
+/// ShowTutorialCalloutHUD (20): arg1 the gesture record key (empty = text only), arg2 the text; HideTutorialCalloutHUD
+/// (21). Both done at once.
+pub struct CalloutHandler {
+    host: Arc<Mutex<CalloutHost>>,
+    show: bool,
+}
+
+impl Handler for CalloutHandler {
+    fn start(&mut self, event: &Event) {
+        if let Ok(mut h) = self.host.lock() {
+            if self.show {
+                h.instruction.show(event.args[0].as_deref(), event.args[1].as_deref().unwrap_or(""));
+            } else {
+                h.instruction.hide();
+            }
         }
     }
 }
@@ -292,6 +632,100 @@ mod tests {
         }
         assert!(done && p.fade_alpha() < 1e-3 && !p.fade.lock().unwrap().fade.overlay);
         assert_eq!(lenient_float("abc-1.5e1z"), -15.0);
+    }
+
+    #[test]
+    fn callout_events_reach_the_challenge_hud_in_order_and_cleanup_hides_it() {
+        let mut p = Presenter::default();
+        let mut hint = ev("ShowTutorialCalloutHUD", Some("kickflip"));
+        hint.args[1] = Some("ID_CHALLENGE_TUT_SKSC_11_HINT_N_01".into());
+        p.manager.start(group("a", vec![hint, ev("Wait", Some("0.5"))]));
+        p.update(0.0);
+        p.update(1.0 / 60.0);
+        let mut hud = crate::hud_challenge::ChallengeHudState::default();
+        crate::hud_challenge::take_callout(&mut hud, &p, None);
+        assert_eq!((hud.callout.states.as_slice(), hud.callout.sent, hud.callout.text.as_str()), (&[-10, 10][..], 2, "ID_CHALLENGE_TUT_SKSC_11_HINT_N_01"));
+        p.reset_callout();
+        crate::hud_challenge::take_callout(&mut hud, &p, None);
+        assert_eq!((hud.callout.states.last(), hud.callout.sent), (Some(&-20), 3));
+    }
+
+    #[test]
+    fn set_sim_rate_holds_a_tick_rate_until_restored_or_reset() {
+        let mut p = Presenter::default();
+        p.manager.start(group("a", vec![ev("SetSimRate", Some("30"))]));
+        p.update(0.0);
+        assert_eq!(p.sim_timestep(), Some(1.0 / 30.0));
+        p.manager.start(group("b", vec![ev("RestoreSimRate", Some("60"))]));
+        p.update(0.0);
+        assert_eq!(p.sim_timestep(), None);
+        p.manager.start(group("c", vec![ev("SetSimRate", Some("45"))]));
+        p.update(0.0);
+        assert_eq!(p.sim_timestep(), Some(1.0 / 45.0));
+        p.reset_sim();
+        assert_eq!(p.sim_timestep(), None);
+        p.manager.start(group("d", vec![ev("SetSimRate", Some("junk"))]));
+        p.update(0.0);
+        assert_eq!(p.sim_timestep(), None, "an unreadable rate is ignored");
+    }
+
+    /// A mono 16-bit wav of `seconds` at 48 kHz.
+    fn wav(seconds: f32) -> Vec<u8> {
+        let data = (seconds * 48_000.0) as u32 * 2;
+        let mut w = Vec::new();
+        w.extend(b"RIFF");
+        w.extend((36 + data).to_le_bytes());
+        w.extend(b"WAVEfmt ");
+        w.extend(16u32.to_le_bytes());
+        w.extend(1u16.to_le_bytes());
+        w.extend(1u16.to_le_bytes());
+        w.extend(48_000u32.to_le_bytes());
+        w.extend(96_000u32.to_le_bytes());
+        w.extend(2u16.to_le_bytes());
+        w.extend(16u16.to_le_bytes());
+        w.extend(b"data");
+        w.extend(data.to_le_bytes());
+        w.resize(w.len() + data as usize, 0);
+        w
+    }
+
+    #[test]
+    fn speech_plays_the_speakers_line_and_waits_for_its_end_while_no_wait_finishes_at_once() {
+        let dir = std::env::temp_dir().join(format!("skate-speech-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("31_5012_TUT-X_3.wav"), wav(0.5)).unwrap();
+        let mut p = Presenter::default();
+        {
+            let mut lines = p.speech.lock().unwrap();
+            lines.speakers = (0..104).map(|i| if i == 31 { "SkateCoach".to_owned() } else { format!("S{i}") }).collect();
+            lines.lines.insert((31, 5012), vec!["31_5012_TUT-X_3".into()]);
+            lines.audio = dir.clone();
+        }
+        let mut speech = ev("Speech", Some("SkateCoach"));
+        speech.args[1] = Some("5012".into());
+        p.manager.start(group("a", vec![speech.clone()]));
+        assert!(p.update(0.0).is_empty(), "holds for the line");
+        assert!(p.update(0.25).is_empty());
+        assert_eq!(p.update(0.3), [Out::GroupFinished("a".into())]);
+        let played = std::mem::take(&mut *p.speech_out.lock().unwrap());
+        assert_eq!((played.len(), played[0].character, played[0].id), (1, 31, 5012));
+        assert!((played[0].seconds - 0.5).abs() < 1e-3);
+        speech.kind = "SpeechNoWait".into();
+        p.manager.start(group("b", vec![speech, ev("Speech", Some("Nobody"))]));
+        assert_eq!(p.update(0.0), [Out::GroupFinished("b".into())], "no wait; an unknown speaker finishes at once");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn takes_play_round_robin_two_alternate_and_more_shuffle_each_pass() {
+        let mut l = SpeechLines::default();
+        l.lines.insert((31, 1), vec!["a".into(), "b".into()]);
+        l.lines.insert((31, 2), (0..5).map(|i| i.to_string()).collect());
+        assert_eq!([l.pick((31, 1)), l.pick((31, 1)), l.pick((31, 1))], [Some("a".into()), Some("b".into()), Some("a".into())]);
+        let mut pass: Vec<String> = (0..5).filter_map(|_| l.pick((31, 2))).collect();
+        pass.sort();
+        assert_eq!(pass, ["0", "1", "2", "3", "4"], "every take once per pass");
+        assert_eq!(l.pick((9, 9)), None);
     }
 
     struct Hold;

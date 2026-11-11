@@ -343,6 +343,9 @@ struct Manifest {
     /// `SKATE_SETUP_SPEECH=1`, the decoded takes; optional).
     #[serde(default)]
     speech: BTreeMap<String, SpeechEntry>,
+    /// The music banks (`music: {set: {bank, segments}}`, doc 11 "Music banks"; absent before 2026-11-10 installs).
+    #[serde(default)]
+    music: BTreeMap<String, MusicEntry>,
     /// The front-end sounds (`fe` records: the session marker's cellphone UI, menus; optional,
     /// audio_export.frontend_sounds).
     #[serde(default)]
@@ -464,6 +467,15 @@ struct FeSoundJson {
     alt_bus: bool,
 }
 
+
+/// One music set's bank.
+#[derive(Debug, Default, Deserialize)]
+struct MusicEntry {
+    bank: String,
+    /// The set's PathFinder graph (absent on banks without one).
+    #[serde(default)]
+    graph: Option<String>,
+}
 
 /// One speech archive's export: the index JSON and the folder of decoded takes (None: not decoded).
 #[derive(Debug, Default, Deserialize)]
@@ -1177,6 +1189,20 @@ pub(crate) struct ContentReport {
 impl Library {
     /// A speech archive's export (`livingworld`): the index file and the decoded takes' folder
     /// (None when the takes were not decoded). None without an index.
+    pub(crate) fn music_bank(&self, set: &str) -> Option<PathBuf> {
+        let e = self.manifest.music.get(set)?;
+        safe_relative(&e.bank).then(|| self.root.join(&e.bank))
+    }
+
+    pub(crate) fn music_graph(&self, set: &str) -> Option<PathBuf> {
+        let g = self.manifest.music.get(set)?.graph.as_deref()?;
+        safe_relative(g).then(|| self.root.join(g))
+    }
+
+    pub(crate) fn music_sets(&self) -> Vec<String> {
+        self.manifest.music.keys().cloned().collect()
+    }
+
     pub(crate) fn speech(&self, archive: &str) -> Option<(PathBuf, Option<PathBuf>)> {
         let e = self.manifest.speech.get(archive)?;
         if !safe_relative(&e.index) {

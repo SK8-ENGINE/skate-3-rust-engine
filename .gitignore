@@ -113,3 +113,5 @@ __pycache__/
 mods/world-audio-test/logs/
 # Built by tools/steam-launcher/build.bat
 /tools/steam-launcher/SkateLauncher*.exe
+# Built by mods/music-sdk-test/make_bank.py (self-made tones; build output)
+mods/music-sdk-test/music/

@@ -639,7 +639,9 @@ fn setup(
                         let handler = skate_core::menus::Handler { owner, select: true, highlight: false, callback: None };
                         menus.registry.register_handler(EntryRef::item(TRICK_GUIDE_ITEM), handler);
                     }
-                    crate::trick_guide_host::TrickGuideHost::new(std::sync::Arc::new(guide))
+                    let guide = std::sync::Arc::new(guide);
+                    commands.insert_resource(crate::trick_guide_host::TrickGuideData(guide.clone()));
+                    crate::trick_guide_host::TrickGuideHost::new(guide)
                 }
                 _ => {
                     warn!("RETAIL_MENUS: Trick Guide unavailable (tables {}, movie {has_movie}); run setup", !guide_tables.categories.is_empty());

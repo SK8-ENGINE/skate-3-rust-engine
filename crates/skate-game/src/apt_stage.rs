@@ -86,7 +86,7 @@ struct Bindings<'a> {
     natives: &'a mut dyn StageNatives,
 }
 
-fn new_clip(vm: &mut Vm, parent: usize, name: &str) -> Result<usize, String> {
+pub(crate) fn new_clip(vm: &mut Vm, parent: usize, name: &str) -> Result<usize, String> {
     let id = vm.object(ObjectKind::Native("movie:empty".into()));
     let root = vm.get(parent, "_root");
     vm.set(id, "_root", if root == Value::Undefined { Value::Object(parent) } else { root })?;

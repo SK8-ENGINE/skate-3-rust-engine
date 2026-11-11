@@ -89,6 +89,7 @@ struct Hud {
 /// One challenge HUD movie and its draw slots.
 struct ChallengeMovie {
     runtime: hud_challenge::Runtime,
+    libraries: std::sync::Arc<crate::hud_imports::HudLibraries>,
     source: serde_json::Value,
     shapes: apt_scene::Shapes,
     sounds: Vec<String>,
@@ -287,17 +288,23 @@ fn setup(
         };
         let mut challenge = Vec::new();
         let sounds = frontend_sounds(&config.asset_root);
-        for component in hud_challenge::Component::ALL {
-            let Ok(bytes) = std::fs::read(root.join("runtime").join(component.file())) else {
+        let sources: Vec<(hud_challenge::Component, Vec<u8>)> = hud_challenge::Component::ALL.into_iter().filter_map(|component| {
+            let bytes = std::fs::read(root.join("runtime").join(component.file()));
+            if bytes.is_err() {
                 info!("Challenge HUD {component:?} not installed: Refresh Game Files adds it");
-                continue;
-            };
+            }
+            Some((component, bytes.ok()?))
+        }).collect();
+        let parsed: Vec<serde_json::Value> = sources.iter().filter_map(|(_, b)| serde_json::from_slice(b).ok()).collect();
+        let libraries = std::sync::Arc::new(crate::hud_imports::HudLibraries::load(&root.join("../menu-movies"), &parsed.iter().collect::<Vec<_>>()));
+        for (component, bytes) in sources {
             // Optional: a component that does not load leaves the rest of the HUD running.
             match (|| -> Result<ChallengeMovie, String> {
                 let source: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-                let runtime = hud_challenge::Runtime::load(component, &source, &sounds)?;
-                let shapes: apt_scene::Shapes = serde_json::from_value(source["shapes"].clone()).map_err(|e| e.to_string())?;
-                Ok(ChallengeMovie { runtime, source, shapes, sounds: sounds.clone(), slots: Vec::new(), failed: false, hidden_for: None })
+                let runtime = hud_challenge::Runtime::load_linked(component, &source, &sounds, &libraries)?;
+                let mut shapes: apt_scene::Shapes = serde_json::from_value(source["shapes"].clone()).map_err(|e| e.to_string())?;
+                shapes.extend(libraries.imported_shapes(&runtime.bindings.movie));
+                Ok(ChallengeMovie { runtime, libraries: libraries.clone(), source, shapes, sounds: sounds.clone(), slots: Vec::new(), failed: false, hidden_for: None })
             })() {
                 Ok(m) => {
                     for texture in m.shapes.values().flatten().filter_map(|s| s.texture.as_ref()) {
@@ -586,7 +593,7 @@ fn reset(
         }
     }
     for m in hud.challenge.iter_mut() {
-        match hud_challenge::Runtime::load(m.runtime.component, &m.source, &m.sounds) {
+        match hud_challenge::Runtime::load_linked(m.runtime.component, &m.source, &m.sounds, &m.libraries) {
             Ok(runtime) => {
                 m.runtime = runtime;
                 m.failed = false;

@@ -105,9 +105,13 @@ pub(crate) struct Runtime {
     sequence_active: bool,
     sequence_score: f32,
     banked: Vec<BankedSequence>,
-    /// Keys (hash of the scoring_trick row) of the tricks announced since the last take (retail's trick-done message
-    /// 0x92CC9BBD, research b865; the challenge objectives read them). Capped so nothing grows without a reader.
+    /// Keys (hash of the scoring_trick row) of the tricks announced since the last take (retail's began list, research
+    /// b865 §2: BeganTrick). Capped so nothing grows without a reader.
     announced: Vec<u64>,
+    /// Keys of the tricks completed since the last take, landed and announced (retail's ended list and its trick-done
+    /// message 0x92CC9BBD, b865 §1: DidSpecificTrick and the ThisFrame variants). Bailed and unannounced ones are
+    /// not in it. Capped like `announced`.
+    done: Vec<u64>,
     /// The manual held now: (tail, seconds held).
     manual: Option<(bool, f32)>,
     trick_name: String,
@@ -167,6 +171,7 @@ impl Runtime {
             sequence_score: 0.,
             banked: Vec::new(),
             announced: Vec::new(),
+            done: Vec::new(),
             manual: None,
             trick_name: String::new(),
             display_base: String::new(), display_spin_degrees: 0,
@@ -204,6 +209,10 @@ impl Runtime {
     }
     pub(crate) fn take_announced(&mut self) -> Vec<u64> {
         std::mem::take(&mut self.announced)
+    }
+
+    pub(crate) fn take_done(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.done)
     }
     pub(crate) fn sequence_active(&self) -> bool {
         self.sequence_active
@@ -275,7 +284,12 @@ impl Runtime {
             let (held, distance) = if keep_metric { (0., 0.) } else { (self.held[slot], self.distance[slot]) };
             self.stat_events.push(StatEvent::TrickEnd { id: carrier.scorable.id, success: complete, announced: carrier.announced, held, distance });
             if complete {
-                carrier.complete(self.data.unannounced_factor);
+                // 82DA5F98: only a valid carrier completes, and one completed before its announcement posts nothing.
+                if carrier.complete(self.data.unannounced_factor) && !carrier.unannounced && self.done.len() < 64 {
+                    if let Some(d) = self.data.by_id(carrier.scorable.id) {
+                        self.done.push(skate_data::attrib_hash::hash(d.identifier));
+                    }
+                }
                 if self.collector == Collector::Air {
                     self.session
                         .holder

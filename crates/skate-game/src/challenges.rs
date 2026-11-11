@@ -362,8 +362,6 @@ pub(crate) struct Challenges {
     pub tutorials: Vec<crate::tutorial_run::TutorialData>,
     pub tutorial: Option<crate::tutorial_run::TutorialRun>,
     tutorial_carry: f32,
-    /// The presentation manager and its handlers (tutorials now; the career and mods next; doc 42).
-    pub presentation: crate::presentation_run::Presenter,
     verify_tutorial: Option<String>,
     /// The challenge trick groups (b863), read from the stock collections when the first tutorial starts.
     trick_groups: Option<crate::challenge_objectives::TrickGroups>,
@@ -641,10 +639,10 @@ fn update(
     mut career: MessageWriter<crate::career::ChallengeResult>,
     mut markers: MessageReader<crate::ui_audio::SessionMarkerEvent>,
     config: Res<crate::config::Config>,
-    pad: Option<Res<crate::input::ControllerInput>>,
-    physics: Option<Res<crate::physics::GamePhysics>>,
+    extras: (Option<Res<crate::input::ControllerInput>>, Option<Res<crate::physics::GamePhysics>>, Option<Res<crate::trick_guide_host::TrickGuideData>>, Option<ResMut<crate::camera::CameraRuntime>>, ResMut<crate::presentation_run::Presenter>),
     mut end_dialog: ResMut<crate::end_dialog_host::EndDialogScreen>,
 ) {
+    let (pad, physics, guide, mut camera, mut presenter) = extras;
     use crate::ui_audio::SessionMarkerAction;
     let marker_flags: Vec<bool> = markers.read().filter_map(|m| match m.action {
         SessionMarkerAction::Returned => Some(true),
@@ -674,7 +672,8 @@ fn update(
         }
     }
     let banked = skater.scoring.take_banked();
-    let announced = skater.scoring.take_announced();
+    let began = skater.scoring.take_announced();
+    let done = skater.scoring.take_done();
     let entered: Vec<String> = entered.read().filter(|e| e.body == crate::trigger_volumes::PLAYER).map(|e| e.volume.clone()).collect();
     let exited: Vec<String> = exited.read().filter(|e| e.body == crate::trigger_volumes::PLAYER).map(|e| e.volume.clone()).collect();
     if let Some(mut tutorial) = challenges.tutorial.take() {
@@ -691,15 +690,25 @@ fn update(
         let input = crate::tutorial_run::Inputs { volumes: &map_volumes, entered: &entered_ids, exited: &exited_ids,
             banked: &lines, ticks, teleport_pending: skater.teleport_pending(),
             distance: distance(feet, tutorial.data.start.matrix[3]), state_id: skater.physical_state_id(),
-            in_sequence: skater.scoring.sequence_active(), markers: &marker_flags, tricks: &announced,
+            in_sequence: skater.scoring.sequence_active(), markers: &marker_flags, tricks: &done, began: &began,
             right_stick_y: raw.right[1], triggers: raw.triggers, manual: skater.scoring.manual(),
             pushes: skater.animation_input.take_pushes(), pump_acceleration: skater.ground.pumping.pump_acceleration,
             pump_user: skater.ground.pumping.intentional_pumping != 0,
             grind_rail: (400..=405).contains(&skater.physical_state_id())
                 .then_some(skater.player_input.grind.rail_owner).flatten()
                 .and_then(|owner| physics.as_ref().and_then(|p| p.rail_guids(owner))),
+            time_to_grind: {
+                let air = &skater.player_input.physical.air;
+                if air.flag_443 != 0 { air.collision_time_180 - air.time_in_state_176 } else { skate_core::challenges::api::NO_GRIND_TIME }
+            },
+            board_adjust: skater.animation_input.fields.board_adjust,
             end_choice: end_dialog.choice.take() };
-        let actions = if std::mem::take(&mut challenges.mods.abort) { tutorial.abandon(&mut challenges.presentation) } else { tutorial.step(&input, &mut challenges.presentation) };
+        let actions = if std::mem::take(&mut challenges.mods.abort) { tutorial.abandon(&mut presenter) } else { tutorial.step(&input, &mut presenter) };
+        crate::hud_challenge::take_callout(&mut hud, &presenter, guide.as_deref());
+        // The sim controller posts its rate every frame while set (8256E4F0 -> OnRequestSetSimRate, count 1).
+        if let (Some(timestep), Some(camera)) = (presenter.sim_timestep(), camera.as_mut()) {
+            camera.presentation_rate_requests.push(skate_core::camera::SimulationRateRequest { timestep, ticks: 1 });
+        }
         let mut finished = false;
         for action in actions {
             match action {
@@ -720,6 +729,12 @@ fn update(
                         info!("SKATE_CHALLENGE end dialog NOT RETAIL YET (no movie): continue");
                         d.choice = Some(skate_core::challenges::end_dialog::Action::Continue);
                     }
+                }
+                // The owned it banner (hud2/ownthespot's banner movie) shows as in own the spot. NOT RETAIL YET: the
+                // objective HUD's row texts for tutorials are not known (doc 42 "Tutorial HUD"), so it stays hidden.
+                crate::tutorial_run::Action::ShowHud(skate_core::challenges::tutorial::Hud::OwnedIt, shown) => hud.show(Component::OwnedIt, shown),
+                crate::tutorial_run::Action::ShowHud(skate_core::challenges::tutorial::Hud::Objective, shown) => {
+                    info!("SKATE_TUTORIAL objective HUD {shown} NOT RETAIL YET: row texts unknown, not shown");
                 }
                 crate::tutorial_run::Action::Finished(completion) => {
                     career.write(crate::career::ChallengeResult { challenge: tutorial.data.id.clone(), completion, reactivate: tutorial.data.persistent });
@@ -918,13 +933,16 @@ fn switch_off(
 
 pub(crate) fn install(app: &mut App) {
     app.init_resource::<Challenges>()
+        .init_resource::<crate::presentation_run::Presenter>()
         .init_resource::<crate::end_dialog_host::EndDialogScreen>()
         .init_resource::<crate::poster_host::PosterScreen>()
         .init_resource::<ChallengeHudState>()
         .add_message::<ChallengeSignUp>()
         .add_systems(PreUpdate, arm.after(crate::map_transition::MapTransitionSet).run_if(opted_in))
         .add_systems(Update, switch_off.run_if(not(opted_in)))
-        .add_systems(Update, (sign_up.after(crate::teleporters::prompt).before(crate::retail_menu_stage::MenuStageSet), update.after(crate::trigger_volumes::TriggerSet).in_set(CareerResultSet)).chain().run_if(opted_in));
+        .add_systems(Update, (sign_up.after(crate::teleporters::prompt).before(crate::retail_menu_stage::MenuStageSet), update.after(crate::trigger_volumes::TriggerSet).in_set(CareerResultSet)).chain().run_if(opted_in))
+        .add_systems(Update, crate::presentation_run::tick.after(CareerResultSet).run_if(opted_in))
+        .add_systems(Startup, crate::presentation_run::load_speech);
 }
 
 #[cfg(test)]

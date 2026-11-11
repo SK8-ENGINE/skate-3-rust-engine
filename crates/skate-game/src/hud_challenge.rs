@@ -9,6 +9,7 @@ use crate::{
 };
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// The components a challenge HUD shows, in draw order (retail eHUDComponent names).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -22,11 +23,13 @@ pub(crate) enum Component {
     Countdown,
     /// The race standings (`hud2/leaderboardhud`, b995 item 1).
     Leaderboard,
+    /// The tutorial callout, "Coach Frank Says" (`hud2/hudtutorial`, b866 Â§1, b945 Â§2).
+    Tutorial,
 }
 
 impl Component {
-    pub const ALL: [Component; 7] = [Component::Timer, Component::Objective, Component::Dpo, Component::OwnedIt, Component::KilledIt,
-        Component::Countdown, Component::Leaderboard];
+    pub const ALL: [Component; 8] = [Component::Timer, Component::Objective, Component::Dpo, Component::OwnedIt, Component::KilledIt,
+        Component::Countdown, Component::Leaderboard, Component::Tutorial];
 
     /// The converted movie (`private/hud/runtime/<file>`, tools/prepare_hud.py).
     pub fn file(self) -> &'static str {
@@ -38,6 +41,7 @@ impl Component {
             Component::KilledIt => "killedit.json",
             Component::Countdown => "hudcountdown.json",
             Component::Leaderboard => "leaderboardhud.json",
+            Component::Tutorial => "hudtutorial.json",
         }
     }
 
@@ -46,7 +50,7 @@ impl Component {
     fn refresh_state(self) -> Option<f64> {
         match self {
             Component::Timer | Component::Dpo | Component::Objective => Some(3.0),
-            Component::OwnedIt | Component::KilledIt | Component::Countdown | Component::Leaderboard => None,
+            Component::OwnedIt | Component::KilledIt | Component::Countdown | Component::Leaderboard | Component::Tutorial => None,
         }
     }
 }
@@ -105,6 +109,47 @@ pub(crate) struct ChallengeHudState {
     pub countdown: i32,
     #[serde(default)]
     pub leaderboard: LeaderboardHud,
+    #[serde(default)]
+    pub callout: CalloutHud,
+}
+
+/// The tutorial callout as the movie reads it, and the SetState values the callout component sent (doc 42,
+/// "Tutorial callout").
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct CalloutHud {
+    /// GetTutorialHalText: a text id or literal.
+    pub text: String,
+    /// GetTutorialGesturesButtons: gesture, button, connector per slot.
+    pub gestures: Vec<[String; 3]>,
+    /// PlayerStance_IsRegular.
+    pub regular: bool,
+    /// The latest states, oldest first (at most 16), and the running count of every state sent.
+    pub states: Vec<i32>,
+    pub sent: u32,
+}
+
+/// Move the callout states the presenter produced into the HUD state, with the text and gestures they show.
+pub(crate) fn take_callout(hud: &mut ChallengeHudState, presenter: &crate::presentation_run::Presenter, guide: Option<&crate::trick_guide_host::TrickGuideData>) {
+    let Ok(mut c) = presenter.callout.lock() else { return };
+    if c.states.is_empty() {
+        return;
+    }
+    let states = std::mem::take(&mut c.states);
+    let t = &c.instruction;
+    let regular = !c.goofy;
+    let stance = skate_core::trick_guide::Stance { regular, ..Default::default() };
+    let callout = &mut hud.callout;
+    callout.text = t.text.clone();
+    callout.regular = regular;
+    callout.gestures = if t.text_only {
+        Vec::new()
+    } else {
+        guide.zip(skate_data::trick_guide::record_key(&t.key)).map(|(g, k)| g.0.callout_gestures(k, stance)).unwrap_or_default()
+    };
+    callout.sent = callout.sent.wrapping_add(states.len() as u32);
+    callout.states.extend(states);
+    let over = callout.states.len().saturating_sub(16);
+    callout.states.drain(..over);
 }
 
 /// The variant text id the leaderboard movie treats as "no variant".
@@ -159,7 +204,7 @@ impl ChallengeHudState {
             Component::Timer => format!("{}|{}", self.timer_text, self.timer_flag),
             Component::Dpo => format!("{:?}|{}", self.dpo, self.two_dpos),
             Component::Objective => format!("{:?}", self.objectives),
-            Component::OwnedIt | Component::KilledIt => String::new(),
+            Component::OwnedIt | Component::KilledIt | Component::Tutorial => String::new(),
             Component::Countdown => self.countdown.to_string(),
             Component::Leaderboard => format!("{:?}", self.leaderboard),
         }
@@ -201,6 +246,8 @@ pub struct Bindings {
     /// The last `Mission.SetKilledItShakeActivation` argument.
     pub shake: bool,
     random: u32,
+    /// Object.registerClass bindings: linkage name -> class function.
+    classes: BTreeMap<String, usize>,
 }
 
 impl Host for Bindings {
@@ -216,6 +263,43 @@ impl Host for Bindings {
     fn call(&mut self, vm: &mut Vm, object: usize, method: &str, args: Vec<Value>) -> Result<Value, String> {
         if self.movie.method(vm, object, method, &args)? {
             return Ok(Value::Undefined);
+        }
+        // MovieClip.attachMovie(linkage, name, depth[, init]) on one of this movie's clips (the gesture item attaches
+        // its "g_" + gesture symbol); the new subtree's class constructors run before it returns, as on the menu
+        // stage (apt_stage).
+        // MovieClip.createEmptyMovieClip(name, depth): an empty sprite in this movie's display tree (gesture_item's
+        // holder for the attached gesture).
+        if method == "createEmptyMovieClip" && self.movie.instances.contains_key(&object) {
+            let name = args.first().map(Value::text).unwrap_or_default();
+            let depth = args.get(1).map_or(0, crate::apt_vm::to_integer);
+            let id = crate::apt_stage::new_clip(vm, object, &name)?;
+            self.movie.adopt_empty(vm, id, object, depth)?;
+            return Ok(Value::Object(id));
+        }
+        if method == "attachMovie" && self.movie.instances.contains_key(&object) {
+            let linkage = args.first().map(Value::text).unwrap_or_default();
+            let name = args.get(1).map(Value::text).unwrap_or_default();
+            let depth = args.get(2).map_or(0, crate::apt_vm::to_integer);
+            let init = match args.get(3) {
+                Some(Value::Object(o)) => Some(*o),
+                _ => None,
+            };
+            let before = self.movie.immediate.len();
+            let Some(child) = self.movie.attach(vm, object, &linkage, &name, depth, init)? else {
+                return Ok(Value::Undefined);
+            };
+            let queued: Vec<crate::apt_movie::Pending> = self.movie.immediate.drain(before.min(self.movie.immediate.len())..).collect();
+            let (mut ctors, rest): (Vec<_>, Vec<_>) = queued.into_iter().partition(|p| p.event == crate::apt_movie::CLASS_CONSTRUCTOR);
+            self.movie.immediate.extend(rest);
+            ctors.sort_by_key(|p| p.object == child);
+            let ctors: Vec<(usize, usize)> = ctors
+                .iter()
+                .filter_map(|p| Some((p.object, *self.movie.classes.get(&self.movie.instances.get(&p.object)?.character)?)))
+                .collect();
+            for (clip, class) in ctors {
+                vm.call_function(class, clip, vec![], self)?;
+            }
+            return Ok(Value::Object(child));
         }
         let native = match vm.objects.get(object).map(|o| &o.kind) {
             Some(ObjectKind::Native(name)) => name.as_str(),
@@ -233,6 +317,13 @@ impl Host for Bindings {
                 Ok(Value::Number(self.random as f64 / 4294967296.0))
             }
             ("global", "ASSetPropFlags") => Ok(Value::Undefined),
+            ("Object", "registerClass") => {
+                if let (Some(name), Some(Value::Object(class))) = (args.first(), args.get(1)) {
+                    self.classes.insert(name.text(), *class);
+                    return Ok(Value::Bool(true));
+                }
+                Ok(Value::Bool(false))
+            }
             ("HUDComponents", "Timer_GetData") => array(vm, [Value::Text(s.timer_text.clone()), Value::Number(s.timer_flag as f64)]),
             ("HUDComponents", "DPO_IsUsingTwoDPOs") => Ok(Value::Bool(s.two_dpos)),
             // hudcountdown's ShowCountdown: "#3" / "#2" / "#1" pick the number frame, anything else GO (8265D910 "#%d").
@@ -259,6 +350,14 @@ impl Host for Bindings {
                 }).collect();
                 array(vm, items)
             }
+            ("HUDComponents", "GetTutorialHalText") => Ok(Value::Text(self.movie.text_assets.localize(&s.callout.text))),
+            // [count, gesture, button, connector, ...] (82661238).
+            ("HUDComponents", "GetTutorialGesturesButtons") => {
+                let g = &s.callout.gestures;
+                let items: Vec<Value> = std::iter::once(Value::Number(g.len() as f64)).chain(g.iter().flatten().map(|t| Value::Text(t.clone()))).collect();
+                array(vm, items)
+            }
+            ("HUDComponents", "PlayerStance_IsRegular") => Ok(Value::Bool(s.callout.regular)),
             ("Mission", "GetTitle") => Ok(Value::Text(self.movie.text_assets.localize(&s.leaderboard.title))),
             // Voice chat status per row: only read in online missions.
             ("FELeaderboard", "GetVoipStatus") => {
@@ -327,6 +426,8 @@ pub struct Runtime {
     read: String,
     /// The timer showed a low time (under 10 s) at its last refresh.
     low: bool,
+    /// The callout state count already sent to hudtutorial.
+    callout_sent: u32,
 }
 
 /// `_global` values one HUD movie writes and another reads. Retail runs every HUD movie on one `_global`; ours each run
@@ -350,7 +451,13 @@ impl Runtime {
     }
 
     /// `sounds`: the `fe` record names, registered as `FE_SOUND_<NAME>` like the front end's RegisterAudioEnum.
+    #[cfg(test)]
     pub fn load(component: Component, json: &serde_json::Value, sounds: &[String]) -> Result<Self, String> {
+        Self::load_linked(component, json, sounds, &crate::hud_imports::HudLibraries::default())
+    }
+
+    /// As `load`, with the movie's imports linked from `libraries` (hudtutorial's gesture / button items).
+    pub fn load_linked(component: Component, json: &serde_json::Value, sounds: &[String], libraries: &crate::hud_imports::HudLibraries) -> Result<Self, String> {
         let mut vm = Vm::new();
         for name in ["MovieClip", "FELanguage", "HUDComponents", "Math", "Audio", "Mission", "ScreenManager", "Render", "FELeaderboard"] {
             let object = vm.object(ObjectKind::Native(name.into()));
@@ -368,8 +475,25 @@ impl Runtime {
             vm.set(vm.global, format!("FE_SOUND_{}", name.to_ascii_uppercase()), Value::Text(name.clone()))?;
         }
         vm.set(vm.global, "Screen_EdgeOffset", Value::Number(0.0))?;
-        let mut bindings =
-            Bindings { movie: Movie::load(json)?, state: ChallengeHudState::default(), sounds: Vec::new(), controller: None, shake: false, random: 0x9e3779b9 };
+        // Linked library classes register through Object.registerClass (gesture_item: "Gesture Item").
+        if !libraries.is_empty() {
+            let object = vm.object(ObjectKind::Native("Object".into()));
+            let prototype = vm.object(ObjectKind::Plain);
+            vm.set(object, "prototype", Value::Object(prototype))?;
+            vm.set(vm.global, "Object", Value::Object(object))?;
+        }
+        let mut bindings = Bindings {
+            movie: libraries.link(&format!("hud/{}", component.file()), json)?,
+            state: ChallengeHudState::default(),
+            sounds: Vec::new(),
+            controller: None,
+            shake: false,
+            random: 0x9e3779b9,
+            classes: BTreeMap::new(),
+        };
+        for code in &libraries.init {
+            vm.run(code, &mut bindings)?;
+        }
         let initial: Vec<_> = bindings
             .movie
             .characters
@@ -383,9 +507,16 @@ impl Runtime {
             let code = bindings.movie.actions[&offset.to_string()].clone();
             vm.run(&code, &mut bindings)?;
         }
+        // registerClass binds by linkage name: every clip of that character gets the class (as the menu stage does).
+        let movie = &bindings.movie;
+        let classes: BTreeMap<i32, usize> = movie.linkage.iter().map(|(name, character)| (*character, name))
+            .chain(movie.class_links.iter().map(|(character, name)| (*character, name)))
+            .filter_map(|(character, name)| Some((character, *bindings.classes.get(name)?)))
+            .collect();
+        bindings.movie.classes.extend(classes);
         vm.begin_update();
         bindings.movie.initialize(&mut vm)?;
-        let mut runtime = Self { vm, bindings, component, controller: usize::MAX, shown: false, read: String::new(), low: false };
+        let mut runtime = Self { vm, bindings, component, controller: usize::MAX, shown: false, read: String::new(), low: false, callout_sent: 0 };
         runtime.drain()?;
         runtime.controller = match (runtime.bindings.controller, runtime.vm.get(runtime.bindings.movie.root, "screen")) {
             (Some(c), _) | (None, Value::Object(c)) => c,
@@ -396,10 +527,17 @@ impl Runtime {
 
     fn drain(&mut self) -> Result<(), String> {
         let mut calls = 0;
-        while let Some(crate::apt_movie::Pending { object, offset, .. }) = self.bindings.movie.next_action() {
+        while let Some(crate::apt_movie::Pending { object, offset, event }) = self.bindings.movie.next_action() {
             calls += 1;
             if calls > 4096 {
                 return Err(format!("{:?} HUD frame action limit", self.component));
+            }
+            if event == crate::apt_movie::CLASS_CONSTRUCTOR {
+                let movie = &self.bindings.movie;
+                if let Some(class) = movie.instances.get(&object).and_then(|i| movie.classes.get(&i.character)).copied() {
+                    self.vm.call_function(class, object, vec![], &mut self.bindings)?;
+                }
+                continue;
             }
             let code = self.bindings.movie.actions.get(&offset.to_string()).ok_or("Missing challenge HUD action block")?.clone();
             self.vm.run_on(object, &code, &mut self.bindings)?;
@@ -436,6 +574,22 @@ impl Runtime {
             } else if !shown && self.shown {
                 self.shown = false;
                 self.set_state(2.0)?;
+            }
+            return Ok(());
+        }
+        // hudtutorial: the states the callout component sent since the last sync, in order.
+        if self.component == Component::Tutorial {
+            let new = state.callout.sent.wrapping_sub(self.callout_sent) as usize;
+            self.callout_sent = state.callout.sent;
+            let states = &state.callout.states;
+            for s in states[states.len().saturating_sub(new)..].to_vec() {
+                use skate_core::challenges::callout as c;
+                match s {
+                    c::STATE_HIDE | c::STATE_HIDE_TEXT => self.shown = false,
+                    c::STATE_SHOW | c::STATE_GESTURES | c::STATE_TEXT | c::STATE_TEXT_FIRST => self.shown = true,
+                    _ => {}
+                }
+                self.set_state(s as f64)?;
             }
             return Ok(());
         }
@@ -620,6 +774,94 @@ mod tests {
         assert!(texts.iter().any(|t| t.contains('2')), "a rank in {texts:?}");
         state.show(Component::Leaderboard, false);
         hud.sync(&state).unwrap();
+        assert!(!hud.shown());
+    }
+
+    /// hudtutorial: a gesture tip (-10 then 10) fills the text and the gesture row, a text tip (11) clears the row,
+    /// and the hides (13, -20) leave it invisible.
+    #[test]
+    #[ignore = "requires the converted challenge HUD movies (SKATE_SCORING_HUD_ROOT=<private/hud>)"]
+    fn the_tutorial_callout_shows_its_text_and_gestures() {
+        let root = std::path::PathBuf::from(std::env::var_os("SKATE_SCORING_HUD_ROOT").unwrap());
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("runtime").join(Component::Tutorial.file())).unwrap()).unwrap();
+        let libraries = crate::hud_imports::HudLibraries::load(&root.join("../menu-movies"), &[&json]);
+        assert!(!libraries.is_empty(), "gesture_item / button_item2 from the menu movie set: {:?}", libraries.failures);
+        let mut hud = Runtime::load_linked(Component::Tutorial, &json, &[], &libraries).unwrap();
+        assert!(!libraries.imported_shapes(&hud.bindings.movie).is_empty(), "imported shapes for the gesture row");
+        let mut all_shapes: crate::apt_scene::Shapes = serde_json::from_value(json["shapes"].clone()).unwrap();
+        all_shapes.extend(libraries.imported_shapes(&hud.bindings.movie));
+        let mut state = ChallengeHudState::default();
+        let get = |hud: &Runtime, path: &[&str]| {
+            let mut at = Value::Object(hud.vm.global);
+            for key in path {
+                at = match at {
+                    Value::Object(o) => hud.vm.get(o, key),
+                    _ => Value::Undefined,
+                };
+            }
+            at
+        };
+        let screen = ["hudtutorial", "mScreen"];
+        let label = ["hudtutorial", "mScreen", "mContainer", "mTextAnim", "mText", "label", "text"];
+        let gesture = ["hudtutorial", "mScreen", "mContainer", "mGesturesAnim", "mGestures", "mcGestureItem0", "_visible"];
+        let send = |hud: &mut Runtime, state: &mut ChallengeHudState, text: &str, gestures: Vec<[String; 3]>, states: &[i32]| {
+            state.callout.text = text.into();
+            state.callout.gestures = gestures;
+            state.callout.regular = true;
+            // The object SetState writes: the registered controller's mScreen (not a path through _global).
+            // hudtutorial's code reads the class static `hudtutorial.mScreen` (constant 1 = hudtutorial).
+            let vis = |hud: &Runtime| format!("{:?} units {}", get(hud, &["hudtutorial", "mScreen", "_visible"]),
+                crate::apt_scene::draw(&hud.bindings.movie, &hud.vm, &all_shapes).map(|d| d.len()).unwrap_or(0));
+            eprintln!("CALLOUT trace before {states:?}: mScreen visible {:?}", vis(hud));
+            // One state per sync, to see which one changes the panel's visibility.
+            for &one in states {
+                state.callout.states = vec![one];
+                state.callout.sent += 1;
+                hud.sync(state).unwrap();
+                eprintln!("CALLOUT trace after state {one}: mScreen visible {:?}", vis(hud));
+            }
+            let mut last = vis(hud);
+            for n in 0..30 {
+                hud.update().unwrap();
+                let now = vis(hud);
+                if now != last {
+                    eprintln!("CALLOUT trace update {n}: mScreen visible {last:?} -> {now:?}");
+                    last = now;
+                }
+            }
+        };
+        let kickflip = vec![["ollie_kickflip".to_string(), String::new(), String::new()]];
+        // A text tip first on its own movie, for comparison (it draws in game).
+        let mut text_hud = Runtime::load_linked(Component::Tutorial, &json, &[], &libraries).unwrap();
+        send(&mut text_hud, &mut ChallengeHudState::default(), "#3 pushes", Vec::new(), &[-10, 12]);
+        send(&mut hud, &mut state, "#Do a kickflip", kickflip, &[-10, 10]);
+        eprintln!("CALLOUT gestures: label {:?} gesture0 visible {:?} shown {}", get(&hud, &label), get(&hud, &gesture), hud.shown());
+        assert!(hud.shown());
+        assert_eq!(get(&hud, &label).text(), "Do a kickflip");
+        assert_eq!(get(&hud, &gesture), Value::Bool(true), "the kickflip gesture item shows");
+        // It draws from the menu set's gesture_item textures (paths re-rooted at the HUD folder, files present).
+        let mut shapes: crate::apt_scene::Shapes = serde_json::from_value(json["shapes"].clone()).unwrap();
+        shapes.extend(libraries.imported_shapes(&hud.bindings.movie));
+        let drawn: Vec<String> = crate::apt_scene::draw(&hud.bindings.movie, &hud.vm, &shapes).unwrap().into_iter().map(|d| d.texture).collect();
+        let gestures: Vec<&String> = drawn.iter().filter(|t| t.contains("gesture_item")).collect();
+        eprintln!("CALLOUT drawn {} units, gesture textures {gestures:?}", drawn.len());
+        // Layout after the gesture state (the in-game gesture tip drew nothing: doc 42 "Tutorial callout").
+        let base = ["hudtutorial", "mScreen"];
+        for clip in [&[][..], &["mContainer"][..], &["mContainer", "mPanelAnim"][..], &["mContainer", "mPanelAnim", "mPanel"][..],
+            &["mContainer", "mTextAnim"][..], &["mContainer", "mTextAnim", "mText"][..], &["mContainer", "mGesturesAnim"][..],
+            &["mContainer", "mGesturesAnim", "mGestures"][..], &["mContainer", "mGesturesAnim", "mGestures", "mcGestureItem0"][..]] {
+            let path: Vec<&str> = base.iter().chain(clip.iter()).copied().collect();
+            let props: Vec<String> = ["_x", "_y", "_width", "_height", "_xscale", "_yscale", "_alpha", "_visible", "_currentframe"].iter()
+                .map(|k| { let mut p = path.clone(); p.push(k); format!("{k}={:?}", get(&hud, &p)) }).collect();
+            eprintln!("CALLOUT layout {}: {}", clip.join("."), props.join(" "));
+        }
+        assert!(!gestures.is_empty() && gestures.iter().all(|t| root.join(t.as_str()).is_file()), "gesture textures draw and exist");
+        send(&mut hud, &mut state, "#Turn", Vec::new(), &[11]);
+        eprintln!("CALLOUT text: label {:?} gesture0 visible {:?}", get(&hud, &label), get(&hud, &gesture));
+        assert_eq!(get(&hud, &label).text(), "Turn");
+        send(&mut hud, &mut state, "#", Vec::new(), &[13, -20]);
+        eprintln!("CALLOUT hidden: screen visible {:?}", get(&hud, &[screen[0], screen[1], "_visible"]));
         assert!(!hud.shown());
     }
 

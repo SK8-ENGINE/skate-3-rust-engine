@@ -39,6 +39,7 @@ pub mod frontend;
 pub mod grain;
 pub mod mixer;
 pub mod mixmap;
+pub mod music;
 pub mod player;
 pub mod runtime;
 pub mod splice;

@@ -126,7 +126,7 @@ pub struct RetailMenuMovies {
     pub failures: BTreeMap<String, String>,
 }
 
-fn merged(mut movie: Value, shared: &serde_json::Map<String, Value>) -> Value {
+pub(crate) fn merged(mut movie: Value, shared: &serde_json::Map<String, Value>) -> Value {
     if let Some(object) = movie.as_object_mut() {
         for (k, v) in shared {
             object.entry(k.clone()).or_insert_with(|| v.clone());

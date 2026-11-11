@@ -4,6 +4,10 @@ use crate::apt_vm::{to_integer, Value, Vm};
 use skate_core::trick_guide::{Stance, TrickGuide, TrickGuideState};
 use std::sync::Arc;
 
+/// The loaded Trick Guide data for in-game readers (the tutorial callout's gestures), set when the menu stage loads it.
+#[derive(bevy::prelude::Resource, Clone, Default)]
+pub struct TrickGuideData(pub Arc<TrickGuide>);
+
 #[derive(Clone, Default)]
 pub struct TrickGuideHost {
     pub guide: Arc<TrickGuide>,

@@ -18,8 +18,11 @@ pub struct ObjectiveApi<'a> {
     /// Flow changes the condition asked for, applied to the group after the message's passes [inferred timing].
     pub flow: &'a mut Vec<FlowCommand>,
     pub skater: SkaterFacts,
-    /// Tricks announced this frame (the ThisFrame variants), as trick keys.
+    /// Tricks completed (landed, announced) this frame (the ThisFrame variants; retail's ended list, b865 §1), as
+    /// trick keys.
     pub tricks_this_frame: &'a [u64],
+    /// Tricks announced this frame (BeganTrick / BeganTrickGroup; retail's began list, b865 §2).
+    pub tricks_began: &'a [u64],
     /// Trick group key -> member trick keys (descendants joined, b863).
     pub trick_groups: &'a std::collections::BTreeMap<u64, std::collections::BTreeSet<u64>>,
     /// A trick or group name to its key (the Attrib hash the data uses).
@@ -28,7 +31,7 @@ pub struct ObjectiveApi<'a> {
 
 /// The skater flags ObjectiveLocomotion / Wipeout read this frame (b864 §2.2 / §2.3), from the engine's state, and
 /// the player's raw pad values (Input.*: 82C637B8, 82C63310 / 82C63430).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SkaterFacts {
     pub in_air: bool,
     pub right_stick_y: f32,
@@ -57,7 +60,31 @@ pub struct SkaterFacts {
     pub on_ground: bool,
     /// An air ended this frame without a wipeout (ObjectiveAir.AirCompleted; also the group's AirCompleted message).
     pub air_completed: bool,
+    /// ObjectiveAir.GetTimeToGrind (82C65E70, b1013): while a grind is predicted on the centre trajectory (air output
+    /// +0x1BB), predicted contact time minus time in the air (+0xB4 - +0xB0), else [`NO_GRIND_TIME`].
+    pub time_to_grind: f32,
+    /// The board adjust now (82BE1AE8 copies the animation attribute packet's value: 1 left, 2 right, 3 up, 4 down,
+    /// [`BOARD_ADJUST_UP`] ...), 0 for none (ObjectiveAir.IsDoingSpecificBoardAdjust 82C65FD0).
+    pub board_adjust: u32,
 }
+
+impl Default for SkaterFacts {
+    fn default() -> Self {
+        Self {
+            in_air: false, right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pump_acceleration: 0.0, last_pump_user: false,
+            grind_rail: None, in_sequence: false, sequence_completed: false, wiping_out: false, off_board: false,
+            went_off_board: false, went_on_board: false, grinding: false, on_board: false, on_ground: false,
+            air_completed: false, time_to_grind: NO_GRIND_TIME, board_adjust: 0,
+        }
+    }
+}
+
+/// GetTimeToGrind without a predicted grind (DAT_8206D108 = FLT_MAX, b1013 / b277).
+pub const NO_GRIND_TIME: f32 = f32::MAX;
+pub const BOARD_ADJUST_LEFT: u32 = 1;
+pub const BOARD_ADJUST_RIGHT: u32 = 2;
+pub const BOARD_ADJUST_UP: u32 = 3;
+pub const BOARD_ADJUST_DOWN: u32 = 4;
 
 /// Flow.ActivateObjective / DeactivateObjective / ResetObjective by 0-based objective index (b864 §2.5).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,7 +99,7 @@ pub enum FlowCommand {
 /// The functions this API answers (last name segment). A group whose programs call anything else does not run:
 /// an unported call errors, and an erroring completion condition defaults to true (retail), so it would complete
 /// at once.
-pub const PORTED: [&str; 43] = ["EnteredVolume", "IsInVolume", "IsSequenceNewlyCompletePoints", "GetGroupAccumulatedPoints",
+pub const PORTED: [&str; 47] = ["BeganTrick", "BeganTrickGroup", "GetTimeToGrind", "IsDoingSpecificBoardAdjust", "EnteredVolume", "IsInVolume", "IsSequenceNewlyCompletePoints", "GetGroupAccumulatedPoints",
     "GetGroupPointsRequirement", "GetAccumulatedPoints", "ActivateObjective", "DeactivateObjective", "ResetObjective",
     "GetObjectiveStatus", "GetTotalNumCompletedObjectives", "IsInSequence", "SequenceCompleted", "IsWipingOut",
     "IsOffBoard", "WentOffBoard", "WentOnBoard", "JustUsedSessionMarker", "JustSetSessionMarker", "SetFractionValue",
@@ -196,6 +223,18 @@ impl Api for ObjectiveApi<'_> {
             // records (82C66DB0 / 82C66ED0); a group matches through its members (an unknown group matches nothing).
             "DidSpecificTrick" => Value::Bool(self.objective.records.tricks.contains(&(self.key)(name_arg(args)?))),
             "DidSpecificTrickThisFrame" => Value::Bool(self.tricks_this_frame.contains(&(self.key)(name_arg(args)?))),
+            "GetTimeToGrind" => num_f(self.skater.time_to_grind),
+            // 82C65FD0: a number argument equal to the board adjust now (a non-number compares a default and is false).
+            "IsDoingSpecificBoardAdjust" => match args.first() {
+                Some(Value::Num(n)) => Value::Bool(*n == self.skater.board_adjust as f32),
+                _ => Value::Bool(false),
+            },
+            // 82C670D8 / 82C671D8: this frame's began records (the announce edge), exact key or group member.
+            "BeganTrick" => Value::Bool(self.tricks_began.contains(&(self.key)(name_arg(args)?))),
+            "BeganTrickGroup" => {
+                let key = (self.key)(name_arg(args)?);
+                Value::Bool(self.trick_groups.get(&key).is_some_and(|m| self.tricks_began.iter().any(|t| m.contains(t))))
+            }
             "DidSpecificTrickGroup" | "DidSpecificTrickGroupThisFrame" | "GetNumTricksDoneInTrickGroup" => {
                 let empty = std::collections::BTreeSet::new();
                 let members = self.trick_groups.get(&(self.key)(name_arg(args)?)).unwrap_or(&empty);
@@ -241,7 +280,7 @@ mod tests {
         let ctx = Context { sequence: true, newly_complete: true, group_points: 1200, requirement: 1000 };
         let run = |p: &Program, o: &Objective, ctx: Context| {
             condition(p, &mut ObjectiveApi { names: &names, objective: o, ctx, volume: &volume, inside: &[], statuses: &[],
-                flow: &mut Vec::new(), skater: SkaterFacts::default(), tricks_this_frame: &[], trick_groups: &Default::default(),
+                flow: &mut Vec::new(), skater: SkaterFacts::default(), tricks_this_frame: &[], tricks_began: &[], trick_groups: &Default::default(),
                 key: &|_: &str| 0u64 }, &mut [], &mut [], false)
         };
         assert!(run(&entered, &spot(&[5]), ctx) && !run(&entered, &spot(&[4]), ctx));
@@ -262,7 +301,7 @@ mod tests {
         let call = |func: u16, arg: &str, o: &Objective, frame: &[u64]| {
             let p = Program { locals: 0, body: vec![Stmt::Return(Expr::Api { func, args: vec![Expr::Lit(Value::Str(arg.into()))] })] };
             condition(&p, &mut ObjectiveApi { names: &names, objective: o, ctx: Context::default(), volume: &|_: &str| None, inside: &[],
-                statuses: &[], flow: &mut Vec::new(), skater: SkaterFacts::default(), tricks_this_frame: frame,
+                statuses: &[], flow: &mut Vec::new(), skater: SkaterFacts::default(), tricks_this_frame: frame, tricks_began: &[],
                 trick_groups: &groups, key: &key }, &mut [], &mut [], false)
         };
         assert!(call(0, "kickflip", &o, &[]) && !call(0, "heelflip", &o, &[]));

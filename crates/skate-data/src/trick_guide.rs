@@ -7,6 +7,8 @@ use skate_core::trick_guide::{Category, Entry, Key, Slot, Subcategory, Trick, Tr
 const CATEGORY: &str = "Hash_8BD17173D2F48577";
 const SUBCATEGORY: &str = "Hash_187447EFFFDF8563";
 const TRICK: &str = "Hash_6918469984A8C596";
+/// scoring_tutorial (b945 §1): the tutorial callout's records with no scoring_trick record.
+const TUTORIAL: &str = "Hash_C294E3D46E9A4CAC";
 const NAME: &str = "Hash_7296FFD6010D73EF";
 const DESCRIPTION: &str = "Hash_273DF7D4EE7A4C1C";
 const TRICK_LABEL: &str = "Hash_843613E915014627";
@@ -105,6 +107,9 @@ pub fn load(data: &Collections, tables: &TrickGuideTables) -> TrickGuide {
             let r = Reader { data, cameras: &cameras, class: SUBCATEGORY, key: &row.key };
             let has_tricks = data.boolean(SUBCATEGORY, &row.key, HAS_TRICKS).unwrap_or(false);
             guide.subcategory.insert(key, Subcategory { entry: r.entry(NAME, DESCRIPTION), has_tricks });
+        } else if class == TUTORIAL {
+            let r = Reader { data, cameras: &cameras, class: TUTORIAL, key: &row.key };
+            guide.tutorial.insert(key, r.slots());
         } else if class == TRICK {
             let r = Reader { data, cameras: &cameras, class: TRICK, key: &row.key };
             let subcategory = data.field(TRICK, &row.key, TRICK_SUBCATEGORY).ok().and_then(|f| ref_key(&f.data));
@@ -113,4 +118,19 @@ pub fn load(data: &Collections, tables: &TrickGuideTables) -> TrickGuide {
         }
     }
     guide
+}
+
+/// A callout's arg1 (a scoring_trick / scoring_tutorial record name) as its record key.
+pub fn record_key(name: &str) -> Option<Key> {
+    key_of(name)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_class_constants_are_the_record_class_names() {
+        use crate::attrib_hash::numeric_name;
+        assert_eq!(numeric_name("scoring_trick"), super::TRICK);
+        assert_eq!(numeric_name("scoring_tutorial"), super::TUTORIAL);
+    }
 }

@@ -21,7 +21,7 @@ archives readable with `tools/owned_game/big.py`.
 | `audiofiles.big` | 376 ABKC `.abk` banks, 20 SPLC (Splice) `.bnk` banks, 23 per-map `.ems` emitter files, 9 MOIR `.csi` AEMS event scripts |
 | `grains.big` | 14 rolling "grains", 7 surfaces × soft/hard wheels (`asphalt_smooth`, `asphalt_rough`, `concrete_smooth`, `concrete_rough`, `concrete_aggregate`, `wood_ramp`, `metal_smooth` hard only) + `x_jet_rolling` |
 | `wheels.big` | `Whls_spins_Jump_1`, `Whls_spins_Man_1` (+ `.sek` seek tables) |
-| `post.big`, `nis.big`, `english/…`, `music/…` | stingers, speech, cutscenes, licensed music: not used |
+| `post.big`, `english/…`, `music/…` | stingers, speech, cutscenes, licensed music: not used (`nis.big`'s presentation speech lines are used since 2026-11-10: doc 42 "Presentation speech") |
 
 ### Formats (worked out from the archives; `tools/asset_pipeline/audio_formats.py`)
 
@@ -5063,3 +5063,103 @@ Retail parity for every audio surface tag 0..127, hard and soft wheels: tag → 
   `VehicleAlarm`, else the AI's `horn`) is the one value the audio host plays. The replay records it with the actor and
   plays it back at the playhead, so a seek or rewind into a sounding alarm or horn plays it (research b409: retail keeps
   a 4-bit horn field per vehicle entry per recorded frame).
+
+<a id="music-banks"></a>
+
+## Music banks (2026-11-10, in progress; research b1015)
+
+- Disc [data b1015, checked]: `data/audio/music` holds three EA PathFinder v5 sets, a `.mpf` graph ("PFDx") with its
+  `.mus` stream (EA SNR/SNS around XMA2, 44.1 kHz stereo): `ipod` (the licensed soundtrack, 1380 segments, 172 MiB),
+  `world` (the interactive DJ music, 5725 segments, 210 MiB), `game` (chase and race, 1074 segments, 27 MiB), plus
+  `overlays.big`. vgmstream decodes each segment as a subsong of the `.mpf`.
+- Decision (user, 2026-11-10): setup decodes once and stores FLAC, one bank file per set (not one file per segment);
+  XMA2 kept as is would be ~430 MB but needs a runtime decoder (FFmpeg's as a native dependency, or a pure Rust port of
+  its WMA Pro / XMA2 decoder): the bank's codec word leaves room for that later.
+- Format (`skate_audio::music::bank`): `SKMB`, version 1, codec 1 (FLAC), count, then per segment {offset u64, size,
+  frames, rate, channels} and the FLAC streams back to back; `write_bank` streams segments to the file and fills the
+  index at the end; `Bank::read_index` / `decode` read one segment (planar f32). FLAC: `flacenc =0.5.1` (encode, no
+  default features) and `claxon =0.4.3` (decode), both pure Rust. Segments under 16 frames are padded and trimmed back.
+- Size: 12 real segments (4 per set) compress to 62 % as FLAC (ffmpeg level 8, measured 2026-11-10), so ~2.7 GB for
+  all three sets against ~4.4 GB of PCM.
+- Setup export (`tools/asset_pipeline/music_export.py`, run by `asset_exports.audio` after the audio converts; gated
+  by `SKATE_SETUP_MUSIC` (default on); a failure leaves the rest of the audio and writes `music-availability.json`):
+  per set, `vgmstream -m` gives the subsong count, ranges of 200 subsongs decode on the decode workers
+  (`-s a -S b -o ?s.wav`, 16-bit 44.1 kHz stereo), then `skate3rust --pack-music <dir> <count> <out.bank>` writes
+  `private/audio/music/<set>.bank` and the WAVs are deleted; `audio_manifest.json` gets `music: {set: {bank,
+  segments}}`. The audio group tracks `music_export.py`.
+- Measured (desktop, 2026-11-10): `game` = 1074 segments, 1558 s of music, bank 165.9 MB (60 % of PCM), 7 s for decode
+  and pack. Segment 9 decoded from the bank equals vgmstream's decode sample for sample (data-gated test
+  `skate-audio/tests/music_bank.rs`).
+- Tests: `music::bank` (lossless round trip including a 1-frame segment, refused bad files, 16-bit WAV reader);
+  `tests/music_bank.rs` (data-gated, exact against vgmstream).
+- Player (`skate_audio::music::player::MusicPlayer`, in `Runtime::music`): decoded segments queue back to back as
+  one continuous stream (gapless joins), resampled to 48 kHz with the voices' `dsp::resample::Resampler`, added to the
+  default bus's front left / right after the rolling bed each block; reports the segments that started and the
+  seconds queued ahead. Tests: back to back with no gap, 44.1 kHz resample, one rate per stream, gain 0.
+- Host (`game_audio::music`): opens the banks the manifest lists (`Library::music_bank`), decodes the next segment on
+  a `music-decode` thread and keeps ~6 s queued; the plan is for now only the test aid
+  `SKATE_MUSIC_PLAY=<set>:<first>[-<last>]` (1-based, in order). NOT RETAIL YET: the stream gain is the Music option
+  volume directly (which MixMap output scales retail's music is open), no ducking, no zones, no menu music.
+- Bank version 2 (2026-11-10): the header adds the track table's offset and size; the table lists tracks (first segment,
+  segment count, name, artist; UTF-8). Version 1 banks still read (no tracks).
+- The player's own music (mod music, user ask 2026-11-10): `skate3rust --pack-music-folder <folder> <out.bank>` packs
+  every music file in a folder, sorted by name, one track per file: `music_pack.rs` decodes with Symphonia `=0.5.4`
+  (pure Rust, MPL-2.0; MP3, AAC / M4A, ALAC, Ogg Vorbis, FLAC, WAV, AIFF, MKV / WebM audio) a packet at a time into 10 s
+  16-bit segments (each file keeps its rate; more than two channels fold to front left / right); names from the tags,
+  else `Artist - Title.ext`; unreadable files are skipped with a message. It prints a notice not to share banks that hold
+  copyrighted music. The player accepts segments at another rate (a new stream starts when the current one ends, at most
+  one block between). Desktop test (3 MP3s of the user's, 4.6 MB): 3 tracks, 20 segments, 186 s, 1.2 s, bank 13.75 MB
+  (FLAC of a lossy source is larger; an MP3-frames codec could keep it small later).
+- Bank and playlist tools (`music_playlist.rs`): `skate3rust --music-bank-info <bank>` lists a bank's tracks (index,
+  length, artist, name); `skate3rust --music-playlist <out.json> <name> [--shuffle] <bank>...` writes a playlist of
+  every track of the banks: `{schema: 1, name, shuffle, tracks: [{bank (relative to the playlist), track (index in the
+  bank), name, artist}]}`. A track resolves by its index while its name still matches, else by name (a bank repacked in
+  another order). Desktop test on the user's files: pack, info and playlist as expected. Tests: `music_playlist`.
+- PathFinder graphs (research b1016; `skate_audio::music::pathfinder`): `format::Graph::parse` reads a v5.3 `.mpf` (big
+  endian, bounds checked: nodes with kind (audio segment n -> bank segment n - 1, entry, exit, router, event), section,
+  loop count, random flag, branches (lo, hi, target); events and their actions; variables; segment durations).
+  `stream::Stream` plays one stream: `post(id)` (the bank bit is ignored, lookup by id24) runs the actions (if / elif /
+  else / endif, goto (to a node or the n-th entry of a section; at the next segment end, or now with the cut flag),
+  set (variable or the control value, clamped 0..127), post, callback, arithmetic (sub = value - target, research
+  inferred)); `set_var` by name; `next_segment` follows the pending goto or the playing node's branch, passing entry /
+  router / exit / event nodes; the branch pick is 82957CA0's (first inclusive range, else nearest edge; routers and
+  random entries draw 0..127, exit nodes count their loops). Random draws come from a seeded generator (repeatable).
+  NOT RETAIL YET: waits, sync waits and parameter ramps (actions 2, 3, 5..7, 15..18) are skipped and counted.
+  Setup copies each `.mpf` next to its bank (`music/<set>.mpf`, manifest `graph`).
+- Tests: `pathfinder::stream` (a track plays its segments and stops; branch by control value, nearest edge, stop;
+  if / elif / else, arithmetic, clamp); data-gated `tests/pathfinder.rs` on the disc (`SKATE3_MPF_DIR`): counts
+  (nodes 1210 / 2116 / 5873, events 15 / 3 / 5, variables 8 / 3 / 2, samples 1074 / 1380 / 5725, slots 1 / 2 / 0),
+  46 + 46 iPod entries, iPod track 1 = segments 1..30 then stop, track 2 starts at segment 31, chase starts in sections
+  1..4 and race starts in 5..12 with control 76 for 199 seeds. All pass (2026-11-10).
+- Host queue (2026-11-10, `game_audio::music::Sequencer`): tracks are retail graph tracks (soundtrack track k: `ipod` =
+  k, then event 0x16D750) or a bank's track (its segments in order); shuffle reorders each pass with a seeded
+  generator; a track that ends starts the next. Default queue: every soundtrack track, shuffled (NOT RETAIL YET: which
+  mode free roam plays is open). `SKATE_MUSIC=0` turns music off; `SKATE_MUSIC_PLAYLIST=<playlist.json>` plays a
+  playlist (test aid until the mod API). Each queued segment carries a stream id; when a track's first segment starts
+  playing the host sends `MusicTrackStarted` (title, artist, custom). Base level `MUSIC_LEVEL` = 0.35 under the Music
+  option (user: full scale was too loud; NOT RETAIL YET, the retail MixMap output is open).
+- Music-video caption (user ask 2026-11-10, ours): `game_audio::music_caption` shows a custom bank's title and artist
+  as a lower third (bottom left, translucent band), fade in 0.5 s, hold 6 s, fade out 0.8 s; not for the soundtrack;
+  style in `MusicCaptionStyle`. Other scripts (`ui_fonts.rs`): the first text beyond Latin loads 12 Windows script
+  fonts (67 MB; Segoe UI, symbols, emoji, Microsoft YaHei, Yu Gothic, Malgun Gothic, Nirmala UI, Leelawadee UI,
+  Ebrima, Gadugi, Myanmar Text) on a worker thread into the text engine's database, where its Windows fallback finds
+  them; a caption that needs them waits until they are in. Desktop: the user's LoFi playlist played on DownTown, three
+  tracks back to back at the right times (2026-11-10, user listened); a Japanese title rendered (screenshot). Second
+  listening run with `MUSIC_LEVEL` 0.35 and the captions (master 40): the user judged it much better than full scale.
+- Mod entry (2026-11-10, `sdk.music`, capability `music` 1; sdk/ENGINE_API.md "Music"): play / queue a playlist in the
+  mod's folder (canonical path checked inside the package), the soundtrack (one track or all), stop, skip, a volume
+  0..2 on the engine's level, graph variables and events, the caption style (per mod, newest wins field by field),
+  `music_track_started` events. Engine hook: `game_audio::music::MusicRequest` (the same way in for engine systems);
+  a mod's queue, volume and caption end with the mod (`ClearOwner`). Tests: skate-mods 110 pass; skate-game
+  `requests_replace_the_queue_and_a_mods_queue_and_volume_end_with_it`,
+  `a_mods_caption_change_applies_field_by_field_and_ends_with_it`.
+- Mixed playlists (2026-11-10): a playlist entry is a bank track (`bank`, `track`, `name`) or a disc soundtrack
+  track (`{"soundtrack": 3}`), so one playlist mixes the player's banks with the soundtrack. Dev test mod
+  `mods/music-sdk-test` (off by default): `make_bank.py <skate3rust.exe>` builds a bank of three self-made tones and a
+  mixed playlist; the script walks every sdk.music call and logs `MUSIC_TEST <check> ok|fail` lines.
+- Skip fix (2026-11-10, found by the test mod's first desktop run): the host decodes about 6 s ahead, so a skip
+  during a track whose successor was already decoded skipped that successor too (High Shimmer -> Mid Pulse, Low Hum
+  lost). A skip now puts the started-but-unheard tracks back first (`Sequencer::back`); unit test
+  `a_skip_goes_to_the_track_after_the_heard_one_not_after_the_one_decoded_ahead`.
+- Next: the engine's own music modes
+  (which segments make a track and in what order), the streaming player, zones, menu music (b1015 port plan).

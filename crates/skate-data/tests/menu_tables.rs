@@ -43,6 +43,11 @@ fn check_structure(t: &MenuTables) {
     assert_eq!(t.settings_rows[11].widget, "selector");
     assert_eq!(t.settings_rows.last().unwrap().id, "ID_GAMESETTINGS_SKATEFEED_SETTINGS");
     assert_eq!(t.settings_screens.len(), 13);
+    // The Speech handler's speaker names (b874): 104, in eSk8Characters order.
+    assert_eq!(t.speakers.len(), 104);
+    assert_eq!((t.speakers[0].as_str(), t.speakers[30].as_str(), t.speakers[31].as_str(), t.speakers[40].as_str()),
+        ("Player", "Reda", "SkateCoach", "CameraMan"));
+    assert_eq!(t.speakers[103], "Teammate4");
     let screen = |i: usize| -> Vec<String> { t.to_menu_data().screens[i].iter().map(|s| s.trim_start_matches("ID_GAMESETTINGS_").to_owned()).collect() };
     assert_eq!(screen(1), ["DIFFICULTY_SETTINGS", "AUDIO_SETTINGS", "VIDEO_SETTINGS", "CONTROL_SETTINGS", "ONLINE_SETTINGS", "SKATEFEED_SETTINGS"]);
     assert_eq!(screen(3), ["SFXVOLUME", "DIALOGVOLUME", "MUSICVOLUME", "SFXPACK"]);

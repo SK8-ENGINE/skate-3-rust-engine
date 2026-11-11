@@ -1,0 +1,33 @@
+{
+  "id": "dev-music-sdk-test",
+  "api": 2,
+  "name": "Music SDK Test (dev)",
+  "version": "0.1.0",
+  "author": "Hails",
+  "description": "Dev only (doc 11 Music banks, sdk.music): plays its own bank (make it first: py -3.13 make_bank.py <skate3rust.exe> [--from <music folder> --count N]; default three self-made tones) through a mixed playlist, restyles the caption, sets the volume, skips, queues, stops and hands back to the soundtrack, logging one MUSIC_TEST line per check. Disabling it gives the music back to the engine.",
+  "entry": "main.lua",
+  "enabled_by_default": false,
+  "settings": {
+    "first_title": {
+      "type": "string",
+      "label": "First track",
+      "description": "Title of the playlist's first track (make_bank.py prints it).",
+      "default": "High Shimmer"
+    },
+    "second_title": {
+      "type": "string",
+      "label": "Second track",
+      "description": "Title of the playlist's second track.",
+      "default": "Low Hum"
+    },
+    "step_seconds": {
+      "type": "number",
+      "label": "Listen per step (s)",
+      "description": "Seconds each track plays before the next check (raise it to listen).",
+      "min": 0,
+      "max": 60,
+      "step": 1,
+      "default": 0
+    }
+  }
+}

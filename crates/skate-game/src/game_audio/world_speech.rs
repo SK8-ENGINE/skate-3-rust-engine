@@ -169,6 +169,9 @@ pub(crate) struct WorldSpeech {
     voices: HashMap<u64, u32>,
     /// SFXObj_Speech's inputs as last written (in0..in4).
     speech_inputs: [bool; 5],
+    /// A presentation speech line plays (`nis_speech`): Obj:Speech input 2, the speech system's scripted-dialogue
+    /// state (+0x1BD28 == 2, ids from 5000).
+    pub(crate) scripted: bool,
     /// The speaking peds' positions (`world_sources` fills it; the echo delay reads it).
     pub(crate) ped_positions: HashMap<u64, [f32; 3]>,
     /// Each speaker's echo delay countdown and value (`sub_824D9370`: recomputed when the count
@@ -273,6 +276,7 @@ impl Default for WorldSpeech {
             voice: Default::default(),
             voices: HashMap::new(),
             speech_inputs: [false; 5],
+            scripted: false,
             ped_positions: HashMap::new(),
             delay_clock: HashMap::new(),
             echo_delay: [None; skate_audio::bus::speech_echo::SLOTS],
@@ -1084,7 +1088,7 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
     // F18 / F19 / F23 / F42 / F43 (→ the music, Global C3) and F45 (+200 mB on ped speech) read
     // them. Input 2 is the speech system's scripted-dialogue state (`+0x1BD28` == 2; requests
     // with ids ≥ 5000, `sub_824A4EE8`), input 3 a main-cast stream whose block has `+60` == 0 and
-    // `+93` set: neither happens in free roam (left 0).
+    // `+93` set: input 2 comes from the presentation speech (`nis_speech`, `scripted`), input 3 is left 0.
     let mut active: Vec<u64> = speech.player.speakers().collect();
     let cast_speakers: Vec<u64> = speech.cast.as_ref().map(|c| c.player.speakers().collect()).unwrap_or_default();
     active.extend(cast_speakers.iter().copied());
@@ -1102,6 +1106,7 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
         inputs[1] |= (75..=77).contains(v);
         inputs[4] |= (1..=29).contains(v);
     }
+    inputs[2] = speech.scripted;
     if inputs != speech.speech_inputs {
         for (i, on) in inputs.iter().enumerate() {
             m.set_input(skate_audio::mixmap::keys::SPEECH, i, if *on { 32767 } else { 0 });

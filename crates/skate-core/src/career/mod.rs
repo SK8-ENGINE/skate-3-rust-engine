@@ -300,6 +300,13 @@ impl Career {
         self.settle(out.into(), data, graphs)
     }
 
+    /// The running graph's Execute group finished: its state change happens now.
+    pub fn events_finished(&mut self, data: &Progression, graphs: &BTreeMap<String, graph::Graph>) -> Vec<graph::Request> {
+        let mut out = Vec::new();
+        self.runner.events_finished(graphs, &StatusView(&self.status), &mut out);
+        self.settle(out.into(), data, graphs)
+    }
+
     fn start_graphs(&mut self, effects: Vec<Effect>, graphs: &BTreeMap<String, graph::Graph>,
                     pending: &mut std::collections::VecDeque<graph::Request>) {
         for e in effects {

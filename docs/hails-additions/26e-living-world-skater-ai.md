@@ -282,8 +282,8 @@ cooldown, free gaps, steering into the nearer gap and its offset, switch off. sk
 line stops the NPC (under 3 m in 3 s instead of 22 m, `npc_avoid` slow_down event), which rides on once the player
 leaves. skate-mods validation cases for `npc_avoid`. Not play-tested.
 
-**Open.** Mode 6 / 7 consumers (low prop ollie, stepping off: logged only), skitching itself (mode 4 raises nothing
-yet), the prop gate `sub_82464350`, an entry-add offset term reading controller `+128`, retail's path search window.
+**Open.** Mode 6 / 7 consumers (low prop ollie, stepping off: logged only), the prop gate `sub_82464350`, an entry-add offset term reading controller `+128`, retail's path search window.
+(Skitching itself was ported later: 26h-living-world-traffic.md#skitching-step-7-npc-skaters-skitch-opt-in-2026-10-09.)
 
 ## NPC skater proxies in retail's collision groups (2026-10-09)
 

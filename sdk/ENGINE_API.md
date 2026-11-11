@@ -244,6 +244,29 @@ Career changes stay when the mod stops (the graphs they fired cannot be undone);
 the mod's own flags go. Amounts are capped at 10,000,000 per call. Details:
 `docs/hails-additions/43-career.md`.
 
+## Music (`sdk.music`, capability `music` 1)
+
+The music player: the disc soundtrack and players' own music banks (FLAC banks made with
+`skate3rust --pack-music-folder`, playlists with `--music-playlist`).
+
+    sdk.music.state()                -- {on, playing={title, artist, custom} or nil, queued, owner, volume}
+    sdk.music.playing()              -- the track heard now, or nil
+    sdk.music.play_playlist(path)    -- a playlist JSON in the mod's folder replaces the queue
+    sdk.music.queue_playlist(path)   --   or is added to it (its banks relative to it; bank and
+                                     --   soundtrack entries can be mixed)
+    sdk.music.play_soundtrack(track) -- the disc soundtrack: track n (1-based) then the rest, or all shuffled
+    sdk.music.stop()                 -- silence
+    sdk.music.skip()                 -- the next track
+    sdk.music.set_volume(level)      -- 0..2 on the engine's music level; nil: back to the engine's
+    sdk.music.set_var(name, value)   -- a variable of the playing disc graph (PathFinder)
+    sdk.music.post(event)            -- an event to the playing disc graph
+    sdk.music.caption(options)       -- the custom-track caption: {enabled, fade_in, hold, fade_out,
+                                     --   left, bottom (percent), title_size, artist_size}; nil: default
+
+Events in `on_event`: `music_track_started` (`{title, artist, custom}`). A mod's queue, volume
+and caption changes end when the mod stops (the default soundtrack comes back). Do not share
+bank files with copyrighted music. Details: `docs/hails-additions/11-audio.md#music-banks`.
+
 ## Multiplayer names
 
 Edit **Your name** in the Multiplayer menu. Names are saved to

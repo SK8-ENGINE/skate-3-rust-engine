@@ -124,7 +124,7 @@ def livingworld(game_root, stage, work, report, log, converted=None, dlc=None):
     availability.unlink(missing_ok=True)
 
 
-def audio(game_root, stage, work, report, log, tools, dlc_jobs=(), dlc_vaults=()):
+def audio(game_root, stage, work, report, log, tools, dlc_jobs=(), dlc_vaults=(), game_exe=None):
     private=stage/"assets/private"
     from .audio_export import VGMSTREAM_SHA, VGMSTREAM_URL, convert
     from .optional_content import CONTENT_ERRORS, note
@@ -139,3 +139,18 @@ def audio(game_root, stage, work, report, log, tools, dlc_jobs=(), dlc_vaults=()
         note(availability,'Game audio',error,report=report)
         return
     availability.unlink(missing_ok=True)
+    # The in-game music (music_export.py, doc 11 "Music banks"): FLAC banks packed by the game executable; a failure
+    # leaves the rest of the audio in place.
+    from .music_export import music_requested, export as write_music
+    music_availability=private/'music-availability.json'
+    if game_exe and music_requested() and (Path(game_root)/'data/audio/music').is_dir():
+        try:
+            music=write_music(game_exe,vgmstream,Path(game_root)/'data/audio/music',private/'audio',work/'music',log,report)
+            manifest_path=private/'audio/audio_manifest.json'
+            manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
+            manifest['music']=music
+            manifest_path.write_text(json.dumps(manifest),encoding='utf-8')
+            music_availability.unlink(missing_ok=True)
+        except CONTENT_ERRORS as error:
+            if (private/'audio/music').exists():shutil.rmtree(private/'audio/music')
+            note(music_availability,'Music',error,report=report)

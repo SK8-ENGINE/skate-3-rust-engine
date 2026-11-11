@@ -459,6 +459,34 @@ function sdk.minimap.remove(key) end
 ---@param shown boolean false hides the HUD minimap while this mod is enabled
 function sdk.minimap.show(shown) end
 
+---@class MusicTrack
+---@field title string
+---@field artist string
+---@field custom boolean a player's own bank (not the disc soundtrack)
+
+sdk.music = {version=1}
+---@return {on:boolean, playing:MusicTrack|nil, queued:integer, owner:string|nil, volume:number}
+function sdk.music.state() end
+---@return MusicTrack|nil
+function sdk.music.playing() end
+---@param path string a playlist JSON inside the mod's folder; replaces the queue
+function sdk.music.play_playlist(path) end
+---@param path string a playlist JSON inside the mod's folder; added to the queue
+function sdk.music.queue_playlist(path) end
+---@param track integer|nil 1-based disc soundtrack track, then the rest; nil: all shuffled
+function sdk.music.play_soundtrack(track) end
+function sdk.music.stop() end
+function sdk.music.skip() end
+---@param level number|nil 0..2 on the engine's music level; nil: the engine's
+function sdk.music.set_volume(level) end
+---@param name string a variable of the playing disc graph
+---@param value integer
+function sdk.music.set_var(name, value) end
+---@param event integer an event id for the playing disc graph
+function sdk.music.post(event) end
+---@param options {enabled?:boolean, fade_in?:number, hold?:number, fade_out?:number, left?:number, bottom?:number, title_size?:number, artist_size?:number}|nil nil: the default caption
+function sdk.music.caption(options) end
+
 sdk.loading = {}
 ---@param key string
 ---@param line {title:string, text:string}|nil a hint panel line (string ids are localised); nil removes it

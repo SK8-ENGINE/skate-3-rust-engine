@@ -126,6 +126,8 @@ pub(crate) struct DataObjectives {
     /// Trick group key -> member trick keys (b863), and the tricks announced this frame.
     trick_groups: TrickGroups,
     pub tricks_this_frame: Vec<u64>,
+    /// The tricks announced this frame (BeganTrick).
+    pub tricks_began: Vec<u64>,
 }
 
 pub(crate) type TrickGroups = std::sync::Arc<std::collections::BTreeMap<u64, std::collections::BTreeSet<u64>>>;
@@ -147,6 +149,7 @@ struct Eval<'a> {
     flow: Vec<FlowCommand>,
     skater: SkaterFacts,
     tricks_this_frame: &'a [u64],
+    tricks_began: &'a [u64],
     trick_groups: &'a std::collections::BTreeMap<u64, std::collections::BTreeSet<u64>>,
 }
 
@@ -159,7 +162,7 @@ impl Eval<'_> {
         };
         let mut api = ObjectiveApi { names: &self.names.api, objective: o, ctx, volume: &lookup, inside: self.inside,
             statuses: &self.statuses, flow: &mut self.flow, skater: self.skater, tricks_this_frame: self.tricks_this_frame,
-            trick_groups: self.trick_groups, key: &trick_key };
+            tricks_began: self.tricks_began, trick_groups: self.trick_groups, key: &trick_key };
         condition(p, &mut api, &mut self.vars[i], self.globals, default)
     }
 }
@@ -266,7 +269,7 @@ impl DataObjectives {
         info!("SKATE_CHALLENGE {id} objectives from data: {} rows, {} failure rows, {} hint rows, api {:?}", rows.len(),
             count(&failures), count(&hints), names.api);
         Some(Self { group, programs, failures, hints, names, vars, globals, volumes, inside: Vec::new(), skater: SkaterFacts::default(), fraction: None,
-            trick_groups, tricks_this_frame: Vec::new() })
+            trick_groups, tricks_this_frame: Vec::new(), tricks_began: Vec::new() })
     }
 
     pub(crate) fn handle(&mut self, message: Message) -> Vec<Event> {
@@ -278,7 +281,7 @@ impl DataObjectives {
         let statuses = self.group.objectives.iter().map(|o| o.state).collect();
         let mut eval = Eval { programs: &self.programs, failures: &self.failures, hints: &self.hints, names: &self.names, vars: &mut self.vars, globals: &mut self.globals,
             volumes: &self.volumes, inside: &self.inside, statuses, flow: Vec::new(), skater: self.skater,
-            tricks_this_frame: &self.tricks_this_frame, trick_groups: &self.trick_groups };
+            tricks_this_frame: &self.tricks_this_frame, tricks_began: &self.tricks_began, trick_groups: &self.trick_groups };
         let mut events = self.group.handle_with(message, &mut eval);
         for command in std::mem::take(&mut eval.flow) {
             match command {

@@ -708,6 +708,169 @@ course from the split centres).
   HideTutorialCalloutHUD 53, SFX 52, Wait 48, NIS 22, SetSimRate 22, TeleportLocalPlayer 19, RestoreSimRate 19), so
   no fade played in game; tut_sksc_01 with pass unchanged (Owned, no group stuck).
 
+<a id="tutorial-hud"></a>
+
+### Tutorial HUD (2026-11-10)
+
+- Retail [data b858]: make_hud creates the tutorial's HUD group {ObjectiveHUD, TutorialInstructionHUD, OwnedItHUD};
+  challenge_running shows ObjectiveHUD, the owned it banner shows at completion.
+- Ours: the tutorial's ShowHud commands (only logged before; the user saw no tutorial HUD in the desktop run) are now
+  `tutorial_run::Action::ShowHud`; `challenges.rs` shows / hides `Component::OwnedIt` from them. Tests:
+  `tutorial_run` (objective HUD requested on arrival, owned it banner at the end).
+- NOT RETAIL YET / open: the objective HUD stays hidden for tutorials: its row texts (Objective_GetObjectiveTitle,
+  objective data +0xd0) are not known. The objective records carry only key, activation mode and definition (the
+  definition's second u32 is 0, not a description: checked on the disc 2026-11-10); own the spot sets its row with
+  Objectives.ChangeObjectiveText, so a tutorial's texts come from Objectives.MakeObjectives / its HUD hookup (to read).
+
+<a id="presentation-speech"></a>
+
+### Presentation speech (2026-11-10; b874 §2 / §3, b1014)
+
+- Retail [code b874]: Speech (2) / SpeechNoWait (3) start 8257C308 map arg1 (speaker name) to an eSk8Characters id
+  through a map built from the 104 names (TU3 0x82232694; SkateCoach 31, Reda 30, CameraMan 40), take arg2 as the
+  speech id and call the speech system vt+0x3C(character, id, 0). Speech holds its group until cMsgSpeechEnded
+  (payload +0x10 character, +0x14 id; posted when the stream ends, or at once when the line is not found, b1014
+  status) or a 10.0 s timer (821963E4); SpeechNoWait finishes at once. Ids from 5000 take the NIS path (b1014).
+- Data [data]: `data/audio/<lang>/nis.big` holds 927 bare `.sns` bodies `<char>_<id>_<CAT>-<TAG>_<take>[_360]`
+  and `nisresident.big` one 8-byte `.snr` header each (532 (character, id) pairs; up to 12 files per pair).
+- Ours: setup extracts the speaker names into `menu-tables.json` `speakers` (`skate_data::menu_tables::speakers`,
+  checked on the TU3 image and the disc build: 104, same order; `menu_tables.py` requires them) and exports
+  `private/audio/speech/nis.json` (926 lines: character, id, category, tag, take, x360, snr) with every line
+  decoded to `speech/nis/<file>.wav` (`world_audio.nis_index` / `decode_nis`; mono 48 kHz, checked on three
+  lines; not gated by the Ped Speech switch). `presentation_run::SpeechHandler` resolves the speaker and line,
+  queues a `SpeechPlay` (`Presenter::speech_out`) and, for Speech, holds the group for the line's length capped at
+  10 s; an unknown speaker or a missing line finishes at once (logged).
+- Takes [code b1014, verified on the disc]: retail builds each line's take list from nisresident.big's file table
+  in order (824A5A08: character = name chars 0..1, id = chars 3..6; 927 files, 626 lines: 490 with 1 take, 59 with
+  2, ... one with 12; nis.big's order is the same). 82482130 plays them round-robin; at the start of each pass a line
+  with more than 2 takes is shuffled with count / 2 random swaps (824821C0), so 2 takes alternate. `_360` takes are
+  never preferred (no take has both). Ours: the export walks the resident table the same way (927 lines);
+  `SpeechLines::pick` keeps the order and cursor per line, with a seeded xorshift in place of the global PRNG
+  (82A8AF10). One stream: a request while a line plays does not play and ends at once (824A5568 posts Started +
+  Ended); ours tracks `SpeechLines::playing`.
+- Retail mix [inferred b1014]: 2D on the main cast's stream channel 0 (no actor or position); MixMap Obj:Speech input
+  2 is raised while the scripted-dialogue state (+0x1BD28) is 2, which ducks the music. Subtitles: each take shows
+  string `SPEECH_SCRIPTED_<file>` (our HUD export already holds 884 of them) through message 0x61363201.
+- Playback: `game_audio::nis_speech` takes the picked lines (`Presenter::speech_out`), reads the wav on a thread
+  (`nis-speech`), puts it in its own mixer bank (`skate_audio::world::speech::NIS_BANK`, beside the living world /
+  main cast / announcer speech banks) and opens a 2D direct voice (gain 1, no position); while it plays,
+  `WorldSpeech::scripted` raises MixMap Obj:Speech input 2 (the retail Global then ducks the music). Logged
+  `AUDIO_NIS_SPEECH <file> voice ..`.
+- Laptop presentation-speech (2026-11-10 12:01): build OK; Refresh Game Files 404 s (environment + audio redone):
+  `speech/nis` 927 wav (732 MB), menu-tables speakers 104; menu_tables on the disc data 2, presentation 8, tutorial
+  2, setup 12 pass. Startup `104 speakers, 626 lines`. tut_sksc_06: SpeechNoWait SkateCoach 5227 picks
+  31_5227_TUT-JORD_1 (2.13 s), the mixer opens its voice 9 ms later; the second line 5213 4 ms later is refused
+  (one at a time). tut_sksc_01: 5012 -> 31_5012_TUT-JORD_3 (5.08 s) plays. Runs muted: not judged by ear yet.
+- Desktop run (2026-11-10 12:25, after Refresh Game Files, user watching, sound on): tut_sksc_01's SpeechNoWait
+  SkateCoach 5012 played 31_5012_TUT-JORD_3 0.8 s after the tutorial started; the user heard the line clearly
+  ("You'll only need a couple of pushes to get up to speed. Coach Frank uses one." in the retail subtitle string);
+  the callout followed 0.2 s later. No music played (the engine has no licensed-music player), so the ducking was
+  not heard. The tutorial's objective HUD did not show: the ShowHud commands are not wired yet (separate item).
+- NOT RETAIL YET / open: the line's gain and the main cast channel's stream DSP (ours: a plain direct voice);
+  subtitles; the `Unknown` speaker's AudioCharacterOverride; Coach Frank's quit line
+  (31 / 5706) queued after the current line; the per-character flag (2 / 3 / 0) passed with the line; other
+  languages are not exported.
+- Tests: `presentation_run` (Speech plays and waits for the line, SpeechNoWait and an unknown speaker finish at
+  once; takes round-robin, 2 alternate, more shuffle per pass); `skate-data` menu_tables (speakers on both builds); setup `test_world_audio` (line names),
+  `test_menu_tables` (speakers required).
+
+<a id="career-presentation-groups"></a>
+
+### Career presentation groups (2026-11-10; b964 §5 step 7, R12)
+
+- Retail [code, Ghidra 2026-11-10]: Events.ExecuteEventsAndChangeState (cfunc 827D16F0; binding name 821A7D18,
+  table 82311734) hashes the target state name (FNV-1a 64), builds a callback object (vtable 82311908) and asks
+  827D1480 for a group of the current state's events. No events: the state changes at once. Otherwise the group
+  goes to the presentation manager (82DBACA0: start now or queue, up to 8) and the change happens in the callback
+  when the group finishes (827D1420: graph vt+4 with the hash). With its second argument true and a global flag set
+  it first calls 827CFC58 (clears pause reason 6 and some HUD bits) [code; purpose inferred]. DeferEventsAndChangeState
+  (827D1970) builds the group with 827D1870 (callback 82311900), pushes it on a deferred list without starting it,
+  and changes state at once.
+- FIXED: ours changed state in the same call for Execute. Now `graph::Runner` holds the target (`Running::waiting`)
+  when the state has events and `Runner::events_finished` / `Career::events_finished` enters it; `Request::Events`
+  carries the target.
+- One presenter for the game: `presentation_run::Presenter` is a resource (retail's singleton), updated once a frame
+  by `presentation_run::tick` (unless a tutorial already ran it with its zero-time passes), with a finished-group
+  list (`take_finished`). The career host (`career.rs` `run_presentation`) starts an Execute group
+  `career/<graph>/<state>` (owner `career`) and calls `events_finished` when it finishes (at once if the queue
+  dropped it); released deferred events start as `career/deferred/<n>` groups; GrantAchievement is a handler
+  (`GrantHandler`) whose names the career grants. Without a presenter the old at-once path remains.
+- Tests: `career::graph` (Execute waits for the state's events, a state without events changes at once).
+- Laptop career-presentation (2026-11-10 11:27): build OK; core career 40, game career 5, presentation 6, tutorial 2,
+  challenge 21 pass. Progression: 247 graphs, ChangeState none 244 / Execute 17 / Defer 27; 10 land on a state with
+  events (Execute: press_photo_anyw_11, gpmm_starting, gpmm_billboard_photo, photo_anyw_01 / 11 / 21 / 31 / 41
+  billboard celebrations; Defer: tut_skpk_univ_01 meet_photographers, ftl_univ_03). The tut_sksc_01 pass run starts
+  none of them, so the wait is not seen in game yet (needs a photo billboard or tut_skpk_univ_01); it ends Owned,
+  the callout hides with -20 at completion, save restored identical.
+- Open: the 827CFC58 flag; the career's callout / sim-rate states only reach the HUD while a tutorial runs
+  (`take_callout` and the rate posts sit in the tutorial branch).
+
+<a id="trick-done-and-began"></a>
+
+### Trick done and began lists (2026-11-10; b863 §2, b865 §1 / §2)
+
+- Retail [code b865]: the trick-done message 0x92CC9BBD (which the objectives' trick list and DidSpecificTrick /
+  DidSpecificTrickGroup / GetNumTricksDoneInTrickGroup read) and the ThisFrame variants come from the ended list,
+  filled only when a trick carrier completes landed (82DA5F98), and only for a trick that was announced first
+  (rec+0xBE clear); bailed or unannounced tricks post nothing. BeganTrick / BeganTrickGroup (82C670D8 / 82C671D8)
+  read the began list, filled on the announce edge (82DA5DE0).
+- FIXED: ours fed the announce edge to the done reads, so a trick counted as done the moment it was announced, even
+  when the skater then bailed. Now `ScoringRuntime` keeps both: `announced` (the began list, `take_announced`) and
+  `done` (a valid carrier that completes landed and was announced, `take_done`); the tutorial passes `done` as its
+  trick messages and ThisFrame list and `began` to the new BeganTrick / BeganTrickGroup (exact key, or any member of
+  the group).
+- Effect: tut_sksc_06's hint rows (Tricks.BeganTrick) now load; rows that ask for a trick count it when it lands,
+  not when it is announced.
+- Laptop trick-began (2026-11-10 09:31): build OK; challenge_objectives 1, tutorial 2, scoring 8, presentation 6
+  pass. tut_sksc_06 loads 5 rows, 0 failure rows, 31 hint rows (was 0 hint rows); hint rows 2 and 4 fire at the
+  start: callout 246 + 10 (key bs_5_o, ID_CHALLENGE_TUT_SKSC_06_HINT_03), then 10 (popshuvit,
+  ID_TRICK_FLIP_POP_SHUVIT). BUG: the verify shot at 41 s shows no callout panel; gesture tips (10) draw nothing in
+  game, as in the data-gated test, while text tips (12) draw.
+- FIXED (2026-11-10): the generic HUD show / hide are SetState -10 / -20, not 246 / 236. The movie pushes them with
+  the signed-byte action 0xB5 (our VM decodes it signed, `apt_vm.rs` 0xb5); b866's table read the unsigned dump, and
+  b945 already noted 826678A0 sending -10. So our show never matched: text tips drew only because state 12 sets
+  `mScreen._visible` itself; a gesture tip (10) stayed invisible. Found with a per-state trace in the data-gated test
+  (show 246: mScreen stays hidden; 12: visible, 11 to 12 drawn units; 10: hidden, 0 units). Now
+  `callout::STATE_SHOW` = -10, `STATE_HIDE` = -20, and the test asserts the gesture tip draws the menu set's
+  gesture_item textures (desktop: passes).
+- Laptop callout-show-fix (2026-11-10 10:18): build OK; presentation 6, tutorial 2, challenge_objectives 1,
+  scoring_runtime 14 (data-gated included), the callout test pass. tut_sksc_06: -10 + 10 (bs_5_o), then 10
+  (popshuvit); the shots show the panel with the right-stick gesture icon (RS, arrow) and "Pop Shuvit". tut_sksc_05:
+  4 rows, 0 failure rows, 32 hint rows (was 0); its first tip (text, HINT_03) shows -10 + 12 and hides 10 s later.
+- ObjectiveAir.GetTimeToGrind and IsDoingSpecificBoardAdjust (b1013, 2026-11-10) [code]: GetTimeToGrind (82C65E70)
+  reads the air output: while +0x1BB is set (82DB6EC0 copies trajectory selector byte 9653, set when a grind is
+  found on the centre trajectory) it returns +0xB4 - +0xB0 (predicted contact time minus time in the air, seconds),
+  else FLT_MAX (DAT_8206D108). Ours: `AirOutputFields` `flag_443`, `collision_time_180`, `time_in_state_176`
+  (`skater.player_input.physical.air`), `api::NO_GRIND_TIME`. IsDoingSpecificBoardAdjust(n) (82C65FD0) compares n
+  with the board adjust 82BE1AE8 copies from the animation packet (1 left, 2 right, 3 up, 4 down): ours
+  `ScalarAttributeInputs::board_adjust` (`skater.animation_input.fields.board_adjust`), `api::BOARD_ADJUST_*`.
+  Both now in `SkaterFacts` (its default keeps FLT_MAX). tut_sksc_05 uses `GetTimeToGrind() <= 0.5` and adjusts 3 / 4.
+  Not proven (b1013): that 82C73E50's record is 82DB6EC0's player block; when our selector reset clears flag_443
+  against retail's 82D67228.
+
+<a id="presentation-sim-rate"></a>
+
+### Presentation sim rate (2026-11-10; b900 §5, b902 §2)
+
+- Retail [code b900 / b902]: SetSimRate (47) calls the sim controller's vt+0x7C with 1.0 / atof(arg1); RestoreSimRate
+  (48) and SetSimRate's undo call vt+0x80 (rate 0). While the rate is set, the controller's per-frame update
+  (8256E4F0) posts OnRequestSetSimRate {timestep, count 1} every frame; the Simulation (82857EC8) turns the timestep
+  into a wall-clock tick rate (integration stays 1/60) and returns to 1/60 two ticks after the posts stop. So arg1
+  is a tick rate: "30" plays at half speed, "45" at three quarters. The handlers' stop (82579B90) restores it too.
+- Ours: `presentation_run::SimControl` (timestep, `restore`), `SimRateHandler` for both types,
+  `Presenter::sim_timestep` / `reset_sim` (tutorial cleanup); the challenge system posts
+  `SimulationRateRequest { timestep, ticks: 1 }` each frame into `CameraRuntime::presentation_rate_requests`, applied
+  with the camera's requests by the physics clock (`physics/clock.rs`), not online (as the camera's).
+- NOT RETAIL YET: FixSkaterInAir, PauseSim / UnpauseSim, input restrictions and objective evaluation while paused
+  are still logged stubs; whether our audio follows the slower ticks is not checked.
+- Tests: `presentation_run` (a rate holds until RestoreSimRate or reset, an unreadable rate is ignored); the clock's
+  own tests cover the 30 Hz period.
+- Laptop presentation-sim-rate (2026-11-10 08:38): build OK, presentation 6, tutorial 2, clock 8 pass. All 22
+  SetSimRate lists are hint rows (tut_sksc_03 objectives 8 / 10, tut_sksc_05 rows 5 / 6, tut_sksc_06 row 1) or
+  failure rows (09, 11, 12): none fires in a verify run. tut_sksc_05 / 06 load 0 hint rows because their conditions
+  call unported APIs (`Tricks.BeganTrick`; `ObjectiveAir.GetTimeToGrind`, `ObjectiveAir.IsDoingSpecificBoardAdjust`).
+  Not seen in game yet.
+
 <a id="tutorial-callout"></a>
 
 ### Tutorial callout (2026-11-10; b945 §2, b866 §1, b964 §5 step 6)
@@ -721,11 +884,35 @@ course from the split centres).
 - Ours, step 1: `skate_core::challenges::callout` (`Instruction` show / hide with a revision instead of the changed
   flag, `Panel::update` giving the states in order, plus the generic HUD show 246 / hide 236 when the visible byte
   changes; `CalloutParams.text_timeout` 10 s as a mod-replaceable default).
-- NOT RETAIL YET / open: the 10000 timer read as milliseconds [inferred]; the movie component, its natives
-  (GetTutorialHalText, GetTutorialGesturesButtons from scoring_trick then scoring_tutorial records,
-  PlayerStance_IsRegular) and the Show / Hide handlers are the next step, so tips are still logged stubs in game.
+- Ours, step 2: ShowTutorialCalloutHUD / HideTutorialCalloutHUD handlers write the presenter's shared `CalloutHost`
+  (instruction + panel; `Presenter::update` runs the panel and logs `PRESENTATION callout state <n>`); tutorial
+  cleanup hides it (`Presenter::reset_callout`). `hud_challenge::take_callout` moves the states, the text and the
+  resolved gestures into `ChallengeHudState.callout` (serialisable; a running count so no state is sent twice);
+  `Component::Tutorial` (hud2/hudtutorial) sends them as SetState in order and answers GetTutorialHalText (the text
+  through the movie's language), GetTutorialGesturesButtons (`[count, gesture, button, connector, ...]`) and
+  PlayerStance_IsRegular. Gestures: `TrickGuide::callout_gestures` (scoring_trick record slots, else scoring_tutorial,
+  loaded by skate-data's trick guide reader; up to 4, until the first empty slot; button remap by stance), from the
+  `TrickGuideData` resource the menu stage inserts.
+- HUD imports (`hud_imports::HudLibraries`): hudtutorial imports "Gesture Item" / "Button Item"
+  (source/controls/gesture_item, button_item2). The challenge HUD now loads every imported library from the menu
+  movie set (with shared.json merged, as the menu stage does), links them into the movie, runs the libraries' root
+  init actions first (class definitions, `Object.registerClass`), binds registered classes by linkage name, runs class
+  constructors, and handles `createEmptyMovieClip` / `attachMovie` on its clips; imported shapes join the HUD's
+  shape map with texture paths re-rooted at `../menu-movies`. prepare_hud.py writes HUD `exports` as bare ids, so the
+  HUD side drops them from the import table.
+- NOT RETAIL YET / open: the 10000 timer read as milliseconds [inferred]; the player stance is always regular
+  (PlayerStance_IsRegular true); in the data-gated test the movie draws no units after 246 + 10 (the label and the
+  gesture item are set and visible), a test-side gap: in game it draws (below).
+- Laptop tutorial-callout (2026-11-10 08:17): build OK; callout, trick_guide, presentation, tutorial, hud_challenge
+  and the data-gated test pass. tut_sksc_01: the hint3 tip logs 246 + 12 at the hint and 13 exactly 10.0 s later;
+  the shots show the retail panel ("Coach Frank Says", the coach portrait, "3 pushes = Max speed") on the right
+  and nothing after the timeout. tut_sksc_11 (verify run, 40 s): no callout state (its gesture tips are failure rows
+  and nothing failed), so the gesture row is not seen in game yet; it is covered by the data-gated test only.
 - Tests: `challenges::callout` (gesture tip once and repeat no-op, stance 77; text tip 12 / 11 / timeout 13 / `#`;
-  hide, clear stays cleared, none).
+  hide, clear stays cleared, none); `presentation_run` (callout events reach the HUD state in order, cleanup hides);
+  skate-data `trick_guide` (scoring_trick / scoring_tutorial class hashes); data-gated
+  `the_tutorial_callout_shows_its_text_and_gestures` (desktop 2026-11-10: label "Do a kickflip", then "Turn", hidden
+  after 13 / 236; with the libraries linked, mcGestureItem0 visible for the kickflip tip and hidden for a text tip).
 
 ### The DPO: killed it time and position (2026-11-08, b995 items 2a / 2b, b997 sections 1 and 2)
 

@@ -20,6 +20,7 @@ mod session;
 mod volumes;
 mod career;
 mod challenges;
+mod music;
 mod minimap;
 mod world_audio;
 pub(crate) mod world_tuning;
@@ -645,6 +646,7 @@ fn snapshot_ro(world: &World, mods: &mut Mods, camera: Option<[f32; 3]>) -> serd
         "triggers": triggers::snapshot(world),
         "challenges": challenges::snapshot(world),
         "career": career::snapshot(world),
+        "music": music::snapshot(world),
         "menus": crate::retail_menus::snapshot(world),
         "tick": physics.ticks,
         "keys": keys,
@@ -688,6 +690,7 @@ fn fixed(world: &mut World) {
         bevy::log::tracing::info_span!("mods.triggers").in_scope(|| triggers::dispatch(world, &mut mods));
         challenges::dispatch(world, &mut mods);
         career::dispatch(world, &mut mods);
+        music::dispatch(world, &mut mods);
         let ids: Vec<_> = mods
             .manager
             .packages
@@ -940,6 +943,7 @@ fn clear_runtime(world: &mut World, mods: &mut Mods) {
     triggers::clear(world);
     challenges::clear(world);
     career::clear(world);
+    music::clear(world);
     capture::clear(world);
     clear_camera_angle(world, None);
     clear_water_look(world, None);
@@ -986,6 +990,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
         triggers::clear_owner(world, id);
         challenges::clear_owner(world, id);
         career::clear_owner(world, id);
+        music::clear_owner(world, id);
         capture::clear_owner(world, id);
         clear_camera_angle(world, Some(id));
         clear_water_look(world, Some(id));
@@ -1072,6 +1077,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
             triggers::clear_owner(world, &id);
             challenges::clear_owner(world, &id);
             career::clear_owner(world, &id);
+            music::clear_owner(world, &id);
             capture::clear_owner(world, &id);
             clear_camera_angle(world, Some(&id));
             clear_water_look(world, Some(&id));
@@ -1111,6 +1117,7 @@ fn apply(world: &mut World, mods: &mut Mods) {
             triggers::clear_owner(world, &id);
             challenges::clear_owner(world, &id);
             career::clear_owner(world, &id);
+            music::clear_owner(world, &id);
             capture::clear_owner(world, &id);
             clear_camera_angle(world, Some(&id));
             clear_water_look(world, Some(&id));
@@ -1629,6 +1636,14 @@ fn apply_one(
         Command::ChallengeAbort {} => challenges::abort(world)?,
         Command::ChallengeEnable { id: challenge, enabled } => challenges::enable(world, id, &challenge, enabled)?,
         Command::ChallengeConfigure { id: challenge, options } => challenges::configure(world, id, challenge, options)?,
+        Command::MusicPlaylist { path, queue } => music::playlist(world, mods, id, &path, queue)?,
+        Command::MusicSoundtrack { track } => music::soundtrack(world, id, track)?,
+        Command::MusicStop {} => music::stop(world, id)?,
+        Command::MusicSkip {} => music::skip(world)?,
+        Command::MusicVolume { level } => music::volume(world, id, level)?,
+        Command::MusicVar { name, value } => music::var(world, name, value)?,
+        Command::MusicPost { event } => music::post(world, event)?,
+        Command::MusicCaption { options } => music::caption(world, id, options)?,
         Command::CareerAddSales { amount, reason } => career::add_sales(world, id, amount, reason)?,
         Command::CareerAddMoney { amount } => career::add_money(world, id, amount)?,
         Command::CareerArmAction { id: action } => career::arm_action(world, id, &action)?,

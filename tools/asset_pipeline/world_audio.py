@@ -562,6 +562,64 @@ def speech_index(archive_path: Path, prefix: str = 'livingworld') -> dict:
     return out
 
 
+# Presentation speech lines (Speech / SpeechNoWait events; doc 42 "Presentation speech", research b874): nis.big holds
+# one bare .sns body per line named <character>_<speech id>_<category>-<tag>_<take>[_360] and nisresident.big one
+# 8-byte .snr header per line. The character is the eSk8Characters id (menu-tables.json "speakers").
+NIS_LINE = re.compile(r'(\d+)_(\d+)_([A-Za-z0-9]+)-([A-Za-z0-9-]+)_(\d+)(_360)?\.sns')
+
+
+def nis_index(archive_path: Path) -> dict:
+    """{'archive': name, 'lines': [{file, character, id, category, tag, take, x360, snr}]} in archive order."""
+    from tools.owned_game.big import BigArchive
+    archive = BigArchive(archive_path)
+    resident = _nested(archive, 'nisresident.big')
+    headers = {Path(e.path).stem: resident.read(e) for e in resident.entries}
+    sns = {Path(e.path).stem for e in archive.entries if e.path.endswith('.sns')}
+    lines = []
+    # Retail (824A5A08, research b1014) walks nisresident.big's file table in order and reads the character from
+    # name chars 0..1 and the speech id from chars 3..6; the order is the take order of a line.
+    for e in resident.entries:
+        stem = Path(e.path).stem
+        try:
+            character, speech_id = int(stem[0:2]), int(stem[3:7])
+        except ValueError:
+            continue
+        if stem not in sns:
+            continue
+        m = NIS_LINE.fullmatch(stem + '.sns')
+        lines.append({'file': stem, 'character': character, 'id': speech_id, 'category': m[3] if m else '',
+                      'tag': m[4] if m else '', 'take': int(m[5]) if m else 0, 'x360': bool(m and m[6]),
+                      'snr': headers[stem].hex()})
+    return {'archive': archive_path.name, 'lines': lines}
+
+
+def decode_nis(archive_path: Path, index: dict, output: Path, work: Path, vgmstream: Path, decode, log) -> int:
+    """Decode every line to output/<file>.wav (`decode` = audio_export._decode), one worker per character.
+    Returns the number of lines written."""
+    from tools.owned_game.big import BigArchive
+    from .audio_export import _in_order
+    archive = BigArchive(archive_path)
+    by_name = {Path(e.path).name: e for e in archive.entries}
+    groups: dict[int, list] = {}
+    for line in index['lines']:
+        groups.setdefault(line['character'], []).append(line)
+    output.mkdir(parents=True, exist_ok=True)
+
+    def decode_group(character):
+        folder = work / str(character)
+        folder.mkdir(parents=True, exist_ok=True)
+        names = []
+        for line in groups[character]:
+            (folder / f"{line['file']}.snr").write_bytes(bytes.fromhex(line['snr']))
+            (folder / f"{line['file']}.sns").write_bytes(archive.read(by_name[line['file'] + '.sns']))
+            names.append(f"{line['file']}.snr")
+        decode(vgmstream, folder, names, log)
+        for line in groups[character]:
+            (folder / f"{line['file']}.snr.wav").replace(output / f"{line['file']}.wav")
+        return len(groups[character])
+    return sum(_in_order(decode_group, groups))
+
+
 def speech_requested() -> bool:
     # On by default (USER-ASKS 338); the game passes SKATE_SETUP_SPEECH=0 when the player switched Ped Speech off.
     return os.environ.get('SKATE_SETUP_SPEECH', '') != '0'

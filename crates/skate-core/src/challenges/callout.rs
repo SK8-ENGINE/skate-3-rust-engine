@@ -9,9 +9,10 @@ pub const STATE_TEXT: i32 = 11;
 pub const STATE_TEXT_FIRST: i32 = 12;
 pub const STATE_HIDE_TEXT: i32 = 13;
 pub const STATE_STANCE: i32 = 77;
-/// The generic HUD show / hide of a component.
-pub const STATE_SHOW: i32 = 246;
-pub const STATE_HIDE: i32 = 236;
+/// The generic HUD show / hide of a component. The movie pushes them as signed bytes (action 0xB5): -10 / -20, which
+/// an unsigned dump shows as 246 / 236 (b866's table); 826678A0 sends -10.
+pub const STATE_SHOW: i32 = -10;
+pub const STATE_HIDE: i32 = -20;
 
 /// Retail conventions a mod's tip data uses the same way.
 pub const HIDE_TEXT: &str = "#";

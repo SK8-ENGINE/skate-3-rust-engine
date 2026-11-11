@@ -77,6 +77,10 @@ pub(crate) struct Awards {
     pub events: Vec<serde_json::Value>,
     /// Discovery statuses the graphs set (Discovery.SetDiscoveryStatus), applied to the challenge records.
     pub discovery: Vec<(String, String)>,
+    /// An ExecuteEventsAndChangeState group to start (`career/<graph>/<state>`); the graph waits for it.
+    execute: Option<(String, Vec<skate_core::career::graph::Event>)>,
+    /// Deferred events released to play (as one group each, not waited on).
+    release: Vec<Vec<skate_core::career::graph::Event>>,
 }
 
 impl Awards {
@@ -188,6 +192,10 @@ fn graph_names(graphs: &std::collections::BTreeMap<String, skate_core::career::g
 #[derive(Resource, Default)]
 pub(crate) struct CareerState {
     pub awards: Awards,
+    /// The Execute group the running graph waits for.
+    executing: Option<String>,
+    /// Counter for released deferred groups' ids.
+    released: u64,
     pub summary: Vec<skate_data::career_summary::SummaryRow>,
     pub reward_tabs: Vec<skate_core::career::presentation::Tab>,
     pub data: Option<Loaded>,
@@ -328,12 +336,13 @@ fn settle(career: &mut Career, awards: &mut Awards, data: &Loaded, mut requests:
                 Request::MilestoneEarned => awards.event(serde_json::json!({"name": "career_milestone"})),
                 Request::UnlockTeammate => awards.event(serde_json::json!({"name": "career_teammate"})),
                 Request::BrandTier(tier) => awards.event(serde_json::json!({"name": "career_tier", "tier": tier})),
-                Request::Events { graph, state, mode } => {
+                Request::Events { graph, state, mode, .. } => {
                     let events = graphs.get(graph).and_then(|g| g.states.get(state)).map(|s| s.events.clone()).unwrap_or_default();
                     match mode {
-                        EventMode::Execute => awards.play(events),
+                        // 827D1480 builds no group for a state without events (the graph already moved on).
+                        EventMode::Execute if !events.is_empty() => awards.execute = Some((format!("career/{graph}/{state}"), events)),
                         EventMode::Defer => career.deferred.extend(events),
-                        EventMode::None => {}
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -352,6 +361,58 @@ fn settle(career: &mut Career, awards: &mut Awards, data: &Loaded, mut requests:
         next.extend(career.update(progression, graphs));
         requests = next;
     }
+}
+
+/// The career's presentation groups on the game's presenter: GrantAchievement grants, an Execute group starts and its
+/// finish (827D1420) moves the graph on, released deferred events play as groups. Without a presenter (switched off)
+/// the events play at once as before. Returns whether the career changed.
+fn run_presentation(state: &mut CareerState, data: &Loaded, mut presenter: Option<&mut crate::presentation_run::Presenter>) -> bool {
+    use skate_core::presentation::{Group, Started};
+    let mut changed = false;
+    for _ in 0..8 {
+        if let Some(p) = presenter.as_deref_mut() {
+            for name in p.take_grants() {
+                state.awards.grant(&name);
+            }
+            if let Some(id) = state.executing.clone() {
+                if !p.take_finished(&id) {
+                    break;
+                }
+                info!("SKATE_CAREER presentation group {id} finished");
+                state.executing = None;
+                let requests = state.career.events_finished(&data.progression, &data.graphs);
+                settle(&mut state.career, &mut state.awards, data, requests);
+                changed = true;
+            }
+            for events in std::mem::take(&mut state.awards.release) {
+                state.released += 1;
+                let id = format!("career/deferred/{}", state.released);
+                let started = p.manager.start(Group { id: id.clone(), owner: "career".into(), events });
+                info!("SKATE_CAREER presentation {id} {started:?}");
+            }
+            let Some((id, events)) = state.awards.execute.take() else { break };
+            let started = p.manager.start(Group { id: id.clone(), owner: "career".into(), events });
+            info!("SKATE_CAREER presentation {id} {started:?}");
+            if started == Started::Dropped {
+                // A full queue drops the group: nothing will finish it, so the change happens now.
+                let requests = state.career.events_finished(&data.progression, &data.graphs);
+                settle(&mut state.career, &mut state.awards, data, requests);
+                changed = true;
+                continue;
+            }
+            state.executing = Some(id);
+        } else {
+            for events in std::mem::take(&mut state.awards.release) {
+                state.awards.play(events);
+            }
+            let Some((_, events)) = state.awards.execute.take() else { break };
+            state.awards.play(events);
+            let requests = state.career.events_finished(&data.progression, &data.graphs);
+            settle(&mut state.career, &mut state.awards, data, requests);
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Save entries that point at ids the loaded data does not have (a mod's content after the mod is gone) are
@@ -576,7 +637,12 @@ fn present(state: &mut CareerState, data: &Loaded, screens: &mut RewardScreens, 
                 state.career.unlocks.summary_big.clear();
                 state.career.pending = Default::default();
             }
-            Out::PlayDeferred => state.awards.play(std::mem::take(&mut state.career.deferred)),
+            Out::PlayDeferred => {
+                let events: Vec<_> = std::mem::take(&mut state.career.deferred).into();
+                if !events.is_empty() {
+                    state.awards.release.push(events);
+                }
+            }
             Out::Started | Out::Done => info!("SKATE_CAREER presentation {o:?}"),
         }
     }
@@ -677,7 +743,8 @@ fn publish_gate(career: &Career, challenges: &mut crate::challenges::Challenges)
 fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut results: MessageReader<ChallengeResult>,
           mut discovered: MessageReader<ChallengeDiscovered>,
           menus: Option<ResMut<crate::retail_menus::RetailMenus>>, mut profile: ResMut<CareerProfile>,
-          challenges: Option<ResMut<crate::challenges::Challenges>>, mut screens: ResMut<RewardScreens>) {
+          challenges: Option<ResMut<crate::challenges::Challenges>>, mut screens: ResMut<RewardScreens>,
+          mut presenter: Option<ResMut<crate::presentation_run::Presenter>>) {
     let state: &mut CareerState = &mut res;
     if !state.tried {
         state.tried = true;
@@ -730,6 +797,7 @@ fn update(mut res: ResMut<CareerState>, config: Res<crate::config::Config>, mut 
     }
     let runner_idle = challenges.as_ref().is_none_or(|c| c.run.is_none() && c.tutorial.is_none());
     changed |= present(state, &data, &mut screens, runner_idle);
+    changed |= run_presentation(state, &data, presenter.as_deref_mut());
     if let Some(mut menus) = menus.filter(|_| changed || first) {
         publish_facts(&state.career, &data, &mut menus);
     }

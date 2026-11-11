@@ -180,6 +180,38 @@ impl ChallengeOptions {
     }
 }
 
+/// A mod's music caption style (`sdk.music.caption`; docs/hails-additions/11-audio.md#music-banks): unset fields
+/// keep the engine's value.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MusicCaptionOptions {
+    pub enabled: Option<bool>,
+    pub fade_in: Option<f32>,
+    pub hold: Option<f32>,
+    pub fade_out: Option<f32>,
+    /// Percent of the window from the left / bottom edge.
+    pub left: Option<f32>,
+    pub bottom: Option<f32>,
+    pub title_size: Option<f32>,
+    pub artist_size: Option<f32>,
+}
+
+impl MusicCaptionOptions {
+    pub fn validate(&self) -> bool {
+        let seconds = |t: Option<f32>| t.is_none_or(|t| t.is_finite() && (0.0..=60.0).contains(&t));
+        let percent = |t: Option<f32>| t.is_none_or(|t| t.is_finite() && (0.0..=95.0).contains(&t));
+        let size = |t: Option<f32>| t.is_none_or(|t| t.is_finite() && (6.0..=120.0).contains(&t));
+        seconds(self.fade_in) && seconds(self.hold) && seconds(self.fade_out) && percent(self.left) && percent(self.bottom)
+            && size(self.title_size) && size(self.artist_size)
+    }
+}
+
+/// A path inside a mod folder: relative, forward or back slashes, no `..`, no drive or root.
+fn valid_package_path(path: &str) -> bool {
+    !path.is_empty() && path.len() <= 260 && !path.starts_with(['/', '\\']) && !path.contains(':')
+        && path.split(['/', '\\']).all(|s| !s.is_empty() && s != "..") && !path.chars().any(char::is_control)
+}
+
 fn valid_trigger_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
 }
@@ -779,6 +811,36 @@ pub enum Command {
         #[serde(default)]
         options: Option<TriggerShapeOptions>,
     },
+    MusicPlaylist {
+        /// A playlist JSON in the mod's folder (its banks relative to it).
+        path: String,
+        /// Add to the queue instead of replacing it.
+        #[serde(default)]
+        queue: bool,
+    },
+    MusicSoundtrack {
+        /// One disc soundtrack track (1-based); none: every track, shuffled.
+        #[serde(default)]
+        track: Option<u32>,
+    },
+    MusicStop {},
+    MusicSkip {},
+    MusicVolume {
+        /// The mod's music volume, 0..2 (1 = the engine's level); none: back to the engine's.
+        #[serde(default)]
+        level: Option<f32>,
+    },
+    MusicVar {
+        name: String,
+        value: i32,
+    },
+    MusicPost {
+        event: u32,
+    },
+    MusicCaption {
+        #[serde(default)]
+        options: Option<MusicCaptionOptions>,
+    },
     ChallengeStart {
         id: String,
     },
@@ -1233,6 +1295,13 @@ impl Command {
             Self::TriggerEnable { id, .. } => valid_trigger_id(id),
             Self::ChallengeStart { id } | Self::ChallengeEnable { id, .. } => crate::schema::valid_id(id),
             Self::ChallengeAbort {} => true,
+            Self::MusicPlaylist { path, .. } => valid_package_path(path),
+            Self::MusicSoundtrack { track } => track.is_none_or(|t| (1..=4096).contains(&t)),
+            Self::MusicStop {} | Self::MusicSkip {} => true,
+            Self::MusicVolume { level } => level.is_none_or(|l| l.is_finite() && (0.0..=2.0).contains(&l)),
+            Self::MusicVar { name, .. } => !name.is_empty() && name.len() <= 16 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+            Self::MusicPost { event } => *event <= 0x00FF_FFFF,
+            Self::MusicCaption { options } => options.as_ref().is_none_or(MusicCaptionOptions::validate),
             Self::CareerAddSales { amount, reason } => {
                 *amount <= MAX_CAREER_AMOUNT && reason.as_ref().is_none_or(|r| r.len() <= 128)
             }
@@ -1397,6 +1466,14 @@ fn command_kind(command: &Command) -> &'static str {
         Command::TriggerTrack { .. } => "trigger_track",
         Command::TriggerUntrack { .. } => "trigger_untrack",
         Command::TriggerConfigure { .. } => "trigger_configure",
+        Command::MusicPlaylist { .. } => "music_playlist",
+        Command::MusicSoundtrack { .. } => "music_soundtrack",
+        Command::MusicStop { .. } => "music_stop",
+        Command::MusicSkip { .. } => "music_skip",
+        Command::MusicVolume { .. } => "music_volume",
+        Command::MusicVar { .. } => "music_var",
+        Command::MusicPost { .. } => "music_post",
+        Command::MusicCaption { .. } => "music_caption",
         Command::ChallengeStart { .. } => "challenge_start",
         Command::ChallengeAbort { .. } => "challenge_abort",
         Command::ChallengeEnable { .. } => "challenge_enable",
@@ -1514,6 +1591,7 @@ fn default_snapshot() -> Value {
         "volumes": {},
         "triggers": {"volumes": [], "bodies": {}},
         "challenges": {"on": false, "list": [], "run": Value::Null},
+        "music": {"on": false, "playing": Value::Null, "queued": 0, "owner": Value::Null, "volume": 1.0},
         "career": {"on": false},
         "attach": Value::Null,
         "detach_error": Value::Null,
@@ -1699,6 +1777,7 @@ impl Vm {
             capabilities.set("volumes", 1)?;
             capabilities.set("triggers", 1)?;
             capabilities.set("challenges", 1)?;
+            capabilities.set("music", 1)?;
             capabilities.set("career", 1)?;
             capabilities.set("capture", 1)?;
             capabilities.set("multiplayer_debug", 1)?;

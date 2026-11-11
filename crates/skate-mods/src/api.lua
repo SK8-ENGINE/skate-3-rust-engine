@@ -596,6 +596,25 @@ function sdk.triggers.track(key, options) submit{kind="trigger_track",key=key,op
 function sdk.triggers.untrack(key) submit{kind="trigger_untrack",key=key} end
 function sdk.triggers.configure(options) submit{kind="trigger_configure",options=non_empty(options)} end
 
+-- Music (docs/hails-additions/11-audio.md "Music banks"): the music queue, the player's own banks through playlists
+-- (made with `skate3rust --pack-music-folder` and `--music-playlist`), the disc soundtrack, volume, the playing
+-- PathFinder graph's variables and events, the custom-track caption. on_event gets
+-- {name="music_track_started", title, artist, custom}. A mod's queue, volume and caption end with the mod.
+-- Do not share banks that hold copyrighted music: share playlists for people's own banks.
+sdk.music = { version = 1 }
+local function music_snapshot() return as_table(sdk.snapshot.music) or {} end
+function sdk.music.state() return music_snapshot() end
+function sdk.music.playing() return as_table(music_snapshot().playing) end
+function sdk.music.play_playlist(path) submit{kind="music_playlist",path=path,queue=false} end
+function sdk.music.queue_playlist(path) submit{kind="music_playlist",path=path,queue=true} end
+function sdk.music.play_soundtrack(track) submit{kind="music_soundtrack",track=track} end
+function sdk.music.stop() submit{kind="music_stop"} end
+function sdk.music.skip() submit{kind="music_skip"} end
+function sdk.music.set_volume(level) submit{kind="music_volume",level=level} end
+function sdk.music.set_var(name, value) submit{kind="music_var",name=name,value=value} end
+function sdk.music.post(event) submit{kind="music_post",event=event} end
+function sdk.music.caption(options) submit{kind="music_caption",options=non_empty(options)} end
+
 -- Challenges (own the spot): the current map's challenges with their saved records, the run going, start / abort,
 -- hiding a challenge's sign-up, and per-mod value overrides (undone when the mod stops). Events arrive in on_event:
 -- {name="challenge_discovered"|"challenge_started"|"challenge_ended"|"challenge_personal_best", challenge=id, ...}.

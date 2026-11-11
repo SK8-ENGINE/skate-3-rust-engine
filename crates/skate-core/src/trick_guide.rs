@@ -74,6 +74,30 @@ pub struct TrickGuide {
     pub gestures: Vec<String>,
     /// Button names by slot button id (TU3 0x83027350).
     pub buttons: Vec<String>,
+    /// scoring_tutorial records' input slots by key (the tutorial callout's fallback, b945 §1).
+    pub tutorial: BTreeMap<Key, Vec<Slot>>,
+}
+
+impl TrickGuide {
+    /// One slot as the movies read it: gesture name (58 / 59 blank), button name (remapped for the stance), connector.
+    pub fn slot_names(&self, s: &Slot, stance: Stance) -> [String; 3] {
+        let name = |table: &[String], i: u32| table.get(i as usize).cloned().unwrap_or_default();
+        let gesture = if BLANK_GESTURES.contains(&s.gesture) { 0 } else { s.gesture };
+        [
+            name(&self.gestures, gesture),
+            name(&self.buttons, remap_button(s.button, stance)),
+            CONNECTORS.get(s.connector as usize).copied().unwrap_or("").to_owned(),
+        ]
+    }
+
+    /// HUDComponents.GetTutorialGesturesButtons (82661238): the scoring_trick record's slots, else the
+    /// scoring_tutorial one's, up to 4 and until the first empty slot.
+    pub fn callout_gestures(&self, key: Key, stance: Stance) -> Vec<[String; 3]> {
+        let slots = self.tricks.iter().find(|(k, _)| *k == key).map(|(_, t)| &t.entry.slots).or_else(|| self.tutorial.get(&key));
+        slots
+            .map(|v| v.iter().take(SLOTS).take_while(|s| s.gesture != 0 || s.button != 0).map(|s| self.slot_names(s, stance)).collect())
+            .unwrap_or_default()
+    }
 }
 
 /// Which list an entry belongs to.
@@ -438,19 +462,7 @@ impl TrickGuideState {
     /// gesture name, button name (remapped) and connector per slot.
     pub fn gestures_buttons(&self, guide: &TrickGuide, stance: Stance) -> (usize, Vec<[String; 3]>) {
         let used = self.slots.iter().filter(|s| s.gesture != 0 || s.button != 0).count();
-        let name = |table: &[String], i: u32| table.get(i as usize).cloned().unwrap_or_default();
-        let slots = self
-            .slots
-            .iter()
-            .map(|s| {
-                let gesture = if BLANK_GESTURES.contains(&s.gesture) { 0 } else { s.gesture };
-                [
-                    name(&guide.gestures, gesture),
-                    name(&guide.buttons, remap_button(s.button, stance)),
-                    CONNECTORS.get(s.connector as usize).copied().unwrap_or("").to_owned(),
-                ]
-            })
-            .collect();
+        let slots = self.slots.iter().map(|s| guide.slot_names(s, stance)).collect();
         (used, slots)
     }
 }
