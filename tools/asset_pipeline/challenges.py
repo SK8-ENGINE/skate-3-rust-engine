@@ -111,6 +111,25 @@ AI_PATH_INDEX_OVERRIDE = 'Hash_A2D9488ABA12559C'
 AI_PATHS = 'Hash_0D46945C37C9C237'  # tRoundPaths: 200 u32 text offsets, u32 all paths (+0x320), u32 (+0x324)
 END_TIME_BONUS = 'Hash_5FB1236FD2CB7556'
 COMPETITORS = _field('Competitors')
+# Contests and demos (research b877 / b1009, field names matched by hash 2026-11-11): the params row's ContestRounds
+# (tContestRoundDefinition: a round row RefSpec + 8 bytes) -> round rows (class 1E04F6C0A209B06A) in the local vault.
+CONTEST_FAMILIES = ('contests', 'demos')
+CONTEST_ROUNDS = _field('ContestRounds')
+ROUND_TIME = _field('RoundTime')
+RUN_TYPE = _field('RunType')  # eRunType: 0 normal, 1 SoloRun, 3 TimedRunSingle, 4 TimedRunMulti, 5 (unnamed)
+CONTEST_VARIANT = _field('ContestVariant')  # eContestType: the scorer (Sequence, Sequence_Grind, Air_Only, ...)
+AI_SCORE_ADJUSTMENT = _field('AIScoreAdjustment')
+CUMULATIVE = _field('CumulativeScoring')
+CUMULATIVE_MIN = _field('CumulativeMinScore')
+SOLO_RUN_NUM = _field('SoloRunNum')
+SOLO_AI_MIN = _field('SoloRunAIScoreMin')  # Int16 (b877 read these as floats: 0)
+SOLO_AI_MAX = _field('SoloRunAIScoreMax')
+DEMO_TARGET = _field('DemoTargetScore')
+WAIT_LOCATION = _field('WaitLocation')
+ROUND_BOUNDARY = _field('RoundBoundary')
+SPOT_VOLUMES = _field('SpotVolumes')
+ROUND_PATHS = _field('Paths')
+MUSIC_TYPE = 'Hash_44754347A934FDCD'  # eChallengeMusicType (research music-challenges section 6)
 ONLINE_COMPETITORS = 'Hash_598056F37D38D27A'
 
 
@@ -588,10 +607,91 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
                        final_ribbon=ribbon(params.get(RACE_FINAL_RIBBON)),
                        leg_finish_ribbon=ribbon(params.get(RACE_LEG_FINISH_RIBBON))))
 
+    def contest(key, fields, bank_binary, family):
+        """A contest or demo row (b1009): its rounds from the local vault; competitors from the bank row."""
+        if key not in local:
+            raise ValueError('no local data vault')
+        _, archive, vlt_entry, bin_entry = local[key]
+        data, binary = read_vault(archive, vlt_entry, bin_entry, 'local')
+        by_hash = {(r['class'], key_hash(r['key'])): r for r in data['collections']}
+
+        def merged(ref):
+            out, seen = {}, set()
+            while ref and ref not in seen and ref in by_hash:
+                seen.add(ref)
+                row = by_hash[ref]
+                for name, value in row['fields'].items():
+                    out.setdefault(name, value)
+                ref = (ref[0], key_hash(row['parent'])) if row.get('parent') else None
+            return out
+
+        def num(f, name, kind, default=None):
+            value = (f.get(name) or {}).get('data')
+            if not value:
+                return default
+            raw = bytes.fromhex(value)
+            return {'i16': lambda: struct.unpack_from('>h', raw)[0], 'i32': lambda: struct.unpack_from('>i', raw)[0],
+                    'f32': lambda: round(struct.unpack_from('>f', raw)[0], 6), 'bool': lambda: raw[0] != 0}[kind]()
+
+        def locator(f, name):
+            value = (f.get(name) or {}).get('data')
+            return cstring(binary, int(value[:8], 16)).decode('utf-8') if value and int(value[:8], 16) else None
+
+        def volume_name(raw):
+            try:
+                return parse_trigger(raw, binary)[1]
+            except (ValueError, struct.error, IndexError):
+                return None
+
+        params = merged((PARAMS, hash64(key)))
+        rounds = []
+        for item in ((params.get(CONTEST_ROUNDS) or {}).get('array') or {}).get('items') or []:
+            ref = (f'Hash_{item[:16]}', int(item[16:32], 16))
+            r = merged(ref)
+            paths = bytes.fromhex((r.get(ROUND_PATHS) or {}).get('data') or '')
+            names = []
+            if len(paths) >= 0x328:
+                for offset in struct.unpack_from('>200I', paths, 0):
+                    name = cstring(binary, offset).decode('utf-8') if offset else ''
+                    if name:
+                        names.append(name)
+            boundary = (r.get(ROUND_BOUNDARY) or {}).get('data')
+            spots = ((r.get(SPOT_VOLUMES) or {}).get('array') or {}).get('items') or []
+            rounds.append(dict(
+                key='%016x' % ref[1], variant=num(r, CONTEST_VARIANT, 'i32', 0), run_type=num(r, RUN_TYPE, 'i32', 0),
+                round_time=num(r, ROUND_TIME, 'i16', 0), ai_adjustment=num(r, AI_SCORE_ADJUSTMENT, 'f32', 1.0),
+                cumulative=num(r, CUMULATIVE, 'bool', False), cumulative_min=num(r, CUMULATIVE_MIN, 'i32', 0),
+                solo_runs=num(r, SOLO_RUN_NUM, 'i16', 1), solo_ai_min=num(r, SOLO_AI_MIN, 'i16', 0),
+                solo_ai_max=num(r, SOLO_AI_MAX, 'i16', 0), demo_target=num(r, DEMO_TARGET, 'i32'),
+                start=locator(r, START), wait=locator(r, WAIT_LOCATION),
+                boundary=volume_name(bytes.fromhex(boundary)) if boundary else None,
+                spot_volumes=[n for n in (volume_name(bytes.fromhex(i)) for i in spots) if n],
+                ai_paths=names))
+        if not rounds:
+            raise ValueError('no ContestRounds')
+
+        def competitors(field):
+            out = []
+            for item in ((fields.get(field) or {}).get('array') or {}).get('items') or []:
+                offset, kind = struct.unpack_from('>II', bytes.fromhex(item), 0)
+                out.append(dict(character=cstring(bank_binary, offset).decode('utf-8'), kind=kind))
+            return out
+
+        world = int((fields.get(WORLD) or {}).get('data', '0' * 16)[:16], 16)
+        district = next((d for d, _ in global_locators() if hash64(d) == world), None)
+        title_id = (fields.get(TITLE) or {}).get('data') or None
+        return dict(
+            id=key, family=family, demo=family == 'demos', map=label_of(district) if district else None, district=district,
+            title_id=title_id, title=text.get(title_id) if title_id else None,
+            description_id=(fields.get(DESCRIPTION) or {}).get('data') or None,
+            sign_up_radius=radius(fields, SIGN_UP_RADIUS), discovery_radius=radius(fields, DISCOVERY_RADIUS),
+            challenge_type=_u32(fields.get(CHALLENGE_TYPE)), music_type=num(params, MUSIC_TYPE, 'i32', num(fields, MUSIC_TYPE, 'i32')),
+            competitors=competitors(COMPETITORS), rounds=rounds)
+
     class_of = lambda name: 'Hash_%016X' % hash64(name)
     ribbon_names = {hash64(k): k for (c, k) in rows if c in (class_of('ribbon_indicator'), class_of('ribbon_spline_colour'))}
     icon_names = {hash64(k): k for (c, k) in rows if c == class_of('fe_map_icons')}
-    result, tutorials, races, skipped = [], [], [], []
+    result, tutorials, races, contests, skipped = [], [], [], [], []
     for (cls, key), (parent, _) in sorted(rows.items()):
         if cls != CHALLENGE or key.endswith('_ol'):
             continue
@@ -600,6 +700,13 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             try:
                 tutorials.append(tutorial(key, fields, origin[cls, key][1]))
             except (KeyError, ValueError, StopIteration) as error:
+                skipped.append(f'{key} ({error})')
+            continue
+        contest_family = next((f for f in CONTEST_FAMILIES if f in walked[1:]), None)
+        if contest_family and key not in ('street', 'vert'):
+            try:
+                contests.append(contest(key, fields, origin[cls, key][1], contest_family))
+            except (KeyError, ValueError, StopIteration, struct.error) as error:
                 skipped.append(f'{key} ({error})')
             continue
         if RACES in walked[1:]:
@@ -688,7 +795,7 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'format': FORMAT, 'version': VERSION, 'challenges': result, 'tutorials': tutorials,
-                                  'own_the_lots': lots, 'races': races}, indent=1), encoding='utf-8')
+                                  'own_the_lots': lots, 'races': races, 'contests': contests}, indent=1), encoding='utf-8')
     report(f'Challenges: {len(result)} ({", ".join(FAMILIES)}) on {len({c["map"] for c in result})} maps, '
            f'{len(tutorials)} tutorials, {len(lots)} own the lots, {len(races)} races'
            + (f'; left out: {", ".join(skipped)}' if skipped else ''))
