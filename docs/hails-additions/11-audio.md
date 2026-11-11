@@ -5172,3 +5172,29 @@ Retail parity for every audio surface tag 0..127, hard and soft wheels: tag → 
   `a_playlist_can_add_the_soundtrack_and_override_its_shuffle`.
 - Next: the engine's own music modes
   (which segments make a track and in what order), the streaming player, zones, menu music (b1015 port plan).
+
+## Music Player screen (2026-11-11, world/challenges; research .local/research/music-player-movie-calls.md)
+
+**Problem.** The crossbar's Options tab row Music Player (every mode) was greyed: the engine had no FE 26 screen, so the player could not pick which soundtrack songs play, switch between the music player and the ambient mode, or set the music volume there.
+
+**Retail [code, TU3 Ghidra].**
+- The MusicPlayer row opens FE 26 (`sub_8261AF30(26, 0)`; vtable 0x82303418, init 0x8260B400 opens template 31 `musicplayer/musicplayertest.swf`, key `74d4d64c4784bca1`, input 0x8260B6F0). The record sends keys to the movie after the C++ handler.
+- The movie calls `_global.MusicPlayer` natives (registrar 0x825AC8B8, 25 names): GetDefaultSongList (song ids in table order), GetSongInfo(id) = [artist, title, album], GetPlaylist, IsSongInPlayList(index), GetMusicPlayerSong (playing id), GetMusicVolume, SetEditMode(bool). Song index i is table entry i + 1, our soundtrack track i + 1.
+- State in the options block: playlist ids +0xF8 (up to 100), count +0x288, music volume +0x88 (the Game Settings Music row), mode +0xD4; saved in the profile ("ProfileBackEnd::MusicPlayer").
+- `ToggleSongInPlayList` (0x8260B5D0): a listed song leaves (the last entry takes its slot) unless it is the only one; an unlisted one is appended. The screen re-sorts the list into table order after each toggle.
+- Modes (`SetMusicMode` 0x825E4A60, `sub_8260BBE0` changes it only when it differs): 0 the game's default music (a new profile), 1 the movie's "Interactive Mode" tab (the composers' area scores, no soundtrack), 2 "Playlist Mode" (the playlist).
+- The movie's states (frame actions of action block 9816): 0 Ambient (Interactive), 1 Player (Playlist), 2 Edit, 60 RefreshPlayer, 61 RefreshAmbient, 62 RefreshEdit, 63 RefreshPlayList; kPlayListSize 11 rows. The movie uses APT opcode 0x72 (handler 0x82E73C68: push 0, then setVariable), added to `apt_vm`.
+- Input 0x8260B6F0 (APT keys): 3 Back (ends the edit, closes; saves the profile when something changed), 2 in the Music Player tab's edit plays the highlighted song now, 5 in that edit toggles it (not consumed: the movie updates the checkbox), 14 / 15 on a volume row (table 0x83026E70, row 0 of either tab) step the volume by 0.1 (clamped 0..1, below 0.05 snaps to 0; SetState 0x3C / 0x3D / 0x3E), 7 the Music Player tab (mode 2; SetState 1 then 0x3F), 10 the Ambient tab (mode 1; SetState 0). Sounds: fe records 0x4D927CD64CC8B818 (Back, select), 0x17472B6D55E36C95 (toggle), 0xDC1C35398D5597BC / 0x4648BEBA06CEC261 (volume down / up), 0xFD87566338C118E1 (tab), 0x73D7CC18FE21DBE9 (edit ended).
+
+**Change.**
+- `skate_core::music_player`: MusicMode codes, `song_id`, `toggle`, `sanitise` / `default_playlist` (tests).
+- `skate-game/src/music_player_host.rs`: the natives (case-insensitive: the movie calls GetPlayList) and the key handler, states, sounds; `song_rows` reads menu-tables `ipod_tracks` with the language table's `IPOD_<NAME>_ARTIST` / `_TITLE` / `_ALBUM` (upper case). `MusicPlayerLink` (resource) carries the screen's view and requests between the menu stage and the audio.
+- `retail_menu_stage.rs`: the row opens FE 26 when the set has the movie (greyed before), keys go to the host first, its actions go to the link; `MusicPlayer` is one of the front end's native objects (`crossbar_host` objects list). On the movie's OnScreenLoaded the stage posts the tab's state (NOT RETAIL YET: retail's first state is not found).
+- `game_audio`: `music_player_link` loads the saved playlist and mode, reports the volume and the playing track, applies mode / volume / play now / skip and saves on Back. `Music` plays only playlist tracks (`soundtrack_playlist`) and nothing in the ambient mode (`soundtrack_off`). A mod's own queue is never replaced by the screen.
+- Saved in the audio settings file next to the music volume (`music_playlist`, `music_mode`; older files load with every song and mode 0).
+
+**Moddability.** The playlist and mode are plain settings fields; mods keep `sdk.music` (their queue wins while it runs); `MusicPlayerLink` is the engine-facing entry point.
+
+**NOT RETAIL YET.** The screen's starting tab (we start on the Music Player tab in mode 2, else Ambient); a new profile's playlist (every song); Play / Stop / PlayPlaylist / PlayPrevSong, shuffle and saved playlists (not read); the ambient mode's own music (zones, music step 6) is silence for now.
+
+**Verification.** Unit tests: `skate_core::music_player` (4), `music_player_host` (6), `apt_vm` op 0x72; the data-gated menu set test runs every opcode of the installed movies. Desktop run 2026-11-11 (scripted keys: pause menu, Options tab, Down, A, RT, Down, A, X, B; settings folder backed up and restored, hashes identical): the screen opens on Interactive Mode, RT shows Playlist Mode with the 46 songs (title, artist, checkbox) and Volume 100%, entering the list shows X Song On/Off / A Play / B Back, X unchecks the song, A asks to play it, B saves (45 songs, mode 2) and the soundtrack restarts with 45 tracks.

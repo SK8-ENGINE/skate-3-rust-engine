@@ -241,6 +241,10 @@ pub(crate) struct Music {
     /// `music_track_started` events for the mods (newest 64).
     pub(crate) events: Vec<serde_json::Value>,
     seed: u32,
+    /// The Music Player's playlist (soundtrack track numbers; None = every track) and whether its mode plays the
+    /// soundtrack at all (Ambient does not). docs/hails-additions/11-audio.md#music-player-screen
+    pub(crate) soundtrack_playlist: Option<Vec<u32>>,
+    pub(crate) soundtrack_off: bool,
 }
 
 /// A track became audible (its first segment started playing): the caption, mods' `sdk.music` events.
@@ -308,15 +312,37 @@ impl Music {
 
     /// Every disc soundtrack track (none without the soundtrack graph).
     fn soundtrack_tracks(&self) -> Vec<Track> {
-        let count = self.graphs.get(SOUNDTRACK_SET).map_or(0, |g| g.entries(1).len() as u32);
-        (1..=count).map(|k| Track::Retail { set: SOUNDTRACK_SET.into(), track: k }).collect()
+        let count = self.soundtrack_count();
+        (1..=count)
+            .filter(|k| self.soundtrack_playlist.as_ref().is_none_or(|list| list.contains(k)))
+            .map(|k| Track::Retail { set: SOUNDTRACK_SET.into(), track: k })
+            .collect()
+    }
+
+    /// The disc soundtrack's track count (0 before the music loads or without the soundtrack graph).
+    pub(crate) fn soundtrack_count(&self) -> u32 {
+        self.graphs.get(SOUNDTRACK_SET).map_or(0, |g| g.entries(1).len() as u32)
+    }
+
+    /// The soundtrack track that started last (the Music Player's playing song).
+    pub(crate) fn soundtrack_playing(&self) -> Option<u32> {
+        match self.sequencer.as_ref()?.current.as_ref()? {
+            Track::Retail { set, track } if set == SOUNDTRACK_SET => Some(*track),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_loaded(&self) -> bool {
+        self.loaded
     }
 
     /// The engine's default queue: every soundtrack track, shuffled (None without the soundtrack graph).
     fn soundtrack(&mut self) -> Option<Sequencer> {
-        let g = self.graphs.get(SOUNDTRACK_SET)?;
-        let count = g.entries(1).len() as u32;
+        if self.soundtrack_off || !self.graphs.contains_key(SOUNDTRACK_SET) {
+            return None;
+        }
         let tracks = self.soundtrack_tracks();
+        let count = tracks.len();
         self.seed = self.seed.wrapping_mul(747_796_405).wrapping_add(1);
         info!("AUDIO_MUSIC soundtrack: {count} tracks, shuffled");
         Some(Sequencer::new(tracks, true, self.seed))

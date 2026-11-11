@@ -55,6 +55,9 @@ pub(crate) const FREE_SKATE_SCREEN: &str = "898675eacd78bf05";
 /// The loading screen's id (TU3 FE id 52, template 131 `main/tiploader.swf`; disc index 50, key = hash64("tiploader");
 /// b581).
 pub(crate) const LOADING_SCREEN: &str = "e1fa207da2bdf61a";
+/// The Music Player screen's id (TU3 FE id 26, template 31 `musicplayer/musicplayertest.swf`; vtable 0x82303418, init
+/// 0x8260B400, input 0x8260B6F0).
+pub(crate) const MUSIC_PLAYER_SCREEN: &str = "74d4d64c4784bca1";
 
 #[derive(Resource, Default)]
 pub(crate) struct FeBackdrop {

@@ -79,6 +79,7 @@ mod end_dialog_host;
 mod poster_host;
 mod extras_host;
 mod spawn_skater_host;
+mod music_player_host;
 mod tips_loader_host;
 mod career_stats_host;
 mod free_skate_options_host;

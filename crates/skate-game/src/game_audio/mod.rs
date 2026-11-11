@@ -88,6 +88,10 @@ struct SavedSettings {
     /// Retail's option volumes (Settings menu rows SFX / Dialog / Music, settings object +128 /
     /// +132 / +136), fed to the MixMap's Master controller every pass (`RetailVolumes::master_inputs`).
     retail_volumes: RetailVolumes,
+    /// The Music Player screen's playlist (soundtrack track numbers, options block +0xF8; empty = every song) and
+    /// mode (`skate_core::music_player::MusicMode` code, +0xD4). docs/hails-additions/11-audio.md#music-player-screen
+    music_playlist: Vec<u32>,
+    music_mode: i64,
     /// Which default changes this file has been through (`AUDIO_DEFAULTS_VERSION`; 0 in files from before the field):
     /// files from before 1 get Ped Speech switched on once, so a later "off" sticks.
     #[serde(default)]
@@ -106,6 +110,8 @@ impl Default for SavedSettings {
             decode_speech: true,
             mod_emitter_slots: ModEmitterSlots::Extra,
             retail_volumes: RetailVolumes::default(),
+            music_playlist: Vec::new(),
+            music_mode: 0,
             defaults_version: AUDIO_DEFAULTS_VERSION,
         }
     }
@@ -370,6 +376,19 @@ impl AudioSettings {
         *self.saved.retail_volumes.field(volume) = if value.is_finite() { value.clamp(0.0, 1.0) } else { 1.0 };
         self.save()
     }
+    /// The Music Player playlist for `songs` soundtrack tracks (the saved one kept to existing songs, else every song).
+    pub(crate) fn music_playlist(&self, songs: u32) -> Vec<u32> {
+        skate_core::music_player::sanitise(&self.saved.music_playlist, songs)
+    }
+    pub(crate) fn music_mode(&self) -> skate_core::music_player::MusicMode {
+        skate_core::music_player::MusicMode::from_code(self.saved.music_mode).unwrap_or_default()
+    }
+    /// Save the Music Player's playlist and mode.
+    pub(crate) fn set_music_player(&mut self, playlist: &[u32], mode: skate_core::music_player::MusicMode) -> String {
+        self.saved.music_playlist = playlist.to_vec();
+        self.saved.music_mode = mode.code();
+        self.save()
+    }
     /// Master.in1..in3 as retail's Master step writes them from the option volumes.
     pub(crate) fn master_inputs(&self) -> [(usize, i32); 3] {
         let mut volumes = self.saved.retail_volumes;
@@ -480,6 +499,8 @@ impl Plugin for GameAudioPlugin {
             .init_resource::<music::Music>()
             .add_message::<music::MusicTrackStarted>()
             .add_systems(Update, music::frame)
+            .init_resource::<crate::music_player_host::MusicPlayerLink>()
+            .add_systems(Update, music_player_link.before(music::frame))
             .init_resource::<music_caption::MusicCaptionStyle>()
             .init_resource::<music_caption::PendingCaption>()
             .init_resource::<crate::ui_fonts::FallbackFonts>()
@@ -776,3 +797,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(s.path.parent().unwrap());
     }
 }
+
+/// The Music Player screen's link (docs/hails-additions/11-audio.md#music-player-screen): loads the saved playlist and
+/// mode once the soundtrack is known, reports the volume and the playing song, and applies what the screen asked.
+fn music_player_link(mut link: ResMut<crate::music_player_host::MusicPlayerLink>, mut settings: Option<ResMut<AudioSettings>>, mut music: ResMut<music::Music>) {
+    use crate::music_player_host::MusicPlayerAction;
+    let Some(settings) = settings.as_deref_mut() else { return };
+    let count = music.soundtrack_count();
+    if !link.loaded && music.is_loaded() && count > 0 {
+        link.loaded = true;
+        link.songs = count;
+        link.playlist = settings.music_playlist(count);
+        link.mode = settings.music_mode();
+        apply_music_player(&mut music, &link.playlist, link.mode, count);
+    }
+    link.volume = settings.retail_volume(RetailVolume::Music);
+    link.playing = music.soundtrack_playing();
+    for action in std::mem::take(&mut link.actions) {
+        match action {
+            MusicPlayerAction::Volume(v) => {
+                settings.set_retail_volume(RetailVolume::Music, v);
+            }
+            MusicPlayerAction::Mode(mode) => {
+                link.mode = mode;
+                apply_music_player(&mut music, &link.playlist, mode, count);
+            }
+            MusicPlayerAction::PlaySong(track) if link.mode.soundtrack() && music.owner.is_none() => {
+                music.requests.push(music::MusicRequest::Soundtrack { owner: None, track: Some(track) });
+            }
+            MusicPlayerAction::Next if music.owner.is_none() => music.requests.push(music::MusicRequest::Skip),
+            _ => {}
+        }
+    }
+    if std::mem::take(&mut link.save) {
+        let status = settings.set_music_player(&link.playlist, link.mode);
+        info!("AUDIO_MUSIC music player saved ({} songs, {:?}): {status}", link.playlist.len(), link.mode);
+        apply_music_player(&mut music, &link.playlist, link.mode, count);
+    }
+}
+
+/// The soundtrack follows the playlist and mode; a mod's own queue is left alone (it ends with the mod).
+fn apply_music_player(music: &mut music::Music, playlist: &[u32], mode: skate_core::music_player::MusicMode, count: u32) {
+    let filter = (playlist.len() < count as usize).then(|| playlist.to_vec());
+    let off = !mode.soundtrack();
+    if music.soundtrack_playlist == filter && music.soundtrack_off == off {
+        return;
+    }
+    music.soundtrack_playlist = filter;
+    music.soundtrack_off = off;
+    if music.owner.is_none() {
+        music.requests.push(if off { music::MusicRequest::Stop { owner: None } } else { music::MusicRequest::Soundtrack { owner: None, track: None } });
+    }
+}
+

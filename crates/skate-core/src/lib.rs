@@ -51,3 +51,4 @@ pub mod hall_of_meat;
 pub mod free_skate_options;
 pub mod indicator_trail;
 pub mod minimap;
+pub mod music_player;

@@ -981,10 +981,13 @@ impl Vm {
                     let k = pop(&mut stack)?.text();
                     stack.push(self.variable(scope, &k));
                 }
-                0x1d | 0x3c | 0xa6 => {
+                0x1d | 0x3c | 0x72 | 0xa6 => {
                     // 0xa6 (82E74028) pushes its string operand, then runs the
-                    // setVariable handler 82E6D248 (0x1d).
-                    let v = if op == 0xa6 {
+                    // setVariable handler 82E6D248 (0x1d); 0x72 (82E73C68) pushes 0, then the same (the Music Player
+                    // movie's `index = 0`).
+                    let v = if op == 0x72 {
+                        Value::Number(0.0)
+                    } else if op == 0xa6 {
                         Value::Text(
                             i.operand
                                 .as_str()
@@ -1312,6 +1315,12 @@ mod tests {
         (vm, host, r)
     }
 
+    #[test]
+    fn op_0x72_sets_the_named_variable_to_zero() {
+        // `index = 5; index = 0 (0x72); return index`.
+        let (_, _, r) = run(vec![text("index"), int(5), op(0x1d), text("index"), op(0x72), text("index"), op(0x1c)]);
+        assert_eq!(r, Ok(Value::Number(0.0)));
+    }
     #[test]
     fn trace_pops_and_reports() {
         let (_, host, r) = run(vec![int(7), text("hi"), op(0x26)]);

@@ -96,6 +96,11 @@ const EXTRAS_ITEM: &str = "Extras";
 /// and Call Skater pause items.
 const SPAWN_SKATER: &str = "SpawnSkater";
 const SPAWN_SKATER_PATH: &str = "cas/spawnskater.swf";
+/// The Music Player (template 31, FE 26; init 0x8260B400): the Options tab's MusicPlayer row (sub_8261AF30(26, 0)).
+const MUSIC_PLAYER: &str = "MusicPlayer";
+const MUSIC_PLAYER_PATH: &str = "musicplayer/musicplayertest.swf";
+const MUSIC_PLAYER_MOVIE: &str = "source/screens/musicplayer/musicplayertest";
+const MUSIC_PLAYER_ITEM: &str = "MusicPlayer";
 /// The loading screen (template 131 TipsLoader, FE 52; research b581). Optional in the set.
 const TIPS_LOADER: &str = "TipsLoader";
 const TIPS_LOADER_PATH: &str = "main/tiploader.swf";
@@ -268,6 +273,9 @@ struct MenuStage {
     spawn_skater_id: i32,
     spawn_skater: crate::spawn_skater_host::SpawnSkaterHost,
     spawn_skater_mode: skate_core::spawn_skater::Mode,
+    /// FE 26's AS id and its `MusicPlayer` host.
+    music_player_id: i32,
+    music_player: crate::music_player_host::MusicPlayerHost,
     /// Flow 0x89: the skater to load now that the screen is black, then whether its load is still running.
     swap_due: Option<skate_core::spawn_skater::Skater>,
     swap_loading: bool,
@@ -685,6 +693,12 @@ fn setup(
             } else {
                 warn!("RETAIL_MENUS: Extras screen unavailable (no extras movie); the EXTRAS overlay stands in; run Refresh Game Files");
             }
+            // Music Player (FE 26): greyed without the movie (sets exported before it was added).
+            if movies.movies.contains_key(MUSIC_PLAYER_MOVIE) && menus.registry.data().item(MUSIC_PLAYER_ITEM).is_some() {
+                let owner = Owner::Engine(format!("{}{}", crate::retail_menus::SCREEN, crate::fe_backdrop::MUSIC_PLAYER_SCREEN));
+                let handler = skate_core::menus::Handler { owner, select: true, highlight: false, callback: None };
+                menus.registry.register_handler(EntryRef::item(MUSIC_PLAYER_ITEM), handler);
+            }
             // SpawnSkater (FE 62): Free Play (SoloFreeskateOptions) and Call Skater (SkateWith) push it (b307); greyed
             // without the movie (sets before version 14).
             if movies.movies.contains_key(SPAWN_SKATER_MOVIE) {
@@ -768,6 +782,8 @@ fn setup(
                 credits_id: as_id(CREDITS),
                 credits: Default::default(),
                 spawn_skater_id: as_id(SPAWN_SKATER),
+                music_player_id: as_id(MUSIC_PLAYER),
+                music_player: Default::default(),
                 spawn_skater: Default::default(),
                 spawn_skater_mode: Default::default(),
                 swap_due: None,
@@ -854,11 +870,12 @@ fn update(
     // The Trick Guide's demo and the text entry's keyboard (one parameter: the system is at Bevy's 16).
     (mut demo, mut text_entry, mut marquee): (ResMut<crate::trick_guide_scene::TrickGuideDemo>, ResMut<crate::extras_host::TextEntryView>, ResMut<crate::marquee_preview::MarqueeView>),
     // Popups; the instant replay feed and whether the retail replay screen shows (one parameter: Bevy's 16).
-    (mut popup_mods, replay_feed, mut replay_ui, mut look_screen): (
+    (mut popup_mods, replay_feed, mut replay_ui, mut look_screen, mut music_link): (
         ResMut<crate::popup_host::PopupMods>,
         Option<Res<crate::replay::ReplayFeed>>,
         Option<ResMut<crate::replay::RetailReplayUi>>,
         Option<ResMut<crate::replay::ReplayLookScreen>>,
+        ResMut<crate::music_player_host::MusicPlayerLink>,
     ),
     // Challenge Map travel; cheats out, typed text in and the zombie flag the cheat toggles; FE 62's characters and
     // its requests out.
@@ -892,6 +909,7 @@ fn update(
     let credits = backdrop.index(crate::fe_backdrop::CREDITS_SCREEN);
     let spawn = backdrop.index(crate::fe_backdrop::SPAWN_SKATER_SCREEN);
     let free = backdrop.index(crate::fe_backdrop::FREE_SKATE_SCREEN);
+    let music = backdrop.index(crate::fe_backdrop::MUSIC_PLAYER_SCREEN);
     available.set_if_neq(RetailPause(ready && pause.is_some()));
     if ready && pause.is_none() && !std::mem::replace(&mut *warned, true) {
         warn!("RETAIL_MENUS: the menu tables have no FE screens yet (run setup); Start opens the PC overlay until then");
@@ -991,6 +1009,8 @@ fn update(
     let preview_open = fe.spawn_skater.open && fe.spawn_skater.screen.mode != skate_core::spawn_skater::Mode::SkateWith;
     fe.free_skate = std::mem::take(&mut ms.free_skate);
     fe.free_skate.open = free.is_some() && ms.stack.top(Layer::Main) == free;
+    fe.music_player = std::mem::take(&mut ms.music_player);
+    fe.music_player.open = music.is_some() && ms.stack.top(Layer::Main) == music;
     fe.tips_loader = std::mem::take(&mut ms.tips_loader);
     // The on-screen keyboard (FE 46 on top): typed text and Escape (ours), once per frame; the pad keys go through the
     // key loop below.
@@ -1205,7 +1225,7 @@ fn update(
                 continue;
             }
             let target = ms.stack.input_target();
-            let Some(screen) = target.filter(|t| [pause, options, trick, cal, map, profile, extras, viewer, credits, spawn, free].contains(&Some(*t))) else { continue };
+            let Some(screen) = target.filter(|t| [pause, options, trick, cal, map, profile, extras, viewer, credits, spawn, free, music].contains(&Some(*t))) else { continue };
             // sub_825EC0E8: the screen's C++ handler first, then the movie's UpdateInput when the handler did not
             // consume the key and the screen's record says so (+12).
             let mut consumed = false;
@@ -1229,6 +1249,8 @@ fn update(
                 ms.spawn_skater_id
             } else if Some(screen) == free {
                 ms.free_skate_id
+            } else if Some(screen) == music {
+                ms.music_player_id
             } else {
                 trick_id
             };
@@ -1281,6 +1303,9 @@ fn update(
                     _ => Default::default(),
                 };
                 s.take(out);
+            } else if Some(screen) == music {
+                // Screen 26 input 0x8260B6F0: tabs, edit, song toggles, volume rows, Back (music_player_host::key).
+                consumed = fe.music_player.key(key);
             } else if Some(screen) == credits {
                 // Screen 25 input 0x82608DC8 (b489): Back pops the screen, no sound, at any time; the movie takes no
                 // keys (its record's input flag is off).
@@ -1593,6 +1618,23 @@ fn update(
                     fe.tos.viewer = None;
                 }
                 // FE 25 (b489): the screen reads the lines file, then posts Rolling once it is parsed (below).
+                Effect::Open(i) if Some(i) == music => {
+                    let tracks = std::fs::read_to_string(config.asset_root.join(crate::retail_menus::TABLES))
+                        .ok()
+                        .and_then(|t| skate_data::menu_tables::MenuTables::from_json(&t).ok())
+                        .map(|t| t.ipod_tracks)
+                        .unwrap_or_default();
+                    let songs = crate::music_player_host::song_rows(&tracks[..tracks.len().min(music_link.songs as usize)], &ms.language);
+                    info!("RETAIL_MENUS open Music Player (FE {i}): {} songs, {} in the playlist, {:?}", songs.len(), music_link.playlist.len(), music_link.mode);
+                    fe.music_player.open_with(songs, music_link.playlist.clone(), music_link.mode, music_link.volume);
+                    fe.music_player.playing = music_link.playing;
+                    open_screen(&mut ms.stage, MUSIC_PLAYER_PATH, MUSIC_PLAYER, &mut fe)?;
+                }
+                Effect::Close(i) if Some(i) == music => {
+                    info!("RETAIL_MENUS close Music Player (FE {i})");
+                    fe.music_player.open = false;
+                    close(&mut ms.stage, ms.music_player_id, &mut fe)?;
+                }
                 Effect::Open(i) if Some(i) == credits => {
                     let path = crate::retail_menu_movies::set_root(&config).join(CREDITS_FILE);
                     let retail = std::fs::read(&path).map(|b| skate_core::credits::parse(&skate_core::credits::decode(&b))).unwrap_or_else(|e| {
@@ -2063,6 +2105,48 @@ fn update(
         for state in std::mem::take(&mut fe.free_skate.states) {
             set_state(&mut ms.stage, ms.free_skate_id, state, &mut fe)?;
         }
+        if let Some(m) = music.filter(|m| ms.stack.top(Layer::Main) == Some(*m)) {
+            // Loaded -> the tab's state (0 Interactive, 1 Playlist, then 63 RefreshPlayList). NOT RETAIL YET: who
+            // posts retail's first state is not found (init 0x8260B400 only opens the movie).
+            if take_call(&mut fe, &format!("Game.OnScreenLoaded({})", ms.music_player_id)) {
+                let tab = fe.music_player.tab;
+                fe.music_player.states.push(tab);
+                if tab == 1 {
+                    fe.music_player.states.push(0x3F);
+                }
+            }
+            if take_call(&mut fe, &format!("Game.OnScreenIntroComplete({})", ms.music_player_id)) {
+                ms.stack.ready(m);
+            }
+            fe.music_player.playing = music_link.playing;
+        }
+        for sound in std::mem::take(&mut fe.music_player.sounds) {
+            sounds.write(FrontendSound { key: sound });
+        }
+        for state in std::mem::take(&mut fe.music_player.states) {
+            set_state(&mut ms.stage, ms.music_player_id, state, &mut fe)?;
+        }
+        for action in std::mem::take(&mut fe.music_player.actions) {
+            use crate::music_player_host::MusicPlayerAction;
+            info!("RETAIL_MENUS music player {action:?}");
+            match action {
+                MusicPlayerAction::Close { save } => {
+                    if save {
+                        music_link.playlist = fe.music_player.playlist.clone();
+                        music_link.mode = fe.music_player.mode;
+                        music_link.save = true;
+                    }
+                    if let Some(m) = music {
+                        ms.stack.request(Layer::Main, Request::Close { screen: m });
+                    }
+                }
+                MusicPlayerAction::Mode(mode) => {
+                    music_link.mode = mode;
+                    music_link.actions.push(action);
+                }
+                other => music_link.actions.push(other),
+            }
+        }
         for sound in std::mem::take(&mut fe.spawn_skater.sounds) {
             sounds.write(FrontendSound::named(&sound));
         }
@@ -2264,6 +2348,7 @@ fn update(
     ms.credits = std::mem::take(&mut fe.credits);
     ms.spawn_skater = std::mem::take(&mut fe.spawn_skater);
     ms.free_skate = std::mem::take(&mut fe.free_skate);
+    ms.music_player = std::mem::take(&mut fe.music_player);
     ms.tips_loader = std::mem::take(&mut fe.tips_loader);
     ms.image_slots = std::mem::take(&mut fe.image_slots);
     ms.popup = std::mem::take(&mut fe.popup);
