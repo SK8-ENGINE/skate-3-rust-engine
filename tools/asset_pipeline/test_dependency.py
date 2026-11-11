@@ -9,15 +9,16 @@ from tools.asset_pipeline import install as core
 class ToolDependency(unittest.TestCase):
     def test_non_windows_uses_path_tool_without_downloading(self):
         with tempfile.TemporaryDirectory() as temp:
-            tool=Path(temp)/'extract-xiso'; tool.write_text('#!/bin/sh\n'); tool.chmod(0o755)
+            # Windows' PATH search needs an extension (PATHEXT); the test runs on every OS.
+            tool=Path(temp)/('extract-xiso.exe' if os.name=='nt' else 'extract-xiso'); tool.write_text('#!/bin/sh\n'); tool.chmod(0o755)
             with patch.dict(os.environ,{'PATH':temp}),\
                  patch.object(core,'download',side_effect=AssertionError('downloaded')):
                 found=core.dependency(Path(temp)/'cache','extract-xiso',core.XISO_URL,core.XISO_SHA,lambda _:None,windows=False)
-            self.assertEqual(found,tool)
+            self.assertEqual(found.resolve(),tool.resolve())
 
     def test_non_windows_missing_tool_names_the_tool(self):
         with tempfile.TemporaryDirectory() as temp:
-            with patch.dict(os.environ,{'PATH':temp}),\
+            with patch.dict(os.environ,{'PATH':temp}),patch.dict(core.PLATFORM_TOOLS,clear=True),\
                  patch.object(core,'download',side_effect=AssertionError('downloaded')):
                 with self.assertRaisesRegex(RuntimeError,'extract-xiso is not on PATH'):
                     core.dependency(Path(temp)/'cache','extract-xiso',core.XISO_URL,core.XISO_SHA,lambda _:None,windows=False)

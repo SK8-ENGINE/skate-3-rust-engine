@@ -114,6 +114,16 @@ installed asset directory. `scripts/Build-Release.ps1` builds the portable Windo
 package and requires Python 3.13. GitHub Actions builds `main` automatically;
 numbered releases are published separately.
 
+### Linux
+
+Requires Rust, clang, cmake, patchelf, Python 3 with numpy and Pillow, and a
+Vulkan driver. Run `./BUILD.sh` (`--dev` for the debug profile), then
+`./SETUP.sh /path/to/skate3.iso` once (or pass `default.xex` from an extracted
+game folder) to prepare the assets in `data/`, then `./PLAY.sh`. Setup runs
+headless and downloads the Linux builds of the same pinned extract-xiso and
+vgmstream releases. The character importer, updater and Steam relay remain
+Windows-only.
+
 Custom animations and climbing support remain available, but no custom clips
 are shipped. The included format-demo map is original procedural content.
 

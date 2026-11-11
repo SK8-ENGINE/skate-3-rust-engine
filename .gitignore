@@ -8,6 +8,8 @@
 # TRACE_PLAY.bat's CPU trace output.
 /trace-*.json
 /data/
+# Setup's temporary ISO extraction beside data/.
+/character-source-*/
 __pycache__/
 *.pyc
 .DS_Store

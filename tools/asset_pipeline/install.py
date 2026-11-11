@@ -52,6 +52,14 @@ class Background:
         if self.error is not None:raise self.error
 XISO_URL='https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso-Win64_Release.zip'
 XISO_SHA='fec88d03c7efd6205ab09be4abba70c0afd0eb27a5709f0a6235b828ba5ac11e'
+# Callers pass the Windows pins; other platforms use the same releases' builds.
+# extract-xiso publishes no digests, so its pin is the downloaded archive's SHA-256.
+PLATFORM_TOOLS={'linux':{
+    'extract-xiso':('https://github.com/XboxDev/extract-xiso/releases/download/build-202505152050/extract-xiso_Linux.zip',
+                    '982bbfefc9255d51f5348a477d7135d68abf81c0af9600e5728edb1246cfa200'),
+    'vgmstream-cli':('https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-linux.zip',
+                     '2f98c77f756079f63fbd119939067f1ed461d77e70993bc4cc372736d859c84a'),
+}}
 
 def digest(path):
     with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
@@ -129,18 +137,23 @@ def unpack_zip(archive,destination):
         z.extractall(destination)
 
 def dependency(cache,name,url,sha,report,windows=os.name=='nt'):
-    # Pinned tool downloads are Windows-only.
+    # Windows: the pinned download. Elsewhere: the tool on PATH (Nix shell, distro package), else the pinned build
+    # for this platform.
     if not windows:
         executable=shutil.which(name)
-        if executable is None:raise RuntimeError(f'Missing tool: {name} is not on PATH (run setup inside `nix develop`)')
-        return Path(executable)
+        if executable is not None:return Path(executable)
+        if name not in PLATFORM_TOOLS.get(sys.platform,{}):
+            raise RuntimeError(f'Missing tool: {name} is not on PATH and no {name} build is pinned for {sys.platform} (install it or run setup inside `nix develop`)')
+        url,sha=PLATFORM_TOOLS[sys.platform][name]
     folder=cache/name
     marker=folder/'.complete'
     if not marker.is_file():
         unpack_zip(download(url,sha,cache,report),folder)
         marker.write_text(sha)
-    executable=next(folder.rglob(name+'.exe'),None)
+    executable=next((p for p in folder.rglob(name+'.exe' if os.name=='nt' else name) if p.is_file()),None)
     if executable is None:raise RuntimeError('Missing downloaded tool: '+name)
+    # Zip archives do not keep the executable bit.
+    if os.name!='nt':executable.chmod(executable.stat().st_mode|0o111)
     return executable
 
 def spawn(args,**popen):
