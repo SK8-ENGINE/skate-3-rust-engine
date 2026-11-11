@@ -87,6 +87,48 @@ pub(crate) struct MusicZonesData {
     pub interactive: BTreeMap<String, Interactive>,
 }
 
+/// A race's music tuning (class 4ADAC090BCE2A930; UpdateRaceState's control 8249E9B8).
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct RaceTuning {
+    #[serde(default)]
+    pub delay: f32,
+    #[serde(default)]
+    pub start: f32,
+    #[serde(default)]
+    pub mode: i32,
+    #[serde(default)]
+    pub speed_scale: f32,
+    #[serde(default)]
+    pub rise: f32,
+    #[serde(default)]
+    pub fall: f32,
+    #[serde(default)]
+    pub curve_x: Vec<f32>,
+    #[serde(default)]
+    pub curve_y: Vec<f32>,
+}
+
+/// 82481E10: the 8-point curve, clamped piecewise-linear (a missing curve gives 0, as retail's zero fallback).
+pub(crate) fn curve(xs: &[f32], ys: &[f32], x: f32) -> f32 {
+    let n = xs.len().min(ys.len());
+    if n == 0 {
+        return 0.0;
+    }
+    if x < xs[0] {
+        return ys[0];
+    }
+    if x >= xs[n - 1] {
+        return ys[n - 1];
+    }
+    let i = (1..n).find(|&i| x < xs[i]).unwrap_or(n - 1);
+    let dx = xs[i] - xs[i - 1];
+    if dx <= 0.0 { ys[i] } else { ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / dx }
+}
+
+/// Retail's race control steps per call; NOT RETAIL YET: the call rate is assumed 60 per second (its delay counter steps
+/// 1/60, 0x820849C8).
+const RACE_CALLS_PER_SECOND: f32 = 60.0;
+
 /// The song and piece id tables (menu-tables `ipod_ids`, `dj_ids`): an id's value is its position + 1.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct EnumIds {
@@ -137,6 +179,10 @@ pub(crate) struct Environment {
     /// The race music runs (state 6): `Some(ended)`, with the end hold left once the race ended.
     race: Option<bool>,
     race_hold: f32,
+    /// The race's tuning, its control (+0x458) and delay counter (+0x588), the control last sent.
+    race_tuning: Option<RaceTuning>,
+    race_control: f32,
+    race_counter: f32,
 }
 
 impl Environment {
@@ -149,7 +195,24 @@ impl Environment {
     /// the race music (Start only when nothing plays), 8 Win / 9 Lose post the ending, 12 StopChallengeMusic stops it
     /// (NOT RETAIL YET: 8249BB00 not read). HalfWay / ThreeQuarters / StraightAway (2..4) are not ported (their
     /// sub-states 3..5 are not read).
-    pub(crate) fn race_trigger(&mut self, code: u8, nothing_playing: bool, overlay: Option<(std::path::PathBuf, f32)>) -> Vec<MusicRequest> {
+    pub(crate) fn race_trigger(&mut self, code: u8, nothing_playing: bool, overlay: Option<(std::path::PathBuf, f32)>, tuning: Option<RaceTuning>) -> Vec<MusicRequest> {
+        let starting = matches!(code, 0 | 1) && (self.race.is_none() || code == 1 && nothing_playing && self.race == Some(false));
+        let mut out = self.race_trigger_inner(code, nothing_playing, overlay);
+        if starting && !out.is_empty() {
+            self.race_tuning = None;
+        }
+        if let Some(tuning) = tuning.filter(|_| starting && !out.is_empty()) {
+            // 8249E8E8: the tuning record, the starting control (an install without the record keeps the graph's own).
+            self.race_control = tuning.start;
+            self.race_counter = 0.0;
+            self.sent_control = Some(tuning.start as i32);
+            out.push(MusicRequest::Control(tuning.start as i32));
+            self.race_tuning = Some(tuning);
+        }
+        out
+    }
+
+    fn race_trigger_inner(&mut self, code: u8, nothing_playing: bool, overlay: Option<(std::path::PathBuf, f32)>) -> Vec<MusicRequest> {
         let start = || MusicRequest::Queue {
             tracks: vec![Track::Graph { set: GAME_SET.into(), var: RACE_VAR.into(), value: -1, play: RACE_START }],
             once: true,
@@ -174,6 +237,7 @@ impl Environment {
             }
             12 if self.race == Some(false) => {
                 self.race = None;
+                self.race_tuning = None;
                 self.playing = None;
                 vec![MusicRequest::Stop { owner: None }]
             }
@@ -187,12 +251,34 @@ impl Environment {
         unridden: bool, multiplier: f32, score: f32, piece_done: bool, dt: f32) -> Vec<MusicRequest> {
         let mut out = Vec::new();
         if let Some(ended) = self.race {
-            // The race owns the music; after its end hold and the graph's end the zones choose again.
+            // The race owns the music; its control follows the speed curve (8249E9B8, mode 0). NOT RETAIL YET: mode 1
+            // (the control from the place) is not ported; no disc race uses it.
+            if let Some(t) = self.race_tuning.clone().filter(|t| t.mode == 0) {
+                if self.race_counter < t.delay {
+                    self.race_counter += dt;
+                } else {
+                    let x = if t.speed_scale > 0.0 { (speed.abs() * KMH / t.speed_scale).clamp(0.0, 1.0) } else { 0.0 };
+                    let target = curve(&t.curve_x, &t.curve_y, x) * 127.0;
+                    let calls = dt * RACE_CALLS_PER_SECOND;
+                    let delta = target - self.race_control;
+                    self.race_control += if delta > 0.0 { delta.min(t.rise * calls) } else { delta.max(-t.fall * calls) };
+                }
+                if unridden && !ended {
+                    self.race_control = 0.0;
+                }
+                let value = self.race_control as i32;
+                if self.sent_control != Some(value) {
+                    self.sent_control = Some(value);
+                    out.push(MusicRequest::Control(value));
+                }
+            }
             if ended {
                 self.race_hold -= dt;
                 if self.race_hold <= 0.0 && piece_done {
                     self.race = None;
+                    self.race_tuning = None;
                     self.playing = None;
+                    self.sent_control = None;
                 }
             }
             return out;
@@ -346,7 +432,7 @@ pub(crate) fn environment(
     let done = music.queue_done();
     for code in triggers {
         // NOT RETAIL YET: the slot is the race piece's `raceoverlay` (0..7); every slot names the same sting on the disc.
-        let requests = host.env.race_trigger(code, done, library.race_overlay(0));
+        let requests = host.env.race_trigger(code, done, library.race_overlay(0), library.race_tuning(None));
         for r in &requests {
             info!("AUDIO_MUSIC race trigger {code}: {r:?}");
         }
@@ -423,15 +509,38 @@ mod tests {
     fn a_race_owns_the_music_from_the_countdown_to_its_end_hold() {
         let (d, ids) = (data(), ids());
         let mut e = Environment::default();
-        let start = e.race_trigger(0, true, None);
+        let start = e.race_trigger(0, true, None, None);
         assert!(matches!(&start[0], MusicRequest::Queue { tracks, once: true } if tracks[0] == Track::Graph { set: "game".into(), var: "raceoverlay".into(), value: -1, play: RACE_START }));
-        assert!(e.race_trigger(1, false, None).is_empty(), "Start while the countdown's piece plays changes nothing");
+        assert!(e.race_trigger(1, false, None, None).is_empty(), "Start while the countdown's piece plays changes nothing");
         assert!(e.frame(&d, &ids, Some(&zone(0xBB)), 0.0, false, 1.0, 0.0, false, 0.1).is_empty(), "zones wait during the race");
         let cymbal = (std::path::PathBuf::from("music_overlays/Cymbal_Overlay.wav"), 1.2);
-        assert_eq!(e.race_trigger(8, false, Some(cymbal.clone())), [MusicRequest::Overlay { file: cymbal.0, gain: 1.2 }, MusicRequest::Post { event: RACE_WIN }]);
+        assert_eq!(e.race_trigger(8, false, Some(cymbal.clone()), None), [MusicRequest::Overlay { file: cymbal.0, gain: 1.2 }, MusicRequest::Post { event: RACE_WIN }]);
         e.frame(&d, &ids, None, 0.0, false, 1.0, 0.0, true, 9.0);
         assert!(e.race.is_none(), "after 250 console frames and the graph's end the race lets go");
         assert_eq!(e.frame(&d, &ids, Some(&zone(0xBB)), 0.0, false, 1.0, 0.0, false, 0.1).len(), 1, "the zones choose again");
+    }
+
+    #[test]
+    fn the_race_control_starts_at_the_tuning_then_follows_the_speed_curve_after_the_delay() {
+        let tuning = RaceTuning { delay: 1.0, start: 77.0, mode: 0, speed_scale: 75.0, rise: 1.0, fall: 1.7,
+            curve_x: vec![0.0, 1.0], curve_y: vec![0.0, 1.0] };
+        let (d, ids) = (data(), ids());
+        let mut e = Environment::default();
+        let start = e.race_trigger(0, true, None, Some(tuning));
+        assert_eq!(start.last(), Some(&MusicRequest::Control(77)));
+        assert!(e.frame(&d, &ids, None, 20.0, false, 1.0, 0.0, false, 0.5).is_empty(), "the delay holds the control");
+        e.frame(&d, &ids, None, 20.0, false, 1.0, 0.0, false, 0.6);
+        // 72 km/h of 75 -> target 0.96 x 127 = 121.9; one 1/60 s call may rise 1.
+        let out = e.frame(&d, &ids, None, 20.0, false, 1.0, 0.0, false, 1.0 / 60.0);
+        assert_eq!(out, [MusicRequest::Control(78)]);
+        assert_eq!(e.frame(&d, &ids, None, 20.0, true, 1.0, 0.0, false, 1.0 / 60.0), [MusicRequest::Control(0)], "a bail drops it");
+    }
+
+    #[test]
+    fn the_curve_is_clamped_piecewise_linear() {
+        let (xs, ys) = ([0.0, 0.5, 1.0], [0.0, 1.0, 0.5]);
+        assert_eq!((curve(&xs, &ys, -1.0), curve(&xs, &ys, 0.25), curve(&xs, &ys, 0.75), curve(&xs, &ys, 2.0)), (0.0, 0.5, 0.75, 0.5));
+        assert_eq!(curve(&[], &[], 0.5), 0.0);
     }
 
     #[test]

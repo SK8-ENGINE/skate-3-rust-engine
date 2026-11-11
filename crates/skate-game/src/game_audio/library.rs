@@ -347,6 +347,9 @@ struct Manifest {
     music_settings: BTreeMap<String, MusicSettingsRecord>,
     #[serde(default)]
     music_overlays: BTreeMap<String, Entry>,
+    /// The race music tuning records (`audio_export.race_music`).
+    #[serde(default)]
+    race_music: BTreeMap<String, super::music_zones::RaceTuning>,
     /// District (map stem) -> region layer name -> tiles.
     #[serde(default)]
     regions: BTreeMap<String, BTreeMap<String, Vec<RegionTile>>>,
@@ -1747,6 +1750,11 @@ impl Library {
         let gain = record.fields.get("BD415D2388E07070").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
         let entry = self.manifest.music_overlays.get(name)?;
         safe_relative(&entry.file).then(|| (self.root.join(&entry.file), gain))
+    }
+
+    /// A race's music tuning (`default` when the race names none).
+    pub(crate) fn race_tuning(&self, key: Option<&str>) -> Option<super::music_zones::RaceTuning> {
+        key.and_then(|k| self.manifest.race_music.get(k)).or_else(|| self.manifest.race_music.get("default")).cloned()
     }
 
     /// The music zones' playlists and DJ control values.

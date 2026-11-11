@@ -389,6 +389,47 @@ def music_settings(collections: list[dict]) -> dict[str, dict]:
     return out
 
 
+# The race music tuning (class 4ADAC090BCE2A930, the race's record at challenge attrib E6EE8734584B1523, `default`
+# when none; UpdateRaceState's control 8249E9B8; research music-challenges.md section 8).
+RACE_MUSIC_CLASS = 'Hash_4ADAC090BCE2A930'
+RACE_MUSIC_FIELDS = {
+    'Hash_1B241A8EEA6E0CD7': 'delay',
+    'Hash_46C9C4F614F8ABE9': 'start',
+    'Hash_7A6A3EDB19EEEBC8': 'place4',
+    'Hash_8A86EB9E8A746208': 'place3',
+    'Hash_FA78333D6CCB7F0E': 'place2',
+    'Hash_929F268EC1F9354F': 'place1',
+    'Hash_18EA4B1067757D11': 'mode',  # eRaceMusicType: 0 the speed curve, else the place
+    'Hash_E12D64B75EDD6E53': 'speed_scale',
+    'Hash_93B2EC5047F559F4': 'rise',
+    'Hash_48EC1CC5DE9B871A': 'fall',
+}
+
+
+def race_music(collections: list[dict]) -> dict[str, dict]:
+    """Race music tuning records by key (`default`, `default_skatepark` or 16 hex digits), parents resolved; the speed
+    curve (PointGraphData8 `EAD4643494A5FF26`: 8 x then 8 y) as `curve_x` / `curve_y`."""
+    records = {c['key']: c for c in collections if c['class'] == RACE_MUSIC_CLASS}
+    out = {}
+    for key in records:
+        chain, cursor = [], key
+        while cursor in records and len(chain) < 16:
+            chain.append(records[cursor])
+            cursor = records[cursor]['parent']
+        fields = {}
+        for record in reversed(chain):
+            for name, field in record['fields'].items():
+                if name in RACE_MUSIC_FIELDS:
+                    raw = bytes.fromhex(field['data'][:8])
+                    fields[RACE_MUSIC_FIELDS[name]] = round(struct.unpack('>f', raw)[0], 6) if field['type'].endswith('Float') else struct.unpack('>i', raw)[0]
+                elif name == 'Hash_EAD4643494A5FF26':
+                    values = struct.unpack('>16f', bytes.fromhex(field['data'])[:64])
+                    fields['curve_x'] = [round(v, 6) for v in values[:8]]
+                    fields['curve_y'] = [round(v, 6) for v in values[8:]]
+        out[key[5:] if key.startswith('Hash_') else key] = fields
+    return out
+
+
 def music_overlays(archive: Path, output: Path, work: Path, vgmstream: Path, log) -> dict[str, dict]:
     """The music overlay stings (`overlays.big`, BIG4): each `.snr` with audio decoded to output/<name>.wav."""
     from tools.vendor.university.tools.vanilla_map_extraction.tools.extract_skate2_big4 import read_entries
@@ -1526,6 +1567,7 @@ def _convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report
     manifest['emitters'], placed = emitters(files, attributes, packs)
     manifest['music_zones'] = {'playlists': music_playlists(collections), 'interactive': music_interactive(collections)}
     manifest['music_settings'] = music_settings(collections)
+    manifest['race_music'] = race_music(collections)
     by_file = {Path(e.path).name.lower(): Path(e.path).name for e in files.entries}
     # The packs' loose banks (After Dark's 7 emitter banks, b432) join the disc's; a disc bank keeps its name.
     pack_banks = {}

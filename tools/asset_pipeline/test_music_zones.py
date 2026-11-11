@@ -44,6 +44,16 @@ class MusicZones(unittest.TestCase):
             '8A5B99BA28348132': 'Chase_Scratch', '0B91E756EA46FB6C': 1.75, '2834CACED3DB5A4E': ['Cymbal_Overlay'],
             '916CB408916CB408': {'type': 'Sk8::Audio::PointGraphData8', 'data': '000000003E87EBFC'}})
 
+    def test_race_music_reads_fields_and_the_curve(self):
+        curve = ''.join(f'{v:08X}' for v in [0, 0x3F800000] + [0x3F800000] * 6 + [0, 0x3F000000] + [0x3F800000] * 6)
+        record = {'class': audio_export.RACE_MUSIC_CLASS, 'key': 'default', 'parent': '', 'fields': {
+            'Hash_1B241A8EEA6E0CD7': field('EA::Reflection::Float', '40A00000'),
+            'Hash_929F268EC1F9354F': field('EA::Reflection::Int32', '0000007F'),
+            'Hash_EAD4643494A5FF26': field('Sk8::PointGraphData8', curve)}}
+        out = audio_export.race_music([record])['default']
+        self.assertEqual((out['delay'], out['place1']), (5.0, 127))
+        self.assertEqual((out['curve_x'][:2], out['curve_y'][:2]), ([0.0, 1.0], [0.0, 0.5]))
+
 
 if __name__ == '__main__':
     unittest.main()
