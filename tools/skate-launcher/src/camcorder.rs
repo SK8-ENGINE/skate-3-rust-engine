@@ -206,19 +206,23 @@ pub struct Hits {
 }
 
 fn rgba(a: u8, c: Color32) -> Color32 {
-    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
+    let [r, g, b, _] = c.to_srgba_unmultiplied();
+    Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 fn argb(a: u8, r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 fn mix(a: Color32, b: Color32, k: f32) -> Color32 {
+    // Color32 holds premultiplied channels: mix the unmultiplied ones, or the alpha is applied twice.
     let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k) as u8;
-    Color32::from_rgba_unmultiplied(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()), a.a())
+    let (a, b) = (a.to_srgba_unmultiplied(), b.to_srgba_unmultiplied());
+    Color32::from_rgba_unmultiplied(m(a[0], b[0]), m(a[1], b[1]), m(a[2], b[2]), a[3])
 }
 fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
     let t = t.clamp(0.0, 1.0);
     let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
-    Color32::from_rgba_unmultiplied(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()), m(a.a(), b.a()))
+    let (a, b) = (a.to_srgba_unmultiplied(), b.to_srgba_unmultiplied());
+    Color32::from_rgba_unmultiplied(m(a[0], b[0]), m(a[1], b[1]), m(a[2], b[2]), m(a[3], b[3]))
 }
 fn grow(r: Rect, d: f32) -> Rect {
     r.expand(d)
@@ -391,7 +395,7 @@ impl Osd {
 /// edge-on and settles with a wobble, then the backlight comes on (sometimes with a flicker); closing plays it
 /// backwards, faster. A game start folds the panel shut with the screen still lit, the game's exit swings it back
 /// open lit. Every open and close rolls its own swing time, wobble, delay and flicker; snapshots keep the plain values.
-pub const ON_TOTAL: f32 = 1.2;
+pub const ON_TOTAL: f32 = 1.45;
 const OFF_SPEED: f32 = 1.3;
 pub const OFF_TIME: f32 = ON_TOTAL / OFF_SPEED + 0.05;
 
@@ -422,7 +426,10 @@ impl Anim {
         self.fold_at.is_some() || self.resume_at.is_some()
     }
     fn swing_to(&self) -> f32 {
-        0.08 + 0.6 * self.vary[0]
+        0.08 + 0.78 * self.vary[0]
+    }
+    fn closing(&self) -> bool {
+        self.snap.is_none() && (self.fold_at.is_some() || self.off_at.is_some())
     }
     pub fn fold_time(&self) -> f32 {
         self.swing_to() / OFF_SPEED + 0.05
@@ -437,8 +444,12 @@ impl Anim {
         if let Some(o) = self.off_at { return (ON_TOTAL - (t - o) * OFF_SPEED).max(0.0); }
         self.on_at.map_or(0.0, |o| (t - o).min(ON_TOTAL))
     }
+    /// 0 = shut (edge-on at the hinge), 1 = facing you. A heavy panel (mine, not the classic's BackOut): opening
+    /// starts slowly and settles on a damped spring with a small overshoot; closing gathers speed and lands shut with
+    /// a small bounce. Doc 44a "Open / close swing".
     pub fn panel_open(&self, t: f32) -> f32 {
-        back_out(((self.assembly(t) - 0.08) / (self.swing_to() - 0.08)).clamp(0.0, 1.0), self.vary[1])
+        let x = ((self.assembly(t) - 0.08) / (self.swing_to() - 0.08)).clamp(0.0, 1.0);
+        if self.closing() { heavy_close(1.0 - x) } else { heavy_open(x, self.vary[1]) }
     }
     pub fn screen_level(&self, t: f32) -> f32 {
         if self.standby() { return 1.0; }
@@ -466,18 +477,19 @@ impl Anim {
 /// Every shape is tessellated and its vertices moved, so text, screen and wear swing with the face.
 fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, start: egui::layers::ShapeIdx, open: f32, panel: Rect) {
     let layer = painter.layer_id();
+    let a = (1.0 - open.max(0.0)) * std::f32::consts::FRAC_PI_2;
+    let (cos, sin) = (a.cos(), a.sin());
+    let (w, h, hx, cy) = (panel.width(), panel.height(), panel.right(), panel.center().y);
+    let dist = w * 2.0;
+    let scale = move |u: f32| dist / (dist + 0.6 * u * w * sin);
     if open <= 0.01 {
         ctx.graphics_mut(|g| {
             let list = g.entry(layer);
             for i in start.0..list.next_idx().0 { list.reset_shape(egui::layers::ShapeIdx(i)); }
         });
+        panel_edge(painter, hx, cy, h, scale(1.0), w * 0.03 * sin);
         return;
     }
-    let a = (1.0 - open) * std::f32::consts::FRAC_PI_2;
-    let (cos, sin) = (a.cos(), a.sin());
-    let (w, h, hx, cy) = (panel.width(), panel.height(), panel.right(), panel.center().y);
-    let dist = w * 2.0;
-    let scale = move |u: f32| dist / (dist + 0.6 * u * w * sin);
     let warp = move |p: Pos2| { let u = (hx - p.x) / w; let k = scale(u); pos2(hx - u * w * cos * k, cy + (p.y - cy) * k) };
     let ppp = ctx.pixels_per_point();
     let opts = ctx.tessellation_options(|o| *o);
@@ -509,6 +521,28 @@ fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, start: egui::layers
         let (s1, x1) = (scale(1.0), warp(pos2(panel.left(), cy)).x);
         painter.add(Shape::convex_polygon(vec![pos2(x1, cy - h / 2.0 * s1), pos2(hx, panel.top()), pos2(hx, panel.bottom()), pos2(x1, cy + h / 2.0 * s1)], argb(dark, 0, 0, 0), Stroke::NONE));
     }
+    if sin > 0.0 {
+        let x1 = warp(pos2(panel.left(), cy)).x;
+        panel_edge(painter, x1, cy, h, scale(1.0), w * 0.03 * sin * scale(1.0));
+    }
+}
+
+/// The panel's free edge seen as it turns (mine, not in the classic): a plastic slab `depth` wide on the outside of
+/// the front face's edge at `x`, so the panel reads as a solid screen, not a sheet. Lit lip on the face side.
+fn panel_edge(painter: &egui::Painter, x: f32, cy: f32, h: f32, s: f32, depth: f32) {
+    if depth < 0.3 { return; }
+    let (top, bottom) = (cy - h / 2.0 * s, cy + h / 2.0 * s);
+    let inset = (h * s * 0.025).min(depth * 1.2);
+    let outer = x - depth;
+    let pts = [pos2(x, top + inset * 0.4), pos2(outer, top + inset), pos2(outer, bottom - inset), pos2(x, bottom - inset * 0.4)];
+    let mut mesh = egui::Mesh::default();
+    let cols = [PLASTIC, PLASTIC_DARK, argb(255, 14, 15, 18), PLASTIC_DARK];
+    for (p, c) in pts.iter().zip(cols) { mesh.colored_vertex(*p, c); }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(Shape::mesh(mesh));
+    painter.add(Shape::line_segment([pts[0], pts[3]], Stroke::new(1.0_f32.min(depth * 0.3).max(0.6), argb(70, 255, 255, 255))));
+    painter.add(Shape::line_segment([pts[1], pts[2]], Stroke::new(1.0_f32, argb(180, 0, 0, 0))));
 }
 
 /// Splits triangles wider than `max_w` so colours and textures follow the perspective (the classic's 48 strips).
@@ -532,10 +566,30 @@ fn subdivide(mesh: epaint::Mesh, max_w: f32) -> epaint::Mesh {
     out
 }
 
-fn back_out(x: f32, k: f32) -> f32 {
-    let x = x.clamp(0.0, 1.0) - 1.0;
-    1.0 + (k + 1.0) * x * x * x + k * x * x
+/// Opening over x in 0..1: a slow start (time eased in), then the step response of a damped spring (damping from
+/// the roll: 0.70..0.80, overshoot about 1.5..4.5 %), settled by x = 1.
+fn heavy_open(x: f32, roll: f32) -> f32 {
+    if x <= 0.0 { return 0.0; }
+    if x >= 1.0 { return 1.0; }
+    let zeta = 0.70 + 0.1 * ((roll - 0.2) / 1.0).clamp(0.0, 1.0);
+    let w = 9.0;
+    let tau = x.powf(1.4);
+    let wd = w * (1.0 - zeta * zeta).sqrt();
+    let f = 1.0 - (-zeta * w * tau).exp() * ((wd * tau).cos() + zeta / (1.0 - zeta * zeta).sqrt() * (wd * tau).sin());
+    // Blend the last bit of the tail onto 1 so it ends exactly facing you.
+    let end = ((x - 0.85) / 0.15).clamp(0.0, 1.0);
+    f + (1.0 - f) * end * end
 }
+
+/// Closing over u in 0..1: gathers speed like a falling lid (shut at u = 0.86), then a small bounce off the body.
+fn heavy_close(u: f32) -> f32 {
+    const HIT: f32 = 0.86;
+    if u <= 0.0 { return 1.0; }
+    if u < HIT { let k = u / HIT; return 1.0 - k * k * (1.5 - 0.5 * k); }
+    let b = ((u - HIT) / (1.0 - HIT)).clamp(0.0, 1.0);
+    0.045 * (b * std::f32::consts::PI).sin() * (1.0 - b)
+}
+
 
 /// Paints the whole window; returns what the pointer hit.
 pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear: Option<egui::TextureId>) -> Hits {

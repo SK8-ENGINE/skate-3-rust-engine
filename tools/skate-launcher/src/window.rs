@@ -136,3 +136,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// This thread's top-level window with Windows' own open / close animation switched off (the classic's layered window
+/// has none; it hid the start of the swing). Returns whether the window is on screen yet.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn own_window_shown() -> bool {
+    use windows_sys::core::BOOL;
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumThreadWindows, IsWindowVisible};
+    unsafe extern "system" fn each(h: HWND, shown: LPARAM) -> BOOL {
+        let off: BOOL = 1;
+        // SAFETY: h comes from EnumThreadWindows; the attribute is a BOOL read during the call; shown points at a bool
+        // that outlives the enumeration.
+        unsafe {
+            DwmSetWindowAttribute(h, DWMWA_TRANSITIONS_FORCEDISABLED as u32, (&off as *const BOOL).cast(), 4);
+            if IsWindowVisible(h) != 0 { *(shown as *mut bool) = true; }
+        }
+        1
+    }
+    let mut shown = false;
+    // SAFETY: enumerates this thread's windows with a callback that only touches them and the local flag.
+    unsafe { EnumThreadWindows(GetCurrentThreadId(), Some(each), (&mut shown as *mut bool) as LPARAM); }
+    shown
+}
+#[cfg(not(windows))]
+pub fn own_window_shown() -> bool {
+    true
+}

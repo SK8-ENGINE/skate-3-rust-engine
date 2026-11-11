@@ -1254,7 +1254,9 @@ impl eframe::App for App {
             if let Some(code) = code { self.finish_start(code); }
         }
         let now = self.opened.elapsed().as_secs_f32();
-        if self.anim.on_at.is_none() {
+        // The power-on clock starts once the window is on screen (SkateLauncher.cs: at its first Present), so the whole
+        // swing is seen; until then the window is fully transparent (window_alpha 0).
+        if self.anim.on_at.is_none() && (self.snapshot.is_some() || self.bench.is_some() || crate::window::own_window_shown()) {
             self.anim.on_at = Some(now);
             if self.snapshot.is_none() { self.anim.roll(); }
         }
@@ -1283,6 +1285,13 @@ impl eframe::App for App {
         }
         if self.anim.animating(now) {
             ctx.request_repaint();
+            // SKATE_LAUNCHER_FRAMELOG=<file>: one line per animated frame (clock, open, level) to find hitches.
+            if let Some(p) = std::env::var_os("SKATE_LAUNCHER_FRAMELOG") {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+                    let _ = writeln!(f, "{now:.4} {:.3} {:.2}", self.anim.panel_open(now), self.anim.screen_level(now));
+                }
+            }
         }
         if let Some((entry, label)) = self.waiting_for.clone() {
             if self.pages.last().is_none_or(|p| p.title != "Waiting") {
