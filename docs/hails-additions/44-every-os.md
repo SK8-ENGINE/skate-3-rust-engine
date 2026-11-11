@@ -71,6 +71,14 @@ progress, play, session checks, DLC import, Refresh Game Files, clear builds, si
 apt / dnf / pacman, Homebrew); (4) the camcorder look with the snapshot and bench modes; (5) a parity checklist on
 Windows, then Linux and macOS runs, then the Steam shortcuts move over.
 
+### Progress
+
+- 2026-11-10, step 2 started: crate `tools/skate-launcher` (workspace member; `jiff =0.2.42` for local times on every
+  OS). It finds the launcher folder and state folder as `launcher.ps1` does, reads `config.json` / `versions.json`
+  with the built-in versions, and answers `versions` and `version-set`. Check: on the desktop its `versions` output
+  is byte-identical to `launcher.ps1 versions` (three versions: built, built from the working tree, out of date);
+  unit tests for the version list (2 pass). Next: the other query commands, then the window.
+
 ### Spec of the current launcher
 
 [Doc 44a](44a-launcher-spec.md) (2026-11-10): every backend command and entry with the lines the window parses, every
