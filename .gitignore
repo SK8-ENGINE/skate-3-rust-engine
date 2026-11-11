@@ -1,4 +1,6 @@
 /target/
+# skate-install's Nix GC root for the offline launcher.
+/skate-play
 /bin/
 /logs/
 /.local/
@@ -8,6 +10,7 @@
 /data/
 __pycache__/
 *.pyc
+.DS_Store
 /assets/private/
 /maps/private/
 /maps/*.skate
