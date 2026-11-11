@@ -18,7 +18,7 @@ fn ui() -> bool {
 }
 
 fn git(dir: &Path, args: &[&str]) -> (bool, String) {
-    match Command::new("git").arg("-C").arg(dir).args(args).output() {
+    match crate::proc::cmd("git").arg("-C").arg(dir).args(args).output() {
         Ok(o) => (o.status.success(), String::from_utf8_lossy(&o.stdout).trim().to_owned()),
         Err(_) => (false, String::new()),
     }
@@ -48,7 +48,7 @@ fn fetch(l: &Launcher, v: &Value, dir: &Path) -> String {
     if ui() {
         println!("LAUNCHER_WAIT\tbegin\tfetch\t{branch}\t{from}");
     }
-    let ok = Command::new("git").arg("-C").arg(dir)
+    let ok = crate::proc::cmd("git").arg("-C").arg(dir)
         .args(["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30", "fetch", "-q", &from, &format!("+refs/heads/{branch}:{r}")])
         .env("GIT_TERMINAL_PROMPT", "0").status().ok().and_then(|s| s.code()).unwrap_or(1);
     if ui() {
@@ -109,7 +109,7 @@ fn remove_link(p: &Path) {
 
 #[cfg(windows)]
 fn make_link(link: &Path, target: &Path) -> std::io::Result<()> {
-    let ok = Command::new("cmd").args(["/c", "mklink", "/J"]).arg(link).arg(target).output()?.status.success();
+    let ok = crate::proc::cmd("cmd").args(["/c", "mklink", "/J"]).arg(link).arg(target).output()?.status.success();
     if ok { Ok(()) } else { Err(std::io::Error::other("mklink failed")) }
 }
 #[cfg(not(windows))]
@@ -135,7 +135,7 @@ fn package_target() -> &'static str {
 }
 
 fn download(url: &str, out: &Path) -> Result<(), String> {
-    let status = Command::new("curl").args(["-fsSL", "--retry", "2", "--max-time", "900", "-o"]).arg(out).arg(url).status()
+    let status = crate::proc::cmd("curl").args(["-fsSL", "--retry", "2", "--max-time", "900", "-o"]).arg(out).arg(url).status()
         .map_err(|e| format!("curl: {e}"))?;
     if status.success() { Ok(()) } else { Err(format!("download failed ({url})")) }
 }
@@ -352,12 +352,12 @@ fn head_stamp(d: &Path, dev: bool) -> String {
         return head;
     }
     let inputs = ["--", "crates", "vendor", "Cargo.toml", "Cargo.lock", ".cargo", "docs/images", "maps"];
-    let changed = Command::new("git").arg("-C").arg(d).args(["diff", "--quiet", "HEAD"]).args(inputs).status().ok().and_then(|s| s.code()) == Some(1);
+    let changed = crate::proc::cmd("git").arg("-C").arg(d).args(["diff", "--quiet", "HEAD"]).args(inputs).status().ok().and_then(|s| s.code()) == Some(1);
     if !changed {
         return head;
     }
     let tmp = std::env::temp_dir().join(format!("skate-launcher-diff-{}", std::process::id()));
-    let _ = Command::new("git").arg("-C").arg(d).args(["diff", "--binary"]).arg(format!("--output={}", tmp.display())).arg("HEAD").args(inputs).status();
+    let _ = crate::proc::cmd("git").arg("-C").arg(d).args(["diff", "--binary"]).arg(format!("--output={}", tmp.display())).arg("HEAD").args(inputs).status();
     let hash = git(d, &["hash-object", &tmp.to_string_lossy()]).1;
     let _ = std::fs::remove_file(&tmp);
     if hash.len() >= 12 { format!("{head}+{}", &hash[..12]) } else { head }
@@ -375,10 +375,10 @@ fn cargo_env(c: &mut Command) -> &mut Command {
 /// The build itself: Build.ps1 on Windows (as the PowerShell launcher); elsewhere one static binary into bin/.
 fn run_build(d: &Path, target: &Path) -> i32 {
     if cfg!(windows) {
-        return cargo_env(Command::new("powershell.exe").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(d.join("scripts").join("Build.ps1"))
+        return cargo_env(crate::proc::cmd("powershell.exe").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(d.join("scripts").join("Build.ps1"))
             .arg("-TargetDirectory").arg(target)).status().ok().and_then(|s| s.code()).unwrap_or(1);
     }
-    let code = cargo_env(Command::new("cargo").current_dir(d)
+    let code = cargo_env(crate::proc::cmd("cargo").current_dir(d)
         .args(["build", "--release", "--locked", "-p", "skate-game", "--bin", "skate3rust", "--no-default-features", "--target-dir"]).arg(target))
         .status().ok().and_then(|s| s.code()).unwrap_or(1);
     if code != 0 {
@@ -393,7 +393,7 @@ fn run_build(d: &Path, target: &Path) -> i32 {
     let lib = if cfg!(target_os = "macos") { "librefpack.dylib" } else { "librefpack.so" };
     let native = d.join("target").join("native");
     let _ = std::fs::create_dir_all(&native);
-    let _ = Command::new("rustc").args(["--edition", "2024", "--crate-type", "cdylib", "-C", "opt-level=3", "-C", "panic=abort"])
+    let _ = crate::proc::cmd("rustc").args(["--edition", "2024", "--crate-type", "cdylib", "-C", "opt-level=3", "-C", "panic=abort"])
         .arg(d.join("tools").join("asset_pipeline").join("refpack_native.rs")).arg("-o").arg(native.join(lib)).status();
     0
 }
@@ -413,7 +413,7 @@ pub fn ensure_version(l: &Launcher, v: &Value, build_log: &mut String) -> bool {
         if l.standalone {
             let url = { let u = text(v, "url"); if u.is_empty() { setting(&l.config, "fork_url").and_then(Value::as_str).unwrap_or("https://github.com/Hailey-Ross/rusty-trucks.git").to_owned() } else { u } };
             println!("  Setting up {name}: downloading {branch} from {url}...");
-            let ok = Command::new("git").args(["clone", "-q", "--single-branch", "--branch", &branch, &url]).arg(&d).status().is_ok_and(|s| s.success());
+            let ok = crate::proc::cmd("git").args(["clone", "-q", "--single-branch", "--branch", &branch, &url]).arg(&d).status().is_ok_and(|s| s.success());
             if !ok {
                 println!("  Could not download it (git clone failed).");
                 return false;
@@ -423,7 +423,7 @@ pub fn ensure_version(l: &Launcher, v: &Value, build_log: &mut String) -> bool {
     if !d.join(".git").exists() {
         println!("  Setting up {name}: new worktree for {branch}...");
         let r = fetch(l, v, &l.repo);
-        let mut c = Command::new("git");
+        let mut c = crate::proc::cmd("git");
         c.arg("-C").arg(&l.repo).args(["worktree", "add"]);
         if flag(v, "detached") || !text(v, "url").is_empty() { c.arg("--detach").arg(&d).arg(&r); } else { c.arg(&d).arg(&branch); }
         if !c.status().is_ok_and(|s| s.success()) {

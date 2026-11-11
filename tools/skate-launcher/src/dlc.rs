@@ -2,7 +2,6 @@
 //! its header) copied to `<dlc>/<display name>/<file>`; other files are skipped.
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -52,24 +51,24 @@ fn pick() -> Option<Vec<PathBuf>> {
             $nl = [Environment]::NewLine; $a = [System.Windows.Forms.MessageBox]::Show($o, \"Pick DLC package files?$nl$nl\" + \"Yes: choose one or more package files.$nl\" + 'No: choose a folder (every package inside it).', 'Import DLC', 'YesNoCancel', 'Question'); \
             if ($a -eq 'Yes') { $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = 'Skate 3 DLC packages'; $d.Multiselect = $true; $d.Filter = 'All files (*.*)|*.*'; if ($d.ShowDialog($o) -eq 'OK') { $d.FileNames } } \
             elseif ($a -eq 'No') { $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'The folder with your Skate 3 DLC packages (subfolders too)'; if ($d.ShowDialog($o) -eq 'OK') { 'DIR:' + $d.SelectedPath } }";
-        lines(Command::new("powershell.exe").args(["-NoProfile", "-STA", "-Command", script]).output().ok()?)
+        lines(crate::proc::cmd("powershell.exe").args(["-NoProfile", "-STA", "-Command", script]).output().ok()?)
     } else if cfg!(target_os = "macos") {
         let script = "set c to button returned of (display dialog \"Pick DLC package files, or a folder with every package inside it?\" buttons {\"Cancel\", \"Folder\", \"Files\"} default button \"Files\" with title \"Import DLC\")\n\
             if c is \"Files\" then\nset fs to choose file with prompt \"Skate 3 DLC packages\" with multiple selections allowed\nset out to \"\"\nrepeat with f in fs\nset out to out & POSIX path of f & linefeed\nend repeat\nreturn out\n\
             else\nreturn \"DIR:\" & POSIX path of (choose folder with prompt \"The folder with your Skate 3 DLC packages\")\nend if";
-        lines(Command::new("osascript").args(["-e", script]).output().ok()?)
+        lines(crate::proc::cmd("osascript").args(["-e", script]).output().ok()?)
     } else {
-        let has = |c: &str| Command::new("sh").arg("-c").arg(format!("command -v {c}")).output().is_ok_and(|o| o.status.success());
+        let has = |c: &str| crate::proc::cmd("sh").arg("-c").arg(format!("command -v {c}")).output().is_ok_and(|o| o.status.success());
         if has("zenity") {
-            let files = Command::new("zenity").args(["--question", "--title=Import DLC", "--text=Pick DLC package files?\n\nYes: choose one or more package files.\nNo: choose a folder (every package inside it).", "--ok-label=Files", "--cancel-label=Folder"]).status().ok()?.success();
+            let files = crate::proc::cmd("zenity").args(["--question", "--title=Import DLC", "--text=Pick DLC package files?\n\nYes: choose one or more package files.\nNo: choose a folder (every package inside it).", "--ok-label=Files", "--cancel-label=Folder"]).status().ok()?.success();
             if files {
-                lines(Command::new("zenity").args(["--file-selection", "--multiple", "--separator=\n", "--title=Skate 3 DLC packages"]).output().ok()?)
+                lines(crate::proc::cmd("zenity").args(["--file-selection", "--multiple", "--separator=\n", "--title=Skate 3 DLC packages"]).output().ok()?)
             } else {
-                let o = Command::new("zenity").args(["--file-selection", "--directory", "--title=The folder with your Skate 3 DLC packages"]).output().ok()?;
+                let o = crate::proc::cmd("zenity").args(["--file-selection", "--directory", "--title=The folder with your Skate 3 DLC packages"]).output().ok()?;
                 lines(o).into_iter().map(|p| format!("DIR:{p}")).collect()
             }
         } else if has("kdialog") {
-            let o = Command::new("kdialog").args(["--getexistingdirectory", ".", "--title", "The folder with your Skate 3 DLC packages"]).output().ok()?;
+            let o = crate::proc::cmd("kdialog").args(["--getexistingdirectory", ".", "--title", "The folder with your Skate 3 DLC packages"]).output().ok()?;
             lines(o).into_iter().map(|p| format!("DIR:{p}")).collect()
         } else {
             Vec::new()

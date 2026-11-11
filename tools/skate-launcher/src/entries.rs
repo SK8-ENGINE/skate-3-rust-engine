@@ -49,6 +49,10 @@ pub fn entries(l: &Launcher) -> Vec<Entry> {
         Some(slot) => *slot = e,
         None => list.push(e),
     };
+    if crate::selfupdate::flavour_rust(l) && cfg!(windows) {
+        put(Entry { id: "tool-classic-launcher".into(), group: "tools", name: "Switch back to the classic launcher".into(),
+            hint: "Puts the previous launcher window back (SkateLauncher.classic.exe) and restarts into it. Tools > Try the new launcher switches again.".into(), recomp: None, rpcs3: None });
+    }
     for re in config_list(&l.config, "recomp_entries") {
         put(Entry { id: text(&re, "id"), group: "recomp", name: text(&re, "name"), hint: text(&re, "hint"), recomp: Some(re), rpcs3: None });
     }

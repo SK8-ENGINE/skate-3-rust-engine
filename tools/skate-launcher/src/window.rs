@@ -89,7 +89,7 @@ pub fn free_bytes(path: &Path) -> Option<u64> {
 pub fn free_bytes(path: &Path) -> Option<u64> {
     let mut dir = path.to_path_buf();
     while !dir.exists() { dir = dir.parent()?.to_path_buf(); }
-    let out = std::process::Command::new("df").arg("-Pk").arg(&dir).output().ok()?;
+    let out = std::process::crate::proc::cmd("df").arg("-Pk").arg(&dir).output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     let kb: u64 = text.lines().nth(1)?.split_whitespace().nth(3)?.parse().ok()?;
     Some(kb * 1024)

@@ -3,7 +3,6 @@
 //! are copied from it, local files that differ are backed up first, nothing is committed.
 use std::io::Read;
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 use sha2::Digest;
@@ -37,9 +36,134 @@ fn sha256_hex(bytes: &[u8]) -> String {
     sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+// ---------- the switchover (doc 44 "Switching launchers") ----------
+// `launcher-flavour.txt` in the state folder says which launcher is the window: "rust" once the user switched (Tools >
+// Try the new launcher in the C# window), absent for the classic SkateLauncher.exe. While it says "rust", every update
+// path (the start check, Tools > Update the launcher, build.bat's launcher-exe) keeps the Rust launcher current from
+// the release instead of rebuilding the C# one.
+
+pub fn flavour_rust(l: &Launcher) -> bool {
+    std::fs::read_to_string(l.state_dir.join("launcher-flavour.txt")).is_ok_and(|t| t.trim() == "rust")
+}
+
+fn release_base(l: &Launcher) -> String {
+    let fork = setting(&l.config, "fork_url").and_then(Value::as_str).unwrap_or("https://github.com/Hailey-Ross/rusty-trucks.git");
+    let repo = fork.trim_end_matches(".git").trim_start_matches("https://github.com/");
+    let branch = setting(&l.config, "launcher_branch").and_then(Value::as_str).unwrap_or("hails-additions");
+    format!("https://github.com/{repo}/releases/download/{branch}")
+}
+
+/// The release asset with this OS's Rust launcher.
+pub fn rust_asset() -> &'static str {
+    if cfg!(windows) { "skate-launcher-windows-x64.exe" } else if cfg!(target_os = "macos") { "skate-launcher-macos-arm64" } else { "skate-launcher-linux-x64" }
+}
+
+/// The window's program in the launcher folder: SkateLauncher.exe on Windows (Steam shortcuts point at it), else
+/// skate-launcher.
+pub fn window_exe(l: &Launcher) -> std::path::PathBuf {
+    l.here.join(if cfg!(windows) { "SkateLauncher.exe" } else { "skate-launcher" })
+}
+
+fn download(url: &str, out: &Path) -> bool {
+    crate::proc::cmd("curl").args(["-fsSL", "--max-time", "900", "-o"]).arg(out).arg(url).status().is_ok_and(|s| s.success())
+}
+
+fn file_sha(path: &Path) -> Option<String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path).and_then(|mut f| f.read_to_end(&mut bytes)).ok()?;
+    Some(sha256_hex(&bytes))
+}
+
+/// Puts `new` in place of `exe`, keeping the running one as `<name>.old` (a running program can be renamed, not
+/// replaced).
+fn swap_in(exe: &Path, new: &Path) -> bool {
+    let old = exe.with_extension(if cfg!(windows) { "old.exe" } else { "old" });
+    let moved = (|| -> std::io::Result<()> {
+        if old.exists() { std::fs::remove_file(&old)?; }
+        if exe.exists() { std::fs::rename(exe, &old)?; }
+        std::fs::rename(new, exe)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(exe, std::fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(())
+    })();
+    if moved.is_err() { let _ = std::fs::remove_file(new); }
+    moved.is_ok()
+}
+
+/// The release's Rust launcher in place of the window's program when it differs (checked by its sha256). Ok(true) =
+/// replaced.
+pub fn update_rust_binary(l: &Launcher) -> Result<bool, String> {
+    let base = release_base(l);
+    let asset = rust_asset();
+    let exe = window_exe(l);
+    let side = l.here.join(format!("{asset}.sha256"));
+    if !download(&format!("{base}/{asset}.sha256"), &side) {
+        return Err(format!("could not download {asset}.sha256"));
+    }
+    let want = std::fs::read_to_string(&side).unwrap_or_default().split_whitespace().next().unwrap_or_default().to_ascii_lowercase();
+    let _ = std::fs::remove_file(&side);
+    if want.len() != 64 { return Err(format!("{asset}.sha256 is not a sha256")); }
+    if file_sha(&exe).as_deref() == Some(want.as_str()) { return Ok(false); }
+    let new = l.here.join(format!("{asset}.new"));
+    if !download(&format!("{base}/{asset}"), &new) {
+        let _ = std::fs::remove_file(&new);
+        return Err(format!("could not download {asset}"));
+    }
+    if file_sha(&new).as_deref() != Some(want.as_str()) {
+        let _ = std::fs::remove_file(&new);
+        return Err(format!("{asset} did not match its sha256"));
+    }
+    if swap_in(&exe, &new) { Ok(true) } else { Err(format!("could not replace {}", exe.display())) }
+}
+
+/// Tools > Switch back to the classic launcher (Windows): the kept SkateLauncher.classic.exe, else the classic exe
+/// rebuilt; the window restarts into it.
+pub fn switch_to_classic(l: &Launcher) -> String {
+    if !cfg!(windows) {
+        return "The classic launcher is Windows only.".into();
+    }
+    let _ = std::fs::remove_file(l.state_dir.join("launcher-flavour.txt"));
+    let classic = l.here.join("SkateLauncher.classic.exe");
+    let ok = if classic.exists() {
+        let new = l.here.join("SkateLauncher.new.exe");
+        std::fs::copy(&classic, &new).is_ok() && swap_in(&window_exe(l), &new)
+    } else {
+        rebuild_launcher_exe(l)
+    };
+    if ok {
+        let _ = std::fs::write(l.state_dir.join("restart.txt"), "classic\r\n");
+        log(l, "Switched back to the classic launcher.");
+        "Switched back to the classic launcher; it starts now. Tools > Try the new launcher switches again.".into()
+    } else {
+        let _ = std::fs::write(l.state_dir.join("launcher-flavour.txt"), "rust\r\n");
+        "Could not put the classic launcher back; the new one stays.".into()
+    }
+}
+
+/// The Rust launcher's own update, after the launcher files (every start check and Tools > Update the launcher).
+fn rust_binary_step(l: &Launcher, r: &mut String) {
+    match update_rust_binary(l) {
+        Ok(true) => {
+            let _ = std::fs::write(l.state_dir.join("restart.txt"), "rust\r\n");
+            if !r.is_empty() { r.push(' '); }
+            r.push_str("The new launcher was updated and restarts into the new version.");
+            log(l, &format!("Updated {} from the release.", rust_asset()));
+        }
+        Ok(false) => {}
+        Err(e) => log(l, &format!("New launcher update: {e}; kept the current one.")),
+    }
+}
+
 /// `Get-PrebuiltLauncher` + `Rebuild-LauncherExe` (Windows: the window is SkateLauncher.exe): the release's prebuilt exe
-/// when its sidecar names this SkateLauncher.cs, else compiled with the .NET Framework's csc. True = rebuilt.
+/// when its sidecar names this SkateLauncher.cs, else compiled with the .NET Framework's csc. True = rebuilt. After the
+/// switchover: the Rust launcher from the release instead.
 pub fn rebuild_launcher_exe(l: &Launcher) -> bool {
+    if flavour_rust(l) {
+        return update_rust_binary(l).is_ok() && window_exe(l).exists();
+    }
     if !cfg!(windows) {
         return false;
     }
@@ -50,7 +174,7 @@ pub fn rebuild_launcher_exe(l: &Launcher) -> bool {
     let branch = setting(&l.config, "launcher_branch").and_then(Value::as_str).unwrap_or("hails-additions");
     let base = format!("https://github.com/{repo}/releases/download/{branch}");
     let side = l.here.join("SkateLauncher.new.exe.sha256");
-    let get = |url: &str, out: &Path| Command::new("curl").args(["-fsSL", "--max-time", "900", "-o"]).arg(out).arg(url).status().is_ok_and(|s| s.success());
+    let get = |url: &str, out: &Path| crate::proc::cmd("curl").args(["-fsSL", "--max-time", "900", "-o"]).arg(out).arg(url).status().is_ok_and(|s| s.success());
     let prebuilt = (|| {
         if !get(&format!("{base}/SkateLauncher.exe.source-sha256"), &side) {
             return false;
@@ -76,7 +200,7 @@ pub fn rebuild_launcher_exe(l: &Launcher) -> bool {
     if !prebuilt {
         let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
         let csc = Path::new(&windir).join("Microsoft.NET").join("Framework64").join("v4.0.30319").join("csc.exe");
-        let _ = Command::new(csc).args(["/nologo", "/target:winexe"]).arg(format!("/out:{}", new.display())).arg(&cs).output();
+        let _ = crate::proc::cmd(csc).args(["/nologo", "/target:winexe"]).arg(format!("/out:{}", new.display())).arg(&cs).output();
     }
     if !new.exists() {
         return false;
@@ -117,16 +241,16 @@ pub fn self_update(l: &Launcher, force: bool) -> Option<String> {
     let commit_file = l.state_dir.join("launcher_commit.txt");
     println!("  Checking the launcher: {branch} on {url}...");
     if !self_git.join("HEAD").exists() {
-        let _ = Command::new("git").args(["init", "-q", "--bare"]).arg(&self_git).output();
+        let _ = crate::proc::cmd("git").args(["init", "-q", "--bare"]).arg(&self_git).output();
     }
     remove_stale_locks(&self_git);
     ui_line("LAUNCHER_STAGE\tChecking GitHub for a newer launcher");
     ui_line("LAUNCHER_SELF\tfetching");
-    let ok = Command::new("git").arg("-C").arg(&self_git)
+    let ok = crate::proc::cmd("git").arg("-C").arg(&self_git)
         .args(["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30", "fetch", "-q", "--depth", "1", &url, &format!("+refs/heads/{branch}:refs/heads/self")])
         .env("GIT_TERMINAL_PROMPT", "0").output().is_ok_and(|o| o.status.success());
     ui_line("LAUNCHER_SELF\tfetched");
-    let sha = Command::new("git").arg("-C").arg(&self_git).args(["rev-parse", "--verify", "-q", "refs/heads/self"]).output().ok()
+    let sha = crate::proc::cmd("git").arg("-C").arg(&self_git).args(["rev-parse", "--verify", "-q", "refs/heads/self"]).output().ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default();
     if !ok || sha.is_empty() {
         let r = format!("Launcher update: could not reach {url} ({branch}); kept the current launcher.");
@@ -134,12 +258,17 @@ pub fn self_update(l: &Launcher, force: bool) -> Option<String> {
         return Some(r);
     }
     if !force && std::fs::read_to_string(&commit_file).is_ok_and(|t| t.trim() == sha) {
+        if flavour_rust(l) {
+            let mut r = String::new();
+            rust_binary_step(l, &mut r);
+            return (!r.is_empty()).then_some(r);
+        }
         return None;
     }
     ui_line(&format!("LAUNCHER_STAGE\tInstalling the launcher update ({})", short(&sha)));
     let zip_path = std::env::temp_dir().join(format!("skate-launcher-update-{}.zip", std::process::id()));
     let autocrlf = if cfg!(windows) { "core.autocrlf=true" } else { "core.autocrlf=false" };
-    let archived = Command::new("git").arg("-C").arg(&self_git).args(["-c", autocrlf, "archive", "--format=zip", "-o"]).arg(&zip_path)
+    let archived = crate::proc::cmd("git").arg("-C").arg(&self_git).args(["-c", autocrlf, "archive", "--format=zip", "-o"]).arg(&zip_path)
         .arg("refs/heads/self").arg("--").args(PATHS).output().is_ok_and(|o| o.status.success());
     let archive = std::fs::File::open(&zip_path).ok().filter(|_| archived).and_then(|f| zip::ZipArchive::new(f).ok());
     let Some(mut archive) = archive else {
@@ -203,7 +332,9 @@ pub fn self_update(l: &Launcher, force: bool) -> Option<String> {
     if !backed_up.is_empty() {
         r.push_str(&format!(" Local changes to {} of them were backed up (self-update-backup\\{stamp}).", backed_up.len()));
     }
-    if changed.iter().any(|c| c == "tools/steam-launcher/SkateLauncher.cs") && cfg!(windows) {
+    if flavour_rust(l) {
+        rust_binary_step(l, &mut r);
+    } else if changed.iter().any(|c| c == "tools/steam-launcher/SkateLauncher.cs") && cfg!(windows) {
         if rebuild_launcher_exe(l) {
             let _ = std::fs::write(l.state_dir.join("restart.txt"), format!("{s}\r\n"));
             r.push_str(" The launcher restarts into the new version.");

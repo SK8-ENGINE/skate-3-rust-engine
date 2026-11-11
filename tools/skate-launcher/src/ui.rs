@@ -2,7 +2,7 @@
 //! the mouse. Every action runs this program's own text commands as a child process with `SKATE_LAUNCHER_UI=2`, the
 //! way SkateLauncher.exe runs launcher.ps1, so the window and the command line share one backend.
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -186,7 +186,7 @@ impl StartCheck {
         let (stage, fetching, fetched, skipped, child, result, since) = (s.stage.clone(), s.fetching.clone(), s.fetched.clone(), s.skipped.clone(), s.child.clone(), s.result.clone(), s.since);
         std::thread::spawn(move || {
             let run = |no_self: bool| -> i32 {
-                let mut cmd = Command::new(&exe);
+                let mut cmd = crate::proc::cmd(&exe);
                 cmd.arg("pending").env("SKATE_LAUNCHER_UI", "2").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
                 if no_self { cmd.env("SKATE_LAUNCHER_NO_SELF", "1"); }
                 let Ok(mut c) = cmd.spawn() else { return 0 };
@@ -246,7 +246,7 @@ impl StartCheck {
 
 /// Runs a backend command and returns its lines (short query commands).
 fn query(exe: &PathBuf, args: &[&str]) -> Vec<String> {
-    Command::new(exe).args(args).env("SKATE_LAUNCHER_UI", "2").stdin(Stdio::null()).output().ok()
+    crate::proc::cmd(exe).args(args).env("SKATE_LAUNCHER_UI", "2").stdin(Stdio::null()).output().ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::to_owned).collect()).unwrap_or_default()
 }
 
@@ -407,12 +407,15 @@ impl App {
         let f = self.state_dir.join("restart.txt");
         if !f.exists() { return false; }
         let _ = std::fs::remove_file(&f);
-        let Ok(exe) = std::env::current_exe() else { return false };
+        let Ok(me) = std::env::current_exe() else { return false };
+        // The window's program in its folder (an update or switch renamed the running one aside).
+        let named = me.parent().map(|d| d.join(if cfg!(windows) { "SkateLauncher.exe" } else { "skate-launcher" }));
+        let exe = named.filter(|p| p.exists()).unwrap_or(me);
         let mut args = self.direct.clone();
         if show_last { args.push("--after-update".into()); }
         if self.same_monitor { args.push("--same-monitor".into()); }
         crate::window::release_instance();
-        let Ok(child) = Command::new(&exe).args(&args).spawn() else { return false };
+        let Ok(child) = crate::proc::cmd(&exe).args(&args).spawn() else { return false };
         self.restarted = Some(child);
         true
     }
@@ -797,7 +800,7 @@ impl App {
 
     fn run_job(&mut self, title: &str, args: Vec<String>) {
         let state = Arc::new(Mutex::new(JobState::default()));
-        let child = Command::new(&self.exe).args(&args).env("SKATE_LAUNCHER_UI", "2").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
+        let child = crate::proc::cmd(&self.exe).args(&args).env("SKATE_LAUNCHER_UI", "2").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
         let Ok(mut child) = child else {
             self.pages.push(text_page("Could not start", vec![format!("Could not start {}", self.exe.display())], None));
             return;
@@ -1059,6 +1062,11 @@ impl App {
                 self.anim.roll();
                 self.hidden = false;
             }
+            // An update or a switch of launchers during the job: start the new window (SkateLauncher.cs JobDone).
+            if self.direct.is_empty() && self.restart_if_updated(true) {
+                self.job = None;
+                return;
+            }
             let mut text = self.last_session();
             let mut mono = None;
             if let Some(c) = cancelled {
@@ -1146,9 +1154,9 @@ fn clean(line: &str) -> String {
 /// Ends a job's whole process tree (a build's cargo, a game).
 fn kill_tree(pid: u32) {
     if cfg!(windows) {
-        let _ = Command::new("taskkill").args(["/T", "/F", "/PID", &pid.to_string()]).output();
+        let _ = crate::proc::cmd("taskkill").args(["/T", "/F", "/PID", &pid.to_string()]).output();
     } else {
-        let _ = Command::new("pkill").args(["-TERM", "-P", &pid.to_string()]).output();
+        let _ = crate::proc::cmd("pkill").args(["-TERM", "-P", &pid.to_string()]).output();
     }
 }
 

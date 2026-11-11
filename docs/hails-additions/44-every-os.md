@@ -151,6 +151,23 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   with use, the sticker picker in Tools, the stickers folder override, `--wear-test` / `--bench` / `--standby-test`,
   Linux / macOS grey-outs, more character stickers.
 
+### Switching launchers
+
+The new launcher replaces SkateLauncher.exe in place, so Steam shortcuts keep working:
+- The fork's Windows build publishes `skate-launcher-windows-x64.exe` (C runtime linked in) and the Linux / macOS
+  builds `skate-launcher-linux-x64` / `skate-launcher-macos-arm64`, each with a `.sha256`, on the release; the Linux /
+  macOS packages carry it as `tools/steam-launcher/skate-launcher`.
+- The classic launcher's Tools > **Try the new launcher** (`launcher.ps1` `tool-try-new-launcher`): downloads and checks
+  it, keeps the classic exe as `SkateLauncher.classic.exe`, puts the new one in as `SkateLauncher.exe`, writes
+  `launcher-flavour.txt` (`rust`) and `restart.txt` in the state folder; the classic window restarts into it.
+- While the flavour is `rust`, every update path keeps the new launcher current from the release (the start check,
+  Tools > Update the launcher, build.bat's `launcher-exe`) instead of rebuilding the classic exe; `launcher.ps1`'s
+  `Rebuild-LauncherExe` leaves it alone.
+- The new launcher's Tools > **Switch back to the classic launcher** puts the classic exe back (or rebuilds it), removes
+  the flavour file and restarts into it.
+- On Windows the new launcher is a windowed program (no console behind it from Steam); its text commands attach to the
+  terminal they were started from, and every program it starts gets CREATE_NO_WINDOW (`proc.rs`).
+
 ### Spec of the current launcher
 
 [Doc 44a](44a-launcher-spec.md) (2026-11-10): every backend command and entry with the lines the window parses, every

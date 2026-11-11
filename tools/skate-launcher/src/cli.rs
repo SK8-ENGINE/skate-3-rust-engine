@@ -1,7 +1,6 @@
 //! The launcher's text commands, line for line as `launcher.ps1` prints them (doc 44a section 1a), so the old window,
 //! scripts and the new one read the same output.
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -11,7 +10,7 @@ use crate::state::{flag, text, Launcher};
 pub const GAME_EXE: &str = if cfg!(windows) { "skate3rust.exe" } else { "skate3rust" };
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    Command::new("git").arg("-C").arg(dir).args(args).output().ok()
+    crate::proc::cmd("git").arg("-C").arg(dir).args(args).output().ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
         .unwrap_or_default()

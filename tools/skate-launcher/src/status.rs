@@ -1,6 +1,5 @@
 //! `status`: the main screen's facts, as `launcher.ps1 status` prints them (doc 44a section 1a).
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -12,7 +11,7 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 fn git_line(dir: &Path, args: &[&str]) -> String {
-    Command::new("git").arg("-C").arg(dir).args(args).output().ok()
+    crate::proc::cmd("git").arg("-C").arg(dir).args(args).output().ok()
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8_lossy(&o.stdout).lines().next().map(str::to_owned))
         .unwrap_or_default()
@@ -118,11 +117,11 @@ pub fn fixed_executor_pub(l: &Launcher) -> &'static str {
 /// selected version is a prebuilt release, so the build tools are optional (`SKATE_LAUNCHER_RELEASES=1`).
 pub fn setup_missing(l: &Launcher, release: bool) -> String {
     let mut command = if cfg!(windows) {
-        let mut c = Command::new("powershell.exe");
+        let mut c = crate::proc::cmd("powershell.exe");
         c.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(l.here.join("setup.ps1"));
         c
     } else {
-        let mut c = Command::new("sh");
+        let mut c = crate::proc::cmd("sh");
         c.arg(l.here.join("setup.sh"));
         c
     };

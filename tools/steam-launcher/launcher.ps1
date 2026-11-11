@@ -433,7 +433,36 @@ function Get-PrebuiltLauncher([string]$Out) {
     } catch { Remove-Item $Out -ErrorAction SilentlyContinue; return $false }
     finally { Remove-Item $side -ErrorAction SilentlyContinue }
 }
+# The switchover (docs/hails-additions/44-every-os.md "Switching launchers"): launcher-flavour.txt says "rust" once
+# Tools > Try the new launcher put the Rust launcher in place of SkateLauncher.exe. It keeps itself current from the
+# release, so this never puts the classic exe back over it.
+function Launcher-IsRust { $f = Join-Path $StateDir 'launcher-flavour.txt'; (Test-Path $f) -and "$(Get-Content $f -Raw)".Trim() -eq 'rust' }
+function Switch-ToNewLauncher {
+    $ErrorActionPreference = 'Continue'
+    $repo = ((Setting 'fork_url' 'https://github.com/Hailey-Ross/rusty-trucks.git') -replace '\.git$', '') -replace '^https://github\.com/', ''
+    $base = "https://github.com/$repo/releases/download/$(Setting 'launcher_branch' 'hails-additions')"
+    $asset = 'skate-launcher-windows-x64.exe'
+    $new = Join-Path $Here 'SkateLauncher.new.exe'; $side = "$new.sha256"
+    try {
+        Get-Url "$base/$asset.sha256" $side
+        $want = ("$(Get-Content $side -Raw)".Trim() -split '\s+')[0].ToLower()
+        Get-Url "$base/$asset" $new
+        if ((Get-FileHash $new -Algorithm SHA256).Hash.ToLower() -ne $want) { Remove-Item $new -ErrorAction SilentlyContinue; return 'Try the new launcher: the download did not match its checksum; nothing changed.' }
+    } catch { Remove-Item $new -ErrorAction SilentlyContinue; return "Try the new launcher: could not download it ($($_.Exception.Message)); nothing changed." }
+    finally { Remove-Item $side -ErrorAction SilentlyContinue }
+    $exe = Join-Path $Here 'SkateLauncher.exe'; $old = Join-Path $Here 'SkateLauncher.old.exe'; $classic = Join-Path $Here 'SkateLauncher.classic.exe'
+    try {
+        if (Test-Path $exe) { Copy-Item $exe $classic -Force }
+        if (Test-Path $old) { Remove-Item $old -ErrorAction Stop }
+        if (Test-Path $exe) { Move-Item $exe $old -Force }
+        Move-Item $new $exe -Force
+    } catch { Remove-Item $new -ErrorAction SilentlyContinue; return "Try the new launcher: could not swap the launcher ($($_.Exception.Message)); nothing changed." }
+    Set-Content -Path (Join-Path $StateDir 'launcher-flavour.txt') -Value 'rust' -Encoding ascii
+    Set-Content -Path (Join-Path $StateDir 'restart.txt') -Value 'rust' -Encoding ascii
+    'The new launcher is installed and starts now. Tools > Switch back to the classic launcher undoes it.'
+}
 function Rebuild-LauncherExe {
+    if (Launcher-IsRust) { return $true }
     $cs = Join-Path $Here 'SkateLauncher.cs'; $exe = Join-Path $Here 'SkateLauncher.exe'; $old = Join-Path $Here 'SkateLauncher.old.exe'
     $new = Join-Path $Here 'SkateLauncher.new.exe'
     if (-not (Get-PrebuiltLauncher $new)) {
@@ -962,6 +991,7 @@ $Entries = [ordered]@{
     'tool-refresh'  = @{ Group = 'tools'; Name = 'Refresh game files';        Kind = 'tool';     Hint = 'Checks the game files without playing; converts only what changed.' }
     'tool-build'    = @{ Group = 'tools'; Name = 'Update and build the selected version'; Kind = 'tool'; Hint = 'Fetches its branch and builds it now, so the next launch starts at once.' }
     'tool-self-update' = @{ Group = 'tools'; Name = 'Update the launcher';    Kind = 'tool';     Hint = 'Brings the launcher to the newest hails-additions on the fork and rebuilds it (also at every start and before Update and build).' }
+    'tool-try-new-launcher' = @{ Group = 'tools'; Name = 'Try the new launcher'; Kind = 'tool'; Hint = 'Puts the new launcher (the same camcorder, rewritten to run on every OS) in place of this one and restarts into it. Your Steam shortcut keeps working; its Tools > Switch back to the classic launcher undoes it.' }
     'tool-send'     = @{ Group = 'tools'; Name = 'Send the logs now';         Kind = 'tool';     Hint = 'Runs the after-session send (config.json after_session).' }
     'tool-share'    = @{ Group = 'tools'; Name = 'Share the last session via GitHub'; Kind = 'tool'; Hint = "Packs the new logs and opens a GitHub issue on the selected version's repository; you drop the zip in. Needs Share sessions turned on." }
     'tool-recomp-update'  = @{ Group = 'tools'; Name = 'Recomp: get the newest build'; Kind = 'tool'; Hint = "Copies the main PC's newest recomp build (play-recomp.ps1 -Update)." }
@@ -1111,6 +1141,7 @@ function Run-Tool([string]$Key, $Ver) {
             $r = if ($LASTEXITCODE -eq 0) { 'First-time setup: everything is installed.' } else { 'First-time setup: not finished (see the steps above).' }
         }
         'tool-self-update' { $r = Self-Update -Force; if (-not $r) { $r = 'Launcher: up to date.' } }
+        'tool-try-new-launcher' { $r = Switch-ToNewLauncher }
         'tool-build' {
             # The launcher first, so one press brings both to the newest push.
             $self = ''; if ((Setting 'self_update' $true) -ne $false) { $self = Self-Update; if ($self) { Write-Host "  $self" } }

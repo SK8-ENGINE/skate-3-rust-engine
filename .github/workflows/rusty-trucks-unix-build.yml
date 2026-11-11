@@ -50,6 +50,8 @@ jobs:
           python -m unittest tools.asset_pipeline.test_dependency tools.asset_pipeline.test_versions -v
       - name: Build the game
         run: cargo build --release --locked -p skate-game --bin skate3rust --no-default-features
+      - name: Build the launcher
+        run: cargo build --release --locked -p skate-launcher
       - name: Engine tests
         run: cargo test --release --locked -p skate-core -p skate-audio -p skate-data --lib -- --test-threads=2
       - name: Mod tests
@@ -75,10 +77,15 @@ jobs:
           cp tools/vendor/university/LICENSE-PROJECT.md "$d/licenses/CustomEngineLayer.txt"
           cp vendor/bevy_pbr/LICENSE-MIT "$d/licenses/Bevy-MIT.txt"
           cp vendor/bevy_pbr/LICENSE-APACHE "$d/licenses/Bevy-APACHE.txt"
-          chmod +x "$d/bin/skate3rust" "$d/SETUP.sh" "$d/PLAY.sh" "$d/tools/steam-launcher/setup.sh"
+          # The launcher (tools/skate-launcher) sits in its folder, where it finds its files and updates itself.
+          cp target/release/skate-launcher "$d/tools/steam-launcher/skate-launcher"
+          chmod +x "$d/bin/skate3rust" "$d/SETUP.sh" "$d/PLAY.sh" "$d/tools/steam-launcher/setup.sh" "$d/tools/steam-launcher/skate-launcher"
           printf 'build %s\ncommit %s\n' "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" > "$d/BUILD.txt"
           tar -C out -czf "out/$name.tar.gz" "$name"
           (cd out && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+          # The launcher on its own, for its self-update (selfupdate.rs update_rust_binary).
+          cp target/release/skate-launcher "out/skate-launcher-${{ inputs.target }}"
+          (cd out && shasum -a 256 "skate-launcher-${{ inputs.target }}" > "skate-launcher-${{ inputs.target }}.sha256")
       - name: Report compiler cache hits
         if: always()
         run: sccache --show-stats
@@ -89,6 +96,8 @@ jobs:
           path: |
             out/skate3rust-${{ inputs.target }}.tar.gz
             out/skate3rust-${{ inputs.target }}.tar.gz.sha256
+            out/skate-launcher-${{ inputs.target }}
+            out/skate-launcher-${{ inputs.target }}.sha256
   publish:
     needs: build
     if: github.event_name == 'release' || github.ref == 'refs/heads/hails-additions'
@@ -101,4 +110,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || 'hails-additions' }}
-        run: gh release upload "$TAG" skate3rust-${{ inputs.target }}.tar.gz skate3rust-${{ inputs.target }}.tar.gz.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" skate3rust-${{ inputs.target }}.tar.gz skate3rust-${{ inputs.target }}.tar.gz.sha256 skate-launcher-${{ inputs.target }} skate-launcher-${{ inputs.target }}.sha256 --clobber --repo "$GITHUB_REPOSITORY"

@@ -1,7 +1,6 @@
 //! Starting an entry, as `launcher.ps1` Launch / Run-Tool do (doc 44a 1c): one game at a time, PLAYING.txt while it
 //! runs, the per-entry environment, the session check afterwards, the result line in last_session.txt.
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -60,7 +59,7 @@ pub fn save_result(l: &Launcher, text: &str) {
 /// Runs a play script (PLAY.bat through cmd on Windows, PLAY.sh elsewhere) and waits for the game tree.
 fn run_script(script: &Path, arg: &str, envs: &[(String, String)]) {
     let mut c = if cfg!(windows) {
-        let mut c = Command::new("cmd.exe");
+        let mut c = crate::proc::cmd("cmd.exe");
         let mut line = format!("\"\"{}\"", script.display());
         if !arg.is_empty() {
             line.push(' ');
@@ -74,7 +73,7 @@ fn run_script(script: &Path, arg: &str, envs: &[(String, String)]) {
         }
         c
     } else {
-        let mut c = Command::new("bash");
+        let mut c = crate::proc::cmd("bash");
         c.arg(script);
         if !arg.is_empty() {
             c.arg(arg);
@@ -91,7 +90,7 @@ fn run_script(script: &Path, arg: &str, envs: &[(String, String)]) {
 /// A PowerShell helper script (send, share, recomp): Windows PowerShell, else PowerShell 7 when installed.
 pub fn powershell(script: &Path, args: &[&str], envs: &[(String, String)]) -> Option<(i32, Vec<String>)> {
     let exe = if cfg!(windows) { "powershell.exe" } else { "pwsh" };
-    let out = Command::new(exe).args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(script).args(args)
+    let out = crate::proc::cmd(exe).args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(script).args(args)
         .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str()))).output().ok()?;
     let lines = String::from_utf8_lossy(&out.stdout).lines().map(str::to_owned).filter(|l| !l.trim().is_empty()).collect();
     Some((out.status.code().unwrap_or(1), lines))
@@ -184,7 +183,7 @@ fn check_session(l: &Launcher, kind: &str, since: std::time::SystemTime, root: &
             let check = l.config.get("recomp").map(|r| text(r, "trace_check")).filter(|s| !s.is_empty()).map(|s| resolve_local(l, &s));
             let Some(check) = check.filter(|c| c.exists()) else { return format!("{dname}: {mb} MB trace (no trace_check configured)") };
             println!("  Checking the trace (can take a minute for long sessions)...");
-            let py = if cfg!(windows) { Command::new("py").arg("-3.13").arg(&check).arg(&t).output() } else { Command::new("python3").arg(&check).arg(&t).output() };
+            let py = if cfg!(windows) { crate::proc::cmd("py").arg("-3.13").arg(&check).arg(&t).output() } else { crate::proc::cmd("python3").arg(&check).arg(&t).output() };
             let out = py.map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))).unwrap_or_default();
             let Some(last) = out.lines().filter(|l| l.contains("malformed")).last() else { return format!("{dname}: could not read the check result") };
             let counts: Vec<u64> = last.split(':').skip(1).filter_map(|p| p.trim_start().split(|c: char| !c.is_ascii_digit()).next().and_then(|n| n.parse().ok())).collect();
@@ -262,14 +261,14 @@ fn refresh_game_files(l: &Launcher, v: &Value) -> String {
     }
     let d = l.version_dir(v);
     if l.use_release(v) {
-        let code = Command::new(d.join(crate::cli::GAME_EXE)).arg("--update-game-files").status().ok().and_then(|s| s.code()).unwrap_or(1);
+        let code = crate::proc::cmd(d.join(crate::cli::GAME_EXE)).arg("--update-game-files").status().ok().and_then(|s| s.code()).unwrap_or(1);
         return format!("Refresh game files: exit code {code}.");
     }
     let Some(assets) = dev_assets(&d) else { return "Refresh game files: no game files yet. Convert them first (tools\\setup-dev-assets.ps1).".into() };
     println!("  Checking the game files ({})...", assets.display());
     let marker = l.state_dir.join("REFRESHING.txt");
     let _ = std::fs::write(&marker, format!("\u{feff}{name}\r\n"));
-    let out = Command::new(d.join("bin").join(crate::cli::GAME_EXE)).arg("--update-game-files").arg("--assets").arg(&assets).output();
+    let out = crate::proc::cmd(d.join("bin").join(crate::cli::GAME_EXE)).arg("--update-game-files").arg("--assets").arg(&assets).output();
     let _ = std::fs::remove_file(&marker);
     let Ok(out) = out else { return "Refresh game files: failed (exit code 1).".into() };
     let mut said = String::new();
@@ -301,13 +300,14 @@ fn run_tool(l: &Launcher, key: &str, v: &Value, path_arg: &str) -> bool {
     let r = match key {
         "tool-setup" => {
             let ok = if cfg!(windows) {
-                Command::new("powershell.exe").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(l.here.join("setup.ps1")).arg("-Install").status()
+                crate::proc::cmd("powershell.exe").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(l.here.join("setup.ps1")).arg("-Install").status()
             } else {
-                Command::new("sh").arg(l.here.join("setup.sh")).arg("--install").status()
+                crate::proc::cmd("sh").arg(l.here.join("setup.sh")).arg("--install").status()
             }.is_ok_and(|s| s.success());
             if ok { "First-time setup: everything is installed.".to_owned() } else { "First-time setup: not finished (see the steps above).".to_owned() }
         }
         "tool-self-update" => crate::selfupdate::self_update(l, true).unwrap_or_else(|| "Launcher: up to date.".into()),
+        "tool-classic-launcher" => crate::selfupdate::switch_to_classic(l),
         "tool-build" => {
             let auto = setting(&l.config, "self_update").and_then(Value::as_bool) != Some(false);
             let me = if auto { crate::selfupdate::self_update(l, false).unwrap_or_default() } else { String::new() };
@@ -351,7 +351,7 @@ fn run_tool(l: &Launcher, key: &str, v: &Value, path_arg: &str) -> bool {
 
 fn powershell_passthrough(script: &Path, args: &[&str]) -> Option<i32> {
     let exe = if cfg!(windows) { "powershell.exe" } else { "pwsh" };
-    Command::new(exe).args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(script).args(args).status().ok()?.code()
+    crate::proc::cmd(exe).args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(script).args(args).status().ok()?.code()
 }
 
 /// `Launch`: runs entry `key` (label `label`) for version `version_id` ("" = the selected one). False = it failed in
@@ -399,7 +399,7 @@ pub fn launch(l: &Launcher, key: &str, label: &str, version_id: &str, path_arg: 
             if cfg!(windows) {
                 let _ = powershell_passthrough(&d.join("tools").join("setup-dev-assets.ps1"), &["-Disc", disc]);
             } else {
-                let _ = Command::new("bash").arg(d.join("SETUP.sh")).arg(disc).current_dir(&d).status();
+                let _ = crate::proc::cmd("bash").arg(d.join("SETUP.sh")).arg(disc).current_dir(&d).status();
             }
         }
         if !l.use_release(v) && !stock.exists() {
@@ -617,7 +617,7 @@ fn run_recomp(l: &Launcher, re: &Value, label: &str) {
     let exe = text(&r, "exe");
     let args = { let a = text(&r, "args"); if a.is_empty() { "--skate3_demo_path --skate3_demo_path_signed_in".to_owned() } else { a } };
     let cwd = { let w = text(&r, "working_dir"); if w.is_empty() { Path::new(&exe).parent().map(Path::to_path_buf).unwrap_or_default() } else { PathBuf::from(w) } };
-    let mut c = Command::new(&exe);
+    let mut c = crate::proc::cmd(&exe);
     c.args(args.split_whitespace()).current_dir(&cwd);
     let trace = text(re, "trace");
     if trace.is_empty() {
@@ -653,6 +653,6 @@ fn run_rpcs3(l: &Launcher, pe: &Value) {
     if !own.is_empty() {
         args = own;
     }
-    let _ = Command::new(&exe).args(args.split_whitespace()).arg(text(&r, "game"))
+    let _ = crate::proc::cmd(&exe).args(args.split_whitespace()).arg(text(&r, "game"))
         .current_dir(Path::new(&exe).parent().unwrap_or(Path::new("."))).status();
 }

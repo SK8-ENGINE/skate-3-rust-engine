@@ -1,7 +1,6 @@
 //! Native folder and file pickers on every OS: the Windows Forms dialogs through PowerShell, the macOS dialogs through
 //! osascript, zenity or kdialog on Linux.
 use std::path::PathBuf;
-use std::process::Command;
 
 fn first_line(out: std::process::Output) -> Option<PathBuf> {
     let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
@@ -9,7 +8,7 @@ fn first_line(out: std::process::Output) -> Option<PathBuf> {
 }
 
 fn has(cmd: &str) -> bool {
-    Command::new("sh").arg("-c").arg(format!("command -v {cmd}")).output().is_ok_and(|o| o.status.success())
+    crate::proc::cmd("sh").arg("-c").arg(format!("command -v {cmd}")).output().is_ok_and(|o| o.status.success())
 }
 
 fn ps_quote(s: &str) -> String {
@@ -20,16 +19,16 @@ fn ps_quote(s: &str) -> String {
 pub fn folder(title: &str) -> Option<PathBuf> {
     if cfg!(windows) {
         let script = format!("Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = '{}'; if ($d.ShowDialog() -eq 'OK') {{ $d.SelectedPath }}", ps_quote(title));
-        return first_line(Command::new("powershell.exe").args(["-NoProfile", "-STA", "-Command", &script]).output().ok()?);
+        return first_line(crate::proc::cmd("powershell.exe").args(["-NoProfile", "-STA", "-Command", &script]).output().ok()?);
     }
     if cfg!(target_os = "macos") {
-        return first_line(Command::new("osascript").args(["-e", &format!("POSIX path of (choose folder with prompt \"{}\")", title.replace('"', "'"))]).output().ok()?);
+        return first_line(crate::proc::cmd("osascript").args(["-e", &format!("POSIX path of (choose folder with prompt \"{}\")", title.replace('"', "'"))]).output().ok()?);
     }
     if has("zenity") {
-        return first_line(Command::new("zenity").args(["--file-selection", "--directory", &format!("--title={title}")]).output().ok()?);
+        return first_line(crate::proc::cmd("zenity").args(["--file-selection", "--directory", &format!("--title={title}")]).output().ok()?);
     }
     if has("kdialog") {
-        return first_line(Command::new("kdialog").args(["--getexistingdirectory", ".", "--title", title]).output().ok()?);
+        return first_line(crate::proc::cmd("kdialog").args(["--getexistingdirectory", ".", "--title", title]).output().ok()?);
     }
     None
 }
@@ -38,16 +37,16 @@ pub fn folder(title: &str) -> Option<PathBuf> {
 pub fn file(title: &str, filter: &str) -> Option<PathBuf> {
     if cfg!(windows) {
         let script = format!("Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = '{}'; $d.Filter = '{}'; if ($d.ShowDialog() -eq 'OK') {{ $d.FileName }}", ps_quote(title), ps_quote(filter));
-        return first_line(Command::new("powershell.exe").args(["-NoProfile", "-STA", "-Command", &script]).output().ok()?);
+        return first_line(crate::proc::cmd("powershell.exe").args(["-NoProfile", "-STA", "-Command", &script]).output().ok()?);
     }
     if cfg!(target_os = "macos") {
-        return first_line(Command::new("osascript").args(["-e", &format!("POSIX path of (choose file with prompt \"{}\")", title.replace('"', "'"))]).output().ok()?);
+        return first_line(crate::proc::cmd("osascript").args(["-e", &format!("POSIX path of (choose file with prompt \"{}\")", title.replace('"', "'"))]).output().ok()?);
     }
     if has("zenity") {
-        return first_line(Command::new("zenity").args(["--file-selection", &format!("--title={title}")]).output().ok()?);
+        return first_line(crate::proc::cmd("zenity").args(["--file-selection", &format!("--title={title}")]).output().ok()?);
     }
     if has("kdialog") {
-        return first_line(Command::new("kdialog").args(["--getopenfilename", ".", "--title", title]).output().ok()?);
+        return first_line(crate::proc::cmd("kdialog").args(["--getopenfilename", ".", "--title", title]).output().ok()?);
     }
     None
 }

@@ -2,6 +2,8 @@
 //! 44a). The text commands and entries of `launcher.ps1`, with the same output; the window follows.
 //!
 //! `skate-launcher <command or entry> [label] [-Version <id>] [-Path <file or folder>]`
+// A windowed program on Windows: Steam starts it as SkateLauncher.exe after the switchover, without a console.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 mod builds;
 mod camcorder;
 mod cli;
@@ -11,6 +13,7 @@ mod entries;
 mod ojson;
 mod pick;
 mod play;
+mod proc;
 mod selfupdate;
 mod settings;
 mod state;
@@ -19,14 +22,14 @@ mod ui;
 mod wear;
 mod window;
 
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 /// `setup-check`: the OS's first-time setup check (setup.ps1 / setup.sh), its lines and exit code passed through.
 fn setup_check(l: &state::Launcher) -> ExitCode {
     let status = if cfg!(windows) {
-        Command::new("powershell.exe").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(l.here.join("setup.ps1")).status()
+        crate::proc::cmd("powershell.exe").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(l.here.join("setup.ps1")).status()
     } else {
-        Command::new("sh").arg(l.here.join("setup.sh")).status()
+        crate::proc::cmd("sh").arg(l.here.join("setup.sh")).status()
     };
     exit(status.ok().and_then(|s| s.code()).unwrap_or(1))
 }
@@ -36,6 +39,7 @@ fn exit(code: i32) -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    proc::attach_parent_console();
     let mut args: Vec<String> = Vec::new();
     let (mut version, mut path, mut snapshot, mut snapshot_page, mut snapshot_seed) = (String::new(), String::new(), None, None, None);
     let (mut same_monitor, mut after_update) = (false, false);
