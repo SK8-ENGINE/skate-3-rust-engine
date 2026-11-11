@@ -461,6 +461,77 @@ impl Anim {
     }
 }
 
+/// `FlipPanel`: the panel drawn this frame swung on the hinge at its right edge with perspective (the free edge
+/// recedes while it is edge-on, comes a touch closer in the wobble past flat), darker while it is turned away.
+/// Every shape is tessellated and its vertices moved, so text, screen and wear swing with the face.
+fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, start: egui::layers::ShapeIdx, open: f32, panel: Rect) {
+    let layer = painter.layer_id();
+    if open <= 0.01 {
+        ctx.graphics_mut(|g| {
+            let list = g.entry(layer);
+            for i in start.0..list.next_idx().0 { list.reset_shape(egui::layers::ShapeIdx(i)); }
+        });
+        return;
+    }
+    let a = (1.0 - open) * std::f32::consts::FRAC_PI_2;
+    let (cos, sin) = (a.cos(), a.sin());
+    let (w, h, hx, cy) = (panel.width(), panel.height(), panel.right(), panel.center().y);
+    let dist = w * 2.0;
+    let scale = move |u: f32| dist / (dist + 0.6 * u * w * sin);
+    let warp = move |p: Pos2| { let u = (hx - p.x) / w; let k = scale(u); pos2(hx - u * w * cos * k, cy + (p.y - cy) * k) };
+    let ppp = ctx.pixels_per_point();
+    let opts = ctx.tessellation_options(|o| *o);
+    let font_size = ctx.fonts(|f| f.font_image_size());
+    let shapes: Vec<(usize, epaint::ClippedShape)> = ctx.graphics_mut(|g| {
+        let list = g.entry(layer);
+        list.all_entries().enumerate().skip(start.0).map(|(i, c)| (i, c.clone())).collect()
+    });
+    let mut tess = epaint::Tessellator::new(ppp, opts, font_size, Vec::new());
+    let max_w = w / 32.0;
+    let warped: Vec<(usize, Rect, Shape)> = shapes.into_iter().map(|(i, c)| {
+        let mut mesh = epaint::Mesh::default();
+        tess.set_clip_rect(Rect::EVERYTHING);
+        tess.tessellate_shape(c.shape, &mut mesh);
+        let mut mesh = subdivide(mesh, max_w);
+        for v in &mut mesh.vertices { v.pos = warp(v.pos); }
+        let clip = if c.clip_rect.is_finite() && c.clip_rect.width() < 1.0e6 {
+            let q = [c.clip_rect.left_top(), c.clip_rect.right_top(), c.clip_rect.left_bottom(), c.clip_rect.right_bottom()].map(warp);
+            Rect::from_points(&q)
+        } else { c.clip_rect };
+        (i, clip, Shape::mesh(mesh))
+    }).collect();
+    ctx.graphics_mut(|g| {
+        let list = g.entry(layer);
+        for (i, clip, shape) in warped { list.set(egui::layers::ShapeIdx(i), clip, shape); }
+    });
+    let dark = (170.0 * sin.max(0.0)) as u8;
+    if dark > 0 {
+        let (s1, x1) = (scale(1.0), warp(pos2(panel.left(), cy)).x);
+        painter.add(Shape::convex_polygon(vec![pos2(x1, cy - h / 2.0 * s1), pos2(hx, panel.top()), pos2(hx, panel.bottom()), pos2(x1, cy + h / 2.0 * s1)], argb(dark, 0, 0, 0), Stroke::NONE));
+    }
+}
+
+/// Splits triangles wider than `max_w` so colours and textures follow the perspective (the classic's 48 strips).
+fn subdivide(mesh: epaint::Mesh, max_w: f32) -> epaint::Mesh {
+    let mut out = epaint::Mesh::with_texture(mesh.texture_id);
+    out.vertices = mesh.vertices;
+    let mut stack: Vec<[u32; 3]> = mesh.indices.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect();
+    while let Some(t) = stack.pop() {
+        let p = t.map(|i| out.vertices[i as usize].pos);
+        let span = p.iter().map(|q| q.x).fold(f32::MIN, f32::max) - p.iter().map(|q| q.x).fold(f32::MAX, f32::min);
+        if span <= max_w || stack.len() > 200_000 { out.indices.extend_from_slice(&t); continue; }
+        let e = (0..3).max_by(|&i, &j| p[i].distance(p[(i + 1) % 3]).total_cmp(&p[j].distance(p[(j + 1) % 3]))).unwrap_or(0);
+        let (a, b, c) = (t[e], t[(e + 1) % 3], t[(e + 2) % 3]);
+        let (va, vb) = (out.vertices[a as usize], out.vertices[b as usize]);
+        let m = epaint::Vertex { pos: va.pos.lerp(vb.pos, 0.5), uv: va.uv.lerp(vb.uv, 0.5), color: va.color.lerp_to_gamma(vb.color, 0.5) };
+        let mi = out.vertices.len() as u32;
+        out.vertices.push(m);
+        stack.push([a, mi, c]);
+        stack.push([mi, b, c]);
+    }
+    out
+}
+
 fn back_out(x: f32, k: f32) -> f32 {
     let x = x.clamp(0.0, 1.0) - 1.0;
     1.0 + (k + 1.0) * x * x * x + k * x * x
@@ -473,7 +544,7 @@ pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear
     let dev_x = window.left() + (window.width() - DEV.x * dev_s) / 2.0;
     let dev_y = window.top() + (window.height() - DEV.y * dev_s) / 2.0;
     let hinge = dev_x + 1205.0 * dev_s;
-    let xf = Xf { ox: dev_x, oy: dev_y, sx: dev_s, sy: dev_s, swing: open.max(0.0), hinge };
+    let xf = Xf { ox: dev_x, oy: dev_y, sx: dev_s, sy: dev_s, swing: 1.0, hinge };
     let painter = ui.painter().clone();
     let c = Ctx { painter: &painter, xf };
     let mut hits = Hits::default();
@@ -504,6 +575,7 @@ pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear
         while y < 600.0 { hc.line(pos2(1188.0, y), pos2(1222.0, y), 2.0, argb(110, 0, 0, 0)); y += 70.0; }
     }
 
+    let panel_start = ui.ctx().graphics_mut(|g| g.entry(painter.layer_id()).next_idx());
     // LcdPanel.
     let pts = round_pts(PANEL_R, 34.0);
     c.fill_vgrad(&pts, PANEL_R.top() - 1.0, PANEL_R.bottom() + 1.0, Color32::from_rgb(76, 78, 86), Color32::from_rgb(32, 33, 38));
@@ -570,6 +642,9 @@ pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear
     // Wear and sticker (wear.rs) over the bezel.
     if let Some(tex) = wear {
         painter.image(tex, xf.r(Rect::from_min_size(pos2(0.0, 0.0), DEV)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
+    if (open - 1.0).abs() >= 0.002 {
+        swing_panel(ui.ctx(), &painter, panel_start, open, xf.r(PANEL_R));
     }
 
     // Hits.
