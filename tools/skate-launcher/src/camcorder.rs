@@ -475,14 +475,16 @@ impl Anim {
 /// `FlipPanel`: the panel drawn this frame swung on the hinge at its right edge with perspective (the free edge
 /// recedes while it is edge-on, comes a touch closer in the wobble past flat), darker while it is turned away.
 /// Every shape is tessellated and its vertices moved, so text, screen and wear swing with the face.
-fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, start: egui::layers::ShapeIdx, open: f32, panel: Rect) {
+fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, hinge_start: egui::layers::ShapeIdx, start: egui::layers::ShapeIdx, open: f32, panel: Rect) {
     let layer = painter.layer_id();
     let a = (1.0 - open.max(0.0)) * std::f32::consts::FRAC_PI_2;
     let (cos, sin) = (a.cos(), a.sin());
     let (w, h, hx, cy) = (panel.width(), panel.height(), panel.right(), panel.center().y);
-    let dist = w * 2.0;
-    let scale = move |u: f32| dist / (dist + 0.6 * u * w * sin);
-    let warp = move |p: Pos2| { let u = (hx - p.x) / w; let k = scale(u); pos2(hx - u * w * cos * k, cy + (p.y - cy) * k) };
+    // One camera for the face, its side and the shade: the eye in front of the panel's centre, `eye_d` back
+    // (mine; the classic's eye sits on the hinge line with a 0.6 depth factor). X right, Z away from you.
+    let (eye_x, eye_d) = (panel.center().x, w * 2.4);
+    let proj = move |x: f32, y: f32, z: f32| { let k = eye_d / (eye_d + z); pos2(eye_x + (x - eye_x) * k, cy + (y - cy) * k) };
+    let warp = move |p: Pos2| { let u = (hx - p.x) / w; proj(hx - u * w * cos, p.y, u * w * sin) };
     let ppp = ctx.pixels_per_point();
     let opts = ctx.tessellation_options(|o| *o);
     let font_size = ctx.fonts(|f| f.font_image_size());
@@ -514,35 +516,40 @@ fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, start: egui::layers
         painter.add(Shape::convex_polygon(q.to_vec(), argb(dark, 0, 0, 0), Stroke::NONE));
     }
     if sin > 0.0 {
-        // The hinge end of a panel `depth` thick: turned away, it faces you on the right of the front face.
+        // The hinge end of a panel `depth` thick: turned away, it faces you on the right of the front face (its back
+        // edge at hinge + depth x (sin, cos)), drawn in columns across the depth: front shell, seam, back shell.
         let depth = w * 0.06;
-        let back_s = dist / (dist + 0.6 * depth * cos);
-        hinge_side(painter, hx, hx + depth * sin * back_s, cy, h / 2.0, h / 2.0 * back_s, dark);
+        let stops = [(0.0, Color32::from_rgb(120, 123, 132)), (0.1, Color32::from_rgb(82, 85, 94)), (0.46, Color32::from_rgb(60, 62, 69)),
+                     (0.5, Color32::from_rgb(14, 15, 18)), (0.54, Color32::from_rgb(56, 58, 65)), (1.0, Color32::from_rgb(30, 31, 35))];
+        let round = h * 0.025;
+        let cols: Vec<(Pos2, Pos2, Color32)> = stops.iter().map(|&(t, c)| {
+            let (x, z) = (hx + t * depth * sin, t * depth * cos);
+            let r = round * (1.0 - (1.0 - (2.0 * t - 1.0).powi(2)).max(0.0).sqrt());
+            (proj(x, cy - h / 2.0 + r, z), proj(x, cy + h / 2.0 - r, z), lerp(c, Color32::BLACK, dark as f32 / 255.0 * 0.5))
+        }).collect();
+        hinge_side(painter, &cols);
     }
+    // The hinge barrel stays in front of the panel's side.
+    let hinge: Vec<epaint::ClippedShape> = ctx.graphics_mut(|g| g.entry(layer).all_entries().skip(hinge_start.0).take(start.0 - hinge_start.0).cloned().collect());
+    for c in hinge { painter.with_clip_rect(c.clip_rect).add(c.shape); }
 }
 
-/// The panel's hinge-end side (mine, not in the classic): a solid face from the front face's right edge at `x0` to the
-/// back at `x1`, front shell, seam and back shell across it, its corners rounded like the panel's, darker as it turns.
-fn hinge_side(painter: &egui::Painter, x0: f32, x1: f32, cy: f32, half0: f32, half1: f32, dark: u8) {
-    if x1 - x0 < 0.5 { return; }
-    let stops = [(0.0, Color32::from_rgb(120, 123, 132)), (0.1, Color32::from_rgb(82, 85, 94)), (0.46, Color32::from_rgb(60, 62, 69)),
-                 (0.5, Color32::from_rgb(14, 15, 18)), (0.54, Color32::from_rgb(56, 58, 65)), (1.0, Color32::from_rgb(30, 31, 35))];
-    let round = (x1 - x0).min(half0 * 0.08);
-    let y = |t: f32| half0 + (half1 - half0) * t - round * (1.0 - (1.0 - (2.0 * t - 1.0).powi(2)).max(0.0).sqrt());
-    let shade = |c: Color32| lerp(c, Color32::BLACK, dark as f32 / 255.0 * 0.5);
+/// The panel's hinge-end side (mine, not in the classic): columns of (top, bottom, colour) from the front face's right
+/// edge to the back.
+fn hinge_side(painter: &egui::Painter, cols: &[(Pos2, Pos2, Color32)]) {
+    if cols.len() < 2 || (cols[cols.len() - 1].0.x - cols[0].0.x).abs() < 0.5 { return; }
     let mut mesh = egui::Mesh::default();
-    for (t, c) in stops {
-        let px = x0 + (x1 - x0) * t;
-        mesh.colored_vertex(pos2(px, cy - y(t)), shade(c));
-        mesh.colored_vertex(pos2(px, cy + y(t)), shade(c));
+    for (t, b, c) in cols {
+        mesh.colored_vertex(*t, *c);
+        mesh.colored_vertex(*b, *c);
     }
-    for i in 0..(stops.len() as u32 - 1) {
+    for i in 0..(cols.len() as u32 - 1) {
         let (a, b, c, d) = (2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 3);
         mesh.add_triangle(a, b, d);
         mesh.add_triangle(a, d, c);
     }
     painter.add(Shape::mesh(mesh));
-    let outline: Vec<Pos2> = stops.iter().map(|(t, _)| pos2(x0 + (x1 - x0) * t, cy - y(*t))).chain(stops.iter().rev().map(|(t, _)| pos2(x0 + (x1 - x0) * t, cy + y(*t)))).collect();
+    let outline: Vec<Pos2> = cols.iter().map(|c| c.0).chain(cols.iter().rev().map(|c| c.1)).collect();
     painter.add(Shape::closed_line(outline, Stroke::new(1.0_f32, argb(150, 0, 0, 0))));
 }
 
@@ -622,6 +629,7 @@ pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear
     let mut keys: Vec<(Rect, Key)> = Vec::new();
     let mut items: Vec<(Rect, usize)> = Vec::new();
 
+    let hinge_start = ui.ctx().graphics_mut(|g| g.entry(painter.layer_id()).next_idx());
     if open > 0.01 {
         // Hinge (Cylinder upright + grooves).
         let hr = Rect::from_min_size(pos2(1186.0, 150.0), vec2(38.0, 460.0));
@@ -711,7 +719,7 @@ pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear
         painter.image(tex, xf.r(Rect::from_min_size(pos2(0.0, 0.0), DEV)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
     if (open - 1.0).abs() >= 0.002 {
-        swing_panel(ui.ctx(), &painter, panel_start, open, xf.r(PANEL_R));
+        swing_panel(ui.ctx(), &painter, hinge_start, panel_start, open, xf.r(PANEL_R));
     }
 
     // Hits.
