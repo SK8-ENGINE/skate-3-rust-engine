@@ -57,3 +57,26 @@ fn chase_and_race_starts_pick_their_sections_for_every_seed() {
         assert!(s.next_segment(&g).is_some(), "race music plays (seed {seed})");
     }
 }
+
+/// Research music-pathfinder-actions.md: of the wait / sync / ramp / pause / stop actions (types 2, 3, 5..7, 15..18)
+/// only two waits occur on the disc: game.mpf's escape event 0xB9B8F8 and world.mpf's DJ end event 0x5B4DEF.
+#[test]
+#[ignore = "requires the disc's music graphs"]
+fn only_two_waits_occur_and_no_sync_ramp_pause_or_stop() {
+    use skate_audio::music::pathfinder::format::Action;
+    for (name, waits) in [("game.mpf", vec![0xB9_B8F8u32]), ("ipod.mpf", vec![]), ("world.mpf", vec![0x5B_4DEF])] {
+        let g = graph(name);
+        let mut found = Vec::new();
+        for e in &g.events {
+            for a in &e.actions {
+                match a {
+                    Action::Wait(_) => found.push(e.id),
+                    Action::WaitSync(_) => panic!("{name}: sync wait in {:#x}", e.id),
+                    Action::Unknown { kind, .. } if matches!(kind, 5..=7 | 15..=18) => panic!("{name}: type {kind} in {:#x}", e.id),
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(found, waits, "{name}");
+    }
+}
