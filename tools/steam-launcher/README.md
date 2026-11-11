@@ -63,6 +63,22 @@ What it does:
 Windows only. Needs Windows PowerShell 5.1 (built in) and winget (App Installer, built into Windows 10 1809+ and 11);
 the first-time setup installs the rest.
 
+## Linux and macOS: get your computer ready
+
+The launcher window itself is Windows-only for now (a version for every OS is being built). Until then, this gets a
+Linux or macOS computer ready to build and play:
+
+1. Open a terminal in this folder (Linux: right-click an empty spot, **Open in Terminal**; macOS: right-click the
+   folder in Finder, **New Terminal at Folder**).
+2. Type `sh setup.sh` and press Enter. It lists what is installed and what is missing.
+3. Type `sh setup.sh --install` and press Enter. Type your password when it asks (you will not see it as you type;
+   that is normal). It installs everything missing, which can take a few minutes.
+4. When it says **All required tools are installed**, go to the main folder and run `./SETUP.sh <your Skate 3 ISO>`,
+   then `./BUILD.sh` and `./PLAY.sh`.
+
+On macOS without Homebrew, the setup tells you how to get it first. On a Steam Deck in game mode, use the prebuilt
+versions instead.
+
 ## Launcher-only download (standalone)
 
 Each fork release also has `skate-launcher-windows.zip`: the launcher on its own, without a game build and without a

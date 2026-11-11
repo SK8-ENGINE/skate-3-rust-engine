@@ -38,6 +38,17 @@ Where the two met (2026-11-10, merge `4583fe96`):
   picker through zenity, kdialog or the macOS dialog, else a typed path); README steps for each OS.
 - `.gitattributes`: every `.sh` is stored with LF, every `.bat` with CRLF.
 
+## First-time setup on Linux and macOS (2026-11-10)
+
+`tools/steam-launcher/setup.sh` is the twin of `setup.ps1`: the same check lines (id, name, ok, detail, required)
+for Git, the compiler / CMake / patchelf, the Linux build libraries, Python 3 with Tk, Rust, the GitHub CLI and
+Vulkan (MoltenVK on macOS); `--install` installs everything missing in one step through apt, dnf, pacman, zypper or
+Homebrew (one password prompt through sudo), then Rust for the user through rustup (never as root). On SteamOS it
+explains that the system is read-only and points to the prebuilt versions or Distrobox. Python's own packages
+(numpy, Pillow) come from setup's venv bootstrap, which now finds the venv's Python on every OS. The Rust launcher
+will show it the same way as the Windows setup page. All of the launcher's features are ported (scope of the
+rewrite below); the doc 44a parity checklist decides when it replaces the old one.
+
 ## Fork builds and badges (2026-11-10)
 
 - `.github/workflows/rusty-trucks-linux.yml` (Ubuntu 24.04, x64) and `rusty-trucks-macos.yml` (macOS, latest runner, Apple
