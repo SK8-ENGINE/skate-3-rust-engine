@@ -4568,7 +4568,7 @@ Our replay of the session's tag-66 grinds (e2e, `E2E_FPS=60`):
 and the Skate_Collisions on / off sounds, no metal ring. Metal rails still ring. Some other concrete / stone grinds
 change surface too (tag 3: surface 0 → 1; tag 5 was metal, now concrete).
 
-**Listening (user, 2026-10-03, couch launcher, bin\ with the turn / brake console cadence and the grind tag - 1 fix; session `state_20261003_135706`, 0 malformed; asked about the University concrete ledge, a metal rail, carving, braking, enclosed spots (reverb) and fast riding above 46 km/h):** "all of it sounded really good"
+**Listening (user, 2026-10-03, Skate launcher, bin\ with the turn / brake console cadence and the grind tag - 1 fix; session `state_20261003_135706`, 0 malformed; asked about the University concrete ledge, a metal rail, carving, braking, enclosed spots (reverb) and fast riding above 46 km/h):** "all of it sounded really good"
 
 ### Riding body-collision posts settled (2026-10-03, recomp session `audiox_ride_20261003_141046`, 0 malformed)
 

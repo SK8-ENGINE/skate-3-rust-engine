@@ -1,6 +1,6 @@
-# 44a. Couch launcher: spec of the current launcher for the Rust rewrite
+# 44a. Skate launcher: spec of the current launcher for the Rust rewrite
 
-Part of [doc 44](44-every-os.md#couch-launcher-on-every-os-user-asks-561). Read from `tools/steam-launcher/` as on
+Part of [doc 44](44-every-os.md#skate-launcher-on-every-os-user-asks-561). Read from `tools/steam-launcher/` as on
 `hails-additions` (launcher commit `c6da2ddc`), 2026-11-10. References are `file:line`; L = `launcher.ps1`,
 C = `SkateLauncher.cs`, S = `setup.ps1`, R = `README.md`, D41 =
 [doc 41](41-launcher-camcorder-viewfinder.md). Line numbers are approximate (a spot check found drifts of up to about

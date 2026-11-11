@@ -64,7 +64,7 @@ Xbox 360 research.
 
 ## Playing it from the couch, and closing it
 
-- Our couch launcher (a local script, not published) starts the traced recomp from Steam / Steam Link with one shortcut per
+- Our Skate launcher (a local script, not published) starts the traced recomp from Steam / Steam Link with one shortcut per
   trace mode, checks each trace for malformed lines afterwards, and keeps one game running at a time.
 - The recomp's settings overlay opens with **Escape** or **F1** and has **"Quit to the desktop"**; it is
   controller-navigable once open. On the `research-hooks` branch, holding **LB + RB + Back** for ~1 s opens it from the

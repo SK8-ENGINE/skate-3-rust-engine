@@ -4,7 +4,7 @@ Status: in progress on `world/challenges` (PR #68), started 2026-11-10.
 
 ## Goal
 
-The engine, its setup, its tools and the couch launcher run on every OS we can support: Windows, Linux and macOS
+The engine, its setup, its tools and the Skate launcher run on every OS we can support: Windows, Linux and macOS
 first. Every new change is built that way (ours, not retail: the game was a console title).
 
 ## Imported work (2026-11-10)
@@ -64,7 +64,7 @@ rewrite below); the doc 44a parity checklist decides when it replaces the old on
   (`tools/publish_branch.py`); the release notes walk through the terminal steps.
 - The README shows a badge per OS: the existing Windows workflow (`rusty-trucks-win.yml`) and the two new ones.
 
-## Couch launcher on every OS (USER-ASKS 561)
+## Skate launcher on every OS (USER-ASKS 561)
 
 Decision (2026-11-10): the launcher (`tools/steam-launcher`: the WinForms window `SkateLauncher.cs` and the
 PowerShell backend `launcher.ps1`) is rewritten as one Rust app (egui window with the camcorder look of doc 41, the

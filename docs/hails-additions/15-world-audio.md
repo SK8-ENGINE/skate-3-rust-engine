@@ -980,7 +980,7 @@ marker was set.
   destination is stored and the **loading state** is entered (state function `0x82707508`, event 7 pushed to the state
   event queue `[0x830CFE2C]`), i.e. a loading screen. Which returns load is decided by streaming, not by a fixed distance.
 
-**The user's recording `audiox_marker_20261004_123843`** (couch launcher `recomp-marker`, 41 MB, 0 malformed): two
+**The user's recording `audiox_marker_20261004_123843`** (Skate launcher `recomp-marker`, 41 MB, 0 malformed): two
 go-tos.
 - Far return (trace 193149.7 ms): the recomp shows the **Loading… screen** (shot 194914). The go-to record plays as on
   short returns (58 at +110 … 150 ms in the capture, 59 at +270 … 280, each ~ −40 dB total, −43 … −46 dB above 4 kHz), then
@@ -995,7 +995,7 @@ go-tos.
   audio output stalled during the load (the capture got ~0.5 s of frames over 1.5 s of trace time), so what the console
   plays while it streams cannot be read from this capture.
 
-**Hooks for the next recording** (recomp `src/research/hooks_marker.cpp`, category `audiox`, so the couch launcher's
+**Hooks for the next recording** (recomp `src/research/hooks_marker.cpp`, category `audiox`, so the Skate launcher's
 `recomp-marker` entry records them; built 2026-10-04 12:44, not yet seen firing): TPMARK (request: distance, hold time,
 destination), TPDEC / TPSTREAM (load or not), TPFX (the static amount per tick = the hold's real length), FEREQ (every
 front-end sound request, including Lua's), GSTATE / GEVENT (state changes and events), HUBMSG (posted messages, ≤ 2 / s

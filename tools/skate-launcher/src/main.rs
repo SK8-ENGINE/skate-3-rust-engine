@@ -1,4 +1,4 @@
-//! The couch launcher for every OS (docs/hails-additions/44-every-os.md; spec of the PowerShell launcher it replaces:
+//! The Skate launcher for every OS (docs/hails-additions/44-every-os.md; spec of the PowerShell launcher it replaces:
 //! 44a). The text commands and entries of `launcher.ps1`, with the same output; the window follows.
 //!
 //! `skate-launcher <command or entry> [label] [-Version <id>] [-Path <file or folder>]`

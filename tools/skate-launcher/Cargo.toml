@@ -3,7 +3,7 @@ name = "skate-launcher"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "The couch launcher on every OS (docs/hails-additions/44-every-os.md, spec 44a)."
+description = "The Skate launcher on every OS (docs/hails-additions/44-every-os.md, spec 44a)."
 
 [[bin]]
 name = "skate-launcher"

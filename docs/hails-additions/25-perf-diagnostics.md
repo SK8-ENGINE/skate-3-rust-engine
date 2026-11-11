@@ -1277,7 +1277,7 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268):
 
 ## Launcher-only download (2026-10-19)
 
-- **Problem:** the couch launcher needed a full checkout of the repository around it, so a player who only wants to
+- **Problem:** the Skate launcher needed a full checkout of the repository around it, so a player who only wants to
   play the fork's versions had to clone and set up a dev checkout first.
 - **Change (`tools/steam-launcher/launcher.ps1`, README "Launcher-only download"):** a `STANDALONE.txt` next to the
   script makes the launcher standalone. Its config, state and versions stay in the launcher folder; each version is a

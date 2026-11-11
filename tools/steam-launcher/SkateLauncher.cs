@@ -1,4 +1,4 @@
-// Couch launcher for Steam / Steam Link (see README.md): a camcorder-shaped window (docs/hails-additions/41-...) with a
+// Skate launcher for Steam / Steam Link (see README.md): a camcorder-shaped window (docs/hails-additions/41-...) with a
 // menu for the controller, the keyboard, the mouse or Steam's desktop layout. launcher.ps1 does the work (versions, builds, launching, session checks) and
 // this window shows its output; the entry and version lists come from launcher.ps1 too.
 //   D-pad / left stick = move, A = select, B = back. Arrows / Enter / Esc / Space (Steam's desktop layout) work too.
