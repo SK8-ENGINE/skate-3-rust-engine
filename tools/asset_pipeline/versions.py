@@ -90,7 +90,8 @@ def installed(base):
     if value.get('version') != 1 or not re.fullmatch(r'installations/[0-9a-f]{32}', directory):
         raise ValueError('Invalid installation record')
     root = (base/directory).resolve()
-    if not root.is_relative_to(base.resolve()):
+    # installations/ itself may be a link to another drive (docs/hails-additions/08-setup-performance.md, "Hard drive note").
+    if not root.is_relative_to((base/'installations').resolve()):
         raise ValueError('Installation escapes its package data directory')
     if not root.is_dir():
         return None

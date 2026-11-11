@@ -1,6 +1,6 @@
 """Local owned-disc installation. No game content is downloaded or packaged."""
 from pathlib import Path
-import hashlib,json,os,re,shutil,subprocess,sys,time,urllib.request,uuid,zipfile
+import functools,hashlib,json,os,re,shutil,subprocess,sys,time,urllib.request,uuid,zipfile
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from tools.owned_game.big import BigArchive
 
@@ -9,14 +9,30 @@ TOOLS=Path(__file__).resolve().parents[1]
 GIB=1024**3
 
 def available_memory():
-    """Available physical memory in bytes, or None where it cannot be queried."""
+    """Memory setup may still use in bytes: the smaller of free physical memory and the commit headroom (a small page
+    file runs out of commit long before RAM: 2026-11-10 a refresh exhausted it and bugchecked the PC), or None where
+    it cannot be queried. Linux: MemAvailable; macOS: free + inactive + purgeable pages."""
+    if sys.platform.startswith('linux'):
+        try:
+            for line in Path('/proc/meminfo').read_text().splitlines():
+                if line.startswith('MemAvailable:'):return int(line.split()[1])*1024
+        except (OSError,ValueError,IndexError):pass
+        return None
+    if sys.platform=='darwin':
+        try:
+            out=subprocess.run(['vm_stat'],capture_output=True,text=True,timeout=10).stdout
+            page=int(re.search(r'page size of (\d+) bytes',out).group(1))
+            pages=sum(int(m.group(1)) for m in re.finditer(r'Pages (?:free|inactive|purgeable):\s+(\d+)',out))
+            return pages*page if pages else None
+        except (OSError,subprocess.SubprocessError,AttributeError,ValueError):return None
     if os.name!='nt':return None
     import ctypes
     class Memory(ctypes.Structure):
         _fields_=[('length',ctypes.c_ulong),('load',ctypes.c_ulong)]+[(name,ctypes.c_ulonglong) for name in
             ('total','available','page_total','page_available','virtual_total','virtual_available','extended')]
     memory=Memory();memory.length=ctypes.sizeof(memory)
-    return memory.available if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)) else None
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):return None
+    return min(memory.available,memory.page_available)
 
 def map_workers():
     # The districts are not equal: DownTown alone sets the map stage's length,
@@ -105,7 +121,7 @@ def remove_stale_installations(base, active_stage, report=lambda _:None):
     active_root=active_stage.resolve()
     if active_id is None or active_root!=(installations/active_id).resolve():
         return
-    if not active_root.is_relative_to(base) or not active_root.is_dir():
+    if not active_root.is_relative_to(installations.resolve()) or not active_root.is_dir():
         return
     for entry in installations.iterdir():
         if not entry.is_dir() or not _INSTALLATION_ID.fullmatch(entry.name):
@@ -160,6 +176,26 @@ def dependency(cache,name,url,sha,report,windows=os.name=='nt'):
 import threading
 _SPAWN=threading.Lock()
 
+LIBRARY_PATH={'nt':'PATH'}.get(os.name,'DYLD_LIBRARY_PATH' if sys.platform=='darwin' else 'LD_LIBRARY_PATH')
+MISSING_DLL={0xC0000135,-0x3FFFFECB}
+
+@functools.cache
+def rust_sysroot_libs():
+    try:
+        sysroot=subprocess.run(['rustc','--print','sysroot'],capture_output=True,text=True,timeout=20,
+                               creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0).stdout.strip()
+    except (OSError,subprocess.SubprocessError):return None
+    libs=Path(sysroot)/('bin' if os.name=='nt' else 'lib') if sysroot else None
+    return libs if libs is not None and any(libs.glob('*std-*.*')) else None
+
+def dev_library_dirs(exe):
+    """A cargo dev build loads bevy_dylib from <target>/<profile>/deps and std from the toolchain, which only `cargo run`
+    puts on the search path (docs/hails-additions/08-setup-performance.md, "Dev build as the game exe")."""
+    deps=Path(exe).resolve().parent/'deps'
+    if not deps.is_dir() or not any(deps.glob('*bevy_dylib-*.*')):return []
+    toolchain=rust_sysroot_libs()
+    return [deps]+([toolchain] if toolchain is not None else [])
+
 def spawn(args,**popen):
     # One child start at a time: the frozen build's DLL directory switch below is process-wide, and the HUD, audio and
     # map stages start children from their own threads.
@@ -182,6 +218,10 @@ def _spawn(args,**popen):
         env['PATH']=os.pathsep.join(p for p in env.get('PATH','').split(os.pathsep)
                                    if p and not Path(p).resolve().is_relative_to(bundle))
         kwargs['env']=env
+    libraries=dev_library_dirs(args[0])
+    if libraries:
+        env=kwargs.setdefault('env',os.environ.copy())
+        env[LIBRARY_PATH]=os.pathsep.join([str(p) for p in libraries]+([env[LIBRARY_PATH]] if env.get(LIBRARY_PATH) else []))
     try:
         return subprocess.Popen([str(a) for a in args],text=True,encoding='utf-8',errors='replace',**kwargs,**popen)
     finally:
@@ -192,7 +232,11 @@ def run(args,log,report):
     with child as process:
         for line in process.stdout:
             log.write(line);log.flush()
-        if process.wait():raise RuntimeError('Conversion failed. See '+str(log.name))
+        code=process.wait()
+        if code in MISSING_DLL:
+            raise RuntimeError(f'{Path(args[0]).name} could not start: a DLL it needs is missing. Pass a game build '
+                               'that runs on its own (the bin folder of a checkout). See '+str(log.name))
+        if code:raise RuntimeError('Conversion failed. See '+str(log.name))
 
 def run_stage(name,game_root,stage,work,log,report,dlc=None):
     """An in-process stage function in its own process (stage_job.py): its `REPORT` lines go to `report`, the rest to
@@ -410,6 +454,8 @@ def _install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None
     from .setup_budget import measure_load,MAPS_DONE
     measured='SKATE_SETUP_MEASURED_CORES' in os.environ
     measure_load(report)
+    from .drive_kind import on_hard_drive,HARD_DRIVE_NOTE
+    if on_hard_drive(base):report(HARD_DRIVE_NOTE)
     try:
         return _install_stages(iso,base,game_exe,report,game_root,refresh,finalize)
     finally:
@@ -533,8 +579,10 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                 # and all user settings/custom models untouched.
                 source_directory = Path(directory).resolve()
                 private_source = (previous[0]/'assets/private').resolve()
-                if 'core' in groups and source_directory == private_source:
-                    return {'stock'} & set(names)
+                if source_directory == private_source:
+                    # The audio step deletes private/audio before it writes it (doc 08 "Audio decode cache").
+                    rebuilt = ({'stock'} if 'core' in groups else set()) | ({'audio'} if 'audio' in groups else set())
+                    return rebuilt & set(names)
                 if 'character' in groups and source_directory == private_source/'stock/data/content':
                     return {'createacharacter'} & set(names)
                 return set()

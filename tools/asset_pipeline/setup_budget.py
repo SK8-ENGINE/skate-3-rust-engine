@@ -111,7 +111,14 @@ def customiser_workers(cpu_count=None, environ=None):
     override = _positive('SKATE_SETUP_CUSTOMISER_WORKERS', environ)
     if override:
         return min(override, 32)
-    return max(1, min(8, cores(cpu_count, environ) // 4))
+    count = max(1, min(8, cores(cpu_count, environ) // 4))
+    if cpu_count is None:
+        # Each worker can hold about WORKER_MEMORY; keep the 2 GiB desktop reserve (doc 08 "Lower-memory machines").
+        from .install import available_memory
+        available = available_memory()
+        if available is not None:
+            count = max(1, min(count, (available - 2 * 1024**3) // WORKER_MEMORY))
+    return count
 
 
 MAPS_DONE = 'SKATE_SETUP_MAPS_DONE'

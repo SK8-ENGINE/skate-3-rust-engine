@@ -9,7 +9,9 @@ ambience is downmixed to stereo by a weighted average (audio_formats.py).
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import shutil
 import struct
@@ -87,8 +89,64 @@ BANKS = (
 _BATCH = 256
 
 
+class DecodeCache:
+    """vgmstream results by input bytes, hard-linked in and out (docs/hails-additions/08-setup-performance.md,
+    "Audio decode cache"). Entries a run did not use are dropped by prune()."""
+
+    def __init__(self, folder: Path, vgmstream: Path):
+        self.folder = folder
+        folder.mkdir(parents=True, exist_ok=True)
+        self.tool = hashlib.sha256(vgmstream.read_bytes()).hexdigest()
+        self.used: set[str] = set()
+
+    def key(self, source: Path) -> str:
+        digest = hashlib.sha256(self.tool.encode())
+        for part in (source, source.with_suffix('.sns')):
+            data = part.read_bytes() if part.is_file() else b''
+            digest.update(len(data).to_bytes(8, 'little'))
+            digest.update(data)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _link(source: Path, target: Path) -> None:
+        try:
+            os.link(source, target)
+        except FileExistsError:
+            pass
+        except OSError:
+            shutil.copy2(source, target)
+
+    def fetch(self, key: str, target: Path) -> bool:
+        cached = self.folder/(key + '.wav')
+        if not cached.is_file():
+            return False
+        self._link(cached, target)
+        self.used.add(key)
+        return True
+
+    def store(self, key: str, decoded: Path) -> None:
+        self._link(decoded, self.folder/(key + '.wav'))
+        self.used.add(key)
+
+    def prune(self) -> int:
+        removed = 0
+        for entry in self.folder.glob('*.wav'):
+            if entry.stem not in self.used:
+                entry.unlink(missing_ok=True)
+                removed += 1
+        return removed
+
+
+_CACHE: DecodeCache | None = None
+
+
 def _decode(vgmstream: Path, directory: Path, names: list[str], log) -> None:
-    """Decode standalone `<name>` files in `directory` to `<name>.wav` beside them."""
+    """Decode standalone `<name>` files in `directory` to `<name>.wav` beside them; cached results start no process."""
+    cache = _CACHE
+    keys = {}
+    if cache is not None:
+        keys = {name: cache.key(directory/name) for name in names}
+        names = [name for name in names if not cache.fetch(keys[name], directory/(name + '.wav'))]
     for start in range(0, len(names), _BATCH):
         batch = names[start:start + _BATCH]
         # Imported lazily: install imports this module's group function.
@@ -103,6 +161,8 @@ def _decode(vgmstream: Path, directory: Path, names: list[str], log) -> None:
         for name in batch:
             if not (directory/(name + '.wav')).is_file():
                 raise RuntimeError(f'vgmstream did not decode {directory.name}/{name}')
+            if cache is not None:
+                cache.store(keys[name], directory/(name + '.wav'))
 
 
 # NumPy work (the downmix) runs on one thread at a time: its BLAS crashed with several threads in it at once.
@@ -1236,8 +1296,30 @@ def splice_trees(files: BigArchive, output: Path, banks) -> dict:
     return out
 
 
+def decode_cache_folder(private: Path) -> Path | None:
+    """<base>/installations/decode-cache for an installation's private folder; None elsewhere (tests, scratch runs)
+    or with SKATE_SETUP_DECODE_CACHE=0."""
+    installations = private.resolve().parent.parent.parent
+    if os.environ.get('SKATE_SETUP_DECODE_CACHE', '') == '0' or installations.name != 'installations':
+        return None
+    return installations/'decode-cache'
+
+
 def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report, log, dlc_jobs=(), dlc_vaults=()) -> dict:
     """Write private/audio/** and private/audio/audio_manifest.json; return the manifest."""
+    global _CACHE
+    folder = decode_cache_folder(private)
+    _CACHE = DecodeCache(folder, vgmstream) if folder is not None else None
+    try:
+        manifest = _convert(game_root, private, work, vgmstream, report, log, dlc_jobs, dlc_vaults)
+        if _CACHE is not None:
+            report(f'Audio decode cache: {len(_CACHE.used)} entries used, {_CACHE.prune()} old entries removed')
+        return manifest
+    finally:
+        _CACHE = None
+
+
+def _convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report, log, dlc_jobs=(), dlc_vaults=()) -> dict:
     audio_root = game_root/'data/audio'
     output = private/'audio'
     if output.exists():

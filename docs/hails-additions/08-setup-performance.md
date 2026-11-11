@@ -641,3 +641,45 @@ The native audio runtime's first start (`native::begin_early`, called from `main
 - Desktop (install on a hard disk, University, cold with `COLD=1`, 2 interleaved pairs): game shown 21.3 / 26.4 s with packs vs 27.4 / 30.4 s loose (about -5 s); the player banks done at 5.4 / 14.8 s vs 16.2 / 16.2 s. Cold runs still vary by several seconds (one pack run's banks waited on other start-up reads). Map fingerprint `2479a7e1c4dbf39a` in every run.
 - Laptop (NVMe SSD, 2026-11-03 08:37 note): Refresh Game Files 514 s, 299 packs, banks folder 786 MB -> 1,573 MB; tests 177 pass + the 9 private-trace-data failures, `install_packs_hold_the_loose_wavs` passes (299 banks, 5,867 samples identical). No gain on an SSD: cold 10.30 vs 10.06 s (one pack run after the refresh left out), warm 9.40 vs 9.47 s, player banks about 960 ms either way. Same map fingerprint with and without packs.
 - That refresh also rebuilt the living world group, because the pack code first sat in `audio_formats.py`, which the living world group fingerprints too (its region parser). The pack code now lives in `audio_export.py`, which only the audio group fingerprints, so a refresh rebuilds the audio group alone.
+
+## Hard drive note and memory headroom (2026-11-11, USER-ASKS 582, 588)
+
+**Problem.** A refresh on the desktop install folder (a hard disk) spent its first ten minutes copying the previous install's speech files at about 13 MB/s read and write with about 8 % CPU: on a hard disk, many small files are bound by the drive, not the processor. Users get no hint why setup is slow there. Separately, a refresh on 2026-11-10 ran the machine out of commit (a small page file) while free RAM still looked fine.
+
+**Change.**
+- `tools/asset_pipeline/drive_kind.py` `on_hard_drive(path)`: True on a spinning drive, False on an SSD, None when unknown. Windows asks the volume for its seek penalty (`IOCTL_STORAGE_QUERY_PROPERTY`, `StorageDeviceSeekPenaltyProperty`, no admin rights), Linux reads `queue/rotational` of the disk behind the folder, macOS reads `SolidState` from `diskutil info`. Junctions and symlinks are followed first, so a linked install folder reports the drive it really lives on.
+- `install.py` `_install` reports one calm line (`HARD_DRIVE_NOTE`) at the start of setup when the install folder is on a hard drive. Nothing in game, never repeated.
+- `install.py` `available_memory()` is now the smaller of free physical memory and the commit headroom, so worker counts follow a small page file too.
+
+**Verification.** `tools/asset_pipeline/test_drive_kind.py` (Linux partition-to-disk lookup on a fake `/sys`, unknown platforms, Windows system drive). Desktop: F: and G: report hard drives, C:, D:, E:, I:, K: SSDs.
+
+**Open.** Setup speed on hard disks and lower-RAM machines (USER-ASKS 586, 587): the copy of a rebuilt group's old outputs, single-thread stages, fixed caps.
+
+## Dev build as the game exe (2026-11-11)
+
+**Problem.** `setup.py --game-exe <target>\debug\skate3rust.exe` failed at its TEST_WORLD check with "Conversion failed" and an empty log. A cargo dev build loads `bevy_dylib-<hash>` and `std-<hash>` from `<target>\debug\deps`, which only `cargo run` puts on the search path; started by setup, Windows ended it with 0xC0000135 (DLL not found).
+
+**Change.** `install.py` `_spawn`: when the program has a `deps` folder beside it holding `std-*` and `bevy_dylib-*`, that folder goes first on the library search path of the child (`PATH` on Windows, `LD_LIBRARY_PATH` on Linux, `DYLD_LIBRARY_PATH` on macOS). Every game start in setup (map loads, the map validator, `--check-assets`) goes through `_spawn`. Release builds and the `bin` folder of a checkout have no `deps` folder and start exactly as before. `run` reports a missing-DLL exit (0xC0000135) as such, naming the exe, instead of the generic message.
+
+**Verification.** `tools/asset_pipeline/test_dev_game_exe.py`: the deps folder is found only with both libraries, the spawned dev build gets it first on the path while other children keep the inherited environment, the missing-DLL exit gets its own message.
+
+## Audio decode cache (2026-11-11, USER-ASKS 590)
+
+**Problem.** Every audio rebuild decoded every clip again with vgmstream: hundreds of `vgmstream-cli` processes (one per sound bank, bed, speech group and batch of 256), although most clips are byte-identical between runs. On Windows each process start costs time, and the decode itself is the audio stage's main cost.
+
+**Change.** `tools/asset_pipeline/audio_export.py` `DecodeCache`: `_decode` (the only place setup starts vgmstream; banks, beds, grains, wheels, world / main-cast / announcer speech, presentation speech) keys each input by sha256 over the vgmstream executable, the `.snr` header and its `.sns` body. A hit hard-links the cached WAV into place (a copy where links are not possible) and the clip is left out of the vgmstream call; a folder of hits starts no process. New results are hard-linked into the cache. The cache lives in `<base>/installations/decode-cache` (beside the installs, so links stay on one drive and take no extra space); `convert` drops entries the run did not use, so it holds one set. Nothing after `_decode` writes a decoded WAV in place (it is read, moved or renamed), so a link never changes a cached file. `SKATE_SETUP_DECODE_CACHE=0` turns it off; scratch folders that are not an `installations` folder never use it.
+- A refresh that rebuilds the audio group no longer copies the previous install's `private/audio` (about 5 GB of small WAVs) into the new one first: the audio step deleted that copy before writing (`install.py` `ignore_rebuilt_assets`). On the desktop's hard disk that copy was the first ten minutes of the 2026-11-11 refresh. `retained.carry` reads the previous install itself, not the copy.
+
+**Verification.** `tools/asset_pipeline/test_decode_cache.py` (key over header, body and tool; a second decode starts a process only for the new clip and gives the same bytes; prune; folder rules). Setup bench: see below.
+
+**Open.** The music export (`music_export.py`) decodes with its own vgmstream ranges (about 4 to 7 s per set on the desktop bench) and packs FLAC banks with the game executable, which dominates; caching the packed banks would need the executable in the key. Not cached.
+
+## Lower-memory machines (2026-11-11, USER-ASKS 586)
+
+**Problem.** Setup's memory gates (map workers, the customiser beside the maps, its later share) only worked on Windows: `available_memory()` returned None elsewhere and every gate reads None as "no limit". The customiser's starting worker count (a quarter of the cores, up to 8, about 2 GiB each) had no memory gate at all, so a 16-thread machine with 8 GB could start about 8 GiB of customiser workers.
+
+**Change.**
+- `install.py` `available_memory()`: Linux reads `MemAvailable` from `/proc/meminfo`; macOS sums the free, inactive and purgeable pages from `vm_stat`. Windows stays the smaller of free RAM and the commit headroom.
+- `setup_budget.py` `customiser_workers()`: at most (available memory less the 2 GiB desktop reserve) / 2 GiB workers, at least one. Worker counts do not change the converted files.
+
+**Verification.** `tools/asset_pipeline/test_low_memory.py` (Linux and macOS readings, the worker cap at 6 GiB and 1 GiB); `test_customisation_workers`, `test_setup_budget` pass.

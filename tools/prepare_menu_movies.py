@@ -89,6 +89,9 @@ MENU_ROOTS = (
     'source/screens/hudcomponents/challengefailed_small',
     # The sign-up poster and lot list (FE 0x1B, template 23; research b932, b935).
     'source/screens/challenge/challenge_signup',
+    # The pause menu's Options > Music Player (template 31 MusicPlayer, host object MusicPlayer; research b1015). Optional for
+    # the engine like the action overlay: a set without it keeps the row greyed, so the set version stays.
+    'source/screens/musicplayer/musicplayertest',
     'source/screens/main3dhud',
     'source/helper/screenmanager',
     'source/helper/screentransitionmanager',
