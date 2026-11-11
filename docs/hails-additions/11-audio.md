@@ -5138,6 +5138,7 @@ Retail parity for every audio surface tag 0..127, hard and soft wheels: tag → 
   playlist (test aid until the mod API). Each queued segment carries a stream id; when a track's first segment starts
   playing the host sends `MusicTrackStarted` (title, artist, custom). Base level `MUSIC_LEVEL` = 0.35 under the Music
   option (user: full scale was too loud; NOT RETAIL YET, the retail MixMap output is open).
+- Replay music (2026-11-10, retail `8249F718`, research b1015 / b1016): while a replay runs the soundtrack plays its replay section (ipod.mpf `ipodsection` = 2, entry `$replay`: a shorter excerpt of the same song, event 0x37F4CB); when the replay ends the song starts again at its entry (0x16D750), and a track that starts during a replay starts in the replay section (`Sequencer::set_replay`, followed from `Replay.active` in `music::frame`). A music bank track has no sections and plays on. Mods can post the same events through `sdk.music`. Test: `a_replay_plays_the_soundtracks_replay_section_and_back`. Open: whether retail keeps music going while a replay is paused (ours: the whole output pauses).
 - Music-video caption (user ask 2026-11-10, ours): `game_audio::music_caption` shows a custom bank's title and artist
   as a lower third (bottom left, translucent band), fade in 0.5 s, hold 6 s, fade out 0.8 s; not for the soundtrack;
   style in `MusicCaptionStyle`. Other scripts (`ui_fonts.rs`): the first text beyond Latin loads 12 Windows script

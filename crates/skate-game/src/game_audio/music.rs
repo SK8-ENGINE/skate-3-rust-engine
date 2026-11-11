@@ -26,6 +26,9 @@ pub(crate) const MUSIC_LEVEL: f32 = 0.35;
 pub(crate) const SOUNDTRACK_SET: &str = "ipod";
 const SOUNDTRACK_VAR: &str = "ipod";
 const SOUNDTRACK_PLAY: u32 = 0x16D750;
+/// The soundtrack's replay section (ipod.mpf `ipodsection` = 2, entry `$replay`: a shorter excerpt of the same song),
+/// posted while a replay runs (retail `8249F718`, research b1015 / b1016).
+const SOUNDTRACK_REPLAY: u32 = 0x37F4CB;
 
 /// One track of the queue.
 #[derive(Clone, Debug, PartialEq)]
@@ -52,11 +55,13 @@ pub(crate) struct Sequencer {
     rng: u32,
     /// The track that started last (logs, sdk).
     pub current: Option<Track>,
+    /// A replay runs: soundtrack tracks play their replay section.
+    replay: bool,
 }
 
 impl Sequencer {
     pub(crate) fn new(tracks: Vec<Track>, shuffle: bool, seed: u32) -> Self {
-        let mut s = Self { order: (0..tracks.len()).collect(), tracks, shuffle, at: 0, playing: None, rng: seed.max(1), current: None };
+        let mut s = Self { order: (0..tracks.len()).collect(), tracks, shuffle, at: 0, playing: None, rng: seed.max(1), current: None, replay: false };
         s.reorder();
         s
     }
@@ -84,7 +89,8 @@ impl Sequencer {
             Track::Retail { set, track: k } => {
                 let Some(g) = graphs.get(set) else { return false };
                 let mut stream = Stream::new(g, self.random());
-                if !stream.set_var(g, SOUNDTRACK_VAR, *k as i32) || !stream.post(g, SOUNDTRACK_PLAY) {
+                let play = if self.replay && set == SOUNDTRACK_SET { SOUNDTRACK_REPLAY } else { SOUNDTRACK_PLAY };
+                if !stream.set_var(g, SOUNDTRACK_VAR, *k as i32) || !stream.post(g, play) {
                     return false;
                 }
                 Playing::Retail { set: set.clone(), stream: Box::new(stream) }
@@ -150,6 +156,18 @@ impl Sequencer {
     /// Plays `track` now (the queue goes on after it).
     pub(crate) fn play_now(&mut self, track: Track, graphs: &HashMap<String, Arc<Graph>>) -> bool {
         self.start(track, graphs)
+    }
+
+    /// A replay starts or ends (retail `8249F718`): the playing soundtrack track moves to its replay section or back
+    /// to the song (its entry again, as retail's 0x416D750). A music bank's track has no sections and plays on.
+    pub(crate) fn set_replay(&mut self, graphs: &HashMap<String, Arc<Graph>>, on: bool) {
+        if self.replay == on { return; }
+        self.replay = on;
+        if let Some(Playing::Retail { set, stream }) = self.playing.as_mut() {
+            if set == SOUNDTRACK_SET {
+                if let Some(g) = graphs.get(set.as_str()) { stream.post(g, if on { SOUNDTRACK_REPLAY } else { SOUNDTRACK_PLAY }); }
+            }
+        }
     }
 
     /// Sets a variable of the playing graph stream (by name); false without one.
@@ -432,8 +450,14 @@ impl Music {
 }
 
 pub(super) fn frame(mut music: ResMut<Music>, native: Option<Res<Native>>, library: Option<Res<super::Library>>,
-                    settings: Option<Res<super::AudioSettings>>, mut started: MessageWriter<MusicTrackStarted>) {
+                    settings: Option<Res<super::AudioSettings>>, mut started: MessageWriter<MusicTrackStarted>,
+                    replay: Option<Res<crate::replay::Replay>>) {
     let (Some(native), Some(library)) = (native, library) else { return };
+    let in_replay = replay.is_some_and(|r| r.active);
+    if music.sequencer.as_ref().is_some_and(|s| s.replay != in_replay) {
+        let graphs = music.graphs.clone();
+        if let Some(s) = music.sequencer.as_mut() { s.set_replay(&graphs, in_replay); }
+    }
     if !music.loaded {
         music.load(&library);
     }
@@ -501,6 +525,28 @@ mod tests {
             durations: vec![9500; 4],
         };
         HashMap::from([(SOUNDTRACK_SET.to_owned(), Arc::new(g))])
+    }
+
+    /// Retail `8249F718`: a replay moves the playing soundtrack track to its replay section, the end of the replay
+    /// back to the song; a track that starts during a replay starts in the replay section.
+    #[test]
+    fn a_replay_plays_the_soundtracks_replay_section_and_back() {
+        let mut graphs = soundtrack();
+        let g = Arc::get_mut(graphs.get_mut(SOUNDTRACK_SET).expect("set")).expect("one owner");
+        let n = g.nodes.len();
+        g.nodes.push(Node { kind: Kind::Entry, section: 2, loops: 0, random: false, owner: 0, branches: vec![Branch { lo: 0, hi: 127, target: Some((n + 1) as _) }] });
+        g.nodes.push(Node { kind: Kind::Audio(7), section: 2, loops: 0, random: false, owner: 0, branches: vec![Branch { lo: 0, hi: 127, target: None }] });
+        g.events.push(Event { id: SOUNDTRACK_REPLAY, actions: vec![Action::Goto { node: Operand::Var(0), section: Some(Operand::Const(2)), cut: false }] });
+        let set = |seg| Some((Source::Set(SOUNDTRACK_SET.into()), seg));
+        let mut s = Sequencer::new(vec![Track::Retail { set: SOUNDTRACK_SET.into(), track: 1 }], false, 1);
+        let song = s.next(&graphs);
+        s.set_replay(&graphs, true);
+        assert_eq!(s.next(&graphs), set(6), "replay section");
+        s.set_replay(&graphs, false);
+        assert_eq!(s.next(&graphs), song, "back to the song");
+        let mut s = Sequencer::new(vec![Track::Retail { set: SOUNDTRACK_SET.into(), track: 1 }], false, 1);
+        s.set_replay(&graphs, true);
+        assert_eq!(s.next(&graphs), set(6), "started during a replay");
     }
 
     #[test]
