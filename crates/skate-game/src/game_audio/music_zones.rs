@@ -149,7 +149,7 @@ impl Environment {
     /// the race music (Start only when nothing plays), 8 Win / 9 Lose post the ending, 12 StopChallengeMusic stops it
     /// (NOT RETAIL YET: 8249BB00 not read). HalfWay / ThreeQuarters / StraightAway (2..4) are not ported (their
     /// sub-states 3..5 are not read).
-    pub(crate) fn race_trigger(&mut self, code: u8, nothing_playing: bool) -> Vec<MusicRequest> {
+    pub(crate) fn race_trigger(&mut self, code: u8, nothing_playing: bool, overlay: Option<(std::path::PathBuf, f32)>) -> Vec<MusicRequest> {
         let start = || MusicRequest::Queue {
             tracks: vec![Track::Graph { set: GAME_SET.into(), var: RACE_VAR.into(), value: -1, play: RACE_START }],
             once: true,
@@ -166,7 +166,11 @@ impl Environment {
             8 | 9 if self.race == Some(false) => {
                 self.race = Some(true);
                 self.race_hold = RACE_END_FRAMES / CONSOLE_FPS;
-                vec![MusicRequest::Post { event: if code == 8 { RACE_WIN } else { RACE_LOSE } }]
+                // UpdateRaceState sub-states 6 / 7: the race overlay (8249F130), then the ending. NOT RETAIL YET: the
+                // overlay is not synced to the beat (829559A8) and its extra gain factors (+0x440) are not applied.
+                let mut out: Vec<MusicRequest> = overlay.map(|(file, gain)| MusicRequest::Overlay { file, gain }).into_iter().collect();
+                out.push(MusicRequest::Post { event: if code == 8 { RACE_WIN } else { RACE_LOSE } });
+                out
             }
             12 if self.race == Some(false) => {
                 self.race = None;
@@ -341,7 +345,8 @@ pub(crate) fn environment(
     let (multiplier, score) = skater.as_ref().map_or((1.0, 0.0), |s| (s.scoring.session.combo.multiplier, s.scoring.session.combo.timer.points));
     let done = music.queue_done();
     for code in triggers {
-        let requests = host.env.race_trigger(code, done);
+        // NOT RETAIL YET: the slot is the race piece's `raceoverlay` (0..7); every slot names the same sting on the disc.
+        let requests = host.env.race_trigger(code, done, library.race_overlay(0));
         for r in &requests {
             info!("AUDIO_MUSIC race trigger {code}: {r:?}");
         }
@@ -418,11 +423,12 @@ mod tests {
     fn a_race_owns_the_music_from_the_countdown_to_its_end_hold() {
         let (d, ids) = (data(), ids());
         let mut e = Environment::default();
-        let start = e.race_trigger(0, true);
+        let start = e.race_trigger(0, true, None);
         assert!(matches!(&start[0], MusicRequest::Queue { tracks, once: true } if tracks[0] == Track::Graph { set: "game".into(), var: "raceoverlay".into(), value: -1, play: RACE_START }));
-        assert!(e.race_trigger(1, false).is_empty(), "Start while the countdown's piece plays changes nothing");
+        assert!(e.race_trigger(1, false, None).is_empty(), "Start while the countdown's piece plays changes nothing");
         assert!(e.frame(&d, &ids, Some(&zone(0xBB)), 0.0, false, 1.0, 0.0, false, 0.1).is_empty(), "zones wait during the race");
-        assert_eq!(e.race_trigger(8, false), [MusicRequest::Post { event: RACE_WIN }]);
+        let cymbal = (std::path::PathBuf::from("music_overlays/Cymbal_Overlay.wav"), 1.2);
+        assert_eq!(e.race_trigger(8, false, Some(cymbal.clone())), [MusicRequest::Overlay { file: cymbal.0, gain: 1.2 }, MusicRequest::Post { event: RACE_WIN }]);
         e.frame(&d, &ids, None, 0.0, false, 1.0, 0.0, true, 9.0);
         assert!(e.race.is_none(), "after 250 console frames and the graph's end the race lets go");
         assert_eq!(e.frame(&d, &ids, Some(&zone(0xBB)), 0.0, false, 1.0, 0.0, false, 0.1).len(), 1, "the zones choose again");

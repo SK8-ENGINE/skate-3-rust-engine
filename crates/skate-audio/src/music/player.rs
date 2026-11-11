@@ -8,6 +8,14 @@ use crate::dsp::resample::{ratio, Resampler};
 use crate::mixer::Pcm;
 use crate::BLOCK;
 
+/// A one-shot sting over the stream (the music overlays: Chase_Scratch, Cymbal_Overlay; retail 8249F130), at its own
+/// rate and gain.
+struct Overlay {
+    pcm: Pcm,
+    resampler: Resampler,
+    gain: f32,
+}
+
 /// One queued segment: where it starts in the stream and its frames (stereo; a mono segment plays on both sides).
 struct Queued {
     start: u64,
@@ -32,11 +40,24 @@ pub struct MusicPlayer {
     /// Segments at another rate than the stream's: they start once the stream has played out (a new stream at their
     /// rate; at most one block between them).
     waiting: VecDeque<(u32, Pcm)>,
+    overlays: Vec<Overlay>,
 }
 
 impl MusicPlayer {
     pub fn new() -> Self {
         Self { gain: 1.0, ..Self::default() }
+    }
+
+    /// Plays a sting once over the stream (scaled by its `gain` and the stream's).
+    pub fn overlay(&mut self, pcm: Pcm, gain: f32) {
+        if pcm.rate > 0 && pcm.channels.first().is_some_and(|c| !c.is_empty()) {
+            self.overlays.push(Overlay { pcm, resampler: Resampler::default(), gain });
+        }
+    }
+
+    /// Stings still playing.
+    pub fn overlays_playing(&self) -> usize {
+        self.overlays.len()
     }
 
     /// Queues a decoded segment after the last one. A segment at another rate than the stream's (a player's own bank
@@ -106,6 +127,23 @@ impl MusicPlayer {
 
     /// Adds one block into the 6-channel bus (front left 0, front right 2).
     pub fn add_to(&mut self, bus: &mut [[f32; BLOCK]; 6]) {
+        if !self.overlays.is_empty() {
+            let mut scratch = std::mem::take(&mut self.scratch);
+            scratch.resize(BLOCK, 0.0);
+            for o in &mut self.overlays {
+                o.resampler.set_ratio(ratio(o.pcm.rate, 1.0));
+                for (side, out) in [(0usize, 0usize), (1, 2)] {
+                    let channel = &o.pcm.channels[side.min(o.pcm.channels.len() - 1)];
+                    o.resampler.render(&mut scratch, |i| channel.get(i as usize).copied().unwrap_or(0.0));
+                    for (b, s) in bus[out].iter_mut().zip(&scratch) {
+                        *b += s * o.gain * self.gain;
+                    }
+                }
+                o.resampler.advance(BLOCK);
+            }
+            self.overlays.retain(|o| (o.resampler.position as usize) < o.pcm.channels[0].len());
+            self.scratch = scratch;
+        }
         if self.resampler.position >= self.end && !self.waiting.is_empty() {
             // The stream played out: the waiting segments of the next rate start a new one.
             let rate = self.waiting.front().map_or(0, |(_, p)| p.rate);
@@ -145,6 +183,18 @@ impl MusicPlayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_overlay_plays_once_over_a_silent_stream_and_leaves() {
+        let mut m = MusicPlayer::new();
+        m.overlay(pcm(48_000, BLOCK + 10, 0.5), 2.0);
+        let mut bus = [[0.0f32; BLOCK]; 6];
+        m.add_to(&mut bus);
+        assert!(bus[0].iter().all(|s| (*s - 1.0).abs() < 1e-3) && bus[2].iter().all(|s| (*s + 1.0).abs() < 1e-3));
+        assert_eq!(m.overlays_playing(), 1);
+        m.add_to(&mut [[0.0f32; BLOCK]; 6]);
+        assert_eq!(m.overlays_playing(), 0);
+    }
 
     fn pcm(rate: u32, frames: usize, value: f32) -> Pcm {
         Pcm { rate, channels: vec![vec![value; frames], vec![-value; frames]] }

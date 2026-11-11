@@ -300,6 +300,16 @@ pub(crate) struct Zone {
     pub time_b: f32,
 }
 
+/// One music settings record: its parent and fields by hash (plain values or raw typed hex).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct MusicSettingsRecord {
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub parent: String,
+    #[serde(default)]
+    pub fields: BTreeMap<String, serde_json::Value>,
+}
+
 /// A zone-pair crossfade (class `aud_wp_ambience_crossfades`).
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Crossfade {
@@ -331,6 +341,12 @@ struct Manifest {
     /// The music zones' playlists and DJ control (`audio_export.music_playlists` / `music_interactive`).
     #[serde(default)]
     music_zones: super::music_zones::MusicZonesData,
+    /// The music settings records (class 87EC8C46B85E1D98) and the decoded overlay stings (`audio_export.music_settings`
+    /// / `music_overlays`).
+    #[serde(default)]
+    music_settings: BTreeMap<String, MusicSettingsRecord>,
+    #[serde(default)]
+    music_overlays: BTreeMap<String, Entry>,
     /// District (map stem) -> region layer name -> tiles.
     #[serde(default)]
     regions: BTreeMap<String, BTreeMap<String, Vec<RegionTile>>>,
@@ -1722,6 +1738,17 @@ impl Library {
     }
 
     /// The records of an `.ems` emitter file (empty when absent).
+    /// A music overlay sting's file and its volume for race overlay slot `slot` (music settings record
+    /// `C37B3862A94AFF2E`: names `2834CACED3DB5A4E`, volume `BD415D2388E07070`; research music-challenges §3).
+    pub(crate) fn race_overlay(&self, slot: usize) -> Option<(PathBuf, f32)> {
+        let record = self.manifest.music_settings.get("C37B3862A94AFF2E")?;
+        let names = record.fields.get("2834CACED3DB5A4E")?.as_array()?;
+        let name = names.get(slot).or(names.first())?.as_str()?;
+        let gain = record.fields.get("BD415D2388E07070").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+        let entry = self.manifest.music_overlays.get(name)?;
+        safe_relative(&entry.file).then(|| (self.root.join(&entry.file), gain))
+    }
+
     /// The music zones' playlists and DJ control values.
     pub(crate) fn music_zones(&self) -> &super::music_zones::MusicZonesData {
         &self.manifest.music_zones

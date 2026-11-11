@@ -231,6 +231,8 @@ pub(crate) enum MusicRequest {
     Queue { tracks: Vec<Track>, once: bool },
     /// The playing graph's branch control value (the DJ world music's intensity).
     Control(i32),
+    /// A one-shot sting over the music (a decoded overlay WAV) at a gain.
+    Overlay { file: PathBuf, gain: f32 },
 }
 
 /// Where a segment comes from: a retail set's bank, or a player's bank file.
@@ -273,6 +275,8 @@ pub(crate) struct Music {
     /// soundtrack at all (Ambient does not). docs/hails-additions/11-audio.md#music-player-screen
     pub(crate) soundtrack_playlist: Option<Vec<u32>>,
     pub(crate) soundtrack_off: bool,
+    /// Overlay stings to start this frame.
+    overlays: Vec<(PathBuf, f32)>,
 }
 
 /// A track became audible (its first segment started playing): the caption, mods' `sdk.music` events.
@@ -452,6 +456,7 @@ impl Music {
                     self.owner = None;
                     restart = true;
                 }
+                MusicRequest::Overlay { file, gain } => self.overlays.push((file, gain)),
                 MusicRequest::Control(value) => {
                     if let Some(seq) = self.sequencer.as_mut() {
                         seq.set_control(value);
@@ -538,6 +543,18 @@ pub(super) fn frame(mut music: ResMut<Music>, native: Option<Res<Native>>, libra
     let Ok(mut rt) = super::timing::lock(&native.shared, &super::timing::GAME_LOCK) else { return };
     if restart {
         rt.music.clear();
+    }
+    for (file, gain) in std::mem::take(&mut music.overlays) {
+        match std::fs::read(&file).map_err(|e| e.to_string()).and_then(|b| skate_audio::music::bank::wav16(&b)) {
+            Ok(seg) => {
+                let channels = seg.channels.max(1) as usize;
+                let planar = (0..channels)
+                    .map(|c| seg.samples.iter().skip(c).step_by(channels).map(|&s| f32::from(s) / 32768.0).collect())
+                    .collect();
+                rt.music.overlay(Pcm { rate: seg.rate, channels: planar }, gain);
+            }
+            Err(e) => warn!("AUDIO_MUSIC overlay {}: {e}", file.display()),
+        }
     }
     let mod_volume = music.volume.as_ref().map_or(1.0, |v| v.1);
     rt.music.gain = MUSIC_LEVEL * mod_volume * settings.as_ref().map_or(1.0, |s| s.retail_volume(super::RetailVolume::Music));
