@@ -45,6 +45,7 @@ fn main() -> ExitCode {
     let (mut same_monitor, mut after_update) = (false, false);
     let mut snapshot_size = None;
     let mut bench = None;
+    let mut standby = None;
     let mut it = std::env::args().skip(1).peekable();
     while let Some(a) = it.next() {
         match a.to_ascii_lowercase().as_str() {
@@ -71,6 +72,11 @@ fn main() -> ExitCode {
                 if let Some(r) = it.next_if(|r| r.contains('x') && !r.starts_with('-')) {
                     snapshot_size = r.split_once('x').and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)));
                 }
+            }
+            // --standby-test <out.txt> <out.png>: the game-start fold and the game-exit reopen (SkateLauncher.exe's form).
+            "--standby-test" => {
+                let (txt, png) = (it.next().unwrap_or_else(|| "standby-test.txt".into()), it.next().unwrap_or_else(|| "standby-test.png".into()));
+                standby = Some((std::path::PathBuf::from(txt), std::path::PathBuf::from(png)));
             }
             "--after-update" => after_update = true,
             "--wear-test" => {
@@ -191,11 +197,11 @@ fn main() -> ExitCode {
         "" | "--window" => {
             let direct: Vec<String> = args.iter().skip(1).cloned().collect();
             // One launcher per folder: a second start brings the first to the front instead (snapshots run alongside).
-            if snapshot.is_none() && bench.is_none() && !window::single_instance(&launcher.state_dir) {
+            if snapshot.is_none() && bench.is_none() && standby.is_none() && !window::single_instance(&launcher.state_dir) {
                 return ExitCode::SUCCESS;
             }
             let same_monitor = same_monitor || window::same_monitor_file(&launcher.state_dir).exists();
-            return match ui::run(launcher.state_dir.clone(), direct, snapshot, snapshot_page, snapshot_seed, same_monitor, after_update, snapshot_size, bench) {
+            return match ui::run(launcher.state_dir.clone(), direct, snapshot, snapshot_page, snapshot_seed, same_monitor, after_update, snapshot_size, bench, standby) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("The launcher window could not open: {e}");
@@ -210,7 +216,7 @@ fn main() -> ExitCode {
             if is_entry && std::env::var_os("SKATE_LAUNCHER_UI").is_none() {
                 if !window::single_instance(&launcher.state_dir) { return ExitCode::SUCCESS; }
                 let same_monitor = same_monitor || window::same_monitor_file(&launcher.state_dir).exists();
-                return match ui::run(launcher.state_dir.clone(), args.clone(), None, None, None, same_monitor, after_update, None, None) {
+                return match ui::run(launcher.state_dir.clone(), args.clone(), None, None, None, same_monitor, after_update, None, None, None) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(e) => {
                         eprintln!("The launcher window could not open: {e}");

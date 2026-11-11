@@ -477,12 +477,15 @@ impl Anim {
 /// Every shape is tessellated and its vertices moved, so text, screen and wear swing with the face.
 fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, hinge_start: egui::layers::ShapeIdx, start: egui::layers::ShapeIdx, open: f32, panel: Rect) {
     let layer = painter.layer_id();
-    let a = (1.0 - open.max(0.0)) * std::f32::consts::FRAC_PI_2;
-    let (cos, sin) = (a.cos(), a.sin());
     let (w, h, hx, cy) = (panel.width(), panel.height(), panel.right(), panel.center().y);
+    // Shut = the face edge-on to the eye (a little past 90 degrees, since the eye is left of the hinge), so a closed
+    // panel shows none of its face, only its side.
+    let shut = std::f32::consts::PI - (2.0 * 2.4f32).atan();
+    let a = (1.0 - open.max(0.0)) * shut;
+    let (cos, sin) = (a.cos(), a.sin());
     // One camera for the face, its side and the shade: the eye in front of the panel's centre, `eye_d` back
     // (mine; the classic's eye sits on the hinge line with a 0.6 depth factor). X right, Z away from you.
-    let (eye_x, eye_d) = (panel.center().x, w * 2.4);
+    let (eye_x, eye_d) = (panel.center().x, w * 2.4); // eye_d / (w / 2) = 2 x 2.4 sets the shut angle above
     let proj = move |x: f32, y: f32, z: f32| { let k = eye_d / (eye_d + z); pos2(eye_x + (x - eye_x) * k, cy + (y - cy) * k) };
     let warp = move |p: Pos2| { let u = (hx - p.x) / w; proj(hx - u * w * cos, p.y, u * w * sin) };
     let ppp = ctx.pixels_per_point();
@@ -619,6 +622,15 @@ fn heavy_close(u: f32) -> f32 {
 
 
 /// Paints the whole window; returns what the pointer hit.
+/// Where the screen glass and the hinge line land in a window of this size (points): for `--standby-test`.
+pub fn screen_and_hinge(window: Rect) -> (Rect, f32) {
+    let dev_s = (window.width() / DEV.x).min(window.height() / DEV.y);
+    let dev_x = window.left() + (window.width() - DEV.x * dev_s) / 2.0;
+    let dev_y = window.top() + (window.height() - DEV.y * dev_s) / 2.0;
+    let r = Rect::from_min_max(pos2(dev_x + SCREEN_R.min.x * dev_s, dev_y + SCREEN_R.min.y * dev_s), pos2(dev_x + SCREEN_R.max.x * dev_s, dev_y + SCREEN_R.max.y * dev_s));
+    (r, dev_x + PANEL_R.right() * dev_s)
+}
+
 pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear: Option<egui::TextureId>) -> Hits {
     let window = ui.max_rect();
     let dev_s = (window.width() / DEV.x).min(window.height() / DEV.y);
