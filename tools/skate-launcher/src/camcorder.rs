@@ -521,36 +521,43 @@ fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, hinge_start: egui::
         let depth = w * 0.06;
         let stops = [(0.0, Color32::from_rgb(120, 123, 132)), (0.1, Color32::from_rgb(82, 85, 94)), (0.46, Color32::from_rgb(60, 62, 69)),
                      (0.5, Color32::from_rgb(14, 15, 18)), (0.54, Color32::from_rgb(56, 58, 65)), (1.0, Color32::from_rgb(30, 31, 35))];
-        let round = h * 0.025;
-        let cols: Vec<(Pos2, Pos2, Color32)> = stops.iter().map(|&(t, c)| {
-            let (x, z) = (hx + t * depth * sin, t * depth * cos);
-            let r = round * (1.0 - (1.0 - (2.0 * t - 1.0).powi(2)).max(0.0).sqrt());
-            (proj(x, cy - h / 2.0 + r, z), proj(x, cy + h / 2.0 - r, z), lerp(c, Color32::BLACK, dark as f32 / 255.0 * 0.5))
+        // The right half of the face's outline (PANEL_R's 34 corner radius), extruded back by the depth: the flat side
+        // and both rounded corners, so the side meets the face's top and bottom edges.
+        let r = 34.0 * w / PANEL_R.width();
+        let (top, bottom) = (cy - h / 2.0, cy + h / 2.0);
+        let mut outline: Vec<Pos2> = Vec::with_capacity(20);
+        for k in 0..=8 { let t = (270.0 + 90.0 * k as f32 / 8.0f32).to_radians(); outline.push(pos2(hx - r + r * t.cos(), top + r + r * t.sin())); }
+        for k in 0..=8 { let t = (90.0 * k as f32 / 8.0f32).to_radians(); outline.push(pos2(hx - r + r * t.cos(), bottom - r + r * t.sin())); }
+        let grid: Vec<Vec<(Pos2, Color32)>> = outline.iter().map(|p| {
+            let u = (hx - p.x) / w;
+            let (fx, fz) = (hx - u * w * cos, u * w * sin);
+            stops.iter().map(|&(t, c)| (proj(fx + t * depth * sin, p.y, fz + t * depth * cos), lerp(c, Color32::BLACK, dark as f32 / 255.0 * 0.5))).collect()
         }).collect();
-        hinge_side(painter, &cols);
+        hinge_side(painter, &grid);
     }
     // The hinge barrel stays in front of the panel's side.
     let hinge: Vec<epaint::ClippedShape> = ctx.graphics_mut(|g| g.entry(layer).all_entries().skip(hinge_start.0).take(start.0 - hinge_start.0).cloned().collect());
     for c in hinge { painter.with_clip_rect(c.clip_rect).add(c.shape); }
 }
 
-/// The panel's hinge-end side (mine, not in the classic): columns of (top, bottom, colour) from the front face's right
-/// edge to the back.
-fn hinge_side(painter: &egui::Painter, cols: &[(Pos2, Pos2, Color32)]) {
-    if cols.len() < 2 || (cols[cols.len() - 1].0.x - cols[0].0.x).abs() < 0.5 { return; }
+/// The panel's hinge-end side (mine, not in the classic): a grid of points, one row per outline point, one column
+/// per depth stop from the face to the back.
+fn hinge_side(painter: &egui::Painter, grid: &[Vec<(Pos2, Color32)>]) {
+    let (rows, cols) = (grid.len(), grid.first().map_or(0, |r| r.len()));
+    if rows < 2 || cols < 2 { return; }
     let mut mesh = egui::Mesh::default();
-    for (t, b, c) in cols {
-        mesh.colored_vertex(*t, *c);
-        mesh.colored_vertex(*b, *c);
-    }
-    for i in 0..(cols.len() as u32 - 1) {
-        let (a, b, c, d) = (2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 3);
-        mesh.add_triangle(a, b, d);
-        mesh.add_triangle(a, d, c);
+    for row in grid { for (p, c) in row { mesh.colored_vertex(*p, *c); } }
+    for i in 0..rows - 1 {
+        for j in 0..cols - 1 {
+            let (a, b) = ((i * cols + j) as u32, (i * cols + j + 1) as u32);
+            let (c, d) = (((i + 1) * cols + j) as u32, ((i + 1) * cols + j + 1) as u32);
+            mesh.add_triangle(a, b, d);
+            mesh.add_triangle(a, d, c);
+        }
     }
     painter.add(Shape::mesh(mesh));
-    let outline: Vec<Pos2> = cols.iter().map(|c| c.0).chain(cols.iter().rev().map(|c| c.1)).collect();
-    painter.add(Shape::closed_line(outline, Stroke::new(1.0_f32, argb(150, 0, 0, 0))));
+    let back: Vec<Pos2> = grid.iter().map(|r| r[cols - 1].0).collect();
+    painter.add(Shape::line(back, Stroke::new(1.0_f32, argb(150, 0, 0, 0))));
 }
 
 
