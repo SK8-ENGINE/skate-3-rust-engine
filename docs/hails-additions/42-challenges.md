@@ -1210,3 +1210,17 @@ Challenge ids are the retail key strings. Mods read, start, abort, hide and re-t
 - The multi pick: retail's sphere slot order, the element list's capacity, the input mode pushed while the popup is up
   (826DB498 with 3), and whether the Sk8Popup movie draws the title (b851 open items).
 - What the retail flagged list (+0x34) means; what the Challenge Map and the sign-up marker read from the record.
+
+## Contests
+
+2026-11-11, world/challenges; research `.local/research/b1009-contest-machine.md` (single player, the retail graph `contest_shared` re-read) and `b877` (rows, bindings).
+
+**Problem.** The street / vert contests and demos (eChallengeTypes 8 Street, 0xF Vert, 2 Demo; the career's contest family) had no runner, so their challenges, their results and the contest music could not run.
+
+**Retail [data, b1009].** Rounds: setup, countdown (3 s), the round (RoundTime), end of round, results, cleanup, back to setup. The round score is the best single score, or with CumulativeScoring the sum of scores of at least CumulativeMinScore; AI scores in normal rounds are multiplied by AIScoreAdjustment. SoloRun: the player's best of SoloRunNum runs counts, each AI rolls one score in SoloRunAIScoreMin..Max at setup. TimedRunSingle: the round timer running out scores the player 0. End of round: rank by round score, place points N - i into the totals (a tie with the place above keeps its points). Result: a demo wins unless a round fell under its DemoTargetScore; otherwise the player wins with the top total, ties win. Completion Owned or Abandoned (no killed it). Music triggers: 0 Countdown, 1 Start, 6 AlmostOver (RoundTime - 3), 7 Over (end of round), 8 / 9 Win / Lose.
+
+**Change (step 1).** `skate_core::challenges::contest_run` (`ContestRun`, `Params`, `Round`, `RunType`, events and commands in the race run's style; graph constants as overridable defaults; the SoloRun RNG seeded by the authority).
+
+**Next.** The contest rows from the disc (rounds, competitors, volumes, paths) in the challenge export; a score source for the AI competitors (retail's AI riders are native: a data-driven stand-in first, labelled); the host in skate-game (HUD: countdown, timer, leaderboard, round results); the trick-type and boundary gates on the player's sequences (b1009 §2); the music triggers into `Races::music`'s contest twin.
+
+**Verification.** Unit tests `contest_run` (place points and ties, best vs cumulative and the AI adjustment, ties for the top total win with the music order, SoloRun best run and AI rolls, TimedRunSingle zero and the failed demo).
