@@ -38,14 +38,14 @@ fn request(world: &mut World, r: MusicRequest) -> Result<(), String> {
 
 /// A playlist file inside the mod's folder (its banks may sit anywhere relative to it, e.g. the player's own music
 /// folder: only the playlist must be in the package).
-pub(super) fn playlist(world: &mut World, mods: &Mods, id: &str, path: &str, queue: bool) -> Result<(), String> {
+pub(super) fn playlist(world: &mut World, mods: &Mods, id: &str, path: &str, queue: bool, soundtrack: bool, shuffle: Option<bool>) -> Result<(), String> {
     let package = mods.manager.packages.get(id).ok_or("missing package")?;
     let root = package.root.canonicalize().map_err(|e| e.to_string())?;
     let full = root.join(path).canonicalize().map_err(|e| format!("{path}: {e}"))?;
     if !full.starts_with(&root) {
         return Err("playlist escapes its package".into());
     }
-    request(world, MusicRequest::Playlist { owner: Some(id.to_owned()), path: full, queue })
+    request(world, MusicRequest::Playlist { owner: Some(id.to_owned()), path: full, queue, soundtrack, shuffle })
 }
 
 pub(super) fn soundtrack(world: &mut World, id: &str, track: Option<u32>) -> Result<(), String> {

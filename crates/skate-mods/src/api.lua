@@ -605,8 +605,9 @@ sdk.music = { version = 1 }
 local function music_snapshot() return as_table(sdk.snapshot.music) or {} end
 function sdk.music.state() return music_snapshot() end
 function sdk.music.playing() return as_table(music_snapshot().playing) end
-function sdk.music.play_playlist(path) submit{kind="music_playlist",path=path,queue=false} end
-function sdk.music.queue_playlist(path) submit{kind="music_playlist",path=path,queue=true} end
+-- opts: {soundtrack=true} adds every disc soundtrack track, {shuffle=true|false} overrides the playlist's shuffle.
+function sdk.music.play_playlist(path, opts) opts = opts or {}; submit{kind="music_playlist",path=path,queue=false,soundtrack=opts.soundtrack == true,shuffle=opts.shuffle} end
+function sdk.music.queue_playlist(path, opts) opts = opts or {}; submit{kind="music_playlist",path=path,queue=true,soundtrack=opts.soundtrack == true,shuffle=opts.shuffle} end
 function sdk.music.play_soundtrack(track) submit{kind="music_soundtrack",track=track} end
 function sdk.music.stop() submit{kind="music_stop"} end
 function sdk.music.skip() submit{kind="music_skip"} end

@@ -174,7 +174,8 @@ impl Sequencer {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MusicRequest {
     /// A playlist file (its banks relative to it), replacing the queue or added to it.
-    Playlist { owner: Option<String>, path: PathBuf, queue: bool },
+    /// `soundtrack`: also every disc soundtrack track; `shuffle`: overrides the playlist's.
+    Playlist { owner: Option<String>, path: PathBuf, queue: bool, soundtrack: bool, shuffle: Option<bool> },
     /// The disc soundtrack: one track now (1-based) then the rest shuffled, or all shuffled.
     Soundtrack { owner: Option<String>, track: Option<u32> },
     Stop { owner: Option<String> },
@@ -281,17 +282,23 @@ impl Music {
         }
         self.seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u32);
         if let Some(path) = std::env::var_os("SKATE_MUSIC_PLAYLIST") {
-            self.requests.insert(0, MusicRequest::Playlist { owner: None, path: path.into(), queue: false });
+            self.requests.insert(0, MusicRequest::Playlist { owner: None, path: path.into(), queue: false, soundtrack: false, shuffle: None });
             return;
         }
         self.sequencer = self.soundtrack();
+    }
+
+    /// Every disc soundtrack track (none without the soundtrack graph).
+    fn soundtrack_tracks(&self) -> Vec<Track> {
+        let count = self.graphs.get(SOUNDTRACK_SET).map_or(0, |g| g.entries(1).len() as u32);
+        (1..=count).map(|k| Track::Retail { set: SOUNDTRACK_SET.into(), track: k }).collect()
     }
 
     /// The engine's default queue: every soundtrack track, shuffled (None without the soundtrack graph).
     fn soundtrack(&mut self) -> Option<Sequencer> {
         let g = self.graphs.get(SOUNDTRACK_SET)?;
         let count = g.entries(1).len() as u32;
-        let tracks = (1..=count).map(|k| Track::Retail { set: SOUNDTRACK_SET.into(), track: k }).collect();
+        let tracks = self.soundtrack_tracks();
         self.seed = self.seed.wrapping_mul(747_796_405).wrapping_add(1);
         info!("AUDIO_MUSIC soundtrack: {count} tracks, shuffled");
         Some(Sequencer::new(tracks, true, self.seed))
@@ -302,8 +309,12 @@ impl Music {
         let mut restart = false;
         for request in std::mem::take(&mut self.requests) {
             match request {
-                MusicRequest::Playlist { owner, path, queue } => match playlist_tracks(&path) {
-                    Ok((tracks, shuffle)) => {
+                MusicRequest::Playlist { owner, path, queue, soundtrack, shuffle: shuffle_override } => match playlist_tracks(&path) {
+                    Ok((mut tracks, shuffle)) => {
+                        let shuffle = shuffle_override.unwrap_or(shuffle);
+                        if soundtrack {
+                            tracks.extend(self.soundtrack_tracks());
+                        }
                         info!("AUDIO_MUSIC playlist {}: {} tracks{}", path.display(), tracks.len(), if queue { " queued" } else { "" });
                         match (queue, self.sequencer.as_mut()) {
                             (true, Some(seq)) => seq.append(tracks),
@@ -519,7 +530,7 @@ mod tests {
         let mut list = crate::music_playlist::from_banks(&dir.join("p.json"), "P", false, &[dir.join("mine.bank")]).unwrap();
         list.tracks.push(crate::music_playlist::Entry { bank: String::new(), soundtrack: Some(2), track: 0, name: String::new(), artist: String::new() });
         std::fs::write(dir.join("p.json"), serde_json::to_string(&list).unwrap()).unwrap();
-        m.requests.push(MusicRequest::Playlist { owner: Some("mod_a".into()), path: dir.join("p.json"), queue: false });
+        m.requests.push(MusicRequest::Playlist { owner: Some("mod_a".into()), path: dir.join("p.json"), queue: false, soundtrack: false, shuffle: None });
         m.requests.push(MusicRequest::Volume { owner: Some("mod_a".into()), level: Some(0.5) });
         assert!(m.apply(), "a new queue restarts the stream");
         assert_eq!((m.owner.as_deref(), m.volume.clone()), (Some("mod_a"), Some(("mod_a".into(), 0.5))));
@@ -535,6 +546,20 @@ mod tests {
         m.requests.push(MusicRequest::Stop { owner: Some("mod_a".into()) });
         m.apply();
         assert!(m.sequencer.is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_playlist_can_add_the_soundtrack_and_override_its_shuffle() {
+        let mut m = Music { graphs: soundtrack(), loaded: true, ..Default::default() };
+        let dir = std::env::temp_dir().join(format!("skate-music-mix-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let list = crate::music_playlist::Playlist { schema: 1, name: "P".into(), shuffle: false, tracks: Vec::new() };
+        std::fs::write(dir.join("p.json"), serde_json::to_string(&list).unwrap()).unwrap();
+        m.requests.push(MusicRequest::Playlist { owner: Some("mod_a".into()), path: dir.join("p.json"), queue: false, soundtrack: true, shuffle: Some(true) });
+        assert!(m.apply());
+        let seq = m.sequencer.as_ref().unwrap();
+        assert_eq!((seq.tracks.len(), seq.shuffle), (2, true), "both soundtrack tracks, shuffled by the override");
         std::fs::remove_dir_all(&dir).ok();
     }
 

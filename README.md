@@ -4,6 +4,10 @@
 
 # Skate 3 Rust Engine
 
+[![Rusty Trucks Windows build](https://github.com/Hailey-Ross/rusty-trucks/actions/workflows/rusty-trucks-win.yml/badge.svg)](https://github.com/Hailey-Ross/rusty-trucks/actions/workflows/rusty-trucks-win.yml)
+[![Rusty Trucks Linux build](https://github.com/Hailey-Ross/rusty-trucks/actions/workflows/rusty-trucks-linux.yml/badge.svg)](https://github.com/Hailey-Ross/rusty-trucks/actions/workflows/rusty-trucks-linux.yml)
+[![Rusty Trucks macOS build](https://github.com/Hailey-Ross/rusty-trucks/actions/workflows/rusty-trucks-macos.yml/badge.svg)](https://github.com/Hailey-Ross/rusty-trucks/actions/workflows/rusty-trucks-macos.yml)
+
 A Rust and Bevy skating project built from Skate 3 reverse-engineering research.
 Includes skating, tricks, grinds, offboard movement, difficulty settings and
 `.skate` map support. Gameplay parity is still a work in progress.

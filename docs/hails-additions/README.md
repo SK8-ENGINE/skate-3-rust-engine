@@ -59,6 +59,7 @@ Each document stands alone. File paths are relative to the repository root.
 | 41 | [Launcher: the camcorder's LCD panel](41-launcher-camcorder-viewfinder.md) | Launcher (C#) | On `hails-additions`, launcher only, not for upstream: the window is a mid-2000s HD camcorder's flip-out LCD panel (layered window, bezel keys, first-person swing open / shut with per-run variance), a 2006-style screen UI with the board on it, fresh skate-session wear every start kept off the UI by a wear map (`--wear-test`), a creased per-user sticker (game stickers replace it later) |
 | 42 | [Challenges (own the spot first)](42-challenges.md) | Setup + engine | On `world/challenges` (own upstream PR after #52): retail challenge data and logic researched; setup exports the own the spot challenges (volumes, start, owned / killed it points) to `challenges.json`; engine runner next |
 | 43 | [Career mode](43-career.md) | Setup + engine | On `world/challenges` (with doc 42), in progress: research summary, M1 design, the progression export (`progression.json`: groups, actions, rewards, challenge rewards) |
+| 44 | [Every OS](44-every-os.md) | Engine + setup + tools | On `world/challenges`, in progress: Linux and macOS ports imported (#7, stev0760), our changes made OS-independent, the couch launcher rewrite in Rust planned (spec: [44a](44a-launcher-spec.md)) |
 
 ## Environment used for verification
 

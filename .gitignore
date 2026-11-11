@@ -115,3 +115,5 @@ mods/world-audio-test/logs/
 /tools/steam-launcher/SkateLauncher*.exe
 # Built by mods/music-sdk-test/make_bank.py (self-made tones; build output)
 mods/music-sdk-test/music/
+# The player's own playlists for mods/custom-music (never shipped)
+mods/custom-music/playlists/

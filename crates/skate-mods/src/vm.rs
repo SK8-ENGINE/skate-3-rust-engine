@@ -817,6 +817,12 @@ pub enum Command {
         /// Add to the queue instead of replacing it.
         #[serde(default)]
         queue: bool,
+        /// Also every disc soundtrack track (shuffle mixes them with the playlist's).
+        #[serde(default)]
+        soundtrack: bool,
+        /// Overrides the playlist's own shuffle.
+        #[serde(default)]
+        shuffle: Option<bool>,
     },
     MusicSoundtrack {
         /// One disc soundtrack track (1-based); none: every track, shuffled.

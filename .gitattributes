@@ -6,3 +6,6 @@ mods/*.zip binary
 sdk/examples/**/*.wav binary
 # Shell tools run in Git Bash, which needs LF line endings.
 tools/**/*.sh text eol=lf
+# Every OS: shell scripts need LF (Linux, macOS, Git Bash), batch files CRLF (cmd).
+*.sh text eol=lf
+*.bat text eol=crlf

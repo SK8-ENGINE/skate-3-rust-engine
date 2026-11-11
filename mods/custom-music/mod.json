@@ -1,0 +1,49 @@
+{
+  "id": "custom-music",
+  "api": 2,
+  "name": "Custom Music",
+  "version": "0.1.0",
+  "author": "Hails",
+  "description": "Plays your own music in the game: a playlist of your music banks, instead of the soundtrack or shuffled together with it, with the title and artist along the bottom. To add your music, follow README.md in this mod's folder (one double-click on Windows).",
+  "entry": "main.lua",
+  "enabled_by_default": false,
+  "settings": {
+    "playlist": {
+      "type": "string",
+      "label": "Playlist",
+      "description": "Your playlist file inside this mod's folder (made with skate3rust --music-playlist).",
+      "default": "playlists/my-music.json"
+    },
+    "mode": {
+      "type": "choice",
+      "label": "Mode",
+      "description": "Replace the soundtrack with your music, or mix your music with the soundtrack.",
+      "choices": [
+        "replace",
+        "mix"
+      ],
+      "default": "mix"
+    },
+    "shuffle": {
+      "type": "boolean",
+      "label": "Shuffle",
+      "description": "Play the tracks in a random order.",
+      "default": true
+    },
+    "volume": {
+      "type": "number",
+      "label": "Volume",
+      "description": "Your music's volume on the game's music level (1 = the same).",
+      "min": 0,
+      "max": 2,
+      "step": 0.1,
+      "default": 1
+    },
+    "caption": {
+      "type": "boolean",
+      "label": "Show title and artist",
+      "description": "Show each track's title and artist along the bottom when it starts.",
+      "default": true
+    }
+  }
+}

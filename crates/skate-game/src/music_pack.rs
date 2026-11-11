@@ -14,8 +14,7 @@ use symphonia::core::meta::{MetadataOptions, StandardTagKey};
 use symphonia::core::probe::Hint;
 
 /// Printed by the packer: banks hold the music they were made from.
-pub(crate) const NOTICE: &str = "Music banks contain the music you pack into them. Do not share bank files that hold \
-copyrighted music; share playlists that point to banks people make from their own music instead.";
+pub(crate) const NOTICE: &str = "Note: a bank holds the music packed into it, so please keep banks with copyrighted music to yourself.";
 
 /// Extensions the packer looks at (what the enabled Symphonia formats read).
 pub(crate) const EXTENSIONS: &[&str] = &["mp3", "m4a", "aac", "mp4", "alac", "flac", "ogg", "oga", "wav", "aif", "aiff", "mka", "webm"];

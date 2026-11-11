@@ -470,9 +470,11 @@ function sdk.music.state() end
 ---@return MusicTrack|nil
 function sdk.music.playing() end
 ---@param path string a playlist JSON inside the mod's folder; replaces the queue
-function sdk.music.play_playlist(path) end
+---@param opts? {soundtrack?:boolean, shuffle?:boolean} soundtrack: add every disc soundtrack track; shuffle: override the playlist's
+function sdk.music.play_playlist(path, opts) end
 ---@param path string a playlist JSON inside the mod's folder; added to the queue
-function sdk.music.queue_playlist(path) end
+---@param opts? {soundtrack?:boolean, shuffle?:boolean}
+function sdk.music.queue_playlist(path, opts) end
 ---@param track integer|nil 1-based disc soundtrack track, then the rest; nil: all shuffled
 function sdk.music.play_soundtrack(track) end
 function sdk.music.stop() end

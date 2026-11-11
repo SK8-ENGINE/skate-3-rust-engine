@@ -1,0 +1,77 @@
+# Shared build for the Rusty Trucks Linux and macOS workflows (rusty-trucks-linux.yml, rusty-trucks-macos.yml; doc 44):
+# builds the game, runs the engine and mod tests, and keeps the binaries as a run artifact. Release packages come with
+# scripts/build-release.sh (docs/hails-additions/44-every-os.md "Open").
+name: Rusty Trucks Unix build
+on:
+  workflow_call:
+    inputs:
+      os:
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+      refpack:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 120
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: tools/requirements-setup.txt
+      # The libraries winit, wgpu and SDL3 build against (flake.nix linuxBuildLibs, as Ubuntu packages).
+      - name: Install Linux build libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake clang patchelf pkg-config \
+            libasound2-dev libudev-dev libvulkan-dev libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcursor-dev libxi-dev libxrandr-dev libxcb1-dev libxext-dev libxfixes-dev libxss-dev libxtst-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ inputs.target }}-release
+          cache-on-failure: true
+      - uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Check setup tools
+        run: |
+          python -m pip install -r tools/requirements-setup.txt
+          python -m unittest tools.asset_pipeline.test_dependency tools.asset_pipeline.test_versions -v
+      - name: Build the game
+        run: cargo build --release --locked -p skate-game --bin skate3rust --no-default-features
+      - name: Engine tests
+        run: cargo test --release --locked -p skate-core -p skate-audio -p skate-data --lib -- --test-threads=2
+      - name: Mod tests
+        run: cargo test --release --locked -p skate-mods --lib -- --test-threads=2
+      - name: Native RefPack for setup
+        run: |
+          mkdir -p target/native
+          rustc --edition 2024 --crate-type cdylib -C opt-level=3 -C panic=abort tools/asset_pipeline/refpack_native.rs -o target/native/${{ inputs.refpack }}
+      - name: Package the binaries
+        run: |
+          set -e
+          d=out/skate3rust-${{ inputs.target }}
+          mkdir -p "$d"
+          cp target/release/skate3rust "$d/"
+          cp target/native/${{ inputs.refpack }} "$d/"
+          printf 'build %s\ncommit %s\n' "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" > "$d/BUILD.txt"
+          tar -C out -czf out/skate3rust-${{ inputs.target }}.tar.gz skate3rust-${{ inputs.target }}
+      - name: Report compiler cache hits
+        if: always()
+        run: sccache --show-stats
+      - uses: actions/upload-artifact@v7
+        with:
+          name: skate3rust-${{ inputs.target }}
+          retention-days: 7
+          path: out/skate3rust-${{ inputs.target }}.tar.gz

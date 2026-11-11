@@ -251,9 +251,11 @@ The music player: the disc soundtrack and players' own music banks (FLAC banks m
 
     sdk.music.state()                -- {on, playing={title, artist, custom} or nil, queued, owner, volume}
     sdk.music.playing()              -- the track heard now, or nil
-    sdk.music.play_playlist(path)    -- a playlist JSON in the mod's folder replaces the queue
-    sdk.music.queue_playlist(path)   --   or is added to it (its banks relative to it; bank and
-                                     --   soundtrack entries can be mixed)
+    sdk.music.play_playlist(path, opts)  -- a playlist JSON in the mod's folder replaces the queue
+    sdk.music.queue_playlist(path, opts) --   or is added to it (its banks relative to it; bank and
+                                     --   soundtrack entries can be mixed); opts: {soundtrack=true}
+                                     --   adds every disc soundtrack track, {shuffle=true|false}
+                                     --   overrides the playlist's shuffle
     sdk.music.play_soundtrack(track) -- the disc soundtrack: track n (1-based) then the rest, or all shuffled
     sdk.music.stop()                 -- silence
     sdk.music.skip()                 -- the next track

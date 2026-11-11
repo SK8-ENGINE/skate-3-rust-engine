@@ -5161,5 +5161,11 @@ Retail parity for every audio surface tag 0..127, hard and soft wheels: tag → 
   during a track whose successor was already decoded skipped that successor too (High Shimmer -> Mid Pulse, Low Hum
   lost). A skip now puts the started-but-unheard tracks back first (`Sequencer::back`); unit test
   `a_skip_goes_to_the_track_after_the_heard_one_not_after_the_one_decoded_ahead`.
+- Custom Music mod (user ask 2026-11-10, ours): `mods/custom-music` (off by default) plays the player's playlist from
+  `playlists/` in its folder (ignored by git), replacing the soundtrack or mixed with it (`play_playlist` options
+  `soundtrack` and `shuffle`), with volume and caption settings. The copyright note is for whoever makes banks and stays quiet: one line in the
+  packer's output and a short Sharing section in the README; nothing in game or in the mod menu (decided
+  2026-11-10: repeated warnings only bother players). The README walks through packing and the playlist tool. Unit test
+  `a_playlist_can_add_the_soundtrack_and_override_its_shuffle`.
 - Next: the engine's own music modes
   (which segments make a track and in what order), the streaming player, zones, menu music (b1015 port plan).

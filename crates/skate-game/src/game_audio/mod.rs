@@ -483,6 +483,7 @@ impl Plugin for GameAudioPlugin {
             .init_resource::<music_caption::MusicCaptionStyle>()
             .init_resource::<music_caption::PendingCaption>()
             .init_resource::<crate::ui_fonts::FallbackFonts>()
+            .add_systems(Startup, crate::ui_fonts::load_ui_font)
             .add_systems(Update, (crate::ui_fonts::install, music_caption::show.after(music::frame)).chain())
             .add_plugins(world_bridge::register)
             .add_plugins(car_alarm::register)

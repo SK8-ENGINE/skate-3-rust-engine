@@ -1636,7 +1636,7 @@ fn apply_one(
         Command::ChallengeAbort {} => challenges::abort(world)?,
         Command::ChallengeEnable { id: challenge, enabled } => challenges::enable(world, id, &challenge, enabled)?,
         Command::ChallengeConfigure { id: challenge, options } => challenges::configure(world, id, challenge, options)?,
-        Command::MusicPlaylist { path, queue } => music::playlist(world, mods, id, &path, queue)?,
+        Command::MusicPlaylist { path, queue, soundtrack, shuffle } => music::playlist(world, mods, id, &path, queue, soundtrack, shuffle)?,
         Command::MusicSoundtrack { track } => music::soundtrack(world, id, track)?,
         Command::MusicStop {} => music::stop(world, id)?,
         Command::MusicSkip {} => music::skip(world)?,

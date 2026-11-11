@@ -105,10 +105,10 @@ pub(super) fn show(mut commands: Commands, mut started: MessageReader<MusicTrack
             Node { position_type: PositionType::Absolute, left: percent(style.left), bottom: percent(style.bottom),
                 flex_direction: FlexDirection::Column, padding: UiRect::axes(px(16), px(10)), ..default() },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)))).id();
-        commands.entity(band).with_child((Text::new(track.title.clone()), TextFont { font_size: style.title_size, ..default() },
+        commands.entity(band).with_child((Text::new(track.title.clone()), TextFont { font: fonts.ui_font(), font_size: style.title_size, ..default() },
             TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)), CaptionText { full: 1.0 }));
         if !track.artist.is_empty() {
-            commands.entity(band).with_child((Text::new(track.artist.clone()), TextFont { font_size: style.artist_size, ..default() },
+            commands.entity(band).with_child((Text::new(track.artist.clone()), TextFont { font: fonts.ui_font(), font_size: style.artist_size, ..default() },
                 TextColor(Color::srgba(0.85, 0.85, 0.85, 0.0)), CaptionText { full: 0.9 }));
         }
         return;
