@@ -48,6 +48,10 @@ sdl3 = { version = "=0.20.0", features = ["build-from-source-static"] }
 [target.'cfg(windows)'.dependencies]
 windows = { version = "=0.58.0", features = ["Win32_Foundation", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
 
+# Required for the Vulkan-only renderer to use MoltenVK.
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "=27.0.1", default-features = false, features = ["vulkan-portability"] }
+
 [dev-dependencies]
 naga = { version = "=27.0.3", features = ["wgsl-in"] }
 naga_oil = { version = "=0.20.0", default-features = false }

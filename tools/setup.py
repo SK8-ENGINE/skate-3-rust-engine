@@ -86,7 +86,7 @@ def ensure_dependencies():
     except ImportError:pass
     import subprocess
     venv=ROOT/'.local'/'venv-setup'
-    python=venv/'Scripts'/'python.exe'
+    python=venv/'Scripts'/'python.exe' if os.name=='nt' else venv/'bin'/'python'
     inside=Path(sys.prefix).resolve()==venv.resolve()
     requirements=[line.strip() for line in (ROOT/'tools'/'requirements-setup.txt').read_text(encoding='utf-8').splitlines()
                   if line.strip() and not line.strip().startswith(('#','pyinstaller'))]
@@ -106,6 +106,24 @@ def ensure_dependencies():
         return 1
     if inside:return None  # already the setup environment: the packages are there now
     return subprocess.call([str(python),str(Path(__file__).resolve()),*sys.argv[1:]])
+
+def headless(args):
+    from tools.asset_pipeline.customiser_setup import install
+    from tools.asset_pipeline.versions import installed
+    from tools.asset_pipeline.validation_report import summary
+    refresh=args.refresh or installed(args.base) is not None
+    try:
+        installed_root=install(args.source,args.base,args.game_exe,lambda text:print(text,flush=True),refresh=refresh)
+    except Exception:
+        args.base.mkdir(parents=True,exist_ok=True)
+        (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
+        traceback.print_exc()
+        print('Setup could not finish. Details: '+str(args.base/'setup-error.log'))
+        return 2
+    warnings=summary(installed_root)
+    print(f'Ready with {len(warnings)} warnings or unavailable components. Details: {installed_root/"setup-report.json"}'
+          if warnings else 'Ready')
+    return 0
 
 def main():
     tolerate_dead_console()
@@ -131,8 +149,10 @@ def main():
     parser.add_argument('--base',type=Path,required=True)
     parser.add_argument('--game-exe',type=Path,required=True)
     parser.add_argument('--refresh',action='store_true')
+    parser.add_argument('--source',type=Path,help='Xbox 360 ISO or default.xex; runs setup without the window')
     args=parser.parse_args()
     if enable_long_paths():return restart()
+    if args.source:return headless(args)
     import tkinter as tk
     from tkinter import filedialog,messagebox,ttk
     from tools.asset_pipeline.customiser_setup import install
@@ -148,7 +168,8 @@ def main():
     window.title('Skate 3 Rust Engine setup')
     window.geometry('700x320');window.resizable(False,False)
     icon=ROOT/'docs/images/skating-crab.ico'
-    if icon.is_file():window.iconbitmap(str(icon))
+    # Tk accepts .ico window icons only on Windows.
+    if os.name=='nt' and icon.is_file():window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
     style=ttk.Style(window)
     style.configure('Note.TLabel',foreground='#666666',font=('Segoe UI',10))
@@ -228,5 +249,6 @@ def main():
         window.after(200,lambda:begin(reuse) if not running else None)
     window.mainloop()
     return 0 if success else 2
+
 
 if __name__=='__main__':raise SystemExit(main())
