@@ -45,6 +45,10 @@ fn check_structure(t: &MenuTables) {
     assert_eq!(t.settings_screens.len(), 13);
     // The Speech handler's speaker names (b874): 104, in eSk8Characters order.
     assert_eq!(t.speakers.len(), 104);
+    // The soundtrack's 46 tracks in IPOD enum order (research b1016: 1 = 3 Inches Of Blood, 2 = Agent Orange).
+    assert_eq!(t.ipod_tracks.len(), 46, "{:?}", t.ipod_tracks.first());
+    assert!(t.ipod_tracks[0].to_uppercase().contains("3INCHESOFBLOOD_BATTLEOFBROTHERHOOD"), "{}", t.ipod_tracks[0]);
+    assert!(t.ipod_tracks[1].to_uppercase().contains("AGENTORANGE_BLOODSTAINS"), "{}", t.ipod_tracks[1]);
     assert_eq!((t.speakers[0].as_str(), t.speakers[30].as_str(), t.speakers[31].as_str(), t.speakers[40].as_str()),
         ("Player", "Reda", "SkateCoach", "CameraMan"));
     assert_eq!(t.speakers[103], "Teammate4");

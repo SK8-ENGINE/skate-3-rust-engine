@@ -197,6 +197,10 @@ pub struct MenuTables {
     /// added.
     #[serde(default)]
     pub speakers: Vec<String>,
+    /// The soundtrack's track names in IPOD enum order (track k = entry k - 1; table 0x8302E048 after
+    /// `IPOD_INVALID`, research b1015): the localised `IPOD_<NAME>_ARTIST` / `_TITLE` / `_ALBUM` keys.
+    #[serde(default)]
+    pub ipod_tracks: Vec<String>,
     /// Table addresses in this build (diagnostics only).
     pub addresses: std::collections::BTreeMap<String, String>,
 }
@@ -894,6 +898,22 @@ fn speakers(img: &Image) -> Result<(u32, Vec<String>), String> {
     Ok((img.image.base_address + start as u32, names))
 }
 
+/// The IPOD enum's names: the pointer table that starts with `IPOD_INVALID`; the names after it up to the first
+/// entry that is not a string. Empty when the table is not found (the now-playing popup then stays off).
+fn ipod_tracks(img: &Image) -> (u32, Vec<String>) {
+    let named = |at: u32| img.string_at(at).filter(|s| !s.is_empty());
+    img.pointers_to_string("IPOD_INVALID").into_iter().find_map(|start| {
+        let mut names = Vec::new();
+        let mut cursor = start + 4;
+        while let Some(name) = named(cursor) {
+            if name.contains(' ') || names.len() > 200 { return None; }
+            names.push(name);
+            cursor += 4;
+        }
+        (names.len() >= 20).then_some((start, names))
+    }).unwrap_or_default()
+}
+
 pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
     let img = Image { image };
     let (rows_at, settings_rows, settings_screens) = settings(&img)?;
@@ -907,6 +927,7 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
     let (trick_categories_at, gestures_at, buttons_at, trick_guide) = trick_guide(&img)?;
     let (stats_at, career_stats) = career_stats(&img)?;
     let (speakers_at, speakers) = speakers(&img)?;
+    let (ipod_at, ipod_tracks) = ipod_tracks(&img);
     if modes.is_empty() {
         return Err("no per-mode crossbar menus found".into());
     }
@@ -925,6 +946,7 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
         ("trick_guide_buttons", buttons_at),
         ("career_stats", stats_at),
         ("speakers", speakers_at),
+        ("ipod_tracks", ipod_at),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), hex(v)))
@@ -945,6 +967,7 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
         trick_guide,
         career_stats,
         speakers,
+        ipod_tracks,
         addresses,
     })
 }
