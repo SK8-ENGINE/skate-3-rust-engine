@@ -5609,6 +5609,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "gilrs",
+ "image",
  "jiff",
  "serde",
  "serde_json",

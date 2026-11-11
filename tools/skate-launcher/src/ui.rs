@@ -101,6 +101,9 @@ pub struct App {
     hidden: bool,
     wizard: Vec<(String, String)>,
     direct_close: Option<Instant>,
+    opened: Instant,
+    snapshot: Option<PathBuf>,
+    snapshot_asked: bool,
 }
 
 /// Runs a backend command and returns its lines (short query commands).
@@ -169,7 +172,7 @@ impl App {
     pub fn new(exe: PathBuf, state_dir: PathBuf, direct: Vec<String>) -> App {
         let mut app = App {
             exe, state_dir, pages: Vec::new(), job: None, status: Vec::new(), gilrs: gilrs::Gilrs::new().ok(),
-            last_nav: Instant::now(), hidden: false, wizard: Vec::new(), direct_close: None,
+            last_nav: Instant::now(), hidden: false, wizard: Vec::new(), direct_close: None, opened: Instant::now(), snapshot: None, snapshot_asked: false,
         };
         if !direct.is_empty() {
             app.start_direct(direct);
@@ -657,81 +660,74 @@ impl eframe::App for App {
                 self.back(ctx);
             }
         }
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some(job) = &self.job {
-                let s = job.state.lock();
-                let Ok(s) = s else { return };
-                ui.heading(format!("REC  {}", job.title));
-                ui.label(format!("{:.0} s", job.started.elapsed().as_secs_f32()));
-                if let Some(w) = &s.waiting {
-                    ui.separator();
-                    ui.label(format!("WAITING: {w}"));
-                    ui.label("B twice to cancel");
-                }
-                if !s.stage.is_empty() {
-                    ui.label(&s.stage);
-                }
-                if let Some(name) = &s.building {
-                    ui.label(format!("Building {name}"));
-                    if let Some((a, b)) = s.progress {
-                        ui.add(egui::ProgressBar::new(a as f32 / b.max(1) as f32).text(format!("{a}/{b}")));
-                    }
-                    ui.label(format!("{}  ({} compiled, {} warnings)", s.krate, s.compiled, s.warnings));
-                }
-                ui.separator();
-                egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
-                    for l in s.lines.iter().rev().take(30).rev() {
-                        ui.monospace(l);
-                    }
-                });
-                return;
+        let t = self.opened.elapsed().as_secs_f32();
+        if let Some(out) = self.snapshot.clone() {
+            if t > 2.0 && !self.snapshot_asked {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+                self.snapshot_asked = true;
             }
-            let Some(page) = self.pages.last() else { return };
-            ui.heading(&page.title);
-            ui.separator();
-            for line in &page.body {
-                if page.mono { ui.monospace(line); } else { ui.label(line); }
+            let shot = ctx.input(|i| i.events.iter().find_map(|e| match e { egui::Event::Screenshot { image, .. } => Some(image.clone()), _ => None }));
+            if let Some(img) = shot {
+                let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
+                let _ = image::save_buffer(&out, &rgba, img.size[0] as u32, img.size[1] as u32, image::ColorType::Rgba8);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
-            let mut clicked = None;
-            ui.columns(2, |cols| {
-                for (i, item) in page.items.iter().enumerate() {
-                    let text = egui::RichText::new(&item.text).size(18.0);
-                    let text = if item.on { text } else { text.weak() };
-                    if cols[0].selectable_label(i == page.sel, text).clicked() {
-                        clicked = Some(i);
-                    }
-                }
-                if let Some(item) = page.items.get(page.sel) {
-                    cols[1].label(egui::RichText::new(if item.on { "READY" } else { "NOT AVAILABLE" }).strong());
-                    cols[1].label(&item.hint);
-                    if !item.info.is_empty() {
-                        cols[1].separator();
-                        cols[1].label(&item.info);
-                    }
-                    for r in &item.records {
-                        match r.strip_prefix('#') {
-                            Some(head) => { cols[1].label(egui::RichText::new(head).strong()); }
-                            None => { cols[1].label(r); }
-                        }
-                    }
-                }
+            ctx.request_repaint();
+        }
+        if t < 1.5 {
+            ctx.request_repaint();
+        }
+        let mut hits = crate::camcorder::Hits::default();
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
+            let job_state = self.job.as_ref().and_then(|j| j.state.lock().ok().map(|s| (j, s)));
+            let job_view = job_state.as_ref().map(|(j, s)| crate::camcorder::JobView {
+                title: &j.title, progress: s.progress, krate: &s.krate, compiled: s.compiled, warnings: s.warnings,
+                waiting: s.waiting.as_deref(), stage: &s.stage, lines: s.lines.iter().map(String::as_str).collect(), elapsed: j.started.elapsed().as_secs_f32(),
             });
-            if let Some(i) = clicked {
-                if let Some(p) = self.pages.last_mut() {
-                    p.sel = i;
-                }
-                self.activate(ctx);
-            }
+            let empty = Page::default();
+            let page = self.pages.last().unwrap_or(&empty);
+            let item = page.items.get(page.sel);
+            let entry_page = matches!(page.kind, PageKind::Play | PageKind::Recomp | PageKind::Retail | PageKind::Tools);
+            let view = crate::camcorder::View {
+                title: if job_view.is_some() { "RECORDING" } else { &page.title },
+                items: page.items.iter().map(|i| (i.text.trim_start_matches("> ").trim_start(), i.on, i.text.starts_with("> "))).collect(),
+                sel: page.sel, body: &page.body, mono: page.mono,
+                hint: item.map_or("", |i| i.hint.as_str()), ready: if entry_page { item.map(|i| i.on) } else { None },
+                info: item.map_or("", |i| i.info.as_str()), records: item.map_or(&[][..], |i| i.records.as_slice()),
+                recording: job_view.is_some(), seconds: job_state.as_ref().map_or(0.0, |(j, _)| j.started.elapsed().as_secs_f32()),
+                job: job_view,
+            };
+            hits = crate::camcorder::paint(ui, &view, crate::camcorder::swing(t), crate::camcorder::screen_level(t));
         });
+        if hits.drag {
+            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        match hits.key {
+            Some(crate::camcorder::Key::Power) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Some(crate::camcorder::Key::Home) if self.job.is_none() => self.back(ctx),
+            Some(crate::camcorder::Key::Set) if self.job.is_none() => self.activate(ctx),
+            _ => {}
+        }
+        if let (Some(i), None) = (hits.item, &self.job) {
+            if let Some(p) = self.pages.last_mut() {
+                p.sel = i;
+            }
+            self.activate(ctx);
+        }
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
     }
 }
 
 /// Opens the window. `direct`: launch options (`entry [label] [@version]`) that run at once and close afterwards.
-pub fn run(state_dir: PathBuf, direct: Vec<String>) -> Result<(), String> {
+pub fn run(state_dir: PathBuf, direct: Vec<String>, snapshot: Option<PathBuf>) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_title("Skate launcher").with_inner_size([960.0, 600.0]),
+        viewport: egui::ViewportBuilder::default().with_title("Skate launcher").with_inner_size([1116.0, 684.0])
+            .with_transparent(true).with_decorations(false),
         ..Default::default()
     };
-    eframe::run_native("Skate launcher", options, Box::new(move |_| Ok(Box::new(App::new(exe, state_dir, direct))))).map_err(|e| e.to_string())
+    eframe::run_native("Skate launcher", options, Box::new(move |_| { let mut app = App::new(exe, state_dir, direct); app.snapshot = snapshot; Ok(Box::new(app)) })).map_err(|e| e.to_string())
 }

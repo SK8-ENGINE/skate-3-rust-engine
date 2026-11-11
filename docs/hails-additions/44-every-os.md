@@ -102,6 +102,15 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   this" on a bad result), the previous session at start; the window minimises while a game runs and comes back with
   the result. `--window <entry> [label] [@version]` is the launch-option mode. Desktop check: the window opens with
   the real state (main menu, the selected version READY, the launcher commit). Next: the camcorder look (doc 41).
+- 2026-11-10, the camcorder look, first pass (`camcorder.rs`, the 1240 x 760 unit space of doc 44a 6): a borderless
+  see-through window dragged by its bezel; the panel body with its gradient and rim, the hinge barrel, the HOME /
+  SET / POWER keys (back / select / close, clickable), the gasket and glass; on the LCD a dusk gradient, the STBY /
+  REC status row with the tape counter and battery, the blue title tab, the amber selection bar and current-version
+  dot, the info panel with the READY / NOT AVAILABLE pill and records, the job card (progress bar, counts, waiting
+  card, the build output) and the footer with the button badges and the date; the power-on swing with overshoot
+  and the screen coming on. `--snapshot <out.png>` renders one frame of the window into a PNG and exits (checked on
+  the desktop). Still to come for the look: the wear marks and the sticker, the rolling board on the LCD, the
+  standby fold around a game, the two-column tiles, the splash.
 
 ### Spec of the current launcher
 

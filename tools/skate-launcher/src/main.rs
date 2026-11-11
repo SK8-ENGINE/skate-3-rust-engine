@@ -3,6 +3,7 @@
 //!
 //! `skate-launcher <command or entry> [label] [-Version <id>] [-Path <file or folder>]`
 mod builds;
+mod camcorder;
 mod cli;
 mod dlc;
 mod ensure;
@@ -34,12 +35,13 @@ fn exit(code: i32) -> ExitCode {
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = Vec::new();
-    let (mut version, mut path) = (String::new(), String::new());
+    let (mut version, mut path, mut snapshot) = (String::new(), String::new(), None);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.to_ascii_lowercase().as_str() {
             "-version" | "--version" => version = it.next().unwrap_or_default(),
             "-path" | "--path" => path = it.next().unwrap_or_default(),
+            "--snapshot" => snapshot = it.next().map(std::path::PathBuf::from),
             _ => args.push(a),
         }
     }
@@ -135,7 +137,7 @@ fn main() -> ExitCode {
         }
         "" | "--window" => {
             let direct: Vec<String> = args.iter().skip(1).cloned().collect();
-            return match ui::run(launcher.state_dir.clone(), direct) {
+            return match ui::run(launcher.state_dir.clone(), direct, snapshot) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("The launcher window could not open: {e}");
