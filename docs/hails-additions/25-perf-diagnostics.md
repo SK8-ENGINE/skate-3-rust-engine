@@ -1285,7 +1285,7 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268):
   later updates fetch that branch and fast-forward as before. `builtin_versions` in `config.json` limits the built-in
   list. The first version's `data\` holds the game files that every version shares, and logs go to the selected
   version's `logs\`. The fork release workflow packages the launcher files plus `STANDALONE.txt` as
-  `skate-launcher-windows.zip` (with `.sha256`) on the rolling release and on tagged releases.
+  `skate-launcher.zip` (with `.sha256`) on the rolling release and on tagged releases.
 - **Verification:** the script parses (0 errors); a dry run in a scratch copy listed the versions and entries without
   downloading; the clone command and the update fetch / fast-forward were run once against the fork's
   `hails-additions` (6 s, 0.1 GB, only that branch) in a throwaway folder that was then deleted; the workflow's

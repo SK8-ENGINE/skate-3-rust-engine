@@ -81,16 +81,19 @@ versions instead.
 
 ## Launcher-only download (standalone)
 
-Each fork release also has `skate-launcher-windows.zip`: the launcher on its own, without a game build and without a
-copy of the repository. It downloads only the versions you use:
+Each fork release also has `skate-launcher.zip`: the launcher on its own, for Windows, Linux and macOS, without a game
+build and without a copy of the repository. It downloads only the versions you use:
 
 1. Extract the zip to a folder of its own (for example `C:\Games\SkateLauncher`). The `STANDALONE.txt` inside marks it
    as standalone: its config, state and versions all stay in this folder.
-2. Double-click `build.bat`: it downloads the release's prebuilt `SkateLauncher.exe` (when it was built from this
-   `SkateLauncher.cs`; otherwise it compiles it) and starts it. **Set up the launcher** asks for the game folder, the
-   space for builds, your Skate 3 disc and, optionally, the recomp and RPCS3; then **Install what is missing** installs
-   what the selected version needs (one UAC prompt): Git only for a prebuilt version, plus Rust and the build tools for
-   one built from source. Add `SkateLauncher.exe` to Steam as a non-Steam game for the couch.
+2. Install: on Windows double-click `INSTALL.bat`; on macOS double-click `INSTALL.command`; on Linux run
+   `sh install.sh` in a terminal in the folder. It downloads the Skate launcher for this computer from the release
+   (`skate-launcher-windows-x64.exe` as `SkateLauncher.exe`, or `skate-launcher-linux-x64` / `-macos-arm64` as
+   `skate-launcher`), checks it against the release's SHA-256, runs the first-time setup (`setup.ps1` / `setup.sh`,
+   installing what is missing with one permission prompt) and starts it. Run it again to repair or update the launcher.
+   **Set up the launcher** then asks for the game folder, the space for builds, your Skate 3 disc and, optionally, the
+   recomp and RPCS3. Add `SkateLauncher.exe` (`skate-launcher`) to Steam as a non-Steam game for the couch. Tools >
+   Switch back to the classic launcher builds `SkateLauncher.cs` with `build.bat` (Windows only).
 3. Choose your versions (optional): by default the launcher lists hails-additions and upstream main. To keep only
    one, put `{"builtin_versions": ["hails-additions"]}` in `config.json`; add your own branches in `versions.json`
    (each with `"url"` and `"branch"`).
