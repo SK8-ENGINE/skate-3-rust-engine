@@ -1,6 +1,6 @@
 # Shared build for the Rusty Trucks Linux and macOS workflows (rusty-trucks-linux.yml, rusty-trucks-macos.yml; doc 44):
-# builds the game, runs the engine and mod tests, and keeps the binaries as a run artifact. Release packages come with
-# scripts/build-release.sh (docs/hails-additions/44-every-os.md "Open").
+# builds the game, runs the engine and mod tests, packages it for players (the game, setup, SETUP.sh / PLAY.sh, docs)
+# and attaches the package to the hails-additions release (pushes) or to the published release.
 name: Rusty Trucks Unix build
 on:
   workflow_call:
@@ -15,7 +15,7 @@ on:
         required: true
         type: string
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ${{ inputs.os }}
@@ -58,15 +58,27 @@ jobs:
         run: |
           mkdir -p target/native
           rustc --edition 2024 --crate-type cdylib -C opt-level=3 -C panic=abort tools/asset_pipeline/refpack_native.rs -o target/native/${{ inputs.refpack }}
-      - name: Package the binaries
+      # The player package: laid out like a checkout so SETUP.sh and PLAY.sh work in it unchanged.
+      - name: Package for players
         run: |
           set -e
-          d=out/skate3rust-${{ inputs.target }}
-          mkdir -p "$d"
-          cp target/release/skate3rust "$d/"
-          cp target/native/${{ inputs.refpack }} "$d/"
+          name=skate3rust-${{ inputs.target }}
+          d=out/$name
+          mkdir -p "$d/bin" "$d/licenses"
+          git archive HEAD -- tools ':!tools/claude-skills' ':!tools/dev-bench' ':!tools/recomp-trace' ':!tools/skate-launcher' \
+            SETUP.sh PLAY.sh README.md \
+            docs/images/skating-crab.png mods/Skyline_Drive_Mod | tar -x -C "$d"
+          cp target/release/skate3rust "$d/bin/"
+          # fast_refpack.py loads librefpack.so on every Unix (ctypes opens a .dylib by any name).
+          cp target/native/${{ inputs.refpack }} "$d/tools/asset_pipeline/librefpack.so"
+          cp tools/vendor/utt/LICENSE "$d/licenses/UTT.txt"
+          cp tools/vendor/university/LICENSE-PROJECT.md "$d/licenses/CustomEngineLayer.txt"
+          cp vendor/bevy_pbr/LICENSE-MIT "$d/licenses/Bevy-MIT.txt"
+          cp vendor/bevy_pbr/LICENSE-APACHE "$d/licenses/Bevy-APACHE.txt"
+          chmod +x "$d/bin/skate3rust" "$d/SETUP.sh" "$d/PLAY.sh" "$d/tools/steam-launcher/setup.sh"
           printf 'build %s\ncommit %s\n' "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" > "$d/BUILD.txt"
-          tar -C out -czf out/skate3rust-${{ inputs.target }}.tar.gz skate3rust-${{ inputs.target }}
+          tar -C out -czf "out/$name.tar.gz" "$name"
+          (cd out && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
       - name: Report compiler cache hits
         if: always()
         run: sccache --show-stats
@@ -74,4 +86,19 @@ jobs:
         with:
           name: skate3rust-${{ inputs.target }}
           retention-days: 7
-          path: out/skate3rust-${{ inputs.target }}.tar.gz
+          path: |
+            out/skate3rust-${{ inputs.target }}.tar.gz
+            out/skate3rust-${{ inputs.target }}.tar.gz.sha256
+  publish:
+    needs: build
+    if: github.event_name == 'release' || github.ref == 'refs/heads/hails-additions'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: skate3rust-${{ inputs.target }}
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || 'hails-additions' }}
+        run: gh release upload "$TAG" skate3rust-${{ inputs.target }}.tar.gz skate3rust-${{ inputs.target }}.tar.gz.sha256 --clobber --repo "$GITHUB_REPOSITORY"

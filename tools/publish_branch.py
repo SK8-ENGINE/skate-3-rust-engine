@@ -75,7 +75,9 @@ def publish(directory, branch):
     changes = gh('api', f'repos/{REPO}/commits?sha={meta["revision"]}&per_page=10')
     commits = json.loads(changes)
     notes = (f"Rolling build **{meta['build']}**, commit `{meta['revision'][:12]}`.\n\n"
-             f"[Download Windows ZIP](https://github.com/{REPO}/releases/download/{branch}/{PACKAGE})\n\n"
+             f"[Download Windows ZIP](https://github.com/{REPO}/releases/download/{branch}/{PACKAGE})"
+             f" · [Linux (x64)](https://github.com/{REPO}/releases/download/{branch}/skate3rust-linux-x64.tar.gz)"
+             f" · [macOS (Apple Silicon)](https://github.com/{REPO}/releases/download/{branch}/skate3rust-macos-arm64.tar.gz)\n\n"
              f"Choose **Branch** in the in-game Updates window and enter `{branch}`.\n\n"
              "### Recent commits\n\n" + '\n'.join(
                  f"- {c['sha'][:8]} {c['commit']['message'].splitlines()[0]}" for c in commits))
