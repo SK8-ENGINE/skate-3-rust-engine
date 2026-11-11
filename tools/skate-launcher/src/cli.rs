@@ -65,10 +65,83 @@ pub fn versions(l: &Launcher) -> Vec<String> {
     }).collect()
 }
 
-/// `version-set <id>`: selects a version (version.txt).
-pub fn version_set(l: &Launcher, id: &str) -> Result<(), String> {
-    if !l.versions.iter().any(|v| text(v, "id") == id) {
-        return Err(format!("Unknown version: {id}"));
+/// `Get-Version <id>`: that version, else the first.
+fn version<'a>(l: &'a Launcher, id: &str) -> &'a Value {
+    if id.is_empty() {
+        return l.selected();
     }
-    std::fs::write(l.state_dir.join("version.txt"), id).map_err(|e| e.to_string())
+    l.versions.iter().find(|v| text(v, "id") == id).unwrap_or(&l.versions[0])
+}
+
+/// `notes [id]`: the version's name, branch, status and what to test.
+pub fn notes(l: &Launcher, id: &str) -> Vec<String> {
+    let v = version(l, id);
+    vec![
+        format!("Version: {}", text(v, "name")),
+        format!("Branch: {}   Status: {}", text(v, "branch"), version_status(l, v)),
+        String::new(),
+        "What to test:".into(),
+        text(v, "notes"),
+    ]
+}
+
+/// `version-set <id>` / `version-next` / `version-prev`: selects a version (version.txt, ASCII with CRLF as
+/// Set-Content writes it), then prints its notes.
+pub fn version_step(l: &Launcher, step: i64, id: &str) -> Vec<String> {
+    let new = if step == 0 {
+        text(version(l, id), "id")
+    } else {
+        let ids: Vec<String> = l.versions.iter().map(|v| text(v, "id")).collect();
+        let cur = ids.iter().position(|x| *x == text(l.selected(), "id")).unwrap_or(0) as i64;
+        let n = ids.len() as i64;
+        ids[(cur + step + n).rem_euclid(n) as usize].clone()
+    };
+    let _ = std::fs::write(l.state_dir.join("version.txt"), format!("{new}\r\n"));
+    notes(l, &new)
+}
+
+/// `config-set <file>`: the setup wizard's changed values (a JSON object of dotted keys) merged into config.json,
+/// keeping its key order; the file is removed either way.
+pub fn config_set(l: &Launcher, file: &str) -> Result<Vec<String>, String> {
+    use crate::ojson::OValue;
+    let read = |p: &Path| -> Result<OValue, String> {
+        let t = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|e| format!("{}: {e}", p.display()))
+    };
+    let pairs = read(Path::new(file));
+    let _ = std::fs::remove_file(file);
+    let OValue::Object(pairs) = pairs? else { return Err("config-set: not a JSON object".into()) };
+    let path = l.state_dir.join("config.json");
+    let mut config = if path.exists() { read(&path)? } else { OValue::Object(Vec::new()) };
+    for (key, value) in pairs {
+        config.set_path(&key, value);
+    }
+    let text = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())? + "\n";
+    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    Ok(vec!["saved".into()])
+}
+
+/// `config-get`: the first-time setup's values, key and value per line.
+pub fn config_get(l: &Launcher) -> Vec<String> {
+    let sub = |section: &str, key: &str| -> String {
+        l.config.get(section).and_then(|o| o.get(key)).and_then(Value::as_str)
+            .filter(|v| !v.is_empty() && !v.to_ascii_lowercase().starts_with(r"c:\path\to")).unwrap_or_default().to_owned()
+    };
+    let path = |k: &str| l.setting_path(k).unwrap_or_default();
+    let cap = crate::state::setting(&l.config, "build_cap_gb").map_or_else(|| "0".into(), |v| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    });
+    vec![
+        format!("standalone\t{}", if l.standalone { "1" } else { "" }),
+        format!("default_root\t{}", if l.standalone { l.here.display().to_string() } else { String::new() }),
+        format!("storage_root\t{}", path("storage_root")),
+        format!("target_root\t{}", path("target_root")),
+        format!("build_cap_gb\t{cap}"),
+        format!("disc\t{}", path("disc")),
+        format!("recomp.exe\t{}", sub("recomp", "exe")),
+        format!("recomp.working_dir\t{}", sub("recomp", "working_dir")),
+        format!("rpcs3.exe\t{}", sub("rpcs3", "exe")),
+        format!("rpcs3.game\t{}", sub("rpcs3", "game")),
+    ]
 }

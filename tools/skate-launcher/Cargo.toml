@@ -12,3 +12,7 @@ path = "src/main.rs"
 [dependencies]
 jiff = { version = "=0.2.42", default-features = false, features = ["std", "tz-system", "tzdb-bundle-platform", "tzdb-zoneinfo"] }
 serde_json.workspace = true
+serde.workspace = true
+sha2 = "=0.10.9"
+zip = { version = "=6.0.0", default-features = false, features = ["deflate"] }
+sysinfo = { version = "=0.37.2", default-features = false, features = ["system"] }

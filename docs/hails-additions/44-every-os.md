@@ -77,7 +77,19 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   OS). It finds the launcher folder and state folder as `launcher.ps1` does, reads `config.json` / `versions.json`
   with the built-in versions, and answers `versions` and `version-set`. Check: on the desktop its `versions` output
   is byte-identical to `launcher.ps1 versions` (three versions: built, built from the working tree, out of date);
-  unit tests for the version list (2 pass). Next: the other query commands, then the window.
+  unit tests for the version list (2 pass).
+- 2026-11-10, backend ported: every text command and entry of `launcher.ps1` (`versions`, `notes`, `version-set` /
+  `-next` / `-prev`, `config-get`, `config-set`, `status`, `entries`, `game-settings`, `game-setting`, `sizes`,
+  `setup-check`, `list`, `build`, `share-on` / `-off`, the play entries, the recomp and RPCS3 entries and the tools:
+  refresh, build, self-update, send, share, DLC import, recomp copies, first-time setup). Checks on the desktop: the
+  output of every read command is byte-identical to `launcher.ps1` (versions, notes, config-get, status, 30 entries,
+  21 game settings, setup-check, sizes, list), and version stepping writes the same `version.txt`. Sandbox runs
+  (scratch git repositories, a stand-in build script and play script): worktree, fetch, no rebuild when current,
+  fast-forward and rebuild on a new commit, PLAYING.txt during play, the session check finding a panic, the result
+  line, DLC import by header. Off Windows: builds are one static binary copied into `bin/`, play runs `PLAY.sh`,
+  PowerShell helpers run through `pwsh` when installed, the performance trace is greyed out. New dependencies:
+  `sha2 =0.10.9`; `zip` and `sysinfo` reuse the locked versions. `config.json` keeps its key order (own ordered JSON
+  value, `ojson.rs`). Still open: `pending` and `launcher-exe`, then the window (step 4).
 
 ### Spec of the current launcher
 
@@ -98,6 +110,7 @@ Hardest per-OS problems found:
 
 ## Open
 
-- A Windows build of the merged branch (no regression), then a real Linux run and a macOS run.
+- Fork builds 2026-11-10 at `436c69e7`: Windows, Linux and macOS all pass (game build, engine / mod / setup tests). Still to
+  do: a real play run on a Linux and a macOS machine.
 - Upstream: #7 and stev0760's work are their authors'; this PR carries them merged so the rest of #68 can build on
   them.
