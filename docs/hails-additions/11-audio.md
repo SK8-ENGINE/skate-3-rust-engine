@@ -5173,7 +5173,9 @@ Retail parity for every audio surface tag 0..127, hard and soft wheels: tag → 
 - Next: the engine's own music modes
   (which segments make a track and in what order), the streaming player, zones, menu music (b1015 port plan).
 
-## Music Player screen (2026-11-11, world/challenges; research .local/research/music-player-movie-calls.md)
+## Music Player screen
+
+2026-11-11, world/challenges; research `.local/research/music-player-movie-calls.md`.
 
 **Problem.** The crossbar's Options tab row Music Player (every mode) was greyed: the engine had no FE 26 screen, so the player could not pick which soundtrack songs play, switch between the music player and the ambient mode, or set the music volume there.
 
