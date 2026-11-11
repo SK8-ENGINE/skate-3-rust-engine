@@ -151,10 +151,10 @@ def dependency(cache,name,url,sha,report,windows=os.name=='nt'):
     if not marker.is_file():
         unpack_zip(download(url,sha,cache,report),folder)
         marker.write_text(sha)
-    executable=next((p for p in folder.rglob(name+'.exe' if os.name=='nt' else name) if p.is_file()),None)
+    executable=next((p for p in folder.rglob(name+'.exe' if windows else name) if p.is_file()),None)
     if executable is None:raise RuntimeError('Missing downloaded tool: '+name)
     # Zip archives do not keep the executable bit.
-    if os.name!='nt':executable.chmod(executable.stat().st_mode|0o111)
+    if not windows:executable.chmod(executable.stat().st_mode|0o111)
     return executable
 
 import threading
