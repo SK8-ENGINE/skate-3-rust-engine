@@ -5224,3 +5224,23 @@ Retail parity for every audio surface tag 0..127, hard and soft wheels: tag → 
 **NOT RETAIL YET.** The playlist preset gate of the zones (`+0x648`, writer not found: every zone passes); which cooldown field ends a piece (2.5 s used); the score burst reads our combo points, not retail's score counter; both skater override flags read as "off the board"; ePlayListMode and the songs' gain / extra fields are not used; the stinger and end events' audible result is untested in game.
 
 **Verification.** Unit tests `game_audio::music_zones` (licensed queue, DJ speed gate and checks, end by time, x2 control, the off-board override), `test_music_zones.py`, the data-gated `menu_tables` test (46 soundtrack ids, 25 DJ pieces on the TU3 image and the disc). Desktop runs 2026-11-11 (install refreshed with the zone data, music mode 1, settings folder restored and hash-checked): Industrial at the old factory: 23 music zones load, the deerman zone wins and its licensed playlist plays soundtrack song 27 (id 0x85D8D240, the playlist's one song); DownTown with the test autopilot: 26 zones load and once it rides at about 37 km/h inside an `all_outdoor` zone the world graph starts DJ piece 6. A whole piece (115 to 370 s) and the stinger were not reached in these runs.
+
+## Challenge, chase and race music (in progress)
+
+2026-11-11, world/challenges; research `.local/research/music-challenges.md`.
+
+**Retail [code, TU3; checked at the source where marked].**
+- All of it runs only in the Interactive Mode: the challenge playlist request (`sub_8249E1E8`) and the chase request (`sub_8249DC60`) act only while the manager state is 4 [checked], as does the race request `sub_8249E498` [checked].
+- The audio challenge trigger `sub_8248B258` switches on the challenge type: 2, 8, 0xF, 0x1A, 0x1B start the challenge's playlist (licensed songs on the soundtrack graph); 0x12, 0x13, 0x14 (races) post race requests; own the spot (9) changes nothing [checked].
+- game.mpf: chase pieces in sections 1..4, race pieces in 5..12, picked at random by the start events (0x1335A0 chase, 0x3BE42D race); the race pieces set `raceoverlay` from their intros; end and escape events [data].
+- overlays.big (BIG4, 19 `.snr`): the vault names only Chase_Scratch (volume 1.75, chase start) and Cymbal_Overlay (volume 1.2, every raceoverlay 0..7) [data, checked]; the 16 `*_Overlay_Ending_*` files are never named.
+
+**Change so far (data).** Setup decodes the overlay stings to `music_overlays/<name>.wav` (`audio_export.music_overlays`, through the decode cache) and exports the music settings class 87EC8C46B85E1D98 (`music_settings`: overlay names and volumes, the race tuning records, `default` with the 250-frame end hold) into the audio manifest; graph and tweak typed fields stay raw hex. Test: `test_music_zones.py`.
+
+- The trigger codes are eSk8MissionMusicTrigger (names at 0x82191648 [checked]): 0 Countdown, 1 Start, 2 HalfWay, 3 ThreeQuarters, 4 StraightAway, 5 Abort, 6 AlmostOver, 7 Over, 8 Win, 9 Lose, 10 JumpShort, 11 ChallengeRunning, 12 StopChallengeMusic; the race scripts post 0 at `countdown`, 1 at `run_heat`, 8 / 9 at `end_heat`. Race types: 0x12 Point2PointRace, 0x13 DeathRace, 0x14 SpotRace; the playlist types 2 Demo, 8 Street, 0xF Vert, 0x1A MegaRamp, 0x1B StreetSkating (research section 6).
+
+**Change (engine, races).** `race_run` sends `MusicTrigger(0)` entering the countdown and `MusicTrigger(1)` entering the heat; `race_host` adds 8 / 9 at the results (passed or not) and 12 at the end (`Races::music`). In the Interactive Mode `music_zones::Environment::race_trigger` starts the race music (game.mpf, `raceoverlay` = -1, event 0x3BE42D; Start only when nothing plays), posts the Win / Lose ending (0xC17631 / 0x88B48E), holds 250 console frames and the graph's end, then the zones choose again; the zones wait while a race owns the music.
+
+**NOT RETAIL YET / open.** The beat-synced Cymbal_Overlay at the ending (exported, not played: no one-shot path on the music bus yet); HalfWay / ThreeQuarters / StraightAway (requests 3..5 not read); the race control curve from speed and the place (the race tuning record's fields); StopChallengeMusic's moment and effect (8249BB00 not read; here it stops the race music); the challenge playlists of the other types (needs the challenge music type field `44754347A934FDCD` exported); contests and the guard chase (no runner in the engine yet). A trigger that arrives before the saved music mode is loaded at start-up is dropped.
+
+**Verification.** Unit test `a_race_owns_the_music_from_the_countdown_to_its_end_hold`; desktop run (race_dwtn_02, the test autopilot, music mode 1, settings restored and hash-checked): the heat start queues the race piece and the game graph plays it.

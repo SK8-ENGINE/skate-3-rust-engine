@@ -24,6 +24,18 @@ const DJ_STINGER: u32 = 0x62_EA22;
 const IPOD_SET: &str = "ipod";
 const IPOD_VAR: &str = "ipod";
 const IPOD_PLAY: u32 = 0x16_D750;
+/// The race music on game.mpf (research music-challenges.md): start race 0x3BE42D picks one of the 8 race pieces
+/// (sections 5..12) and sets `raceoverlay` to -1; Win posts 0xC17631, Lose 0x88B48E (UpdateRaceState 8249E680
+/// sub-states 6 / 7); after the end the music holds 250 console frames (`default.59BE3547112AAC36`) and the graph's
+/// end before free roam (here the zones) returns.
+const GAME_SET: &str = "game";
+const RACE_VAR: &str = "raceoverlay";
+const RACE_START: u32 = 0x3B_E42D;
+const RACE_WIN: u32 = 0xC1_7631;
+const RACE_LOSE: u32 = 0x88_B48E;
+const RACE_END_FRAMES: f32 = 250.0;
+/// Retail's frame clock for its music counters (the 360's ~30 fps, memory console-cadence).
+const CONSOLE_FPS: f32 = 30.0;
 /// eChannelMapPreset values.
 const PRESET_DJ: i32 = 3;
 const PRESET_LICENSED: i32 = 4;
@@ -122,6 +134,9 @@ pub(crate) struct Environment {
     score_at_entry: f32,
     sent_control: Option<i32>,
     rng: u32,
+    /// The race music runs (state 6): `Some(ended)`, with the end hold left once the race ended.
+    race: Option<bool>,
+    race_hold: f32,
 }
 
 impl Environment {
@@ -130,11 +145,54 @@ impl Environment {
         if hi <= lo { lo } else { lo + (self.rng >> 8) as i32 % (hi - lo + 1) }
     }
 
+    /// A mission music trigger (eSk8MissionMusicTrigger) for a race (8248B258 -> 8249E498): 0 Countdown / 1 Start start
+    /// the race music (Start only when nothing plays), 8 Win / 9 Lose post the ending, 12 StopChallengeMusic stops it
+    /// (NOT RETAIL YET: 8249BB00 not read). HalfWay / ThreeQuarters / StraightAway (2..4) are not ported (their
+    /// sub-states 3..5 are not read).
+    pub(crate) fn race_trigger(&mut self, code: u8, nothing_playing: bool) -> Vec<MusicRequest> {
+        let start = || MusicRequest::Queue {
+            tracks: vec![Track::Graph { set: GAME_SET.into(), var: RACE_VAR.into(), value: -1, play: RACE_START }],
+            once: true,
+        };
+        match code {
+            0 if self.race.is_none() => {
+                self.race = Some(false);
+                vec![start()]
+            }
+            1 if self.race.is_none() || nothing_playing && self.race == Some(false) => {
+                self.race = Some(false);
+                vec![start()]
+            }
+            8 | 9 if self.race == Some(false) => {
+                self.race = Some(true);
+                self.race_hold = RACE_END_FRAMES / CONSOLE_FPS;
+                vec![MusicRequest::Post { event: if code == 8 { RACE_WIN } else { RACE_LOSE } }]
+            }
+            12 if self.race == Some(false) => {
+                self.race = None;
+                self.playing = None;
+                vec![MusicRequest::Stop { owner: None }]
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// One frame: the requests for the music (empty when nothing changes).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn frame(&mut self, data: &MusicZonesData, ids: &EnumIds, zone: Option<&super::emitters::MusicZoneWinner>, speed: f32,
         unridden: bool, multiplier: f32, score: f32, piece_done: bool, dt: f32) -> Vec<MusicRequest> {
         let mut out = Vec::new();
+        if let Some(ended) = self.race {
+            // The race owns the music; after its end hold and the graph's end the zones choose again.
+            if ended {
+                self.race_hold -= dt;
+                if self.race_hold <= 0.0 && piece_done {
+                    self.race = None;
+                    self.playing = None;
+                }
+            }
+            return out;
+        }
         let default = data.interactive.get("default").copied().unwrap_or_default();
         self.cooldown = (self.cooldown - dt).max(0.0);
         self.stinger_cooldown = (self.stinger_cooldown - dt).max(0.0);
@@ -259,6 +317,7 @@ pub(crate) fn environment(
     zone: Res<MusicZone>,
     library: Option<Res<super::Library>>,
     mut music: ResMut<Music>,
+    mut races: Option<ResMut<crate::race_host::Races>>,
     cues: Res<super::skate_events::Cues>,
     skater: Option<Res<crate::physics::SkaterRuntime>>,
     config: Res<crate::config::Config>,
@@ -266,6 +325,7 @@ pub(crate) fn environment(
 ) {
     let Some(library) = library else { return };
     let interactive = music.soundtrack_off && music.owner.is_none();
+    let triggers = races.as_mut().map(|r| std::mem::take(&mut r.music)).unwrap_or_default();
     if !interactive {
         if host.active {
             host.active = false;
@@ -280,6 +340,13 @@ pub(crate) fn environment(
     let ids = host.ids.get_or_insert_with(|| enum_ids(&config.asset_root)).clone();
     let (multiplier, score) = skater.as_ref().map_or((1.0, 0.0), |s| (s.scoring.session.combo.multiplier, s.scoring.session.combo.timer.points));
     let done = music.queue_done();
+    for code in triggers {
+        let requests = host.env.race_trigger(code, done);
+        for r in &requests {
+            info!("AUDIO_MUSIC race trigger {code}: {r:?}");
+        }
+        music.requests.extend(requests);
+    }
     let requests = host.env.frame(library.music_zones(), &ids, zone.winner.as_ref(), cues.riding.speed, cues.riding.unridden, multiplier, score, done, time.delta_secs());
     for r in &requests {
         if !matches!(r, MusicRequest::Control(_)) {
@@ -345,6 +412,20 @@ mod tests {
             ended.extend(e.frame(&d, &ids, None, fast, false, 2.0, 0.0, false, 0.1));
         }
         assert!(ended.contains(&MusicRequest::Post { event: DJ_END }), "{ended:?}");
+    }
+
+    #[test]
+    fn a_race_owns_the_music_from_the_countdown_to_its_end_hold() {
+        let (d, ids) = (data(), ids());
+        let mut e = Environment::default();
+        let start = e.race_trigger(0, true);
+        assert!(matches!(&start[0], MusicRequest::Queue { tracks, once: true } if tracks[0] == Track::Graph { set: "game".into(), var: "raceoverlay".into(), value: -1, play: RACE_START }));
+        assert!(e.race_trigger(1, false).is_empty(), "Start while the countdown's piece plays changes nothing");
+        assert!(e.frame(&d, &ids, Some(&zone(0xBB)), 0.0, false, 1.0, 0.0, false, 0.1).is_empty(), "zones wait during the race");
+        assert_eq!(e.race_trigger(8, false), [MusicRequest::Post { event: RACE_WIN }]);
+        e.frame(&d, &ids, None, 0.0, false, 1.0, 0.0, true, 9.0);
+        assert!(e.race.is_none(), "after 250 console frames and the graph's end the race lets go");
+        assert_eq!(e.frame(&d, &ids, Some(&zone(0xBB)), 0.0, false, 1.0, 0.0, false, 0.1).len(), 1, "the zones choose again");
     }
 
     #[test]

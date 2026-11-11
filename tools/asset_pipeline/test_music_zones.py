@@ -33,6 +33,17 @@ class MusicZones(unittest.TestCase):
         out = audio_export.music_interactive([default, tier])
         self.assertEqual(out, {'default': {'speed_gate': 30.0}, 'times2': {'speed_gate': 30.0, 'value_min': 112}})
 
+    def test_music_settings_keep_plain_values_and_raw_graph_types(self):
+        record = {'class': audio_export.MUSIC_CLASS, 'key': 'Hash_C37B3862A94AFF2E', 'parent': '', 'fields': {
+            'Hash_8A5B99BA28348132': field('EA::Reflection::Text', 'Chase_Scratch'),
+            'Hash_0B91E756EA46FB6C': field('EA::Reflection::Float', '3FE00000'),
+            'Hash_2834CACED3DB5A4E': {'type': 'EA::Reflection::Text', 'data': '', 'array': {'items': ['0000310E'], 'text_items': ['Cymbal_Overlay']}},
+            'Hash_916CB408916CB408': field('Sk8::Audio::PointGraphData8', '000000003E87EBFC')}}
+        out = audio_export.music_settings([record])
+        self.assertEqual(out['C37B3862A94AFF2E']['fields'], {
+            '8A5B99BA28348132': 'Chase_Scratch', '0B91E756EA46FB6C': 1.75, '2834CACED3DB5A4E': ['Cymbal_Overlay'],
+            '916CB408916CB408': {'type': 'Sk8::Audio::PointGraphData8', 'data': '000000003E87EBFC'}})
+
 
 if __name__ == '__main__':
     unittest.main()

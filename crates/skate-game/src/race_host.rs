@@ -154,6 +154,8 @@ pub(crate) struct Races {
     /// RaceStop), and the last finished race's result line.
     pub placements: u32,
     pub started: bool,
+    /// Mission music triggers for the audio (eSk8MissionMusicTrigger codes, `game_audio::music_zones`).
+    pub music: Vec<u8>,
     pub result: Option<String>,
     /// The fe_map_icons records (read at the first race start) and the gate icon rules (retail defaults).
     map_icons: Option<std::collections::BTreeMap<String, skate_data::challenge_map::MapIcon>>,
@@ -569,6 +571,7 @@ fn apply(
                     ai.add_to(&mut state.tracker);
                 }
             }
+            Command::MusicTrigger(code) => races.music.push(code),
             Command::RaceStart => {
                 races.started = true;
                 if let Some(ai) = state.ai.as_mut() {
@@ -670,9 +673,15 @@ fn apply(
                     let located = r.id == PLAYER || state.ai.as_ref().is_some_and(|ai| ai.racers.iter().any(|a| a.ai.id == r.id && a.npc.is_some()));
                     info!("SKATE_RACE {id} standing racer {} leg {} split {} eta {:.2} finish {:?} rank {} npc {located}", r.id, r.leg, r.split, r.eta, r.finish_time, r.rank);
                 }
+                // end_heat posts Win (8) or Lose (9) (research music-challenges §6).
+                races.music.push(if passed { 8 } else { 9 });
                 state.end_results = Some((view, passed));
             }
-            Command::Complete(c) => finished = Some(c),
+            Command::Complete(c) => {
+                // StopChallengeMusic (12). NOT RETAIL YET: its exact moment (825F12E8 / 82616EC0 not read).
+                races.music.push(12);
+                finished = Some(c);
+            }
             other => info!("SKATE_RACE {id} {other:?}"),
         }
     }

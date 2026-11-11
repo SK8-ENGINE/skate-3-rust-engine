@@ -99,6 +99,9 @@ pub enum Command {
     ShowGates { leg: usize },
     RemoveGates,
     StartCountdownHud { ticks: i32 },
+    /// The audio's mission music trigger (eSk8MissionMusicTrigger, posted by the race scripts' state entries:
+    /// 0 Countdown in `countdown`, 1 Start in `run_heat`; research music-challenges §6).
+    MusicTrigger(u8),
     StartTimerHud { ticks: i32 },
     /// setup_heat DPO 1 (when the heat has a KilledItTime): ID_CHALLENGE_RACE_KILLED_IT_TIME, icon KilledIt, Time.
     DpoKilledItTime(f32),
@@ -265,6 +268,7 @@ impl RaceRun {
                 self.enter(State::Countdown, out);
             }
             State::Countdown => {
+                out.push(Command::MusicTrigger(0));
                 out.push(Command::ShowGates { leg: 0 });
                 if self.params.include_321 {
                     self.countdown = Some(self.timers.add_countdown(self.params.countdown_delay));
@@ -274,6 +278,7 @@ impl RaceRun {
             }
             State::RunHeat => {
                 self.racing = true;
+                out.push(Command::MusicTrigger(1));
                 out.push(Command::RaceStart);
                 self.pass = Some(self.timers.add_countdown(self.params.pass_refresh_time));
                 let p = &self.params;

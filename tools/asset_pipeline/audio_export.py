@@ -352,6 +352,66 @@ def music_playlists(collections: list[dict]) -> dict[str, dict]:
     return out
 
 
+# The challenge / chase / race music's settings (class 87EC8C46B85E1D98: overlay names and volumes, the race tuning
+# records, `default`; .local/research/music-challenges.md section 3): every field by its hash, plain values decoded,
+# the graph and tweak types kept as raw hex for the engine.
+MUSIC_CLASS = 'Hash_87EC8C46B85E1D98'
+
+
+def _raw_value(field):
+    kind = field['type']
+    if 'array' in field:
+        if kind.endswith('Text') and 'text_items' in field['array']:
+            return list(field['array']['text_items'])
+        if kind.endswith('Float') or kind.endswith('Int32') or kind.endswith('Int8'):
+            return [_raw_value({'type': kind, 'data': item}) for item in field['array']['items']]
+        return {'type': kind, 'items': field['array']['items']}
+    if kind.endswith('Text'):
+        return field['data']
+    if kind.endswith('Float'):
+        return round(struct.unpack('>f', bytes.fromhex(field['data']))[0], 6)
+    if kind.endswith('Int32'):
+        return struct.unpack('>i', bytes.fromhex(field['data']))[0]
+    if kind.endswith('Int8'):
+        return struct.unpack('>b', bytes.fromhex(field['data'])[:1])[0]
+    return {'type': kind, 'data': field['data']}
+
+
+def music_settings(collections: list[dict]) -> dict[str, dict]:
+    """Class 87EC8C46B85E1D98 records by key (`default` or 16 hex digits): parent and fields by hash."""
+    out = {}
+    for c in collections:
+        if c['class'] != MUSIC_CLASS:
+            continue
+        key = c['key'][5:] if c['key'].startswith('Hash_') else c['key']
+        parent = c['parent'][5:] if c['parent'].startswith('Hash_') else c['parent']
+        out[key] = {'parent': parent, 'fields': {name[5:] if name.startswith('Hash_') else name: _raw_value(f) for name, f in c['fields'].items()}}
+    return out
+
+
+def music_overlays(archive: Path, output: Path, work: Path, vgmstream: Path, log) -> dict[str, dict]:
+    """The music overlay stings (`overlays.big`, BIG4): each `.snr` with audio decoded to output/<name>.wav."""
+    from tools.vendor.university.tools.vanilla_map_extraction.tools.extract_skate2_big4 import read_entries
+    raw = archive.read_bytes()
+    work.mkdir(parents=True, exist_ok=True)
+    output.mkdir(parents=True, exist_ok=True)
+    names = []
+    for entry in read_entries(archive):
+        name = Path(entry.name).name
+        if not name.lower().endswith('.snr') or entry.size < 64:  # the 43-byte `-f16s.snr` holds no audio
+            continue
+        (work/name).write_bytes(raw[entry.offset:entry.offset + entry.size])
+        names.append(name)
+    _decode(vgmstream, work, names, log)
+    out = {}
+    for name in names:
+        stem = Path(name).stem
+        target = output/(stem + '.wav')
+        shutil.move(work/(name + '.wav'), target)
+        out[stem] = {'file': f'music_overlays/{stem}.wav', **_wav_info(target)}
+    return out
+
+
 def music_interactive(collections: list[dict]) -> dict[str, dict]:
     """aud_interactive by record name (default and the score multiplier tiers), parents resolved."""
     resolved = _resolved(collections, INTERACTIVE_CLASS, INTERACTIVE_FIELDS)
@@ -1465,6 +1525,7 @@ def _convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report
     attributes = emitter_attributes(collections)
     manifest['emitters'], placed = emitters(files, attributes, packs)
     manifest['music_zones'] = {'playlists': music_playlists(collections), 'interactive': music_interactive(collections)}
+    manifest['music_settings'] = music_settings(collections)
     by_file = {Path(e.path).name.lower(): Path(e.path).name for e in files.entries}
     # The packs' loose banks (After Dark's 7 emitter banks, b432) join the disc's; a disc bank keeps its name.
     pack_banks = {}
@@ -1586,5 +1647,9 @@ def _convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report
                           events=ANNOUNCER_EVENTS)
             entry['audio'] = 'speech/announcer'
         manifest.setdefault('speech', {})['announcer'] = entry
+    overlays = audio_root/'music'/'overlays.big'
+    if overlays.is_file():
+        report('Decoding music overlays')
+        manifest['music_overlays'] = music_overlays(overlays, output/'music_overlays', work/'music_overlays', vgmstream, log)
     (output/'audio_manifest.json').write_text(json.dumps(manifest, indent=1), encoding='utf-8')
     return manifest
