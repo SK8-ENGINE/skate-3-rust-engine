@@ -8,11 +8,13 @@ mod dlc;
 mod ensure;
 mod entries;
 mod ojson;
+mod pick;
 mod play;
 mod selfupdate;
 mod settings;
 mod state;
 mod status;
+mod ui;
 
 use std::process::{Command, ExitCode};
 
@@ -90,6 +92,36 @@ fn main() -> ExitCode {
         }
         "list" => entries::entries(&launcher).iter().map(|e| format!("{:<20} {}", e.id, e.name)).collect(),
         "setup-check" => return setup_check(&launcher),
+        "clear-cache" | "clear-build" => match builds::clear(&launcher, arg(0) == "clear-build", arg(1)) {
+            Ok(line) => vec![line],
+            Err(e) => {
+                println!("{e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        "room" => {
+            let id = if arg(1).is_empty() { version.as_str() } else { arg(1) };
+            let v = if id.is_empty() { launcher.selected() } else { launcher.versions.iter().find(|x| state::text(x, "id") == id).unwrap_or(&launcher.versions[0]) };
+            ensure::make_room(&launcher, v);
+            Vec::new()
+        }
+        "send" => {
+            let r = play::send_sessions(&launcher, &[]);
+            vec![if r.is_empty() { "Send: no after_session in config.json.".into() } else { r }]
+        }
+        "fixed-executor-single" | "fixed-executor-multi" => {
+            let _ = settings::set_physics_threads(&launcher, arg(0) == "fixed-executor-multi");
+            Vec::new()
+        }
+        "pending" => return if play::pending(&launcher) { ExitCode::from(10) } else { ExitCode::SUCCESS },
+        "launcher-exe" => {
+            if selfupdate::rebuild_launcher_exe(&launcher) {
+                println!("ok");
+                return ExitCode::SUCCESS;
+            }
+            println!("failed");
+            return ExitCode::FAILURE;
+        }
         "share-on" | "share-off" => {
             let flag = if arg(0) == "share-on" { "-Consent" } else { "-Revoke" };
             let root = launcher.version_dir(launcher.selected());
@@ -101,9 +133,15 @@ fn main() -> ExitCode {
                 None => vec!["share: not available in this launcher".into()],
             }
         }
-        "" => {
-            eprintln!("The launcher window is not ported yet; the commands and entries work (see `list`).");
-            return ExitCode::from(2);
+        "" | "--window" => {
+            let direct: Vec<String> = args.iter().skip(1).cloned().collect();
+            return match ui::run(launcher.state_dir.clone(), direct) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("The launcher window could not open: {e}");
+                    ExitCode::FAILURE
+                }
+            };
         }
         key => {
             if entries::entries(&launcher).iter().any(|e| e.id == key) || key.starts_with("rust-") || key.starts_with("tool-") {

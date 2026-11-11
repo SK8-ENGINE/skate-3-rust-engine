@@ -31,6 +31,36 @@ pub fn folder_bytes(path: &Path) -> u64 {
     }).sum()
 }
 
+/// `clear-cache` / `clear-build <id|all>`: deletes the versions' build caches (and with `build` their bin/ too).
+/// Ok(result line) or Err(message), both already saved / printed as launcher.ps1 does.
+pub fn clear(l: &Launcher, whole: bool, which: &str) -> Result<String, String> {
+    let entry = if whole { "clear-build" } else { "clear-cache" };
+    if !crate::play::running_games().is_empty() {
+        crate::play::save_result(l, "Not cleared: a game is running.");
+        return Err("Not cleared: a game is running.".into());
+    }
+    let versions: Vec<&Value> = l.versions.iter().filter(|v| which == "all" || text(v, "id") == which).collect();
+    if versions.is_empty() {
+        return Err(format!("Unknown version: {which}"));
+    }
+    let (mut freed, mut done) = (0u64, Vec::new());
+    for v in versions {
+        let mut dirs = vec![target_dir(l, v)];
+        if whole {
+            dirs.push(l.version_dir(v).join("bin"));
+        }
+        for d in dirs.into_iter().filter(|d| d.exists()) {
+            freed += folder_bytes(&d);
+            println!("  Deleting {}...", d.display());
+            let _ = std::fs::remove_dir_all(&d);
+        }
+        done.push(text(v, "name"));
+    }
+    let r = format!("Cleared the {} of {} ({:.1} GB freed).", if whole { "builds" } else { "build caches" }, done.join(", "), freed as f64 / 1073741824.0);
+    crate::play::save_result(l, &format!("{}  {entry} {which}\r\n{r}", jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S")));
+    Ok(format!("  {r}"))
+}
+
 /// `sizes`: id, name, build cache bytes, bin bytes.
 pub fn sizes(l: &Launcher) -> Vec<String> {
     l.versions.iter().map(|v| {

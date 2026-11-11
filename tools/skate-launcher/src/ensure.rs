@@ -299,7 +299,7 @@ fn build_holder(l: &Launcher, v: &Value, target: &Path) -> String {
 }
 
 /// `Make-Room`: keeps the build folders under the size cap, deleting the oldest-built versions' build caches.
-fn make_room(l: &Launcher, v: &Value) {
+pub fn make_room(l: &Launcher, v: &Value) {
     let num = |k: &str, d: f64| setting(&l.config, k).and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).unwrap_or(d);
     let cap = num("build_cap_gb", 0.0);
     if cap <= 0.0 {

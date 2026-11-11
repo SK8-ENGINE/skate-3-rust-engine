@@ -174,6 +174,15 @@ pub fn list(l: &Launcher) -> Vec<String> {
     }).collect()
 }
 
+/// `fixed-executor-single` / `-multi`: the game's physics thread setting.
+pub fn set_physics_threads(l: &Launcher, multi: bool) -> Result<(), String> {
+    let mut o = read(l, "graphics.json");
+    set(&mut o, "physics_threads_multi", json!(multi));
+    let dir = settings_dir(l);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("graphics.json"), serde_json::to_string_pretty(&o).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
 /// `game-setting <key>`: steps the row to its next value and writes the file (not while a game runs).
 pub fn step(l: &Launcher, key: &str) -> Result<(), String> {
     let all = rows();

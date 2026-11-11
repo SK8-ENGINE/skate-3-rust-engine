@@ -122,8 +122,9 @@ fn count_lines(path: &Path, needle: &str) -> usize {
 }
 
 /// `Check-Session`: a one-line summary of the session written since `since`.
-fn check_session(l: &Launcher, kind: &str, since: std::time::SystemTime, v: &Value) -> String {
-    let root = l.version_dir(v);
+/// `root`: the checkout whose logs/ the session wrote (the version's, or the repository's for `pending`).
+fn check_session(l: &Launcher, kind: &str, since: std::time::SystemTime, root: &Path) -> String {
+    let root = root.to_path_buf();
     match kind {
         "rust" => {
             let Some(f) = newest(&root.join("logs"), |e| { let n = e.file_name().to_string_lossy().into_owned(); n.starts_with("game-") && n.ends_with(".log") && !n.ends_with(".stderr.log") }, since, false) else {
@@ -480,7 +481,7 @@ pub fn launch(l: &Launcher, key: &str, label: &str, version_id: &str, path_arg: 
     let _ = std::fs::remove_file(&playing);
     println!("  Session ended.");
     let kind = entry_kind(e);
-    let mut summary = check_session(l, kind, since, v);
+    let mut summary = check_session(l, kind, since, &l.version_dir(v));
     let repaired = crate::ensure::repair_all_asset_links(l);
     if !repaired.is_empty() {
         summary = std::iter::once(summary).chain(repaired).collect::<Vec<_>>().join("\r\n");
@@ -495,6 +496,108 @@ pub fn launch(l: &Launcher, key: &str, label: &str, version_id: &str, path_arg: 
         summary = [summary, shared].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\r\n");
     }
     save_result(l, &format!("{}  {key} {label}{ver_text}\r\n{summary}", now("%Y-%m-%d %H:%M:%S")));
+    true
+}
+
+fn newest_time(dir: &Path, keep: impl Fn(&str, bool) -> bool, created: bool) -> Option<std::time::SystemTime> {
+    std::fs::read_dir(dir).ok()?.flatten()
+        .filter(|e| keep(&e.file_name().to_string_lossy(), e.path().is_dir()))
+        .filter_map(|e| { let m = e.metadata().ok()?; if created { m.created().ok() } else { m.modified().ok() } })
+        .max()
+}
+
+/// `pending`, run by the window at every start: the launcher's own update, the assets links, and the newest session
+/// when it closed before its check (Steam's Exit game closes the launcher with the game). True = a result was written
+/// (exit code 10).
+pub fn pending(l: &Launcher) -> bool {
+    let ui = |t: &str| if std::env::var("SKATE_LAUNCHER_UI").is_ok_and(|v| v == "2") { println!("LAUNCHER_STAGE\t{t}") };
+    let _ = std::fs::remove_file(l.here.join("SkateLauncher.old.exe"));
+    let auto = setting(&l.config, "self_update").and_then(Value::as_bool) != Some(false);
+    let no_self = std::env::var("SKATE_LAUNCHER_NO_SELF").is_ok_and(|v| v == "1");
+    let mut self_said = if auto && !no_self && running_games().is_empty() { crate::selfupdate::self_update(l, false).unwrap_or_default() } else { String::new() };
+    if cfg!(windows) {
+        let (cs, exe, restart) = (l.here.join("SkateLauncher.cs"), l.here.join("SkateLauncher.exe"), l.state_dir.join("restart.txt"));
+        let newer = std::fs::metadata(&cs).and_then(|m| m.modified()).ok().zip(std::fs::metadata(&exe).and_then(|m| m.modified()).ok()).is_some_and(|(c, e)| c > e);
+        if !restart.exists() && newer {
+            ui("Building the updated launcher");
+            if crate::selfupdate::rebuild_launcher_exe(l) {
+                let _ = std::fs::write(&restart, "local\r\n");
+            }
+        }
+    }
+    if self_said.starts_with("Launcher: up to date") {
+        self_said.clear();
+    }
+    if running_games().is_empty() {
+        ui("Checking the game file links");
+        for line in crate::ensure::repair_all_asset_links(l) {
+            println!("  {line}");
+        }
+    }
+    ui("Looking for your last session");
+    let last = l.state_dir.join("last_session.txt");
+    let since = std::fs::metadata(&last).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+    let second = std::time::Duration::from_secs(1);
+    let state_log = newest_time(&l.repo.join(".local").join("audio-state-logs"), |n, d| !d && n.starts_with("state_") && n.ends_with(".tsv"), false);
+    let recomp = if l.config.is_null() { None } else { newest_time(&recomp_sessions(l), |_, d| d, true) };
+    let (mut kind, mut t0) = ("", since);
+    if let Some(t) = state_log.filter(|t| *t > since) {
+        kind = "statelog";
+        t0 = t - second;
+    }
+    if let Some(t) = recomp.filter(|t| *t > since && state_log.is_none_or(|s| *t > s)) {
+        kind = "recomp";
+        t0 = t - second;
+    }
+    let logs_root = if l.standalone { l.version_dir(l.selected()).join("logs") } else { l.repo.join("logs") };
+    let trace_all = std::fs::read_dir(&logs_root).ok().and_then(|r| r.flatten()
+        .filter(|e| e.path().is_dir() && e.file_name().to_string_lossy().starts_with("trace-all-"))
+        .filter_map(|e| { let m = e.metadata().ok()?; Some((m.modified().ok()?, m.created().ok()?)) })
+        .max_by_key(|(m, _)| *m));
+    if let Some((_, created)) = trace_all.filter(|(m, _)| *m > since && *m > t0) {
+        kind = "traceall";
+        t0 = created - second;
+    }
+    let playing = l.state_dir.join("PLAYING.txt");
+    if playing.exists() && running_games().is_empty() {
+        let _ = std::fs::remove_file(&playing);
+    }
+    if playing.exists() {
+        return false;
+    }
+    let game = std::fs::read_dir(&logs_root).ok().and_then(|r| r.flatten()
+        .filter(|e| { let n = e.file_name().to_string_lossy().into_owned(); n.starts_with("game-") && n.ends_with(".log") })
+        .filter_map(|e| { let m = e.metadata().ok()?; Some((m.modified().ok()?, m.created().ok()?)) })
+        .max_by_key(|(m, _)| *m));
+    let has_send = l.config.get("after_session").and_then(Value::as_str).is_some_and(|s| !s.is_empty());
+    let missed_send = has_send && (game.is_some_and(|(m, _)| m > since) || trace_all.is_some_and(|(m, _)| m > since));
+    if kind.is_empty() {
+        if let Some((_, created)) = game.filter(|(m, _)| *m > since) {
+            kind = "rust";
+            t0 = created - second;
+        }
+    }
+    if kind.is_empty() && !missed_send {
+        if !self_said.is_empty() {
+            save_result(l, &format!("{}  launcher update\r\n{self_said}", now("%Y-%m-%d %H:%M:%S")));
+            return true;
+        }
+        return false;
+    }
+    let mut summary = String::new();
+    if !kind.is_empty() {
+        println!("  Checking the last session (it closed before its check)...");
+        ui("Checking your last session");
+        summary = check_session(l, kind, t0, &l.repo);
+    }
+    if missed_send {
+        ui("Sending your last session");
+        summary = [summary, send_sessions(l, &[])].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\r\n");
+    }
+    if !self_said.is_empty() {
+        summary = format!("{self_said}\r\n{summary}");
+    }
+    save_result(l, &format!("{}  (checked at next start)\r\n{summary}", now("%Y-%m-%d %H:%M:%S")));
     true
 }
 

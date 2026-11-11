@@ -90,6 +90,18 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   PowerShell helpers run through `pwsh` when installed, the performance trace is greyed out. New dependencies:
   `sha2 =0.10.9`; `zip` and `sysinfo` reuse the locked versions. `config.json` keeps its key order (own ordered JSON
   value, `ojson.rs`). Still open: `pending` and `launcher-exe`, then the window (step 4).
+- 2026-11-10, rest of the backend: `pending` (the start check: self-update, assets links, the session that closed
+  before its check; sandbox: exit 10 with "(checked at next start)", then 0), `launcher-exe`, `clear-cache` /
+  `clear-build`, `room`, `send`, `fixed-executor-single` / `-multi`.
+- 2026-11-10, the window, functional pass: `skate-launcher` with no arguments opens it (eframe =0.33.3 on the
+  workspace's wgpu 27.0.1 and winit; gamepads through gilrs =0.11.2, keyboard and mouse). Pages as in doc 44a 2: Main,
+  Play / Recomp / RPCS3 with the info panel (READY / NOT AVAILABLE, info, records), Tools, Opt-ins and Settings,
+  Versions, Label, Clear builds with a confirmation, Share sessions, First-time setup, Set up the launcher (native
+  pickers on every OS: Windows Forms, osascript, zenity / kdialog), the job screen (cargo progress, crate, compiled
+  and warning counts, the waiting card, two B presses cancel, the first error), the finished page ("Finished, check
+  this" on a bad result), the previous session at start; the window minimises while a game runs and comes back with
+  the result. `--window <entry> [label] [@version]` is the launch-option mode. Desktop check: the window opens with
+  the real state (main menu, the selected version READY, the launcher commit). Next: the camcorder look (doc 41).
 
 ### Spec of the current launcher
 

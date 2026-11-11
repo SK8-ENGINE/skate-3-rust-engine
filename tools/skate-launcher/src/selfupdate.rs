@@ -39,7 +39,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 /// `Get-PrebuiltLauncher` + `Rebuild-LauncherExe` (Windows: the window is SkateLauncher.exe): the release's prebuilt exe
 /// when its sidecar names this SkateLauncher.cs, else compiled with the .NET Framework's csc. True = rebuilt.
-fn rebuild_launcher_exe(l: &Launcher) -> bool {
+pub fn rebuild_launcher_exe(l: &Launcher) -> bool {
     if !cfg!(windows) {
         return false;
     }
