@@ -17,6 +17,7 @@ mod state;
 mod status;
 mod ui;
 mod wear;
+mod window;
 
 use std::process::{Command, ExitCode};
 
@@ -37,14 +38,29 @@ fn exit(code: i32) -> ExitCode {
 fn main() -> ExitCode {
     let mut args: Vec<String> = Vec::new();
     let (mut version, mut path, mut snapshot, mut snapshot_page, mut snapshot_seed) = (String::new(), String::new(), None, None, None);
-    let mut it = std::env::args().skip(1);
+    let (mut same_monitor, mut after_update) = (false, false);
+    let mut snapshot_size = None;
+    let mut it = std::env::args().skip(1).peekable();
     while let Some(a) = it.next() {
         match a.to_ascii_lowercase().as_str() {
             "-version" | "--version" => version = it.next().unwrap_or_default(),
             "-path" | "--path" => path = it.next().unwrap_or_default(),
-            "--snapshot" => snapshot = it.next().map(std::path::PathBuf::from),
+            // --snapshot <out.png> [<screen>[@t][#seed]] [WxH] (SkateLauncher.exe's form), or with the flags below.
+            "--snapshot" => {
+                snapshot = it.next().map(std::path::PathBuf::from);
+                for _ in 0..2 {
+                    let Some(r) = it.next_if(|r| !r.starts_with('-')) else { break };
+                    if let Some((w, h)) = r.split_once('x').and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?))) {
+                        snapshot_size = Some((w, h));
+                    } else {
+                        snapshot_page = Some(r);
+                    }
+                }
+            }
             "--snapshot-page" => snapshot_page = it.next(),
             "--snapshot-seed" => snapshot_seed = it.next().and_then(|s| s.parse().ok()),
+            "--same-monitor" => same_monitor = true,
+            "--after-update" => after_update = true,
             "--sticker-sheet" => {
                 let out = it.next().unwrap_or_else(|| "stickers.png".into());
                 let only = it.next().and_then(|d| d.parse().ok());
@@ -151,7 +167,12 @@ fn main() -> ExitCode {
         }
         "" | "--window" => {
             let direct: Vec<String> = args.iter().skip(1).cloned().collect();
-            return match ui::run(launcher.state_dir.clone(), direct, snapshot, snapshot_page, snapshot_seed) {
+            // One launcher per folder: a second start brings the first to the front instead (snapshots run alongside).
+            if snapshot.is_none() && !window::single_instance(&launcher.state_dir) {
+                return ExitCode::SUCCESS;
+            }
+            let same_monitor = same_monitor || window::same_monitor_file(&launcher.state_dir).exists();
+            return match ui::run(launcher.state_dir.clone(), direct, snapshot, snapshot_page, snapshot_seed, same_monitor, after_update, snapshot_size) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("The launcher window could not open: {e}");
@@ -160,7 +181,21 @@ fn main() -> ExitCode {
             };
         }
         key => {
-            if entries::entries(&launcher).iter().any(|e| e.id == key) || key.starts_with("rust-") || key.starts_with("tool-") {
+            let is_entry = entries::entries(&launcher).iter().any(|e| e.id == key) || key.starts_with("rust-") || key.starts_with("tool-");
+            // A launch option (Steam: `skate-launcher rust-play [label] [@version]`) opens the window and runs it there, as
+            // SkateLauncher.exe does; the window's own jobs come with SKATE_LAUNCHER_UI=2 and run here headless.
+            if is_entry && std::env::var_os("SKATE_LAUNCHER_UI").is_none() {
+                if !window::single_instance(&launcher.state_dir) { return ExitCode::SUCCESS; }
+                let same_monitor = same_monitor || window::same_monitor_file(&launcher.state_dir).exists();
+                return match ui::run(launcher.state_dir.clone(), args.clone(), None, None, None, same_monitor, after_update, None) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(e) => {
+                        eprintln!("The launcher window could not open: {e}");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
+            if is_entry {
                 return if play::launch(&launcher, key, arg(1), &version, &path) { ExitCode::SUCCESS } else { ExitCode::FAILURE };
             }
             eprintln!("Not ported yet: {key} (doc 44a parity checklist)");

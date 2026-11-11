@@ -55,8 +55,13 @@ rewrite below); the doc 44a parity checklist decides when it replaces the old on
   Silicon) run on the fork (`Hailey-Ross/rusty-trucks`) for every push to `hails-additions`, its releases and manual
   runs; both call `rusty-trucks-unix-build.yml`: the Linux build libraries (flake.nix's list as Ubuntu packages), the
   setup dependency tests, the game build without dynamic linking, the skate-core / skate-audio / skate-data and
-  skate-mods library tests, the native RefPack library, and the binaries as a 7-day run artifact. They check the
-  repository name, so they do nothing upstream. Release packages for Linux and macOS are still open.
+  skate-mods library tests, the native RefPack library, and a player package. They check the repository name, so they
+  do nothing upstream.
+- Player packages (2026-11-10): `skate3rust-linux-x64.tar.gz` and `skate3rust-macos-arm64.tar.gz` (+ `.sha256`), laid
+  out like a checkout (`bin/skate3rust`, `tools/` for setup with the native RefPack as `librefpack.so`, `SETUP.sh`,
+  `PLAY.sh`, README, the Skyline mod, licenses), attached to the `hails-additions` release on every push (to the
+  published release on release events). The release header links them next to the Windows ZIP
+  (`tools/publish_branch.py`); the release notes walk through the terminal steps.
 - The README shows a badge per OS: the existing Windows workflow (`rusty-trucks-win.yml`) and the two new ones.
 
 ## Couch launcher on every OS (USER-ASKS 561)
@@ -129,8 +134,22 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   (no peel or wear), as the coming Tools sticker picker will.
 - 2026-11-10, window: fixed 1240 x 760 (not resizable, no maximise), centred; snapshots print their image, window
   and scale sizes (`SNAPSHOT_SIZE`). One earlier snapshot came out 1440 x 789 while the window was resizable.
-- Next: wear that builds with use (clean at first, more scuffs and graffiti over time), the sticker picker in Tools,
-  more character stickers.
+- 2026-11-10, parity pass against the C# window (audit of the doc 44a 7 checklist: 19 lines done, 14 partial, none
+  missing), ported: the window at 62 % of the work area at the panel's shape, centred, on the main monitor or (Tools >
+  Open on, `--same-monitor`) the launching one; one launcher per state folder (a second start brings the first
+  forward); the power-on / power-off clock with its rolled swing, wobble and flicker, closing through the power-off,
+  the fold before a game and the lit reopen after it; the start check behind the splash (stage line, timer, B twice
+  skips a slow self-update fetch, restart into an updated launcher); the build log written from the stream; cancel only
+  while a build or fetch waits, with the C# texts; the Waiting page that starts the entry once the game closes; the
+  Finished page (built / failed line, first error as a mono block); the share toggle on Tools and Play; versions
+  preselected; the first-time setup texts; the wizard's texts, free space, default game folder, changed-keys-only save
+  with the derived folders, recursive skate3.exe search; keys (W / S / A / D, Space = back), the pad only while focused,
+  hold repeat, the 150 ms pad / key de-dup, hover selects, right-click back; direct mode for a bare launch option;
+  `--snapshot <out> <screen>[@t][#seed] [WxH]` with the C# screens; text measuring with GDI's 1/6 em padding. Checked
+  screen by screen against the C# snapshots; the remaining difference is line wrapping (GDI's hinted glyph widths).
+- Next: the Rust launcher's own release binary and self-update, the switchover from SkateLauncher.exe, wear that builds
+  with use, the sticker picker in Tools, the stickers folder override, `--wear-test` / `--bench` / `--standby-test`,
+  Linux / macOS grey-outs, more character stickers.
 
 ### Spec of the current launcher
 

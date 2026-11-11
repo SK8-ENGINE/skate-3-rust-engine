@@ -160,6 +160,9 @@ pub struct View<'a> {
     pub recording: bool,
     pub tape: f32,
     pub splash: Option<&'a str>,
+    /// The start check: seconds since it began, and Some(armed) while B can skip its self-update fetch.
+    pub splash_secs: f32,
+    pub splash_skip: Option<bool>,
     pub hover: Option<Key>,
     pub cancel_armed: bool,
     pub close_in: Option<u32>,
@@ -179,6 +182,11 @@ pub struct JobView<'a> {
     pub error: &'a [String],
     pub lines: Vec<&'a str>,
     pub elapsed: f32,
+    pub wait_who: Option<&'a str>,
+    pub wait_secs: f32,
+    /// A fetch the backend has waited on for 5 s or more: what, and for how long.
+    pub fetch_wait: Option<(&'a str, f32)>,
+    pub built_secs: Option<f32>,
 }
 
 #[derive(Default)]
@@ -187,6 +195,11 @@ pub struct Hits {
     pub key: Option<Key>,
     pub hover: Option<Key>,
     pub drag: bool,
+    /// The list row under the pointer (hover selects it, as in the C# window).
+    pub hover_item: Option<usize>,
+    pub right_click: bool,
+    /// A left click on neither a row nor a key (closes the direct-mode countdown).
+    pub empty_click: bool,
 }
 
 fn rgba(a: u8, c: Color32) -> Color32 {
@@ -325,7 +338,8 @@ impl Ctx<'_> {
     /// `MeasureString` width.
     fn measure(&self, s: &str, f: Font) -> f32 {
         let galley = self.painter.layout_no_wrap(s.to_owned(), FontId::new(self.xf.s(f.size), FontFamily::Name(f.family.into())), Color32::WHITE);
-        galley.size().x / self.xf.sy + 2.0
+        // GDI MeasureString: the advance plus 1/6 em of padding on each side.
+        galley.size().x / self.xf.sy + f.size / 3.0
     }
     /// `MeasureString` height with wrapping at `w`.
     fn measure_h(&self, s: &str, f: Font, w: f32) -> f32 {
@@ -370,19 +384,76 @@ impl Osd {
     }
 }
 
-/// The power-on clock (Assembly / PanelOpen / ScreenLevel) with the plain snapshot values (vary = 1, 0.6, 0, 0).
-pub fn panel_open(t: f32) -> f32 {
-    let swing_to = 0.08 + 0.6;
-    let a = t.min(1.2);
-    back_out(((a - 0.08) / (swing_to - 0.08)).clamp(0.0, 1.0), 0.6)
+/// Power and standby on one clock (SkateLauncher.cs Assembly / PanelOpen / ScreenLevel): the panel swings out from
+/// edge-on and settles with a wobble, then the backlight comes on (sometimes with a flicker); closing plays it
+/// backwards, faster. A game start folds the panel shut with the screen still lit, the game's exit swings it back
+/// open lit. Every open and close rolls its own swing time, wobble, delay and flicker; snapshots keep the plain values.
+pub const ON_TOTAL: f32 = 1.2;
+const OFF_SPEED: f32 = 1.3;
+pub const OFF_TIME: f32 = ON_TOTAL / OFF_SPEED + 0.05;
+
+pub struct Anim {
+    /// Snapshots: this far through the power-on (0..1), fixed.
+    pub snap: Option<f32>,
+    pub on_at: Option<f32>,
+    pub off_at: Option<f32>,
+    pub fold_at: Option<f32>,
+    pub resume_at: Option<f32>,
+    vary: [f32; 5],
+    rng: NetRandom,
 }
+
+impl Anim {
+    pub fn new(seed: i32) -> Self {
+        Anim { snap: None, on_at: None, off_at: None, fold_at: None, resume_at: None, vary: [1.0, 0.6, 0.0, 0.0, 0.0], rng: NetRandom::new(seed) }
+    }
+    /// `Vary`: this open's or close's own swing time, wobble, light delay and flicker.
+    pub fn roll(&mut self) {
+        let mut u = |lo: f64, hi: f64| (lo + self.rng.next_double() * (hi - lo)) as f32;
+        let (a, b, c) = (u(0.85, 1.15), u(0.2, 1.2), u(-0.04, 0.06));
+        let flicker = self.rng.next(3) as f32;
+        let phase = self.rng.next_double() as f32;
+        self.vary = [a, b, c, flicker, phase];
+    }
+    pub fn standby(&self) -> bool {
+        self.fold_at.is_some() || self.resume_at.is_some()
+    }
+    fn swing_to(&self) -> f32 {
+        0.08 + 0.6 * self.vary[0]
+    }
+    pub fn fold_time(&self) -> f32 {
+        self.swing_to() / OFF_SPEED + 0.05
+    }
+    pub fn resume_time(&self) -> f32 {
+        self.swing_to() + 0.05
+    }
+    fn assembly(&self, t: f32) -> f32 {
+        if let Some(s) = self.snap { return s * ON_TOTAL; }
+        if let Some(f) = self.fold_at { return (self.swing_to() - (t - f) * OFF_SPEED).max(0.0); }
+        if let Some(r) = self.resume_at { return (t - r).min(self.swing_to()); }
+        if let Some(o) = self.off_at { return (ON_TOTAL - (t - o) * OFF_SPEED).max(0.0); }
+        self.on_at.map_or(0.0, |o| (t - o).min(ON_TOTAL))
+    }
+    pub fn panel_open(&self, t: f32) -> f32 {
+        back_out(((self.assembly(t) - 0.08) / (self.swing_to() - 0.08)).clamp(0.0, 1.0), self.vary[1])
+    }
+    pub fn screen_level(&self, t: f32) -> f32 {
+        if self.standby() { return 1.0; }
+        let mut level = ((self.assembly(t) - self.swing_to() - 0.1 - self.vary[2]) / 0.25).clamp(0.0, 1.0);
+        if self.vary[3] >= 1.0 && level > 0.0 && level < 1.0 {
+            let q = (level * 6.0 + self.vary[4]) as i32;
+            if q % 3 == 1 && q < 3 * self.vary[3] as i32 + 1 { level *= 0.25; }
+        }
+        level
+    }
+    pub fn animating(&self, t: f32) -> bool {
+        self.on_at.is_none_or(|o| t - o < ON_TOTAL + 0.1) || self.off_at.is_some() || self.standby()
+    }
+}
+
 fn back_out(x: f32, k: f32) -> f32 {
     let x = x.clamp(0.0, 1.0) - 1.0;
     1.0 + (k + 1.0) * x * x * x + k * x * x
-}
-pub fn screen_level(t: f32) -> f32 {
-    let swing_to = 0.08 + 0.6;
-    ((t.min(1.2) - swing_to - 0.1) / 0.25).clamp(0.0, 1.0)
 }
 
 /// Paints the whole window; returns what the pointer hit.
@@ -498,8 +569,13 @@ pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear
         }
     }
     for (r, i) in &items {
-        if pointer.is_some_and(|p| xf.r(*r).contains(p)) && clicked { hits.item = Some(*i); }
+        if pointer.is_some_and(|p| xf.r(*r).contains(p)) {
+            hits.hover_item = Some(*i);
+            if clicked { hits.item = Some(*i); }
+        }
     }
+    hits.right_click = ui.ctx().input(|i| i.pointer.secondary_clicked());
+    hits.empty_click = clicked && hits.item.is_none() && hits.key.is_none();
     let body = xf.r(PANEL_R);
     if pressed && hits.hover.is_none() && hits.item.is_none() && pointer.is_some_and(|p| body.contains(p)) {
         hits.drag = true;
@@ -537,7 +613,7 @@ fn lcd_canvas(panel: &Ctx, view: &View, t: f32, items: &mut Vec<(Rect, usize)>) 
     let top = osd.row.height() + 7.0;
     let bottom = h - foot - lane - 2.0;
     if let Some(stage) = view.splash {
-        lcd_splash(&o, &osd, w, h, t, stage);
+        lcd_splash(&o, &osd, w, h, t, stage, view.splash_secs);
     } else {
         lcd_status(&o, &osd, w, view);
         if let Some(job) = &view.job {
@@ -677,12 +753,13 @@ fn lcd_foot(o: &Ctx, osd: &Osd, view: &View, w: f32, h: f32) {
     let mut x = 5.0;
     let a = Color32::from_rgb(92, 186, 72);
     let b = Color32::from_rgb(220, 70, 60);
-    let cancel = view.job.as_ref().is_some_and(|j| j.waiting.is_some() && j.ended.is_none());
+    let cancel = view.job.as_ref().is_some_and(|j| (j.waiting.is_some() && j.ended.is_none()) || j.fetch_wait.is_some());
     if let Some(s) = view.close_in {
         o.shadow_text(&format!("Closing in {s} s"), osd.small, LCD_INK, x, y);
     } else if cancel {
         badge(o, osd, &mut x, y, "B", b, if view.cancel_armed { "Again to cancel" } else { "Cancel" });
     } else if view.splash.is_some() {
+        if let Some(armed) = view.splash_skip { badge(o, osd, &mut x, y, "B", b, if armed { "Again to skip" } else { "Skip the check" }); }
     } else if view.job.is_none() {
         badge(o, osd, &mut x, y, "A", a, "Select");
         if view.main { badge(o, osd, &mut x, y, "START/STOP", REC_RED, "Play"); } else { badge(o, osd, &mut x, y, "B", b, "Back"); }
@@ -918,15 +995,15 @@ fn lcd_job(o: &Ctx, osd: &Osd, w: f32, top: f32, bottom: f32, t: f32, job: &JobV
     y += 10.0;
     if is_build {
         let mut count = match job.progress { Some((a, b)) if b > 0 => format!("{a} / {b} build steps"), _ => format!("{} crates compiled", job.compiled) };
-        if job.ended.is_none() { if let Some(wt) = job.waiting { count = format!("Waiting: {wt}"); } else if job.progress.is_none() && job.compiled == 0 && !job.stage.is_empty() { count = job.stage.to_owned(); } }
-        if let Some(ok) = job.ended { count = if ok { format!("Built in {}", clock(job.elapsed)) } else { "Build failed".into() }; }
+        if job.ended.is_none() { if let Some(wt) = job.waiting { count = format!("Waiting {}: {wt}", clock(job.wait_secs)); } else if job.progress.is_none() && job.compiled == 0 && !job.stage.is_empty() { count = job.stage.to_owned(); } }
+        if let Some(ok) = job.ended { count = if ok { format!("Built in {}", clock(job.built_secs.unwrap_or(job.elapsed))) } else { "Build failed".into() }; }
         o.write(&count, osd.row, if failed { LCD_RED } else { LCD_INK }, Rect::from_min_size(pos2(x, y), vec2(ww * 0.7, osd.row.height() + 2.0)), Align::Near, Align::Near, false);
         if job.warnings > 0 {
             let wt = format!("{} {}", job.warnings, if job.warnings == 1 { "warning" } else { "warnings" });
             pill(o, osd, &wt, LCD_AMBER, x + ww - o.measure(&wt, osd.tiny) - 3.0, y + 1.0);
         }
         y += osd.row.height() + 2.0;
-        let line = if job.ended.is_none() && job.waiting.is_some() { "Cargo does not say who; it continues by itself once that build ends.".to_owned() } else if !job.now.is_empty() && job.ended.is_none() { format!("Now: {}", job.now) } else { String::new() };
+        let line = if job.ended.is_none() && job.waiting.is_some() { job.wait_who.unwrap_or("Cargo does not say who; it continues by itself once that build ends.").to_owned() } else if !job.now.is_empty() && job.ended.is_none() { format!("Now: {}", job.now) } else { String::new() };
         if !line.is_empty() {
             o.write(&line, osd.small, LCD_DIM, Rect::from_min_size(pos2(x, y), vec2(ww, sh * 2.2)), Align::Near, Align::Near, true);
             y += sh * 2.2;
@@ -941,9 +1018,13 @@ fn lcd_job(o: &Ctx, osd: &Osd, w: f32, top: f32, bottom: f32, t: f32, job: &JobV
         return;
     }
     let lines: Vec<&str> = job.lines.iter().rev().map(|l| l.trim()).filter(|l| !l.is_empty()).take(12).collect();
-    let status = lines.first().copied().unwrap_or("Starting...");
-    o.write(status, osd.row, LCD_INK, Rect::from_min_size(pos2(x, y), vec2(ww, osd.row.height() + 2.0)), Align::Near, Align::Near, false);
+    let status = match job.fetch_wait { Some((what, secs)) => format!("Waiting {}: {what}", clock(secs)), None => lines.first().copied().unwrap_or("Starting...").to_owned() };
+    o.write(&status, osd.row, LCD_INK, Rect::from_min_size(pos2(x, y), vec2(ww, osd.row.height() + 2.0)), Align::Near, Align::Near, false);
     y += osd.row.height() + 2.0;
+    if job.fetch_wait.is_some() {
+        o.write("git stops by itself if nothing arrives for 30 s; cancelling keeps the last fetched version.", osd.small, LCD_DIM, Rect::from_min_size(pos2(x, y), vec2(ww, sh * 2.2)), Align::Near, Align::Near, true);
+        y += sh * 2.2;
+    }
     for (i, l) in lines.iter().enumerate().skip(1) {
         if y + sh > card.bottom() - 3.0 { break; }
         o.write(l, osd.small, rgba((255 - i as i32 * 22).max(90) as u8, LCD_DIM), Rect::from_min_size(pos2(x, y), vec2(ww, sh + 1.0)), Align::Near, Align::Near, false);
@@ -952,12 +1033,13 @@ fn lcd_job(o: &Ctx, osd: &Osd, w: f32, top: f32, bottom: f32, t: f32, job: &JobV
 }
 
 /// `LcdSplash`: the logo, the model, the start check's step with three pulsing dots.
-fn lcd_splash(o: &Ctx, osd: &Osd, w: f32, h: f32, t: f32, stage: &str) {
+fn lcd_splash(o: &Ctx, osd: &Osd, w: f32, h: f32, t: f32, stage: &str, since: f32) {
+    if since >= 3.0 { o.shadow_text(&clock(since), osd.small, LCD_DIM, 5.0, 4.0); }
     let lsw = o.measure("SKATE", osd.logo);
     let lsh = osd.logo.height();
     let (lx, ly) = ((w - lsw) / 2.0, h * 0.16);
     o.write("SKATE", osd.logo, LCD_INK, Rect::from_min_size(pos2(lx, ly), vec2(lsw + 4.0, lsh)), Align::Near, Align::Near, false);
-    let hd = Rect::from_min_size(pos2(lx + lsw - 2.0, ly + lsh * 0.22), vec2(osd.row.height() * 1.4, osd.row.height()));
+    let hd = Rect::from_min_size(pos2(lx + lsw * 1.06, ly + lsh * 0.22), vec2(osd.row.height() * 1.4, osd.row.height()));
     o.gloss(hd, 3.0, Color32::from_rgb(88, 152, 242), Color32::from_rgb(26, 74, 168));
     o.write("HD", osd.row, Color32::WHITE, hd, Align::Center, Align::Center, false);
     o.write("SK8-1000  HIGH DEFINITION", osd.tiny, LCD_DIM, Rect::from_min_size(pos2(0.0, ly + lsh * 0.95), vec2(w, osd.tiny.height() + 2.0)), Align::Center, Align::Near, false);

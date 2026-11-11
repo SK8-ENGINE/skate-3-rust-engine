@@ -22,3 +22,6 @@ wgpu = { version = "=27.0.1", default-features = false, features = ["dx12", "met
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
 tiny-skia = { version = "=0.11.4", default-features = false, features = ["std", "simd"] }
 ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
