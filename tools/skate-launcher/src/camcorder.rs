@@ -395,7 +395,7 @@ impl Osd {
 /// edge-on and settles with a wobble, then the backlight comes on (sometimes with a flicker); closing plays it
 /// backwards, faster. A game start folds the panel shut with the screen still lit, the game's exit swings it back
 /// open lit. Every open and close rolls its own swing time, wobble, delay and flicker; snapshots keep the plain values.
-pub const ON_TOTAL: f32 = 1.45;
+pub const ON_TOTAL: f32 = 1.65;
 const OFF_SPEED: f32 = 1.3;
 pub const OFF_TIME: f32 = ON_TOTAL / OFF_SPEED + 0.05;
 
@@ -426,7 +426,7 @@ impl Anim {
         self.fold_at.is_some() || self.resume_at.is_some()
     }
     fn swing_to(&self) -> f32 {
-        0.08 + 0.78 * self.vary[0]
+        0.08 + 0.8 * self.vary[0]
     }
     fn closing(&self) -> bool {
         self.snap.is_none() && (self.fold_at.is_some() || self.off_at.is_some())
@@ -487,7 +487,7 @@ fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, start: egui::layers
             let list = g.entry(layer);
             for i in start.0..list.next_idx().0 { list.reset_shape(egui::layers::ShapeIdx(i)); }
         });
-        panel_edge(painter, hx, cy, h, scale(1.0), w * 0.03 * sin);
+        panel_edge(painter, hx, cy, h, scale(1.0), w * 0.09 * sin);
         return;
     }
     let warp = move |p: Pos2| { let u = (hx - p.x) / w; let k = scale(u); pos2(hx - u * w * cos * k, cy + (p.y - cy) * k) };
@@ -523,26 +523,36 @@ fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, start: egui::layers
     }
     if sin > 0.0 {
         let x1 = warp(pos2(panel.left(), cy)).x;
-        panel_edge(painter, x1, cy, h, scale(1.0), w * 0.03 * sin * scale(1.0));
+        panel_edge(painter, x1, cy, h, scale(1.0), w * 0.09 * sin * scale(1.0));
     }
 }
 
-/// The panel's free edge seen as it turns (mine, not in the classic): a plastic slab `depth` wide on the outside of
-/// the front face's edge at `x`, so the panel reads as a solid screen, not a sheet. Lit lip on the face side.
+/// The panel's free edge seen as it turns (mine, not in the classic): the side of a solid screen `depth` wide on the
+/// outside of the front face's edge at `x`, front and back shells with a seam between them, rounded off at the top
+/// and bottom, its far side a little smaller in perspective.
 fn panel_edge(painter: &egui::Painter, x: f32, cy: f32, h: f32, s: f32, depth: f32) {
-    if depth < 0.3 { return; }
-    let (top, bottom) = (cy - h / 2.0 * s, cy + h / 2.0 * s);
-    let inset = (h * s * 0.025).min(depth * 1.2);
-    let outer = x - depth;
-    let pts = [pos2(x, top + inset * 0.4), pos2(outer, top + inset), pos2(outer, bottom - inset), pos2(x, bottom - inset * 0.4)];
+    if depth < 0.5 { return; }
+    let half = h / 2.0 * s;
+    // The far side is a little smaller (further away); the corners are rounded off by a chamfer.
+    let far = half * (1.0 - 0.05 * (depth / (h * s)).min(1.0));
+    let chamfer = (depth * 0.35).min(half * 0.15);
+    let stops = [(0.0, Color32::from_rgb(122, 125, 134)), (0.08, Color32::from_rgb(86, 89, 98)), (0.46, Color32::from_rgb(62, 64, 71)),
+                 (0.5, Color32::from_rgb(14, 15, 18)), (0.54, Color32::from_rgb(58, 60, 67)), (1.0, Color32::from_rgb(28, 29, 33))];
+    let y = |t: f32| half + (far - half) * t - chamfer * (2.0 * t - 1.0).abs().powi(4);
     let mut mesh = egui::Mesh::default();
-    let cols = [PLASTIC, PLASTIC_DARK, argb(255, 14, 15, 18), PLASTIC_DARK];
-    for (p, c) in pts.iter().zip(cols) { mesh.colored_vertex(*p, c); }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
+    for (t, c) in stops {
+        let px = x - depth * t;
+        mesh.colored_vertex(pos2(px, cy - y(t)), c);
+        mesh.colored_vertex(pos2(px, cy + y(t)), c);
+    }
+    for i in 0..(stops.len() as u32 - 1) {
+        let (a, b, c, d) = (2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 3);
+        mesh.add_triangle(a, b, d);
+        mesh.add_triangle(a, d, c);
+    }
     painter.add(Shape::mesh(mesh));
-    painter.add(Shape::line_segment([pts[0], pts[3]], Stroke::new(1.0_f32.min(depth * 0.3).max(0.6), argb(70, 255, 255, 255))));
-    painter.add(Shape::line_segment([pts[1], pts[2]], Stroke::new(1.0_f32, argb(180, 0, 0, 0))));
+    let outline: Vec<Pos2> = stops.iter().map(|(t, _)| pos2(x - depth * t, cy - y(*t))).chain(stops.iter().rev().map(|(t, _)| pos2(x - depth * t, cy + y(*t)))).collect();
+    painter.add(Shape::closed_line(outline, Stroke::new(1.0_f32, argb(150, 0, 0, 0))));
 }
 
 /// Splits triangles wider than `max_w` so colours and textures follow the perspective (the classic's 48 strips).
@@ -566,28 +576,39 @@ fn subdivide(mesh: epaint::Mesh, max_w: f32) -> epaint::Mesh {
     out
 }
 
-/// Opening over x in 0..1: a slow start (time eased in), then the step response of a damped spring (damping from
-/// the roll: 0.70..0.80, overshoot about 1.5..4.5 %), settled by x = 1.
-fn heavy_open(x: f32, roll: f32) -> f32 {
-    if x <= 0.0 { return 0.0; }
-    if x >= 1.0 { return 1.0; }
-    let zeta = 0.70 + 0.1 * ((roll - 0.2) / 1.0).clamp(0.0, 1.0);
-    let w = 9.0;
-    let tau = x.powf(1.4);
-    let wd = w * (1.0 - zeta * zeta).sqrt();
-    let f = 1.0 - (-zeta * w * tau).exp() * ((wd * tau).cos() + zeta / (1.0 - zeta * zeta).sqrt() * (wd * tau).sin());
-    // Blend the last bit of the tail onto 1 so it ends exactly facing you.
-    let end = ((x - 0.85) / 0.15).clamp(0.0, 1.0);
-    f + (1.0 - f) * end * end
+/// Travel with constant acceleration over the first `a`, steady speed, constant braking over the last `d` (0..1).
+fn trapezoid(k: f32, a: f32, d: f32) -> f32 {
+    let k = k.clamp(0.0, 1.0);
+    let v = 1.0 / (1.0 - a / 2.0 - d / 2.0);
+    if k < a { return v * k * k / (2.0 * a); }
+    if k <= 1.0 - d { return v * (a / 2.0 + (k - a)); }
+    let r = 1.0 - k;
+    1.0 - v * r * r / (2.0 * d)
 }
 
-/// Closing over u in 0..1: gathers speed like a falling lid (shut at u = 0.86), then a small bounce off the body.
+/// Opening over x in 0..1, like a camcorder's flip screen pulled open on its friction hinge: it takes a moment to get
+/// going, swings at a steady pace, slows into the stop and clicks into the detent with a small firm settle (the
+/// click's size from the roll).
+fn heavy_open(x: f32, roll: f32) -> f32 {
+    const STOP: f32 = 0.9;
+    if x <= 0.0 { return 0.0; }
+    if x >= 1.0 { return 1.0; }
+    if x < STOP { return trapezoid(x / STOP, 0.25, 0.3); }
+    let k = (x - STOP) / (1.0 - STOP);
+    let click = 0.008 + 0.006 * ((roll - 0.2) / 1.0).clamp(0.0, 1.0);
+    1.0 + click * (k * std::f32::consts::PI).sin() * (1.0 - k)
+}
+
+/// Closing over u in 0..1: pushed shut against the hinge's friction, it slows near the body, then the latch pulls it
+/// in with a quick snap (shut at u = 0.88) and a small rebound.
 fn heavy_close(u: f32) -> f32 {
-    const HIT: f32 = 0.86;
+    const PUSH: f32 = 0.78;
+    const HIT: f32 = 0.88;
     if u <= 0.0 { return 1.0; }
-    if u < HIT { let k = u / HIT; return 1.0 - k * k * (1.5 - 0.5 * k); }
+    if u < PUSH { return 1.0 - 0.86 * trapezoid(u / PUSH, 0.3, 0.35); }
+    if u < HIT { let k = (u - PUSH) / (HIT - PUSH); return 0.14 * (1.0 - k * k); }
     let b = ((u - HIT) / (1.0 - HIT)).clamp(0.0, 1.0);
-    0.045 * (b * std::f32::consts::PI).sin() * (1.0 - b)
+    0.018 * (b * std::f32::consts::PI).sin() * (1.0 - b)
 }
 
 
