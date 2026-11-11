@@ -118,6 +118,15 @@ fn blocked(l: &Launcher, e: &Entry, v: &Value, missing: &str, send_blocked: &str
     if (e.group == "rust" || e.id == "tool-refresh" || e.id == "tool-build") && !missing.is_empty() {
         return format!("Needs {missing} first: run the first-time setup (Tools).");
     }
+    // Off Windows (doc 44a 5): the recomp is a Windows build; the share / send / recomp helpers are PowerShell scripts.
+    if !cfg!(windows) {
+        if e.group == "recomp" || e.id.starts_with("tool-recomp-") {
+            return "Skate 3 Recompiled is a Windows build: not available on this system.".into();
+        }
+        if matches!(e.id.as_str(), "tool-share" | "tool-send") && !on_path("pwsh") {
+            return "Needs PowerShell (pwsh) on this system: install it, then try again.".into();
+        }
+    }
     let name = text(v, "name");
     match e.id.as_str() {
         "rust-traceall" => if l.version_dir(v).exists() && version_traces(l, v).is_empty() {
@@ -209,6 +218,11 @@ fn traceall_records(l: &Launcher, v: &Value) -> Vec<&'static str> {
 }
 
 /// `Entry-Blocked` for one entry and version ("" = it can run).
+/// Whether a program is on PATH.
+fn on_path(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
+}
+
 pub fn blocked_for(l: &Launcher, e: &Entry, v: &Value) -> String {
     let missing = crate::status::setup_missing(l, l.use_release(v));
     blocked(l, e, v, &missing, &crate::status::send_blocked(l), &crate::status::share(l, &l.version_dir(v)))

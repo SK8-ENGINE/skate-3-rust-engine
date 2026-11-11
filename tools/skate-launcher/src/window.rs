@@ -23,13 +23,16 @@ pub fn start_area(same_monitor: bool) -> Option<(f32, f32, f32, f32)> {
     use windows_sys::Win32::Foundation::{POINT, RECT};
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
     use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI};
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow};
     // SAFETY: plain Win32 queries with valid out pointers; the awareness call is the one winit makes anyway (a second
     // call fails harmlessly).
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let fg = if same_monitor { GetForegroundWindow() } else { std::ptr::null_mut() };
-        let mon = if fg.is_null() { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) } else { MonitorFromWindow(fg, MONITOR_DEFAULTTOPRIMARY) };
+        // No foreground window: the monitor under the cursor (SkateLauncher.cs StartScreen).
+        let mut cursor = POINT { x: 0, y: 0 };
+        if same_monitor && fg.is_null() { GetCursorPos(&mut cursor); }
+        let mon = if fg.is_null() { MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY) } else { MonitorFromWindow(fg, MONITOR_DEFAULTTOPRIMARY) };
         let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, rcMonitor: RECT { left: 0, top: 0, right: 0, bottom: 0 }, rcWork: RECT { left: 0, top: 0, right: 0, bottom: 0 }, dwFlags: 0 };
         if GetMonitorInfoW(mon, &mut info) == 0 {
             return None;

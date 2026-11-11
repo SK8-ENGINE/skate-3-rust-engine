@@ -469,7 +469,9 @@ fn wobble(px: &mut Pixmap, ts: Transform, clip: Option<&Mask>, pen: &Stroke, c: 
 }
 
 /// The wear and sticker layer for the panel.
-pub fn render(spec: &Spec, marks_seed: i32) -> Pixmap {
+/// `stickers`: the state folder's stickers folder; its PNGs (the game's own stickers once the asset export finds
+/// them, or the player's own) replace the drawn designs (SkateLauncher.cs GameSticker).
+pub fn render(spec: &Spec, marks_seed: i32, stickers: Option<&Path>) -> Pixmap {
     let mut px = Pixmap::new(W, H).expect("pixmap");
     let (wear_map, tag_map) = maps(spec);
     let mut marks = roll_marks(&mut NetRandom::new(marks_seed));
@@ -496,7 +498,7 @@ pub fn render(spec: &Spec, marks_seed: i32) -> Pixmap {
     }
     ink_on_plastic(&mut ink, marks_seed);
     px.draw_pixmap(0, 0, ink.as_ref(), &tiny_skia::PixmapPaint::default(), Transform::identity(), None);
-    place_sticker(&mut px, spec);
+    place_sticker(&mut px, spec, stickers);
     surface(&mut px, marks_seed);
     px
 }
@@ -793,7 +795,27 @@ fn creases(px: &mut Pixmap, ts: Transform, clip: Option<&Mask>, ridges: &[[(f32,
 }
 
 /// `PlaceSticker`: the sticker on the bezel's bottom strip, rotated and scaled, the surface's ridges in its own space.
-fn place_sticker(px: &mut Pixmap, s: &Spec) {
+/// The stickers folder's PNGs, in name order.
+fn game_stickers(dir: Option<&Path>) -> Vec<PathBuf> {
+    let Some(dir) = dir else { return Vec::new() };
+    let mut list: Vec<PathBuf> = std::fs::read_dir(dir).map(|r| r.flatten().map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("png"))).collect()).unwrap_or_default();
+    list.sort();
+    list
+}
+
+fn png_pixmap(path: &Path) -> Option<Pixmap> {
+    let img = image::open(path).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    let mut px = Pixmap::new(w, h)?;
+    for (dst, src) in px.pixels_mut().iter_mut().zip(img.pixels()) {
+        let c = tiny_skia::ColorU8::from_rgba(src[0], src[1], src[2], src[3]);
+        *dst = c.premultiply();
+    }
+    Some(px)
+}
+
+fn place_sticker(px: &mut Pixmap, s: &Spec, stickers: Option<&Path>) {
     let (cx, cy) = sticker_at(s);
     let scale = 0.68;
     let ra = -s[4].to_radians();
@@ -803,6 +825,17 @@ fn place_sticker(px: &mut Pixmap, s: &Spec) {
         [f(seg[0]), f(seg[1])]
     }).collect();
     let ts = device().pre_translate(cx, cy).pre_rotate(s[4]).pre_scale(scale, scale);
+    let list = game_stickers(stickers);
+    if let Some(img) = (!list.is_empty()).then(|| png_pixmap(&list[s[5] as usize % list.len()])).flatten() {
+        // Scaled so its longer side is 160 units, centred, the surface's ridges creased into it.
+        let k = 160.0 / img.width().max(img.height()) as f32;
+        let (w, h) = (img.width() as f32 * k, img.height() as f32 * k);
+        let at = ts.pre_translate(-w / 2.0, -h / 2.0).pre_scale(k, k);
+        px.draw_pixmap(0, 0, img.as_ref(), &tiny_skia::PixmapPaint { quality: tiny_skia::FilterQuality::Bicubic, ..Default::default() }, at, None);
+        let clip = mask_of(&rect(-w / 2.0, -h / 2.0, w, h), ts);
+        creases(px, ts, Some(&clip), &local);
+        return;
+    }
     draw_sticker(px, s[0] as i32, s[6] as usize, s[5] as i32, &local, ts, false);
 }
 

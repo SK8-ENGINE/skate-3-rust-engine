@@ -1051,6 +1051,38 @@ fn lcd_splash(o: &Ctx, osd: &Osd, w: f32, h: f32, t: f32, stage: &str, since: f3
 }
 
 #[cfg(test)]
+mod anim_tests {
+    use super::*;
+
+    /// `--standby-test`'s checks on the clock: the fold keeps the screen lit and ends shut; the reopen stays lit and
+    /// ends facing you; the power-off ends edge-on and dark.
+    #[test]
+    fn fold_and_reopen_keep_the_screen_lit_and_end_where_they_should() {
+        for seed in 0..20 {
+            let mut a = Anim::new(seed);
+            a.on_at = Some(0.0);
+            a.roll();
+            a.fold_at = Some(10.0);
+            for k in 0..=7 {
+                let t = 10.0 + a.fold_time() * k as f32 / 7.0;
+                assert_eq!(a.screen_level(t), 1.0, "fold frame {k} dark (seed {seed})");
+            }
+            assert!(a.panel_open(10.0 + a.fold_time()) < 0.01, "fold did not shut (seed {seed})");
+            a.fold_at = None;
+            a.resume_at = Some(20.0);
+            for k in 0..=7 {
+                let t = 20.0 + a.resume_time() * k as f32 / 7.0;
+                assert_eq!(a.screen_level(t), 1.0, "reopen frame {k} dark (seed {seed})");
+            }
+            assert!((a.panel_open(20.0 + a.resume_time()) - 1.0).abs() < 0.02, "reopen did not face you (seed {seed})");
+            a.resume_at = None;
+            a.off_at = Some(30.0);
+            assert!(a.panel_open(30.0 + OFF_TIME) < 0.01 && a.screen_level(30.0 + OFF_TIME) == 0.0, "power-off (seed {seed})");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -154,6 +154,11 @@ pub struct App {
     restarted: Option<std::process::Child>,
     started: bool,
     snapshot_screen: String,
+    snapshot_tries: u32,
+    wear_ms: f32,
+    wear_rx: Option<std::sync::mpsc::Receiver<(tiny_skia::Pixmap, f32)>>,
+    /// `--bench <out.txt>`: the render's CPU time at five points of the power-on, 20 frames each (SkateLauncher.cs Bench).
+    pub bench: Option<(PathBuf, usize, Vec<f32>, String)>,
     last_act: (u8, bool, Instant),
     powered_off: bool,
     /// A game's window took over: the panel is folding shut, then the window minimises.
@@ -359,7 +364,7 @@ impl App {
     pub fn new(exe: PathBuf, state_dir: PathBuf, direct: Vec<String>) -> App {
         let mut app = App {
             exe, state_dir, pages: Vec::new(), job: None, status: Vec::new(), gilrs: gilrs::Gilrs::new().ok(),
-            last_nav: Instant::now(), hidden: false, wizard: Vec::new(), wizard_start: Vec::new(), direct_close: None, opened: Instant::now(), snapshot: None, snapshot_asked: false, hover: None, wear: None, snapshot_seed: 3, fit_pending: false, raise_checked: Instant::now(), anim: crate::camcorder::Anim::new(crate::wear::launch_seed()), powered_off: false, folding: false, waiting_for: None, games_checked: Instant::now(), games_running: false, pad_prev: 0, pad_since: Instant::now(), start: None, direct: Vec::new(), after_update: false, same_monitor: false, restarted: None, started: false, snapshot_screen: String::new(), last_act: (0, false, Instant::now()),
+            last_nav: Instant::now(), hidden: false, wizard: Vec::new(), wizard_start: Vec::new(), direct_close: None, opened: Instant::now(), snapshot: None, snapshot_asked: false, hover: None, wear: None, snapshot_seed: 3, fit_pending: false, raise_checked: Instant::now(), anim: crate::camcorder::Anim::new(crate::wear::launch_seed()), powered_off: false, folding: false, waiting_for: None, games_checked: Instant::now(), games_running: false, pad_prev: 0, pad_since: Instant::now(), start: None, direct: Vec::new(), after_update: false, same_monitor: false, restarted: None, started: false, snapshot_screen: String::new(), snapshot_tries: 0, wear_ms: 0.0, wear_rx: None, bench: None, last_act: (0, false, Instant::now()),
         };
         app.direct = direct;
         app
@@ -367,7 +372,9 @@ impl App {
 
     /// The window shows first; the start check runs behind the splash (snapshots skip it and show the menu at once).
     fn begin_start(&mut self) {
-        if self.snapshot.is_some() {
+        if self.bench.is_some() {
+            self.finish_start(0);
+        } else if self.snapshot.is_some() {
             self.finish_start(0);
             self.snapshot_screen_setup();
         } else {
@@ -456,6 +463,32 @@ impl App {
             self.anim.snap = Some(1.0);
         }
         self.snapshot_screen = screen;
+    }
+
+    fn bench_frame(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        const AT: [f32; 5] = [0.3, 0.5, 0.65, 0.9, 1.0];
+        let Some((out, step, times, text)) = self.bench.as_mut() else { return };
+        if *step < AT.len() {
+            self.anim.snap = Some(AT[*step]);
+            // The first frames of each step settle; the CPU time of the next 20 counts.
+            if let Some(cpu) = frame.info().cpu_usage { times.push(cpu * 1000.0); }
+            if times.len() >= 24 {
+                let ms: f32 = times[4..].iter().sum::<f32>() / 20.0;
+                text.push_str(&format!("assembly {:.2}: render {ms:.1} ms\n", AT[*step]));
+                times.clear();
+                *step += 1;
+            }
+            ctx.request_repaint();
+        } else if self.wear.is_some() {
+            text.push_str(&format!("wear texture: {:.1} ms (built off the window's thread)\n", self.wear_ms));
+            let _ = std::fs::write(&*out, text.as_bytes());
+            print!("{text}");
+            self.bench = None;
+            self.powered_off = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else {
+            ctx.request_repaint();
+        }
     }
 
     /// Sets up the snapshot's screen once the main page is there.
@@ -1161,7 +1194,8 @@ fn kill_tree(pid: u32) {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.bench_frame(ctx, frame);
         ctx.request_repaint_after(Duration::from_millis(100));
         if !self.started {
             self.started = true;
@@ -1273,24 +1307,54 @@ impl eframe::App for App {
             if let Some(img) = shot {
                 let (screen, ppp, inner) = ctx.input(|i| (i.content_rect(), i.pixels_per_point(), i.viewport().inner_rect));
                 println!("SNAPSHOT_SIZE image {}x{} screen {:?} ppp {ppp} inner {inner:?}", img.size[0], img.size[1], screen.size());
-                let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
-                let _ = image::save_buffer(&out, &rgba, img.size[0] as u32, img.size[1] as u32, image::ColorType::Rgba8);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                // The window's surface can lag its layout for a few frames (seen at 150 % scale and once at 100 %): take
+                // the shot again until it has the layout's size, then crop or pad to it as a last resort.
+                let want = [(screen.width() * ppp).round() as usize, (screen.height() * ppp).round() as usize];
+                if img.size != want && self.snapshot_tries < 20 {
+                    self.snapshot_tries += 1;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+                } else {
+                    let mut rgba = vec![0u8; want[0] * want[1] * 4];
+                    for y in 0..want[1].min(img.size[1]) {
+                        for x in 0..want[0].min(img.size[0]) {
+                            let c = img.pixels[y * img.size[0] + x].to_array();
+                            rgba[(y * want[0] + x) * 4..][..4].copy_from_slice(&c);
+                        }
+                    }
+                    if img.size != want { println!("SNAPSHOT_FIT {}x{} -> {}x{}", img.size[0], img.size[1], want[0], want[1]); }
+                    let _ = image::save_buffer(&out, &rgba, want[0] as u32, want[1] as u32, image::ColorType::Rgba8);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
             }
             ctx.request_repaint();
         }
         if t < 1.5 {
             ctx.request_repaint();
         }
-        if self.wear.is_none() {
+        if self.wear.is_none() && self.wear_rx.is_none() {
             // The sticker stays the same per install; the wear rolls a new seed every launch (user 2026-11-10). A
-            // snapshot uses its seed for both.
+            // snapshot uses its seed for both. Built off the window's thread (about 0.4 s): the window shows at once and
+            // the wear is in by the time the panel has swung open.
             let snap = self.snapshot.is_some().then_some(self.snapshot_seed);
-            let spec = crate::wear::sticker_spec(&self.state_dir, snap);
-            let marks_seed = snap.unwrap_or_else(crate::wear::launch_seed);
-            let px = crate::wear::render(&spec, marks_seed);
+            let state_dir = self.state_dir.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let spec = crate::wear::sticker_spec(&state_dir, snap);
+                let marks_seed = snap.unwrap_or_else(crate::wear::launch_seed);
+                let built = Instant::now();
+                let px = crate::wear::render(&spec, marks_seed, Some(&state_dir.join("stickers")));
+                let _ = tx.send((px, built.elapsed().as_secs_f32() * 1000.0));
+            });
+            self.wear_rx = Some(rx);
+        }
+        if let Some((px, ms)) = self.wear_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.wear_rx = None;
+            self.wear_ms = ms;
             let img = egui::ColorImage::from_rgba_premultiplied([px.width() as usize, px.height() as usize], px.data());
             self.wear = Some(ctx.load_texture("wear", img, egui::TextureOptions::LINEAR));
+        }
+        if self.wear_rx.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(30));
         }
         let wear_id = self.wear.as_ref().map(|t| t.id());
         let mut hits = crate::camcorder::Hits::default();
@@ -1371,7 +1435,8 @@ impl eframe::App for App {
 
 /// Opens the window. `direct`: launch options (`entry [label] [@version]`) that run at once and close afterwards.
 #[allow(clippy::too_many_arguments)]
-pub fn run(state_dir: PathBuf, direct: Vec<String>, snapshot: Option<PathBuf>, snapshot_page: Option<String>, snapshot_seed: Option<i32>, same_monitor: bool, after_update: bool, snapshot_size: Option<(f32, f32)>) -> Result<(), String> {
+pub fn run(state_dir: PathBuf, direct: Vec<String>, snapshot: Option<PathBuf>, snapshot_page: Option<String>, snapshot_seed: Option<i32>, same_monitor: bool, after_update: bool, snapshot_size: Option<(f32, f32)>, bench: Option<PathBuf>) -> Result<(), String> {
+    let snapshot = snapshot.or_else(|| bench.is_some().then(PathBuf::new)).filter(|_| true);
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     // Snapshots render at the panel's own 1240 x 760; a real start sizes from the monitor (window.rs).
     let area = if snapshot.is_some() { None } else { crate::window::start_area(same_monitor) };
@@ -1383,7 +1448,7 @@ pub fn run(state_dir: PathBuf, direct: Vec<String>, snapshot: Option<PathBuf>, s
     }
     let fit_on_first_frame = snapshot.is_none() && area.is_none();
     let options = eframe::NativeOptions { viewport, centered: area.is_none(), ..Default::default() };
-    eframe::run_native("Skate launcher", options, Box::new(move |cc| { crate::camcorder::install_fonts(&cc.egui_ctx); let mut app = App::new(exe, state_dir, direct); app.snapshot = snapshot; app.snapshot_seed = snapshot_seed.unwrap_or_else(crate::wear::launch_seed); if app.snapshot.is_some() { println!("SNAPSHOT_SEED {}", app.snapshot_seed); } app.snapshot_page(snapshot_page.as_deref()); app.fit_pending = fit_on_first_frame; app.same_monitor = same_monitor; app.after_update = after_update; Ok(Box::new(app)) })).map_err(|e| e.to_string())
+    eframe::run_native("Skate launcher", options, Box::new(move |cc| { crate::camcorder::install_fonts(&cc.egui_ctx); let mut app = App::new(exe, state_dir, direct); app.snapshot = snapshot; app.snapshot_seed = snapshot_seed.unwrap_or_else(crate::wear::launch_seed); app.snapshot_page(snapshot_page.as_deref()); if app.snapshot.is_some() { println!("SNAPSHOT_SEED {}", app.snapshot_seed); } app.fit_pending = fit_on_first_frame; app.same_monitor = same_monitor; app.after_update = after_update; if let Some(b) = bench { app.bench = Some((b, 0, Vec::new(), String::new())); app.snapshot = None; } Ok(Box::new(app)) })).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
