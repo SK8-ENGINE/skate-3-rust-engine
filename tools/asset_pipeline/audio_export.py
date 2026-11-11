@@ -100,9 +100,13 @@ class DecodeCache:
         self.used: set[str] = set()
 
     def key(self, source: Path) -> str:
+        body = source.with_suffix('.sns')
+        return self.key_bytes(source.read_bytes(), body.read_bytes() if body.is_file() else b'')
+
+    def key_bytes(self, header: bytes, body: bytes = b'') -> str:
+        """The key of a `.snr` header and its `.sns` body (empty without one), the same as `key` of those files."""
         digest = hashlib.sha256(self.tool.encode())
-        for part in (source, source.with_suffix('.sns')):
-            data = part.read_bytes() if part.is_file() else b''
+        for data in (header, body):
             digest.update(len(data).to_bytes(8, 'little'))
             digest.update(data)
         return digest.hexdigest()
@@ -138,6 +142,12 @@ class DecodeCache:
 
 
 _CACHE: DecodeCache | None = None
+
+
+def cached(header: bytes, body: bytes, target: Path) -> bool:
+    """Puts the cached decode of these input bytes at `target` without writing the inputs; False without a hit."""
+    cache = _CACHE
+    return cache is not None and cache.fetch(cache.key_bytes(header, body), target)
 
 
 def _decode(vgmstream: Path, directory: Path, names: list[str], log) -> None:
@@ -1420,16 +1430,21 @@ def _convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report
         folder = work/'banks'/stem
         folder.mkdir(parents=True)
         streams = _streams(bank, data)
-        for index, stream in enumerate(streams):
-            (folder/f'{index:04d}.snr').write_bytes(standalone(data, stream))
-        _decode(vgmstream, folder, [f'{index:04d}.snr' for index in range(len(streams))], log)
         target_folder = output/'banks'/stem
         target_folder.mkdir(parents=True)
+        missing = []
+        for index, stream in enumerate(streams):
+            clip = standalone(data, stream)
+            if not cached(clip, b'', target_folder/f'{index:04d}.wav'):
+                (folder/f'{index:04d}.snr').write_bytes(clip)
+                missing.append(index)
+        _decode(vgmstream, folder, [f'{index:04d}.snr' for index in missing], log)
         samples = []
         wavs = []
         for index in range(len(streams)):
             target = target_folder/f'{index:04d}.wav'
-            shutil.move(folder/f'{index:04d}.snr.wav', target)
+            if index in missing:
+                shutil.move(folder/f'{index:04d}.snr.wav', target)
             samples.append({'file': f'banks/{stem}/{index:04d}.wav', **_wav_info(target)})
             wavs.append(target.read_bytes())
         # The game reads the pack; the loose WAVs stay for older engine versions sharing the install.

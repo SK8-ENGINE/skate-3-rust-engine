@@ -52,6 +52,19 @@ class DecodeCacheTests(unittest.TestCase):
         self.assertEqual(calls,[['0000.snr','0001.snr'],['0002.snr']])
         for name,data in first.items():self.assertEqual((again/(name+'.wav')).read_bytes(),data)
 
+    def test_byte_keys_match_file_keys_and_a_hit_writes_no_inputs(self):
+        (self.work/'a.snr').write_bytes(b'head');(self.work/'a.sns').write_bytes(b'body');(self.work/'b.snr').write_bytes(b'solo')
+        self.assertEqual(self.cache.key(self.work/'a.snr'),self.cache.key_bytes(b'head',b'body'))
+        self.assertEqual(self.cache.key(self.work/'b.snr'),self.cache.key_bytes(b'solo'))
+        (self.work/'a.snr.wav').write_bytes(b'decoded')
+        self.cache.store(self.cache.key(self.work/'a.snr'),self.work/'a.snr.wav')
+        out=self.root/'out';out.mkdir()
+        audio_export._CACHE=self.cache
+        self.assertTrue(audio_export.cached(b'head',b'body',out/'00.wav'))
+        self.assertFalse(audio_export.cached(b'head',b'other',out/'01.wav'))
+        self.assertEqual(sorted(p.name for p in out.iterdir()),['00.wav'])
+        self.assertEqual((out/'00.wav').read_bytes(),b'decoded')
+
     def test_prune_keeps_only_entries_used_this_run(self):
         (self.work/'x.snr').write_bytes(b'x');(self.work/'x.snr.wav').write_bytes(b'wav')
         key=self.cache.key(self.work/'x.snr');self.cache.store(key,self.work/'x.snr.wav')

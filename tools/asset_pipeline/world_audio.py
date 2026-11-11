@@ -606,16 +606,20 @@ def decode_nis(archive_path: Path, index: dict, output: Path, work: Path, vgmstr
     output.mkdir(parents=True, exist_ok=True)
 
     def decode_group(character):
+        from .audio_export import cached
         folder = work / str(character)
         folder.mkdir(parents=True, exist_ok=True)
         names = []
         for line in groups[character]:
-            (folder / f"{line['file']}.snr").write_bytes(bytes.fromhex(line['snr']))
-            (folder / f"{line['file']}.sns").write_bytes(archive.read(by_name[line['file'] + '.sns']))
+            header, body = bytes.fromhex(line['snr']), archive.read(by_name[line['file'] + '.sns'])
+            if cached(header, body, output / f"{line['file']}.wav"):
+                continue
+            (folder / f"{line['file']}.snr").write_bytes(header)
+            (folder / f"{line['file']}.sns").write_bytes(body)
             names.append(f"{line['file']}.snr")
         decode(vgmstream, folder, names, log)
-        for line in groups[character]:
-            (folder / f"{line['file']}.snr.wav").replace(output / f"{line['file']}.wav")
+        for name in names:
+            (folder / f"{name}.wav").replace(output / f"{name[:-len('.snr')]}.wav")
         return len(groups[character])
     return sum(_in_order(decode_group, groups))
 
@@ -643,19 +647,23 @@ def decode_speech(archive_path: Path, index: dict, output: Path, work: Path, vgm
     def decode_group(stem):
         written = 0
         for clip in groups[stem]:
+            from .audio_export import cached
             data = archive.read(by_name[clip['name']])
             folder = work / stem
             folder.mkdir(parents=True, exist_ok=True)
-            names = []
-            for i, t in enumerate(clip['takes']):
-                (folder / f'{i:02d}.snr').write_bytes(bytes.fromhex(t['snr']))
-                (folder / f'{i:02d}.sns').write_bytes(data[t['offset']:t['offset'] + t['size']])
-                names.append(f'{i:02d}.snr')
-            decode(vgmstream, folder, names, log)
             target = output / stem
             target.mkdir(parents=True, exist_ok=True)
-            for i in range(len(clip['takes'])):
-                (folder / f'{i:02d}.snr.wav').replace(target / f'{i:02d}.wav')
-                written += 1
+            names = []
+            for i, t in enumerate(clip['takes']):
+                header, body = bytes.fromhex(t['snr']), data[t['offset']:t['offset'] + t['size']]
+                if cached(header, body, target / f'{i:02d}.wav'):
+                    continue
+                (folder / f'{i:02d}.snr').write_bytes(header)
+                (folder / f'{i:02d}.sns').write_bytes(body)
+                names.append(f'{i:02d}.snr')
+            decode(vgmstream, folder, names, log)
+            for name in names:
+                (folder / f'{name}.wav').replace(target / f"{name[:-len('.snr')]}.wav")
+            written += len(clip['takes'])
         return written
     return sum(_in_order(decode_group, groups))
