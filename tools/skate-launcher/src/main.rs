@@ -73,6 +73,17 @@ fn main() -> ExitCode {
                 }
             }
             "--after-update" => after_update = true,
+            "--wear-test" => {
+                let (txt, png) = (it.next().unwrap_or_else(|| "wear-test.txt".into()), it.next().unwrap_or_else(|| "wear-test.png".into()));
+                return match wear::wear_test(std::path::Path::new(&txt), std::path::Path::new(&png)) {
+                    Ok(true) => ExitCode::SUCCESS,
+                    Ok(false) => ExitCode::from(1),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        ExitCode::from(2)
+                    }
+                };
+            }
             "--sticker-sheet" => {
                 let out = it.next().unwrap_or_else(|| "stickers.png".into());
                 let only = it.next().and_then(|d| d.parse().ok());

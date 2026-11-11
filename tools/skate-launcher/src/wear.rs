@@ -472,6 +472,15 @@ fn wobble(px: &mut Pixmap, ts: Transform, clip: Option<&Mask>, pen: &Stroke, c: 
 /// `stickers`: the state folder's stickers folder; its PNGs (the game's own stickers once the asset export finds
 /// them, or the player's own) replace the drawn designs (SkateLauncher.cs GameSticker).
 pub fn render(spec: &Spec, marks_seed: i32, stickers: Option<&Path>) -> Pixmap {
+    let (mut px, _, _) = marks_layer(spec, marks_seed);
+    place_sticker(&mut px, spec, stickers);
+    surface(&mut px, marks_seed);
+    px
+}
+
+/// The rolled marks alone (tags, doodles, scratches, rubbed edges, tape), the wear map they must stay on, and how
+/// many tags / doodles found no room.
+fn marks_layer(spec: &Spec, marks_seed: i32) -> (Pixmap, Mask, usize) {
     let mut px = Pixmap::new(W, H).expect("pixmap");
     let (wear_map, tag_map) = maps(spec);
     let mut marks = roll_marks(&mut NetRandom::new(marks_seed));
@@ -498,9 +507,40 @@ pub fn render(spec: &Spec, marks_seed: i32, stickers: Option<&Path>) -> Pixmap {
     }
     ink_on_plastic(&mut ink, marks_seed);
     px.draw_pixmap(0, 0, ink.as_ref(), &tiny_skia::PixmapPaint::default(), Transform::identity(), None);
-    place_sticker(&mut px, spec, stickers);
-    surface(&mut px, marks_seed);
-    px
+    let skipped = marks.iter().filter(|m| m.skip).count();
+    (px, wear_map, skipped)
+}
+
+/// `--wear-test <out.txt> <out.png>` (SkateLauncher.cs WearTest): ten starts' wear rolls, each checked: nothing drawn
+/// off the wear map (the camera's UI, the glass, outside the panel), and how many tags / doodles found no room; the
+/// bottom strips side by side in the PNG.
+pub fn wear_test(out_txt: &Path, out_png: &Path) -> Result<bool, String> {
+    let mut report = String::new();
+    let mut all_ok = true;
+    let strip_h = (110.0 * SCALE) as u32;
+    let top = (630.0 * SCALE) as u32;
+    let mut sheet = image::RgbaImage::new(W, strip_h * 10);
+    for k in 0..10 {
+        let seed = launch_seed().wrapping_add(k * 7919);
+        let spec = sticker_spec(Path::new(""), Some(seed));
+        let (marks, map, skipped) = marks_layer(&spec, seed);
+        let off = marks.pixels().iter().zip(map.data()).filter(|(p, m)| p.alpha() > 8 && **m == 0).count();
+        let ok = off == 0;
+        all_ok &= ok;
+        report.push_str(&format!("seed {seed}: {}  off the wear map {off} px, {skipped} tags / doodles without room\n", if ok { "PASS" } else { "FAIL" }));
+        let full = render(&spec, seed, None);
+        for y in 0..strip_h {
+            for x in 0..W {
+                let c = full.pixel(x, top + y).map(|c| c.demultiply()).map_or([0, 0, 0, 0], |c| [c.red(), c.green(), c.blue(), c.alpha()]);
+                sheet.put_pixel(x, k as u32 * strip_h + y, image::Rgba(c));
+            }
+        }
+    }
+    report.push_str(if all_ok { "PASS\n" } else { "FAIL\n" });
+    std::fs::write(out_txt, &report).map_err(|e| e.to_string())?;
+    sheet.save(out_png).map_err(|e| e.to_string())?;
+    print!("{report}");
+    Ok(all_ok)
 }
 
 /// A cluster of scratches: each a gouge (dark groove, lit far lip) that tapers in and out along a slight curve, with a

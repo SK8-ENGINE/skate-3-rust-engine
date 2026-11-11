@@ -98,6 +98,17 @@ pub fn free_bytes(path: &Path) -> Option<u64> {
     Some(kb * 1024)
 }
 
+/// Lets the game the launcher starts take the foreground (Steam gives the foreground window its controller layout).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn allow_foreground() {
+    // SAFETY: a plain Win32 call; ASFW_ANY lets any process the launcher starts set the foreground window.
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(windows_sys::Win32::UI::WindowsAndMessaging::ASFW_ANY) };
+}
+
+#[cfg(not(windows))]
+pub fn allow_foreground() {}
+
 pub fn raise_file(state_dir: &Path) -> PathBuf {
     state_dir.join("raise.txt")
 }

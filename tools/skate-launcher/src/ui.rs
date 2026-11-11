@@ -872,6 +872,7 @@ impl App {
     }
 
     fn run_job(&mut self, title: &str, args: Vec<String>) {
+        crate::window::allow_foreground();
         let state = Arc::new(Mutex::new(JobState::default()));
         let child = crate::proc::cmd(&self.exe).args(&args).env("SKATE_LAUNCHER_UI", "2").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
         let Ok(mut child) = child else {
@@ -1432,6 +1433,7 @@ impl eframe::App for App {
                 splash_skip: self.start.as_ref().and_then(|s| s.can_skip().then_some(s.skip_armed)), hover: self.hover, cancel_armed: self.job.as_ref().is_some_and(|j| j.cancel_presses == 1),
                 close_in: self.direct_close.map(|c| c.saturating_duration_since(Instant::now()).as_secs() as u32),
             };
+            ui.set_opacity(if self.snapshot.is_some() || self.bench.is_some() { 1.0 } else { self.anim.window_alpha(t) });
             hits = crate::camcorder::paint(ui, &view, t, self.anim.panel_open(t), self.anim.screen_level(t), wear_id);
         });
         self.hover = hits.hover;
@@ -1455,6 +1457,27 @@ impl eframe::App for App {
             (Some(Key::Down | Key::Right), false) => self.nav(1),
             (Some(Key::A), false) => self.activate(ctx),
             (Some(Key::Play), false) if self.start.is_none() => {
+                if let Some(p) = self.pages.last_mut().filter(|p| p.kind == PageKind::Main) { p.sel = 0; }
+                self.activate(ctx);
+            }
+            _ => {}
+        }
+        // Clickable prompts and a hand over everything clickable (SkateLauncher.cs PromptAt / PromptPress / OnMouseMove).
+        if hits.hover.is_some() || hits.prompt_hover.is_some() || (self.job.is_none() && hits.hover_item.is_some()) {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        match hits.prompt.as_deref() {
+            Some("B") => {
+                if self.job.is_some() {
+                    self.job_frame(ctx, true);
+                } else if let Some(st) = self.start.as_mut() {
+                    st.skip_press();
+                } else {
+                    self.back(ctx);
+                }
+            }
+            Some("A") if self.job.is_none() && self.start.is_none() => self.activate(ctx),
+            Some("START/STOP") if self.job.is_none() && self.start.is_none() => {
                 if let Some(p) = self.pages.last_mut().filter(|p| p.kind == PageKind::Main) { p.sel = 0; }
                 self.activate(ctx);
             }

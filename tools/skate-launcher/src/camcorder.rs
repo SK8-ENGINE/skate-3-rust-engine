@@ -198,6 +198,9 @@ pub struct Hits {
     /// The list row under the pointer (hover selects it, as in the C# window).
     pub hover_item: Option<usize>,
     pub right_click: bool,
+    /// A footer prompt (A / B / START/STOP badge with its label) under the pointer, and the one clicked.
+    pub prompt_hover: Option<String>,
+    pub prompt: Option<String>,
     /// A left click on neither a row nor a key (closes the direct-mode countdown).
     pub empty_click: bool,
 }
@@ -446,6 +449,13 @@ impl Anim {
         }
         level
     }
+    /// `WindowAlpha`: the whole window fades in over the first moment of the power-on and out at the end of the
+    /// power-off.
+    pub fn window_alpha(&self, t: f32) -> f32 {
+        if self.snap.is_some() { return 1.0; }
+        (self.assembly(t) / 0.06).clamp(0.0, 1.0)
+    }
+
     pub fn animating(&self, t: f32) -> bool {
         self.on_at.is_none_or(|o| t - o < ON_TOTAL + 0.1) || self.off_at.is_some() || self.standby()
     }
@@ -467,6 +477,7 @@ pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear
     let painter = ui.painter().clone();
     let c = Ctx { painter: &painter, xf };
     let mut hits = Hits::default();
+    PROMPTS.with(|p| p.borrow_mut().clear());
     let pointer = ui.ctx().input(|i| i.pointer.hover_pos());
     let clicked = ui.ctx().input(|i| i.pointer.primary_clicked());
     let pressed = ui.ctx().input(|i| i.pointer.primary_pressed());
@@ -575,7 +586,11 @@ pub fn paint(ui: &mut egui::Ui, view: &View, t: f32, open: f32, level: f32, wear
         }
     }
     hits.right_click = ui.ctx().input(|i| i.pointer.secondary_clicked());
-    hits.empty_click = clicked && hits.item.is_none() && hits.key.is_none();
+    if let Some(p) = pointer {
+        hits.prompt_hover = PROMPTS.with(|v| v.borrow().iter().find(|(r, _)| r.contains(p)).map(|(_, k)| k.clone()));
+        if clicked { hits.prompt = hits.prompt_hover.clone(); }
+    }
+    hits.empty_click = clicked && hits.item.is_none() && hits.key.is_none() && hits.prompt.is_none();
     let body = xf.r(PANEL_R);
     if pressed && hits.hover.is_none() && hits.item.is_none() && pointer.is_some_and(|p| body.contains(p)) {
         hits.drag = true;
@@ -737,7 +752,13 @@ fn lcd_status(o: &Ctx, osd: &Osd, w: f32, view: &View) {
     o.shadow_text(mins, osd.small, LCD_INK, w - 5.0 - msw, y + (fh - osd.small.height()) / 2.0);
 }
 
+thread_local! {
+    /// The prompts drawn this paint, in window points (SkateLauncher.cs promptHits).
+    static PROMPTS: std::cell::RefCell<Vec<(Rect, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 fn badge(o: &Ctx, osd: &Osd, x: &mut f32, y: f32, key: &str, c: Color32, label: &str) {
+    let x0 = *x;
     let d = osd.small.height() * 0.9;
     let r = if key.chars().count() == 1 { Rect::from_min_size(pos2(*x, y + (osd.small.height() - d) / 2.0), vec2(d, d)) } else { Rect::from_min_size(pos2(*x, y + (osd.small.height() - d) / 2.0), vec2(o.measure(key, osd.tiny) + 3.0, d)) };
     o.gloss(r, d / 2.0, mix(c, Color32::WHITE, 0.25), mix(c, Color32::BLACK, 0.2));
@@ -745,6 +766,8 @@ fn badge(o: &Ctx, osd: &Osd, x: &mut f32, y: f32, key: &str, c: Color32, label: 
     *x = r.right() + 2.0;
     o.shadow_text(label, osd.small, LCD_INK, *x, y);
     *x += o.measure(label, osd.small) + 5.0;
+    let area = o.xf.r(Rect::from_min_max(pos2(x0, y), pos2(*x, y + osd.small.height())));
+    PROMPTS.with(|p| p.borrow_mut().push((area, key.to_owned())));
 }
 
 /// `LcdFoot`: the keys on the left, the date and time on the right.
