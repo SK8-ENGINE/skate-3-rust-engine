@@ -40,7 +40,7 @@ Where the two met (2026-11-10, merge `4583fe96`):
 
 ## Fork builds and badges (2026-11-10)
 
-- `.github/workflows/rusty-trucks-linux.yml` (Ubuntu 24.04, x64) and `rusty-trucks-macos.yml` (macOS 14, Apple
+- `.github/workflows/rusty-trucks-linux.yml` (Ubuntu 24.04, x64) and `rusty-trucks-macos.yml` (macOS, latest runner, Apple
   Silicon) run on the fork (`Hailey-Ross/rusty-trucks`) for every push to `hails-additions`, its releases and manual
   runs; both call `rusty-trucks-unix-build.yml`: the Linux build libraries (flake.nix's list as Ubuntu packages), the
   setup dependency tests, the game build without dynamic linking, the skate-core / skate-audio / skate-data and
