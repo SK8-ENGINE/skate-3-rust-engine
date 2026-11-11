@@ -43,6 +43,8 @@ pub(crate) struct Riding {
     /// `audio.wheel_position` the pair the rendered board interpolates between, which Class_Seams
     /// reads (`PlayerAudio::step_wheels`).
     pub wheels_before: [[f32; 3]; 4],
+    /// Off the board or wiping out (`board_unridden`): the music zones' DJ control drops to its override value.
+    pub unridden: bool,
 }
 
 /// What `observe` publishes for the audio host (`native::mixmap_frame`).
@@ -504,6 +506,7 @@ pub(crate) fn observe(
         deck_contact: skater.player_input.physical.collision.flag_3475 != 0,
         deck_material: skate_audio::player::state::material_of_tag(physics.riding.ground.part_audio_surfaces[2]),
         wheels_before,
+        unridden: board_unridden(state),
     });
     seen.braking = braking;
     seen.brake_time = brake_time;

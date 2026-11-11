@@ -49,6 +49,11 @@ fn check_structure(t: &MenuTables) {
     assert_eq!(t.ipod_tracks.len(), 46, "{:?}", t.ipod_tracks.first());
     assert!(t.ipod_tracks[0].to_uppercase().contains("3INCHESOFBLOOD_BATTLEOFBROTHERHOOD"), "{}", t.ipod_tracks[0]);
     assert!(t.ipod_tracks[1].to_uppercase().contains("AGENTORANGE_BLOODSTAINS"), "{}", t.ipod_tracks[1]);
+    // Their playlist ids (0x8302E108, the ipod_playlist order) and the 25 DJ world music pieces with theirs.
+    assert_eq!(t.ipod_ids.len(), 46);
+    assert_eq!(&t.ipod_ids[..3], &[0x4CAB08CC, 0x440DA036, 0xD239525F]);
+    assert_eq!((t.dj_pieces.len(), t.dj_ids.len()), (25, 25), "{:?} {:?}", t.dj_pieces, t.dj_ids);
+    assert_eq!(&t.dj_ids[..2], &[0xC147C887, 0xDBCD2847]);
     assert_eq!((t.speakers[0].as_str(), t.speakers[30].as_str(), t.speakers[31].as_str(), t.speakers[40].as_str()),
         ("Player", "Reda", "SkateCoach", "CameraMan"));
     assert_eq!(t.speakers[103], "Teammate4");

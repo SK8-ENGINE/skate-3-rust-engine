@@ -50,6 +50,7 @@ mod world_sources;
 mod world_speech;
 mod nis_speech;
 pub(crate) mod music;
+pub(crate) mod music_zones;
 pub(crate) mod music_caption;
 
 use bevy::{audio::Volume, prelude::*};
@@ -501,6 +502,8 @@ impl Plugin for GameAudioPlugin {
             .add_systems(Update, music::frame)
             .init_resource::<crate::music_player_host::MusicPlayerLink>()
             .add_systems(Update, music_player_link.before(music::frame))
+            .init_resource::<emitters::MusicZone>()
+            .add_systems(Update, (emitters::music_zones, music_zones::environment).chain().after(music_player_link).after(map_audio::update).before(music::frame))
             .init_resource::<music_caption::MusicCaptionStyle>()
             .init_resource::<music_caption::PendingCaption>()
             .init_resource::<crate::ui_fonts::FallbackFonts>()

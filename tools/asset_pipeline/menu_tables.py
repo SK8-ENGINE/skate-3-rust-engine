@@ -4,7 +4,8 @@
 default.xex and locates the tables in any build (skate_data::menu_tables,
 `skate3rust --extract-menu-tables`): Game Settings rows and screens, pause-menu
 (crossbar) categories and items, the Apt key table, the per-mode menus and the
-Trick Guide's category order and slot name tables, the career stats rows and the speaker names.
+Trick Guide's category order and slot name tables, the career stats rows, the speaker names and the soundtrack /
+DJ world music enum tables (names and playlist ids).
 Without this file the game's menu registry starts empty (mods can still add
 entries). No game content is embedded in this tool.
 """

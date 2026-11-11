@@ -290,7 +290,72 @@ EMITTER_FIELDS = {
     'Hash_F209C093F40A4CCC': 'falloff',  # eVolumeFalloffType: 0 = (1-d)^2, 1 = 1-d, else flat
     'Hash_9908F2D75D7381BD': 'seconds',  # float, 10 by default (meaning not verified)
     'Hash_99FD793BC30CF0FA': 'reverb',  # reverb zones (kind 5): the reverb preset (class 204CAC1FD77088B8)
+    'Hash_442A158E27F2B5AD': 'playlist',  # music zones (kind 4): the aud_playlists record (824A2198)
+    'Hash_463B21BB46415616': 'zone_level',  # music zones: 0.16 / 0.17, consumer not found (research music-zones-dj §2)
 }
+
+
+# The music playlists (class `aud_playlists`) and the DJ world music control (class `aud_interactive`) the music zones
+# and the Interactive Mode use (.local/research/music-zones-dj.md; docs/hails-additions/11-audio.md "Music zones").
+PLAYLIST_CLASS = 'Hash_E93ABF17955A5264'
+INTERACTIVE_CLASS = 'Hash_A365B5F2303E8874'
+INTERACTIVE_FIELDS = {
+    'Hash_6AAE7EF9E3C13ABD': 'speed_gate',  # default: km/h a DJ zone needs (8249C9E8)
+    'Hash_B3FCF82EE63033A2': 'speed_checks',  # default: fast checks before a DJ piece starts
+    'Hash_59482767DC62F962': 'cooldown_short',
+    'Hash_CDF8A8BD1E89A90C': 'cooldown',  # the x3 stinger cooldown (times3 record) / the piece-end cooldown
+    'Hash_F6CAE2575F983C4C': 'override_a',  # the control value while skater flag +0x98 bit 30 is set
+    'Hash_256BFA6E8887CADE': 'override_b',  # ... while skater flag +0x94 bit 5 is set
+    'Hash_20DC37163719859F': 'override_hold',
+    'Hash_D56BFF3C91AAD6E0': 'value_min',  # tier records: the control value range 0..127
+    'Hash_5EE2297EB071CF70': 'value_max',
+    'Hash_969D6B4C1736FF76': 'hold',
+    'Hash_4DA4B07AEB6442E6': 'burst_threshold',  # score gain that switches to the burst value (-1 off)
+    'Hash_04611C4FBA83BFC9': 'burst_min',
+    'Hash_4D679FE040C6EC88': 'burst_max',
+    'Hash_95B88487E9712589': 'burst_time',
+}
+INTERACTIVE_RECORDS = ('default', 'nomultiplier', 'times15', 'times2', 'times3')
+
+
+def music_playlists(collections: list[dict]) -> dict[str, dict]:
+    """aud_playlists by record key (hex): mode, preset (eChannelMapPreset: 3 DJ world music, 4 licensed location), the
+    licensed songs [id, gain, extra] and the DJ pieces [id, gain, play seconds, extra], parents resolved."""
+    wanted = {'Hash_99B1389B44C64809': 'mode', 'Hash_FC6C57A267A28231': 'preset',
+              'Hash_E7CC11BB107155EC': 'songs', 'Hash_F41187C8E3599333': 'pieces'}
+    records = {c['key']: c for c in collections if c['class'] == PLAYLIST_CLASS}
+    out = {}
+    for key in records:
+        chain, cursor = [], key
+        while cursor in records and len(chain) < 16:
+            chain.append(records[cursor])
+            cursor = records[cursor]['parent']
+        fields = {}
+        for record in reversed(chain):
+            for name, field in record['fields'].items():
+                if name not in wanted:
+                    continue
+                if 'array' in field:
+                    rows = []
+                    for item in field['array']['items']:
+                        raw = bytes.fromhex(item)
+                        if len(raw) == 12:
+                            song, gain, extra = struct.unpack('>Ifi', raw)
+                            rows.append([song, round(gain, 6), extra])
+                        else:
+                            song, gain, seconds, extra = struct.unpack('>Iffi', raw)
+                            rows.append([song, round(gain, 6), round(seconds, 6), extra])
+                    fields[wanted[name]] = rows
+                else:
+                    fields[wanted[name]] = _value(field)
+        out[f'{int(key[5:], 16) if key.startswith("Hash_") else name_id(key):016X}'] = fields
+    return out
+
+
+def music_interactive(collections: list[dict]) -> dict[str, dict]:
+    """aud_interactive by record name (default and the score multiplier tiers), parents resolved."""
+    resolved = _resolved(collections, INTERACTIVE_CLASS, INTERACTIVE_FIELDS)
+    return {name: resolved[name_id(name)] for name in INTERACTIVE_RECORDS if name_id(name) in resolved}
 
 
 # Location sets of random distant one-shots (sirens, dogs, bangs...): class
@@ -496,6 +561,8 @@ def emitters(files: BigArchive, attributes: dict[int, dict] | None = None, extra
             record.update(sound)
             if 'reverb' in record:
                 record['reverb'] = f"{record['reverb']:016X}"
+            if 'playlist' in record:
+                record['playlist'] = f"{record['playlist']:016X}"
             record['bank'] = Path(bank).stem if bank else None
             record['sound_id'] = f"{record['sound_id']:016X}"
             if bank and sounds:
@@ -1397,6 +1464,7 @@ def _convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report
     manifest['frontend'] = frontend_sounds(collections)
     attributes = emitter_attributes(collections)
     manifest['emitters'], placed = emitters(files, attributes, packs)
+    manifest['music_zones'] = {'playlists': music_playlists(collections), 'interactive': music_interactive(collections)}
     by_file = {Path(e.path).name.lower(): Path(e.path).name for e in files.entries}
     # The packs' loose banks (After Dark's 7 emitter banks, b432) join the disc's; a disc bank keeps its name.
     pack_banks = {}

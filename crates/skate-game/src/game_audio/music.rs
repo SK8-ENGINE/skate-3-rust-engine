@@ -37,6 +37,9 @@ pub(crate) enum Track {
     Retail { set: String, track: u32 },
     /// A player's own track: `count` segments from `first` in a music bank.
     Bank { bank: PathBuf, first: u32, count: u32, name: String, artist: String },
+    /// A retail graph piece started by a variable and an event (id24): a DJ world music piece (`world`, `dj` = the
+    /// DJINTERACTIVE value, event 0x15EEFA7) or a licensed location song (`ipod`, retail 8249D070).
+    Graph { set: String, var: String, value: i32, play: u32 },
 }
 
 /// What plays now.
@@ -57,11 +60,13 @@ pub(crate) struct Sequencer {
     pub current: Option<Track>,
     /// A replay runs: soundtrack tracks play their replay section.
     replay: bool,
+    /// The queue plays once and stops (a DJ world music piece); otherwise it starts over.
+    pub once: bool,
 }
 
 impl Sequencer {
     pub(crate) fn new(tracks: Vec<Track>, shuffle: bool, seed: u32) -> Self {
-        let mut s = Self { order: (0..tracks.len()).collect(), tracks, shuffle, at: 0, playing: None, rng: seed.max(1), current: None, replay: false };
+        let mut s = Self { order: (0..tracks.len()).collect(), tracks, shuffle, at: 0, playing: None, rng: seed.max(1), current: None, replay: false, once: false };
         s.reorder();
         s
     }
@@ -96,6 +101,14 @@ impl Sequencer {
                 Playing::Retail { set: set.clone(), stream: Box::new(stream) }
             }
             Track::Bank { bank, first, count, .. } => Playing::Bank { bank: bank.clone(), next: *first, end: first + count },
+            Track::Graph { set, var, value, play } => {
+                let Some(g) = graphs.get(set) else { return false };
+                let mut stream = Stream::new(g, self.random());
+                if !stream.set_var(g, var, *value) || !stream.post(g, *play) {
+                    return false;
+                }
+                Playing::Retail { set: set.clone(), stream: Box::new(stream) }
+            }
         };
         self.playing = Some(playing);
         self.current = Some(track);
@@ -127,6 +140,9 @@ impl Sequencer {
                 return None;
             }
             if self.at >= self.order.len() {
+                if self.once {
+                    return None;
+                }
                 self.reorder();
             }
             let track = self.tracks[self.order[self.at]].clone();
@@ -178,6 +194,13 @@ impl Sequencer {
         }
     }
 
+    /// Sets the playing graph stream's branch control value (property 1, 0..127; retail sub_82955758).
+    pub(crate) fn set_control(&mut self, value: i32) {
+        if let Some(Playing::Retail { stream, .. }) = self.playing.as_mut() {
+            stream.control = value.clamp(0, 127);
+        }
+    }
+
     /// Posts an event (id24) to the playing graph stream; false without one or without that event.
     pub(crate) fn post(&mut self, graphs: &HashMap<String, Arc<Graph>>, event: u32) -> bool {
         match self.playing.as_mut() {
@@ -203,6 +226,11 @@ pub(crate) enum MusicRequest {
     Var { name: String, value: i32 },
     Post { event: u32 },
     ClearOwner(String),
+    /// The music zones' queue (Interactive Mode, `music_zones::environment`): replaces the engine's queue, in order;
+    /// `once` stops after it.
+    Queue { tracks: Vec<Track>, once: bool },
+    /// The playing graph's branch control value (the DJ world music's intensity).
+    Control(i32),
 }
 
 /// Where a segment comes from: a retail set's bank, or a player's bank file.
@@ -336,6 +364,11 @@ impl Music {
         self.loaded
     }
 
+    /// A play-once queue (a DJ piece) has played out, or nothing is queued.
+    pub(crate) fn queue_done(&self) -> bool {
+        self.sequencer.as_ref().is_none_or(|s| s.once && s.playing.is_none() && s.at >= s.order.len())
+    }
+
     /// The engine's default queue: every soundtrack track, shuffled (None without the soundtrack graph).
     fn soundtrack(&mut self) -> Option<Sequencer> {
         if self.soundtrack_off || !self.graphs.contains_key(SOUNDTRACK_SET) {
@@ -409,6 +442,19 @@ impl Music {
                     let graphs = self.graphs.clone();
                     if !self.sequencer.as_mut().is_some_and(|s| s.post(&graphs, event)) {
                         warn!("AUDIO_MUSIC no playing graph has event {event:#x}");
+                    }
+                }
+                MusicRequest::Queue { tracks, once } => {
+                    self.seed = self.seed.wrapping_add(1);
+                    let mut seq = Sequencer::new(tracks, false, self.seed);
+                    seq.once = once;
+                    self.sequencer = Some(seq);
+                    self.owner = None;
+                    restart = true;
+                }
+                MusicRequest::Control(value) => {
+                    if let Some(seq) = self.sequencer.as_mut() {
+                        seq.set_control(value);
                     }
                 }
                 MusicRequest::ClearOwner(id) => {
@@ -514,6 +560,7 @@ pub(super) fn frame(mut music: ResMut<Music>, native: Option<Res<Native>>, libra
             let (title, artist, custom) = match &track {
                 Track::Bank { name, artist, .. } => (name.clone(), artist.clone(), true),
                 Track::Retail { set, track } => (format!("{set} {track}"), String::new(), false),
+                Track::Graph { set, var, value, .. } => (format!("{set} {var}={value}"), String::new(), false),
             };
             info!("AUDIO_MUSIC playing {title:?} by {artist:?}");
             if music.events.len() >= 64 {

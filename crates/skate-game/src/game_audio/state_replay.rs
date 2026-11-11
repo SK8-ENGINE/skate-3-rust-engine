@@ -251,6 +251,7 @@ impl Script {
             deck_up: if r.0.contains_key("deck_up") { r.f("deck_up") } else { 1.0 },
             deck_contact: r.i("deck_contact") != 0,
             deck_material: material_of_tag(r.i("deck_tag") as u32),
+            unridden: false,
         }
     }
 }

@@ -11,7 +11,8 @@ pub enum MusicMode {
     /// 0: the game's default music (music manager state 2); a new profile's mode.
     #[default]
     Default,
-    /// 1: ambient (sub_82498A80(manager, 4)): no soundtrack.
+    /// 1: the screen's Interactive Mode (sub_82498A80(manager, 4)): the soundtrack stops and the music zones choose
+    /// the music (licensed location songs or DJ world music; .local/research/music-zones-dj.md).
     Ambient,
     /// 2: the Music Player plays the playlist (manager state 7, sub_825E46B0 picks the song).
     Player,

@@ -52,6 +52,12 @@ pub(crate) struct EmitterRecord {
     pub sound_id: String,
     #[serde(default)]
     pub reverb: Option<String>,
+    /// Music zones (`kind` 4): the `aud_playlists` record key (16 hex digits) and the zone's level field
+    /// (`463B21BB46415616`, consumer not found). docs/hails-additions/11-audio.md#music-zones
+    #[serde(default)]
+    pub playlist: Option<String>,
+    #[serde(default)]
+    pub zone_level: Option<f32>,
 }
 
 /// The native AEMS runtime's inputs (audio_export.aems_files): Csis projects in install order and
@@ -322,6 +328,9 @@ struct Manifest {
     zones: BTreeMap<String, Zone>,
     #[serde(default)]
     crossfades: Vec<Crossfade>,
+    /// The music zones' playlists and DJ control (`audio_export.music_playlists` / `music_interactive`).
+    #[serde(default)]
+    music_zones: super::music_zones::MusicZonesData,
     /// District (map stem) -> region layer name -> tiles.
     #[serde(default)]
     regions: BTreeMap<String, BTreeMap<String, Vec<RegionTile>>>,
@@ -1713,6 +1722,11 @@ impl Library {
     }
 
     /// The records of an `.ems` emitter file (empty when absent).
+    /// The music zones' playlists and DJ control values.
+    pub(crate) fn music_zones(&self) -> &super::music_zones::MusicZonesData {
+        &self.manifest.music_zones
+    }
+
     pub(crate) fn emitters(&self, file: &str) -> &[EmitterRecord] {
         self.manifest.emitters.get(file).map_or(&[], Vec::as_slice)
     }

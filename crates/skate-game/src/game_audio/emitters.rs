@@ -38,6 +38,111 @@ const MAX_ACTIVE: usize = 5;
 // (sound emitters 1, reverb zones 5, music zones 4); `music_` holds music zones, `speakers_` /
 // `crowds_` types 6 / 7.
 
+/// The winning music zone (`eVolumeType` 4; the emitter system's `+0xD0` block, `sub_828EB410` / `sub_824A2198`),
+/// read by the music's environment chooser (`music_zones::environment`). docs/hails-additions/11-audio.md#music-zones
+#[derive(Resource, Default, Clone, Debug, PartialEq)]
+pub(crate) struct MusicZone {
+    pub winner: Option<MusicZoneWinner>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MusicZoneWinner {
+    /// The record (`file << 32 | index`) and its attribute (sound id).
+    pub record: u64,
+    pub attribute: u64,
+    /// The attribute's `aud_playlists` record key.
+    pub playlist: u64,
+    /// Normalised distance in the zone (0 inside its core).
+    pub distance: f32,
+    pub level: f32,
+}
+
+struct MusicZoneRecord {
+    shape: Shape,
+    id: u64,
+    attribute: u64,
+    playlist: u64,
+    level: f32,
+}
+
+#[derive(Default)]
+pub(super) struct MusicZoneState {
+    map: Option<(String, u64, u64)>,
+    records: Vec<MusicZoneRecord>,
+    /// Reached records in discovery order (the active node list the reverb zones share).
+    active: Vec<usize>,
+}
+
+/// Per frame: the music zones holding the listener and the winner (sub_828EB410): the winner persists across frames;
+/// a reached zone of the winner's attribute keeps the smallest distance, a zone of another attribute takes over, so
+/// among different kinds the last reached wins. NOT RETAIL YET: the playlist preset gate (`+0x648`, 824A2330) passes
+/// every zone (its writer is not found).
+pub(super) fn music_zones(
+    mut state: Local<MusicZoneState>,
+    map: Res<crate::map_transition::CurrentMap>,
+    library: Option<Res<Library>>,
+    listener: Query<&GlobalTransform, With<super::GameAudioListener>>,
+    mut out: ResMut<MusicZone>,
+    content: Res<super::AudioContent>,
+    audio: Res<super::map_audio::MapAudio>,
+) {
+    let Some(library) = library else { return };
+    let state = &mut *state;
+    let identity = (map.name.clone(), map.generation, content.world_generation);
+    if state.map.as_ref() != Some(&identity) || audio.is_changed() {
+        state.records = audio
+            .records(&library)
+            .filter(|(_, r)| r.kind == 4 && r.flags == 0)
+            .filter_map(|(f, r)| {
+                let playlist = u64::from_str_radix(r.playlist.as_deref()?, 16).ok()?;
+                let s = r.scalars;
+                Some(MusicZoneRecord {
+                    shape: Shape { position: Vec3::from(r.position), extent: Vec3::from(r.extent), forward: Vec3::new(s[1], s[2], s[3]), core: s[0] },
+                    id: ((f as u64) << 32) | u64::from(r.index),
+                    attribute: u64::from_str_radix(&r.sound_id, 16).unwrap_or(0),
+                    playlist,
+                    level: r.zone_level.unwrap_or(0.0),
+                })
+            })
+            .collect();
+        state.active.clear();
+        if !state.records.is_empty() {
+            info!("Music zones: {} records on {}", state.records.len(), audio.stem);
+        }
+        state.map = Some(identity);
+        out.winner = None;
+    }
+    let Ok(listener) = listener.single() else { return };
+    let ear = listener.translation();
+    let reached: Vec<Option<f32>> = state.records.iter().map(|z| reach(&z.shape, ear)).collect();
+    state.active.retain(|&i| reached[i].is_some());
+    for (i, hit) in reached.iter().enumerate() {
+        if hit.is_some() && !state.active.contains(&i) {
+            state.active.push(i);
+        }
+    }
+    let mut kind = out.winner.as_ref().map(|w| w.attribute);
+    let mut best: Option<(usize, f32)> = None;
+    for &i in &state.active {
+        let (r, d) = (&state.records[i], reached[i].unwrap_or(1.0));
+        if Some(r.attribute) == kind {
+            if best.is_none_or(|(_, b)| d < b) {
+                best = Some((i, d));
+            }
+        } else {
+            kind = Some(r.attribute);
+            best = Some((i, d));
+        }
+    }
+    let winner = best.map(|(i, d)| {
+        let r = &state.records[i];
+        MusicZoneWinner { record: r.id, attribute: r.attribute, playlist: r.playlist, distance: d, level: r.level }
+    });
+    if out.winner != winner {
+        out.winner = winner;
+    }
+}
+
 /// The reverb-zone emitters (`eVolumeType` 5) the listener is inside this frame, in the order
 /// they were reached (retail's active node list, which `sub_82488278` walks for `SFXObj_Reverb`).
 #[derive(Resource, Default)]

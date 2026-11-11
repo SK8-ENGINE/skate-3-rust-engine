@@ -5200,3 +5200,27 @@ Retail parity for every audio surface tag 0..127, hard and soft wheels: tag → 
 **NOT RETAIL YET.** The screen's starting tab (we start on the Music Player tab in mode 2, else Ambient); a new profile's playlist (every song); Play / Stop / PlayPlaylist / PlayPrevSong, shuffle and saved playlists (not read); the ambient mode's own music (zones, music step 6) is silence for now.
 
 **Verification.** Unit tests: `skate_core::music_player` (4), `music_player_host` (6), `apt_vm` op 0x72; the data-gated menu set test runs every opcode of the installed movies. Desktop run 2026-11-11 (scripted keys: pause menu, Options tab, Down, A, RT, Down, A, X, B; settings folder backed up and restored, hashes identical): the screen opens on Interactive Mode, RT shows Playlist Mode with the 46 songs (title, artist, checkbox) and Volume 100%, entering the list shows X Song On/Off / A Play / B Back, X unchecks the song, A asks to play it, B saves (45 songs, mode 2) and the soundtrack restarts with 45 tracks.
+
+## Music zones
+
+2026-11-11, world/challenges; research `.local/research/music-zones-dj.md` (zones, playlists, the DJ control; Ghidra and the disc vault, checked at the source where noted there).
+
+**Problem.** The Music Player's Interactive Mode (music mode 1) played nothing: retail hands the music to the map's music zones there, which the engine did not run.
+
+**Retail [code, TU3].**
+- `SetMusicMode(1)` -> `sub_82498A80(manager, 4)`: stops the track, sets the manager state (+0x4B4) to 4 and re-arms the environment request (`sub_8249CE90`, which acts only in state 4).
+- Zones: `.ems` records whose attribute has eVolumeType 4 and a playlist (`aud_emitter` RefSpec `442A158E27F2B5AD`). The district `music_*` zones point at `all_outdoor` (25 DJ pieces), one Industrial zone at `deerman_playlist`, three `reverb_*` zones at `all_licensed_outdoor`. The winner (`sub_828EB410`) persists; a zone of its kind keeps the smallest distance, another kind takes over.
+- Chooser (`sub_8249C9E8`): a licensed location playlist (eChannelMapPreset 4) plays at once, its songs in order; a DJ playlist (3) starts a piece when the skater has been at 30 km/h or more inside the zone's core for more than 5 checks (`aud_interactive/default`); a piece ends after its play time (DJSongInfo), then a cooldown; leaving the zone does not cut it; at a x3 multiplier the stinger event plays once per x3 phase (10 s cooldown).
+- UpdateEnvironmentState (`sub_8249D070`): a DJ piece is world.mpf with `dj` = the piece's DJINTERACTIVE value, event 0x15EEFA7; a licensed song is ipod.mpf with `ipod` = the song's value, event 0x416D750; the end event 0x15B4DEF.
+- Song and piece ids map to their values through the image's id tables (`sub_82499938`: IPOD 0x8302E108 in the soundtrack's order, DJINTERACTIVE 0x8302E230); a value is the id's position + 1.
+- DJ control (`sub_8249D578`): the graph's branch control (property 1, 0..127) from the score multiplier tier (`aud_interactive` nomultiplier 15, times15 77, times2 112, times3 111..127, each held for its time, with score bursts), 21 off the board; world.mpf branches at 75.
+
+**Change.**
+- Setup: menu tables `ipod_ids`, `dj_pieces`, `dj_ids` (`skate_data::menu_tables`); the audio manifest's `music_zones` (`audio_export.music_playlists`, `music_interactive`) and the zone records' `playlist` / `zone_level`.
+- `game_audio/emitters.rs` `music_zones`: the zone winner as the `MusicZone` resource.
+- `game_audio/music_zones.rs`: the chooser, piece timer, cooldown, stinger and DJ control; requests the music through `MusicRequest::Queue` (play once for a DJ piece) and `MusicRequest::Control`. `Track::Graph` starts a graph piece by variable and event.
+- Runs only in the Interactive Mode while no mod owns the queue; a content overlay can change zones, playlists and every `aud_interactive` value.
+
+**NOT RETAIL YET.** The playlist preset gate of the zones (`+0x648`, writer not found: every zone passes); which cooldown field ends a piece (2.5 s used); the score burst reads our combo points, not retail's score counter; both skater override flags read as "off the board"; ePlayListMode and the songs' gain / extra fields are not used; the stinger and end events' audible result is untested in game.
+
+**Verification.** Unit tests `game_audio::music_zones` (licensed queue, DJ speed gate and checks, end by time, x2 control, the off-board override), `test_music_zones.py`, the data-gated `menu_tables` test (46 soundtrack ids, 25 DJ pieces on the TU3 image and the disc). Desktop runs 2026-11-11 (install refreshed with the zone data, music mode 1, settings folder restored and hash-checked): Industrial at the old factory: 23 music zones load, the deerman zone wins and its licensed playlist plays soundtrack song 27 (id 0x85D8D240, the playlist's one song); DownTown with the test autopilot: 26 zones load and once it rides at about 37 km/h inside an `all_outdoor` zone the world graph starts DJ piece 6. A whole piece (115 to 370 s) and the stinger were not reached in these runs.

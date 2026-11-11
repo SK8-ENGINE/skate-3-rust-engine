@@ -201,6 +201,16 @@ pub struct MenuTables {
     /// `IPOD_INVALID`, research b1015): the localised `IPOD_<NAME>_ARTIST` / `_TITLE` / `_ALBUM` keys.
     #[serde(default)]
     pub ipod_tracks: Vec<String>,
+    /// The playlist song id of each soundtrack track, same order (the IPOD id table after the names, 0x8302E108;
+    /// research music-zones-dj §7): an `aud_playlists` IPodSongInfo id -> track k = position + 1.
+    #[serde(default)]
+    pub ipod_ids: Vec<u32>,
+    /// The DJ world music pieces (names after `DJ_INTERACTIVE_INVALID`, e.g. `Del_Beastin_Main`; 0x8302E1C8) and their playlist ids (0x8302E230): a
+    /// DJSongInfo id -> the world.mpf `dj` value = position + 1.
+    #[serde(default)]
+    pub dj_pieces: Vec<String>,
+    #[serde(default)]
+    pub dj_ids: Vec<u32>,
     /// Table addresses in this build (diagnostics only).
     pub addresses: std::collections::BTreeMap<String, String>,
 }
@@ -900,6 +910,33 @@ fn speakers(img: &Image) -> Result<(u32, Vec<String>), String> {
 
 /// The IPOD enum's names: the pointer table that starts with `IPOD_INVALID`; the names after it up to the first
 /// entry that is not a string. Empty when the table is not found (the now-playing popup then stays off).
+/// The ids registered with an enum name table (sub_82499938): an array of u32 at the first 8-byte boundary after the
+/// `count` name pointers that start at `names_at`, the first (the INVALID entry) 0; one id per name after it.
+fn enum_ids(img: &Image, names_at: u32, count: usize) -> Vec<u32> {
+    let end = names_at + 4 * (count as u32 + 1);
+    let at = (end + 7) & !7;
+    if names_at == 0 || img.word(at) != Some(0) {
+        return Vec::new();
+    }
+    (1..=count as u32).map_while(|i| img.word(at + 4 * i)).collect()
+}
+
+/// The DJ world music piece names: the pointer table that starts with `DJ_INTERACTIVE_INVALID`.
+fn dj_pieces(img: &Image) -> (u32, Vec<String>) {
+    // Names may hold spaces ("Del_Prototype 3_Main"); the list ends at the id table's first word (0).
+    let named = |at: u32| img.string_at(at).filter(|s| !s.is_empty());
+    img.pointers_to_string("DJ_INTERACTIVE_INVALID").into_iter().find_map(|start| {
+        let mut names = Vec::new();
+        let mut cursor = start + 4;
+        while let Some(name) = named(cursor) {
+            if names.len() > 200 { return None; }
+            names.push(name);
+            cursor += 4;
+        }
+        (!names.is_empty()).then_some((start, names))
+    }).unwrap_or_default()
+}
+
 fn ipod_tracks(img: &Image) -> (u32, Vec<String>) {
     let named = |at: u32| img.string_at(at).filter(|s| !s.is_empty());
     img.pointers_to_string("IPOD_INVALID").into_iter().find_map(|start| {
@@ -928,6 +965,9 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
     let (stats_at, career_stats) = career_stats(&img)?;
     let (speakers_at, speakers) = speakers(&img)?;
     let (ipod_at, ipod_tracks) = ipod_tracks(&img);
+    let ipod_ids = enum_ids(&img, ipod_at, ipod_tracks.len());
+    let (dj_at, dj_pieces) = dj_pieces(&img);
+    let dj_ids = enum_ids(&img, dj_at, dj_pieces.len());
     if modes.is_empty() {
         return Err("no per-mode crossbar menus found".into());
     }
@@ -947,6 +987,7 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
         ("career_stats", stats_at),
         ("speakers", speakers_at),
         ("ipod_tracks", ipod_at),
+        ("dj_pieces", dj_at),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), hex(v)))
@@ -968,6 +1009,9 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
         career_stats,
         speakers,
         ipod_tracks,
+        ipod_ids,
+        dj_pieces,
+        dj_ids,
         addresses,
     })
 }
