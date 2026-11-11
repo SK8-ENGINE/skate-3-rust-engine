@@ -482,14 +482,6 @@ fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, start: egui::layers
     let (w, h, hx, cy) = (panel.width(), panel.height(), panel.right(), panel.center().y);
     let dist = w * 2.0;
     let scale = move |u: f32| dist / (dist + 0.6 * u * w * sin);
-    if open <= 0.01 {
-        ctx.graphics_mut(|g| {
-            let list = g.entry(layer);
-            for i in start.0..list.next_idx().0 { list.reset_shape(egui::layers::ShapeIdx(i)); }
-        });
-        panel_edge(painter, hx, cy, h, scale(1.0), w * 0.09 * sin);
-        return;
-    }
     let warp = move |p: Pos2| { let u = (hx - p.x) / w; let k = scale(u); pos2(hx - u * w * cos * k, cy + (p.y - cy) * k) };
     let ppp = ctx.pixels_per_point();
     let opts = ctx.tessellation_options(|o| *o);
@@ -518,32 +510,31 @@ fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, start: egui::layers
     });
     let dark = (170.0 * sin.max(0.0)) as u8;
     if dark > 0 {
-        let (s1, x1) = (scale(1.0), warp(pos2(panel.left(), cy)).x);
-        painter.add(Shape::convex_polygon(vec![pos2(x1, cy - h / 2.0 * s1), pos2(hx, panel.top()), pos2(hx, panel.bottom()), pos2(x1, cy + h / 2.0 * s1)], argb(dark, 0, 0, 0), Stroke::NONE));
+        let q = [panel.left_top(), panel.right_top(), panel.right_bottom(), panel.left_bottom()].map(warp);
+        painter.add(Shape::convex_polygon(q.to_vec(), argb(dark, 0, 0, 0), Stroke::NONE));
     }
     if sin > 0.0 {
-        let x1 = warp(pos2(panel.left(), cy)).x;
-        panel_edge(painter, x1, cy, h, scale(1.0), w * 0.09 * sin * scale(1.0));
+        // The hinge end of a panel `depth` thick: turned away, it faces you on the right of the front face.
+        let depth = w * 0.06;
+        let back_s = dist / (dist + 0.6 * depth * cos);
+        hinge_side(painter, hx, hx + depth * sin * back_s, cy, h / 2.0, h / 2.0 * back_s, dark);
     }
 }
 
-/// The panel's free edge seen as it turns (mine, not in the classic): the side of a solid screen `depth` wide on the
-/// outside of the front face's edge at `x`, front and back shells with a seam between them, rounded off at the top
-/// and bottom, its far side a little smaller in perspective.
-fn panel_edge(painter: &egui::Painter, x: f32, cy: f32, h: f32, s: f32, depth: f32) {
-    if depth < 0.5 { return; }
-    let half = h / 2.0 * s;
-    // The far side is a little smaller (further away); the corners are rounded off by a chamfer.
-    let far = half * (1.0 - 0.05 * (depth / (h * s)).min(1.0));
-    let chamfer = (depth * 0.35).min(half * 0.15);
-    let stops = [(0.0, Color32::from_rgb(122, 125, 134)), (0.08, Color32::from_rgb(86, 89, 98)), (0.46, Color32::from_rgb(62, 64, 71)),
-                 (0.5, Color32::from_rgb(14, 15, 18)), (0.54, Color32::from_rgb(58, 60, 67)), (1.0, Color32::from_rgb(28, 29, 33))];
-    let y = |t: f32| half + (far - half) * t - chamfer * (2.0 * t - 1.0).abs().powi(4);
+/// The panel's hinge-end side (mine, not in the classic): a solid face from the front face's right edge at `x0` to the
+/// back at `x1`, front shell, seam and back shell across it, its corners rounded like the panel's, darker as it turns.
+fn hinge_side(painter: &egui::Painter, x0: f32, x1: f32, cy: f32, half0: f32, half1: f32, dark: u8) {
+    if x1 - x0 < 0.5 { return; }
+    let stops = [(0.0, Color32::from_rgb(120, 123, 132)), (0.1, Color32::from_rgb(82, 85, 94)), (0.46, Color32::from_rgb(60, 62, 69)),
+                 (0.5, Color32::from_rgb(14, 15, 18)), (0.54, Color32::from_rgb(56, 58, 65)), (1.0, Color32::from_rgb(30, 31, 35))];
+    let round = (x1 - x0).min(half0 * 0.08);
+    let y = |t: f32| half0 + (half1 - half0) * t - round * (1.0 - (1.0 - (2.0 * t - 1.0).powi(2)).max(0.0).sqrt());
+    let shade = |c: Color32| lerp(c, Color32::BLACK, dark as f32 / 255.0 * 0.5);
     let mut mesh = egui::Mesh::default();
     for (t, c) in stops {
-        let px = x - depth * t;
-        mesh.colored_vertex(pos2(px, cy - y(t)), c);
-        mesh.colored_vertex(pos2(px, cy + y(t)), c);
+        let px = x0 + (x1 - x0) * t;
+        mesh.colored_vertex(pos2(px, cy - y(t)), shade(c));
+        mesh.colored_vertex(pos2(px, cy + y(t)), shade(c));
     }
     for i in 0..(stops.len() as u32 - 1) {
         let (a, b, c, d) = (2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 3);
@@ -551,9 +542,10 @@ fn panel_edge(painter: &egui::Painter, x: f32, cy: f32, h: f32, s: f32, depth: f
         mesh.add_triangle(a, d, c);
     }
     painter.add(Shape::mesh(mesh));
-    let outline: Vec<Pos2> = stops.iter().map(|(t, _)| pos2(x - depth * t, cy - y(*t))).chain(stops.iter().rev().map(|(t, _)| pos2(x - depth * t, cy + y(*t)))).collect();
+    let outline: Vec<Pos2> = stops.iter().map(|(t, _)| pos2(x0 + (x1 - x0) * t, cy - y(*t))).chain(stops.iter().rev().map(|(t, _)| pos2(x0 + (x1 - x0) * t, cy + y(*t)))).collect();
     painter.add(Shape::closed_line(outline, Stroke::new(1.0_f32, argb(150, 0, 0, 0))));
 }
+
 
 /// Splits triangles wider than `max_w` so colours and textures follow the perspective (the classic's 48 strips).
 fn subdivide(mesh: epaint::Mesh, max_w: f32) -> epaint::Mesh {
