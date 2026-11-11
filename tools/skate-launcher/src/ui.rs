@@ -1299,7 +1299,8 @@ impl eframe::App for App {
         }
         let t = self.opened.elapsed().as_secs_f32();
         if let Some(out) = self.snapshot.clone() {
-            if t > 2.0 && !self.snapshot_asked {
+            // After the wear texture is in (it builds off the window thread).
+            if t > 2.0 && !self.snapshot_asked && self.wear.is_some() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
                 self.snapshot_asked = true;
             }
