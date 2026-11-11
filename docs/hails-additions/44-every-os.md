@@ -111,6 +111,26 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   and the screen coming on. `--snapshot <out.png>` renders one frame of the window into a PNG and exits (checked on
   the desktop). Still to come for the look: the wear marks and the sticker, the rolling board on the LCD, the
   standby fold around a game, the two-column tiles, the splash.
+- 2026-11-10, the camcorder redone as a faithful port of the C# drawing code (`camcorder.rs`: LcdPanel / LcdCanvas,
+  .NET `System.Random` ported so seeded layouts match; GDI text padding and font sizes), checked side by side with the
+  C# `--snapshot` at seeds 1, 7, 42 and 2026.
+- 2026-11-10, wear and sticker (`wear.rs`, port of RollMarks / DrawMarks / MarkerTag / Doodle / GaffTape / the
+  sticker code, tiny-skia masks for GDI regions, ttf-parser glyph outlines). The wear rolls a new seed every launch;
+  the sticker is fixed per install (`camcorder-sticker.txt`). New past the C# window, so the wear sits in the plastic:
+  marker ink that streaks and shows pores, the panel's top-down light on the marks and the sticker, grain, dirt along
+  the lip and the gasket, a faint sheen; scratches as tapered gouges with hairlines; rubbed edges as bare plastic;
+  stickers with paper grain, print rubbed thin in patches and dirt at the edge.
+- 2026-11-10, stickers: 30 original skate-culture parody designs (`wear/stickers.rs`) with 4 colour / text
+  variations each, and 100 sticker wear patterns (peel side, scuffs, chips, rubbed print) rolled per install
+  independently of the design. About half the designs lean on looks and jokes many women skaters pick (a woman
+  skater in the filmer's riso style, cherries, band-aid heart, Y2K sparkle, butterfly bearings, evil eye...); a new
+  install rolls that set or the rest 50/50. No gender-label stickers. `camcorder-sticker.txt` gains a 7th field (the
+  variation); six-field files still load. `--sticker-sheet <png> [design]` renders the designs as clean previews
+  (no peel or wear), as the coming Tools sticker picker will.
+- 2026-11-10, window: fixed 1240 x 760 (not resizable, no maximise), centred; snapshots print their image, window
+  and scale sizes (`SNAPSHOT_SIZE`). One earlier snapshot came out 1440 x 789 while the window was resizable.
+- Next: wear that builds with use (clean at first, more scuffs and graffiti over time), the sticker picker in Tools,
+  more character stickers.
 
 ### Spec of the current launcher
 

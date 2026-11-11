@@ -63,7 +63,6 @@ struct Page {
     items: Vec<Item>,
     sel: usize,
     body: Vec<String>,
-    mono: bool,
 }
 
 /// A running job's state, filled by the reader thread from the child's output (doc 44a 1e).
@@ -79,6 +78,8 @@ struct JobState {
     waiting: Option<String>,
     stage: String,
     done: Option<i32>,
+    commit: String,
+    ended: Option<bool>,
 }
 
 struct Job {
@@ -104,6 +105,9 @@ pub struct App {
     opened: Instant,
     snapshot: Option<PathBuf>,
     snapshot_asked: bool,
+    hover: Option<crate::camcorder::Key>,
+    wear: Option<egui::TextureHandle>,
+    snapshot_seed: i32,
 }
 
 /// Runs a backend command and returns its lines (short query commands).
@@ -121,10 +125,13 @@ fn feed(s: &mut JobState, line: &str) {
     let f: Vec<&str> = line.split('\t').collect();
     match f.first().copied() {
         Some("LAUNCHER_BUILD") => match f.get(1).copied() {
-            Some("begin") => s.building = Some(f.get(2).copied().unwrap_or_default().to_owned()),
+            Some("begin") => {
+                s.building = Some(f.get(2).copied().unwrap_or_default().to_owned());
+                s.commit = f.get(3).copied().unwrap_or_default().to_owned();
+            }
             Some("wait") => s.waiting = Some(f.get(3).copied().unwrap_or_default().to_owned()),
             Some("waitend") => s.waiting = None,
-            Some("end") => s.building = None,
+            Some("end") => s.ended = Some(f.get(2).copied() == Some("0")),
             _ => {}
         },
         Some("LAUNCHER_WAIT") => match f.get(1).copied() {
@@ -172,7 +179,7 @@ impl App {
     pub fn new(exe: PathBuf, state_dir: PathBuf, direct: Vec<String>) -> App {
         let mut app = App {
             exe, state_dir, pages: Vec::new(), job: None, status: Vec::new(), gilrs: gilrs::Gilrs::new().ok(),
-            last_nav: Instant::now(), hidden: false, wizard: Vec::new(), direct_close: None, opened: Instant::now(), snapshot: None, snapshot_asked: false,
+            last_nav: Instant::now(), hidden: false, wizard: Vec::new(), direct_close: None, opened: Instant::now(), snapshot: None, snapshot_asked: false, hover: None, wear: None, snapshot_seed: 3,
         };
         if !direct.is_empty() {
             app.start_direct(direct);
@@ -217,6 +224,17 @@ impl App {
         }
     }
 
+    /// `--snapshot-page`: the page the snapshot shows (main, play, tools), on top of the start pages' main screen.
+    fn snapshot_page(&mut self, page: Option<&str>) {
+        let Some(page) = page else { return };
+        self.pages.truncate(1);
+        match page {
+            "play" => self.open(PageKind::Play),
+            "tools" => self.open(PageKind::Tools),
+            _ => {}
+        }
+    }
+
     fn refresh_status(&mut self) {
         self.status = query(&self.exe, &["status"]).iter().filter_map(|l| l.split_once('\t').map(|(k, v)| (k.to_owned(), v.to_owned()))).collect();
     }
@@ -241,17 +259,18 @@ impl App {
         let version = self.status_of("version").unwrap_or_default().to_owned();
         let launcher = self.status_of("launcher").unwrap_or_default();
         let newer = self.status_of("launcher_newer").unwrap_or_default();
-        let title = if newer.is_empty() { format!("Skate launcher  {launcher}") } else { format!("Skate launcher  {launcher} (newer: {newer})") };
+        let _ = (launcher, newer);
+        let title = "Skate launcher".to_owned();
         Page {
             kind: PageKind::Main, title,
             items: vec![
-                item(&format!("Play: {version}"), self.status_of("version_status").unwrap_or_default(), true, Action::Open(PageKind::Play)),
-                item("Versions", "Choose which version Play starts.", true, Action::Open(PageKind::Versions)),
-                item("What to test", "The selected version's notes.", true, Action::Job(vec!["notes".into()])),
-                item("Recomp", if has("recomp") { "Skate 3 Recompiled with trace options." } else { "Not set up: recomp_entries in config.json." }, has("recomp"), Action::Open(PageKind::Recomp)),
-                item("RPCS3", if has("retail") { "Retail Skate 3 in RPCS3." } else { "Not set up: rpcs3_entries in config.json." }, has("retail"), Action::Open(PageKind::Retail)),
-                item("Tools", "Refresh, build, DLC, settings, setup, clear builds.", true, Action::Open(PageKind::Tools)),
-                item("Last session", self.status_of("last").unwrap_or_default(), true, Action::Open(PageKind::Text)),
+                item(&format!("Play: {version}"), &format!("Our engine, the selected version ({}).", self.status_of("version_status").unwrap_or_default()), true, Action::Open(PageKind::Play)),
+                item("Versions", "Pick the build Play starts.", true, Action::Open(PageKind::Versions)),
+                item("What to test", "What changed and what to try.", true, Action::Job(vec!["notes".into()])),
+                item("Recomp", if has("recomp") { "Recompiled retail, traced or not." } else { "Not set up (see README.md)." }, has("recomp"), Action::Open(PageKind::Recomp)),
+                item("RPCS3", if has("retail") { "The PS3 game in RPCS3." } else { "Not set up (see README.md)." }, has("retail"), Action::Open(PageKind::Retail)),
+                item("Tools", "Game files, builds, logs, recomp, setup.", true, Action::Open(PageKind::Tools)),
+                item("Last session", "What was checked and sent.", true, Action::Open(PageKind::Text)),
                 item("Exit", "Close the launcher.", true, Action::Exit),
             ],
             ..Default::default()
@@ -415,9 +434,9 @@ impl App {
 
     fn open(&mut self, kind: PageKind) {
         let page = match kind {
-            PageKind::Play => self.entry_page(kind, "rust", "Play"),
+            PageKind::Play => self.entry_page(kind, "rust", &format!("Play: {}", self.status_of("version").unwrap_or_default())),
             PageKind::Recomp => self.entry_page(kind, "recomp", "Recomp"),
-            PageKind::Retail => self.entry_page(kind, "retail", "RPCS3"),
+            PageKind::Retail => self.entry_page(kind, "retail", "Retail Skate 3 (RPCS3)"),
             PageKind::Tools => self.entry_page(kind, "tools", "Tools"),
             PageKind::OptIns | PageKind::Settings => self.settings_page(kind),
             PageKind::Versions => self.versions_page(),
@@ -627,8 +646,8 @@ impl App {
     }
 }
 
-fn text_page(title: &str, body: Vec<String>, mono: bool) -> Page {
-    Page { kind: PageKind::Text, title: title.into(), body, mono, ..Default::default() }
+fn text_page(title: &str, body: Vec<String>, _mono: bool) -> Page {
+    Page { kind: PageKind::Text, title: title.into(), body, ..Default::default() }
 }
 
 /// Ends a job's whole process tree (a build's cargo, a game).
@@ -668,6 +687,8 @@ impl eframe::App for App {
             }
             let shot = ctx.input(|i| i.events.iter().find_map(|e| match e { egui::Event::Screenshot { image, .. } => Some(image.clone()), _ => None }));
             if let Some(img) = shot {
+                let (screen, ppp, inner) = ctx.input(|i| (i.content_rect(), i.pixels_per_point(), i.viewport().inner_rect));
+                println!("SNAPSHOT_SIZE image {}x{} screen {:?} ppp {ppp} inner {inner:?}", img.size[0], img.size[1], screen.size());
                 let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
                 let _ = image::save_buffer(&out, &rgba, img.size[0] as u32, img.size[1] as u32, image::ColorType::Rgba8);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -677,35 +698,63 @@ impl eframe::App for App {
         if t < 1.5 {
             ctx.request_repaint();
         }
+        if self.wear.is_none() {
+            // The sticker stays the same per install; the wear rolls a new seed every launch (user 2026-11-10). A
+            // snapshot uses its seed for both.
+            let snap = self.snapshot.is_some().then_some(self.snapshot_seed);
+            let spec = crate::wear::sticker_spec(&self.state_dir, snap);
+            let marks_seed = snap.unwrap_or_else(crate::wear::launch_seed);
+            let px = crate::wear::render(&spec, marks_seed);
+            let img = egui::ColorImage::from_rgba_premultiplied([px.width() as usize, px.height() as usize], px.data());
+            self.wear = Some(ctx.load_texture("wear", img, egui::TextureOptions::LINEAR));
+        }
+        let wear_id = self.wear.as_ref().map(|t| t.id());
         let mut hits = crate::camcorder::Hits::default();
+        let status = |k: &str| self.status.iter().find(|(x, _)| x == k).map_or(String::new(), |(_, v)| v.clone());
+        let (version, version_status, last, send) = (status("version"), status("version_status"), status("last"), status("send"));
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
             let job_state = self.job.as_ref().and_then(|j| j.state.lock().ok().map(|s| (j, s)));
             let job_view = job_state.as_ref().map(|(j, s)| crate::camcorder::JobView {
-                title: &j.title, progress: s.progress, krate: &s.krate, compiled: s.compiled, warnings: s.warnings,
-                waiting: s.waiting.as_deref(), stage: &s.stage, lines: s.lines.iter().map(String::as_str).collect(), elapsed: j.started.elapsed().as_secs_f32(),
+                title: &j.title, building: s.building.as_deref(), commit: &s.commit, progress: s.progress, compiled: s.compiled,
+                warnings: s.warnings, now: &s.krate, waiting: s.waiting.as_deref(), stage: &s.stage, ended: s.ended,
+                error: &s.first_error, lines: s.lines.iter().map(String::as_str).collect(), elapsed: j.started.elapsed().as_secs_f32(),
             });
             let empty = Page::default();
             let page = self.pages.last().unwrap_or(&empty);
             let item = page.items.get(page.sel);
-            let entry_page = matches!(page.kind, PageKind::Play | PageKind::Recomp | PageKind::Retail | PageKind::Tools);
+            let body = (!page.body.is_empty()).then(|| page.body.join("\n"));
             let view = crate::camcorder::View {
-                title: if job_view.is_some() { "RECORDING" } else { &page.title },
-                items: page.items.iter().map(|i| (i.text.trim_start_matches("> ").trim_start(), i.on, i.text.starts_with("> "))).collect(),
-                sel: page.sel, body: &page.body, mono: page.mono,
-                hint: item.map_or("", |i| i.hint.as_str()), ready: if entry_page { item.map(|i| i.on) } else { None },
-                info: item.map_or("", |i| i.info.as_str()), records: item.map_or(&[][..], |i| i.records.as_slice()),
-                recording: job_view.is_some(), seconds: job_state.as_ref().map_or(0.0, |(j, _)| j.started.elapsed().as_secs_f32()),
-                job: job_view,
+                main: page.kind == PageKind::Main, title: &page.title,
+                items: page.items.iter().map(|i| (i.text.as_str(), i.on)).collect(), sel: page.sel,
+                body, mono: None,
+                info: item.map_or("", |i| i.info.as_str()), hint: item.map_or("", |i| i.hint.as_str()),
+                records: item.map_or(&[][..], |i| i.records.as_slice()),
+                version: &version, version_status: &version_status, last: &last, send: &send,
+                recording: job_view.is_some(), tape: job_state.as_ref().map_or(0.0, |(j, _)| j.started.elapsed().as_secs_f32()),
+                job: job_view, splash: None, hover: self.hover, cancel_armed: self.job.as_ref().is_some_and(|j| j.cancel_presses == 1),
+                close_in: self.direct_close.map(|c| c.saturating_duration_since(Instant::now()).as_secs() as u32),
             };
-            hits = crate::camcorder::paint(ui, &view, crate::camcorder::swing(t), crate::camcorder::screen_level(t));
+            hits = crate::camcorder::paint(ui, &view, t, crate::camcorder::panel_open(t), crate::camcorder::screen_level(t), wear_id);
         });
+        self.hover = hits.hover;
         if hits.drag {
             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
-        match hits.key {
-            Some(crate::camcorder::Key::Power) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-            Some(crate::camcorder::Key::Home) if self.job.is_none() => self.back(ctx),
-            Some(crate::camcorder::Key::Set) if self.job.is_none() => self.activate(ctx),
+        use crate::camcorder::Key;
+        match (hits.key, self.job.is_some()) {
+            (Some(Key::Power), _) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            (Some(Key::Menu), false) => self.back(ctx),
+            (Some(Key::Menu), true) => self.job_frame(ctx, true),
+            (Some(Key::Up | Key::Left), false) => self.nav(-1),
+            (Some(Key::Down | Key::Right), false) => self.nav(1),
+            (Some(Key::A), false) => self.activate(ctx),
+            (Some(Key::Play), false) => {
+                if self.pages.last().is_some_and(|p| p.kind == PageKind::Main) {
+                    self.begin("rust-play", "");
+                } else {
+                    self.activate(ctx);
+                }
+            }
             _ => {}
         }
         if let (Some(i), None) = (hits.item, &self.job) {
@@ -716,18 +765,21 @@ impl eframe::App for App {
         }
     }
 
+
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
     }
 }
 
 /// Opens the window. `direct`: launch options (`entry [label] [@version]`) that run at once and close afterwards.
-pub fn run(state_dir: PathBuf, direct: Vec<String>, snapshot: Option<PathBuf>) -> Result<(), String> {
+pub fn run(state_dir: PathBuf, direct: Vec<String>, snapshot: Option<PathBuf>, snapshot_page: Option<String>, snapshot_seed: Option<i32>) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_title("Skate launcher").with_inner_size([1116.0, 684.0])
+        viewport: egui::ViewportBuilder::default().with_title("Skate launcher").with_inner_size([1240.0, 760.0])
+            .with_min_inner_size([1240.0, 760.0]).with_max_inner_size([1240.0, 760.0]).with_resizable(false).with_maximize_button(false)
             .with_transparent(true).with_decorations(false),
+        centered: true,
         ..Default::default()
     };
-    eframe::run_native("Skate launcher", options, Box::new(move |_| { let mut app = App::new(exe, state_dir, direct); app.snapshot = snapshot; Ok(Box::new(app)) })).map_err(|e| e.to_string())
+    eframe::run_native("Skate launcher", options, Box::new(move |cc| { crate::camcorder::install_fonts(&cc.egui_ctx); let mut app = App::new(exe, state_dir, direct); app.snapshot = snapshot; app.snapshot_seed = snapshot_seed.unwrap_or_else(crate::wear::launch_seed); if app.snapshot.is_some() { println!("SNAPSHOT_SEED {}", app.snapshot_seed); } app.snapshot_page(snapshot_page.as_deref()); Ok(Box::new(app)) })).map_err(|e| e.to_string())
 }
