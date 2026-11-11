@@ -59,6 +59,7 @@ pub fn save_result(l: &Launcher, text: &str) {
 /// Runs a play script (PLAY.bat through cmd on Windows, PLAY.sh elsewhere) and waits for the game tree.
 fn run_script(script: &Path, arg: &str, envs: &[(String, String)]) {
     let mut c = if cfg!(windows) {
+        #[allow(unused_mut)]
         let mut c = crate::proc::cmd("cmd.exe");
         let mut line = format!("\"\"{}\"", script.display());
         if !arg.is_empty() {
