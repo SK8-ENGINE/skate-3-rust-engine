@@ -65,7 +65,7 @@ asking for the task it describes, or by name (for example `/regression-check`).
 | `audio-tuning/tools` | `check_sets_vs_trace.py`, `long_run_stats.py`, `check_bed_level.py` (world audio vs recomp traces) |
 | `audio-autotest/tools` | `audio_mod_autotest.ps1` (the autotest runner) |
 | `living-world/tools` | `render_glb.py` (offscreen render of a converted model) |
-| `ghidra/tools` | `decompile.ps1` (pseudocode for a batch of addresses), `ghidra_headless.ps1` (AnalyzeHeadless without the .bat), `scripts/DecompileAt.java` (the post-script) |
+| `ghidra/tools` | `decompile.ps1` (pseudocode for a batch of addresses), `dump.ps1` (bytes / words / strings at addresses), `find-refs.ps1` (references and raw word matches), `find-strings.ps1` (where a C string sits and who uses it), `apply-names.ps1` (load a function names TSV, default the repo's `tools/ghidra/skate3-tu3` list), `ghidra_headless.ps1` (AnalyzeHeadless without the .bat; `GHIDRA_PRIORITY=Idle` for low priority), `scripts/` (the post-scripts: DecompileAt, DumpAt, FindRefs, FindStrings, FindImm64, ApplyNames) |
 | `retail-menus/tools` | `apt_dump.py` (an exported menu movie's actions as text, pool names resolved), `check_trick_clips.sh` (Trick Guide demo clips: names, decode, posture) |
 | `bom-sanitise/tools` | `bom_scrub.py` (scan / staged / msg / log / stdin; `--fix` strips, exit code 1 on findings) |
 | `setup-bench/tools` | `setup_bench.py` (timed full setup into a scratch base plus a sha256 manifest of the install) |

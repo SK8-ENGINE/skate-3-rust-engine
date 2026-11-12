@@ -19,6 +19,10 @@ pub(crate) struct EndDialogScreen {
     pub available: bool,
     /// The results table (a race's RACE_TIMES, skate-core `challenges::results`); None for families without one.
     pub results: Option<skate_core::challenges::results::ResultsView>,
+    /// The other results block and its slots (a contest's round results / standings), for Next / Previous.
+    pub other: Option<([u32; 4], skate_core::challenges::results::ResultsView)>,
+    /// A page changed: the stage refills the shown movie (SetState 6).
+    pub refill: bool,
 }
 
 impl EndDialogScreen {
@@ -32,6 +36,14 @@ impl EndDialogScreen {
         let action = self.dialog.press(slot);
         if action == Action::Nothing {
             return None;
+        }
+        if action == Action::Page {
+            let (slots, view) = self.other.take()?;
+            let results = self.results.take().unwrap_or_default();
+            self.other = Some((std::mem::replace(&mut self.dialog.slots, slots), results));
+            self.results = Some(view);
+            self.refill = true;
+            return Some(action);
         }
         self.choice = Some(action);
         self.open = false;
@@ -80,7 +92,8 @@ impl EndDialogHost {
             ("HUDComponents", "Results_GetNumPlayers") => Value::Number(self.results.as_ref().map_or(0, |r| r.rows.len()) as f64),
             ("HUDComponents", "Results_GetLayoutType") => Value::Number(self.results.as_ref().map_or(0, |r| r.layout) as f64),
             ("HUDComponents", "Results_GetSelfRank") => Value::Number(self.results.as_ref().map_or(0, |r| r.self_rank()) as f64),
-            ("HUDComponents", "Results_GetThrowdownType") | ("HUDComponents", "Results_GetLeaderboardType") => Value::Number(0.0),
+            ("HUDComponents", "Results_GetThrowdownType") => Value::Number(0.0),
+            ("HUDComponents", "Results_GetLeaderboardType") => Value::Number(self.results.as_ref().map_or(0, |r| r.active_menu) as f64),
             ("HUDComponents", "Results_GetLeaderboardColTitle") => {
                 let c = match args.first() {
                     Some(Value::Number(n)) if *n >= 0.0 => *n as usize,
@@ -156,5 +169,19 @@ mod tests {
         assert_eq!(screen.press(0), Some(Action::Continue));
         assert!(!screen.open);
         assert_eq!(screen.choice, Some(Action::Continue));
+    }
+
+    #[test]
+    fn next_and_previous_swap_the_result_blocks_and_refill() {
+        use skate_core::challenges::end_dialog::{CONTINUE, NEXT, NONE, PREVIOUS};
+        use skate_core::challenges::results::ResultsView;
+        let view = |menu| ResultsView { active_menu: menu, ..Default::default() };
+        let mut screen = EndDialogScreen { open: true, dialog: EndDialog { passed: true, slots: [NEXT, NONE, NONE, NONE], ..Default::default() },
+            results: Some(view(1)), other: Some(([CONTINUE, PREVIOUS, NONE, NONE], view(0))), ..Default::default() };
+        assert_eq!(screen.press(0), Some(Action::Page));
+        assert!(screen.open && screen.refill && screen.choice.is_none());
+        assert_eq!((screen.dialog.slots[1], screen.results.as_ref().unwrap().active_menu), (PREVIOUS, 0));
+        assert_eq!(screen.press(1), Some(Action::Page));
+        assert_eq!((screen.dialog.slots[0], screen.results.as_ref().unwrap().active_menu), (NEXT, 1));
     }
 }

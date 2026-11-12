@@ -129,7 +129,9 @@ WAIT_LOCATION = _field('WaitLocation')
 ROUND_BOUNDARY = _field('RoundBoundary')
 SPOT_VOLUMES = _field('SpotVolumes')
 ROUND_PATHS = _field('Paths')
+RESULT_COLUMNS = [_field('ResultsScreenHALIDCol%d' % i) for i in (1, 2, 3)]
 MUSIC_TYPE = 'Hash_44754347A934FDCD'  # eChallengeMusicType (research music-challenges section 6)
+MUSIC_PLAYLIST = 'Hash_874EC914B4D34708'  # the challenge's aud_playlists RefSpec (8248B258; default 614B4D4D82510720)
 ONLINE_COMPETITORS = 'Hash_598056F37D38D27A'
 
 
@@ -666,7 +668,10 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
                 start=locator(r, START), wait=locator(r, WAIT_LOCATION),
                 boundary=volume_name(bytes.fromhex(boundary)) if boundary else None,
                 spot_volumes=[n for n in (volume_name(bytes.fromhex(i)) for i in spots) if n],
-                ai_paths=names))
+                result_columns=[(r.get(c) or {}).get('data') or '' for c in RESULT_COLUMNS],
+                ai_paths=dict(names=names,
+                              all_paths=struct.unpack_from('>I', paths, 0x320)[0] == 1 if len(paths) >= 0x328 else True,
+                              param=struct.unpack_from('>I', paths, 0x324)[0] if len(paths) >= 0x328 else 0)))
         if not rounds:
             raise ValueError('no ContestRounds')
 
@@ -679,8 +684,39 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
 
         world = int((fields.get(WORLD) or {}).get('data', '0' * 16)[:16], 16)
         district = next((d for d, _ in global_locators() if hash64(d) == world), None)
+        # The start locators sit in the contest's hull (missions/<key>), else in the district's locators.
+        hull = None
+        if key in hulls:
+            hull = work / 'hulls' / MISSIONS / key
+            if not hull.is_dir():
+                hulls[key][0].extract_entries(hulls[key][1], work / 'hulls')
+        for r in rounds:
+            found = [rec['matrix'] for _, _, arena in stream_arenas(hull) for rec in location_records(arena)
+                     if rec['locator'] == r['start']] if hull and r['start'] else []
+            source = hull if found else None
+            if not found and r['start']:
+                # Some rows name another contest's locators (street_dtwn_01 uses street_dwtn_02's): that contest's hull.
+                for other in sorted((h for h in hulls if r['start'].startswith(h + '_')), key=len, reverse=True):
+                    folder = work / 'hulls' / MISSIONS / other
+                    if not folder.is_dir():
+                        hulls[other][0].extract_entries(hulls[other][1], work / 'hulls')
+                    found = [rec['matrix'] for _, _, arena in stream_arenas(folder) for rec in location_records(arena)
+                             if rec['locator'] == r['start']]
+                    if found:
+                        source = folder
+                        break
+            if not found and district and r['start']:
+                found = global_locators().get((district.casefold(), r['start']), [])
+            r['start_matrix'] = found[0] if len({json.dumps(m) for m in found}) == 1 else None
+            # setup_round: AI.RepositionAI(id, CurRound.StartLocation, id, ...) (contest_shared @430-442): competitor n
+            # stands on child n of the start locator, like the race heats (b992); the player is 0.
+            r['start_slots'] = next((s for _, _, arena in stream_arenas(source) for s in [locator_slots(arena, r['start'])] if s),
+                                    []) if source and r['start'] else []
+        # The challenge's music playlist (8248B258 reads challenge attrib 874EC914B4D34708; default 614B4D4D82510720).
+        playlist = (params.get(MUSIC_PLAYLIST) or fields.get(MUSIC_PLAYLIST) or {}).get('data') or ''
         title_id = (fields.get(TITLE) or {}).get('data') or None
         return dict(
+            music_playlist=playlist[16:32].upper() if len(playlist) >= 32 else '614B4D4D82510720',
             id=key, family=family, demo=family == 'demos', map=label_of(district) if district else None, district=district,
             title_id=title_id, title=text.get(title_id) if title_id else None,
             description_id=(fields.get(DESCRIPTION) or {}).get('data') or None,

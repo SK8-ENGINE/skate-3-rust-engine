@@ -85,6 +85,8 @@ pub enum Command {
     /// 9 Lose, 5 Abort).
     MusicTrigger(u8),
     StartCountdownHud { ticks: i32 },
+    /// Put the player at the round's start (setup_round; SoloRun: before each run) and pin the AI there.
+    TeleportToStart { round: usize },
     /// The round runs: scoring on, AI unpinned, the round timer (ticks) on the HUD; `run` counts SoloRun runs from 1.
     RoundStart { round: usize, run: u32, ticks: i32 },
     /// Scoring off, AI pinned.
@@ -154,6 +156,14 @@ impl ContestRun {
     pub fn totals(&self) -> &[u32] {
         &self.totals
     }
+    /// Ticks left on the round's 3 s HUD countdown (countdown state); `None` outside it.
+    pub fn countdown_hud_ticks(&self) -> Option<i32> {
+        if self.state != State::Countdown {
+            return None;
+        }
+        self.countdown.and_then(|id| self.timers.remaining(id))
+    }
+
     pub fn round_ticks(&self) -> Option<i32> {
         self.round_timer.and_then(|id| self.timers.remaining(id))
     }
@@ -252,6 +262,7 @@ impl ContestRun {
                     }
                 }
                 out.push(self.scores());
+                out.push(Command::TeleportToStart { round: self.round });
                 self.enter(State::Countdown, out);
             }
             State::Countdown => {
@@ -359,6 +370,7 @@ impl ContestRun {
                 self.run += 1;
                 self.round_scores[0] = 0.0;
                 out.push(self.scores());
+                out.push(Command::TeleportToStart { round: self.round });
                 self.enter(State::RunRound, out);
             } else {
                 self.enter(State::EndRound, out);

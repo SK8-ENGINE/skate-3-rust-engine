@@ -16,5 +16,6 @@ $vmargs = & $java -cp (Join-Path $install "support\LaunchSupport.jar") LaunchSup
     ForEach-Object { $_.Trim() } | Where-Object { $_ }
 $cmd = @($vmargs) + @("-Xmx$MaxMem", "-Duser.home=$env:USERPROFILE", "-cp", (Join-Path $install "Ghidra\Framework\Utility\lib\Utility.jar"),
     "ghidra.Ghidra", "ghidra.app.util.headless.AnalyzeHeadless") + $Rest
+if ($env:GHIDRA_PRIORITY) { try { (Get-Process -Id $PID).PriorityClass = $env:GHIDRA_PRIORITY } catch { Write-Warning "GHIDRA_PRIORITY: $_" } }  # Idle / BelowNormal: java inherits it
 & $java @cmd 2>&1 | ForEach-Object { "$_" }
 exit $LASTEXITCODE

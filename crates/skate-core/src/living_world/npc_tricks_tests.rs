@@ -244,3 +244,39 @@ fn a_dropped_slot_opens_no_trick_span() {
     assert!(phases.contains(&ReplayPhase::Air), "{phases:?}");
     assert!(!phases.iter().any(|ph| matches!(ph, ReplayPhase::AirTrick | ReplayPhase::GroundTrick)), "{phases:?}");
 }
+
+fn trick_id(name: &str) -> i16 {
+    catalog::IDENTIFIERS.iter().position(|t| t.0 == name).unwrap_or_else(|| panic!("{name}")) as i16
+}
+
+#[test]
+fn landing_roll_matches_the_retail_formula() {
+    // street_medium-like values: tiers 85 / 75 / 65, 0.8 per half turn.
+    let s = LandingSkill::new(85.0, 75.0, 65.0, Some(0.8));
+    assert_eq!(s.tiers, [85.0, 75.0, 65.0, 75.0], "tier 3 reads the tier 1 field again (+28 = F83A)");
+    assert_eq!(s.chance(0, 0), 85.0);
+    assert!((s.chance(2, 2) - 65.0 * 0.64).abs() < 1e-4);
+    assert_eq!(s.chance(9, 0), 75.0, "out of range uses +28");
+    // Bail when chance < u * 100.
+    assert!(s.lands(0, 0, 0.84) && !s.lands(0, 0, 0.86));
+    // busenitz_ftl: 100 / 100 / 100 and 0.0 per half turn: straight tricks always land, any spin bails.
+    let ftl = LandingSkill::new(100.0, 100.0, 100.0, Some(0.0));
+    assert!(ftl.lands(3, 0, 0.999));
+    assert!(!ftl.lands(0, 1, 0.01));
+    // A missing +40 reads the zero default block; values are clamped like 824602B8.
+    assert_eq!(LandingSkill::new(150.0, -5.0, f32::NAN, None), LandingSkill { tiers: [100.0, 0.0, 0.0, 0.0], per_half_turn: 0.0 });
+}
+
+#[test]
+fn only_non_ambient_flips_grabs_and_fingerflips_roll() {
+    let flip = catalog::IDENTIFIERS.iter().position(|t| t.2 == 2).unwrap() as i16;
+    let fingerflip = catalog::IDENTIFIERS.iter().position(|t| t.2 == 3).unwrap() as i16;
+    let grab = catalog::IDENTIFIERS.iter().position(|t| t.2 == 4 && t.0 != "coffin").unwrap() as i16;
+    for t in [flip, grab, fingerflip] {
+        assert!(rolls_landing(t, false), "{}", catalog::IDENTIFIERS[t as usize].0);
+        assert!(!rolls_landing(t, true), "ambient riders never roll");
+    }
+    assert!(!rolls_landing(trick_id("coffin"), false));
+    assert!(!rolls_landing(trick_id("nosemanual"), false));
+    assert!(!rolls_landing(OLLIE, false));
+}

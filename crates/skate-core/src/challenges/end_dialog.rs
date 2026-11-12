@@ -11,6 +11,9 @@ pub const RETRY_QUIT: u32 = 11;
 pub const NONE: u32 = 12;
 pub const MORE_ACTIVITIES: u32 = 18;
 pub const CHANGE_DIFFICULTY: u32 = 19;
+pub const HIGHLIGHT_REEL: u32 = 9;
+pub const NEXT: u32 = 13;
+pub const PREVIOUS: u32 = 14;
 
 /// The slots after a reset (825ECD18).
 pub const DEFAULT_SLOTS: [u32; 4] = [CONTINUE_RETRY, RETRY_QUIT, NONE, NONE];
@@ -44,6 +47,8 @@ pub enum Action {
     Retry { confirm: bool },
     /// Push the difficulty screen (FE 45); the slots are kept.
     ChangeDifficulty,
+    /// Next / Previous: the other results block (825F1768 / 825F17C0), the dialog stays and refills (SetState 6).
+    Page,
     /// No effect (an empty slot or an option without an offline action).
     Nothing,
 }
@@ -100,6 +105,7 @@ impl EndDialog {
             CONTINUE | QUIT | MORE_ACTIVITIES => Action::Continue,
             RETRY | REMATCH => Action::Retry { confirm: self.passed },
             CHANGE_DIFFICULTY => Action::ChangeDifficulty,
+            NEXT | PREVIOUS => Action::Page,
             _ => Action::Nothing,
         }
     }

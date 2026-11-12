@@ -269,7 +269,7 @@ impl TutorialRun {
             match choice {
                 Pick::Continue => { self.end_open = false; events.push(Event::HudContinue) }
                 Pick::Retry { .. } => { self.end_open = false; events.push(Event::HudRetry) }
-                Pick::ChangeDifficulty | Pick::Nothing => {}
+                Pick::ChangeDifficulty | Pick::Page | Pick::Nothing => {}
             }
         }
         for (slot, list) in std::mem::take(&mut self.tips) {

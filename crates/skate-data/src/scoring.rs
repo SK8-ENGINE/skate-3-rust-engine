@@ -54,6 +54,9 @@ pub struct Definition {
     pub completion_delay: f32,
     pub variant: i32,
     pub flags: u32,
+    /// `Sk8::Score::ETrickDifficulty` (record +0x74, 0..3): the tier of the AI landing roll (`sub_82460460`);
+    /// `u32::MAX` when the record has none (the roll then uses its fallback tier).
+    pub difficulty: u32,
     /// The timed intents an AI skater posts while this trick's slot is open (`SkaterIntentTuple`, up to 6;
     /// `sub_82470ED0`). Empty for most grinds and slides.
     pub intents: Vec<skate_core::living_world::ai_signals::IntentTuple>,
@@ -121,6 +124,7 @@ impl ScoringData {
                 completion_delay: data.float(SCORABLE, identifier, "Hash_DC7F402E5680BA02")?,
                 variant: words("Hash_2E90BC04042A0B5A")? as i32,
                 flags: words("Hash_D34A84B044B60CE3")?,
+                difficulty: words("Hash_183878B4AFE58B7F").unwrap_or(u32::MAX),
                 intents: data.field(SCORABLE, identifier, INTENTS).map_or_else(|_| Ok(Vec::new()), intent_tuples)
                     .map_err(|e| format!("Scorable {identifier}: {e}"))?,
             });

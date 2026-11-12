@@ -59,6 +59,9 @@ pub(crate) struct Heat {
     pub time_limit_warning: Option<i32>,
     pub killed_it_time: Option<f32>,
     pub legs: Vec<Leg>,
+    /// The heat's AIPaths (AI.FilterPaths): which lines its racers may take.
+    #[serde(default)]
+    pub ai_paths: crate::contest_host::RoundPathsJson,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -238,8 +241,9 @@ fn arm(
         return;
     };
     let best = challenges.records.get(&race.id).best_time.unwrap_or(0.0);
-    // The line-up shuffle follows the session's population seed (one authority picks it; b987 §3).
-    let seed = population.as_ref().map_or(0, |p| skate_core::living_world::rng::derive(p.world.seed(), &[map.generation]));
+    // The line-up shuffle (which character stands on which start slot) is rolled new at every start; one authority
+    // picks it (b987 §3).
+    let seed = crate::race_ai_host::start_seed(map.generation);
     let commands = start(&mut races, &mut volumes, best, race, &config.asset_root, seed);
     apply(&mut races, &mut challenges, &mut skater, &mut hud, None, population.as_deref_mut(), commands);
 }

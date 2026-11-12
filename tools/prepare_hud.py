@@ -112,6 +112,15 @@ def prepare_movie(output: Path, cache, mappings, collections: Path, name: str, f
             family = c['font']['name']
             asset = cache.font_asset(family)
             fonts[family] = asset
+    # Retail's secondary font (825D6B68: "Futura Shadow" -> native "futuraheavy", from the whole native font table
+    # 82809208) draws over the shadow pass even when this movie places no such font (hudtimer places only Futura
+    # Shadow: without the pair its text drew the shadow atlas alone in the text colour, ask 600).
+    from prepare_menu_movies import FONT_PAIRS
+    for family in sorted(fonts):
+        partner = next((v for k, v in FONT_PAIRS.items() if k.lower() == family.lower()), None)
+        for apt_name, row in (mappings.items() if partner else ()):
+            if row['file_name'].lower() == partner.lower() and apt_name not in fonts:
+                fonts[apt_name] = cache.font_asset(apt_name)
     result = {
         'format': 'skate3-scoring-hud', 'version': 1,
         'source': {'bundle': name,

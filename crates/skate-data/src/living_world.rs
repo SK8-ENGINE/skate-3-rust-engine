@@ -209,7 +209,15 @@ pub struct SkaterTrickProfiles {
     pub character_profile: BTreeMap<String, String>,
     /// [`PROFILE_SLOT_TRICKS`] by `ai_skater_profiles` record name.
     pub slot_tricks: BTreeMap<String, bool>,
+    /// The AI landing roll's skill ([`PROFILE_LANDING`] + [`PROFILE_LANDING_PER_HALF_TURN`]) by record name.
+    pub landing: BTreeMap<String, skate_core::living_world::npc_tricks::LandingSkill>,
 }
+
+/// `ai_skater_profiles` landing percentages for difficulty tiers 0, 1, 2 (layout +392 / +384 / +388 -> runtime +16 /
+/// +20 / +24; +28 reads +384 again), read by the AI landing roll `sub_82460460`.
+pub const PROFILE_LANDING: [&str; 3] = ["Hash_913D2B5F07880189", "Hash_F83A843573435E6C", "Hash_06025FDC568AA983"];
+/// Optional `ai_skater_profiles` factor per half turn of spin (runtime +40).
+pub const PROFILE_LANDING_PER_HALF_TURN: &str = "Hash_1DD7BEA0203DD57B";
 
 impl SkaterTrickProfiles {
     /// The table of a character: its `aiprofile` record, else `default`.
@@ -222,6 +230,11 @@ impl SkaterTrickProfiles {
     pub fn slot_tricks_for(&self, key: &str) -> bool {
         let profile = self.character_profile.get(key).filter(|p| self.slot_tricks.contains_key(*p)).map_or("default", |p| p.as_str());
         self.slot_tricks.get(profile).copied().unwrap_or(true)
+    }
+
+    /// The landing skill of a character's profile (else `default`'s).
+    pub fn landing_for(&self, key: &str) -> Option<skate_core::living_world::npc_tricks::LandingSkill> {
+        self.character_profile.get(key).and_then(|p| self.landing.get(p)).or_else(|| self.landing.get("default")).copied()
     }
 }
 
@@ -253,7 +266,16 @@ pub fn skater_trick_profiles(json: &[u8]) -> Result<SkaterTrickProfiles, LivingW
         .filter_map(|(k, c)| c["aiprofile"].as_str().filter(|p| !p.is_empty()).map(|p| (k.clone(), p.to_owned())))
         .collect();
     let slot_tricks = records.iter().filter_map(|(name, r)| r["fields"][PROFILE_SLOT_TRICKS].as_bool().map(|b| (name.clone(), b))).collect();
-    Ok(SkaterTrickProfiles { profiles, character_profile, slot_tricks })
+    let landing = records
+        .iter()
+        .filter_map(|(name, r)| {
+            let f = &r["fields"];
+            let [a, b, c] = PROFILE_LANDING.map(|k| f[k].as_f64());
+            let per = f[PROFILE_LANDING_PER_HALF_TURN].as_f64().map(|v| v as f32);
+            Some((name.clone(), skate_core::living_world::npc_tricks::LandingSkill::new(a? as f32, b? as f32, c? as f32, per)))
+        })
+        .collect();
+    Ok(SkaterTrickProfiles { profiles, character_profile, slot_tricks, landing })
 }
 
 /// Population view of decoded lines: ambient lines only, start = node 0, heading from node 0

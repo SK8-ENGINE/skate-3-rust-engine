@@ -101,6 +101,52 @@ $i = "<game-install>"
   (section 5). Then confirm every offset and constant you will use in the recomp function of the same address.
 - When you delegate research to a background agent, name this skill and `decompile.ps1` in the brief and have it pass
   `-Out` with its own file.
+- **The other tools** (same project options as `decompile.ps1`, same `-Out` habit):
+  - `dump.ps1 [-Out <file>] [+len] <addr> ...`: bytes, big-endian words and the C string at addresses (vtable slots,
+    float constants, string tables; `scripts\DumpAt.java`).
+  - `find-refs.ps1 [-Out <file>] <address> ...`: Ghidra's references to an address plus every place its 32-bit value
+    sits in initialized memory (vtable slots of functions with no direct callers; `scripts\FindRefs.java`). Ignore
+    `.pdata` hits (exception tables).
+  - `find-strings.ps1 [-Out <file>] <string> ...`: where an exact C string sits and which functions reference it
+    (`scripts\FindStrings.java`). It only reports a hit preceded by a NUL byte, so text inside a longer string is
+    missed; search the raw bytes too. No hit at all means the name is not in the executable.
+  - `scripts\FindImm64.java`: every code site that builds a 64-bit hash constant (Attrib class / field keys built with
+    lis / oris / ori / addi): `ghidra_headless.ps1 -MaxMem 8G $env:GHIDRA_PROJECT_DIR skate3-tu3 -process default.xexp
+    -noanalysis -readOnly -scriptPath <repo>\.claude\skills\ghidra\tools\scripts -postScript FindImm64.java <out.txt> <hash16hex> ...`.
+- **Low priority:** set `$env:GHIDRA_PRIORITY = 'Idle'` (or `BelowNormal`) before any of the tools: `ghidra_headless.ps1`
+  sets its own process to that class and the Java process inherits it, so long batches do not slow down a game or
+  build. Agents should always run Ghidra this way.
+
+### Function names
+
+`tools/ghidra/skate3-tu3/` in this repo holds names for about 1,000 decoded TU3 functions (README there): load
+`skate3-tu3-symbols.txt` with Ghidra's built-in `ImportSymbolsScript.py`, or apply `skate3-tu3-functions.tsv` (with
+each description as a plate comment) with `tools\apply-names.ps1 [-Tsv <file>]` (default: that list) or from the
+Script Manager with `ApplyNames.java` (it asks for the file). It runs without `-readOnly`, so the names are saved; it
+creates a function where none starts at an address and skips + logs (`<Tsv>.log`) addresses inside another function
+and functions you already named yourself. Re-running is safe.
+
+Keep your own additions in a second TSV (same columns: `address<TAB>name<TAB>comment[<TAB>source]`) and apply it the
+same way. Naming used here: PascalCase with a subsystem prefix (`HudTimer_Update`, `AIPathCtrl_AirLatch`); the
+retail class / message / Lua binding name wins where one exists (`FrontEnd_SetEndChallengeOption`, `LuaBind_<Name>`
+for the C functions behind the Lua binding tables, `LuaMsg_<cMsgName>_New` for the message constructors); temporary
+guesses as `guess_<Subsystem>_<What>` with a one-line reason, so they are never mistaken for confirmed names.
+
+Methods that find names fast:
+- Lua C bindings: rows `{name ptr, cfunc, 0, 2}` in 0x82312E94..0x82314FEC (423 rows, 345 functions).
+- Message hashes: `LuaMsg_RegisterAll` 0x823C1098 registers each `cMsg*` as a constructor (holding the hash as a
+  `lis` / `ori` immediate) plus its name (300 messages). A hash with no immediate in its constructor is built by a
+  callee (0x92CC9BBD cMsgTrickComplete via 0x82383258).
+- Who posts or handles a message: search the recomp's generated code for the hash halves (`lis` = the high half << 16
+  as a decimal, e.g. 0x781C092D -> `2015100928`, followed within a few dozen lines by `ori ... 2349`); the function
+  holding the site is the last `sub_` definition above it. Posts go through `MsgBus_Post` 0x82B938D8, subscriptions
+  through `MsgBus_Subscribe` 0x82B93A30; a message's reflection entry (hash, name, generic poster, field count, size)
+  sits in `.rdata`.
+- A value the static image leaves at zero is set at runtime: read it live in the recomp instead of guessing (e.g. the
+  HUD timer's format widths at 0x82FDE25E are `02 02 02 02` at runtime, zero on disk).
+- An indexed read (`lfsx` / `lwzx` with a computed offset) is invisible to an immediate-offset scan, so "no reader
+  found" from such a scan is not proof.
+
 
 ## 5. Known quirks and the optional VMX128 language patch
 - `xenon_lvlx_partial` / `xenon_lvrx_partial` (and the `stvlx` / `stvrx` ones): deliberate opaque userops = an

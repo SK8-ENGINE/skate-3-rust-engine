@@ -35,9 +35,19 @@ pub(crate) struct RaceAi {
     last_tick: Option<u64>,
 }
 
+/// The seed of one race / contest start (the line-up and start slot roll): new every start, picked once by the
+/// authority (clients get the result). `SKATE_CHALLENGE_SEED=<n>` pins it for repeatable runs.
+pub(crate) fn start_seed(generation: u64) -> u64 {
+    if let Some(s) = std::env::var("SKATE_CHALLENGE_SEED").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
+        return s;
+    }
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    skate_core::living_world::rng::derive(nanos, &[generation, u64::from(std::process::id())])
+}
+
 /// ai_characters row -> its look (the characters_marquee key) and the look's display name id, from the export
 /// (`skater_profiles.json`).
-fn looks(asset_root: &std::path::Path) -> BTreeMap<String, (String, String)> {
+pub(crate) fn looks(asset_root: &std::path::Path) -> BTreeMap<String, (String, String)> {
     let Ok(bytes) = std::fs::read(asset_root.join("private/living_world/skater_profiles.json")) else { return BTreeMap::new() };
     let Ok(doc) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return BTreeMap::new() };
     doc["ai_characters"].as_object().into_iter().flatten()
@@ -83,7 +93,11 @@ impl RaceAi {
     /// this set (the challenge path filter, b972 §3).
     pub(crate) fn place(&mut self, heat: &Heat, population: &mut PopulationState) {
         crate::living_world::merge_npc_lines(population, &self.lines, true);
-        population.scripted_lines = Some(std::sync::Arc::new(self.lines.keys().copied().collect()));
+        // LoadRaceHeatPaths + FilterReset + FilterPaths(heat AIPaths); the first line from the slot in mode 1 with the
+        // nearest-start fallback (b972 §4).
+        let valid = heat.ai_paths.paths().valid_lines(self.lines.keys());
+        population.scripted_lines = Some(std::sync::Arc::new(valid.clone().unwrap_or_else(|| self.lines.keys().copied().collect())));
+        let chain = ChainConfig { fallback: true, ..ChainConfig::retail() };
         let mut placed: Vec<([u8; 16], u32)> = Vec::new();
         let mut in_use: Vec<[u8; 16]> = Vec::new();
         for r in &mut self.racers {
@@ -93,10 +107,10 @@ impl RaceAi {
             let slot = heat.start.slot(r.ai.id as usize);
             let point = [slot[3][0], slot[3][1], slot[3][2]];
             let ctx = BranchContext { position: point, forward: [slot[2][0], slot[2][1], slot[2][2]], speed: 0.0, players: &[], others: &placed,
-                in_use: &in_use, preferred_skill: -1, online: false, chain: ChainConfig::retail(), tricks: Default::default(), body: None,
-                valid_lines: None };
+                in_use: &in_use, preferred_skill: -1, online: false, chain, tricks: Default::default(), body: None,
+                valid_lines: valid.as_deref() };
             let Some((line, _)) = choose_line_from(&self.lines, point, &ctx) else {
-                warn!("SKATE_RACE racer {} ({}): no line near slot {:?}", r.ai.id, r.row, point);
+                warn!("SKATE_RACE racer {} ({}): no line for slot {:?}; not spawned", r.ai.id, r.row, point);
                 continue;
             };
             placed.push((line, 0));

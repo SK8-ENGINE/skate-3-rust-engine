@@ -6,6 +6,12 @@ use super::dpo::time_text;
 
 /// eResultsLBType.DeathRace (82063B08 = 3.0): the layout a race's results use (rank, name, time).
 pub const LAYOUT_DEATH_RACE: u32 = 3;
+/// eResultsLBType BestTrickNonElimFloat / BestTrickNonElimInt: a contest without elimination (place, name, score).
+pub const LAYOUT_BEST_TRICK_NON_ELIM_FLOAT: u32 = 4;
+pub const LAYOUT_BEST_TRICK_NON_ELIM_INT: u32 = 5;
+/// eResultGroupType (Results_SetActiveResultsMenu 825ECDB0; Next 825F1768 picks 0, Previous 825F17C0 picks 1).
+pub const MENU_FINAL_RESULTS: u32 = 0;
+pub const MENU_ROUND_RESULTS: u32 = 1;
 
 /// The race's texts and rules (retail values; data, so a mod can change them).
 #[derive(Clone, Debug, PartialEq)]
@@ -44,6 +50,10 @@ pub struct ResultRow {
     pub time: f32,
     pub status: String,
     pub local: bool,
+    /// Results_SetPlayerData's int score (rec +0x04, the score text); None for races.
+    pub score: Option<i32>,
+    /// Its float (rec +0x0C).
+    pub value: f32,
 }
 
 /// What the end dialog's results table shows.
@@ -54,6 +64,8 @@ pub struct ResultsView {
     pub columns: Vec<String>,
     pub rows: Vec<ResultRow>,
     pub dnf: String,
+    /// Results_SetActiveResultsMenu (Results_GetLeaderboardType).
+    pub active_menu: u32,
 }
 
 /// One item of the table's data block.
@@ -91,8 +103,8 @@ impl ResultsView {
             .flat_map(|(i, r)| {
                 [
                     Cell::Number(r.place as f32),
-                    Cell::Text(String::new()),
-                    Cell::Number(0.0),
+                    Cell::Text(r.score.map(|s| s.to_string()).unwrap_or_default()),
+                    Cell::Number(r.value),
                     Cell::Text(r.status.clone()),
                     Cell::Text(self.time_text(r.time)),
                     Cell::Bool(r.local),
@@ -101,6 +113,35 @@ impl ResultsView {
                 ]
             })
             .collect()
+    }
+}
+
+/// A contest competitor's score for one results table.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContestScore {
+    pub id: u32,
+    pub name: String,
+    pub local: bool,
+    pub score: f32,
+}
+
+/// results_screen without elimination (contest_shared results_screen.stateenter@220-776, single player): the rows in
+/// score order (descending, ties in competitor order), place = position; int layouts write the score as the int,
+/// float layouts -1 and the score as the float. `columns` are the round's ResultsScreenHALIDCol1..3.
+pub fn contest_results(scores: &[ContestScore], int: bool, title: &str, columns: &[String], active_menu: u32) -> ResultsView {
+    let mut sorted: Vec<&ContestScore> = scores.iter().collect();
+    sorted.sort_by(|a, b| b.score.total_cmp(&a.score));
+    let rows = sorted.iter().enumerate().map(|(i, s)| ResultRow {
+        id: s.id, place: i as u32 + 1, name: s.name.clone(), time: -1.0, status: String::new(), local: s.local,
+        score: Some(if int { s.score as i32 } else { -1 }), value: s.score,
+    }).collect();
+    ResultsView {
+        title: title.into(),
+        layout: if int { LAYOUT_BEST_TRICK_NON_ELIM_INT } else { LAYOUT_BEST_TRICK_NON_ELIM_FLOAT },
+        columns: columns.to_vec(),
+        rows,
+        dnf: String::new(),
+        active_menu,
     }
 }
 
@@ -144,10 +185,10 @@ pub fn race_results(standings: &[Standing], elapsed: f32, more_heats: bool, plac
             } else {
                 &rules.status_lose
             };
-            ResultRow { id: s.id, place, name: s.name.clone(), time: time(s), status: status.clone(), local: s.local }
+            ResultRow { id: s.id, place, name: s.name.clone(), time: time(s), status: status.clone(), local: s.local, score: None, value: 0.0 }
         })
         .collect();
-    ResultsView { title: rules.title.clone(), layout: rules.layout, columns: rules.columns.clone(), rows, dnf: rules.dnf.clone() }
+    ResultsView { title: rules.title.clone(), layout: rules.layout, columns: rules.columns.clone(), rows, dnf: rules.dnf.clone(), active_menu: MENU_FINAL_RESULTS }
 }
 
 #[cfg(test)]
@@ -183,5 +224,16 @@ mod tests {
         assert_eq!(b[7], Cell::Text("r0".into()));
         assert_eq!(b[14], Cell::Number(1.0));
         assert_eq!(v.layout, LAYOUT_DEATH_RACE);
+    }
+
+    #[test]
+    fn contest_tables_sort_by_score_and_write_int_or_float() {
+        let c = |id, score| ContestScore { id, name: format!("#{id}"), local: id == 0, score };
+        let v = contest_results(&[c(0, 500.0), c(1, 900.0), c(2, 500.0)], true, "T", &[], MENU_ROUND_RESULTS);
+        assert_eq!(v.rows.iter().map(|r| (r.id, r.place)).collect::<Vec<_>>(), [(1, 1), (0, 2), (2, 3)], "ties in competitor order");
+        assert_eq!((v.layout, v.active_menu, v.self_rank()), (LAYOUT_BEST_TRICK_NON_ELIM_INT, MENU_ROUND_RESULTS, 2));
+        assert_eq!(v.data_block()[1], Cell::Text("900".into()));
+        let f = contest_results(&[c(0, 12.5)], false, "T", &[], MENU_FINAL_RESULTS);
+        assert_eq!((f.layout, f.rows[0].score, f.rows[0].value), (LAYOUT_BEST_TRICK_NON_ELIM_FLOAT, Some(-1), 12.5));
     }
 }

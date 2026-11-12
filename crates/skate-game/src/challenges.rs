@@ -337,6 +337,8 @@ impl ModControl {
 
 #[derive(Resource, Default)]
 pub(crate) struct Challenges {
+    /// The sequences the player banked this frame (taken once here; the contest host reads them).
+    pub banked_this_frame: Vec<crate::scoring_runtime::BankedSequence>,
     pub retail: Vec<Challenge>,
     pub loaded: bool,
     pub generation: Option<u64>,
@@ -672,6 +674,7 @@ fn update(
         }
     }
     let banked = skater.scoring.take_banked();
+    challenges.banked_this_frame = banked.clone();
     let began = skater.scoring.take_announced();
     let done = skater.scoring.take_done();
     let entered: Vec<String> = entered.read().filter(|e| e.body == crate::trigger_volumes::PLAYER).map(|e| e.volume.clone()).collect();

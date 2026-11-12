@@ -241,6 +241,9 @@ pub(crate) struct NpcSim {
     /// The PathController's trick slot (`pc+832` / `+844` / `+904`) and takeoff board yaw (`+856` / `+860` / `+930` /
     /// `+931`), research b113; cleared with the controller.
     slot: skate_core::living_world::ai_signals::TrickSlot,
+    /// Half turns of spin of the current air (score state +0x3018), kept from the last airborne tick for the landing
+    /// roll (the scoring runtime resets its own on landing).
+    air_half_turns: u32,
     board_yaw: skate_core::living_world::ai_signals::BoardYaw,
     /// `pc+824`, the ground steer's last error; retail keeps it between steer ticks.
     ground_error: Option<f32>,
@@ -559,7 +562,7 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, was_pinned: false, start_ticks: 0, braking: false, pump_cycle: 0, pump_ticks: 0, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, was_pinned: false, start_ticks: 0, braking: false, pump_cycle: 0, pump_ticks: 0, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), air_half_turns: 0, board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
     if fit_to_ground {
         sim.body.runtime.fit_next_arrival();
@@ -1563,6 +1566,11 @@ pub(crate) fn simulate(
                     None => Vec::new(),
                 };
                 // Mode 4 (skitch; b65, main checked 0x8246FC78): GrabWorld every tick on the ground, no tricks.
+                let (landing_skill, world_tick) = (state.npc.tricks.landing_for(&npc.character), state.world.tick());
+                // Every simulated skater's own banked sequences (cMsgSequenceComplete per skater; contests score them).
+                for s in sim.body.runtime.scoring.take_banked() {
+                    events.write(super::npc_skaters::NpcSkaterEvent::SequenceComplete { id: npc.id, score: s.score, wiped_out: s.wiped_out });
+                }
                 let state = sim.body.runtime.player_state.current();
                 let mut intents = intents;
                 intents.extend(walk_intents);
@@ -1584,10 +1592,32 @@ pub(crate) fn simulate(
                     // Cursor A (`pc+608`, `pc+652`), as `sub_8246A700` reads it; the replay cursor when off its line.
                     let cursor_a = sim.follow.filter(|(id, _)| *id == replay.cursor.line).map_or(replay.cursor.node, |(_, f)| f.a.0);
                     let node_forward = skate_core::living_world::air_steer::node_skater_forward(line, cursor_a);
+                    if airborne_now {
+                        sim.air_half_turns = sim.body.runtime.scoring.half_turns();
+                    }
                     if sim.air.airborne && !airborne_now {
                         // The air steer's check (b616): the landing facing against the recorded one, sign expected = latch.
                         let d = char_forward[0] * node_forward[0] + char_forward[2] * node_forward[2];
                         info!("NPC_SKATER_LAND #{} {} node {} flip {} char.node {d:.2} aligned {}", npc.id.serial, npc.character, replay.cursor.node, sim.air.flip, (d < 0.0) == sim.air.flip);
+                        // `sub_8246A700` 0x8246A9B4: the landing roll `sub_82460460` for a challenge AI's posted flip,
+                        // fingerflip or grab (the race / contest riders carry an NpcRaceClock; ambient skaters never roll).
+                        let trick = sim.slot.trick;
+                        if skate_core::living_world::npc_tricks::rolls_landing(trick, race.is_none()) {
+                            if let Some(skill) = landing_skill {
+                                let difficulty = sim.body.runtime.scoring.data.definitions.iter()
+                                    .find(|def| def.metadata.id as i16 == trick).map_or(u32::MAX, |def| def.difficulty);
+                                let r = skate_core::living_world::rng::derive(npc.seed, &[world_tick, 0x4C41_4E44]);
+                                let u = (r >> 40) as f32 / (1u64 << 24) as f32;
+                                let lands = skill.lands(difficulty, sim.air_half_turns, u);
+                                info!("NPC_LANDING_ROLL #{} {} trick {} difficulty {difficulty} half_turns {} chance {:.1} roll {:.1} -> {}",
+                                    npc.id.serial, npc.character, super::npc_skaters::trick_name(trick), sim.air_half_turns,
+                                    skill.chance(difficulty, sim.air_half_turns), u * 100.0, if lands { "lands" } else { "bails" });
+                                if !lands {
+                                    intents.push(("WipeOutRequest".into(), 1.0));
+                                }
+                                sim.slot.trick = -1;
+                            }
+                        }
                     }
                     if sim.air.tick(airborne_now, char_forward, node_forward) {
                         // `sub_8246A700` -> `sub_824566C8` -> `sub_8246B1F8`: the recorded board-vs-skater yaw of the node

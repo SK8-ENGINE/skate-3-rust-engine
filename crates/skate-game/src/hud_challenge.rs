@@ -185,6 +185,10 @@ pub(crate) struct LeaderboardRow {
 
 /// The race layout (`eLeaderBoardHUD_RankNameTime`, set to 4 in leaderboardhud's init).
 pub(crate) const LEADERBOARD_RANK_NAME_TIME: i32 = 4;
+/// Contests with integer scores (`eLeaderBoardHUD_RankNameScore`).
+pub(crate) const LEADERBOARD_RANK_NAME_SCORE: i32 = 3;
+/// Contests with float scores (`eLeaderBoardHUD_RankNameFloatscore`).
+pub(crate) const LEADERBOARD_RANK_NAME_FLOATSCORE: i32 = 6;
 
 impl ChallengeHudState {
     pub fn show(&mut self, component: Component, shown: bool) {
@@ -341,10 +345,10 @@ impl Host for Bindings {
                 array(vm, names)
             }
             // RefreshAll: per row (playerStructItems 8) rank, score, score text, highlight, turn, team, row slot (the
-            // `player_<n>` clip, by rank), sort id.
+            // `player_<n>` clip: the row's place in rank order, tied ranks by row id, one clip each), sort id.
             ("HUDComponents", "Leaderboard_GetLeaderboardDataBlock") => {
                 let items: Vec<Value> = s.leaderboard.rows.iter().flat_map(|r| {
-                    let slot = (r.rank - 1).clamp(0, 7);
+                    let slot = s.leaderboard.rows.iter().filter(|o| (o.rank, o.id) < (r.rank, r.id)).count().min(7);
                     [Value::Number(r.rank as f64), Value::Number(r.score as f64), Value::Text(r.score_text.clone()),
                         Value::Bool(r.highlight), Value::Number(0.0), Value::Number(0.0), Value::Number(slot as f64), Value::Number(r.id as f64)]
                 }).collect();
@@ -911,5 +915,50 @@ mod tests {
             assert!(!a.is_empty(), "value {i} draws nothing");
             assert!(textures[i + 1..].iter().all(|b| b != a), "3, 2, 1 and GO draw different pictures: {textures:?}");
         }
+    }
+
+    /// Ask 600: the round timer after its show intro, at 33 s left (not low time): composed alpha of what draws.
+    #[test]
+    #[ignore = "requires the converted challenge HUD movies (SKATE_SCORING_HUD_ROOT=<private/hud>)"]
+    fn the_timer_is_opaque_after_its_intro() {
+        let root = std::path::PathBuf::from(std::env::var_os("SKATE_SCORING_HUD_ROOT").unwrap());
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("runtime").join(Component::Timer.file())).unwrap()).unwrap();
+        let shapes: crate::apt_scene::Shapes = serde_json::from_value(json["shapes"].clone()).unwrap();
+        let mut hud = Runtime::load(Component::Timer, &json, &[]).unwrap();
+        let get = |hud: &Runtime, path: &[&str]| {
+            let mut at = Value::Object(hud.vm.global);
+            for key in path {
+                at = match at {
+                    Value::Object(o) => hud.vm.get(o, key),
+                    _ => Value::Undefined,
+                };
+            }
+            at
+        };
+        let mut state = ChallengeHudState::default();
+        state.show(Component::Timer, true);
+        (state.timer_text, state.timer_flag) = ("33".into(), 1);
+        hud.sync(&state).unwrap();
+        for frame in 0..90 {
+            hud.update().unwrap();
+            if frame % 10 == 9 {
+                state.timer_text = format!("{}", 32 - frame / 60);
+                hud.sync(&state).unwrap();
+                let alphas: Vec<f32> = crate::apt_scene::draw(&hud.bindings.movie, &hud.vm, &shapes).unwrap().iter().map(|d| d.multiply[3]).collect();
+                let props: Vec<String> = [&["hudtimer", "mScreen", "_currentframe"][..], &["hudtimer", "mScreen", "mcTextTimer", "_currentframe"][..],
+                    &["hudtimer", "mScreen", "mcTextTimer", "_alpha"][..], &["hudtimer", "mScreen", "mcTextTimer", "mcTimer", "_currentframe"][..]]
+                    .iter().map(|p| format!("{}={:?}", p.last().unwrap(), get(&hud, p))).collect();
+                eprintln!("TIMER frame {frame}: draws alpha {alphas:?} {}", props.join(" "));
+            }
+        }
+        let draws = crate::apt_scene::draw(&hud.bindings.movie, &hud.vm, &shapes).unwrap();
+        for d in &draws {
+            eprintln!("TIMER draw {} multiply {:?} add {:?} vertices {}", d.texture, d.multiply, d.add, d.vertices.len());
+        }
+        assert!(!draws.is_empty() && draws.iter().all(|d| d.multiply[3] > 0.99), "opaque after the intro");
+        // Retail 825D6B68: the Futura Shadow pass in black, then futuraheavy in the text colour over it.
+        assert!(draws.iter().any(|d| d.texture.contains("futurashadow") && d.multiply[..3].iter().all(|c| *c < 0.01)), "black shadow pass");
+        assert!(draws.iter().any(|d| d.texture.contains("futuraheavy") && d.multiply[0] > 0.9), "futuraheavy in the text colour");
     }
 }

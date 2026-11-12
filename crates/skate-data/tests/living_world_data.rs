@@ -533,3 +533,18 @@ fn npc_skater_trick_slots_and_phase_changes_on_the_exported_lines() {
     assert!(short * 3 > changes, "many phases are shorter than a crossfade ({short} of {changes})");
 }
 
+
+#[test]
+fn every_ai_profile_carries_its_landing_skill() {
+    let Some(profiles) = find("skater_profiles.json") else {
+        eprintln!("skipped: set SKATE3_ASSET_ROOT to an export with skater_profiles.json");
+        return;
+    };
+    let t = living_world::skater_trick_profiles(&std::fs::read(profiles).unwrap()).unwrap();
+    // The landing roll's four fields are on all 193 records [data].
+    assert_eq!(t.landing.len(), 193);
+    let ftl = t.landing["busenitz_ftl"];
+    assert_eq!((ftl.tiers, ftl.per_half_turn), ([100.0, 100.0, 100.0, 100.0], 0.0));
+    let skate = t.landing["ali_boulala_skate"];
+    assert_eq!((skate.tiers, skate.per_half_turn), ([85.0, 75.0, 70.0, 75.0], 0.8));
+}

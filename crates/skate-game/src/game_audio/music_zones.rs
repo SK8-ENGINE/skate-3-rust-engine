@@ -183,6 +183,8 @@ pub(crate) struct Environment {
     race_tuning: Option<RaceTuning>,
     race_control: f32,
     race_counter: f32,
+    /// A contest's playlist owns the music (8249E1E8, state 9).
+    contest: bool,
 }
 
 impl Environment {
@@ -210,6 +212,34 @@ impl Environment {
             self.race_tuning = Some(tuning);
         }
         out
+    }
+
+    /// A mission music trigger for a contest / demo (the playlist branch of 8248B258 -> 8249E1E8): 0 Countdown stops
+    /// the music (request 1), 1 Start plays the challenge's playlist (request 2, licensed songs on the soundtrack graph,
+    /// UpdateChallengeState 8249FCF0), 12 StopChallengeMusic gives the music back to the zones. NOT RETAIL YET: 6
+    /// AlmostOver fades the stream to level 2 over 3000 ms (no fades yet), 7 Over (state 3) is not read further.
+    pub(crate) fn contest_trigger(&mut self, code: u8, playlist: Option<&Playlist>, ids: &EnumIds) -> Vec<MusicRequest> {
+        match code {
+            0 => {
+                self.contest = true;
+                self.playing = None;
+                vec![MusicRequest::Stop { owner: None }]
+            }
+            1 => {
+                self.contest = true;
+                let tracks: Vec<Track> = playlist.map(|l| l.songs.iter()
+                    .filter_map(|s| EnumIds::value(&ids.ipod, s.0))
+                    .map(|k| Track::Graph { set: IPOD_SET.into(), var: IPOD_VAR.into(), value: k, play: IPOD_PLAY })
+                    .collect()).unwrap_or_default();
+                if tracks.is_empty() { Vec::new() } else { vec![MusicRequest::Queue { tracks, once: false }] }
+            }
+            12 if self.contest => {
+                self.contest = false;
+                self.playing = None;
+                vec![MusicRequest::Stop { owner: None }]
+            }
+            _ => Vec::new(),
+        }
     }
 
     fn race_trigger_inner(&mut self, code: u8, nothing_playing: bool, overlay: Option<(std::path::PathBuf, f32)>) -> Vec<MusicRequest> {
@@ -250,6 +280,9 @@ impl Environment {
     pub(crate) fn frame(&mut self, data: &MusicZonesData, ids: &EnumIds, zone: Option<&super::emitters::MusicZoneWinner>, speed: f32,
         unridden: bool, multiplier: f32, score: f32, piece_done: bool, dt: f32) -> Vec<MusicRequest> {
         let mut out = Vec::new();
+        if self.contest {
+            return out;
+        }
         if let Some(ended) = self.race {
             // The race owns the music; its control follows the speed curve (8249E9B8, mode 0). NOT RETAIL YET: mode 1
             // (the control from the place) is not ported; no disc race uses it.
@@ -408,6 +441,7 @@ pub(crate) fn environment(
     library: Option<Res<super::Library>>,
     mut music: ResMut<Music>,
     mut races: Option<ResMut<crate::race_host::Races>>,
+    mut contests: Option<ResMut<crate::contest_host::Contests>>,
     cues: Res<super::skate_events::Cues>,
     skater: Option<Res<crate::physics::SkaterRuntime>>,
     config: Res<crate::config::Config>,
@@ -416,6 +450,7 @@ pub(crate) fn environment(
     let Some(library) = library else { return };
     let interactive = music.soundtrack_off && music.owner.is_none();
     let triggers = races.as_mut().map(|r| std::mem::take(&mut r.music)).unwrap_or_default();
+    let contest_triggers = contests.as_mut().map(|c| std::mem::take(&mut c.music)).unwrap_or_default();
     if !interactive {
         if host.active {
             host.active = false;
@@ -435,6 +470,14 @@ pub(crate) fn environment(
         let requests = host.env.race_trigger(code, done, library.race_overlay(0), library.race_tuning(None));
         for r in &requests {
             info!("AUDIO_MUSIC race trigger {code}: {r:?}");
+        }
+        music.requests.extend(requests);
+    }
+    for (code, key) in contest_triggers {
+        let playlist = key.as_deref().and_then(|k| library.music_zones().playlists.get(k));
+        let requests = host.env.contest_trigger(code, playlist, &ids);
+        for r in &requests {
+            info!("AUDIO_MUSIC contest trigger {code}: {r:?}");
         }
         music.requests.extend(requests);
     }
@@ -534,6 +577,18 @@ mod tests {
         let out = e.frame(&d, &ids, None, 20.0, false, 1.0, 0.0, false, 1.0 / 60.0);
         assert_eq!(out, [MusicRequest::Control(78)]);
         assert_eq!(e.frame(&d, &ids, None, 20.0, true, 1.0, 0.0, false, 1.0 / 60.0), [MusicRequest::Control(0)], "a bail drops it");
+    }
+
+    #[test]
+    fn a_contest_stops_the_music_plays_its_playlist_and_gives_it_back() {
+        let (d, ids) = (data(), ids());
+        let mut e = Environment::default();
+        assert_eq!(e.contest_trigger(0, None, &ids), [MusicRequest::Stop { owner: None }]);
+        let out = e.contest_trigger(1, d.playlists.get("00000000000000BB"), &ids);
+        assert!(matches!(&out[0], MusicRequest::Queue { tracks, once: false } if tracks.len() == 2));
+        assert!(e.frame(&d, &ids, Some(&zone(0xBB)), 0.0, false, 1.0, 0.0, false, 0.1).is_empty(), "zones wait");
+        assert_eq!(e.contest_trigger(12, None, &ids), [MusicRequest::Stop { owner: None }]);
+        assert_eq!(e.frame(&d, &ids, Some(&zone(0xBB)), 0.0, false, 1.0, 0.0, false, 0.1).len(), 1, "the zones choose again");
     }
 
     #[test]

@@ -135,6 +135,11 @@ pub(crate) struct Runtime {
     pub close_tricks: bool,
 }
 impl Runtime {
+    /// Half turns of spin so far in this air (score state +0x3018; `GetCurrentDegreesOfSpin` / 180).
+    pub(crate) fn half_turns(&self) -> u32 {
+        self.spin_turns.unsigned_abs()
+    }
+
     pub fn load(data: &Collections) -> Result<Self, String> {
         Ok(Self {
             data: ScoringData::load(data)?,

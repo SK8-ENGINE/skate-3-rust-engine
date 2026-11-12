@@ -48,6 +48,9 @@ pub(crate) fn payloads(
                 "name": "living_world", "event": "npc_avoid", "id": id.to_u64(), "mode": mode.name(),
                 "target_kind": target.map(|t| format!("{:?}", t.0).to_lowercase()), "target_id": target.map(|t| t.1),
             })),
+            NpcSkaterEvent::SequenceComplete { id, score, wiped_out } => out.push(json!({
+                "name": "living_world", "event": "npc_sequence_complete", "id": id.to_u64(), "score": score, "wiped_out": wiped_out,
+            })),
             _ => {}
         }
     }

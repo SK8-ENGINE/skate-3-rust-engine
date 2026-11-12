@@ -1906,6 +1906,12 @@ fn update(
         // Shown after its intro, or on load, or after SHOW_FALLBACK_FRAMES updates: the hudComponents dialogs report
         // neither (laptop run 2026-11-07: logged open, never drawn).
         if let Some(id) = ms.end_open.and_then(|m| ms.end_ids[m]) {
+            if ms.end_shown && end_screen.as_ref().is_some_and(|e| e.refill) {
+                if let Some(e) = end_screen.as_mut() {
+                    e.refill = false;
+                }
+                set_state(&mut ms.stage, id, 6, &mut fe)?;
+            }
             ms.end_frames += 1;
             let loaded = take_call(&mut fe, &format!("Game.OnScreenLoaded({id})"));
             let intro = take_call(&mut fe, &format!("Game.OnScreenIntroComplete({id})"));

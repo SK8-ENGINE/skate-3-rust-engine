@@ -7,6 +7,7 @@ pub mod contest_run;
 pub mod dpo;
 pub mod end_dialog;
 pub mod lots;
+pub mod path_filter;
 pub mod objectives;
 pub mod poster;
 pub mod predicate;

@@ -177,6 +177,43 @@ pub fn choose(line: &ReplayLine, slot: u32, frame: u64, ctx: &TrickContext) -> T
     }
 }
 
+/// A profile's landing skill (`ai_skater_profiles`, runtime profile +16..+28 and +40, clamped by `sub_824602B8`):
+/// percent chance to land per trick difficulty tier, and the factor applied once per half turn of spin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LandingSkill {
+    /// Tier 0..3 (+16 `Hash_913D2B5F07880189`, +20 `Hash_F83A843573435E6C`, +24 `Hash_06025FDC568AA983`, +28 F83A again);
+    /// the last one is also the fallback for a difficulty outside 0..3.
+    pub tiers: [f32; 4],
+    /// +40 `Hash_1DD7BEA0203DD57B` (optional on the record; a missing one reads the zero default block 0x830D0850).
+    pub per_half_turn: f32,
+}
+
+impl LandingSkill {
+    /// From the record values, clamped like `sub_824602B8` (0..100, 0..1).
+    pub fn new(tier0: f32, tier1: f32, tier2: f32, per_half_turn: Option<f32>) -> Self {
+        let pct = |v: f32| if v.is_finite() { v.clamp(0.0, 100.0) } else { 0.0 };
+        let f = per_half_turn.filter(|v| v.is_finite()).unwrap_or(0.0).clamp(0.0, 1.0);
+        Self { tiers: [pct(tier0), pct(tier1), pct(tier2), pct(tier1)], per_half_turn: f }
+    }
+
+    /// `sub_82460460`: percent chance to land a trick of `difficulty` (scoring_trick +0x74) after `half_turns` half turns.
+    pub fn chance(&self, difficulty: u32, half_turns: u32) -> f32 {
+        let base = self.tiers.get(difficulty as usize).copied().unwrap_or(self.tiers[3]);
+        base * (0..half_turns).fold(1.0f32, |p, _| p * self.per_half_turn)
+    }
+
+    /// The roll: the AI bails (WipeOutRequest) when `chance < u * 100` for `u` in [0, 1).
+    pub fn lands(&self, difficulty: u32, half_turns: u32, u: f32) -> bool {
+        !(self.chance(difficulty, half_turns) < u * 100.0)
+    }
+}
+
+/// `AIPathCtrl_AirLatch` 8246A700 (0x8246A9B4): the landing roll runs for a posted flip, fingerflip or grab
+/// (categories 2, 3, 4) other than the coffin grab (0x3C), and only for non-ambient AI (`[[skater+0x724]+0x9C] != 0`).
+pub fn rolls_landing(trick: i16, ambient: bool) -> bool {
+    !ambient && trick != 0x3C && matches!(catalog::category(trick), Some(2..=4))
+}
+
 #[cfg(test)]
 #[path = "npc_tricks_tests.rs"]
 mod tests;

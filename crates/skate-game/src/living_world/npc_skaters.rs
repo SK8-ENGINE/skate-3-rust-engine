@@ -197,6 +197,9 @@ pub(crate) enum NpcSkaterEvent {
     WalkBack { id: LivingWorldId, node: u32, started: bool },
     /// The obstacle avoider changed mode (target: obstacle kind and id).
     Avoid { id: LivingWorldId, mode: skate_core::living_world::avoid::AvoidMode, target: Option<(skate_core::living_world::avoid::ObstacleKind, u64)> },
+    /// A simulated NPC skater banked a sequence (retail cMsgSequenceComplete from that skater's own score state:
+    /// 82DF18B0 -> 82DF0878 run for every skater, b1009 §0): its score and whether it ended in a bail.
+    SequenceComplete { id: LivingWorldId, score: i32, wiped_out: bool },
 }
 
 /// The stock clip a replay NPC shows per phase ([data]: names checked against the decoded stock
