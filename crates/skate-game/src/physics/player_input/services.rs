@@ -166,8 +166,8 @@ impl<C: PlayerInputCallbacks> InputPhaseServices for Services<'_, C> {
                 });
                 // Logs must diagnose arrival reports: where the teleport asked to land and where the fit put it.
                 bevy::log::info!(
-                    "TELEPORT_ARRIVAL asked=[{:.2}, {:.2}, {:.2}] fitted_y={:.2} ground_fit={}",
-                    asked[0], asked[1], asked[2], target[3][1], fit.enabled
+                    "TELEPORT_ARRIVAL asked=[{:.2}, {:.2}, {:.2}] fitted_y={:.2} ground_fit={} moved={}",
+                    asked[0], asked[1], asked[2], target[3][1], fit.enabled, (target[3][1] - asked[1]).abs() > 1e-4
                 );
             }
             self.callbacks

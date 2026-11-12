@@ -382,9 +382,199 @@ impl ContestRun {
     }
 }
 
+/// `Contest.eContestType` values, from its enum builder 8284C8A8 (each name followed by its number).
+pub mod variant {
+    pub const SEQUENCE: i32 = 0;
+    pub const SEQUENCE_GRAB: i32 = 1;
+    pub const SEQUENCE_GRIND: i32 = 2;
+    pub const SEQUENCE_FLIP: i32 = 3;
+    pub const SEQUENCE_FOOTPLANT: i32 = 4;
+    pub const SEQUENCE_HANDPLANT: i32 = 5;
+    pub const SEQUENCE_HIPPYJUMP: i32 = 6;
+    pub const GRIND_LENGTH: i32 = 7;
+    pub const SPEED: i32 = 8;
+    pub const AIR_DISTANCE: i32 = 9;
+    pub const AIR_GRAB_TIME: i32 = 10;
+    pub const AIR_HEIGHT: i32 = 11;
+    pub const AIR_SPIN: i32 = 12;
+    pub const AIR_TIME: i32 = 13;
+    pub const BEST_LINE: i32 = 14;
+    pub const AIR_ONLY: i32 = 15;
+    pub const GRIND_ONLY: i32 = 16;
+}
+
+/// One competitor's volume state in a round (contest_shared Competitor fields; setup_round @173-224 starts them
+/// in bounds, in no spot volume).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Gates {
+    pub in_boundary: bool,
+    pub in_spot_volumes: u32,
+    pub hit_spot: bool,
+}
+
+impl Default for Gates {
+    fn default() -> Self {
+        Self { in_boundary: true, in_spot_volumes: 0, hit_spot: false }
+    }
+}
+
+impl Gates {
+    /// run_round.sequencebegin: outside Best_Line, the line counts as started in a spot volume when one holds the skater.
+    pub fn sequence_begin(&mut self, variant: i32) {
+        if variant != variant::BEST_LINE {
+            self.hit_spot = self.in_spot_volumes > 0;
+        }
+    }
+
+    /// triggerentercollision / triggerexitcollision of the round boundary.
+    pub fn boundary(&mut self, inside: bool) {
+        self.in_boundary = inside;
+    }
+
+    /// triggerentercollision of a spot volume (outside Best_Line): one more volume holds the skater, the line hit one.
+    pub fn enter_spot(&mut self) {
+        self.in_spot_volumes += 1;
+        self.hit_spot = true;
+    }
+
+    /// triggerexitcollision of a spot volume.
+    pub fn exit_spot(&mut self) {
+        self.in_spot_volumes = self.in_spot_volumes.saturating_sub(1);
+    }
+}
+
+/// What a banked line held, for the trick type gate.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LineFacts<'a> {
+    /// Completed tricks by catalog category (`Trick.GetNumTrickType`).
+    pub tricks: &'a [u16],
+    /// An air of the line landed with body flips (`didFlip`, `Trick.GetCompletedAirNumFlips`).
+    pub flipped: bool,
+}
+
+/// Why a line scored nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gate {
+    Scored,
+    OutOfBounds,
+    NoSpotVolume,
+    WrongTrickType,
+}
+
+/// The catalog category a trick type variant asks for (`Trick.eTrickType` Grab / Grind / Footplant / Handplant /
+/// Hippyjump, matched to the catalog categories by name).
+pub fn variant_category(v: i32) -> Option<usize> {
+    match v {
+        variant::SEQUENCE_GRAB => Some(4),
+        variant::SEQUENCE_GRIND => Some(5),
+        variant::SEQUENCE_FOOTPLANT => Some(13),
+        variant::SEQUENCE_HANDPLANT => Some(6),
+        variant::SEQUENCE_HIPPYJUMP => Some(10),
+        _ => None,
+    }
+}
+
+/// run_round.sequencecomplete @17-206: the first failing gate zeroes the line (out of the boundary; a round with spot
+/// volumes and a line that hit none; the variant's trick type missing, or a flip round without a flip).
+pub fn gate_line(variant: i32, spot_volumes: usize, gates: &Gates, line: LineFacts) -> Gate {
+    if !gates.in_boundary {
+        Gate::OutOfBounds
+    } else if spot_volumes > 0 && !gates.hit_spot {
+        Gate::NoSpotVolume
+    } else if variant_category(variant).is_some_and(|c| line.tricks.get(c).copied().unwrap_or(0) == 0)
+        || variant == variant::SEQUENCE_FLIP && !line.flipped
+    {
+        Gate::WrongTrickType
+    } else {
+        Gate::Scored
+    }
+}
+
+/// The modifier of `ID_CONTEST_WRONG_TYPE` per variant (@233-289): 2 for the air rounds, 3 grab, 4 grind, 5 spin, else 1.
+pub fn wrong_type_modifier(v: i32) -> u32 {
+    match v {
+        variant::AIR_DISTANCE | variant::AIR_GRAB_TIME | variant::AIR_ONLY | variant::AIR_TIME => 2,
+        variant::SEQUENCE_GRAB => 3,
+        variant::SEQUENCE_GRIND => 4,
+        variant::AIR_SPIN => 5,
+        _ => 1,
+    }
+}
+
+/// The local player's wrong trick counter (@215-299; NumWrongTricksToWarn 3 from setup_code).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WrongTricks {
+    pub count: u32,
+    pub warn_at: u32,
+}
+
+impl Default for WrongTricks {
+    fn default() -> Self {
+        Self { count: 0, warn_at: 3 }
+    }
+}
+
+impl WrongTricks {
+    /// After the player's line: true when the warning shows now (central message + speech line 307).
+    pub fn line(&mut self, gate: Gate, points: f32) -> bool {
+        if gate == Gate::WrongTrickType {
+            self.count += 1;
+            if self.count >= self.warn_at {
+                self.count = 0;
+                return true;
+            }
+        } else if points > 0.0 {
+            self.count = 0;
+        }
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_gates_follow_the_contest_graph() {
+        let mut g = Gates::default();
+        let mut tricks = [0u16; 14];
+        fn line(t: &[u16; 14], flipped: bool) -> LineFacts<'_> {
+            LineFacts { tricks: &t[..], flipped }
+        }
+        assert_eq!(gate_line(variant::SEQUENCE, 0, &g, line(&tricks, false)), Gate::Scored);
+        // A round with spot volumes: the line must start in one or enter one.
+        assert_eq!(gate_line(variant::SEQUENCE, 1, &g, line(&tricks, false)), Gate::NoSpotVolume);
+        g.enter_spot();
+        g.exit_spot();
+        assert_eq!(gate_line(variant::SEQUENCE, 1, &g, line(&tricks, false)), Gate::Scored, "entered during the line");
+        g.sequence_begin(variant::SEQUENCE);
+        assert_eq!(gate_line(variant::SEQUENCE, 1, &g, line(&tricks, false)), Gate::NoSpotVolume, "next line began outside");
+        g.enter_spot();
+        g.sequence_begin(variant::SEQUENCE);
+        assert!(g.hit_spot, "began inside");
+        // Trick type rounds.
+        assert_eq!(gate_line(variant::SEQUENCE_GRAB, 1, &g, line(&tricks, false)), Gate::WrongTrickType);
+        tricks[4] = 1;
+        assert_eq!(gate_line(variant::SEQUENCE_GRAB, 1, &g, line(&tricks, false)), Gate::Scored);
+        assert_eq!(gate_line(variant::SEQUENCE_FLIP, 1, &g, line(&tricks, false)), Gate::WrongTrickType);
+        assert_eq!(gate_line(variant::SEQUENCE_FLIP, 1, &g, line(&tricks, true)), Gate::Scored);
+        // Out of bounds wins over every other gate.
+        g.boundary(false);
+        assert_eq!(gate_line(variant::SEQUENCE_FLIP, 1, &g, line(&tricks, false)), Gate::OutOfBounds);
+    }
+
+    #[test]
+    fn three_wrong_lines_warn_and_a_scoring_line_resets() {
+        let mut w = WrongTricks::default();
+        assert!(!w.line(Gate::WrongTrickType, 0.0));
+        assert!(!w.line(Gate::Scored, 120.0), "a scoring line resets the count");
+        assert!(!w.line(Gate::WrongTrickType, 0.0));
+        assert!(!w.line(Gate::WrongTrickType, 0.0));
+        assert!(w.line(Gate::WrongTrickType, 0.0), "the third in a row warns");
+        assert_eq!(w.count, 0);
+        assert!(!w.line(Gate::OutOfBounds, 0.0) && w.count == 0, "other gates leave the count");
+        assert_eq!((wrong_type_modifier(variant::SEQUENCE_GRAB), wrong_type_modifier(variant::AIR_TIME), wrong_type_modifier(variant::SEQUENCE)), (3, 2, 1));
+    }
 
     fn round(run_type: RunType) -> Round {
         Round { round_time: 2.0, run_type, cumulative: false, cumulative_min: 0.0, ai_adjustment: 1.0, demo_target: None }

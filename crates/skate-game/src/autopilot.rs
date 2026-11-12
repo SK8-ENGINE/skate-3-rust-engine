@@ -60,6 +60,9 @@ pub(crate) struct Autopilot {
     ticks: u64,
     /// Where it was when it last made progress (position, tick): no `CRAWL_DISTANCE` in `CRAWL_TICKS` is a wedge.
     crawl_anchor: Option<([f32; 3], u64)>,
+    /// A host teleported the player (a contest round start): pick a line again where it arrives. The deck jump test
+    /// misses these while the brain drives (its step resets `last_deck`).
+    pub(crate) host_teleported: bool,
 }
 
 impl Autopilot {
@@ -126,6 +129,12 @@ pub(crate) fn engage(
     // Any teleport (--teleport, the teleport menu, a challenge start): pick a line again where the player arrived.
     let deck = physics.board.bodies()[skate_core::physics::board::BodyId::Deck.index()].rates.position;
     let deck = [deck.x, deck.y, deck.z];
+    if std::mem::take(&mut autopilot.host_teleported) && autopilot.npc.is_some() && autopilot.restart_in == 0 {
+        autopilot.restart_in = RESTART_TICKS;
+        autopilot.avoid.clear();
+        autopilot.bails.clear();
+        info!("AUTOPILOT a host teleported the player: picking a line again there");
+    }
     if let Some(last) = autopilot.last_deck.replace(deck) {
         let moved = ((deck[0] - last[0]).powi(2) + (deck[1] - last[1]).powi(2) + (deck[2] - last[2]).powi(2)).sqrt();
         if moved > TELEPORT_JUMP && autopilot.npc.is_some() && autopilot.restart_in == 0 {
@@ -422,7 +431,7 @@ pub(crate) fn possess_out(
         // Every 2 s: where the brain has the player (logs must diagnose).
         if *calls % 120 == 1 {
             let v = physics.board.bodies()[skate_core::physics::board::BodyId::Deck.index()].rates.linear_velocity;
-            info!("AUTOPILOT at [{:.1}, {:.1}, {:.1}] {:.1} m/s state {:?} line {} node {}", deck[0], deck[1], deck[2],
+            info!("AUTOPILOT deck at [{:.1}, {:.1}, {:.1}] {:.1} m/s state {:?} line {} node {}", deck[0], deck[1], deck[2],
                 (v.x * v.x + v.z * v.z).sqrt(), skater.player_state.current(), hex(&replay.cursor.line), replay.cursor.node);
         }
     }

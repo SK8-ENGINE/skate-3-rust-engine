@@ -645,6 +645,13 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             except (ValueError, struct.error, IndexError):
                 return None
 
+        def volume_ref(raw):
+            try:
+                _, name, instance = parse_trigger(raw, binary)
+                return dict(name=name, instance=instance)
+            except (ValueError, struct.error, IndexError):
+                return None
+
         params = merged((PARAMS, hash64(key)))
         rounds = []
         for item in ((params.get(CONTEST_ROUNDS) or {}).get('array') or {}).get('items') or []:
@@ -668,6 +675,8 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
                 start=locator(r, START), wait=locator(r, WAIT_LOCATION),
                 boundary=volume_name(bytes.fromhex(boundary)) if boundary else None,
                 spot_volumes=[n for n in (volume_name(bytes.fromhex(i)) for i in spots) if n],
+                _volume_refs=dict(boundary=volume_ref(bytes.fromhex(boundary)) if boundary else None,
+                                  spots=[v for v in (volume_ref(bytes.fromhex(i)) for i in spots) if v]),
                 result_columns=[(r.get(c) or {}).get('data') or '' for c in RESULT_COLUMNS],
                 ai_paths=dict(names=names,
                               all_paths=struct.unpack_from('>I', paths, 0x320)[0] == 1 if len(paths) >= 0x328 else True,
@@ -712,6 +721,14 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             # stands on child n of the start locator, like the race heats (b992); the player is 0.
             r['start_slots'] = next((s for _, _, arena in stream_arenas(source) for s in [locator_slots(arena, r['start'])] if s),
                                     []) if source and r['start'] else []
+            # The round boundary and spot volumes (run_round trigger enter / exit: inBoundary, inNumSpotVol), the
+            # shapes from the hull the round's locators came from (as the race gates).
+            refs = r.pop('_volume_refs')
+            def shape(ref):
+                found = volume_of(source, ref['instance']) if source and ref else None
+                return dict(name=ref['name'], id='%016x' % ref['instance'], volume=found) if found else None
+            r['boundary_volume'] = shape(refs['boundary'])
+            r['spot_volume_shapes'] = [v for v in (shape(x) for x in refs['spots']) if v]
         # The challenge's music playlist (8248B258 reads challenge attrib 874EC914B4D34708; default 614B4D4D82510720).
         playlist = (params.get(MUSIC_PLAYLIST) or fields.get(MUSIC_PLAYLIST) or {}).get('data') or ''
         title_id = (fields.get(TITLE) or {}).get('data') or None

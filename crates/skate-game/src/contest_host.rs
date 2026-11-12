@@ -45,6 +45,11 @@ pub(crate) struct ContestRound {
     /// The round's `Paths` (AI.FilterPaths): which lines its riders may take.
     #[serde(default)]
     pub ai_paths: RoundPathsJson,
+    /// RoundBoundary (inBoundary) and SpotVolumes (hitSpotVol), with their shapes.
+    #[serde(default)]
+    pub boundary_volume: Option<crate::challenges::Volume>,
+    #[serde(default)]
+    pub spot_volume_shapes: Vec<crate::challenges::Volume>,
 }
 
 /// `ai_paths` as exported: `{names, all_paths, param}`, or a bare name list (exports before 2026-11-11, which did not
@@ -185,6 +190,12 @@ pub(crate) struct ContestState {
     /// The round results dialog is open (the run waits for its Continue).
     dialog_open: bool,
     dialog_seconds: f32,
+    /// Per competitor (player 0): run_round's volume state, reset at setup_round.
+    gates: Vec<skate_core::challenges::contest_run::Gates>,
+    /// Per competitor: inside the round boundary, and which spot volumes hold it (bit per volume), last tick.
+    inside: Vec<(bool, u64)>,
+    wrong: skate_core::challenges::contest_run::WrongTricks,
+    player_sequence: bool,
 }
 
 #[derive(Resource, Default)]
@@ -240,7 +251,9 @@ fn arm(mut contests: ResMut<Contests>, config: Res<crate::config::Config>, map: 
         let rows: Vec<String> = contest.competitors.iter().map(|c| c.character.clone()).collect();
         crate::contest_ai_host::ContestAi::load(&config.asset_root, &contest.id, &rows, crate::race_ai_host::start_seed(map.generation))
     };
-    contests.run = Some(ContestState { contest, run, carry: 0.0, rng: seed, ai_scored: false, names, go_shown: 0.0, ai, dialog_open: false, dialog_seconds: 0.0 });
+    let n = contest.competitors.len() + 1;
+    contests.run = Some(ContestState { contest, run, carry: 0.0, rng: seed, ai_scored: false, names, go_shown: 0.0, ai, dialog_open: false, dialog_seconds: 0.0,
+        gates: vec![Default::default(); n], inside: vec![(true, 0); n], wrong: Default::default(), player_sequence: false });
     contests.pending = commands;
 }
 
@@ -255,10 +268,14 @@ fn update(
     challenges: Res<crate::challenges::Challenges>,
     mut skater: ResMut<crate::physics::SkaterRuntime>,
     stand_in: Res<AiScoreStandIn>,
-    mut npc_events: MessageReader<crate::living_world::npc_skaters::NpcSkaterEvent>,
+    (mut npc_events, npc_transforms, mut central): (
+        MessageReader<crate::living_world::npc_skaters::NpcSkaterEvent>,
+        Query<&Transform, With<crate::living_world::npc_skaters::NpcSkater>>,
+        MessageWriter<crate::hud_central::CentralMessage>,
+    ),
     mut hud: ResMut<ChallengeHudState>,
     mut end_dialog: Option<ResMut<crate::end_dialog_host::EndDialogScreen>>,
-    autopilot: Option<Res<crate::autopilot::Autopilot>>,
+    mut autopilot: Option<ResMut<crate::autopilot::Autopilot>>,
     time: Res<Time>,
     (mut population, index, mut clocks, mut commands_ecs): (
         Option<ResMut<crate::living_world::PopulationState>>,
@@ -296,22 +313,100 @@ fn update(
             None => state.dialog_open = false,
         }
     }
-    // The player's banked sequences (run_round.sequencecomplete; NOT RETAIL YET: the boundary, spot volume and
-    // trick-type gates of b1009 §2 are not applied). A bail ends the line without a score.
-    for s in challenges.banked_this_frame.iter().filter(|s| !s.wiped_out) {
-        commands.extend(state.run.handle(Event::Score { competitor: 0, points: s.score as f32 }));
+    // run_round's volume and sequence handlers, then sequencecomplete with its gates (b1009 §2): every competitor's
+    // banked line (the player's from the scoring runtime, a rider's own NpcSkaterEvent) is gated, then
+    // UpdateScore(CIndex, points) (the run applies AIScoreAdjustment). A bailed line scores nothing.
+    use crate::living_world::npc_skaters::NpcSkaterEvent;
+    use skate_core::challenges::contest_run::{gate_line, wrong_type_modifier, Gate, LineFacts};
+    let round = state.contest.rounds.get(state.run.round().saturating_sub(1));
+    let variant = round.map_or(0, |r| r.variant);
+    let running = state.run.state() == State::RunRound;
+    let npc_list: Vec<NpcSkaterEvent> = npc_events.read().cloned().collect();
+    let rider_of = |state: &ContestState, id| state.ai.as_ref().and_then(|ai| ai.riders.iter().find(|r| r.npc == Some(id))).map(|r| r.id as usize);
+    // Positions (hips height; [inferred]: retail tests the skater's own trigger body): the player, then each rider.
+    let mut points: Vec<Option<[f32; 3]>> = vec![None; state.gates.len()];
+    if let Some(p) = points.get_mut(0) {
+        *p = Some(crate::trigger_volumes::player_points(&skater)[2]);
     }
-    // The riders' own banked sequences: GetCompetitorIndex(msg.PlayerID) -> UpdateScore(CIndex, SequenceScore), the
-    // run applies AIScoreAdjustment (contest_shared run_round.sequencecomplete, b1009 §0). A bailed line scores nothing.
-    let rider_scores: Vec<(usize, i32)> = npc_events.read().filter_map(|e| match e {
-        crate::living_world::npc_skaters::NpcSkaterEvent::SequenceComplete { id, score, wiped_out: false } => state.ai.as_ref()
-            .and_then(|ai| ai.riders.iter().find(|r| r.npc == Some(*id)))
-            .map(|r| (r.id as usize, *score)),
-        _ => None,
-    }).collect();
-    for (c, score) in rider_scores {
-        info!("SKATE_CONTEST rider {c} banked {score}");
-        commands.extend(state.run.handle(Event::Score { competitor: c, points: score as f32 }));
+    if let (Some(ai), Some(index)) = (state.ai.as_ref(), index.as_deref()) {
+        for r in &ai.riders {
+            let at = r.npc.and_then(|id| index.0.get(&id)).and_then(|e| npc_transforms.get(*e).ok()).map(|t| t.translation);
+            if let (Some(t), Some(p)) = (at, points.get_mut(r.id as usize)) {
+                *p = Some([t.x, t.y + 1.0, t.z]);
+            }
+        }
+    }
+    if let (true, Some(round)) = (running, round) {
+        let boundary = round.boundary_volume.as_ref().map(|v| v.volume.shape.oriented_box());
+        let spots: Vec<_> = round.spot_volume_shapes.iter().map(|v| v.volume.shape.oriented_box()).collect();
+        for (c, at) in points.iter().enumerate() {
+            let Some(at) = *at else { continue };
+            let (was_in, was_mask) = state.inside[c];
+            if let Some(b) = &boundary {
+                let now_in = b.contains_point(at);
+                if now_in != was_in {
+                    state.gates[c].boundary(now_in);
+                    if c == 0 {
+                        info!("SKATE_CONTEST player {} the round boundary", if now_in { "entered" } else { "left" });
+                    }
+                }
+                state.inside[c].0 = now_in;
+            }
+            let mut mask = 0u64;
+            for (i, s) in spots.iter().enumerate().take(64) {
+                if s.contains_point(at) {
+                    mask |= 1 << i;
+                }
+            }
+            if variant != skate_core::challenges::contest_run::variant::BEST_LINE {
+                for _ in 0..(mask & !was_mask).count_ones() {
+                    state.gates[c].enter_spot();
+                }
+                for _ in 0..(was_mask & !mask).count_ones() {
+                    state.gates[c].exit_spot();
+                }
+            }
+            state.inside[c].1 = mask;
+        }
+    }
+    // sequencebegin: the player's scoring runtime opening a sequence, a rider's SequenceBegin.
+    let player_active = skater.scoring.sequence_active();
+    if running && player_active && !state.player_sequence {
+        state.gates[0].sequence_begin(variant);
+    }
+    state.player_sequence = player_active;
+    // The lines: (competitor, points, tricks, flipped).
+    let mut lines: Vec<(usize, f32, [u16; crate::scoring_runtime::SEQUENCE_CATEGORIES], bool)> =
+        challenges.banked_this_frame.iter().filter(|s| !s.wiped_out).map(|s| (0, s.score as f32, s.tricks, s.flipped)).collect();
+    for e in &npc_list {
+        match e {
+            NpcSkaterEvent::SequenceBegin { id } if running => {
+                if let Some(c) = rider_of(state, *id).filter(|c| *c < state.gates.len()) {
+                    state.gates[c].sequence_begin(variant);
+                }
+            }
+            NpcSkaterEvent::SequenceComplete { id, score, wiped_out: false, tricks, flipped } => {
+                if let Some(c) = rider_of(state, *id) {
+                    lines.push((c, *score as f32, *tricks, *flipped));
+                }
+            }
+            _ => {}
+        }
+    }
+    let spot_count = round.map_or(0, |r| r.spot_volume_shapes.len());
+    for (c, raw, tricks, flipped) in lines {
+        let gates = state.gates.get(c).copied().unwrap_or_default();
+        let gate = gate_line(variant, spot_count, &gates, LineFacts { tricks: &tricks[..], flipped });
+        let points = if gate == Gate::Scored { raw } else { 0.0 };
+        if c == 0 && running && state.wrong.line(gate, points) {
+            info!("SKATE_CONTEST wrong trick type warning (ID_CONTEST_WRONG_TYPE {}, speech 307)", wrong_type_modifier(variant));
+            // NOT RETAIL YET: what the modifier does to the text (82850770's second argument) and speech line 307.
+            central.write(crate::hud_central::CentralMessage::modified("ID_CONTEST_WRONG_TYPE"));
+        }
+        if c > 0 || gate != Gate::Scored {
+            info!("SKATE_CONTEST competitor {c} line {raw} -> {points} ({gate:?})");
+        }
+        commands.extend(state.run.handle(Event::Score { competitor: c, points }));
     }
     if state.run.state() == State::RunRound && !state.ai_scored && state.run.round_ticks().is_some_and(|t| t <= TICKS_PER_SECOND as i32) {
         state.ai_scored = true;
@@ -340,6 +435,9 @@ fn update(
         match c {
             Command::MusicTrigger(code) => music.push((code, playlist.clone())),
             Command::TeleportToStart { round } => {
+                // setup_round @173-224: every competitor starts the round in bounds, in no spot volume.
+                state.gates.iter_mut().for_each(|g| *g = Default::default());
+                state.inside.iter_mut().for_each(|i| *i = (true, 0));
                 if let Some(m) = state.contest.rounds.get(round.saturating_sub(1)).and_then(|r| r.start_matrix) {
                     let name = state.contest.rounds.get(round.saturating_sub(1)).and_then(|r| r.start.clone()).unwrap_or_default();
                     info!("SKATE_CONTEST {id} round {round} start {name} {:?}", &m[3][..3]);
@@ -350,8 +448,16 @@ fn update(
                         let paths = r.map(|r| r.ai_paths.paths()).unwrap_or_default();
                         ai.place(&m, r.map_or(&[][..], |r| &r.start_slots[..]), &paths, pop);
                     }
-                    if let Err(e) = skater.travel_ex(m, None, true) {
+                    // RepositionAI(id, StartLocation, id) puts the player (competitor 0) on slot 0 of the locator, like the
+                    // race heats (b992); the locator itself can sit under the ground (street_dwtn_01 round 2: 1.3 m
+                    // below the plaza, the player fell through). The locator when the round has no slots.
+                    let player = state.contest.rounds.get(round.saturating_sub(1)).and_then(|r| r.start_slots.first().copied()).unwrap_or(m);
+                    info!("SKATE_CONTEST {id} round {round} player slot 0 {:?}", &player[3][..3]);
+                    if let Err(e) = skater.travel_ex(player, None, true) {
                         warn!("SKATE_CONTEST teleport {e}");
+                    }
+                    if let Some(a) = autopilot.as_mut() {
+                        a.host_teleported = true;
                     }
                 }
             }
@@ -563,7 +669,7 @@ mod tests {
     #[test]
     fn rows_become_params_with_solo_runs_and_timed_runs() {
         let row = |run_type, solo_runs| ContestRound { run_type, variant: 0, round_time: 90, ai_adjustment: 0.75, cumulative: true, cumulative_min: 0,
-            solo_runs, solo_ai_min: 3500, solo_ai_max: 2000, demo_target: None, start: None, start_matrix: None, start_slots: Vec::new(), result_columns: Vec::new(), ai_paths: Default::default() };
+            solo_runs, solo_ai_min: 3500, solo_ai_max: 2000, demo_target: None, start: None, start_matrix: None, start_slots: Vec::new(), result_columns: Vec::new(), ai_paths: Default::default(), boundary_volume: None, spot_volume_shapes: Vec::new() };
         let c = Contest { id: "street_univ_01".into(), map: None, demo: false, competitors: vec![crate::race_host::CompetitorRow { character: "a".into(), kind: 0 }; 3],
             music_playlist: None, title: None, title_id: None, rounds: vec![row(1, 1), row(3, 1), row(4, 1)] };
         let p = params(&c, 7);

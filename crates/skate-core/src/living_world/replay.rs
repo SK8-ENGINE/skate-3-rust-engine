@@ -282,6 +282,29 @@ impl LineSource for BTreeMap<[u8; 16], ReplayLine> {
     }
 }
 
+/// A line source whose line search only sees `ids` (sorted): retail's line search `82458968` skips a line the challenge
+/// path filter rejects (`82458860` returns 1) before any other test, so it is neither a candidate nor a fallback; the
+/// valid / invalid split of the fallback is the mask / leg test `82456970` (`BranchContext::valid_lines`). Lookups by id
+/// still see every line, so a skater's current line always resolves.
+pub struct FilteredLines<'a> {
+    pub inner: &'a dyn LineSource,
+    pub ids: &'a [[u8; 16]],
+}
+
+impl LineSource for FilteredLines<'_> {
+    fn line(&self, id: &[u8; 16]) -> Option<&ReplayLine> {
+        self.inner.line(id)
+    }
+    fn for_each_line<'a>(&'a self, f: &mut dyn FnMut(&'a ReplayLine)) {
+        let (inner, ids): (&'a dyn LineSource, &'a [[u8; 16]]) = (self.inner, self.ids);
+        inner.for_each_line(&mut |l| {
+            if ids.binary_search(&l.id).is_ok() {
+                f(l);
+            }
+        });
+    }
+}
+
 /// Decode a node orientation: x, y, z, w with +Z = forward ([data]: the skater quaternion turns
 /// +Z onto the travel direction within 25 deg on 81 % of moving nodes in this order; other
 /// orders and axes score far lower).

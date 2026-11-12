@@ -60,7 +60,7 @@ Each document stands alone. File paths are relative to the repository root.
 | 42 | [Challenges (own the spot first)](42-challenges.md) | Setup + engine | On `world/challenges` (own upstream PR after #52): retail challenge data and logic researched; setup exports the own the spot challenges (volumes, start, owned / killed it points) to `challenges.json`; engine runner next |
 | 43 | [Career mode](43-career.md) | Setup + engine | On `world/challenges` (with doc 42), in progress: research summary, M1 design, the progression export (`progression.json`: groups, actions, rewards, challenge rewards) |
 | 44 | [Every OS](44-every-os.md) | Engine + setup + tools | On `world/challenges`, in progress: Linux and macOS ports imported (#7, stev0760), our changes made OS-independent, the Skate launcher rewrite in Rust planned (spec: [44a](44a-launcher-spec.md)) |
-| 45 | [Ghidra function names](45-ghidra-function-names.md) | Tools | On `world/challenges` (#68): 6,070 decoded Skate 3 (TU3) function names for Ghidra, loadable with the built-in ImportSymbolsScript.py or ApplyNames.java (descriptions as comments). |
+| 45 | [Ghidra function names](45-ghidra-function-names.md) | Tools | On `world/challenges` (#68): 7,607 decoded Skate 3 (TU3) function names for Ghidra, loadable with the built-in ImportSymbolsScript.py or ApplyNames.java (descriptions as comments). |
 
 ## Environment used for verification
 

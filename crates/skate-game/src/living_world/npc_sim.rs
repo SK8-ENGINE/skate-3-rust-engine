@@ -244,6 +244,8 @@ pub(crate) struct NpcSim {
     /// Half turns of spin of the current air (score state +0x3018), kept from the last airborne tick for the landing
     /// roll (the scoring runtime resets its own on landing).
     air_half_turns: u32,
+    /// The scoring runtime had a sequence open last tick (for `NpcSkaterEvent::SequenceBegin`).
+    sequence_active: bool,
     board_yaw: skate_core::living_world::ai_signals::BoardYaw,
     /// `pc+824`, the ground steer's last error; retail keeps it between steer ticks.
     ground_error: Option<f32>,
@@ -562,7 +564,7 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, was_pinned: false, start_ticks: 0, braking: false, pump_cycle: 0, pump_ticks: 0, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), air_half_turns: 0, board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, was_pinned: false, start_ticks: 0, braking: false, pump_cycle: 0, pump_ticks: 0, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), air_half_turns: 0, sequence_active: false, board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
     if fit_to_ground {
         sim.body.runtime.fit_next_arrival();
@@ -1323,9 +1325,12 @@ pub(crate) fn simulate(
                                 super::npc_skaters::fill_others(order, npc.id, others, in_use);
                                 let profile = super::npc_skaters::npc_trick_profile(&state.npc.tricks, &settings.skater_trick_profiles, &npc.character);
                                 let tricks = skate_core::living_world::npc_tricks::TrickContext { mode: settings.npc_tricks.mode, params: settings.npc_tricks.params, profile: profile.as_deref(), seed: npc.seed, slot_tricks: state.npc.tricks.slot_tricks_for(&npc.character) };
-                                let ctx = skate_core::living_world::replay::BranchContext { position: pos, forward: heading, speed: speed.abs(), players, others, in_use, preferred_skill: -1, online: observers.online, chain: line_chain, tricks, body: replay.body_gate, valid_lines: filter.map(|f| f.0.as_slice()).or_else(|| valid.as_ref().and_then(|v| v.per_character.get(&npc.character)).map(Vec::as_slice)) };
+                                let ctx = skate_core::living_world::replay::BranchContext { position: pos, forward: heading, speed: speed.abs(), players, others, in_use, preferred_skill: -1, online: observers.online, chain: line_chain, tricks, body: replay.body_gate, valid_lines: valid.as_ref().and_then(|v| v.per_character.get(&npc.character)).map(Vec::as_slice) };
                                 out.clear();
-                                if let Some((to, node)) = replay.cursor.line_end_chain(&*lines, &ctx, out) {
+                                // The path filter hides the other lines from the search (82458860 skips them, b972 / 82458968).
+                                let filtered = filter.map(|f| skate_core::living_world::replay::FilteredLines { inner: &*lines, ids: f.0.as_slice() });
+                                let search: &dyn skate_core::living_world::replay::LineSource = match &filtered { Some(f) => f, None => &*lines };
+                                if let Some((to, node)) = replay.cursor.line_end_chain(search, &ctx, out) {
                                     for ev in out.drain(..) {
                                         if let skate_core::living_world::replay::CursorEvent::Branch(record) = ev {
                                             replay.branches.push(record.clone());
@@ -1569,8 +1574,13 @@ pub(crate) fn simulate(
                 let (landing_skill, world_tick) = (state.npc.tricks.landing_for(&npc.character), state.world.tick());
                 // Every simulated skater's own banked sequences (cMsgSequenceComplete per skater; contests score them).
                 for s in sim.body.runtime.scoring.take_banked() {
-                    events.write(super::npc_skaters::NpcSkaterEvent::SequenceComplete { id: npc.id, score: s.score, wiped_out: s.wiped_out });
+                    events.write(super::npc_skaters::NpcSkaterEvent::SequenceComplete { id: npc.id, score: s.score, wiped_out: s.wiped_out, tricks: s.tricks, flipped: s.flipped });
                 }
+                let sequence_active = sim.body.runtime.scoring.sequence_active();
+                if sequence_active && !sim.sequence_active {
+                    events.write(super::npc_skaters::NpcSkaterEvent::SequenceBegin { id: npc.id });
+                }
+                sim.sequence_active = sequence_active;
                 let state = sim.body.runtime.player_state.current();
                 let mut intents = intents;
                 intents.extend(walk_intents);

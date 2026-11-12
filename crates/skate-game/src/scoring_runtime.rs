@@ -67,7 +67,14 @@ pub(crate) enum StatEvent {
 pub(crate) struct BankedSequence {
     pub score: i32,
     pub wiped_out: bool,
+    /// Completed tricks of the sequence by trick category (`catalog::category`; retail `Trick.GetNumTrickType`).
+    pub tricks: [u16; SEQUENCE_CATEGORIES],
+    /// An air of the sequence landed with body flips (retail `didFlip` from `Trick.GetCompletedAirNumFlips`).
+    pub flipped: bool,
 }
+
+/// Trick categories counted per sequence (catalog categories 0..13).
+pub(crate) const SEQUENCE_CATEGORIES: usize = 14;
 
 const BANKED_CAP: usize = 16;
 
@@ -112,6 +119,8 @@ pub(crate) struct Runtime {
     /// message 0x92CC9BBD, b865 §1: DidSpecificTrick and the ThisFrame variants). Bailed and unannounced ones are
     /// not in it. Capped like `announced`.
     done: Vec<u64>,
+    seq_tricks: [u16; SEQUENCE_CATEGORIES],
+    seq_flipped: bool,
     /// The manual held now: (tail, seconds held).
     manual: Option<(bool, f32)>,
     trick_name: String,
@@ -177,6 +186,8 @@ impl Runtime {
             banked: Vec::new(),
             announced: Vec::new(),
             done: Vec::new(),
+            seq_tricks: [0; SEQUENCE_CATEGORIES],
+            seq_flipped: false,
             manual: None,
             trick_name: String::new(),
             display_base: String::new(), display_spin_degrees: 0,
@@ -290,9 +301,14 @@ impl Runtime {
             self.stat_events.push(StatEvent::TrickEnd { id: carrier.scorable.id, success: complete, announced: carrier.announced, held, distance });
             if complete {
                 // 82DA5F98: only a valid carrier completes, and one completed before its announcement posts nothing.
-                if carrier.complete(self.data.unannounced_factor) && !carrier.unannounced && self.done.len() < 64 {
-                    if let Some(d) = self.data.by_id(carrier.scorable.id) {
-                        self.done.push(skate_data::attrib_hash::hash(d.identifier));
+                if carrier.complete(self.data.unannounced_factor) && !carrier.unannounced {
+                    if let Some(c) = self.seq_tricks.get_mut(carrier.scorable.score_type) {
+                        *c = c.saturating_add(1);
+                    }
+                    if self.done.len() < 64 {
+                        if let Some(d) = self.data.by_id(carrier.scorable.id) {
+                            self.done.push(skate_data::attrib_hash::hash(d.identifier));
+                        }
                     }
                 }
                 if self.collector == Collector::Air {
@@ -546,6 +562,7 @@ impl Runtime {
             if self.collector == Collector::Air {
                 if complete && self.body_flip_count != 0 {
                     self.stat_events.push(StatEvent::BodyFlips(self.body_flip_count.unsigned_abs()));
+                    self.seq_flipped = true;
                 }
                 if complete {
                     for (i, reward) in self.air_metrics.into_iter().enumerate() {
@@ -834,8 +851,9 @@ impl Runtime {
                 self.session
                     .publish_sequence(&self.data.session_rules(), 1., bailout, true);
             if self.banked.len() < BANKED_CAP {
-                self.banked.push(BankedSequence { score: self.sequence_score as i32, wiped_out: bailout });
+                self.banked.push(BankedSequence { score: self.sequence_score as i32, wiped_out: bailout, tricks: self.seq_tricks, flipped: self.seq_flipped });
             }
+            (self.seq_tricks, self.seq_flipped) = ([0; SEQUENCE_CATEGORIES], false);
             bevy::log::info!(target: "scoring", "SCORING_BANK tick={} state={} raw={} applied_multiplier={} reward={} next_multiplier={} line={} line_expired={} bail={} teleport={}", f.tick, f.state, raw_reward, applied_multiplier, self.sequence_score, self.session.combo.multiplier, self.session.holder.snapshot.line, self.session.line.expired, bailout, f.teleported);
             if !bailout
                 && !f.teleported

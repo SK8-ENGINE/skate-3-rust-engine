@@ -1315,3 +1315,20 @@ fn a_bailed_skater_fades_out_over_the_last_second_before_its_respawn() {
     assert_eq!(LeaveFadeConfig { bail_fade_lead_seconds: 2.0, ..c }.bail_alpha(180, 300), 1.0);
     assert!(LeaveFadeConfig { bail_fade_lead_seconds: 2.0, ..c }.bail_alpha(200, 300) < 1.0);
 }
+
+/// 82458968: a line the challenge path filter rejects (82458860) is skipped before any other test, so the mode 1
+/// fallback never takes it; the fallback's invalid lines are only the mask / leg failures (`valid_lines`).
+#[test]
+fn a_filtered_out_line_is_never_a_fallback() {
+    let players: [Vec3; 0] = [];
+    let end = along(1, [0.0; 3], [0.0, 1.0], 21);
+    let at = ctx([0.0, 0.0, 20.0], &players);
+    let fb = BranchContext { chain: ChainConfig { fallback: true, ..ChainConfig::retail() }, ..at };
+    // Line 5 (ambient, outside the filter) starts 8 m away, line 3 (in the filter) 15 m away, the own start 20 m.
+    let ls = lines(vec![end, along(3, [15.0, 0.0, 20.0], [0.0, 1.0], 10), along(5, [8.0, 0.0, 20.0], [0.0, 1.0], 10)]);
+    assert_eq!(choose_next_line(&ls, &ls[&id(1)], &fb), Some((id(5), 0)), "unfiltered: the nearest start");
+    let filter = [id(1), id(3)];
+    let only = FilteredLines { inner: &ls, ids: &filter };
+    assert_eq!(choose_next_line(&only, &ls[&id(1)], &fb), Some((id(3), 0)), "filtered: line 5 does not exist for the search");
+    assert!(only.line(&id(5)).is_some(), "lookups still see every line");
+}

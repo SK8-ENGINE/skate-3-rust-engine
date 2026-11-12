@@ -199,7 +199,9 @@ pub(crate) enum NpcSkaterEvent {
     Avoid { id: LivingWorldId, mode: skate_core::living_world::avoid::AvoidMode, target: Option<(skate_core::living_world::avoid::ObstacleKind, u64)> },
     /// A simulated NPC skater banked a sequence (retail cMsgSequenceComplete from that skater's own score state:
     /// 82DF18B0 -> 82DF0878 run for every skater, b1009 §0): its score and whether it ended in a bail.
-    SequenceComplete { id: LivingWorldId, score: i32, wiped_out: bool },
+    SequenceComplete { id: LivingWorldId, score: i32, wiped_out: bool, tricks: [u16; crate::scoring_runtime::SEQUENCE_CATEGORIES], flipped: bool },
+    /// A simulated NPC skater started a sequence (retail cMsgSequenceBegin from its own score state).
+    SequenceBegin { id: LivingWorldId },
 }
 
 /// The stock clip a replay NPC shows per phase ([data]: names checked against the decoded stock
@@ -1210,7 +1212,14 @@ pub(crate) fn advance(
         replay.cursor.fakie_settings = chain.fakie;
         // A simulated skater holds at a dead end (host and client alike, from the replicated `follow_target`).
         replay.cursor.hold_at_end = replay.follow_target.is_some();
-        let valid_lines = filter.map(|f| f.0.as_slice()).or_else(|| valid.get(&npc.character).map(Vec::as_slice));
+        // A challenge skater's path filter hides the other lines from its line search (82458860 skips them); the
+        // per-character mask stays the valid / invalid split of the fallback (82456970).
+        let valid_lines = valid.get(&npc.character).map(Vec::as_slice);
+        let filtered = filter.map(|f| skate_core::living_world::replay::FilteredLines { inner: &*lines, ids: f.0.as_slice() });
+        let search: &dyn skate_core::living_world::replay::LineSource = match &filtered {
+            Some(f) => f,
+            None => &*lines,
+        };
         // The NPC's trick tables (disc profile, mod overrides), read at its trick slots.
         let trick_profile = npc_trick_profile(&state.npc.tricks, &settings.skater_trick_profiles, &npc.character);
         // A simulated skater's line end chains in `npc_sim::simulate` on its trigger tick (b701 / b712).
@@ -1235,7 +1244,7 @@ pub(crate) fn advance(
             let r = &mut *replay;
             let mut decider = if mirror { Decider::Mirror(&r.branches, &r.tricks) } else { Decider::Decide(ctx) };
             let before = r.cursor.frames;
-            r.cursor.step(&*lines, &mut decider, out);
+            r.cursor.step(search, &mut decider, out);
             // A simulated skater held on its last node does not advance: no busy loop.
             if r.cursor.frames == before && !r.cursor.finished {
                 break;
