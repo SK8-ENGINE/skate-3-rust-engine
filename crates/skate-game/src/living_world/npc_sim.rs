@@ -553,7 +553,10 @@ fn spawn_sim(
     fit_to_ground: bool,
 ) -> Result<NpcSim, String> {
     let spawn = line_spawn(target);
+    let started = std::time::Instant::now();
     pool.finish_load();
+    let waited = started.elapsed();
+    let pooled = !pool.bodies.is_empty();
     let (context, body) = match pool.bodies.pop() {
         // A new actor on a pooled body: the per-actor parts a fresh body would have, and no record from the last owner
         // (b295 / b296 / b299; the placement's teleport reset and state Exit / Enter do the rest).
@@ -564,6 +567,9 @@ fn spawn_sim(
         }
         None => load_body(physics, config, graphs, spawn, &mut pool.source)?,
     };
+    // Logs must diagnose: where a promotion's game-thread time goes (a hitch report).
+    info!("NPC_SIM_SPAWN_COST pooled={pooled} left={} wait_load_ms={:.1} body_ms={:.1}", pool.bodies.len(), waited.as_secs_f64() * 1000.0,
+        (started.elapsed() - waited).as_secs_f64() * 1000.0);
     let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, was_pinned: false, start_ticks: 0, braking: false, pump_cycle: 0, pump_ticks: 0, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), air_half_turns: 0, sequence_active: false, board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
     if fit_to_ground {
