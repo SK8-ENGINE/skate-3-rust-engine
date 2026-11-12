@@ -2,7 +2,7 @@
 
 **Problem.** Every retail function in a fresh Ghidra project is `FUN_xxxxxxxx`. Each decode started from unnamed callers and callees, and anyone else reading the TU3 code had to rediscover what we had already worked out.
 
-**Change.** `tools/ghidra/skate3-tu3/`: the names of 3,908 functions decoded during this port, as a list anyone can load into their own Ghidra project (README there, written for a first-time Ghidra user):
+**Change.** `tools/ghidra/skate3-tu3/`: the names of 6,070 functions decoded during this port, as a list anyone can load into their own Ghidra project (README there, written for a first-time Ghidra user):
 - `skate3-tu3-symbols.txt` for Ghidra's built-in `ImportSymbolsScript.py` (nothing extra to install);
 - `skate3-tu3-functions.tsv` (address, name, one-line description);
 - `ApplyNames.java`, an optional script that applies the TSV with each description as a plate comment, skips addresses inside other functions and never overwrites names the user set (run from the Script Manager, it asks for the file; headless takes `<tsv> <log>`).

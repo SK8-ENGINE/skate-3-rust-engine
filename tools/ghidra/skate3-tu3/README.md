@@ -1,6 +1,6 @@
 # Skate 3 (TU3) function names for Ghidra
 
-Names for 3,908 functions of the Xbox 360 Skate 3 executable with Title Update 3, worked out while porting Skate 3 to this engine. Load them into your own Ghidra project and the decompiler shows `Score_UpdatePlayers` instead of `FUN_82df18b0`.
+Names for 6,070 functions of the Xbox 360 Skate 3 executable with Title Update 3, worked out while porting Skate 3 to this engine. Load them into your own Ghidra project and the decompiler shows `Score_UpdatePlayers` instead of `FUN_82df18b0`.
 
 This folder holds names and short descriptions only. It contains no game code and no game files.
 
