@@ -102,6 +102,11 @@ fn announcer_speaker(voice: u32) -> u64 {
     u64::MAX - 1024 + u64::from(voice)
 }
 
+/// The speaker id of a cast character with no body in the world (a presentation's line, 824AC050).
+fn cast_speaker(voice: u32) -> u64 {
+    u64::MAX - 2048 + u64::from(voice)
+}
+
 /// An announcer request from an engine system or a mod ([`crate::world_audio::AnnouncerSpeechEvent`]).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AnnouncerRequest {
@@ -864,12 +869,12 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
         }
     }
     // A presentation's cast line (824AC050): the active skater with the speaker's character says it (its distance
-    // sets near / far, as any of its lines). NOT RETAIL YET: with no such skater retail asks with the character's
-    // attrib words and flag 2; ours logs and drops it.
+    // sets near / far, as any of its lines); with none in the world the character still says it, below.
+    let mut bodiless: Vec<(u32, u16)> = Vec::new();
     for (voice, event) in std::mem::take(&mut speech.presented) {
         match speech.skaters.iter().find(|s| s.voice == voice).copied() {
             Some(sk) => says.push((sk, None, Some(event), None, None)),
-            None => info!("AUDIO_WORLD presentation cast line {event}: no skater with voice {voice} in the world"),
+            None => bodiless.push((voice, event)),
         }
     }
     // `SFXObj_PlayerSpeech`'s non-local process, once per console frame (free skate: game mode 0).
@@ -931,6 +936,22 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
             let flag = if far { skate_audio::world::speech_manager::FAR } else { skate_audio::world::speech_manager::NEAR };
             let res = speech.manager.request_event(&mut data.library, &data.table, event, flag, &words, &inputs, &mut speech.rng);
             new.push((sk.id, Who::Skater(sk.voice), res, -1, Chan::Living));
+        }
+    }
+    // 824AC050 with no active skater of the character: the request carries the character's own cast words and
+    // flag 2 (far) and plays on a PlayerSpeech instance with no world position (a speaker id of its own per voice).
+    // OURS: the block's word order is the pros' (`cast_block`); 824AC050's own order is not cross-checked.
+    for (voice, event) in bodiless {
+        match (speech.cast.as_mut(), cast_of(library, voice)) {
+            (Some(c), Some(words)) => {
+                let id = cast_speaker(voice);
+                speech.voices.insert(id, voice);
+                let block = cast_block(words, true, None);
+                let res = c.manager.request_main_cast(&mut c.data.library, &c.data.table, event, voice, &block, &inputs, &mut speech.rng);
+                info!("AUDIO_WORLD presentation cast line {event}: voice {voice} has no skater in the world, said far");
+                new.push((id, Who::Skater(voice), res, -1, Chan::Cast));
+            }
+            _ => info!("AUDIO_WORLD presentation cast line {event}: voice {voice} has no main-cast words (or no main cast)"),
         }
     }
     // Engine systems' and mods' announcer requests.

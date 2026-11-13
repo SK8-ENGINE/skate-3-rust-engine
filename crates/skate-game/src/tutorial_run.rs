@@ -136,7 +136,24 @@ pub(crate) struct TutorialRun {
     waiting: Vec<(String, Presentation)>,
     /// Failure / hint row tips fired this frame, started before the frame's events reach the state machine.
     tips: Vec<(String, Vec<skate_core::presentation::Event>)>,
+    /// One-frame skater facts since the last objective evaluation, spent on the next one (frames without a 60 Hz
+    /// tick keep them; a frame with several ticks spends them once).
+    pending: Pending,
 }
+
+/// The skater's edge facts and trick lists waiting for the next objective evaluation.
+#[derive(Default)]
+struct Pending {
+    sequence_completed: bool,
+    went_off_board: bool,
+    went_on_board: bool,
+    air_completed: bool,
+    tricks: Vec<u64>,
+    began: Vec<u64>,
+}
+
+/// At most this many objective evaluations catch up in one frame (a long frame does not replay seconds of them).
+const MAX_EVALUATIONS_PER_FRAME: u32 = 4;
 
 impl TutorialRun {
     pub(crate) fn new(data: TutorialData, trick_groups: crate::challenge_objectives::TrickGroups) -> Self {
@@ -145,7 +162,7 @@ impl TutorialRun {
             spawn_offboard: data.spawn_offboard };
         Self { data, machine: Tutorial::new(params), objectives: None, evaluating: false, awaiting_teleport: false, end_open: false,
             force_pass: std::env::var("SKATE_VERIFY_TUTORIAL_PASS").is_ok_and(|v| v == "1"), started: false,
-            was_off_board: false, last_state: 0, trick_groups, waiting: Vec::new(), tips: Vec::new() }
+            was_off_board: false, last_state: 0, trick_groups, waiting: Vec::new(), tips: Vec::new(), pending: Pending::default() }
     }
 
     /// Adds one of this tutorial's groups to the manager (owner = the tutorial id). `None` = nothing to wait for: no
@@ -255,7 +272,31 @@ impl TutorialRun {
             self.feed(Message::SequenceComplete { score, clean: !dirty }, &mut events);
             self.feed(Message::SequenceBegin, &mut events);
         }
-        self.feed(Message::Tick { gated: false }, &mut events);
+        // The objectives evaluate once per 60 Hz challenge tick, whatever the frame rate (a row's own counters keep
+        // their time); the frame's edges wait for the next evaluation and are spent once. [inferred: retail's
+        // evaluation rate is open, b1006]
+        if let Some(o) = self.objectives.as_ref() {
+            let p = &mut self.pending;
+            p.sequence_completed |= o.skater.sequence_completed;
+            p.went_off_board |= o.skater.went_off_board;
+            p.went_on_board |= o.skater.went_on_board;
+            p.air_completed |= o.skater.air_completed;
+            p.tricks.extend_from_slice(input.tricks);
+            p.began.extend_from_slice(input.began);
+        }
+        for n in 0..input.ticks.min(MAX_EVALUATIONS_PER_FRAME) {
+            if let Some(o) = self.objectives.as_mut() {
+                let p = std::mem::take(&mut self.pending);
+                let first = n == 0;
+                o.skater.sequence_completed = first && p.sequence_completed;
+                o.skater.went_off_board = first && p.went_off_board;
+                o.skater.went_on_board = first && p.went_on_board;
+                o.skater.air_completed = first && p.air_completed;
+                o.tricks_this_frame = if first { p.tricks } else { Vec::new() };
+                o.tricks_began = if first { p.began } else { Vec::new() };
+            }
+            self.feed(Message::Tick { gated: false }, &mut events);
+        }
         if self.awaiting_teleport && !input.teleport_pending {
             self.awaiting_teleport = false;
             events.push(Event::TeleportFinished);

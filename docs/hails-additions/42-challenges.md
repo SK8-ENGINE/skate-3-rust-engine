@@ -1403,7 +1403,9 @@ Challenge ids are the retail key strings. Mods read, start, abort, hide and re-t
 - `crates/skate-game/src/presentation_run.rs`: `Speech` / `SpeechNoWait` with an id under 5000 map it through `CAST_SPEECH_EVENTS` (the `8224F1B8` table, retail values as the default) and queue a `CastSpeech` instead of looking for a NIS file; the event does not wait on it.
 - `crates/skate-game/src/game_audio/world_speech.rs`: a presentation's cast line is said by the skater in the world with that voice (the leader), through the main cast like its other lines (its distance sets near / far).
 
-**NOT RETAIL YET.** With no skater of that voice in the world retail asks with the character's attrib words and flag 2; ours logs and drops the line. Tutorials still evaluate once per frame (the same rate question).
+**No skater of that voice in the world** (824AC050's other path): the request carries the character's own cast words and flag 2 (far) and plays on a PlayerSpeech instance with no world position (`cast_speaker`). OURS: the block's word order is the pros' (`cast_block`); 824AC050's own order (161E7AD7 / 14FD437D / AF7F / 6F2933E9 / D6EA428C) is not cross-checked.
+
+**Tutorials too** (`crates/skate-game/src/tutorial_run.rs`): their objectives also evaluate once per 60 Hz tick now. A frame's edge facts (sequence completed, on / off board, air completed) and trick lists wait for the next evaluation and are spent on its first tick, so a frame without a tick loses none and a frame with two counts none twice. Verify run 2026-11-13 07:24 (tut_sksc_01): intro, hint row 3, the run as before.
 
 **Verification.** `cast_speech_ids_map_to_main_cast_events`, `a_cast_speech_event_goes_to_the_main_cast`. Desktop run 2026-11-13 06:31 (ftl_univ_02, test autopilot, muted): the start tip shown, the hint rows firing about once a second, `309_30_follow_behind` playing on the main cast from the leader. Not listened to yet.
 
