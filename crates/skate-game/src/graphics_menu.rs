@@ -272,13 +272,13 @@ const SECTIONS: &[(&str, &str, &str)] = &[
     ("SKATER", "Skater", "Difficulty, custom tuning, camera angle and your skater's look."),
     ("GRAPHICS", "Graphics", "Display, framerate, world lighting and sound settings."),
     ("MULTIPLAYER", "Multiplayer", "Host or join a session. A session is better with friends."),
-    ("EXTRAS", "Extras", "Mods, updates and connected controllers."),
+    ("EXTRAS", "Extras", "Mods and connected controllers. Updates come through the Skate launcher."),
     ("OPT_INS", "Opt-Ins", "Every feature that is off by default or not retail."),
 ];
 /// Section header rows (lime bars, not selectable).
 const HEADERS: &[(usize, &str)] = &[
     (900, "Display"), (901, "World"), (902, "Audio"), (903, "Interface"), (904, "Difficulty"), (905, "Custom Tuning"),
-    (906, "Camera"), (907, "Character"), (908, "Mods & Updates"), (909, "Controllers"), (910, "Teleport Spots"),
+    (906, "Camera"), (907, "Character"), (908, "Mods"), (909, "Controllers"), (910, "Teleport Spots"),
     (912, "Game Files"),
     (911, "Living World"),
     (913, "Opt-In Features"),
@@ -374,7 +374,7 @@ impl Menu {
             1 => vec![3, CAMERA_ANGLE_ROW, 8, 10],
             2 => vec![0, 1, 2, 13, 16, 17, 18, FRAME_STATS_ROW, FRAME_STATS_CORNER_ROW, SESSION_TIMER_ROW],
             // Quitting is the rail's Close Game; Refresh Game Files only while the game files are out of date.
-            4 => [11, 14, 19].into_iter().chain((!crate::setup::stale_groups().is_empty()).then_some(REFRESH_ROW)).collect(),
+            4 => [14, 19].into_iter().chain((!crate::setup::stale_groups().is_empty()).then_some(REFRESH_ROW)).collect(),
             // Every opt-in (off by default or not retail) in one place, in row order (user 2026-10-25, USER-ASKS 336).
             5 => [NPC_DRAW_DISTANCE_ROW, BETTER_WATER_ROW, MORE_AUDIBLE_ROW, SPEECH_ROW, EXTENDED_REPLAYS_ROW, REPLAY_LENGTH_ROW,
                 BETTER_MOVER_ROW, DEBUG_MENUS_ROW, FLY_CAM_ROW, PHYSICS_THREADS_ROW].into_iter().chain(OPT_IN_ROWS).collect(),
@@ -404,7 +404,7 @@ impl Menu {
                 (true, 1, 300) => Some(905),
                 (true, 1, CAMERA_ANGLE_ROW) => Some(906),
                 (true, 1, 8) => Some(907),
-                (true, 4, 11) => Some(908),
+                (true, 4, 14) => Some(908),
                 (true, 4, 19) => Some(909),
                 (true, 4, REFRESH_ROW) => Some(912),
                 (true, 0, id) if id >= 1_000_000 && page.last().is_none_or(|last| *last < 1_000_000) => Some(910),
@@ -581,7 +581,6 @@ impl Menu {
             8 => RowView::action("Character Customiser", "Change your skater's look."),
             9 => RowView::action("Multiplayer", "Host or join a session."),
             10 => RowView::action("Custom Models", "Choose custom character and board models."),
-            11 => RowView::action("Updates", "Check for and install a new version."),
             12 => RowView::action("Teleport", "Pick a drop-in spot on this map."),
             13 => RowView::action("Day & Night", "Time of day, day cycle speed and ambient light for custom maps. Retail maps keep their authored lighting."),
             14 => RowView::action("Mods", "Turn mods on or off and open their menus."),
@@ -909,7 +908,7 @@ pub(crate) fn interact(
     mut exit: MessageWriter<AppExit>,
     mut net: ResMut<crate::multiplayer::Multiplayer>,
     mut typing: MessageReader<bevy::input::keyboard::KeyboardInput>,
-    (mut updater, mut audio, mut camera_angle, mut living, mut water_look): (ResMut<crate::updater::Updater>, ResMut<crate::game_audio::AudioSettings>, ResMut<crate::camera::CameraAngleSettings>, ResMut<crate::living_world::LivingWorldSettings>, Option<ResMut<crate::water_look::WaterLookSettings>>),
+    (mut audio, mut camera_angle, mut living, mut water_look): (ResMut<crate::game_audio::AudioSettings>, ResMut<crate::camera::CameraAngleSettings>, ResMut<crate::living_world::LivingWorldSettings>, Option<ResMut<crate::water_look::WaterLookSettings>>),
     travel: Res<crate::teleport_menu::Travel>,
     (mut mods, mut logged, cover): (ResMut<crate::modding::ModMenu>, Local<Option<(bool, String, String)>>, Option<Res<crate::map_transition::LoadingCover>>),
 ) {
@@ -1234,7 +1233,7 @@ pub(crate) fn interact(
         Some(Act::Step(row, _) | Act::Activate(row)) => {
             let direction = if let Some(Act::Step(_, d)) = act { d } else { 1 };
             run_row(&mut menu, row, direction, (&mut *config, &mut *physics, &mut *net, &mut exit, &mut *customiser,
-                &mut *custom_models, &mut *updater, &mut *audio, &mut *camera_angle, &mut *mods, &mut *living));
+                &mut *custom_models, &mut *audio, &mut *camera_angle, &mut *mods, &mut *living));
             Some(row)
         }
         None => None,
@@ -1285,7 +1284,6 @@ type RowResources<'a, 'w> = (
     &'a mut MessageWriter<'w, AppExit>,
     &'a mut crate::customiser::Customiser,
     &'a mut crate::custom_models::CustomModels,
-    &'a mut crate::updater::Updater,
     &'a mut crate::game_audio::AudioSettings,
     &'a mut crate::camera::CameraAngleSettings,
     &'a mut crate::modding::ModMenu,
@@ -1294,7 +1292,7 @@ type RowResources<'a, 'w> = (
 
 /// Step or activate one row (`direction` +1 for Select, which cycles enums with wrap-around).
 fn run_row(menu: &mut Menu, row: usize, direction: i32, r: RowResources) {
-    let (config, physics, net, exit, customiser, custom_models, updater, audio, camera_angle, mods, living) = r;
+    let (config, physics, net, exit, customiser, custom_models, audio, camera_angle, mods, living) = r;
     if menu.daylight {
         match row {
             0 => menu.settings.hour = ((menu.settings.hour * 4.).round() + direction as f32).rem_euclid(96.) / 4.,
@@ -1393,7 +1391,6 @@ fn run_row(menu: &mut Menu, row: usize, direction: i32, r: RowResources) {
                 menu.selected = 0;
             }
             10 => custom_models.begin(),
-            11 => menu.status = updater.open(false),
             12 => {
                 menu.select_section(0);
                 menu.selected_map = menu.maps.iter().position(|m| m.path == config.map_path).unwrap_or(0);
@@ -1778,7 +1775,7 @@ mod tests {
         m.select_section(1);
         assert_eq!(m.page(), vec![904, 3, 906, CAMERA_ANGLE_ROW, 907, 8, 10]);
         m.select_section(4);
-        assert_eq!(m.page(), vec![908, 11, 14, 909, 19]);
+        assert_eq!(m.page(), vec![908, 14, 909, 19]);
         m.select_section(3);
         assert_eq!(m.page(), m.rows(), "no headers in the multiplayer pages");
         m.select_section(0);

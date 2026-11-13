@@ -428,6 +428,8 @@ are unchanged; the label now says setup checks the installed files first.
 
 **Verification.** Setup unit tests (37) pass. The window itself has not been opened yet (the user was playing).
 
+**Fix (2026-11-13): a refresh with the window crashed, then hung.** The window's progress bar was named `progress`, the same name as the progress writer (`ProgressWriter`, the launcher's progress file) that the worker hands to the conversion as its report since the per-group progress above. With a progress file the worker passed the Tk bar instead: an ISO refresh failed at once ("'Progressbar' object is not callable", `iso_refresh.py`), and the error handler failed on the same bar (`progress.write`) before it told the window, so the window stayed in its running state (it cannot be closed while running) and the refresh hung until it was killed (laptop, 30 min). Now the bar is `bar`, and the handler posts the error to the window first, then writes the log and the progress line inside its own try, so a failing report never leaves the window stuck. Test `test_the_window_bar_never_hides_the_progress_writer` (it finds the old name in the code before the fix); setup tests 13 / 13 (`test_setup_refresh`, `test_setup_progress`, `test_setup_recovery`).
+
 ## Code reference: asset_check.rs
 
 Detail moved out of the code comments of `crates/skate-game/src/asset_check.rs`; each comment there links its section here.

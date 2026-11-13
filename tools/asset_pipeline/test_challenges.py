@@ -52,7 +52,7 @@ class ChallengeData(unittest.TestCase):
         out = objective_programs(rows, refspec(GROUP, hash64('obj_a')), binary)
         self.assertEqual(out, [{'key': 'obj_a_0', 'condition': {'locals': 0, 'body': [
             {'return': {'api': 'Lib.Done', 'args': []}}]}, 'triggers': [False] * 14, 'activation': 0,
-            'failures': [], 'failure_first': False, 'hints': []}])
+            'failures': [], 'failures_inline': [], 'failure_first': False, 'hints': []}])
         self.assertEqual(objective_programs(rows, None, binary), [])
 
     def test_points_valid_is_inherited_and_read_from_the_parents_bank(self):

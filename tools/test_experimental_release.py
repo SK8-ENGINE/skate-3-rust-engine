@@ -6,7 +6,13 @@ import tempfile
 import unittest
 import zipfile
 import publish_experimental as p
-from test_updater import metadata
+import release_meta
+
+
+def metadata(build=2):
+    files = ('skate3rust.exe', 'support/skate3setup.exe', 'steam-relay/skate-steam-relay.exe', 'steam-relay/steam_api64.dll')
+    return dict(schema=1, repository=release_meta.REPO, target='windows-x64', build=build,
+                tag=f'v{build}', revision='a' * 40, files={n: 'b' * 64 for n in files})
 
 
 class RollingReleaseTests(unittest.TestCase):

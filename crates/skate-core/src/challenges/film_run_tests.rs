@@ -96,8 +96,25 @@ fn follow_the_leader_too_far_behind_fails_the_objective_and_ends_the_run() {
 }
 
 #[test]
-fn a_film_runs_out_of_time_and_a_wipeout_rearms_instead_of_ending() {
+fn an_offline_film_has_no_time_limit_but_keeps_the_low_time_speech() {
     let mut run = film();
+    let out = to_running(&mut run);
+    assert!(!out.iter().any(|c| matches!(c, Command::StartTimerHud { .. })), "no film clock offline (b999 §0.1)");
+    assert_eq!(run.film_ticks(), None);
+    let out: Vec<Command> = (0..181 * 60).flat_map(|_| run.tick()).collect();
+    assert!(out.contains(&Command::Speech(Speech::TimeLimitLow)), "the warning timer still runs (b999 §0.2)");
+    assert!(!out.contains(&Command::CentralMessage(Message::TimeUp)));
+    assert_eq!(run.state(), State::ChallengeRunning, "past 180 s the film goes on");
+    let mut anywhere = FilmRun::new(Params::retail(Kind::AnywhereFilm));
+    let out = to_running(&mut anywhere);
+    let out: Vec<Command> = out.into_iter().chain((0..31 * 60).flat_map(|_| anywhere.tick())).collect();
+    assert!(!out.contains(&Command::Speech(Speech::TimeLimitLow)) && anywhere.state() == State::ChallengeRunning,
+        "anywhere films: no FilmTimerLowLimit, no warning, no time limit (b1003 §4)");
+}
+
+#[test]
+fn a_film_in_simul_play_runs_out_of_time_and_a_wipeout_rearms_instead_of_ending() {
+    let mut run = FilmRun::new(Params { boundary: Some(BOUNDARY), simul_play: true, ..Params::retail(Kind::Film) });
     let out = to_running(&mut run);
     assert!(out.contains(&Command::StartTimerHud { ticks: 180 * 60 }));
     assert_eq!(run.film_ticks(), Some(180 * 60));
@@ -124,6 +141,8 @@ fn leaving_a_films_boundary_counts_down_and_coming_back_cancels_it() {
     run.handle(Event::TriggerExit { volume: BOUNDARY });
     let out: Vec<Command> = (0..303).flat_map(|_| run.tick()).collect();
     assert!(out.contains(&Command::CentralMessage(Message::OutOfBounds)) && out.contains(&Command::RepositionPlayer), "a film repairs: back to the start");
+    assert_eq!(out.iter().filter(|c| **c == Command::RepositionPlayer).count(), 1,
+        "once: the selector runs before the out-of-bounds flag is set (b999 §2)");
     assert_eq!(run.state(), State::ChallengeRunning);
 }
 

@@ -239,6 +239,43 @@ function Write-ReleasePlay([string]$Dir) {
 }
 # Downloads the version's release when it moved (checksum checked) and installs it over the old build; the converted
 # game files (data\), logs and settings stay. True = a build is there to play.
+# Patch updates (doc 44a "Patch updates"): when the release lists a chain of patches from the installed revision
+# that, with the helper below, is smaller than the package, the Rust launcher (the release's
+# skate-launcher-windows-x64.exe, kept in patch-helper\ by its sha256 so it downloads once per launcher build) applies
+# them. $true = updated; $false = take the full download (nothing changed, or put back).
+function Try-ReleasePatch([string]$Dir, [string]$Base, $Cur, $Meta, [string]$Tmp) {
+    $pkg = 'skate3rust-windows-x64'
+    try { Get-Url "$Base/$pkg.patches.json" (Join-Path $Tmp 'patches.json') } catch { return $false }
+    $index = $(try { Read-Json (Join-Path $Tmp 'patches.json') } catch { $null })
+    if (-not $index -or $index.format -ne 'skate-patches/1' -or -not $index.package_size) { return $false }
+    $at = "$($Cur.revision)"; $bytes = 0; $hops = 0
+    while ($at -ne "$($Meta.revision)") {
+        $next = @($index.links | Where-Object { $_.from -eq $at }) | Select-Object -First 1
+        if (-not $next -or ++$hops -gt @($index.links).Count) { return $false }
+        $bytes += [long]$next.size; $at = "$($next.to)"
+    }
+    if ($hops -eq 0) { return $false }
+    $helperDir = Join-Path $StateDir 'patch-helper'
+    try { Get-Url "$Base/skate-launcher-windows-x64.exe.sha256" (Join-Path $Tmp 'helper.sha256') } catch { return $false }
+    $want = ((Get-Content (Join-Path $Tmp 'helper.sha256') -Raw).Trim() -split '\s+')[0].ToLower()
+    if ($want -notmatch '^[0-9a-f]{64}$') { return $false }
+    $helper = Join-Path $helperDir "skate-launcher-$($want.Substring(0, 12)).exe"
+    $fetch = -not (Test-Path $helper)
+    $extra = if ($fetch) { 14MB } else { 0 }
+    if (($bytes + $extra) -ge 0.8 * [long]$index.package_size) { return $false }
+    if ($fetch) {
+        New-Item -ItemType Directory -Path $helperDir -Force | Out-Null
+        Get-ChildItem $helperDir -Filter 'skate-launcher-*.exe' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        try { Get-Url "$Base/skate-launcher-windows-x64.exe" "$helper.part" } catch { return $false }
+        if ((Get-FileHash "$helper.part" -Algorithm SHA256).Hash.ToLower() -ne $want) { Remove-Item "$helper.part" -Force; return $false }
+        Move-Item "$helper.part" $helper -Force
+    }
+    Write-Host ("  Updating with {0} patch{1} ({2:N1} MB instead of the full download)..." -f $hops, $(if ($hops -eq 1) { '' } else { 'es' }), ($bytes / 1MB))
+    & $helper release-patch $Dir $Base $pkg "$($Meta.revision)" | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -eq 0) { return $true }
+    Write-Host '  The patch could not be used; downloading the full build instead.'
+    return $false
+}
 function Ensure-Release($v) {
     $ErrorActionPreference = 'Continue'
     $d = Version-Dir $v; $base = Release-Base $v
@@ -253,6 +290,11 @@ function Ensure-Release($v) {
         }
         $meta = Read-Json (Join-Path $tmp 'release.json'); $cur = Release-Installed $v
         if ($have -and $cur -and $cur.revision -eq $meta.revision) { Write-ReleasePlay $d; return $true }
+        if ($have -and $cur -and (Try-ReleasePatch $d $base $cur $meta $tmp)) {
+            Write-ReleasePlay $d
+            Write-Host "  Installed $($v.name) build $($meta.build)."
+            return $true
+        }
         Write-Host "  Downloading $($v.name) build $($meta.build)..."
         $zip = Join-Path $tmp 'package.zip'
         try {

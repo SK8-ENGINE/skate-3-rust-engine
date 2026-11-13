@@ -32,12 +32,8 @@ jobs:
       # Cargo's dependency cache excludes our vendored Bevy crates. Cache their
       # compiler outputs by content as well, independent of checkout timestamps.
       - uses: mozilla-actions/sccache-action@v0.0.11
-      - name: Check updater and publisher without starting game
+      - name: Check publisher without starting game
         run: python -m unittest discover -s tools -p "test_*release*.py" -v
-      - name: Check updater protocol
-        run: python -m unittest discover -s tools -p "test_update*.py" -v
-      - name: Check character package update transaction
-        run: python tools/mixamo_to_skate/check_package.py --transaction-only
       - name: Check isolated asset refresh and failure recovery
         run: python -m unittest tools.asset_pipeline.test_versions -v
       - name: Build Windows package

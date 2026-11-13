@@ -127,9 +127,73 @@ fn poster_view(c: &Challenge, saved: &crate::challenge_records::Saved, progressi
     }
 }
 
-pub(crate) fn sign_up_state(c: &Challenge) -> i32 {
+/// What the sign-up prompt needs of any challenge kind (own the spot, follow the leader): one sign-up sphere.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Offer {
+    pub id: String,
+    pub family: String,
+    pub title_id: Option<String>,
+    pub title: Option<String>,
+    pub description_id: Option<String>,
+    pub challenge_type: Option<i32>,
+    pub location: [f32; 4],
+    pub sign_up_radius: f32,
+}
+
+/// The bank row's sign-up fields as setup exports them for every non own the spot kind (races, contests, follow the
+/// leader): Location (the sphere's center) and GlobalActivateRadius, with the poster's description and the type.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub(crate) struct SignUpFields {
+    #[serde(default)]
+    pub description_id: Option<String>,
+    #[serde(default)]
+    pub challenge_type: Option<i32>,
+    #[serde(default)]
+    pub location: Option<Start>,
+    #[serde(default)]
+    pub sign_up_radius: Option<f32>,
+}
+
+impl SignUpFields {
+    /// The row's offer to the sign-up prompt when it is on `map` and has a sphere.
+    pub(crate) fn offer(&self, id: &str, family: &str, row_map: Option<&str>, title_id: Option<&String>, title: Option<&String>,
+        map: Option<&Path>) -> Option<Offer> {
+        let here = row_map.is_some_and(|m| map.is_some_and(|p| crate::teleport_menu::same_map(p, m)));
+        here.then_some(())?;
+        Some(Offer { id: id.into(), family: family.into(), title_id: title_id.cloned(), title: title.cloned(),
+            description_id: self.description_id.clone(), challenge_type: self.challenge_type,
+            location: self.location.as_ref()?.matrix[3], sign_up_radius: self.sign_up_radius? })
+    }
+}
+
+impl From<&Challenge> for Offer {
+    fn from(c: &Challenge) -> Self {
+        Self { id: c.id.clone(), family: c.family.clone(), title_id: c.title_id.clone(), title: c.title.clone(),
+            description_id: c.description_id.clone(), challenge_type: c.challenge_type, location: c.location.matrix[3],
+            sign_up_radius: c.sign_up_radius }
+    }
+}
+
+pub(crate) fn sign_up_state(c: &Offer) -> i32 {
     let ots = c.challenge_type.map_or(c.family == "own_the_spots", |t| t == OWN_THE_SPOT_TYPE);
     if ots { 5 } else { 1 }
+}
+
+/// The poster of a challenge without own the spot's objective titles (8264D130 adds them for type 9 only, b947).
+fn offer_poster_view(c: &Offer, saved: &crate::challenge_records::Saved, progression: Option<&skate_core::career::Progression>) -> PosterView {
+    let rewards = progression.and_then(|p| p.challenge_rewards.get(&c.id));
+    PosterView {
+        challenge_id: c.id.clone(),
+        title_id: c.title_id.clone().or_else(|| c.title.clone()),
+        description: c.description_id.clone().map(|id| Title { id, arg: None }),
+        killable: progression.is_some_and(|p| p.killable.contains(&c.id)),
+        owned: saved.completion.as_deref() == Some("owned"),
+        killed: saved.completion.as_deref() == Some("killed"),
+        rewards: rewards.map_or((0, 0, 0), |r| (r.owned.sales as i32, r.killed.sales as i32, 0)),
+        rewards_shown: rewards.is_some(),
+        can_sign_up: true,
+        ..PosterView::default()
+    }
 }
 
 /// eChallengeTypes of create-a-spot: listed last, labeled by `CREATE_A_SPOT_LABEL` (research b851).
@@ -146,16 +210,16 @@ pub(crate) const REPRESS_DELAY_SECONDS: f32 = 15.0 / 30.0;
 
 /// Every challenge whose sign-up sphere (`sign_up_radius` around `location`) holds `point`, in retail's list order
 /// (82D29C38, b851): create-a-spot ones last in query order, the others before them in reverse query order.
-pub(crate) fn in_sign_up<'a>(candidates: impl Iterator<Item = &'a Challenge>, point: [f32; 3]) -> Vec<&'a Challenge> {
-    let found: Vec<&Challenge> = candidates.filter(|c| distance(point, c.location.matrix[3]) <= c.sign_up_radius).collect();
-    let spot = |c: &&Challenge| c.challenge_type == Some(CREATE_A_SPOT_TYPE);
+pub(crate) fn in_sign_up<'a>(candidates: impl Iterator<Item = &'a Offer>, point: [f32; 3]) -> Vec<&'a Offer> {
+    let found: Vec<&Offer> = candidates.filter(|c| distance(point, c.location) <= c.sign_up_radius).collect();
+    let spot = |c: &&Offer| c.challenge_type == Some(CREATE_A_SPOT_TYPE);
     found.iter().rev().filter(|c| !spot(c)).chain(found.iter().filter(|c| spot(c))).copied().collect()
 }
 
 /// The pick popup for several challenges in range: "Multiple Challenges", an empty body, one entry per challenge
 /// (its Title id), B cancels (826660F0, b851).
-pub(crate) fn pick_popup(list: &[Challenge]) -> skate_core::fe_popup::PopupRequest {
-    let label = |c: &Challenge| if c.challenge_type == Some(CREATE_A_SPOT_TYPE) {
+pub(crate) fn pick_popup(list: &[Offer]) -> skate_core::fe_popup::PopupRequest {
+    let label = |c: &Offer| if c.challenge_type == Some(CREATE_A_SPOT_TYPE) {
         CREATE_A_SPOT_LABEL.to_owned()
     } else {
         c.title_id.clone().or_else(|| c.title.clone()).unwrap_or_else(|| c.id.clone())
@@ -214,7 +278,7 @@ pub(crate) fn update_hud(hud: &mut ChallengeHudState, score: i32, target: i32, p
 const OUT_OF_BOUNDS_TIME: i32 = 5;
 const OWNED_DISPLAY_TIME: f32 = 3.1;
 const KILLED_DISPLAY_TIME: f32 = 3.3;
-const RETURN_TO_AREA: &str = "ID_CHALLENGE_CENTRAL_MESSAGE_OBJECTIVE_RETURNTOCHAL";
+pub(crate) const RETURN_TO_AREA: &str = "ID_CHALLENGE_CENTRAL_MESSAGE_OBJECTIVE_RETURNTOCHAL";
 
 fn params(c: &Challenge) -> Result<Params, String> {
     Ok(Params {
@@ -339,6 +403,12 @@ impl ModControl {
 pub(crate) struct Challenges {
     /// The sequences the player banked this frame (taken once here; the contest host reads them).
     pub banked_this_frame: Vec<crate::scoring_runtime::BankedSequence>,
+    /// The frame's tricks done / begun, session marker uses (true) and sets (false) and new pushes, taken once here
+    /// like the banked sequences, for every objective feed (tutorials here, the objectives_shared host after).
+    pub tricks_done_this_frame: Vec<u64>,
+    pub tricks_began_this_frame: Vec<u64>,
+    pub markers_this_frame: Vec<bool>,
+    pub pushes_this_frame: u32,
     pub retail: Vec<Challenge>,
     pub loaded: bool,
     pub generation: Option<u64>,
@@ -494,8 +564,8 @@ fn sign_up(
     lines: Query<Entity, With<SignUpLine>>,
     mut entered: MessageReader<crate::trigger_volumes::TriggerEntered>,
     time: Res<Time>,
-    mut poster: ResMut<crate::poster_host::PosterScreen>,
-    career: Option<Res<crate::career::CareerState>>,
+    (mut poster, career, ftl, races, contests): (ResMut<crate::poster_host::PosterScreen>, Option<Res<crate::career::CareerState>>,
+        Option<Res<crate::ftl_host::FollowTheLeader>>, Option<Res<crate::race_host::Races>>, Option<Res<crate::contest_host::Contests>>),
 ) {
     // The poster's answer (825ED410): A starts the challenge (825EE188 -> 82D52B60), B cancels the pending sign-up.
     match poster.outcome.take() {
@@ -545,8 +615,16 @@ fn sign_up(
     if !popups.stage_ready {
         challenges.picking = None;
     }
-    let near: Vec<Challenge> = if gameplay && challenges.run.is_none() && popups.signup_title.is_none() && challenges.picking.is_none() {
-        in_sign_up(challenges.on_map(map.path.as_deref()).filter(|c| challenges.available(&c.id)), feet).into_iter().cloned().collect()
+    let idle = challenges.run.is_none() && challenges.tutorial.is_none() && ftl.as_ref().is_none_or(|f| f.run.is_none())
+        && races.as_ref().is_none_or(|r| r.run.is_none()) && contests.as_ref().is_none_or(|c| c.run.is_none());
+    let near: Vec<Offer> = if gameplay && idle && popups.signup_title.is_none() && challenges.picking.is_none() {
+        let path = map.path.as_deref();
+        let mut offers: Vec<Offer> = challenges.on_map(path).map(Offer::from).collect();
+        offers.extend(ftl.as_deref().into_iter().flat_map(|f| f.offers(path)));
+        offers.extend(races.as_deref().into_iter().flat_map(|r| r.offers(path)));
+        offers.extend(contests.as_deref().into_iter().flat_map(|c| c.offers(path)));
+        offers.retain(|c| challenges.available(&c.id));
+        in_sign_up(offers.iter(), feet).into_iter().cloned().collect()
     } else {
         Vec::new()
     };
@@ -579,7 +657,13 @@ fn sign_up(
             // One challenge: the sign-up poster first (b932, b935), with the stage and the screens switch.
             [c] if poster.available => {
                 info!("SKATE_CHALLENGE poster {}", c.id);
-                poster.poster = Some(Poster::new(poster_view(c, &challenges.records.get(&c.id), career.as_ref().and_then(|c| c.data.as_ref()).map(|d| &d.progression))));
+                let saved = challenges.records.get(&c.id);
+                let progression = career.as_ref().and_then(|c| c.data.as_ref()).map(|d| &d.progression);
+                let view = match challenges.retail.iter().find(|r| r.id == c.id) {
+                    Some(ots) => poster_view(ots, &saved, progression),
+                    None => offer_poster_view(c, &saved, progression),
+                };
+                poster.poster = Some(Poster::new(view));
             }
             [c] => {
                 info!("SKATE_CHALLENGE sign-up {}", c.id);
@@ -670,13 +754,19 @@ fn update(
                 }).clone();
                 challenges.tutorial = Some(crate::tutorial_run::TutorialRun::new(t, groups));
             }
-            _ => info!("SKATE_CHALLENGE sign-up {id} ignored"),
+            _ => info!("SKATE_CHALLENGE sign-up {id}: no own the spot or tutorial here (another host may start it)"),
         }
     }
     let banked = skater.scoring.take_banked();
     challenges.banked_this_frame = banked.clone();
     let began = skater.scoring.take_announced();
     let done = skater.scoring.take_done();
+    // taken every frame: a count left untaken piled up while no tutorial ran and reached the next one's first frame
+    let pushes = skater.animation_input.take_pushes();
+    challenges.tricks_done_this_frame = done.clone();
+    challenges.tricks_began_this_frame = began.clone();
+    challenges.markers_this_frame = marker_flags.clone();
+    challenges.pushes_this_frame = pushes;
     let entered: Vec<String> = entered.read().filter(|e| e.body == crate::trigger_volumes::PLAYER).map(|e| e.volume.clone()).collect();
     let exited: Vec<String> = exited.read().filter(|e| e.body == crate::trigger_volumes::PLAYER).map(|e| e.volume.clone()).collect();
     if let Some(mut tutorial) = challenges.tutorial.take() {
@@ -695,7 +785,7 @@ fn update(
             distance: distance(feet, tutorial.data.start.matrix[3]), state_id: skater.physical_state_id(),
             in_sequence: skater.scoring.sequence_active(), markers: &marker_flags, tricks: &done, began: &began,
             right_stick_y: raw.right[1], triggers: raw.triggers, manual: skater.scoring.manual(),
-            pushes: skater.animation_input.take_pushes(), pump_acceleration: skater.ground.pumping.pump_acceleration,
+            pushes, pump_acceleration: skater.ground.pumping.pump_acceleration,
             pump_user: skater.ground.pumping.intentional_pumping != 0,
             grind_rail: (400..=405).contains(&skater.physical_state_id())
                 .then_some(skater.player_input.grind.rail_owner).flatten()
@@ -988,18 +1078,18 @@ mod tests {
     #[test]
     fn own_the_spot_signs_up_in_the_ots_overlay_state() {
         let mut c = at("a", 0., 10.);
-        assert_eq!(sign_up_state(&c), 5);
+        assert_eq!(sign_up_state(&Offer::from(&c)), 5);
         c.challenge_type = Some(3);
-        assert_eq!(sign_up_state(&c), 1);
+        assert_eq!(sign_up_state(&Offer::from(&c)), 1);
         c.challenge_type = None;
-        assert_eq!(sign_up_state(&c), 5, "family fallback");
+        assert_eq!(sign_up_state(&Offer::from(&c)), 5, "family fallback");
     }
 
     #[test]
     fn every_sign_up_sphere_holding_the_skater_lists_in_retail_order() {
         let mut spot = at("s", 6., 10.);
         spot.challenge_type = Some(CREATE_A_SPOT_TYPE);
-        let list = [at("a", 0., 10.), spot, at("b", 12., 10.), at("c", 40., 10.)];
+        let list: Vec<Offer> = [at("a", 0., 10.), spot, at("b", 12., 10.), at("c", 40., 10.)].iter().map(Offer::from).collect();
         let ids = |p: [f32; 3]| in_sign_up(list.iter(), p).into_iter().map(|c| c.id.as_str()).collect::<Vec<_>>();
         assert_eq!(ids([9., 0., 0.]), ["b", "a", "s"], "others reversed, create-a-spot last (b851)");
         assert_eq!(ids([20., 0., 0.]), ["b"]);
@@ -1007,11 +1097,25 @@ mod tests {
     }
 
     #[test]
+    fn a_race_or_contest_row_offers_its_sphere_on_its_own_map_only() {
+        let fields: SignUpFields = serde_json::from_value(serde_json::json!({"challenge_type": 19, "sign_up_radius": 3.0,
+            "location": {"locator": "race_dwtn_01_challengeLocator_01", "matrix": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[4,5,6,1]]}})).unwrap();
+        let here = Some(Path::new("maps/DownTown.skate"));
+        let o = fields.offer("race_dwtn_01", "races", Some("downtown"), None, None, here).unwrap();
+        assert_eq!((o.location, o.sign_up_radius, sign_up_state(&o)), ([4., 5., 6., 1.], 3.0, 1));
+        let list = [o];
+        assert_eq!(in_sign_up(list.iter(), [5., 5., 6.]).len(), 1);
+        assert!(fields.offer("race_dwtn_01", "races", Some("industrial"), None, None, here).is_none(), "another map");
+        assert!(SignUpFields { location: None, ..fields.clone() }.offer("r", "races", Some("downtown"), None, None, here).is_none(),
+            "an older export without the location");
+    }
+
+    #[test]
     fn several_in_range_offer_up_to_four_by_title() {
         let mut list: Vec<Challenge> = (0..6).map(|i| at(&format!("c{i}"), 0., 10.)).collect();
         list[0].title_id = Some("ID_C0_TITLE".into());
         list[1].challenge_type = Some(CREATE_A_SPOT_TYPE);
-        let p = pick_popup(&list);
+        let p = pick_popup(&list.iter().map(Offer::from).collect::<Vec<_>>());
         assert_eq!((p.title.as_str(), p.description.as_str(), p.cancelable, p.callback.as_str()),
             (MULTIPLE_CHALLENGES, "#", true, PICK_POPUP));
         assert_eq!(p.options, ["ID_C0_TITLE", CREATE_A_SPOT_LABEL, "c2", "c3"]);

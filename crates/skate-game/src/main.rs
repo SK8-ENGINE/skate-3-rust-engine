@@ -46,7 +46,6 @@ mod assets;
 mod camera;
 mod config;
 mod setup;
-mod updater;
 mod map_library;
 mod map_render;
 mod map_transition;
@@ -166,11 +165,6 @@ fn main() -> bevy::app::AppExit {
         eprintln!("{text}");
         crash_report::present_message(text);
         return bevy::app::AppExit::error();
-    }
-    match updater::recover() {
-        Ok(true) => return bevy::app::AppExit::Success,
-        Err(error) => { eprintln!("{error}"); return bevy::app::AppExit::Success; },
-        Ok(false) => {}
     }
     // Setup tool mode: `--extract-ocean-pca <default.xex> <ocean-pca.json>`.
     // Before the crash supervisor, whose report window would block setup on

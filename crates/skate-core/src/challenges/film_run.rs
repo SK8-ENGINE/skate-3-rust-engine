@@ -58,7 +58,13 @@ pub struct Params {
     pub countdown_delay: f32,
     pub prefilm_time: f32,
     pub total_film_time: f32,
+    /// FilmTimerLowLimit: the low-time speech this many seconds before TotalFilmTime; 0 = the row does not set it (no
+    /// warning: anywhere films, b1003 §4).
     pub film_low_limit: f32,
+    /// SimulPlay: the film timer (TotalFilmTime, its HUD clock and its time-up loss) runs only in simul play; offline
+    /// films have no time limit (countdown.timerexpired@19-27, b999 §0.1, b1003 §4). A mod can switch the timed
+    /// variant on for single player.
+    pub simul_play: bool,
     pub out_of_bounds_time: f32,
     pub owned_display_time: f32,
     pub killed_display_time: f32,
@@ -100,7 +106,8 @@ impl Params {
             countdown_delay: 1.5,
             prefilm_time: prefilm,
             total_film_time: film,
-            film_low_limit: if kind.film() { 5.0 } else { 0.0 },
+            film_low_limit: if matches!(kind, Kind::Film | Kind::SpotFilm) { 5.0 } else { 0.0 },
+            simul_play: false,
             out_of_bounds_time: 5.0,
             owned_display_time: 3.1,
             killed_display_time: 3.3,
@@ -748,12 +755,13 @@ impl FilmRun {
                 out.push(Command::StartCountdownHud { ticks: Timers::ticks(p.prefilm_time) });
             }
             State::Countdown if is(self.ids.countdown) => {
-                if p.total_film_time > 0.0 {
+                // the film timer only in simul play; the low-time speech whenever the row sets a limit below it
+                if p.simul_play && p.total_film_time > 0.0 {
                     self.ids.film = self.add(p.total_film_time);
                     out.push(Command::StartTimerHud { ticks: Timers::ticks(p.total_film_time) });
-                    if p.film_low_limit < p.total_film_time {
-                        self.ids.warning = self.add(p.total_film_time - p.film_low_limit);
-                    }
+                }
+                if p.film_low_limit > 0.0 && p.film_low_limit < p.total_film_time {
+                    self.ids.warning = self.add(p.total_film_time - p.film_low_limit);
                 }
                 out.push(Command::PinPlayer(false));
                 if p.competitors > 0 {
@@ -791,8 +799,11 @@ impl FilmRun {
             self.ids.out_of_bounds = None;
             out.push(Command::CentralMessage(Message::OutOfBounds));
             self.result = Flow::Lose;
+            // the selector runs at the handler's entry, before the flag is set (timerexpired@0-3, b999 §2): a film
+            // repositions once here; the stale flag repositions again at the selector's next call, as in retail
+            let ends = self.selector(out);
             self.out_of_bound = true;
-            if self.selector(out) {
+            if ends {
                 self.change(State::ChallengeCleanup);
             } else {
                 out.push(Command::RepositionPlayer);

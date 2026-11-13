@@ -213,11 +213,11 @@ def main():
     ttk.Label(frame,text=note,style='Note.TLabel',wraplength=640,justify='left').pack(anchor='w',pady=(4,0))
     status=tk.StringVar(value='Starting…' if updating and reuse else 'Choose your game to begin.')
     ttk.Label(frame,textvariable=status,style='Status.TLabel',wraplength=640).pack(anchor='w',side='top',pady=(36,6))
-    progress=ttk.Progressbar(frame,mode='indeterminate',style='Setup.Horizontal.TProgressbar');progress.pack(fill='x')
+    bar=ttk.Progressbar(frame,mode='indeterminate',style='Setup.Horizontal.TProgressbar');bar.pack(fill='x')
     messages=queue.Queue();running=False;success=False
     def begin(iso):
         nonlocal running
-        button.config(state='disabled');running=True;progress.start()
+        button.config(state='disabled');running=True;bar.start()
         def work():
             try:
                 say=lambda text:messages.put(('progress',text))
@@ -233,12 +233,16 @@ def main():
                 if progress:progress.write('done',warnings=len(warnings),report=str(installed_root/'setup-report.json'))
                 messages.put(('done',f'Ready with {len(warnings)} warnings or unavailable components. Details: {installed_root / "setup-report.json"}' if warnings else 'Ready'))
             except Exception as error:
-                args.base.mkdir(parents=True,exist_ok=True)
-                (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
-                if progress:progress.write('error',text=str(error),log=str(args.base/'setup-error.log'))
-                # "Could not reuse the source" only when the source itself is the problem, not for every failure.
+                # The window learns of the failure first: if reporting it fails too, the window must still leave its
+                # running state (an error in this handler once left it stuck for 30 min, laptop 2026-11-13).
                 source_failed=not (Path(iso).is_file() or Path(iso).is_dir()) or isinstance(error,(FileNotFoundError,PermissionError))
                 messages.put(('error-source' if source_failed else 'error',str(error)))
+                try:
+                    args.base.mkdir(parents=True,exist_ok=True)
+                    (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
+                    if progress:progress.write('error',text=str(error),log=str(args.base/'setup-error.log'))
+                except Exception:
+                    traceback.print_exc()
         threading.Thread(target=work,daemon=True).start()
     def start():
         nonlocal running
@@ -263,9 +267,9 @@ def main():
             kind,text=messages.get_nowait();status.set(text)
             if kind=='done':
                 if text!='Ready':messagebox.showwarning('Setup completed with warnings',text,parent=window)
-                running=False;success=True;progress.stop();window.destroy();return
+                running=False;success=True;bar.stop();window.destroy();return
             if kind in ('error','error-source'):
-                running=False;progress.stop();button.config(state='normal');show_button()
+                running=False;bar.stop();button.config(state='normal');show_button()
                 if reuse and text and kind=='error-source':
                     status.set('Could not reuse the previous Xbox source. Select default.xex or an ISO.')
                 messagebox.showerror('Setup could not finish',text+'\n\nDetails: '+str(args.base/'setup-error.log'),parent=window)

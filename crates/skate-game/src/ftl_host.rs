@@ -1,15 +1,15 @@
 //! Follow the leader in play (research b1006; doc 42 "Follow the leader"): a row from `private/challenges.json`
 //! `follow_the_leaders` runs through `skate_core::challenges::film_run` (Kind::Follow), its owned objectives from the
 //! exported rows (`challenge_objectives.rs`), the leader (competitor 1) riding the challenge's lines (`ch_<id>`) on the
-//! contest rider code with the follower band. Start: `SKATE_FTL=<id>` on that row's map.
-//! NOT RETAIL YET: the follow indicator trail (logged), speech, the killed objectives.
+//! contest rider code with the follower band. Start: the sign-up prompt at the row's sign-up sphere (challenges.rs),
+//! the career's first challenge, or `SKATE_FTL=<id>` on that row's map.
+//! The killed it group runs next to the owned one (make_objectives builds both lists, b875); no retail FTL row has one.
 use crate::challenge_objectives::{DataObjectives, ObjectiveData};
 use crate::hud_challenge::{ChallengeHudState, Component};
 use bevy::prelude::*;
 use serde::Deserialize;
-use skate_core::challenges::api::SkaterFacts;
 use skate_core::challenges::film_run::{Command, Event, FilmRun, HudComponent, Kind, Message, Params, State};
-use skate_core::challenges::objectives::{Event as GroupEvent, Message as GroupMessage};
+use skate_core::challenges::objectives::Event as GroupEvent;
 use skate_core::challenges::race_ai::{follower_band, shaped_speed, BandTuning, FollowerBand};
 use skate_core::challenges::timers::TICKS_PER_SECOND;
 use skate_core::challenges::{Completion, Flow};
@@ -39,8 +39,6 @@ fn yes() -> bool {
     true
 }
 
-/// At most this many objective evaluations catch up in one frame (a long frame does not replay seconds of them).
-const MAX_EVALUATIONS_PER_FRAME: u32 = 4;
 
 /// The autopilot's gap behind the leader (m): inside it the brain holds the leader's speed or less. OURS, a test aid.
 const FOLLOW_GAP: f32 = 8.0;
@@ -70,14 +68,22 @@ fn follow_cap(behind: f32, speed: f32) -> Option<f32> {
     Some(cap.max(FOLLOW_MIN_SPEED))
 }
 
-/// One `follow_the_leaders` row as `challenges.py` exports it.
+/// One row of the objectives_shared graph as `challenges.py` exports it: `follow_the_leaders` and `films` (spot films
+/// and anywhere films share the export, b999 / b1003).
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct FtlData {
     pub id: String,
+    /// `follow_the_leaders`, `films` or `anywhere_films` (absent in an export from before films: follow the leader).
+    #[serde(default)]
+    pub family: Option<String>,
     #[serde(default)]
     pub map: Option<String>,
     #[serde(default)]
     pub title_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(flatten)]
+    pub sign_up: crate::challenges::SignUpFields,
     pub start: FtlStart,
     #[serde(default)]
     pub end_volume: Option<crate::challenges::Volume>,
@@ -87,6 +93,20 @@ pub(crate) struct FtlData {
     pub max_follow_distance: Option<f32>,
     #[serde(default)]
     pub countdown_delay: Option<f32>,
+    /// Film row values (b999 §3): PrefilmTime, TotalFilmTime (simul play only), FilmTimerLowLimit, OutOfBoundsTime and
+    /// the banner times; absent = the family default in `Params::retail`.
+    #[serde(default)]
+    pub prefilm_time: Option<f32>,
+    #[serde(default)]
+    pub total_film_time: Option<f32>,
+    #[serde(default)]
+    pub film_low_limit: Option<i32>,
+    #[serde(default)]
+    pub out_of_bounds_time: Option<f32>,
+    #[serde(default)]
+    pub owned_display_time: Option<f32>,
+    #[serde(default)]
+    pub killed_display_time: Option<f32>,
     #[serde(default = "yes")]
     pub allow_player_bail: bool,
     #[serde(default)]
@@ -99,41 +119,93 @@ pub(crate) struct FtlData {
     pub competitors: Vec<crate::race_host::CompetitorRow>,
     #[serde(default)]
     pub objectives: FtlObjectives,
+    /// The volumes the objectives test (IsInVolume / EnteredVolume), from the challenge's hull: a film's spot volumes
+    /// are not among the map's trigger volumes, so the run arms them.
+    #[serde(default)]
+    pub objective_volumes: Vec<crate::challenges::Volume>,
 }
 
 #[derive(Deserialize)]
 struct File {
     #[serde(default)]
-    follow_the_leaders: Vec<FtlData>,
+    follow_the_leaders: Vec<serde_json::Value>,
+    #[serde(default)]
+    films: Vec<serde_json::Value>,
 }
 
+/// Every follow the leader and film row. Rows are read one by one, so a row this host cannot run yet (an anywhere
+/// film: no start, its objectives not exported, b961 §1) is left out with a log line instead of hiding the others.
 pub(crate) fn load(assets: &std::path::Path) -> Vec<FtlData> {
-    std::fs::read(assets.join("private/challenges.json")).ok()
-        .and_then(|b| serde_json::from_slice::<File>(&b).ok()).map(|f| f.follow_the_leaders).unwrap_or_default()
+    let Some(file) = std::fs::read(assets.join("private/challenges.json")).ok().and_then(|b| serde_json::from_slice::<File>(&b).ok()) else {
+        return Vec::new();
+    };
+    let mut skipped = Vec::new();
+    let rows: Vec<FtlData> = file.follow_the_leaders.into_iter().chain(file.films).filter_map(|v| {
+        let id = v.get("id").and_then(|i| i.as_str()).unwrap_or("?").to_owned();
+        serde_json::from_value(v).map_err(|_| skipped.push(id)).ok()
+    }).collect();
+    if !skipped.is_empty() {
+        info!("SKATE_FTL rows not runnable here yet (no start; anywhere films NOT RETAIL YET): {skipped:?}");
+    }
+    rows
 }
 
 fn volume_id(v: &Option<crate::challenges::Volume>) -> Option<u64> {
     v.as_ref().and_then(|v| u64::from_str_radix(&v.id, 16).ok())
 }
 
-/// The row's values over the family defaults (b1006 §3).
+/// The graph's challenge type for a row's family.
+pub(crate) fn kind(d: &FtlData) -> Kind {
+    match d.family.as_deref() {
+        Some("films") => Kind::Film,
+        Some("anywhere_films") => Kind::AnywhereFilm,
+        _ => Kind::Follow,
+    }
+}
+
+/// The row's values over the family defaults (b1006 §3, b999 §3).
 pub(crate) fn params(d: &FtlData) -> Params {
-    let base = Params::retail(Kind::Follow);
+    let kind = kind(d);
+    let base = Params::retail(kind);
     Params {
-        competitors: d.competitors.len().max(1) as u32,
+        // follow the leader always has its leader; films ride alone
+        competitors: if kind == Kind::Follow { d.competitors.len().max(1) } else { d.competitors.len() } as u32,
         boundary: volume_id(&d.boundary),
         ftl_end_volume: volume_id(&d.end_volume),
         countdown_delay: d.countdown_delay.unwrap_or(base.countdown_delay),
+        prefilm_time: d.prefilm_time.unwrap_or(base.prefilm_time),
+        total_film_time: d.total_film_time.unwrap_or(base.total_film_time),
+        film_low_limit: d.film_low_limit.map_or(base.film_low_limit, |v| v as f32),
+        out_of_bounds_time: d.out_of_bounds_time.unwrap_or(base.out_of_bounds_time),
+        owned_display_time: d.owned_display_time.unwrap_or(base.owned_display_time),
+        killed_display_time: d.killed_display_time.unwrap_or(base.killed_display_time),
         allow_player_bail: d.allow_player_bail,
         allow_objective_failure: d.allow_objective_failure,
         ..base
     }
 }
 
+/// One objective group of the run: the owned it list or the killed it list.
+pub(crate) struct FtlGroup {
+    killed: bool,
+    objectives: DataObjectives,
+}
+
+/// The run's groups from the row: the owned list (required), then the killed list when the row has one. None when
+/// the owned list does not load; a killed list that does not load is left out (logged by DataObjectives).
+fn load_groups(data: &FtlData, volumes: Vec<(String, u64)>) -> Option<Vec<FtlGroup>> {
+    let owned = DataObjectives::new(&data.id, &data.objectives.owned, volumes.clone(), Default::default())?;
+    let mut groups = vec![FtlGroup { killed: false, objectives: owned }];
+    if let Some(killed) = DataObjectives::new(&data.id, &data.objectives.killed, volumes, Default::default()) {
+        groups.push(FtlGroup { killed: true, objectives: killed });
+    }
+    Some(groups)
+}
+
 pub(crate) struct FtlState {
     pub data: FtlData,
     run: FilmRun,
-    objectives: Option<DataObjectives>,
+    groups: Vec<FtlGroup>,
     evaluating: bool,
     leader: Option<crate::contest_ai_host::ContestAi>,
     awaiting_teleport: bool,
@@ -158,6 +230,10 @@ pub(crate) struct FtlState {
     meter: Option<skate_core::challenges::distance_meter::DistanceMeter>,
     /// Commands for the next update (the start's, made in arm).
     queued: Vec<Command>,
+    /// What the player does, for the objective groups (shared with the tutorials).
+    feed: crate::challenge_objectives::ObjectiveFeed,
+    /// The autopilot's area lines were looked up for this run (films).
+    area_checked: bool,
 }
 
 #[derive(Resource, Default)]
@@ -171,6 +247,12 @@ pub(crate) struct FollowTheLeader {
 }
 
 impl FollowTheLeader {
+    /// The rows on `map` with a sign-up sphere, for the sign-up prompt (challenges.rs).
+    pub(crate) fn offers<'a>(&'a self, map: Option<&'a std::path::Path>) -> impl Iterator<Item = crate::challenges::Offer> + 'a {
+        self.rows.iter().filter_map(move |r| r.sign_up.offer(&r.id, r.family.as_deref().unwrap_or("follow_the_leaders"), r.map.as_deref(),
+            r.title_id.as_ref(), r.title.as_ref(), map))
+    }
+
     /// The player is held from the start until the countdown releases it (PinPlayer / UnpinAI(player)).
     pub(crate) fn player_pinned(&self) -> bool {
         self.run.as_ref().is_some_and(|r| matches!(r.run.state(), State::PinPlayer | State::MakeObjectives | State::PrefilmDisplay
@@ -178,24 +260,58 @@ impl FollowTheLeader {
     }
 }
 
+/// A new map drops the old map's run and starts `SKATE_FTL`; a sign-up (the prompt at the row's sign-up sphere, the
+/// career's first challenge) starts its row when nothing else runs.
 fn arm(mut ftl: ResMut<FollowTheLeader>, config: Res<crate::config::Config>, map: Res<crate::map_transition::CurrentMap>,
-    mut volumes: ResMut<crate::trigger_volumes::TriggerVolumes>, mut population: Option<ResMut<crate::living_world::PopulationState>>) {
-    if ftl.generation == Some(map.generation) {
-        return;
-    }
-    ftl.generation = Some(map.generation);
-    if !ftl.loaded {
-        ftl.loaded = true;
-        ftl.rows = load(&config.asset_root);
-        info!("SKATE_FTL rows={}", ftl.rows.len());
-    }
-    if let Some(mut run) = ftl.run.take() {
-        info!("SKATE_FTL {} dropped by the map change", run.data.id);
-        if let (Some(ai), Some(pop)) = (run.leader.as_mut(), population.as_deref_mut()) {
-            ai.remove(pop);
+    mut volumes: ResMut<crate::trigger_volumes::TriggerVolumes>, mut population: Option<ResMut<crate::living_world::PopulationState>>,
+    mut signed: MessageReader<crate::challenges::ChallengeSignUp>, challenges: Option<Res<crate::challenges::Challenges>>,
+    mut skater: ResMut<crate::physics::SkaterRuntime>) {
+    let mut wanted = Vec::new();
+    if ftl.generation != Some(map.generation) {
+        ftl.generation = Some(map.generation);
+        if !ftl.loaded {
+            ftl.loaded = true;
+            ftl.rows = load(&config.asset_root);
+            info!("SKATE_FTL rows={}", ftl.rows.len());
+        }
+        if let Some(mut run) = ftl.run.take() {
+            info!("SKATE_FTL {} dropped by the map change", run.data.id);
+            if let (Some(ai), Some(pop)) = (run.leader.as_mut(), population.as_deref_mut()) {
+                ai.remove(pop);
+            }
+        }
+        wanted.extend(std::env::var("SKATE_FTL").ok());
+        wanted.extend(std::env::var("SKATE_FILM").ok());
+        // `--verify` runs: SKATE_VERIFY_CHALLENGE places the skater at the row's sign-up, as for own the spot.
+        let verify = config.verification_capture.as_ref().and_then(|_| std::env::var("SKATE_VERIFY_CHALLENGE").ok());
+        let path = map.path.as_deref();
+        if let Some(o) = verify.and_then(|id| ftl.offers(path).find(|o| o.id == id)) {
+            let at = ftl.rows.iter().find(|r| r.id == o.id).and_then(|r| r.sign_up.location.as_ref()).map(|l| l.matrix);
+            info!("SKATE_VERIFY_CHALLENGE {} start at its sign-up {:?}", o.id, &o.location[..3]);
+            if let Err(e) = at.map_or(Ok(()), |m| skater.travel_to(m)) {
+                warn!("SKATE_VERIFY_CHALLENGE {e}");
+            }
         }
     }
-    let Ok(wanted) = std::env::var("SKATE_FTL") else { return };
+    let busy = challenges.as_deref().is_some_and(|c| c.run.is_some() || c.tutorial.is_some());
+    for s in signed.read().filter(|s| s.body == crate::trigger_volumes::PLAYER) {
+        if !ftl.rows.iter().any(|r| r.id == s.challenge) {
+            continue;
+        }
+        if busy || ftl.run.is_some() {
+            info!("SKATE_FTL sign-up {} ignored: a challenge is running", s.challenge);
+            continue;
+        }
+        info!("SKATE_FTL sign-up {}", s.challenge);
+        wanted.push(s.challenge.clone());
+    }
+    if let Some(id) = wanted.first() {
+        start(&mut ftl, id, &config, &map, &mut volumes);
+    }
+}
+
+fn start(ftl: &mut FollowTheLeader, wanted: &str, config: &crate::config::Config, map: &crate::map_transition::CurrentMap,
+    volumes: &mut crate::trigger_volumes::TriggerVolumes) {
     let Some(data) = ftl.rows.iter().find(|r| r.id == wanted).cloned() else {
         info!("SKATE_FTL {wanted} not found");
         return;
@@ -204,28 +320,29 @@ fn arm(mut ftl: ResMut<FollowTheLeader>, config: Res<crate::config::Config>, map
         info!("SKATE_FTL {wanted} is not on {}", map.name);
         return;
     }
-    for v in [&data.end_volume, &data.boundary].into_iter().flatten() {
+    for v in [&data.end_volume, &data.boundary].into_iter().flatten().chain(&data.objective_volumes) {
         if volumes.get(&v.id).is_none() {
             volumes.map.push(crate::trigger_volumes::TriggerVolume::from_record(&v.volume));
         }
     }
+    info!("SKATE_FTL {wanted}: {} objective volumes armed", data.objective_volumes.len());
     let map_volumes: Vec<(String, u64)> =
         volumes.map.iter().filter_map(|v| Some((v.name.clone(), u64::from_str_radix(&v.id, 16).ok()?))).collect();
-    let objectives = DataObjectives::new(&data.id, &data.objectives.owned, map_volumes, Default::default());
-    if objectives.is_none() {
+    let Some(groups) = load_groups(&data, map_volumes) else {
         warn!("SKATE_FTL {wanted}: its owned objectives do not load; not started");
         return;
-    }
-    if !data.objectives.killed.is_empty() {
-        info!("SKATE_FTL {wanted}: {} killed objective rows NOT RETAIL YET (not run)", data.objectives.killed.len());
-    }
+    };
     let rows: Vec<String> = data.competitors.iter().map(|c| c.character.clone()).collect();
-    let leader = crate::contest_ai_host::ContestAi::load(&config.asset_root, &data.id, &rows, crate::race_ai_host::start_seed(map.generation));
+    // films ride alone: only a row with competitors (follow the leader) loads its riders
+    let leader = if rows.is_empty() { None } else {
+        crate::contest_ai_host::ContestAi::load(&config.asset_root, &data.id, &rows, crate::race_ai_host::start_seed(map.generation))
+    };
     let mut run = FilmRun::new(params(&data));
     info!("SKATE_FTL start {} at {} end={:?} max={:?} leaders={rows:?}", data.id, data.start.locator, data.end_volume.as_ref().map(|v| &v.name), data.max_follow_distance);
     let commands = run.start();
-    let mut state = FtlState { data, run, objectives, evaluating: false, leader, awaiting_teleport: false, band: Some(FollowerBand::default()),
-        carry: 0.0, eval_carry: 0.0, leader_last: None, leader_speed: 0.0, leader_path: Vec::new(), last_state: 0, failure_text: None, dialog_open: false, dialog_seconds: 0.0, leaders_in_end: Vec::new(), follow_indicators: Vec::new(), meter: None, queued: Vec::new() };
+    info!("SKATE_FTL {wanted}: {} objective groups (killed it: {})", groups.len(), groups.iter().any(|g| g.killed));
+    let mut state = FtlState { data, run, groups, evaluating: false, leader, awaiting_teleport: false, band: Some(FollowerBand::default()),
+        carry: 0.0, eval_carry: 0.0, leader_last: None, leader_speed: 0.0, leader_path: Vec::new(), last_state: 0, failure_text: None, dialog_open: false, dialog_seconds: 0.0, leaders_in_end: Vec::new(), follow_indicators: Vec::new(), meter: None, queued: Vec::new(), feed: Default::default(), area_checked: false };
     // The first commands run on the next update with the frame's resources.
     state.pending(commands);
     ftl.run = Some(state);
@@ -235,6 +352,24 @@ impl FtlState {
     fn pending(&mut self, commands: Vec<Command>) {
         self.queued.extend(commands);
     }
+}
+
+/// The objective HUD's rows for a group (b844 / b947): the objectives with DisplayInHUD, in row order, each with its
+/// title text id (the movie localizes it; `#OBJECTIVE NOT VALID!` without one, as retail's 8264D130) and its state
+/// as the movie reads it: 0 failed, 1 complete, 2 not active yet, 3 active.
+fn objective_rows(rows: &[ObjectiveData], states: &[skate_core::challenges::objectives::State]) -> Vec<crate::hud_challenge::ObjectiveRow> {
+    use skate_core::challenges::objectives::State as S;
+    rows.iter().zip(states).filter(|(r, _)| r.display_in_hud).map(|(r, s)| crate::hud_challenge::ObjectiveRow {
+        state: match s {
+            S::Failed => 0,
+            S::Complete => 1,
+            S::Inactive | S::Armed => 2,
+            S::Active => 3,
+        },
+        kind: 0,
+        title: r.title_id.clone().unwrap_or_else(|| "#OBJECTIVE NOT VALID!".into()),
+        value: String::new(),
+    }).collect()
 }
 
 fn hud_component(c: HudComponent) -> Option<Component> {
@@ -262,6 +397,7 @@ fn update(
     mut end_dialog: Option<ResMut<crate::end_dialog_host::EndDialogScreen>>,
     mut autopilot: Option<ResMut<crate::autopilot::Autopilot>>,
     (time, menus, mut follow, mut presenter): (Res<Time>, Option<Res<crate::retail_menus::RetailMenus>>, ResMut<crate::visual_indicators::FollowIndicators>, Option<ResMut<crate::presentation_run::Presenter>>),
+    (challenges, pad, physics): (Option<Res<crate::challenges::Challenges>>, Option<Res<crate::input::ControllerInput>>, Option<Res<crate::physics::GamePhysics>>),
     (mut population, index, npc_transforms, mut clocks, mut commands_ecs, replays, mut brains): (
         Option<ResMut<crate::living_world::PopulationState>>,
         Option<Res<crate::living_world::npc_skaters::NpcSkaterIndex>>,
@@ -280,8 +416,9 @@ fn update(
         if !follow.0.is_empty() {
             follow.0.clear();
         }
-        if let Some(a) = autopilot.as_mut().filter(|a| a.follow.is_some()) {
+        if let Some(a) = autopilot.as_mut().filter(|a| a.follow.is_some() || a.area.is_some()) {
             a.follow = None;
+            a.area = None;
         }
         for mut b in &mut brains {
             b.speed_cap = None;
@@ -329,6 +466,42 @@ fn update(
         }).collect(),
         _ => Vec::new(),
     };
+    // A film with a boundary: the autopilot (a test aid) keeps to the lines that run through it, so a test run stays
+    // where the objectives are instead of riding off and being sent back to the start.
+    if let (Some(a), Some(b), Some(pop)) = (autopilot.as_mut(), state.data.boundary.as_ref(), population.as_deref()) {
+        if state.leader.is_none() && a.area.is_none() && !state.area_checked {
+            state.area_checked = true;
+            // the lines through the objectives' own volumes (the spots that complete them), else through the boundary
+            let lines = crate::living_world::npc_skaters::npc_lines(pop);
+            let through = |boxes: &[skate_core::triggers::OrientedBox]| -> Vec<[u8; 16]> {
+                lines.values().filter(|l| l.nodes.iter().any(|n| boxes.iter().any(|b| b.contains_point(n.position)))).map(|l| l.id).collect()
+            };
+            let spots: Vec<_> = state.data.objective_volumes.iter().map(|v| v.volume.shape.oriented_box()).collect();
+            // first the lines that do a trick (a grind, a flip) inside one: the objectives ask for a trick at the spot
+            let tricking: Vec<[u8; 16]> = lines.values().filter(|l| {
+                let mut open = false;
+                l.nodes.iter().any(|n| {
+                    use skate_core::living_world::replay::node_events::{END_TRICK, START_TRICK};
+                    open = match n.event { START_TRICK => true, END_TRICK => false, _ => open };
+                    open && spots.iter().any(|b| b.contains_point(n.position))
+                })
+            }).map(|l| l.id).collect();
+            let mut inside = if tricking.is_empty() { through(&spots) } else { tricking.clone() };
+            if !tricking.is_empty() {
+                info!("SKATE_FTL {id} autopilot area: {} lines trick inside the objective volumes", tricking.len());
+            }
+            let what = if inside.is_empty() {
+                inside = through(&[b.volume.shape.oriented_box()]);
+                b.name.clone()
+            } else {
+                format!("{} objective volumes", spots.len())
+            };
+            info!("SKATE_FTL {id} autopilot area: {} lines through {what}", inside.len());
+            if !inside.is_empty() {
+                a.area = Some(std::sync::Arc::new(inside));
+            }
+        }
+    }
     // The autopilot (a test aid) takes the first leader's lines in the leader's order: the line the leader took after
     // the one the brain is on (after a bail it keeps to the path instead of walking to where the leader is now).
     if let Some(a) = autopilot.as_mut() {
@@ -394,38 +567,38 @@ fn update(
     if state_id == 300 && state.last_state != 300 {
         commands.extend(state.run.handle(Event::Wipeout));
     }
-    let off = crate::tutorial_run::off_board(state_id);
-    let in_air = (200..=202).contains(&state_id);
-    if let Some(o) = state.objectives.as_mut() {
-        o.skater = SkaterFacts {
-            wiping_out: state_id == 300,
-            off_board: off,
-            grinding: (400..=405).contains(&state_id),
-            on_board: !off && state_id != 300 && state_id < 700,
-            on_ground: (100..=105).contains(&state_id),
-            in_air,
-            competitor_distances: distances,
-            ..SkaterFacts::default()
-        };
-    }
     state.last_state = state_id;
+    // The groups get what the tutorial's get (the shared feed): skater facts, the frame's volumes, air, pushes,
+    // tricks, markers and banked sequences, and one evaluation per 60 Hz challenge tick, so a row's own counters (the
+    // speech rows' `Delay` of 60 evaluations) keep their time. [inferred: retail's evaluation rate is open, b1006]
+    state.eval_carry += time.delta_secs() * TICKS_PER_SECOND;
+    let ticks = state.eval_carry as u32;
+    state.eval_carry -= state.eval_carry.floor();
+    let shared = challenges.as_deref();
+    let banked: Vec<(i32, bool)> = shared.map(|c| c.banked_this_frame.iter().map(|s| (s.score, s.wiped_out)).collect()).unwrap_or_default();
+    let raw = pad.as_ref().map(|p| p.raw_input()).unwrap_or_default();
+    let feed_input = crate::challenge_objectives::FeedInput {
+        entered: &entered, exited: &exited, banked: &banked, ticks, state_id, in_sequence: skater.scoring.sequence_active(),
+        markers: shared.map_or(&[][..], |c| &c.markers_this_frame), tricks: shared.map_or(&[][..], |c| &c.tricks_done_this_frame),
+        began: shared.map_or(&[][..], |c| &c.tricks_began_this_frame), right_stick_y: raw.right[1], triggers: raw.triggers,
+        manual: skater.scoring.manual(), pushes: shared.map_or(0, |c| c.pushes_this_frame),
+        pump_acceleration: skater.ground.pumping.pump_acceleration, pump_user: skater.ground.pumping.intentional_pumping != 0,
+        grind_rail: (400..=405).contains(&state_id).then_some(skater.player_input.grind.rail_owner).flatten()
+            .and_then(|owner| physics.as_ref().and_then(|p| p.rail_guids(owner))),
+        time_to_grind: {
+            let air = &skater.player_input.physical.air;
+            if air.flag_443 != 0 { air.collision_time_180 - air.time_in_state_176 } else { skate_core::challenges::api::NO_GRIND_TIME }
+        },
+        board_adjust: skater.animation_input.fields.board_adjust,
+        competitor_distances: distances,
+    };
+    let killed_of: Vec<bool> = state.groups.iter().map(|g| g.killed).collect();
+    let mut groups: Vec<&mut DataObjectives> = state.groups.iter_mut().map(|g| &mut g.objectives).collect();
+    let fed = state.feed.step(&mut groups, &feed_input, state.evaluating);
     if state.evaluating {
-        let mut events = Vec::new();
-        // The objectives evaluate once per 60 Hz challenge tick, whatever the frame rate: a row's own counters (the
-        // speech rows' `Delay` of 60 evaluations) keep their time. [inferred: retail's evaluation rate is open, b1006]
-        state.eval_carry += time.delta_secs() * TICKS_PER_SECOND;
-        let evaluations = (state.eval_carry as u32).min(MAX_EVALUATIONS_PER_FRAME);
-        state.eval_carry -= state.eval_carry.floor();
-        if let Some(o) = state.objectives.as_mut() {
-            for &v in &exited {
-                events.extend(o.handle(GroupMessage::TriggerExit { volume: v }));
-            }
-            for &v in &entered {
-                events.extend(o.handle(GroupMessage::TriggerEnter { volume: v }));
-            }
-            for _ in 0..evaluations {
-                events.extend(o.handle(GroupMessage::Tick { gated: false }));
-            }
+        let events: Vec<(bool, GroupEvent)> = fed.into_iter().map(|(i, e)| (killed_of[i], e)).collect();
+        for g in &mut state.groups {
+            let o = &mut g.objectives;
             for (competitor, on) in o.follow_indicator.drain(..) {
                 // retail removes any entry for the id first, so adding twice keeps one (82D4F470)
                 state.follow_indicators.retain(|&c| c != competitor);
@@ -441,20 +614,27 @@ fn update(
         if follow.0 != serials {
             follow.0 = serials;
         }
-        for e in events {
+        for (killed, e) in events {
+            let rows = if killed { &state.data.objectives.killed } else { &state.data.objectives.owned };
             match e {
-                GroupEvent::AllComplete => commands.extend(state.run.handle(Event::AllObjectivesComplete { killed: false })),
+                GroupEvent::Completed(i) => {
+                    info!("SKATE_FTL {id} objective {i} complete (killed it group: {killed}) {}", rows.get(i).map_or("", |o| o.key.as_str()));
+                }
+                GroupEvent::AllComplete => {
+                    info!("SKATE_FTL {id} all objectives complete (killed it group: {killed})");
+                    commands.extend(state.run.handle(Event::AllObjectivesComplete { killed }));
+                }
                 GroupEvent::FailureCondition { objective, row } => {
-                    let text = state.data.objectives.owned.get(objective).and_then(|o| o.inline_failure(row)).and_then(|f| f.text.clone());
-                    info!("SKATE_FTL {id} objective {objective} failure row {row} ({text:?}) distances {distances:?}");
+                    let text = rows.get(objective).and_then(|o| o.inline_failure(row)).and_then(|f| f.text.clone());
+                    info!("SKATE_FTL {id} objective {objective} (killed it group: {killed}) failure row {row} ({text:?}) distances {distances:?}");
                     state.failure_text = Some(text.unwrap_or_else(|| FAILURE_TEXT.into()));
                     commands.extend(state.run.handle(Event::ObjectiveFailed));
                 }
                 // A hint row plays its presentation only (82C755B8, b942): the leader's speech lines and the start tip.
                 GroupEvent::Hint { objective, row } => {
-                    let events = state.data.objectives.owned.get(objective).and_then(|o| o.hints.get(row)).map(|h| h.presentation.events()).unwrap_or_default();
+                    let events = rows.get(objective).and_then(|o| o.hints.get(row)).map(|h| h.presentation.events()).unwrap_or_default();
                     if let (Some(p), false) = (presenter.as_deref_mut(), events.is_empty()) {
-                        let group = format!("{id}/obj{objective}/hint{row}");
+                        let group = format!("{id}/{}obj{objective}/hint{row}", if killed { "killed/" } else { "" });
                         let started = p.manager.start(skate_core::presentation::Group { id: group.clone(), owner: id.clone(), events });
                         info!("SKATE_FTL {id} hint row {row} of objective {objective}: presentation {group} {started:?}");
                     }
@@ -494,6 +674,11 @@ fn update(
                         r.moving = false;
                     }
                 }
+                // retail repositions twice in one frame after a second out-of-bounds (the stale flag, b999 §2); the
+                // player is already on the way to the start, so the second one is that same move
+                Command::RepositionPlayer if state.awaiting_teleport && skater.teleport_pending() => {
+                    info!("SKATE_FTL {id} already on the way to the start");
+                }
                 Command::RepositionPlayer => {
                     let at = state.data.start.slots.first().copied().unwrap_or(state.data.start.matrix);
                     info!("SKATE_FTL {id} player to the start {:?}", &at[3][..3]);
@@ -506,17 +691,28 @@ fn update(
                     state.awaiting_teleport = true;
                 }
                 Command::Evaluation(on) => state.evaluating = on,
+                // every objective active (the films' flow, b934): not only the first one, which left a film's other
+                // objectives inactive however often their spots were skated (desktop run 2026-11-13)
                 Command::ActivateStartObjectives => {
-                    if let Some(o) = state.objectives.as_mut() {
-                        o.activate_first();
+                    for g in &mut state.groups {
+                        g.objectives.activate_flow();
+                        info!("SKATE_FTL {id} objectives start (killed it group: {}): {:?}", g.killed, g.objectives.states());
                     }
                 }
                 Command::ResetObjectives => {
-                    state.leaders_in_end.clear();
-                    state.leader_path.clear();
-                    state.failure_text = None;
-                    if let Some(o) = state.objectives.as_mut() {
-                        o.reset_only();
+                    // a restart resets and the countdown activates later; a re-arm while running (a film's wipeout,
+                    // objective failure or session marker, b999 §2) starts the objectives over at once
+                    let running = state.run.state() == State::ChallengeRunning;
+                    if !running {
+                        state.leaders_in_end.clear();
+                        state.leader_path.clear();
+                        state.failure_text = None;
+                    }
+                    for g in &mut state.groups {
+                        g.objectives.reset_only();
+                        if running {
+                            g.objectives.activate_flow();
+                        }
                     }
                 }
                 Command::ShowHud(c, shown) => {
@@ -535,6 +731,8 @@ fn update(
                 Command::CentralMessage(m) => {
                     let text = match m {
                         Message::ObjectiveFailure => state.failure_text.clone().unwrap_or_else(|| FAILURE_TEXT.into()),
+                        // a film's boundary: the same retail text as own the spot's (ReturnToChallengeArea)
+                        Message::ReturnToArea => crate::challenges::RETURN_TO_AREA.into(),
                         other => {
                             info!("SKATE_FTL {id} central message {other:?} NOT RETAIL YET");
                             continue;
@@ -544,12 +742,13 @@ fn update(
                 }
                 Command::PlayHighlightReel => queue.extend(state.run.handle(Event::HighlightReelComplete)),
                 Command::OpenContinueRetry => {
-                    let won = state.run.result() == Flow::Win;
-                    info!("SKATE_FTL {id} end options won={won}");
+                    let killed = state.run.result() == Flow::Kill;
+                    let won = killed || state.run.result() == Flow::Win;
+                    info!("SKATE_FTL {id} end options won={won} killed={killed}");
                     match end_dialog.as_deref_mut().filter(|d| d.available) {
                         Some(d) => {
                             d.dialog.passed = won;
-                            d.dialog.killed = false;
+                            d.dialog.killed = killed;
                             d.title = state.data.title_id.clone();
                             d.open = true;
                             state.dialog_open = true;
@@ -598,6 +797,16 @@ fn update(
             hud.timer_flag = flag;
         }
     }
+    // The objective HUD (SetupObjectiveHUDData on the first owned group, b875): one row per objective shown on the
+    // HUD, its title text id and its state as the objective movie reads it. NOT RETAIL YET: a replay of an owned
+    // challenge shows the first killed group instead.
+    if hud.is_shown(Component::Objective) {
+        let states = state.groups.iter().find(|g| !g.killed).map(|g| g.objectives.states()).unwrap_or_default();
+        let rows = objective_rows(&state.data.objectives.owned, &states);
+        if hud.objectives != rows {
+            hud.objectives = rows;
+        }
+    }
     if let Some(meter) = state.meter.as_mut().filter(|_| hud.is_shown(Component::DistanceMeter)) {
         let tuning = skate_core::challenges::distance_meter::MeterTuning::default();
         meter.advance(time.delta_secs(), distances[0].unwrap_or(meter.shown), &tuning);
@@ -635,6 +844,7 @@ pub(crate) fn register(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use skate_core::challenges::objectives::Message as GroupMessage;
 
     #[test]
     fn the_autopilot_keeps_a_gap_and_never_passes_the_leader() {
@@ -655,6 +865,155 @@ mod tests {
         assert_eq!(follow_line(&path, None), Some(a));
         assert_eq!(follow_line(&path, Some([9u8; 16])), Some(c));
         assert_eq!(follow_line(&[], Some(a)), None);
+    }
+
+    fn volume_row(key: &str, volume: &str) -> ObjectiveData {
+        let mut triggers = vec![false; 14];
+        triggers[12] = true;
+        ObjectiveData { key: key.into(), activation: 0, triggers, points_valid: None,
+            condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.IsInVolume",
+                "args": [{"lit": "1"}, {"lit": format!("DIST_DownTown|{volume}")}]}}]}),
+            failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new(), title_id: None, title_arg: None, display_in_hud: true }
+    }
+
+    #[test]
+    fn a_killed_it_list_runs_as_its_own_group_and_completes_on_its_own() {
+        let mut row: FtlData = serde_json::from_value(serde_json::json!({
+            "id": "ftl_test", "start": {"locator": "s", "matrix": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}
+        })).unwrap();
+        let volumes = vec![("ftl_end".to_string(), 7), ("ftl_kill".to_string(), 9)];
+        row.objectives.owned = vec![volume_row("owned_0", "ftl_end")];
+        assert_eq!(load_groups(&row, volumes.clone()).map(|g| g.len()), Some(1), "retail rows: the owned list only");
+        row.objectives.killed = vec![volume_row("killed_0", "ftl_kill")];
+        let mut groups = load_groups(&row, volumes).unwrap();
+        assert_eq!(groups.iter().map(|g| g.killed).collect::<Vec<_>>(), [false, true]);
+        let mut done = Vec::new();
+        for g in &mut groups {
+            g.objectives.activate_first();
+            g.objectives.enter(9);
+            let events = g.objectives.handle(GroupMessage::Tick { gated: false });
+            if events.contains(&GroupEvent::AllComplete) {
+                done.push(g.killed);
+            }
+        }
+        assert_eq!(done, [true], "inside the killed volume only the killed it group completes");
+        row.objectives.owned.clear();
+        assert!(load_groups(&row, vec![]).is_none(), "no owned list: not started");
+    }
+
+    #[test]
+    fn rows_with_a_sign_up_sphere_on_this_map_are_offered_to_the_prompt() {
+        let row = |id: &str, map: &str, sphere: bool| -> FtlData {
+            let mut v = serde_json::json!({"id": id, "map": map, "title_id": "ID_T", "challenge_type": 23,
+                "start": {"locator": "s", "matrix": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}});
+            if sphere {
+                v["location"] = serde_json::json!({"locator": "l", "matrix": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[5,6,7,1]]});
+                v["sign_up_radius"] = serde_json::json!(3.0);
+            }
+            serde_json::from_value(v).unwrap()
+        };
+        let ftl = FollowTheLeader { rows: vec![row("a", "university", true), row("b", "university", false), row("c", "downtown", true)], ..Default::default() };
+        let offers: Vec<_> = ftl.offers(Some(std::path::Path::new("maps/University.skate"))).collect();
+        assert_eq!(offers.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert_eq!((offers[0].location, offers[0].sign_up_radius, offers[0].challenge_type), ([5., 6., 7., 1.], 3.0, Some(23)));
+        assert_eq!(crate::challenges::sign_up_state(&offers[0]), 1, "the Challenge overlay state, not own the spot's");
+        assert_eq!(ftl.offers(None).count(), 0);
+    }
+
+    #[test]
+    fn a_films_objectives_all_start_active_not_only_the_first() {
+        use skate_core::challenges::objectives::State as S;
+        // film_univ_02's owned rows: activation 0, 5 (on a sequence), 0
+        let mut rows = vec![volume_row("film_univ_02_0", "a"), volume_row("film_univ_02_1", "b"), volume_row("film_univ_02_2", "c")];
+        rows[1].activation = 5;
+        let mut d = DataObjectives::new("film_univ_02", &rows, vec![("a".into(), 1), ("b".into(), 2), ("c".into(), 3)], Default::default()).unwrap();
+        d.activate_flow();
+        assert_eq!(d.states(), [S::Active, S::Active, S::Active], "the films' flow mode 0 (b934)");
+    }
+
+    #[test]
+    fn the_objective_hud_lists_the_shown_objectives_with_their_titles_and_states() {
+        use skate_core::challenges::objectives::State as S;
+        let mut a = volume_row("film_indu_01_0", "x");
+        a.title_id = Some("ID_CHALLENGE_FILM_INDU_01_OWNED01".into());
+        let mut hidden = volume_row("film_indu_01_6", "x");
+        hidden.display_in_hud = false;
+        let mut b = volume_row("film_indu_01_1", "x");
+        b.title_id = Some("ID_CHALLENGE_FILM_INDU_01_OWNED02".into());
+        let rows = objective_rows(&[a, hidden, b], &[S::Complete, S::Active, S::Active]);
+        let got: Vec<(i32, &str)> = rows.iter().map(|r| (r.state, r.title.as_str())).collect();
+        assert_eq!(got, [(1, "ID_CHALLENGE_FILM_INDU_01_OWNED01"), (3, "ID_CHALLENGE_FILM_INDU_01_OWNED02")],
+            "DisplayInHUD false leaves the row out (film_indu_01_6, b947)");
+    }
+
+    /// The exported film_univ_02 (SKATE_TEST_ASSETS = an assets folder with private/challenges.json): a clean line
+    /// that grinds inside an objective's volumes completes that objective and its HUD row, through the same feed and
+    /// rows the host uses; a line that grinds outside them or bails completes nothing.
+    #[test]
+    fn film_univ_02_grind_objectives_complete_from_the_exported_rows() {
+        use crate::challenge_objectives::{FeedInput, ObjectiveFeed};
+        use skate_core::challenges::objectives::State as S;
+        let Some(assets) = std::env::var_os("SKATE_TEST_ASSETS") else { test_skip!("set SKATE_TEST_ASSETS") };
+        let Some(data) = load(std::path::Path::new(&assets)).into_iter().find(|r| r.id == "film_univ_02") else {
+            test_skip!("no film_univ_02 in the export")
+        };
+        let volumes: Vec<(String, u64)> =
+            data.objective_volumes.iter().filter_map(|v| Some((v.name.clone(), u64::from_str_radix(&v.id, 16).ok()?))).collect();
+        let id = |name: &str| volumes.iter().find(|(n, _)| n == name).map(|(_, i)| *i).unwrap_or_else(|| panic!("no volume {name}"));
+        // (volume to grind in, the owned objective it completes)
+        let cases = [("film_univ_02_grind_volume_2", Some(2)), ("film_univ_02_gap_01_grd_volume_3", Some(0)), ("film_univ_02_gap_02_volume_1", None)];
+        for (volume, expected) in cases {
+            for bail in [false, true] {
+                let mut groups = load_groups(&data, volumes.clone()).expect("the rows load");
+                for g in &mut groups {
+                    g.objectives.activate_flow();
+                }
+                let mut feed = ObjectiveFeed::default();
+                let mut completed = Vec::new();
+                let mut frame = |entered: &[u64], exited: &[u64], state_id: u32, in_sequence: bool, banked: &[(i32, bool)]| {
+                    let input = FeedInput { entered, exited, banked, ticks: 1, state_id, in_sequence, ..Default::default() };
+                    let mut refs: Vec<&mut DataObjectives> = groups.iter_mut().map(|g| &mut g.objectives).collect();
+                    for (i, e) in feed.step(&mut refs, &input, true) {
+                        if let GroupEvent::Completed(o) = e {
+                            completed.push((i, o));
+                        }
+                    }
+                };
+                let v = id(volume);
+                frame(&[], &[], 100, true, &[]);
+                frame(&[v], &[], 200, true, &[]);
+                for _ in 0..20 {
+                    frame(&[], &[], 401, true, &[]);
+                }
+                frame(&[], &[v], 200, true, &[]);
+                frame(&[], &[], if bail { 300 } else { 100 }, true, &[]);
+                frame(&[], &[], 100, false, &[(800, bail)]);
+                let owned: Vec<usize> = completed.iter().filter(|(g, _)| *g == 0).map(|(_, o)| *o).collect();
+                let want: Vec<usize> = if bail { Vec::new() } else { expected.into_iter().collect() };
+                assert_eq!(owned, want, "grinding in {volume}, bail {bail}");
+                let rows = objective_rows(&data.objectives.owned, &groups[0].objectives.states());
+                let done: Vec<usize> = rows.iter().enumerate().filter(|(_, r)| r.state == 1).map(|(i, _)| i).collect();
+                assert_eq!(done, want, "the HUD rows show it ({volume}, bail {bail})");
+                assert!(groups[0].objectives.states().iter().all(|s| *s != S::Failed));
+            }
+        }
+    }
+
+    #[test]
+    fn a_film_row_runs_on_the_same_host_without_a_leader_or_a_film_clock() {
+        let row: FtlData = serde_json::from_value(serde_json::json!({
+            "id": "film_univ_02", "family": "films", "map": "university",
+            "start": {"locator": "s", "matrix": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]},
+            "total_film_time": 180.0, "film_low_limit": 5, "prefilm_time": 0.0, "allow_player_bail": false
+        })).unwrap();
+        let p = params(&row);
+        assert_eq!((p.kind, p.competitors, p.allow_player_bail), (Kind::Film, 0, false), "films ride alone and re-arm on a bail");
+        assert_eq!((p.total_film_time, p.film_low_limit, p.prefilm_time, p.simul_play), (180.0, 5.0, 0.0, false));
+        let old: FtlData = serde_json::from_value(serde_json::json!({
+            "id": "ftl_test", "start": {"locator": "s", "matrix": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}})).unwrap();
+        assert_eq!(kind(&old), Kind::Follow, "an export from before films is follow the leader");
+        let anywhere = serde_json::json!({"id": "film_anyw_01", "family": "anywhere_films", "start": null});
+        assert!(serde_json::from_value::<FtlData>(anywhere).is_err(), "anywhere films are left out until they are hosted");
     }
 
     #[test]

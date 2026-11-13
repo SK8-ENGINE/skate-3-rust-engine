@@ -154,6 +154,18 @@ fn sha256(path: &Path) -> Result<String, String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// The release package's file type: the Windows package is a zip, the Linux and macOS ones are tar.gz (doc 44).
+fn package_ext() -> &'static str {
+    if cfg!(windows) { "zip" } else { "tar.gz" }
+}
+
+/// The game in a release folder: at the root in the Windows package, in bin/ in the Linux and macOS packages (laid
+/// out like a checkout).
+pub fn release_exe(d: &Path) -> PathBuf {
+    let root = d.join(GAME_EXE);
+    if cfg!(windows) || root.is_file() { root } else { d.join("bin").join(GAME_EXE) }
+}
+
 /// `Write-ReleasePlay`: the release folder's play script (the game with its session log in logs/).
 fn write_release_play(dir: &Path) {
     if cfg!(windows) {
@@ -162,10 +174,53 @@ fn write_release_play(dir: &Path) {
             "\"%~dp0skate3rust.exe\" > \"logs\\game-%STAMP%.log\" 2> \"logs\\game-%STAMP%.stderr.log\""].join("\r\n");
         let _ = std::fs::write(dir.join("PLAY.bat"), bat + "\r\n");
     } else {
-        let sh = "#!/bin/sh\ncd \"$(dirname \"$0\")\"\nmkdir -p logs\nstamp=$(date +%Y%m%d-%H%M%S)\n./skate3rust > \"logs/game-$stamp.log\" 2> \"logs/game-$stamp.stderr.log\"\n";
+        let exe = if dir.join(GAME_EXE).is_file() { format!("./{GAME_EXE}") } else { format!("./bin/{GAME_EXE}") };
+        let sh = format!("#!/bin/sh\ncd \"$(dirname \"$0\")\"\nmkdir -p logs\nstamp=$(date +%Y%m%d-%H%M%S)\n{exe} > \"logs/game-$stamp.log\" 2> \"logs/game-$stamp.stderr.log\"\n");
         let path = dir.join("PLAY.sh");
         let _ = std::fs::write(&path, sh);
         set_executable(&path);
+    }
+}
+
+/// The release's metadata for this OS: `<pkg>.release.json` (every OS), else the Windows-era `release.json`.
+fn release_meta(base: &str, pkg: &str, tmp: &Path) -> Option<Value> {
+    let p = tmp.join("release.json");
+    [format!("{base}/{pkg}.release.json"), format!("{base}/release.json")].iter()
+        .find(|url| download(url, &p).is_ok()).and_then(|_| read_json(&p))
+}
+
+/// Unpacks a downloaded package into `x` (zip with the zip crate; tar.gz with the system tar, present on Linux and
+/// macOS).
+fn unpack(file: &Path, x: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(x).map_err(|e| e.to_string())?;
+    if package_ext() == "zip" {
+        let f = std::fs::File::open(file).map_err(|e| e.to_string())?;
+        zip::ZipArchive::new(f).and_then(|mut a| a.extract(x)).map_err(|e| e.to_string())
+    } else {
+        let ok = crate::proc::cmd("tar").arg("-xzf").arg(file).arg("-C").arg(x).status().map_err(|e| format!("tar: {e}"))?;
+        if ok.success() { Ok(()) } else { Err("tar could not unpack it".into()) }
+    }
+}
+
+/// `skate-launcher release-patch <release folder> <release base url> <package name> <revision>`: brings the release
+/// folder to `revision` with the release's patches (the classic PowerShell launcher calls this). Exit 0 = updated,
+/// 3 = no usable patch (take the full download).
+pub fn cli_release_patch(args: &[String]) -> std::process::ExitCode {
+    let [d, base, pkg, revision, ..] = args else {
+        eprintln!("usage: release-patch <release folder> <release base url> <package name> <revision>");
+        return std::process::ExitCode::from(2);
+    };
+    let d = Path::new(d);
+    let tmp = std::env::temp_dir().join(format!("skate-release-patch-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp);
+    let done = read_json(&d.join("release.json"))
+        .is_some_and(|cur| try_patches(base, pkg, d, &tmp, &cur, &serde_json::json!({"revision": revision})));
+    let _ = std::fs::remove_dir_all(&tmp);
+    if done {
+        set_executable(&release_exe(d));
+        std::process::ExitCode::SUCCESS
+    } else {
+        std::process::ExitCode::from(3)
     }
 }
 
@@ -204,10 +259,43 @@ fn copy_tree(src: &Path, dst: &Path, skip: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Patch updates (patch.rs): when the release lists a chain of patches from the installed revision that is smaller
+/// than the package, download and apply them link by link. False (nothing changed, or put back) = take the full
+/// download.
+fn try_patches(base: &str, pkg: &str, d: &Path, tmp: &Path, cur: &Value, meta: &Value) -> bool {
+    let index_path = tmp.join("patches.json");
+    if download(&format!("{base}/{pkg}.patches.json"), &index_path).is_err() {
+        return false;
+    }
+    let Some(index) = read_json(&index_path) else { return false };
+    let Some((links, bytes)) = crate::patch::chain(&index, &text(cur, "revision"), &text(meta, "revision")) else { return false };
+    println!("  Updating with {} patch{} ({:.1} MB instead of the full download)...", links.len(),
+        if links.len() == 1 { "" } else { "es" }, bytes as f64 / 1_048_576.0);
+    for (i, link) in links.iter().enumerate() {
+        let file = text(link, "file");
+        let path = tmp.join(&file);
+        if file.contains(['/', '\\']) || download(&format!("{base}/{file}"), &path).is_err() {
+            println!("  The patch download failed; downloading the full build instead.");
+            return false;
+        }
+        if crate::patch::sha256_file(&path).ok().as_deref() != Some(text(link, "sha256").as_str()) {
+            println!("  A patch does not match its checksum; downloading the full build instead.");
+            return false;
+        }
+        let staged = crate::patch::stage(d, &path, &tmp.join(format!("stage-{i}")))
+            .and_then(|s| crate::patch::commit(d, &s));
+        if let Err(e) = staged {
+            println!("  The patch could not be applied ({e}); downloading the full build instead.");
+            return false;
+        }
+    }
+    true
+}
+
 /// `Ensure-Release`: downloads the release when it moved (checksum checked) and installs it over the old build.
 fn ensure_release(l: &Launcher, v: &Value) -> bool {
     let d = l.version_dir(v);
-    let have = d.join(GAME_EXE).is_file();
+    let have = release_exe(&d).is_file();
     let url = { let u = text(v, "url"); if u.is_empty() { setting(&l.config, "fork_url").and_then(Value::as_str).unwrap_or("https://github.com/Hailey-Ross/rusty-trucks.git").to_owned() } else { u } };
     let repo = url.trim_end_matches(".git").trim_start_matches("https://github.com/").to_owned();
     let base = format!("https://github.com/{repo}/releases/download/{}", text(v, "release"));
@@ -215,38 +303,45 @@ fn ensure_release(l: &Launcher, v: &Value) -> bool {
     let _ = std::fs::create_dir_all(&tmp);
     let result = (|| {
         println!("  Checking the {} release...", text(v, "release"));
-        if download(&format!("{base}/release.json"), &tmp.join("release.json")).is_err() {
+        let pkg = format!("skate3rust-{}", package_target());
+        let Some(meta) = release_meta(&base, &pkg, &tmp) else {
             if have {
                 println!("  Could not reach the release; playing the installed build.");
                 return true;
             }
             println!("  Could not download {} (the release is not reachable).", text(v, "name"));
             return false;
-        }
-        let meta = read_json(&tmp.join("release.json")).unwrap_or(Value::Null);
+        };
         let cur = read_json(&d.join("release.json"));
-        if have && cur.is_some_and(|c| text(&c, "revision") == text(&meta, "revision")) {
+        if have && cur.as_ref().is_some_and(|c| text(c, "revision") == text(&meta, "revision")) {
             write_release_play(&d);
             return true;
         }
+        if have {
+            if let Some(c) = cur.as_ref() {
+                if try_patches(&base, &pkg, &d, &tmp, c, &meta) {
+                    set_executable(&release_exe(&d));
+                    write_release_play(&d);
+                    println!("  Installed {} build {}.", text(v, "name"), text(&meta, "build"));
+                    return true;
+                }
+            }
+        }
         println!("  Downloading {} build {}...", text(v, "name"), text(&meta, "build"));
-        let pkg = format!("skate3rust-{}", package_target());
-        let zip = tmp.join("package.zip");
-        let sum = tmp.join("package.zip.sha256");
-        if let Err(e) = download(&format!("{base}/{pkg}.zip"), &zip).and_then(|_| download(&format!("{base}/{pkg}.zip.sha256"), &sum)) {
+        let file = format!("{pkg}.{}", package_ext());
+        let package = tmp.join(&file);
+        let sum = tmp.join(format!("{file}.sha256"));
+        if let Err(e) = download(&format!("{base}/{file}"), &package).and_then(|_| download(&format!("{base}/{file}.sha256"), &sum)) {
             println!("  The download failed ({e}).");
             return have;
         }
         let want = std::fs::read_to_string(&sum).unwrap_or_default().split_whitespace().next().unwrap_or_default().to_ascii_lowercase();
-        if sha256(&zip).ok().as_deref() != Some(want.as_str()) {
+        if sha256(&package).ok().as_deref() != Some(want.as_str()) {
             println!("  The download does not match its checksum; not installed.");
             return have;
         }
         let x = tmp.join("x");
-        let extracted = std::fs::File::open(&zip).map_err(|e| e.to_string())
-            .and_then(|f| zip::ZipArchive::new(f).map_err(|e| e.to_string()))
-            .and_then(|mut a| a.extract(&x).map_err(|e| e.to_string()));
-        if let Err(e) = extracted {
+        if let Err(e) = unpack(&package, &x) {
             println!("  Could not unpack the download ({e}).");
             return have;
         }
@@ -255,8 +350,11 @@ fn ensure_release(l: &Launcher, v: &Value) -> bool {
             println!("  Could not copy the new build into place (is the game still running?).");
             return have;
         }
-        let _ = std::fs::copy(src.join("release.json"), d.join("release.json"));
-        set_executable(&d.join(GAME_EXE));
+        // a package without its own release.json (an older Linux / macOS one) keeps the release's
+        if std::fs::copy(src.join("release.json"), d.join("release.json")).is_err() {
+            let _ = std::fs::write(d.join("release.json"), meta.to_string());
+        }
+        set_executable(&release_exe(&d));
         write_release_play(&d);
         println!("  Installed {} build {}.", text(v, "name"), text(&meta, "build"));
         true

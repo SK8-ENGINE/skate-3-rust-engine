@@ -30,7 +30,7 @@ pub fn version_status(l: &Launcher, v: &Value) -> String {
         let release = std::fs::read_to_string(dir.join("release.json")).ok()
             .and_then(|t| serde_json::from_str::<Value>(t.trim_start_matches('\u{feff}')).ok());
         return match release {
-            Some(r) if dir.join(GAME_EXE).is_file() => {
+            Some(r) if crate::ensure::release_exe(&dir).is_file() => {
                 let revision = text(&r, "revision");
                 format!("release build {} ({})", text(&r, "build"), revision.get(..7).unwrap_or(&revision))
             }

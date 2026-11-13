@@ -66,6 +66,10 @@ pub(crate) struct Autopilot {
     pub(crate) follow: Option<[u8; 16]>,
     /// The follow line last put on the possessed NPC as its line filter.
     applied_follow: Option<[u8; 16]>,
+    /// The lines a challenge with an area (a film's boundary) keeps the brain on: it starts on one and chains only
+    /// to them, so a test run stays where the objectives are. Ours, a test aid; `follow` wins over it.
+    pub(crate) area: Option<std::sync::Arc<Vec<[u8; 16]>>>,
+    applied_area: Option<std::sync::Arc<Vec<[u8; 16]>>>,
     /// A host teleported the player (a contest round start): pick a line again where it arrives. The deck jump test
     /// misses these while the brain drives (its step resets `last_deck`).
     pub(crate) host_teleported: bool,
@@ -199,7 +203,9 @@ pub(crate) fn engage(
             // In a challenge with its own lines (a race) only those count, as for its AI racers.
             let scripted = population.scripted_lines.clone();
             let avoid = autopilot.avoid.clone();
-            let allowed = |id: &[u8; 16]| scripted.as_ref().is_none_or(|s| s.contains(id)) && !avoid.contains(id);
+            let area = autopilot.area.clone();
+            let allowed = |id: &[u8; 16]| scripted.as_ref().is_none_or(|s| s.contains(id)) && !avoid.contains(id)
+                && area.as_ref().is_none_or(|a| a.contains(id));
             let given = autopilot.line.filter(|l| {
                 let known = lines.contains_key(l);
                 if !known {
@@ -237,6 +243,7 @@ pub(crate) fn engage(
             let character = autopilot.character.clone();
             autopilot.npc = population.spawn_scripted(line, &character, 0, position, heading);
             autopilot.applied_follow = None;
+            autopilot.applied_area = None;
             autopilot.start = Some((position, heading));
             autopilot.quiet = false;
             info!("AUTOPILOT engaged: brain {character} on line {} node {node} at {position:?} ({speed:.1} m/s)", hex(&line));
@@ -273,17 +280,22 @@ pub(crate) fn engage(
                     // node) and its line waits; `possess_in` releases it once it holds the player.
                     commands.entity(e).insert((Possessed, NpcRaceClock { moving: false, scale: 1.0, start: autopilot.start, ..default() }));
                 }
-                if autopilot.follow != autopilot.applied_follow {
-                    match autopilot.follow {
-                        Some(line) => {
+                if autopilot.follow != autopilot.applied_follow || (autopilot.follow.is_none() && autopilot.area != autopilot.applied_area) {
+                    match (autopilot.follow, autopilot.area.clone()) {
+                        (Some(line), _) => {
                             info!("AUTOPILOT follows line {}", hex(&line));
                             commands.entity(e).insert(crate::living_world::npc_skaters::NpcLineFilter(std::sync::Arc::new(vec![line])));
                         }
-                        None => {
+                        (None, Some(area)) => {
+                            info!("AUTOPILOT keeps to the challenge area: {} lines", area.len());
+                            commands.entity(e).insert(crate::living_world::npc_skaters::NpcLineFilter(area));
+                        }
+                        (None, None) => {
                             commands.entity(e).remove::<crate::living_world::npc_skaters::NpcLineFilter>();
                         }
                     }
                     autopilot.applied_follow = autopilot.follow;
+                    autopilot.applied_area = autopilot.area.clone();
                 }
             }
         }

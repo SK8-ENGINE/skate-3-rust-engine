@@ -262,7 +262,7 @@ fn refresh_game_files(l: &Launcher, v: &Value) -> String {
     }
     let d = l.version_dir(v);
     if l.use_release(v) {
-        let code = crate::proc::cmd(d.join(crate::cli::GAME_EXE)).arg("--update-game-files").status().ok().and_then(|s| s.code()).unwrap_or(1);
+        let code = crate::proc::cmd(crate::ensure::release_exe(&d)).arg("--update-game-files").status().ok().and_then(|s| s.code()).unwrap_or(1);
         return format!("Refresh game files: exit code {code}.");
     }
     let Some(assets) = dev_assets(&d) else { return "Refresh game files: no game files yet. Convert them first (tools\\setup-dev-assets.ps1).".into() };

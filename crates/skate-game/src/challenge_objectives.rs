@@ -32,6 +32,18 @@ pub(crate) struct ObjectiveData {
     /// Hint rows in order (HintObjectives, research b942), the same row shape as the failures.
     #[serde(default)]
     pub hints: Vec<FailureData>,
+    /// The objective's HUD / poster title (tObjectiveDefinition words 3 / 4: a text id and its argument, b947) and
+    /// DisplayInHUD (shown when true or absent). Absent in an export from before them: no title, shown.
+    #[serde(default)]
+    pub title_id: Option<String>,
+    #[serde(default)]
+    pub title_arg: Option<String>,
+    #[serde(default = "shown")]
+    pub display_in_hud: bool,
+}
+
+fn shown() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -348,6 +360,20 @@ impl DataObjectives {
         self.handle(Message::SequenceBegin);
     }
 
+    /// The objectives_shared start and re-arm: the group's flow pass in mode 0, the films' ObjectiveFlow (b934 §1, b860:
+    /// films (0, 1)): every objective in list order goes active (or armed when it has an activation volume), so a
+    /// film's objectives can be done in any order. [inferred: the first flow pass at the start; b934 reads it for the
+    /// re-arm] Flow modes 1 / 2 (killed groups (1, 2), photos (1, 1)) are NOT RETAIL YET: mode 0 for every group.
+    pub(crate) fn activate_flow(&mut self) {
+        self.group.activate_all(&mut Vec::new());
+        self.handle(Message::SequenceBegin);
+    }
+
+    /// Every objective's state, in row order (the objective HUD's rows).
+    pub(crate) fn states(&self) -> Vec<State> {
+        self.group.objectives.iter().map(|o| o.state).collect()
+    }
+
     /// The graph's ResetObjective(group, i, true, false) on objectivefailed: progress cleared, state kept (b936).
     pub(crate) fn reset_one(&mut self, i: usize) {
         self.group.reset(i, false);
@@ -374,6 +400,151 @@ impl DataObjectives {
     }
 }
 
+/// One frame of what the player did, for the objective groups of a run (tutorials, films, follow the leader).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct FeedInput<'a> {
+    pub entered: &'a [u64],
+    pub exited: &'a [u64],
+    /// Banked sequences as (score, wiped out or session marker).
+    pub banked: &'a [(i32, bool)],
+    /// 60 Hz challenge ticks this frame.
+    pub ticks: u32,
+    /// The player's physical state id and whether a sequence is running (scoring).
+    pub state_id: u32,
+    pub in_sequence: bool,
+    /// Session marker this frame: true = used (Go To Marker), false = set (Place Marker).
+    pub markers: &'a [bool],
+    /// Trick keys done this frame (retail's trick-done message, b865) and begun this frame (BeganTrick).
+    pub tricks: &'a [u64],
+    pub began: &'a [u64],
+    pub right_stick_y: f32,
+    pub triggers: [f32; 2],
+    /// The manual held now: (tail, seconds).
+    pub manual: Option<(bool, f32)>,
+    /// New push contacts this frame.
+    pub pushes: u32,
+    pub pump_acceleration: f32,
+    pub pump_user: bool,
+    pub grind_rail: Option<[u64; 2]>,
+    pub time_to_grind: f32,
+    pub board_adjust: u32,
+    /// Leader.* distances to competitors 1..4 (follow the leader).
+    pub competitor_distances: [Option<f32>; 4],
+}
+
+/// The skater's edge facts and trick lists waiting for the next objective evaluation.
+#[derive(Default)]
+struct Pending {
+    sequence_completed: bool,
+    went_off_board: bool,
+    went_on_board: bool,
+    air_completed: bool,
+    tricks: Vec<u64>,
+    began: Vec<u64>,
+}
+
+/// At most this many objective evaluations catch up in one frame (a long frame does not replay seconds of them).
+pub(crate) const MAX_EVALUATIONS_PER_FRAME: u32 = 4;
+
+/// Feeds a run's objective groups from the player each frame: the skater facts, the frame's messages (volumes, air
+/// completed, pushes, tricks, markers, banked sequences) and one evaluation per 60 Hz tick; the frame's edges wait for
+/// the next evaluation and are spent once. Shared by the tutorial and the objectives_shared host.
+#[derive(Default)]
+pub(crate) struct ObjectiveFeed {
+    was_off_board: bool,
+    last_state: u32,
+    pending: Pending,
+}
+
+impl ObjectiveFeed {
+    /// Every group's events this frame, tagged with the group's index. Without `evaluating` the facts still update
+    /// and the edges are still spent, but no message reaches the groups.
+    pub(crate) fn step(&mut self, groups: &mut [&mut DataObjectives], input: &FeedInput, evaluating: bool) -> Vec<(usize, Event)> {
+        let off = crate::tutorial_run::off_board(input.state_id);
+        let in_air = |s: u32| (200..=202).contains(&s);
+        let air_completed = in_air(self.last_state) && !in_air(input.state_id) && input.state_id != 300;
+        self.last_state = input.state_id;
+        let facts = SkaterFacts {
+            in_sequence: input.in_sequence,
+            sequence_completed: input.banked.iter().any(|(_, dirty)| !dirty),
+            wiping_out: input.state_id == 300,
+            off_board: off,
+            went_off_board: off && !self.was_off_board,
+            went_on_board: !off && self.was_off_board,
+            grinding: (400..=405).contains(&input.state_id),
+            on_board: !off && input.state_id != 300 && input.state_id < 700,
+            on_ground: (100..=105).contains(&input.state_id),
+            air_completed,
+            in_air: in_air(input.state_id),
+            right_stick_y: input.right_stick_y,
+            triggers: input.triggers,
+            manual: input.manual,
+            pump_acceleration: input.pump_acceleration,
+            last_pump_user: input.pump_user,
+            grind_rail: input.grind_rail,
+            time_to_grind: input.time_to_grind,
+            board_adjust: input.board_adjust,
+            competitor_distances: input.competitor_distances,
+        };
+        for g in groups.iter_mut() {
+            g.skater = facts;
+            g.tricks_this_frame = input.tricks.to_vec();
+            g.tricks_began = input.began.to_vec();
+        }
+        self.was_off_board = off;
+        let mut messages = Vec::new();
+        messages.extend(input.exited.iter().map(|&volume| Message::TriggerExit { volume }));
+        messages.extend(input.entered.iter().map(|&volume| Message::TriggerEnter { volume }));
+        if air_completed {
+            messages.push(Message::AirCompleted);
+        }
+        messages.extend((0..input.pushes).map(|_| Message::SkaterPushed));
+        messages.extend(input.tricks.iter().map(|&key| Message::TrickDone { key }));
+        messages.extend(input.markers.iter().map(|&used| if used { Message::MarkerUsed } else { Message::MarkerSet }));
+        for &(score, dirty) in input.banked {
+            messages.push(Message::SequenceComplete { score, clean: !dirty });
+            messages.push(Message::SequenceBegin);
+        }
+        let mut events = Vec::new();
+        let send = |groups: &mut [&mut DataObjectives], m: Message, events: &mut Vec<(usize, Event)>| {
+            if evaluating {
+                for (i, g) in groups.iter_mut().enumerate() {
+                    events.extend(g.handle(m).into_iter().map(|e| (i, e)));
+                }
+            }
+        };
+        for m in messages {
+            send(groups, m, &mut events);
+        }
+        // The objectives evaluate once per 60 Hz challenge tick, whatever the frame rate (a row's own counters keep
+        // their time); the frame's edges wait for the next evaluation and are spent once. [inferred: retail's
+        // evaluation rate is open, b1006]
+        if !groups.is_empty() {
+            let p = &mut self.pending;
+            p.sequence_completed |= facts.sequence_completed;
+            p.went_off_board |= facts.went_off_board;
+            p.went_on_board |= facts.went_on_board;
+            p.air_completed |= facts.air_completed;
+            p.tricks.extend_from_slice(input.tricks);
+            p.began.extend_from_slice(input.began);
+        }
+        for n in 0..input.ticks.min(MAX_EVALUATIONS_PER_FRAME) {
+            let p = std::mem::take(&mut self.pending);
+            let first = n == 0;
+            for g in groups.iter_mut() {
+                g.skater.sequence_completed = first && p.sequence_completed;
+                g.skater.went_off_board = first && p.went_off_board;
+                g.skater.went_on_board = first && p.went_on_board;
+                g.skater.air_completed = first && p.air_completed;
+                g.tricks_this_frame = if first { p.tricks.clone() } else { Vec::new() };
+                g.tricks_began = if first { p.began.clone() } else { Vec::new() };
+            }
+            send(groups, Message::Tick { gated: false }, &mut events);
+        }
+        events
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,11 +561,11 @@ mod tests {
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.EnteredVolume",
                     "args": [{"lit": "1"}, {"lit": "DIST_DownTown|ots_a_spotvolume_01"}]}}]}),
                 points_valid: Some(serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectivePoints.IsSequenceNewlyCompletePoints", "args": []}}]})),
-                failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new() },
+                failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new(), title_id: None, title_arg: None, display_in_hud: true },
             ObjectiveData { key: "global_points_objective".into(), activation: 0, triggers: points_triggers,
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"cmp": "ge", "args": [
                     {"api": "GetGroupAccumulatedPoints", "args": []}, {"api": "GetGroupPointsRequirement", "args": []}]}}]}),
-                points_valid: None, failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new() },
+                points_valid: None, failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new(), title_id: None, title_arg: None, display_in_hud: true },
         ]
     }
 
@@ -425,7 +596,7 @@ mod tests {
                 "args": [{"lit": "1"}, {"lit": "DIST_DownTown|ftl_end"}]}}]}),
             failures: vec![never], failures_inline: vec![InlineFailure { condition: Some(serde_json::json!({"locals": 0, "body": [{"return":
                 {"cmp": "ge", "args": [{"api": "Leader.GetDistanceToNearestAISkater", "args": []}, {"lit": 40.0}]}}]})), text: None }],
-            failure_first: false, hints: Vec::new() };
+            failure_first: false, hints: Vec::new(), title_id: None, title_arg: None, display_in_hud: true };
         let mut d = DataObjectives::new("ftl", std::slice::from_ref(&row), vec![("ftl_end".into(), 7)], Default::default()).unwrap();
         d.activate_first();
         d.skater.competitor_distances = [Some(25.0), None, None, None];

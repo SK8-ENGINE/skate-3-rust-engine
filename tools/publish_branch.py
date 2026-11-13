@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import zipfile
 
-from updater import REPO, PACKAGE, PREFIX, identity, program_metadata
+from release_meta import REPO, PACKAGE, PREFIX, identity, program_metadata
 
 BRANCH_RE = re.compile(r'[A-Za-z0-9._/-]{1,120}')
 
@@ -47,7 +47,7 @@ def validate(directory):
     return meta, digest
 
 
-def publish(directory, branch):
+def publish(directory, branch, notes_file=None):
     branch = (branch or '').strip()
     if not BRANCH_RE.fullmatch(branch):
         raise ValueError('Invalid branch name')
@@ -78,8 +78,12 @@ def publish(directory, branch):
              f"[Download Windows ZIP](https://github.com/{REPO}/releases/download/{branch}/{PACKAGE})"
              f" · [Linux (x64)](https://github.com/{REPO}/releases/download/{branch}/skate3rust-linux-x64.tar.gz)"
              f" · [macOS (Apple Silicon)](https://github.com/{REPO}/releases/download/{branch}/skate3rust-macos-arm64.tar.gz)\n\n"
-             f"Choose **Branch** in the in-game Updates window and enter `{branch}`.\n\n"
-             "### Recent commits\n\n" + '\n'.join(
+             f"The Skate launcher installs and updates this build (a version with release `{branch}`); "
+             "it downloads only a small patch when your install is a recent build of it.\n\n"
+             # Branch notes kept in the repository (setup, testing, known issues), so every
+             # rolling build keeps them instead of only the commit list.
+             + (Path(notes_file).read_text(encoding='utf-8').strip() + '\n\n' if notes_file else '')
+             + "### Recent commits\n\n" + '\n'.join(
                  f"- {c['sha'][:8]} {c['commit']['message'].splitlines()[0]}" for c in commits))
     api(f"releases/{release['id']}", 'PATCH', dict(
         name=branch,
@@ -97,4 +101,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--branch', required=True)
-    publish(parser.parse_args().directory, parser.parse_args().branch)
+    parser.add_argument('--notes-file', type=Path, help='Markdown placed above the commit list')
+    args = parser.parse_args()
+    publish(args.directory, args.branch, args.notes_file)

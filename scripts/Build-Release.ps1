@@ -80,9 +80,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Setup packaging failed' }
     & $packagePython tools/mixamo_to_skate/check_package.py --setup "$stage/support/skate3setup.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Packaged character importer verification failed' }
-    & $packagePython -m PyInstaller --noconfirm --clean --onefile --windowed --name skate3update `
-        --distpath "$stage/support" --workpath target/updater-build/work --specpath target/updater-build tools/updater.py
-    if ($LASTEXITCODE -ne 0) { throw 'Updater packaging failed' }
+    # The repository that publishes this build (a fork's CI sets SKATE3RUST_REPOSITORY); release.json names it.
+    $repository = if ($env:SKATE3RUST_REPOSITORY) { $env:SKATE3RUST_REPOSITORY } else { 'SK8-ENGINE/skate-3-rust-engine' }
+    if ($repository -notmatch '^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$') { throw "Invalid release repository '$repository'" }
     # GitHub run number is monotonic across releases, including prereleases. Re-runs
     # deliberately retain identity; publish a new run/tag for a new eligible build.
     $build = if ($env:GITHUB_RUN_NUMBER) { [long]$env:GITHUB_RUN_NUMBER } else { 0 }
@@ -102,7 +102,7 @@ try {
     New-Item -ItemType Directory -Path "$stage/docs/images" -Force | Out-Null
     Copy-IfExists @(
         'docs/installation.md', 'docs/retail-renderer.md', 'docs/crash-reports.md',
-        'docs/performance-tracing.md', 'docs/updates.md', 'docs/custom-models.md',
+        'docs/performance-tracing.md', 'docs/custom-models.md',
         'docs/mixamo-to-skate.md', 'docs/character-customisation.md'
     ) "$stage/docs"
     Copy-IfExists @('docs/images/skating-crab.png') "$stage/docs/images"
@@ -125,14 +125,14 @@ try {
         $files[$name] = Get-Sha256Hex $file.FullName
     }
     @{
-        schema = 1; repository = 'SK8-ENGINE/skate-3-rust-engine'; target = 'windows-x64'
+        schema = 1; repository = $repository; target = 'windows-x64'
         build = $build; tag = $tag; revision = (& git rev-parse HEAD).Trim(); files = $files
         asset_pipelines = $assetPipelines; character_customiser = $characterCustomiser
         pipeline_equivalence = $pipelineEquivalence
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath "$stage/release.json" -Encoding utf8
     Copy-Item -LiteralPath "$stage/release.json" -Destination (Join-Path $ProjectRoot 'target/release.json')
     # Seed fresh downloads with Skyline only. Mods stay outside release.json:
-    # the updater deliberately never owns or overwrites a user's mod packages.
+    # launcher updates (full or patch) never own or overwrite a user's mod packages.
     $bundledModFiles = @(& git ls-files -- 'mods/Skyline_Drive_Mod/')
     if ($LASTEXITCODE -ne 0 -or $bundledModFiles.Count -eq 0) { throw 'Tracked Skyline package missing' }
     foreach ($relative in $bundledModFiles) {

@@ -8,7 +8,7 @@ use crate::challenges::Start;
 use crate::presentation_run::Presenter;
 use bevy::prelude::*;
 use serde::Deserialize;
-use skate_core::challenges::objectives::{Event as GroupEvent, Message};
+use skate_core::challenges::objectives::Event as GroupEvent;
 use skate_core::challenges::tutorial::{Command, Event, Params, Presentation, Tutorial};
 use skate_core::challenges::Completion;
 use skate_core::presentation::{Group, Out, Started};
@@ -129,31 +129,15 @@ pub(crate) struct TutorialRun {
     /// dialog and the career's reward chain can be checked without playing.
     force_pass: bool,
     started: bool,
-    was_off_board: bool,
-    last_state: u32,
     trick_groups: crate::challenge_objectives::TrickGroups,
     /// The tutorial's groups on the manager whose finish the state machine waits for.
     waiting: Vec<(String, Presentation)>,
     /// Failure / hint row tips fired this frame, started before the frame's events reach the state machine.
     tips: Vec<(String, Vec<skate_core::presentation::Event>)>,
-    /// One-frame skater facts since the last objective evaluation, spent on the next one (frames without a 60 Hz
-    /// tick keep them; a frame with several ticks spends them once).
-    pending: Pending,
+    /// The skater facts, the frame's messages and the 60 Hz evaluations for the objective group (shared with the
+    /// objectives_shared host).
+    feed: crate::challenge_objectives::ObjectiveFeed,
 }
-
-/// The skater's edge facts and trick lists waiting for the next objective evaluation.
-#[derive(Default)]
-struct Pending {
-    sequence_completed: bool,
-    went_off_board: bool,
-    went_on_board: bool,
-    air_completed: bool,
-    tricks: Vec<u64>,
-    began: Vec<u64>,
-}
-
-/// At most this many objective evaluations catch up in one frame (a long frame does not replay seconds of them).
-const MAX_EVALUATIONS_PER_FRAME: u32 = 4;
 
 impl TutorialRun {
     pub(crate) fn new(data: TutorialData, trick_groups: crate::challenge_objectives::TrickGroups) -> Self {
@@ -162,7 +146,7 @@ impl TutorialRun {
             spawn_offboard: data.spawn_offboard };
         Self { data, machine: Tutorial::new(params), objectives: None, evaluating: false, awaiting_teleport: false, end_open: false,
             force_pass: std::env::var("SKATE_VERIFY_TUTORIAL_PASS").is_ok_and(|v| v == "1"), started: false,
-            was_off_board: false, last_state: 0, trick_groups, waiting: Vec::new(), tips: Vec::new(), pending: Pending::default() }
+            trick_groups, waiting: Vec::new(), tips: Vec::new(), feed: Default::default() }
     }
 
     /// Adds one of this tutorial's groups to the manager (owner = the tutorial id). `None` = nothing to wait for: no
@@ -184,12 +168,9 @@ impl TutorialRun {
         self.tips.push((format!("obj{objective}/{kind}{row}"), events));
     }
 
-    fn feed(&mut self, message: Message, events: &mut Vec<Event>) {
-        if !self.evaluating {
-            return;
-        }
-        let Some(objectives) = self.objectives.as_mut() else { return };
-        for e in objectives.handle(message) {
+    /// The objective group's events, as the tutorial graph's events.
+    fn take_events(&mut self, raw: Vec<GroupEvent>, events: &mut Vec<Event>) {
+        for e in raw {
             match e {
                 GroupEvent::AllComplete => events.push(Event::AllObjectivesComplete),
                 // objectivefailed comes only from a failure row on an active objective (82C6E4B0, research b940);
@@ -218,85 +199,18 @@ impl TutorialRun {
             self.started = true;
             commands.extend(self.machine.start());
         }
-        let off = off_board(input.state_id);
-        let in_air = |s: u32| (200..=202).contains(&s);
-        let air_completed = in_air(self.last_state) && !in_air(input.state_id) && input.state_id != 300;
-        self.last_state = input.state_id;
-        if let Some(o) = self.objectives.as_mut() {
-            o.skater = skate_core::challenges::api::SkaterFacts {
-                in_sequence: input.in_sequence,
-                sequence_completed: input.banked.iter().any(|(_, dirty)| !dirty),
-                wiping_out: input.state_id == 300,
-                off_board: off,
-                went_off_board: off && !self.was_off_board,
-                went_on_board: !off && self.was_off_board,
-                grinding: (400..=405).contains(&input.state_id),
-                on_board: !off && input.state_id != 300 && input.state_id < 700,
-                on_ground: (100..=105).contains(&input.state_id),
-                air_completed,
-                in_air: in_air(input.state_id),
-                right_stick_y: input.right_stick_y,
-                triggers: input.triggers,
-                manual: input.manual,
-                pump_acceleration: input.pump_acceleration,
-                last_pump_user: input.pump_user,
-                grind_rail: input.grind_rail,
-                time_to_grind: input.time_to_grind,
-                board_adjust: input.board_adjust,
-                competitor_distances: [None; 4],
-            };
-            o.tricks_this_frame = input.tricks.to_vec();
-            o.tricks_began = input.began.to_vec();
-        }
-        self.was_off_board = off;
+        let feed_input = crate::challenge_objectives::FeedInput {
+            entered: input.entered, exited: input.exited, banked: input.banked, ticks: input.ticks,
+            state_id: input.state_id, in_sequence: input.in_sequence, markers: input.markers, tricks: input.tricks,
+            began: input.began, right_stick_y: input.right_stick_y, triggers: input.triggers, manual: input.manual,
+            pushes: input.pushes, pump_acceleration: input.pump_acceleration, pump_user: input.pump_user,
+            grind_rail: input.grind_rail, time_to_grind: input.time_to_grind, board_adjust: input.board_adjust,
+            competitor_distances: [None; 4],
+        };
+        let mut groups: Vec<&mut DataObjectives> = self.objectives.as_mut().into_iter().collect();
+        let raw: Vec<GroupEvent> = self.feed.step(&mut groups, &feed_input, self.evaluating).into_iter().map(|(_, e)| e).collect();
         let mut events = Vec::new();
-        for &v in input.exited {
-            self.feed(Message::TriggerExit { volume: v }, &mut events);
-        }
-        for &v in input.entered {
-            self.feed(Message::TriggerEnter { volume: v }, &mut events);
-        }
-        if air_completed {
-            self.feed(Message::AirCompleted, &mut events);
-        }
-        for _ in 0..input.pushes {
-            self.feed(Message::SkaterPushed, &mut events);
-        }
-        for &key in input.tricks {
-            self.feed(Message::TrickDone { key }, &mut events);
-        }
-        for &used in input.markers {
-            self.feed(if used { Message::MarkerUsed } else { Message::MarkerSet }, &mut events);
-        }
-        for &(score, dirty) in input.banked {
-            self.feed(Message::SequenceComplete { score, clean: !dirty }, &mut events);
-            self.feed(Message::SequenceBegin, &mut events);
-        }
-        // The objectives evaluate once per 60 Hz challenge tick, whatever the frame rate (a row's own counters keep
-        // their time); the frame's edges wait for the next evaluation and are spent once. [inferred: retail's
-        // evaluation rate is open, b1006]
-        if let Some(o) = self.objectives.as_ref() {
-            let p = &mut self.pending;
-            p.sequence_completed |= o.skater.sequence_completed;
-            p.went_off_board |= o.skater.went_off_board;
-            p.went_on_board |= o.skater.went_on_board;
-            p.air_completed |= o.skater.air_completed;
-            p.tricks.extend_from_slice(input.tricks);
-            p.began.extend_from_slice(input.began);
-        }
-        for n in 0..input.ticks.min(MAX_EVALUATIONS_PER_FRAME) {
-            if let Some(o) = self.objectives.as_mut() {
-                let p = std::mem::take(&mut self.pending);
-                let first = n == 0;
-                o.skater.sequence_completed = first && p.sequence_completed;
-                o.skater.went_off_board = first && p.went_off_board;
-                o.skater.went_on_board = first && p.went_on_board;
-                o.skater.air_completed = first && p.air_completed;
-                o.tricks_this_frame = if first { p.tricks } else { Vec::new() };
-                o.tricks_began = if first { p.began } else { Vec::new() };
-            }
-            self.feed(Message::Tick { gated: false }, &mut events);
-        }
+        self.take_events(raw, &mut events);
         if self.awaiting_teleport && !input.teleport_pending {
             self.awaiting_teleport = false;
             events.push(Event::TeleportFinished);
@@ -451,7 +365,7 @@ mod tests {
             objectives: vec![ObjectiveData { key: "tut_test_0".into(), activation: 0, triggers: gate, points_valid: None,
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.IsInVolume",
                     "args": [{"lit": "1"}, {"lit": "DIST_SkateSchool|tut_test_gate_01"}]}}]}),
-                failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new() }],
+                failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new(), title_id: None, title_arg: None, display_in_hud: true }],
         }
     }
 

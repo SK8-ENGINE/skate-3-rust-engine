@@ -1,6 +1,7 @@
 //! Races in play, player first: a race from `private/challenges.json` `races` runs through
 //! `skate_core::challenges::race_run` with the race tracker and its AI racers (`race_ai_host`). Start:
-//! `SKATE_RACE=<id>` on that race's map. No race HUD movies or sign-up yet. Details: docs/hails-additions/42-challenges.md#change-races-in-play-race_hostrs
+//! the sign-up prompt at the race's sign-up sphere (challenges.rs), or `SKATE_RACE=<id>` on that race's map. No race HUD
+//! movies yet. Details: docs/hails-additions/42-challenges.md#change-races-in-play-race_hostrs
 use crate::challenges::{Start, Volume};
 use crate::hud_challenge::{ChallengeHudState, Component, DpoSlot, DpoValue, LeaderboardHud, LeaderboardRow, LEADERBOARD_NO_VARIANT, LEADERBOARD_RANK_NAME_TIME};
 use skate_core::challenges::dpo::{self, DpoFormat};
@@ -70,6 +71,10 @@ pub(crate) struct Race {
     /// The race's title text id (the end dialog's Mission.GetTitle).
     #[serde(default)]
     pub title_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(flatten)]
+    pub sign_up: crate::challenges::SignUpFields,
     pub map: String,
     pub heats: Vec<Heat>,
     /// The single player competitors (b987): ai_characters rows; kind 1 (a random pick from a pool) is not used by
@@ -165,6 +170,13 @@ pub(crate) struct Races {
     gate_icons: skate_core::challenges::race::GateIcons,
 }
 
+impl Races {
+    /// The races on `map` with a sign-up sphere, for the sign-up prompt (challenges.rs).
+    pub(crate) fn offers<'a>(&'a self, map: Option<&'a std::path::Path>) -> impl Iterator<Item = crate::challenges::Offer> + 'a {
+        self.races.iter().filter_map(move |r| r.sign_up.offer(&r.id, "races", Some(&r.map), r.title_id.as_ref(), r.title.as_ref(), map))
+    }
+}
+
 const PLAYER: u32 = 0;
 const RACE_FINISHED: &str = "ID_RACE_FINISHED";
 const CHALLENGE_FAILED: &str = "ID_MISSION_CHALLENGE_FAILED";
@@ -206,7 +218,9 @@ fn start(races: &mut Races, volumes: &mut crate::trigger_volumes::TriggerVolumes
     commands
 }
 
-/// A new map: read the races once, drop a run from the old map, start `SKATE_RACE` if it is on this one.
+/// A new map: read the races once, drop a run from the old map, start `SKATE_RACE` if it is on this one; a sign-up
+/// (the prompt at the race's sign-up sphere) starts its race when nothing else runs.
+#[allow(clippy::too_many_arguments)]
 fn arm(
     mut races: ResMut<Races>,
     mut challenges: ResMut<crate::challenges::Challenges>,
@@ -216,26 +230,38 @@ fn arm(
     mut hud: ResMut<ChallengeHudState>,
     mut skater: ResMut<crate::physics::SkaterRuntime>,
     mut population: Option<ResMut<crate::living_world::PopulationState>>,
+    mut signed: MessageReader<crate::challenges::ChallengeSignUp>,
 ) {
-    if races.generation == Some(map.generation) {
-        return;
+    let mut wanted = None;
+    if races.generation != Some(map.generation) {
+        races.generation = Some(map.generation);
+        if !races.loaded {
+            races.loaded = true;
+            races.races = load(&config.asset_root).unwrap_or_else(|e| {
+                info!("SKATE_RACES none ({e})");
+                Vec::new()
+            });
+        }
+        if let Some(run) = races.run.take() {
+            info!("SKATE_RACE {} dropped by the map change", run.race.id);
+            *hud = ChallengeHudState::default();
+        }
+        let count = races.races.iter().filter(|r| map.path.as_deref().is_some_and(|p| crate::teleport_menu::same_map(p, &r.map))).count();
+        info!("SKATE_RACES map={} races={count}", map.name);
+        wanted = std::env::var("SKATE_RACE").ok();
     }
-    races.generation = Some(map.generation);
-    if !races.loaded {
-        races.loaded = true;
-        races.races = load(&config.asset_root).unwrap_or_else(|e| {
-            info!("SKATE_RACES none ({e})");
-            Vec::new()
-        });
+    let busy = races.run.is_some() || challenges.run.is_some() || challenges.tutorial.is_some();
+    for s in signed.read().filter(|s| s.body == crate::trigger_volumes::PLAYER && races.races.iter().any(|r| r.id == s.challenge)) {
+        if busy {
+            info!("SKATE_RACE sign-up {} ignored: a challenge is running", s.challenge);
+        } else {
+            info!("SKATE_RACE sign-up {}", s.challenge);
+            wanted.get_or_insert_with(|| s.challenge.clone());
+        }
     }
-    if let Some(run) = races.run.take() {
-        info!("SKATE_RACE {} dropped by the map change", run.race.id);
-        *hud = ChallengeHudState::default();
-    }
+    let Some(wanted) = wanted else { return };
     let on_map: Vec<Race> = races.races.iter()
         .filter(|r| map.path.as_deref().is_some_and(|p| crate::teleport_menu::same_map(p, &r.map))).cloned().collect();
-    info!("SKATE_RACES map={} races={}", map.name, on_map.len());
-    let Ok(wanted) = std::env::var("SKATE_RACE") else { return };
     let Some(race) = on_map.into_iter().find(|r| r.id == wanted) else {
         info!("SKATE_RACE {wanted} is not on {}", map.name);
         return;

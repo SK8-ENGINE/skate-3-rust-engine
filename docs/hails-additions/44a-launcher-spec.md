@@ -332,6 +332,76 @@ Parity checklist (one line per behavior):
 - [ ] `--snapshot` all screens, `@` and `#` suffixes, `--bench` output.
 - [ ] Linux / macOS: recomp grayed with reason; installs via the OS package manager; symlinks instead of junctions.
 
+## 8. Patch updates (2026-11-13)
+
+**Problem.** A release version (prebuilt download) re-downloaded the whole game package on every new build
+(Windows 95.9 MB) although most of it does not change between builds.
+
+**Change.** `tools/skate-launcher/src/patch.rs`. A patch (`skate-patch/1`) is a stored zip with `manifest.json`, the
+new `release.json` and one zstd frame per changed file: made against the old file as its reference (zstd "patch
+from", long matching, level 19), or of the new file alone when that is smaller or the file is new; unchanged files are
+listed as `same`, removed release files as `delete`. The release carries `skate3rust-<target>.patches.json`: the
+links (from / to revision and build, file, sha256, size), newest first, the newest 5 kept, and the full package's size.
+- `ensure_release`: when the installed `release.json` revision differs from the release's, it looks for a chain of
+  links from the installed revision to the new one (each link's `from` = the previous link's `to`); a chain under 80 %
+  of the package's size is downloaded link by link, each checked by its sha256, then applied. Anything else (no index,
+  no chain, an install that is not a direct ancestor, a checksum or apply failure) takes the full download as before.
+- Applying (`stage` + `commit`) checks every installed file the patch relies on against its old sha256 (a changed or
+  missing file refuses the patch), builds the new files in a staging folder and checks each against the new
+  `release.json`, then moves the old files aside, puts the new ones in place and writes `release.json` last; any error
+  puts the old files back. Only files the release owns are touched (saves, settings, mods, logs never are).
+- CLI: `skate-launcher make-patch --old <pkg> --new <pkg> --out <dir> [--index <previous patches.json>] [--keep N]
+  [--package-size N]` (CI; packages as zips or folders; the made link is staged against the old package before it is
+  written as good) and `skate-launcher apply-patch <install folder> <patch>` (tests, support).
+- Fork CI (`rusty-trucks-win.yml` on hails-additions): the Windows job downloads the rolling package and index on the
+  release now, makes the link to the new build, and the publish job uploads the link and index before the package and
+  removes links that fell out of the index. A failure leaves no patch (a warning), never a broken release.
+
+**Verification.** Tests `a_patch_turns_the_old_install_into_the_new_release_and_is_small`,
+`a_changed_install_or_another_revision_is_refused_and_nothing_changes`,
+`the_chain_follows_links_from_the_installed_revision_and_gives_up_when_not_worth_it`. Real packages, fork runs 135 ->
+136 (2e847ce0 -> e8dc9c17, Windows): patch 11.6 MB for the 95.9 MB package (skate3rust.exe 127.3 MB -> 10.75 MB
+payload, skate3setup.exe 35.7 MB -> 0.48 MB, 12 files unchanged), made in 123 s, applied in 0.4 s; the patched
+install was byte-identical to run 136's package and a file in `saves\` was untouched.
+
+**One updater: the launcher (in-game updater removed).** The game had its own updater (Extras > Mods & Updates >
+Updates: `crates/skate-game/src/updater.rs` started `support/skate3update.exe`, built from `tools/updater.py` with
+`update_install.py` / `update_processes.py`, which downloaded the whole package into an `.update-transaction` and
+swapped it in). Two updaters for one install meant two ways a package changed under the player; the launcher's
+patch updates only help when the launcher does the updating. Removed: the game module, its startup recovery, the
+Extras row (the header is now "Mods"; the Extras text says updates come through the Skate launcher), the build's
+`SKATE_RELEASE_REVISION` / `SKATE_RELEASE_BUILD`, the helper and its tests, `skate3update.exe` in `Build-Release.ps1`,
+and the CI steps "Check updater protocol" / "Check character package update transaction". Kept and moved: the
+publish scripts' release checks (`identity`, `program_metadata`, `package_name`, the user-data and Windows device name
+rules) now live in `tools/release_meta.py`; `check_package.py` copies the packaged setup into its modelled install.
+`release.json` stays: it is what the launcher compares, verifies and patches against. `patch.rs` refuses the same
+names the old installer refused (player data folders, dot folders, device names), test
+`patches_never_name_player_data_or_paths_outside_the_install`.
+
+**Linux and macOS releases.** Release mode did not work there: `ensure_release` asked for `<pkg>.zip` (their
+packages are `.tar.gz`), looked for the game at the folder root (their packages are laid out like a checkout, the game
+in `bin/`), wrote a PLAY.sh that started `./skate3rust`, and compared against the Windows `release.json` (theirs had
+none). Now: `package_ext` (zip / tar.gz, unpacked with the system tar), `release_exe` (root or `bin/`, also for
+Version-Status and Refresh game files), PLAY.sh starts the game where it is, and the metadata is
+`skate3rust-<target>.release.json` (every OS; the Windows-era `release.json` is the fallback). The Linux / macOS
+packages get their own release.json from `skate-launcher write-manifest` (every file but the launcher's PLAY.sh /
+PLAY.bat and the player's data folders; test `the_unix_manifest_owns_the_program_files_only`), and patches keep the
+executable bit (`exec` per payload). `rusty-trucks-unix-build.yml` writes the manifest, makes the patch from the
+rolling package with the launcher it just built, and publishes patches, package, launcher and release.json in that
+order, then prunes old links.
+
+**Classic launcher.** `launcher.ps1` Try-ReleasePatch: before the full download it reads the release's
+`patches.json`, follows the chain from the installed revision, and when the chain plus the helper (the release's
+`skate-launcher-windows-x64.exe`, 14 MB, kept in `patch-helper\` under its sha256 so it downloads once per launcher
+build) is under 80 % of the package, runs `skate-launcher release-patch <folder> <release url> <package> <revision>`
+(exit 0 = updated, 3 = take the full download). The Rust launcher is a windowed program: PowerShell waits for it and
+gets its exit code only when its output is piped, so every call pipes it.
+
+**Verification (both launchers).** `.local/tools/release-patch-check.ps1`: two stand-in Windows packages and a
+`file://` release; `release-patch` PASS, the classic Try-ReleasePatch (helper download, chain, apply) PASS, an
+install that is already current takes no patch PASS. Not run here: Linux / macOS (no Linux target or WSL on the
+desktop; their code is compiled by the fork's Linux and macOS CI on the next push).
+
 ## Open items
 
 - Not read: Write-ReleasePlay contents (L:234-240), Self-Update file list and `$SelfCommit` name (L:470-524),

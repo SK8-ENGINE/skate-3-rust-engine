@@ -11,6 +11,7 @@ mod dlc;
 mod ensure;
 mod entries;
 mod ojson;
+mod patch;
 mod pick;
 mod play;
 mod proc;
@@ -103,6 +104,24 @@ fn main() -> ExitCode {
             }
             _ => args.push(a),
         }
+    }
+    // CI: the patch from the previous release package to this one (needs no launcher folder)
+    if args.first().is_some_and(|a| a == "release-patch") {
+        return ensure::cli_release_patch(&args[1..]);
+    }
+    if let Some(cmd @ ("make-patch" | "apply-patch" | "write-manifest")) = args.first().map(String::as_str) {
+        let r = match cmd {
+            "make-patch" => patch::cli_make(&args[1..]),
+            "apply-patch" => patch::cli_apply(&args[1..]),
+            _ => patch::cli_manifest(&args[1..]),
+        };
+        return match r {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("{cmd}: {e}");
+                ExitCode::FAILURE
+            }
+        };
     }
     let Some(here) = state::find_here() else {
         eprintln!("Could not find the launcher folder (tools/steam-launcher). Run this from the game's checkout, or set SKATE_LAUNCHER_DIR.");

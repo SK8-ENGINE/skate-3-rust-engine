@@ -235,7 +235,6 @@ pub(crate) fn build(
     crate::ftl_host::register(&mut app);
     crate::career::install(&mut app);
     crate::visual_indicators::install(&mut app);
-    app.add_plugins(crate::updater::UpdaterPlugin);
     app.add_plugins(crate::multiplayer::MultiplayerPlugin);
     app.add_plugins(crate::scoring_hud::ScoringHudPlugin);
     app.add_plugins(crate::retail_menu_stage::RetailMenuStagePlugin);

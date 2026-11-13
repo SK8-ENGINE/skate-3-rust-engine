@@ -1870,10 +1870,10 @@ pub(crate) fn present_fade<M: FadeMaterial>(
                         m.0 = original.clone();
                     }
                     if tags.contains(*mesh) {
-                        commands.entity(*mesh).remove::<bevy::mesh::MeshTag>();
+                        commands.entity(*mesh).try_remove::<bevy::mesh::MeshTag>();
                     }
                 }
-                commands.entity(e).remove::<NpcFadeMaterials<M>>();
+                commands.entity(e).try_remove::<NpcFadeMaterials<M>>();
             }
             continue;
         }
@@ -1917,15 +1917,17 @@ pub(crate) fn present_fade<M: FadeMaterial>(
                 let tag = bevy::mesh::MeshTag(fade_tag(*base * alpha));
                 match tags.get_mut(*mesh) {
                     Ok(mut t) => *t = tag,
+                    // a mesh despawned since it was listed (the model rebuilt) is skipped: insert would panic on it
+                    // (desktop film run 2026-11-13, EntityMutableFetchError in present_fade)
                     Err(_) => {
-                        commands.entity(*mesh).insert(tag);
+                        commands.entity(*mesh).try_insert(tag);
                     }
                 }
             }
             state.alpha = alpha;
         }
         if let Some(s) = fresh {
-            commands.entity(e).insert(s);
+            commands.entity(e).try_insert(s);
         }
     }
 }

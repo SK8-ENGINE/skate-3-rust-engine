@@ -1,6 +1,6 @@
 //! Contests in play (street / vert contests, demos), player first: a contest from `private/challenges.json` `contests`
-//! runs through `skate_core::challenges::contest_run`. Start: `SKATE_CONTEST=<id>` on that contest's map. No contest
-//! HUD, sign-up or AI riders yet. Details: docs/hails-additions/42-challenges.md#contests
+//! runs through `skate_core::challenges::contest_run`. Start: the sign-up prompt at the contest's sign-up sphere
+//! (challenges.rs), or `SKATE_CONTEST=<id>` on that contest's map. Details: docs/hails-additions/42-challenges.md#contests
 use bevy::prelude::*;
 use serde::Deserialize;
 use crate::hud_challenge::{ChallengeHudState, Component, LeaderboardHud, LeaderboardRow, LEADERBOARD_NO_VARIANT,
@@ -111,6 +111,8 @@ pub(crate) struct Contest {
     pub competitors: Vec<crate::race_host::CompetitorRow>,
     #[serde(default)]
     pub music_playlist: Option<String>,
+    #[serde(flatten)]
+    pub sign_up: crate::challenges::SignUpFields,
     pub rounds: Vec<ContestRound>,
 }
 
@@ -211,27 +213,47 @@ pub(crate) struct Contests {
     pending: Vec<Command>,
 }
 
-/// A new map: read the contests once, drop a run from the old map, start `SKATE_CONTEST` if it is on this one.
+impl Contests {
+    /// The contests and demos on `map` with a sign-up sphere, for the sign-up prompt (challenges.rs).
+    pub(crate) fn offers<'a>(&'a self, map: Option<&'a std::path::Path>) -> impl Iterator<Item = crate::challenges::Offer> + 'a {
+        self.contests.iter().filter_map(move |c| c.sign_up.offer(&c.id, if c.demo { "demos" } else { "contests" }, c.map.as_deref(),
+            c.title_id.as_ref(), c.title.as_ref(), map))
+    }
+}
+
+/// A new map: read the contests once, drop a run from the old map, start `SKATE_CONTEST` if it is on this one; a
+/// sign-up (the prompt at the contest's sign-up sphere) starts its contest when nothing else runs.
 fn arm(mut contests: ResMut<Contests>, config: Res<crate::config::Config>, map: Res<crate::map_transition::CurrentMap>,
-    mut population: Option<ResMut<crate::living_world::PopulationState>>) {
-    if contests.generation == Some(map.generation) {
-        return;
+    mut population: Option<ResMut<crate::living_world::PopulationState>>,
+    mut signed: MessageReader<crate::challenges::ChallengeSignUp>, challenges: Option<Res<crate::challenges::Challenges>>) {
+    let mut wanted = None;
+    if contests.generation != Some(map.generation) {
+        contests.generation = Some(map.generation);
+        if !contests.loaded {
+            contests.loaded = true;
+            contests.contests = load(&config.asset_root).unwrap_or_else(|e| {
+                info!("SKATE_CONTESTS none ({e})");
+                Vec::new()
+            });
+        }
+        if let Some(mut run) = contests.run.take() {
+            info!("SKATE_CONTEST {} dropped by the map change", run.contest.id);
+            if let (Some(ai), Some(pop)) = (run.ai.as_mut(), population.as_deref_mut()) {
+                ai.remove(pop);
+            }
+        }
+        wanted = std::env::var("SKATE_CONTEST").ok();
     }
-    contests.generation = Some(map.generation);
-    if !contests.loaded {
-        contests.loaded = true;
-        contests.contests = load(&config.asset_root).unwrap_or_else(|e| {
-            info!("SKATE_CONTESTS none ({e})");
-            Vec::new()
-        });
-    }
-    if let Some(mut run) = contests.run.take() {
-        info!("SKATE_CONTEST {} dropped by the map change", run.contest.id);
-        if let (Some(ai), Some(pop)) = (run.ai.as_mut(), population.as_deref_mut()) {
-            ai.remove(pop);
+    let busy = contests.run.is_some() || challenges.as_deref().is_some_and(|c| c.run.is_some() || c.tutorial.is_some());
+    for s in signed.read().filter(|s| s.body == crate::trigger_volumes::PLAYER && contests.contests.iter().any(|c| c.id == s.challenge)) {
+        if busy {
+            info!("SKATE_CONTEST sign-up {} ignored: a challenge is running", s.challenge);
+        } else {
+            info!("SKATE_CONTEST sign-up {}", s.challenge);
+            wanted.get_or_insert_with(|| s.challenge.clone());
         }
     }
-    let Ok(wanted) = std::env::var("SKATE_CONTEST") else { return };
+    let Some(wanted) = wanted else { return };
     let Some(contest) = contests.contests.iter().find(|c| c.id == wanted).cloned() else {
         info!("SKATE_CONTEST {wanted} not found");
         return;
@@ -677,7 +699,7 @@ mod tests {
         let row = |run_type, solo_runs| ContestRound { run_type, variant: 0, round_time: 90, ai_adjustment: 0.75, cumulative: true, cumulative_min: 0,
             solo_runs, solo_ai_min: 3500, solo_ai_max: 2000, demo_target: None, start: None, start_matrix: None, start_slots: Vec::new(), result_columns: Vec::new(), ai_paths: Default::default(), boundary_volume: None, spot_volume_shapes: Vec::new() };
         let c = Contest { id: "street_univ_01".into(), map: None, demo: false, competitors: vec![crate::race_host::CompetitorRow { character: "a".into(), kind: 0 }; 3],
-            music_playlist: None, title: None, title_id: None, rounds: vec![row(1, 1), row(3, 1), row(4, 1)] };
+            music_playlist: None, title: None, title_id: None, sign_up: Default::default(), rounds: vec![row(1, 1), row(3, 1), row(4, 1)] };
         let p = params(&c, 7);
         assert_eq!(p.ai, 3);
         assert_eq!(p.rounds[0].run_type, RunType::SoloRun { runs: 1, ai_min: 3500.0, ai_max: 2000.0 });
