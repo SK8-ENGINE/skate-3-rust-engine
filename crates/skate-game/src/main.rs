@@ -103,6 +103,11 @@ mod splash {
     pub(crate) fn detail(_text: String) {}
     pub(crate) fn warning(_text: String) {}
     pub(crate) fn active() -> bool { false }
+    pub(crate) fn refresh_mode(_groups: &[String]) {}
+    pub(crate) fn progress(_fraction: Option<f32>) {}
+    pub(crate) fn fail(_text: &str) {}
+    pub(crate) fn end_refresh() {}
+    pub(crate) fn cancel_requested() -> bool { false }
 }
 mod modding;
 mod customiser;
