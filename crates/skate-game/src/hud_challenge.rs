@@ -25,11 +25,13 @@ pub(crate) enum Component {
     Leaderboard,
     /// The tutorial callout, "Coach Frank Says" (`hud2/hudtutorial`, b866 Â§1, b945 Â§2).
     Tutorial,
+    /// Follow the leader's distance to the leader (`hud2/huddistance`, template 45, research b1006 item 8).
+    DistanceMeter,
 }
 
 impl Component {
-    pub const ALL: [Component; 8] = [Component::Timer, Component::Objective, Component::Dpo, Component::OwnedIt, Component::KilledIt,
-        Component::Countdown, Component::Leaderboard, Component::Tutorial];
+    pub const ALL: [Component; 9] = [Component::Timer, Component::Objective, Component::Dpo, Component::OwnedIt, Component::KilledIt,
+        Component::Countdown, Component::Leaderboard, Component::Tutorial, Component::DistanceMeter];
 
     /// The converted movie (`private/hud/runtime/<file>`, tools/prepare_hud.py).
     pub fn file(self) -> &'static str {
@@ -42,14 +44,15 @@ impl Component {
             Component::Countdown => "hudcountdown.json",
             Component::Leaderboard => "leaderboardhud.json",
             Component::Tutorial => "hudtutorial.json",
+            Component::DistanceMeter => "huddistance.json",
         }
     }
 
     /// The movie's refresh state while shown (b844: timer 3 `UpdateTimerHUD`, dpo 3 `Update`, objective 3
-    /// `SetupObjectives`); the banners have none.
+    /// `SetupObjectives`, distance 3 from its refresh 826647E8); the banners have none.
     fn refresh_state(self) -> Option<f64> {
         match self {
-            Component::Timer | Component::Dpo | Component::Objective => Some(3.0),
+            Component::Timer | Component::Dpo | Component::Objective | Component::DistanceMeter => Some(3.0),
             Component::OwnedIt | Component::KilledIt | Component::Countdown | Component::Leaderboard | Component::Tutorial => None,
         }
     }
@@ -111,6 +114,17 @@ pub(crate) struct ChallengeHudState {
     pub leaderboard: LeaderboardHud,
     #[serde(default)]
     pub callout: CalloutHud,
+    #[serde(default)]
+    pub distance: DistanceHud,
+}
+
+/// What `DistanceMeter_GetData` (8265C978) returns: the shown distance as text (meters, or feet under imperial units)
+/// and the color flag (0 red, 1 white).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DistanceHud {
+    pub metres: f32,
+    pub imperial: bool,
+    pub flag: i32,
 }
 
 /// The tutorial callout as the movie reads it, and the SetState values the callout component sent (doc 42,
@@ -211,6 +225,7 @@ impl ChallengeHudState {
             Component::OwnedIt | Component::KilledIt | Component::Tutorial => String::new(),
             Component::Countdown => self.countdown.to_string(),
             Component::Leaderboard => format!("{:?}", self.leaderboard),
+            Component::DistanceMeter => format!("{:?}", self.distance),
         }
     }
 }
@@ -329,6 +344,13 @@ impl Host for Bindings {
                 Ok(Value::Bool(false))
             }
             ("HUDComponents", "Timer_GetData") => array(vm, [Value::Text(s.timer_text.clone()), Value::Number(s.timer_flag as f64)]),
+            ("HUDComponents", "DistanceMeter_GetData") => {
+                let text = &self.movie.text_assets;
+                let float = |x: f64, d: usize| crate::fe_language::NumberFormat::default().float(x, d);
+                let shown = skate_core::career_stats::distance_text(s.distance.metres as f64, s.distance.imperial, &float,
+                    &text.localize("ID_COMMON_METRIC_DISTANCE"), &text.localize("ID_COMMON_METRIC_NEW_FEET"));
+                array(vm, [Value::Text(shown), Value::Number(s.distance.flag as f64)])
+            }
             ("HUDComponents", "DPO_IsUsingTwoDPOs") => Ok(Value::Bool(s.two_dpos)),
             // hudcountdown's ShowCountdown: "#3" / "#2" / "#1" pick the number frame, anything else GO (8265D910 "#%d").
             ("HUDComponents", "Countdown_GetCountdownTime") => Ok(Value::Text(format!("#{}", s.countdown))),
@@ -915,6 +937,50 @@ mod tests {
             assert!(!a.is_empty(), "value {i} draws nothing");
             assert!(textures[i + 1..].iter().all(|b| b != a), "3, 2, 1 and GO draw different pictures: {textures:?}");
         }
+    }
+
+    /// Follow the leader's meter: the retail movie shows `DistanceMeter_GetData`'s text, white until flag 0.
+    #[test]
+    #[ignore = "requires the converted challenge HUD movies (SKATE_SCORING_HUD_ROOT=<private/hud>)"]
+    fn the_distance_meter_shows_the_distance_and_turns_red() {
+        let root = std::path::PathBuf::from(std::env::var_os("SKATE_SCORING_HUD_ROOT").unwrap());
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("runtime").join(Component::DistanceMeter.file())).unwrap()).unwrap();
+        let libraries = crate::hud_imports::HudLibraries::load(&root.join("../menu-movies"), &[&json]);
+        let mut hud = Runtime::load_linked(Component::DistanceMeter, &json, &[], &libraries).unwrap();
+        let get = |hud: &Runtime, path: &[&str]| {
+            let mut at = Value::Object(hud.vm.global);
+            for key in path {
+                at = match at {
+                    Value::Object(o) => hud.vm.get(o, key),
+                    _ => Value::Undefined,
+                };
+            }
+            at
+        };
+        let label = ["huddistance", "mScreen", "mcTextTimer", "mcTimer", "labelText"];
+        let mut state = ChallengeHudState::default();
+        state.show(Component::DistanceMeter, true);
+        state.distance = DistanceHud { metres: 12.34, imperial: false, flag: 1 };
+        hud.sync(&state).unwrap();
+        for _ in 0..60 {
+            hud.update().unwrap();
+        }
+        let text = |hud: &Runtime| match get(hud, &label) {
+            Value::Object(o) => (hud.vm.get(o, "text").text(), hud.vm.get(o, "textColor")),
+            other => (format!("{other:?}"), Value::Undefined),
+        };
+        let (white_text, white) = text(&hud);
+        assert_eq!(white_text, "12.3 m");
+        state.distance = DistanceHud { metres: 70.0, imperial: true, flag: 0 };
+        hud.sync(&state).unwrap();
+        hud.update().unwrap();
+        let (red_text, red) = text(&hud);
+        assert_eq!(red_text, "210.0 ft");
+        assert_ne!(format!("{white:?}"), format!("{red:?}"), "the color changes with the flag");
+        state.show(Component::DistanceMeter, false);
+        hud.sync(&state).unwrap();
+        assert!(!hud.shown());
     }
 
     /// Ask 600: the round timer after its show intro, at 33 s left (not low time): composed alpha of what draws.

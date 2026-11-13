@@ -239,16 +239,17 @@ fn drain_log_queue(limit: std::time::Duration) {
 mod stderr_pump {
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
     use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
     use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, SetStdHandle};
-    use windows::Win32::System::Pipes::{CreatePipe, PeekNamedPipe};
+    use windows::Win32::System::Pipes::CreatePipe;
 
     const PIPE_BYTES: u32 = 8 << 20;
-    /// The pipe's read end (as an address: `HANDLE` is not `Send`).
-    static READ: OnceLock<usize> = OnceLock::new();
-    /// The pump holds a chunk it has read but not yet written.
-    static FORWARDING: AtomicBool = AtomicBool::new(false);
+    /// The original stderr and the pipe's write end (as addresses: HANDLE is not Send).
+    static ENDS: OnceLock<(usize, usize)> = OnceLock::new();
+    static CLOSED: AtomicBool = AtomicBool::new(false);
+    /// The pump read end of file: everything written before the close is forwarded.
+    static STOPPED: AtomicBool = AtomicBool::new(false);
 
     pub(super) fn install() -> bool {
         // SAFETY: plain Win32 handle calls; every handle passed is one these calls returned.
@@ -268,9 +269,9 @@ mod stderr_pump {
                 loop {
                     let mut n = 0u32;
                     if ReadFile(read, Some(&mut buf), Some(&mut n), None).is_err() || n == 0 {
+                        STOPPED.store(true, Ordering::Release);
                         return;
                     }
-                    FORWARDING.store(true, Ordering::Release);
                     let mut at = 0usize;
                     while at < n as usize {
                         let mut wrote = 0u32;
@@ -279,27 +280,30 @@ mod stderr_pump {
                         }
                         at += wrote as usize;
                     }
-                    FORWARDING.store(false, Ordering::Release);
                 }
             });
             if pump.is_err() || SetStdHandle(STD_ERROR_HANDLE, write).is_err() {
                 return false;
             }
-            let _ = READ.set(read_at);
+            let _ = ENDS.set((out_at, write.0 as usize));
             true
         }
     }
 
-    /// Wait (until `until`) for the pump to forward everything written so far.
+    /// At exit or panic: stderr goes back to the original, the write end closes, and the pump forwards what is left
+    /// and stops (waited for until until). Nothing may query the read end meanwhile: a synchronous pipe handle runs
+    /// one call at a time, so a PeekNamedPipe waited behind the pump's idle ReadFile forever and the process never
+    /// exited (--check-assets hung, laptop 2026-11-12).
     pub(super) fn drain(until: std::time::Instant) {
-        let Some(&read_at) = READ.get() else { return };
-        loop {
-            let mut waiting = 0u32;
-            // SAFETY: the read end stays open for the process lifetime.
-            let ok = unsafe { PeekNamedPipe(HANDLE(read_at as _), None, 0, None, Some(&mut waiting), None) }.is_ok();
-            if !ok || (waiting == 0 && !FORWARDING.load(Ordering::Acquire)) || std::time::Instant::now() >= until {
-                return;
+        let Some(&(original, write)) = ENDS.get() else { return };
+        if !CLOSED.swap(true, Ordering::AcqRel) {
+            // SAFETY: both handles came from install; CLOSED makes the close happen once.
+            unsafe {
+                let _ = SetStdHandle(STD_ERROR_HANDLE, HANDLE(original as _));
+                let _ = CloseHandle(HANDLE(write as _));
             }
+        }
+        while !STOPPED.load(Ordering::Acquire) && std::time::Instant::now() < until {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
     }

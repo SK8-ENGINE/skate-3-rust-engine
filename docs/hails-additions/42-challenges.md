@@ -1348,6 +1348,27 @@ Challenge ids are the retail key strings. Mods read, start, abort, hide and re-t
 - `crates/skate-game/src/challenge_objectives.rs`: inline failures load after the with-events rows of their objective (row index past them, `ObjectiveData::inline_failure`).
 - `crates/skate-game/src/ftl_host.rs`: the host. It handles start via `SKATE_FTL=<id>`, the leader on the contest rider code (`contest_ai_host.rs`, now with a per-rider speed scale), distances, the leader's end-volume entry by its body, the player pin, the 10 s window on the timer HUD, the failure central message, the end dialog and the career result.
 
-**Not yet (NOT RETAIL YET, logged).** The DistanceMeter HUD (no meter movie exported yet), the follow indicator trail, speech rows, the killed objectives, sign-up from the challenge map (start is `SKATE_FTL` only), the band's sign (b969 open, ours: the player behind the leader slows it).
+**Not yet (NOT RETAIL YET, logged).** The follow indicator trail, speech rows, the killed objectives, sign-up from the challenge map (start is `SKATE_FTL` only), the band's sign (b969 open, ours: the player behind the leader slows it).
 
 **Verification.** Tests `leader_calls_read_competitor_distances_and_push_the_indicator`, `inline_failures_fire_after_the_with_events_rows`, `the_follower_band_ramps_from_five_to_fifteen_meters_and_slows_a_leader_the_player_trails`, `rows_become_follow_params_with_the_end_volume_and_their_competitors`, plus the film_run tests above.
+
+## The distance meter
+
+**Problem.** Follow the leader showed no distance to the leader: the meter movie was not exported and the host only logged it.
+
+**Root cause / evidence (Ghidra, TU3; research b1006 item 8, b882 section 4).**
+- The meter is FE template 45 `DistanceMeter` = `hud2/huddistance` (template table 0x8302F1A8). The movie is a copy of the timer movie (states 1 show, 2 hide, 3 `UpdateTimerHUD`) and reads `HUDComponents.DistanceMeter_GetData` (8265C978): [text +0x3C, flag +0x5C] of the HUD element `distance` (vtable 0x8230622C, built in 82659A10, flag starts at 1).
+- `SetupDistanceHUDData(name, max, current)` (82850320) writes the group component's current (+0xC) and max (+0x10). The element's tick (826648D0) refreshes every 5th HUD tick (826647E8): flag 0 (red) when max >= 0 and current / max > 0.6 (0x821EE79C), else 1; text = `ID_COMMON_DISTANCE_PRECISION_ONE` ("{0:distance.1}") with the current value, then SetState 3.
+- The `distance` text type (824FE848, registered by 824FDFC0): one decimal and `ID_COMMON_METRIC_DISTANCE` ("m"), or under Game Settings > Units imperial the value times 3.0 and `ID_COMMON_METRIC_NEW_FEET` ("ft"), the same formatter as the career stats.
+
+**Change.**
+- `tools/prepare_hud.py`: exports `hud2/huddistance` -> `private/hud/runtime/huddistance.json` (needs Refresh Game Files; without it the component is skipped and logged).
+- `crates/skate-core/src/challenges/distance_meter.rs` (new): `flag`, `DistanceMeter` (setup, a 5-tick refresh at 60 Hz HUD ticks, any frame rate) and `MeterTuning` (retail values as data).
+- `crates/skate-core/src/career_stats.rs`: `distance_text` shared by the stats and the meter.
+- `crates/skate-game/src/hud_challenge.rs`: `Component::DistanceMeter`, `ChallengeHudState::distance` (serializable: shown meters, units, flag) and the `DistanceMeter_GetData` binding.
+- `crates/skate-game/src/ftl_host.rs`: at the countdown's ShowHud(DistanceMeter) sets the meter up with the row's `max_follow_distance` and the distance to leader 1, then feeds it every frame; hidden at the end like the other components.
+- `crates/skate-game/src/retail_menus.rs`: `imperial()` (also used by the Stats panel).
+
+**OURS.** A row without a max gets -1 (never red); the HUD tick rate is taken as the FE cadence (60 Hz, doc 31). Mods cannot change `MeterTuning` yet (no API entry).
+
+**Verification.** `red_above_sixty_percent_of_the_max`, `refreshes_every_fifth_tick_at_any_frame_rate` (skate-core), `the_distance_meter_shows_the_distance_and_turns_red` (the retail movie, ignored without the converted HUD). Not play-tested.

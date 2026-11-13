@@ -4,6 +4,7 @@
 pub mod api;
 pub mod callout;
 pub mod contest_run;
+pub mod distance_meter;
 pub mod dpo;
 pub mod end_dialog;
 pub mod film_run;

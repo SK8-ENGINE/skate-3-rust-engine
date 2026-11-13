@@ -351,6 +351,11 @@ pub(crate) fn setting(menus: &RetailMenus, id: &str) -> Option<SettingValue> {
     menus.registry.value(&EntryRef::setting(id))
 }
 
+/// Game Settings > Units: imperial (distances in feet).
+pub(crate) fn imperial(menus: &RetailMenus) -> bool {
+    matches!(setting(menus, "ID_GAMESETTINGS_UNITS_TOGGLE"), Some(SettingValue::Int(1) | SettingValue::Bool(true)))
+}
+
 /// Binds every stored row once the tables are in, then saves a row the menu changed (the engine layer's own
 /// value moved; a mod layer on top leaves it alone).
 fn sync_stored_values(menus: Option<ResMut<RetailMenus>>, stored: Option<ResMut<StoredSettings>>) {

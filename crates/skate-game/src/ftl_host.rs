@@ -2,7 +2,7 @@
 //! `follow_the_leaders` runs through `skate_core::challenges::film_run` (Kind::Follow), its owned objectives from the
 //! exported rows (`challenge_objectives.rs`), the leader (competitor 1) riding the challenge's lines (`ch_<id>`) on the
 //! contest rider code with the follower band. Start: `SKATE_FTL=<id>` on that row's map.
-//! NOT RETAIL YET: the DistanceMeter HUD and the follow indicator trail (logged), speech, the killed objectives.
+//! NOT RETAIL YET: the follow indicator trail (logged), speech, the killed objectives.
 use crate::challenge_objectives::{DataObjectives, ObjectiveData};
 use crate::hud_challenge::{ChallengeHudState, Component};
 use bevy::prelude::*;
@@ -116,6 +116,7 @@ pub(crate) struct FtlState {
     /// Leaders already counted inside the end volume.
     leaders_in_end: Vec<u32>,
     follow_indicator: bool,
+    meter: Option<skate_core::challenges::distance_meter::DistanceMeter>,
     /// Commands for the next update (the start's, made in arm).
     queued: Vec<Command>,
 }
@@ -185,7 +186,7 @@ fn arm(mut ftl: ResMut<FollowTheLeader>, config: Res<crate::config::Config>, map
     info!("SKATE_FTL start {} at {} end={:?} max={:?} leaders={rows:?}", data.id, data.start.locator, data.end_volume.as_ref().map(|v| &v.name), data.max_follow_distance);
     let commands = run.start();
     let mut state = FtlState { data, run, objectives, evaluating: false, leader, awaiting_teleport: false, band: Some(FollowerBand::default()),
-        carry: 0.0, last_state: 0, failure_text: None, dialog_open: false, dialog_seconds: 0.0, leaders_in_end: Vec::new(), follow_indicator: false, queued: Vec::new() };
+        carry: 0.0, last_state: 0, failure_text: None, dialog_open: false, dialog_seconds: 0.0, leaders_in_end: Vec::new(), follow_indicator: false, meter: None, queued: Vec::new() };
     // The first commands run on the next update with the frame's resources.
     state.pending(commands);
     ftl.run = Some(state);
@@ -204,7 +205,7 @@ fn hud_component(c: HudComponent) -> Option<Component> {
         HudComponent::OwnedIt => Some(Component::OwnedIt),
         HudComponent::KilledIt => Some(Component::KilledIt),
         HudComponent::Countdown => Some(Component::Countdown),
-        HudComponent::DistanceMeter => None,
+        HudComponent::DistanceMeter => Some(Component::DistanceMeter),
     }
 }
 
@@ -221,7 +222,7 @@ fn update(
     mut hud: ResMut<ChallengeHudState>,
     mut end_dialog: Option<ResMut<crate::end_dialog_host::EndDialogScreen>>,
     mut autopilot: Option<ResMut<crate::autopilot::Autopilot>>,
-    time: Res<Time>,
+    (time, menus): (Res<Time>, Option<Res<crate::retail_menus::RetailMenus>>),
     (mut population, index, npc_transforms, mut clocks, mut commands_ecs): (
         Option<ResMut<crate::living_world::PopulationState>>,
         Option<Res<crate::living_world::npc_skaters::NpcSkaterIndex>>,
@@ -369,12 +370,7 @@ fn update(
         while let Some(c) = queue.pop_front() {
             guard += 1;
             match c {
-                Command::CreateHud { distance_meter } => {
-                    if distance_meter {
-                        info!("SKATE_FTL {id} DistanceMeter (max {:?}) NOT RETAIL YET: no meter movie", state.data.max_follow_distance);
-                    }
-                    queue.extend(state.run.handle(Event::HudLoaded));
-                }
+                Command::CreateHud { .. } => queue.extend(state.run.handle(Event::HudLoaded)),
                 Command::StartPresentation => queue.extend(state.run.handle(Event::PresentationFinished)),
                 Command::SpawnAi | Command::RespawnAiAtStart => {
                     if let (Some(ai), Some(pop)) = (state.leader.as_mut(), population.as_deref_mut()) {
@@ -413,10 +409,18 @@ fn update(
                         o.reset_only();
                     }
                 }
-                Command::ShowHud(c, shown) => match hud_component(c) {
-                    Some(c) => hud.show(c, shown),
-                    None => info!("SKATE_FTL {id} ShowHud({c:?}, {shown}) NOT RETAIL YET"),
-                },
+                Command::ShowHud(c, shown) => {
+                    // Countdown entry: SetupDistanceHUDData(max = the row's FTLMaxFollowDistance, current) with the show.
+                    // OURS: a row without a max gets -1 (never red).
+                    if matches!(c, HudComponent::DistanceMeter) && shown {
+                        let max = state.data.max_follow_distance.unwrap_or(-1.0);
+                        state.meter = Some(skate_core::challenges::distance_meter::DistanceMeter::setup(max, distances[0].unwrap_or(0.0)));
+                    }
+                    match hud_component(c) {
+                        Some(c) => hud.show(c, shown),
+                        None => info!("SKATE_FTL {id} ShowHud({c:?}, {shown}) NOT RETAIL YET"),
+                    }
+                }
                 Command::StartTimerHud { .. } => hud.show(Component::Timer, true),
                 Command::CentralMessage(m) => {
                     let text = match m {
@@ -484,6 +488,18 @@ fn update(
             hud.timer_flag = flag;
         }
     }
+    if let Some(meter) = state.meter.as_mut().filter(|_| hud.is_shown(Component::DistanceMeter)) {
+        let tuning = skate_core::challenges::distance_meter::MeterTuning::default();
+        meter.advance(time.delta_secs(), distances[0].unwrap_or(meter.shown), &tuning);
+        let now = crate::hud_challenge::DistanceHud {
+            metres: meter.shown,
+            imperial: menus.as_deref().is_some_and(crate::retail_menus::imperial),
+            flag: meter.flag(&tuning),
+        };
+        if hud.distance != now {
+            hud.distance = now;
+        }
+    }
     if let Some(c) = finished {
         let mut done = ftl.run.take().expect("the run");
         if let (Some(ai), Some(pop)) = (done.leader.as_mut(), population.as_deref_mut()) {
@@ -491,7 +507,7 @@ fn update(
         }
         info!("SKATE_FTL end {id} completion={c:?}");
         ftl.result = Some(format!("ftl={id} completion={c:?}"));
-        for h in [Component::Timer, Component::Countdown, Component::OwnedIt, Component::KilledIt] {
+        for h in [Component::Timer, Component::Countdown, Component::OwnedIt, Component::KilledIt, Component::DistanceMeter] {
             hud.show(h, false);
         }
         if c != Completion::Abandoned || done.run.result() == Flow::Win {

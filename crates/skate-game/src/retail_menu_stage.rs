@@ -916,10 +916,7 @@ fn update(
     }
     let (Some(mut ms), Some(movies), Some(mut menus)) = (stage, movies, menus) else { return };
     // Game Settings > Units (distances on the Stats panel in feet when imperial).
-    let imperial = matches!(
-        crate::retail_menus::setting(&menus, "ID_GAMESETTINGS_UNITS_TOGGLE"),
-        Some(skate_core::menus::SettingValue::Int(1) | skate_core::menus::SettingValue::Bool(true))
-    );
+    let imperial = crate::retail_menus::imperial(&menus);
     if ms.failed {
         // A stopped stage gives the game back: no suspended gameplay, no pause backdrop (Start then opens the PC
         // overlay). Without this a stage error with the pause menu open froze the game (session 2026-10-12).

@@ -330,6 +330,16 @@ pub fn clock(seconds: f32) -> String {
     out
 }
 
+/// The `distance` text type (0x824FE848): one decimal and the meter word, or under imperial units the value times 3.0
+/// (retail's factor) and the feet word.
+pub fn distance_text(metres: f64, imperial: bool, float: &dyn Fn(f64, usize) -> String, metres_word: &str, feet_word: &str) -> String {
+    if imperial {
+        format!("{} {}", float(metres * 3.0, 1), feet_word)
+    } else {
+        format!("{} {}", float(metres, 1), metres_word)
+    }
+}
+
 /// What a row shows: the localized pieces the caller passes in (units setting, unit words, number grouping and the
 /// ped type names).
 pub struct Format<'a> {
@@ -349,13 +359,7 @@ pub struct Format<'a> {
 impl CareerStats {
     pub fn format(&self, index: usize, f: &Format) -> String {
         let v = self.value(index);
-        let distance = |metres: f64| {
-            if f.imperial {
-                format!("{} {}", (f.float)(metres * 3.0, 1), f.feet)
-            } else {
-                format!("{} {}", (f.float)(metres, 1), f.metres)
-            }
-        };
+        let distance = |metres: f64| distance_text(metres, f.imperial, f.float, f.metres, f.feet);
         match kind(index) {
             Kind::Time if v <= 0.0 => format!("#0 {}", f.seconds),
             Kind::Time => format!("{} {}", clock(v), f.seconds),

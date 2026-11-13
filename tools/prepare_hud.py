@@ -68,7 +68,9 @@ MOVIES = (("data/fe/source/screens/hud2/trickdisplay2", "trickdisplay.json"),
           ("data/fe/source/screens/challenge/ownthespot", "ownthespot.json"),
           ("data/fe/source/screens/challenge/killedit", "killedit.json"),
           # The tutorials' TutorialInstructionHUD (HUD component 17, research b866).
-          ("data/fe/source/screens/hud2/hudtutorial", "hudtutorial.json"))
+          ("data/fe/source/screens/hud2/hudtutorial", "hudtutorial.json"),
+          # Follow the leader's DistanceMeter (template 45, research b1006 item 8).
+          ("data/fe/source/screens/hud2/huddistance", "huddistance.json"))
 
 
 def prepare(game: Path, output: Path, collections: Path):
