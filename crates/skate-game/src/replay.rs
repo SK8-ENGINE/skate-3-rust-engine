@@ -1110,6 +1110,12 @@ pub(crate) fn world_live(replay: Option<Res<Replay>>) -> bool {
     replay.is_none_or(|r| !r.active)
 }
 
+/// `825EB998`'s gates we port: enough recorded (`8250B8F8`) and no FE fade on screen (825D5E90 / 825E8A08 together:
+/// fader alpha above 0).
+fn back_opens(recorded_enough: bool, fade_alpha: Option<f32>) -> bool {
+    recorded_enough && fade_alpha.is_none_or(|a| a <= 0.0)
+}
+
 fn axis(value: f32) -> f32 {
     value.signum() * ((value.abs() - 0.18) / 0.82).clamp(0.0, 1.0)
 }
@@ -1129,6 +1135,7 @@ pub(crate) fn controls(
     mut sounds: MessageWriter<crate::ui_audio::FrontendSound>,
     mut export: Option<ResMut<export_run::ReplayExport>>,
     physics: Option<Res<crate::physics::GamePhysics>>,
+    fade: Option<Res<crate::retail_menu_stage::FeFadeAlpha>>,
 ) {
     if replay.exporting || export.as_ref().is_some_and(|e| e.busy()) {
         input.discard_gameplay();
@@ -1266,9 +1273,8 @@ pub(crate) fn controls(
     if !menu_open {
         let back = pressed & SELECT != 0 || keys.just_pressed(KeyCode::F6);
         if !replay.active {
-            // Retail: Back during play opens the instant replay (`825EB998`), only with enough recorded
-            // (`8250B8F8`); a refusal is silent.
-            if back && replay.can_open() {
+            // Retail: Back during play opens the instant replay (`825EB998`); a refusal is silent.
+            if back && back_opens(replay.can_open(), fade.map(|f| f.0)) {
                 replay.enter();
                 // Retail plays UI sound 0x394015B68783BE9E as it opens (`825EB998`, b389): the fe record
                 // `editor_select`.

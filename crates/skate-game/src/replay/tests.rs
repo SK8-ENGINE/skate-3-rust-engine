@@ -10,6 +10,15 @@ fn pose(x: f32) -> Snapshot {
 }
 
 #[test]
+fn back_is_refused_while_the_fe_fade_shows() {
+    assert!(back_opens(true, None));
+    assert!(back_opens(true, Some(0.0)));
+    assert!(!back_opens(true, Some(0.04)), "fading");
+    assert!(!back_opens(true, Some(1.0)), "black");
+    assert!(!back_opens(false, Some(0.0)), "not enough recorded");
+}
+
+#[test]
 fn rolling_window_is_the_retail_ninety_seconds_with_variable_cadence() {
     let mut replay = Replay::default();
     for i in 0..4000 {

@@ -806,6 +806,19 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
   table that key is the fe record `editor_select` (level 0.88). `replay.rs` sends `FrontendSound::named("editor_select")`
   on open (`OPEN_SOUND`, data). Test: `retail_quit_warning_and_minimum_length` checks the message. Not heard yet.
 
+## Back is refused during a screen fade (2026-11-12)
+- Problem: Back opened the instant replay while the front end's fade to black was on screen (a map load, the skater
+  swap, the Trick Guide return); retail refuses it then.
+- Evidence (Ghidra, TU3): `825EB998` first reads the FE fader `[[0x830CFE14]+0x130]` (doc 31 "Fade to black", our
+  `fe_fade.rs`) and goes on only when both `825D5E90` (alpha above 0 and black or fading in) and `825E8A08` (alpha
+  strictly between 0 and 1) are false: together, alpha above 0 refuses.
+- Change: `retail_menu_stage` publishes the fader alpha as `FeFadeAlpha`; `replay::controls` opens on Back only with
+  enough recorded and alpha 0 (`back_opens`). Without the retail menu stage there is no fader and nothing changes.
+- Test: `back_is_refused_while_the_fe_fade_shows`.
+- Still open from `825EB998` (research b389): the game-flow busy counter (`[0x830CFE14]+0x1C4` / `+0x1C0`), the
+  `[0x830CFE14]+0x134` list, the mission timer check (`[0x83083BCC]+0x9C`, kind 0x14) and the FE screen checks
+  (`+0x82`, active screen `+0x10`).
+
 ## M4 step 1: the export encoder (Save to PC) (2026-10-20)
 - User: "Add `windows` (Recommended)" (for "Save to PC": Windows' own encoder). `skate-game` now depends on `windows`
   =0.58.0 on Windows only (the version already in the lockfile; one added lockfile line), features MediaFoundation,

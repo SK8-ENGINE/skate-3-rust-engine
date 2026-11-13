@@ -348,10 +348,15 @@ pub(crate) struct MenuStageSet;
 /// The fe sound the sign-up prompt plays when it appears (any prompt kind: the component is shared).
 pub(crate) const SIGNUP_SHOW_SOUND: &str = "object_r1_options";
 
+/// The FE fader's alpha (`[[0x830CFE14]+304]+12`, 1 = black), for gates that read it outside the stage.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct FeFadeAlpha(pub f32);
+
 pub(crate) struct RetailMenuStagePlugin;
 impl Plugin for RetailMenuStagePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RetailPause>()
+            .init_resource::<FeFadeAlpha>()
             .init_resource::<crate::trick_guide_host::TrickGuideMods>()
             .init_resource::<crate::offline_profile_host::ProfileMods>()
             .init_resource::<crate::extras_host::CreditsMods>()
@@ -879,7 +884,7 @@ fn update(
     ),
     // Challenge Map travel; cheats out, typed text in and the zombie flag the cheat toggles; FE 62's characters and
     // its requests out.
-    (mut travel, mut cheats_out, mut unlocks_out, mut typing, mut living, mut characters, mut spawner_out, population, transition, mut cover): (
+    (mut travel, mut cheats_out, mut unlocks_out, mut typing, mut living, mut characters, mut spawner_out, population, transition, mut cover, mut fade_alpha): (
         ResMut<crate::challenge_map::ChallengeMapTravel>,
         MessageWriter<crate::extras_host::CheatChanged>,
         MessageWriter<crate::extras_host::UnlockGranted>,
@@ -890,6 +895,7 @@ fn update(
         Option<Res<crate::living_world::PopulationState>>,
         Res<crate::map_transition::MapTransition>,
         ResMut<crate::map_transition::LoadingCover>,
+        ResMut<FeFadeAlpha>,
     ),
 ) {
     let ready = stage.as_ref().is_some_and(|s| !s.failed) && movies.is_some() && menus.is_some();
@@ -1822,6 +1828,7 @@ fn update(
         if before != ms.fade.alpha && (ms.fade.alpha == 0.0 || ms.fade.alpha == 1.0) {
             info!("RETAIL_MENUS fade {}", if ms.fade.alpha == 1.0 { "black" } else { "clear" });
         }
+        fade_alpha.set_if_neq(FeFadeAlpha(ms.fade.alpha));
         ms.stage.update(time.delta_secs() * 1000.0, &movies.movies, &mut fe)?;
         if let Some(show) = ms.save_tag.step(crate::save_tag::saving(), time.delta_secs()) {
             save_tag(&mut ms.stage, show, &mut fe);
