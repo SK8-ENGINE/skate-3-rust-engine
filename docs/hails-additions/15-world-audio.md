@@ -11,8 +11,8 @@ retail does. But the engine has no traffic, pedestrian or AI-skater system yet. 
 in any fork has one, and no issue asks for one (prior-work check, 2026-10-03). The sounds therefore
 had no way in.
 
-The goal (the user, 2026-10-03): "build out everything that can then easily be hooked to by the game
-engine once they are added", in this PR, and moddable like the rest of the engine.
+The goal (the user, 2026-10-03): build out everything the game engine can easily hook into once those
+systems are added, in this PR, and moddable like the rest of the engine.
 
 ## The change in one paragraph
 
@@ -38,7 +38,7 @@ remove the component. Owner ids are `Entity::to_bits()`, so a reused index count
 
 | field | retail | meaning | who fills it | default |
 |---|---|---|---|---|
-| `engine` | vehicle record `+168` | the `aud_traffic_engine` record by name, **or the living-world model** (`taxi01`, `sedan02`, `suv`, `minivan01`, …), which setup maps through retail's attribute chain (entity → vehicle spec → record, G1; export `world_tuning.traffic_models`): sedans / hatchback → `c01_family01`, sports / muscle → `c03_sports01`, taxi / patrol → `c04_taxi01`, SUV / pickup / minivan → `c05_truck01`. The engine's patch override picks c06 / c07 / c08 itself. | the vehicle system, from the model | — (an unknown name is logged once and stays silent) |
+| `engine` | vehicle record `+168` | the `aud_traffic_engine` record by name, **or the living-world model** (`taxi01`, `sedan02`, `suv`, `minivan01`, …), which setup maps through retail's attribute chain (entity → vehicle spec → record, G1; export `world_tuning.traffic_models`): sedans / hatchback → `c01_family01`, sports / muscle → `c03_sports01`, taxi / patrol → `c04_taxi01`, SUV / pickup / minivan → `c05_truck01`. The engine's patch override picks c06 / c07 / c08 itself. | the vehicle system, from the model | none (an unknown name is logged once and stays silent) |
 | `speed` | `+148` | m/s | the vehicle system | the length of the velocity |
 | `load` | `+144` | the driver's signed acceleration in m/s². G1 measured −15.6 in a hard stop, up to +3 pulling away, and 0 while cruising. It goes into the engine and skid words × 3000. | the driving AI | derived from the speed change |
 | `horn` | `+156` | `None`, `Honk(1..=5)` or `Alarm` | the AI (honk decisions) | `None` |
@@ -312,7 +312,7 @@ New in this pass:
 
 **Data and failure modes.**
 - The index and rules are part of the normal setup.
-- The takes need the opt-in decode (`SKATE_SETUP_SPEECH=1`, about 2.4 GB). The dev install now has all 40
+- The takes need the speech decode (on by default since 2026-10-25, USER-ASKS 338; `SKATE_SETUP_SPEECH=0` skips it, about 2.4 GB). The dev install now has all 40
   free-roam events: 13,322 takes, 2.3 GB.
 - A take is read from disk when its line starts, as retail streams it. The last 24 stay loaded.
 - Without the index, speech is off and the log says so once.
@@ -461,7 +461,7 @@ and §8.6.
 
 Built from the P3–P5 state and checked headless against the existing recordings, plus one scripted background
 recomp run for the NPC board slide (user-approved gap runs; muted, one game at a time). All numbers are "the
-recomp". Reference only: the TU3 recompilation (skate3recomp / rexglue / Xenia); our own code.
+recomp". Reference only: the TU3 (title update 3) recompilation (skate3recomp / rexglue / Xenia); our own code.
 
 ### Tazer (`skate_audio::world::peds::PedTazer`)
 - **Decoded:** `SFXObj_Tazer` (Pedestrian object 3, factory `sub_824F12D0`). Its process posts the 9-word
@@ -657,14 +657,14 @@ recompilation (skate3recomp / rexglue / Xenia); addresses and constants are fact
   behind (MixMap catalog). `sub_824AE6E0` writes input 1 = |listener `+0` − emitter| and input 3 = the azimuth in
   the frame (listener `+0` pulled back 0.25 m, listener `+32`); inputs 0 / 2 use listener `+64` / `+96`.
   `sub_8248CC08` fills the listener: `+0` / `+32` from the camera's matrix, `+64` from the skater list's first
-  entry (the local skater). So the bed's level reads the **camera** distance and the **camera-frame** azimuth —
+  entry (the local skater). So the bed's level reads the **camera** distance and the **camera-frame** azimuth:
   what the port already writes (`ObjPos::write`). The earlier note ("the lookups measure the distance to the local
   skater, which the rows don't give") was wrong for the Player slot; it holds for the ped speech lookups (input 0).
 - **What was wrong was the test.** `npc_bed_follows_the_recomp_rows` placed the NPC dead ahead of the camera for
   every row: always the 4–50 m quadrant. The recomp's NPC passes at the side or behind as often.
 - **The rows now carry their geometry** (local tool `npc_grec_rows.py`): the NPC board (SKATEB, matched by speed,
-  with the local skater's own board — the track that follows the local SkateBoard's GREC speed, median error
-  0.11 m/s — left out, and rows where two boards match within 0.3 m/s dropped), interpolated to the row; the
+  with the local skater's own board (the track that follows the local SkateBoard's GREC speed, median error
+  0.11 m/s) left out, and rows where two boards match within 0.3 m/s dropped), interpolated to the row; the
   camera (WPPOS, interpolated); the camera's view (not logged: the direction from the camera to the local board,
   or the camera's own motion when that board is more than 8 m away). The test rolls our NPC bed through each
   row's own geometry (camera and local skater moving with the local board's velocity).
@@ -909,8 +909,8 @@ the engine asked for them.
 - The `alt_bus` flag (photo records) and the HOM / moment fields are exported but not played (no caller yet).
 
 ### Follow-up: the static noise on Go To Marker (2026-10-04, investigated, nothing new to port yet)
-User, after listening: "I tried the marker sounds and they sound good. but there is no static noise that plays with
-the transition when you go back to a marker like it does in retail."
+The user, after listening: the marker sounds sound good, but no static noise plays with the transition back to
+a marker as it does in retail.
 
 **What retail does (the recomp, TU3; reference only).** Searched for a sound outside the `fe` record and found none:
 - **Code path.** Go To Marker in `sub_82898FC8` does three things: (1) every UI tick of the hold it sends message
@@ -1001,7 +1001,7 @@ destination), TPDEC / TPSTREAM (load or not), TPFX (the static amount per tick =
 front-end sound request, including Lua's), GSTATE / GEVENT (state changes and events), HUBMSG (posted messages, ≤ 2 / s
 per id). Field counts and the analysis: local research tools (not published).
 
-**Change:** none yet. Open: what the console plays for "about a second" on a far return — the static during a 1 s hold
+**Change:** none yet. Open: what the console plays for "about a second" on a far return: the static during a 1 s hold
 (no sound for it in the code or the recomp), the record's bursts followed by the loading silence, or a console-only
 effect of the streaming load. Our engine has no streaming load, so a far return never goes silent after the record.
 
@@ -1121,8 +1121,8 @@ Credits: the recomp (skate3recomp, rexglue, Xenia) as the research build; our ow
 ## The car alarm trigger (2026-10-04, follow-up to the world follow-ups)
 **Problem.** The car alarm sound was ported (`VehicleAlarm { vehicle }` = horn state 6 for 8 s, the mod event
 `alarm`), but nothing set it off the way retail does: a parked car's alarm goes off when the player runs into it.
-The user's words (recomp session 2026-10-04 16:11): "I found a taxi, so yeah, and I skitched on it too." / "it
-ended up parking on the side of the road and when I ran into the car alarm went off".
+The user's account (recomp session 2026-10-04 16:11): the user found a taxi and skitched on it; it
+ended up parked at the side of the road, and when the user ran into it the car alarm went off.
 
 **Root cause.** The trigger is traffic AI, not audio: it lives in the vehicle's collision callback and its
 `StayingParked` state, which the engine does not have (there is no traffic yet).

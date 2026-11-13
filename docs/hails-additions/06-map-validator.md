@@ -31,7 +31,7 @@ after the stock loads (config, gameplay config, manifest, graphs):
     `skate_world::validate_runtime`, physics with the map's collision, skater
     runtime. A panic inside one map becomes that map's error (`catch_unwind`).
   - **warnings** (reported, never rejecting): from
-    `physics/startup_check.rs` — no collision within 10 m below the spawn; deck
+    `physics/startup_check.rs`: no collision within 10 m below the spawn; deck
     spawned away from the map spawn/heading; a neutral startup (zero actions,
     as with no controller) must settle with wheel support for 12 consecutive
     ticks within 240 ticks (4 s at 60 Hz), with finite body state, no physics
@@ -78,7 +78,7 @@ after the stock loads (config, gameplay config, manifest, graphs):
   "wheels never found support"; Industrial's old harbour-bed spawn → "no visible
   surface … (invisible collision)".
 - Known limit: a spawn on a solid, visible roof (Industrial Skate Park's old
-  roof spawn) is not flagged — rooftops are legitimate skate spots; only
+  roof spawn) is not flagged: rooftops are legitimate skate spots; only
   authored start data (doc 4) distinguishes them.
 - Unit tests: `map_validation::tests` (visible-surface heights, single-line JSON
   with the documented fields); Python `test_map_validator.py` with a fake

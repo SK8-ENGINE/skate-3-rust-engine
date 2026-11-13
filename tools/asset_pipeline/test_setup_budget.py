@@ -18,15 +18,28 @@ class SetupBudgetTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {'SKATE_SETUP_MAP_WORKERS': '5'}):
             self.assertEqual(install.map_workers(), 5)
 
+    def test_the_budget_is_three_quarters_of_the_cpus(self):
+        for cpus, budget in ((1, 1), (2, 1), (4, 3), (8, 6), (16, 12), (28, 21), (128, 96)):
+            self.assertEqual(setup_budget.cores(cpus, {}), budget, cpus)
+        self.assertEqual(setup_budget.cores(28, {'SKATE_SETUP_CORES': '4'}), 4)
+        self.assertEqual(setup_budget.cores(28, {'SKATE_SETUP_CORES': '0'}), 21)
+        # Every pool stays inside the budget: three map jobs' threads plus the customiser's workers.
+        for cpus in (2, 4, 8, 16, 28, 64):
+            budget = setup_budget.cores(cpus, {})
+            self.assertLessEqual(setup_budget.decode_workers(cpus, {}), budget)
+            self.assertLessEqual(setup_budget.extract_threads(cpus, {}), budget)
+            if budget >= 4:
+                self.assertLessEqual(3 * setup_budget.job_threads(cpus, {}) + setup_budget.customiser_workers(cpus, {}), budget, cpus)
+
     def test_job_threads_scale_with_cpus_within_bounds(self):
-        self.assertEqual(setup_budget.job_threads(1, {}), 2)
-        self.assertEqual(setup_budget.job_threads(8, {}), 2)
-        self.assertEqual(setup_budget.job_threads(16, {}), 4)
-        self.assertEqual(setup_budget.job_threads(28, {}), 6)
-        self.assertEqual(setup_budget.job_threads(128, {}), 6)
+        self.assertEqual(setup_budget.job_threads(1, {}), 1)
+        self.assertEqual(setup_budget.job_threads(8, {}), 1)
+        self.assertEqual(setup_budget.job_threads(16, {}), 3)
+        self.assertEqual(setup_budget.job_threads(28, {}), 5)
+        self.assertEqual(setup_budget.job_threads(128, {}), 29)
         self.assertEqual(setup_budget.job_threads(28, {'SKATE_SETUP_THREADS': '1'}), 1)
         self.assertEqual(setup_budget.job_threads(28, {'SKATE_SETUP_THREADS': '999'}), 32)
-        self.assertEqual(setup_budget.job_threads(28, {'SKATE_SETUP_THREADS': 'x'}), 6)
+        self.assertEqual(setup_budget.job_threads(28, {'SKATE_SETUP_THREADS': 'x'}), 5)
 
     def test_priority_defaults_to_below_normal(self):
         self.assertEqual(setup_budget.priority_class({}), 0x4000)

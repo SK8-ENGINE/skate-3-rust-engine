@@ -195,7 +195,11 @@ pub struct RandomSetDef {
     pub min_interval: f32,
     #[serde(default = "default_max_interval")]
     pub max_interval: f32,
+    /// The level grid: a level is drawn as a whole step of 1 / `level_steps` between the two levels (retail 10).
+    #[serde(default = "default_level_steps")]
+    pub level_steps: u32,
 }
+fn default_level_steps() -> u32 { 10 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -542,6 +546,9 @@ impl RandomSetDef {
             || !(0.0..=4.0).contains(&self.min_level) || self.max_level < self.min_level || self.max_level > 4.0
             || !(0.0..=3600.0).contains(&self.min_interval) || self.max_interval < self.min_interval || self.max_interval > 3600.0 {
             return Err(format!("{at}: levels 0..4 and intervals 0..3600 s, min ≤ max"));
+        }
+        if !(1..=1000).contains(&self.level_steps) {
+            return Err(format!("{at}: level_steps 1..1000"));
         }
         if self.name.as_deref().is_some_and(|n| !valid_name(n)) {
             return Err(format!("{at}: bad name"));

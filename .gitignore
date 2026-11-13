@@ -112,4 +112,4 @@ __pycache__/
 # The world audio test mod's ghost input: the user's own recorded audio state logs (never committed).
 mods/world-audio-test/logs/
 # Built by tools/steam-launcher/build.bat
-/tools/steam-launcher/SkateLauncher.exe
+/tools/steam-launcher/SkateLauncher*.exe

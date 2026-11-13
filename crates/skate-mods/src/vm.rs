@@ -20,6 +20,9 @@ pub struct TeleportOptions {
     pub heading: Option<f32>,
     #[serde(default)]
     pub velocity: Option<[f32; 3]>,
+    /// Fit the arrival height onto the ground below as retail teleports do (default true; false = exactly here).
+    #[serde(default)]
+    pub ground_fit: Option<bool>,
 }
 
 impl TeleportOptions {
@@ -54,6 +57,59 @@ impl TriggerBoxOptions {
             && self.rotation.as_ref().is_none_or(crate::scene::valid_quaternion)
             && self.name.as_ref().is_none_or(|n| n.len() <= 128 && !n.chars().any(char::is_control))
             && self.group.as_deref().is_none_or(|g| matches!(g, "challenge" | "stairs" | "camera"))
+    }
+}
+
+/// One `sdk.triggers.teleporter` exit: where the skater lands (heading in radians, forward = (sin h, 0, cos h)) and,
+/// for another map, its name (the map file's stem); `None` = the map the teleporter is on.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TeleporterExit {
+    pub position: [f32; 3],
+    #[serde(default)]
+    pub heading: f32,
+    #[serde(default)]
+    pub map: Option<String>,
+    /// A skate.Park world row on that map (`dist_megapark_full`): the map loads with its layout.
+    #[serde(default)]
+    pub world: Option<String>,
+}
+
+/// `sdk.triggers.teleporter`: a teleporter like retail's (doc 38 "Teleporters"): entering `volume` (a map volume id
+/// or the mod's own `sdk.triggers.box` key) shows the prompt, D-pad Up asks, Yes moves the skater to the first exit
+/// (several exits: the player picks). A key equal to a retail teleporter's id replaces it.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TeleporterOptions {
+    pub volume: String,
+    pub exits: Vec<TeleporterExit>,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// A `ribbon_indicator` key (`teleport`) for the floating icon; none without it.
+    #[serde(default)]
+    pub indicator: Option<String>,
+    /// Where the icon's anchor sits (default: the volume's centre).
+    #[serde(default)]
+    pub indicator_position: Option<[f32; 3]>,
+    /// A `visualindicators` row (`smallarrow`, `gates`, ...) in place of the indicator row's own style.
+    #[serde(default)]
+    pub indicator_style: Option<String>,
+    /// A `ribbon_spline_colour` row (`default` = blue, `red`, `green`, ...) for the icon's textures.
+    #[serde(default)]
+    pub indicator_colour: Option<String>,
+}
+
+impl TeleporterOptions {
+    pub fn validate(&self) -> bool {
+        !self.volume.is_empty() && self.volume.len() <= 160 && !self.volume.chars().any(char::is_control)
+            && (1..=8).contains(&self.exits.len())
+            && self.exits.iter().all(|e| e.position.iter().all(|v| v.is_finite() && v.abs() <= 100_000.)
+                && e.heading.is_finite() && e.map.as_deref().is_none_or(crate::schema::valid_id))
+            && self.title.as_ref().is_none_or(|t| t.len() <= 128 && !t.chars().any(char::is_control))
+            && self.indicator.as_ref().is_none_or(|k| !k.is_empty() && k.len() <= 64 && !k.chars().any(char::is_control))
+            && self.indicator_position.is_none_or(|p| p.iter().all(|v| v.is_finite() && v.abs() <= 100_000.))
+            && self.indicator_style.as_ref().is_none_or(|k| !k.is_empty() && k.len() <= 64 && !k.chars().any(char::is_control))
+            && self.indicator_colour.as_ref().is_none_or(|k| !k.is_empty() && k.len() <= 64 && !k.chars().any(char::is_control))
     }
 }
 
@@ -117,6 +173,56 @@ pub struct VolumeOptions {
     pub color: [f32; 3],
     #[serde(default = "volume_opacity")]
     pub opacity: f32,
+}
+
+/// A mod's HUD minimap icon (`sdk.minimap.icon`): a fe_map_icons record at a world position.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MinimapIconOptions {
+    pub position: [f32; 3],
+    /// The fe_map_icons record name; retail's script icons default to `race_gate` (82849B78, b571).
+    #[serde(default = "minimap_icon")]
+    pub icon: String,
+    /// Radians, map up = north.
+    #[serde(default)]
+    pub angle: f32,
+    #[serde(default = "minimap_scale")]
+    pub scale: f32,
+    /// Fades out with distance as retail's icons do.
+    #[serde(default = "minimap_fade")]
+    pub fade: bool,
+    /// Overrides the record's max distance.
+    #[serde(default)]
+    pub max_distance: Option<f32>,
+    #[serde(default = "minimap_colour")]
+    pub colour: [f32; 4],
+}
+
+fn minimap_icon() -> String {
+    "race_gate".into()
+}
+fn minimap_scale() -> f32 {
+    1.0
+}
+fn minimap_fade() -> bool {
+    true
+}
+fn minimap_colour() -> [f32; 4] {
+    [1.0; 4]
+}
+
+impl MinimapIconOptions {
+    pub fn validate(&self) -> bool {
+        self.position.iter().all(|v| v.is_finite() && v.abs() <= 100_000.)
+            && !self.icon.is_empty()
+            && self.icon.len() <= 64
+            && self.angle.is_finite()
+            && self.scale.is_finite()
+            && self.scale > 0.0
+            && self.scale <= 10.0
+            && self.max_distance.is_none_or(|d| d.is_finite() && d >= 0.0)
+            && self.colour.iter().all(|v| v.is_finite() && (0. ..=1.).contains(v))
+    }
 }
 
 fn volume_color() -> [f32; 3] {
@@ -199,6 +305,17 @@ pub enum Command {
     MultiplayerDebug { key: String, text: String },
     UiCanvas { key: String, options: crate::presentation::CanvasOptions },
     UiRemove { key: String },
+    /// One line in the HUD's central message (retail's `hudcentral` movie, where the chase shows "ZAP!"): a
+    /// language id of that movie or plain text, shown for `seconds` (default retail's 6 s, `82664550`), then the
+    /// movie's outro.
+    UiCentralMessage {
+        text: String,
+        #[serde(default)]
+        seconds: Option<f32>,
+    },
+    /// Show (true, the default) or hide the alerts over peds that warn or chase the player; released when the
+    /// mod stops.
+    UiChaseAlerts { enabled: bool },
     CameraRig { body: String, options: crate::presentation::CameraRigOptions },
     AudioPreload { path: String },
     AudioPlay { key: String, options: crate::audio::AudioPlayOptions },
@@ -261,6 +378,67 @@ pub enum Command {
         domain: String,
         #[serde(default)]
         patch: Option<Value>,
+    },
+    /// World tuning extension 1: patch a typed living-world / props / carry domain while the mod
+    /// runs (`patch` absent = restore this mod's patch of the domain).
+    WorldSetTuning {
+        domain: String,
+        #[serde(default)]
+        patch: Option<Value>,
+    },
+    /// Reset moved objects (doc 27, Object Dropper and reset): every dynamic prop away from its
+    /// authored pose goes back to it (retail cMsgResetDMO per object).
+    WorldResetMovedProps {},
+    /// Reset one dynamic prop (stable map id) to its authored pose (retail cMsgResetDMO).
+    WorldResetProp { id: u32 },
+    /// Upright one dynamic prop (stable map id): retail cMsgUprightDMO, the 2 s self-righting
+    /// window (doc 27, Upright).
+    WorldUprightProp { id: u32 },
+    /// Create a dynamic prop mid-game: a copy of map prop `from` at a pose and velocity; per mod key, removed on disable.
+    WorldSpawnProp {
+        key: String,
+        from: u32,
+        position: [f32; 3],
+        #[serde(default)]
+        yaw: f32,
+        #[serde(default)]
+        velocity: [f32; 3],
+        #[serde(default)]
+        spin: [f32; 3],
+    },
+    /// Remove a prop this mod created with `WorldSpawnProp`.
+    WorldRemoveProp { key: String },
+    /// Open the instant replay at the newest frame (doc 37).
+    ReplayOpen {},
+    /// A replay marker at the newest recorded frame (retail provider id 10, up to 50).
+    ReplayMarker { label: String },
+    /// Override the replay limits; both absent restores the defaults.
+    ReplaySetLimits {
+        #[serde(default)]
+        max_frames: Option<u32>,
+        #[serde(default)]
+        byte_budget: Option<u64>,
+        /// The longest encoded edit that can be shared / saved, s (retail 60, `EditLimits::share_max_seconds`).
+        #[serde(default)]
+        share_max_seconds: Option<u32>,
+    },
+    /// Override the replay cameras' world collision (switch, sphere radius m) and leash (m), and the frame a Follow
+    /// key's eye rides ("camera" = the recorded gameplay camera, "skater"), and whether a camera picked on a clip with
+    /// no keys covers the whole clip (`fill_section`), and whether editor playback constrains keyed cameras too
+    /// (`playback_collide`); all absent restores retail's (on, 0.1, 40, "camera", true, false).
+    ReplaySetCamera {
+        #[serde(default)]
+        collide: Option<bool>,
+        #[serde(default)]
+        radius: Option<f32>,
+        #[serde(default)]
+        leash: Option<f32>,
+        #[serde(default)]
+        follow_eye: Option<String>,
+        #[serde(default)]
+        fill_section: Option<bool>,
+        #[serde(default)]
+        playback_collide: Option<bool>,
     },
     /// Audio extension 4 (doc 16 L2): write one input of a retail MixMap controller (`value` absent
     /// = release it: the input gets back the value before this mod's first write).
@@ -481,6 +659,11 @@ pub enum Command {
         #[serde(default)]
         patch: Option<crate::presentation::CameraShotTuning>,
     },
+    /// Replaces values of the water look layer; nil restores the player's look.
+    WaterLook {
+        #[serde(default)]
+        patch: Option<crate::presentation::WaterLookPatch>,
+    },
     NetworkState {
         key: String,
         #[serde(default)]
@@ -493,6 +676,11 @@ pub enum Command {
     EngineInspect { system:String },
     Request { key:String, #[serde(default)] token:u64, command:Box<Command> },
     InputOverride { action:usize, value:Option<f32> },
+    /// Controller rumble (retail's rumble channels): motor levels 0..1, decay rate per second, the mod's channel
+    /// 0..1023, the pad slot (None = the active pad).
+    InputRumble { #[serde(default)] pad:Option<u8>, #[serde(default)] channel:u32, low:f32, high:f32, #[serde(default)] rate:f32 },
+    /// Stop this mod's rumble on a pad (None = every pad).
+    InputStopRumble { #[serde(default)] pad:Option<u8> },
     NativeImpulse { body:crate::extensions::NativeBodyRef, impulse:[f32;3], point:Option<[f32;3]>, angular:bool },
     PlayerJoint { joint:usize, options:crate::extensions::JointOverride },
     PlayerResetJoint { joint:usize },
@@ -516,12 +704,27 @@ pub enum Command {
     VolumeRemove {
         key: String,
     },
+    MinimapIcon {
+        key: String,
+        options: MinimapIconOptions,
+    },
+    MinimapRemove {
+        key: String,
+    },
+    MinimapShow {
+        shown: bool,
+    },
     TriggerBox {
         key: String,
         options: TriggerBoxOptions,
     },
     TriggerRemove {
         key: String,
+    },
+    TriggerTeleporter {
+        key: String,
+        #[serde(default)]
+        options: Option<TeleporterOptions>,
     },
     TriggerEnable {
         id: String,
@@ -568,6 +771,26 @@ pub enum Command {
     /// Replace one bitmap of a front-end APT movie by its stable id (movie import name + bitmap
     /// character id) with a PNG from the mod's folder.
     MenuBitmap { movie: String, bitmap: i32, path: String },
+    /// The backdrop of an FE screen by its retail screen key: blur on / off and the ramp; no options =
+    /// drop this mod's override.
+    MenuBackdrop { screen: String, #[serde(default)] options: Option<crate::menus::BackdropOptions> },
+    /// Add or change a Trick Guide entry (category / subcategory / trick) by key; no options = drop this mod's
+    /// change to it.
+    MenuTrickGuide { entry: String, key: String, #[serde(default)] options: Option<crate::menus::TrickGuideOptions> },
+    /// Raise (or replace) this mod's retail popup by key; no options = take it down.
+    MenuPopup { key: String, #[serde(default)] options: Option<crate::menus::PopupOptions> },
+    /// Change a Skate Profile bar or add / change a table row by key; no options = drop this mod's change to it.
+    MenuProfile { page: String, key: String, #[serde(default)] options: Option<crate::menus::ProfileOptions> },
+    /// This mod's credit lines by key, after the retail credits (Extras > Credits); no lines = drop the section.
+    MenuCredits { key: String, #[serde(default)] lines: Option<Vec<crate::menus::CreditLine>> },
+    /// This mod's loading screen line by key (a hint or a Coach Frank line); no line = drop it.
+    LoadingLine { key: String, #[serde(default)] line: Option<crate::menus::LoadingLine> },
+    /// false: while this mod runs the loading screen shows only mods' lines (with none, the retail lines stay).
+    LoadingRetail { shown: bool },
+    /// Keep the loading screen up after a load's own work is done until released (capped by the engine).
+    LoadingHold { key: String, held: bool },
+    /// Seconds a panel shows and its outro takes (retail 9.0 / 0.5); none = this mod's change is dropped.
+    LoadingTiming { #[serde(default)] show: Option<f32>, #[serde(default)] outro: Option<f32> },
     CameraClearCapture {
         key: String,
     },
@@ -606,14 +829,24 @@ impl Command {
         match self {
             Self::RigPart {index,options} => *index<26 && options.as_ref().is_none_or(|o|o.validate()),
             Self::GraphGate {graph,target,index,..} => matches!(graph.as_str(),"action"|"motion") && matches!(target.as_str(),"state"|"transition"|"behavior") && *index<65536,
-            Self::EngineInspect {system} => matches!(system.as_str(),"graphs"|"scoring"|"audio_catalog") || crate::audio_tuning::valid_inspect(system),
+            Self::EngineInspect {system} => matches!(system.as_str(),"graphs"|"scoring"|"audio_catalog") || crate::audio_tuning::valid_inspect(system) || crate::world_tuning::valid_inspect(system),
             Self::Request {key,command,token} => *token<=9_007_199_254_740_991 && crate::schema::valid_id(key) && !matches!(**command,Self::Request{..}) && command.validate(),
             Self::InputOverride {action,value} => (64..=81).contains(action) && value.is_none_or(|v|v.is_finite() && (-1.0..=1.0).contains(&v)),
+            Self::InputRumble {pad,channel,low,high,rate} => pad.is_none_or(|p|p<4) && *channel<1024
+                && [low,high].iter().all(|v|v.is_finite() && (0.0..=1.0).contains(*v)) && rate.is_finite() && (0.0..=600.0).contains(rate),
+            Self::InputStopRumble {pad} => pad.is_none_or(|p|p<4),
             Self::NativeImpulse {body,impulse,point:p,..} => body.validate() && impulse.iter().all(|v|v.is_finite() && v.abs()<=100_000.) && p.as_ref().is_none_or(point),
             Self::Log { text } => text.len() <= 2048,
             Self::Overlay { key, text } | Self::MultiplayerDebug { key, text } => crate::schema::valid_id(key) && text.len() <= 1024,
             Self::UiCanvas { key, options } => crate::schema::valid_id(key) && options.validate(),
             Self::UiRemove { key } => crate::schema::valid_id(key),
+            Self::UiChaseAlerts { .. } => true,
+            Self::UiCentralMessage { text, seconds } => {
+                !text.is_empty()
+                    && text.chars().count() <= 64
+                    && !text.chars().any(char::is_control)
+                    && seconds.is_none_or(|s| s.is_finite() && s > 0.0 && s <= 60.0)
+            }
             Self::CameraRig { body, options } => crate::schema::valid_id(body) && options.validate(),
             Self::AudioPreload { path } => crate::audio::valid_audio_path(path),
             Self::AudioPlay { key, options } => {
@@ -638,6 +871,25 @@ impl Command {
             Self::AudioSetMixmapInput { slot, object, instance, input, value, float } => crate::audio::valid_symbol(slot) && *object <= 127 && *instance <= 31 && *input <= 15
                 && value.is_none_or(|v| v.is_finite() && (*float || (v.fract() == 0.0 && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&v)))),
             Self::AudioSeed { .. } => true,
+            Self::WorldResetMovedProps {} => true,
+            Self::WorldResetProp { .. } => true,
+            Self::WorldUprightProp { .. } => true,
+            Self::WorldSpawnProp { key, position, yaw, velocity, spin, .. } => crate::schema::valid_id(key)
+                && position.iter().all(|v| v.is_finite() && v.abs() <= 100_000.)
+                && yaw.is_finite() && yaw.abs() <= 1000.
+                && velocity.iter().chain(spin).all(|v| v.is_finite() && v.abs() <= 200.),
+            Self::WorldRemoveProp { key } => crate::schema::valid_id(key),
+            Self::ReplayOpen {} => true,
+            Self::ReplayMarker { label } => !label.is_empty() && label.len() <= 64 && !label.chars().any(char::is_control),
+            // 1 s to 10 min at 60 frames per second; 1 MiB to 1 GiB.
+            Self::ReplaySetLimits { max_frames, byte_budget, share_max_seconds } => max_frames.is_none_or(|f| (60..=36_000).contains(&f))
+                && byte_budget.is_none_or(|b| (1 << 20..=1 << 30).contains(&b))
+                && share_max_seconds.is_none_or(|s| (1..=600).contains(&s)),
+            // Up to a 2 m sphere; a 1 m to 1 km leash.
+            Self::ReplaySetCamera { radius, leash, follow_eye, .. } => radius.is_none_or(|r| (0.0..=2.0).contains(&r))
+                && leash.is_none_or(|l| (1.0..=1000.0).contains(&l))
+                && follow_eye.as_deref().is_none_or(|f| matches!(f, "camera" | "camera_full" | "skater")),
+            Self::WorldSetTuning { domain, patch } => crate::world_tuning::DOMAINS.contains(&domain.as_str()) && patch.as_ref().is_none_or(|p| crate::world_tuning::valid_patch(domain, p)),
             Self::AudioSetTuning { domain, patch } => crate::audio_tuning::DOMAINS.contains(&domain.as_str()) && patch.as_ref().is_none_or(|p| crate::audio_tuning::valid_patch(domain, p)),
             Self::AudioWatch { globals, mixmap } => globals.len() <= crate::audio::MAX_WATCH && globals.iter().all(|g| crate::audio::valid_symbol(g))
                 && mixmap.len() <= crate::audio::MAX_WATCH && mixmap.iter().all(crate::audio::MixMapKey::validate),
@@ -849,6 +1101,7 @@ impl Command {
             Self::CameraAngle { .. } => true,
             Self::CameraShotTune { shot, patch } => valid_shot_name(shot)
                 && patch.as_ref().is_none_or(|p| p.validate()),
+            Self::WaterLook { patch } => patch.as_ref().is_none_or(|p| p.validate()),
             Self::NetworkState { key, value } => {
                 crate::schema::valid_id(key)
                     && serde_json::to_vec(value).is_ok_and(|v| v.len() <= 512)
@@ -865,7 +1118,13 @@ impl Command {
             Self::SessionTeleport { peer, options } => valid_peer(peer) && options.validate(),
             Self::VolumeBox { key, options } => crate::schema::valid_id(key) && options.validate(),
             Self::VolumeRemove { key } => crate::schema::valid_id(key),
+        Self::MinimapIcon { key, options } => crate::schema::valid_id(key) && options.validate(),
+        Self::MinimapRemove { key } => crate::schema::valid_id(key),
+        Self::MinimapShow { .. } => true,
             Self::TriggerBox { key, options } => crate::schema::valid_id(key) && options.validate(),
+            Self::TriggerTeleporter { key, options } => {
+                crate::schema::valid_id(key) && options.as_ref().is_none_or(TeleporterOptions::validate)
+            }
             Self::TriggerRemove { key } | Self::TriggerUntrack { key } => crate::schema::valid_id(key),
             Self::TriggerEnable { id, .. } => valid_trigger_id(id),
             Self::TriggerTrack { key, options } => {
@@ -882,6 +1141,22 @@ impl Command {
             Self::MenuSetValue { id, value } => crate::menus::valid_menu_id(id) && value.validate(),
             Self::MenuMovie { name, path } => !name.is_empty() && name.len() <= 160 && crate::audio_content::valid_content_path(path, &["json"]),
             Self::MenuBitmap { movie, bitmap, path } => !movie.is_empty() && movie.len() <= 160 && (0..=0xFFFF).contains(bitmap) && crate::graphics_dynamic::valid_texture_path(path),
+            Self::MenuBackdrop { screen, options } => crate::menus::valid_screen_key(screen) && options.as_ref().is_none_or(crate::menus::BackdropOptions::validate),
+            Self::MenuTrickGuide { entry, key, options } => crate::menus::TRICK_GUIDE_ENTRIES.contains(&entry.as_str()) && crate::menus::valid_trick_guide_key(key) && options.as_ref().is_none_or(crate::menus::TrickGuideOptions::validate),
+            Self::MenuPopup { key, options } => crate::menus::valid_menu_id(key) && options.as_ref().is_none_or(crate::menus::PopupOptions::validate),
+            Self::MenuProfile { page, key, options } => {
+                crate::menus::PROFILE_PAGES.contains(&page.as_str()) && crate::menus::valid_menu_id(key) && options.as_ref().is_none_or(|o| o.validate(page))
+            }
+            Self::MenuCredits { key, lines } => {
+                crate::menus::valid_menu_id(key)
+                    && lines.as_ref().is_none_or(|l| l.len() <= crate::menus::MAX_CREDIT_LINES && l.iter().all(crate::menus::CreditLine::validate))
+            }
+            Self::LoadingLine { key, line } => crate::menus::valid_menu_id(key) && line.as_ref().is_none_or(crate::menus::LoadingLine::validate),
+            Self::LoadingRetail { .. } => true,
+            Self::LoadingHold { key, .. } => crate::menus::valid_menu_id(key),
+            Self::LoadingTiming { show, outro } => {
+                show.is_none_or(|s| s.is_finite() && (1.0..=120.0).contains(&s)) && outro.is_none_or(|o| o.is_finite() && (0.0..=10.0).contains(&o))
+            }
             Self::CameraClearCapture { key } => crate::schema::valid_id(key),
         }
     }
@@ -896,12 +1171,16 @@ fn command_kind(command: &Command) -> &'static str {
         Command::EngineInspect {..} => "engine_inspect",
         Command::Request {..} => "request",
         Command::InputOverride {..} => "input_override",
+        Command::InputRumble {..} => "input_rumble",
+        Command::InputStopRumble {..} => "input_stop_rumble",
         Command::NativeImpulse {..} => "native_impulse",
         Command::Log { .. } => "log",
         Command::Overlay { .. } => "overlay",
         Command::MultiplayerDebug { .. } => "multiplayer_debug",
         Command::UiCanvas { .. } => "ui_canvas",
         Command::UiRemove { .. } => "ui_remove",
+        Command::UiCentralMessage { .. } => "ui_central_message",
+        Command::UiChaseAlerts { .. } => "ui_chase_alerts",
         Command::CameraRig { .. } => "camera_rig",
         Command::AudioPreload { .. } => "audio_preload",
         Command::AudioPlay { .. } => "audio_play",
@@ -920,6 +1199,16 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AudioRule { .. } => "audio_rule",
         Command::AudioSetMixmapInput { .. } => "audio_set_mixmap_input",
         Command::AudioSeed { .. } => "audio_seed",
+        Command::WorldSetTuning { .. } => "world_set_tuning",
+        Command::WorldResetMovedProps {} => "world_reset_moved_props",
+        Command::WorldResetProp { .. } => "world_reset_prop",
+        Command::WorldUprightProp { .. } => "world_upright_prop",
+        Command::WorldSpawnProp { .. } => "world_spawn_prop",
+        Command::WorldRemoveProp { .. } => "world_remove_prop",
+        Command::ReplayOpen { .. } => "replay_open",
+        Command::ReplayMarker { .. } => "replay_marker",
+        Command::ReplaySetLimits { .. } => "replay_set_limits",
+        Command::ReplaySetCamera { .. } => "replay_set_camera",
         Command::WorldAudioSpawn { .. } => "world_audio_spawn",
         Command::WorldAudioUpdate { .. } => "world_audio_update",
         Command::WorldAudioEvent { .. } => "world_audio_event",
@@ -960,6 +1249,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::CameraWatch { .. } => "camera_watch",
         Command::CameraAngle { .. } => "camera_angle",
         Command::CameraShotTune { .. } => "camera_shot_tune",
+        Command::WaterLook { .. } => "water_look",
         Command::NetworkState { .. } => "network_state",
         Command::UiMenu { .. } => "ui_menu",
         Command::UiRemoveMenu { .. } => "ui_remove_menu",
@@ -973,8 +1263,12 @@ fn command_kind(command: &Command) -> &'static str {
         Command::SessionTeleport { .. } => "session_teleport",
         Command::VolumeBox { .. } => "volume_box",
         Command::VolumeRemove { .. } => "volume_remove",
+        Command::MinimapIcon { .. } => "minimap_icon",
+        Command::MinimapRemove { .. } => "minimap_remove",
+        Command::MinimapShow { .. } => "minimap_show",
         Command::TriggerBox { .. } => "trigger_box",
         Command::TriggerRemove { .. } => "trigger_remove",
+        Command::TriggerTeleporter { .. } => "trigger_teleporter",
         Command::TriggerEnable { .. } => "trigger_enable",
         Command::TriggerTrack { .. } => "trigger_track",
         Command::TriggerUntrack { .. } => "trigger_untrack",
@@ -988,6 +1282,15 @@ fn command_kind(command: &Command) -> &'static str {
         Command::MenuUnhandle { .. } => "menu_unhandle",
         Command::MenuSetValue { .. } => "menu_set_value",
         Command::MenuMovie { .. } => "menu_movie",
+        Command::MenuBackdrop { .. } => "menu_backdrop",
+        Command::MenuTrickGuide { .. } => "menu_trick_guide",
+        Command::MenuPopup { .. } => "menu_popup",
+        Command::MenuProfile { .. } => "menu_profile",
+        Command::MenuCredits { .. } => "menu_credits",
+        Command::LoadingLine { .. } => "loading_line",
+        Command::LoadingRetail { .. } => "loading_retail",
+        Command::LoadingHold { .. } => "loading_hold",
+        Command::LoadingTiming { .. } => "loading_timing",
         Command::MenuBitmap { .. } => "menu_bitmap",
         Command::CameraClearCapture { .. } => "camera_clear_capture",
     }
@@ -1232,17 +1535,21 @@ impl Vm {
             capabilities.set("scene_transforms", 2)?;
             capabilities.set("skater", 4)?;
             capabilities.set("menus", 3)?;
+            capabilities.set("loading", 2)?;
             capabilities.set("player_physics", 2)?;
             capabilities.set("engine_access", 1)?;
             capabilities.set("command_results", 1)?;
             capabilities.set("native_bodies", 1)?;
             capabilities.set("input_override", 1)?;
+            // sdk.input.rumble / stop_rumble.
+            capabilities.set("input_rumble", 1)?;
             // sdk.input.controller(s) (read-only identity) and sdk.input.action_ids.
             capabilities.set("controllers", 1)?;
             capabilities.set("action_ids", 1)?;
             capabilities.set("player_overlap", 1)?;
             capabilities.set("landed_details", 1)?;
             capabilities.set("camera", 4)?;
+            capabilities.set("water_look", 1)?;
             capabilities.set("player_control", 1)?;
             capabilities.set("session", 1)?;
             capabilities.set("volumes", 1)?;
@@ -1276,6 +1583,8 @@ impl Vm {
             capabilities.set("audio_events", 3)?;
             // Tuning writes at run time (`sdk.audio.set_tuning`: player / world / bus / reverb domains).
             capabilities.set("audio_tuning", 1)?;
+            capabilities.set("world_tuning", 1)?;
+        capabilities.set("replay", 1)?;
             // Retail menus (sdk.menus): edit the retail menu structure, handle any entry.
             capabilities.set("retail_menus", 1)?;
             sdk.set("_native_capabilities", capabilities)?;
@@ -1615,6 +1924,41 @@ mod driving_extension_tests {
         assert!(!far.validate());
         drop(vm);std::fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn water_look_api_crosses_the_lua_boundary() {
+        use std::time::{SystemTime,UNIX_EPOCH};
+        let root=std::env::temp_dir().join(format!("skate-water-look-api-{}-{}",
+            std::process::id(),SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"), r#"
+            return { on_load=function()
+                assert(sdk.capabilities.water_look >= 1)
+                sdk.graphics.water_look({ripple_scale=2, reflection_tint={0.9,1,1}, seamless_clock=false})
+                sdk.graphics.water_look(nil)
+            end }
+        "#).unwrap();
+        let manifest:Manifest=serde_json::from_value(json!({
+            "id":"tests.water_look","api":2,"name":"Water look test", "version":"1.0.0",
+            "author":"test","description":"test","entry":"main.lua","settings":{}
+        })).unwrap();
+        let snap=json!({});
+        let mut vm=Vm::new(&root,&manifest,&BTreeMap::new(),&snap).unwrap();
+        let out=vm.call("on_load",json!({}),&snap).unwrap();
+        assert_eq!(out.len(),2);
+        match &out[0] { Command::WaterLook{patch:Some(p)} => {
+            assert_eq!(p.ripple_scale,Some(2.0));
+            assert_eq!(p.reflection_tint,Some([0.9,1.0,1.0]));
+            assert_eq!(p.seamless_clock,Some(false));
+            assert_eq!(p.enabled,None);
+            assert!(out[0].validate());
+        }, other => panic!("wrong water look command {other:?}") }
+        assert!(matches!(&out[1],Command::WaterLook{patch:None}));
+        assert!(serde_json::from_value::<Command>(json!({"kind":"water_look","patch":{"ripples":2}})).is_err());
+        let far:Command=serde_json::from_value(json!({"kind":"water_look","patch":{"ripple_scale":900}})).unwrap();
+        assert!(!far.validate());
+        drop(vm);std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 
@@ -1713,6 +2057,8 @@ mod model_collision_extension_tests {
                 assert(#sdk.triggers.inside('mod:x:ball') == 0, 'other body')
                 sdk.triggers.box('goal', {center={1,2,3}, half_extents={1,1,1}, rotation={0,0,0,1}, name='goal', group='stairs'})
                 sdk.triggers.remove('goal')
+                sdk.triggers.teleporter('up', {volume='goal', exits={{position={1,40,2}, heading=1.5}}, title='To the top'})
+                sdk.triggers.teleporter('up')
                 sdk.triggers.set_enabled('2c7017060025128f', false)
                 sdk.triggers.track('ball')
                 sdk.triggers.track('ball', {radius=0.5, length=0.2})
@@ -1729,12 +2075,14 @@ mod model_collision_extension_tests {
         let mut vm = Vm::new(&root, &manifest, &BTreeMap::new(), &snap).unwrap();
         let out = vm.call("on_load", json!({}), &snap).unwrap();
         assert_eq!(out.iter().map(command_kind).collect::<Vec<_>>(), vec!["trigger_box", "trigger_remove",
-            "trigger_enable", "trigger_track", "trigger_track", "trigger_untrack", "trigger_configure", "trigger_configure"]);
+            "trigger_teleporter", "trigger_teleporter", "trigger_enable", "trigger_track", "trigger_track", "trigger_untrack", "trigger_configure", "trigger_configure"]);
         assert!(out.iter().all(Command::validate));
-        assert!(matches!(&out[2], Command::TriggerEnable { enabled: false, .. }));
-        assert!(matches!(&out[3], Command::TriggerTrack { options: None, .. }));
-        assert!(matches!(&out[4], Command::TriggerTrack { options: Some(o), .. } if o.radius == Some(0.5)));
-        assert!(matches!(&out[7], Command::TriggerConfigure { options: None }));
+        assert!(matches!(&out[2], Command::TriggerTeleporter { options: Some(o), .. } if o.exits[0].position[1] == 40. && o.exits[0].map.is_none()));
+        assert!(matches!(&out[3], Command::TriggerTeleporter { options: None, .. }));
+        assert!(matches!(&out[4], Command::TriggerEnable { enabled: false, .. }));
+        assert!(matches!(&out[5], Command::TriggerTrack { options: None, .. }));
+        assert!(matches!(&out[6], Command::TriggerTrack { options: Some(o), .. } if o.radius == Some(0.5)));
+        assert!(matches!(&out[9], Command::TriggerConfigure { options: None }));
         let bad = TriggerBoxOptions { center: [0.; 3], half_extents: [0., 1., 1.], rotation: None, name: None, group: None };
         assert!(!bad.validate());
         let lobby = TriggerBoxOptions { half_extents: [1.; 3], group: Some("lobby".into()), ..bad };
@@ -2423,6 +2771,91 @@ mod world_audio_tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// World tuning extension 1: `world_set_tuning` validates per domain, the Lua wrappers submit
+    /// set / restore / read and `world_tuning` is advertised.
+    #[test]
+    fn world_tuning_commands_deserialize_and_validate() {
+        for (value, ok) in [
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_draw_distance":2.0}}), true),
+            (json!({"kind":"world_set_tuning","domain":"carry"}), true),
+            (json!({"kind":"engine_inspect","system":"world_tuning:props"}), true),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"nope":1}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_tricks":{"mode":"recorded","min_air_frames":30},"skater_trick_profiles":{"default":{"regular":[{"trick":96,"weight":1.0}]}}}}), true),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_tricks":{"mode":"scripted"}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_simulated":{"enabled":true,"radius":30.0,"max":2}}}), true),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"npc_simulated":{"radius":-1.0}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"free_play":{"traffic":0.3,"ai_skaters":false},"pedestrians":{"density":2.0},"ambient_skaters":5}}), true),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"free_play":{"traffic":1.5}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"vehicles":{"density":9.0}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"ambient_skaters":20}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"skater_trick_profiles":{"default":{"regular":[{"trick":400,"weight":1.0}]}}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"living_world","patch":{"skater_trick_profiles":{"default":{"nollie":[{"trick":117,"weight":-1.0}]}}}}), false),
+            (json!({"kind":"world_set_tuning","domain":"roads","patch":{}}), false),
+            (json!({"kind":"world_reset_moved_props"}), true),
+            (json!({"kind":"world_reset_prop","id":7}), true),
+            (json!({"kind":"world_upright_prop","id":7}), true),
+            (json!({"kind":"world_spawn_prop","key":"can","from":7,"position":[1,2,3],"velocity":[4,2,0]}), true),
+            (json!({"kind":"world_spawn_prop","key":"can","from":7,"position":[1,2,3],"velocity":[400,0,0]}), false),
+            (json!({"kind":"world_spawn_prop","key":"../x","from":7,"position":[1,2,3]}), false),
+            (json!({"kind":"world_remove_prop","key":"can"}), true),
+            (json!({"kind":"replay_open"}), true),
+            (json!({"kind":"replay_marker","label":"kickflip"}), true),
+            (json!({"kind":"replay_marker","label":""}), false),
+            (json!({"kind":"replay_set_limits","max_frames":5400}), true),
+            (json!({"kind":"replay_set_limits"}), true),
+            (json!({"kind":"replay_set_limits","max_frames":10}), false),
+            (json!({"kind":"replay_set_limits","byte_budget":1}), false),
+            (json!({"kind":"replay_set_camera","collide":false}), true),
+            (json!({"kind":"replay_set_camera"}), true),
+            (json!({"kind":"replay_set_camera","radius":5.0}), false),
+            (json!({"kind":"replay_set_camera","leash":0.5}), false),
+            (json!({"kind":"replay_set_camera","follow_eye":"skater"}), true),
+            (json!({"kind":"replay_set_camera","follow_eye":"camera_full"}), true),
+            (json!({"kind":"replay_set_camera","follow_eye":"board"}), false),
+            (json!({"kind":"replay_set_camera","fill_section":false}), true),
+            (json!({"kind":"replay_set_camera","playback_collide":true}), true),
+        ] {
+            let c: Command = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(c.validate(), ok, "{value}");
+        }
+        let root = std::env::temp_dir().join(format!("skate-world-tuning-lua-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.lua"), r#"
+            local M = {}
+            function M.on_update()
+                assert(sdk.capabilities.world_tuning == 1, 'capability')
+                sdk.world.set_tuning('living_world', {skater_fade = {fade_seconds = 2}})
+                sdk.world.set_tuning('living_world', nil)
+                sdk.world.tuning('t', 'carry')
+                sdk.world.reset_moved_props()
+                sdk.world.reset_prop(7)
+                sdk.world.upright_prop(7)
+                sdk.world.spawn_prop('can', 7, {position = {1, 2, 3}, velocity = {4, 2, 0}})
+                sdk.world.remove_prop('can')
+                assert(sdk.capabilities.replay == 1, 'replay capability')
+                sdk.replay.open()
+                sdk.replay.marker('kickflip')
+                sdk.replay.set_limits({max_frames = 1800})
+                sdk.replay.set_limits(nil)
+                sdk.replay.set_camera({collide = false, leash = 80})
+            end
+            return M
+        "#).unwrap();
+        let manifest: Manifest = serde_json::from_value(json!({
+            "id":"tests.world-tuning","api":2,"name":"World tuning","version":"1.0.0",
+            "author":"test","description":"test","entry":"main.lua","settings":{}})).unwrap();
+        let mut vm = Vm::new(&root, &manifest, &BTreeMap::new(), &Value::Null).unwrap();
+        let cmds = vm.call("on_update", json!({"dt": 0.016}), &json!({})).unwrap();
+        let kinds: Vec<_> = cmds.iter().map(command_kind).collect();
+        assert_eq!(kinds, ["world_set_tuning", "world_set_tuning", "request", "world_reset_moved_props", "world_reset_prop", "world_upright_prop", "world_spawn_prop", "world_remove_prop",
+            "replay_open", "replay_marker", "replay_set_limits", "replay_set_limits", "replay_set_camera"]);
+        assert!(matches!(&cmds[12], Command::ReplaySetCamera { collide: Some(false), radius: None, leash: Some(80.0), follow_eye: None, fill_section: None, playback_collide: None }));
+        assert!(matches!(&cmds[11], Command::ReplaySetLimits { max_frames: None, byte_budget: None, share_max_seconds: None }), "nil restores");
+        assert!(cmds.iter().all(Command::validate));
+        assert!(matches!(&cmds[1], Command::WorldSetTuning { patch: None, .. }), "nil restores");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// Audio extension 4 (doc 16 L2, L5): `audio_set_mixmap_input` and `audio_seed` cross the serde
     /// boundary (valid, invalid, unknown field) and the Lua wrappers submit them (nil releases).
     #[test]
@@ -2744,6 +3177,45 @@ mod empty_table_lists {
         assert!(matches!(bitmap, Command::MenuBitmap { bitmap: 2, .. }) && bitmap.validate());
         assert!(!eval("return {kind='menu_bitmap', movie='source/screens/main/core_menu', bitmap=-1, path='fe/glow.png'}").validate());
         assert!(!eval("return {kind='menu_bitmap', movie='source/screens/main/core_menu', bitmap=2, path='fe/glow.json'}").validate());
+        let popup = eval("return {kind='menu_popup', key='ask', options={description='#Keep going?', options={'ID_COMMON_YES', 'ID_COMMON_NO'}, cancelable=true}}");
+        assert!(matches!(&popup, Command::MenuPopup { options: Some(o), .. } if o.options.as_ref().is_some_and(|o| o.len() == 2) && o.cancelable) && popup.validate());
+        assert!(eval("return {kind='menu_popup', key='ask'}").validate());
+        assert!(!eval("return {kind='menu_popup', key='ask', options={kind='huge'}}").validate());
+        assert!(!eval("return {kind='menu_popup', key='ask', options={options={'1','2','3','4','5','6','7','8','9'}}}").validate());
+        let backdrop = eval("return {kind='menu_backdrop', screen='b4b7976b40b3e837', options={blur=true, tint={30, 30, 30}, step=0.4}}");
+        assert!(matches!(&backdrop, Command::MenuBackdrop { options: Some(o), .. } if o.tint == Some(vec![30, 30, 30])) && backdrop.validate());
+        assert!(eval("return {kind='menu_backdrop', screen='b4b7976b40b3e837'}").validate());
+        let tg = eval("return {kind='menu_trick_guide', entry='trick', key='my-mod.trick', options={label='#Mod Flip', parent='8bca54f004465329', slots={{gesture=48, button=3, connector=1}}, order=5}}");
+        assert!(matches!(&tg, Command::MenuTrickGuide { options: Some(o), .. } if o.slots.as_ref().is_some_and(|s| s[0].gesture == 48)) && tg.validate());
+        assert!(eval("return {kind='menu_trick_guide', entry='category', key='046ed0ccbda1091f'}").validate());
+        assert!(!eval("return {kind='menu_trick_guide', entry='grind', key='a'}").validate());
+        assert!(!eval("return {kind='menu_trick_guide', entry='trick', key='a', options={slots={{connector=4}}}}").validate());
+        let row = eval("return {kind='menu_profile', page='stats', key='my-mod.kickflips', options={label='#Kickflips', value=42, order=1}}");
+        assert!(matches!(&row, Command::MenuProfile { options: Some(o), .. } if o.value == Some(crate::menus::ProfileValue::Number(42.0))) && row.validate());
+        assert!(eval("return {kind='menu_profile', page='career', key='my-mod.career', options={title='#Career', current=3, total=10}}").validate());
+        assert!(eval("return {kind='menu_profile', page='personal_bests', key='my-mod.best', options={value='#12.5 m'}}").validate());
+        assert!(eval("return {kind='menu_profile', page='stats', key='my-mod.kickflips'}").validate());
+        // Bar fields on a table page and row fields on a bar are refused, as is an unknown page.
+        assert!(!eval("return {kind='menu_profile', page='stats', key='a', options={total=3}}").validate());
+        assert!(!eval("return {kind='menu_profile', page='career', key='a', options={label='#x'}}").validate());
+        assert!(!eval("return {kind='menu_profile', page='friends', key='a'}").validate());
+        let hint = eval("return {kind='loading_line', key='my-mod.tip', line={panel='hint', title='#Tip', text='#Hold A to ollie higher.'}}");
+        assert!(matches!(&hint, Command::LoadingLine { line: Some(crate::menus::LoadingLine::Hint { .. }), .. }) && hint.validate());
+        assert!(eval("return {kind='loading_line', key='my-mod.frank', line={panel='coach_frank', text='ID_TIPS_COACHFRANK_3'}}").validate());
+        assert!(eval("return {kind='loading_line', key='my-mod.tip'}").validate());
+        assert!(eval("return {kind='loading_line', key='my-mod.kicks', line={panel='stat', label='#Kickflips', value='#12'}}").validate());
+        assert!(!eval("return {kind='loading_line', key='my-mod.kicks', line={panel='stat', label='#Kickflips', value=''}}").validate());
+        assert!(!eval("return {kind='loading_line', key='my-mod.tip', line={panel='hint', title='', text='x'}}").validate());
+        assert!(eval("return {kind='loading_hold', key='my-mod.bank', held=true}").validate());
+        assert!(eval("return {kind='loading_retail', shown=false}").validate());
+        assert!(eval("return {kind='loading_timing', show=4.5, outro=0.25}").validate());
+        assert!(eval("return {kind='loading_timing'}").validate());
+        assert!(!eval("return {kind='loading_timing', show=0.2}").validate());
+        assert!(!eval("return {kind='loading_timing', outro=30}").validate());
+        assert!(!eval("return {kind='menu_backdrop', screen='56'}").validate());
+        assert!(eval("return {kind='menu_backdrop', screen='a774f79d33b6be83:1'}").validate());
+        assert!(!eval("return {kind='menu_backdrop', screen='b4b7976b40b3e837', options={tint={1, 2}}}").validate());
+        assert!(!eval("return {kind='menu_backdrop', screen='b4b7976b40b3e837', options={step=0}}").validate());
         assert!(matches!(eval("return {kind='menu_set_value', id='a', value=0.25}"), Command::MenuSetValue { value: crate::menus::MenuValue::Float(v), .. } if v == 0.25));
     }
 }

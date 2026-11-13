@@ -42,6 +42,12 @@ notes file in your checkout.
 - Rust: `cargo test -p <crate> --release` (scope it; skate-core and skate-game are large). `skate-data`: use
   `--lib --tests` (some of its examples may not compile upstream). Filter within skate-game:
   `cargo test -p skate-game --release --bin skate3rust -- input::`.
+- Whole workspace: `cargo test --workspace --lib --bins --tests --no-fail-fast` (leave the examples out: some do
+  not compile). Data-gated tests are `#[ignore]` with the reason in the attribute; run them with `-- --include-ignored`
+  and the paths they name (for example `SKATE3_ASSET_ROOT=<repo>\assets`, `SKATE3_MAP=<installation>\maps\DownTown.skate`).
+- Never put a short `timeout` on a test or build run: a compile killed mid-codegen leaves a broken incremental cache,
+  and the next link fails with hundreds of unresolved `.llvm.*` symbols (`LNK1120`). Fix: delete only
+  `<target>\debug\incremental\<crate>-*` and rebuild.
 - Python tools: `py -3.13 -m unittest tools.test_setup_assets tools.test_setup_refresh` (setup-related), or
   `discover -s tools -p "test_*.py"`.
 - Mods: `cargo run --locked -p skate-mods --example check_mod -- <mod-folder>`.
@@ -67,14 +73,25 @@ notes file in your checkout.
 - Smoke test from an agent (opens a window briefly): start `bin\skate3rust.exe --assets "<repo>\assets"` with
   `SKATE3_MODS=<repo>\mods`, redirect stdout/stderr into `.local\`, stop it after about 15-25 s, then grep the log for
   `Controller`, `SDL`, `panic`, `ERROR`.
-- Audio branches: add `--mute` to automated smoke runs (silences game + mod audio); master volume defaults to 25 %
+- Audio (upstream main since PR #32): add `--mute` to automated smoke runs (silences game + mod audio); master volume defaults to 25 %
   (`settings\audio.json`). Launch long play sessions from Explorer/cmd rather than inside Windows Terminal (a
   Terminal crash kills the attached game). Audio iteration: skill `audio-tuning`.
-- Audio diagnostics switches (audio branches): `SKATE_AUDIO_TRACE`, `SKATE_AUDIO_TIMING`, `SKATE_AUDIO_STATE_LOG`,
+- Audio diagnostics switches: `SKATE_AUDIO_TRACE`, `SKATE_AUDIO_TIMING`, `SKATE_AUDIO_STATE_LOG`,
   `SKATE_AUDIO_SET`, `SKATE_AEMS_BANKS`, `SKATE_AUDIO_FMA`, plus world toggles `SKATE_AEMS_WORLD`,
   `SKATE_AEMS_WORLD_PREFETCH`, `SKATE_AEMS_NPC_SKATERS`.
 - Input backend: SDL3 by default; `SKATE3_INPUT=xinput` for the old XInput path. SDL hints can be set as env vars
   (for example `SDL_JOYSTICK_HIDAPI_XBOX_ONE=1`).
 - Run only one game instance at a time (engine or recomp); two GPU-heavy instances can make a machine unstable.
+- Hitches (living-world branch): every frame over the hitch rule logs a `FRAME_HITCH` line with the slowest stage, the physics phases, the
+  living-world systems and the audio systems (`audio_parts`), so a reported stutter can be traced from the log alone.
+
+## Getting to a spot: teleport there
+Use coordinate teleports to reach an issue spot instead of menu teleports or driving there:
+- Retail (the recomp research build): `SKATE3_TP_OVERRIDE="x y z yaw[; ...]"` (skill `recomp-scripted-runs`): each
+  Challenge Map menu teleport lands at the next pose. Add about 4 m to an estimated ground height and read the settled
+  height from the trace; points outside the playable area put the game into its out-of-bounds re-place loop.
+- The engine: `sdk.player.teleport(...)` / `sdk.camera.set(pos, look_at)` from a tiny test mod with `--verify`
+  captures (above), or `--teleport <id>`.
+- Use the same pose in both for matched retail and engine shots, and keep the poses next to the evidence.
 
 After running, record any new environment findings in your notes file.

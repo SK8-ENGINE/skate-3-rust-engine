@@ -6,6 +6,7 @@ pub mod audio_merge;
 pub mod audio_rules;
 pub mod audio_tuning;
 pub mod world_audio;
+pub mod world_tuning;
 pub mod menus;
 pub mod graphics_dynamic;
 pub mod presentation;
@@ -24,8 +25,8 @@ pub use model::model_shape_file;
 pub use query::{with_host, DynamicsHost, RaycastFilter, RaycastOptions};
 pub use schema::{Manifest, Setting, SettingValue};
 pub use vm::{
-    CaptureOptions, Command, TeleportOptions, TriggerBoxOptions, TriggerShapeOptions,
-    TriggerTrackOptions, VolumeOptions,
+    CaptureOptions, Command, TeleportOptions, TeleporterExit, TeleporterOptions, TriggerBoxOptions, TriggerShapeOptions,
+    TriggerTrackOptions, VolumeOptions, MinimapIconOptions,
 };
 
 use serde::{Deserialize, Serialize};
@@ -93,6 +94,9 @@ impl Package {
     }
 }
 
+/// How often an unforced [`Manager::scan`] reads the mods folder.
+const SCAN_INTERVAL: Duration = Duration::from_millis(500);
+
 pub struct Manager {
     pub packages: BTreeMap<String, Package>,
     pub diagnostics: Vec<String>,
@@ -133,8 +137,14 @@ impl Manager {
         }
     }
 
+    /// Whether an unforced [`Self::scan`] would read the folder within `ahead` from now (the host keeps the snapshot
+    /// a starting mod gets fresh around then).
+    pub fn scan_due_within(&self, ahead: Duration) -> bool {
+        self.last_scan.elapsed() + ahead >= SCAN_INTERVAL
+    }
+
     pub fn scan(&mut self, force: bool) {
-        if !force && self.last_scan.elapsed() < Duration::from_millis(500) {
+        if !force && self.last_scan.elapsed() < SCAN_INTERVAL {
             return;
         }
         self.last_scan = Instant::now();

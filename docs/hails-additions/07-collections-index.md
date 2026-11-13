@@ -42,7 +42,7 @@ settings tables), so lookups dominated.
 The old predicate was `(name == x || numeric(name) == numeric(x))` for class and
 key. `numeric_name` is a pure function, so equal names have equal numeric names
 and the predicate reduces to "numeric names equal". The index keeps the **first**
-position per numeric pair, which is exactly what a forward linear scan returns —
+position per numeric pair, which is exactly what a forward linear scan returns,
 including if duplicate entries ever exist (`load` already rejects them; directly
 deserialized data might not).
 

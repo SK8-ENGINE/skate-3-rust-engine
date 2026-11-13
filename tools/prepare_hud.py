@@ -39,6 +39,10 @@ def font_mapping(collections: Path, cache: AssetCache) -> dict:
             raise ValueError(f'Ambiguous native font record: {apt_name}')
         scale = {name: struct.unpack('>f',bytes.fromhex(field(name)['data']))[0]
                  for name in ('ScaleX','ScaleY','OffsetX','OffsetY')}
+        # Line spacing (unnamed float, layout +28 = FontManager row +24 -> font+364 in 82809308; wrapped
+        # text advances LineHeight * scale * this * height per line, 82CA2118). futuraheavy 0.9, others 1.0.
+        spacing = field('Hash_672E35A2AA8C4A00')
+        scale['LineSpacing'] = struct.unpack('>f',bytes.fromhex(spacing['data']))[0] if spacing else 1.0
         target = matches[0]['font']['family']
         provenance = {'class': row['class'], 'key': row['key'],
                       'source_sha256': row['sha256'], 'file_name':filename,
@@ -48,15 +52,29 @@ def font_mapping(collections: Path, cache: AssetCache) -> dict:
     return result
 
 
+# The scoring HUD (trick display) and the central message HUD (`hudcentral`: the chase "ZAP!" / "BAM!" lines and other
+# centre-screen messages, retail `826B4FC0` -> `82663F38`), each as runtime/<file> in the same format.
+MOVIES = (("data/fe/source/screens/hud2/trickdisplay2", "trickdisplay.json"),
+          ("data/fe/source/screens/hud2/hudcentral", "hudcentral.json"),
+          # The HUD minimap's frame (template 53 MiniMap, research b568); the map picture is drawn by the engine.
+          ("data/fe/source/screens/hud2/hudminimap", "hudminimap.json"))
+
+
 def prepare(game: Path, output: Path, collections: Path):
-    extract_project(game, output, prefixes=("data/fe/source/screens/hud2/trickdisplay2",), update=True)
+    extract_project(game, output, prefixes=tuple(name for name, _ in MOVIES), update=True)
     cache = AssetCache(output)
     mappings = font_mapping(collections,cache)
-    name = "data/fe/source/screens/hud2/trickdisplay2"
+    results = [prepare_movie(output, cache, mappings, collections, name, file) for name, file in MOVIES]
+    return results[0]
+
+
+def prepare_movie(output: Path, cache, mappings, collections: Path, name: str, file: str):
     bundle = cache.load_bundle(name)
     apt_path = output / "raw" / (name + ".apt")
     const_path = apt_path.with_suffix('.const')
-    actions = Actions(apt_path.read_bytes(), const_path.read_bytes())
+    from prepare_menu_movies import PLACE_HAS_CLIP_ACTIONS, clip_actions
+    apt_bytes = apt_path.read_bytes()
+    actions = Actions(apt_bytes, const_path.read_bytes())
     blocks = {}
     for c in bundle['characters'].values():
         for f in c.get('frames', []):
@@ -65,6 +83,12 @@ def prepare(game: Path, output: Path, collections: Path):
                     offset = control.get('actions_offset', 0)
                     if offset:
                         blocks[str(offset)] = actions.stream(offset)
+                # Placement clip events (the minimap's frame has one), as the menu movies export them.
+                elif control['type_name'] in ('place_object2', 'place_object3') \
+                        and control.get('flags', 0) & PLACE_HAS_CLIP_ACTIONS and control.get('actions_offset', 0):
+                    control['clip_actions'] = clip_actions(apt_bytes, control['actions_offset'])
+                    for event in control['clip_actions']:
+                        blocks[str(event['actions_offset'])] = actions.stream(event['actions_offset'])
     shapes = {}
     fonts = {}
     for c in bundle['characters'].values():
@@ -89,8 +113,11 @@ def prepare(game: Path, output: Path, collections: Path):
         'language': {row['label'].strip(): row['value'] for row in
                      json.loads((output / 'metadata/languages/english_global.json').read_text(encoding='utf-8'))['entries']},
         'unresolved_fonts': [family for family, asset in fonts.items() if asset is None],
+        # Linkage records (name, character id, source movie): the engine leaves an import no library resolves absent.
+        'imports': list((bundle.get('imports') or {}).values()),
+        'exports': list((bundle.get('exports') or {}).values()),
     }
-    target = output / 'runtime' / 'trickdisplay.json'
+    target = output / 'runtime' / file
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(result, separators=(',', ':')) + '\n', encoding='utf-8')
     print(f"Prepared {len(shapes)} original HUD shapes and {len(blocks)} action blocks: {target}")

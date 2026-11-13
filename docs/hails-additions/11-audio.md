@@ -1,6 +1,6 @@
-# 11 — Game audio (ambience, rolling, trick cues, footsteps, water)
+# 11. Game audio (ambience, rolling, trick cues, footsteps, water)
 
-**Branch:** `gameplay/audio` (from `gameplay/water`; partly committed 2026-10-02; the world-audio work since then is uncommitted until the user's batch commit). Upstream form: `audio/retail-audio`, draft PR #32, marked Work in Progress. **Status:** implemented and tuned
+**Branch:** `gameplay/audio`, merged upstream as PR #32 on 2026-10-06 (upstream form `audio/retail-audio`; both branches gone). **Status:** implemented and tuned
 by ear over ~15 play sessions with the user (2026-10-01). Most cues are confirmed in play; the rest are marked
 **not yet confirmed** below. All sample choices are project choices, not retail event data.
 
@@ -18,10 +18,10 @@ archives readable with `tools/owned_game/big.py`.
 | Archive | Contents |
 |---|---|
 | `ambience.big` + `ambienceresident.big` | 24 per-area ambience beds (`.sns` bodies, `.snr` headers), e.g. `04_dt_main`, `09_univ_campus`; 5-channel 48 kHz, ~2–2.5 min loops |
-| `audiofiles.big` | 376 ABKC `.abk` banks, 20 SPLC `.bnk` banks, 23 per-map `.ems` emitter files, 9 MOIR `.csi` AEMS event scripts |
+| `audiofiles.big` | 376 ABKC `.abk` banks, 20 SPLC (Splice) `.bnk` banks, 23 per-map `.ems` emitter files, 9 MOIR `.csi` AEMS event scripts |
 | `grains.big` | 14 rolling "grains", 7 surfaces × soft/hard wheels (`asphalt_smooth`, `asphalt_rough`, `concrete_smooth`, `concrete_rough`, `concrete_aggregate`, `wood_ramp`, `metal_smooth` hard only) + `x_jet_rolling` |
 | `wheels.big` | `Whls_spins_Jump_1`, `Whls_spins_Man_1` (+ `.sek` seek tables) |
-| `post.big`, `nis.big`, `english/…`, `music/…` | stingers, speech, cutscenes, licensed music — not used |
+| `post.big`, `nis.big`, `english/…`, `music/…` | stingers, speech, cutscenes, licensed music: not used |
 
 ### Formats (worked out from the archives; `tools/asset_pipeline/audio_formats.py`)
 
@@ -46,14 +46,14 @@ archives readable with `tools/owned_game/big.py`.
 - Retail mixes at runtime: many raw samples peak at 0 dBFS with RMS up to −6 dBFS, so playback levels
   must be low; footstep recordings are the opposite (peak ≈ −11 dBFS, RMS ≈ −28 dBFS).
 
-## Change — current design
+## Change: current design
 
 ### Setup: new `audio` asset group
 
-- `tools/asset_pipeline/audio_formats.py` — SNR scanner/validator (block-chain check), SPLC and grain
+- `tools/asset_pipeline/audio_formats.py`: SNR scanner/validator (block-chain check), SPLC and grain
   readers, standalone `.snr` cut-out, gain-free 5→2 downmix (weights per output sum to 1), loopable
   band cutting for grains.
-- `tools/asset_pipeline/audio_export.py` — decodes only what the engine plays to PCM16 WAV in
+- `tools/asset_pipeline/audio_export.py`: decodes only what the engine plays to PCM16 WAV in
   `assets/private/audio/` with `audio_manifest.json` (version 2): 22 ambience beds (stereo), 14 grains
   cut into **6 loopable speed bands** each (84 files, 0.08 s loop cross-fade), 2 wheel spins and 23 sample
   banks (2,718 samples). No normalisation or gain. ~40 s, ~615 MB.
@@ -72,7 +72,7 @@ archives readable with `tools/owned_game/big.py`.
 
 | File | Role |
 |---|---|
-| `mod.rs` | `AudioSettings` (master **75 % by default** — 100 % is unity gain; 25 % (−12 dB) was too quiet to judge retail parity in play, user 2026-10-02 —, ambience 100 %, effects 100 %, 5 % steps) saved to `settings/audio.json`; menu rows in GRAPHICS; `--mute`; `GlobalVolume` follows the master so mod audio obeys it; the single `SpatialListener` (moved out of `modding/audio.rs`) follows the gameplay camera; preloads every cue sample, grain band, wheel spin and water piece at startup (~207 clips, ~35 ms) so riding never reads the disk. |
+| `mod.rs` | `AudioSettings` (master **75 % by default** (100 % is unity gain; 25 % (−12 dB) was too quiet to judge retail parity in play, user 2026-10-02), ambience 100 %, effects 100 %, 5 % steps) saved to `settings/audio.json`; menu rows in GRAPHICS; `--mute`; `GlobalVolume` follows the master so mod audio obeys it; the single `SpatialListener` (moved out of `modding/audio.rs`) follows the gameplay camera; preloads every cue sample, grain band, wheel spin and water piece at startup (~207 clips, ~35 ms) so riding never reads the disk. |
 | `library.rs` | Loads the manifest; reads WAVs into `Assets<AudioSource>`, measuring each clip's peak; rejects paths outside the audio folder; warns once per missing file. |
 | `voices.rs` | Voice pool and **loudness rules** (below). Everything pauses while the menu is open or a replay runs. |
 | `cues.rs` | The sample table, per-cue minimum gaps, metal-surface test, surface → grain table. |
@@ -82,13 +82,13 @@ archives readable with `tools/owned_game/big.py`.
 
 Outside the module (observation only; physics never reads any of it):
 
-- `physics/animation_input.rs` — `AudioEvents` latch. `push_contact` (flags bit 27), `brake_contact`
+- `physics/animation_input.rs`: `AudioEvents` latch. `push_contact` (flags bit 27), `brake_contact`
   foot-down/up (bits 28 + 30 / 23) and `AudibleFootStepStrength` are cleared within the tick
   (`finish_output_publication`, `ScalarAttributeInputs::reset`), so they are latched while the animation
   attributes are processed and taken by `observe`.
-- `physics.rs` `foot_clearance` — each animated foot's height above its ground line test (via
+- `physics.rs` `foot_clearance`: each animated foot's height above its ground line test (via
   `biped_ground::services::feet_input`).
-- `skate-core` `WheelLineState.audio_surfaces` — audio surface (`surface_tag & 0x7F`) per wheel, next to the
+- `skate-core` `WheelLineState.audio_surfaces`: audio surface (`surface_tag & 0x7F`) per wheel, next to the
   existing `physics_surfaces`. Additive output only.
 
 ### Loudness rules (`voices.rs`)
@@ -98,7 +98,7 @@ Outside the module (observation only; physics never reads any of it):
   full scale × master.
 - One-shots start at their final level on the first sample; loops and sounds that ask for a fade start
   silent and fade in (≥ 10 ms). (Until 2026-10-01 every sound faded in and its gain was raised once per
-  frame from 0, which ate the attack of 25–35 ms impacts and knocks — pops and landings lost their
+  frame from 0, which ate the attack of 25–35 ms impacts and knocks: pops and landings lost their
   layering.) Retail layer offsets are kept with `Record::delay` (frame-granular). At most 32 voices, 3 of one sound, same sound again only
   after 40 ms; each cue also has a minimum gap (`cues::min_gap`: step 0.2 s, run step 0.15, push 0.3,
   bail 0.5, splash 1.0, others 0.12) as a safety net against flags that stay set for many ticks.
@@ -212,7 +212,7 @@ water "overlapping or playing too many times".
   `sfx_*` / `skateschool` emitters use: 100 banks, 95 of them new. All 486 sound emitters resolve to a bank
   on the disc.
 
-**Game side (from TU3, reference only):**
+**Game side (from TU3, title update 3, reference only):**
 - **Shape:** a record is a sphere (equal extents) or an ellipsoid. Its semi-axes are the extents along
   forward = scalars[1..4], up and side (side = Y × forward).
 - **Core:** scalars[0] is an inner core with full level. Outside it the distance is rescaled to the edge.
@@ -272,7 +272,7 @@ random one-shot scheduler, not from placed emitters.
   wolves and coyotes at the Spillway; hawks and rockfalls at the mega-park.
 - Retail fired `Siren_city_5` at Hotel District and no siren sample played, so the banks we keep silent
   are silent in retail too.
-- **Long runs (5 minutes per location, 2026-10-02)** — *re-verify on clean data: the long_* sessions were deleted
+- **Long runs (5 minutes per location, 2026-10-02)**: *re-verify on clean data: the long_* sessions were deleted
   (malformed, interleaved trace lines; user, 2026-10-02):*
   - **All 36 Challenge Map locations** (Downtown 14, Industrial 12, University 10). Our location sets match
     the game on **26,817 of 26,817** samples, across 28 sets.
@@ -379,7 +379,7 @@ this keeps retail's bed-to-player balance. Before this the beds were 11 dB too l
   +9 mode) of 72-byte members (+0 sample index, +8 gain, +44 pitch spread, +48 gain range, +64 probability;
   +20/+52 delay, not used yet). Verified on all 20 SPLC banks: the walk ends exactly at the sample table,
   every member names a valid sample (5,973 members → 2,266 samples), and sample-table offsets sit at a
-  constant distance from our SNR scan — **SPLC sample index n is our stream n**.
+  constant distance from our SNR scan: **SPLC sample index n is our stream n**.
 - **Semantics** (per PRs #1/#4, implemented independently in `skate_events.rs` `play_record`): a record's
   groups are layers played together, one member each; group mode 0 random, 1 in sequence, 2 shuffled
   without an immediate repeat; a member plays unless rand > probability; gain ± range; pitch random between
@@ -400,7 +400,7 @@ this keeps retail's bed-to-player balance. Before this the beds were 11 dB too l
 
 Each step came from the user's report of an in-play session plus the `AUDIO_*` log lines of that session.
 
-1. **First pass:** push, foot drag, footsteps silent — the animation events are cleared inside the tick
+1. **First pass:** push, foot drag, footsteps silent: the animation events are cleared inside the tick
    before any ECS system can see them → `AudioEvents` latch. Bails silent (`board_wiping_out` is reset by the
    ground phase) → WipeoutGround state. Grinds silent (raw `category_12`) → `player_state.current()`.
 2. **Flood:** the next log showed **push fired 1,723 times** and steps ~60/s: push contact and
@@ -558,7 +558,7 @@ interface lists after the sample data, so the whole file is needed. S10A slot i 
   the 4 the spec lists; 291 banks bind to `c_emitter`.
 - **Evaluator vs the PoC oracle** (our probe `aems_golden` in the local PoC worktree, with its op 5
   fixed and n-ary min/max added locally, never committed; identical mock voice device on both sides):
-  **234 of 235 scripts identical — 88,597 device calls (open / set / azimuth / release / end) and 599
+  **234 of 235 scripts identical: 88,597 device calls (open / set / azimuth / release / end) and 599
   voice opens, 0 differences.** Scripts: one per emitter and location-set bank in the manifest
   (utility at boot, release at 20 s), both crossfade banks with group changes, sirens posted twice, and
   28 player/world classes (grinds, footsteps, cloth, seams, rolling, traffic, crowds incl. op 20, car
@@ -643,13 +643,13 @@ repeats and cross-faded with square-root fades, rescheduled every 256-frame bloc
   `grain_whole` keeps each member's whole decoded recording (`grains/<stem>.wav`) and raw `.grain`;
   `grain_tuning` exports the vault's grain class, owner class and `Sk8::AudioSurfaceMap` exactly
   (`manifest.grain_player`). All keys are optional, so the manifest version stays 5. Dev installs:
-  The local tool `stage_grain_mixmap.py` adds them without a full setup run.
+  the local tool `stage_grain_mixmap.py` adds them without a full setup run.
 
 **Evidence.**
 - **MixMap vs the PoC's port** (PR #4's MixMap run locally as a black box, `mixmap_golden`) **and our
   Python reference**: 3 golden scripts, 1,500 evaluations, **87,000 / 87,000 output cells identical**
   (local tool `mixmap_compare.py`). golden1/2: ambience fade/crossfade, emitter distance/angle,
-  player speed and Doppler, pause/menu/reverb/HOM ducks, dt changes; golden3 (new): 10 Collision
+  player speed and Doppler, pause/menu/reverb/HOM (Hall of Meat) ducks, dt changes; golden3 (new): 10 Collision
   instances, a Traffic drive-by with Doppler and sign-flip resets, the ADSR envelopes (F133/F137/F138 with
   retrigger), F24, Jitter-driven sums, a dt change.
 - Disc census: 14 slots; 547 input entries, 853 A, 635 B, 350 F, 240 C, 1044 E; 154 output blocks;
@@ -664,7 +664,7 @@ repeats and cross-faded with square-root fades, rescheduled every 256-frame bloc
   (tags 0–127).
 - Board outputs with our inputs (`examples/board_mix_probe.rs`): grain pitch 0.790 at rest, 0.864 at
   1 m/s, 0.996 from 5 km/h (retail medians 3209 / ~3500 / ~4080 of 4096); high-pass 77 Hz and low-pass
-  24971 Hz (retail modal 77 / 24971 — 1109 Hz with id 9 = 32767, which is how id 9 = 0 for the local
+  24971 Hz (retail modal 77 / 24971; 1109 Hz with id 9 = 32767, which is how id 9 = 0 for the local
   player was confirmed); gain A 0.23–0.26 from 5 km/h (retail p90 7859 = 0.24).
 - Whole bed headless (`examples/grain_bed_render.rs`, concrete_rough_hard): 6.6 grain starts/s after the
   bind (retail modal 6/s for one truck), at most 4 voices, stereo RMS −40.7 dBFS at 5 km/h rising to
@@ -687,7 +687,7 @@ examples `mixmap_golden`, `board_mix_probe`, `grain_bed_render`, `game_audio/gra
 
 **Not modelled / open** (nothing invented):
 - MixMap inputs without a game source yet stay 0: Jitter (random every frame in retail), VU meter,
-  Menu/NIS/HOM/Challenge flags, Contacts 2/6, Rail, OffBoard, HandGrabs, PlayerPhysics 3/5/6/11/12/13, the
+  Menu/NIS (non-interactive sequence, a cutscene)/HOM/Challenge flags, Contacts 2/6, Rail, OffBoard, HandGrabs, PlayerPhysics 3/5/6/11/12/13, the
   skater-frame azimuths (camera frame used for both), relative speeds (no Doppler), the second player.
   Retail's medians of gain A (0.06 at 5 km/h, 0.08–0.17 above) are lower than ours (0.23–0.26, near
   retail's p90); the missing inputs (Jitter scales A63, for one) are the first suspects.
@@ -701,7 +701,7 @@ examples `mixmap_golden`, `board_mix_probe`, `grain_bed_render`, `game_audio/gra
   next frame's start).
 - `mixmap-spec.md` §6.2 said PlayerPhysics.in9 = 32767 for the local player; the PoC's input writer and
   the board's 77 Hz high-pass say 0. With 0 the ambience bed's speed duck (A[Player.5], up to −3 dB) is
-  active — the ambience beds are not native yet, so nothing changes there today.
+  active; the ambience beds are not native yet, so nothing changes there today.
 
 ### Player inputs and the first native player components (2026-10-02, `skate_audio::player`)
 **Problem.** The native runtime left most MixMap inputs at 0 (Jitter, Contacts 2/6, Rail, OffBoard,
@@ -716,7 +716,7 @@ owner's outputs and redelivers them.
 
 **Change** (`crates/skate-audio/src/player/`, engine independent, unit-tested):
 - `state.rs`: the audio-state record (`AudioState`, retail offsets in the docs). The game fills it in
-  `skate_events::observe` (`audio_state`): ground speed, COM velocity/position (SystemReckoning),
+  `skate_events::observe` (`audio_state`): ground speed, COM (centre of mass) velocity/position (SystemReckoning),
   board position/velocity, per-wheel contact / material (tag − 1, 143 none) / **seam pattern** (new
   in `skate-core` `WheelLineState.seam_patterns`, tag bits 12..15, the part `board_ground.rs` used to
   drop), turn (`animation_input.fields.turn` = Processed+2676), slope `+712` (pumping absorption),
@@ -725,12 +725,12 @@ owner's outputs and redelivers them.
   flag bits 24/25), feet in the deck box (Skeleton 600/601), soft wheels (wheel hardness
   Processed+2764 < 0.5), latched grind family / material.
 - `inputs.rs`: PlayerPhysics 0–14 (3 = 0 and 13 = 0, see below; 11 = the bail-camera byte held 110
-  frames after a bail — PR #4's capture shape, writer unidentified), Contacts (1 landing pulse, 2 the
+  frames after a bail: PR #4's capture shape, writer unidentified), Contacts (1 landing pulse, 2 the
   landing class from the per-wheel air buckets of `sub_824B2350`: ≥ 1 s air → 32767, ≥ 0.62 s →
   16000; 6 the landing-flag material), Rail 0/1, OffBoard 0.
 - `jitter.rs`: `SFXObj_Jitter`, 24 bounded random walks from the vault (6 write inputs 0–5), own
   instance of the title generator.
-- `objpos.rs`: the 3DObjPos writer as retail binds it — 60010010 follows the skater's COM (with its
+- `objpos.rs`: the 3DObjPos writer as retail binds it: 60010010 follows the skater's COM (with its
   velocity), 60010020 the board; camera distance from the camera itself, frame-A azimuth from the
   0.25 m pulled-back origin, horizontal-plane angles, **signed relative speeds** (Doppler) and the
   sign-flip bits 31/30.
@@ -744,7 +744,7 @@ owner's outputs and redelivers them.
   forced 0 by a latch, signed slew with the rise step when the target is above), the manual / trick
   latches, slope levels (owner inputs 2/3, A79 = +244 mB on gain A downhill) and the seam-pattern gain
   envelope (`sub_824CA448` / `sub_824CA318`: **one** linear ramp from 1 to a random gain per pattern
-  change, then hold — the grain spec's "random walk" corrected; only spidercrack has a wobble ≠ {1, 1}).
+  change, then hold; the grain spec's "random walk" corrected; only spidercrack has a wobble ≠ {1, 1}).
 - `mixer.rs`: per-bank volume groups (world / player, our user volumes) and a voice snapshot for
   diagnostics.
 
@@ -756,7 +756,7 @@ in the player group (effects volume) and stay across map changes; the interim me
 sense_of_speed bed cue and the foot-drag pieces are then silent. The default path (native off) is
 unchanged. Setup: `audio_export.player_tuning` exports the AudioSurfaceMap rows, Jitter channels, seam
 wobbles, grind levels (grind surface keys from the image table `0x82249F90`, as constants), wheel
-landing buckets and — only with a TU3 image, so not in setup — the landing-flag materials; dev
+landing buckets and (only with a TU3 image, so not in setup) the landing-flag materials; dev
 installs: the local tool `stage_player_tuning.py`.
 
 **Two values read as "0 for the local player".** PlayerPhysics.in13 is |state+96 − `[G+0x2F078]`+32|:
@@ -768,13 +768,13 @@ outside combos).
 **Evidence.**
 - **Wind level vs retail**: SenseOfSpeed level(4) (= wind w7) at matched COM speeds against PR #4's
   retail medians: 25 km/h 339 / 343 (−0.10 dB), 30 km/h 693 / 730 (−0.45 dB), 35 km/h 1239 / 1194
-  (+0.32 dB), 40 km/h 2074 / 2017 (+0.24 dB) — test `wind_level_matches_the_retail_medians`.
+  (+0.32 dB), 40 km/h 2074 / 2017 (+0.24 dB); test `wind_level_matches_the_retail_medians`.
 - **Components through the real banks, MixMap and voice graph** (test
   `components_play_their_retail_banks`, 3 s each; gain = master × dry): Class_grind metal 6 m/s
-  median 0.018 / max 0.199, ledge (family 0, two layers) 0.026 / 0.237 — retail Class_grind 0.004–0.11
-  / ≤ 0.28 (session 20261001_211347 — deleted, re-verify on clean data), GRINDS 0.004 / p90 0.027 / max 0.083 (all_20261002_163809);
-  wind + rattle 55 km/h 0.033 / 0.132, 40 km/h 0.004 / 0.015 — retail sense_of_speed 0.003 / p90 0.093
-  / max 0.387; foot drag 4 m/s 0.023 / 0.057 — retail FOOT_DRAG 0.006 / p90 0.075 / max 0.281.
+  median 0.018 / max 0.199, ledge (family 0, two layers) 0.026 / 0.237; retail Class_grind 0.004–0.11
+  / ≤ 0.28 (session 20261001_211347, deleted, re-verify on clean data), GRINDS 0.004 / p90 0.027 / max 0.083 (all_20261002_163809);
+  wind + rattle 55 km/h 0.033 / 0.132, 40 km/h 0.004 / 0.015; retail sense_of_speed 0.003 / p90 0.093
+  / max 0.387; foot drag 4 m/s 0.023 / 0.057; retail FOOT_DRAG 0.006 / p90 0.075 / max 0.281.
 - Unit tests: Jitter walk bounds and a hand-computed step; 3DObjPos signs and flip bits; landing
   buckets; grind posts (one layer, family 0 two layers, release, speed cap); rattle/wind thresholds and
   words; foot drag words; turn intensity cap/slew/latch; latches; slope; seam envelope draw and ramp.
@@ -799,20 +799,20 @@ outside combos).
   and mixed surfaces; a turn of 0.5 alone takes gain A to 0.13–0.15. The 163809 session's per-start
   grain levels (A and B pooled, idle and air time included) are lower still (asphalt_smooth_hard
   median 0.000 / p90 0.032; concrete_rough_hard 0.009 / 0.071), as expected when every start at rest
-  or in the air counts. **Not settled:** a straight-roll retail measurement at turn 0 (GREC hook, grain
+  or in the air counts. **Not settled:** a straight-roll retail measurement at turn 0 (GREC hook: our recomp trace line for the rolling bed's per-frame state, grain
   spec §5.3) would close it; we invented no factor.
 
 **Not modelled / open:** `Class_wheels_skid` (needs slip `+232`: the vault pair 45 / −0.75 of holder
-`0xBA9837A6CF4C26ED` does not fit PR #4's formula as written — check `sub_82772E18`), Class_Seams,
+`0xBA9837A6CF4C26ED` does not fit PR #4's formula as written; check `sub_82772E18`), Class_Seams,
 squeaks, rolling rattle, Class_rolling, cloth/body slide, footsteps, Class_Flips / Treatment, and the
 SPLC Contacts (pops, landings, touchdowns: a Splice player plus the unrecovered pop bank pick
-`sub_824B9AD8`) — their interim cues play. Contacts.in6 needs the TU3 material key table (dev only).
+`sub_824B9AD8`); their interim cues play. Contacts.in6 needs the TU3 material key table (dev only).
 Grind SPLC starts/pieces (collision manager `sub_824D2318`) stay interim. The bool-class word of
 Class_grind (a global setting) is 0. Owner input 5 (heading rate), skid input 1, PlayerPhysics 4/5 and
 Rail.in1 reach no MixMap output. Retail's B layer is silent ≥ 40 km/h in PR #4's capture; ours would
-sound with a turn input there (level(2) 0.72 at 40 km/h) — check in game.
+sound with a turn input there (level(2) 0.72 at 40 km/h); check in game.
 
-**Later stages (data from the main session):** traffic (horn `sub_824D6BE8`, skids `sub_824D7440`,
+**Later stages (data gathered separately):** traffic (horn `sub_824D6BE8`, skids `sub_824D7440`,
 engine `aud_traffic_engine`; vehicle positions in VEHSTATE lines for Doppler validation; no special
 skitch sounds) and pedestrian speech (not AEMS: streamed from `livingworldspeech.big` with
 `*_Events.evt` / `hdr.big` / `sth.big` event tables; reaction → clip map in
@@ -829,7 +829,7 @@ instead):
    the turn and the main layer dips; straight again → B fades out within ~10 frames.
 3. Manual: the bed drops (special gain 0.65) and the turn layer stays off until four wheels are down.
 4. Roll down a slope / pump a transition: when `+712` (our pumping absorption; what retail means by it
-   is UNCERTAIN) goes negative the bed gets a little louder (A79, up to +244 mB) and B joins in —
+   is UNCERTAIN) goes negative the bed gets a little louder (A79, up to +244 mB) and B joins in;
    listen for a bed that swells on every pump (that would mean the mapping is wrong).
 5. Ride over a spidercrack pavement: one dip of the bed (to 0.6–0.8) per pattern change.
 6. Change the board's wheels to soft (hardness < 0.5): the soft grain members play.
@@ -838,7 +838,7 @@ instead):
 8. Ride fast (> 30 km/h): rattle comes in; the wind from 15 km/h of body speed, louder with speed;
    bail at speed: wind keeps blowing while tumbling (1 → 10 km/h range).
 9. Brake with the foot (and manual brake): native foot drag instead of the interim pieces (the interim
-   one was confirmed by ear — compare).
+   one was confirmed by ear; compare).
 
 **Files.** New: `crates/skate-audio/src/player/{mod,state,tuning,inputs,jitter,objpos,components}.rs`,
 `crates/skate-game/src/game_audio/player_audio.rs`, the local tool `stage_player_tuning.py`.
@@ -862,7 +862,7 @@ but it still needs tuning"; rolling "wasn't quite right as far as sync and being
 not at the right octave … just wasn't the same sound"; overall "pretty underwhelmed". Decision: "the PoC sounded
 closer, use it as a reference" → the end-to-end PoC comparison harness below. A note on the reference: on one launch
 of the PoC build the wheels-over-cracks (seam) sounds played louder/harsher, rattle-like; on the next launch at the
-same spot they were the normal, quieter version; not reproduced since — a first-play effect of the PoC (it decodes XMA
+same spot they were the normal, quieter version; not reproduced since; a first-play effect of the PoC (it decodes XMA
 into a PCM cache at run time). **Requirement recorded for our port:** the first trigger of every sample must sound like
 the later ones (decoded before use, same gain/filter path): the native banks decode their WAVs when they load, and
 `splice::tests::the_first_trigger_of_a_sample_renders_like_the_next` renders a sample twice, bit-identical.
@@ -881,7 +881,7 @@ interim samples at interim levels, and the rolling bed dominated the mix.
   fade-in end / fade-out start, `+40` curve (0: 1−cos, 1: (1−cos)², 2: linear, 3: sin, 4: sin² over π/2), `+44` gain
   spread (gain × [s, 1/s], linear in 2U−1), `+48` pitch randomisation. Record `+8` gain and `+12 + U·+16` pitch
   factor. A voice stops when its elapsed time (advancing by the previous frame's pitch × dt) passes
-  `+8 / pitch × +28 + 0.16` or the sample ends. The CRT `rand()` (MS LCG) drives every draw.
+  `+8 / pitch × +28 + 0.16` or the sample ends. The C runtime's `rand()` (Microsoft's linear congruential generator) drives every draw.
 - **Contacts** (`SFXObj_Contacts`; vault class `0xC26949FCB638A2CA` `default`): frame order `sub_824B8218` →
   manual landing `sub_824BB330` → touchdowns `sub_824B86E0` → process `sub_824B90D8` (pop `sub_824B9CC8` on entering
   the air with an audio trick other than −1/31/32/35/36; landing `sub_824BA630`) → update `sub_824BE1B8` after the
@@ -893,7 +893,7 @@ interim samples at interim levels, and the rolling bed dominated the mix.
   2·hollow + soft wheels; the second voice of a bucket-2 landing reads tier 0), gain trunc(level(3) × K[tier][…]).
   The block every sound gets: [level/32767, pitch(1)/4096, raw(0)·360/65535, dt, 1 (local 3-D), 1].
 - **Class_wheels_skid** (`sub_824C7438` / `sub_824C72F0` / `sub_824AF678` / `sub_824C7A20`): held while the
-  predicate holds — any slip (with a wheel down; slip `+232` = clamp((|deck velocity · deck Ri| + 0.75)/45, 0, 1),
+  predicate holds: any slip (with a wheel down; slip `+232` = clamp((|deck velocity · deck Ri| + 0.75)/45, 0, 1),
   `sub_82772E18`, vault holder `0xBA9837A6CF4C26ED` 45 and −0.75: **settled**, so straight rolling keeps a skid at slip
   word 1), not grinding (unless family 4), no audio trick but a grab; without slip the revert flag `+690` / counter.
   w10 = clamp(counter + trunc(90 × slip), 0, 90).
@@ -942,7 +942,7 @@ Causes of the remaining differences, each checked against retail rather than the
   retail's GRINDS voices in all_20261002_164620 / 20261001_211347 / long_dt_c (the last two deleted: re-verify on
   clean data) are samples 13/14, 20–23, 55/56
   (= our surfaces 0/1 and 4–9 through the program, the local tool `grind_census.py`), never 94/95, with pitch ratio
-  p50 0.98–1.00 and LPF 24971 / HPF 0 like ours (`tools/retail_voices.py`). So **pitch and sample choice are retail;
+  p50 0.98–1.00 and low-pass (LPF) 24971 / high-pass (HPF) 0 like ours (`tools/retail_voices.py`). So **pitch and sample choice are retail;
   the PoC's grind is not**. Retail's grind sound is mostly the collision manager's Splice layers (ledge start 954 with
   464 events, 968, 958, 969, 876–878 in 164620, levels 0.1–0.4) with GRINDS underneath (p50 0.007, p90 0.15): those
   layers are the next port (below) and the likely reason ours "isn't the same sound". **Corrected in the next
@@ -955,8 +955,8 @@ Causes of the remaining differences, each checked against retail rather than the
   (retail code reading); a GREC session settles it.
 - **Rolling level ("too loud"):** the native bed equals the PoC's to ±0.4 dB at every speed, so the bed itself is not
   louder than the PoC. What differs is the host: our stereo fold is the title's table (0.707·L + 0.5·C + 0.5·Ls, spec)
-  while the PoC trims its downmix (0.6 × (L + 0.707·C + 0.5·Ls), not retail) — ours is 1.4 dB (front) to 4.4 dB
-  (surround) hotter for the same mix — and until this stage the impacts that retail puts 17–23 dB over the bed were
+  while the PoC trims its downmix (0.6 × (L + 0.707·C + 0.5·Ls), not retail): ours is 1.4 dB (front) to 4.4 dB
+  (surround) hotter for the same mix, and until this stage the impacts that retail puts 17–23 dB over the bed were
   missing, so the bed was all there was. Against the retail capture (`tools/e2e/retail_windows.py`) the bed cannot be
   isolated: the capture's floor at rest is −32 dBFS (ambience, emitters) and only three clean straight-roll windows
   exist; the per-voice levels agree (retail grain voices p50 0.15 / p90 0.27, ours gain A 0.21–0.24).
@@ -967,12 +967,12 @@ Causes of the remaining differences, each checked against retail rather than the
 **Contacts against retail** (all_20261002_164620 report, per-sample audible level medians): roll 1111 retail
 0.13–0.18, ours 0.16–0.24; pop selector 1 (1098) retail 0.07–0.40, ours 0.15–0.35; touchdown kind 0 (1052) retail
 0.42–0.64, ours 0.22–0.48. Ollie 1096 and landing impact 1095 are silent outside combos in both: their outputs 12/13
-carry the envelope F[Global.135] triggered by Music.in3 (the combo emphasis), which no one writes yet — retail's
+carry the envelope F[Global.135] triggered by Music.in3 (the combo emphasis), which no one writes yet; retail's
 medians (0.01–0.12) are consistent with that.
 
-**Not modelled / open:** the owner buses of the Splice voices (eEQChain presets, Contacts levels 14/15 as send levels)
-— they mix dry; the landing's collision-manager pair contact; foot taps / scuffs on the deck (`sub_824B95A0`,
-board knocks 1112/1115 — frequent and loud in retail, next with the collision manager); the grind start contact
+**Not modelled / open:** the owner buses of the Splice voices (eEQChain presets, Contacts levels 14/15 as send levels):
+they mix dry; the landing's collision-manager pair contact; foot taps / scuffs on the deck (`sub_824B95A0`,
+board knocks 1112/1115: frequent and loud in retail, next with the collision manager); the grind start contact
 `sub_824BB0E0`; body / deck impacts; Music.in3 (combo emphasis); `+308`, `+720`, `+814` (not published); the slip's
 B40+16 ring. Still interim: seams (`Class_Seams`, `sub_824C14C8` / `sub_824C1698` / `sub_824C1CA0` grid / `sub_824C1F18`),
 rolling rattle, `Class_rolling`, footsteps, cloth / body slide, flips / treatment, the collision manager
@@ -1010,7 +1010,7 @@ components}.rs`; `game_audio/{mod,library,native,player_audio,grain_bed,skate_ev
 `tools/asset_pipeline/audio_export.py` (+ tests). The PoC probe (`player_audio/e2e.rs` in the PoC worktree) is local.
 
 ### Collision manager, wheel spin, foot taps; the second listening test and the retail bed data (2026-10-02, `player::collision`, `player::wheels`)
-**User's second listening test** (native build 18:02, `SKATE_AEMS=1`, relayed by the main session): (1) carving "too
+**User's second listening test** (native build 18:02, `SKATE_AEMS=1`): (1) carving "too
 easily triggered, just turning a little bit causes them to trigger"; (2) background ambience and noises like cars "a
 little loud and don't sound like they're in the distance enough"; (3) "when jumping the rolling sound continues to
 play"; (4) "manuals sound completely wrong"; (5) falling in water "almost right, maybe a tiny bit too loud"; (6)
@@ -1020,8 +1020,8 @@ but not quite right; it should sound like wheels hitting the ground and whatever
 aren't being recreated".
 
 **Validation data used.**
-- Retail **GREC** session `all_20261002_180430` (11 min, the user playing the recomp; hook on `sub_824C6BD8` added by
-  the main session from our spec, tool `tools/recomp-trace/grec_level.py`; credit: skate3recomp by
+- Retail **GREC** session `all_20261002_180430` (11 min, the user playing the recomp; hook on `sub_824C6BD8` added
+  from our spec, tool `tools/recomp-trace/grec_level.py`; credit: skate3recomp by
   @mchughalex, run locally): per-frame grain records A/B of both trucks, turn intensity, brake slew, state words.
 - Our engine's **real-play log** `state_20261002_181631.tsv` (`SKATE_AUDIO_STATE_LOG`, the
   user's own 4 min of play), cut with `scenarios.py --from-log` into `log_jump`, `log_ollie`, `log_manual`,
@@ -1029,31 +1029,31 @@ aren't being recreated".
 - Clean retail level sessions only (`all_20261002_163809`, `all_20261002_164620`, `all_20261002_180430`); the
   sessions with malformed trace lines were deleted by the user (see "re-verify" notes in this document).
 
-**The bed's low-speed level ("~5–6 dB too loud") — not confirmed.** The pooled straight-roll medians (`grec_level.py`:
+**The bed's low-speed level ("~5–6 dB too loud"): not confirmed.** The pooled straight-roll medians (`grec_level.py`:
 0.104 at 5–10 km/h, 0.114 at 10–15, 0.188 at 15–20, 0.233 at 30–35) mix in frames the bed is meant to be quiet
 in: the `+336` word (brake, push) and the `+340` word (balance, **grinding**, trick) are not filtered, a paused game
 (material 4 at 25–30 km/h: speed fixed at 7.9362 m/s for ~10 s, gain 0), the seam envelope (`+1456` 0.74–0.98 on
 material 1), a second board owner (`40C34020`, material 65) and Doppler moments (pitch A 1.18–1.24). On **clean**
 frames (`tools/recomp-trace/grec_clean.py`: four wheels, |turn| ≤ 0.02, I/Bk ≈ 0, both words 0, 30 settled
 rows, gain ÷ seam envelope) retail's level(1) is 0.219 (material 2, 5–10 km/h), 0.21 (material 40, 10–15), 0.229–0.244
-(20–30), 0.245–0.25 (30–50) — our MixMap gives 0.231–0.256 at the test camera (3.5 m), i.e. within ~1 dB (Jitter −0.4
+(20–30), 0.245–0.25 (30–50): our MixMap gives 0.231–0.256 at the test camera (3.5 m), i.e. within ~1 dB (Jitter −0.4
 dB). On clean carves A/(1−I) = 0.20–0.27 (= level(1)) and B/I = 0.61–0.83 (ours level(2) 0.62–0.78): the bed formula
 is retail's. Not changed. Open: the board's camera distance (B[Player.2] roll-off: 5 m −0.6 dB, 7 m −1.8, 10 m −3.9) is
-not in GREC — adding the `0x60010020` block's input 1 to the hook would settle the residual. Analysis:
+not in GREC; adding the `0x60010020` block's input 1 to the hook would settle the residual. Analysis:
 `grec_180430_clean.txt`.
 
 **(1) Carving.** Our turn intensity follows `sub_824C8588` exactly: I vs |turn input| medians ours / retail 0.1 →
 0.06 / 0.066, 0.3 → 0.18 / 0.185, 0.5 → 0.24 / 0.30, 1.0 → 0.50 / 0.60 (cap 0.8 vs retail p90 0.99 on some
 surfaces). The difference is upstream: **our turn input (`Turn` animation attribute, ProcessedPhysIn+2676) is almost
-binary** — in the user's log 29 % of riding frames sit at |turn| = 1.0 and 7 % in between, retail 16 % / 25 %; a stick
+binary**: in the user's log 29 % of riding frames sit at |turn| = 1.0 and 7 % in between, retail 16 % / 25 %; a stick
 movement takes our value 0 → 0.5 → 0.75 → 1.0 in three frames. After the stick returns our I decays for ~13 frames
 (retail's input decays through the middle values, so retail's I is 0 at turn 0: p90 0.0 vs ours 0.196). That is the
-animation side (the `Turn` scalar our animation graph publishes), not audio; reported to the main session. No audio
+animation side (the `Turn` scalar our animation graph publishes), not audio; left as an open item. No audio
 change.
 
 **(3) Rolling in the air / (4) manuals: `SFXObj_Wheels` was missing.** In the air our bed goes silent within ~5
 frames (the MixMap's no-wheels duck F[Player.0] on level(1), confirmed headless on `log_jump`: gain A 0.25 → 0 in 3
-frames). What kept playing was the interim `AIR_WHEELS` loop — `Whls_spins_Jump_1` from its beginning at a constant
+frames). What kept playing was the interim `AIR_WHEELS` loop: `Whls_spins_Jump_1` from its beginning at a constant
 level for the whole air time. Retail (`sub_824CD6F8` / `sub_824CDC70` / `sub_824CDD28`, our port `player/wheels.rs`):
 a **spin-down recording started part-way in**, t0 = 14 s × (1 − clamp01(speed / 50 km/h)) (vault `0xC1831BDB6CB1B1EA`
 `0x03B710C80E1AC13E`), slot 0 in the air, slot 1 **while balancing (manuals)**, the jump and manual recordings
@@ -1065,10 +1065,10 @@ shift of the special state is still not modelled.
 
 **(6) Grinding: the collision manager** (`CSTATEMGR_Collision`, our port `player/collision.rs`; full mechanism in the
 module docs): `sub_82486EF0` posts a 48-byte message (materials A/B, impact tiers, position, two contact levels) to an
-LRU router over ten slots; each slot's `SFXObj_Collision` (`sub_824D1E00` / `sub_824D1F68` / `sub_824D2318`) starts one
-Splice voice per material — the sample from the material's AudioSurface record (layout read from the disc schema,
+LRU (least recently used) router over ten slots; each slot's `SFXObj_Collision` (`sub_824D1E00` / `sub_824D1F68` / `sub_824D2318`) starts one
+Splice voice per material: the sample from the material's AudioSurface record (layout read from the disc schema,
 `tools/vault_layout.py`) by its **kind** (the TU3 table at `0x8302D6E8`: 0 Skate_Collisions, 1 Skate_Metal, 2
-HOM_Set_1), its tier and the other material's collision class — and updates it from the slot's Collision controller
+HOM_Set_1), its tier and the other material's collision class, and updates it from the slot's Collision controller
 outputs (category level 12..21, pitch 1/22, azimuth from the slot's 3-D block at the message position). Contact levels
 `sub_82496C58` (the 13E20D39 window record), impact bands `sub_82497088` (the 7DAFF70B record). Ported posters:
 - **grind start** `sub_824BB0E0`: truck 96 (board 95 for families 1, 2, 5) against the grind material, tier by the
@@ -1079,21 +1079,22 @@ outputs (category level 12..21, pitch 1/22, azimuth from the slot's 3-D block at
   impact band on `+668` = max of the last 4 clamp01(|deck acceleration · deck normal| × 0.00125); a band-2 hit posts
   a second message at tier 1 × the window record's `+40`; 6-frame cooldown. Needs the deck contact's tag:
   `skate-core` `BoardGroundState.part_audio_surfaces` (CollisionInfo+4/+8/+12, + test).
+
 **Correction of the previous section:** Skate_Collisions sounds 954 / 955 / 956 / 947 / 948 are the **skin / denim /
 arm / leg** body-impact sounds (materials 107, 108/109, 100, 99), posted by the body-impact posters (`sub_824BC188`,
 ragdoll `sub_824E3BE0`); only 29 of 464 events of 954 in 164620 fall within 1.5 s of a GRINDS voice. The interim
 grind start (954) and the re-fired "scrape pieces" (955 every 63 ms) were body sounds, which is part of why grinds were
 "not the same sound"; with the native contacts they are now silent. Retail's grind = Class_grind's GRINDS loop
 (native since the previous stage) plus this start contact. Retail pitch of the start samples (163809 MOD lines):
-streams 690–692 p10 0.44 / p50 0.61–0.95 — the material's pitch word 2096 (0.51) shows in retail too. The body
+streams 690–692 p10 0.44 / p50 0.61–0.95; the material's pitch word 2096 (0.51) shows in retail too. The body
 posters are **not ported**: they need the skeleton's per-region contacts (Collision+80..195, `sub_82BD60C8`), which
 the engine does not compute. "Sync" of the continuous grind layer: GRINDS starts on the grind's first frame in the
 log replay (`log_grind`).
 
 **Foot taps and scuffs** (`sub_824B95A0` → `sub_824B9508` / `sub_824B9268`, `sub_824B9948` / `sub_824B97A8`, updates
 `sub_824BEBD8` / `sub_824BF4A8`): a foot coming back into the deck box (Skeleton 600/601) after more than 25 ms out
-taps the deck — first foot 1112–1114, second 1115–1117, both 1118–1120 by toe speed (≥ 2 / ≥ 5 m/s, Skeleton+196/+212),
-hippy-jump set 1176–1178 — at Contacts level(8); a foot in the box moving faster than 0.35 m/s across the deck (max |x|,
+taps the deck: first foot 1112–1114, second 1115–1117, both 1118–1120 by toe speed (≥ 2 / ≥ 5 m/s, Skeleton+196/+212),
+hippy-jump set 1176–1178, at Contacts level(8); a foot in the box moving faster than 0.35 m/s across the deck (max |x|,
 |z| of its local velocity) scuffs it (`sk8_foley` 95 / 94) at level(9). Retail (164620): board knocks 1112 ×152 / 1115
 ×132 (sample medians 0.11–0.41), sk8_foley 94/95 ×434/×488 (0.06–0.25); ours on the log 0.2–0.3. The engine already
 publishes the toe velocities (`FootPhysicalOutput.local_velocity`). The soft variants (`+484` from the unidentified
@@ -1103,7 +1104,7 @@ publishes the toe velocities (`FootPhysicalOutput.local_velocity`). The soft var
 retail mechanism; the interim knock (1119) and wheel touch (1054) doubled them and are silent with the native
 contacts. The interim foot-on-deck set (1126) stays: retail's step-on / step-off (`sub_824B85B0` → `sub_824B8310` 1124
 in the air / 1125 on the ground, `sub_824B8448` 1126) needs Skeleton+602/+603 (feet planted on the deck), which the
-engine does not publish. The owner buses (eEQChain presets) are still not modelled — that is the "effects" part.
+engine does not publish. The owner buses (eEQChain presets) are still not modelled; that is the "effects" part.
 
 **(2) Distance / (5) water: the interim layer's ×2.** Every interim cue plays at measured retail level × `RETAIL_SCALE`
 (2.0), a factor anchored to the interim rolling loop (by ear). The native player sounds play at retail level, so with
@@ -1112,18 +1113,18 @@ hot relative to retail's balance. With the native player components running the 
 measured level (`Voices.scale` = 1/RETAIL_SCALE, `native::follow_volume`); the default path is unchanged. Measured
 remainder (open, item 7 of the plan): our native host folds 6 channels to stereo with the title's table, so a mono voice
 at per-voice gain g reaches each ear at 0.5 g (front) … 0.35 g (rear) (`examples/pan_fold_probe.rs`), while an
-interim Bevy voice reaches 0.75 g (spatial, near) or g (beds) — the interim layer is still ~3–6 dB above the native
+interim Bevy voice reaches 0.75 g (spatial, near) or g (beds); the interim layer is still ~3–6 dB above the native
 one. The distance cue retail adds through the emitters' positional send (MixMap out8 into the send buses) is not
 modelled (buses not ported).
 
-**(7) Riding noise after picking up the board — not reproduced.** In the `log_pickup` replay every voice is silent
+**(7) Riding noise after picking up the board: not reproduced.** In the `log_pickup` replay every voice is silent
 within 0.1 s of state 500 (no wheels → the no-contact duck) and wind within 0.75 s. Retail's wind (SenseOfSpeed) also
 keeps running on COM speed. Needs the user's timestamp (or a fresh state log) of the moment.
 
-**Music.in3 ("combo emphasis") — a game-mode flag, not a gap.** `SFXObj_Music`'s process `sub_824D1208` writes in3 =
+**Music.in3 ("combo emphasis"): a game-mode flag, not a gap.** `SFXObj_Music`'s process `sub_824D1208` writes in3 =
 32767 when `sub_824898C8` holds: a bit of `*(0x83083C38)+0x2F0D0` (bit 13), or the manager's `+932` with `+476`, or the
 manager's mode `+1060` = 8. None is part of free skating, so outputs 12/13 (ollie 1096, landing impact 1095) stay
-gated — retail 164620: 1095 69 events, sample medians 0.002–0.115. Left at 0.
+gated; retail 164620: 1095 69 events, sample medians 0.002–0.115. Left at 0.
 
 **First-trigger rule.** The grain recordings are now decoded when the bed is created (`grain_bed::Bed::new`), not at
 first use; the wheel-spin streams and the Skate_Metal / sk8_foley Splice banks are decoded at start like
@@ -1152,7 +1153,7 @@ target. `skate-core` lib: 621 pass, the 2 known pre-existing failures. Pipeline 
 
 **In-game listening checklist** (`SKATE_AEMS=1`):
 1. Ollie at ~20 km/h: in the air a wheel-spin that is already slowing down (fainter and lower the slower you go), gone
-   on landing — no rolling sound in the air.
+   on landing; no rolling sound in the air.
 2. Manual at ~15 km/h: the lifted wheels spin down audibly under a quieter bed; ends with the manual.
 3. Grind a metal rail and a concrete ledge: a hit at the start (truck or board on the rail, metal ring on rails), then
    the continuous GRINDS layer; no repeated skin/denim "pieces" any more.
@@ -1219,7 +1220,7 @@ and a flush or OS stall blocked the frame.
 - The remaining small costs belong to the final optimisation pass (below): mixmap_frame p90 220 µs, grain_bed
   58 µs, render_block 157 µs, game lock wait at most 131 µs.
 
-**"Riding sound continues too long" (19:29 session) — the riderless board.**
+**"Riding sound continues too long" (19:29 session): the riderless board.**
 - Replaying the windows headless (new tool
   `tools/audio-e2e/frame_levels.py`, which prints per-frame folded dBFS and per-voice-group gains next to the
   state) shows the bed is not lingering after takeoff: gain A drops to 0 within 3 frames of air.
@@ -1236,7 +1237,7 @@ and a flush or OS stall blocked the frame.
   `rolling = false` there too.
 - After the fix: **−79 dBFS**, then silence. In state 300 the bed stops at once.
 - UNCERTAIN: the record writer itself (+152 bits 20–22) is not located; this rests on the measured retail behaviour.
-- Physics note for the main session: the user called these "mid-air tricks", but our engine moved the skater into
+- Physics note: the user called these "mid-air tricks", but our engine moved the skater into
   Offboard or Wipeout.
 
 **Walking with the board (19:32 test).** The user picked the board up and put it down repeatedly while walking:
@@ -1273,7 +1274,7 @@ FlangeSub return. That return is not modelled yet and is the remaining audible d
 - Positional: by azimuth, compared with rodio's ear factors. Ahead −3.5 dB, behind −6.6 dB.
 - **rodio 0.20's spatial source is mirrored.** It gives the ear *farther* from the source the larger factor:
   ((d_this − d_other)/gap + 1)/4 + 0.5. With the native host on, the listener's ears are swapped so interim sounds
-  come from the right side. The default path (no native host) is unchanged; a decision for the main session.
+  come from the right side. The default path (no native host) is unchanged; an open decision.
 
 ### The buses: environment (reverb) network, eEQChain buses, owner one-shot buses; Class_Seams (2026-10-02, `skate_audio::bus`, `player::seams`)
 
@@ -1411,7 +1412,7 @@ riding … when going over seams … too much reverb added possibly". Logs `stat
 **Surfaces.** The brick is tag 66 with seam pattern 13 (`mini_tile`: 0.08 m grid, angle 30°) and tag 5 / pattern 7;
 the park is tag 41 (Wood_1) / pattern 9 (`irregular_large`, 0.7 m, gain 0.41).
 
-**Cause 1 — materials gated by contact (fixed).** The audio record's wheel materials (`+620..+632`) and seam patterns
+**Cause 1: materials gated by contact (fixed).** The audio record's wheel materials (`+620..+632`) and seam patterns
 (`+636..+648`) come from the wheel lines (82C079E0: each wheel's 0.2 m ray), not from contact. Our `audio_state`
 gated them by `in_contact`, so every contact flicker was a material change, and Class_Seams fires a *transition* hit
 (AudioSurfaceMap word 9 + 5, a different sound) on every change.
@@ -1425,14 +1426,14 @@ gated them by `in_contact`, so every contact flicker was a material change, and 
 - Park windows: transition hits 243 → 80 (of 635 → 531 hits) in `mp_seams2`, 118 → 40 in `mp_seams`; brick 58 → 36.
   Scripted e2e: 11 of 12 renders bit-identical, `manual15` differs (the lifted truck keeps its material) within 0.1 dB.
 
-**Cause 2 — interim seams and knocks still playing beside the native ones (fixed).** In native mode the interim
+**Cause 2: interim seams and knocks still playing beside the native ones (fixed).** In native mode the interim
 riding bed (`cues::BED_CUES`) still fired random `Seams_Bank` samples (about 0.45 a second, at random times: "out of
 sync"), and `BED_RECORDS` fired the deck knocks 1112 / 1115 / 1119 and the scuffs `sk8_foley` 94 / 95 that the native
 foot taps / scuffs play; the interim `CATCH` knock (1115, 0.22 s after a flip) doubled the native taps too. All
 silent now when the native player / contacts run (`cues::bed_record_native`).
 
 **Hit rate on brick: not above retail.** Ours on tag 66 / pattern 13 at ~8 m/s: 100–220 Class_Seams hits a second
-(the 0.08 m grid; 116 a second over the brick window, 224 in the 30 km/h sweep), heard as about 11 seam voices a second — the program sees the
+(the 0.08 m grid; 116 a second over the brick window, 224 in the 30 km/h sweep), heard as about 11 seam voices a second: the program sees the
 one-frame w7 pulse only at its 32 ms walks, as in retail. Retail on the same material (wheel-0 material 65 = tag 66,
 180430 seconds 443 / 451 / 452): 27–40 Seams_Bank voices a second, per-voice gain median 0.088 (ours 0.07–0.09).
 
@@ -1440,7 +1441,7 @@ one-frame w7 pulse only at its 32 ms walks, as in retail. Retail on the same mat
 (`player_audio::tests::seam_samples_by_words`, `SEAM_SWEEP=word:value`) shows the program picks one sample per
 (surface w10, speed w8, soft w11): surface 1 → sample 80 (72 at speed word 0, 88 at 10000), soft → 170. So at a steady
 speed ours repeats one or two samples (80 / 32 on the brick). Retail on tag 66 plays 45, 83, 170, 80, 176, 34 … in
-the same seconds — the soft-wheel set (170 / 176) and other surface blocks appear. Which words differ in retail is not
+the same seconds: the soft-wheel set (170 / 176) and other surface blocks appear. Which words differ in retail is not
 known: a recomp hook on the Class_Seams packet (`sub_824C1DF8` / `sub_824C1F18`, words 7–18 per wheel) would settle it.
 
 **Reverb in the park: retail's preset, strong echoes.** The University's `audio_reverb` region gives preset
@@ -1453,8 +1454,8 @@ checked against retail *output* (no trace of the network's return); a capture of
 
 ### Listening test 7: rolling "busy", "continues into jumps", "rougher than it is" (2026-10-02)
 
-User: rolling "can sound faster or like more is happening than actually is"; "sometimes while jumping the rolling on
-ground sound continues"; "the materials sound rougher than they are for some things". Logs
+The user reported that rolling can sound faster or busier than what is happening, that the rolling-on-ground
+sound sometimes continues while jumping, and that some materials sound rougher than they are. Logs
 `state_20261002_203746.tsv` / `_204047.tsv` (University, 0 malformed lines), plus a recomp trace-all session at the
 same spot (`all_20261002_204336`, clean).
 
@@ -1513,7 +1514,7 @@ At 20–30 hits a second, the same transient repeated as a regular buzz, which r
   | surface | retail | ours, after the fix |
   |---|---|---|
   | concrete, pattern 8, 30–40 km/h | 21 voices/s, 16 walks/s | 28 voices/s, 18 frames/s (36 km/h) |
-  | concrete, pattern 8, 40–50 km/h | 28 voices/s | — |
+  | concrete, pattern 8, 40–50 km/h | 28 voices/s | n/a |
   | brick (material 65), 30 km/h | 27–40 voices/s | 29–31 voices/s |
 - *Per-voice level.* Ours is 0.045–0.053 on concrete against retail's 0.052–0.074 (by block), and 0.08–0.09 on brick.
   Ours is not louder than retail.
@@ -1556,7 +1557,7 @@ Specs (our reading of the TU3 code in research passes): `audio-specs/aems-board-
   routing writes SkateBoard inputs 0 / 6; `grain_bed.rs` keeps its old one-truck routing only when the native
   rolling layers are off.
 - *Class_rolling* (constructor `sub_824C4C18`): the non-grain rolling surfaces 7, 8, 10, 11, 12, 13 post a
-  per-surface patch (selectors 1, 2, 10, 12, 11, 9) instead of a grain — this replaces the interim stand-ins in
+  per-surface patch (selectors 1, 2, 10, 12, 11, 9) instead of a grain; this replaces the interim stand-ins in
   `cues::grain_for` (tags 8 / 10 / 70 → aggregate, 37 / 67–69 → metal) on the native path. Rolling surface 0
   (tag 90) binds asphalt_rough_hard with the `default` collection's tuning (open question closed).
 - *Held layers 0 and 3* (posted once at board create, `sub_824C9830` / `sub_824C9948`) and *layer 5* while wheel 0
@@ -1584,7 +1585,7 @@ Specs (our reading of the TU3 code in research passes): `audio-specs/aems-board-
 - *Graph 3* (the high-speed copy): send 0 below 46 km/h → 3.0 at 70 km/h, DCl0 ±0.09, the wobble gain, HS20 5 kHz ×
   0.65. *Wobbles* (`sub_824CB078` / `sub_824CB180`) and the graph-1 level ramp, with the quirk that truck 1 never
   receives a wobble. *Graph 2*: the env send level(13)/32767 (pre-pan mono) into the reverb network, the
-  FlangeSub send level(21)/(22) carried but not rendered (no bed → return route yet).
+  FlangeSub send level(21)/(22) into return A (rendered since 2026-10-29).
 - Retail (`dsp_20261002_185826`, local script `chain_check.py`): the graph-3 send matches exactly (189
   posts), graph-1 / graph-3 gain = the level ramp within 1e-4, wobble depth 0.290 / 0.240 against the caps 0.30 /
   0.25, only truck 0's graph-3 gains change.
@@ -1617,15 +1618,15 @@ Specs (our reading of the TU3 code in research passes): `audio-specs/aems-board-
   script that attributed every line to an owner's last PLAY of the session (local script `senda_bank_fixed.py`
   is the corrected one). Nothing to port.
 - *Collision SubMix* (`sub_824D25E0`): collision voices play mono into their submix with an env send at the
-  category's Collision output (≈ 0.100 near the camera, as the trace) and the AudioSurfaceMap words 12–16 eEQChain bus
+  category's Collision output (≈ 0.100 near the camera, as in the trace) and the AudioSurfaceMap words 12–16 eEQChain bus
   (all 8 = SFX Master in the vault). On by default (`SKATE_AEMS_SUBMIX=0` = the old direct route).
 - *SFXObj_Reverb's selector* (`sub_824DE548`, zone blend `sub_824DEEF0`) runs in retail's order (`env.update`): the
   first region preset fades in over 1 s from reverb01. The reverb-zone emitters (`.ems` attribute type 5) are not
-  wired: one record on the disc (`1F94F2F815C00368` → preset `BEEFC8E3DE04FBAE`). *Superseded: 1,040 records, now wired
-  — see "FootStep SubMix, the skeleton inputs, …".*
+  wired: one record on the disc (`1F94F2F815C00368` → preset `BEEFC8E3DE04FBAE`). *Superseded: 1,040 records, now wired;
+  see "FootStep SubMix, the skeleton inputs, …".*
 - Not applied: the global env-send scale (manager +104 = Reverb out4): it depends on Reverb.in5, whose writer is
   unknown (the trace says in5 = 0; our hosts write 32767, which would drop every env send 4 dB). *Superseded: the writer
-  is `sub_824DF468` (by the preset number); applied — see "FootStep SubMix, the skeleton inputs, …".*
+  is `sub_824DF468` (by the preset number); applied; see "FootStep SubMix, the skeleton inputs, …".*
 
 **Footsteps, clothing, hands on the deck** (`player/footsteps.rs`, `player/clothing.rs`, `player/step_on.rs`; spec
 `audio-specs/aems-offboard-clothing-spec.md`):
@@ -1639,13 +1640,13 @@ Specs (our reading of the TU3 code in research passes): `audio-specs/aems-board-
 - *Hands on the deck*: Skeleton+602/+603 are the IK's **hand** targets (limbs 2 / 3) inside the padded deck box, not
   the feet. 1124 / 1125 (hand on, air / ground) and 1126 (hand off) play when the board is picked up or put down
   by hand (Contacts `sub_824B85B0`). The interim "1126 = foot on deck" was a wrong mapping and is silent natively.
-- Caller 824D8164 (the 1017 `sk8_foley` 62/63/64 events in 164620) is `SFXObj_PedestrianSFX` — pedestrian footsteps,
+- Caller 824D8164 (the 1017 `sk8_foley` 62/63/64 events in 164620) is `SFXObj_PedestrianSFX`: pedestrian footsteps,
   not the player.
 - Levels vs retail per-voice medians: walking foley 62 / 63 0.387 / 0.244 (retail 0.387 / 0.244); step layer 82 equal
   per sample; board in hand 0.155–0.28 (0.17–0.34); metal surface 0.082 (0.082); push foley 0.257 (0.18–0.26);
   hand on 0.125–0.153 (0.13–0.16), hand off 0.062–0.070 (0.071–0.081); Foley_Cloth +7 dB (guessed inputs below).
 - Engine inputs: feet down (OffBoard 306 / 307, Air 449 / 450, push flags, brake), the feet's surfaces
-  (`processed.right/left_surface`), toe world speeds, footstep strength, the hand targets — published. APPROXIMATE:
+  (`processed.right/left_surface`), toe world speeds, footstep strength, the hand targets: published. APPROXIMATE:
   the feet's vertical speeds (toe world velocity y), the body speed (COM speed). Not published: the step code
   (Skeleton+144/+160), the limb speeds and the ragdoll body-part slide records (body slide stays silent). The
   FootStep SubMix chain (HPF → LPF → PI20 → env → pan per sound) is passed through but not rendered by the mixer.
@@ -1877,7 +1878,7 @@ first, from the optional banks).
 | 163809 | 645 → 624 | 125 / 124 → 114 / 114 | 11 / 10 | 282 (11, values 0.08–0.55) |
 | 164620 | 1941 → 1827 | 299 / 303 → 244 / 244 | 55 / 59 | 801 (40) |
 | 223306 | 269 → 233 | 43 / 43 → 25 / 25 | 18 / 18 | 72 (2) |
-| 223613 | — → 1059 | — → 128 / 128 | 24 / 26 | 440 (9) |
+| 223613 | none → 1059 | none → 128 / 128 | 24 / 26 | 440 (9) |
 
 - Send A stays 0 (FXWET0 = 0, as the updater writes). The few non-zero lines are module-address reuse by other
   graphs; with the fix there are fewer of them, not more. The old "retail median 0.015" was such an artefact.
@@ -2107,8 +2108,8 @@ Measured in the recomp:
 - Our cell computation matches retail's. From the logged positions, 400 of 520 grid hits coincide with a cell change of
   that wheel on the same call.
 
-**Change: the console cadence at any frame rate.** User decision, verbatim: "match the shipped game, use the 30 fps
-cadence however lets scale up and account for the higher framerates that the rust engine is going to be running at".
+**Change: the console cadence at any frame rate.** The user's decision: match the shipped game's 30 fps
+cadence, scaled to account for the higher frame rates the Rust engine runs at.
 - **Virtual calls.** `player::seams::Seams::frame` runs on every rendered frame (`PlayerAudio::seam_frame`, from
   `native::mixmap_frame`). It makes virtual process calls on a fixed 30 Hz grid of real time.
 - **Wheel positions.** Each virtual call reads the wheel positions at its own time, interpolated along the rendered
@@ -2197,8 +2198,8 @@ reproduces both machines. No console capture exists to check the 30 fps numbers 
 
 **Problem.** Listening test 9 left two items open. First, the per-frame host rules other than Class_Seams (the MixMap
 tick, the eEQChain jitter, the Doppler slew, wheel 0's landed latch) still ran on our 60 Hz step instead of the shipped
-console's cadence. The user's decision for that: "match the shipped game, use the 30 fps cadence however lets scale up
-and account for the higher framerates". Second, the seam hits measured more prominent above the rolling bed in ours
+console's cadence. The user's decision for that: match the shipped game's 30 fps cadence, scaled
+to account for the higher frame rates. Second, the seam hits measured more prominent above the rolling bed in ours
 than in the recomp's capture (5.5–11 dB vs 2.8–6 dB high-frequency rise), and ours showed more high-frequency onsets.
 
 **Mechanism (asm, `sub_82485190`, the audio manager; reference reading only).** The manager runs once per rendered
@@ -2395,7 +2396,7 @@ Each owner is driven by its game object's state, so the owners need that state b
   - The 13 world banks join the decoded set.
   - The manifest gets `world_tuning` (the `aud_traffic_engine` records and the ped footstep fields).
   - `speech/livingworld.json` holds the clip index (2.3 MB).
-  - Decoding the speech is opt-in with `SKATE_SETUP_SPEECH=1`: about 2.4 GB of PCM for the free-roam events.
+  - Decoding the speech is on by default since 2026-10-25 (USER-ASKS 338; Ped Speech, `SKATE_SETUP_SPEECH=0` skips it): about 2.4 GB of PCM for the free-roam events.
   - Dev install tools: `stage_extra_banks.py --tag world …` and the local tool `stage_world_audio.py`.
 
 **Verification.**
@@ -2617,8 +2618,8 @@ straight into frame-time jitter at 300+ fps.
   340–377 µs.
 - *Where it goes* (temporary per-stage timers, real play, µs per block): eEQChain buses 95–104, grain bed 70–77 (its
   FrequencyShiftSsb 59), env network 22–25, voices 8–20, evaluator 5–7.
-- *Root cause.* Every `f32::mul_add` without the `fma` target feature is a call into the CRT's `fmaf`. A
-  256-sample biquad channel costs 1.4 µs that way and 0.43 µs with hardware FMA; an FSS `sin` costs 19 ns against
+- *Root cause.* Every `f32::mul_add` without the `fma` target feature is a call into the C runtime's (CRT) `fmaf`. A
+  256-sample biquad channel costs 1.4 µs that way and 0.43 µs with hardware FMA (fused multiply-add); an FSS (frequency shift) `sin` costs 19 ns against
   ~1 ns. The eEQChain filters 8 buses × 6 channels × 2 peaking EQs every block, mostly on silence. The FSS evaluates
   512 polynomial `sin` / `cos` per chain per block.
 
@@ -2883,7 +2884,7 @@ change an observable output:
   plain kernel gives on that path (tests `kernel_block_matches_the_plain_kernel` with NaN histories and
   coefficients, `silent_shortcuts_match_the_plain_kernel`). A different payload can only change *whether* the memo
   fires, never a value.
-- NaN is absorbing in these loops: in the IIR feedback, the sums and the gains. No sample value feeds control flow:
+- NaN is absorbing in these loops: in the IIR (infinite impulse response) feedback, the sums and the gains. No sample value feeds control flow:
   voice lifetimes, the evaluator, grain picks and bus routing depend on parameters, positions and the RNG. So the
   voice logs cannot see it. Casts (`as i32`), comparisons, `max` / `clamp` and `is_nan` ignore payloads.
 - The output goes to rodio as f32. A NaN there is already a broken sample either way.
@@ -2972,7 +2973,7 @@ retail. Recomp figures below are from the nine clean sessions 163809 … 223613,
 - State log: new `plant` column (State55). The `push` column keeps its old meaning (the animation's push edge).
   `e2e.rs` prefers `plant` when present.
 - Older logs have no State55. `E2E_PLANT_FROM_FEET=1` rebuilds it from their `foot_down` bits on ground states without
-  the brake (State55 && (State57 || State56)) — a proof aid only.
+  the brake (State55 && (State57 || State56)); a proof aid only.
 - Off: `SKATE_AEMS_PUSH_PLANT=0` / `E2E_PUSH_PLANT=0`.
 
 | per push (the recomp: 137 pushes / 917 riding s; ours: 4 user logs, 32 pushes / 236 riding s) | the recomp | ours before | ours after (feet proxy) |
@@ -3021,7 +3022,7 @@ in ours. The remaining rate gap is +19 % (the foot-down proxy, not the game's ow
   - Materials 77 / 87 / 92 / 97 / 98 exported as missing, and every RefSpec to the `default` bands resolved nothing.
   - Before the fix, an impact on those materials read tier 2 with an empty window.
   - `audio_export.collision_tuning` now aliases name keys by hash64. Head = ids 1032 / 952 / 953; torso = 951 / 949 /
-    950 — the ids the recomp plays in bails (below).
+    950: the ids the recomp plays in bails (below).
 - Not ported, and why:
   - The first-hit torso message `sub_824BCEB0`: gated by an unidentified global at `*(0x82083C38) + 0x2FCB4`.
   - The Hall of Meat layer: global byte `+859`.
@@ -3211,7 +3212,7 @@ Caveats:
    `sub_827A1B78` passes a table entry. The per-skater loop `sub_827A11B0` (return address `0x827A13FC`) passes a
    stack array (its `r1 + 1064 − 152`, stride 544), and `sub_827A1030` (return `0x827A10A0`) a single zeroed stack entry
    with r6 = 1. So the "local entry" test never held, BAILLOCAL never logged and no pass matched the local X. Entry
-   `+152` bit 31 is the r6 argument (in the loop: the skater's controller test). Fixed in the recomp (uncommitted): the
+   `+152` bit 31 is the r6 argument (in the loop: the skater's controller test). Fixed in the recomp (committed on research-hooks): the
    hook accepts only the loop's call (`lr == 0x827A13FC`) with bit 31 set, and a bail is active when the entry's bits
    or `+676` / `+677` of a GREC-local audio state are set. A rate-limited `BAILCAND` line (7 fields) shows the lookup's
    raw inputs (first 32 calls; each new X of the output pass), so a failed lookup is visible in the next trace.
@@ -3220,7 +3221,7 @@ Caveats:
      22.9 s), each once per frame. FIRSTHIT kept one set of last values, so the +676 / +677 bytes "alternated" 1 / 0
      every call: one owner was bailing and the other was not. `40C34020` bailed once (154.7 s) with B+16 still 0, so it
      is not the local skater. `40C33020` is. FIRSTHIT now keeps its last values per state. ~~Earlier sessions had one
-     owner.~~ (Wrong: 15 of 18 sessions had the second owner, an NPC skater; the hooks now gate on local72 — see "The
+     owner.~~ (Wrong: 15 of 18 sessions had the second owner, an NPC skater; the hooks now gate on local72; see "The
      per-player recomp hooks logged an NPC skater too" below.) GREC / GRECX / TREAT / SEAMPAT readers should filter by owner (GREC's published local state alternates
      too, so the TREAT / SEAMPAT local-mask bit 2 is unreliable when a second owner exists).
    - **10 local bails**, 3.6–7.9 s from +676 rising to clearing. +677 (end) rises 1.4–4.0 s in and clears ≈ 1.0 s before
@@ -3415,6 +3416,179 @@ Results: skate-audio 228 pass; game_audio 58 pass (new world test included, run 
 builds. e2e doesn't run the changed code: `world_sources` is not in the harness, and
 `prefetch.rs` only gained a counter and a public `contains`.
 
+### Silent cliff fall: the body hits played at the board (2026-10-08, `player::contacts`)
+
+**Problem.** The user reported (2026-10-07) a silent fall: after jumping off a cliff, landing balled up
+or spread eagle made no sound.
+
+**Root cause.** The body poster (`Contacts::body`) posted every body-region hit at `board_position`. In that fall the
+board stayed up the slope while the skater fell about 45 m down, so the hits played 44 m from the skater and the
+camera: posted, but inaudible.
+
+**Evidence.**
+- Session `game-20261007-151236` / `state_20261007_151236.tsv` (third segment): walk off the edge at COM y 133.8, bail,
+  five seconds of ragdoll air with every region clear, ground contact at 21:30:01.415 (head 0.321, legs 0.606 / 0.501
+  on concrete, |COM v| 22.8 m/s, speed graph x5: tier 2 on concrete, no cooldown). The pair, second, cloth and pad
+  messages all posted. Board (342.5, 107.0, -679.5) against COM (323.5, 88.3, -644.6): 44 m.
+- Retail `sub_824BC188` (the body poster) posts via `bl 0x82486EF0` with `lvx128 vN, state, r18`, r18 = 48: audio
+  state `+48`. The instance bridge `sub_824B0DA8` writes state `+48` from the skater record's `+0` (the skater point,
+  our `com_position`) and state `+144` from record `+48` (the board, our `board_position`).
+- Cross-check of the other posters: grind start `sub_824BB0E0` `li r5, 48` (skater; ours already `com_position`),
+  deck impact `sub_824BD000` `li r24, 144` (board; ours `board_position`, correct), landing pair `sub_824BA630`
+  `li r5, 144` (board; ours `board_position`, correct). Only the body poster was wrong.
+- The earlier recomp bail runs (`bailx3_20261003_110208`, `bandq_20261003_105210`) validated tiers and levels, not
+  positions; their boards landed near the body, which hid this.
+
+**Change.**
+- `Contacts::body` posts at `s.com_position` (doc comment cites `sub_824BC188` `+48` and the bridge mapping). The
+  second, cloth and pad messages copy the pair's position, so all four move. NPC skaters run the same code
+  (`world::skaters`), so their bails are fixed too.
+- `Contacts::body_hits`: one `BodyHit` (region, impact after the speed graph, the pair message) per region that
+  posted, cleared at the start of every process and bounded (32). Read by both hosts after the process
+  (`player_audio::body_hits`, used for the local player and by `npc_skaters::pre` for each held NPC).
+- Diagnostics: one `AUDIO_EVENT body impact owner=.. region=.. impact=.. tier=a/b material=a/b pos=(x,y,z) dist=..`
+  line per region hit (distance to the listener camera; -1 when the host has none yet). The 15-console-frame cooldown
+  per region keeps it to a few lines per bail, never one per frame.
+- Moddability: a `body_impact` event tag (`EventKind::BodyImpact`, slot `body`, id = region) for the local player
+  (owner 0) and NPC skaters (owner = skater id); the row adds `region`, `impact`, `tier`, `material`, `position`. It
+  is observe only (not a rule tag: the hit's sounds are ordinary posts that rules already reach). Subscriptions drop
+  with the mod (`AudioApi::clear_owner`), and the sites' buffers go the next frames. Bands, cooldowns, the speed graph
+  and the pad thresholds stay data-driven in `ContactsTuning` / the collision tuning with retail defaults. SDK:
+  `sdk/skate.lua` `AudioEvent` fields, `api.lua` comment, doc 16.
+
+**Files.** `crates/skate-audio/src/player/contacts.rs`, `crates/skate-audio/src/world/skaters.rs`,
+`crates/skate-game/src/game_audio/{player_audio, npc_skaters, mod_audio}.rs` (plus the `hit: None` field on every
+other `EventRow` site: `ambience`, `emitters`, `mod_rules`, `mod_voices`, `world_sources`, `world_speech`),
+`crates/skate-mods/src/api.lua`, `sdk/skate.lua`, `docs/hails-additions/16-audio-modding.md`.
+
+**Verification.**
+- New tests: `the_body_poster_posts_at_the_skater_not_the_board` (all four retail points: body and grind start at the
+  skater, deck and landing pair at the board), `a_cliff_fall_lands_its_body_hits_at_the_body` (the session's shape:
+  300 frames of ragdoll air, then the head / leg hits with the board 44 m away; every message at the body, within 5 m
+  of a camera beside it), `body_impacts_reach_a_subscriber_per_skater` (player and NPC rows with their fields; mod
+  disable drops subscription and buffers).
+- `cargo test -p skate-audio --locked`: 245 pass. `cargo test -p skate-game --release --bin skate3rust --locked --
+  game_audio`: 77 pass.
+- e2e (`game_audio::e2e::e2e_render`, `E2E_FPS=60`) before and after on the 13 scenarios, the 4 real sessions of the
+  optimisation bench and a cut of the cliff-fall log (rows 50740..51770): 69 of 72 outputs byte-identical. Only
+  `cliff_fall` changes, the only input with body posts: its body trace has the same frames and post counts with new
+  digests (the position is hashed), and its voices differ only in gain and send (same voices, same pitches) from the
+  first body post on. Its deck trace is identical. (The e2e replay puts COM and board 0.9 m apart, so the change is
+  small there; the 44 m case is the unit test.)
+- To playtest: the user does a cliff fall (tuck and spread eagle) and checks the landing is heard.
+
+### Landing into a manual: retail parity checked, a per-landing diagnostic line (2026-10-08, `player::contacts`)
+
+**Problem.** The user reported (2026-10-07) no landing sound when landing in a manual, then that silent
+landings are not always manuals. There is no session with a manual landing in it yet, so the check works from the
+retail code.
+
+**Root cause.** Not found in the Contacts code: it matches retail gate for gate (below). Landing into a manual posts the
+same sounds in retail and ours. What is left is outside these gates: a start the host refuses (the NPC voice leak fixed
+in 54cf8f5, which is not on `gameplay/audio` yet), a quiet variant or level, or physics inputs we have not seen in a
+session. The new line tells these apart from one session.
+
+**Evidence** (TU3 recomp, reference only; [code]).
+- Frame order `sub_824B8218`: manual landing `sub_824BB330`, its result into the touchdowns `sub_824B86E0` (r4), then the
+  process `sub_824B90D8`. Ours: `Contacts::process`, same order.
+- `sub_824B90D8`: calls the landing `sub_824BA630` when `+120` (airborne last frame) is set and `+332` (airborne) and
+  `+341` (grinding) are clear. No balance gate. `sub_824BA630` starts the landing impact for the local player (`+72`)
+  and posts the pair contact (first landed wheel `+464` with a material `+620`, landing-flag materials only). Ours:
+  `land()` / `land_pair()`, same gates.
+- `sub_824B86E0`: two newly landed wheels with none counted (kind 1, "a pair from nothing") call the touchdown
+  `sub_824B8D48` with no manual gate. Only the last pair (two new wheels with two counted, `0x824B8B24` and
+  `0x824B8CA8`) is skipped when the manual landing returned true (r26) or `+121` (in a manual) is set.
+  `sub_824B8D48` returns when all four slots (`+140`, stride 24) are held. Ours: same.
+- `sub_824BB330`: `+340` set latches `+121`; with `+340` clear and `+121` set it reads `+200`: 3 or 4 wheels release
+  the old holder (`+36`), start kind 4 variant 0, mark all wheels counted (`+132..+135`) and clear `+121`; 0 wheels
+  clears `+121`; 1 or 2 wheels keep it. Ours: `manual_landing()`, same.
+- The inputs: the packer `sub_827A1B78` builds record `+148` from state byte 60 (`rlwimi .., 26, 5, 5`, the bridge's
+  `+340`) and Air `+438` (bit 31, the bridge's `+332`); ProcessOutput `sub_82DB6EC0` (`0x82DB764C`) writes Air `+438` =
+  physical state in 200..300 and the wheel count word 0. Ours: `balance` = flag 60, `airborne` = state 200..300 with no
+  wheel down: the same.
+- So a front or nose manual landing on two wheels plays, in retail and ours: the landing impact (1095), the pair
+  contact (on a landing material) and the kind 1 touchdown on the landing frame; nothing when the back pair comes
+  down inside the manual; the manual landing (kind 4) when the manual ends with 3 or 4 wheels down.
+
+**Change** (diagnostics only, no sound changes).
+- `Contacts::landing_note` (`LandingNote`): per process with a landing, a manual landing or a manual-skipped back pair:
+  the impact (`started` / `novoice` / `notlocal`), the pair (`posted:tier` / `nomaterial` / `notlandingmaterial` /
+  `silent`), the touchdown (kind, variant, `started` / `novoice` / `noslot` / `skippedmanual`), the manual landing,
+  balance, in a manual, wheels, contact and landed masks, air time. NPC skaters fill it too (per skater, no shared
+  state); only the local player logs it.
+- `player_audio`: one `AUDIO_LANDING ...` line per such process (a landing gives one line, a manual landing up to
+  three: landing, skipped back pair, manual landing).
+- Moddability: no threshold or window changed; the ids, gains and landing data stay in `ContactsTuning` / the
+  collision tuning with retail defaults (mod-reachable through the tuning overlay).
+
+**Files.** `crates/skate-audio/src/player/contacts.rs`, `crates/skate-game/src/game_audio/player_audio.rs`.
+
+**Verification.**
+- New tests (one per retail rule): `a_landing_into_a_manual_plays_the_impact_and_the_pair_touchdown`,
+  `the_back_pair_in_a_manual_is_silent_until_the_manual_landing`, `a_manual_let_go_on_two_wheels_lands_with_the_manual_sound`,
+  `leaving_the_ground_ends_the_manual_latch`, `a_remote_landing_notes_the_impact_as_not_local`.
+- `cargo test -p skate-audio --locked`: 250 pass. `cargo test -p skate-game --release --bin skate3rust --locked --
+  game_audio::`: 77 pass.
+- e2e (`e2e_bench.sh`, row mode) before and after on the 13 scenarios (`manual15` among them) and the 4 real sessions
+  of the optimisation bench: 34 of 34 outputs (renders and voice logs) byte-identical. Nothing audible changes.
+- To playtest: land into nose and tail manuals (from a plain ollie and after a flip trick), let some run out onto
+  four wheels and some roll off into the air; report any silent one with the time, then read its `AUDIO_LANDING` line.
+
+**Open questions.**
+- Which of the outcomes a silent manual landing shows in a user session (`AUDIO_LANDING`): `novoice` points at the
+  voice cap (54cf8f5), `started` everywhere points at levels or the mix, a missing line at the physics inputs.
+- `sub_824B86E0` returns early when a game flag (`*(0x830CFDC4)` `+564`, then a hash lookup) is set for the local
+  player with `+64` clear; not modelled, it would only make retail quieter.
+- The landing catch itself (when a landing becomes a manual) is the authored motion graph's, not Contacts'.
+
+### Location one-shots: the level grid and set changes (2026-10-16, `game_audio::random_sets`)
+- **Checked first (research b160):** how often the location sets fire already matches retail: the interval
+  `min + (max - min) * (rand % 1000) * 0.001` (sub_824A1980), redrawn on every expiry, 2 loaded banks, the oldest
+  loaded idle entry plays, weighted pick; the timer counts seconds (the recomp: gap / drawn interval 0.998, n = 119).
+  Fires per interval, the recomp vs ours: brewery 0.66 / 0.60, mem_plaza 0.68 / 0.67, city_center 0.42 / 0.53 (noise).
+  The `AUDIO_RANDOM set ... 7-5 s` print is the data (`e_dwtn_skatepark` has min 7, max 5): both draw 5..7.
+- **Level grid [code]:** sub_824A1A20 draws lo = trunc(steps x min), hi = trunc(steps x max), level =
+  (lo + rand % (hi - lo)) / steps, with `steps` the set's field `79460EEF1A8253B0`. Ours rounded both ends and fixed
+  10 steps. Now: the exporter writes `level_steps` (`audio_export.py`), the library and mod sets read it (default 10;
+  mods 1..1000), and `level` truncates.
+- **Set change [code]:** sub_828EA4E0 / 828EA708 mark the old set's entries stale: idle loaded banks unload, playing
+  posts play to their end and their banks count toward the 2-bank cap until they are freed. Ours faded every post out
+  over 0.3 s at a zone change. Now the posts keep playing (`Post::stale`, own bank), count toward the cap, and free
+  their bank when they end; silencing (menus, replays: ours) still stops everything.
+- **Verification:** `levels_are_tenths_below_the_maximum` (truncation and a 4-step grid), skate-game 715 pass, skate-mods
+  106 pass. Not listened to yet. The asset export must be re-run for `level_steps`; until then every set uses 10.
+- **Open (b160):** random posts and .ems emitter starts share one 5-state voice object in retail
+  (`*(0x830CFDC4)+0x2A8` vtable +0xC; a full pool drops the post and the entry fires at the next interval), ours does
+  not claim a state; the MixMap level / pitch / low-pass on posts (sub_824DCF08); one bank load per frame and play
+  only once loaded; `<` vs `>=` on the timer.
+
+### Rolling leftovers: the grain chain's FlangeSub send (2026-10-29, `grain::bed`)
+
+**Problem.** The rolling open line listed four leftovers: the `Class_rolling` surfaces on stand-in grains, tag 90,
+what selects the soft-wheel grains, and the grain chain's FlangeSub send. Checked against the code, three were
+already ported: `Class_rolling` posts the per-surface patch with no grain and tag 90 binds asphalt_rough_hard
+("The board's other layers"); the local player's soft members follow
+the wheel hardness, Processed+2764 < 0.5 (`skate-game/src/game_audio/skate_events.rs`, from the board setup's
+`wheel_hardness`), and an NPC board's follow `sub_824B23C8` ("NPC skaters' board sounds"). The FlangeSub send
+was carried but not rendered.
+
+**Retail.** Graph 2 of every grain chain is `Sub0 · Sen0 (→ [[mgr+116]], FlangeSub return A) · Sen0 (→ env) ·
+Pn21 · Sen0 (→ bus)`; both Sends tap the mono before the panner. The first is posted 0 at build, then for the
+local player level(21) / 32767 (player A) and level(22) / 32767 (player B) (`aems-grain-chain-spec.md` §1, §4).
+
+**Change.**
+- `grain/bed.rs`: each chain gets graph 2's FlangeSub `Level` next to its env one; `process_full` adds the pre-pan
+  mono × `flange_send` × the user gain into the bed's new `flange` buffer; `GrainBed::flange_send` hands it out,
+  None when no chain sends.
+- `mixer.rs`: `render_with_env` takes the bed's FlangeSub input and adds it into return A after the voices (pass
+  order 5 after 0), only while the returns are enabled; return A then renders that block.
+- `runtime.rs`: the local bed's FlangeSub input goes in; an NPC bed posts no level (local only), as in retail.
+
+**Verification.** skate-audio 284 passed, incl. `the_flange_send_is_mono_before_the_pan_and_apart_from_the_env_send`
+(the tap = 0.25 × the centre-panned dry signal, sample for sample; the env tap stays 0) and
+`the_bed_flange_input_feeds_return_a_only_when_enabled` (no change with the returns off; a delayed copy in the centre
+with them on). Not heard in game yet.
+
 ## Credits
 
 The retail measurements in this document were taken with **[skate3recomp](https://github.com/mchughalex/skate3recomp)**
@@ -3465,7 +3639,7 @@ user's vault. Upstream PR #4's `player-audio-retail-drivers.md` and `mixmap/inpu
 @andrewnakas (no licence, reference only) gave the function map, the packet word tables, the Jitter /
 Contacts / 3DObjPos writer descriptions and the retail wind and grain capture tables we validate
 against. The retail level tables come from our local recomp trace sessions
-(recomp session `20261001_211347` — deleted 2026-10-02, re-verify on clean data — and
+(recomp session `20261001_211347`, deleted 2026-10-02, re-verify on clean data, and
 `all_20261002_163809`). No code from any of these is included.
 
 The Splice player, the board contacts, skid and squeaks (2026-10-02) are our own code from our reading of the retail
@@ -3497,8 +3671,8 @@ holder fields, the owner bus builder and the Class_Seams function map. No code f
   assignment; the traffic 3DObjPos binding; ped model → shoe class / voice; PedBodyFall, Tazer (op 38), NPC skaters' grain bed / wheels / foley (foundation in "NPC skaters' board sounds"),
   event PA / crowds / music zones ("World sound sources").
 - Main bail body-impact sound (Bodyslide is only a layer); landing weight layer level; metal grind pick
-  (54–56) by ear; powerslide, wheel spin, push sound, fountain bank, caveman jump-on — not yet confirmed.
-- Surface → grain now follows retail (2026-10-02); still open: the `Class_rolling` surfaces (interim stand-ins), tag 90, and what selects the soft-wheel grains.
+  (54–56) by ear; powerslide, wheel spin, push sound, fountain bank, caveman jump-on: not yet confirmed.
+- Surface → grain follows retail; `Class_rolling`, tag 90, the soft-wheel grains and the FlangeSub send are ported ("Rolling leftovers: the grain chain's FlangeSub send").
 - Retail plays rolling granularly; the default path plays banded loops, `SKATE_AEMS=1` plays the native
   granular bed (player B silent until turn/slope inputs exist; FSS, graph 3, wobble not modelled).
 - MixMap inputs: VU (output meter) and the menu/NIS/HOM/Challenge flags stay 0; the bed's gain A matches
@@ -3514,7 +3688,7 @@ holder fields, the owner bus builder and the Class_Seams function map. No code f
 - The interim layer still bypasses the native host's 6→2 fold (~3–6 dB above native voices of the same per-voice
   level); the send buses (distance cue) are not modelled.
 - User listening check 2026-10-02 (native build 16:59): rolling "too loud" and "not in sync", grinds "not the
-  same sound" — see "Board contacts, skid and squeaks; the end-to-end PoC comparison" for what the measurements
+  same sound"; see "Board contacts, skid and squeaks; the end-to-end PoC comparison" for what the measurements
   show; the PoC reference had a one-off louder/harsher seam sound on one launch (first-play decode).
 - Zone ambience from `.ems` emitters (beds per map are a name-based guess); manual wheel spin
   (`Whls_spins_Man_1`); music.
@@ -3533,8 +3707,7 @@ holder fields, the owner bus builder and the Class_Seams function map. No code f
 - rodio 0.20's spatial panning is mirrored (the default path still uses it; native mode swaps the ears).
 - 19:38 air tricks #1 / #3: the audible in-air voice is retail's wheel spin-down; a retail ollie at ~30 km/h would
   settle whether ours sounds like it.
-- Port stage 2026-10-02 (rolling layers, chain, tricks, footsteps, returns), still open: the FlangeSub send of the grain chain
-  (no bed → return route); the bool-class word `0x11A631878B239355`; the seam pattern retail sees on University's sidewalk
+- Port stage 2026-10-02 (rolling layers, chain, tricks, footsteps, returns), still open: the bool-class word `0x11A631878B239355`; the seam pattern retail sees on University's sidewalk
   cells (pattern 11, "Listening test 8"). The seam sample variety is fixed: it was the missing `Start_up_Play_ctl` boot
   utility ("Listening test 8"). Closed 2026-10-02 (stage "FootStep SubMix, the skeleton inputs, …"): the FootStep SubMix, the
   step code, limb / body speeds, ragdoll slide records, the loose-board vectors, Reverb.in0..6 + the env scale, the reverb
@@ -3573,8 +3746,8 @@ ambience and the other seam voices. The user hears the seams as "WAY BETTER". No
 
 ### Interim cue tables retired; the water splash is native (2026-10-03, `player::footsteps::Splash`)
 
-The user, after the listening check of build 04:20: "go ahead and remove the interim cues", then, on hearing some were
-still in use: "oh.. if they are still being used then we aren't done." Decisions: splash "port it natively first";
+After the listening check of build 04:20 the user asked to remove the interim cues, then, on hearing some were
+still in use, ruled that the work is not done while they are. Decisions: splash: port it natively first;
 the riding bed: remove it, then check it against the recomp; installs without the data: require it (no fallback).
 
 **Listening (user, 2026-10-03, bin\ 10:06, session `state_20261003_101640`, 0 malformed):** "The sounds are SO GOOD.
@@ -3666,7 +3839,7 @@ poster (the recomp, riding):
     sessions likely include NPC skaters (no COLLPOST in those sessions; the session review's PCU / park sessions had
     AI skaters). To check in a user session: `PLAY_TRACE_AUDIOX.bat` now logs COLLPOST.
 - **sk8_foley:** every poster is ported. The rates differ with riding style. The recomp's riding has 0.42 plant /
-  lift posts per second; ours 0.19 / 0.16 (the user: "the 19 plants are correct, i didn't ride fast"). Push-driven
+  lift posts per second; ours 0.19 / 0.16 (the user confirmed the 19 plants are correct; they did not ride fast). Push-driven
   sounds scale with that: the Clothing push foley 74 / 73 (ours 0.16/s, the recomp 0.79/s) and the on-board
   footsteps. Shoe scuffs 94 / 95: ours 1.61/s, the recomp 2.71/s (both p50 0.061). The pedestrians' sk8_foley 62 / 63
   (0.53/s in the recomp, `SFXObj_PedestrianSFX`) are a world layer we can't have yet. No mechanism gap found; not
@@ -3769,7 +3942,7 @@ skid updater `sub_824C7A20` reads `lbz 72` of `[owner+16]`; the eqchain / grain 
 The NPC's component has byte 72 = 0 but a non-zero byte after it, so the word test passed. The TREAT / SEAMPAT mask bit 2
 (state = GREC's last accepted state) alternated with the two owners, so it selected neither reliably.
 
-**Change (recomp research hooks only, `src/research/hooks_audio.cpp`, uncommitted).** All seven kinds now gate on the
+**Change (recomp research hooks only, `src/research/hooks_audio.cpp`, committed on research-hooks).** All seven kinds now gate on the
 byte `[[object+28]+72]` (local72, as COLLPOST). SKID keeps its last holder per owner; FIRSTHIT keeps its per-state slots.
 TREAT / SEAMPAT / SEAMHIT's last field: bit 4 = local72 (the gate), bit 1 = byte `[[object+16]+72]`, bit 2 = state equals
 GREC's local state. New kind `LOCALTEST` (category `audio`, ≤ 256 lines, 6 fields; `trace.py` FIELD_COUNTS): per hook and
@@ -3798,13 +3971,13 @@ scripts in the same folder; the local object is the first one each trace logs, c
 | Pattern 11 hits (223306) | 15–21 /s at 20–40 km/h | 15–29 /s | Holds (sparse sidewalk = short pulse). |
 | Grid hits on a cell change of that wheel (223306, `seamhit_match.py`) | 400 of 520 | 2,677 of 3,156 (85 %); pattern 11: 470 of 619 | Holds. |
 | TREAT replay, air-time +236 changes (223306), sense_of_speed replay (223613) | 860 of 5,094 | same | Already filtered by object (`40C581A0`, `40C33020`). The "57,323 lines" count includes the NPC (local 33,786, ~305 /s). |
-| Clean carves A/(1−I), B/I; bed per material (`review/bed.py`) | — | — | Already filtered by owner (`rlib` / local owner). |
+| Clean carves A/(1−I), B/I; bed per material (`review/bed.py`) | n/a | n/a | Already filtered by owner (`rlib` / local owner). |
 
 **Not separable:** voice-based figures (PLAY, SPLC: the riding Skate_Collisions / sk8_foley rates, seam voice rates
 and levels) include an NPC's sounds whenever one was near, and these sessions have no COLLPOST. That was already noted
 for the 1.7 /s body posts; a user session with `PLAY_TRACE_AUDIOX.bat` (COLLPOST) settles it.
 
-**For the main session (no engine change made):**
+**Open items (no engine change made):**
 - "(1) Carving": the turn input is not the difference. If ours really keeps I up for ~13 frames after the stick
   returns (retail: 0 within 50 ms), the cause is on our I side, not the animation's `Turn` scalar; worth a look.
 - Hook consumers written before this fix need an object filter (or `filter_local.py`); new traces need none.
@@ -4038,11 +4211,11 @@ Spec: `audio-specs/ragdoll-contact-spec.md` (retail mechanism, ours, decision po
   3.6 / 4.571 / 5.0 (read from the running game with a watch on `[[[0x830CFDA4]+36]+4]`). New recomp hook `BANDQ` on
   `sub_82497088` (impact, tier, band edges per query) shows the body poster's impact = 5.0 × the clamped region impact
   (ratio p50 5.0 over 218 posts) and band edges equal to our exported table. Ours skips the curve, so our body impacts
-  are 1/5 of retail's at the poster: no tier 1 / 2, and concrete 1047 / 991 (> 1.0 / 1.85) unreachable — this also
+  are 1/5 of retail's at the poster: no tier 1 / 2, and concrete 1047 / 991 (> 1.0 / 1.85) unreachable; this also
   answers the open question "which impact posts concrete tier 1 / 2" above.
 - **Not changed** (needs the user's go): port the curve in `skate_events` (audio only; skate-core untouched), together
   with the |Δv·n| abs and the body poster's 30 fps cadence; then re-measure bail density against the recomp.
-  *Ported 2026-10-03 (user: "Port it"): see "The bridge's speed curve on the body impacts" below.*
+  *Ported 2026-10-03 (the user's go): see "The bridge's speed curve on the body impacts" below.*
 - Script: `bail_ledge.txt` now uses `lt rt l3 r3` (6 / 6 bails; user tip), with an X jump + mid-air `l3 r3 lt rt` fallback.
 
 ### The bridge's speed curve on the body impacts (2026-10-03, user decision "Port it"; `player::contacts`, `skate_events`)
@@ -4725,7 +4898,7 @@ The data-gated world / NPC / speech tests were also run before and after:
 
 Their printed tables were diffed; only the elapsed-time lines differ.
 
-**Timing method.** Other agents built and ran on the machine during the pass, so the timing of a whole bench
+**Timing method.** Other builds and runs used the machine during the pass, so the timing of a whole bench
 run was unusable (one reference run came out +30 % p50 with identical output). Before / after numbers come
 from saved test binaries run alternately (A B A B …, 3–4 rounds):
 - two whole sessions (`real_143434`, `real_115334`, 180,638 blocks) in `row` mode;
@@ -4733,7 +4906,7 @@ from saved test binaries run alternately (A B A B …, 3–4 rounds):
 
 All timing runs used one local measurement patch on both sides. The patch is a counting allocator plus
 per-block walk / voices / allocation stats in the e2e harness and a timed world-host test, and it was never
-landed. Rounds that another agent's build disturbed show up as one side jumping by 15–40 %. They are named
+landed. Rounds that another build disturbed show up as one side jumping by 15–40 %. They are named
 below and not counted.
 
 | # | Change | Result | Kept |
@@ -4746,7 +4919,7 @@ below and not counted.
 | 4 | eEQChain silent-bus memo: a silent bus from the state of an earlier silent block that left the state unchanged adds the stored output (state and output keyed on bits) | counted first: 77 % of bus-blocks silent, 38–40 % would hit; then no gain: sessions p50 +0.8 µs, world +1–3 µs (the extra silence scans and key compares cost what the skipped EQs saved) | **dropped** |
 | 5 | MixMap `tick`: the held-input save list kept between ticks | −1 allocation per evaluation | yes |
 | 6 | `Jitter::process_each` (same draws, same write order; the MixMap writes don't touch the walk) instead of collecting a `Vec` per frame | −1 allocation per frame; with 5: game thread 18.0–18.9 → 16.4–17.2 allocations per frame | yes |
-| 7, 8 | first emitter start after a load; per-frame map-name / tuning clones | not touched: cosmetic or ≈ 0, as the baseline said | — |
+| 7, 8 | first emitter start after a load; per-frame map-name / tuning clones | not touched: cosmetic or ≈ 0, as the baseline said | no |
 
 The rest of item 6 was left out: making every component's `Command { words: Vec<i32> }` allocation-free.
 `Command` is public API that the audio modding (doc 16; former #36, now part of #32) builds on, so it needs a fixed-size word array agreed with
@@ -4852,3 +5025,41 @@ Full write-up: [15](15-world-audio.md), section "Follow-ups". In short:
   0.94 (was 0.045 / 0.065 and 0.005 / 0.014 with the NPC always dead ahead). No engine change.
 - **NPC board slide observed** in session 180430 (an NPC bail, two posts, `board_scrapes` 62–68 ms later).
 - Local player byte-identical (e2e bench, all sets).
+
+## Code reference: player/hand_grabs.rs
+
+Detail moved out of the code comments of `crates/skate-audio/src/player/hand_grabs.rs`; each comment there links its section here.
+
+### HandGrabs skitch audio
+
+The HandGrabs component's skitch part (`sub_824EC3E0` -> `sub_824EC488`). Retail (TU3, evidence only; re-implemented; research b141, main read the packer, bridge and reader):
+- the packer `sub_827A1B78` sets record `+152` bit `0x100` while the physical state is 104 (Skitching, `0x827A29EC`); the bridge `sub_824B0DA8` copies it to audio state `+744` ([`AudioState::skitching`]);
+- the component updates only for the local player; on the rising edge of `+744` it releases its two voices and starts the `aud_splicer` `handgrab` pair (field `3A6CB8809410A268` Skate_Collisions, `04B0B78035ED5EC6` Skate_Metal) through the eEQChain bus of field `CCDFABBAEEA33EAE`, start block `[0, 1, 0, dt, 1, 1]`; the falling edge only clears the latch (the one-shots run out);
+- MixMap `HandGrabs.in0` is 32767 while the latch is set, else 0 (the MixMap's own player fades the board's volume by it).
+
+## Code reference: player/contacts.rs (fork additions)
+
+Detail moved out of the fork-added code comments of `crates/skate-audio/src/player/contacts.rs`; each comment there links its section here.
+
+### Audio posting points
+
+Retail's posting points per poster (the instance bridge `sub_824B0DA8` fills audio state `+48` from the skater record's `+0` = our `com_position`, `+144` from `+48` = our `board_position`): the body poster `sub_824BC188` (`lvx128` r18 = 48) and the grind start `sub_824BB0E0` (`li r5, 48`) post at the skater; the deck impact `sub_824BD000` (`li r24, 144`) and the landing pair `sub_824BA630` (`li r5, 144`) at the board.
+
+## Code reference: player/rolling.rs (fork additions)
+
+Detail moved out of the fork-added code comments of `crates/skate-audio/src/player/rolling.rs`; each comment there links its section here.
+
+### Rolling routing parity test
+
+Retail parity for every audio surface tag 0..127, hard and soft wheels: tag → material (tag − 1, 0 → 143) → rolling surface (`sub_824C82A8` + `sub_82494CD8`, the AudioSurfaceMap word +4) → what the owner's routing `sub_824C5CA8` starts: a grain bind of `sub_824C8370`'s member (kind 1) with no Class_rolling patch, or the per-surface Class_rolling patch (`sub_824C4C18`, selector by the `+1488` switch: 7→1, 8→2, 10→10, 11→12, 12→11, 13→9, w6 = the surface) with **no grain**. Run on both the install-table route ([`surface_for`] with a table) and the no-table default ([`retail_surface`]).
+
+## Code reference: grain_bed.rs, world_audio.rs
+
+- `grain_bed.rs` surface routing (one sounding truck): the wheels' majority surface -> rolling surface
+  (`surface_of_tag`, the retail AudioSurfaceMap) -> grain member (`bound_for`: none on the Class_rolling surfaces 7, 8,
+  10..13, as `sub_824C5CA8`); a change stops both players and binds the new member (pulsing SkateBoard input 0);
+  grinding (surface 14) stops them.
+- `world_audio.rs` `VehicleHornState`: a vehicle's effective horn state (the bridge's hold from `VehicleHorn` /
+  `VehicleAlarm`, else the AI's `horn`) is the one value the audio host plays. The replay records it with the actor and
+  plays it back at the playhead, so a seek or rewind into a sounding alarm or horn plays it (research b409: retail keeps
+  a 4-bit horn field per vehicle entry per recorded frame).

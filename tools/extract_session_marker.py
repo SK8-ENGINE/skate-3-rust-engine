@@ -145,9 +145,11 @@ def compile_hud(cache_root: Path, output: Path, toolkit="vendor.skate3_ui") -> N
             if font is None: raise ValueError("Missing original futuraheavy font")
             emit_text(text, value, font, tint, offset, role)
 
+    # The source manifest names the setup's temp folder: hash it without that folder (reproducible output).
+    source = (cache_root/"manifest.json").read_bytes().replace(json.dumps(str(cache_root))[1:-1].encode(), b"")
     manifest = {"version": 1, "canvas": [1280,720], "textures": textures,
         "meshes": sorted(meshes, key=lambda m:m["order"]),
-        "source_manifest_sha256": hashlib.sha256((cache_root/"manifest.json").read_bytes()).hexdigest(),
+        "source_manifest_sha256": hashlib.sha256(source).hexdigest(),
         "timelines": {"hudintro": [1,14], "hudoutro": [15,30], "maximized": [27,49], "3": [9,18]},
         "presentation": {"panel_opacity": PANEL_OPACITY, "shadow_coverage_gamma": SHADOW_COVERAGE_GAMMA},
         "notes": "Authored three-row display list; native RenderButton dimensions and dual font passes. Panel opacity and shadow coverage compensate the host compositor against reference screenshots; they are not recovered native constants. Object Dropper is unavailable; its 0.3 opacity is a host presentation choice."}

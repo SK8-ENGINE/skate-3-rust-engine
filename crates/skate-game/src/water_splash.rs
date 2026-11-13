@@ -99,20 +99,36 @@ fn deep_surface(physics: &GamePhysics, p: Vector3) -> Option<f32> {
 /// Splashes on the frame the skater root or the board deck enters deep water.
 fn detect(
     mut commands: Commands,
-    physics: Option<Res<GamePhysics>>,
+    physics: Option<ResMut<GamePhysics>>,
     skater: Option<Res<crate::physics::SkaterRuntime>>,
     assets: Option<Res<SplashAssets>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut state: Local<EntryState>,
+    look: Option<Res<crate::water_look::WaterLookSettings>>,
 ) {
-    let (Some(physics), Some(skater), Some(assets)) = (physics, skater, assets) else { return };
+    let (Some(mut physics), Some(skater), Some(assets)) = (physics, skater, assets) else { return };
+    // Props falling into water (Better Water's props in water): a puff sized to the prop. Checked before taking the
+    // props mutably, so a frame without entries never touches them.
+    if physics.prop_dynamics().is_some_and(|d| d.has_water_entries())
+        && let Some(dynamics) = physics.prop_dynamics_mut()
+    {
+        for (at, speed, size) in dynamics.take_water_entries() {
+            let strength = (speed / 8.0).clamp(0.4, 1.2) * (size / 1.2).clamp(0.3, 1.0);
+            spawn_plume(&mut commands, &assets, &mut materials, &mut state.rng, Vec3::new(at.x, at.y, at.z), strength);
+        }
+    }
     if state.rng == 0 {
         state.rng = 0x9e37_79b9;
     }
+    // Better Water's shallow splash (fountains): retail has none, so the retail look (Better Water off) gives 0.
+    let shallow = look.map_or(0.0, |l| l.active().effective().shallow_splash);
     let root = skater.skeleton.bodies()[0].rates;
     let deck = physics.board.bodies()[BodyId::Deck.index()].rates;
     for (is_board, body) in [(false, root), (true, deck)] {
-        let surface = deep_surface(&physics, body.position);
+        let entry = deep_surface(&physics, body.position).map(|s| (s, 1.0)).or_else(|| {
+            (shallow > 0.0).then(|| physics.world().water_surface_at(body.position, ABOVE, MAX_DEPTH)).flatten().map(|s| (s, shallow))
+        });
+        let surface = entry.map(|(s, _)| s);
         let was = if is_board { state.board } else { state.skater };
         let speed = -body.linear_velocity.y;
         if let Some(surface) = surface
@@ -120,7 +136,8 @@ fn detect(
             && speed > MIN_SPEED
         {
             let at = Vec3::new(body.position.x, surface, body.position.z);
-            let strength = (speed / 8.0).clamp(0.4, 1.2) * if is_board { 0.45 } else { 1.0 };
+            let share = entry.map_or(1.0, |(_, share)| share);
+            let strength = (speed / 8.0).clamp(0.4, 1.2) * if is_board { 0.45 } else { 1.0 } * share;
             spawn_plume(&mut commands, &assets, &mut materials, &mut state.rng, at, strength);
         }
         if is_board {

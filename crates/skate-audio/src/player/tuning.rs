@@ -144,6 +144,8 @@ pub struct PlayerTuning {
     /// The grind contact sounds' eEQChain bus (class `42AFE160E647167C` `default` field
     /// `D1A87641CCB98787`, `sub_824C3FC8` / `sub_824C4138`): 0.
     pub grind_contact_eq: u8,
+    /// `aud_splicer` `handgrab` and its bus (`player::hand_grabs`).
+    pub hand_grab: super::hand_grabs::HandGrabTuning,
 }
 
 /// The jitter keys of [`PlayerTuning::eq_jitter`], in order.
@@ -171,6 +173,7 @@ impl Default for PlayerTuning {
             tricks: Default::default(),
             treatment: Default::default(),
             grind_contact_eq: 0,
+            hand_grab: Default::default(),
         }
     }
 }

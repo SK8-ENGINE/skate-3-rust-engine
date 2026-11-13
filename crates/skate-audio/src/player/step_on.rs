@@ -68,6 +68,15 @@ pub struct StepOn {
 }
 
 impl StepOn {
+    /// The owner's release: stop every held hand sound (on and off).
+    pub fn release_all(&mut self, host: &mut dyn SpliceHost) {
+        for slot in self.on.iter_mut().chain(self.off.iter_mut()) {
+            if let Some(sound) = slot.take() {
+                host.release(sound);
+            }
+        }
+    }
+
     /// `sub_824B85B0` (rising `+689`, rising `+688`, falling `+689`, falling `+688`).
     pub fn process(&mut self, s: &AudioState, c: &StepOnTuning, host: &mut dyn SpliceHost) {
         let now = s.hands_on_deck;

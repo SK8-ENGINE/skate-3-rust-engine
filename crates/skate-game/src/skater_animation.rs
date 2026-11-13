@@ -38,6 +38,10 @@ pub(crate) struct AnimationSource {
     evaluator: Arc<PoseEvaluator>,
 }
 impl AnimationSource {
+    /// The bank bytes this source decoded (read once, shared by every body built on it).
+    pub(crate) fn banks(&self) -> &skate_data::animation_banks::AnimationBanks {
+        &self.banks
+    }
     pub(crate) fn load(root: &Path) -> Result<Arc<Self>, String> {
         let banks = skate_data::animation_banks::AnimationBanks::load(root)?;
         let mut evaluator = PoseEvaluator::from_banks(&banks)?;
@@ -100,6 +104,14 @@ impl SkaterAnimation {
     /// Native Initialize82B97E38 selects both orientation/mirror bits for
     /// regular stance. A profile edit changes the natural basis while retaining
     /// the current relative stance and trick state.
+    /// The profile's natural stance is regular (CAS byte +120; HUDComponents.PlayerStance_IsRegular).
+    pub(crate) fn regular_stance(&self) -> bool {
+        self.state.publication.natural_stance == 0
+    }
+    /// Riding switch (relative stance 1; SkaterAnim vt+0x18 `82B97128`, the Trick Guide's swap input, b672).
+    pub(crate) fn riding_switch(&self) -> bool {
+        self.state.switch()
+    }
     pub(crate) fn set_customisation(&mut self, natural: u32, style: u32) {
         if natural <= 1 && self.state.publication.natural_stance != natural as i32 {
             self.state.publication.natural_stance = natural as i32;

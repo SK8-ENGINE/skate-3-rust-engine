@@ -22,6 +22,7 @@ struct TeleportWire {
     g: u64, s: u32, p: [f32; 3],
     #[serde(default)] h: Option<f32>,
     #[serde(default)] v: Option<[f32; 3]>,
+    #[serde(default)] f: Option<bool>,
 }
 
 #[derive(Default)]
@@ -75,7 +76,9 @@ fn connected(world: &World, peer: &str) -> bool {
 }
 pub(super) fn apply_local(world: &mut World, options: &TeleportOptions) -> Result<(), String> {
     if !options.validate() { return Err("invalid teleport options".into()); }
-    world.resource_mut::<crate::physics::SkaterRuntime>().travel(spawn_matrix(options.position, options.heading), options.velocity)
+    let mut skater = world.resource_mut::<crate::physics::SkaterRuntime>();
+    let fit = skate_core::physics::teleport_ground_fit::GroundFit { enabled: options.ground_fit.unwrap_or(true), ..skater.ground_fit };
+    skater.travel_fit(spawn_matrix(options.position, options.heading), options.velocity, true, fit)
 }
 pub(super) fn resolved_authority(mods: &Mods, local: &str, host: bool, host_peer: &str) -> String {
     mods.session.advertised.clone().unwrap_or_else(|| if host { local.into() } else { host_peer.into() })
@@ -107,7 +110,7 @@ pub(super) fn teleport(world: &mut World, mods: &mut Mods, peer: &str, options: 
     if peer == local { return apply_local(world, &options); }
     mods.session.teleport_seq = mods.session.teleport_seq.saturating_add(1);
     mods.session.pending_teleports.insert(peer.into(), TeleportWire {
-        g: mods.session.generation, s: mods.session.teleport_seq, p: options.position, h: options.heading, v: options.velocity,
+        g: mods.session.generation, s: mods.session.teleport_seq, p: options.position, h: options.heading, v: options.velocity, f: options.ground_fit,
     });
     Ok(())
 }
@@ -138,7 +141,7 @@ fn receive_teleport(state: &mut Runtime, peer: u64, bytes: &[u8], authority: u64
     if peer != authority { return None; }
     let cmd: TeleportWire = serde_json::from_slice(bytes).ok()?;
     if cmd.g != state.generation || cmd.s <= state.applied.get(&peer).copied().unwrap_or(0) { return None; }
-    let options = TeleportOptions { position: cmd.p, heading: cmd.h, velocity: cmd.v };
+    let options = TeleportOptions { position: cmd.p, heading: cmd.h, velocity: cmd.v, ground_fit: cmd.f };
     if !options.validate() { return None; }
     state.applied.insert(peer, cmd.s);
     Some(options)
@@ -202,7 +205,7 @@ mod tests {
     #[test]
     fn teleports_reject_wrong_sender_invalid_values_replays_and_old_generations() {
         let mut state = Runtime::default();
-        let packet = |g, s, x| serde_json::to_vec(&TeleportWire {g,s,p:[x,0.,0.],h:None,v:None}).unwrap();
+        let packet = |g, s, x| serde_json::to_vec(&TeleportWire {g,s,p:[x,0.,0.],h:None,v:None,f:None}).unwrap();
         assert!(receive_teleport(&mut state, 3, &packet(0,1,1.), 1).is_none());
         assert!(receive_teleport(&mut state, 1, &packet(0,1,200_000.), 1).is_none());
         assert!(receive_teleport(&mut state, 1, &packet(0,1,1.), 1).is_some());

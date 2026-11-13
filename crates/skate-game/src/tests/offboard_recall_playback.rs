@@ -376,11 +376,11 @@ fn raw_repeated_walk_turn_throw_recall_jump_remount_preserves_full_roots_and_joi
     // at tick4585, before cycle3's commanded jump. Give this endurance test
     // actual collision geometry covering its route; keep the dedicated ledge
     // tests and every landing/ownership/root/joint assertion unchanged.
-    r.physics.world = super::offboard_air_tests::edge_world(
+    r.physics.world = (super::offboard_air_tests::edge_world(
         r.physics.settings.floor_material,
         250.0,
         ground::HEIGHT - 100.0,
-    );
+    )).into();
     //Three uninterrupted cycles exceed both reported827 and3315 histories.
     //All timing and movement below are test commands, not physics parameters.
     for cycle in 0..3 {

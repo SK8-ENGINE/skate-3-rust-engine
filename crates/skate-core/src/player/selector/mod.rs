@@ -14,6 +14,22 @@ pub use input::{ProcessedStateInput, StateSelectionInput};
 
 use crate::player::state::PhysicalStateId;
 
+/// Retail air timeout: `CalcSuggestedState` `0x82D8ADE8` requests a checkpoint teleport once
+/// the category-200 (air) frame count passes this (`count > 300` at `0x82D8B034`), 5 s at the
+/// fixed 1/60 s step.
+pub const RETAIL_AIR_TIMEOUT_FRAMES: i32 = 300;
+
+/// Air frames allowed before the checkpoint teleport request (retail
+/// [`RETAIL_AIR_TIMEOUT_FRAMES`]; a host or mod setting may change it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AirTimeoutFrames(pub i32);
+
+impl Default for AirTimeoutFrames {
+    fn default() -> Self {
+        Self(RETAIL_AIR_TIMEOUT_FRAMES)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StateSelector {
     pub current_state: Option<PhysicalStateId>,
@@ -28,6 +44,8 @@ pub struct StateSelector {
     pub skitch_exit_countdown: i32,
     pub revert_exited_normally: bool,
     pub request_teleport: bool,
+    /// Tuning, not state: the air frame limit (retail 300).
+    pub air_timeout: AirTimeoutFrames,
 }
 
 #[derive(Clone, Copy)]
@@ -114,7 +132,7 @@ impl StateSelector {
         if p.has_2468(2) || p.has_2472(0x4_0000) {
             return PhysicalStateId::Teleporting;
         }
-        if self.air_frames > 300 {
+        if self.air_frames > self.air_timeout.0 {
             self.request_teleport = true;
             return current;
         }

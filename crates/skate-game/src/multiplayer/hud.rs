@@ -47,6 +47,7 @@ pub(super) fn draw(
     net: Res<Multiplayer>, windows: Query<&Window>,
     mut nodes: Query<(&mut Node, Option<&RosterRoot>, Option<&RosterRow>, Option<&RosterText>), Or<(With<RosterRoot>, With<RosterRow>, With<RosterText>)>>,
     mut labels: Query<(&mut Text, &mut TextFont, Option<&RosterText>, Option<&RosterTitle>), Or<(With<RosterText>, With<RosterTitle>)>>,
+    fe_hud: Option<Res<crate::fe_backdrop::FeHud>>,
 ) {
     let scale = windows.iter().next().map_or(1., |w| (w.height() / 1080.).clamp(0.65, 2.));
     let mut roster = Vec::new();
@@ -67,7 +68,9 @@ pub(super) fn draw(
     }
     for (mut node, root, row, field) in &mut nodes {
         if root.is_some() {
-            node.display = if roster.is_empty() { Display::None } else { Display::Flex };
+            // The online HUDs follow the FE screen's HUD mode ("onlinehuds", hidden under the pause menu).
+            let online = fe_hud.as_ref().is_none_or(|f| f.online);
+            node.display = if roster.is_empty() || !online { Display::None } else { Display::Flex };
             node.right = px(24. * scale); node.bottom = px(24. * scale);
             node.width = px(310. * scale); node.padding = UiRect::all(px(8. * scale));
             node.row_gap = px(3. * scale);

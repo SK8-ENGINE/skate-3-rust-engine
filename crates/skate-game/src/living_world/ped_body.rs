@@ -1,0 +1,391 @@
+//! Peds as solid bodies (group 11) in the skater's contact solve (b138, b144 to b147).
+//! Retail mechanism and gaps: docs/hails-additions/26g-living-world-ped-interactions.md#ped-solid-bodies
+use bevy::prelude::*;
+
+use super::peds::{PedBody, PedData, Pedestrian};
+
+/// Retail ped collision group (`sub_82BD4A30`: 5 skater, 8 vehicle, 11 pedestrian).
+pub(crate) const PED_GROUP: u32 = 11;
+/// Proxy ids: `PED_PROXY_TAG | ped serial << 2 | part` (stable; the multiplayer authority keys). The serial, not
+/// `LivingWorldId::to_u64`: its kind byte (bit 56) shifted by 2 lands in the tag bits, and the tag test then dropped
+/// every real ped part (walker and board ped hits were always empty).
+pub(crate) const PED_PROXY_TAG: u64 = 0x5045_0000_0000_0000;
+const PED_PROXY_TAG_MASK: u64 = 0xFFFF_0000_0000_0000;
+
+pub(crate) fn proxy_id(serial: u32, part: usize) -> u64 {
+    PED_PROXY_TAG | (serial as u64) << 2 | part as u64 & 3
+}
+
+/// The ped serial of a ped part proxy id, `None` for any other solid.
+pub(crate) fn proxy_serial(id: u64) -> Option<u32> {
+    (id & PED_PROXY_TAG_MASK == PED_PROXY_TAG).then_some((id >> 2) as u32)
+}
+
+/// One capsule of the body, between two bones.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PedBodyPart {
+    /// Rig bone names (matched ignoring case).
+    pub from: String,
+    pub to: String,
+    /// Where the centre sits from `from` (0) to `to` (1); the axis runs from `from` to `to`.
+    pub centre: f32,
+    pub radius: f32,
+    pub half_length: f32,
+    /// kg.
+    pub mass: f32,
+    /// Contact friction of the part's collider (static; dynamic is 0.75 of it, restitution 0, `solid_contacts`).
+    pub friction: f32,
+}
+
+/// Retail 0 (b289): ped part friction and restitution 0.0 (82E268C8, 82E0E4B0, 82DC4588).
+pub(crate) const DEFAULT_PART_FRICTION: f32 = 0.0;
+
+/// `living_world.ped_body` (mod-facing; the default is retail as marked).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PedBodySettings {
+    /// Retail on (peds are solid).
+    pub enabled: bool,
+    pub parts: Vec<PedBodyPart>,
+    /// Seconds of ped velocity the parts are moved ahead (retail 1/60).
+    pub look_ahead: f32,
+    /// Peds farther than this from every observer get no body (m; ours).
+    pub range: f32,
+    /// The part whose speed after the solve decides the ped's reaction, whichever part was touched: retail reads
+    /// only part 0, the torso (`sub_82E38FB8` kind 5, `[parts]+76` with no index; b283).
+    pub reaction_part: usize,
+    /// Body A, the movement proxy (group 9): the body cars and props meet (b342 section 7). `None` = off.
+    pub proxy: Option<PedProxy>,
+}
+
+/// Body A (82E38400, group 9; b146, b342): upright root capsule vs map, cars and DMOs: docs/hails-additions/26g-living-world-ped-interactions.md#ped-body-a
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PedProxy {
+    pub radius: f32,
+    pub half_length: f32,
+    /// kg.
+    pub mass: f32,
+    /// Collision sliding (ped +5936 bit 0x40 from ped attribute 0xB168050B3E6FC967: on for every generic ped type,
+    /// research b635): a side contact the ped walks or faces into moves its root with body A (82E38400 kind 1).
+    pub slide: bool,
+    /// The side test `|up x n| >` this (0x8208E95C).
+    pub slide_side: f32,
+    /// sub_82E35160: a posed ped's body A is centred on this bone's position (upright, root rotation; a lying ped's
+    /// capsule drops with its spine, research b644); unposed: root + `unposed_height` / 2 + `unposed_lift` up
+    /// (sub_82E0E210; the height is inferred).
+    pub centre_bone: &'static str,
+    pub unposed_height: f32,
+    pub unposed_lift: f32,
+}
+
+impl Default for PedProxy {
+    fn default() -> Self {
+        Self { radius: 0.3125, half_length: 0.5375, mass: 10.0, slide: true, slide_side: 0.45, centre_bone: "Spine1", unposed_height: 1.7, unposed_lift: 0.2 }
+    }
+}
+
+/// 82E38400's kind 1 for a contact whose normal `n` points into the ped: a side contact (`|up x n| > side`) the ped
+/// faces into or moves into (`facing . n < 0` or `velocity . n < 0`). The handler sub_82E38FB8 then moves the root
+/// to body A's solved X / Z (Y kept): docs/hails-additions/26g-living-world-ped-interactions.md#ped-body-a
+pub(crate) fn slides(n: Vec3, facing: Vec3, velocity: Vec3, side: f32) -> bool {
+    let up_cross = Vec3::Y.cross(n).length();
+    up_cross > side && (facing.dot(n) < 0.0 || velocity.dot(n) < 0.0)
+}
+
+/// Retail group of body A.
+pub(crate) const PED_PROXY_GROUP: u32 = 9;
+/// Body A's actor id in the prop step: the part ids use bits 0..1, body A sets bit 47 (between the serial and the tag,
+/// so [`proxy_serial`] still names the ped).
+pub(crate) const PED_BODY_A_BIT: u64 = 1 << 47;
+
+pub(crate) fn body_a_id(serial: u32) -> u64 {
+    PED_PROXY_TAG | PED_BODY_A_BIT | (serial as u64) << 2
+}
+
+/// Body A as a prop-step volume without a pose: an upright capsule above the root (sub_82E0E210), moving with the ped.
+pub(crate) fn body_a_volume(position: Vec3, velocity: Vec3, p: &PedProxy) -> skate_core::physics::board_world::BoardWorldVolume {
+    body_a_volume_at(position + Vec3::Y * (0.5 * p.unposed_height + p.unposed_lift), velocity, p)
+}
+
+/// Body A as a prop-step volume: an upright capsule centred at `centre`, moving with the ped.
+pub(crate) fn body_a_volume_at(centre: Vec3, velocity: Vec3, p: &PedProxy) -> skate_core::physics::board_world::BoardWorldVolume {
+    use skate_core::math::Vector3;
+    let v = |a: Vec3| Vector3::new(a.x, a.y, a.z);
+    let half = p.half_length.max(0.0);
+    let radius = p.radius.max(0.01);
+    skate_core::physics::board_world::BoardWorldVolume {
+        collision_group: PED_PROXY_GROUP,
+        // Not a board: the prop's body-bump cap applies.
+        body: skate_core::physics::board_step::CollisionBody::Attached(0),
+        primitive: skate_core::physics::world_contact::ContactPrimitive::Capsule { center: v(centre), axis: v(Vec3::Y), half_length: half, radius },
+        motion: skate_core::physics::board_world::VolumeMotion { linear_velocity: v(velocity), ..Default::default() },
+        material: skate_core::physics::contact::RetailContactMaterial { static_friction: 0.0, dynamic_friction: 0.0, restitution: 0.0 },
+    }
+}
+
+impl Default for PedBodySettings {
+    fn default() -> Self {
+        let part = |from: &str, to: &str, centre: f32, radius: f32, half_length: f32, mass: f32| PedBodyPart {
+            from: from.into(),
+            to: to.into(),
+            centre,
+            radius,
+            half_length,
+            mass,
+            friction: DEFAULT_PART_FRICTION,
+        };
+        Self {
+            enabled: true,
+            parts: vec![
+                part("Hips", "Head", 0.0, 0.20, 0.575, 10.0),
+                part("LeftForeArm", "LeftHand", 0.5, 0.08, 0.20, 20.0),
+                part("RightForeArm", "RightHand", 0.5, 0.08, 0.20, 20.0),
+            ],
+            look_ahead: 1.0 / 60.0,
+            range: 12.0,
+            reaction_part: 0,
+            proxy: Some(PedProxy::default()),
+        }
+    }
+}
+
+/// The (|v|, |w|) after the solve of ped `serial`'s reaction part, from every ped part in the solve (`after`: proxy
+/// id, speeds). `None` when the settings name no such part or it was not in the solve.
+pub(crate) fn reaction_part_speed(after: &[(u64, [f32; 2])], serial: u32, s: &PedBodySettings) -> Option<[f32; 2]> {
+    if s.reaction_part >= s.parts.len() {
+        return None;
+    }
+    let id = proxy_id(serial, s.reaction_part);
+    after.iter().find(|p| p.0 == id).map(|p| p.1)
+}
+
+/// One part's body: a capsule centred between `a` and `b` (world) along `a -> b`, moving at `velocity`.
+pub(crate) fn part_proxy(serial: u32, index: usize, a: Vec3, b: Vec3, velocity: Vec3, part: &PedBodyPart, look_ahead: f32) -> skate_dynamics::SolidBody {
+    use skate_dynamics::rapier3d::prelude::{Pose, Rotation, SharedShape, Vector};
+    let axis = (b - a).try_normalize().unwrap_or(Vec3::Y);
+    let q = Quat::from_rotation_arc(Vec3::Y, axis);
+    let centre = a.lerp(b, part.centre) + velocity * look_ahead;
+    let rotation = Rotation::from_xyzw(q.x, q.y, q.z, q.w);
+    let p = |v: Vec3| Vector::new(v.x, v.y, v.z);
+    let pose = Pose::from_parts(p(centre), rotation);
+    skate_dynamics::SolidBody {
+        id: proxy_id(serial, index),
+        pose,
+        center_of_mass: p(centre),
+        inertia_rotation: rotation,
+        inverse_mass: if part.mass > 0.0 { 1.0 / part.mass } else { 0.0 },
+        // Posed every frame (not written back), but it turns in the solve like retail's part, whose |w| afterwards
+        // can knock the ped down.
+        inverse_inertia: inverse_inertia(part),
+        linvel: p(velocity),
+        angvel: Vector::new(0.0, 0.0, 0.0),
+        contact_group: PED_GROUP,
+        colliders: vec![skate_dynamics::SolidCollider { shape: SharedShape::capsule_y(part.half_length.max(0.0), part.radius.max(0.01)), pose, friction: part.friction.max(0.0) }],
+    }
+}
+
+/// A capsule part's inverse inertia in its own frame (axis y): retail `sub_82AE7770` from the shape's per-kg inertia
+/// (`sub_82AE7228`, capsule: R = max(r, 0.05 h), along the axis 0.4 R^2, across (1.6 R^3 + 0.75 h R^2 + 4 h^2 R + h^3)
+/// / (4 R + 3 h)) times the mass (research b275, matches the PEDPART trace). Massless: no rotation.
+pub(crate) fn inverse_inertia(part: &PedBodyPart) -> skate_dynamics::rapier3d::prelude::Vector {
+    use skate_dynamics::rapier3d::prelude::Vector;
+    let (h, m) = (part.half_length.max(0.0), part.mass);
+    let r = part.radius.max(1e-7).max(0.05 * h);
+    let along = 0.4 * r * r;
+    let across = (1.6 * r * r * r + 0.75 * h * r * r + 4.0 * h * h * r + h * h * h) / (4.0 * r + 3.0 * h);
+    if !(m > 0.0) {
+        return Vector::new(0.0, 0.0, 0.0);
+    }
+    Vector::new(1.0 / (across * m), 1.0 / (along * m), 1.0 / (across * m))
+}
+
+/// A bone's world position: the ped root (position, heading) applied to the model-space global.
+pub(crate) fn bone_world(position: Vec3, heading: f32, global: &Mat4) -> Vec3 {
+    position + Quat::from_rotation_y(heading) * global.w_axis.truncate()
+}
+
+/// Add near peds' bodies to the skater solve each tick; they stay through reactions (b203): docs/hails-additions/26g-living-world-ped-interactions.md#ped-proxies-in-the-solve
+pub(crate) fn push_ped_proxies(
+    mut peds: Query<(&Pedestrian, &mut PedBody)>,
+    data: Res<PedData>,
+    settings: Res<super::LivingWorldSettings>,
+    observers: Res<super::LivingWorldObservers>,
+    mut physics: ResMut<crate::physics::GamePhysics>,
+    skater: Res<crate::physics::SkaterRuntime>,
+    replay: Res<crate::replay::Replay>,
+) {
+    let s = &settings.ped_body;
+    // The last prop steps' body A displacements (sub_82E38FB8): sliding peds' roots follow them before body A is
+    // placed again, so a pushed prop shoves a ped aside instead of stopping on a body that never moves (USER-ASKS 375).
+    let shoves = std::mem::take(&mut physics.ped_prop_shoves);
+    // A sliding ped's body A keeps its solved velocity into the next step (retail's body A is one persistent body).
+    let mut carried: Vec<(u64, Vec3)> = Vec::new();
+    if let Some(proxy) = s.proxy.as_ref().filter(|p| p.slide && !replay.active) {
+        for (ped, mut body) in &mut peds {
+            let Some((_, shove, normal, solved)) = shoves.iter().find(|x| x.0 == body_a_id(ped.id.serial)) else { continue };
+            let n = Vec3::new(normal.x, normal.y, normal.z);
+            let facing = Quat::from_rotation_y(body.heading) * Vec3::Z;
+            if slides(n, facing, body.velocity, proxy.slide_side) {
+                body.position += Vec3::new(shove.x, 0.0, shove.z);
+                carried.push((body_a_id(ped.id.serial), Vec3::new(solved.x, 0.0, solved.z)));
+                info!("PED_PROP_SHOVE ped=#{} by [{:.3}, {:.3}] at [{:.2}, {:.2}, {:.2}]", ped.id.serial, shove.x, shove.z, body.position.x, body.position.y, body.position.z);
+            }
+        }
+    }
+    physics.ped_prop_volumes.clear();
+    if replay.active || !s.enabled {
+        return;
+    }
+    // Body A for the prop step: every near ped, whether or not body B can be posed (b342).
+    if let Some(proxy) = s.proxy.as_ref() {
+        let spine_bone = data.rig.names.iter().position(|n| n.eq_ignore_ascii_case(proxy.centre_bone));
+        let near = |p: Vec3| observers.observers.iter().any(|o| Vec3::from_array(o.position).distance(p) <= s.range);
+        let mut a: Vec<_> = peds
+            .iter()
+            .filter(|(_, body)| near(body.position))
+            .map(|(ped, body)| {
+                let id = body_a_id(ped.id.serial);
+                let velocity = carried.iter().find(|c| c.0 == id).map_or(body.velocity, |c| c.1);
+                // Posed: on the centre bone (it follows a knock-down's lying spine); else above the root.
+                let spine = spine_bone
+                    .and_then(|i| super::peds::ped_globals(&data.rig, body, &*data, 0.0, &[])?.get(i).map(|g| bone_world(body.position, body.heading, g)));
+                let volume = match spine {
+                    Some(centre) => body_a_volume_at(centre, velocity, proxy),
+                    None => body_a_volume(body.position, velocity, proxy),
+                };
+                (id, volume, proxy.mass)
+            })
+            .collect();
+        a.sort_by_key(|x| x.0);
+        physics.ped_prop_volumes = a;
+    }
+    if s.parts.is_empty() || data.rig.names.is_empty() {
+        return;
+    }
+    let bone = |name: &str| data.rig.names.iter().position(|n| n.eq_ignore_ascii_case(name));
+    let bones: Vec<Option<(usize, usize)>> = s.parts.iter().map(|p| Some((bone(&p.from)?, bone(&p.to)?))).collect();
+    let near = |p: Vec3| observers.observers.iter().any(|o| Vec3::from_array(o.position).distance(p) <= s.range);
+    let mut list: Vec<_> = peds.iter().filter(|(_, body)| near(body.position)).collect();
+    if list.is_empty() {
+        return;
+    }
+    list.sort_by_key(|(ped, ..)| ped.id.to_u64());
+    let mut solids = Vec::new();
+    for (ped, body) in list {
+        let Some(globals) = super::peds::ped_globals(&data.rig, body, &*data, 0.0, &[]) else { continue };
+        for (index, (part, pair)) in s.parts.iter().zip(&bones).enumerate() {
+            let Some((a, b)) = pair.and_then(|(a, b)| Some((globals.get(a)?, globals.get(b)?))) else { continue };
+            let (a, b) = (bone_world(body.position, body.heading, a), bone_world(body.position, body.heading, b));
+            solids.push(part_proxy(ped.id.serial, index, a, b, body.velocity, part, s.look_ahead));
+        }
+    }
+    let mut proxies = std::mem::take(&mut physics.network_proxies);
+    for solid in solids {
+        proxies.append_solid(solid, &physics, &skater, false);
+    }
+    physics.network_proxies = proxies;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn body_a_is_an_upright_root_capsule_in_group_9_with_its_own_id() {
+        let p = PedProxy::default();
+        assert_eq!((p.radius, p.half_length, p.mass), (0.3125, 0.5375, 10.0), "b146 / b342 retail values");
+        let v = body_a_volume(Vec3::new(1.0, 2.0, 3.0), Vec3::X, &p);
+        assert_eq!(v.collision_group, 9);
+        let skate_core::physics::world_contact::ContactPrimitive::Capsule { center, axis, half_length, radius } = v.primitive else { panic!("capsule") };
+        assert!((center.y - (2.0 + 0.5 * 1.7 + 0.2)).abs() < 1e-5 && axis.y == 1.0 && half_length == 0.5375 && radius == 0.3125, "unposed: root + height / 2 + 0.2 (sub_82E0E210)");
+        // Body A's id never equals a body B part id of any ped, and still names the ped.
+        let a = body_a_id(7);
+        assert!((0..4).all(|part| a != proxy_id(7, part)) && proxy_serial(a) == Some(7));
+        assert!(PedBodySettings::default().proxy.is_some(), "retail on");
+    }
+
+    #[test]
+    fn the_parts_turn_with_retails_capsule_inertia() {
+        // b275: the PEDPART trace's inverse inertia (across, along the axis): torso 0.520984 / 6.25, forearm 2.037273 / 19.53125.
+        let parts = PedBodySettings::default().parts;
+        for (part, across, along) in [(&parts[0], 0.520984, 6.25), (&parts[1], 2.037273, 19.53125)] {
+            let i = inverse_inertia(part);
+            assert!((i.x - across).abs() < 1e-4 && (i.z - across).abs() < 1e-4 && (i.y - along).abs() < 1e-3, "{i:?}");
+        }
+    }
+
+    #[test]
+    fn a_part_is_a_capsule_between_its_bones_in_group_11() {
+        let s = PedBodySettings::default();
+        let arm = &s.parts[1];
+        let b = part_proxy(7, 1, Vec3::new(0.0, 1.2, 0.0), Vec3::new(0.3, 1.2, 0.0), Vec3::new(0.6, 0.0, 0.0), arm, s.look_ahead);
+        assert_eq!(b.colliders[0].friction, 0.0, "retail ped parts have no friction (b289)");
+        assert_eq!((b.id, b.contact_group), (PED_PROXY_TAG | 7 << 2 | 1, 11));
+        assert_eq!(proxy_serial(b.id), Some(7));
+        // Any serial keeps the tag bits (the kind byte of `to_u64` did not: no ped hit was ever reported).
+        assert_eq!(proxy_serial(proxy_id(u32::MAX, 3)), Some(u32::MAX));
+        let ped = skate_core::living_world::LivingWorldId { kind: skate_core::living_world::Kind::Pedestrian, serial: 5 };
+        assert_eq!(proxy_serial(ped.to_u64() << 2), None, "a kind byte in the id is not a ped proxy");
+        assert!((b.inverse_mass - 1.0 / 20.0).abs() < 1e-6);
+        let c = b.pose.translation;
+        assert!((c.x - (0.15 + 0.6 / 60.0)).abs() < 1e-5 && (c.y - 1.2).abs() < 1e-5, "midway, moved ahead 1/60 s: {c:?}");
+        let capsule = b.colliders[0].shape.as_capsule().unwrap();
+        assert!((capsule.radius - 0.08).abs() < 1e-6 && (capsule.half_height() - 0.20).abs() < 1e-5);
+        // Along the forearm (+x here): the capsule's segment runs along x.
+        let seg = capsule.segment.b - capsule.segment.a;
+        let world = b.pose.rotation * seg;
+        assert!(world.x.abs() > 0.39 && world.y.abs() < 1e-4, "{world:?}");
+        // The default is retail's three parts, 50 kg in total.
+        assert_eq!(s.parts.iter().map(|p| p.mass).sum::<f32>(), 50.0);
+    }
+
+    /// b283: retail's reaction reads the torso (part 0) only, so a fast-spinning forearm touched alone does not decide
+    /// it; a mod can name another part, and a part that does not exist gives no reading.
+    #[test]
+    fn the_reaction_reads_the_torso_whichever_part_was_touched() {
+        let mut s = PedBodySettings::default();
+        assert_eq!(s.reaction_part, 0);
+        let after = [(proxy_id(7, 0), [0.9, 1.2]), (proxy_id(7, 1), [2.0, 9.5]), (proxy_id(8, 0), [5.0, 5.0])];
+        assert_eq!(reaction_part_speed(&after, 7, &s), Some([0.9, 1.2]));
+        assert_eq!(reaction_part_speed(&after, 9, &s), None, "not in the solve");
+        s.reaction_part = 1;
+        assert_eq!(reaction_part_speed(&after, 7, &s), Some([2.0, 9.5]));
+        s.reaction_part = 3;
+        assert_eq!(reaction_part_speed(&after, 7, &s), None, "only three parts");
+    }
+
+    /// Data test: the retail parts' bones exist in the exported ped rig, and in its reference pose part 0 stands on
+    /// the hips and spans the body (the capsule from about the knees to above the head).
+    #[test]
+    #[ignore = "requires the private install data (SKATE3_ASSET_ROOT=<repo>\\assets)"]
+    fn the_retail_parts_find_their_bones_in_the_ped_rig() {
+        let root = std::path::PathBuf::from(std::env::var_os("SKATE3_ASSET_ROOT").unwrap());
+        let data = PedData::load(&root);
+        assert!(!data.rig.names.is_empty(), "{}", data.status);
+        let globals = super::super::peds::reference_globals(&data.rig);
+        let at = |name: &str| {
+            let i = data.rig.names.iter().position(|n| n.eq_ignore_ascii_case(name)).unwrap_or_else(|| panic!("no bone {name} in {:?}", data.rig.names));
+            bone_world(Vec3::ZERO, 0.0, &globals[i])
+        };
+        let (hips, head) = (at("Hips"), at("Head"));
+        eprintln!("hips {hips:?} head {head:?} left forearm {:?} left hand {:?}", at("LeftForeArm"), at("LeftHand"));
+        let part = &PedBodySettings::default().parts[0];
+        let (bottom, top) = (hips.y - part.half_length - part.radius, hips.y + part.half_length + part.radius);
+        assert!((0.7..1.2).contains(&hips.y) && head.y > hips.y + 0.4, "hips {hips:?} head {head:?}");
+        assert!(bottom < 0.4 && top > head.y - 0.2, "part 0 spans {bottom:.2}..{top:.2} m");
+    }
+}
+
+#[cfg(test)]
+mod slide_tests {
+    use super::slides;
+    use bevy::prelude::Vec3;
+
+    #[test]
+    fn kind_one_needs_a_side_contact_the_ped_faces_or_walks_into() {
+        let n = Vec3::X;
+        assert!(slides(n, -Vec3::X, Vec3::ZERO, 0.45), "facing into the prop (n points into the ped)");
+        assert!(slides(n, Vec3::Z, Vec3::new(-1.0, 0.0, 0.0), 0.45), "walking into it");
+        assert!(!slides(n, Vec3::X, Vec3::new(1.0, 0.0, 0.0), 0.45), "hit from behind while walking away: kind 0");
+        assert!(!slides(Vec3::Y, -Vec3::X, Vec3::ZERO, 0.45), "a contact from above is no side contact");
+    }
+}

@@ -2,7 +2,7 @@
 //! CameraRuntime::advance after its complete physical/animation publication.
 mod settings;
 mod collision;
-mod world_query;
+pub(crate) mod world_query;
 mod shot_data;
 mod stock_names;
 mod shake_data;
@@ -12,6 +12,7 @@ mod graph_subject;
 mod graph_conditions;
 mod graph;
 mod runtime;
+mod water;
 mod publication;
 pub(crate) mod angle;
 pub(crate) use publication::{
@@ -33,7 +34,7 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
             // After the pause menu, before the fixed simulation steps that advance the camera.
-            .add_systems(PreUpdate, angle::sync_runtime.after(crate::graphics_menu::MenuInput))
+            .add_systems(PreUpdate, (angle::sync_runtime, angle::sync_look_invert).after(crate::graphics_menu::MenuInput))
             .add_systems(Update, present.after(FrameSet::Animation).before(FrameSet::Verification));
     }
 }
@@ -44,7 +45,13 @@ fn spawn(mut commands: Commands, config: Res<Config>, retail: Res<crate::retail_
     commands.insert_resource(CameraAngleSettings::load(&config.asset_root));
     let mut camera = commands.spawn((
         GameplayCamera,
-        Camera3d::default(),
+        // Depth sampleable by the retail tone pass (the colour grade's near / far mix, `postfx_visualfxPS`).
+        Camera3d {
+            depth_texture_usages: (bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT
+                | bevy::render::render_resource::TextureUsages::TEXTURE_BINDING)
+                .into(),
+            ..default()
+        },
         Camera { is_active: false, ..default() },
         Transform::default(),
     ));
@@ -58,6 +65,8 @@ pub(crate) fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window
     history: Res<crate::presentation::Presentation>, time: Res<Time<Fixed>>,
     replay: Res<crate::replay::Replay>,
     customiser: Option<Res<crate::customiser::Customiser>>,
+    mut guard: Local<crate::replay::CameraGuard>,
+    physics: Option<Res<crate::physics::GamePhysics>>,
     mut cameras: Query<(&mut Camera, &mut Transform, &mut Projection), With<GameplayCamera>>) {
     if let Ok(window) = windows.single() {
         // A minimized window reports 0x0, and 0/0 is NaN. That poisons the
@@ -73,9 +82,32 @@ pub(crate) fn present(mut runtime: ResMut<CameraRuntime>, windows: Query<&Window
     for (mut camera, mut transform, mut projection) in &mut cameras {
         *transform = crate::presentation::blend(previous.camera, current.camera, alpha);
         if replay.active {
-            if let Some(free) = replay.free_camera { *transform = free; }
-        } else if let Some(pose) = manual_pose {
-            *transform = pose;
+            if let Some(free) = replay.free_camera {
+                *transform = free;
+                *guard = Default::default();
+            } else {
+                // The editor's camera key on the skater root (Follow / Tripod / Free; Game keeps the recording).
+                let root = crate::presentation::blend(previous.root, current.root, alpha);
+                let recorded = crate::presentation::blend(previous.camera, current.camera, alpha);
+                let world = physics.as_deref().map(crate::physics::GamePhysics::world);
+                let (key_pose, fov) = replay.guarded_editor_camera(&recorded, &root, &mut guard,
+                    |from, to, radius| world.and_then(|w| crate::replay::camera_collision::sweep(w, from, to, radius)));
+                if let Some(pose) = key_pose {
+                    *transform = pose;
+                }
+                if let (Some(fov), Projection::Perspective(p)) = (fov, &mut *projection) {
+                    p.fov = fov;
+                }
+                // The editor's Shake row: retail multiplies the shake into the camera matrix (`82C8AF50`, b399).
+                if let Some(shake) = replay.shake() {
+                    *transform = *transform * shake;
+                }
+            }
+        } else {
+            *guard = Default::default();
+            if let Some(pose) = manual_pose {
+                *transform = pose;
+            }
         }
         if let Projection::Perspective(p) = &mut *projection {
             p.fov = previous.fov + (current.fov - previous.fov) * alpha;

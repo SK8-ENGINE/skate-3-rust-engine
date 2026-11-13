@@ -1,7 +1,7 @@
 # Bus leftovers: FlangeSub returns, sense_of_speed FXWET0, Splice Send A / Collision SubMix, reverb zones
 
 Written 2026-10-02 (headless reading of the code). Companion to `aems-env-bus-spec.md` (§7 FlangeSub, §6.2 zones) and
-`aems-eqchain-buses-spec.md`, which it completes. Behaviour in our own words from the TU3 lifted code (reference
+`aems-eqchain-buses-spec.md`, which it completes. Behaviour in our own words from the TU3 (title update 3) lifted code (reference
 only); addresses are TU3 3.0.3.0. Tags: [R] our reading of the code, [IMG] image constant, [VLT] vault value,
 [TR] checked against a clean recomp trace, UNCERTAIN = not settled. Local analysis scripts
 (`sendb_bank.py`, `senda_bank_fixed.py`, `senda_windows.py`, `voice_windows.py`, `submix_sends.py`). Crate
@@ -67,7 +67,7 @@ The template words are 0 and programs fill them; `post_probe` shows the source.
 | bank / class | record 9 | record 10 (enable) ← | record 11 (level) ← | record 12 |
 |---|---|---|---|---|
 | GRINDS / Class_grind | 4096 → A | w14 (local) | w15 = Rail out6 | w16 = eEQChain 5 |
-| WHEEL_SKID_BANK / Class_wheels_skid | 8192 → A | w15 (local) | w16 = SkateBoard out20 | — |
+| WHEEL_SKID_BANK / Class_wheels_skid | 8192 → A | w15 (local) | w16 = SkateBoard out20 | n/a |
 | Sk8_Air_Flip_Tricks / Class_Flips | 16384 → B | (not ported) | | |
 | hom_slo_mo / hall_of_meat_slo_mo | 16384 → B | (not ported) | | |
 
@@ -147,11 +147,11 @@ Totals over all routing records: 0: 211, 256: 3, 512: 160, 2048: 347, 4096: 6, 8
 |---|---|---|---|---|
 | GRINDS | 15 (15) | 0.0102 | 0.165 | 0.0499 |
 | WHEEL_SKID_BANK | 107 (88) | 0.0146 | 0.635 | 0.0561 |
-| fstep_skateshoe1_sm | 3318 (2527) | 0.0147 | 0.255 | — |
-| Seams_Bank | 730 (623) | 0.0127 | 0.205 | — |
-| Rolling_Rattles | 326 (326) | 0.0241 | 0.190 | — |
-| sense_of_speed | 293 (11) | artefacts | 754 | — |
-| Skate_Collisions | 153 of 6754 voices | 0.0703 (= Collision SubMix env sends on reused owners) | 1.44 | — |
+| fstep_skateshoe1_sm | 3318 (2527) | 0.0147 | 0.255 | n/a |
+| Seams_Bank | 730 (623) | 0.0127 | 0.205 | n/a |
+| Rolling_Rattles | 326 (326) | 0.0241 | 0.190 | n/a |
+| sense_of_speed | 293 (11) | artefacts | 754 | n/a |
+| Skate_Collisions | 153 of 6754 voices | 0.0703 (= Collision SubMix env sends on reused owners) | 1.44 | n/a |
 
 - The doc-11 table's GRINDS / WHEEL_SKID / FOOT_DRAG Send A figures should be re-read with the fixed
   script.

@@ -29,6 +29,12 @@ pub(crate) struct Navigation {
     held_for: f32,
     repeat_at: f32,
 }
+impl Navigation {
+    /// Pad buttons, the left stick as d-pad bits and the arrow keys held this frame (before edge detection).
+    pub(crate) fn held(&self) -> u16 {
+        self.previous
+    }
+}
 #[derive(Resource)]
 pub(crate) struct Customiser {
     pub open: bool,

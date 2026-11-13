@@ -27,8 +27,22 @@ use std::path::Path;
 pub const FORMAT: &str = "skate3-menu-movies";
 /// Largest mod movie file accepted (the biggest retail menu movie is well below this).
 pub const MAX_MOD_MOVIE_BYTES: u64 = 16 << 20;
-/// Manifest version this engine reads (3: textured units carry their bitmap id, Milestone 4).
-pub const VERSION: u64 = 3;
+/// Menu manifest version setup writes; history of what each version added: docs/hails-additions/31-retail-menus.md#menu-manifest-versions
+pub const VERSION: u64 = 14;
+/// Oldest manifest version this engine reads and what older sets lack: docs/hails-additions/31-retail-menus.md#oldest-menu-manifest
+pub const OLDEST_VERSION: u64 = 5;
+/// Texture key prefix of a named runtime image (`Game.ImageRenderer_Load`): `image/<image_key>`.
+pub const NAMED_IMAGE_PREFIX: &str = "image/";
+
+/// The table key of a runtime image request: retail builds `data\` + name + `.rx2` (b258 section 2); `\` -> `/`, no
+/// leading `/` or `data/`, no `.rx2`, lower case (retail names are all lower case; this only widens what mods type).
+pub fn image_key(request: &str) -> String {
+    let path = request.replace('\\', "/").to_ascii_lowercase();
+    let path = path.trim_start_matches('/');
+    let path = path.strip_prefix("data/").unwrap_or(path);
+    path.strip_suffix(".rx2").unwrap_or(path).to_owned()
+}
+
 /// Mod bitmap limits: per mod, and the largest side (same as mod mesh textures).
 pub const MAX_MOD_BITMAPS: usize = 64;
 pub const MAX_MOD_BITMAP_SIDE: u32 = 2048;
@@ -100,6 +114,10 @@ pub struct RetailMenuMovies {
     retail_images: BTreeMap<String, [u32; 2]>,
     /// Mod bitmaps in submission order, newest last: (owner, movie key, bitmap id, image).
     mod_bitmaps: Vec<(String, String, i32, ModBitmap)>,
+    /// Named runtime images (manifest `images`, version 7): image key -> payload path, size.
+    named_images: BTreeMap<String, (String, [u32; 2])>,
+    /// Mod named images, newest last: (owner, image key, image). A mod replaces a retail name or adds its own.
+    mod_images: Vec<(String, String, ModBitmap)>,
     /// Linked movies by key (retail layered with mod movies).
     pub movies: BTreeMap<String, Movie>,
     pub imports_total: usize,
@@ -130,7 +148,8 @@ impl RetailMenuMovies {
             return Ok(Self::default());
         }
         let manifest = read_json(&manifest_path)?;
-        if manifest["format"] != FORMAT || manifest["version"] != VERSION {
+        let version = manifest["version"].as_u64().unwrap_or(0);
+        if manifest["format"] != FORMAT || !(OLDEST_VERSION..=VERSION).contains(&version) {
             // 2 (Milestone 3d): placement clip actions; 3 (Milestone 4): unit bitmap ids. Setup re-exports.
             return Err("unsupported menu movie set".into());
         }
@@ -145,6 +164,14 @@ impl RetailMenuMovies {
                 return Err(format!("menu movie path escapes its folder: {file}"));
             }
             out.base.insert(library_key(key), merged(read_json(&root.join(file))?, &out.shared));
+        }
+        for (key, image) in manifest["images"].as_object().into_iter().flatten() {
+            let path = image["rgba"].as_str().ok_or("menu image path missing")?;
+            if path.contains("..") {
+                return Err(format!("menu image path escapes its folder: {path}"));
+            }
+            let size = [image["width"].as_u64().unwrap_or(0) as u32, image["height"].as_u64().unwrap_or(0) as u32];
+            out.named_images.insert(image_key(key), (path.to_owned(), size));
         }
         out.relink();
         Ok(out)
@@ -175,6 +202,13 @@ impl RetailMenuMovies {
         self.failures.clear();
         let mut all_shapes = BTreeMap::new();
         let mut images = BTreeMap::new();
+        // Font atlases: text draws name them (apt_text), so they resolve like bitmaps.
+        for font in self.shared.get("fonts").and_then(Value::as_object).into_iter().flat_map(|f| f.values()) {
+            let size = &font["definition"]["textures"][0];
+            if let (Some(path), Some(w), Some(h)) = (font["texture"].as_str(), size["width"].as_u64(), size["height"].as_u64()) {
+                images.insert(path.to_string(), [w as u32, h as u32]);
+            }
+        }
         let mut decls = BTreeMap::new();
         let mut libraries = BTreeMap::new();
         for key in &keys {
@@ -280,6 +314,39 @@ impl RetailMenuMovies {
         Ok(())
     }
 
+    /// A mod supplies the runtime image `name` (a retail request path such as `fe\source\images\map\map1024`, or
+    /// its own name a world record points at). Same limits as menu bitmaps.
+    pub fn set_named_image(&mut self, owner: &str, name: &str, image: ModBitmap) -> Result<(), String> {
+        let key = image_key(name);
+        let (w, h) = (image.width, image.height);
+        if key.is_empty()
+            || w == 0
+            || h == 0
+            || w > MAX_MOD_BITMAP_SIDE
+            || h > MAX_MOD_BITMAP_SIDE
+            || image.rgba.len() as u64 != u64::from(w) * u64::from(h) * 4
+        {
+            return Err("menu image size out of range".into());
+        }
+        self.mod_images.retain(|(o, k, _)| !(o == owner && *k == key));
+        if self.mod_images.iter().filter(|(o, ..)| o == owner).count() >= MAX_MOD_BITMAPS {
+            return Err(format!("menu image limit reached ({MAX_MOD_BITMAPS} per mod)"));
+        }
+        self.mod_images.push((owner.to_string(), key, image));
+        Ok(())
+    }
+
+    /// Whether a runtime image exists (a mod's or the set's).
+    /// A movie by key is in the set (retail or a mod's).
+    pub fn has_movie(&self, key: &str) -> bool {
+        self.base.contains_key(key) || self.mods.values().any(|m| m.contains_key(key))
+    }
+
+    pub fn has_named_image(&self, name: &str) -> bool {
+        let key = image_key(name);
+        self.mod_images.iter().any(|(_, k, _)| *k == key) || self.named_images.contains_key(&key)
+    }
+
     /// Owner of the newest mod bitmap for a stable id.
     fn mod_bitmap_owner(&self, key: &str, bitmap: i32) -> Option<&str> {
         self.mod_bitmaps
@@ -296,7 +363,21 @@ impl RetailMenuMovies {
     }
 
     /// The image behind a texture key from `MenuScene`.
+    /// The set's shared fonts and language without a movie (engine-drawn panels such as the on-screen keyboard).
+    pub fn shared_text_assets(&self) -> Option<crate::apt_text::TextAssets> {
+        let mut json = Value::Object(self.shared.clone());
+        json["characters"] = Value::Array(Vec::new());
+        crate::apt_text::TextAssets::load(&json).ok()
+    }
+
     pub fn image(&self, texture: &str) -> Option<MenuImage<'_>> {
+        if let Some(key) = texture.strip_prefix(NAMED_IMAGE_PREFIX) {
+            if let Some((.., image)) = self.mod_images.iter().rev().find(|(_, k, _)| k == key) {
+                return Some(MenuImage::Mod(image));
+            }
+            let (path, size) = self.named_images.get(key)?;
+            return Some(MenuImage::Retail { path, width: size[0], height: size[1] });
+        }
         if let Some(rest) = texture.strip_prefix(MOD_TEXTURE_PREFIX) {
             // mod:<owner>:<movie>#<bitmap>
             let (owner, id) = rest.split_once(':')?;
@@ -316,6 +397,7 @@ impl RetailMenuMovies {
     /// Removes everything `owner` supplied (mod disabled or stopped).
     pub fn clear_owner(&mut self, owner: &str) {
         self.mod_bitmaps.retain(|(o, ..)| o != owner);
+        self.mod_images.retain(|(o, ..)| o != owner);
         if self.mods.remove(owner).is_some() {
             self.overrides.clear_owner(owner);
             self.relink();
@@ -327,6 +409,7 @@ impl RetailMenuMovies {
             self.overrides.clear_owner(&owner);
         }
         self.mod_bitmaps.clear();
+        self.mod_images.clear();
         if !self.mods.is_empty() {
             self.mods.clear();
             self.relink();
@@ -424,9 +507,44 @@ pub fn valid_movie_name(key: &str) -> bool {
         })
 }
 
+/// The exported set: `SKATE3_MENU_MOVIES` (a dev export) or the installed `private/menu-movies`.
+/// The world records' own map picture names (manifest `world_maps`, version 7; empty for older sets).
+pub(crate) fn world_maps(root: &Path) -> BTreeMap<String, String> {
+    read_json(&root.join("manifest.json"))
+        .ok()
+        .and_then(|m| serde_json::from_value(m["world_maps"].clone()).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn set_root(config: &crate::config::Config) -> std::path::PathBuf {
+    std::env::var("SKATE3_MENU_MOVIES")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| config.asset_root.join("private/menu-movies"))
+}
+
+type EarlyRead = (std::path::PathBuf, std::thread::JoinHandle<Result<RetailMenuMovies, String>>);
+static EARLY: std::sync::Mutex<Option<EarlyRead>> = std::sync::Mutex::new(None);
+
+/// Begin [`RetailMenuMovies::read`] on its own thread at the top of `main`; [`load`] takes the result at its old place
+/// (docs/hails-additions/08-setup-performance.md#menu-movies-read-begins-in-main). `SKATE_EARLY_MENU_MOVIES=0` off.
+pub(crate) fn begin_early(config: &crate::config::Config) {
+    if std::env::var("SKATE_EARLY_MENU_MOVIES").is_ok_and(|v| v == "0") {
+        return;
+    }
+    let root = set_root(config);
+    let read_root = root.clone();
+    if let Ok(handle) = std::thread::Builder::new().name("menu-movies-read".into()).spawn(move || RetailMenuMovies::read(&read_root)) {
+        if let Ok(mut early) = EARLY.lock() {
+            *early = Some((root, handle));
+        }
+    }
+}
+
 pub(crate) fn load(mut commands: Commands, config: Res<crate::config::Config>) {
-    let root = config.asset_root.join("private/menu-movies");
-    let movies = RetailMenuMovies::read(&root).unwrap_or_else(|e| {
+    let root = set_root(&config);
+    let early = EARLY.lock().ok().and_then(|mut e| e.take()).filter(|(r, _)| *r == root);
+    let read = early.and_then(|(_, handle)| handle.join().ok()).unwrap_or_else(|| RetailMenuMovies::read(&root));
+    let movies = read.unwrap_or_else(|e| {
         warn!("RETAIL_MENUS menu movies unavailable: {e}");
         RetailMenuMovies::default()
     });
@@ -610,6 +728,38 @@ mod tests {
         assert!(m.mods.is_empty());
     }
 
+    /// Version 7's named runtime images: the manifest table by request key, mods replace or add names and revert.
+    #[test]
+    fn named_images_resolve_by_request_key_and_mods_replace_then_revert() {
+        assert_eq!(image_key("fe\\source\\images\\map\\MAP1024"), "fe/source/images/map/map1024");
+        assert_eq!(image_key("data/fe/source/images/map/map1024.rx2"), "fe/source/images/map/map1024");
+        let root = std::env::temp_dir().join(format!("skate3-named-images-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let manifest = |path: &str| {
+            serde_json::json!({"format": FORMAT, "version": 7, "movies": {}, "shared": "shared.json",
+                "images": {"fe/source/images/map/map1024": {"rgba": path, "width": 4, "height": 2}}})
+        };
+        std::fs::write(root.join("shared.json"), "{}").unwrap();
+        std::fs::write(root.join("manifest.json"), manifest("a/0000_map1024.Texture.rgba").to_string()).unwrap();
+        let mut m = RetailMenuMovies::read(&root).unwrap();
+        let key = format!("{NAMED_IMAGE_PREFIX}fe/source/images/map/map1024");
+        assert!(matches!(m.image(&key), Some(MenuImage::Retail { path: "a/0000_map1024.Texture.rgba", width: 4, height: 2 })));
+        assert!(m.image("image/fe/source/images/map/nothing").is_none());
+        assert!(m.has_named_image("fe\\source\\images\\map\\map1024"));
+        let image = ModBitmap { width: 1, height: 1, rgba: vec![255; 4] };
+        assert!(m.set_named_image("mod", "fe/source/images/map/map1024", ModBitmap { width: 2, ..image.clone() }).is_err(), "size check");
+        m.set_named_image("mod", "fe\\source\\images\\map\\map1024", image.clone()).unwrap();
+        m.set_named_image("mod", "mymod/maps/park", image).unwrap();
+        assert!(matches!(m.image(&key), Some(MenuImage::Mod(b)) if b.width == 1));
+        assert!(m.image("image/mymod/maps/park").is_some());
+        m.clear_owner("mod");
+        assert!(matches!(m.image(&key), Some(MenuImage::Retail { .. })));
+        assert!(m.image("image/mymod/maps/park").is_none());
+        std::fs::write(root.join("manifest.json"), manifest("../escape.rgba").to_string()).unwrap();
+        assert!(RetailMenuMovies::read(&root).is_err(), "a path out of the set is refused");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn missing_set_is_empty() {
         let m = RetailMenuMovies::read(Path::new("does/not/exist")).unwrap();
@@ -620,13 +770,9 @@ mod tests {
     /// `assets/private/menu-movies`, found from a worktree too). Skips when absent.
     #[test]
     fn retail_menu_movie_set_loads_links_and_runs() {
-        let root = std::env::var("SKATE3_MENU_MOVIES")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| crate::apt_imports::main_checkout().join("assets/private/menu-movies"));
-        if !root.join("manifest.json").is_file() {
-            eprintln!("skipped: no exported menu movies in {}", root.display());
+        let Some(root) = crate::apt_imports::test_menu_set() else {
             return;
-        }
+        };
         let m = RetailMenuMovies::read(&root).unwrap();
         // After M3e (doc 31 "Milestone 3e") every movie loads; any failure is a regression.
         for (key, e) in &m.failures {

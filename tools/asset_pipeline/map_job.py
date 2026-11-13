@@ -7,8 +7,11 @@ from tools.asset_pipeline.install import convert_map
 if __name__=='__main__':
     p=argparse.ArgumentParser()
     for name in ('archive','stage','game-exe','result'):p.add_argument('--'+name,type=Path,required=True)
+    # DLC jobs name the stream folder, label and source pack; disc jobs derive them from worldDIST_<D>.big.
+    for name in ('district','label','source'):p.add_argument('--'+name)
     a=p.parse_args();start=time.perf_counter()
-    with (a.stage/(a.archive.stem+'-load.log')).open('w',encoding='utf-8') as log:
-        entry=convert_map(a.archive,a.stage/'conversion',a.stage/'maps',a.stage,a.game_exe,log,lambda s:print(s,flush=True))
+    with (a.stage/((a.label or a.archive.stem)+'-load.log')).open('w',encoding='utf-8') as log:
+        entry=convert_map(a.archive,a.stage/'conversion',a.stage/'maps',a.stage,a.game_exe,log,lambda s:print(s,flush=True),
+                          district=a.district,label=a.label,source=a.source)
     entry['conversion_seconds']=round(time.perf_counter()-start,3)
     a.result.write_text(json.dumps(entry),encoding='utf-8')

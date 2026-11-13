@@ -986,11 +986,28 @@ pub fn check_entities_needing_specialization<M>(
 {
     entities_needing_specialization.clear();
 
+    // skate3rust patch: a serial pass (vendor/README.md "Serial specialization check"). The filter test per entity is
+    // tiny, and the parallel version spun up a compute-pool scope for every material type every frame (about 0.1 ms
+    // each, more than the work). Same entities; the list is a set to the specialization that reads it.
+    if serial_specialization_check() {
+        entities_needing_specialization.extend(needs_specialization.iter());
+        return;
+    }
     needs_specialization
         .par_iter()
         .for_each(|entity| par_local.borrow_local_mut().push(entity));
 
     par_local.drain_into(&mut entities_needing_specialization);
+}
+
+/// skate3rust patch: `SKATE_SERIAL_SPECIALIZATION_CHECK=0` restores upstream's parallel pass (A/B checks); read once.
+fn serial_specialization_check() -> bool {
+    static SERIAL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SERIAL.get_or_init(|| {
+        let serial = std::env::var("SKATE_SERIAL_SPECIALIZATION_CHECK").map_or(true, |v| v != "0");
+        bevy_log::info!("SPECIALIZATION_CHECK {}", if serial { "serial" } else { "parallel (upstream)" });
+        serial
+    })
 }
 
 pub fn specialize_material_meshes(

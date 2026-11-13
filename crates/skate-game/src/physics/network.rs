@@ -65,9 +65,14 @@ pub(crate) fn anchors(skater: &SkaterRuntime) -> Vec<usize> {
     indices
 }
 pub(crate) fn capture_body(physics: &GamePhysics, skater: &SkaterRuntime) -> BodyState {
+    capture_body_of(&physics.board, skater)
+}
+
+/// [`capture_body`] with the board of any skater context (a simulated NPC's own board).
+pub(crate) fn capture_body_of(board: &super::BoardRuntime, skater: &SkaterRuntime) -> BodyState {
     let mut enabled = 0u64;
     {
-        for (i, b) in physics.board.bodies().iter().enumerate() {
+        for (i, b) in board.bodies().iter().enumerate() {
             if b.state_flags != 1 && skater.board_possession_live.volume_enabled(CollisionBody::Board(skate_core::physics::board::BodyId::ORDER[i])) {
                 enabled |= 1 << i;
             }
@@ -86,8 +91,7 @@ pub(crate) fn capture_body(physics: &GamePhysics, skater: &SkaterRuntime) -> Bod
             skater.animated_skeleton.roots.animation_to_world,
         )),
         enabled,
-        bodies: physics
-            .board
+        bodies: board
             .bodies()
             .iter()
             .chain(skater.skeleton.bodies())
@@ -260,8 +264,78 @@ pub(crate) struct Proxies {
     pub actors: std::collections::BTreeMap<usize,(u64,usize)>,
     pub dynamics_before: Vec<(u64, usize, [f32; 3], [f32; 3])>,
     pub dynamics_deltas: Vec<(u64, [f32; 3], [f32; 3], [f32; 3], [f32; 3])>,
+    /// Ped parts (group 11) in the solve: id, solve index, linear and angular velocity before. Observed only: the ped
+    /// is not moved by the solve; its reaction reads the part's velocity after it (`ped_after`, `sub_82E38FB8` kind 5).
+    pub observed: Vec<(u64, usize, [f32; 3], [f32; 3])>,
+    /// Each observed part's linear and angular velocity after the last solve.
+    pub ped_after: Vec<(u64, [f32; 3], [f32; 3])>,
 }
+// By hand so `clone_from` copies field by field into the existing buffers: the NPC worker sync clones a proxy set per
+// job each tick (`npc_sim`), and the derived `clone_from` (= `*self = source.clone()`) allocated every Vec again
+// (b333). Same values either way.
+impl Clone for Proxies {
+    fn clone(&self) -> Self {
+        Self {
+            bodies: self.bodies.clone(),
+            volumes: self.volumes.clone(),
+            solids: self.solids.clone(),
+            groups: self.groups.clone(),
+            actors: self.actors.clone(),
+            dynamics_before: self.dynamics_before.clone(),
+            dynamics_deltas: self.dynamics_deltas.clone(),
+            observed: self.observed.clone(),
+            ped_after: self.ped_after.clone(),
+        }
+    }
+    fn clone_from(&mut self, source: &Self) {
+        self.bodies.clone_from(&source.bodies);
+        self.volumes.clone_from(&source.volumes);
+        self.solids.clone_from(&source.solids);
+        self.groups.clone_from(&source.groups);
+        self.actors.clone_from(&source.actors);
+        self.dynamics_before.clone_from(&source.dynamics_before);
+        self.dynamics_deltas.clone_from(&source.dynamics_deltas);
+        self.observed.clone_from(&source.observed);
+        self.ped_after.clone_from(&source.ped_after);
+    }
+}
+
+/// Where a proxy set stood before some appends ([`Proxies::mark`]), to drop them again ([`Proxies::truncate`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProxyMark {
+    bodies: usize,
+    volumes: usize,
+    solids: usize,
+    dynamics_before: usize,
+    observed: usize,
+    /// The solve index of the first body appended after the mark (keys of `groups` / `actors`).
+    first_index: usize,
+}
+
 impl Proxies {
+    /// The current end, for a solve by `skater`.
+    pub fn mark(&self, skater: &SkaterRuntime) -> ProxyMark {
+        ProxyMark {
+            bodies: self.bodies.len(),
+            volumes: self.volumes.len(),
+            solids: self.solids.len(),
+            dynamics_before: self.dynamics_before.len(),
+            observed: self.observed.len(),
+            first_index: skater.skeleton.bodies().len() + skater.skeleton_drives.targets.bodies.len() + self.bodies.len(),
+        }
+    }
+
+    /// Drop everything appended after `mark`.
+    pub fn truncate(&mut self, mark: ProxyMark) {
+        self.bodies.truncate(mark.bodies);
+        self.volumes.truncate(mark.volumes);
+        self.solids.truncate(mark.solids);
+        self.dynamics_before.truncate(mark.dynamics_before);
+        self.observed.truncate(mark.observed);
+        self.groups.retain(|&k, _| k < mark.first_index);
+        self.actors.retain(|&k, _| k < mark.first_index);
+    }
+
     pub fn append(
         &mut self,
         peer: u64,
@@ -377,6 +451,8 @@ impl Proxies {
         self.groups.insert(index, solid.contact_group);
         if locally_owned && solid.inverse_mass > 0. {
             self.dynamics_before.push((solid.id, index, solid.linvel.to_array(), solid.angvel.to_array()));
+        } else if solid.contact_group == crate::living_world::ped_body::PED_GROUP && solid.inverse_mass > 0. {
+            self.observed.push((solid.id, index, solid.linvel.to_array(), solid.angvel.to_array()));
         }
         self.bodies.push(body);
         self.solids.push((index, solid));
@@ -386,7 +462,13 @@ impl Proxies {
         &mut self, reactions: &[skate_core::physics::rigid_body::RetailReactionCorrections], dt: f32,
     ) {
         self.dynamics_deltas.clear();
+        self.ped_after.clear();
         if !(dt.is_finite() && dt > 0.) { return; }
+        for &(id, index, v, w) in &self.observed {
+            let Some(r) = reactions.get(skate_core::physics::board_step::ATTACHED_REACTION_BASE + index) else { continue };
+            let (dv, dw) = (xyz(r.linear_displacement), xyz(r.angular_displacement));
+            self.ped_after.push((id, std::array::from_fn(|i| v[i] + dv[i] / dt), std::array::from_fn(|i| w[i] + dw[i] / dt)));
+        }
         for &(id, index, _, _) in &self.dynamics_before {
             let Some(r) = reactions.get(skate_core::physics::board_step::ATTACHED_REACTION_BASE + index) else { continue };
             self.dynamics_deltas.push((id,
@@ -395,5 +477,55 @@ impl Proxies {
                 xyz(r.position_displacement), xyz(r.orientation_displacement),
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod ped_after_tests {
+    use super::*;
+
+    /// A ped part in the solve is observed, never written back: its velocity after the solve is the velocity before
+    /// plus the solver's velocity change (the reaction reads it, retail `sub_82E38FB8` kind 5).
+    #[test]
+    fn an_observed_ped_part_reports_its_velocity_after_the_solve() {
+        let mut proxies = Proxies { observed: vec![(7, 2, [1.0, 0.0, 0.0], [0.0; 3])], ..Default::default() };
+        let mut reactions = vec![skate_core::physics::rigid_body::RetailReactionCorrections::default(); skate_core::physics::board_step::ATTACHED_REACTION_BASE + 3];
+        reactions[skate_core::physics::board_step::ATTACHED_REACTION_BASE + 2].linear_displacement = Vector3::new(0.1, 0.0, 0.0);
+        reactions[skate_core::physics::board_step::ATTACHED_REACTION_BASE + 2].angular_displacement = Vector3::new(0.0, 0.05, 0.0);
+        proxies.capture_dynamics_reactions(&reactions, 1.0 / 60.0);
+        assert_eq!(proxies.ped_after.len(), 1);
+        assert!((proxies.ped_after[0].1[0] - 7.0).abs() < 1e-4 && (proxies.ped_after[0].2[1] - 3.0).abs() < 1e-4, "{:?}", proxies.ped_after);
+        assert!(proxies.dynamics_deltas.is_empty(), "nothing to write back");
+    }
+}
+
+#[cfg(test)]
+mod clone_tests {
+    use super::*;
+
+    /// The hand-written `clone_from` (buffer reuse, b333) gives the same proxy set as `clone`, also over a longer one.
+    #[test]
+    fn clone_from_equals_clone() {
+        let mut a = Proxies::default();
+        a.groups.insert(3, 11);
+        a.actors.insert(4, (7, 2));
+        a.dynamics_before.push((1, 2, [1.0, 2.0, 3.0], [0.5, -0.0, f32::MIN_POSITIVE]));
+        a.dynamics_deltas.push((9, [1.0; 3], [2.0; 3], [3.0; 3], [4.0; 3]));
+        a.observed.push((5, 6, [0.1; 3], [0.2; 3]));
+        a.ped_after.push((5, [0.3; 3], [0.4; 3]));
+        let mut b = Proxies::default();
+        b.groups.insert(1, 1);
+        b.groups.insert(8, 8);
+        b.dynamics_before.extend([(0, 0, [9.0; 3], [9.0; 3]); 4]);
+        b.ped_after.extend([(0, [9.0; 3], [9.0; 3]); 3]);
+        b.clone_from(&a);
+        let c = a.clone();
+        let bits = |v: &[(u64, usize, [f32; 3], [f32; 3])]| v.iter().map(|e| (e.0, e.1, e.2.map(f32::to_bits), e.3.map(f32::to_bits))).collect::<Vec<_>>();
+        assert_eq!((&b.groups, &b.actors), (&c.groups, &c.actors));
+        assert_eq!(bits(&b.dynamics_before), bits(&c.dynamics_before));
+        assert_eq!(bits(&b.observed), bits(&c.observed));
+        assert_eq!(b.dynamics_deltas.len(), c.dynamics_deltas.len());
+        assert_eq!(b.ped_after.iter().map(|e| (e.0, e.1.map(f32::to_bits))).collect::<Vec<_>>(), c.ped_after.iter().map(|e| (e.0, e.1.map(f32::to_bits))).collect::<Vec<_>>());
+        assert_eq!((b.bodies.len(), b.volumes.len(), b.solids.len()), (0, 0, 0));
     }
 }

@@ -10,6 +10,7 @@ ambience is downmixed to stereo by a weighted average (audio_formats.py).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import struct
 import subprocess
@@ -33,14 +34,36 @@ LOOP_CROSSFADE = 0.08  # seconds
 VGMSTREAM_URL = 'https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip'
 VGMSTREAM_SHA = '6c4a8a3813864fefed081bbd337dbc0ad93bf88e0b92f5db98d7ab258b22dc6c'
 
-# Per-map ambience beds (ambience.big + headers in ambienceresident.big).
-AMBIENCE = (
-    '01_dt_apt', '02_dt_less_busy', '03_dt_rez', '04_dt_main', '05_dt_parks', '06_dt_open',
-    '07_univ_mt_high', '08_univ_mt_low', '09_univ_campus', '10_univ_housing',
-    '11_indu_shipyard', '12_indu_drydock', '13_indu_quarry', '14_reclaimed_a', '15_indu_new_factory',
-    '16_spillway', '17_space_park', '18_skate_school', '19_reclaimed_b_fix', '20_indu_old_factory',
-    '21_interior_arena_amb', '22_interior_tunnel_amb',
-)
+# Per-map ambience beds (research b432): retail builds its bed table from ambienceresident.big's index (824D4630:
+# bed number = the stream name's leading number, the first entry per number wins; bodies in ambience.big), and
+# adds a mounted pack's loose `data/audio/<N>_dlc_ambience.snr` / `.sns` for a number the disc lacks (824D3990, at
+# most 16 such slots; `%d`, no zero padding). A pack can not replace a disc bed.
+DLC_BED = re.compile(r'^(\d+)_dlc_ambience$', re.IGNORECASE)
+DLC_BED_SLOTS = 16
+
+
+def bed_table(headers, bodies, packs=()):
+    """{bed number: (stream stem, (archive, header entry), (archive, body entry))}: the disc's beds, then the packs'."""
+    table = {}
+    disc_bodies = {Path(e.path).stem: e for e in bodies.entries if e.path.endswith('.sns')}
+    for entry in headers.entries:
+        stem = Path(entry.path).stem
+        if not entry.path.endswith('.snr') or not stem[:2].isdigit() or int(stem[:2]) in table:
+            continue
+        if stem not in disc_bodies:
+            raise KeyError(f'ambience bed {stem} is missing from the disc')
+        table[int(stem[:2])] = (stem, (headers, entry), (bodies, disc_bodies[stem]))
+    slots = 0
+    for archive in packs:
+        audio = {Path(e.path).name.lower(): e for e in archive.entries if e.path.lower().startswith('data/audio/')}
+        for name in sorted(audio):
+            found = DLC_BED.match(Path(name).stem) if name.endswith('.snr') else None
+            body = audio.get(Path(name).stem + '.sns')
+            if not found or body is None or int(found.group(1)) in table or slots >= DLC_BED_SLOTS:
+                continue
+            table[int(found.group(1))] = (Path(audio[name].path).stem, (archive, audio[name]), (archive, body))
+            slots += 1
+    return table
 
 # Sample banks from audiofiles.big (data/audio/<name>).
 BANKS = (
@@ -80,6 +103,45 @@ def _decode(vgmstream: Path, directory: Path, names: list[str], log) -> None:
         for name in batch:
             if not (directory/(name + '.wav')).is_file():
                 raise RuntimeError(f'vgmstream did not decode {directory.name}/{name}')
+
+
+# NumPy work (the downmix) runs on one thread at a time: its BLAS crashed with several threads in it at once.
+_NUMPY = __import__('threading').Lock()
+
+
+def _in_order(work, items):
+    """`work(item)` for every item on `setup_budget.decode_workers()` threads (the decodes are vgmstream processes);
+    the results in the items' order, the first failure (in that order) raised. Each item writes only its own files."""
+    from concurrent.futures import ThreadPoolExecutor
+    from .setup_budget import decode_workers
+    items = list(items)
+    with ThreadPoolExecutor(min(decode_workers(), max(1, len(items)))) as pool:
+        futures = [pool.submit(work, item) for item in items]
+        return [future.result() for future in futures]
+
+
+# One file per sound bank (docs/hails-additions/08-setup-performance.md#one-file-per-sound-bank): the bank's WAVs
+# back to back after an index, so the game reads a bank with one open instead of one per sample.
+WAV_PACK_MAGIC = b'SKWAVPK1'
+
+
+def wav_pack(wavs: list[bytes]) -> tuple[bytes, list[tuple[int, int]]]:
+    """The pack bytes and each WAV's (offset, size) in it."""
+    at = 16 + 16 * len(wavs)
+    ranges = []
+    for data in wavs:
+        ranges.append((at, len(data)))
+        at += len(data)
+    head = WAV_PACK_MAGIC + struct.pack('<II', len(wavs), 0) + b''.join(struct.pack('<QQ', o, n) for o, n in ranges)
+    return head + b''.join(wavs), ranges
+
+
+def wav_pack_entries(data: bytes) -> list[bytes]:
+    """The WAVs of a pack, in order."""
+    if data[:8] != WAV_PACK_MAGIC:
+        raise ValueError('not a sound bank pack')
+    count = struct.unpack_from('<I', data, 8)[0]
+    return [data[o:o + n] for o, n in (struct.unpack_from('<QQ', data, 16 + 16 * i) for i in range(count))]
 
 
 def _wav_info(path: Path) -> dict:
@@ -172,6 +234,7 @@ RANDOM_SET_FIELDS = {
     'Hash_A306BD1F4023A642': 'max_interval',
     'Hash_5CA06CA086D8F953': 'sounds',  # RefSpec array of EMITTER_CLASS records
     'Hash_07DDABF96E5F2731': 'weights',  # Int32 array, one per sound
+    'Hash_79460EEF1A8253B0': 'level_steps',  # Int32: the level grid, lo/hi = trunc(steps * min/max) (sub_824A1A20)
 }
 
 
@@ -274,14 +337,14 @@ CROSSFADE_FIELDS = {
 CROSSFADE_BANKS = ('Main_Ambience_Crossfade_DT.abk', 'Main_Ambience_Crossfade_Ind.abk', 'Main_Ambience_Crossfade_Uni.abk')
 
 
-def ambience_zones(collections: list[dict], names: list[str]) -> tuple[dict, list[dict]]:
-    """Zones by key ({name, bed stream, volume, times}) and crossfades ({name, from, to, group,
-    level, ...} with zone keys as 16 hex digits)."""
+def ambience_zones(collections: list[dict], names: list[str], beds: dict[int, str]) -> tuple[dict, list[dict]]:
+    """Zones by key ({name, bed stream, bed_index, volume, times}) and crossfades ({name, from, to, group,
+    level, ...} with zone keys as 16 hex digits). `beds`: bed number -> stream stem (`bed_table`); a number with no
+    bed stays `bed: None` (retail plays nothing)."""
     known = {name_id(n): n for n in names}
-    beds = {int(name.split('_', 1)[0]): name for name in AMBIENCE}
     zones = {}
     for key, fields in _resolved(collections, ZONE_CLASS, ZONE_FIELDS).items():
-        zones[f'{key:016X}'] = {'name': known.get(key), 'bed': beds.get(fields.get('bed', 0)),
+        zones[f'{key:016X}'] = {'name': known.get(key), 'bed': beds.get(fields.get('bed', 0)), 'bed_index': fields.get('bed'),
                                 **{k: fields[k] for k in ('volume', 'time_a', 'time_b') if k in fields}}
     crossfades = []
     for key, fields in _resolved(collections, CROSSFADE_CLASS, CROSSFADE_FIELDS).items():
@@ -317,9 +380,10 @@ def random_sets(collections: list[dict], attributes: dict[int, dict], names: lis
     return listed, banks
 
 
-def emitters(files: BigArchive, attributes: dict[int, dict] | None = None) -> tuple[dict, set[str]]:
+def emitters(files: BigArchive, attributes: dict[int, dict] | None = None, extra=()) -> tuple[dict, set[str]]:
     """Every `.ems` file's records with their sound's attributes and bank (None
-    when the disc has no such bank), and the banks placed by sound emitters."""
+    when the disc has no such bank), and the banks placed by sound emitters. `extra`: the player's DLC map packs'
+    BIGs, whose `data/audio/*.ems` (e.g. DLC_Maloof.ems) place disc banks (b414)."""
     attributes = attributes or {}
     banks = {}
     by_file = {Path(e.path).name.lower(): Path(e.path).name for e in files.entries}
@@ -329,12 +393,31 @@ def emitters(files: BigArchive, attributes: dict[int, dict] | None = None) -> tu
             # Ids hash the name either as the file is named or lower-cased (both occur).
             for key in {Path(name).stem, Path(name).stem.lower()}:
                 banks[name_id(key)] = name
+    # A pack's loose banks (After Dark's cage_rattle_1, human_moaning_1, ... for its own emitters, b432) resolve
+    # too; a disc bank keeps its name.
+    for pack in extra:
+        for entry in pack.entries:
+            name = Path(entry.path).name
+            if entry.path.replace('\\', '/').lower().startswith('data/audio/') and name.lower().endswith('.abk') \
+                    and name.lower() not in by_file:
+                by_file[name.lower()] = name
+                for key in {Path(name).stem, Path(name).stem.lower()}:
+                    banks.setdefault(name_id(key), name)
     listed, placed = {}, set()
-    for entry in sorted(files.entries, key=lambda e: e.path):
+    sources = [(files, e) for e in sorted(files.entries, key=lambda e: e.path)]
+    for pack in extra:
+        sources += [(pack, e) for e in sorted(pack.entries, key=lambda e: e.path)
+                    if e.path.replace('\\', '/').lower().startswith('data/audio/')]
+    for archive, entry in sources:
         if not entry.path.endswith('.ems'):
             continue
         stem = Path(entry.path).stem
-        records = ems_emitters(files.read(entry))
+        # A pack's .ems is its map's own emitter file (DLC_sanitarium, DLC_Maloof, b414 / b432), the disc's
+        # sfx_<district> counterpart: its banks play in the world.
+        sounds = stem.startswith(SOUND_EMITTERS) or archive is not files
+        if stem in listed:
+            continue
+        records = ems_emitters(archive.read(entry))
         for record in records:
             sound = dict(attributes.get(record['sound_id'], {}))
             named = sound.pop('bank_file', '')
@@ -345,7 +428,7 @@ def emitters(files: BigArchive, attributes: dict[int, dict] | None = None) -> tu
                 record['reverb'] = f"{record['reverb']:016X}"
             record['bank'] = Path(bank).stem if bank else None
             record['sound_id'] = f"{record['sound_id']:016X}"
-            if bank and stem.startswith(SOUND_EMITTERS):
+            if bank and sounds:
                 placed.add(bank)
         listed[stem] = records
     return listed, placed
@@ -356,17 +439,20 @@ def emitters(files: BigArchive, attributes: dict[int, dict] | None = None) -> tu
 AUDIO_REGION_LAYERS = ('audio_emitters', 'audio_ambience', 'audio_reverb')
 
 
-def regions(game_root: Path, work: Path) -> dict:
+def regions(game_root: Path, work: Path, dlc_jobs=()) -> dict:
     """Each map's audio region layers from its district streams:
-    {map: {layer: [{box, nodes, keys (16 hex digits)}]}}."""
+    {map: {layer: [{box, nodes, keys (16 hex digits)}]}}. `dlc_jobs` (asset_pipeline.dlc.load): the DLC maps' streams,
+    keyed by their map label like the disc's (b414)."""
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'vendor/university/tools/vanilla_map_extraction/tools'))
     from skate3_streams import read_atoc, read_sfil
     out = {}
-    for archive in sorted((game_root/'data/content').glob('worldDIST_*.big')):
-        district = archive.stem.removeprefix('worldDIST_')
+    sources = [(a, a.stem.removeprefix('worldDIST_'), None) for a in sorted((game_root/'data/content').glob('worldDIST_*.big'))]
+    sources += [(j['archive'], j['label'], ('data/content/world/stream/' + j['district'] + '/').lower()) for j in dlc_jobs]
+    for archive, district, folder_prefix in sources:
         big = BigArchive(archive)
-        index = next((e for e in big.entries if e.path.endswith('_Sim.xst')), None)
+        streamed = [e for e in big.entries if folder_prefix is None or e.path.replace('\\', '/').lower().startswith(folder_prefix)]
+        index = next((e for e in streamed if e.path.endswith('_Sim.xst')), None)
         if index is None:
             continue
         folder = work/'regions'/district
@@ -375,7 +461,7 @@ def regions(game_root: Path, work: Path) -> dict:
         records = read_atoc(folder/'index.xst')
         by_id = {r.asset_id: r for r in records}
         layers, seen = {}, set()
-        for entry in big.entries:
+        for entry in streamed:
             name = Path(entry.path).name
             if not (name.startswith('cSim_') and name.endswith('.xsf')):
                 continue
@@ -681,6 +767,9 @@ MATERIAL_PITCH_ALT, MATERIAL_CATEGORY = 'Hash_3A3DD47E8DAFE796', 'Hash_D5EF68628
 # RefSpecs: +0 the contact-level windows (class 13E20D398E385A56, sub_82496C58 / sub_82496F50), +24 the
 # impact bands (class 7DAFF70B3A91CD5D, sub_82497088).
 MATERIAL_WINDOWS, MATERIAL_BANDS = 'Hash_82B1451A90152514', 'Hash_E228508FE0F53970'
+# The alternate window / band RefSpecs and their gate (byte +57): a poster passing the flag (the prop impact poster
+# sub_824E3BE0) reads them instead when the material sets the byte (sub_82496DF8 / sub_82497088).
+MATERIAL_ALT_FLAG, MATERIAL_ALT_WINDOWS, MATERIAL_ALT_BANDS = 'Hash_AA24BEE814DA6B9A', 'Hash_E007F3FC90E887D0', 'Hash_F64F891C312EFD5E'
 WINDOW_CLASS = 'Hash_13E20D398E385A56'
 WINDOW_FIELDS = ('Hash_036F313CEBC664FD', 'Hash_8001982DA2E91D6A', 'Hash_E24D9CB4000A53AC', 'Hash_1A83AD0330976744',
                  'Hash_24B725E05CEB027E', 'Hash_CBBB19E302CE1A17', 'Hash_75DC915E876A9DC9', 'Hash_711F1F54903E76C9',
@@ -714,6 +803,12 @@ COLLISION_POSTERS = (
     ('Hash_923CCB46EF5BF5BA', 'Hash_F1647BFB782BE97F', 'Hash_DB56952676D7122E', 'tap_first_soft'),
     ('Hash_923CCB46EF5BF5BA', 'Hash_F1647BFB782BE97F', 'Hash_0ACFCB7E532B7A0B', 'tap_second_soft'),
     ('Hash_923CCB46EF5BF5BA', 'Hash_F1647BFB782BE97F', 'Hash_7EA37827E4228614', 'tap_other_soft'),
+    # The collide line's floors (sub_824BDA90): a car contact, a skater / group 11 contact.
+    ('aud_speech', 'default', 'Hash_7503A1AD356BFCCD', 'collide_vehicle_min'),
+    ('aud_speech', 'default', 'Hash_359EC8EF52598AA8', 'collide_min'),
+    # The same class by its hash (hash64('aud_speech')), for a conversion that does not name it.
+    ('Hash_B29C3B2C13D96482', 'default', 'Hash_7503A1AD356BFCCD', 'collide_vehicle_min'),
+    ('Hash_B29C3B2C13D96482', 'default', 'Hash_359EC8EF52598AA8', 'collide_min'),
 )
 
 # The push foot's plant / lift (sub_824BBB28, Contacts `default`): sk8_foley ids by material kind 0..4.
@@ -725,6 +820,10 @@ LIFT_FIELDS = ('Hash_2D97D30AEA78BCE2', 'Hash_73CB69882A79481B', 'Hash_767F6CAEA
 EQCHAIN_CLASS = 'Hash_42AFE160E647167C'
 PLANT_EQ = 'Hash_748CBC9727A5347F'
 GRIND_CONTACT_EQ = 'Hash_D1A87641CCB98787'
+# HandGrabs' skitch pair (sub_824EC488): aud_splicer handgrab, Skate_Collisions / Skate_Metal ids, and its bus
+# (aud_randomeqtuning default).
+HANDGRAB = ('Hash_923CCB46EF5BF5BA', ('handgrab', 'Hash_E0C3B44AB44F7B90'), 'Hash_3A6CB8809410A268', 'Hash_04B0B78035ED5EC6')
+HANDGRAB_EQ = 'Hash_CCDFABBAEEA33EAE'
 # The body poster (sub_824BC188; class 6EBA5BCD3E38A98A `default`): the per-region cooldown and the pad thresholds.
 BODY_POSTERS = (('Hash_6DD85F43C1B6E6AA', 'body_cooldown'),
                 ('Hash_D12003A60E987B9D', 'body_110_head_low'), ('Hash_FA2AA5A0C0481D00', 'body_110_head_high'),
@@ -811,6 +910,20 @@ def collision_tuning(resolve, by_class) -> dict:
         v = resolve(cls, key, f)
         return _words(v)[0] if v is not None and _words(v) else default
 
+    def window_bands(key, windows_field, bands_field):
+        out = {}
+        windows_key = ref_key(resolve(MATERIAL_CLASS, key, windows_field))
+        if windows_key and windows_key in by_class.get(WINDOW_CLASS, {}):
+            w = [word(WINDOW_CLASS, windows_key, f) for f in WINDOW_FIELDS]
+            w += [word(WINDOW_CLASS, windows_key, f) for f in WINDOW_FIELDS_2]
+            out['windows'] = w
+            scale = resolve(WINDOW_CLASS, windows_key, WINDOW_SCALE)
+            out['scale'] = _scalar_or_list(scale) if scale is not None else 0.0
+        bands_key = ref_key(resolve(MATERIAL_CLASS, key, bands_field))
+        if bands_key and bands_key in by_class.get(BAND_CLASS, {}):
+            out['bands'] = [(_scalar_or_list(v) if (v := resolve(BAND_CLASS, bands_key, f)) is not None else 0.0) for f in BAND_FIELDS]
+        return out
+
     rows = []
     for m in range(143):
         kind, key = MATERIAL_KINDS[m], 'Hash_%016X' % MATERIAL_KEYS[m]
@@ -832,16 +945,9 @@ def collision_tuning(resolve, by_class) -> dict:
         row['footsteps'] = word(MATERIAL_CLASS, key, MATERIAL_FOOTSTEPS) != 0
         row['step_gain'] = word(MATERIAL_CLASS, key, MATERIAL_STEP_GAIN, 32767)
         row['step_landing_gain'] = word(MATERIAL_CLASS, key, MATERIAL_STEP_LANDING_GAIN, 32767)
-        windows_key = ref_key(resolve(MATERIAL_CLASS, key, MATERIAL_WINDOWS))
-        if windows_key and windows_key in by_class.get(WINDOW_CLASS, {}):
-            w = [word(WINDOW_CLASS, windows_key, f) for f in WINDOW_FIELDS]
-            w += [word(WINDOW_CLASS, windows_key, f) for f in WINDOW_FIELDS_2]
-            row['windows'] = w
-            scale = resolve(WINDOW_CLASS, windows_key, WINDOW_SCALE)
-            row['scale'] = _scalar_or_list(scale) if scale is not None else 0.0
-        bands_key = ref_key(resolve(MATERIAL_CLASS, key, MATERIAL_BANDS))
-        if bands_key and bands_key in by_class.get(BAND_CLASS, {}):
-            row['bands'] = [(_scalar_or_list(v) if (v := resolve(BAND_CLASS, bands_key, f)) is not None else 0.0) for f in BAND_FIELDS]
+        row.update(window_bands(key, MATERIAL_WINDOWS, MATERIAL_BANDS))
+        if word(MATERIAL_CLASS, key, MATERIAL_ALT_FLAG) != 0:
+            row['alt'] = window_bands(key, MATERIAL_ALT_WINDOWS, MATERIAL_ALT_BANDS)
         rows.append(row)
     posters = {}
     for cls, key, field, name in COLLISION_POSTERS:
@@ -1037,6 +1143,13 @@ def player_tuning(collections: list[dict], image: bytes | None = None, image_bas
         bus = by_class.get(EQCHAIN_CLASS, {}).get('default', {}).get('fields', {}).get(GRIND_CONTACT_EQ)
         if bus is not None:
             out['grind_contact_eq'] = _words(bus)[0]
+    splicer = by_class.get(HANDGRAB[0], {}) or by_class.get('aud_splicer', {})
+    grab = next((splicer[k] for k in HANDGRAB[1] if k in splicer), None)
+    if grab and HANDGRAB[2] in grab['fields'] and HANDGRAB[3] in grab['fields']:
+        out['hand_grab'] = {'collisions': _words(grab['fields'][HANDGRAB[2]])[0], 'metal': _words(grab['fields'][HANDGRAB[3]])[0]}
+        bus = by_class.get(EQCHAIN_CLASS, {}).get('default', {}).get('fields', {}).get(HANDGRAB_EQ)
+        if bus is not None:
+            out['hand_grab']['eq'] = _words(bus)[0]
     wheel = by_class.get(WHEEL_CLASS, {}).get('default')
     if wheel:
         for field, name in WHEEL_BUCKET.items():
@@ -1075,7 +1188,7 @@ def player_tuning(collections: list[dict], image: bytes | None = None, image_bas
     return out
 
 
-def aems_files(files: BigArchive, output: Path, banks) -> dict:
+def aems_files(files: BigArchive, output: Path, banks, extra=None) -> dict:
     """Copy the native AEMS runtime's inputs into output/'aems', byte for byte: every Csis project
     (`.csi`, in archive order, the order the runtime installs them) and the ABKC module banks among
     `banks` plus AEMS_EXTRA_BANKS. The runtime runs each bank's own patch programs; its samples stay
@@ -1087,11 +1200,12 @@ def aems_files(files: BigArchive, output: Path, banks) -> dict:
     for name in projects:
         (folder/name).write_bytes(files.read(by_name[name]))
     copied = {}
+    extra = extra or {}  # {bank name: read()}: the packs' loose banks (b432)
     for bank in sorted(set(banks) | set(AEMS_EXTRA_BANKS)):
         entry = by_name.get(bank)
-        if entry is None or not bank.lower().endswith('.abk'):
+        if (entry is None and bank not in extra) or not bank.lower().endswith('.abk'):
             continue
-        data = files.read(entry)
+        data = files.read(entry) if entry is not None else extra[bank]()
         if data[:4] != b'ABKC':
             continue
         (folder/bank).write_bytes(data)
@@ -1122,7 +1236,7 @@ def splice_trees(files: BigArchive, output: Path, banks) -> dict:
     return out
 
 
-def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report, log) -> dict:
+def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report, log, dlc_jobs=(), dlc_vaults=()) -> dict:
     """Write private/audio/** and private/audio/audio_manifest.json; return the manifest."""
     audio_root = game_root/'data/audio'
     output = private/'audio'
@@ -1132,22 +1246,23 @@ def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report,
     manifest = {'version': VERSION, 'ambience': {}, 'grains': {}, 'wheels': {}, 'banks': {}, 'patches': {}}
 
     report('Decoding ambience')
-    beds, headers = BigArchive(audio_root/'ambience.big'), BigArchive(audio_root/'ambienceresident.big')
-    bodies = {Path(e.path).stem: e for e in beds.entries if e.path.endswith('.sns')}
-    heads = {Path(e.path).stem: e for e in headers.entries if e.path.endswith('.snr')}
+    # The player's DLC packs (their map BIGs): DLC beds and loose banks (b432).
+    packs = [BigArchive(a) for a in sorted({j['archive'] for j in dlc_jobs})]
+    beds = bed_table(BigArchive(audio_root/'ambienceresident.big'), BigArchive(audio_root/'ambience.big'), packs)
     folder = work/'ambience'
     folder.mkdir()
-    for name in AMBIENCE:
-        if name not in bodies or name not in heads:
-            raise KeyError(f'ambience bed {name} is missing from the disc')
     (output/'ambience').mkdir(parents=True)
-    for name in AMBIENCE:
-        (folder/(name + '.snr')).write_bytes(headers.read(heads[name]))
-        (folder/(name + '.sns')).write_bytes(beds.read(bodies[name]))
+    def bed(item):
+        name, (head_archive, head), (body_archive, body) = item
+        (folder/(name + '.snr')).write_bytes(head_archive.read(head))
+        (folder/(name + '.sns')).write_bytes(body_archive.read(body))
         _decode(vgmstream, folder, [name + '.snr'], log)
         decoded = folder/(name + '.snr.wav')
-        info = _stereo(decoded, output/'ambience'/(name + '.wav'))
+        with _NUMPY:
+            info = _stereo(decoded, output/'ambience'/(name + '.wav'))
         decoded.unlink()  # ~65 MB of five-channel PCM each
+        return name, info
+    for name, info in _in_order(bed, (b for _, b in sorted(beds.items()))):
         manifest['ambience'][name] = {'file': f'ambience/{name}.wav', **info}
 
     for kind, archive, suffix in (('grains', 'grains.big', '.grain'), ('wheels', 'wheels.big', '.snr')):
@@ -1180,28 +1295,45 @@ def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report,
     files = BigArchive(audio_root/'audiofiles.big')
     by_name = {Path(e.path).name: e for e in files.entries}
     collections, record_names = _collections(game_root, work)
+    # The player's DLC map packs (b414): their rows join the disc's (a DLC row never replaces one).
+    if dlc_vaults:
+        from .dlc import merged
+        collections = merged({'collections': collections}, list(dlc_vaults))['collections']
     manifest['grain_player'] = grain_tuning(collections)
     manifest['player_tuning'] = player_tuning(collections)
     manifest['bus_tuning'] = bus_tuning(collections)
     manifest['frontend'] = frontend_sounds(collections)
     attributes = emitter_attributes(collections)
-    manifest['emitters'], placed = emitters(files, attributes)
+    manifest['emitters'], placed = emitters(files, attributes, packs)
     by_file = {Path(e.path).name.lower(): Path(e.path).name for e in files.entries}
+    # The packs' loose banks (After Dark's 7 emitter banks, b432) join the disc's; a disc bank keeps its name.
+    pack_banks = {}
+    for archive in packs:
+        for entry in archive.entries:
+            name = Path(entry.path).name
+            if entry.path.lower().startswith('data/audio/') and name.lower().endswith('.abk') and name.lower() not in by_file:
+                pack_banks.setdefault(name, (archive, entry))
+    by_file.update({name.lower(): name for name in pack_banks})
     manifest['random_sets'], random_banks = random_sets(collections, attributes, record_names, by_file)
     placed |= random_banks
-    manifest['zones'], manifest['crossfades'] = ambience_zones(collections, record_names)
+    manifest['zones'], manifest['crossfades'] = ambience_zones(collections, record_names, {n: s for n, (s, _, _) in beds.items()})
     placed |= set(CROSSFADE_BANKS)
     # The world sources' banks, tuning and speech index (crates/skate-audio/src/world; inert in game
     # until a ped / traffic system publishes owners).
-    from .world_audio import WORLD_BANKS, WORLD_SPLICE_BANKS, world_tuning
+    from .world_audio import WORLD_BANKS, WORLD_SPLICE_BANKS, prop_banks, world_tuning
     placed |= set(WORLD_BANKS)
+    prop_abks, prop_bnks = prop_banks(collections)
+    placed |= prop_abks | prop_bnks
     manifest['world_tuning'] = world_tuning(collections, record_names, (private/'stock', game_root))
     report('Reading audio regions')
-    manifest['regions'] = regions(game_root, work)
-    for bank in BANKS + tuple(sorted(placed - set(BANKS))):
-        if bank not in by_name:
+    manifest['regions'] = regions(game_root, work, dlc_jobs)
+    order = BANKS + tuple(sorted(placed - set(BANKS)))
+    for bank in order:
+        if bank not in by_name and bank not in pack_banks:
             raise KeyError(f'sound bank {bank} is missing from the disc')
-        data = files.read(by_name[bank])
+
+    def decode_bank(bank):
+        data = files.read(by_name[bank]) if bank in by_name else pack_banks[bank][0].read(pack_banks[bank][1])
         stem = Path(bank).stem
         folder = work/'banks'/stem
         folder.mkdir(parents=True)
@@ -1212,21 +1344,32 @@ def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report,
         target_folder = output/'banks'/stem
         target_folder.mkdir(parents=True)
         samples = []
+        wavs = []
         for index in range(len(streams)):
             target = target_folder/f'{index:04d}.wav'
             shutil.move(folder/f'{index:04d}.snr.wav', target)
             samples.append({'file': f'banks/{stem}/{index:04d}.wav', **_wav_info(target)})
+            wavs.append(target.read_bytes())
+        # The game reads the pack; the loose WAVs stay for older engine versions sharing the install.
+        pack, ranges = wav_pack(wavs)
+        (output/'banks'/f'{stem}.pack').write_bytes(pack)
+        for sample, at in zip(samples, ranges):
+            sample['pack'] = list(at)
+        # Retail's own layering/randomisation per sound (audio_formats.splc_patches).
+        return stem, samples, splc_patches(data) if data[:4] == b'SPLC' else None
+    manifest['bank_packs'] = {}
+    for stem, samples, patches in _in_order(decode_bank, order):
         manifest['banks'][stem] = samples
-        if data[:4] == b'SPLC':
-            # Retail's own layering/randomisation per sound (audio_formats.splc_patches).
-            manifest['patches'][stem] = splc_patches(data)
+        manifest['bank_packs'][stem] = f'banks/{stem}.pack'
+        if patches is not None:
+            manifest['patches'][stem] = patches
 
     report('Copying the AEMS banks and projects')
-    manifest['aems'] = aems_files(files, output, BANKS + tuple(placed))
+    manifest['aems'] = aems_files(files, output, BANKS + tuple(placed), {n: (lambda a=a, e=e: a.read(e)) for n, (a, e) in pack_banks.items()})
     mixmap = mixmap_file(audio_root, output)
     if mixmap:
         manifest['aems']['mixmap'] = mixmap
-    manifest['aems']['splice'] = splice_trees(files, output, BANKS + WORLD_SPLICE_BANKS)
+    manifest['aems']['splice'] = splice_trees(files, output, BANKS + WORLD_SPLICE_BANKS + tuple(sorted(prop_bnks)))
     speech = audio_root/'english'/'livingworldspeech.big'
     if speech.is_file():
         report('Indexing world speech')
@@ -1235,7 +1378,7 @@ def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report,
         (output/'speech').mkdir(parents=True, exist_ok=True)
         (output/'speech'/'livingworld.json').write_text(json.dumps(index), encoding='utf-8')
         entry = {'index': 'speech/livingworld.json', 'audio': None}
-        if speech_requested():  # SKATE_SETUP_SPEECH=1: ~2.4 GB of PCM
+        if speech_requested():  # Ped Speech on (the default; SKATE_SETUP_SPEECH=0 skips it): ~2.4 GB of PCM
             report('Decoding world speech')
             decode_speech(speech, index, output/'speech'/'livingworld', work/'speech', vgmstream, _decode, log)
             entry['audio'] = 'speech/livingworld'
@@ -1248,7 +1391,7 @@ def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report,
         (output/'speech').mkdir(parents=True, exist_ok=True)
         (output/'speech'/'maincast.json').write_text(json.dumps(index), encoding='utf-8')
         entry = {'index': 'speech/maincast.json', 'audio': None}
-        if speech_requested():  # SKATE_SETUP_SPEECH=1: ~0.95 GB more
+        if speech_requested():  # Ped Speech on (the default; SKATE_SETUP_SPEECH=0 skips it): ~0.95 GB more
             report('Decoding main-cast speech')
             decode_speech(main_cast, index, output/'speech'/'maincast', work/'speech_maincast', vgmstream, _decode, log,
                           events=MAIN_CAST_EVENTS)
@@ -1262,7 +1405,7 @@ def convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report,
         (output/'speech').mkdir(parents=True, exist_ok=True)
         (output/'speech'/'announcer.json').write_text(json.dumps(index), encoding='utf-8')
         entry = {'index': 'speech/announcer.json', 'audio': None}
-        if speech_requested():  # SKATE_SETUP_SPEECH=1: ~41 MB more (the crash line)
+        if speech_requested():  # Ped Speech on (the default; SKATE_SETUP_SPEECH=0 skips it): ~41 MB more (the crash line)
             report('Decoding announcer speech')
             decode_speech(announcer, index, output/'speech'/'announcer', work/'speech_announcer', vgmstream, _decode, log,
                           events=ANNOUNCER_EVENTS)

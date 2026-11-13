@@ -112,6 +112,18 @@ pub fn board_bounds(frame: Frame, offset: Vector, extents: Vector) -> Bounds {
     Bounds { frame: [right, up, forward, position], extents }
 }
 
+///82D2E250 with argument7=true (the riding skitch query, 82D39BB8): the frame's own forward (row2, not
+///flattened), right = row0 with y removed and normalised, up = forward x right; same placement as
+///[`board_bounds`].
+pub fn skitch_bounds(frame: Frame, offset: Vector, extents: Vector) -> Bounds {
+    let forward = frame[2];
+    let mut right = frame[0]; right[1] = 0.0;
+    let right = normalize_or(right, [1.0,0.0,0.0,0.0]);
+    let up = cross(forward, right);
+    let position = madd(up, offset[1], madd(forward, offset[2]+extents[2], frame[3]));
+    Bounds { frame: [right, up, forward, position], extents }
+}
+
 ///82D324B0. The caller clears144; a failed probe deliberately preserves that byte.
 pub fn update_board<S: Services>(state: &mut State, services: &mut S) {
     let settings = services.board_settings();

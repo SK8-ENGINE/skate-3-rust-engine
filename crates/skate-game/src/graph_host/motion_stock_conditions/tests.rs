@@ -1,5 +1,21 @@
 use super::*;
 use crate::graph_host::motion_animation::MotionAnimation;
+use skate_data::state_graph::GraphAttribute;
+
+#[test]
+fn angle_adjust_by_animation_end_is_a_resolved_moving_object_leaf() {
+    assert!(Condition::recognizes("AngleAdjustByAnimationEndLessThan"));
+    let a = [GraphAttribute {
+        name: "name".into(),
+        text: "AngleAdjustByAnimationEndLessThan".into(),
+        float_bits: 0,
+        boolean_byte: 0,
+    }];
+    assert_eq!(
+        Condition::parse(&Attributes::new(&a)),
+        Condition::AngleAdjustByAnimationEndLessThan
+    );
+}
 
 #[test]
 fn obstacle_distance_uses_named_clip_displacement_and_native_boundary() {

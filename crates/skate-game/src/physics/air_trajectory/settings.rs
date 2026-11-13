@@ -74,6 +74,12 @@ pub(super) fn load(data: &Collections) -> Result<SelectorSettings, String> {
             "default",
             "MinTrajectorySize",
         )? as i32,
+        //The AI recorded-jump accept window and arc error are code constants
+        //(sub_82D67B50 / sub_82D67A00), kept here so they stay data-driven.
+        recorded_arc_radius_squared: 4.0,
+        recorded_arc_speed_ratio_min: 0.333,
+        recorded_arc_speed_ratio_max: 3.0,
+        recorded_arc_error: 1.0,
         vert_jump_align_factor: r("VertJumpAlignFactor")?, //0B42DFBB7F7756A0
         vert_jump_align_max_ground_normal_y: r("VertJumpAlignMaxGroundNormalY")?, //94923D136EA2DA37
         vert_jump_align_min_direction_y: r("VertJumpAlignMinJumpDirY")?, //58BFC8D41216C7EE

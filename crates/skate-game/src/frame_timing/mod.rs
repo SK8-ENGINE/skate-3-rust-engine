@@ -19,7 +19,9 @@
 //! Observation only: these systems read clocks and write only this module's own
 //! resource and its overlay entities (test `systems_touch_only_their_own_state`),
 //! so gameplay is identical with the readout and the log on or off.
+pub(crate) mod hitch;
 pub(crate) mod log;
+mod render_split;
 pub(crate) mod stats;
 
 use bevy::app::{RunFixedMainLoop, RunFixedMainLoopSystems};
@@ -61,6 +63,8 @@ pub(crate) struct FrameTiming {
     steps_pending: u32,
     last_main_ms: f32,
     last_fixed_ms: f32,
+    last_median_ms: Option<f32>,
+    last_now_s: f64,
     origin: Instant,
     /// Start of the current frame: monotonic and wall clock.
     frame_started: Option<(Instant, f64)>,
@@ -69,7 +73,10 @@ pub(crate) struct FrameTiming {
     /// The current frame's CPU split, from `record` (Last).
     pending: Option<FrameCpu>,
     window: VecDeque<Sample>,
+    /// Previous frames without their physics loop (`ms - fixed_ms`), and the cost of one fixed step in the frames
+    /// that ran any: the hitch rule's expected frame time ([`stats::expected_ms`]).
     history: VecDeque<f32>,
+    step_history: VecDeque<f32>,
     summary: stats::Summary,
     hitches: usize,
     interval: Interval,
@@ -89,6 +96,8 @@ impl Default for FrameTiming {
             steps_pending: 0,
             last_main_ms: 0.0,
             last_fixed_ms: 0.0,
+            last_median_ms: None,
+            last_now_s: 0.0,
             origin: Instant::now(),
             frame_started: None,
             fixed_started: None,
@@ -96,6 +105,7 @@ impl Default for FrameTiming {
             pending: None,
             window: VecDeque::new(),
             history: VecDeque::with_capacity(stats::HITCH_HISTORY + 1),
+            step_history: VecDeque::with_capacity(stats::HITCH_HISTORY + 1),
             summary: stats::Summary::default(),
             hitches: 0,
             interval: Interval::default(),
@@ -141,10 +151,12 @@ impl Interval {
 impl FrameTiming {
     /// Records one frame that took `ms` (start to next start) and ended at
     /// `now_s` (seconds on this resource's clock), with what it did on the main
-    /// thread. Returns the log row values: (hitch, median of the history).
+    /// thread. Returns the log row values: (hitch, the frame's expected time).
     fn push(&mut self, now_s: f64, ms: f32, cpu: FrameCpu) -> (bool, Option<f32>) {
         let FrameCpu { main_ms, fixed_ms, steps } = cpu;
-        let median = stats::history_median(self.history.iter().copied(), &mut self.scratch);
+        let rest = stats::history_median(self.history.iter().copied(), &mut self.scratch);
+        let step = stats::history_median(self.step_history.iter().copied(), &mut self.scratch);
+        let median = stats::expected_ms(rest, step, steps);
         let hitch = stats::is_hitch(ms, median);
         self.frame += 1;
         self.last_ms = ms;
@@ -152,10 +164,18 @@ impl FrameTiming {
         self.last_steps = steps;
         self.last_main_ms = main_ms;
         self.last_fixed_ms = fixed_ms;
+        self.last_median_ms = median;
+        self.last_now_s = now_s;
         if self.history.len() == stats::HITCH_HISTORY {
             self.history.pop_front();
         }
-        self.history.push_back(ms);
+        self.history.push_back((ms - fixed_ms).max(0.0));
+        if steps > 0 {
+            if self.step_history.len() == stats::HITCH_HISTORY {
+                self.step_history.pop_front();
+            }
+            self.step_history.push_back(fixed_ms / steps as f32);
+        }
         self.window.push_back(Sample { end_s: now_s, ms, hitch });
         while self.window.len() > MAX_FRAMES
             || self.window.front().is_some_and(|s| s.end_s < now_s - WINDOW_S)
@@ -179,6 +199,19 @@ impl FrameTiming {
         self.hitches = self.window.iter().filter(|s| s.hitch).count();
         self.shown = std::mem::take(&mut self.interval);
         true
+    }
+
+    /// The frame `begin_frame` closed last (the `FRAME_HITCH` line's numbers).
+    pub(crate) fn closed(&self) -> hitch::ClosedFrame {
+        hitch::ClosedFrame {
+            frame: self.frame,
+            ms: self.last_ms,
+            median_ms: self.last_median_ms,
+            main_ms: self.last_main_ms,
+            fixed_ms: self.last_fixed_ms,
+            steps: self.last_steps,
+            now_s: self.last_now_s,
+        }
     }
 
     fn now_s(&self) -> f64 {
@@ -209,6 +242,7 @@ impl FrameTiming {
             "low_01_ms": s.low_01_ms,
             "worst_ms": s.worst_ms,
             "hitches": self.hitches,
+            "session_s": self.now_s(),
         })
     }
 
@@ -241,12 +275,39 @@ struct FrameLogSink(log::FrameLog);
 
 #[derive(Component)]
 struct FrameOverlay;
+/// The counter and, centred under it, the session timer: moved between the corners as one.
+#[derive(Component)]
+struct FrameStack;
+/// The two top corners the counter can sit in (graphics menu "FPS Counter Position"); the warning stays left.
+#[derive(Component)]
+struct FrameCorner {
+    right: bool,
+}
 #[derive(Component)]
 struct FrameText;
 #[derive(Component)]
 struct FrameBar(usize);
 #[derive(Component)]
 struct FrameGraph;
+/// The red "game files need a refresh" box: below the counter when it is shown, in its place when it is not.
+#[derive(Component)]
+struct RefreshWarning;
+#[derive(Component)]
+struct RefreshWarningText;
+
+/// The machine's threads and Bevy's pool sizes once at start-up: the parallel transform propagation spikes seen on
+/// one PC and not another (research b554) depend on them.
+fn log_threads() {
+    use bevy::tasks::{AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool};
+    let logical = std::thread::available_parallelism().map_or(0, |n| n.get());
+    let pool = |n: Option<usize>| n.map_or("-".to_owned(), |n| n.to_string());
+    info!(
+        "SKATE_THREADS logical={logical} compute={} async_compute={} io={}",
+        pool(ComputeTaskPool::try_get().map(|p| p.thread_num())),
+        pool(AsyncComputeTaskPool::try_get().map(|p| p.thread_num())),
+        pool(IoTaskPool::try_get().map(|p| p.thread_num())),
+    );
+}
 
 pub(crate) struct FrameTimingPlugin;
 
@@ -256,12 +317,14 @@ impl Plugin for FrameTimingPlugin {
         if let Some(log) = log::FrameLog::from_env() {
             app.insert_resource(FrameLogSink(log));
         }
-        app.add_systems(Startup, spawn_overlay)
+        app.add_systems(Startup, (spawn_overlay, log_threads))
             .add_systems(First, begin_frame.before(bevy::time::TimeSystems))
             .add_systems(RunFixedMainLoop, begin_fixed.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop))
             .add_systems(RunFixedMainLoop, end_fixed.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop))
             .add_systems(bevy::app::FixedFirst, count_fixed_step)
-            .add_systems(Last, (record, show).chain());
+            .add_systems(Last, (record, show, place_overlay, show_session_timer).chain());
+        hitch::register(app);
+        render_split::register(app);
     }
 }
 
@@ -332,12 +395,28 @@ fn show(
     mut text: Query<(&mut Text, &mut TextFont), With<FrameText>>,
     mut bars: Query<(&FrameBar, &mut Node, &mut BackgroundColor), (Without<FrameOverlay>, Without<FrameGraph>)>,
     mut graph_node: Query<&mut Node, (With<FrameGraph>, Without<FrameOverlay>, Without<FrameBar>)>,
+    mut warning_box: Query<&mut Node, (With<RefreshWarning>, Without<FrameOverlay>, Without<FrameBar>, Without<FrameGraph>)>,
+    mut warning_text: Query<(&mut Text, &mut TextFont), (With<RefreshWarningText>, Without<FrameText>)>,
     mut graph: Local<Vec<f32>>,
+    mut hitch_bars: Local<Vec<f32>>,
     mut shown_at: Local<Option<f64>>,
     mut layout_simple: Local<Option<bool>>,
+    mut warning_generation: Local<u64>,
 ) {
     let visible = menu.as_ref().is_some_and(|m| m.frame_stats_visible());
     let simple = menu.as_ref().is_some_and(|m| m.frame_stats_simple());
+    // The asset check's notice (start-up check, then the full check): shown whether or not the counter is.
+    let (generation, features) = crate::asset_check::notice();
+    if generation != *warning_generation {
+        *warning_generation = generation;
+        let text = crate::asset_check::warning_box_text(&features);
+        for mut node in &mut warning_box {
+            node.display = if text.is_some() { Display::Flex } else { Display::None };
+        }
+        for (mut label, _) in &mut warning_text {
+            label.0 = text.clone().unwrap_or_default();
+        }
+    }
     for mut node in &mut overlay {
         let display = if visible { Display::Flex } else { Display::None };
         if node.display != display {
@@ -353,6 +432,9 @@ fn show(
         *layout_simple = Some(simple);
         *shown_at = None;
         for (_, mut font) in &mut text {
+            font.font_size = if simple { 11.0 } else { 14.0 };
+        }
+        for (_, mut font) in &mut warning_text {
             font.font_size = if simple { 11.0 } else { 14.0 };
         }
         for mut node in &mut graph_node {
@@ -376,11 +458,14 @@ fn show(
     }
     graph.resize(if simple { SIMPLE_BARS } else { GRAPH_BARS }, 0.0);
     stats::bucket_worst(timing.window.iter().map(|s| (s.end_s, s.ms)), now_s, GRAPH_BUCKET_S, graph.as_mut_slice());
-    let median = timing.summary.median_ms;
+    // Red = the bucket holds a hitch by the expected-time rule (not 2 x the median: a normal fixed-step frame is ~2x a
+    // step-less one at high fps).
+    hitch_bars.resize(graph.len(), 0.0);
+    stats::bucket_worst(timing.window.iter().map(|s| (s.end_s, if s.hitch { 1.0 } else { 0.0 })), now_s, GRAPH_BUCKET_S, hitch_bars.as_mut_slice());
     for (bar, mut node, mut color) in &mut bars {
         let Some(&ms) = graph.get(bar.0) else { continue };
         node.height = percent((ms / GRAPH_FULL_MS).clamp(0.0, 1.0) * 100.0);
-        color.0 = if median > 0.0 && ms > stats::HITCH_FACTOR * median {
+        color.0 = if hitch_bars.get(bar.0).is_some_and(|&h| h > 0.0) {
             Color::srgb(0.95, 0.25, 0.2)
         } else if ms > 1000.0 / 60.0 {
             Color::srgb(0.95, 0.75, 0.2)
@@ -390,25 +475,133 @@ fn show(
     }
 }
 
+#[derive(Component)]
+struct SessionTimer;
+
+/// The session timer's font: this share of the window's height (UI pixels already carry the DPI scale), at least the
+/// minimum.
+const SESSION_TIMER_FONT_SHARE: f32 = 0.024;
+const SESSION_TIMER_MIN_FONT: f32 = 14.0;
+
+fn session_timer_font(window_height: f32) -> f32 {
+    (window_height * SESSION_TIMER_FONT_SHARE).round().max(SESSION_TIMER_MIN_FONT)
+}
+
+/// `h:mm:ss` since the game started (the session log's start).
+fn session_clock(seconds: f64) -> String {
+    let s = seconds.max(0.0) as u64;
+    format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+}
+
+/// The session timer (graphics menu "Session Timer", USER-ASKS 495): the time since the game started, attached to the FPS overlay,
+/// so a moment seen in play can be named in a report. Every full minute logs `SESSION_TIMER`, tying the shown time to
+/// the log's wall clock.
+fn show_session_timer(
+    timing: Res<FrameTiming>,
+    menu: Option<Res<crate::graphics_menu::Menu>>,
+    mut node: Query<&mut Node, With<SessionTimer>>,
+    mut text: Query<(&mut Text, &mut TextFont), With<SessionTimer>>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut shown: Local<u64>,
+    mut logged: Local<u64>,
+) {
+    // Readable on any screen: the font follows the window height (DPI is in the UI scale already).
+    if let Ok(w) = window.single() {
+        let size = session_timer_font(w.height());
+        for (_, mut font) in &mut text {
+            if font.font_size != size {
+                font.font_size = size;
+            }
+        }
+    }
+    let now_s = timing.now_s();
+    let second = now_s as u64;
+    if second / 60 != *logged {
+        *logged = second / 60;
+        info!("SESSION_TIMER {}", session_clock((second / 60 * 60) as f64));
+    }
+    let visible = menu.as_ref().is_none_or(|m| m.session_timer_visible());
+    for mut n in &mut node {
+        let display = if visible { Display::Flex } else { Display::None };
+        if n.display != display {
+            n.display = display;
+        }
+    }
+    if !visible || second == *shown && second != 0 {
+        return;
+    }
+    *shown = second;
+    for (mut t, _) in &mut text {
+        t.0 = session_clock(now_s);
+    }
+}
+
+/// Moves the counter to the corner the menu picks (only when it changes).
+fn place_overlay(
+    mut commands: Commands,
+    menu: Option<Res<crate::graphics_menu::Menu>>,
+    stack: Query<(Entity, &ChildOf), With<FrameStack>>,
+    corners: Query<(Entity, &FrameCorner)>,
+) {
+    let right = menu.as_ref().is_some_and(|m| m.frame_stats_right());
+    let Some((corner, _)) = corners.iter().find(|(_, c)| c.right == right) else { return };
+    for (e, parent) in &stack {
+        if parent.parent() != corner {
+            // First in the column, above the warning.
+            commands.entity(corner).insert_children(0, &[e]);
+        }
+    }
+}
+
 fn spawn_overlay(mut commands: Commands) {
     // Uses the existing UI camera; no separate render loop. Hidden until the
     // graphics menu's "Frame-time counter" row turns it on.
+    // The top-left corner (the HUD minimap owns the top right, user 2026-10-23) holds the counter and, below it, the
+    // refresh warning; a hidden counter takes no room, so the warning then sits in its place.
+    let corner = commands
+        .spawn((
+            Name::new("Frame-time corner"),
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(12),
+                left: px(12),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexStart,
+                row_gap: px(6),
+                ..default()
+            },
+            GlobalZIndex(100),
+            FrameCorner { right: false },
+        ))
+        .id();
+    commands.spawn((
+        Name::new("Frame-time corner (right)"),
+        Node { position_type: PositionType::Absolute, top: px(12), right: px(12), flex_direction: FlexDirection::Column, align_items: AlignItems::FlexEnd, ..default() },
+        GlobalZIndex(100),
+        FrameCorner { right: true },
+    ));
+    // The counter with the session timer centred under it (place_overlay moves the pair between the corners).
+    let stack = commands
+        .spawn((
+            Name::new("Frame-time stack"),
+            FrameStack,
+            Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(6), ..default() },
+            ChildOf(corner),
+        ))
+        .id();
     commands
         .spawn((
             Name::new("Frame-time overlay"),
             FrameOverlay,
             Node {
                 display: Display::None,
-                position_type: PositionType::Absolute,
-                top: px(12),
-                right: px(12),
                 padding: UiRect::axes(px(10), px(6)),
                 flex_direction: FlexDirection::Column,
                 row_gap: px(4),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
-            GlobalZIndex(100),
+            ChildOf(stack),
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -435,11 +628,46 @@ fn spawn_overlay(mut commands: Commands) {
                     }
                 });
         });
+    // Attached to the FPS overlay: centred under it (the stack), sized from the window (show_session_timer).
+    commands.spawn((
+        Name::new("Session timer"),
+        SessionTimer,
+        Text::new("0:00:00"),
+        TextFont { font_size: SESSION_TIMER_MIN_FONT, ..default() },
+        TextColor(Color::WHITE),
+        Node { padding: UiRect::axes(px(10), px(4)), ..default() },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+        ChildOf(stack),
+    ));
+    // Same box style as the counter, in red, hidden until the asset check publishes something to refresh.
+    commands
+        .spawn((
+            Name::new("Refresh warning"),
+            RefreshWarning,
+            Node {
+                display: Display::None,
+                padding: UiRect::axes(px(10), px(6)),
+                max_width: px(420),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.62, 0.06, 0.06, 0.92)),
+            ChildOf(corner),
+        ))
+        .with_children(|parent| {
+            parent.spawn((RefreshWarningText, Text::new(""), TextFont { font_size: 14.0, ..default() }, TextColor(Color::WHITE)));
+        });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_session_clock_reads_hours_minutes_seconds() {
+        assert_eq!(session_clock(0.0), "0:00:00");
+        assert_eq!(session_clock(59.9), "0:00:59");
+        assert_eq!(session_clock(3723.0), "1:02:03");
+    }
 
     #[test]
     fn window_drops_old_frames_and_counts_hitches() {
@@ -483,6 +711,27 @@ mod tests {
         }
         assert_eq!(timing.window.len(), MAX_FRAMES);
         assert_eq!(timing.history.len(), stats::HITCH_HISTORY);
+    }
+
+    /// 5 ms frames alternating with 11 ms frames that ran one ~6 ms fixed step: no hitches; a 30 ms step frame is one.
+    #[test]
+    fn alternating_fixed_step_frames_are_not_hitches() {
+        let mut timing = FrameTiming { legacy: None, ..default() };
+        let mut now = 0.0;
+        let mut hitches = 0;
+        for i in 0..400 {
+            let (ms, cpu) = if i % 2 == 0 {
+                (5.1, FrameCpu { main_ms: 4.6, fixed_ms: 0.0, steps: 0 })
+            } else {
+                (11.2, FrameCpu { main_ms: 10.6, fixed_ms: 5.9, steps: 1 })
+            };
+            now += f64::from(ms) / 1000.0;
+            hitches += usize::from(timing.push(now, ms, cpu).0);
+        }
+        assert_eq!(hitches, 0);
+        let (hitch, expected) = timing.push(now + 0.03, 30.0, FrameCpu { main_ms: 29.0, fixed_ms: 6.0, steps: 1 });
+        assert!(hitch);
+        assert!((expected.unwrap() - 11.0).abs() < 0.01, "{expected:?}");
     }
 
     #[derive(Resource, Default, Debug, Clone, PartialEq)]
@@ -551,6 +800,95 @@ mod tests {
         assert!(last_steps <= 8, "only the final frame's steps are unlogged: {last_steps}");
         assert!(rows.iter().all(|r| r.main_ms <= r.frame_ms + 0.01), "a frame contains its schedules");
         let _ = std::fs::remove_file(path);
+    }
+
+    /// The same game with every trace-all diagnostic that runs per frame on the game thread: the
+    /// frame timing plugin, the frame log and the rolling performance report (short windows, so
+    /// several are handed to the writer thread during the run).
+    fn run_trace_all(dir: &std::path::Path, frames: u64) -> (Sim, std::time::Duration) {
+        use bevy::time::TimeUpdateStrategy;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).init_resource::<Sim>().add_systems(FixedUpdate, sim);
+        app.add_plugins(FrameTimingPlugin);
+        app.insert_resource(FrameLogSink(log::FrameLog::open(dir.join("frames.tsv")).unwrap()));
+        app.init_resource::<bevy::diagnostic::DiagnosticsStore>();
+        crate::performance::install(
+            &mut app,
+            // 1 ms windows: the 600 MinimalPlugins frames take only ~20 ms of wall time, so a 20 ms window could close
+            // after the run (flaky NotFound on perf.json, 2026-10-19).
+            crate::performance::Performance::rolling(dir.join("perf.json"), 0.001).with_warmup(0.0),
+        );
+        let started = std::time::Instant::now();
+        for i in 0..frames {
+            let ms = if i % 97 == 0 { 120 } else { 3 + i % 5 * 4 };
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(std::time::Duration::from_millis(ms)));
+            app.update();
+        }
+        let elapsed = started.elapsed();
+        let sim = app.world().resource::<Sim>().clone();
+        app.world_mut().remove_resource::<FrameLogSink>();
+        (sim, elapsed)
+    }
+
+    /// Trace-all on or off: the simulated game sees the same fixed steps and deltas, bit for bit,
+    /// and the rolling report keeps writing windows instead of exiting the app.
+    #[test]
+    fn game_is_identical_with_trace_all_on_or_off() {
+        let (plain, _) = run_app(false, None);
+        let dir = std::env::temp_dir().join(format!("skate-trace-all-app-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (traced, _) = run_trace_all(&dir, 600);
+        assert_eq!(plain, traced);
+        assert_eq!(plain.state.to_bits(), traced.state.to_bits());
+        // The writer thread rewrites the report after each window; give it a moment.
+        let report = dir.join("perf.json");
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !report.exists() && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let json: serde_json::Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+        assert_eq!(json["mode"], "rolling");
+        assert!(!json["windows"].as_array().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Per-frame game-thread cost of the trace-all diagnostics (run with `--ignored --nocapture`):
+    /// the same 3000-frame app as normal play has it (the frame timing plugin is always on) and with
+    /// the trace-all additions (frame log, rolling perf report), interleaved, best of 5 each.
+    #[test]
+    #[ignore = "timing measurement, run by hand"]
+    fn trace_all_overhead() {
+        use bevy::time::TimeUpdateStrategy;
+        let frames = 3000u64;
+        let plain = || {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins).init_resource::<Sim>().add_systems(FixedUpdate, sim);
+            app.add_plugins(FrameTimingPlugin);
+            let started = std::time::Instant::now();
+            for i in 0..frames {
+                let ms = if i % 97 == 0 { 120 } else { 3 + i % 5 * 4 };
+                app.insert_resource(TimeUpdateStrategy::ManualDuration(std::time::Duration::from_millis(ms)));
+                app.update();
+            }
+            started.elapsed()
+        };
+        let dir = std::env::temp_dir().join(format!("skate-trace-all-cost-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (mut off, mut on) = (Vec::new(), Vec::new());
+        for _ in 0..7 {
+            off.push(plain());
+            on.push(run_trace_all(&dir, frames).1);
+        }
+        let per_frame = |v: &[std::time::Duration]| v.iter().min().unwrap().as_secs_f64() * 1e6 / frames as f64;
+        let spread = |v: &[std::time::Duration]| {
+            let us: Vec<f64> = v.iter().map(|d| d.as_secs_f64() * 1e6 / frames as f64).collect();
+            us.iter().cloned().fold(f64::MIN, f64::max) - us.iter().cloned().fold(f64::MAX, f64::min)
+        };
+        eprintln!(
+            "TRACE_ALL_OVERHEAD frames={frames} off_us_per_frame={:.2} (spread {:.2}) on_us_per_frame={:.2} (spread {:.2}) delta_us={:.2}",
+            per_frame(&off), spread(&off), per_frame(&on), spread(&on), per_frame(&on) - per_frame(&off)
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Diagnostics never change the game: no system here writes any resource

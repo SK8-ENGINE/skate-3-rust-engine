@@ -1,0 +1,8 @@
+{
+  "_comment": "Material changes retail makes to a sky model by its name. Hawaiian Dream: the TU3 executable swaps the pack's model for a copy (0x828A1460, 0x82FDFF38) that differs only in material 2: environmentsimple.alphatest instead of environment.transparent, without its specular (research b427).",
+  "models": {
+    "world/models/DIST_DW_MegaCompund": {
+      "materials": {"2": {"shader": "environmentsimple.alphatest", "remove": ["specular"]}}
+    }
+  }
+}

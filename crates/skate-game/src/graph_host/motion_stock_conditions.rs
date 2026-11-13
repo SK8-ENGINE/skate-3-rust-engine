@@ -16,13 +16,15 @@ pub enum Condition {
     TrucksOrDeckInContact,
     PhysicsWantsManualExit,
     ApexReached,
+    /// MovingObjectNew push / pull: producer not recovered; true selects Immediate (WillExpire still leaves).
+    AngleAdjustByAnimationEndLessThan,
 }
 impl Condition {
     pub fn recognizes(name: &str) -> bool {
         matches!(name, "CanLandOnBoard" | "DistToEdge" | "IsDeckFree" |
             "IsBipedCommittedToMotion" | "EnoughDistToObstacle" | "CanBipedLand" |
             "IsCrouchedEnoughForBlendToGrabCycle" | "TrucksOrDeckInContact" |
-            "PhysicsWantsManualExit" | "ApexReached")
+            "PhysicsWantsManualExit" | "ApexReached" | "AngleAdjustByAnimationEndLessThan")
     }
     pub fn parse(a: &Attributes<'_>) -> Self {
         match a.text("name").unwrap_or("") {
@@ -39,6 +41,7 @@ impl Condition {
             "TrucksOrDeckInContact" => Self::TrucksOrDeckInContact,
             "PhysicsWantsManualExit" => Self::PhysicsWantsManualExit,
             "ApexReached" => Self::ApexReached,
+            "AngleAdjustByAnimationEndLessThan" => Self::AngleAdjustByAnimationEndLessThan,
             _ => unreachable!(),
         }
     }
@@ -55,6 +58,7 @@ impl Condition {
             //82BA42E0 reads Collision3472 OR3475, excluding wheel contacts.
             Self::TrucksOrDeckInContact => p.trucks_or_deck_contact,
             Self::ApexReached => p.reached_apex,
+            Self::AngleAdjustByAnimationEndLessThan => true,
             //82BA8238 compares completed OffBoard116.
             Self::DistToEdge(numeric) => numeric.matches(p.offboard_edge_distance),
             Self::EnoughDistToObstacle { database, animation } => {

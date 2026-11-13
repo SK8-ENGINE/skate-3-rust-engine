@@ -34,6 +34,34 @@ pub(crate) fn surface_probe(
     line(world, actor[1] as i32, probe)
 }
 
+/// [`surface_probe`] over the map and the props' collision layer: the nearest hit, the map's on a tie. Retail's
+/// grind line queries see one world with the DMOs in it, so a grind on a prop rail finds the prop's surface.
+pub(crate) fn surface_probe_with_props(
+    world: &BoardWorld,
+    props: Option<&BoardWorld>,
+    actor: [u32; 2],
+    index: usize,
+    probe: Probe,
+) -> Result<Option<ProbeHit>, String> {
+    let map = surface_probe(world, actor, index, probe)?;
+    let Some(props) = props else { return Ok(map) };
+    let prop = surface_probe(props, actor, index, probe)?;
+    Ok(match (map, prop) {
+        (Some(m), Some(p)) => Some(if p.fraction < m.fraction { p } else { m }),
+        (m, p) => m.or(p),
+    })
+}
+
+/// [`force_exit_line`] with the hit fraction, to pick the nearest of several worlds.
+pub(crate) fn force_exit_line_hit(
+    world: &BoardWorld,
+    actor: [u32; 2],
+    probe: ForceExitProbe,
+) -> Result<Option<(f32, ForceExitHit)>, String> {
+    Ok(line(world, actor[1] as i32, Probe { start: probe.start, end: probe.end, radius: 0. })?
+        .map(|hit| (hit.fraction, ForceExitHit { normal: hit.normal })))
+}
+
 ///82D86C88 passes processed2952 into82E0AAD0, not actor identity2948.
 pub(crate) fn force_exit_line(
     world: &BoardWorld,

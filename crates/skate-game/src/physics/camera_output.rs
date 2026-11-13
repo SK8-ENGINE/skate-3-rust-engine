@@ -43,8 +43,8 @@ pub(crate) fn advance(
         feedback,
         skater.centre_of_mass_output,
         CameraPreferences {
-            // User preferences are owned here: ordinary uninverted controls.
-            invert_look: [false; 2],
+            // Game Settings > Control > offboard X / Y axis (`CameraRuntime::invert_look`).
+            invert_look: camera.invert_look,
             // Native preferences constructor82DF6294/629C initializes both
             // fields to zero.82DF8E80 only updates its air-side bytes37..39.
             shake_variant: 0,
@@ -65,6 +65,10 @@ pub(crate) fn advance(
         volumes: Vec::new(),
     };
     let gravity = physics.settings.step.simulation.gravity_acceleration;
+    // Water bail: the wiping-out bit (Processed+2468 bit 18) with retail's water special surface
+    // (82DB8120 -> Collision+3481, published as Processed+2488 bit 30) and its height (+2924).
+    let p = &skater.player_input.processed;
+    let water = (bit(p.flags_2468, 18) != 0 && bit(p.flags_2488, 30) != 0).then_some(p.collision_scalar_2924);
     camera
         .advance(
             physics.settings.step.simulation.time_step,
@@ -73,6 +77,7 @@ pub(crate) fn advance(
             [gravity.x, gravity.y, gravity.z, 0.0],
             &environment,
             &mut StaticWorld,
+            water,
         )
         .map(|_| ())
 }

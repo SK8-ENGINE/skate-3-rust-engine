@@ -1,6 +1,6 @@
 # Skate 3 environment (reverb) bus: behavioural spec for the native port
 
-Written 2026-10-02 (headless RE of TU3 + clean recomp traces). Companion to `aems-voice-graph-spec.md`
+Written 2026-10-02 (headless reverse engineering of TU3 (title update 3) + clean recomp traces). Companion to `aems-voice-graph-spec.md`
 (§3 Send A, §4.8 Send, §6 buses), `mixmap-spec.md` §6.3 (emitter send word out8), `ems-emitters-re.md` (reverb
 zones, region layers). Behaviour, formulas and constants in our own words. The recomp's generated code, PR #4 / the
 PoC and b5-decomp were read for behaviour only. Addresses are TU3 3.0.3.0. Tags as in the voice-graph spec:
@@ -18,7 +18,7 @@ Send A levels to banks, `presets.py` dumps the 24 reverb presets, `strs.py` read
 108–1920 voice graphs per session carry `… LPF SEND1 GAIN …`). The env bus feeds a fixed 15-graph network: two
 parallel "sides" (A/B, for crossfading presets), each = EQ stage → one **ReverbModel1** (Schroeder: 6 combs + allpass)
 with a pre-delay, panned to the left and right surrounds-ish (270° / 90°), plus two **feedback echo taps**
-(0.04–0.3 s, LFO-wobbled delay and pan) — all summed into the 6-ch "SFX Master" bus. Parameters come from 24 vault
+(0.04–0.3 s, LFO-wobbled delay and pan): all summed into the 6-ch "SFX Master" bus. Parameters come from 24 vault
 presets (`aud_reverb/reverbNN`, class `204CAC1FD77088B8`), chosen by the world-painter `audio_reverb` region layer
 (default `reverb01`) or a type-5 reverb-zone emitter, crossfaded by moving the env send between side A and B. A
 voice's env send level = VOL × FXWET0 (property 5). For emitters FXWET0 is the MixMap send word (out8 = −2600 mB +
@@ -30,10 +30,10 @@ distance roll-off B0), so a nearby emitter carries a wet tail/echo and a far one
 
 Audio boot `sub_826DD3A8` allocates the bus manager (1156 bytes) into global **0x830CFDEC**, sets
 manager+104 = **1.0** (global env-send scale), +388/+392 = 0.0, and calls in order:
-1. `sub_8248EEE8` — the **environment network** (this spec);
-2. `sub_82490270` — the two **"FlangeSub" effect returns** (§7);
-3. `sub_824907D8` — fills 14 **LFO records** and registers the per-block **"LFO Task"** `sub_82490B60` (§5);
-4. `sub_82490CA0` — the material buses (not part of this spec).
+1. `sub_8248EEE8`: the **environment network** (this spec);
+2. `sub_82490270`: the two **"FlangeSub" effect returns** (§7);
+3. `sub_824907D8`: fills 14 **LFO records** and registers the per-block **"LFO Task"** `sub_82490B60` (§5);
+4. `sub_82490CA0`: the material buses (not part of this spec).
 
 Graph creation is `sub_82B48C48(system, order, module_count, module_list)`; a module-list entry is
 {params, descriptor, channel_count}. Module descriptors are looked up by FourCC: Sub0, Sen0, Gai0, PI20 (PeakingIir2),
@@ -107,7 +107,7 @@ voice Send A (N ch → 1 ch: 1→1 copy, 2→1 L+R, 4→1 sum, 6→1 L+C+R+Ls+Rs
   presets (e.g. reverb01 gain_eq = 1.0).
 
 ---------------------------------------------------------------------------------------------------------
-## 3. Parameter application — `sub_8248DD18(manager, block)` [R]
+## 3. Parameter application: `sub_8248DD18(manager, block)` [R]
 
 `block` is a 212-byte record (copied to manager+868, flag manager+1080 = 1). Offsets (bytes), the module/parameter
 each goes to (side s = block+0: 0 = A, 1 = B), and the preset-record field it comes from (`sub_824DE140`, record =
@@ -115,10 +115,10 @@ the vault preset, §6). Parameter ids are the module's attribute index.
 
 | block | target | from preset record (offset, hash) |
 |---|---|---|
-| +0 | side s (int) | — |
+| +0 | side s (int) | n/a |
 | +4 | EnvSendSub Sen0 (1 + s) level = side blend weight | 0 at preset load, then the crossfade (§6.3) |
 | +8 | EnvSub Gai0 p0 (g_in) | +84 `C76E3B36EC05F9E0` |
-| +12 | EnvSub PI20 p0 (f_eq, Hz) — then LFO-driven (§5) | +80 `2DA3FDBA90F64924` |
+| +12 | EnvSub PI20 p0 (f_eq, Hz), then LFO-driven (§5) | +80 `2DA3FDBA90F64924` |
 | +16 | PI20 p1 gain_eq: posted only if 0.1 ≤ v ≤ 20 [IMG 0x820641A8, 0x820996EC], else **0.1** | +76 `DECBDDB58AC61519` |
 | +20 | PI20 p2 Q_eq: posted if 0.2 ≤ v ≤ 20 [IMG 0x82099280], else **0.2** | +64 `2EBE3CBF5E339625` |
 | +24 | EQ LFO depth (fraction) | +72 `8249454FFE32EA2B` |
@@ -148,7 +148,7 @@ the vault preset, §6). Parameter ids are the module's attribute index.
 | +204 / +208 | tap 2 pan-LFO depth / rate | +92 / +88 (same fields as tap 1) |
 
 Preset fields never read by this path: +48 (int index = the NN of reverbNN), +96, +100, +104 (270.0), +136, +140,
-+144 (90.0) — the authored pan constants are ignored in favour of the code constants (same values).
++144 (90.0): the authored pan constants are ignored in favour of the code constants (same values).
 
 A lighter per-frame re-post `sub_8248D770` (called through `sub_824DE400`) sends only: the side weight, f_eq,
 filt L/R pans (+ rotated, §6.3) and gains, tap 1/2 delays and the fixed tap pans 270/90.
@@ -175,7 +175,7 @@ filt L/R pans (+ rotated, §6.3) and gains, tap 1/2 delays and the fixed tap pan
   whose output also re-enters the env bus.
 
 ---------------------------------------------------------------------------------------------------------
-## 5. The LFO task — `sub_82490B60` [R][TR]
+## 5. The LFO task: `sub_82490B60` [R][TR]
 
 Registered by `sub_824907D8` (`sub_82481BE0`, task list 0, name "LFO Task"); called **once per mixer block with
 dt = 256/48000 s** [TR: the EnvSub PI20 frequency moves 0.777 Hz per block near the sweep centre for reverb02
@@ -201,7 +201,7 @@ Per block: `phase = fmod(phase + dt, period)` (truncating), `out = centre + dept
 
 So, effectively:
 - f_eq(t) = f_eq · (1 + depth_eq · sin(2π·rate_eq·t));
-- d1(t) = d1 · (1 + depth_d1 · sin(2π·rate_d1·t)) — the echo taps' delay times wobble in whole-sample steps, each
+- d1(t) = d1 · (1 + depth_d1 · sin(2π·rate_d1·t)): the echo taps' delay times wobble in whole-sample steps, each
   step a 128-sample tap crossfade (§8.3), e.g. reverb01 tap 1: 0.28 s ± 50 % at 0.51 Hz;
 - tap 1 azimuth = 270 + 90·depth_pan·sin(2π·rate_pan·t), tap 2 = 90 + 90·depth_pan·sin(… + π): the two echoes
   swing around the left/right sides in opposite directions.
@@ -276,7 +276,7 @@ posted by `sub_8248FFF8` (Pn21/Sen0/Gai0 of each return). [TR: 0x40C40770 PEAK s
 ---------------------------------------------------------------------------------------------------------
 ## 8. DSP modules new to the port
 
-### 8.1 Delay (Del0) — attributes from the image help strings [IMG 0x820F6348..]
+### 8.1 Delay (Del0): attributes from the image help strings [IMG 0x820F6348..]
 - Constructor CONSTRUCTORPARAM_MAXDELAY (s): buffer size; larger requests reallocate.
 - p0 ATTRIBUTE_SETDELAYTIME (s), "a delay of 0 turns the plug-in off".
 - p1 ATTRIBUTE_SETFEEDBACK, range −0.99 … 0.99.
@@ -284,7 +284,7 @@ posted by `sub_8248FFF8` (Pn21/Sen0/Gai0 of each return). [TR: 0x40C40770 PEAK s
   another … over a 128 sample period."
 - DSP details: see §8.3 (filled from the asm).
 
-### 8.2 ReverbModel1 (RM10) — attributes [IMG 0x82116294..]
+### 8.2 ReverbModel1 (RM10): attributes [IMG 0x82116294..]
 - Constructor CONSTRUCTORPARAM_MAXSPACESIZE (default 80 m).
 - p0 ATTRIBUTE_SETREVERBTIME (s): T60; **0 = off and the module outputs nothing**; non-zero values below 0.366 s are
   clamped to 0.366.
@@ -297,11 +297,11 @@ posted by `sub_8248FFF8` (Pn21/Sen0/Gai0 of each return). [TR: 0x40C40770 PEAK s
 ### 8.3 DSP details from the asm [R] (2026-10-02; local asm dumps `rm/`, `dl/`, `del/`;
 model script `rm_model.py`)
 
-**Delay (Del0)** — GetSize 0x82B21F80 (192 B), CreateInstance `sub_82B22008`, **Process `sub_82B222D8`**, timer
+**Delay (Del0)**: GetSize 0x82B21F80 (192 B), CreateInstance `sub_82B22008`, **Process `sub_82B222D8`**, timer
 `sub_82B22228` (same task scheduler as the LFO task), kernels plain `sub_82B3CF58` / crossfade `sub_82B3D0A8`.
 - +52 p0 delay s, +60 p1 feedback, +72 max delay (ctor), line at +100 sized round(max·48000); the timer grows it if
   p0 exceeds max.
-- D = round-half-away(p0 · 48000) — **whole samples, no fractional read**. Feedback: |p1| > 0.99 → ±0.99
+- D = round-half-away(p0 · 48000): **whole samples, no fractional read**. Feedback: |p1| > 0.99 → ±0.99
   (0x820ED5E8 / 0x822F8E60); NaN passes.
 - State +64: 0 = **bypass** (module skipped, signal passes undelayed); on D > 0: reset filter + positions, set fb,
   → state 1. State 1: D ≤ 0 → state 0; buffer filled < D → state 2 (keep old D until filled); D changed → crossfade.
@@ -312,7 +312,7 @@ model script `rm_model.py`)
 - Under the LFO (§5) every block whose rounded D changes starts one 128-sample tap crossfade → stepped integer taps
   (slight phasing/zipper), **not a Doppler pitch glide**.
 
-**ReverbModel1 (RM10)** — GetSize 0x82B2EC00 (1104 B), CreateInstance `sub_82B2EC08`, ctor `sub_82B2E788`,
+**ReverbModel1 (RM10)**: GetSize 0x82B2EC00 (1104 B), CreateInstance `sub_82B2EC08`, ctor `sub_82B2E788`,
 **Process `sub_82B2F8C0`**, configure `sub_82B2F590`, distances `sub_82B2FE00`, delays `sub_82B2FEA8`, G1
 `sub_82B2F2C8`, allpass setup `sub_82B2FF88`, apply `sub_82B2F150`, timer `sub_82B2F038`; comb kernel
 `sub_82B399D0` (the "one-pole stage" of the voice-graph spec), allpass kernel `sub_82B389A0`.
@@ -332,7 +332,7 @@ model script `rm_model.py`)
 - **Allpass** (mode 1 = mono, our case): one section g = 0.7, D = round(48000·0.006) = 288 (0x821161AC,
   0x82116288): a[n] = c[n] − 0.7·a[n−288]; **y[n] = 2.0·(0.7·a[n] + a[n−288])** (mix gain 2/ch = 2.0).
   Modes 2/4 use 0.63/320 + 0.7778/259 and copy across channels (not used here).
-- **Output** y = 2·AP(Σ combs(x)) — wet only; RvrbSub's Gai0 follows.
+- **Output** y = 2·AP(Σ combs(x)): wet only; RvrbSub's Gai0 follows.
 - **p0 ≤ 0** → output zeroed (state 0). A parameter change sets state 1: the current block still runs the old network
   (or silence if coming from state 0), configure runs at the end of Process, and the new gains/line sizes are applied
   at the next **timer** tick (state 2 → 3 → 4). No crossfade on a reverb change.
@@ -354,7 +354,7 @@ before D samples are buffered; bit-exact f32 order of the vectorised comb/allpas
   This settles voice-graph spec §6.2's "8-plane master" inference.
 - **0x8306705D** (output channel count) is written only by the Dac set-up `sub_82B20EF8`: **always 6** once the
   output device is opened. The same function posts Dac parameter 0 = 3.0 / 5.0 / 1.0 depending on the console
-  speaker-config flags (bit 16 / bit 0 / neither) — a speaker-mode code, not a gain (UNCERTAIN meaning).
+  speaker-config flags (bit 16 / bit 0 / neither): a speaker-mode code, not a gain (UNCERTAIN meaning).
 - No master gain was found on this path besides SFX Master's Gai0 (1.0).
 
 ---------------------------------------------------------------------------------------------------------
@@ -370,16 +370,16 @@ before D samples are buffered; bit-exact f32 order of the vectorised comb/allpas
    crossfade, the zone blend from type-5 `.ems` nodes, and the 14-record per-block LFO.
 5. Apply posts at the same cadence: presets on key change, weights per game frame, LFO per block.
 6. Validation: per-graph parameter timelines against the trace (EnvSendSub weights, EnvSub GAIN/PEAK, RvrbSub GAIN,
-   filt/delay HPF/LPF/GAIN — §1 owners), then an impulse through the whole network at reverb01 compared with a
+   filt/delay HPF/LPF/GAIN; §1 owners), then an impulse through the whole network at reverb01 compared with a
    recomp capture of a single isolated click (short scripted run, if ever needed).
 
 ---------------------------------------------------------------------------------------------------------
 ## 11. UNCERTAIN / open
 1. Runtime send levels of the non-voice env contributors (Splicer Wet, FootStep/Collision SubMix, `sub_82498248`,
-   grain graph 2) — hook their Sen0 posts.
+   grain graph 2): hook their Sen0 posts.
 2. Whether anything other than the constructor writes manager+104 (global env scale).
 3. Mode-2 (zone-to-zone) blend details and the exact θ function of the zone pan rotation (`sub_82453298`).
 4. FlangeSub preset fields and which banks route 4096/8192/16384.
 5. SFX Master DCl0 level; Dac parameter 0 meaning (3/5/1 by speaker config).
-6. `c_main_ambience_crossfade` w2 (send) — set by the bank program or 0.
+6. `c_main_ambience_crossfade` w2 (send): set by the bank program or 0.
 7. See §8.3 for the DSP-level uncertainties.

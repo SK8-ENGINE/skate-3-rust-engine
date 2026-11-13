@@ -7,7 +7,7 @@ use super::*;
 fn recorded_controller_sequence_runs_production_gameplay() {
     let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
     let root = std::path::Path::new(&root);
-    let path = std::env::var_os("SKATE3_INPUT_RECORDING").expect("set SKATE3_INPUT_RECORDING");
+    let Some(path) = std::env::var_os("SKATE3_INPUT_RECORDING") else { test_skip!("set SKATE3_INPUT_RECORDING") };
     let recording =
         skate_data::input_recording::Recording::load(std::path::Path::new(&path)).unwrap();
     let assets = skate_data::GameAssets::load(root).unwrap();
@@ -15,7 +15,7 @@ fn recorded_controller_sequence_runs_production_gameplay() {
     let mut physics = GamePhysics::load(root).unwrap();
     // User confirmed this recording was made on flat ground. Keep the same
     // authored surface material and query metadata while removing the ramp.
-    physics.world = ground::flat_world(physics.world.triangles()[0].material);
+    physics.world = (ground::flat_world(physics.world.triangles()[0].material)).into();
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::load(root).unwrap();
     let mut input = crate::input::ControllerInput::default();

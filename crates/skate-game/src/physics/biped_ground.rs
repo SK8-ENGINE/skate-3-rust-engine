@@ -22,6 +22,8 @@ pub(crate) struct Owner {
     air_launch: skate_core::player::offboard::air_launch::Settings,
     collision_settings: skate_core::player::offboard::ground_lifecycle::CollisionSettings,
     pub grab_settings: skate_core::player::offboard::ground_sync::BoardSettings,
+    /// The last `WALKER_STEP` (prop, outcome), so the line is written on change only.
+    step_log: Option<(u32, &'static str)>,
 }
 
 impl Owner {
@@ -82,6 +84,7 @@ impl Owner {
             air_launch,
             collision_settings: lifecycle::load_collision_settings(data)?,
             grab_settings,
+            step_log: None,
         })
     }
 
@@ -129,6 +132,7 @@ impl Owner {
             });
     }
 }
+
 
 pub(crate) fn enter(_physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<(), String> {
     let p = &skater.player_input.processed;
@@ -178,6 +182,51 @@ pub(crate) fn exit(skater: &mut SkaterRuntime) {
     skater.biped_ground.geometry.reset();
 }
 
+/// Diagnostics for walking onto props (which prop, step height, outcome; step threshold 82D837C8): docs/hails-additions/27-dynamic-props.md#prop-walk-over-log
+fn log_step(owner: &mut Owner, physics: &GamePhysics, prefix: contact_toolkit::ContactPrefix, frame: [[f32; 4]; 4]) {
+    let Some(props) = physics.prop_dynamics() else { return };
+    let prop_at = |p: [f32; 4]| props.nearest_body(skate_core::math::Vector3::new(p[0], p[1], p[2]), 0.1).map(|(id, _)| id);
+    let target = prefix.flags_176 & 2 != 0;
+    let prop = target
+        .then(|| prop_at(prefix.target_position))
+        .flatten()
+        .or_else(|| (prefix.flags_176 & 4 != 0).then(|| prop_at(prefix.edge_position)).flatten());
+    let Some(prop) = prop else {
+        if let Some((id, _)) = owner.step_log.take() {
+            bevy::log::info!("WALKER_STEP prop={id} left");
+        }
+        return;
+    };
+    let rise = prefix.target_position[1] - frame[3][1];
+    let outcome = if target && rise > 0.05 {
+        "step"
+    } else if target {
+        "flat"
+    } else if prefix.flags_176 & 1024 != 0 {
+        "no-candidate"
+    } else if owner.controller.state.contact.active {
+        "obstacle"
+    } else {
+        "no-target"
+    };
+    if owner.step_log == Some((prop, outcome)) {
+        return;
+    }
+    owner.step_log = Some((prop, outcome));
+    let edge_rise = prefix.edge_position[1] - frame[3][1];
+    let speed = owner.controller.state.motion.speed_704;
+    bevy::log::info!(
+        "WALKER_STEP prop={prop} ({}) {outcome} rise {rise:.3} m edge_rise {edge_rise:.3} m ahead {:.2} m speed {speed:.2} m/s flags {:#x} kind {} at [{:.2}, {:.2}, {:.2}]",
+        props.describe_template(prop),
+        prefix.distance_168.min(99.0),
+        prefix.flags_176,
+        prefix.kind_164,
+        frame[3][0],
+        frame[3][1],
+        frame[3][2],
+    );
+}
+
 pub(crate) fn update(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
@@ -225,12 +274,30 @@ pub(crate) fn update(
         );
     }
     let frame = skater.biped_ground.ground.frame_80;
+    // Move Object (502): the skater follows the object's grab edge (82D45D30, 82D46218, 82D46610, 82BDF268): docs/hails-additions/27-dynamic-props.md#move-object-skater-follow
+    let moving_object = (p.state_2508 == 502 && physics.prop_carry.held().is_some())
+        .then(|| physics.prop_carry.skater_target())
+        .flatten()
+        .map(|(target, facing)| {
+            let root = skater.animated_skeleton.roots.animation_to_world[3];
+            let dt = physics.settings.step.simulation.time_step.max(1e-4);
+            let (dx, dz) = (target.x - root[0], target.z - root[2]);
+            let velocity = [dx / dt, 0.0, dz / dt, 0.0];
+            let wrap = |a: f32| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            let turn = wrap(facing.x.atan2(facing.z) - frame[2][0].atan2(frame[2][2])) * physics.prop_carry.root_yaw_gain();
+            (velocity, turn)
+        });
+    let (stick_x, stick_z) = if moving_object.is_some() {
+        (0.0, 0.0)
+    } else {
+        (extra.biped_world_x, extra.biped_world_z)
+    };
     let input = skate_core::player::offboard::ground_input::GroundInput {
         processed_flags_2472: p.flags_2472,
         processed_direct_2684: extra.offboard_magnitude,
         processed_direct_2680: extra.offboard_turn,
-        processed_stick_2692: extra.biped_world_x,
-        processed_stick_2688: extra.biped_world_z,
+        processed_stick_2692: stick_x,
+        processed_stick_2688: stick_z,
         processed_scale_2912: fields.magnitude_scale,
         processed_scale_2908: fields.turn_scale,
         frame_forward_112: [frame[2][0], frame[2][1], frame[2][2]],
@@ -242,7 +309,7 @@ pub(crate) fn update(
     );
     let third_line = p.line_tests_960_1008_1056[2];
     let owner = &mut skater.biped_ground;
-    let job = ground_job::prepare(
+    let mut job = ground_job::prepare(
         &mut owner.contact,
         &mut owner.ground.distance_164,
         ground_job::Input {
@@ -270,9 +337,28 @@ pub(crate) fn update(
         |input| Ok::<_, String>(owner.geometry.consume(input)),
     )?;
     owner.geometry_adjustment = Some(job.geometry);
+    if let Some((velocity, angle)) = moving_object {
+        // Face the grab edge (the prop's turn carries the skater round).
+        if angle != 0.0 {
+            let motion = &mut owner.controller.state.motion;
+            motion.frame_0[0] = super::prop_carry::yaw_row(motion.frame_0[0], angle);
+            motion.frame_0[2] = super::prop_carry::yaw_row(motion.frame_0[2], angle);
+        }
+        // Planar velocity through the velocity override every held tick, also a zero step (82D44A10 -> 82BDF268).
+        {
+            // Request the cadence's current phase over a positive duration, so the walk cycle holds while carrying.
+            job.job.requested_phase = owner.controller.state.cadence.phase.phase;
+            job.job.requested_duration = 1.0;
+            job.job.override_duration = 0.0;
+            job.job.animation_velocity = velocity;
+            // NOT RETAIL YET: 82BDF268 not decoded; the follow move drops the target-contact bit (2) for this job: docs/hails-additions/27-dynamic-props.md#follow-move-contact-bit
+            job.job.flags &= !2;
+        }
+    }
     let previous_position=owner.controller.state.position_368;
     let mut result=owner.run(job.job);
     super::solid_contacts::constrain_ground(owner,&mut result,previous_position,&physics.network_proxies.solids);
+    log_step(owner, physics, contact.prefix, frame);
     if result
         .physical_frame
         .iter()
@@ -384,7 +470,7 @@ pub(crate) fn submit_geometry(
         .result
         .ok_or("Ground geometry submission requires completed motion")?;
     owner.geometry.submit(
-        &physics.world,
+        physics.biped_world(),
         &physics.network_proxies.solids,
         owner.ground.frame_80,
         result.velocity,

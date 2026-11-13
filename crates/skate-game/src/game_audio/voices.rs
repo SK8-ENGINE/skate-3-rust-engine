@@ -325,7 +325,7 @@ pub(super) fn sync(
         ears: (l.left_ear_offset, l.right_ear_offset),
     });
     let dt = time.delta_secs().clamp(0.0, 0.25);
-    let silenced = super::silenced(menu.as_deref(), &replay);
+    let silenced = super::speech_silenced(menu.as_deref(), &replay);
     let master = settings.master().clamp(0.0, 1.0);
     for category in [Category::Ambience, Category::Effects] {
         voices.mix[category as usize] = settings.category(category).clamp(0.0, 1.0) * master;

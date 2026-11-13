@@ -25,8 +25,54 @@ use skate_core::physics::{
 use skate_data::collections::Collections;
 use std::path::Path;
 
+/// A pending ped takedown on the skater (see [`SkaterRuntime::takedown`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Takedown {
+    /// Unit direction from the chaser to the skater (zero when they coincide).
+    pub direction: [f32; 3],
+    /// Seconds the latch has been set.
+    pub age: f32,
+}
+
+impl Takedown {
+    /// `82592390`: normalize(skater - chaser), zero when coincident.
+    pub fn from_positions(skater: [f32; 3], chaser: [f32; 3]) -> Self {
+        let d = [skater[0] - chaser[0], skater[1] - chaser[1], skater[2] - chaser[2]];
+        let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let direction = if l > 1e-6 { [d[0] / l, d[1] / l, d[2] / l] } else { [0.0; 3] };
+        Self { direction, age: 0.0 }
+    }
+}
+
+/// How long a takedown latch waits for the wipeout before it is dropped, s. NOT RETAIL: retail's
+/// clear of `1904` bit 30 is not found (b15); this keeps a missed wipeout from holding the flag.
+pub(crate) const TAKEDOWN_LATCH_SECONDS: f32 = 2.0;
+
 #[derive(Resource)]
 pub(crate) struct SkaterRuntime {
+    /// Teleport arrival fit-up values (retail defaults, b475); a mod or data can replace them.
+    pub(crate) ground_fit: skate_core::physics::teleport_ground_fit::GroundFit,
+    /// The AI controller's physics record (an NPC skater; `None` for the local player). Retail:
+    /// AIPhysicsInput `*(skater+1840)`, written by the PathController, with the actor's "input
+    /// fresh" bit (`1904` bit 27) and the controller pointer (`1828`).
+    pub ai_physics: Option<AiPhysicsSource>,
+    /// A ped took this skater down (retail `82592390`: actor `1904` bit 30 and the direction
+    /// away from the chaser at `*(actor+1832)`), published as the packet's external impulse until
+    /// WipeoutGround Enter used it.
+    pub takedown: Option<Takedown>,
+    /// The vehicle-group solids (traffic car proxies, mod vehicles) the skeleton touched in the last
+    /// solve: (solid id, contact point, relative speed at the contact m/s). The living world maps them to
+    /// cars (the hit brake, the parked car alarm).
+    pub vehicle_hits: Vec<(u64, [f32; 3], f32)>,
+    /// The ped bodies (group 11 proxies, `living_world::ped_body`) the skeleton touched in the last solve, same
+    /// layout: the ped's knock-down comes from these real contacts (research b185).
+    /// Ped parts the skeleton touched: proxy id, contact point, the part's (|v|, |w|) after the solve.
+    pub ped_hits: Vec<(u64, [f32; 3], [f32; 2])>,
+    /// Every ped part in the last solve, touched or not: proxy id, (|v|, |w|) after the solve. The reaction reads
+    /// the touched ped's `ped_body.reaction_part` here (retail: the torso, also for an arm-only touch).
+    pub ped_after: Vec<(u64, [f32; 2])>,
+    /// The ped bodies that stopped the on-foot walker's capsule this step (`solid_contacts::constrain_ground`), same
+    /// layout; the closing speed is the walker's, not yet the part's (the ped side applies the masses).
     pub scoring: crate::scoring_runtime::Runtime,
     pub climbing: super::climbing::Runtime,
     /// Completed physical pose in native animation space, read by rendering.
@@ -49,6 +95,10 @@ pub(crate) struct SkaterRuntime {
     pub ground_animation_settings: super::ground_animation::GroundAnimationSettings,
     pub revert_state: super::revert_state::RevertState,
     pub slide_state: super::slide_state::SlideState,
+    pub skitch_state: super::skitch_state::SkitchState,
+    /// The spline geometry of the published grab records (Processed 1888 / 2176 keep only the 72 words; the skitch
+    /// grab point walks the points, 82D2D550 via the held record's +196).
+    pub grab_geometry: [Option<std::sync::Arc<skate_core::player::offboard::grab_scene::Geometry>>; 2],
     pub trajectory: super::air_trajectory::AirTrajectoryRuntime,
     pub grind_camera: super::grind_camera::GrindCamera,
     pub grind: super::grind::Runtime,
@@ -74,6 +124,14 @@ pub(crate) struct SkaterRuntime {
     ///Skeleton16384 is published by the completed pose-error response. Wipeout
     ///runs after that publication; no fabricated pre-solve measurement exists.
     pub collision_maximum_error: Option<f32>,
+    /// Ticks left of the SKITCH_RELEASE_TRACE log after leaving Skitching (the stopped-car release bail, 2026-10-17).
+    pub skitch_release_trace: u8,
+    /// The highest pose error logged in this skitch hold (SKITCH_HOLD_POSE, research b687: the stopped-car release
+    /// bail's error builds up during the hold).
+    pub skitch_hold_peak: f32,
+    /// A new actor's trajectory selector reset waits for its placement (b310): the placement runs the old state's Exit
+    /// first (`frame.rs`, after `enter_after_teleport`), and KnownAir's Exit reads the selection.
+    pub trajectory_reset_pending: bool,
     pub solved_drives: Option<SkeletonDriveBatch>,
     pub foot_ik: FootIk,
     pub foot_physical: FootPhysicalOutputs,
@@ -102,6 +160,22 @@ pub(crate) struct SkaterRuntime {
 }
 
 impl SkaterRuntime {
+    /// A pooled body becoming a new NPC: retail builds a new actor and PhysicalPlayer per NPC (`82590DC0` ->
+    /// `82DB18A0`, b295). Re-runs the load-time initialisers of the per-actor parts the placement does not route
+    /// through the state machine (b299); the placement's ResetSystems port and state Exit / Enter do the rest.
+    pub(crate) fn reset_for_new_actor(&mut self, data: &Collections) -> Result<(), String> {
+        self.player_input.reset_for_new_actor(data)?;
+        self.player_state.reset_for_new_actor();
+        // After the placement's Exit / Enter, not now: a body pooled in KnownAir exits KnownAir there, which needs
+        // its old selection (laptop 2026-10-19: "KnownAir requires a completed selected trajectory" on the first step).
+        self.trajectory_reset_pending = true;
+        self.grind.reset_for_new_actor();
+        self.takedown = None;
+        self.ai_physics = None;
+        self.skitch_release_trace = 0;
+        self.skitch_hold_peak = 0.0;
+        Ok(())
+    }
     /// Prepare all settings before committing; never replace active physics state.
     pub(crate) fn reload_difficulty(&mut self, data: &Collections) -> Result<(), String> {
         let profiles = super::ground_runtime::GroundProfiles::load(data)?;
@@ -129,6 +203,11 @@ impl SkaterRuntime {
         Ok(())
     }
 
+    /// Completed placements of this skater (retail place-skater counter +1864).
+    pub(crate) fn placements(&self) -> u32 {
+        self.respawn.placements
+    }
+
     pub(crate) fn travel_to(&mut self, transform: [[f32; 4]; 4]) -> Result<(), String> {
         self.travel(transform, None)
     }
@@ -138,9 +217,60 @@ impl SkaterRuntime {
         transform: [[f32; 4]; 4],
         velocity: Option<[f32; 3]>,
     ) -> Result<(), String> {
-        self.player_input.request_teleport_ex(transform, velocity)?;
-        self.teleport_state.request_manual(transform, true);
+        self.travel_ex(transform, velocity, true)
+    }
+
+    /// A teleport that lands on the board or on foot (retail's Challenge Map teleports arrive off the board, the
+    /// event's IsOnBoard = 0, b244d; the on-foot landing is BipedGround through the teleport state).
+    pub(crate) fn travel_ex(
+        &mut self,
+        transform: [[f32; 4]; 4],
+        velocity: Option<[f32; 3]>,
+        on_board: bool,
+    ) -> Result<(), String> {
+        let fit = self.ground_fit;
+        self.travel_fit(transform, velocity, on_board, fit)
+    }
+
+    /// `travel_ex` with the arrival fit-up chosen by the caller (a mod's `ground_fit = false` places exactly).
+    pub(crate) fn travel_fit(
+        &mut self,
+        transform: [[f32; 4]; 4],
+        velocity: Option<[f32; 3]>,
+        on_board: bool,
+        fit: skate_core::physics::teleport_ground_fit::GroundFit,
+    ) -> Result<(), String> {
+        // One move, retail's actor reply (825926F8 -> 82DB8998, b471); the host teleport it used to add on top was a
+        // second reset a tick earlier. A request while one is in flight is refused so two cannot stack.
+        if self.teleport_pending() {
+            return Err("A pending teleport must complete before replacement".into());
+        }
+        self.player_input.set_arrival_velocity(velocity)?;
+        self.player_input.set_arrival_ground_fit(Some(fit));
+        self.teleport_state.request_manual(transform, on_board);
         Ok(())
+    }
+
+    /// A teleport is in flight: a host request, a reply not yet published, or a 702 reset not yet applied (b471).
+    pub(crate) fn teleport_pending(&self) -> bool {
+        self.player_input.pending_teleport().is_some()
+            || self.teleport_state.has_pending_reply()
+            || self.player_input.physical.state.flag_61 != 0
+    }
+
+    /// An AI skater's respawn destination for the next wipeout-end teleport (instead of the checkpoint history).
+    pub(crate) fn set_respawn_destination(&mut self, transform: [[f32; 4]; 4], on_board: bool) {
+        self.respawn.destination = Some(super::teleport_state::Checkpoint { transform, on_board });
+    }
+
+    pub(crate) fn clear_respawn_destination(&mut self) {
+        self.respawn.destination = None;
+    }
+
+    /// The actor reply alone (retail `825926F8`, NPC skater placements): one reset that also moves the animated
+    /// skeleton's root, unlike the host teleport (which left a placed skater drawn where its body was before).
+    pub(crate) fn place_by_reply(&mut self, transform: [[f32; 4]; 4], on_board: bool) {
+        self.teleport_state.request_manual(transform, on_board);
     }
     pub fn load(
         asset_root: &Path,
@@ -156,7 +286,15 @@ impl SkaterRuntime {
         source: Option<std::sync::Arc<crate::skater_animation::AnimationSource>>,
     ) -> Result<Self, String> {
         let data = crate::custom_difficulty::load_collections(asset_root)?;
-        let banks = skate_data::animation_banks::AnimationBanks::load(asset_root)?;
+        // With a shared source its banks are the same file already read; otherwise read them here.
+        let loaded;
+        let banks = match &source {
+            Some(s) => s.banks(),
+            None => {
+                loaded = skate_data::animation_banks::AnimationBanks::load(asset_root)?;
+                &loaded
+            }
+        };
         let animation_metadata = banks.metadata()?;
         // The host's current character is a custom skater with no pro selector
         // or equipped physical hat. These are profile choices, not force values.
@@ -261,6 +399,12 @@ impl SkaterRuntime {
             initial_targets.following_com,
         ];
         Ok(Self {
+            ground_fit: Default::default(),
+            ai_physics: None,
+            takedown: None,
+            vehicle_hits: Vec::new(),
+            ped_hits: Vec::new(),
+            ped_after: Vec::new(),
             respawn,
             scoring: crate::scoring_runtime::Runtime::load(&data)?,
             climbing: super::climbing::Runtime::load(asset_root, &animation.evaluator.frames.bone_names)?,
@@ -290,6 +434,8 @@ impl SkaterRuntime {
             ground_animation_settings: super::ground_animation::GroundAnimationSettings::load(&data)?,
             revert_state: super::revert_state::RevertState::load(&data)?,
             slide_state: super::slide_state::SlideState::load(&data)?,
+            skitch_state: Default::default(),
+            grab_geometry: [None, None],
             trajectory,
             grind_camera: super::grind_camera::GrindCamera::default(),
             grind: super::grind::Runtime::load(&data)?,
@@ -324,6 +470,9 @@ impl SkaterRuntime {
             collision_pose_error: [0.0; 4],
             collision_extra_errors: [[0.0; 4]; 2],
             collision_maximum_error: None,
+            skitch_release_trace: 0,
+            skitch_hold_peak: 0.0,
+            trajectory_reset_pending: false,
             solved_drives: None,
             foot_ik,
             foot_physical: FootPhysicalOutputs::load(&data)?,
@@ -353,4 +502,27 @@ impl SkaterRuntime {
             )?,
         })
     }
+}
+
+/// An NPC skater's AI physics record for the next tick (doc 26, "Simulated NPC skaters").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AiPhysicsSource {
+    /// The record (`skate_core::riding::grounded::state::board_path` reads +32 / +48 / +64 / +160).
+    pub record: skate_core::animation::output::actor_packet::ExternalPhysicsInput,
+    /// Set when the AI wrote `record` this tick (`1904` bit 27); the next packet consumes it.
+    pub fresh: bool,
+    /// Where the record's trajectory came from this tick, for the `NPC_GRIND_ENTRY` log (b294).
+    pub cursor: Option<AiRecordCursor>,
+}
+
+/// The line cursor behind an AI record's trajectory (diagnostics only, never read by the simulation).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AiRecordCursor {
+    pub node: u32,
+    pub frame_in_segment: u32,
+    /// The node whose ext the record read (`ai_record::trajectory_node`).
+    pub ext_node: u32,
+    pub has_trajectory: bool,
+    /// The node `lands_in_grind` started from (`max(node - 1, 0)`).
+    pub lands_node: u32,
 }

@@ -73,6 +73,10 @@ impl TrajectorySelector {
     pub fn grind_normal(&self) -> Option<Vector> {
         self.grind_normal
     }
+    /// The last launch cast the recorded AI arc (`82D67B50` accepted it).
+    pub fn recorded(&self) -> bool {
+        self.batch.as_ref().is_some_and(|b| b.recorded)
+    }
     pub fn launch_info(&self) -> Option<&LaunchInfo> {
         self.launch_info.as_ref()
     }
@@ -267,9 +271,14 @@ impl TrajectorySelector {
         }
         selection.surface_category = (c.prediction.result.surface >> 7) & 31;
         selection.com_trajectory = self.com_trajectory(selection, input, s);
+        //82D68C80 returns at once after a recorded AI arc (9659): no grind lock, no pass 2.
+        let recorded = self.batch.as_ref().is_some_and(|b| b.recorded);
         //82D68C80: only a winning centre acquisition locks the grind.
-        self.grind_locked_to_middle = index == 0 && c.grind.is_some();
-        let second_pass = self.pass == 1
+        if !recorded {
+            self.grind_locked_to_middle = index == 0 && c.grind.is_some();
+        }
+        let second_pass = !recorded
+            && self.pass == 1
             && count >= 2
             && !self.grind_locked_to_middle
             && !(angle_between(selection.landing_normal, input.ground_normal)

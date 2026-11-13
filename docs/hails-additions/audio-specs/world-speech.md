@@ -1,4 +1,4 @@
-# World speech (peds) — data, mechanism, port state (2026-10-03)
+# World speech (peds): data, mechanism, port state (2026-10-03)
 
 Port:
 - `crates/skate-audio/src/world/speech.rs`: the index;
@@ -270,7 +270,7 @@ Harness: `tests/world_sources.rs` `a_bumped_ped_warns_with_a_line_of_its_voice`.
 - **Main-cast path (pros, S+116 == 0)**: `sub_824AC438`: 29 → event 141 (speaker word 136), 28 → 11 (when
   `sub_82487ED0` is false and system +1196 == 0), 30 / 51 → stop the speaker's stream, then 6 or 115 (`rand() & 1`),
   53 / 54 → 77, else nothing; request `sub_824AC560` (event id → index in a 72-entry table at `0x8224CB80`, vault
-  record at mgr + (index + 194) × 8, tuning bank "0" — exported) with words [S+100, S+104, flag 2/1 swapped, 0,
+  record at mgr + (index + 194) × 8, tuning bank "0", exported) with words [S+100, S+104, flag 2/1 swapped, 0,
   S+108, S+112]. **Not ported:** needs the main-cast speech index + decode (`maincastspeech.big`).
 
 ## The echo send and the main cast (2026-10-03, ported; corrects "Two sends" and "Queue timeout unit" above)

@@ -193,9 +193,45 @@ pub(crate) fn sync_runtime(settings: Option<Res<CameraAngleSettings>>, runtime: 
     }
 }
 
+/// Game Settings > Control > offboard X / Y axis (settings +193 / +192, `retail_menus::setting`: the stored value,
+/// or a mod's) into the camera runtime; retail copies them into its camera config (sub_8252FEB0, config +24 / +25).
+pub(crate) fn sync_look_invert(
+    menus: Option<Res<crate::retail_menus::RetailMenus>>,
+    runtime: Option<ResMut<super::CameraRuntime>>,
+) {
+    let (Some(menus), Some(mut runtime)) = (menus, runtime) else { return };
+    let invert = look_invert(&menus);
+    if runtime.invert_look != invert {
+        info!("Offboard look invert: x {} y {}", invert[0], invert[1]);
+        runtime.invert_look = invert;
+    }
+}
+
+/// [x, y] invert from the two settings rows (On = 1 = `ID_GAMESETTINGS_AXIS_INVERTED`).
+fn look_invert(menus: &crate::retail_menus::RetailMenus) -> [bool; 2] {
+    let on = |id: &str| crate::retail_menus::setting(menus, id).is_some_and(|v| skate_core::menu_values::number(&v) != 0.0);
+    [on("ID_GAMESETTINGS_OFFBOARD_X_AXIS_TOGGLE"), on("ID_GAMESETTINGS_OFFBOARD_Y_AXIS_TOGGLE")]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn look_invert_follows_the_axis_rows() {
+        use skate_core::menus::{EntryRef, MenuData, Owner, Setting, SettingValue, ValueHook, Widget};
+        let (x, y) = ("ID_GAMESETTINGS_OFFBOARD_X_AXIS_TOGGLE", "ID_GAMESETTINGS_OFFBOARD_Y_AXIS_TOGGLE");
+        let data = MenuData {
+            settings: [x, y].map(|id| Setting { id: id.into(), label: id.into(), widget: Widget::Selector, link: None }).to_vec(),
+            ..Default::default()
+        };
+        let mut menus = crate::retail_menus::RetailMenus::new(data, true);
+        assert_eq!(look_invert(&menus), [false, false], "retail's default: Normal");
+        menus.registry.bind_value(EntryRef::setting(y), Owner::Engine("settings".into()), ValueHook::Stored(SettingValue::Int(1)));
+        assert_eq!(look_invert(&menus), [false, true]);
+        menus.registry.bind_value(EntryRef::setting(x), Owner::Mod("m".into()), ValueHook::Stored(SettingValue::Int(1)));
+        assert_eq!(look_invert(&menus), [true, true], "a mod's value counts");
+    }
 
     fn settings() -> CameraAngleSettings {
         CameraAngleSettings::new(CameraAngle::High, PathBuf::from("unused/camera.json"))

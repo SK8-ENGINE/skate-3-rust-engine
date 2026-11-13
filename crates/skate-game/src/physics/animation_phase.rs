@@ -147,6 +147,11 @@ pub(crate) fn advance(
             footplant_contact_time: physical.air.footplant_contact_time_208,
             time_to_skitch: physical.ground.scalar_276,
             skitch_transition_time: profile.skitch_transition_time,
+            skitch_grab_height: physical.ground.skitch_grab_height_280,
+            skitch_absorb: physical.ground.skitch_absorb_284,
+            skitch_push: physical.ground.skitch_push_308,
+            skitch_shimmy: physical.animation.skitch_shimmy_136,
+            skitch_hands: physical.animation.skitch_hands_140,
             time_to_land: physical.air.scalar_184,
             time_to_land_valid: physical.air.known_air_valid_437 != 0,
             offboard_trajectory_time: physical.off_board.trajectory_time_120,
@@ -309,6 +314,10 @@ pub(crate) fn advance(
             biped_correction: contact.active.then_some(contact.direction),
         },
     ) {
+        // An AI's own value (controller B's OB_Mag) wins over the neutral pad's.
+        if controls.ai_driven && controls.action_intents.contains_key(intent.name) {
+            continue;
+        }
         action_intents.insert(intent.name, intent.value);
     }
     for intent in skate_core::input::offboard_intentions::produce_discrete(
@@ -317,6 +326,16 @@ pub(crate) fn advance(
         physical.air.use_air_reckoning_452 != 0,
     ) {
         action_intents.insert(intent.name, intent.value);
+    }
+    // Move Object mode: the stock AG forwards these to MovingObjectNew's
+    // AttachIntents; only produce them while the host carry owns a prop.
+    if physics.prop_carry.held().is_some() {
+        for intent in skate_core::input::offboard_intentions::produce_object_move(
+            &controls.controller,
+            &physics.settings.object_move,
+        ) {
+            action_intents.insert(intent.name, intent.value);
+        }
     }
     let mut output = AnimationPhaseOutput::new();
     skater.animation.advance(
@@ -327,6 +346,14 @@ pub(crate) fn advance(
         &mut output.reset,
     )?;
     output.publish(&skater.animation.packet, profile, controls.actor_flags);
+    if let Some(source) = skater.ai_physics.as_mut() {
+        output.publish_ai_physics(source);
+    }
+    if let Some(mut t) = skater.takedown {
+        output.publish_takedown(t.direction);
+        t.age += physics.settings.step.simulation.time_step;
+        skater.takedown = (t.age <= super::skater::TAKEDOWN_LATCH_SECONDS).then_some(t);
+    }
     if let Some(reply) = skater.teleport_state.take_reply() {
         output.publish_external_reset(reply);
     }

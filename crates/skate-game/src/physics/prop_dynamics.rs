@@ -1,0 +1,6261 @@
+//! Dynamic rigid bodies for DMO prop instances: retail integrator, mass, contact rows and sleep.
+//! Details: docs/hails-additions/27-dynamic-props.md#prop-body-model
+use bevy::prelude::*;
+use skate_core::{
+    math::{Basis3, Vector3},
+    physics::{
+        board_world::{BoardWorld, BoardWorldVolume},
+        contact::{
+            RetailContactBodyState, RetailContactInput, RetailContactMaterial,
+            combine_contact_materials, generate_contact,
+        },
+        contact_solver::{ACTIVE_BODY, RetailContactJacobian, build_contact_jacobian},
+        mass::{DmoBodyData, RETAIL_UNBOUNDED_VELOCITY, dmo_body_inertia, primitive_mass_properties},
+        rigid_body::{
+            RetailInertiaDynamics, RetailQuaternion, RetailReactionCorrections, RetailBodyRates,
+            RetailSimulationStep, integrate_body_rates, pack_world_inverse_inertia,
+            world_inverse_inertia,
+        },
+        solver::solve_constraints,
+        collision::WorldContactSettings,
+        world_contact::{
+            ContactPrimitive, PrimitiveContactManifold, PrimitivePairSettings,
+            primitive_pair_contacts, primitive_triangle_world_contacts,
+        },
+    },
+};
+
+/// Template-space contact box that replaces the render-AABB box of one prop
+/// type (centre and half extents, per-axis scale applied on top).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PropBox {
+    pub center: Vector3,
+    pub half_extents: Vector3,
+}
+
+/// Tunables of the prop impulse pass and the skater push, per prop type via `PropTuningTable`: docs/hails-additions/27-dynamic-props.md#prop-tuning
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PropTuning {
+    /// Contact band of the prop pair queries (m).
+    pub contact_padding: f32,
+    /// Penetration ignored by the positional correction (m; older impulse
+    /// pass only, `PropSolverSettings::row_solver` off).
+    pub penetration_slop: f32,
+    /// Fraction of the penetration removed per tick (Baumgarte; older
+    /// impulse pass only).
+    pub penetration_correction: f32,
+    /// Max positional correction of one body per tick (m; older impulse pass only, retail rows have no cap).
+    pub max_depenetration_per_tick: f32,
+    /// Older impulse pass only: restitution applies only above this closing
+    /// speed (m/s); below it
+    /// contacts are inelastic so resting stacks settle.
+    pub restitution_threshold: f32,
+    /// Effective skater mass (kg) for prop pushes.
+    pub skater_push_mass: f32,
+    /// Fraction of the closing speed transferred to a prop by a skater hit.
+    pub push_transfer: f32,
+    /// Top speed a body bump can impart along the push direction (m/s).
+    pub body_push_speed: f32,
+    /// Top speed a board hit can impart along the push direction (m/s).
+    pub board_push_speed: f32,
+    /// Push speed used when a skater volume is inside the prop but not
+    /// closing (m/s): nudges an overlapping prop apart.
+    pub penetration_push_speed: f32,
+    /// Ticks a skater volume may sit inside a prop without closing before the overlap nudge stops; 0 = no nudge.
+    pub stuck_release_ticks: u32,
+    /// Replaces the render-AABB contact box of this prop type.
+    pub collision_box: Option<PropBox>,
+    /// Better Water: the prop's material density in water (kg/m3); `None` = by its template name
+    /// ([`super::prop_water::density_for_template`]). Not the solver mass: retail's masses are pushing masses.
+    pub water_density: Option<f32>,
+}
+
+impl Default for PropTuning {
+    fn default() -> Self {
+        Self {
+            contact_padding: 0.02,
+            penetration_slop: 0.005,
+            penetration_correction: 0.4,
+            max_depenetration_per_tick: 0.05,
+            restitution_threshold: 1.0,
+            skater_push_mass: 75.0,
+            push_transfer: 0.5,
+            body_push_speed: 1.2,
+            board_push_speed: 6.0,
+            penetration_push_speed: 0.5,
+            stuck_release_ticks: 30,
+            collision_box: None,
+            water_density: None,
+        }
+    }
+}
+
+/// Prop tuning for the whole map: a default plus per prop type overrides,
+/// keyed by MOBJ template name. `reset` restores the shipped defaults (mod
+/// disable).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct PropTuningTable {
+    pub default: PropTuning,
+    pub by_template: std::collections::BTreeMap<String, PropTuning>,
+    /// Island settings shared by every prop (one DMO simulation in retail).
+    pub solver: PropSolverSettings,
+    /// Self-righting window of the phone's per-object Upright (cMsgUprightDMO).
+    pub upright: PropUprightSettings,
+}
+
+/// Retail DMO self-righting (82C4B8C0, 82C56780, 82C573D0), every field a mod knob: docs/hails-additions/27-dynamic-props.md#upright-window
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PropUprightSettings {
+    /// Window length (retail 2.0 s, 0x82060C50).
+    pub window_seconds: f32,
+    /// Timer increment per update (retail 1/60, 0x820849C8: a fixed per-frame
+    /// step, matching our 60 Hz prop step).
+    pub tick_seconds: f32,
+    /// Tilt below which the window ends (retail 10 deg, 0x821963E4).
+    pub stop_angle_deg: f32,
+    /// Tilt cap of the righting speed (retail 70 deg: 70 (0x820BB1E0) x
+    /// 0.0174533 (0x8206D110)).
+    pub max_angle_deg: f32,
+    /// Dead band subtracted from the capped tilt (retail 5 deg, 0x820BB1D8).
+    pub dead_band_deg: f32,
+    /// Righting gain (1/s) at the low end of the blend (retail 3, 0x82063B08).
+    pub gain_min: f32,
+    /// Righting gain at the high end of the blend (retail 5, 0x821F1790).
+    pub gain_max: f32,
+    /// Blend weight t = clamp(|A| - gain_blend_start, 0, 1) on the body
+    /// vector A (state block +72); retail 0.1 (0x820641A8) + 1.0 (0x8231A844).
+    pub gain_blend_start: f32,
+    /// Fraction of the off-axis spin the command removes per update (retail
+    /// 0.1, 0x820641A8: the command targets w_axis + 0.1 w_perp).
+    pub off_axis_spin: f32,
+    /// Command scale (retail 60, 0x821FF080: one 60 Hz step to the target).
+    pub command_rate: f32,
+    /// Above this tilt (or with a degenerate axis) the body's own X or Z axis
+    /// is used instead of up x world-up (retail 120 deg, 0x82256FE0).
+    pub fallback_angle_deg: f32,
+    /// External yaw commands refused while righting (retail 82C52E68).
+    pub block_yaw: bool,
+}
+
+impl Default for PropUprightSettings {
+    fn default() -> Self {
+        Self {
+            window_seconds: 2.0,
+            tick_seconds: 1.0 / 60.0,
+            stop_angle_deg: 10.0,
+            max_angle_deg: 70.0,
+            dead_band_deg: 5.0,
+            gain_min: 3.0,
+            gain_max: 5.0,
+            gain_blend_start: 1.1,
+            off_axis_spin: 0.1,
+            command_rate: 60.0,
+            fallback_angle_deg: 120.0,
+            block_yaw: true,
+        }
+    }
+}
+
+/// Righting command of 82C573D0 (body vector `a` not identified); `None` = tilt below `stop_angle_deg`.
+pub(crate) fn upright_command(basis: Basis3, w: Vector3, a: Vector3, s: &PropUprightSettings) -> Option<Vector3> {
+    let up = mul_basis(basis, Vector3::new(0.0, 1.0, 0.0));
+    let up_len = length(up);
+    let cos = if up_len > 0.0 { (up.y / up_len).clamp(-1.0, 1.0) } else { 1.0 };
+    let angle = cos.acos();
+    let degrees = angle.to_degrees();
+    if degrees < s.stop_angle_deg {
+        return None;
+    }
+    let normalize = |v: Vector3| {
+        let l = length(v);
+        if l > 0.0 { scale(v, 1.0 / l) } else { Vector3::ZERO }
+    };
+    let mut axis = normalize(cross(up, Vector3::new(0.0, 1.0, 0.0)));
+    let degenerate = axis.x.abs() <= f32::EPSILON && axis.y.abs() <= f32::EPSILON && axis.z.abs() <= f32::EPSILON;
+    if degenerate || degrees > s.fallback_angle_deg {
+        let local = if a.x > a.z { Vector3::new(1.0, 0.0, 0.0) } else { Vector3::new(0.0, 0.0, 1.0) };
+        axis = normalize(mul_basis(basis, local));
+    }
+    let capped = angle.min(s.max_angle_deg.to_radians());
+    let t = (length(a) - s.gain_blend_start).clamp(0.0, 1.0);
+    let gain = (1.0 - t) * s.gain_min + t * s.gain_max;
+    let speed = gain * (capped - s.dead_band_deg.to_radians()).max(0.0);
+    let along = scale(axis, dot(axis, w));
+    let across = sub(w, along);
+    let keep = add(along, scale(across, s.off_axis_spin));
+    Some(scale(sub(scale(axis, speed), keep), s.command_rate))
+}
+
+/// DMO island settings (8275DCC8 -> 82DC2840), every field a mod knob: docs/hails-additions/27-dynamic-props.md#dmo-island-settings
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PropSolverSettings {
+    /// true = retail row solver (82AE10C8 rows, 82AE27D0); false = older impulse pass (NOT RETAIL, mod option).
+    pub row_solver: bool,
+    /// Row solver iterations per step (retail 25).
+    pub iterations: u32,
+    /// Sleep energy threshold on E = |v|^2 + s * m^-1 * |w|^2 after damping
+    /// and the speed caps (integrator 82AE6590; retail 1e-5, 0x8219B100).
+    pub sleep_energy: f32,
+    /// Steps with E below `sleep_energy` and not rising before the sleep
+    /// pass (82DC3130) puts a body to sleep; also the counter cap (retail 2).
+    pub sleep_frames: u32,
+    /// Bodies the sleep pass puts to sleep per step at most (retail 100).
+    pub max_sleeps_per_step: u32,
+    /// Engine rest snap (NOT RETAIL, off by default, mod option): zero a touching body below `sleep_energy`.
+    pub rest_snap: bool,
+    /// The bail clamp (retail `82C530F0`, doc 27 "What wakes a resting prop"): when a bailing actor's volume
+    /// touches a prop, the prop's velocity is capped and it is woken, so bailing into a prop does not throw it.
+    pub bail_clamp: bool,
+    /// Linear cap = `bail_linear_factor` x inverse mass, m/s (retail 5.0, `0x821F1790`).
+    pub bail_linear_factor: f32,
+    /// Spin cap = `bail_angular_factor` x inverse mass, rad/s (retail 15.0).
+    pub bail_angular_factor: f32,
+    /// From this mass on (kg) the linear allowance is 0 and the spin is zeroed (retail 200).
+    pub bail_heavy_mass: f32,
+    /// Ball radius blend: radius = blend x (max(cap, |d|) + cap) (retail 0.5).
+    pub bail_blend: f32,
+    /// A prop type of at least this mass (kg) is collision type 12, lighter ones 14 (retail 5.5, `0x822F8C68`, slot 33
+    /// `82C56BA0`; spawns `82C4E940` -> `82E0E338` give the same pair, trace .local/research/prop-types). The on-foot
+    /// walker's queries reject types 13 and 14, so only the heavier props are ground for it.
+    pub walkable_mass: f32,
+    /// true = the skater pushes props through their box (the older model, NOT RETAIL, mod option); false = through
+    /// their mesh: docs/hails-additions/27-dynamic-props.md#skater-vs-prop-mesh
+    pub skater_push_box: bool,
+    /// true = skater mesh contacts are rows in the prop's row solve, against its floor friction (retail: one shared
+    /// solve, 82AE1AE8 / 82AE27D0, research b617); false = the older impulse push (NOT RETAIL, mod option).
+    pub skater_rows: bool,
+    /// Mass (kg) of the board side of a skater row (our board solver's `board_mass`, 8).
+    pub board_row_mass: f32,
+    /// Retail's ground contact reduction for the row solver (`82779EB0`): docs/hails-additions/27-dynamic-props.md#ground-contact-reduction
+    pub ground_reduction: skate_core::physics::contact_reduction::ReductionRules,
+}
+
+impl Default for PropSolverSettings {
+    fn default() -> Self {
+        Self {
+            row_solver: true,
+            iterations: 25,
+            sleep_energy: 1e-5,
+            sleep_frames: 2,
+            max_sleeps_per_step: 100,
+            rest_snap: false,
+            bail_clamp: true,
+            bail_linear_factor: 5.0,
+            bail_angular_factor: 15.0,
+            bail_heavy_mass: 200.0,
+            bail_blend: 0.5,
+            walkable_mass: 5.5,
+            skater_push_box: false,
+            skater_rows: true,
+            board_row_mass: 8.0,
+            ground_reduction: Default::default(),
+        }
+    }
+}
+
+/// Retail bail clamp 82C530F0 on one prop; `None` for a static body: docs/hails-additions/27-dynamic-props.md#bail-clamp-82c530f0
+pub(crate) fn bail_clamp(s: &PropSolverSettings, w: f32, d: Vector3, linear: Vector3, angular: Vector3) -> Option<(Vector3, Vector3)> {
+    if !(w > 0.0) {
+        return None;
+    }
+    let light = 1.0 / w < s.bail_heavy_mass;
+    let cap = if light { s.bail_linear_factor * w } else { 0.0 };
+    let angular = if light {
+        let limit = s.bail_angular_factor * w;
+        let l = length(angular);
+        if l > limit { scale(angular, limit / l) } else { angular }
+    } else {
+        Vector3::new(0.0, 0.0, 0.0)
+    };
+    let dl = length(d);
+    let n = if dl > 1.5e-5 { scale(d, 1.0 / dl) } else { Vector3::new(0.0, 0.0, 0.0) };
+    let mag = s.bail_blend * (cap.max(dl) + cap);
+    let centre = scale(n, mag);
+    let off = sub(linear, centre);
+    let ol = length(off);
+    let linear = if ol > mag { add(centre, scale(off, if ol > 0.0 { mag / ol } else { 0.0 })) } else { linear };
+    Some((linear, angular))
+}
+
+impl PropTuningTable {
+    pub(crate) fn for_template(&self, template: &str) -> &PropTuning {
+        self.by_template.get(template).unwrap_or(&self.default)
+    }
+}
+
+/// Per-step work counters, for tests and the frame-cost check.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PropStepStats {
+    pub awake: u32,
+    pub rebakes: u32,
+    pub skater_pushes: u32,
+}
+/// Actor id of the local player's skater volumes in the prop step (NPC skaters
+/// use their proxy solid id, `living_world::npc_skaters::PROXY_ID_TAG | id`).
+pub(crate) const LOCAL_PUSHER: u64 = 0;
+
+/// Where the held prop's collision triangles are parked so skater queries
+/// cannot see them while it is carried.
+pub(crate) const HELD_PARK: Vector3 = Vector3::new(0.0, -10000.0, 0.0);
+
+/// The props' own simulation step (8275DCC8 -> 82DC2840) with the live `PropSolverSettings`.
+pub(crate) fn prop_simulation(
+    base: skate_core::physics::rigid_body::RetailSimulationStep,
+) -> skate_core::physics::rigid_body::RetailSimulationStep {
+    let solver = PropSolverSettings::default();
+    skate_core::physics::rigid_body::RetailSimulationStep {
+        cool_down: solver.sleep_frames,
+        minimum_energy: solver.sleep_energy,
+        ..base
+    }
+}
+
+/// Props in the grab scene and Move Object on their authored grab records: always on in the game (set by
+/// `LivingWorldPlugin`, user 2026-10-15; doc 26i "Move Object step 3"); off (unit tests' default), the scene holds no props and
+/// carrying uses the box stand-in edge.
+static PROP_GRAB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) fn prop_grab_enabled() -> bool {
+    PROP_GRAB.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// Set by `living_world::opt_ins` (the player's choice); in effect from the next tick.
+pub(crate) fn set_prop_grab_enabled(on: bool) {
+    PROP_GRAB.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+/// Holds [`PROP_GRAB`] at `on` for one test, serialised with the others, and restores it off even after a panic.
+#[cfg(test)]
+pub(crate) fn prop_grab_for_test(on: bool) -> impl Drop {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    struct Restore(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            set_prop_grab_enabled(false);
+        }
+    }
+    let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_prop_grab_enabled(on);
+    Restore(guard)
+}
+
+/// Height of a generated grab spline over the box bottom, m (the authored splines sit at about hand height, ~0.98 m
+/// on the DownTown tables); a lower box is held by its top.
+const GENERATED_GRAB_HEIGHT: f32 = 1.0;
+
+/// Better Object Mover's grab splines for a prop without authored ones: one per vertical box face along its
+/// horizontal edge at [`GENERATED_GRAB_HEIGHT`], approach = the face's outward normal and flags 4, as the authored
+/// splines are laid out (template space, scale divided out: `grab_object_of` multiplies it back in).
+/// A body's grab-scene spline geometry (the first 64 splines; ids from its grab slot, points scaled by `axis_scale`).
+fn grab_geometry_of(b: &PropBody) -> Vec<std::sync::Arc<skate_core::player::offboard::grab_scene::Geometry>> {
+    let s = b.axis_scale;
+    b.grab_splines
+        .iter()
+        .take(64)
+        .enumerate()
+        .map(|(i, g)| {
+            let key = PROP_GRAB_TAG | (b.grab_slot << 6) | i as u32;
+            std::sync::Arc::new(skate_core::player::offboard::grab_scene::Geometry {
+                id: key,
+                points: g.points.iter().map(|p| [p[0] * s.x, p[1] * s.y, p[2] * s.z, 1.0]).collect(),
+                approach_vectors: vec![[g.direction[0], g.direction[1], g.direction[2], 0.0]],
+                word_60: g.flags,
+            })
+        })
+        .collect()
+}
+
+impl PropBody {
+    fn rebuild_grab_geometry(&mut self) {
+        self.grab_geometry = grab_geometry_of(self);
+    }
+}
+
+fn generated_grab_splines(b: &PropBody) -> Vec<crate::living_world::vehicles::CarGrabSpline> {
+    let (c, h, s) = ([b.local_center.x, b.local_center.y, b.local_center.z], [b.half_extents.x, b.half_extents.y, b.half_extents.z], [b.axis_scale.x, b.axis_scale.y, b.axis_scale.z]);
+    if h.iter().chain(&s).any(|v| !(v.is_finite() && v.abs() > 1e-4)) {
+        return Vec::new();
+    }
+    let y = (c[1] - h[1] + GENERATED_GRAB_HEIGHT).min(c[1] + h[1]);
+    let unscale = |p: [f32; 3]| [p[0] / s[0], p[1] / s[1], p[2] / s[2]];
+    let mut out = Vec::new();
+    for (axis, along) in [(0, 2), (2, 0)] {
+        for side in [-1.0f32, 1.0] {
+            let mut mid = c;
+            mid[1] = y;
+            mid[axis] += side * h[axis];
+            let (mut a, mut b) = (mid, mid);
+            a[along] -= h[along] * 0.9;
+            b[along] += h[along] * 0.9;
+            let mut direction = [0.0; 3];
+            direction[axis] = side;
+            out.push(crate::living_world::vehicles::CarGrabSpline { points: vec![unscale(a), unscale(a), unscale(b), unscale(b)], direction, flags: 4 });
+        }
+    }
+    out
+}
+
+/// The PC overlay's Better Object Mover into the prop bodies (each frame a cheap compare; a map load starts off).
+pub(crate) fn apply_better_object_mover(menu: Option<Res<crate::graphics_menu::Menu>>, mut physics: ResMut<super::GamePhysics>) {
+    let want = menu.is_some_and(|m| m.better_object_mover());
+    if physics.prop_dynamics().is_some_and(|d| d.better_object_mover() != want) {
+        if let Some(dynamics) = physics.prop_dynamics_mut() {
+            let generated = dynamics.set_better_object_mover(want);
+            info!("SKATE_PROP_GRAB better_object_mover={want} generated={generated}");
+        }
+    }
+}
+
+/// Grab-scene id tag of props (cars use `living_world::vehicles::CAR_GRAB_TAG`, the high bit).
+pub(crate) const PROP_GRAB_TAG: u32 = 0x4000_0000;
+
+pub(crate) struct PropBody {
+    /// Index into the collision layer's instance list (and its rebake target).
+    instance: usize,
+    id: u32,
+    /// Dense grab-scene number (map props in load order, then mid-game bodies in creation order): the grab ids
+    /// pack it as `PROP_GRAB_TAG | slot << 6 | spline`, which the 32-bit map instance ids do not fit (only ids
+    /// below 2^24 did, so the grab scene held 2 of DownTown's 786 props, laptop 2026-10-18).
+    grab_slot: u32,
+    /// Box centre and half extents in template space, scale folded in.
+    local_center: Vector3,
+    half_extents: Vector3,
+    rates: RetailBodyRates,
+    /// Effective Inertia ([`PropDynamics::body_inertia`], refreshed when the
+    /// type data or mod rules change).
+    inertia: RetailInertiaDynamics,
+    /// Inertia from the authored MOBJ block (density x box volume, damping),
+    /// the fallback for fields the type data and mods leave unset.
+    authored_inertia: RetailInertiaDynamics,
+    /// Authored MOBJ contact material (friction/restitution).
+    material: RetailContactMaterial,
+    enable_sleep: bool,
+    asleep: bool,
+    /// Streamed out by the DMO census (`skate_core::living_world::dmo`): asleep, collision parked, never woken,
+    /// pushed, grabbed or listed until it streams back in.
+    dormant: bool,
+    /// MOBJ template name: the prop type key of `PropTuningTable`.
+    template: String,
+    /// Retail type data of this prop (vault record name and values,
+    /// [`PropDynamics::set_type_data`]); `None` = not resolved.
+    type_data: Option<DmoType>,
+    /// Resolved tuning of this prop type.
+    tuning: PropTuning,
+    /// The template's authored grab splines (template space; `set_grab_splines`), or with Better Object Mover on and
+    /// none authored, generated ones ([`generated_grab_splines`]).
+    grab_splines: Vec<crate::living_world::vehicles::CarGrabSpline>,
+    /// The grab-scene geometry of `grab_splines` (first 64) for `grab_slot` and `axis_scale`, rebuilt by
+    /// `rebuild_grab_geometry` whenever either changes, shared by every tick's grab-scene objects.
+    grab_geometry: Vec<std::sync::Arc<skate_core::player::offboard::grab_scene::Geometry>>,
+    /// The template has authored grab splines (retail can move it).
+    authored_grab: bool,
+    /// Box derived from the render AABB (scale folded in), kept so a
+    /// `collision_box` override can be removed again.
+    authored_center: Vector3,
+    authored_half_extents: Vector3,
+    axis_scale: Vector3,
+    /// Consecutive ticks a skater volume sat inside this prop without
+    /// closing on it.
+    stuck_ticks: u32,
+    /// Stable actor id of the skater whose contact last pushed this prop
+    /// ([`LOCAL_PUSHER`] or an NPC skater proxy id): the authority owner a
+    /// future host uses for the moved prop. `None` until something pushes it.
+    pushed_by: Option<u64>,
+    /// `PROP_PUSHED` diagnostics since it last slept: start position, pushes, largest dv, and that push's closing speed, direction and source (board / body).
+    push_log: Option<(Vector3, u32, f32, f32, Vector3, bool)>,
+    /// Pose last written to the collision layer; an unchanged pose skips the
+    /// (identical) rebake.
+    baked: Option<(Vector3, Basis3)>,
+    /// Contact manifolds (static triangles and other props) that touched this
+    /// body in its last step, for the HELD_PROP diagnostics.
+    contacts: u32,
+    /// Box centre height where this body last rested (spawn, sleep or grab):
+    /// the ground probe for HELD_PROP / PROP_BELOW_GROUND starts above it, so
+    /// a body that sank under the floor still finds the floor it left.
+    rest_y: f32,
+    /// Authored (spawn) template-origin pose: what a DMO reset returns the body to
+    /// (retail cMsgResetDMO, doc 27 "Object Dropper and reset").
+    spawn_origin: Vector3,
+    spawn_basis: Basis3,
+    /// A Move Object command arrived for this body since its last step
+    /// (retail DMO+4465 bit 0x02, set by the slot 9 sinks 82C52DC0 /
+    /// 82C52E68).
+    commanded: bool,
+    /// The body runs on the commanded parameter block (retail DMO+4465 bit
+    /// 0x01: the previous tick's commanded bit; 82C53EF8 swaps the block when
+    /// the two differ).
+    commanded_block: bool,
+    /// Self-righting window timer (retail DMO+4376; `Some` = DMO+4464 bit
+    /// 0x40 set, [`PropUprightSettings`]).
+    upright_timer: Option<f32>,
+    /// Better Water: opacity while it sinks in water too deep to see the bottom (1 = shown, 0 = gone and asleep).
+    water_fade: f32,
+    /// Created mid-game ([`PropDynamics::spawn_body`]), not placed by the map:
+    /// no authored pose to reset to or save in the layout.
+    runtime: bool,
+    /// The authored physics block the body was built from (copied by
+    /// [`PropDynamics::copy_spec`]).
+    physics: skate_data::skate_map::ObjectPhysics,
+    /// Strongest contact since the audio last read it ([`PropDynamics::take_audio_contacts`]): the closing speed
+    /// along the normal (m/s) and the other surface's tag (0 = another prop): docs/hails-additions/27-dynamic-props.md#prop-sounds
+    audio_contact: Option<(f32, u32)>,
+    /// The local skater pushed it since the audio last read it (the audio entry's +0x20).
+    audio_pushed: bool,
+}
+
+/// Friction pair `[static, dynamic]` of a retail contact material block (82C550A8, 82763078): docs/hails-additions/27-dynamic-props.md#contact-material-block
+pub(crate) type MaterialBlock = [f32; 2];
+
+/// Retail commanded friction pair {0.03 (0x8208EA80), 0.02 (0x821E9580)}
+/// (82C53EF8 while DMO+4465 bit 0x02 is set).
+pub(crate) const RETAIL_COMMANDED_MATERIAL: MaterialBlock = [0.03, 0.02];
+
+/// Retail upright test of 82C54B00: the body's up axis (transform row 1) has
+/// y > 0.65 (0x820BB0EC); sets DMO+4465 bit 0x08.
+pub(crate) const RETAIL_UPRIGHT_COS: f32 = 0.65;
+
+/// Per prop type material data from the DMO type record; mod `carry.by_template` overrides: docs/hails-additions/27-dynamic-props.md#per-type-material-data
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct PropMaterialBlocks {
+    /// Friction pair while commanded; `None` = `MoveCommandRules::commanded_material`.
+    pub held: Option<MaterialBlock>,
+    /// Free friction pair (DMO data +320 / +328; also the only free pair when
+    /// `upright_pair` is off); `None` = authored MOBJ friction for both.
+    pub free: Option<MaterialBlock>,
+    /// Free friction pair while upright (DMO data +316 / +324), used only when
+    /// `upright_pair` is set; `None` = `free`.
+    pub free_upright: Option<MaterialBlock>,
+    /// Type flag DMO data +312 bit 0 (-> DMO+4465 bit 0x10, ctor 82C51E28):
+    /// the free pair depends on the upright test. `None` = false.
+    pub upright_pair: Option<bool>,
+    /// Restitution of every block of this type (DMO data +272); `None` = the
+    /// authored MOBJ restitution.
+    pub restitution: Option<f32>,
+    /// Record+272 of this prop type (Move Object speeds x
+    /// `record_272_speed_scale`): retail 82C4B960 sets it (1 or 2) only when
+    /// DMO data +312 is set. `None` = false.
+    pub record_272: Option<bool>,
+    /// Linear drag (DMO data +308, 82C4E568), per second: `v *= 1 - drag dt`; `None` = authored MOBJ damping.
+    pub linear_drag: Option<f32>,
+    /// Angular drag (DMO data +336 `AngularDrag` -> Inertia +36, same rule).
+    /// `None` = the authored MOBJ damping.
+    pub angular_drag: Option<f32>,
+    /// Body mass in kg (DMO data +304; 82C4E568 stores 1 / mass at Inertia
+    /// +16 and builds the box inertia from it). `None` = the authored MOBJ
+    /// density x box volume.
+    pub mass: Option<f32>,
+    /// Linear speed cap in m/s (DMO data +292 -> Inertia +24; the integrator
+    /// 82AE6590 scales v down to this length after drag). `None` = unbounded.
+    pub maximum_linear_velocity: Option<f32>,
+    /// Angular speed cap in rad/s (DMO data +296 -> Inertia +28, same rule).
+    /// `None` = unbounded.
+    pub maximum_angular_velocity: Option<f32>,
+    /// Box inertia scale (DMO data +16, offset +32; 82C4E568, 82C47FC8): docs/hails-additions/27-dynamic-props.md#box-inertia-shape
+    pub inertia_scale: Option<[f32; 3]>,
+    pub inertia_offset: Option<[f32; 3]>,
+    /// The ped-plugin check (`82C56DB0`, research b136 / b137): per-axis rotation tolerance from the authored pose in
+    /// degrees (DMO data +0 `Hash_E43445036AAEE7C5`, stock (2.5, 15, 2.5)) and the farthest the prop may move from
+    /// its authored spot (+280 `Hash_2114F9329E98F00C`, stock 5 m) before its seats stop being offered.
+    pub plugin_rotation_tolerance: Option<[f32; 3]>,
+    pub plugin_max_distance: Option<f32>,
+}
+
+/// Box inertia scale of the class's `default` record (DMO data +16), used
+/// for a mod's mass on a prop without type data.
+pub(crate) const DMO_DEFAULT_INERTIA_SCALE: [f32; 3] = [1.2, 1.2, 1.2];
+
+impl PropMaterialBlocks {
+    /// Field by field: this block's value where set, else `base`'s.
+    pub(crate) fn over(&self, base: &PropMaterialBlocks) -> PropMaterialBlocks {
+        PropMaterialBlocks {
+            held: self.held.or(base.held),
+            free: self.free.or(base.free),
+            free_upright: self.free_upright.or(base.free_upright),
+            upright_pair: self.upright_pair.or(base.upright_pair),
+            restitution: self.restitution.or(base.restitution),
+            record_272: self.record_272.or(base.record_272),
+            linear_drag: self.linear_drag.or(base.linear_drag),
+            angular_drag: self.angular_drag.or(base.angular_drag),
+            mass: self.mass.or(base.mass),
+            maximum_linear_velocity: self.maximum_linear_velocity.or(base.maximum_linear_velocity),
+            maximum_angular_velocity: self.maximum_angular_velocity.or(base.maximum_angular_velocity),
+            inertia_scale: self.inertia_scale.or(base.inertia_scale),
+            inertia_offset: self.inertia_offset.or(base.inertia_offset),
+            plugin_rotation_tolerance: self.plugin_rotation_tolerance.or(base.plugin_rotation_tolerance),
+            plugin_max_distance: self.plugin_max_distance.or(base.plugin_max_distance),
+        }
+    }
+}
+
+/// Vault class of the per-type DMO data.
+pub(crate) const DMO_TYPE_CLASS: &str = "livingworld_dynamicobject_characteristics";
+
+/// Retail values of one DMO type record (82C51E28 layout, offsets, hashes): docs/hails-additions/27-dynamic-props.md#dmo-type-record-layout
+pub(crate) fn dmo_type_blocks(
+    collections: &skate_data::collections::Collections,
+    record: &str,
+) -> Result<PropMaterialBlocks, String> {
+    let f = |name: &str| collections.float(DMO_TYPE_CLASS, record, name);
+    let upright = collections.boolean(DMO_TYPE_CLASS, record, "Hash_C4D8A03586A31915")?;
+    let v = |name: &str| -> Result<[f32; 3], String> {
+        let w = collections.words::<4>(DMO_TYPE_CLASS, record, name)?;
+        let out = [f32::from_bits(w[0]), f32::from_bits(w[1]), f32::from_bits(w[2])];
+        if out.iter().all(|x| x.is_finite()) { Ok(out) } else { Err(format!("Non-finite {record}/{name}")) }
+    };
+    Ok(PropMaterialBlocks {
+        held: None,
+        free: Some([f("Hash_6E0BB4F5881A4841")?, f("Hash_086956BCA2187458")?]),
+        free_upright: Some([f("Hash_E0101A9DFD63DEE9")?, f("Hash_CDA7A31C5EDBEB6E")?]),
+        upright_pair: Some(upright),
+        restitution: Some(f("Hash_5CCD5998E03C299B")?),
+        record_272: Some(upright),
+        linear_drag: Some(f("LinearDrag")?),
+        angular_drag: Some(f("AngularDrag")?),
+        mass: Some(f("Hash_E5778CDD4576D890")?),
+        maximum_linear_velocity: Some(f("Hash_4890392C91829954")?),
+        maximum_angular_velocity: Some(f("Hash_BAA01E2BA1237455")?),
+        inertia_scale: Some(v("Hash_F4D1C84C36A854AC")?),
+        inertia_offset: Some(v("Hash_D3CDE380DBB3ADC0")?),
+        // Optional for older exports (every stock record stores them).
+        plugin_rotation_tolerance: v("Hash_E43445036AAEE7C5").ok(),
+        plugin_max_distance: f("Hash_2114F9329E98F00C").ok(),
+    })
+}
+
+/// One prop type's retail data for [`PropDynamics::set_type_data`]: the vault
+/// record's name (the mod-facing type key, e.g. `dt_garbagebin`) and values.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DmoType {
+    pub key: String,
+    pub blocks: PropMaterialBlocks,
+    /// The type's `livingworld_dynamicobject_priority` value (the census score; `None` = `keepalways`).
+    pub priority: Option<u32>,
+    /// The prop audio records ([`dmo_type_audio`]); `None` = silent.
+    pub audio: Option<PropAudioType>,
+}
+
+/// One DMO type's prop audio (the owner writer 824B5558's reads of the characteristics record).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PropAudioType {
+    /// The owner's `+0x80` record (impacts, the free loop) and `+0x88` (the loop while the player moves it).
+    pub primary: Option<skate_audio::world::props::PropSfxRecord>,
+    pub moved: Option<skate_audio::world::props::PropSfxRecord>,
+    /// `+0xA5`: slides (the type does not roll).
+    pub sliding: bool,
+    /// `+0x98` / `+0x9C`: the moved levels (the free loop's scale is +0x9C).
+    pub moved_levels: [f32; 2],
+    /// The pushed-prop object's data (the primary record's moveable sets, banks, one-shots, judder).
+    pub moving: Option<std::sync::Arc<skate_audio::world::moveable::MovingType>>,
+}
+
+/// One awake prop for the prop audio ([`PropDynamics::take_audio_samples`]).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PropAudioSample {
+    pub id: u64,
+    pub audio: Option<PropAudioType>,
+    pub position: [f32; 3],
+    pub velocity: [f32; 3],
+    pub speed: f32,
+    pub spin: f32,
+    pub pushed: bool,
+    /// Strongest contact (closing speed m/s, audio material 0..143).
+    pub contact: Option<(f32, i32)>,
+}
+
+/// The characteristics' prop SFX RefSpecs (24 bytes: class, key, pointer) the owner writer 824B5558 reads: a rolling
+/// type's +0x88 / +0x70, a sliding one's +0xB8 / +0x40 (primary / moved); bool 0x154 = rolls; the moved levels
+/// 0x10C / 0x108 (rolling) or 0x114 / 0xFC (sliding).
+const DMO_AUDIO_ROLLING: [&str; 2] = ["Hash_64B6475EA79A904D", "Hash_1DD28458327DDE7B"];
+const DMO_AUDIO_SLIDING: [&str; 2] = ["Hash_EC8E46337DBA5454", "Hash_9084A9BC417257B1"];
+const DMO_ROLLS: &str = "Hash_7E9838A590602713";
+const DMO_LEVELS_ROLLING: [&str; 2] = ["Hash_B7B8E2166895035E", "Hash_E119794F275D9260"];
+const DMO_LEVELS_SLIDING: [&str; 2] = ["Hash_7D91607B1CFC864C", "Hash_DE4DB9DD46FA4D9D"];
+/// The sliding loop's record words w13..w34 (layout 0x9C, 0x98, 0x94, 0x90, 0x7C, 0x78, 0x80, 0x8C, 0x84, 0x88,
+/// 0x154, 0x14C, 0x150, 0x148, 0x140, 0x144, 0x160, 0x158, 0x15C, 0x70, 0x6C, 0x74; research b628).
+const LOOP_SLIDING_FIELDS: [&str; 22] = [
+    "Hash_A367E3F148D8835E", "Hash_5D81F4BAD95A763E", "Hash_6C6362BFCEA3D9B6", "Hash_18E0C2B1C507A763", "Hash_E984F043AD777915",
+    "Hash_299AC5E2D2AAFF45", "Hash_03EA4D1B7F4007DC", "Hash_457949153A7DC517", "Hash_9764A4BF17C550F0", "Hash_045540993B1A5CE9",
+    "Hash_D4B5188920D70CBA", "Hash_2DB68BB3E71DBA8B", "Hash_1707FBCAB7586ACC", "Hash_48F405A5F62EC541", "Hash_4B0DD186CD2C7E5B",
+    "Hash_71DDD34BC3BA4B33", "Hash_B5DFA3C9912A8E74", "Hash_9A1F4EEC96B2690D", "Hash_48C5D1F749FA0F49", "Hash_18D3D5079622AF06",
+    "Hash_DFE990A2736661E7", "Hash_6896D0FBCDF4401D",
+];
+/// The rolling loop's w13..w34: the record's 22 optional attributes (824E3160's lookups, in order).
+const LOOP_ROLLING_FIELDS: [&str; 22] = [
+    "Hash_C6A2B85AC87A6E6E", "Hash_4006C73511384DD9", "Hash_D2B68F518948B6B1", "Hash_47B151FB093E8B63", "Hash_15CDD8F99FD5143D",
+    "Hash_775AC9A044EBA15B", "Hash_22439C1E29DF5306", "Hash_8F3F4E349A86F668", "Hash_5D2598EFB05C9903", "Hash_A4B1ACF59F9A6AD2",
+    "Hash_0B09639BE4E26AE8", "Hash_A67DB8DB254882DE", "Hash_FB37ABA85116510F", "Hash_46509B25419F00F8", "Hash_FB7AC54202727AD1",
+    "Hash_C639D3F0C4DA2BD9", "Hash_905A6733BA0A6992", "Hash_20540FCA23FA5469", "Hash_B0D70899984B85F5", "Hash_4355DF82D13F308A",
+    "Hash_1F6191702E0972F6", "Hash_8F7144D130C2C523",
+];
+
+/// One prop SFX record by its RefSpec key [data] (824E3930 / 824E3160 offsets -> field hashes: research m-props, b628).
+fn prop_sfx_record(collections: &skate_data::collections::Collections, key: u64) -> Result<Option<skate_audio::world::props::PropSfxRecord>, String> {
+    use skate_audio::world::props::{LoopRecord, PropSfxRecord, RECORD_CLASS};
+    if key == 0 {
+        return Ok(None);
+    }
+    let name = format!("Hash_{key:016X}");
+    let word = |field: &str| collections.words::<1>(RECORD_CLASS, &name, field).map(|w| w[0] as i32);
+    let float = |field: &str| collections.float(RECORD_CLASS, &name, field);
+    // Optional attributes (missing = the empty attribute: false / 0).
+    let attenuation = |flag: &str, limit: &str| collections.boolean(RECORD_CLASS, &name, flag).unwrap_or(false).then(|| float(limit).unwrap_or(0.0));
+    let words = |fields: &[&str; 22]| -> [i32; 22] { std::array::from_fn(|i| word(fields[i]).unwrap_or(0)) };
+    Ok(Some(PropSfxRecord {
+        key,
+        material: word("Hash_47C530FCCCB8D720")?,
+        secondary: word("Hash_8CB5FC3FB86B5259")?,
+        use_contact_material: collections.boolean(RECORD_CLASS, &name, "Hash_40D1C4D9FE126616")?,
+        impact_min: float("Hash_656A29819E8F77D9")?,
+        impact_max: float("Hash_42251F85D0298332")?,
+        cooldown: word("Hash_5C3511E4A37E930D")?,
+        speed_attenuation: attenuation("Hash_35BC26C216FBCC33", "Hash_D34C61EB3A1B8335"),
+        spin_attenuation: attenuation("Hash_6A1E46E04CF26CBB", "Hash_7B05C20A7DB5D09C"),
+        looping: LoopRecord {
+            patch: word("Hash_1FE511BDBA36F55A")?,
+            max_kmh: float("Hash_E12D64B75EDD6E53")?,
+            rise: float("Hash_132C643877D3F766")?,
+            moved_max_kmh: float("Hash_66B0990AF31D13C6")?,
+            pitch_scale: word("Hash_9E6E09F0A98598C3")?,
+            sliding: words(&LOOP_SLIDING_FIELDS),
+            rolling: words(&LOOP_ROLLING_FIELDS),
+        },
+    }))
+}
+
+/// A DMO type's prop audio [data]: the rolling or sliding RefSpecs' prop SFX records and the moved levels. The
+/// owner's other two sliding terms (DMO flags) are not modelled.
+pub(crate) fn dmo_type_audio(collections: &skate_data::collections::Collections, record: &str) -> Result<Option<PropAudioType>, String> {
+    let rolls = collections.boolean(DMO_TYPE_CLASS, record, DMO_ROLLS)?;
+    let (refs, levels) = if rolls { (DMO_AUDIO_ROLLING, DMO_LEVELS_ROLLING) } else { (DMO_AUDIO_SLIDING, DMO_LEVELS_SLIDING) };
+    let key = |field: &str| -> Result<u64, String> {
+        let w = collections.words::<6>(DMO_TYPE_CLASS, record, field)?;
+        Ok((u64::from(w[2]) << 32) | u64::from(w[3]))
+    };
+    let primary_key = key(refs[0])?;
+    let primary = prop_sfx_record(collections, primary_key)?;
+    let moved = prop_sfx_record(collections, key(refs[1])?)?;
+    if primary.is_none() && moved.is_none() {
+        return Ok(None);
+    }
+    let level = |field: &str| collections.float(DMO_TYPE_CLASS, record, field).unwrap_or(1.0);
+    let moving = if primary.is_some() { moving_type(collections, primary_key).map(std::sync::Arc::new) } else { None };
+    Ok(Some(PropAudioType { primary, moved, sliding: !rolls, moved_levels: [level(levels[0]), level(levels[1])], moving }))
+}
+
+/// The moveable sets' fields (sub_824E6068: the sliding set by layout offset 0x124, 0x120, 0xF8, ...; the rolling set's
+/// 37 optional attributes in order; index 35 of each = the start loop's gain): research b630.
+const MOVING_SLIDING_FIELDS: [&str; 37] = [
+    "Hash_FF71B1E550CB6E4D", "Hash_173D15BD691E6641", "Hash_A16BDFFB6CF2C9D3", "Hash_DE3556B5BAE681D7", "Hash_61359CA654AE12DB",
+    "Hash_A092930D6F1D8026", "Hash_0155E57E1863A341", "Hash_CF879E04419ABABF", "Hash_3FFBA853D6CB2A63", "Hash_04EB7029A3C67D63",
+    "Hash_02F8CE34FE9BE4DB", "Hash_4E23279BDCB1666F", "Hash_826AF4E5088FA60A", "Hash_FE896F5E846BBB93", "Hash_D7E44750FFB35BDE",
+    "Hash_960A62E5504EB110", "Hash_2E9CD18B604ECE01", "Hash_7E02C11E7358D06F", "Hash_7561681645EA6718", "Hash_DD807CC052FA5925",
+    "Hash_A9E88935C35A9EC3", "Hash_5D0BC00DF13A2155", "Hash_EF50EDDA4E554696", "Hash_413A276937CFA943", "Hash_2710C3587C1DC907",
+    "Hash_4EE357B60141411E", "Hash_77BDC01B563147A1", "Hash_A19EB133192FA1B6", "Hash_62934AE167299A6F", "Hash_0668D44825753B87",
+    "Hash_C6EE0290122062FD", "Hash_846D64C54B8EF4F2", "Hash_AE0F45802E27A964", "Hash_6DBF232D44593DFC", "Hash_DE5490567A005B47",
+    "Hash_2CC0006763475FE4", "Hash_2D610A0030B16526",
+];
+const MOVING_ROLLING_FIELDS: [&str; 37] = [
+    "Hash_EF6D5AFCBB9E77D1", "Hash_100F22783E955CCB", "Hash_DC8601C0F2CFD377", "Hash_C06667B2D73742A9", "Hash_2F8542355CFABE9C",
+    "Hash_034E2678A1547AB5", "Hash_C848E2A31D8B4388", "Hash_8D5F8F7435692C63", "Hash_4F837B7FBD0F8C0B", "Hash_FDCC49BD07A8C29C",
+    "Hash_BE6F283B29066754", "Hash_6EADCAE5611AC954", "Hash_8D4FFC6C78B63FC2", "Hash_AA6157F0C59FEC7A", "Hash_468C8187DB553DE0",
+    "Hash_566683AE4847D270", "Hash_75AAA4C5645FE970", "Hash_9CCD964E5D357264", "Hash_A88B6FEFBF376A65", "Hash_D11A3A527B068243",
+    "Hash_5C253F37657354B1", "Hash_A945B0A70E81A9FB", "Hash_8E0102F00272C985", "Hash_21237F59A40817C8", "Hash_6FB1F1D3084AD4B9",
+    "Hash_662F9353B313EF73", "Hash_0C623FD62BEDCEC1", "Hash_2DE0BB7C51C45B97", "Hash_C767AE54A4B2141B", "Hash_5A40AE51F18D7BDA",
+    "Hash_AFB7ED7E3E216814", "Hash_581C2D89164BEF45", "Hash_8729CA6B14F5D983", "Hash_1C4D5773FAB99FE0", "Hash_F4EAC394BCB7FDA7",
+    "Hash_9BA3BB6B50E9C63A", "Hash_262E68E0665B1879",
+];
+/// The one-shot record (class 74F2B4132A1D39EA, word index -> field; research b630 / b632) and the judder record
+/// (class DCD364A878BA0AA3, research b639 / b640).
+const ONESHOT_CLASS: &str = "Hash_74F2B4132A1D39EA";
+const ONESHOT_FIELDS: [&str; 14] = [
+    "Hash_A09DA314AE53C56D", "Hash_18DB42A4488DE380", "Hash_3E7244FD6FE5ADB8", "Hash_4D518FDEBF91B7FE", "Hash_4FE493C1F00F2653",
+    "Hash_5572B57337210B4B", "Hash_2B05DCD8547E0247", "Hash_44987B5FC81B5C65", "Hash_350C7BC150BCA8EE", "Hash_BCC11284F580EA63",
+    "Hash_84034EB2E17ACDDB", "Hash_EA4B2EAD78A8852A", "Hash_F47D491685D2DF8F", "Hash_ED74C279AF0F5D8E",
+];
+const JUDDER_CLASS: &str = "Hash_DCD364A878BA0AA3";
+
+/// A RefSpec field's record key (24 bytes: class, key, pointer).
+fn refspec_key(collections: &skate_data::collections::Collections, class: &str, record: &str, field: &str) -> Option<String> {
+    let w = collections.words::<6>(class, record, field).ok()?;
+    let key = (u64::from(w[2]) << 32) | u64::from(w[3]);
+    (key != 0).then(|| format!("Hash_{key:016X}"))
+}
+
+/// The pushed-prop object's data of one prop SFX record [data]; `None` = no main bank.
+fn moving_type(collections: &skate_data::collections::Collections, key: u64) -> Option<skate_audio::world::moveable::MovingType> {
+    use skate_audio::world::moveable::{FreqRecord, GainRecord, JitterRecord, JudderRecord, LfoRecord, ManagerRecord, MoveableRecord, MovingType, OneShotRecord};
+    use skate_audio::world::props::RECORD_CLASS;
+    let name = format!("Hash_{key:016X}");
+    let text = |class: &str, record: &str, field: &str| -> Option<String> {
+        let data = collections.field(class, record, field).ok()?.data.trim().to_string();
+        (!data.is_empty()).then(|| std::path::Path::new(&data).file_stem().map_or(data.clone(), |s| s.to_string_lossy().into_owned()))
+    };
+    let word = |class: &str, record: &str, field: &str| collections.words::<1>(class, record, field).map_or(0, |w| w[0] as i32);
+    let float = |class: &str, record: &str, field: &str, default: f32| collections.float(class, record, field).unwrap_or(default);
+    let bank = text(RECORD_CLASS, &name, "Hash_BE88128A30BE926E")?;
+    let record = MoveableRecord {
+        bank,
+        patch: word(RECORD_CLASS, &name, "Hash_1FE511BDBA36F55A"),
+        max_kmh: float(RECORD_CLASS, &name, "Hash_E12D64B75EDD6E53", 1.0),
+        moved_max_kmh: float(RECORD_CLASS, &name, "Hash_66B0990AF31D13C6", 1.0),
+        pitch_scale: word(RECORD_CLASS, &name, "Hash_9E6E09F0A98598C3"),
+        sliding: std::array::from_fn(|i| word(RECORD_CLASS, &name, MOVING_SLIDING_FIELDS[i])),
+        rolling: std::array::from_fn(|i| word(RECORD_CLASS, &name, MOVING_ROLLING_FIELDS[i])),
+    };
+    let oneshot = refspec_key(collections, RECORD_CLASS, &name, "Hash_63F16D8F04D0CAE7").and_then(|k| {
+        let w = |i: usize| word(ONESHOT_CLASS, &k, ONESHOT_FIELDS[i]);
+        Some(OneShotRecord {
+            bank: text(ONESHOT_CLASS, &k, ONESHOT_FIELDS[0])?,
+            id: w(6),
+            level: w(3) as f32 / 32767.0,
+            pitch: w(8) as f32 / 4096.0,
+            full_kmh: float(ONESHOT_CLASS, &k, ONESHOT_FIELDS[13], 10.0),
+            rest_ms: [w(9), w(11)],
+            full_ms: [w(10), w(12).max(w(10) + 1)],
+            chance: w(7),
+        })
+    });
+    let manager_key = refspec_key(collections, RECORD_CLASS, &name, "Hash_E514B7881C3B72CA");
+    let manager = manager_key.as_deref().map_or_else(ManagerRecord::default, |k| {
+        let w = |f: &str| word(JUDDER_CLASS, k, f);
+        let f = |f: &str, d: f32| float(JUDDER_CLASS, k, f, d);
+        let milli = |f: &str| (float(JUDDER_CLASS, k, f, 0.0) * 1000.0) as i32;
+        let lfo = |h: [&str; 12]| LfoRecord {
+            q: f(h[0], 1.0),
+            gain: f(h[1], 1.0),
+            speed: [f(h[2], 0.0), f(h[3], 1.0)],
+            hz: [f(h[4], 0.0), f(h[5], 0.0)],
+            period_ms: f(h[6], 0.0),
+            wobble_hold: [w(h[7]), w(h[8])],
+            wobble: [milli(h[9]), milli(h[10])],
+            depth: f(h[11], 0.0),
+        };
+        let gain = |h: [&str; 10]| GainRecord {
+            hold_low: [w(h[0]), w(h[1])],
+            hold_high: [w(h[2]), w(h[3])],
+            level_low: [w(h[4]), w(h[5])],
+            level_high: [w(h[6]), w(h[7])],
+            speed: [f(h[8], 0.0), f(h[9], 1.0)],
+        };
+        ManagerRecord {
+            // Graph A PI20 #1 (0x120..0x14C), graph B (0x68..0x94): Q, gain, speed lo, Hz low, speed hi, Hz high, period,
+            // wobble hold, wobble range, depth (research b640 section 4).
+            lfo: [
+                lfo(["Hash_EE356004DBE723A6", "Hash_8EF61F34FE6C8894", "Hash_01543F39D850B915", "Hash_E96FD0D1B710E153", "Hash_685ED7C3C37B0935",
+                    "Hash_5B3E2A1CA3B4A738", "Hash_36ED53AD7D9391CA", "Hash_D809FDB6A07540D0", "Hash_E3DEA755570549FD", "Hash_FE114D78A54D9C15",
+                    "Hash_C5F20F7013959CFA", "Hash_C2EF2EC85996F678"]),
+                lfo(["Hash_C026C9A9D81FF505", "Hash_B9FE1B32CAED3A15", "Hash_7C9228C62D594D43", "Hash_6511F43FFD464CA8", "Hash_F068A7118F543D2A",
+                    "Hash_3A8C85D64DD80C36", "Hash_8743D6DA39DE6588", "Hash_0FDFED5FBF6AC62D", "Hash_4EF0F7E12B736C4B", "Hash_4751D6A5FEC66FDC",
+                    "Hash_5D154DC166950A56", "Hash_092C706021F98E62"]),
+            ],
+            jitter: [
+                JitterRecord { q: f("Hash_DC69C81DB5CDE310", 1.0), hold: [w("Hash_8E05793504E7ED7F"), w("Hash_8DC898EDFD6BD1D3")], gain: [milli("Hash_3DD671A9A8FA41FE"), milli("Hash_99C0230EBFD1E0BF")] },
+                JitterRecord { q: f("Hash_B31F769FF49459C8", 1.0), hold: [w("Hash_DD3F20750879260B"), w("Hash_11D9B7BC2363772D")], gain: [milli("Hash_EC5CD1E86899D259"), milli("Hash_7369BDA93A80E02D")] },
+            ],
+            base_gain: f("Hash_E9BCA32757FDD9D9", 1.0),
+            freq: FreqRecord {
+                speed: [f("Hash_D29C006387F8CEAE", 0.0), f("Hash_DD22F4979BE76175", 0.0)],
+                hold_max: [w("Hash_086FF4F827FEFC11"), w("Hash_88A41AA1B4358FFA")],
+                hz: [milli("Hash_B2C8A1D6BF3D4A89"), milli("Hash_4B1D17586882CDB6")],
+            },
+            gains: [
+                gain(["Hash_D117E30D6D349210", "Hash_D7864E69351EDEAC", "Hash_5C5147E3832E51C8", "Hash_017576601AA58420", "Hash_1522E34EB3B3FD1A",
+                    "Hash_0599CA86AC5369D3", "Hash_90B198D924DD22DE", "Hash_407511B05690D81F", "Hash_12FFD2B07A48D506", "Hash_19EE6C62AB93F067"]),
+                gain(["Hash_443BA7D42C87C94B", "Hash_CF744C24CFAFCA82", "Hash_1CB5CD53D244DAE7", "Hash_301255228EAEBABA", "Hash_EEC780C93699D1C5",
+                    "Hash_0A0BEA66CCF5EA72", "Hash_2700AAE2276E8492", "Hash_321218D557823512", "Hash_456270BBFE4FE8E3", "Hash_D35998F85ED4B669"]),
+            ],
+            b_scale: w("Hash_6B0D01ECECA56350") as f32 / 32767.0,
+        }
+    });
+    let judder = manager_key.map_or_else(JudderRecord::default, |k| {
+        let w = |f: &str| word(JUDDER_CLASS, &k, f);
+        JudderRecord {
+            speed: [float(JUDDER_CLASS, &k, "Hash_45F2DACB19D32174", 0.0), float(JUDDER_CLASS, &k, "Hash_091E25E8B15E3F12", 1.0)],
+            on_value: [w("Hash_1D961ABE90325F9E"), w("Hash_E2EE197DF38E205D")],
+            on_ms: [w("Hash_52AFB3969050799E"), w("Hash_370B19BEADE96FA3")],
+            off_low_ms: [w("Hash_A81636F2360E2F90"), w("Hash_EF6311A0A50B20BA")],
+            off_high_ms: [w("Hash_8B793FBB80DF9D82"), w("Hash_E027FA8069FDD3AB")],
+            pitch: w("Hash_C1777A0F02CDDE75"),
+        }
+    });
+    let push_pull = [float(RECORD_CLASS, &name, "Hash_D11F4CA1B70E5A05", 0.0), float(RECORD_CLASS, &name, "Hash_96DC816296298526", 0.0)];
+    Some(MovingType { record, oneshot, judder, manager, push_pull })
+}
+
+/// The priority class the characteristics' `Priority` RefSpec points into, and its value field.
+pub(crate) const DMO_PRIORITY_CLASS: &str = "livingworld_dynamicobject_priority";
+const DMO_PRIORITY_VALUE: &str = "Hash_52BD74D46C494CB7";
+
+/// A DMO type's priority [data]: the characteristics record's `Priority` RefSpec (key hash in its first 8 bytes)
+/// -> the `livingworld_dynamicobject_priority` record's value (`neverkeep` 0, `lowpriority` 1, `default` 100,
+/// `mediumpriority` 200, `highpriority` 450, `keepalways` 0xFFFFFFFF = `None`).
+pub(crate) fn dmo_type_priority(collections: &skate_data::collections::Collections, record: &str) -> Result<Option<u32>, String> {
+    let w = collections.words::<4>(DMO_TYPE_CLASS, record, "Priority")?;
+    let key = format!("Hash_{:016X}", (u64::from(w[0]) << 32) | u64::from(w[1]));
+    let value = collections.integer(DMO_PRIORITY_CLASS, &key, DMO_PRIORITY_VALUE)?;
+    Ok((value != u32::MAX).then_some(value))
+}
+
+/// How a Move Object command reaches the held body (slot 9, 82C4C370 / 82C4C3E0); mod knobs, cleared on disable.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MoveCommandRules {
+    /// Friction pair every commanded body switches to (retail {0.03, 0.02});
+    /// the block's restitution stays the type's (DMO data +272).
+    pub commanded_material: MaterialBlock,
+    /// Upright test threshold on the body's up axis y (retail 0.65).
+    pub upright_cos: f32,
+    /// Per prop type overrides of the held / free blocks.
+    pub by_template: std::collections::BTreeMap<String, PropMaterialBlocks>,
+    /// Linear command at the centre of mass (retail: accumulator +144, no
+    /// torque). `false` = applied at the grip point (lever torque; mod only).
+    pub apply_at_com: bool,
+    /// Yaw command replaces the angular accumulator (retail 82D9CCF0
+    /// overwrites +160). `false` = added to the body's torque accumulator.
+    pub yaw_replaces_torque: bool,
+    /// Vertical command dropped (retail 82C4C370 passes only &linear).
+    pub ignore_vertical: bool,
+    /// Every command wakes the body and clears its sleep counter (retail
+    /// 82ADF7B8 in both sinks). `false` = only a non-zero command wakes it.
+    pub wake_on_command: bool,
+}
+
+impl Default for MoveCommandRules {
+    fn default() -> Self {
+        Self {
+            commanded_material: RETAIL_COMMANDED_MATERIAL,
+            upright_cos: RETAIL_UPRIGHT_COS,
+            by_template: Default::default(),
+            apply_at_com: true,
+            yaw_replaces_torque: true,
+            ignore_vertical: true,
+            wake_on_command: true,
+        }
+    }
+}
+
+impl MoveCommandRules {
+    /// The body's own contact material block (82C550A8): commanded, upright or default pair: docs/hails-additions/27-dynamic-props.md#body-material-choice
+    pub(crate) fn body_material(&self, template: &str, authored: RetailContactMaterial, commanded: bool, up_y: f32) -> RetailContactMaterial {
+        self.typed_body_material(&self.blocks(template, None, &PropMaterialBlocks::default()), authored, commanded, up_y)
+    }
+
+    /// A body's effective type blocks: the mod entry for its MOBJ template
+    /// name, else for its type key (vault record name), over the retail type
+    /// data.
+    pub(crate) fn blocks(&self, template: &str, type_key: Option<&str>, retail: &PropMaterialBlocks) -> PropMaterialBlocks {
+        let modded = self.by_template.get(template).or_else(|| type_key.and_then(|k| self.by_template.get(k)));
+        modded.map_or(*retail, |m| m.over(retail))
+    }
+
+    /// [`Self::body_material`] on resolved blocks.
+    pub(crate) fn typed_body_material(&self, blocks: &PropMaterialBlocks, authored: RetailContactMaterial, commanded: bool, up_y: f32) -> RetailContactMaterial {
+        let restitution = blocks.restitution.unwrap_or(authored.restitution);
+        let [static_friction, dynamic_friction] = if commanded {
+            blocks.held.unwrap_or(self.commanded_material)
+        } else {
+            let free = blocks.free.unwrap_or([authored.static_friction, authored.dynamic_friction]);
+            let upright = blocks.upright_pair.unwrap_or(false) && up_y > self.upright_cos;
+            if upright { blocks.free_upright.unwrap_or(free) } else { free }
+        };
+        RetailContactMaterial { static_friction, dynamic_friction, restitution }
+    }
+}
+
+/// The Move Object part of a HELD_PROP line (`stick=[x, z, rot]`: left stick
+/// X / Z and right stick X as OB_ObjectMv intents).
+pub(crate) fn move_fields(mv: Option<MoveDiagnostics>) -> String {
+    match mv {
+        Some(m) => format!(
+            "stick=[{:.2}, {:.2}, {:.2}] command=[{:.2}, {:.2}] yaw_cmd={:.2} lever={:.2} rot={:.2} blocked={} drift={:.3} yaw_rate={:.3}",
+            m.stick[0], m.stick[1], m.stick[2], m.linear[0], m.linear[2], m.yaw, m.lever, m.rotation, m.blocked, m.drift, m.yaw_rate
+        ),
+        None => "stick=none".into(),
+    }
+}
+
+/// Seconds a released prop keeps logging HELD_PROP lines.
+const RELEASE_LOG_SECONDS: f32 = 3.0;
+/// HELD_PROP lines per second with trace-all (1 otherwise): a short push, pull, side step or
+/// turn of a held prop lasts well under a second.
+const HELD_PROP_HZ_TRACE_ALL: u64 = 5;
+/// Minimum seconds between two PROP_BELOW_GROUND lines for one prop.
+const BELOW_GROUND_LOG_SECONDS: f32 = 10.0;
+
+/// One body's ground relation, for the diagnostics and tests.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PropGroundProbe {
+    /// Box centre.
+    pub center: Vector3,
+    /// World-space half height of the (possibly tilted) box.
+    pub half_height: f32,
+    /// Height of the first static surface under the body, probed from above
+    /// its last rest height; `None` if nothing is under it.
+    pub ground: Option<f32>,
+}
+
+impl PropGroundProbe {
+    /// Box bottom minus the ground under it (negative = inside or below the floor).
+    pub(crate) fn gap(&self) -> Option<f32> {
+        self.ground.map(|g| self.center.y - self.half_height - g)
+    }
+
+    /// The centre is more than its half height below the floor: the box has
+    /// passed the floor's face and the one-sided triangle fixup can no longer
+    /// push it back up (see `step_with_actors`).
+    pub(crate) fn below_ground(&self) -> bool {
+        self.ground.is_some_and(|g| g - self.center.y > self.half_height)
+    }
+}
+
+pub(crate) struct PropDynamics {
+    bodies: Vec<PropBody>,
+    by_id: std::collections::HashMap<u32, usize>,
+    simulation: RetailSimulationStep,
+    pair: PrimitivePairSettings,
+    /// Prop currently carried: exempt from skater pushes and rebake.
+    held: Option<u32>,
+    /// The bodies are a skate.Park layout's pieces: retail's park load (`825111F8` mode 1) spawns them with no
+    /// placement record, so the census never culls them (research b681).
+    layout_pieces: bool,
+    tuning: PropTuningTable,
+    stats: PropStepStats,
+    /// Steps taken (diagnostics clock; deterministic, plain data).
+    tick: u64,
+    /// Prop released from a carry and the tick until which it keeps logging.
+    released: Option<(u32, u64)>,
+    /// Last tick a PROP_BELOW_GROUND line was written per prop id.
+    below_logged: std::collections::BTreeMap<u32, u64>,
+    /// Move Object values of the held prop for HELD_PROP.
+    move_diagnostics: Option<MoveDiagnostics>,
+    /// How Move Object commands reach a body (retail defaults, mod knobs).
+    move_rules: MoveCommandRules,
+    /// Next id [`PropDynamics::next_runtime_id`] tries.
+    next_runtime_id: u32,
+    /// Next grab slot ([`PropBody::grab_slot`]) for a body created mid-game.
+    next_grab_slot: u32,
+    /// Better Object Mover (PC overlay, not retail; user 2026-10-20): props without authored grab splines get
+    /// generated ones, so every prop can be moved. Off = retail (only props with authored splines).
+    better_object_mover: bool,
+    /// Grind rails per template id, template space (`native-props/<map>.json` `grind_splines`); looked up by
+    /// template at query time, so runtime copies of a template carry them too.
+    grind_rails: std::collections::BTreeMap<String, std::sync::Arc<[crate::grind_world::props::PropRail]>>,
+    /// The prop the local skater grinds now (`set_grinded`): the skater's volumes do not push it.
+    grinded: Option<u32>,
+    /// This tick's skater mesh contacts for the row solve (`PropSolverSettings::skater_rows`): prop index, manifold
+    /// (prop toward the skater volume), the volume's velocity, its mass and material.
+    skater_contacts: Vec<(usize, PrimitiveContactManifold, Vector3, f32, RetailContactMaterial, u64)>,
+    /// Each actor's solved row-body displacement of the last step (a ped's body A follows it: research b635 / b636),
+    /// the contact normal turned along it, and the body's solved velocity (retail's body A keeps it).
+    actor_shoves: Vec<(u64, Vector3, Vector3, Vector3)>,
+    /// Pushers (actor ids, [`LOCAL_PUSHER`] for the local skater) bailing this tick (`set_bailing`): their contacts
+    /// apply the bail clamp.
+    bailing: Vec<u64>,
+    /// Pushers that are not a 75 kg skater (`set_actor_push_mass`): actor id, kg. Peds' body A (10 kg, b342).
+    actor_push_mass: Vec<(u64, f32)>,
+    /// Static triangles only props collide with, read after the step's world (`set_props_only_world`).
+    props_only: Option<BoardWorld>,
+    /// `SKATE_PROP_WATCH="x y z r"`: the prop nearest that point logs `PROP_WATCH` every tick (the recomp's DMOROWS
+    /// counterpart): docs/hails-additions/27-dynamic-props.md#prop-watch-line
+    watch: Option<([f32; 4], Option<u32>)>,
+    /// Better Water's props in water (`set_water`); `None` = retail (props fall through water to the floor).
+    water: Option<super::prop_water::PropWater>,
+    /// Props that entered water this step: surface point, downward speed, box size (m), for the splash.
+    water_entries: Vec<(Vector3, f32, f32)>,
+}
+
+/// `SKATE_PROP_WATCH`: four numbers `x y z r` (spaces or commas).
+fn parse_watch(spec: &str) -> Option<[f32; 4]> {
+    let v: Vec<f32> = spec.split([' ', ',']).filter(|s| !s.is_empty()).map(str::parse).collect::<Result<_, _>>().ok()?;
+    let spec: [f32; 4] = v.try_into().ok()?;
+    (spec.iter().all(|x| x.is_finite()) && spec[3] >= 0.0).then_some(spec)
+}
+
+/// First id of bodies created mid-game: ids from here up to [`PROP_GRAB_TAG`]
+/// stay clear of the grab-scene tags (props `0x4000_0000`, cars the high bit).
+/// Ours: retail DMOs are addressed by manager slot, not by such an id.
+pub(crate) const RUNTIME_PROP_ID_BASE: u32 = 0x2000_0000;
+
+/// A prop body created mid-game ([`PropDynamics::spawn_body`]).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RuntimeProp {
+    /// Prop type key (template name), as a map prop's MOBJ name: picks the
+    /// prop tuning and is logged.
+    pub template: String,
+    /// Template-space collision triangles, scale folded in; the body box is
+    /// their bounds.
+    pub local: Vec<[Vector3; 3]>,
+    /// Authored physics block (density, damping, friction, restitution, gravity scale, sleep).
+    pub physics: skate_data::skate_map::ObjectPhysics,
+    /// Retail per-type data of the template, when known.
+    pub type_data: Option<DmoType>,
+    /// Template origin and rotation at creation.
+    pub origin: Vector3,
+    pub basis: Basis3,
+    pub linear_velocity: Vector3,
+    pub angular_velocity: Vector3,
+}
+
+/// Move Object values logged on HELD_PROP lines.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct MoveDiagnostics {
+    /// OB_ObjectMvX / Z / Rot.
+    pub stick: [f32; 3],
+    pub linear: [f32; 3],
+    pub yaw: f32,
+    pub lever: f32,
+    pub rotation: f32,
+    pub blocked: bool,
+    pub drift: f32,
+    /// Measured yaw rate the yaw controller tracks (82D45318 +1192 sign kept).
+    pub yaw_rate: f32,
+}
+
+/// 82C4C4E0, our prop pass of the shared rail query: props in id order (retail walks its DMO hash table; NOT
+/// RETAIL ORDER), each placed by its last stepped pose (`grind_world::props::PosedRails`).
+impl crate::grind_world::RailSource for PropDynamics {
+    fn append_rails(&self, min: [f32; 3], max: [f32; 3], skip: Option<u32>, rules: &crate::grind_world::RailRules, out: &mut Vec<crate::grind_world::RailHit>) {
+        if self.grind_rails.is_empty() {
+            return;
+        }
+        for posed in self.rail_poses(skip).0 {
+            if !posed.append(min, max, rules, out) {
+                return;
+            }
+        }
+    }
+    fn describe(&self, id: u32) -> Option<String> {
+        self.template_of(id).map(|_| self.describe_template(id))
+    }
+}
+
+fn mul_basis(basis: Basis3, v: Vector3) -> Vector3 {
+    Vector3::new(
+        basis.columns[0][0] * v.x + basis.columns[1][0] * v.y + basis.columns[2][0] * v.z,
+        basis.columns[0][1] * v.x + basis.columns[1][1] * v.y + basis.columns[2][1] * v.z,
+        basis.columns[0][2] * v.x + basis.columns[1][2] * v.y + basis.columns[2][2] * v.z,
+    )
+}
+
+fn cross(a: Vector3, b: Vector3) -> Vector3 {
+    Vector3::new(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+    )
+}
+
+fn dot(a: Vector3, b: Vector3) -> f32 {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn add(a: Vector3, b: Vector3) -> Vector3 {
+    Vector3::new(a.x + b.x, a.y + b.y, a.z + b.z)
+}
+
+fn sub(a: Vector3, b: Vector3) -> Vector3 {
+    Vector3::new(a.x - b.x, a.y - b.y, a.z - b.z)
+}
+
+fn scale(v: Vector3, s: f32) -> Vector3 {
+    Vector3::new(v.x * s, v.y * s, v.z * s)
+}
+
+fn length(v: Vector3) -> f32 {
+    dot(v, v).sqrt()
+}
+
+fn mul_components(a: Vector3, b: Vector3) -> Vector3 {
+    Vector3::new(a.x * b.x, a.y * b.y, a.z * b.z)
+}
+
+/// Shepperd's method; the basis is a pure rotation by construction.
+fn quaternion_from_basis(basis: Basis3) -> RetailQuaternion {
+    let m = |c: usize, r: usize| basis.columns[c][r];
+    let trace = m(0, 0) + m(1, 1) + m(2, 2);
+    let (x, y, z, w) = if trace > 0.0 {
+        let s = (trace + 1.0).sqrt() * 2.0;
+        (
+            (m(1, 2) - m(2, 1)) / s,
+            (m(2, 0) - m(0, 2)) / s,
+            (m(0, 1) - m(1, 0)) / s,
+            0.25 * s,
+        )
+    } else if m(0, 0) > m(1, 1) && m(0, 0) > m(2, 2) {
+        let s = (1.0 + m(0, 0) - m(1, 1) - m(2, 2)).sqrt() * 2.0;
+        (
+            0.25 * s,
+            (m(1, 0) + m(0, 1)) / s,
+            (m(2, 0) + m(0, 2)) / s,
+            (m(1, 2) - m(2, 1)) / s,
+        )
+    } else if m(1, 1) > m(2, 2) {
+        let s = (1.0 + m(1, 1) - m(0, 0) - m(2, 2)).sqrt() * 2.0;
+        (
+            (m(1, 0) + m(0, 1)) / s,
+            0.25 * s,
+            (m(2, 1) + m(1, 2)) / s,
+            (m(2, 0) - m(0, 2)) / s,
+        )
+    } else {
+        let s = (1.0 + m(2, 2) - m(0, 0) - m(1, 1)).sqrt() * 2.0;
+        (
+            (m(2, 0) + m(0, 2)) / s,
+            (m(2, 1) + m(1, 2)) / s,
+            0.25 * s,
+            (m(0, 1) - m(1, 0)) / s,
+        )
+    };
+    let inverse = 1.0 / (x * x + y * y + z * z + w * w).sqrt().max(1e-20);
+    RetailQuaternion {
+        x: x * inverse,
+        y: y * inverse,
+        z: z * inverse,
+        w: w * inverse,
+    }
+}
+
+impl PropBody {
+    fn box_primitive(&self) -> ContactPrimitive {
+        ContactPrimitive::RoundedBox {
+            center: self.rates.position,
+            basis: self.rates.basis,
+            half_extents: self.half_extents,
+            radius: 0.0,
+        }
+    }
+
+    fn bounds(&self) -> skate_core::physics::board_world::query_metadata::Bounds {
+        let half = [self.half_extents.x, self.half_extents.y, self.half_extents.z];
+        let extent = |axis: usize| {
+            self.rates
+                .basis
+                .columns
+                .iter()
+                .zip(half)
+                .map(|(column, h)| h * column[axis].abs())
+                .sum::<f32>()
+        };
+        let (ex, ey, ez) = (extent(0), extent(1), extent(2));
+        let c = self.rates.position;
+        skate_core::physics::board_world::query_metadata::Bounds {
+            min: Vector3::new(c.x - ex, c.y - ey, c.z - ez),
+            max: Vector3::new(c.x + ex, c.y + ey, c.z + ez),
+        }
+    }
+
+    fn wake(&mut self) {
+        self.asleep = false;
+        self.rates.cool_down = 0;
+    }
+
+    /// Impulse applied at a world point, directly to velocities. Returns the
+    /// impulse vector for the other body / wake accounting.
+    fn apply_impulse(&mut self, impulse: Vector3, point: Vector3) -> Vector3 {
+        self.wake();
+        self.add_impulse(impulse, point)
+    }
+
+    /// [`Self::apply_impulse`] without the wake: a steady force (the water) must not reset the sleep counter, or a
+    /// prop resting under it never sleeps (USER-ASKS 390).
+    fn add_impulse(&mut self, impulse: Vector3, point: Vector3) -> Vector3 {
+        self.rates.linear_velocity = add(
+            self.rates.linear_velocity,
+            scale(impulse, self.inertia.inverse_mass),
+        );
+        let r = sub(point, self.rates.position);
+        let angular = cross(r, impulse);
+        let delta = mul_basis(self.rates.world_inverse_inertia, angular);
+        self.rates.angular_velocity = add(self.rates.angular_velocity, delta);
+        impulse
+    }
+
+    fn velocity_at(&self, point: Vector3) -> Vector3 {
+        add(
+            self.rates.linear_velocity,
+            cross(self.rates.angular_velocity, sub(point, self.rates.position)),
+        )
+    }
+
+    /// Template-origin pose for rendering and collision rebake.
+    fn origin(&self) -> Vector3 {
+        sub(
+            self.rates.position,
+            mul_basis(self.rates.basis, self.local_center),
+        )
+    }
+}
+
+/// Pose tolerance for "moved" (metres / basis component). Ours: float noise
+/// of a body that slept at its authored pose; retail's per-DMO moved flag is a
+/// record field (sub_826666A8 reads it), not a distance. NOT RETAIL YET.
+const SPAWN_POSE_EPSILON: f32 = 1e-4;
+
+impl PropDynamics {
+    /// One box body per collision-layer instance, asleep at its authored pose, with the MOBJ physics block.
+    pub(crate) fn new(
+        objects: &[skate_data::skate_map::StaticObject],
+        instances: &[crate::skate_world::PropCollisionInstance],
+        simulation: RetailSimulationStep,
+    ) -> Self {
+        let mut bodies = Vec::new();
+        let mut by_id = std::collections::HashMap::new();
+        for (index, entry) in instances.iter().enumerate() {
+            let object = &objects[entry.object];
+            let Some(mut body) = Self::build_body(index, entry.id, &object.name, entry.local_points(), object.physics, &object.transform, simulation) else {
+                continue;
+            };
+            body.grab_slot = bodies.len() as u32;
+            body.rebuild_grab_geometry();
+            bodies.push(body);
+            by_id.insert(entry.id, bodies.len() - 1);
+        }
+        let next_grab_slot = bodies.len() as u32;
+        Self {
+            bodies,
+            by_id,
+            next_grab_slot,
+            better_object_mover: false,
+            simulation,
+            pair: PrimitivePairSettings {
+                padding_a: PropTuning::default().contact_padding,
+                padding_b: PropTuning::default().contact_padding,
+                additional_padding: 0.0,
+                edge_cos_bend_normal_threshold: 0.999,
+                convexity_epsilon: 0.01,
+            },
+            held: None,
+            layout_pieces: false,
+            tuning: PropTuningTable::default(),
+            stats: PropStepStats::default(),
+            tick: 0,
+            released: None,
+            below_logged: std::collections::BTreeMap::new(),
+            move_diagnostics: None,
+            move_rules: MoveCommandRules::default(),
+            next_runtime_id: RUNTIME_PROP_ID_BASE,
+            grind_rails: std::collections::BTreeMap::new(),
+            grinded: None,
+            skater_contacts: Vec::new(),
+            actor_shoves: Vec::new(),
+            bailing: Vec::new(),
+            actor_push_mass: Vec::new(),
+            props_only: None,
+            watch: std::env::var("SKATE_PROP_WATCH").ok().and_then(|s| parse_watch(&s)).map(|spec| (spec, None)),
+            water: None,
+            water_entries: Vec::new(),
+        }
+    }
+
+    pub(crate) fn water(&self) -> Option<super::prop_water::PropWater> {
+        self.water
+    }
+
+    /// Better Water's props in water on (`Some`) or retail (`None`). A switch wakes every prop in water, so floating
+    /// props sink to the floor (off) or rise again (on). Returns how many woke.
+    pub(crate) fn set_water(&mut self, water: Option<super::prop_water::PropWater>, world: &BoardWorld) -> usize {
+        let was = self.water.is_some();
+        self.water = water;
+        if was == water.is_some() {
+            return 0;
+        }
+        let mut woke = 0;
+        for body in self.bodies.iter_mut().filter(|b| !b.dormant && b.asleep) {
+            let bounds = body.bounds();
+            let probe = Vector3::new(body.rates.position.x, bounds.min.y, body.rates.position.z);
+            if world.water_surface_at(probe, 0.05, bounds.max.y - bounds.min.y + super::prop_water::SURFACE_DEPTH).is_some() {
+                body.wake();
+                woke += 1;
+            }
+        }
+        woke
+    }
+
+    pub(crate) fn has_water_entries(&self) -> bool {
+        !self.water_entries.is_empty()
+    }
+
+    /// The prop audio's entries (awake props, map order; ids are the stable instance ids) with their strongest
+    /// contact since the last call, into `out` (cleared first): docs/hails-additions/27-dynamic-props.md#prop-sounds
+    pub(crate) fn take_audio_samples(&mut self, out: &mut Vec<PropAudioSample>) {
+        out.clear();
+        let held = self.held;
+        for body in &mut self.bodies {
+            let contact = body.audio_contact.take();
+            let pushed = std::mem::take(&mut body.audio_pushed);
+            if body.dormant || (body.asleep && contact.is_none()) {
+                continue;
+            }
+            let length = |v: Vector3| dot(v, v).sqrt();
+            let p = body.rates.position;
+            out.push(PropAudioSample {
+                id: u64::from(body.id),
+                audio: body.type_data.as_ref().and_then(|t| t.audio.clone()),
+                position: [p.x, p.y, p.z],
+                speed: length(body.rates.linear_velocity),
+                spin: length(body.rates.angular_velocity),
+                // Entry +0x20 (its writer is not traced): the local player moves it (Move Object: the whole carry, not
+                // only reads that land before the step clears `commanded`) or pushed it this read.
+                pushed: held == Some(body.id) || body.commanded || body.commanded_block || pushed,
+                velocity: [body.rates.linear_velocity.x, body.rates.linear_velocity.y, body.rates.linear_velocity.z],
+                contact: contact.map(|(strength, tag)| (strength, skate_audio::player::state::material_of_tag(tag & 0x7F) as i32)),
+            });
+        }
+    }
+
+    /// The actors' solved displacements since the last call (actor id, displacement, contact normal along it).
+    pub(crate) fn take_actor_shoves(&mut self, out: &mut Vec<(u64, Vector3, Vector3, Vector3)>) {
+        out.clear();
+        out.append(&mut self.actor_shoves);
+    }
+
+    /// Props that entered water since the last call (surface point, downward speed, box size), for splashes.
+    pub(crate) fn take_water_entries(&mut self) -> Vec<(Vector3, f32, f32)> {
+        std::mem::take(&mut self.water_entries)
+    }
+
+    /// Buoyancy and water drag on every awake, free prop in water (Better Water): docs/hails-additions/09-water.md#props-in-water
+    fn apply_water(&mut self, world: &BoardWorld, gravity: Vector3, dt: f32) {
+        let Some(water) = self.water else { return };
+        for index in 0..self.bodies.len() {
+            if self.is_held(index) {
+                continue;
+            }
+            let body = &self.bodies[index];
+            if body.asleep || body.dormant || body.inertia.inverse_mass <= 0.0 {
+                continue;
+            }
+            let bounds = body.bounds();
+            let height = (bounds.max.y - bounds.min.y) / 2.0;
+            let c = body.rates.position;
+            // One query at the bottom first: most props are nowhere near water.
+            let bottom = Vector3::new(c.x, bounds.min.y, c.z);
+            let Some(surface) = world.water_surface_at(bottom, super::prop_water::SURFACE_ABOVE, super::prop_water::SURFACE_DEPTH + 2.0 * height) else {
+                continue;
+            };
+            let half = body.half_extents;
+            let mass = body.inertia.inverse_mass.recip();
+            // Deep = the prop cannot reach the floor while floating: the water carries it and it bobs. Shallow = its
+            // own material decides: heavy ones sink, light ones float near the top (user 2026-10-26).
+            let material = body.tuning.water_density.unwrap_or_else(|| super::prop_water::density_for_template(&body.template));
+            let surface_point = Vector3::new(c.x, surface, c.z);
+            let deep = world
+                .deep_water_surface_at(surface_point, 0.01, 0.02, (2.0 * height).max(skate_core::physics::board_world::FLOAT_DEPTH))
+                .is_some();
+            // Heavy props (a dumpster) always sink, even where deep water carries the rest (user 2026-10-26).
+            let heavy = material >= water.heavy_density;
+            let density = if deep && !heavy { material.min(water.deep_float_density) } else { material };
+            // Sunk and resting on the floor: no water forces, so it settles and sleeps like on land (ask 390).
+            let speed2 = dot(body.rates.linear_velocity, body.rates.linear_velocity);
+            if density > water.density && body.contacts > 0 && speed2 < water.settle_speed * water.settle_speed {
+                continue;
+            }
+            // The water this mass displaces when fully under: the solver mass over the material density.
+            let volume = mass / density.max(1.0);
+            let lift = if deep { super::prop_water::bob(&water, c.x, c.z, self.tick as f32 * dt) } else { 0.0 };
+            let columns = body.rates.basis.columns;
+            let samples = super::prop_water::samples(c, columns, half, height, |p| {
+                world.water_surface_at(p, height, super::prop_water::SURFACE_DEPTH + 2.0 * height).map(|h| h + lift)
+            });
+            let submerged = samples.iter().map(|s| s.submerged).sum::<f32>() / 8.0;
+            if submerged <= 0.0 {
+                continue;
+            }
+            // Entry: the bottom was above the surface last step and the box falls into it.
+            let falling = -body.rates.linear_velocity.y;
+            // Capped: without the splash sprite nothing drains them.
+            if bounds.min.y - body.rates.linear_velocity.y * dt > surface {
+                let floor = world.query_thin_line(Vector3::new(c.x, surface - 0.001, c.z), Vector3::new(c.x, surface - 30.0, c.z)).ok().flatten();
+                let depth = floor.map_or("over 30".to_string(), |h| format!("{:.2}", surface - h.geometry.position.y));
+                info!("PROP_WATER_ENTRY prop={} {} water ({depth} m deep, prop {:.2} m tall), density {density:.0} kg/m3 (material {material:.0}) vs water {:.0} at [{:.1}, {:.1}, {:.1}] falling {falling:.1} m/s ({})",
+                    body.id, if deep { "deep" } else { "shallow" }, 2.0 * height, water.density, c.x, surface, c.z, body.template);
+                if falling > super::prop_water::SPLASH_SPEED && self.water_entries.len() < 16 {
+                    self.water_entries.push((Vector3::new(c.x, surface, c.z), falling, 2.0 * half.x.max(half.z)));
+                }
+            }
+            let body = &mut self.bodies[index];
+            for s in samples {
+                let impulse = super::prop_water::sample_impulse(&water, s, volume, mass, body.velocity_at(s.point), gravity, dt);
+                if impulse != Vector3::ZERO {
+                    body.add_impulse(impulse, s.point);
+                }
+            }
+            body.rates.angular_velocity = super::prop_water::spin_damped(&water, body.rates.angular_velocity, submerged, dt);
+            // Water too deep to see the bottom (the prop's height plus the fade depth, like the sea): the prop fades as
+            // its top goes under, and once gone it rests where it is, asleep and hidden (a reset brings it back).
+            if water.fade_depth > 0.0 && submerged >= 1.0 {
+                let abyss = world
+                    .deep_water_surface_at(surface_point, 0.01, 0.02, 2.0 * height + water.fade_depth)
+                    .is_some();
+                if abyss {
+                    let fade = super::prop_water::fade(&water, surface, bounds.max.y);
+                    body.water_fade = body.water_fade.min(fade);
+                    if body.water_fade <= 0.0 {
+                        body.rates.linear_velocity = Vector3::ZERO;
+                        body.rates.angular_velocity = Vector3::ZERO;
+                        body.asleep = true;
+                        info!("PROP_WATER_GONE prop={} sank out of sight at [{:.1}, {:.1}, {:.1}] ({})", body.id, c.x, c.y, c.z, body.template);
+                    }
+                }
+            }
+        }
+    }
+
+    /// No bodies yet (a map without placed props, which can still get props
+    /// created mid-game).
+    pub(crate) fn empty(simulation: RetailSimulationStep) -> Self {
+        Self::new(&[], &[], simulation)
+    }
+
+    /// A free id for a body created mid-game: the first unused id from
+    /// [`RUNTIME_PROP_ID_BASE`] up, in creation order (deterministic, so a host
+    /// and its peers agree when the host hands them out).
+    pub(crate) fn next_runtime_id(&mut self) -> u32 {
+        let after = |id: u32| if id + 1 >= PROP_GRAB_TAG { RUNTIME_PROP_ID_BASE } else { id + 1 };
+        let mut id = self.next_runtime_id.max(RUNTIME_PROP_ID_BASE);
+        while self.by_id.contains_key(&id) {
+            id = after(id);
+        }
+        self.next_runtime_id = after(id);
+        id
+    }
+
+    /// Create an awake body mid-game (retail: DMO for a released hand prop); false = no volume or `id` taken.
+    pub(crate) fn spawn_body(&mut self, instance: usize, id: u32, spec: &RuntimeProp) -> bool {
+        if self.by_id.contains_key(&id) {
+            return false;
+        }
+        let c = spec.basis.columns;
+        let t = [
+            c[0][0], c[0][1], c[0][2], c[1][0], c[1][1], c[1][2], c[2][0], c[2][1], c[2][2],
+            spec.origin.x, spec.origin.y, spec.origin.z,
+        ];
+        let Some(mut body) = Self::build_body(instance, id, &spec.template, &spec.local, spec.physics, &t, self.simulation)
+        else {
+            return false;
+        };
+        body.runtime = true;
+        if self.better_object_mover {
+            body.grab_splines = generated_grab_splines(&body);
+        }
+        body.grab_slot = self.next_grab_slot;
+        self.next_grab_slot = self.next_grab_slot.wrapping_add(1);
+        body.rebuild_grab_geometry();
+        body.type_data = spec.type_data.clone();
+        body.rates.linear_velocity = spec.linear_velocity;
+        body.rates.angular_velocity = spec.angular_velocity;
+        let tuning = *self.tuning.for_template(&spec.template);
+        Self::apply_tuning(&mut body, tuning);
+        body.asleep = false;
+        self.bodies.push(body);
+        let index = self.bodies.len() - 1;
+        self.by_id.insert(id, index);
+        let inertia = self.body_inertia(index);
+        let body = &mut self.bodies[index];
+        body.inertia = inertia;
+        body.rates.world_inverse_inertia = world_inverse_inertia(body.rates.basis, inertia.inverse_tensor);
+        true
+    }
+
+    /// Remove a body created mid-game (retail removes the released hand prop's
+    /// DMO). Map props are never removed. Returns its collision instance for
+    /// `PropCollisionLayer::retire_instance`.
+    pub(crate) fn remove_body(&mut self, id: u32) -> Option<usize> {
+        let index = *self.by_id.get(&id)?;
+        if !self.bodies[index].runtime {
+            return None;
+        }
+        if self.held == Some(id) {
+            self.set_held(None);
+        }
+        let body = self.bodies.remove(index);
+        self.by_id = self.bodies.iter().enumerate().map(|(i, b)| (b.id, i)).collect();
+        if self.released.is_some_and(|(r, _)| r == id) {
+            self.released = None;
+        }
+        self.below_logged.remove(&id);
+        Some(body.instance)
+    }
+
+    /// A [`RuntimeProp`] copying body `id`'s template, physics block and type
+    /// data, at its current pose and at rest; `local` is left empty for the
+    /// caller to fill from the collision layer.
+    pub(crate) fn copy_spec(&self, id: u32) -> Option<RuntimeProp> {
+        let body = self.bodies.get(*self.by_id.get(&id)?)?;
+        Some(RuntimeProp {
+            template: body.template.clone(),
+            local: Vec::new(),
+            physics: body.physics,
+            type_data: body.type_data.clone(),
+            origin: body.origin(),
+            basis: body.rates.basis,
+            linear_velocity: Vector3::ZERO,
+            angular_velocity: Vector3::ZERO,
+        })
+    }
+
+    /// Whether `id` is a body created mid-game.
+    pub(crate) fn is_runtime(&self, id: u32) -> bool {
+        self.by_id.get(&id).is_some_and(|&i| self.bodies[i].runtime)
+    }
+
+    /// One asleep box body at placement `t` (rows = scaled local axes); `None` without triangles or mass.
+    #[allow(clippy::too_many_arguments)]
+    fn build_body(
+        instance: usize,
+        id: u32,
+        template: &str,
+        local_points: &[[Vector3; 3]],
+        authored: skate_data::skate_map::ObjectPhysics,
+        t: &[f32; 12],
+        simulation: RetailSimulationStep,
+    ) -> Option<PropBody> {
+        let axis_scale = [
+            (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt(),
+            (t[3] * t[3] + t[4] * t[4] + t[5] * t[5]).sqrt(),
+            (t[6] * t[6] + t[7] * t[7] + t[8] * t[8]).sqrt(),
+        ];
+        let basis = Basis3 {
+            columns: [
+                [t[0] / axis_scale[0], t[1] / axis_scale[0], t[2] / axis_scale[0]],
+                [t[3] / axis_scale[1], t[4] / axis_scale[1], t[5] / axis_scale[1]],
+                [t[6] / axis_scale[2], t[7] / axis_scale[2], t[8] / axis_scale[2]],
+            ],
+        };
+        let first = local_points.first()?[0];
+        let mut min = first;
+        let mut max = first;
+        for point in local_points.iter().flatten() {
+            min = Vector3::new(min.x.min(point.x), min.y.min(point.y), min.z.min(point.z));
+            max = Vector3::new(max.x.max(point.x), max.y.max(point.y), max.z.max(point.z));
+        }
+        let local_center = scale(add(min, max), 0.5);
+        let half_extents = scale(sub(max, min), 0.5);
+        let volume = 8.0 * half_extents.x * half_extents.y * half_extents.z;
+        let properties = primitive_mass_properties(
+            skate_core::physics::mass::PartMassInput {
+                shape: skate_core::physics::mass::MassShape::RoundedBox {
+                    half_extents,
+                    radius: 0.0,
+                },
+                requested_mass: volume * authored.density.max(0.001),
+            },
+            RETAIL_UNBOUNDED_VELOCITY,
+            authored.angular_damping,
+        )?;
+        let mut inertia = properties.dynamics;
+        inertia.linear_drag = authored.linear_damping;
+        inertia.maximum_linear_velocity = RETAIL_UNBOUNDED_VELOCITY;
+        let origin = Vector3::new(t[9], t[10], t[11]);
+        let center = add(origin, mul_basis(basis, local_center));
+        Some(PropBody {
+            instance,
+            id,
+            grab_slot: 0,
+            local_center,
+            half_extents,
+            template: template.to_string(),
+            type_data: None,
+            grab_splines: Vec::new(),
+            grab_geometry: Vec::new(),
+            authored_grab: false,
+            tuning: PropTuning::default(),
+            authored_center: local_center,
+            authored_half_extents: half_extents,
+            axis_scale: Vector3::new(axis_scale[0], axis_scale[1], axis_scale[2]),
+            stuck_ticks: 0,
+            pushed_by: None,
+            push_log: None,
+            baked: None,
+            contacts: 0,
+            rest_y: center.y,
+            spawn_origin: origin,
+            spawn_basis: basis,
+            commanded: false,
+            commanded_block: false,
+            upright_timer: None,
+            water_fade: 1.0,
+            audio_contact: None,
+            audio_pushed: false,
+            rates: RetailBodyRates {
+                orientation: quaternion_from_basis(basis),
+                basis,
+                world_inverse_inertia: world_inverse_inertia(basis, inertia.inverse_tensor),
+                position: center,
+                linear_velocity: Vector3::ZERO,
+                angular_velocity: Vector3::ZERO,
+                force_acceleration: scale(
+                    simulation.gravity_acceleration,
+                    authored.gravity_scale,
+                ),
+                torque_acceleration: Vector3::ZERO,
+                kinetic_energy: 0.0,
+                cool_down: simulation.cool_down,
+            },
+            inertia,
+            authored_inertia: inertia,
+            material: RetailContactMaterial {
+                static_friction: authored.friction,
+                dynamic_friction: authored.friction,
+                restitution: authored.restitution,
+            },
+            enable_sleep: authored.enable_sleep,
+            asleep: !authored.initially_awake,
+            dormant: false,
+            runtime: false,
+            physics: authored,
+        })
+    }
+
+    /// Move Object command rules in effect.
+    pub(crate) fn move_rules(&self) -> &MoveCommandRules {
+        &self.move_rules
+    }
+
+    /// Replace the Move Object command rules (mod tuning; `Default` restores
+    /// retail on mod disable).
+    pub(crate) fn set_move_rules(&mut self, rules: MoveCommandRules) {
+        self.move_rules = rules;
+        self.refresh_inertia();
+    }
+
+    /// Body `index`'s own material block: what retail copies into its
+    /// collision objects (CO +116..+124) before the pair combine.
+    fn body_material(&self, index: usize) -> RetailContactMaterial {
+        let body = &self.bodies[index];
+        self.move_rules.typed_body_material(&self.body_blocks(body), body.material, body.commanded_block, body.rates.basis.columns[1][1])
+    }
+
+    /// Effective type blocks of a body: mod entry over its retail type data.
+    fn body_blocks(&self, body: &PropBody) -> PropMaterialBlocks {
+        let (key, retail) = match &body.type_data {
+            Some(t) => (Some(t.key.as_str()), t.blocks),
+            None => (None, PropMaterialBlocks::default()),
+        };
+        self.move_rules.blocks(&body.template, key, &retail)
+    }
+
+    /// Body `index`'s Inertia (82C4E568): type data, then mod rules, then authored MOBJ: docs/hails-additions/27-dynamic-props.md#body-inertia-82c4e568
+    fn body_inertia(&self, index: usize) -> RetailInertiaDynamics {
+        let body = &self.bodies[index];
+        let blocks = self.body_blocks(body);
+        let authored = body.authored_inertia;
+        let mut inertia = if blocks.mass.is_some() || blocks.inertia_scale.is_some() || blocks.inertia_offset.is_some() {
+            let v = |a: [f32; 3]| Vector3::new(a[0], a[1], a[2]);
+            dmo_body_inertia(
+                body.authored_half_extents,
+                DmoBodyData {
+                    mass: blocks.mass.unwrap_or(1.0 / authored.inverse_mass),
+                    maximum_linear_velocity: authored.maximum_linear_velocity,
+                    maximum_angular_velocity: authored.maximum_angular_velocity,
+                    linear_drag: authored.linear_drag,
+                    angular_drag: authored.angular_drag,
+                    inertia_scale: v(blocks.inertia_scale.unwrap_or(DMO_DEFAULT_INERTIA_SCALE)),
+                    inertia_offset: v(blocks.inertia_offset.unwrap_or([0.0; 3])),
+                },
+            )
+        } else {
+            authored
+        };
+        if let Some(cap) = blocks.maximum_linear_velocity {
+            inertia.maximum_linear_velocity = cap;
+        }
+        if let Some(cap) = blocks.maximum_angular_velocity {
+            inertia.maximum_angular_velocity = cap;
+        }
+        if let Some(drag) = blocks.linear_drag {
+            inertia.linear_drag = drag;
+        }
+        if let Some(drag) = blocks.angular_drag {
+            inertia.angular_drag = drag;
+        }
+        inertia
+    }
+
+    /// Store every body's effective Inertia ([`Self::body_inertia`]) and its
+    /// world inverse inertia: after type data or mod rules change (mod
+    /// disable restores retail through `MoveCommandRules::default()`).
+    fn refresh_inertia(&mut self) {
+        for index in 0..self.bodies.len() {
+            let inertia = self.body_inertia(index);
+            let body = &mut self.bodies[index];
+            body.inertia = inertia;
+            body.rates.world_inverse_inertia = world_inverse_inertia(body.rates.basis, inertia.inverse_tensor);
+        }
+    }
+
+    /// Attach the retail per-type data, keyed by template id (the MOBJ name's
+    /// part before '/'). Bodies whose template is not in `types` keep their
+    /// authored material. Returns how many bodies got type data.
+    pub(crate) fn set_type_data(&mut self, types: &std::collections::BTreeMap<String, DmoType>) -> usize {
+        let mut count = 0;
+        for body in &mut self.bodies {
+            let id = body.template.split('/').next().unwrap_or_default();
+            body.type_data = types.get(id).cloned();
+            count += usize::from(body.type_data.is_some());
+        }
+        self.refresh_inertia();
+        count
+    }
+
+    /// The authored grab splines per template id (`native-props/<map>.json` `grab_splines`). Returns the props that
+    /// got splines.
+    pub(crate) fn set_grab_splines(&mut self, splines: &std::collections::BTreeMap<String, Vec<crate::living_world::vehicles::CarGrabSpline>>) -> usize {
+        let mut count = 0;
+        let better = self.better_object_mover;
+        for body in &mut self.bodies {
+            let id = body.template.split('/').next().unwrap_or_default();
+            body.grab_splines = splines.get(id).cloned().unwrap_or_default();
+            body.authored_grab = !body.grab_splines.is_empty();
+            count += usize::from(body.authored_grab);
+            if better && !body.authored_grab {
+                body.grab_splines = generated_grab_splines(body);
+            }
+            body.rebuild_grab_geometry();
+        }
+        count
+    }
+
+    pub(crate) fn better_object_mover(&self) -> bool {
+        self.better_object_mover
+    }
+
+    /// Better Object Mover on / off: props without authored grab splines get generated ones / lose them. Returns how
+    /// many props have generated splines now.
+    pub(crate) fn set_better_object_mover(&mut self, on: bool) -> usize {
+        self.better_object_mover = on;
+        let mut generated = 0;
+        for body in self.bodies.iter_mut().filter(|b| !b.authored_grab) {
+            body.grab_splines = if on { generated_grab_splines(body) } else { Vec::new() };
+            body.rebuild_grab_geometry();
+            generated += usize::from(!body.grab_splines.is_empty());
+        }
+        generated
+    }
+
+    /// The grind rails per template id (`native-props/<map>.json` `grind_splines`). Returns the props that got
+    /// rails.
+    pub(crate) fn set_grind_rails(&mut self, rails: std::collections::BTreeMap<String, Vec<crate::grind_world::props::PropRail>>) -> usize {
+        self.grind_rails = rails.into_iter().filter(|(_, r)| !r.is_empty()).map(|(k, r)| (k, r.into())).collect();
+        self.bodies.iter().filter(|b| self.rails_of(b).is_some()).count()
+    }
+
+    /// The prop the local skater grinds this tick (none when not grinding a prop).
+    pub(crate) fn set_grinded(&mut self, id: Option<u32>) {
+        self.grinded = id;
+    }
+
+    /// The pushers bailing this tick (retail's bail clamp gate; ours: the wipeout state, `board_wiping_out`).
+    pub(crate) fn set_bailing(&mut self, actors: &[u64]) {
+        self.bailing.clear();
+        self.bailing.extend_from_slice(actors);
+    }
+
+    /// The push mass of actors that are not a skater (actor id, kg), for this tick's step; any other actor pushes with
+    /// the prop's `skater_push_mass`.
+    pub(crate) fn set_actor_push_mass(&mut self, actors: &[(u64, f32)]) {
+        self.actor_push_mass.clear();
+        self.actor_push_mass.extend_from_slice(actors);
+    }
+
+    /// Static triangles props collide with and the skater does not (skate.Park IgnoreFuser pieces).
+    pub(crate) fn set_props_only_world(&mut self, world: Option<BoardWorld>) {
+        self.props_only = world;
+    }
+
+    fn rails_of(&self, body: &PropBody) -> Option<&std::sync::Arc<[crate::grind_world::props::PropRail]>> {
+        self.grind_rails.get(body.template.split('/').next().unwrap_or_default())
+    }
+
+    /// Every awake or resting (not streamed-out) prop with rails at its last stepped pose, id order, without
+    /// `skip` (the carried prop).
+    pub(crate) fn rail_poses(&self, skip: Option<u32>) -> crate::grind_world::props::PropRailPoses {
+        let mut out: Vec<_> = self
+            .bodies
+            .iter()
+            .filter(|b| !b.dormant && Some(b.id) != skip)
+            .filter_map(|b| {
+                let rails = self.rails_of(b)?.clone();
+                let o = b.origin();
+                let s = b.axis_scale;
+                Some(crate::grind_world::props::PosedRails { id: b.id, tag: crate::grind_world::props::PROP_OWNER_TAG, origin: [o.x, o.y, o.z], basis: b.rates.basis.columns, scale: [s.x, s.y, s.z], rails })
+            })
+            .collect();
+        out.sort_by_key(|p| p.id);
+        crate::grind_world::props::PropRailPoses(out)
+    }
+
+    /// Props with grab splines as grab-scene objects (scene +4084, b54; NOT RETAIL YET assembly): docs/hails-additions/27-dynamic-props.md#prop-grab-objects
+    pub(crate) fn grab_objects(&self) -> Vec<skate_core::player::offboard::grab_scene::Object> {
+        self.bodies.iter().filter(|b| !b.dormant).filter_map(Self::grab_object_of).collect()
+    }
+
+    /// One prop's grab-scene object (see [`Self::grab_objects`]) from its current pose; `None` without
+    /// authored grab splines. Move Object rebuilds the held record from it every tick (82D44A10 path A).
+    pub(crate) fn grab_object(&self, id: u32) -> Option<skate_core::player::offboard::grab_scene::Object> {
+        Self::grab_object_of(self.bodies.get(*self.by_id.get(&id)?)?)
+    }
+
+    /// The prop id of a grab-scene object or spline key (`PROP_GRAB_TAG | slot << 6 | index`, or the object id
+    /// `PROP_GRAB_TAG | slot` with `spline_key` false); `None` for a key that is not a present prop's.
+    pub(crate) fn prop_of_grab_key(&self, key: u32, spline_key: bool) -> Option<u32> {
+        if key & PROP_GRAB_TAG == 0 {
+            return None;
+        }
+        let slot = if spline_key { (key & !PROP_GRAB_TAG) >> 6 } else { key & !PROP_GRAB_TAG };
+        self.bodies.iter().find(|b| b.grab_slot == slot).map(|b| b.id)
+    }
+
+    fn grab_object_of(b: &PropBody) -> Option<skate_core::player::offboard::grab_scene::Object> {
+        use skate_core::player::offboard::grab_scene::{AssemblyData, Descriptor, Object, PartData, Provider, RatesData, Spline};
+        #[cfg(test)]
+        assert_eq!(format!("{:?}", b.grab_geometry), format!("{:?}", grab_geometry_of(b)), "grab geometry cache is current");
+        (!b.grab_splines.is_empty() && b.grab_slot < (1 << 24))
+            .then(|| {
+                let id = PROP_GRAB_TAG | b.grab_slot;
+                let o = b.origin();
+                let c = b.rates.basis.columns;
+                Object {
+                    id,
+                    provider: Provider::LivingWorld,
+                    disabled: false,
+                    assembly_ready: true,
+                    // 82585F58 (b227): the part is the prop's one body; +216 is only a null gate: docs/hails-additions/27-dynamic-props.md#prop-grab-assembly-82585f58
+                    assembly: Some(AssemblyData {
+                        identity: id,
+                        first_part: Some(PartData {
+                            identity: id,
+                            coefficients_0_to_36: {
+                                let (t, i) = (b.inertia.inverse_tensor, &b.inertia);
+                                [t.x, t.y, t.z, 0.0, i.inverse_mass, i.spherical, i.maximum_linear_velocity, i.maximum_angular_velocity, i.linear_drag, i.angular_drag]
+                            },
+                            rates: Some(RatesData {
+                                identity: id,
+                                vector_48: [b.rates.angular_velocity.x, b.rates.angular_velocity.y, b.rates.angular_velocity.z, 0.0],
+                                transform_position_48: [b.rates.position.x, b.rates.position.y, b.rates.position.z, 0.0],
+                            }),
+                        }),
+                    }),
+                    frame: [[c[0][0], c[0][1], c[0][2], 0.0], [c[1][0], c[1][1], c[1][2], 0.0], [c[2][0], c[2][1], c[2][2], 0.0], [o.x, o.y, o.z, 1.0]],
+                    object_vector_128: [b.rates.linear_velocity.x, b.rates.linear_velocity.y, b.rates.linear_velocity.z, 0.0],
+                    splines: b
+                        .grab_geometry
+                        .iter()
+                        .enumerate()
+                        .map(|(i, geometry)| {
+                            let key = PROP_GRAB_TAG | (b.grab_slot << 6) | i as u32;
+                            Spline {
+                                descriptor: Descriptor { kind: 2, id: key },
+                                geometry: std::sync::Arc::clone(geometry),
+                                word_272: 0,
+                            }
+                        })
+                        .collect(),
+                }
+            })
+    }
+
+    /// Vault record name of a body's prop type (diagnostics, mod keys).
+    pub(crate) fn type_key(&self, id: u32) -> Option<&str> {
+        self.bodies.get(*self.by_id.get(&id)?)?.type_data.as_ref().map(|t| t.key.as_str())
+    }
+
+    /// Contact material of body `index` against a surface material: the
+    /// retail pair combine 82763078 of the body's block and the other side.
+    fn contact_material(&self, index: usize, other: RetailContactMaterial) -> RetailContactMaterial {
+        combine_contact_materials(self.body_material(index), other)
+    }
+
+    /// Current tuning table (defaults plus per prop type overrides).
+    pub(crate) fn tuning(&self) -> &PropTuningTable {
+        &self.tuning
+    }
+
+    /// Replace the tuning table and re-resolve every body. A changed
+    /// `collision_box` moves the box centre so the template origin (the
+    /// rendered pose) stays where it is; mass properties are unchanged.
+    pub(crate) fn set_tuning(&mut self, table: PropTuningTable) {
+        for body in &mut self.bodies {
+            let tuning = *table.for_template(&body.template);
+            // Untouched prop types stay asleep: a mod changing one type must
+            // not wake (and rebake) every prop on the map.
+            if tuning == body.tuning {
+                continue;
+            }
+            Self::apply_tuning(body, tuning);
+            body.wake();
+        }
+        self.tuning = table;
+    }
+
+    /// Give one body its prop type's tuning: `collision_box` moves the box
+    /// centre so the template origin stays where it is.
+    fn apply_tuning(body: &mut PropBody, tuning: PropTuning) {
+        let origin = body.origin();
+        let (center, half) = match tuning.collision_box {
+            Some(override_box) => (
+                mul_components(override_box.center, body.axis_scale),
+                mul_components(override_box.half_extents, body.axis_scale),
+            ),
+            None => (body.authored_center, body.authored_half_extents),
+        };
+        body.local_center = center;
+        body.half_extents = Vector3::new(half.x.abs(), half.y.abs(), half.z.abs());
+        body.rates.position = add(origin, mul_basis(body.rates.basis, center));
+        body.tuning = tuning;
+        body.stuck_ticks = 0;
+    }
+
+    /// Restore the shipped defaults (mod disable).
+    /// (Mod API entry point; the Lua binding is a follow-up.)
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn reset_tuning(&mut self) {
+        self.set_tuning(PropTuningTable::default());
+    }
+
+    /// Stable actor id of the skater that last pushed prop `id` ([`LOCAL_PUSHER`] or an NPC
+    /// skater proxy id); `None` if nothing has pushed it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn pushed_by(&self, id: u32) -> Option<u64> {
+        self.bodies.get(*self.by_id.get(&id)?)?.pushed_by
+    }
+
+    /// Work done by the last `step`.
+    /// (Mod API entry point; the Lua binding is a follow-up.)
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn last_step_stats(&self) -> PropStepStats {
+        self.stats
+    }
+
+    /// Prop vs static world: object world query 8277B720, not the pair query 82AD43A8: docs/hails-additions/27-dynamic-props.md#prop-world-query
+    fn world_query_for(&self, index: usize) -> WorldContactSettings {
+        WorldContactSettings {
+            volume_padding: self.bodies[index].tuning.contact_padding,
+            maximum_separating_distance: 0.0,
+            edge_cos_bend_normal_threshold: self.pair.edge_cos_bend_normal_threshold,
+            convexity_epsilon: self.pair.convexity_epsilon,
+            is_object: true,
+        }
+    }
+
+    /// A skater volume against the prop's own posed triangles (deepest contact), `None` when the prop has none so the
+    /// box stands in: docs/hails-additions/27-dynamic-props.md#skater-vs-prop-mesh
+    fn skater_mesh_manifold(
+        &self,
+        layer: &crate::skate_world::PropCollisionLayer,
+        index: usize,
+        volume: &BoardWorldVolume,
+    ) -> Option<Option<PrimitiveContactManifold>> {
+        let range = layer.instances().get(self.bodies[index].instance)?.range.clone();
+        let triangles = layer.world().triangles().get(range).filter(|t| !t.is_empty())?;
+        let settings = WorldContactSettings { is_object: false, ..self.world_query_for(index) };
+        let depth = |m: &PrimitiveContactManifold| {
+            m.points[..m.count].iter().map(|p| dot(sub(p.a, p.b), m.normal)).fold(f32::MAX, f32::min)
+        };
+        Some(
+            triangles
+                .iter()
+                .filter_map(|t| primitive_triangle_world_contacts(volume.primitive, t.triangle, volume.motion.linear_velocity, settings))
+                .min_by(|a, b| depth(a).total_cmp(&depth(b))),
+        )
+    }
+
+    /// Pair query settings with this body's contact band.
+    fn pair_for(&self, index: usize) -> PrimitivePairSettings {
+        let padding = self.bodies[index].tuning.contact_padding;
+        PrimitivePairSettings {
+            padding_a: padding,
+            padding_b: padding,
+            ..self.pair
+        }
+    }
+
+    /// Template-origin pose of one prop for render sync.
+    pub(crate) fn pose(&self, id: u32) -> Option<(Vector3, Basis3)> {
+        let body = self.bodies.get(*self.by_id.get(&id)?)?;
+        Some((body.origin(), body.rates.basis))
+    }
+
+    /// Every body as a navigation obstacle for peds (doc 26, fix 11): id, box centre, basis,
+    /// half extents (the contact box, so a `collision_box` override counts), linear velocity and
+    /// whether it is carried (retail switches a carried object's obstacle off). Id order.
+    pub(crate) fn obstacle_boxes(&self) -> Vec<(u32, Vector3, Basis3, Vector3, Vector3, bool)> {
+        let mut out: Vec<_> = self
+            .bodies
+            .iter()
+            .filter(|b| !b.dormant)
+            .map(|b| (b.id, b.rates.position, b.rates.basis, b.half_extents, b.rates.linear_velocity, self.held == Some(b.id)))
+            .collect();
+        out.sort_by_key(|b| b.0);
+        out
+    }
+
+    /// A body's model name for logs ("DMO_DT_BenchFlat_1015"), or "?".
+    pub(crate) fn describe_template(&self, id: u32) -> String {
+        self.template_of(id).map_or("?".to_owned(), |t| t.split_once('/').map_or(t, |x| x.1).split("_0x").next().unwrap_or(t).to_owned())
+    }
+
+    /// A body's MOBJ template name (its model / prop type), for logs.
+    pub(crate) fn template_of(&self, id: u32) -> Option<&str> {
+        self.bodies.get(*self.by_id.get(&id)?).map(|b| b.template.as_str())
+    }
+
+    /// One body's box centre, basis, half extents, linear and angular velocity and effective inertia (a solid proxy
+    /// in the skater's contact solve).
+    pub(crate) fn body_state(&self, id: u32) -> Option<(Vector3, Basis3, Vector3, Vector3, Vector3, RetailInertiaDynamics)> {
+        let b = self.bodies.get(*self.by_id.get(&id)?)?;
+        Some((b.rates.position, b.rates.basis, b.half_extents, b.rates.linear_velocity, b.rates.angular_velocity, b.inertia))
+    }
+
+    /// Stream one body out (parked at [`HELD_PARK`]) or back in (b98); `None` for the held prop or unknown ids.
+    pub(crate) fn set_dormant(&mut self, id: u32, dormant: bool, authored: bool) -> Option<(usize, Vector3, Basis3)> {
+        if self.held == Some(id) || self.is_dormant(id) == dormant {
+            return None;
+        }
+        if !dormant && authored {
+            let (origin, basis) = self.spawn_pose(id)?;
+            self.teleport(id, origin, basis);
+        }
+        let body = self.bodies.get_mut(*self.by_id.get(&id)?)?;
+        if body.dormant == dormant {
+            return None;
+        }
+        body.dormant = dormant;
+        body.asleep = true;
+        body.rates.linear_velocity = Vector3::ZERO;
+        body.rates.angular_velocity = Vector3::ZERO;
+        body.baked = (!dormant).then(|| (body.origin(), body.rates.basis));
+        let identity = Basis3 { columns: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] };
+        Some(if dormant { (body.instance, HELD_PARK, identity) } else { (body.instance, body.origin(), body.rates.basis) })
+    }
+
+    /// The map props as DMO census placements (runtime props, a ped's released hand prop or a mod's copy, are not
+    /// streamed): id, authored position, bounding radius (box half diagonal) and
+    /// the type priority (no type data: the `default` record, 100).
+    /// `dmo_placements().len()` without building them.
+    pub(crate) fn dmo_placement_count(&self) -> usize {
+        self.bodies.iter().filter(|b| !b.runtime).count()
+    }
+
+    pub(crate) fn dmo_placements(&self) -> Vec<skate_core::living_world::dmo::DmoPlacement> {
+        let mut out: Vec<_> = self
+            .bodies
+            .iter()
+            .filter(|b| !b.runtime)
+            .map(|b| {
+                // The census places it where it spawns: the authored pose (retail placement record +0).
+                let (p, h) = (b.spawn_origin, b.half_extents);
+                skate_core::living_world::dmo::DmoPlacement {
+                    id: b.id,
+                    position: [p.x, p.y, p.z],
+                    radius: (h.x * h.x + h.y * h.y + h.z * h.z).sqrt(),
+                    priority: b.type_data.as_ref().map_or(Some(100), |t| t.priority),
+                    keep: false,
+                    streamable: !self.layout_pieces,
+                }
+            })
+            .collect();
+        out.sort_by_key(|p| p.id);
+        out
+    }
+
+    /// Mark the bodies as a skate.Park layout's pieces (not census streamed).
+    pub(crate) fn set_layout_pieces(&mut self, layout: bool) {
+        self.layout_pieces = layout;
+    }
+
+    /// The streamed-out bodies.
+    pub(crate) fn dormant_ids(&self) -> std::collections::BTreeSet<u32> {
+        self.bodies.iter().filter(|b| b.dormant).map(|b| b.id).collect()
+    }
+
+    /// Whether a body is streamed out.
+    pub(crate) fn is_dormant(&self, id: u32) -> bool {
+        self.by_id.get(&id).is_some_and(|&i| self.bodies[i].dormant)
+    }
+
+    /// World position of one body's box centre.
+    /// The body's origin (the frame its spawn pose is in), for the census.
+    pub(crate) fn origin_of(&self, id: u32) -> Option<Vector3> {
+        Some(self.bodies.get(*self.by_id.get(&id)?)?.origin())
+    }
+
+    pub(crate) fn position_of(&self, id: u32) -> Option<Vector3> {
+        Some(self.bodies.get(*self.by_id.get(&id)?)?.rates.position)
+    }
+
+    /// Nearest body within `radius` of `point`, measured to the box SURFACE
+    /// (not the centre, so big ramps are grabbable by their edge), as
+    /// `(id, centre)`.
+    pub(crate) fn nearest_body(&self, point: Vector3, radius: f32) -> Option<(u32, Vector3)> {
+        let mut best: Option<(u32, Vector3, f32)> = None;
+        for body in self.bodies.iter().filter(|b| !b.dormant) {
+            // Local-space point clamped into the box: the gap vector to it is
+            // the surface distance (zero when the point is inside).
+            let d = sub(point, body.rates.position);
+            let b = body.rates.basis.columns;
+            let local = [
+                d.x * b[0][0] + d.y * b[0][1] + d.z * b[0][2],
+                d.x * b[1][0] + d.y * b[1][1] + d.z * b[1][2],
+                d.x * b[2][0] + d.y * b[2][1] + d.z * b[2][2],
+            ];
+            let he = body.half_extents;
+            let gap = Vector3::new(
+                (local[0].abs() - he.x).max(0.0),
+                (local[1].abs() - he.y).max(0.0),
+                (local[2].abs() - he.z).max(0.0),
+            );
+            let distance_squared = dot(gap, gap);
+            if distance_squared > radius * radius {
+                continue;
+            }
+            if best.map_or(true, |(_, _, b)| distance_squared < b) {
+                best = Some((body.id, body.rates.position, distance_squared));
+            }
+        }
+        best.map(|(id, position, _)| (id, position))
+    }
+
+    /// Collision-layer instance index for one body (rebake target).
+    pub(crate) fn instance_of(&self, id: u32) -> Option<usize> {
+        Some(self.bodies.get(*self.by_id.get(&id)?)?.instance)
+    }
+
+    /// The prop currently carried, if any.
+    pub(crate) fn held(&self) -> Option<u32> {
+        self.held
+    }
+
+    /// Mark the carried prop: it stops receiving the carrier's pushes (peds still meet it) and its layer
+    /// triangles stay parked until the drop rebakes them.
+    pub(crate) fn set_held(&mut self, held: Option<u32>) {
+        if self.held == held {
+            return;
+        }
+        self.move_diagnostics = None;
+        // PROP_HELD: the grab / release edge itself (the HELD_PROP lines are periodic).
+        let describe = |id: Option<u32>| {
+            id.and_then(|id| self.by_id.get(&id).map(|&i| (id, &self.bodies[i]))).map_or("none".to_string(), |(id, b)| {
+                let (p, v) = (b.rates.position, b.rates.linear_velocity);
+                format!("#{id} {} at=[{:.2}, {:.2}, {:.2}] velocity=[{:.2}, {:.2}, {:.2}]", b.template, p.x, p.y, p.z, v.x, v.y, v.z)
+            })
+        };
+        info!("PROP_HELD from={} to={} tick={}", describe(self.held), describe(held), self.tick);
+        if let Some(previous) = self.held {
+            let ticks = (RELEASE_LOG_SECONDS / self.simulation.time_step.max(1e-4)).ceil() as u64;
+            self.released = Some((previous, self.tick + ticks));
+        }
+        if let Some(index) = held.and_then(|id| self.by_id.get(&id).copied()) {
+            let body = &mut self.bodies[index];
+            body.rest_y = body.rest_y.max(body.rates.position.y);
+        }
+        self.held = held;
+    }
+
+    /// Ground relation of one prop (centre, world half height, floor under it).
+    /// (Diagnostics and tests; a mod-facing readout is a follow-up.)
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn ground_probe(&self, id: u32, world: &BoardWorld) -> Option<PropGroundProbe> {
+        Some(self.probe(*self.by_id.get(&id)?, world))
+    }
+
+    fn probe(&self, index: usize, world: &BoardWorld) -> PropGroundProbe {
+        let body = &self.bodies[index];
+        let bounds = body.bounds();
+        let center = body.rates.position;
+        let half_height = 0.5 * (bounds.max.y - bounds.min.y);
+        // From above the last rest height (a sunk body still finds the floor
+        // it fell through), down well past the body.
+        let top = center.y.max(body.rest_y) + half_height + 0.5;
+        let ground = world
+            .query_thin_line(
+                Vector3::new(center.x, top, center.z),
+                Vector3::new(center.x, center.y - half_height - 30.0, center.z),
+            )
+            .ok()
+            .flatten()
+            .map(|hit| hit.geometry.position.y);
+        PropGroundProbe { center, half_height, ground }
+    }
+
+    /// HELD_PROP and PROP_BELOW_GROUND log lines (held / released prop, awake bodies twice a second).
+    fn log_diagnostics(&mut self, world: &BoardWorld) {
+        let per_second = (1.0 / self.simulation.time_step.max(1e-4)).round().max(1.0) as u64;
+        if self.released.is_some_and(|(_, until)| self.tick > until) {
+            self.released = None;
+        }
+        self.log_watch();
+        let held_every = if crate::trace_all::on() { (per_second / HELD_PROP_HZ_TRACE_ALL).max(1) } else { per_second };
+        if self.tick % held_every == 0 {
+            let watched = [self.held.map(|id| (id, "held")), self.released.map(|(id, _)| (id, "released"))];
+            for (id, phase) in watched.into_iter().flatten() {
+                let Some(&index) = self.by_id.get(&id) else { continue };
+                let probe = self.probe(index, world);
+                let body = &self.bodies[index];
+                let v = body.rates.linear_velocity;
+                let up = body.rates.basis.columns[1];
+                let mv = if phase == "held" { self.move_diagnostics } else { None };
+                info!(
+                    "HELD_PROP id={id} phase={phase} template={} type={} center=[{:.2}, {:.2}, {:.2}] up_y={:.3} velocity=[{:.2}, {:.2}, {:.2}] ground={} gap={} contacts={} asleep={} {} tick={}",
+                    body.template, self.type_key(id).unwrap_or("none"), probe.center.x, probe.center.y, probe.center.z, up[1], v.x, v.y, v.z,
+                    probe.ground.map_or("none".into(), |g| format!("{g:.2}")),
+                    probe.gap().map_or("none".into(), |g| format!("{g:.2}")),
+                    body.contacts, body.asleep, move_fields(mv), self.tick
+                );
+            }
+        }
+        if self.tick % (per_second / 2).max(1) != 0 {
+            return;
+        }
+        let quiet = (BELOW_GROUND_LOG_SECONDS * per_second as f32) as u64;
+        for index in 0..self.bodies.len() {
+            if self.bodies[index].asleep {
+                continue;
+            }
+            let id = self.bodies[index].id;
+            if self.below_logged.get(&id).is_some_and(|&at| self.tick < at + quiet) {
+                continue;
+            }
+            let probe = self.probe(index, world);
+            if !probe.below_ground() {
+                continue;
+            }
+            self.below_logged.insert(id, self.tick);
+            let body = &self.bodies[index];
+            let v = body.rates.linear_velocity;
+            info!(
+                "PROP_BELOW_GROUND id={id} template={} center=[{:.2}, {:.2}, {:.2}] half_height={:.2} ground={:.2} rest_y={:.2} velocity=[{:.2}, {:.2}, {:.2}] up_y={:.3} held={} contacts={} tick={}",
+                body.template, probe.center.x, probe.center.y, probe.center.z, probe.half_height,
+                probe.ground.unwrap_or(f32::NAN), body.rest_y, v.x, v.y, v.z, body.rates.basis.columns[1][1],
+                self.held == Some(id), body.contacts, self.tick
+            );
+        }
+    }
+
+    fn log_watch(&mut self) {
+        let Some((spec, armed)) = self.watch else { return };
+        let index = match armed {
+            Some(id) => self.by_id.get(&id).copied(),
+            None => {
+                let distance = |b: &PropBody| {
+                    let p = b.rates.position;
+                    ((p.x - spec[0]).powi(2) + (p.y - spec[1]).powi(2) + (p.z - spec[2]).powi(2)).sqrt()
+                };
+                let nearest = (0..self.bodies.len())
+                    .filter(|&i| distance(&self.bodies[i]) <= spec[3])
+                    .min_by(|&a, &b| distance(&self.bodies[a]).total_cmp(&distance(&self.bodies[b])));
+                if let Some(i) = nearest {
+                    let body = &self.bodies[i];
+                    info!("PROP_WATCH_ARM id={} template={} distance={:.2} tick={}", body.id, body.template, distance(body), self.tick);
+                    self.watch = Some((spec, Some(body.id)));
+                }
+                nearest
+            }
+        };
+        let Some(body) = index.map(|i| &self.bodies[i]) else { return };
+        let (p, v, w, up) = (body.rates.position, body.rates.linear_velocity, body.rates.angular_velocity, body.rates.basis.columns[1]);
+        info!(
+            "PROP_WATCH tick={} id={} pos=[{:.4}, {:.4}, {:.4}] v=[{:.4}, {:.4}, {:.4}] w=[{:.4}, {:.4}, {:.4}] up=[{:.4}, {:.4}, {:.4}] contacts={} asleep={}",
+            self.tick, body.id, p.x, p.y, p.z, v.x, v.y, v.z, w.x, w.y, w.z, up[0], up[1], up[2], body.contacts, body.asleep
+        );
+    }
+
+    fn is_held(&self, index: usize) -> bool {
+        self.held == Some(self.bodies[index].id)
+    }
+
+    /// The held prop as Move Object reads it (centre, box axes, half
+    /// extents, velocity, mass, yaw inertia): the interim grab record's source.
+    pub(crate) fn held_body(&self, id: u32) -> Option<crate::physics::prop_carry::HeldBody> {
+        let body = self.bodies.get(*self.by_id.get(&id)?)?;
+        let inverse_yaw = body.inertia.inverse_tensor.y;
+        Some(crate::physics::prop_carry::HeldBody {
+            center: body.rates.position,
+            basis: body.rates.basis,
+            half_extents: body.half_extents,
+            velocity: body.rates.linear_velocity,
+            mass: if body.inertia.inverse_mass > 0.0 { 1.0 / body.inertia.inverse_mass } else { f32::INFINITY },
+            yaw_inertia: if inverse_yaw > 0.0 { 1.0 / inverse_yaw } else { f32::INFINITY },
+            record_272: self.body_blocks(body).record_272.unwrap_or(false),
+        })
+    }
+
+    /// Move Object command for the held prop as retail slot 9 applies it, once per step: docs/hails-additions/27-dynamic-props.md#move-object-command-slot-9
+    pub(crate) fn apply_move_command(&mut self, id: u32, linear: Vector3, yaw: f32, grip: Vector3, time_step: f32) -> bool {
+        let Some(&index) = self.by_id.get(&id) else {
+            return false;
+        };
+        let rules = &self.move_rules;
+        let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
+        let body = &mut self.bodies[index];
+        if body.inertia.inverse_mass <= 0.0 {
+            return true;
+        }
+        let vertical = if rules.ignore_vertical { 0.0 } else { finite(linear.y) };
+        let l = Vector3::new(finite(linear.x), vertical, finite(linear.z));
+        // 82C52E68 refuses the angular command while the righting window
+        // (DMO+4464 0x40) is open; the linear sink 82C52DC0 is not gated.
+        let yaw_blocked = body.upright_timer.is_some() && self.tuning.upright.block_yaw;
+        let yaw = if yaw_blocked { 0.0 } else { finite(yaw) };
+        if rules.wake_on_command || l != Vector3::ZERO || yaw != 0.0 {
+            body.wake();
+        }
+        body.commanded = true;
+        body.rates.linear_velocity = add(body.rates.linear_velocity, scale(l, time_step));
+        if !rules.apply_at_com {
+            // Mod option: the same force (m L) at the grip point adds the
+            // lever torque I^-1 (r x m L).
+            let mass = 1.0 / body.inertia.inverse_mass;
+            let r = sub(grip, body.rates.position);
+            let spin = mul_basis(body.rates.world_inverse_inertia, cross(r, scale(l, mass)));
+            body.rates.angular_velocity = add(body.rates.angular_velocity, scale(spin, time_step));
+        }
+        if yaw_blocked {
+            return true;
+        }
+        if rules.yaw_replaces_torque {
+            body.rates.torque_acceleration = Vector3::ZERO;
+        }
+        let w = body.rates.angular_velocity;
+        body.rates.angular_velocity = Vector3::new(w.x, w.y + yaw * time_step, w.z);
+        true
+    }
+
+    /// Open one body's self-righting window (cMsgUprightDMO -> 82C4B8C0); false if refused: docs/hails-additions/27-dynamic-props.md#upright-start
+    pub(crate) fn upright(&mut self, id: u32) -> bool {
+        let Some(&index) = self.by_id.get(&id) else {
+            return false;
+        };
+        let body = &mut self.bodies[index];
+        if body.inertia.inverse_mass <= 0.0 {
+            return false;
+        }
+        body.upright_timer = Some(0.0);
+        true
+    }
+
+    /// True while the body's righting window is open (DMO+4464 bit 0x40).
+    pub(crate) fn is_uprighting(&self, id: u32) -> bool {
+        self.by_id.get(&id).is_some_and(|&i| self.bodies[i].upright_timer.is_some())
+    }
+
+    /// Body vector A of 82C573D0 (state block +72, not identified); ours: body-space inverse inertia (NOT RETAIL YET).
+    fn upright_vector(body: &PropBody) -> Vector3 {
+        body.inertia.inverse_tensor
+    }
+
+    /// Righting pass of the DMO update 82C56780, before the contact solve: docs/hails-additions/27-dynamic-props.md#upright-pass-82c56780
+    fn apply_upright(&mut self, time_step: f32) {
+        let settings = self.tuning.upright;
+        let replaces = self.move_rules.yaw_replaces_torque;
+        for body in self.bodies.iter_mut().filter(|b| !b.dormant) {
+            let Some(timer) = body.upright_timer else { continue };
+            let timer = timer + settings.tick_seconds;
+            body.upright_timer = (timer <= settings.window_seconds).then_some(timer);
+            let a = Self::upright_vector(body);
+            let Some(command) = upright_command(body.rates.basis, body.rates.angular_velocity, a, &settings) else {
+                body.upright_timer = None;
+                continue;
+            };
+            if body.inertia.inverse_mass <= 0.0 {
+                continue;
+            }
+            body.wake();
+            body.commanded = true;
+            if replaces {
+                body.rates.torque_acceleration = Vector3::ZERO;
+            }
+            body.rates.angular_velocity = add(body.rates.angular_velocity, scale(command, time_step));
+        }
+    }
+
+    /// Move Object values for the HELD_PROP line (stick, command, lever,
+    /// rotation demand, blocked flag, latch drift).
+    pub(crate) fn set_move_diagnostics(&mut self, diagnostics: Option<MoveDiagnostics>) {
+        self.move_diagnostics = diagnostics;
+    }
+
+    /// Kinematic follow while carried: wake and steer the body toward
+    /// `target` by velocity (never teleport), capped at `max_speed`, with
+    /// rotation frozen. Returns false if the id is unknown.
+    pub(crate) fn carry_to(
+        &mut self,
+        id: u32,
+        target: Vector3,
+        max_speed: f32,
+        time_step: f32,
+    ) -> bool {
+        let Some(&index) = self.by_id.get(&id) else {
+            return false;
+        };
+        let body = &mut self.bodies[index];
+        body.wake();
+        let delta = sub(target, body.rates.position);
+        let distance = dot(delta, delta).sqrt();
+        let speed = (distance / time_step).min(max_speed);
+        body.rates.linear_velocity = if distance > 1e-6 {
+            scale(delta, speed / distance)
+        } else {
+            Vector3::ZERO
+        };
+        body.rates.angular_velocity = Vector3::ZERO;
+        true
+    }
+
+    /// Placement follow: like `carry_to`, but also snaps the orientation to
+    /// `basis` (ghost yaw edit). Position still moves by velocity only.
+    pub(crate) fn carry_to_pose(
+        &mut self,
+        id: u32,
+        target: Vector3,
+        basis: Basis3,
+        max_speed: f32,
+        time_step: f32,
+    ) -> bool {
+        if !self.carry_to(id, target, max_speed, time_step) {
+            return false;
+        }
+        let body = &mut self.bodies[self.by_id[&id]];
+        body.rates.basis = basis;
+        body.rates.orientation = quaternion_from_basis(basis);
+        body.rates.world_inverse_inertia =
+            world_inverse_inertia(basis, body.inertia.inverse_tensor);
+        true
+    }
+
+    /// Confirming a placement sets the prop down gently: velocity zeroed so
+    /// the leftover follow velocity does not throw it.
+    pub(crate) fn release_still(&mut self, id: u32) {
+        if let Some(&index) = self.by_id.get(&id) {
+            self.bodies[index].rates.linear_velocity = Vector3::ZERO;
+            self.bodies[index].rates.angular_velocity = Vector3::ZERO;
+        }
+    }
+
+    /// Teleport a body to a saved layout pose, asleep. Returns the collision
+    /// instance index so the caller can rebake its triangles.
+    pub(crate) fn teleport(&mut self, id: u32, origin: Vector3, basis: Basis3) -> Option<usize> {
+        let cool_down = self.step_simulation().cool_down;
+        let body = self.bodies.get_mut(*self.by_id.get(&id)?)?;
+        body.rates.basis = basis;
+        body.rates.orientation = quaternion_from_basis(basis);
+        body.rates.world_inverse_inertia =
+            world_inverse_inertia(basis, body.inertia.inverse_tensor);
+        body.rates.position = add(origin, mul_basis(basis, body.local_center));
+        body.rates.linear_velocity = Vector3::ZERO;
+        body.rates.angular_velocity = Vector3::ZERO;
+        body.rates.kinetic_energy = 0.0;
+        body.rates.cool_down = cool_down;
+        body.asleep = true;
+        body.water_fade = 1.0;
+        Some(body.instance)
+    }
+
+    /// Some prop is part-way through its sinking fade (neither shown nor gone).
+    pub(crate) fn any_fading(&self) -> bool {
+        self.bodies.iter().any(|b| b.water_fade > 0.0 && b.water_fade < 1.0)
+    }
+
+    /// Better Water's sinking fade of a prop: 1 = shown, 0 = gone ([`PropBody::water_fade`]).
+    pub(crate) fn water_fade(&self, id: u32) -> f32 {
+        self.by_id.get(&id).map_or(1.0, |&i| self.bodies[i].water_fade)
+    }
+
+    /// Ids of bodies whose pose differs from the authored spawn pose, in id order.
+    /// Retail offers the per-object reset (cMsgResetDMO) only for a moved object
+    /// (sub_826666A8 gate); this is the engine-side list behind "reset moved objects".
+    pub(crate) fn moved_ids(&self) -> Vec<u32> {
+        let mut ids: Vec<u32> = self
+            .bodies
+            .iter()
+            .filter(|b| !b.runtime)
+            .filter(|b| {
+                let o = b.origin();
+                let d = sub(o, b.spawn_origin);
+                d.x * d.x + d.y * d.y + d.z * d.z > SPAWN_POSE_EPSILON * SPAWN_POSE_EPSILON
+                    || b.rates.basis.columns.iter().zip(b.spawn_basis.columns.iter()).any(|(a, s)| {
+                        a.iter().zip(s.iter()).any(|(x, y)| (x - y).abs() > SPAWN_POSE_EPSILON)
+                    })
+            })
+            .map(|b| b.id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Authored spawn pose of one body (template origin, basis).
+    pub(crate) fn spawn_pose(&self, id: u32) -> Option<(Vector3, Basis3)> {
+        let body = self.bodies.get(*self.by_id.get(&id)?)?;
+        Some((body.spawn_origin, body.spawn_basis))
+    }
+
+    /// The ped-plugin check limits of a body's type (mod entry over retail data): rotation tolerance (degrees, per
+    /// axis) and max distance from the authored spot. `None` = no type data (the seats stay offered).
+    pub(crate) fn plugin_check_limits(&self, id: u32) -> Option<([f32; 3], f32)> {
+        let body = self.bodies.get(*self.by_id.get(&id)?)?;
+        let b = self.body_blocks(body);
+        Some((b.plugin_rotation_tolerance?, b.plugin_max_distance?))
+    }
+
+    /// Reset one body to its authored spawn pose, asleep (cMsgResetDMO; instant teleport, NOT RETAIL YET).
+    pub(crate) fn reset_to_spawn(&mut self, id: u32) -> Option<usize> {
+        if self.is_runtime(id) {
+            return None;
+        }
+        let (origin, basis) = self.spawn_pose(id)?;
+        if self.held == Some(id) {
+            self.set_held(None);
+        }
+        self.teleport(id, origin, basis)
+    }
+
+    /// Advance awake bodies one tick; wake bodies the skater touches. Moved
+    /// instances re-bake their triangles in the collision layer afterwards.
+    pub(crate) fn step(
+        &mut self,
+        world: &BoardWorld,
+        layer: &mut crate::skate_world::PropCollisionLayer,
+        skater_volumes: &[BoardWorldVolume],
+    ) {
+        self.step_with_actors(world, layer, skater_volumes, &[]);
+    }
+
+    /// [`Self::step`] with NPC skaters' volumes too (`others` sorted by actor id, local player first).
+    pub(crate) fn step_with_actors(
+        &mut self,
+        world: &BoardWorld,
+        layer: &mut crate::skate_world::PropCollisionLayer,
+        skater_volumes: &[BoardWorldVolume],
+        others: &[(u64, BoardWorldVolume)],
+    ) {
+        self.stats = PropStepStats::default();
+        let time_step = self.step_simulation().time_step;
+        self.apply_upright(time_step);
+        let gravity = self.step_simulation().gravity_acceleration;
+        self.apply_water(world, gravity, time_step);
+        self.skater_contacts.clear();
+        for index in 0..self.bodies.len() {
+            if self.bodies[index].dormant {
+                continue;
+            }
+            let held = self.is_held(index);
+            // Skater push: cheap bounds reject, then the retail pair query.
+            // The carried prop is velocity-driven by the carrier; letting the
+            // carrier push it (or be pushed by it) fights the drag. Peds and other
+            // actors still meet it, so a carried prop shoves them instead of passing through.
+            {
+                let body_bounds = self.bodies[index].bounds();
+                let mut overlapping = false;
+                let mut closing = false;
+                let before = self.bodies[index].rates.linear_velocity;
+                let mut bail_touch = false;
+                // The prop under the local skater's grind is not pushed by them (others still can).
+                let spared = self.grinded == Some(self.bodies[index].id);
+                let actors = skater_volumes
+                    .iter()
+                    .filter(|_| !spared && !held)
+                    .map(|v| (LOCAL_PUSHER, v))
+                    .chain(others.iter().map(|(actor, v)| (*actor, v)));
+                for (actor, volume) in actors {
+                    let Some(volume_bounds) = volume_bounds(volume.primitive) else {
+                        continue;
+                    };
+                    if !body_bounds.overlaps(volume_bounds) {
+                        continue;
+                    }
+                    // The carried prop's layer triangles are parked away from it, so it meets actors by its box.
+                    let mesh = if self.tuning.solver.skater_push_box || held { None } else { self.skater_mesh_manifold(layer, index, volume) };
+                    let on_mesh = mesh.is_some();
+                    let Some(manifold) = mesh.unwrap_or_else(|| {
+                        primitive_pair_contacts(volume.primitive, self.bodies[index].box_primitive(), self.pair_for(index))
+                    }) else {
+                        continue;
+                    };
+                    let pushes = self.stats.skater_pushes;
+                    let push_mass = self.actor_push_mass.iter().find(|a| a.0 == actor).map(|a| a.1);
+                    // The held prop's mesh is parked while carried, so its box contact gives the rows (and the ped its shove).
+                    let rows = (on_mesh || held) && self.tuning.solver.skater_rows && self.tuning.solver.row_solver;
+                    let contact = self.push_from_skater(index, volume, &manifold, push_mass, on_mesh, rows);
+                    if self.stats.skater_pushes > pushes {
+                        self.bodies[index].pushed_by = Some(actor);
+                        self.bodies[index].audio_pushed |= actor == LOCAL_PUSHER;
+                    }
+                    // A bailing actor's contacts only clamp the prop (bail clamp below), so they add no rows.
+                    if rows && contact != SkaterContact::Separate && !self.bailing.contains(&actor) {
+                        let board = matches!(volume.body, skate_core::physics::board_step::CollisionBody::Board(_));
+                        let mass = if board { self.tuning.solver.board_row_mass } else { push_mass.unwrap_or(self.bodies[index].tuning.skater_push_mass) };
+                        // A closing touch wakes a resting prop (ours until retail's wake source is found, b617); the rows then
+                        // push it only as far as the contact and its floor friction allow.
+                        if contact == SkaterContact::Closing {
+                            self.bodies[index].wake();
+                            self.bodies[index].pushed_by = Some(actor);
+                            self.bodies[index].audio_pushed |= actor == LOCAL_PUSHER;
+                        }
+                        self.skater_contacts.push((index, manifold, volume.motion.linear_velocity, mass, volume.material, actor));
+                        let body = &mut self.bodies[index];
+                        let log = body.push_log.get_or_insert((body.rates.position, 0, 0.0, 0.0, scale(manifold.normal, -1.0), board));
+                        log.1 += 1;
+                    }
+                    match contact {
+                        SkaterContact::Closing => closing = true,
+                        SkaterContact::OverlapOnly => overlapping = true,
+                        SkaterContact::Separate => {}
+                    }
+                    bail_touch |= contact != SkaterContact::Separate && self.bailing.contains(&actor);
+                }
+                // A bailing actor touched it: retail caps the prop's velocity and wakes it (once per prop per tick).
+                let solver = self.tuning.solver;
+                if bail_touch && solver.bail_clamp {
+                    let body = &mut self.bodies[index];
+                    if let Some((linear, angular)) = bail_clamp(&solver, body.inertia.inverse_mass, before, body.rates.linear_velocity, body.rates.angular_velocity) {
+                        body.rates.linear_velocity = linear;
+                        body.rates.angular_velocity = angular;
+                        body.wake();
+                    }
+                }
+                // A skater volume parked inside the box would nudge it forever; past `stuck_release_ticks` only real hits push.
+                let release = self.bodies[index].tuning.stuck_release_ticks;
+                let body = &mut self.bodies[index];
+                body.stuck_ticks = if closing {
+                    0
+                } else if overlapping {
+                    body.stuck_ticks.saturating_add(1)
+                } else {
+                    0
+                };
+                // Diagnostics: a skater volume that sat inside the prop long enough to stop nudging it (the board
+                // under a seat, or the skater pulled into a fallen bench), once per stay.
+                if body.stuck_ticks == release {
+                    let (id, c, up) = (body.id, body.rates.position, body.rates.basis.columns[1][1]);
+                    info!("PROP_OVERLAP prop={id} ({}) skater inside for {release} ticks at [{:.2}, {:.2}, {:.2}] up_y {up:.2}", self.describe_template(id), c.x, c.y, c.z);
+                }
+            }
+        }
+        let solver = self.tuning.solver;
+        let simulation = self.step_simulation();
+        // Awake bodies in body order (deterministic; plain indices).
+        let awake: Vec<usize> = (0..self.bodies.len()).filter(|&i| !self.bodies[i].asleep && !self.bodies[i].dormant).collect();
+        self.stats.awake = awake.len() as u32;
+        // Parameter block swap (82C53EF8): commanded since the last step -> commanded block; the flag lasts one step.
+        let mut commanded_now = vec![false; self.bodies.len()];
+        for &index in &awake {
+            let body = &mut self.bodies[index];
+            commanded_now[index] = body.commanded;
+            body.commanded_block = body.commanded;
+            body.commanded = false;
+        }
+        // Retail: every awake body's contact rows go through one shared row
+        // solve (contact stage 82DC30A8 -> 82AE27D0, island +176 iterations)
+        // and only then does any body integrate (BatchIntegrator).
+        let props_only = self.props_only.take();
+        let worlds: Vec<&BoardWorld> = std::iter::once(world).chain(props_only.as_ref()).collect();
+        let rows = solver.row_solver.then(|| self.row_corrections(&worlds, &awake, solver.iterations));
+        let mut sleeps = 0u32;
+        for &index in &awake {
+            let held = self.is_held(index);
+            let commanded = commanded_now[index];
+            // The held prop stays a normal dynamic body (Move Object is horizontal + yaw only, 82D45318), so it can tip.
+            let corrections = match &rows {
+                Some(rows) => rows[index],
+                None => self.contact_corrections(index, &worlds),
+            };
+            // Commanded or held bodies never rest or sleep (82ADF7B8 clears the counter on every command).
+            let body_sleep_capable = self.bodies[index].enable_sleep && !held && !commanded;
+            // Rest snap (NOT RETAIL, mod option `rest_snap`): only while
+            // something is touching the body, so it never zeroes a fall.
+            let resting = solver.rest_snap
+                && body_sleep_capable
+                && (dot(corrections.linear_displacement, corrections.linear_displacement)
+                    > 0.0
+                    || dot(corrections.position_displacement, corrections.position_displacement)
+                        > 0.0
+                    || dot(corrections.angular_displacement, corrections.angular_displacement)
+                        > 0.0);
+            let inertia = self.body_inertia(index);
+            let body = &mut self.bodies[index];
+            // Integrator 82AE6590: E = |v|^2 + s m^-1 |w|^2 after damping and
+            // the caps; counter = 0 when E >= island +172, else +1 if E did
+            // not rise, capped at island +168.
+            let step = integrate_body_rates(body.rates, inertia, simulation, corrections);
+            body.rates = step.state;
+            if resting && body.rates.kinetic_energy < simulation.minimum_energy {
+                body.rates.linear_velocity = Vector3::ZERO;
+                body.rates.angular_velocity = Vector3::ZERO;
+                body.rates.kinetic_energy = 0.0;
+                // The snap zeroes the energy the integrator compares against,
+                // so its counter stalls; count snapped resting ticks here.
+                body.rates.cool_down = (body.rates.cool_down + 1).min(simulation.cool_down);
+            }
+            // Sleep pass 82DC3130: counter >= sim +204 (= island +168) moves
+            // the body to the sleeping list, at most 100 bodies per call.
+            if body_sleep_capable
+                && body.rates.cool_down >= solver.sleep_frames
+                && sleeps < solver.max_sleeps_per_step
+            {
+                sleeps += 1;
+                body.asleep = true;
+                body.rates.cool_down = simulation.cool_down;
+                body.rest_y = body.rates.position.y;
+                // How far skater pushes moved it before it came to rest (ask 357: the logs could not show a slide).
+                if let Some((from, pushes, max_dv, closing, dir, board)) = body.push_log.take() {
+                    let p = body.rates.position;
+                    let moved = ((p.x - from.x).powi(2) + (p.y - from.y).powi(2) + (p.z - from.z).powi(2)).sqrt();
+                    info!("PROP_PUSHED prop={} moved {moved:.2} m by {pushes} skater pushes (max dv {max_dv:.3} m/s: {} closing {closing:.2} m/s along [{:.2}, {:.2}, {:.2}]) from [{:.2}, {:.2}, {:.2}] to [{:.2}, {:.2}, {:.2}]", body.id, if board { "board" } else { "body" }, dir.x, dir.y, dir.z, from.x, from.y, from.z, p.x, p.y, p.z);
+                }
+            }
+            // The held prop's triangles stay parked (set_held/HELD_PARK) so
+            // skater queries never see them while carrying.
+            if held {
+                continue;
+            }
+            // An unchanged pose would rebake identical triangles (and rebuild
+            // the layer's query index for nothing); skip it.
+            let body = &self.bodies[index];
+            let pose = (body.origin(), body.rates.basis);
+            if body.baked.is_some_and(|baked| same_pose(baked, pose)) {
+                continue;
+            }
+            if let Err(error) = layer.rebake(body.instance, pose.1.columns, pose.0) {
+                warn!("SKATE_PROP_DYNAMICS: rebake instance {}: {error}", body.instance);
+            }
+            self.bodies[index].baked = Some(pose);
+            self.stats.rebakes += 1;
+        }
+        drop(worlds);
+        self.props_only = props_only;
+        self.log_diagnostics(world);
+        self.tick += 1;
+    }
+
+    /// Skater volumes push the prop by a share of the closing speed through the pair's reduced mass.
+    fn push_from_skater(
+        &mut self,
+        index: usize,
+        volume: &BoardWorldVolume,
+        manifold: &PrimitiveContactManifold,
+        push_mass: Option<f32>,
+        on_mesh: bool,
+        rows: bool,
+    ) -> SkaterContact {
+        let tuning = self.bodies[index].tuning;
+        // The overlap nudge (ours, box only) stops once the volume has sat inside for
+        // `stuck_release_ticks`; from then on slow drift (solver jitter of a
+        // parked board) does not push either, only a real hit does.
+        let stuck = self.bodies[index].stuck_ticks >= tuning.stuck_release_ticks;
+        let nudge = if stuck || on_mesh { 0.0 } else { tuning.penetration_push_speed };
+        let hit_floor = if stuck { tuning.penetration_push_speed } else { 0.0 };
+        // The manifold normal points from the prop (B) toward the skater (A).
+        let push = scale(manifold.normal, -1.0);
+        let mut strongest = 0.0_f32;
+        let mut point = self.bodies[index].rates.position;
+        let mut any_closing = false;
+        let mut any_overlap = false;
+        for pair in &manifold.points[..manifold.count] {
+            let closing = dot(sub(volume.motion.linear_velocity, self.bodies[index].velocity_at(pair.b)), push);
+            let closing = if closing > hit_floor { closing } else { 0.0 };
+            let penetration = dot(sub(pair.a, pair.b), manifold.normal);
+            any_closing |= closing > 0.0;
+            any_overlap |= penetration < 0.0;
+            let drive = closing.max(if penetration < 0.0 { nudge } else { 0.0 });
+            if drive > strongest {
+                strongest = drive;
+                point = pair.b;
+            }
+        }
+        let contact = if any_closing {
+            SkaterContact::Closing
+        } else if any_overlap {
+            SkaterContact::OverlapOnly
+        } else {
+            SkaterContact::Separate
+        };
+        if strongest <= 0.0 || rows {
+            return contact;
+        }
+        // dv = strongest x transfer x M/(M+m); board and body pushes are both capped along the push direction.
+        let mass = 1.0 / self.bodies[index].inertia.inverse_mass;
+        let pusher = push_mass.unwrap_or(tuning.skater_push_mass).max(0.0);
+        let reduced = mass * pusher / (pusher + mass).max(1e-6);
+        let mut amount = strongest * reduced * tuning.push_transfer;
+        let cap = if matches!(
+            volume.body,
+            skate_core::physics::board_step::CollisionBody::Board(_)
+        ) {
+            tuning.board_push_speed
+        } else {
+            tuning.body_push_speed
+        };
+        let along = dot(self.bodies[index].rates.linear_velocity, push);
+        let allowed = (cap - along).max(0.0) * mass;
+        amount = amount.min(allowed);
+        if amount <= 0.0 {
+            return contact;
+        }
+        let impulse = scale(push, amount);
+        self.bodies[index].apply_impulse(impulse, point);
+        self.stats.skater_pushes += 1;
+        // Diagnostics: a big shove (2 m/s or more in one tick), with what the push saw.
+        let dv = amount / mass;
+        let body = &mut self.bodies[index];
+        let board = matches!(volume.body, skate_core::physics::board_step::CollisionBody::Board(_));
+        let log = body.push_log.get_or_insert((body.rates.position, 0, 0.0, 0.0, push, board));
+        log.1 += 1;
+        if dv > log.2 {
+            *log = (log.0, log.1, dv, strongest, push, board);
+        }
+        if dv >= 2.0 {
+            let id = self.bodies[index].id;
+            let board = matches!(volume.body, skate_core::physics::board_step::CollisionBody::Board(_));
+            info!("PROP_SHOVE prop={id} ({}) dv {dv:.2} m/s mass {mass:.0} kg closing {strongest:.2} m/s by {} at [{:.2}, {:.2}, {:.2}]", self.describe_template(id), if board { "board" } else { "body" }, point.x, point.y, point.z);
+        }
+        contact
+    }
+
+    /// The simulation step with the live island settings (sleep energy and
+    /// counter cap from [`PropSolverSettings`]).
+    fn step_simulation(&self) -> RetailSimulationStep {
+        let solver = self.tuning.solver;
+        RetailSimulationStep {
+            cool_down: solver.sleep_frames,
+            minimum_energy: solver.sleep_energy,
+            ..self.simulation
+        }
+    }
+
+    /// Solver-side state of an awake prop (reaction slot = body index).
+    fn row_body(&self, index: usize) -> RetailContactBodyState {
+        let body = &self.bodies[index];
+        let inertia = pack_world_inverse_inertia(body.rates.world_inverse_inertia);
+        RetailContactBodyState {
+            contact_body_id: index as u32,
+            reaction_id: index as u32,
+            center_of_mass: body.rates.position,
+            inverse_inertia_full: inertia.full,
+            inverse_inertia_split: inertia.split,
+            inverse_mass: body.inertia.inverse_mass,
+            state: ACTIVE_BODY,
+            force_acceleration: body.rates.force_acceleration,
+            torque_acceleration: body.rates.torque_acceleration,
+            linear_velocity: body.rates.linear_velocity,
+            angular_velocity: body.rates.angular_velocity,
+            kinetic_energy: body.rates.kinetic_energy,
+            cool_down: body.rates.cool_down,
+        }
+    }
+
+    /// Solver-side state of an immovable support: the static world, or an
+    /// asleep prop (inactive, so the row solver gives it no response).
+    fn row_support(&self, world_reaction: usize, center: Vector3) -> RetailContactBodyState {
+        RetailContactBodyState {
+            contact_body_id: u32::MAX,
+            reaction_id: world_reaction as u32,
+            center_of_mass: center,
+            inverse_inertia_full: Vector3::ZERO,
+            inverse_inertia_split: Vector3::ZERO,
+            inverse_mass: 0.0,
+            state: 0,
+            force_acceleration: Vector3::ZERO,
+            torque_acceleration: Vector3::ZERO,
+            linear_velocity: Vector3::ZERO,
+            angular_velocity: Vector3::ZERO,
+            kinetic_energy: 0.0,
+            cool_down: 0,
+        }
+    }
+
+    /// The prop audio's contact strength (DMO collision callback 82C54618: |relative velocity . normal| per point,
+    /// before the response), kept when stronger than this step's earlier ones.
+    fn note_audio_contact(&mut self, index: usize, manifold: &PrimitiveContactManifold, other_velocity: Vector3, tag: u32) {
+        let body = &self.bodies[index];
+        let strength = manifold.points[..manifold.count]
+            .iter()
+            .map(|pair| dot(sub(body.velocity_at(pair.a), other_velocity), manifold.normal).abs())
+            .fold(0.0_f32, f32::max);
+        if body.audio_contact.is_none_or(|(s, _)| s < strength) {
+            self.bodies[index].audio_contact = Some((strength, tag));
+        }
+    }
+
+    /// Retail contact rows for every awake prop (82AE10C8 build, 82AE27D0 iterations): docs/hails-additions/27-dynamic-props.md#prop-contact-rows
+    fn row_corrections(
+        &mut self,
+        worlds: &[&BoardWorld],
+        awake: &[usize],
+        iterations: u32,
+    ) -> Vec<RetailReactionCorrections> {
+        let count = self.bodies.len();
+        let world_reaction = count;
+        let dt = self.simulation.time_step;
+        let mut rows = Vec::new();
+        let mut wake = Vec::new();
+        for &index in awake {
+            self.bodies[index].contacts = 0;
+        }
+        let push_point = |rows: &mut Vec<RetailContactJacobian>,
+                              on_a: Vector3,
+                              on_b: Vector3,
+                              normal: Vector3,
+                              material: RetailContactMaterial,
+                              a: RetailContactBodyState,
+                              b: RetailContactBodyState| {
+            let contact = generate_contact(
+                RetailContactInput {
+                    position_on_a: on_a,
+                    position_on_b: on_b,
+                    normal,
+                    restitution: material.restitution,
+                    static_friction: material.static_friction,
+                    dynamic_friction: material.dynamic_friction,
+                    tag: 0,
+                },
+                a,
+                b,
+            );
+            rows.push(build_contact_jacobian(contact, dt));
+        };
+        let push_rows = |rows: &mut Vec<RetailContactJacobian>,
+                             manifold: &PrimitiveContactManifold,
+                             material: RetailContactMaterial,
+                             a: RetailContactBodyState,
+                             b: RetailContactBodyState| {
+            for pair in &manifold.points[..manifold.count] {
+                push_point(rows, pair.a, pair.b, manifold.normal, material, a, b);
+            }
+        };
+        let reduction = self.tuning.solver.ground_reduction;
+        for &index in awake {
+            let tuning = self.bodies[index].tuning;
+            let box_primitive = self.bodies[index].box_primitive();
+            let world_query = self.world_query_for(index);
+            let pair_settings = self.pair_for(index);
+            let bounds = self.bodies[index].bounds().expanded(tuning.contact_padding + 0.05);
+            let a = self.row_body(index);
+            let support = self.row_support(world_reaction, Vector3::ZERO);
+            // The step's world (map + fused park) is retail's ground set: its contacts are reduced per body (`82779EB0`);
+            // the props-only pieces are the terrain set, kept raw: docs/hails-additions/27-dynamic-props.md#ground-contact-reduction
+            let mut ground: Vec<(skate_core::physics::contact_reduction::ContactRecord, RetailContactMaterial)> = Vec::new();
+            let mut terrain = Vec::new();
+            for (set, world) in worlds.iter().enumerate() {
+                for range in world.candidate_ranges(Some(bounds)) {
+                    for triangle in &world.triangles()[range] {
+                        // Water is not solid to props (retail clip 2026-10-26: a dumpster pushed into the Aletown canal
+                        // sinks through the surface): docs/hails-additions/09-water.md#props-in-water
+                        if skate_core::physics::board_world::is_water_tag(triangle.tag) {
+                            continue;
+                        }
+                        let Some(manifold) = primitive_triangle_world_contacts(
+                            box_primitive,
+                            triangle.triangle,
+                            Vector3::ZERO,
+                            world_query,
+                        ) else {
+                            continue;
+                        };
+                        self.bodies[index].contacts += 1;
+                        self.note_audio_contact(index, &manifold, Vector3::ZERO, triangle.tag);
+                        let material = self.contact_material(index, triangle.material);
+                        if set == 0 {
+                            ground.extend(manifold.points[..manifold.count].iter().map(|pair| {
+                                (skate_core::physics::contact_reduction::ContactRecord { p0: pair.a, p1: pair.b, normal: manifold.normal }, material)
+                            }));
+                        } else {
+                            push_rows(&mut terrain, &manifold, material, a, support);
+                        }
+                    }
+                }
+            }
+            let records: Vec<_> = ground.iter().map(|g| g.0).collect();
+            for k in skate_core::physics::contact_reduction::reduce(&records, &reduction) {
+                let (r, material) = ground[k];
+                push_point(&mut rows, r.p0, r.p1, r.normal, material, a, support);
+            }
+            rows.append(&mut terrain);
+            for other in 0..count {
+                let other_awake = !self.bodies[other].asleep;
+                // Each awake pair once, from its lower index.
+                if other == index || (other_awake && other < index) {
+                    continue;
+                }
+                if !self.bodies[index].bounds().overlaps(self.bodies[other].bounds().expanded(tuning.contact_padding)) {
+                    continue;
+                }
+                let Some(manifold) = primitive_pair_contacts(
+                    box_primitive,
+                    self.bodies[other].box_primitive(),
+                    pair_settings,
+                ) else {
+                    continue;
+                };
+                self.bodies[index].contacts += 1;
+                let other_velocity = self.bodies[other].rates.linear_velocity;
+                self.note_audio_contact(index, &manifold, other_velocity, 0);
+                if other_awake {
+                    self.note_audio_contact(other, &manifold, self.bodies[index].rates.linear_velocity, 0);
+                }
+                let material = self.contact_material(index, self.body_material(other));
+                let b = if other_awake {
+                    self.bodies[other].contacts += 1;
+                    self.row_body(other)
+                } else {
+                    // Asleep prop = immovable support; a hit closing over 1 m/s wakes it (NOT RETAIL YET: retail merges islands).
+                    let closing = manifold.points[..manifold.count]
+                        .iter()
+                        .map(|pair| dot(self.bodies[index].velocity_at(pair.a), manifold.normal))
+                        .fold(0.0_f32, f32::min);
+                    if closing < -1.0 {
+                        wake.push(other);
+                    }
+                    self.row_support(world_reaction, self.bodies[other].rates.position)
+                };
+                push_rows(&mut rows, &manifold, material, a, b);
+            }
+        }
+        // Skater mesh contacts (b617): the volume is body A with its own mass and velocity and a reaction slot of its
+        // own, the prop body B; only the prop's correction is used (the board solver handles the skater side).
+        let skaters = std::mem::take(&mut self.skater_contacts);
+        for (k, (index, manifold, velocity, mass, material, _)) in skaters.iter().enumerate() {
+            if !awake.contains(index) || *mass <= 0.0 {
+                continue;
+            }
+            let skater = RetailContactBodyState {
+                contact_body_id: u32::MAX - 1 - k as u32,
+                reaction_id: (count + 1 + k) as u32,
+                center_of_mass: manifold.points[0].a,
+                inverse_inertia_full: Vector3::ZERO,
+                inverse_inertia_split: Vector3::ZERO,
+                inverse_mass: 1.0 / mass,
+                state: ACTIVE_BODY,
+                force_acceleration: Vector3::ZERO,
+                torque_acceleration: Vector3::ZERO,
+                linear_velocity: *velocity,
+                angular_velocity: Vector3::ZERO,
+                kinetic_energy: 0.0,
+                cool_down: 0,
+            };
+            self.bodies[*index].contacts += 1;
+            push_rows(&mut rows, manifold, self.contact_material(*index, *material), skater, self.row_body(*index));
+        }
+        let mut reactions = vec![RetailReactionCorrections::default(); count + 1 + skaters.len()];
+        solve_constraints(&mut rows, &mut [], &mut [], &mut reactions, iterations);
+        // The actors' own corrections: retail solves a ped's body A as a finite-mass body and moves the ped's root to
+        // it (sub_82E38FB8, kind 1); the host applies them (`living_world::ped_body`).
+        for (k, (index, manifold, velocity, _, _, actor)) in skaters.iter().enumerate() {
+            if !awake.contains(index) {
+                continue;
+            }
+            let r = reactions[count + 1 + k];
+            // The corrections are displacements (velocity change x dt, as the impulse pass writes them).
+            let solved = add(*velocity, scale(r.linear_displacement, 1.0 / dt));
+            let shove = add(r.linear_displacement, r.position_displacement);
+            if dot(shove, shove) <= 0.0 {
+                continue;
+            }
+            let normal = if dot(manifold.normal, shove) < 0.0 { scale(manifold.normal, -1.0) } else { manifold.normal };
+            match self.actor_shoves.iter_mut().find(|s| s.0 == *actor) {
+                Some(s) => {
+                    s.1 = add(s.1, shove);
+                    s.3 = add(s.3, scale(r.linear_displacement, 1.0 / dt));
+                }
+                None => self.actor_shoves.push((*actor, shove, normal, solved)),
+            }
+        }
+        for other in wake {
+            self.bodies[other].wake();
+        }
+        reactions.truncate(count);
+        reactions
+    }
+
+    /// Impulse and positional corrections for one awake body against the
+    /// static world and every other prop box (asleep props are immovable).
+    /// The engine's older pass (NOT RETAIL), used when `row_solver` is off.
+    fn contact_corrections(&mut self, index: usize, worlds: &[&BoardWorld]) -> RetailReactionCorrections {
+        let mut corrections = RetailReactionCorrections::default();
+        let box_primitive = self.bodies[index].box_primitive();
+        let tuning = self.bodies[index].tuning;
+        let pair_settings = self.pair_for(index);
+        let world_query = self.world_query_for(index);
+        let bounds = self.bodies[index].bounds().expanded(tuning.contact_padding + 0.05);
+        let mut contacts = 0u32;
+        // All static manifolds first: the closing impulse is shared over every simultaneous point, not per triangle.
+        let mut manifolds = Vec::new();
+        for (world, range) in worlds.iter().flat_map(|w| w.candidate_ranges(Some(bounds)).into_iter().map(move |r| (*w, r))) {
+            for triangle in &world.triangles()[range] {
+                if skate_core::physics::board_world::is_water_tag(triangle.tag) {
+                    continue;
+                }
+                let Some(manifold) = primitive_triangle_world_contacts(
+                    box_primitive,
+                    triangle.triangle,
+                    Vector3::ZERO,
+                    world_query,
+                ) else {
+                    continue;
+                };
+                contacts += 1;
+                self.note_audio_contact(index, &manifold, Vector3::ZERO, triangle.tag);
+                manifolds.push((manifold, triangle.material));
+            }
+        }
+        let points: usize = manifolds.iter().map(|(m, _)| m.count.max(1)).sum();
+        for (manifold, triangle_material) in &manifolds {
+            let material = self.contact_material(index, *triangle_material);
+            self.resolve_static(index, manifold, material, points as f32, &mut corrections);
+        }
+        let box_primitive = self.bodies[index].box_primitive();
+        for other in 0..self.bodies.len() {
+            if other == index || self.bodies[other].dormant {
+                continue;
+            }
+            if !self.bodies[index].bounds().overlaps(self.bodies[other].bounds().expanded(tuning.contact_padding)) {
+                continue;
+            }
+            let Some(manifold) = primitive_pair_contacts(
+                box_primitive,
+                self.bodies[other].box_primitive(),
+                pair_settings,
+            ) else {
+                continue;
+            };
+            contacts += 1;
+            let other_velocity = self.bodies[other].rates.linear_velocity;
+            self.note_audio_contact(index, &manifold, other_velocity, 0);
+            let material = self.contact_material(index, self.body_material(other));
+            if self.bodies[other].asleep {
+                // An asleep prop is an immovable support; a hard hit wakes it.
+                let closing = manifold.points[..manifold.count]
+                    .iter()
+                    .map(|pair| {
+                        dot(
+                            sub(
+                                self.bodies[index].velocity_at(pair.a),
+                                self.bodies[other].velocity_at(pair.b),
+                            ),
+                            manifold.normal,
+                        )
+                    })
+                    .fold(0.0_f32, |a, b| a.min(b));
+                self.resolve_static(index, &manifold, material, manifold.count.max(1) as f32, &mut corrections);
+                if closing < -1.0 {
+                    self.bodies[other].wake();
+                }
+            } else {
+                self.resolve_dynamic(index, other, &manifold, material, &mut corrections);
+            }
+        }
+        self.bodies[index].contacts = contacts;
+        // Bounded depenetration: the per-point corrections add up (every
+        // triangle and prop touching a deep body contributes), so a body
+        // pushed deep into geometry would otherwise jump out in one tick.
+        let cap = tuning.max_depenetration_per_tick;
+        let depth = length(corrections.position_displacement);
+        if cap.is_finite() && cap >= 0.0 && depth > cap {
+            corrections.position_displacement =
+                scale(corrections.position_displacement, cap / depth);
+        }
+        corrections
+    }
+
+    /// Resolve contacts against an immovable surface (static world or asleep
+    /// prop). The manifold normal points from the surface toward this prop.
+    fn resolve_static(
+        &mut self,
+        index: usize,
+        manifold: &PrimitiveContactManifold,
+        material: RetailContactMaterial,
+        shared_points: f32,
+        corrections: &mut RetailReactionCorrections,
+    ) {
+        let dt = self.simulation.time_step;
+        let tuning = self.bodies[index].tuning;
+        let count = manifold.count.max(1) as f32;
+        let share = shared_points.max(count);
+        for pair in &manifold.points[..manifold.count] {
+            let normal = manifold.normal;
+            let gap = dot(sub(pair.a, pair.b), normal);
+            if gap > tuning.contact_padding {
+                continue;
+            }
+            let body = &self.bodies[index];
+            let r = sub(pair.a, body.rates.position);
+            let velocity = body.velocity_at(pair.a);
+            let vn = dot(velocity, normal);
+            let inverse_mass = body.inertia.inverse_mass;
+            let angular = mul_basis(body.rates.world_inverse_inertia, cross(r, normal));
+            let denominator = inverse_mass + dot(normal, cross(angular, r));
+            if denominator <= 1e-9 {
+                continue;
+            }
+            if vn < 0.0 {
+                let restitution = if vn < -tuning.restitution_threshold {
+                    material.restitution.max(0.0)
+                } else {
+                    0.0
+                };
+                // Each point applies its share, so N simultaneous points do not sum to N times the correction.
+                let impulse = -(1.0 + restitution) * vn / (denominator * share);
+                let mut delta = scale(normal, impulse * inverse_mass);
+                let mut spin = mul_basis(
+                    body.rates.world_inverse_inertia,
+                    cross(r, scale(normal, impulse)),
+                );
+                // Retail combine friction caps the tangential impulse.
+                let tangent = sub(velocity, scale(normal, vn));
+                let speed = length(tangent);
+                if speed > 1e-6 {
+                    let limit = material.dynamic_friction.max(0.0) * impulse;
+                    let friction = (-speed / denominator).clamp(-limit, limit);
+                    let direction = scale(tangent, 1.0 / speed);
+                    delta = add(delta, scale(direction, friction * inverse_mass));
+                    spin = add(
+                        spin,
+                        mul_basis(
+                            body.rates.world_inverse_inertia,
+                            cross(r, scale(direction, friction)),
+                        ),
+                    );
+                }
+                corrections.linear_displacement =
+                    add(corrections.linear_displacement, scale(delta, dt));
+                corrections.angular_displacement =
+                    add(corrections.angular_displacement, scale(spin, dt));
+            }
+            let penetration = (-gap - tuning.penetration_slop).max(0.0) * tuning.penetration_correction;
+            corrections.position_displacement = add(
+                corrections.position_displacement,
+                scale(normal, penetration / count),
+            );
+        }
+    }
+
+    /// Two awake props split the impulse by their inverse masses. Positional
+    /// correction is applied to this body only; the other accumulates its own
+    /// when its turn comes (the pair is visited twice per tick).
+    fn resolve_dynamic(
+        &mut self,
+        index: usize,
+        other: usize,
+        manifold: &PrimitiveContactManifold,
+        material: RetailContactMaterial,
+        corrections: &mut RetailReactionCorrections,
+    ) {
+        let dt = self.simulation.time_step;
+        let tuning = self.bodies[index].tuning;
+        let normal = manifold.normal;
+        let count = manifold.count.max(1) as f32;
+        for pair in &manifold.points[..manifold.count] {
+            let gap = dot(sub(pair.a, pair.b), normal);
+            if gap > tuning.contact_padding {
+                continue;
+            }
+            let (body, other_body) = if index < other {
+                let (a, b) = self.bodies.split_at_mut(other);
+                (&a[index], &b[0])
+            } else {
+                let (a, b) = self.bodies.split_at_mut(index);
+                (&b[0], &a[other])
+            };
+            let inverse_mass = body.inertia.inverse_mass + other_body.inertia.inverse_mass;
+            let velocity = sub(body.velocity_at(pair.a), other_body.velocity_at(pair.b));
+            let vn = dot(velocity, normal);
+            if vn >= 0.0 {
+                continue;
+            }
+            let restitution = if vn < -tuning.restitution_threshold {
+                material.restitution.max(0.0)
+            } else {
+                0.0
+            };
+            // Same per-point sharing as the static contact above.
+            let impulse = -(1.0 + restitution) * vn / (inverse_mass * count);
+            let share = impulse * body.inertia.inverse_mass;
+            corrections.linear_displacement = add(
+                corrections.linear_displacement,
+                scale(normal, share * dt),
+            );
+            let penetration = (-gap - tuning.penetration_slop).max(0.0) * tuning.penetration_correction;
+            corrections.position_displacement = add(
+                corrections.position_displacement,
+                scale(normal, penetration * 0.5),
+            );
+        }
+    }
+}
+
+/// How one skater volume touched a prop this tick.
+#[derive(Clone, Copy, PartialEq)]
+enum SkaterContact {
+    Separate,
+    /// Inside the box but not closing on it.
+    OverlapOnly,
+    Closing,
+}
+
+fn same_pose(a: (Vector3, Basis3), b: (Vector3, Basis3)) -> bool {
+    a.0.x.to_bits() == b.0.x.to_bits()
+        && a.0.y.to_bits() == b.0.y.to_bits()
+        && a.0.z.to_bits() == b.0.z.to_bits()
+        && a.1
+            .columns
+            .iter()
+            .flatten()
+            .zip(b.1.columns.iter().flatten())
+            .all(|(x, y)| x.to_bits() == y.to_bits())
+}
+
+fn volume_bounds(
+    primitive: ContactPrimitive,
+) -> Option<skate_core::physics::board_world::query_metadata::Bounds> {
+    let expanded = |center: Vector3, radius: f32| {
+        let r = radius.abs();
+        skate_core::physics::board_world::query_metadata::Bounds::from_points([
+            Vector3::new(center.x - r, center.y - r, center.z - r),
+            Vector3::new(center.x + r, center.y + r, center.z + r),
+        ])
+    };
+    match primitive {
+        ContactPrimitive::Sphere(sphere) => expanded(sphere.center, sphere.radius),
+        ContactPrimitive::Capsule {
+            center,
+            axis,
+            half_length,
+            radius,
+        } => {
+            let offset = scale(axis, half_length);
+            let a = sub(center, offset);
+            let b = add(center, offset);
+            let lo = Vector3::new(a.x.min(b.x), a.y.min(b.y), a.z.min(b.z));
+            let hi = Vector3::new(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z));
+            let r = radius.abs();
+            skate_core::physics::board_world::query_metadata::Bounds::from_points([
+                Vector3::new(lo.x - r, lo.y - r, lo.z - r),
+                Vector3::new(hi.x + r, hi.y + r, hi.z + r),
+            ])
+        }
+        _ => None,
+    }
+}
+
+/// Prop tuning set by a mod or the engine: default plus per-template overrides; `default()` restores shipped values.
+#[derive(Resource, Clone, Debug, Default, PartialEq)]
+pub(crate) struct PropTuningSettings(pub PropTuningTable);
+
+pub(crate) fn apply_prop_tuning(
+    settings: Res<PropTuningSettings>,
+    mut physics: ResMut<super::GamePhysics>,
+) {
+    if physics
+        .prop_dynamics()
+        .is_none_or(|dynamics| dynamics.tuning() == &settings.0)
+    {
+        return;
+    }
+    if let Some(dynamics) = physics.prop_dynamics_mut() {
+        dynamics.set_tuning(settings.0.clone());
+    }
+}
+
+/// Publish dynamic prop poses to the spawned Bevy entities. The component
+/// transform holds the template-origin placement; scale stays as spawned.
+pub(crate) fn sync_prop_transforms(
+    physics: Res<super::GamePhysics>,
+    mut props: Query<(&crate::skate_world::PropInstance, &mut Transform, Option<&mut Visibility>)>,
+) {
+    let Some(dynamics) = physics.prop_dynamics() else {
+        return;
+    };
+    for (prop, mut transform, visibility) in &mut props {
+        // Streamed-out props are hidden (retail destroys and recreates them), so are props sunk out of sight
+        // (Better Water's fade, `prop_water::apply_prop_fade`).
+        if let Some(mut v) = visibility {
+            let gone = dynamics.is_dormant(prop.id) || dynamics.water_fade(prop.id) <= 0.0;
+            let want = if gone { Visibility::Hidden } else { Visibility::Inherited };
+            if *v != want {
+                *v = want;
+            }
+        }
+        let Some((origin, basis)) = dynamics.pose(prop.id) else {
+            continue;
+        };
+        let translation = Vec3::new(origin.x, origin.y, origin.z);
+        let rotation = Quat::from_mat3(&Mat3::from_cols(
+            Vec3::from_array(basis.columns[0]),
+            Vec3::from_array(basis.columns[1]),
+            Vec3::from_array(basis.columns[2]),
+        ));
+        if (transform.translation - translation).length_squared() > 1e-12
+            || (transform.rotation - rotation).length_squared() > 1e-12
+        {
+            transform.translation = translation;
+            transform.rotation = rotation;
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::skate_world::build_prop_layer;
+    use skate_core::physics::{
+        board::BodyId,
+        board_step::CollisionBody,
+        collision::Sphere,
+    };
+
+    fn material() -> RetailContactMaterial {
+        RetailContactMaterial {
+            static_friction: 0.8,
+            dynamic_friction: 0.6,
+            restitution: 0.0,
+        }
+    }
+
+    /// Static world material for prop contacts (8277C5D8, context 83034F34): {0, 0, 1}, so the prop's block wins.
+    fn floor_material() -> RetailContactMaterial {
+        RetailContactMaterial { static_friction: 0.0, dynamic_friction: 0.0, restitution: 1.0 }
+    }
+
+    fn simulation() -> RetailSimulationStep {
+        super::prop_simulation(RetailSimulationStep::fixed_60_hz(
+            0,
+            0.01,
+            Vector3::new(0., -9.81, 0.),
+        ))
+    }
+
+    /// Unit-cube template (±0.5) with a single instance placed at `origin`.
+    fn fixture(
+        origin: [f32; 3],
+    ) -> (
+        BoardWorld,
+        crate::skate_world::PropCollisionLayer,
+        PropDynamics,
+    ) {
+        box_fixture(origin, [0.5, 0.5, 0.5])
+    }
+
+    /// Box template with half extents `half` and one instance at `origin`.
+    fn box_fixture(
+        origin: [f32; 3],
+        half: [f32; 3],
+    ) -> (
+        BoardWorld,
+        crate::skate_world::PropCollisionLayer,
+        PropDynamics,
+    ) {
+        let corners = [
+            [-1., -1., -1.], [1., -1., -1.], [1., -1., 1.], [-1., -1., 1.],
+            [-1., 1., -1.], [1., 1., -1.], [1., 1., 1.], [-1., 1., 1.],
+        ]
+        .map(|c: [f32; 3]| [c[0] * half[0], c[1] * half[1], c[2] * half[2]]);
+        let faces = [
+            [4, 7, 6], [4, 6, 5], // +Y top
+            [0, 1, 2], [0, 2, 3], // -Y bottom
+            [1, 5, 6], [1, 6, 2], // +X
+            [0, 7, 4], [0, 3, 7], // -X
+            [3, 2, 6], [3, 6, 7], // +Z
+            [0, 5, 1], [0, 4, 5], // -Z
+        ];
+        shape_fixture(origin, corners.to_vec(), faces.to_vec())
+    }
+
+    /// One prop of the given triangles (outward winding) at `origin`.
+    fn shape_fixture(
+        origin: [f32; 3],
+        corners: Vec<[f32; 3]>,
+        faces: Vec<[u32; 3]>,
+    ) -> (
+        BoardWorld,
+        crate::skate_world::PropCollisionLayer,
+        PropDynamics,
+    ) {
+        let index_count = faces.len() as u32 * 3;
+        let vertex = |position| skate_data::skate_map::Vertex {
+            position,
+            normal: [0., 1., 0.],
+            uv: [0.; 2],
+            lightmap_uv: [0.; 2],
+            material: 1,
+            decal_uv: None,
+            tangent_frame: None,
+        };
+        let map = skate_data::skate_map::SkateMap {
+            version: 14,
+            name: "props".into(),
+            spawn: [0.; 3],
+            heading: 0.,
+            environment: vec![0.; 45],
+            materials: vec![skate_data::skate_map::Material {
+                name: "prop".into(),
+                flags: 0,
+                friction: 0.5,
+                restitution: 0.1,
+                color: [1.; 3],
+                roughness: 0.5,
+                emissive: 0.,
+                textures: [0; 5],
+                indirect_strength: 0.,
+                alpha_mode: 0,
+                alpha_cutoff: 0.5,
+                audio: 3,
+                physics: 1,
+                pattern: 0,
+                depth_layer: None,
+                retail_definition: None,
+            }],
+            textures: vec![],
+            geometry: skate_data::skate_map::Geometry {
+                vertices: corners.into_iter().map(vertex).collect(),
+                indices: faces.into_iter().flatten().collect(),
+                collision: vec![],
+            },
+            rails: vec![],
+            doors: vec![],
+            lights: vec![],
+            routes: vec![],
+            extensions: vec![],
+        };
+        let objects = vec![skate_data::skate_map::StaticObject {
+            id: 7,
+            name: "template/crate".into(),
+            transform: [
+                1., 0., 0., 0., 1., 0., 0., 0., 1., origin[0], origin[1], origin[2],
+            ],
+            first_index: 0,
+            index_count,
+            first_collision: 0,
+            collision_count: 0,
+            rails: vec![],
+            physics: Default::default(),
+        }];
+        let layer = build_prop_layer(&map, &objects, floor_material()).unwrap().unwrap();
+        let dynamics = PropDynamics::new(&objects, layer.instances(), simulation());
+        let world = super::super::ground::Terrain::Flat.world(floor_material());
+        (world, layer, dynamics)
+    }
+
+    const REST_Y: f32 = super::super::ground::HEIGHT + 0.5;
+
+    #[test]
+    fn prop_watch_spec_parses_four_numbers() {
+        assert_eq!(parse_watch("60.26 1.45 -119.35 2"), Some([60.26, 1.45, -119.35, 2.0]));
+        assert_eq!(parse_watch("1,2,3,0.5"), Some([1.0, 2.0, 3.0, 0.5]));
+        assert_eq!(parse_watch("1 2 3"), None);
+        assert_eq!(parse_watch("1 2 3 -1"), None);
+        assert_eq!(parse_watch("1 2 x 4"), None);
+    }
+
+    /// A skate.Park IgnoreFuser piece is in no skater world, but props land on it (b485 / b492).
+    #[test]
+    fn props_rest_on_props_only_pieces() {
+        let y = super::super::ground::HEIGHT + 1.0;
+        let plate = [[[-2., y, -2.], [-2., y, 2.], [2., y, 2.]], [[-2., y, -2.], [2., y, 2.], [2., y, -2.]]];
+        let pieces = crate::park_layout::Pieces {
+            collision: plate.iter().map(|&points| skate_data::skate_map::Collision {
+                points, surface: 0, material: 1, native_edges: Some([0x60; 3]),
+            }).collect(),
+            ranges: vec![0..2], materials: vec![], rails: vec![],
+            fuse: crate::park_layout::FuseRules::default(), unfused: vec![true], tags: vec![],
+        };
+        let rest = |props_only: bool| {
+            let (world, mut layer, mut dynamics) = fixture([0., y + 2.5, 0.]);
+            if props_only {
+                dynamics.set_props_only_world(crate::skate_world::props_only_world(&pieces, floor_material()).unwrap());
+            }
+            dynamics.bodies[0].wake();
+            for _ in 0..240 {
+                dynamics.step(&world, &mut layer, &[]);
+            }
+            dynamics.bodies[0].rates.position.y
+        };
+        assert!((rest(true) - (y + 0.5)).abs() < 0.1, "on the piece: {}", rest(true));
+        assert!((rest(false) - REST_Y).abs() < 0.1, "through it to the floor: {}", rest(false));
+    }
+
+    /// The flat fixture floor plus a water quad (surface type 12) `depth` above it.
+    fn with_water(world: &BoardWorld, depth: f32) -> BoardWorld {
+        let y = super::super::ground::HEIGHT + depth;
+        let v = Vector3::new;
+        let quad = [v(-10., y, -10.), v(10., y, -10.), v(10., y, 10.), v(-10., y, 10.)];
+        let mut triangles = world.triangles().to_vec();
+        for indices in [[0, 2, 1], [0, 3, 2]] {
+            triangles.push(skate_core::physics::board_world::WorldTriangle {
+                triangle: skate_core::physics::world_contact::triangle_from_volume(indices.map(|i| quad[i]), 0.0, [1.0; 3], skate_core::physics::collision::TriangleFeature::ONE_SIDED),
+                material: floor_material(),
+                tag: 12 << 7,
+            });
+        }
+        BoardWorld::new(triangles)
+    }
+
+    /// Retail: a prop falls through water to the floor (clip 2026-10-26). Better Water: deep water (deeper than the
+    /// prop) carries every prop; in shallow water a heavy prop sinks and a light one floats near the top (user
+    /// 2026-10-26): docs/hails-additions/09-water.md#props-in-water
+    #[test]
+    fn props_fall_through_water_or_float_with_better_water() {
+        // Water `depth` over the floor, the prop's material `density` (None = retail, no Better Water): its height and
+        // sinking fade after 15 s.
+        let drop = |depth: f32, density: Option<f32>| {
+            let (flat, mut layer, mut dynamics) = fixture([0., REST_Y + depth + 2., 0.]);
+            let world = with_water(&flat, depth);
+            dynamics.bodies[0].tuning.water_density = density;
+            let water = super::super::prop_water::PropWater {
+                density: 1000., drag: 2.0, spin_drag: 1.5, deep_float_density: 700., bob_height: 0., bob_period: 3.,
+                heavy_density: 2000., fade_depth: 1.5, settle_speed: 0.2,
+            };
+            dynamics.set_water(density.map(|_| water), &world);
+            dynamics.bodies[0].wake();
+            for _ in 0..900 {
+                dynamics.step(&world, &mut layer, &[]);
+            }
+            (dynamics.bodies[0].rates.position.y, dynamics.water_fade(7))
+        };
+        let water_y = |depth: f32| super::super::ground::HEIGHT + depth;
+        let (retail, _) = drop(3.0, None);
+        assert!((retail - REST_Y).abs() < 0.1, "retail: on the floor under the water, at {retail}");
+        // 2.2 m: deeper than the prop (deep), shallower than prop + fade depth (the bottom stays in sight).
+        let (deep_heavy, fade) = drop(2.2, Some(2500.));
+        assert!((deep_heavy - REST_Y).abs() < 0.1 && fade == 1.0, "a heavy prop (a dumpster) sinks even in deep water, at {deep_heavy}");
+        let (deep_medium, _) = drop(2.2, Some(1400.));
+        assert!((deep_medium - (water_y(2.2) + 0.5 - 0.7)).abs() < 0.1, "deep water carries a prop under the heavy line (70 % under), at {deep_medium}");
+        let (shallow_medium, _) = drop(0.8, Some(1400.));
+        assert!((shallow_medium - REST_Y).abs() < 0.1, "shallow water: a prop heavier than water sinks to the floor, at {shallow_medium}");
+        let (shallow_light, _) = drop(0.8, Some(250.));
+        assert!((shallow_light - (water_y(0.8) + 0.25)).abs() < 0.1, "shallow water: a light prop floats near the top, at {shallow_light}");
+        let (abyss, fade) = drop(20.0, Some(2500.));
+        assert_eq!(fade, 0.0, "sunk out of sight in water too deep to see the bottom");
+        assert!(abyss > REST_Y + 10.0 && abyss < water_y(20.0) - 1.5, "it stops where it faded out, at {abyss}");
+    }
+
+    /// Ask 390: a prop that sank to the floor of shallow water settles and sleeps instead of jiggling under the
+    /// water's samples (each of them used to reset the sleep counter).
+    #[test]
+    fn a_prop_sunk_in_shallow_water_comes_to_rest() {
+        let (flat, mut layer, mut dynamics) = fixture([0., REST_Y + 2.8, 0.]);
+        let world = with_water(&flat, 0.8);
+        dynamics.bodies[0].tuning.water_density = Some(1400.);
+        let water = super::super::prop_water::PropWater {
+            density: 1000., drag: 2.0, spin_drag: 1.5, deep_float_density: 700., bob_height: 0., bob_period: 3.,
+            heavy_density: 2000., fade_depth: 1.5, settle_speed: 0.2,
+        };
+        dynamics.set_water(Some(water), &world);
+        dynamics.bodies[0].wake();
+        for _ in 0..900 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        assert!(dynamics.bodies[0].asleep, "sunk prop sleeps: {:?}", dynamics.bodies[0].rates);
+        let rest = dynamics.bodies[0].rates.position;
+        for _ in 0..300 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        assert_eq!(dynamics.bodies[0].rates.position, rest, "and stays put");
+    }
+
+    /// A prop dropped from the air falls, settles on the floor and sleeps; its
+    /// collision triangles are re-baked at the new pose.
+    #[test]
+    fn dropped_prop_falls_settles_and_sleeps() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y + 5., 0.]);
+        dynamics.bodies[0].wake();
+        for _ in 0..240 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let body = &dynamics.bodies[0];
+        assert!(body.asleep, "prop should cool down to sleep: {:#?}", body.rates);
+        assert!(
+            (body.rates.position.y - REST_Y).abs() < 0.1,
+            "resting height {}",
+            body.rates.position.y
+        );
+        // Re-baked triangles: a probe from the drop height hits the top face.
+        let hit = layer
+            .world()
+            .query_thin_line(Vector3::new(0., REST_Y + 5., 0.), Vector3::new(0., REST_Y - 1., 0.))
+            .unwrap()
+            .unwrap();
+        assert!((hit.geometry.position.y - (REST_Y + 0.5)).abs() < 0.1);
+    }
+
+    /// The prop audio reads the landing as one strong contact (the fall speed along the floor normal), then only
+    /// weak ones while it settles, and nothing once it sleeps: docs/hails-additions/27-dynamic-props.md#prop-sounds
+    #[test]
+    fn audio_samples_carry_the_landing_closing_speed() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y + 5., 0.]);
+        dynamics.bodies[0].wake();
+        let mut samples = Vec::new();
+        let mut landing = None;
+        for _ in 0..240 {
+            dynamics.step(&world, &mut layer, &[]);
+            dynamics.take_audio_samples(&mut samples);
+            if landing.is_none() {
+                landing = samples.first().and_then(|s| s.contact);
+            }
+        }
+        let (strength, material) = landing.expect("the landing touched the floor");
+        assert!(strength > 7.0 && strength < 11.0, "a 4.5 m fall closes at about 9.4 m/s: {strength}");
+        assert!((0..=143).contains(&material));
+        assert!(samples.is_empty(), "an asleep prop with no new contact has no entry: {samples:?}");
+    }
+
+    /// Ask 389: a carried prop is "moved by the player" (entry +0x20) for every audio read of the carry, so its
+    /// moveable loop does not drop out between reads; it ends with the carry.
+    #[test]
+    fn audio_samples_mark_the_carried_prop_pushed_for_the_whole_carry() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 0.]);
+        dynamics.bodies[0].wake();
+        let id = dynamics.bodies[0].id;
+        dynamics.set_held(Some(id));
+        let mut samples = Vec::new();
+        for _ in 0..30 {
+            dynamics.step(&world, &mut layer, &[]);
+            dynamics.take_audio_samples(&mut samples);
+            assert!(samples.iter().find(|s| s.id == u64::from(id)).is_some_and(|s| s.pushed), "held: {samples:?}");
+        }
+        dynamics.set_held(None);
+        for _ in 0..2 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        dynamics.take_audio_samples(&mut samples);
+        assert!(samples.iter().all(|s| !s.pushed), "released: {samples:?}");
+    }
+
+    /// Template-space triangles of a box with half extents `half` (outward winding).
+    fn box_triangles(half: f32) -> Vec<[Vector3; 3]> {
+        let c = [
+            [-1., -1., -1.], [1., -1., -1.], [1., -1., 1.], [-1., -1., 1.],
+            [-1., 1., -1.], [1., 1., -1.], [1., 1., 1.], [-1., 1., 1.],
+        ]
+        .map(|c: [f32; 3]| Vector3::new(c[0] * half, c[1] * half, c[2] * half));
+        [[4, 7, 6], [4, 6, 5], [0, 1, 2], [0, 2, 3], [1, 5, 6], [1, 6, 2], [0, 7, 4], [0, 3, 7], [3, 2, 6], [3, 6, 7], [0, 5, 1], [0, 4, 5]]
+            .map(|f: [usize; 3]| f.map(|i| c[i]))
+            .to_vec()
+    }
+
+    fn thrown(origin: Vector3, velocity: Vector3) -> RuntimeProp {
+        RuntimeProp {
+            template: "template/can".into(),
+            local: box_triangles(0.5),
+            physics: Default::default(),
+            type_data: None,
+            origin,
+            basis: Basis3 { columns: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]] },
+            linear_velocity: velocity,
+            angular_velocity: Vector3::ZERO,
+        }
+    }
+
+    fn spawn(layer: &mut crate::skate_world::PropCollisionLayer, dynamics: &mut PropDynamics, spec: &RuntimeProp) -> u32 {
+        let id = dynamics.next_runtime_id();
+        let instance = layer.add_instance(id, spec.local.clone(), 0, spec.basis.columns, spec.origin).unwrap();
+        assert!(dynamics.spawn_body(instance, id, spec));
+        id
+    }
+
+    /// A mid-game prop on a map without placed props flies, lands and sleeps; removal parks it and frees the slot.
+    #[test]
+    fn runtime_prop_is_thrown_lands_and_is_removed() {
+        let world = super::super::ground::Terrain::Flat.world(floor_material());
+        let mut layer = crate::skate_world::PropCollisionLayer::empty(floor_material()).unwrap();
+        let mut dynamics = PropDynamics::empty(simulation());
+        let id = spawn(&mut layer, &mut dynamics, &thrown(Vector3::new(0., REST_Y + 2., 0.), Vector3::new(3., 2., 0.)));
+        assert_eq!(id, RUNTIME_PROP_ID_BASE);
+        assert!(dynamics.is_runtime(id));
+        dynamics.step(&world, &mut layer, &[]);
+        assert!(dynamics.position_of(id).unwrap().x > 0.0, "throw velocity carries it");
+        for _ in 0..400 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let (origin, _) = dynamics.pose(id).unwrap();
+        let body = &dynamics.bodies[0];
+        assert!(body.asleep, "landed prop sleeps: {:#?}", body.rates);
+        assert!(origin.x > 1.0, "landed down range: {origin:?}");
+        assert!((body.rates.position.y - REST_Y).abs() < 0.1, "resting height {}", body.rates.position.y);
+        let probe = |layer: &crate::skate_world::PropCollisionLayer| {
+            layer.world().query_thin_line(Vector3::new(origin.x, REST_Y + 5., origin.z), Vector3::new(origin.x, REST_Y - 1., origin.z)).unwrap()
+        };
+        let hit = probe(&layer).expect("its triangles are rebaked where it landed");
+        assert!((hit.geometry.position.y - (REST_Y + 0.5)).abs() < 0.1);
+        assert!(dynamics.moved_ids().is_empty(), "a runtime prop has no authored pose");
+        assert_eq!(dynamics.reset_to_spawn(id), None);
+
+        let triangles = layer.world().triangles().len();
+        let instance = dynamics.remove_body(id).unwrap();
+        layer.retire_instance(instance, HELD_PARK).unwrap();
+        assert!(dynamics.pose(id).is_none() && !dynamics.is_runtime(id));
+        assert!(probe(&layer).is_none(), "removed prop no longer collides");
+        assert!(layer.retire_instance(instance, HELD_PARK).is_err(), "retired once");
+
+        let again = spawn(&mut layer, &mut dynamics, &thrown(Vector3::new(5., REST_Y + 1., 0.), Vector3::ZERO));
+        assert_ne!(again, id);
+        assert_eq!(layer.world().triangles().len(), triangles, "same-size slot reused");
+        assert_eq!(dynamics.instance_of(again), Some(instance));
+    }
+
+    /// Map props are never removed by the runtime path, and adding a runtime
+    /// prop leaves the map prop's body and triangles as they were.
+    #[test]
+    fn runtime_spawn_keeps_map_props() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 0.]);
+        let before: Vec<_> = layer.world().triangles().iter().map(|t| (t.triangle.vertices, t.tag)).collect();
+        let pose = dynamics.pose(7);
+        let id = spawn(&mut layer, &mut dynamics, &thrown(Vector3::new(10., REST_Y + 1., 0.), Vector3::ZERO));
+        let after: Vec<_> = layer.world().triangles()[..before.len()].iter().map(|t| (t.triangle.vertices, t.tag)).collect();
+        assert_eq!(after, before);
+        assert_eq!(dynamics.pose(7), pose);
+        assert_eq!(dynamics.remove_body(7), None);
+        assert!(layer.retire_instance(0, HELD_PARK).is_err());
+        for _ in 0..240 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        assert!(dynamics.pose(id).is_some());
+        assert_eq!(dynamics.moved_ids(), Vec::<u32>::new());
+    }
+
+    /// A moving skater sphere wakes a resting prop and pushes it sideways.
+    #[test]
+    fn skater_volume_pushes_resting_prop() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 0.]);
+        let start_x = dynamics.bodies[0].rates.position.x;
+        assert!(dynamics.bodies[0].asleep);
+        let volumes = [BoardWorldVolume {
+            collision_group: 4,
+            body: CollisionBody::Board(BodyId::Deck),
+            primitive: ContactPrimitive::Sphere(Sphere {
+                center: Vector3::new(-0.55, REST_Y, 0.),
+                radius: 0.2,
+            }),
+            motion: skate_core::physics::board_world::VolumeMotion { linear_velocity: Vector3::new(2., 0., 0.), ..Default::default() },
+            material: material(),
+        }];
+        for _ in 0..30 {
+            dynamics.step(&world, &mut layer, &volumes);
+        }
+        let body = &dynamics.bodies[0];
+        assert!(
+            body.rates.position.x > start_x + 0.02,
+            "pushed from {start_x} to {}",
+            body.rates.position.x
+        );
+    }
+
+    /// The prop the skater grinds is not pushed by the skater's volumes (the user, from retail play); once the grind
+    /// ends the same volume pushes it again.
+    #[test]
+    fn the_grinded_prop_is_not_pushed_by_the_skater() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 0.]);
+        let start_x = dynamics.bodies[0].rates.position.x;
+        let volumes = [BoardWorldVolume {
+            collision_group: 4,
+            body: CollisionBody::Board(BodyId::Deck),
+            primitive: ContactPrimitive::Sphere(Sphere { center: Vector3::new(-0.55, REST_Y, 0.), radius: 0.2 }),
+            motion: skate_core::physics::board_world::VolumeMotion { linear_velocity: Vector3::new(2., 0., 0.), ..Default::default() },
+            material: material(),
+        }];
+        dynamics.set_grinded(Some(7));
+        for _ in 0..30 {
+            dynamics.step(&world, &mut layer, &volumes);
+        }
+        assert!((dynamics.bodies[0].rates.position.x - start_x).abs() < 1e-3, "grinded prop moved to {}", dynamics.bodies[0].rates.position.x);
+        dynamics.set_grinded(None);
+        for _ in 0..30 {
+            dynamics.step(&world, &mut layer, &volumes);
+        }
+        assert!(dynamics.bodies[0].rates.position.x > start_x + 0.02, "not pushed after the grind");
+    }
+
+    /// A settled prop stays put and finite over long idle ticks.
+    #[test]
+    fn settled_prop_does_not_sink_or_diverge() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y + 5., 0.]);
+        dynamics.bodies[0].wake();
+        for _ in 0..240 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let settled = dynamics.bodies[0].rates.position;
+        for _ in 0..120 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let body = &dynamics.bodies[0];
+        let p = body.rates.position;
+        assert!(p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
+        assert!(p.y > REST_Y - 0.1, "sank to {}", p.y);
+        assert!((p.y - settled.y).abs() < 0.02, "drifted {} -> {}", settled.y, p.y);
+    }
+
+    // Board stuck inside a prop (2026-10-05, bench near the Aletown spawn).
+
+    /// Bench-sized box: 2.0 x 0.9 x 0.7 m, about 126 kg at the default
+    /// density, resting on the flat ground.
+    const BENCH_HALF: [f32; 3] = [1.0, 0.45, 0.35];
+    const BENCH_REST_Y: f32 = super::super::ground::HEIGHT + 0.45;
+
+    /// A parked deck capsule inside the bench box (under the seat, where the
+    /// render mesh is open but the render-AABB contact box is solid).
+    fn parked_deck() -> [BoardWorldVolume; 1] {
+        [BoardWorldVolume {
+            collision_group: 4,
+            body: CollisionBody::Board(BodyId::Deck),
+            primitive: ContactPrimitive::Capsule {
+                center: Vector3::new(0.1, super::super::ground::HEIGHT + 0.1, 0.05),
+                axis: Vector3::new(1., 0., 0.),
+                half_length: 0.3,
+                radius: 0.06,
+            },
+            motion: skate_core::physics::board_world::VolumeMotion { linear_velocity: Vector3::ZERO, ..Default::default() },
+            material: material(),
+        }]
+    }
+
+    /// #15's push before the fix: overlap nudge forever, no board cap, no
+    /// depenetration bound.
+    fn legacy_tuning() -> PropTuningTable {
+        PropTuningTable {
+            default: PropTuning {
+                stuck_release_ticks: u32::MAX,
+                board_push_speed: f32::INFINITY,
+                max_depenetration_per_tick: f32::INFINITY,
+                ..PropTuning::default()
+            },
+            solver: PropSolverSettings { skater_push_box: true, ..Default::default() },
+            ..Default::default()
+        }
+    }
+
+    /// Runs `ticks` steps with the deck parked inside the bench and returns
+    /// (awake ticks, rebakes, skater pushes) over the last `tail` ticks plus
+    /// the bench's horizontal travel.
+    fn park_deck_in_bench(table: Option<PropTuningTable>, ticks: u32, tail: u32) -> (u32, u32, u32, f32) {
+        let (world, mut layer, mut dynamics) = box_fixture([0., BENCH_REST_Y, 0.], BENCH_HALF);
+        if let Some(table) = table {
+            dynamics.set_tuning(table);
+        }
+        let start = dynamics.bodies[0].rates.position;
+        let volumes = parked_deck();
+        let (mut awake, mut rebakes, mut pushes) = (0, 0, 0);
+        for tick in 0..ticks {
+            dynamics.step(&world, &mut layer, &volumes);
+            let stats = dynamics.last_step_stats();
+            if tick >= ticks - tail {
+                awake += stats.awake;
+                rebakes += stats.rebakes;
+                pushes += stats.skater_pushes;
+            }
+        }
+        let end = dynamics.bodies[0].rates.position;
+        let travel = ((end.x - start.x).powi(2) + (end.z - start.z).powi(2)).sqrt();
+        (awake, rebakes, pushes, travel)
+    }
+
+    /// Repro: #15's push nudged a bench around a parked deck every tick, so it never slept and rebaked every tick.
+    #[test]
+    fn legacy_push_keeps_bench_awake_with_parked_deck() {
+        let (awake, rebakes, pushes, travel) = park_deck_in_bench(Some(legacy_tuning()), 600, 300);
+        println!("legacy: awake {awake}/300 rebakes {rebakes} pushes {pushes} travel {travel:.3} m");
+        assert_eq!(awake, 300, "bench should stay awake every tick under #15's push");
+        assert_eq!(pushes, 300, "a push every tick");
+        assert!(rebakes > 250, "rebake nearly every tick: {rebakes}");
+    }
+
+    /// Fix: the overlap nudge stops after `stuck_release_ticks`, so the bench
+    /// cools down and sleeps with the deck still inside; no per-tick work.
+    #[test]
+    fn parked_deck_inside_bench_lets_it_sleep() {
+        let (awake, rebakes, pushes, travel) = park_deck_in_bench(None, 600, 300);
+        println!("fixed: awake {awake}/300 rebakes {rebakes} pushes {pushes} travel {travel:.3} m");
+        assert_eq!(awake, 0, "bench should be asleep");
+        assert_eq!(rebakes, 0);
+        assert_eq!(pushes, 0);
+        assert!(travel < 0.5, "bench travelled {travel} m");
+    }
+
+    /// A real hit after the release still pushes the prop.
+    #[test]
+    fn released_bench_still_takes_a_real_hit() {
+        let (world, mut layer, mut dynamics) = box_fixture([0., BENCH_REST_Y, 0.], BENCH_HALF);
+        let parked = parked_deck();
+        for _ in 0..300 {
+            dynamics.step(&world, &mut layer, &parked);
+        }
+        assert!(dynamics.bodies[0].asleep);
+        let start = dynamics.bodies[0].rates.position.z;
+        let mut hit = parked;
+        hit[0].primitive = ContactPrimitive::Sphere(Sphere {
+            center: Vector3::new(0., BENCH_REST_Y, -0.35 - 0.15),
+            radius: 0.2,
+        });
+        hit[0].motion.linear_velocity = Vector3::new(0., 0., 4.);
+        for _ in 0..20 {
+            dynamics.step(&world, &mut layer, &hit);
+        }
+        assert!(dynamics.bodies[0].rates.position.z > start + 0.01);
+    }
+
+    /// The board push is capped like the body bump: a board held against a
+    /// light prop cannot drive it past `board_push_speed`.
+    /// Laptop session 2026-10-22 (Black Box quarter pipe): a wheel gliding up a ramp prop's slope is inside the prop's
+    /// box but outside its mesh; it must not shove the ramp away.
+    #[test]
+    fn riding_up_a_ramp_prop_does_not_shove_it() {
+        let corners = vec![
+            [-1., -0.5, -1.], [1., -0.5, -1.], [1., -0.5, 1.], [-1., -0.5, 1.], [1., 0.5, -1.], [1., 0.5, 1.],
+        ];
+        let faces = vec![[0, 1, 2], [0, 2, 3], [0, 3, 5], [0, 5, 4], [1, 4, 5], [1, 5, 2], [0, 4, 1], [3, 2, 5]];
+        let (world, mut layer, mut dynamics) = shape_fixture([0., REST_Y, 0.], corners, faces);
+        let start = dynamics.bodies[0].rates.position;
+        let normal = scale(Vector3::new(-1., 2., 0.), 1. / 5f32.sqrt());
+        let along = scale(Vector3::new(2., 1., 0.), 1. / 5f32.sqrt());
+        let radius = 0.1;
+        for tick in 0..30 {
+            let x = start.x - 0.6 + tick as f32 * 0.04;
+            let surface = Vector3::new(x, start.y + (x - start.x) * 0.5, start.z);
+            let volumes = [BoardWorldVolume {
+                collision_group: 4,
+                body: CollisionBody::Board(BodyId::Deck),
+                primitive: ContactPrimitive::Sphere(Sphere { center: add(surface, scale(normal, radius - 0.005)), radius }),
+                motion: skate_core::physics::board_world::VolumeMotion { linear_velocity: scale(along, 6.0), ..Default::default() },
+                material: material(),
+            }];
+            dynamics.step(&world, &mut layer, &volumes);
+        }
+        let d = sub(dynamics.bodies[0].rates.position, start);
+        let moved = dot(d, d).sqrt();
+        assert!(moved < 0.01, "the ramp moved {moved} m under the rider");
+    }
+
+    /// Ask 357 (Black Box quarter pipe, 250 kg): a board driving into the slope (closing on the face every tick) must not
+    /// slide the ramp; as skater rows (b617) the floor friction holds it, the older impulse push slid it.
+    #[test]
+    fn a_board_driving_into_a_heavy_ramp_does_not_slide_it() {
+        let ride = |rows: bool| {
+            let corners = vec![
+                [-1., -0.5, -1.], [1., -0.5, -1.], [1., -0.5, 1.], [-1., -0.5, 1.], [1., 0.5, -1.], [1., 0.5, 1.],
+            ];
+            let faces = vec![[0, 1, 2], [0, 2, 3], [0, 3, 5], [0, 5, 4], [1, 4, 5], [1, 5, 2], [0, 4, 1], [3, 2, 5]];
+            let (world, mut layer, mut dynamics) = shape_fixture([0., REST_Y, 0.], corners, faces);
+            dynamics.set_tuning(PropTuningTable { solver: PropSolverSettings { skater_rows: rows, ..Default::default() }, ..Default::default() });
+            dynamics.bodies[0].inertia.inverse_mass = 1.0 / 250.0;
+            let start = dynamics.bodies[0].rates.position;
+            let normal = scale(Vector3::new(-1., 2., 0.), 1. / 5f32.sqrt());
+            let radius = 0.1;
+            for tick in 0..30 {
+                let p = dynamics.bodies[0].rates.position;
+                let x = p.x - 0.6 + tick as f32 * 0.03;
+                let surface = Vector3::new(x, p.y + (x - p.x) * 0.5, p.z);
+                let volumes = [BoardWorldVolume {
+                    collision_group: 4,
+                    body: CollisionBody::Board(BodyId::Deck),
+                    primitive: ContactPrimitive::Sphere(Sphere { center: add(surface, scale(normal, radius - 0.01)), radius }),
+                    motion: skate_core::physics::board_world::VolumeMotion { linear_velocity: Vector3::new(6., 0., 0.), ..Default::default() },
+                    material: material(),
+                }];
+                dynamics.step(&world, &mut layer, &volumes);
+            }
+            let d = sub(dynamics.bodies[0].rates.position, start);
+            (d.x * d.x + d.z * d.z).sqrt()
+        };
+        let (old, new) = (ride(false), ride(true));
+        assert!(new < 0.02, "the ramp slid {new} m as skater rows (impulse push: {old} m)");
+    }
+
+    #[test]
+    fn board_push_speed_is_capped() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 0.]);
+        let mut table = PropTuningTable::default();
+        table.default.board_push_speed = 0.8;
+        table.solver.skater_rows = false;
+        dynamics.set_tuning(table);
+        let mut fastest = 0.0_f32;
+        for tick in 0..60 {
+            let x = dynamics.bodies[0].rates.position.x - 0.55 - 0.05 + tick as f32 * 0.0;
+            let volumes = [BoardWorldVolume {
+                collision_group: 4,
+                body: CollisionBody::Board(BodyId::Deck),
+                primitive: ContactPrimitive::Sphere(Sphere {
+                    center: Vector3::new(x, REST_Y, 0.),
+                    radius: 0.2,
+                }),
+                motion: skate_core::physics::board_world::VolumeMotion { linear_velocity: Vector3::new(10., 0., 0.), ..Default::default() },
+                material: material(),
+            }];
+            dynamics.step(&world, &mut layer, &volumes);
+            fastest = fastest.max(dynamics.bodies[0].rates.linear_velocity.x);
+        }
+        assert!(fastest <= 0.8 + 1e-3, "pushed to {fastest} m/s");
+        assert!(fastest > 0.1, "push still applies: {fastest}");
+    }
+
+    /// Older impulse pass: a box deep in the floor rises at most `max_depenetration_per_tick` per tick.
+    #[test]
+    fn depenetration_is_bounded_per_tick() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y - 0.4, 0.]);
+        dynamics.set_tuning(PropTuningTable {
+            solver: PropSolverSettings { row_solver: false, ..Default::default() },
+            ..Default::default()
+        });
+        dynamics.bodies[0].wake();
+        let cap = dynamics.tuning().default.max_depenetration_per_tick;
+        let mut previous = dynamics.bodies[0].rates.position.y;
+        for _ in 0..30 {
+            dynamics.step(&world, &mut layer, &[]);
+            let y = dynamics.bodies[0].rates.position.y;
+            // Velocity terms add at most a few mm on top of the correction.
+            assert!(y - previous <= cap + 0.02, "rose {} m in one tick", y - previous);
+            previous = y;
+        }
+        assert!(previous > REST_Y - 0.4 + 0.05, "the box still comes out: {previous}");
+    }
+
+    /// The retail row solver has no per-tick cap: a box 0.4 m deep in the
+    /// floor comes out on the full predicted-separation target and settles.
+    #[test]
+    fn retail_rows_push_a_deep_box_out_and_it_settles() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y - 0.4, 0.]);
+        dynamics.bodies[0].wake();
+        let mut previous = dynamics.bodies[0].rates.position.y;
+        let mut largest_rise = 0.0f32;
+        let mut fastest = 0.0f32;
+        let mut highest = previous;
+        let mut slept_at = None;
+        for tick in 0..240 {
+            dynamics.step(&world, &mut layer, &[]);
+            let body = &dynamics.bodies[0];
+            let y = body.rates.position.y;
+            largest_rise = largest_rise.max(y - previous);
+            fastest = fastest.max(body.rates.linear_velocity.y);
+            highest = highest.max(y);
+            if slept_at.is_none() && body.asleep {
+                slept_at = Some(tick);
+            }
+            previous = y;
+        }
+        println!("deep box: largest rise {largest_rise:.4} m/tick, fastest up {fastest:.3} m/s, highest {:.4} over rest, end {:.4} over rest, slept at {slept_at:?}", highest - REST_Y, previous - REST_Y);
+        assert!((previous - REST_Y).abs() < 0.02, "the box rests on the floor: {}", previous - REST_Y);
+        assert!(slept_at.is_some(), "the box sleeps");
+    }
+
+    /// Per prop type tuning: an override keyed by template name applies to
+    /// that type only, a collision box override keeps the rendered pose, and
+    /// reset restores the defaults.
+    #[test]
+    fn tuning_overrides_per_template_and_resets() {
+        let (_, _, mut dynamics) = fixture([0., REST_Y, 0.]);
+        let origin = dynamics.bodies[0].origin();
+        let mut table = PropTuningTable::default();
+        table.by_template.insert(
+            "template/crate".into(),
+            PropTuning {
+                stuck_release_ticks: 5,
+                collision_box: Some(PropBox {
+                    center: Vector3::new(0., -0.25, 0.),
+                    half_extents: Vector3::new(0.5, 0.25, 0.5),
+                }),
+                ..PropTuning::default()
+            },
+        );
+        dynamics.set_tuning(table);
+        let body = &dynamics.bodies[0];
+        assert_eq!(body.tuning.stuck_release_ticks, 5);
+        assert!((body.half_extents.y - 0.25).abs() < 1e-6);
+        let moved = body.origin();
+        assert!((moved.y - origin.y).abs() < 1e-5, "rendered pose must not move");
+        dynamics.reset_tuning();
+        let body = &dynamics.bodies[0];
+        assert_eq!(body.tuning, PropTuning::default());
+        assert!((body.half_extents.y - 0.5).abs() < 1e-6);
+    }
+
+    /// Frame-cost probe on the converted DownTown props (private assets,
+    /// `SKATE3_ASSET_ROOT`): time of one prop rebake, which also rebuilds the
+    /// prop layer's query index. Run with `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn downtown_prop_rebake_cost() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT"),
+        );
+        let (mut layer, dynamics) = crate::skate_world::load_prop_layer(
+            &root,
+            "DownTown",
+            floor_material(),
+            simulation(),
+        )
+        .expect("DownTown props");
+        let bench = dynamics
+            .bodies
+            .iter()
+            .position(|b| b.template.to_ascii_lowercase().contains("bench"))
+            .unwrap_or(0);
+        let body = &dynamics.bodies[bench];
+        let (origin, basis) = (body.origin(), body.rates.basis);
+        let started = std::time::Instant::now();
+        for _ in 0..100 {
+            layer.rebake(body.instance, basis.columns, origin).unwrap();
+        }
+        let each = started.elapsed() / 100;
+        println!(
+            "DownTown: {} props, {} triangles; {} ({} tris, box {:?}) rebake {:?} each",
+            dynamics.bodies.len(),
+            layer.world().triangles().len(),
+            body.template,
+            layer.instances()[body.instance].range.len(),
+            body.half_extents,
+            each
+        );
+    }
+
+    // Phase 3: offboard carry glue (`crate::physics::prop_carry`).
+
+    fn carrier(state: skate_core::player::state::PhysicalStateId, z: f32) -> crate::physics::prop_carry::Carrier {
+        crate::physics::prop_carry::Carrier {
+            state,
+            position: Vector3::new(0., super::super::ground::HEIGHT + 0.9, z),
+            forward: Vector3::new(0., 0., 1.),
+            time_step: simulation().time_step,
+            skeleton: None,
+            ground_grab: None,
+        }
+    }
+
+    /// One carry tick with the grab button held (the carry keeps its prop).
+    fn tick() -> crate::physics::prop_carry::Tick {
+        crate::physics::prop_carry::Tick {
+            grab: true,
+            ..Default::default()
+        }
+    }
+
+    /// Grab button released: drops a carry or confirms a placement.
+    fn release() -> crate::physics::prop_carry::Tick {
+        crate::physics::prop_carry::Tick::default()
+    }
+
+    /// Derived controller words with the given raw flag bits held this tick
+    /// (word 13) and on the previous tick (word 6).
+    fn controller_words(now: &[u32], before: &[u32]) -> [u32; 26] {
+        let mut words = [0u32; 26];
+        for bit in now {
+            words[13] |= 1 << bit;
+        }
+        for bit in before {
+            words[6] |= 1 << bit;
+        }
+        words
+    }
+
+    /// Sprint (A, raw bit 21) never grabs: a prop passed at a run stays put.
+    #[test]
+    fn sprinting_past_a_prop_does_not_grab_it() {
+        let (world, mut layer, mut dynamics) = fixture([0.8, REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let state = skate_core::player::state::PhysicalStateId::BipedGround;
+        let buttons = carry.buttons();
+        let start = dynamics.position_of(7).unwrap();
+        // Run along +Z at 5 m/s past the prop, which sits 0.8 m to the side.
+        let speed_per_tick = 5.0 * simulation().time_step;
+        for i in 0..90 {
+            let words = if i == 0 {
+                controller_words(&[21], &[])
+            } else {
+                controller_words(&[21], &[21])
+            };
+            let tick = crate::physics::prop_carry::Tick::from_controller(&words, buttons, 0., 0., 0.);
+            assert!(!tick.grab, "sprint (A) produced a grab on tick {i}");
+            carry.update(&mut dynamics, tick, carrier(state, -1.0 + speed_per_tick * i as f32));
+            assert_eq!(carry.held(), None, "sprinting grabbed the prop on tick {i}");
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let end = dynamics.position_of(7).unwrap();
+        let moved = ((end.x - start.x).powi(2) + (end.z - start.z).powi(2)).sqrt();
+        assert!(moved < 0.05, "prop followed the runner: moved {moved} m");
+    }
+
+    /// The retail GrabWorld button (RB, raw bit 28) grabs while held and
+    /// releasing it drops the prop.
+    #[test]
+    fn grab_world_button_holds_and_release_drops() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let state = skate_core::player::state::PhysicalStateId::BipedGround;
+        let buttons = carry.buttons();
+        let from = |now: &[u32], before: &[u32]| {
+            crate::physics::prop_carry::Tick::from_controller(
+                &controller_words(now, before),
+                buttons,
+                0.,
+                0.,
+                0.,
+            )
+        };
+        carry.update(&mut dynamics, from(&[28], &[]), carrier(state, 0.));
+        assert_eq!(carry.held(), Some(7));
+        for i in 0..30 {
+            carry.update(&mut dynamics, from(&[28], &[28]), carrier(state, 0.));
+            dynamics.step(&world, &mut layer, &[]);
+            assert_eq!(carry.held(), Some(7), "held grab dropped on tick {i}");
+        }
+        carry.update(&mut dynamics, from(&[], &[28]), carrier(state, 1.5));
+        assert_eq!(carry.held(), None, "releasing the grab button must drop");
+        // B is a rising edge for placement, not a level.
+        assert!(from(&[20], &[]).placement);
+        assert!(!from(&[20], &[20]).placement);
+    }
+
+    /// One held tick with the OB_ObjectMv intents (left stick X / Z, right stick X).
+    fn stick(x: f32, z: f32, rot: f32) -> crate::physics::prop_carry::Tick {
+        crate::physics::prop_carry::Tick { grab: true, object_move: [x, z, rot], ..Default::default() }
+    }
+
+    /// The skater follows the prop's grab frame (Move Object: the prop leads),
+    /// as `biped_ground` does in the game; height stays the carrier's.
+    fn follow(
+        carry: &crate::physics::prop_carry::PropCarry,
+        carrier: crate::physics::prop_carry::Carrier,
+    ) -> crate::physics::prop_carry::Carrier {
+        match carry.skater_target() {
+            Some((p, f)) => crate::physics::prop_carry::Carrier {
+                position: Vector3::new(p.x, carrier.position.y, p.z),
+                forward: f,
+                ..carrier
+            },
+            None => carrier,
+        }
+    }
+
+    /// Heading in the yaw-rate sense (positive angular velocity about +Y
+    /// increases it), like `HeldBody::heading`.
+    fn heading_of(dynamics: &PropDynamics, id: u32) -> f32 {
+        let z = dynamics.pose(id).unwrap().1.columns[2];
+        z[0].atan2(z[2])
+    }
+
+    /// The axis convention the Move Object heading relies on: a positive yaw
+    /// rate on a free body turns its local +Z toward world +X (right-handed).
+    #[test]
+    fn positive_yaw_rate_turns_local_z_toward_plus_x() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y + 20., 0.]);
+        dynamics.bodies[0].wake();
+        dynamics.bodies[0].rates.angular_velocity = Vector3::new(0., 1., 0.);
+        for _ in 0..10 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let z = dynamics.pose(7).unwrap().1.columns[2];
+        assert!(z[0] > 0.1, "local +Z after a positive yaw rate: {z:?}");
+        assert!(heading_of(&dynamics, 7) > 0.1);
+    }
+
+    /// Retail controller math alone for a centre push on a free point mass (82D45318, `v += L dt`); speed per tick.
+    fn predicted_centre_push(mass: f32, move_z: f32, ticks: usize) -> Vec<f32> {
+        use skate_core::player::offboard::move_object::{command, MoveObjectController, MoveObjectInput};
+        let t = crate::physics::prop_carry::CarryLocomotion::default().move_object;
+        let dt = simulation().time_step;
+        let mut state = MoveObjectController::default();
+        let mut v = 0.0f32;
+        let mut z = 1.2f32;
+        (0..ticks)
+            .map(|_| {
+                let input = MoveObjectInput {
+                    move_z,
+                    move_x: 0.0,
+                    move_rotation: 0.0,
+                    forward: [0.0, 0.0, 1.0],
+                    grip: [0.0, 0.0, z - 0.5],
+                    center: [0.0, 0.0, z],
+                    velocity: [0.0, 0.0, v],
+                    heading: 0.0,
+                    mass,
+                    yaw_inertia: 1.0,
+                    contact_normal: [0.0; 3],
+                    record_272: false,
+                };
+                v += command(&t, &mut state, &input).linear[2] * dt;
+                z += v * dt;
+                v
+            })
+            .collect()
+    }
+
+    /// Object-relative stick (82D45318): the left stick never turns a centre-grabbed prop; Z push / pull, X slide.
+    #[test]
+    fn move_object_left_stick_moves_the_prop_in_the_edge_frame() {
+        for step in 0..8 {
+            let a = step as f32 * std::f32::consts::TAU / 8.0;
+            let (x, z) = (a.sin(), a.cos());
+            let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+            let mut carry = crate::physics::prop_carry::PropCarry::default();
+            let mut at = carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.);
+            carry.update(&mut dynamics, tick(), at);
+            dynamics.set_held(carry.held());
+            let start = dynamics.position_of(7).unwrap();
+            at.state = skate_core::player::state::PhysicalStateId::OffBoardPushing;
+            for _ in 0..90 {
+                at = follow(&carry, at);
+                carry.update(&mut dynamics, stick(x, z, 0.0), at);
+                dynamics.set_held(carry.held());
+                dynamics.step(&world, &mut layer, &[]);
+            }
+            assert_eq!(carry.held(), Some(7), "stick ({x:.2}, {z:.2}) lost the grab");
+            let end = dynamics.position_of(7).unwrap();
+            let (dx, dz) = (end.x - start.x, end.z - start.z);
+            let travelled = (dx * dx + dz * dz).sqrt();
+            let t = crate::physics::prop_carry::CarryLocomotion::default().move_object;
+            // Facing +Z, stick right is the skater's right, -X (the +400 side row, b241; laptop 2026-10-18).
+            let (ex, ez) = (-x * t.side_speed, z * if z > 0.0 { t.push_speed } else { t.pull_speed });
+            let expected = (ex * ex + ez * ez).sqrt();
+            assert!(travelled > 0.5, "stick ({x:.2}, {z:.2}) did not move the prop: {travelled}");
+            let along = (dx * ex + dz * ez) / (travelled * expected);
+            assert!(along > 0.97, "stick ({x:.2}, {z:.2}) moved the prop off its direction: {along}");
+            assert!(heading_of(&dynamics, 7).abs() < 0.05, "left stick turned the prop: {}", heading_of(&dynamics, 7));
+            let target = carry.skater_target().unwrap().0;
+            let lag = ((target.x - at.position.x).powi(2) + (target.z - at.position.z).powi(2)).sqrt();
+            assert!(lag < 0.2, "skater fell {lag} m behind the grab frame");
+        }
+    }
+
+    /// Better Object Mover: a prop without authored grab splines gets one generated spline per vertical box face (the
+    /// authored layout: outward approach, flags 4) and loses them again when it goes off; a later map load (new
+    /// splines) keeps them while on. Off = retail: no grab object for it.
+    #[test]
+    fn better_object_mover_gives_props_without_grab_splines_generated_ones() {
+        let (_, _, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        assert_eq!(dynamics.set_grab_splines(&std::collections::BTreeMap::new()), 0);
+        assert!(dynamics.grab_object(7).is_none(), "retail: no grab handles, not movable");
+        assert_eq!(dynamics.set_better_object_mover(true), 1);
+        let object = dynamics.grab_object(7).expect("generated grab object");
+        assert_eq!(object.splines.len(), 4);
+        for spline in &object.splines {
+            let a = spline.geometry.approach_vectors[0];
+            assert!((a[0].abs() + a[2].abs() - 1.0).abs() < 1e-6 && a[1] == 0.0, "outward horizontal approach {a:?}");
+            assert_eq!(spline.geometry.word_60, 4);
+        }
+        assert_eq!(dynamics.set_grab_splines(&std::collections::BTreeMap::new()), 0);
+        assert!(dynamics.grab_object(7).is_some(), "kept across a spline reload while on");
+        assert_eq!(dynamics.set_better_object_mover(false), 0);
+        assert!(dynamics.grab_object(7).is_none());
+    }
+
+    /// The carry binds exactly the record the Move Object enter passed (82D442D0, b233): the decision on tick N
+    /// starts nothing, the published record binds on N+1, even when another record of the prop is nearer (the large
+    /// dumpster's bottom edges, b224 / b226).
+    #[test]
+    fn the_carry_binds_the_published_record_at_the_move_object_enter() {
+        let (_, _, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut splines = std::collections::BTreeMap::new();
+        // 0: a bottom edge on the near face (approach straight down); 1: the rim higher up the same face.
+        splines.insert("template".to_owned(), vec![
+            crate::living_world::vehicles::CarGrabSpline { points: vec![[-0.4, -0.5, -0.5], [0.4, -0.5, -0.5]], direction: [0.0, -1.0, 0.0], flags: 0 },
+            crate::living_world::vehicles::CarGrabSpline { points: vec![[-0.4, 0.4, -0.5], [0.4, 0.4, -0.5]], direction: [0.0, 0.0, -1.0], flags: 0 },
+        ]);
+        assert_eq!(dynamics.set_grab_splines(&splines), 1);
+        // 82585F58: the record's part / rates block is filled, so the enter's +216 gate (82D442D0) passes.
+        let object = dynamics.grab_object(7).unwrap();
+        let part = object.assembly.as_ref().and_then(|a| a.first_part.as_ref()).expect("a part");
+        // Grab ids pack the body's grab slot (0: the fixture's first body), not its id (map ids are 32-bit).
+        assert_eq!((part.identity, part.rates.as_ref().map(|r| r.identity)), (PROP_GRAB_TAG, Some(PROP_GRAB_TAG)));
+        assert_eq!(part.coefficients_0_to_36[4], dynamics.bodies[0].inertia.inverse_mass);
+        let key = |i: u32| PROP_GRAB_TAG | i;
+        assert_eq!(dynamics.prop_of_grab_key(key(1), true), Some(7));
+        assert_eq!(dynamics.prop_of_grab_key(PROP_GRAB_TAG, false), Some(7));
+        assert_eq!(dynamics.prop_of_grab_key(1 << 6, true), None, "not a prop key");
+        let records = crate::physics::prop_carry::authored_records(&dynamics, 7, true).unwrap();
+        let rim = records.iter().find(|r| r.0[48] == key(1)).unwrap().clone();
+        assert!(rim.0[49] != 0 && rim.0[54] != 0, "the enter's geometry and rates gate");
+        let at = crate::physics::prop_carry::Carrier {
+            ground_grab: Some(Some((2, key(1)))),
+            ..carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.)
+        };
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        carry.set_authored_records(true);
+        carry.update(&mut dynamics, tick(), at);
+        assert_eq!(carry.held(), None, "tick N: the decision alone starts nothing");
+        carry.bind_published(rim);
+        let at = crate::physics::prop_carry::Carrier { ground_grab: Some(None), state: skate_core::player::state::PhysicalStateId::OffBoardPushing, ..at };
+        carry.update(&mut dynamics, tick(), at);
+        assert_eq!((carry.held(), carry.held_grip().map(|g| g.descriptor)), (Some(7), Some((2, key(1)))), "binds the published rim");
+        // Nothing published: no carry, also with grab held in 502.
+        let mut idle = crate::physics::prop_carry::PropCarry::default();
+        idle.set_authored_records(true);
+        idle.update(&mut dynamics, tick(), at);
+        assert_eq!(idle.held(), None);
+    }
+    /// A prop with a grab spline is carried by that record (82D444A0 / 82D45D30), not the box stand-in.
+    #[test]
+    fn a_prop_with_grab_splines_is_carried_by_its_authored_record() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut splines = std::collections::BTreeMap::new();
+        // Spline on the -Z face (toward the skater), off centre along X.
+        splines.insert("template".to_owned(), vec![crate::living_world::vehicles::CarGrabSpline { points: vec![[-0.4, 0.3, -0.5], [0.0, 0.3, -0.5], [0.4, 0.3, -0.5]], direction: [0.0, 0.0, -1.0], flags: 0 }]);
+        assert_eq!(dynamics.set_grab_splines(&splines), 1);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        carry.set_authored_records(true);
+        let mut at = carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.);
+        at.position.x = 0.35;
+        carry.update(&mut dynamics, tick(), at);
+        assert_eq!(carry.held(), Some(7));
+        let grip = carry.held_grip().expect("bound to the authored record");
+        let scale = dynamics.bodies[0].axis_scale;
+        let length = 0.8 * scale.x;
+        // Grip clamped by the end exclusion (0.25) from the skater's x.
+        let expected = (0.35f32 + 0.4 * scale.x).min(length - 0.25);
+        let arc = if grip.reversed { length - grip.grip } else { grip.grip };
+        assert!((arc - expected).abs() < 1e-3, "{grip:?} expected arc {expected}");
+        let (_, forward) = carry.skater_target().unwrap();
+        assert!((forward.z - 1.0).abs() < 1e-4, "{forward:?}");
+        dynamics.set_held(Some(7));
+        at.state = skate_core::player::state::PhysicalStateId::OffBoardPushing;
+        for _ in 0..60 {
+            at = follow(&carry, at);
+            carry.update(&mut dynamics, stick(0., 1., 0.), at);
+            dynamics.set_held(carry.held());
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        assert_eq!(carry.held(), Some(7), "the push dropped the prop");
+        assert_eq!(carry.held_grip().unwrap().descriptor, grip.descriptor);
+        assert!(dynamics.position_of(7).unwrap().z > 1.25, "the prop did not move");
+    }
+
+    /// The grind surface probes (82C205D8 line queries) find a prop's top through the prop collision layer, which
+    /// the grind host probes next to the map (retail queries one world with the DMOs in it).
+    #[test]
+    fn grind_surface_probes_hit_a_prop_through_the_prop_layer() {
+        let (world, layer, dynamics) = fixture([0., REST_Y, 1.2]);
+        let (origin, _) = dynamics.pose(7).unwrap();
+        let c = dynamics.position_of(7).unwrap();
+        let probe = skate_core::air::trajectory::grind_surface::Probe { start: [c.x, c.y + 2.0, c.z, 1.0], end: [c.x, c.y - 2.0, c.z, 1.0], radius: 0.0 };
+        let on_prop = crate::physics::player_input::grind::world::surface_probe(layer.world(), [0, u32::MAX], 0, probe).unwrap();
+        let hit = on_prop.expect("the probe hits the prop's top");
+        assert!(hit.position[1] > origin.y && hit.normal[1] > 0.9, "{hit:?}");
+        // The map alone (ground under the prop) answers lower or not at all: the host must ask the prop layer.
+        if let Some(ground) = crate::physics::player_input::grind::world::surface_probe(&world, [0, u32::MAX], 0, probe).unwrap() {
+            assert!(ground.fraction > hit.fraction, "{ground:?} {hit:?}");
+        }
+    }
+
+    /// Prop rails (82C4C4E0): template-space segments placed by the current pose like the grab splines, owner
+    /// (prop id, rail), flags 0; the radius rule, the shared cap and the held prop's exclusion apply.
+    #[test]
+    fn prop_rails_follow_the_pose_and_the_query_rules() {
+        use crate::grind_world::{props::{prop_owner, PropRail, PropSegment}, RailRules, RailSource};
+        let (_world, _layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let rail = PropRail { guids: [0x11, 0x22], segments: vec![
+            PropSegment { start: [-0.4, 0.3, -0.5, 1.0], end: [0.0, 0.3, -0.5, 1.0], min: [-0.4, 0.3, -0.5], max: [0.0, 0.3, -0.5] },
+            PropSegment { start: [0.0, 0.3, -0.5, 1.0], end: [0.4, 0.3, -0.5, 1.0], min: [0.0, 0.3, -0.5], max: [0.4, 0.3, -0.5] },
+        ] };
+        assert_eq!(dynamics.set_grind_rails([("template".to_owned(), vec![rail])].into()), 1);
+        let (origin, basis) = dynamics.pose(7).unwrap();
+        let s = dynamics.bodies[0].axis_scale;
+        let place = |p: [f32; 3]| add(origin, mul_basis(basis, Vector3::new(p[0] * s.x, p[1] * s.y, p[2] * s.z)));
+        let mid = place([0.0, 0.3, -0.5]);
+        let (min, max) = ([mid.x - 1.2, mid.y - 1.2, mid.z - 1.2], [mid.x + 1.2, mid.y + 1.2, mid.z + 1.2]);
+        let rules = RailRules::default();
+        let mut hits = Vec::new();
+        dynamics.append_rails(min, max, None, &rules, &mut hits);
+        assert_eq!(hits.len(), 2);
+        for (i, (hit, [a, b])) in hits.iter().zip([[[-0.4, 0.3, -0.5], [0.0, 0.3, -0.5]], [[0.0, 0.3, -0.5], [0.4, 0.3, -0.5]]]).enumerate() {
+            let (a, b) = (place(a), place(b));
+            for (got, want) in [(hit.primitive.start, a), (hit.primitive.end, b)] {
+                assert!((got[0] - want.x).abs() < 1e-5 && (got[1] - want.y).abs() < 1e-5 && (got[2] - want.z).abs() < 1e-5, "{got:?} {want:?}");
+            }
+            assert_eq!(hit.primitive.owner, prop_owner(7, 0));
+            assert_eq!((hit.metadata.spline_guids, hit.metadata.segment_index, hit.metadata.flags), ([0x11, 0x22], i as u32, 0));
+        }
+        // A box away from the segments, the radius rule, the shared cap and the held prop.
+        let far = [mid.x + 5.0, mid.y, mid.z];
+        let mut none = Vec::new();
+        dynamics.append_rails([far[0] - 1.0, far[1] - 1.0, far[2] - 1.0], [far[0] + 1.0, far[1] + 1.0, far[2] + 1.0], None, &rules, &mut none);
+        dynamics.append_rails(min, max, None, &RailRules { prop_radius: 0.01, ..rules }, &mut none);
+        dynamics.append_rails(min, max, Some(7), &rules, &mut none);
+        assert!(none.is_empty(), "{none:?}");
+        let mut capped = Vec::new();
+        dynamics.append_rails(min, max, None, &RailRules { cap: 1, ..rules }, &mut capped);
+        assert_eq!(capped.len(), 1);
+        assert!(prop_owner(7, 0) > u64::from(u32::MAX), "prop owners never meet static 1-based rail owners");
+    }
+
+    /// A straight push moves the prop along the grab-edge normal at about the
+    /// retail push speed, and the skater stays on the grab frame.
+    #[test]
+    fn dragged_prop_follows_a_straight_push() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let mut at = carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.);
+        carry.update(&mut dynamics, tick(), at);
+        assert_eq!(carry.held(), Some(7));
+        dynamics.set_held(Some(7));
+        at.state = skate_core::player::state::PhysicalStateId::OffBoardPushing;
+        let mut max_side = 0.0f32;
+        let mut speed = 0.0f32;
+        let mut peak = 0.0f32;
+        let mut up_min = 1.0f32;
+        for _ in 0..180 {
+            at = follow(&carry, at);
+            carry.update(&mut dynamics, stick(0., 1., 0.), at);
+            dynamics.set_held(carry.held());
+            dynamics.step(&world, &mut layer, &[]);
+            let p = dynamics.position_of(7).unwrap();
+            max_side = max_side.max(p.x.abs());
+            speed = dynamics.bodies[0].rates.linear_velocity.z;
+            peak = peak.max(speed);
+            up_min = up_min.min(dynamics.bodies[0].rates.basis.columns[1][1]);
+        }
+        assert_eq!(carry.held(), Some(7), "the push dropped the prop");
+        assert!(max_side < 0.05, "prop wandered {max_side} m off the push line");
+        let mass = 1.0 / dynamics.bodies[0].inertia.inverse_mass;
+        let t = crate::physics::prop_carry::CarryLocomotion::default().move_object;
+        let target = t.push_speed * t.speed_scale(mass);
+        let predicted = predicted_centre_push(mass, 1.0, 180);
+        let predicted_peak = predicted.iter().fold(0.0f32, |a, b| a.max(*b));
+        let predicted_end = predicted[179];
+        println!("straight push: speed {speed:.3} (retail math {predicted_end:.3}, target {target}), peak {peak:.3} (retail math {predicted_peak:.3}), up_y min {up_min:.4}");
+        // The retail controller settles on the target; the sim must follow the
+        // controller's own prediction (floor contacts only add the commanded
+        // block's small friction, which the integrating controller removes).
+        assert!((predicted_end - target).abs() < 0.05 * target, "retail math does not settle on the target: {predicted_end}");
+        assert!((speed - predicted_end).abs() < 0.1 * target, "push speed {speed} m/s, retail math {predicted_end}");
+        assert!((peak - predicted_peak).abs() < 0.15 * target, "peak {peak} m/s, retail math {predicted_peak}");
+        assert!(up_min > 0.99, "a straight push tipped the cube: up_y {up_min}");
+    }
+
+    /// The right stick turns the held prop (yaw command only, retail sign)
+    /// and the skater is carried round with its grab edge.
+    #[test]
+    fn right_stick_turns_the_held_prop_and_the_skater_follows() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let mut at = carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.);
+        carry.update(&mut dynamics, tick(), at);
+        dynamics.set_held(Some(7));
+        at.state = skate_core::player::state::PhysicalStateId::OffBoardPushing;
+        let mut turned = 0.0f32;
+        let mut previous = heading_of(&dynamics, 7);
+        let mut framed = previous;
+        for _ in 0..90 {
+            at = follow(&carry, at);
+            carry.update(&mut dynamics, stick(0., 0., 1.), at);
+            // The grab frame is built from the pose before this step.
+            framed = heading_of(&dynamics, 7);
+            dynamics.set_held(carry.held());
+            dynamics.step(&world, &mut layer, &[]);
+            let h = heading_of(&dynamics, 7);
+            turned += (h - previous + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            previous = h;
+        }
+        assert_eq!(carry.held(), Some(7));
+        // 82D45318: w = -(curve x MvRot x gain) about +Y, so a positive MvRot turns the prop clockwise from above.
+        assert!(turned < -0.3, "positive MvRot did not turn the prop clockwise: {turned} rad");
+        let up = dynamics.bodies[0].rates.basis.columns[1][1];
+        assert!(up > 0.99, "a yaw command tipped the prop: up_y {up}");
+        // The skater faces the turned edge (frame of the last carry update).
+        let (_, facing) = carry.skater_target().unwrap();
+        let off = (facing.x.atan2(facing.z) - framed + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        assert!(off.abs() < 0.05, "skater not facing the grab edge: {off} rad off");
+    }
+
+    /// Pushing at the grab point off the centre turns the prop through the
+    /// lever-arm curves (a bench grabbed near its end).
+    #[test]
+    fn off_centre_push_turns_a_long_prop() {
+        let (world, mut layer, mut dynamics) = box_fixture([0., super::super::ground::HEIGHT + 0.41, 0.], [2.3, 0.41, 0.29]);
+        let id = dynamics.bodies[0].id;
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        // Behind the bench, 1.8 m right of its centre.
+        let mut at = crate::physics::prop_carry::Carrier {
+            position: Vector3::new(1.8, super::super::ground::HEIGHT + 0.9, -0.9),
+            ..carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.)
+        };
+        carry.update(&mut dynamics, tick(), at);
+        assert_eq!(carry.held(), Some(id));
+        dynamics.set_held(Some(id));
+        at.state = skate_core::player::state::PhysicalStateId::OffBoardPushing;
+        let mut turned = 0.0f32;
+        let mut previous = heading_of(&dynamics, id);
+        for _ in 0..120 {
+            at = follow(&carry, at);
+            carry.update(&mut dynamics, stick(0., 1., 0.), at);
+            dynamics.set_held(carry.held());
+            dynamics.step(&world, &mut layer, &[]);
+            let h = heading_of(&dynamics, id);
+            turned += (h - previous + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            previous = h;
+        }
+        assert_eq!(carry.held(), Some(id), "the push dropped the bench");
+        // Push along +Z at r = (1.8, 0, -0.3) from the centre: torque about +Y
+        // is -1.8 F, and retail's yaw term (82D45318) turns the same way.
+        println!("off-centre push: turned {turned:.3} rad");
+        assert!(turned < -0.05, "the off-centre push did not turn the bench with its torque: {turned}");
+    }
+
+    /// A held right stick turns the prop at the retail yaw-rate target (82D45318 PID): docs/hails-additions/27-dynamic-props.md#move-object-yaw-rate-pid
+    #[test]
+    fn held_right_stick_turn_rate_stays_bounded() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let mut at = carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.);
+        carry.update(&mut dynamics, tick(), at);
+        dynamics.set_held(Some(7));
+        at.state = skate_core::player::state::PhysicalStateId::OffBoardPushing;
+        let mut peak = 0.0f32;
+        for _ in 0..180 {
+            at = follow(&carry, at);
+            carry.update(&mut dynamics, stick(0., 0., 1.), at);
+            dynamics.set_held(carry.held());
+            dynamics.step(&world, &mut layer, &[]);
+            peak = peak.max(dynamics.bodies[0].rates.angular_velocity.y.abs());
+        }
+        assert_eq!(carry.held(), Some(7), "the turn dropped the prop");
+        let (command, _) = carry.last_command().expect("held");
+        let target = command.yaw_target.abs();
+        let rate = dynamics.bodies[0].rates.angular_velocity.y.abs();
+        println!("right stick turn: rate {rate:.3} rad/s, peak {peak:.3}, retail target {target:.3}");
+        assert!(target > 0.5, "no yaw target from the right stick: {command:?}");
+        assert!((rate - target).abs() < 0.05 * target, "yaw rate {rate} rad/s, retail target {target}");
+        assert!(peak < 1.05 * target, "yaw rate overshoot {peak} rad/s for a target of {target}");
+    }
+
+    /// Grabbing the prop ahead picks it up; the stick moves it.
+    #[test]
+    fn grabbed_prop_moves_with_the_stick() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let mut at = carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.);
+        carry.update(&mut dynamics, crate::physics::prop_carry::Tick { grab: true, ..tick() }, at);
+        assert_eq!(carry.held(), Some(7));
+        dynamics.set_held(carry.held());
+        let start = dynamics.position_of(7).unwrap().z;
+        for _ in 0..60 {
+            at = follow(&carry, at);
+            carry.update(&mut dynamics, stick(0., 1., 0.), at);
+            dynamics.set_held(carry.held());
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let p = dynamics.position_of(7).unwrap();
+        // Distance the retail controller math predicts in one second.
+        let dt = simulation().time_step;
+        let mass = 1.0 / dynamics.bodies[0].inertia.inverse_mass;
+        let predicted: f32 = predicted_centre_push(mass, 1.0, 60).iter().map(|v| v * dt).sum();
+        let travelled = p.z - start;
+        println!("push distance: {travelled:.3} m in 1 s (retail math {predicted:.3} m)");
+        assert!((travelled - predicted).abs() < 0.1 * predicted, "pushed {travelled} m, retail math {predicted} m");
+        assert!(p.y > super::super::ground::HEIGHT, "carried prop underground: {p:?}");
+    }
+
+    /// Dropping releases the prop; it falls, keeps no NaN, and sleeps again.
+    #[test]
+    fn dropped_carry_falls_and_sleeps() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let state = skate_core::player::state::PhysicalStateId::BipedGround;
+        carry.update(&mut dynamics, crate::physics::prop_carry::Tick { grab: true, ..tick() }, carrier(state, 0.));
+        for _ in 0..30 {
+            carry.update(&mut dynamics, tick(), carrier(state, 0.));
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        carry.update(&mut dynamics, release(), carrier(state, 0.));
+        assert_eq!(carry.held(), None);
+        for _ in 0..300 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let p = dynamics.position_of(7).unwrap();
+        assert!((p.y - REST_Y).abs() < 0.1, "resting height {}", p.y);
+        assert!(dynamics.bodies[0].asleep, "dropped prop never slept");
+    }
+
+    /// The grab is ignored unless the skater is on foot.
+    #[test]
+    fn grab_requires_biped_ground() {
+        let (_world, _layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        for state in [
+            skate_core::player::state::PhysicalStateId::PhysicsGround,
+            skate_core::player::state::PhysicalStateId::BipedAir,
+            skate_core::player::state::PhysicalStateId::WipeoutGround,
+        ] {
+            carry.update(&mut dynamics, crate::physics::prop_carry::Tick { grab: true, ..tick() }, carrier(state, 0.));
+            assert_eq!(carry.held(), None, "{state:?} must not grab");
+        }
+        // Grabbing, then mounting the board, drops the prop automatically.
+        carry.update(
+            &mut dynamics,
+            crate::physics::prop_carry::Tick { grab: true, ..tick() },
+            carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.),
+        );
+        assert_eq!(carry.held(), Some(7));
+        carry.update(
+            &mut dynamics,
+            tick(),
+            carrier(skate_core::player::state::PhysicalStateId::PhysicsGround, 0.),
+        );
+        assert_eq!(carry.held(), None);
+    }
+
+    /// Retail grab-object publication moves the selector to OffBoardPushing
+    /// while held; the carry must not treat state 502 as leaving the ground.
+    #[test]
+    fn carry_survives_offboard_pushing_and_drops_afterwards() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let ground = skate_core::player::state::PhysicalStateId::BipedGround;
+        let pushing = skate_core::player::state::PhysicalStateId::OffBoardPushing;
+        carry.update(&mut dynamics, crate::physics::prop_carry::Tick { grab: true, ..tick() }, carrier(ground, 0.));
+        assert_eq!(carry.held(), Some(7));
+        let mut at = carrier(pushing, 0.);
+        for _ in 0..30 {
+            at = follow(&carry, at);
+            carry.update(&mut dynamics, stick(0., 0.2, 0.), at);
+            dynamics.step(&world, &mut layer, &[]);
+            assert_eq!(carry.held(), Some(7), "state 502 dropped the carry");
+        }
+        assert!(dynamics.position_of(7).unwrap().z > 1.25, "the stick did not move the prop in 502");
+        // Leaving the on-foot states still auto-drops.
+        carry.update(
+            &mut dynamics,
+            tick(),
+            carrier(skate_core::player::state::PhysicalStateId::BipedAir, 0.),
+        );
+        assert_eq!(carry.held(), None);
+    }
+
+    // Phase 4: placement mode and layout persistence.
+
+    /// Placement adjusts the ghost pose; confirming drops the prop there,
+    /// records the layout pose, and the prop falls and sleeps in place.
+    #[test]
+    fn placement_adjust_confirm_and_sleep() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let state = skate_core::player::state::PhysicalStateId::BipedGround;
+        let grab = crate::physics::prop_carry::Tick { grab: true, ..tick() };
+        carry.update(&mut dynamics, grab, carrier(state, 0.));
+        assert_eq!(carry.held(), Some(7));
+        // Enter placement; push the ghost far (distance axis) and yaw it.
+        carry.update(
+            &mut dynamics,
+            crate::physics::prop_carry::Tick { placement: true, ..tick() },
+            carrier(state, 0.),
+        );
+        assert!(carry.placing());
+        for _ in 0..60 {
+            carry.update(
+                &mut dynamics,
+                crate::physics::prop_carry::Tick {
+                    distance_axis: 1.0,
+                    yaw_axis: 0.25,
+                    ..tick()
+                },
+                carrier(state, 0.),
+            );
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let held_pose = dynamics.position_of(7).unwrap();
+        let horizontal = (held_pose.x * held_pose.x + held_pose.z * held_pose.z).sqrt();
+        assert!(horizontal > 2.0, "ghost pushed out to r={horizontal}");
+        let recorded_basis = dynamics.pose(7).unwrap().1;
+        assert!(
+            recorded_basis.columns[2][0] > 0.3,
+            "ghost yaw never applied: {:?}",
+            recorded_basis.columns
+        );
+        // Confirm (release the grab button): drop at the ghost pose; the prop
+        // stays there and sleeps.
+        carry.update(&mut dynamics, release(), carrier(state, 0.));
+        assert_eq!(carry.held(), None);
+        assert!(!carry.placing());
+        let recorded = carry.layout().get(&7).copied();
+        assert!(recorded.is_some(), "confirmed placement was not recorded");
+        for _ in 0..300 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let p = dynamics.position_of(7).unwrap();
+        assert!((p.y - REST_Y).abs() < 0.1, "placed prop rests at {}", p.y);
+        let placed_horizontal = (p.x * p.x + p.z * p.z).sqrt();
+        assert!(placed_horizontal > 1.5, "placed prop kept its distance: {placed_horizontal}");
+        assert!(dynamics.bodies[0].asleep, "placed prop never slept");
+    }
+
+    /// Cancelling placement returns to plain carry with the prop still held.
+    #[test]
+    fn placement_cancel_returns_to_carry() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        let state = skate_core::player::state::PhysicalStateId::BipedGround;
+        let grab = crate::physics::prop_carry::Tick { grab: true, ..tick() };
+        let place = crate::physics::prop_carry::Tick { placement: true, grab: true, ..tick() };
+        carry.update(&mut dynamics, grab, carrier(state, 0.));
+        carry.update(&mut dynamics, place, carrier(state, 0.));
+        assert!(carry.placing());
+        carry.update(&mut dynamics, place, carrier(state, 0.));
+        assert!(!carry.placing());
+        assert_eq!(carry.held(), Some(7), "cancel must keep the carry");
+        assert!(carry.layout().is_empty(), "cancel must not record a pose");
+        // The Move Object push still works after the cancel.
+        carry.update(&mut dynamics, stick(0., 1., 0.), carrier(state, 0.));
+        dynamics.step(&world, &mut layer, &[]);
+        assert!(dynamics.position_of(7).unwrap().z > 1.2);
+    }
+
+    /// A saved layout teleports a fresh body to the stored pose, asleep, and
+    /// the rebaked triangles follow.
+    #[test]
+    fn layout_teleports_fresh_body() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let basis = skate_core::math::Basis3 {
+            columns: [[0., 0., -1.], [0., 1., 0.], [1., 0., 0.]],
+        };
+        let origin = Vector3::new(4., REST_Y + 0.5, -3.);
+        let instance = dynamics.teleport(7, origin, basis).unwrap();
+        layer.rebake(instance, basis.columns, origin).unwrap();
+        let (pose_origin, pose_basis) = dynamics.pose(7).unwrap();
+        assert_eq!(pose_origin, origin);
+        assert_eq!(pose_basis.columns[2], [1., 0., 0.]);
+        assert!(dynamics.bodies[0].asleep);
+        // Rotated 90° about Y: the cube is symmetric, but the rebaked probe
+        // confirms the range moved to the new origin.
+        let hit = layer
+            .world()
+            .query_thin_line(
+                Vector3::new(4., REST_Y + 2., -3.),
+                Vector3::new(4., REST_Y - 1., -3.),
+            )
+            .unwrap()
+            .unwrap();
+        assert!((hit.geometry.position.y - (REST_Y + 1.)).abs() < 0.05);
+        let _ = world;
+    }
+
+    /// "Reset moved objects": a moved body is listed, reset returns it to the
+    /// authored pose asleep and at rest, and the list empties.
+    #[test]
+    fn reset_to_spawn_returns_moved_body() {
+        let (_world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let (spawn_origin, spawn_basis) = dynamics.spawn_pose(7).unwrap();
+        assert_eq!(dynamics.pose(7).unwrap().0, spawn_origin);
+        assert!(dynamics.moved_ids().is_empty());
+        let basis = skate_core::math::Basis3 {
+            columns: [[0., 0., -1.], [0., 1., 0.], [1., 0., 0.]],
+        };
+        let instance = dynamics.teleport(7, Vector3::new(4., REST_Y + 0.5, -3.), basis).unwrap();
+        layer.rebake(instance, basis.columns, Vector3::new(4., REST_Y + 0.5, -3.)).unwrap();
+        assert_eq!(dynamics.moved_ids(), vec![7]);
+        let instance = dynamics.reset_to_spawn(7).unwrap();
+        layer.rebake(instance, spawn_basis.columns, spawn_origin).unwrap();
+        let (origin, basis) = dynamics.pose(7).unwrap();
+        let d = sub(origin, spawn_origin);
+        assert!(d.x.abs() + d.y.abs() + d.z.abs() < 1e-5);
+        assert_eq!(basis.columns, spawn_basis.columns);
+        assert!(dynamics.bodies[0].asleep);
+        assert_eq!(dynamics.bodies[0].rates.linear_velocity, Vector3::ZERO);
+        assert!(dynamics.moved_ids().is_empty());
+        assert!(dynamics.reset_to_spawn(99).is_none());
+    }
+
+    // Upright (retail cMsgUprightDMO, doc 27 "Upright").
+
+    /// Basis rotated by `degrees` about world Z (local Y tips toward -X).
+    fn tilted_about_z(degrees: f32) -> skate_core::math::Basis3 {
+        let (s, c) = degrees.to_radians().sin_cos();
+        skate_core::math::Basis3 { columns: [[c, s, 0.], [-s, c, 0.], [0., 0., 1.]] }
+    }
+
+    fn tilt_degrees(basis: skate_core::math::Basis3) -> f32 {
+        let up = mul_basis(basis, Vector3::new(0., 1., 0.));
+        (up.y / length(up)).clamp(-1., 1.).acos().to_degrees()
+    }
+
+    /// 82C573D0 righting values: docs/hails-additions/27-dynamic-props.md#upright-command-values-82c573d0
+    #[test]
+    fn upright_command_matches_retail_constants() {
+        let s = PropUprightSettings::default();
+        let a = Vector3::ZERO;
+        assert!(upright_command(tilted_about_z(0.), Vector3::ZERO, a, &s).is_none());
+        assert!(upright_command(tilted_about_z(9.9), Vector3::ZERO, a, &s).is_none());
+        // 30 deg: up = (-sin, cos, 0); up x Y = (0, 0, -sin) -> axis -Z.
+        let c = upright_command(tilted_about_z(30.), Vector3::ZERO, a, &s).unwrap();
+        let speed = 3.0 * (30f32.to_radians() - 5f32.to_radians());
+        assert!((c.z - (-speed * 60.)).abs() < 1e-3 && c.x.abs() < 1e-5 && c.y.abs() < 1e-5, "{c:?}");
+        // 90 deg: capped at 70 deg.
+        let c = upright_command(tilted_about_z(90.), Vector3::ZERO, a, &s).unwrap();
+        let speed = 3.0 * (70f32.to_radians() - 5f32.to_radians());
+        assert!((c.z + speed * 60.).abs() < 1e-3, "{c:?}");
+        // Spin: along the axis replaced, 10% of the off-axis spin removed.
+        let w = Vector3::new(2.0, 0.0, -1.0);
+        let c = upright_command(tilted_about_z(90.), w, a, &s).unwrap();
+        assert!((c.z - (-speed - (-1.0)) * 60.).abs() < 1e-3, "{c:?}");
+        assert!((c.x - (-0.1 * 2.0 * 60.)).abs() < 1e-3, "{c:?}");
+        // Gain blend: |A| >= 2.1 -> gain 5.
+        let c = upright_command(tilted_about_z(30.), Vector3::ZERO, Vector3::new(0., 3., 0.), &s).unwrap();
+        let speed = 5.0 * (30f32.to_radians() - 5f32.to_radians());
+        assert!((c.z + speed * 60.).abs() < 1e-3, "{c:?}");
+        // Above 120 deg: the body's own Z axis (A.x <= A.z) or X axis (A.x > A.z).
+        let basis = tilted_about_z(150.);
+        let c = upright_command(basis, Vector3::ZERO, a, &s).unwrap();
+        assert!(c.x.abs() < 1e-5 && c.y.abs() < 1e-5 && c.z > 0., "{c:?}");
+        let c = upright_command(basis, Vector3::ZERO, Vector3::new(1., 0., 0.), &s).unwrap();
+        let x = mul_basis(basis, Vector3::new(1., 0., 0.));
+        let along = dot(c, x) / length(c);
+        assert!((along - 1.0).abs() < 1e-4, "{c:?}");
+    }
+
+    /// A box lying on its side, uprighted, turns back within the 2 s window;
+    /// the window closes when the tilt drops under 10 deg.
+    #[test]
+    fn upright_rights_a_tipped_box_within_the_window() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 0.]);
+        let instance = dynamics.teleport(7, Vector3::new(0., REST_Y + 0.05, 0.), tilted_about_z(90.)).unwrap();
+        layer.rebake(instance, tilted_about_z(90.).columns, Vector3::new(0., REST_Y + 0.05, 0.)).unwrap();
+        assert!(!dynamics.upright(99));
+        assert!(dynamics.upright(7));
+        assert!(dynamics.is_uprighting(7));
+        let mut closed_at = None;
+        for step in 1..=120 {
+            dynamics.step(&world, &mut layer, &[]);
+            if !dynamics.is_uprighting(7) {
+                closed_at = Some(step);
+                break;
+            }
+        }
+        let tilt = tilt_degrees(dynamics.bodies[0].rates.basis);
+        let step = closed_at.expect("window should close by tilt before the 2 s timeout");
+        assert!(tilt < 10.0, "closed at step {step} with tilt {tilt}");
+        for _ in 0..240 {
+            dynamics.step(&world, &mut layer, &[]);
+        }
+        let tilt = tilt_degrees(dynamics.bodies[0].rates.basis);
+        assert!(tilt < 10.0, "settled tilt {tilt}");
+    }
+
+    /// With no righting gain the window times out after 2.0 s of 1/60 s
+    /// updates (82C56780: open while timer <= 2.0).
+    #[test]
+    fn upright_window_times_out_at_two_seconds() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 0.]);
+        dynamics.teleport(7, Vector3::new(0., REST_Y, 0.), tilted_about_z(90.)).unwrap();
+        let mut table = PropTuningTable::default();
+        table.upright.gain_min = 0.0;
+        table.upright.gain_max = 0.0;
+        dynamics.set_tuning(table);
+        let s = PropUprightSettings::default();
+        let mut expected = 0u32;
+        let mut t = 0f32;
+        while t <= s.window_seconds {
+            t += s.tick_seconds;
+            expected += 1;
+        }
+        assert!((120..=121).contains(&expected));
+        assert!(dynamics.upright(7));
+        let mut closed_at = None;
+        for step in 1..=200 {
+            dynamics.step(&world, &mut layer, &[]);
+            if !dynamics.is_uprighting(7) {
+                closed_at = Some(step);
+                break;
+            }
+        }
+        assert_eq!(closed_at, Some(expected));
+        assert!(tilt_degrees(dynamics.bodies[0].rates.basis) > 10.0);
+    }
+
+    /// 82C52E68 refuses Move Object yaw while the window is open; the linear
+    /// command still applies. After the window closes yaw applies again.
+    #[test]
+    fn upright_blocks_move_object_yaw_during_the_window() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 0.]);
+        dynamics.teleport(7, Vector3::new(0., REST_Y, 0.), tilted_about_z(90.)).unwrap();
+        assert!(dynamics.upright(7));
+        let dt = dynamics.step_simulation().time_step;
+        let w0 = dynamics.bodies[0].rates.angular_velocity;
+        let v0 = dynamics.bodies[0].rates.linear_velocity;
+        assert!(dynamics.apply_move_command(7, Vector3::new(3., 0., 0.), 5.0, Vector3::ZERO, dt));
+        assert_eq!(dynamics.bodies[0].rates.angular_velocity, w0, "yaw refused");
+        assert!((dynamics.bodies[0].rates.linear_velocity.x - (v0.x + 3. * dt)).abs() < 1e-6, "linear applied");
+        // Mod knob: block_yaw off lets the yaw through.
+        let mut table = PropTuningTable::default();
+        table.upright.block_yaw = false;
+        dynamics.set_tuning(table);
+        assert!(dynamics.apply_move_command(7, Vector3::ZERO, 5.0, Vector3::ZERO, dt));
+        assert!((dynamics.bodies[0].rates.angular_velocity.y - (w0.y + 5. * dt)).abs() < 1e-6);
+        dynamics.set_tuning(PropTuningTable::default());
+        // An upright body closes the window on its first update; yaw applies again.
+        let (world2, mut layer2, mut upright) = fixture([0., REST_Y, 0.]);
+        assert!(upright.upright(7));
+        upright.step(&world2, &mut layer2, &[]);
+        assert!(!upright.is_uprighting(7));
+        let w = upright.bodies[0].rates.angular_velocity;
+        assert!(upright.apply_move_command(7, Vector3::ZERO, 5.0, Vector3::ZERO, dt));
+        assert!((upright.bodies[0].rates.angular_velocity.y - (w.y + 5. * dt)).abs() < 1e-6);
+        let _ = (world, &mut layer);
+    }
+
+    // NPC skaters against props (doc 26, fix 19).
+
+    /// One NPC skater rolling along +X (its +Z forward turned to +X) at `speed`, at `x`.
+    fn npc_sample(x: f32, speed: f32) -> skate_core::living_world::replay::ReplaySample {
+        let q = bevy::prelude::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        skate_core::living_world::replay::ReplaySample {
+            line: [0; 16],
+            node: 0,
+            position: [x, super::super::ground::HEIGHT, 0.0],
+            velocity: [speed, 0.0, 0.0],
+            heading: std::f32::consts::FRAC_PI_2,
+            board: [q.x, q.y, q.z, q.w],
+            skater: [q.x, q.y, q.z, q.w],
+            flags: 0,
+            phase: skate_core::living_world::replay::ReplayPhase::Rolling,
+            jump: None,
+            phase_frames: 0,
+            previous_phase: None,
+            previous_phase_frames: 0,
+            sub_frame: 0.0,
+            fakie: false,
+        }
+    }
+
+    const NPC: skate_core::living_world::LivingWorldId =
+        skate_core::living_world::LivingWorldId { kind: skate_core::living_world::Kind::Skater, serial: 7 };
+
+    /// Run an NPC line along +X through a prop centred at x = 0 for `ticks` 60 Hz ticks.
+    /// Returns the prop centre x per tick and the NPC x per tick.
+    fn npc_run(
+        dynamics: &mut PropDynamics,
+        world: &BoardWorld,
+        layer: &mut crate::skate_world::PropCollisionLayer,
+        start_x: f32,
+        speed: f32,
+        ticks: usize,
+        push: bool,
+    ) -> Vec<(f32, f32)> {
+        let mut out = Vec::new();
+        for tick in 0..ticks {
+            let x = start_x + speed * tick as f32 / 60.0;
+            let volumes = if push {
+                crate::living_world::npc_skaters::prop_volumes(NPC, &npc_sample(x, speed)).to_vec()
+            } else {
+                Vec::new()
+            };
+            dynamics.step_with_actors(world, layer, &[], &volumes);
+            out.push((dynamics.bodies[0].rates.position.x, x));
+        }
+        out
+    }
+
+    /// Retail's bail clamp `82C530F0` with its defaults: the cap is 5 / mass m/s and 15 / mass rad/s under 200 kg,
+    /// a heavier prop is stopped (b206, b209).
+    #[test]
+    fn bail_clamp_caps_light_props_and_stops_heavy_ones() {
+        let s = PropSolverSettings::default();
+        let v = |x: f32, y: f32, z: f32| Vector3::new(x, y, z);
+        let zero = v(0.0, 0.0, 0.0);
+        // 1 kg at rest (d = 0): the ball is centred on 0 with radius 5, so 10 m/s becomes 5 m/s; spin 30 -> 15.
+        let (l, a) = bail_clamp(&s, 1.0, zero, v(10.0, 0.0, 0.0), v(0.0, 30.0, 0.0)).unwrap();
+        assert!((l.x - 5.0).abs() < 1e-5 && l.y.abs() < 1e-6 && (a.y - 15.0).abs() < 1e-4, "{l:?} {a:?}");
+        // 20 kg: 0.25 m/s, 0.75 rad/s.
+        let (l, a) = bail_clamp(&s, 1.0 / 20.0, zero, v(0.0, 0.0, 3.0), v(2.0, 0.0, 0.0)).unwrap();
+        assert!((length(l) - 0.25).abs() < 1e-5 && (length(a) - 0.75).abs() < 1e-5);
+        // Already inside the ball: unchanged.
+        let (l, _) = bail_clamp(&s, 1.0 / 20.0, zero, v(0.1, 0.0, 0.0), zero).unwrap();
+        assert!((l.x - 0.1).abs() < 1e-6);
+        // Moving along d: up to |d| + cap ahead (ball of radius mag around n * mag).
+        let (l, _) = bail_clamp(&s, 1.0 / 20.0, v(2.0, 0.0, 0.0), v(9.0, 0.0, 0.0), zero).unwrap();
+        assert!((l.x - 2.25).abs() < 1e-5, "{l:?}");
+        // 300 kg: stopped, spin zeroed.
+        let (l, a) = bail_clamp(&s, 1.0 / 300.0, zero, v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0)).unwrap();
+        assert!(length(l) < 1e-6 && length(a) < 1e-6);
+        // A static body is left alone.
+        assert!(bail_clamp(&s, 0.0, zero, v(1.0, 0.0, 0.0), zero).is_none());
+    }
+
+    /// A bailing pusher's contacts clamp the prop: the bin barely moves, while the same run without the bail
+    /// knocks it ahead.
+    #[test]
+    fn a_bailing_pusher_does_not_throw_a_bin() {
+        let half = [0.3, 0.45, 0.3];
+        let rest = super::super::ground::HEIGHT + 0.45;
+        let pushed = {
+            let (world, mut layer, mut dynamics) = box_fixture([0., rest, 0.], half);
+            npc_run(&mut dynamics, &world, &mut layer, -3.0, 5.0, 120, true)
+        };
+        let (world, mut layer, mut dynamics) = box_fixture([0., rest, 0.], half);
+        dynamics.set_bailing(&[crate::living_world::npc_skaters::PROXY_ID_TAG | NPC.to_u64()]);
+        let bailed = npc_run(&mut dynamics, &world, &mut layer, -3.0, 5.0, 120, true);
+        let (free, clamped) = (pushed.last().unwrap().0, bailed.last().unwrap().0);
+        assert!(free > 1.0 && clamped < free * 0.5, "free push {free:.2} m, bail-clamped {clamped:.2} m");
+        let speed = length(dynamics.bodies[0].rates.linear_velocity);
+        let mass = 1.0 / dynamics.bodies[0].inertia.inverse_mass;
+        assert!(speed <= 2.0 * 5.0 / mass + 1e-3, "speed {speed} for {mass} kg");
+    }
+
+    /// A carried bin (the carrier drives its velocity) still meets a ped's body A (USER-ASKS 387).
+    #[test]
+    fn a_carried_bin_shoves_a_ped_instead_of_passing_through() {
+        use crate::living_world::ped_body::{body_a_id, body_a_volume, PedProxy};
+        let half = [0.3, 0.45, 0.3];
+        let rest = super::super::ground::HEIGHT + 0.45;
+        let (world, mut layer, mut dynamics) = box_fixture([0., rest, 0.], half);
+        let held = dynamics.bodies[0].id;
+        dynamics.set_held(Some(held));
+        dynamics.bodies[0].wake();
+        let proxy = PedProxy::default();
+        let id = body_a_id(3);
+        dynamics.set_actor_push_mass(&[(id, proxy.mass)]);
+        let feet = bevy::prelude::Vec3::new(1.2, super::super::ground::HEIGHT, 0.0);
+        let (mut shoves, mut pushed) = (Vec::new(), 0.0);
+        for _ in 0..90 {
+            // The carrier drives the carried prop's velocity every tick.
+            dynamics.bodies[0].rates.linear_velocity = Vector3::new(2.0, 0.0, 0.0);
+            dynamics.step_with_actors(&world, &mut layer, &[], &[(id, body_a_volume(feet, bevy::prelude::Vec3::ZERO, &proxy))]);
+            dynamics.take_actor_shoves(&mut shoves);
+            pushed += shoves.drain(..).map(|s| s.1.x).sum::<f32>();
+        }
+        assert!(pushed > 0.0, "the ped in the carried bin's way is shoved: {pushed:.3}, bin x {:.2} held {:?} stats {:?}", dynamics.bodies[0].rates.position.x, dynamics.held, dynamics.stats.skater_pushes);
+    }
+
+    /// A bin slid into a ped's body A (group 9, 10 kg): the solve reports body A's displacement; a ped whose root does
+    /// not follow it (no collision sliding) stops the bin, one that follows it (82E38400 kind 1, the root moved to body
+    /// A by sub_82E38FB8) is shoved along and the bin keeps most of its speed (b342, b635, USER-ASKS 375).
+    #[test]
+    fn a_sliding_bin_shoves_a_ped_whose_body_a_follows() {
+        use crate::living_world::ped_body::{body_a_id, body_a_volume, PedProxy};
+        let half = [0.3, 0.45, 0.3];
+        let rest = super::super::ground::HEIGHT + 0.45;
+        let ped_x = 1.2;
+        let run = |ped: bool, follow: bool| {
+            let (world, mut layer, mut dynamics) = box_fixture([0., rest, 0.], half);
+            dynamics.bodies[0].rates.linear_velocity = Vector3::new(4.0, 0.0, 0.0);
+            dynamics.bodies[0].wake();
+            let proxy = PedProxy::default();
+            let id = body_a_id(3);
+            dynamics.set_actor_push_mass(&[(id, proxy.mass)]);
+            let mut feet = bevy::prelude::Vec3::new(ped_x, super::super::ground::HEIGHT, 0.0);
+            let mut shoves = Vec::new();
+            let mut pushed = 0.0;
+            let mut carried = bevy::prelude::Vec3::ZERO;
+            for _ in 0..90 {
+                let volumes = if ped { vec![(id, body_a_volume(feet, carried, &proxy))] } else { Vec::new() };
+                dynamics.step_with_actors(&world, &mut layer, &[], &volumes);
+                dynamics.take_actor_shoves(&mut shoves);
+                carried = bevy::prelude::Vec3::ZERO;
+                for (actor, shove, normal, solved) in &shoves {
+                    assert_eq!(*actor, id);
+                    assert!(dot(*shove, *normal) >= 0.0, "the normal is turned along the shove");
+                    pushed += shove.x;
+                    if follow {
+                        feet += bevy::prelude::Vec3::new(shove.x, 0.0, shove.z);
+                        carried = bevy::prelude::Vec3::new(solved.x, 0.0, solved.z);
+                    }
+                }
+            }
+            (dynamics.bodies[0].rates.position.x, pushed, feet.x)
+        };
+        let (free, ..) = run(false, false);
+        let (blocked, pushed, _) = run(true, false);
+        let (shoved, _, ped_end) = run(true, true);
+        assert!(free > ped_x, "without the ped the bin slides past it: x {free:.2}");
+        assert!(blocked < ped_x - 0.3 && pushed > 0.0, "a ped that never moves stops the bin: x {blocked:.2}, body A shoved {pushed:.2}");
+        // A bin about as heavy as body A shares its momentum with the ped (a heavy dumpster keeps most of its speed).
+        assert!(shoved > blocked + 0.15 && ped_end > ped_x + 0.3, "a sliding ped is shoved along: bin x {shoved:.2} (stopped {blocked:.2}), ped x {ped_end:.2}");
+    }
+
+    /// A bin-sized prop resting on an NPC skater's line is knocked ahead of it (the player's push
+    /// rule), the NPC owns the moved prop, and the bin never ends behind the NPC's board.
+    #[test]
+    fn npc_skater_knocks_a_bin_on_its_line_out_of_the_way() {
+        let half = [0.3, 0.45, 0.3];
+        let rest = super::super::ground::HEIGHT + 0.45;
+        let (world, mut layer, mut dynamics) = box_fixture([0., rest, 0.], half);
+        let control = {
+            let (world, mut layer, mut dynamics) = box_fixture([0., rest, 0.], half);
+            npc_run(&mut dynamics, &world, &mut layer, -3.0, 5.0, 120, false)
+        };
+        assert!(control.iter().all(|(p, _)| p.abs() < 1e-4), "nothing touches the control bin");
+        let run = npc_run(&mut dynamics, &world, &mut layer, -3.0, 5.0, 120, true);
+        let (end_prop, end_npc) = *run.last().unwrap();
+        assert!(end_prop > 1.0, "bin pushed ahead along the line: x {end_prop}");
+        assert_eq!(dynamics.pushed_by(dynamics.bodies[0].id), Some(crate::living_world::npc_skaters::PROXY_ID_TAG | NPC.to_u64()));
+        // No pass-through: once the board reached the bin, the bin's centre stays ahead of the
+        // board's nose (0.4 m) minus the bin's own half depth, or it was knocked clear sideways.
+        for &(prop, npc) in &run {
+            assert!(prop - npc > -(0.4 + half[0]) - 0.05 || dynamics.bodies[0].rates.position.z.abs() > 0.6, "bin {prop} behind npc {npc}");
+        }
+        let _ = end_npc;
+    }
+
+    /// A bench (126 kg) on the line is pushed by the same rule (weight-scaled, board-capped);
+    /// the result is identical bit for bit on a second run (seeded, ordered by actor id).
+    #[test]
+    fn npc_skater_bench_push_is_deterministic() {
+        let runs: Vec<Vec<(f32, f32)>> = (0..2)
+            .map(|_| {
+                let (world, mut layer, mut dynamics) = box_fixture([0., BENCH_REST_Y, 0.], BENCH_HALF);
+                npc_run(&mut dynamics, &world, &mut layer, -3.0, 5.0, 120, true)
+            })
+            .collect();
+        assert_eq!(runs[0], runs[1]);
+        let (end_prop, _) = *runs[0].last().unwrap();
+        assert!(end_prop > 0.5, "bench pushed along the line: x {end_prop}");
+    }
+
+    /// NPC volumes and the local player's both push in one step; the last actually pushing actor
+    /// owns the prop, and a far NPC does not touch it.
+    #[test]
+    fn far_npc_leaves_props_alone_and_local_push_owns_it() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 0.]);
+        let far = crate::living_world::npc_skaters::prop_volumes(NPC, &npc_sample(-20.0, 5.0));
+        let local = [BoardWorldVolume {
+            collision_group: 4,
+            body: CollisionBody::Board(BodyId::Deck),
+            primitive: ContactPrimitive::Sphere(Sphere { center: Vector3::new(-0.55, REST_Y, 0.), radius: 0.2 }),
+            motion: skate_core::physics::board_world::VolumeMotion { linear_velocity: Vector3::new(2., 0., 0.), ..Default::default() },
+            material: material(),
+        }];
+        dynamics.step_with_actors(&world, &mut layer, &[], &far);
+        assert!(dynamics.bodies[0].asleep);
+        assert_eq!(dynamics.pushed_by(dynamics.bodies[0].id), None);
+        dynamics.step_with_actors(&world, &mut layer, &local, &far);
+        assert_eq!(dynamics.pushed_by(dynamics.bodies[0].id), Some(LOCAL_PUSHER));
+    }
+
+    // Dragged props sink through the floor (2026-10-07, DownTown, doc 26).
+
+    /// DownTown-like sidewalk height (the log's props rest with bottoms at 12.6).
+    const SIDEWALK_Y: f32 = 12.6;
+    /// Street one curb lower, from z = CURB_Z on.
+    const STREET_Y: f32 = SIDEWALK_Y - 0.15;
+    const CURB_Z: f32 = 6.0;
+
+    /// A map collision world like a city street: 1 m one-sided floor tiles
+    /// (many interior edges, as the district meshes), a sidewalk, a curb face
+    /// and the street below it.
+    fn street_world() -> BoardWorld {
+        let mut collision = Vec::new();
+        let mut push = |points: [[f32; 3]; 3]| {
+            collision.push(skate_data::skate_map::Collision { points, surface: 0, material: 1, native_edges: None });
+        };
+        for xi in -8..8 {
+            for zi in -6..18 {
+                let (x0, x1, z0, z1) = (xi as f32, xi as f32 + 1.0, zi as f32, zi as f32 + 1.0);
+                let y = if z0 < CURB_Z { SIDEWALK_Y } else { STREET_Y };
+                push([[x0, y, z0], [x0, y, z1], [x1, y, z1]]);
+                push([[x0, y, z0], [x1, y, z1], [x1, y, z0]]);
+            }
+            let (x0, x1) = (xi as f32, xi as f32 + 1.0);
+            push([[x0, STREET_Y, CURB_Z], [x1, STREET_Y, CURB_Z], [x1, SIDEWALK_Y, CURB_Z]]);
+            push([[x0, STREET_Y, CURB_Z], [x1, SIDEWALK_Y, CURB_Z], [x0, SIDEWALK_Y, CURB_Z]]);
+        }
+        let map = skate_data::skate_map::SkateMap {
+            version: 14,
+            name: "street".into(),
+            spawn: [0.; 3],
+            heading: 0.,
+            environment: vec![0.; 45],
+            materials: vec![skate_data::skate_map::Material {
+                name: "concrete".into(),
+                flags: 0,
+                friction: 0.5,
+                restitution: 0.1,
+                color: [1.; 3],
+                roughness: 0.5,
+                emissive: 0.,
+                textures: [0; 5],
+                indirect_strength: 0.,
+                alpha_mode: 0,
+                alpha_cutoff: 0.5,
+                audio: 3,
+                physics: 1,
+                pattern: 0,
+                depth_layer: None,
+                retail_definition: None,
+            }],
+            textures: vec![],
+            geometry: skate_data::skate_map::Geometry { vertices: vec![], indices: vec![], collision },
+            rails: vec![],
+            doors: vec![],
+            lights: vec![],
+            routes: vec![],
+            extensions: vec![],
+        };
+        crate::skate_world::collision_world(&map, floor_material()).unwrap()
+    }
+
+    /// Box sizes of the props the user dragged in the 2026-10-07 session
+    /// (half extents from the PED_OBSTACLE lines: bench, bin, vending, rail).
+    const DRAGGED_TEMPLATES: [(&str, [f32; 3]); 4] = [
+        ("bench", [2.30, 0.41, 0.29]),
+        ("bin", [0.28, 0.41, 0.27]),
+        ("vending", [0.50, 0.95, 0.45]),
+        ("rail", [2.00, 0.30, 0.12]),
+    ];
+
+    struct DragRun {
+        /// Lowest box bottom minus floor seen over the whole run.
+        worst_gap: f32,
+        /// Smallest up-axis Y while held (1 = upright).
+        held_up_min: f32,
+        /// Horizontal distance from the spawn at release and at the end.
+        away_at_release: f32,
+        away_at_end: f32,
+        end: PropGroundProbe,
+        asleep: bool,
+    }
+
+    /// Push a held prop `seconds` along +Z across the curb, release, settle 3 s (held id via `set_held`).
+    fn drag_and_release(half: [f32; 3], seconds: f32) -> DragRun {
+        let world = street_world();
+        let (_, mut layer, mut dynamics) = box_fixture([0., SIDEWALK_Y + half[1], 0.], half);
+        let id = dynamics.bodies[0].id;
+        let spawn = dynamics.position_of(id).unwrap();
+        let dt = simulation().time_step;
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        use skate_core::player::state::PhysicalStateId::{BipedGround, OffBoardPushing};
+        let mut at = crate::physics::prop_carry::Carrier {
+            state: BipedGround,
+            position: Vector3::new(0., SIDEWALK_Y + 0.9, -(half[2] + 0.6)),
+            forward: Vector3::new(0., 0., 1.),
+            time_step: dt,
+            skeleton: None,
+            ground_grab: None,
+        };
+        carry.update(&mut dynamics, tick(), at);
+        assert_eq!(carry.held(), Some(id), "grab failed");
+        dynamics.set_held(carry.held());
+        at.state = OffBoardPushing;
+        let mut worst_gap = f32::INFINITY;
+        let mut held_up_min = 1.0f32;
+        let track = |dynamics: &PropDynamics, worst: &mut f32| {
+            let probe = dynamics.ground_probe(id, &world).unwrap();
+            if let Some(gap) = probe.gap() {
+                *worst = worst.min(gap);
+            }
+            probe
+        };
+        let ticks = (seconds / dt) as u32;
+        for _ in 1..=ticks {
+            at = follow(&carry, at);
+            carry.update(&mut dynamics, stick(0., 1., 0.), at);
+            dynamics.set_held(carry.held());
+            dynamics.step(&world, &mut layer, &[]);
+            track(&dynamics, &mut worst_gap);
+            held_up_min = held_up_min.min(dynamics.bodies[0].rates.basis.columns[1][1]);
+        }
+        assert_eq!(carry.held(), Some(id), "the push dropped the prop");
+        carry.update(&mut dynamics, release(), at);
+        dynamics.set_held(carry.held());
+        let flat = |p: Vector3| ((p.x - spawn.x).powi(2) + (p.z - spawn.z).powi(2)).sqrt();
+        let away_at_release = flat(dynamics.position_of(id).unwrap());
+        let mut end = track(&dynamics, &mut worst_gap);
+        for _ in 0..180 {
+            dynamics.step(&world, &mut layer, &[]);
+            end = track(&dynamics, &mut worst_gap);
+        }
+        DragRun {
+            worst_gap,
+            held_up_min,
+            away_at_release,
+            away_at_end: flat(end.center),
+            end,
+            asleep: dynamics.bodies[0].asleep,
+        }
+    }
+
+    /// A ped walking head-on while Move Object drags a bin at it, holds, then releases it; returns counts and poses.
+    fn ped_vs_dragged_bin(params: skate_core::living_world::peds::ObstacleParams) -> (u32, u32, u32, skate_core::living_world::peds::NavObstacles, Vector3, Vector3) {
+        use skate_core::living_world::peds::NavObstacles;
+        let half = [0.35, 0.5, 0.35];
+        let world = street_world();
+        let (_, mut layer, mut dynamics) = box_fixture([0., SIDEWALK_Y + half[1], 0.], half);
+        let id = dynamics.bodies[0].id;
+        let spawn = dynamics.position_of(id).unwrap();
+        let dt = simulation().time_step;
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        use skate_core::player::state::PhysicalStateId::{BipedGround, OffBoardPushing};
+        let mut at = crate::physics::prop_carry::Carrier {
+            state: BipedGround,
+            position: Vector3::new(0., SIDEWALK_Y + 0.9, -(half[2] + 0.6)),
+            forward: Vector3::new(0., 0., 1.),
+            time_step: dt,
+            skeleton: None,
+            ground_grab: None,
+        };
+        carry.update(&mut dynamics, tick(), at);
+        assert_eq!(carry.held(), Some(id), "grab failed");
+        dynamics.set_held(carry.held());
+        at.state = OffBoardPushing;
+        let mut o = NavObstacles::new(params);
+        let (radius, speed) = (0.35f32, 1.4f32);
+        let mut ped = [0.0f32, SIDEWALK_Y, 3.5];
+        let mut dir = -1.0f32;
+        let (mut entered, mut held_cut, mut held_moving) = (0u32, 0u32, 0u32);
+        let push_ticks = (1.0 / dt) as u32;
+        let hold_ticks = push_ticks + (3.0 / dt) as u32;
+        let rest_ticks = (3.0 / dt) as u32;
+        for k in 0..hold_ticks + rest_ticks {
+            if k < hold_ticks {
+                at = follow(&carry, at);
+                carry.update(&mut dynamics, if k < push_ticks { stick(0., 1., 0.) } else { stick(0., 0., 0.) }, at);
+            } else if k == hold_ticks {
+                carry.update(&mut dynamics, release(), at);
+            }
+            dynamics.set_held(carry.held());
+            dynamics.step(&world, &mut layer, &[]);
+            o.update(&crate::living_world::peds::prop_obstacle_inputs(&dynamics));
+            let s = &o.states[&(id as u64)];
+            if s.held && s.cut.is_some() {
+                held_cut += 1;
+            }
+            if s.held && s.moving {
+                held_moving += 1;
+            }
+            if ped[2] < -1.0 || ped[2] > 4.0 {
+                dir = if ped[2] < -1.0 { 1.0 } else { -1.0 };
+            }
+            let to = [ped[0], ped[1], ped[2] + dir * speed * dt];
+            let next = o.resolve_step(ped, to, radius).unwrap_or(ped);
+            let body = s.now;
+            // Deeper than the cut may lag the body (retail re-cut tolerance 0.25 x 0.35 m).
+            let grow = radius - 0.25 * 0.35;
+            let d = |p: [f32; 3]| (p[0] - body.center[0]).hypot(p[2] - body.center[1]);
+            if body.applies(ped[1], 0.0) && body.contains(next, grow) && d(next) < d(ped) - 1e-6 {
+                entered += 1;
+            }
+            ped = next;
+        }
+        assert_eq!(carry.held(), None);
+        (entered, held_cut, held_moving, o, spawn, dynamics.position_of(id).unwrap())
+    }
+
+    /// Peds vs a held prop: retail keeps it a NavPower obstacle: docs/hails-additions/27-dynamic-props.md#held-prop-as-ped-obstacle
+    #[test]
+    fn peds_do_not_walk_through_a_held_prop_and_see_it_where_it_rests() {
+        use skate_core::living_world::peds::ObstacleParams;
+        let (entered, held_cut, held_moving, o, spawn, rest) = ped_vs_dragged_bin(ObstacleParams::default());
+        let (control, ..) = ped_vs_dragged_bin(ObstacleParams { held_is_obstacle: false, ..ObstacleParams::default() });
+        let s = o.states.values().next().unwrap();
+        let cut = s.cut.expect("the released bin rests and is cut");
+        let cut_at = Vector3::new(s.cut_at[0], s.cut_at[1], s.cut_at[2]);
+        let moved = ((rest.x - spawn.x).powi(2) + (rest.z - spawn.z).powi(2)).sqrt();
+        let dist = |a: Vector3, b: Vector3| ((a.x - b.x).powi(2) + (a.y - b.y).powi(2) + (a.z - b.z).powi(2)).sqrt();
+        println!(
+            "held: entered {entered} (control {control}), ticks held+cut {held_cut}, held+moving {held_moving}; rest {rest:?} moved {moved:.2} m from {spawn:?}; cut centre {:?} (body {:.3} m away), version {}",
+            cut.center,
+            dist(cut_at, rest),
+            o.version
+        );
+        assert_eq!(entered, 0, "a ped never steps deeper into the held prop");
+        assert!(control > 0, "control: with held props ignored the ped walks into it ({control})");
+        assert!(held_moving > 0, "the drag moved it faster than 0.4 m/s at times");
+        assert!(held_cut > 0, "held still, it is cut where it is (retail: below 0.4 m/s)");
+        assert!(moved > 0.5, "dragged away from the spawn: {moved}");
+        // Re-cut where it rests (within the 0.25 x 0.35 m re-cut tolerance), not at the spawn.
+        assert!(dist(cut_at, rest) <= 0.25 * 0.35 + 1e-4);
+        let at = |p: Vector3| [p.x, SIDEWALK_Y, p.z];
+        assert!(o.blocked(at(rest), 0.35), "the new spot blocks");
+        assert!(!o.blocked(at(spawn), 0.35), "the old spot is free");
+        // A path leg through the new spot hits the cut (a detour), one through the old spot does not.
+        let leg = |p: Vector3| o.first_hit([p.x - 3.0, SIDEWALK_Y, p.z], [p.x + 3.0, SIDEWALK_Y, p.z], 0.45);
+        assert!(leg(rest).is_some() && leg(spawn).is_none());
+    }
+
+    /// Every dragged template stays on the floor, rests after release and does not slide back; tipping is allowed.
+    #[test]
+    fn dragged_props_rest_on_the_floor_after_release() {
+        let mut failures = Vec::new();
+        for (name, half) in DRAGGED_TEMPLATES {
+            let run = drag_and_release(half, 5.0);
+            println!(
+                "{name}: worst gap {:.3} m, held up_y min {:.4}, away {:.2} -> {:.2} m, end {:?}, asleep {}",
+                run.worst_gap, run.held_up_min, run.away_at_release, run.away_at_end, run.end, run.asleep
+            );
+            let rest = run.end.gap();
+            let checks = [
+                (run.worst_gap > -0.08, format!("{name} sank {} m into the floor", -run.worst_gap)),
+                (!run.end.below_ground(), format!("{name} ended below the floor: {:?}", run.end)),
+                (rest.is_some_and(|g| g.abs() < 0.08), format!("{name} not resting on the street: gap {rest:?}")),
+                (run.away_at_end > run.away_at_release - 0.1, format!("{name} slid back toward its spawn: {} -> {}", run.away_at_release, run.away_at_end)),
+                // Moved at all (a full push may tip a prop over; tipping is allowed).
+                (run.away_at_release > 0.5, format!("{name} was not dragged: {}", run.away_at_release)),
+            ];
+            failures.extend(checks.into_iter().filter(|c| !c.0).map(|c| c.1));
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// A tall prop pushed off-centre into the curb tips (the contacts decide) and never ends under the floor.
+    #[test]
+    fn pushing_a_tall_prop_into_the_curb_can_tip_it() {
+        let world = street_world();
+        let half = [0.50, 0.95, 0.45];
+        let (_, mut layer, mut dynamics) = box_fixture([0., STREET_Y + half[1], CURB_Z + 1.2], half);
+        let id = dynamics.bodies[0].id;
+        let dt = simulation().time_step;
+        let mut carry = crate::physics::prop_carry::PropCarry::default();
+        use skate_core::player::state::PhysicalStateId::{BipedGround, OffBoardPushing};
+        let mut at = crate::physics::prop_carry::Carrier {
+            state: BipedGround,
+            position: Vector3::new(0.3, STREET_Y + 0.9, CURB_Z + 1.2 + half[2] + 0.6),
+            forward: Vector3::new(0., 0., -1.),
+            time_step: dt,
+            skeleton: None,
+            ground_grab: None,
+        };
+        carry.update(&mut dynamics, tick(), at);
+        assert_eq!(carry.held(), Some(id), "grab failed");
+        dynamics.set_held(carry.held());
+        at.state = OffBoardPushing;
+        let mut up_min = 1.0f32;
+        let mut worst_gap = f32::INFINITY;
+        for _ in 0..180 {
+            at = follow(&carry, at);
+            carry.update(&mut dynamics, stick(0., 1., 0.), at);
+            dynamics.set_held(carry.held());
+            dynamics.step(&world, &mut layer, &[]);
+            up_min = up_min.min(dynamics.bodies[0].rates.basis.columns[1][1]);
+            if let Some(gap) = dynamics.ground_probe(id, &world).unwrap().gap() {
+                worst_gap = worst_gap.min(gap);
+            }
+            if carry.held().is_none() {
+                break;
+            }
+        }
+        println!("tall prop into the curb: up_y min {up_min:.3}, worst gap {worst_gap:.3}");
+        assert!(up_min < 0.97, "the prop never tipped against the curb: up_y min {up_min}");
+        assert!(!dynamics.ground_probe(id, &world).unwrap().below_ground(), "the tipped prop went under the floor");
+    }
+
+    /// A straight full push on flat ground does not tip a prop (spec 7.4: command at the centre of mass).
+    #[test]
+    fn straight_push_on_flat_ground_does_not_tip_a_cube_or_the_bin() {
+        for (name, half) in [("cube", [0.5f32, 0.5, 0.5]), ("bin", [0.28, 0.41, 0.27])] {
+            let world = street_world();
+            let (_, mut layer, mut dynamics) = box_fixture([0., SIDEWALK_Y + half[1], -4.0], half);
+            let id = dynamics.bodies[0].id;
+            let dt = simulation().time_step;
+            let mut carry = crate::physics::prop_carry::PropCarry::default();
+            use skate_core::player::state::PhysicalStateId::{BipedGround, OffBoardPushing};
+            let mut at = crate::physics::prop_carry::Carrier {
+                state: BipedGround,
+                position: Vector3::new(0., SIDEWALK_Y + 0.9, -4.0 - (half[2] + 0.6)),
+                forward: Vector3::new(0., 0., 1.),
+                time_step: dt,
+                skeleton: None,
+                ground_grab: None,
+            };
+            carry.update(&mut dynamics, tick(), at);
+            assert_eq!(carry.held(), Some(id), "{name}: grab failed");
+            dynamics.set_held(carry.held());
+            at.state = OffBoardPushing;
+            let mut up_min = 1.0f32;
+            // 2 s of full push stays on the flat sidewalk (curb at z = 6).
+            for _ in 0..120 {
+                at = follow(&carry, at);
+                carry.update(&mut dynamics, stick(0., 1., 0.), at);
+                dynamics.set_held(carry.held());
+                dynamics.step(&world, &mut layer, &[]);
+                up_min = up_min.min(dynamics.bodies[0].rates.basis.columns[1][1]);
+            }
+            let z = dynamics.position_of(id).unwrap().z;
+            println!("{name}: up_y min {up_min:.4}, z {z:.2}");
+            assert_eq!(carry.held(), Some(id), "{name}: the push dropped the prop");
+            assert!(z < CURB_Z - half[2], "{name}: reached the curb, test not on flat ground: z {z}");
+            assert!(z > -4.0 + 1.0, "{name}: barely moved: z {z}");
+            assert!(up_min > 0.99, "{name}: a straight push tipped it: up_y min {up_min}");
+        }
+    }
+
+    /// Commanded block (82C53EF8) swaps in on the next step and out after; every command wakes (82ADF7B8).
+    #[test]
+    fn commanded_block_switches_with_the_command_and_zero_commands_wake() {
+        let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        assert!(dynamics.bodies[0].asleep);
+        let authored = dynamics.bodies[0].material;
+        let low = RetailContactMaterial { static_friction: 0.01, dynamic_friction: 0.005, restitution: 0.9 };
+        assert_eq!(dynamics.body_material(0), authored, "free block = authored material by default");
+        assert!(dynamics.apply_move_command(7, Vector3::ZERO, 0.0, Vector3::ZERO, simulation().time_step));
+        assert!(!dynamics.bodies[0].asleep, "a zero command must still wake the body");
+        dynamics.step(&world, &mut layer, &[]);
+        let held = dynamics.body_material(0);
+        assert_eq!((held.static_friction, held.dynamic_friction, held.restitution), (0.03, 0.02, authored.restitution));
+        // Combine, not replace: against a low-friction side the held block wins,
+        // against the floor material the higher friction wins (max / max / min).
+        let c = dynamics.contact_material(0, low);
+        assert_eq!((c.static_friction, c.dynamic_friction, c.restitution), (0.03, 0.02, authored.restitution.min(0.9)));
+        let floor = material();
+        let c = dynamics.contact_material(0, floor);
+        assert_eq!(c, combine_contact_materials(held, floor));
+        assert_eq!(c.dynamic_friction, floor.dynamic_friction.max(0.02));
+        dynamics.step(&world, &mut layer, &[]);
+        assert_eq!(dynamics.body_material(0), authored, "block not restored after commands stopped");
+        // Per prop type override (mod) and the old wake rule.
+        let mut rules = MoveCommandRules::default();
+        rules.by_template.insert(
+            "template/crate".into(),
+            PropMaterialBlocks { held: Some([0.4, 0.3]), free: Some([0.9, 0.8]), restitution: Some(0.2), ..Default::default() },
+        );
+        rules.wake_on_command = false;
+        dynamics.set_move_rules(rules);
+        assert_eq!(dynamics.body_material(0), RetailContactMaterial { static_friction: 0.9, dynamic_friction: 0.8, restitution: 0.2 });
+        dynamics.bodies[0].asleep = true;
+        dynamics.apply_move_command(7, Vector3::ZERO, 0.0, Vector3::ZERO, simulation().time_step);
+        assert!(dynamics.bodies[0].asleep, "wake_on_command off: a zero command leaves the body asleep");
+        dynamics.apply_move_command(7, Vector3::new(1.0, 0.0, 0.0), 0.0, Vector3::ZERO, simulation().time_step);
+        dynamics.step(&world, &mut layer, &[]);
+        assert_eq!(dynamics.body_material(0), RetailContactMaterial { static_friction: 0.4, dynamic_friction: 0.3, restitution: 0.2 });
+    }
+
+    /// Per-type DMO data from the vault record (+272, +312, +316 / +324, +320 / +328), inherited from the parent.
+    #[test]
+    fn dmo_type_audio_follows_the_sliding_or_rolling_refspec() {
+        use skate_audio::world::props::{PropSfxRecord, RECORD_CLASS};
+        let field = |t: &str, d: &str| serde_json::json!({"type": t, "data": d});
+        let float = |v: f32| field("EA::Reflection::Float", &format!("{:08X}", v.to_bits()));
+        let int = |v: i32| field("EA::Reflection::Int32", &format!("{v:08X}"));
+        let enumerated = |v: i32| field("Sk8::Audio::ESurfaceType", &format!("{v:08X}"));
+        let bool_ = |v: bool| field("EA::Reflection::Bool", if v { "01" } else { "00" });
+        let refspec = |key: u64| field("Attrib::RefSpec", &format!("B05F7C74C63ACFB8{key:016X}0000000000000000"));
+        let json = serde_json::json!({"version": 1, "collections": [
+            {"class": DMO_TYPE_CLASS, "key": "default", "parent": "", "source": "", "sha256": "", "fields": {
+                "Hash_7E9838A590602713": bool_(false), "Hash_64B6475EA79A904D": refspec(0), "Hash_EC8E46337DBA5454": refspec(0),
+                "Hash_1DD28458327DDE7B": refspec(0), "Hash_9084A9BC417257B1": refspec(0)}},
+            {"class": DMO_TYPE_CLASS, "key": "bin", "parent": "default", "source": "", "sha256": "", "fields": {
+                "Hash_64B6475EA79A904D": refspec(0x1111), "Hash_EC8E46337DBA5454": refspec(0x2222)}},
+            {"class": RECORD_CLASS, "key": "default", "parent": "", "source": "", "sha256": "", "fields": {
+                "Hash_47C530FCCCB8D720": enumerated(143), "Hash_8CB5FC3FB86B5259": enumerated(143),
+                "Hash_40D1C4D9FE126616": bool_(true), "Hash_656A29819E8F77D9": float(0.1),
+                "Hash_42251F85D0298332": float(1.0), "Hash_5C3511E4A37E930D": int(10),
+                "Hash_1FE511BDBA36F55A": int(6), "Hash_E12D64B75EDD6E53": float(12.0), "Hash_132C643877D3F766": float(0.05), "Hash_66B0990AF31D13C6": float(5.0),
+                "Hash_9E6E09F0A98598C3": int(0)}},
+            {"class": RECORD_CLASS, "key": "Hash_0000000000002222", "parent": "default", "source": "", "sha256": "", "fields": {
+                "Hash_47C530FCCCB8D720": enumerated(84), "Hash_8CB5FC3FB86B5259": enumerated(114),
+                "Hash_42251F85D0298332": float(1.45), "Hash_35BC26C216FBCC33": bool_(true), "Hash_D34C61EB3A1B8335": float(2.0)}},
+        ]});
+        let collections: skate_data::collections::Collections = serde_json::from_value(json).unwrap();
+        let audio = dmo_type_audio(&collections, "bin").unwrap().unwrap();
+        let primary = audio.primary.unwrap();
+        assert_eq!((primary.key, primary.material, primary.secondary, primary.use_contact_material), (0x2222, 84, 114, true));
+        assert_eq!((primary.impact_min, primary.impact_max, primary.cooldown), (0.1, 1.45, 10), "min and cooldown from the parent");
+        assert_eq!((primary.speed_attenuation, primary.spin_attenuation), (Some(2.0), None));
+        assert_eq!(primary.looping.patch, 6, "loop words from the parent too");
+        assert!(audio.sliding && audio.moved.is_none(), "a sliding type (rolls = false) takes the 0xB8 / 0x40 RefSpecs");
+        assert_eq!(dmo_type_audio(&collections, "default").unwrap(), None, "empty RefSpecs are silent");
+        let _ = PropSfxRecord::default();
+    }
+
+    #[test]
+    fn dmo_type_blocks_read_the_characteristics_record_with_parents() {
+        let field = |t: &str, d: &str| serde_json::json!({"type": t, "data": d});
+        let float = |v: f32| field("EA::Reflection::Float", &format!("{:08X}", v.to_bits()));
+        let vector = |v: [f32; 3]| field("EA::Reflection::Vector3",
+            &format!("{:08X}{:08X}{:08X}00000000", v[0].to_bits(), v[1].to_bits(), v[2].to_bits()));
+        let json = serde_json::json!({"version": 1, "collections": [
+            {"class": DMO_TYPE_CLASS, "key": "default", "parent": "", "source": "", "sha256": "", "fields": {
+                "Hash_5CCD5998E03C299B": float(0.5), "Hash_C4D8A03586A31915": field("EA::Reflection::Bool", "00"),
+                "Hash_E0101A9DFD63DEE9": float(0.0), "Hash_6E0BB4F5881A4841": float(0.8),
+                "Hash_CDA7A31C5EDBEB6E": float(0.0), "Hash_086956BCA2187458": float(0.6),
+                "LinearDrag": float(0.0), "AngularDrag": float(0.0),
+                "Hash_E5778CDD4576D890": float(100.0), "Hash_4890392C91829954": float(100.0),
+                "Hash_BAA01E2BA1237455": float(100.0), "Hash_F4D1C84C36A854AC": vector([1.2; 3]),
+                "Hash_D3CDE380DBB3ADC0": vector([0.0; 3]), "Hash_E43445036AAEE7C5": vector([2.5, 15.0, 2.5]),
+                "Hash_2114F9329E98F00C": float(5.0)}},
+            {"class": DMO_TYPE_CLASS, "key": "cart", "parent": "default", "source": "", "sha256": "", "fields": {
+                "Hash_C4D8A03586A31915": field("EA::Reflection::Bool", "01"),
+                "Hash_E0101A9DFD63DEE9": float(0.2), "Hash_6E0BB4F5881A4841": float(0.35),
+                "Hash_CDA7A31C5EDBEB6E": float(0.175), "Hash_086956BCA2187458": float(0.25),
+                "AngularDrag": float(0.35), "Hash_E5778CDD4576D890": float(20.0),
+                "Hash_D3CDE380DBB3ADC0": vector([0.0, 0.2, 0.0])}},
+        ]});
+        let collections: skate_data::collections::Collections = serde_json::from_value(json).unwrap();
+        let plain = dmo_type_blocks(&collections, "default").unwrap();
+        assert_eq!(plain, PropMaterialBlocks {
+            held: None, free: Some([0.8, 0.6]), free_upright: Some([0.0, 0.0]),
+            upright_pair: Some(false), restitution: Some(0.5), record_272: Some(false),
+            linear_drag: Some(0.0), angular_drag: Some(0.0), mass: Some(100.0),
+            maximum_linear_velocity: Some(100.0), maximum_angular_velocity: Some(100.0),
+            inertia_scale: Some([1.2; 3]), inertia_offset: Some([0.0; 3]),
+            plugin_rotation_tolerance: Some([2.5, 15.0, 2.5]), plugin_max_distance: Some(5.0),
+        });
+        let cart = dmo_type_blocks(&collections, "cart").unwrap();
+        assert_eq!(cart.free, Some([0.35, 0.25]));
+        assert_eq!(cart.free_upright, Some([0.2, 0.175]));
+        assert_eq!((cart.upright_pair, cart.record_272, cart.restitution), (Some(true), Some(true), Some(0.5)));
+        assert_eq!((cart.linear_drag, cart.angular_drag), (Some(0.0), Some(0.35)), "drag inherits per field");
+        assert_eq!((cart.mass, cart.maximum_linear_velocity, cart.maximum_angular_velocity), (Some(20.0), Some(100.0), Some(100.0)));
+        assert_eq!((cart.inertia_scale, cart.inertia_offset), (Some([1.2; 3]), Some([0.0, 0.2, 0.0])), "vectors inherit per field");
+        assert_eq!((cart.plugin_rotation_tolerance, cart.plugin_max_distance), (Some([2.5, 15.0, 2.5]), Some(5.0)), "the plugin check limits inherit");
+        assert!(dmo_type_blocks(&collections, "missing").is_err());
+    }
+
+    /// The template's authored grab splines become a world-object grab record that moves with the prop.
+    #[test]
+    fn a_prop_with_grab_splines_is_a_world_object_in_the_grab_scene() {
+        let (_, _, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let mut splines = std::collections::BTreeMap::new();
+        splines.insert("template".to_owned(), vec![crate::living_world::vehicles::CarGrabSpline { points: vec![[-0.5, 0.3, 0.0], [-0.2, 0.3, 0.0], [0.2, 0.3, 0.0], [0.5, 0.3, 0.0]], direction: [0.0, 0.0, -1.0], flags: 0x3E4 }]);
+        assert_eq!(dynamics.set_grab_splines(&splines), 1);
+        let objects = dynamics.grab_objects();
+        assert_eq!(objects.len(), 1);
+        let o = &objects[0];
+        assert!(matches!(o.provider, skate_core::player::offboard::grab_scene::Provider::LivingWorld));
+        assert_eq!(o.splines[0].descriptor.kind, 2);
+        let origin = dynamics.bodies[0].origin();
+        let [start, end] = o.record(&o.splines[0]).unwrap().endpoints();
+        let scale = dynamics.bodies[0].axis_scale;
+        assert!((start[0] - (origin.x - 0.5 * scale.x)).abs() < 1e-5 && (end[1] - (origin.y + 0.3 * scale.y)).abs() < 1e-5, "{start:?} {end:?} {origin:?}");
+        assert!(skate_core::player::offboard::grab_scene::Registry::new(objects).is_ok());
+    }
+
+    /// Retail type data drives the blocks; a mod entry overrides single fields; mod disable restores retail.
+    #[test]
+    fn retail_type_data_is_the_default_and_mods_override_it() {
+        let (_, _, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let authored = dynamics.bodies[0].material;
+        let retail = PropMaterialBlocks {
+            held: None, free: Some([0.35, 0.25]), free_upright: Some([0.2, 0.175]),
+            upright_pair: Some(true), restitution: Some(0.5), record_272: Some(true),
+            ..Default::default()
+        };
+        let mut types = std::collections::BTreeMap::new();
+        types.insert("other".to_owned(), DmoType { priority: Some(100), audio: None, key: "x".into(), blocks: PropMaterialBlocks::default() });
+        assert_eq!(dynamics.set_type_data(&types), 0, "no type for this template id");
+        assert_eq!(dynamics.body_material(0), authored);
+        types.insert("template".to_owned(), DmoType { priority: Some(100), audio: None, key: "cart".into(), blocks: retail });
+        assert_eq!(dynamics.set_type_data(&types), 1);
+        assert_eq!(dynamics.type_key(7), Some("cart"));
+        // Upright fixture body: the upright pair.
+        assert_eq!(dynamics.body_material(0), RetailContactMaterial { static_friction: 0.2, dynamic_friction: 0.175, restitution: 0.5 });
+        assert!(dynamics.held_body(7).unwrap().record_272);
+        let mut rules = MoveCommandRules::default();
+        rules.by_template.insert("cart".into(), PropMaterialBlocks { free_upright: Some([0.9, 0.8]), record_272: Some(false), ..Default::default() });
+        dynamics.set_move_rules(rules.clone());
+        assert_eq!(dynamics.body_material(0), RetailContactMaterial { static_friction: 0.9, dynamic_friction: 0.8, restitution: 0.5 });
+        assert!(!dynamics.held_body(7).unwrap().record_272);
+        // The template name entry wins over the type entry.
+        rules.by_template.insert("template/crate".into(), PropMaterialBlocks { upright_pair: Some(false), ..Default::default() });
+        dynamics.set_move_rules(rules);
+        assert_eq!(dynamics.body_material(0), RetailContactMaterial { static_friction: 0.35, dynamic_friction: 0.25, restitution: 0.5 });
+        dynamics.set_move_rules(MoveCommandRules::default());
+        assert_eq!(dynamics.body_material(0), RetailContactMaterial { static_friction: 0.2, dynamic_friction: 0.175, restitution: 0.5 });
+        assert!(dynamics.held_body(7).unwrap().record_272);
+    }
+
+    /// Type drag (+308 / +336, 82C4E568) applied per second by 82AE6590; mod override; mod disable restores retail.
+    #[test]
+    fn type_drag_is_the_body_drag_and_mods_override_it() {
+        let (_, _, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let authored = dynamics.bodies[0].inertia;
+        assert_eq!(dynamics.body_inertia(0), authored, "no type data: authored damping");
+        let mut types = std::collections::BTreeMap::new();
+        types.insert("template".to_owned(), DmoType { priority: Some(100), audio: None, key: "lw_props".into(), blocks: PropMaterialBlocks {
+            linear_drag: Some(0.1), angular_drag: Some(0.35), ..Default::default() } });
+        assert_eq!(dynamics.set_type_data(&types), 1);
+        let inertia = dynamics.body_inertia(0);
+        assert_eq!((inertia.linear_drag, inertia.angular_drag), (0.1, 0.35));
+        assert_eq!(inertia.inverse_mass, authored.inverse_mass, "drag only");
+        // Applied by the retail integrator: one free step scales v and w by
+        // (frequency - drag) dt.
+        let simulation = dynamics.simulation;
+        let mut rates = dynamics.bodies[0].rates;
+        rates.linear_velocity = Vector3::new(2.0, 0.0, -1.0);
+        rates.angular_velocity = Vector3::new(0.0, 3.0, 0.0);
+        rates.force_acceleration = Vector3::ZERO;
+        let step = integrate_body_rates(rates, inertia, simulation, RetailReactionCorrections::default());
+        let k = |drag: f32| (simulation.frequency - drag) * simulation.time_step;
+        let v = step.state.linear_velocity;
+        assert!((v.x - 2.0 * k(0.1)).abs() < 1e-5 && (v.z + k(0.1)).abs() < 1e-5, "{v:?}");
+        assert!((step.state.angular_velocity.y - 3.0 * k(0.35)).abs() < 1e-5);
+        // Mod override, field-wise, by type record name; reset on disable.
+        let mut rules = MoveCommandRules::default();
+        rules.by_template.insert("lw_props".into(), PropMaterialBlocks { angular_drag: Some(5.0), ..Default::default() });
+        dynamics.set_move_rules(rules);
+        let modded = dynamics.body_inertia(0);
+        assert_eq!((modded.linear_drag, modded.angular_drag), (0.1, 5.0));
+        dynamics.set_move_rules(MoveCommandRules::default());
+        assert_eq!(dynamics.body_inertia(0).angular_drag, 0.35);
+    }
+
+    /// Type body data (82C4E568): mass, caps, box inertia (82C47FC8); mod override; mod disable restores retail.
+    #[test]
+    fn type_body_data_sets_mass_inertia_and_caps() {
+        let (_, _, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let authored = dynamics.bodies[0].inertia;
+        let h = dynamics.bodies[0].authored_half_extents;
+        let mut types = std::collections::BTreeMap::new();
+        types.insert("template".to_owned(), DmoType { priority: Some(100), audio: None, key: "dt_keg".into(), blocks: PropMaterialBlocks {
+            mass: Some(150.0), maximum_linear_velocity: Some(20.0), maximum_angular_velocity: Some(10.0),
+            inertia_scale: Some([1.2; 3]), inertia_offset: Some([0.0, 0.5, 0.0]), ..Default::default() } });
+        assert_eq!(dynamics.set_type_data(&types), 1);
+        let inertia = dynamics.bodies[0].inertia;
+        assert_eq!(inertia, dynamics.body_inertia(0));
+        assert_eq!(inertia.inverse_mass, 1.0 / 150.0);
+        assert_eq!((inertia.maximum_linear_velocity, inertia.maximum_angular_velocity), (20.0, 10.0));
+        let b = Vector3::new(h.x * 1.2, h.y * 1.2 + 0.5, h.z * 1.2);
+        let k = 150.0 / 3.0;
+        let expect = [(b.y * b.y + b.z * b.z) * k, (b.x * b.x + b.z * b.z) * k, (b.x * b.x + b.y * b.y) * k];
+        for (got, want) in [inertia.inverse_tensor.x, inertia.inverse_tensor.y, inertia.inverse_tensor.z].into_iter().zip(expect) {
+            assert!((got * want - 1.0).abs() < 1e-5, "{got} vs 1/{want}");
+        }
+        assert_ne!(inertia.inverse_tensor, authored.inverse_tensor);
+        // The world inverse inertia used by contacts follows the new tensor.
+        let world = world_inverse_inertia(dynamics.bodies[0].rates.basis, inertia.inverse_tensor);
+        assert_eq!(dynamics.bodies[0].rates.world_inverse_inertia, world);
+        // Caps in the retail integrator: speed above the cap comes out at it.
+        let mut rates = dynamics.bodies[0].rates;
+        rates.linear_velocity = Vector3::new(30.0, 0.0, 40.0);
+        rates.angular_velocity = Vector3::new(0.0, 25.0, 0.0);
+        rates.force_acceleration = Vector3::ZERO;
+        let step = integrate_body_rates(rates, inertia, dynamics.simulation, RetailReactionCorrections::default());
+        assert!((length(step.state.linear_velocity) - 20.0).abs() < 1e-3, "{:?}", step.state.linear_velocity);
+        assert!((length(step.state.angular_velocity) - 10.0).abs() < 1e-3);
+        // Mod: mass only, by type record name; the type's box and caps stay.
+        let mut rules = MoveCommandRules::default();
+        rules.by_template.insert("dt_keg".into(), PropMaterialBlocks { mass: Some(300.0), ..Default::default() });
+        dynamics.set_move_rules(rules);
+        let modded = dynamics.bodies[0].inertia;
+        assert_eq!(modded.inverse_mass, 1.0 / 300.0);
+        assert_eq!(modded.maximum_linear_velocity, 20.0);
+        assert!((modded.inverse_tensor.x * 2.0 - inertia.inverse_tensor.x).abs() < 1e-6);
+        dynamics.set_move_rules(MoveCommandRules::default());
+        assert_eq!(dynamics.bodies[0].inertia, inertia, "mod disable restores retail");
+        dynamics.set_type_data(&std::collections::BTreeMap::new());
+        assert_eq!(dynamics.bodies[0].inertia, authored, "no type data: authored");
+    }
+
+    /// Free pair choice (82C54B00): upright pair only with the flag and up y > 0.65; the held block ignores it.
+    #[test]
+    fn free_block_follows_the_upright_test() {
+        let authored = RetailContactMaterial { static_friction: 0.5, dynamic_friction: 0.5, restitution: 0.1 };
+        let blocks = PropMaterialBlocks {
+            free: Some([0.6, 0.5]),
+            free_upright: Some([0.9, 0.7]),
+            restitution: Some(0.3),
+            ..Default::default()
+        };
+        let mut rules = MoveCommandRules::default();
+        rules.by_template.insert("t".into(), blocks);
+        let pair = |r: &MoveCommandRules, commanded, up_y| {
+            let m = r.body_material("t", authored, commanded, up_y);
+            [m.static_friction, m.dynamic_friction, m.restitution]
+        };
+        // Flag off: the default pair whatever the pose.
+        assert_eq!(pair(&rules, false, 1.0), [0.6, 0.5, 0.3]);
+        assert_eq!(pair(&rules, false, 0.0), [0.6, 0.5, 0.3]);
+        rules.by_template.get_mut("t").unwrap().upright_pair = Some(true);
+        assert_eq!(pair(&rules, false, 1.0), [0.9, 0.7, 0.3]);
+        assert_eq!(pair(&rules, false, 0.66), [0.9, 0.7, 0.3]);
+        assert_eq!(pair(&rules, false, 0.65), [0.6, 0.5, 0.3], "strict > 0.65");
+        assert_eq!(pair(&rules, false, -1.0), [0.6, 0.5, 0.3]);
+        assert_eq!(pair(&rules, true, 1.0), [0.03, 0.02, 0.3]);
+        assert_eq!(pair(&rules, true, 0.0), [0.03, 0.02, 0.3]);
+        // Threshold is data.
+        rules.upright_cos = 0.9;
+        assert_eq!(pair(&rules, false, 0.8), [0.6, 0.5, 0.3]);
+        // No type data at all: authored material, held keeps the authored restitution.
+        let plain = MoveCommandRules::default();
+        assert_eq!(plain.body_material("other", authored, false, 1.0), authored);
+        assert_eq!(pair(&plain, true, 1.0)[2], 0.1);
+        // Deterministic: same inputs, same bits.
+        assert_eq!(pair(&rules, false, 0.95).map(f32::to_bits), pair(&rules, false, 0.95).map(f32::to_bits));
+    }
+
+    /// Slot 9 sinks (82D9CC78 / 82D9CCF0): the linear command adds L dt at the
+    /// centre of mass with no mass factor and no torque, the vertical part is
+    /// dropped, and the yaw command adds (0, Y, 0) dt with no inertia factor.
+    #[test]
+    fn move_command_is_an_acceleration_at_the_centre_of_mass() {
+        let (_, _, mut dynamics) = fixture([0., REST_Y, 1.2]);
+        let dt = simulation().time_step;
+        let grip = Vector3::new(0.4, REST_Y, 0.7);
+        dynamics.apply_move_command(7, Vector3::new(6.0, 5.0, -12.0), 3.0, grip, dt);
+        let r = dynamics.bodies[0].rates;
+        assert!((r.linear_velocity.x - 6.0 * dt).abs() < 1e-6 && (r.linear_velocity.z + 12.0 * dt).abs() < 1e-6);
+        assert_eq!(r.linear_velocity.y, 0.0, "vertical command must be dropped");
+        assert_eq!((r.angular_velocity.x, r.angular_velocity.z), (0.0, 0.0), "no lever torque at the centre of mass");
+        assert!((r.angular_velocity.y - 3.0 * dt).abs() < 1e-6);
+        assert_eq!(r.torque_acceleration, Vector3::ZERO);
+    }
+
+    /// A tilted box a few cm into a tiled floor still gets floor manifolds from the object world query.
+    #[test]
+    fn lying_tilted_box_keeps_floor_contacts() {
+        let world = street_world();
+        let half = [0.28f32, 0.41, 0.27];
+        let (_, _, dynamics) = box_fixture([0., SIDEWALK_Y + half[1], 0.], half);
+        let pair = dynamics.pair_for(0);
+        let query = dynamics.world_query_for(0);
+        let mut misses = Vec::new();
+        let mut pair_misses = 0;
+        let mut lowest_up = 1.0f32;
+        for step in 0..36 {
+            let roll = std::f32::consts::FRAC_PI_2 + (step as f32 - 18.0).to_radians();
+            let (s, c) = roll.sin_cos();
+            // Rows = local axes in world space: roll about world Z.
+            let basis = Basis3 { columns: [[c, s, 0.], [-s, c, 0.], [0., 0., 1.]] };
+            let down = half[0] * s.abs() + half[1] * c.abs();
+            for depth in [0.0f32, 0.02, 0.05] {
+                let center = Vector3::new(0.37, SIDEWALK_Y + down - depth, 2.41);
+                let primitive = ContactPrimitive::RoundedBox { center, basis, half_extents: Vector3::new(half[0], half[1], half[2]), radius: 0.0 };
+                let bounds = skate_core::physics::board_world::query_metadata::Bounds {
+                    min: Vector3::new(center.x - 0.6, center.y - 0.6, center.z - 0.6),
+                    max: Vector3::new(center.x + 0.6, center.y + 0.6, center.z + 0.6),
+                };
+                let mut pair_manifolds = 0;
+                let mut candidates = Vec::new();
+                for range in world.candidate_ranges(Some(bounds)) {
+                    for triangle in &world.triangles()[range] {
+                        if primitive_pair_contacts(primitive, ContactPrimitive::Triangle(triangle.triangle), pair).is_some() {
+                            pair_manifolds += 1;
+                        }
+                        candidates.push(triangle.triangle);
+                    }
+                }
+                let mut manifolds = 0;
+                for triangle in candidates {
+                    if let Some(manifold) = primitive_triangle_world_contacts(primitive, triangle, Vector3::ZERO, query) {
+                        manifolds += 1;
+                        lowest_up = lowest_up.min(manifold.normal.y);
+                    }
+                }
+                if manifolds == 0 {
+                    misses.push((step as i32 - 18, depth));
+                }
+                if pair_manifolds == 0 {
+                    pair_misses += 1;
+                }
+            }
+        }
+        println!("tilted box: pair-query misses {pair_misses}, lowest floor normal up {lowest_up:.4}");
+        assert!(misses.is_empty(), "no floor contact for (roll offset deg, depth m): {misses:?}");
+        assert!(pair_misses > 0, "the GP pair query no longer drops these contacts: re-check the repro");
+        assert!(lowest_up > 0.0, "a floor manifold pushes the box down: {lowest_up}");
+    }
+
+    /// PROP_BELOW_GROUND's test: a body pushed under the floor face is
+    /// detected (the probe starts above its last rest height), one resting
+    /// on it is not.
+    #[test]
+    fn ground_probe_flags_a_body_under_the_floor() {
+        let world = street_world();
+        let (_, _, mut dynamics) = box_fixture([0., SIDEWALK_Y + 0.4, 0.], [0.3, 0.4, 0.3]);
+        let id = dynamics.bodies[0].id;
+        let resting = dynamics.ground_probe(id, &world).unwrap();
+        assert!(!resting.below_ground() && resting.gap().unwrap().abs() < 1e-3, "{resting:?}");
+        dynamics.bodies[0].rates.position.y = SIDEWALK_Y - 0.6;
+        let sunk = dynamics.ground_probe(id, &world).unwrap();
+        assert!(sunk.below_ground(), "sunk body not flagged: {sunk:?}");
+    }
+
+    /// Real DownTown repro (private assets): drag the props the user moved on
+    /// 2026-10-07 and release them. `SKATE3_ASSET_ROOT` = assets root,
+    /// `SKATE3_MAP` = DownTown.skate. Run with `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn downtown_dragged_props_rest_on_the_floor() {
+        let _grab = prop_grab_for_test(false);
+        let root = std::path::PathBuf::from(std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT"));
+        let map_path = std::path::PathBuf::from(std::env::var_os("SKATE3_MAP").expect("set SKATE3_MAP"));
+        let map = skate_data::skate_map::SkateMap::parse(&std::fs::read(&map_path).unwrap()).unwrap();
+        let world = crate::skate_world::collision_world(&map, floor_material()).unwrap();
+        let ids = [3417526289u32, 880096370, 44597382, 3160070536, 788476715, 2198011218, 3116907260, 206220507];
+        let dt = simulation().time_step;
+        let mut failures = Vec::new();
+        for id in ids {
+            let (mut layer, mut dynamics) = crate::skate_world::load_prop_layer(&root, "DownTown", floor_material(), simulation()).expect("DownTown props");
+            let Some(spawn) = dynamics.position_of(id) else { println!("{id}: not in the package"); continue };
+            let index = dynamics.by_id[&id];
+            let half = dynamics.bodies[index].half_extents;
+            let ground = dynamics.ground_probe(id, &world).unwrap();
+            let floor = ground.ground.unwrap_or(spawn.y - half.y);
+            let forward = Vector3::new(0., 0., 1.);
+            let reach = dynamics.bodies[index].bounds();
+            let start_z = reach.min.z - 0.6;
+            let at = |state, z: f32| crate::physics::prop_carry::Carrier {
+                state,
+                position: Vector3::new(spawn.x, floor + 0.9, z),
+                forward,
+                time_step: dt,
+                skeleton: None,
+                ground_grab: None,
+            };
+            use skate_core::player::state::PhysicalStateId::{BipedGround, OffBoardPushing};
+            let mut carry = crate::physics::prop_carry::PropCarry::default();
+            carry.update(&mut dynamics, tick(), at(BipedGround, start_z));
+            if carry.held() != Some(id) {
+                println!("{id}: grabbed {:?} instead", carry.held());
+                continue;
+            }
+            dynamics.set_held(carry.held());
+            let mut worst = f32::INFINITY;
+            let mut up_min = 1.0f32;
+            let mut skater = at(OffBoardPushing, start_z);
+            for _ in 1..=180 {
+                skater = follow(&carry, skater);
+                carry.update(&mut dynamics, stick(0., 1., 0.), skater);
+                dynamics.set_held(carry.held());
+                dynamics.step(&world, &mut layer, &[]);
+                worst = worst.min(dynamics.ground_probe(id, &world).unwrap().gap().unwrap_or(0.));
+                up_min = up_min.min(dynamics.bodies[index].rates.basis.columns[1][1]);
+            }
+            carry.update(&mut dynamics, release(), skater);
+            dynamics.set_held(carry.held());
+            for _ in 0..180 {
+                dynamics.step(&world, &mut layer, &[]);
+                worst = worst.min(dynamics.ground_probe(id, &world).unwrap().gap().unwrap_or(0.));
+            }
+            let end = dynamics.ground_probe(id, &world).unwrap();
+            println!(
+                "{id} {} type {:?} mass {:.1}: spawn {spawn:?} floor {floor:.2} worst gap {worst:.3} held up_y min {up_min:.4} end {end:?} asleep {}",
+                dynamics.bodies[index].template,
+                dynamics.type_key(id),
+                1.0 / dynamics.bodies[index].inertia.inverse_mass,
+                dynamics.bodies[index].asleep
+            );
+            if end.below_ground() || worst < -0.1 {
+                failures.push(id);
+            }
+        }
+        assert!(failures.is_empty(), "props sank: {failures:?}");
+    }
+}
+
+/// Retail collision types of DMO query meshes (the query mesh's rejection flag is `1 << type`; b221-b223 and the trace
+/// in .local/research/prop-types): a held prop (a ped's hand prop switches on pickup, slot 32 `82C56B00`).
+pub(crate) const HELD_COLLISION_TYPE: u32 = 13;
+/// A prop at least `walkable_mass` heavy.
+pub(crate) const HEAVY_COLLISION_TYPE: u32 = 12;
+/// A lighter prop.
+pub(crate) const LIGHT_COLLISION_TYPE: u32 = 14;
+
+/// The collision type of a prop of `mass` kg (13 while held). NOT RETAIL YET for the player's own grab: the ped's
+/// pickup switches to 13 in the trace; that the player's grab does too is not traced.
+pub(crate) fn collision_type(mass: f32, held: bool, walkable_mass: f32) -> u32 {
+    if held {
+        HELD_COLLISION_TYPE
+    } else if mass >= walkable_mass {
+        HEAVY_COLLISION_TYPE
+    } else {
+        LIGHT_COLLISION_TYPE
+    }
+}
+
+impl PropDynamics {
+    /// Each body's collision instance and retail collision type (template mass, not a carry's effective mass).
+    pub(crate) fn for_each_collision_type(&self, held: Option<u32>, mut f: impl FnMut(usize, u32)) {
+        let walkable = self.tuning.solver.walkable_mass;
+        for body in &self.bodies {
+            let w = body.authored_inertia.inverse_mass;
+            let mass = if w > 0.0 { 1.0 / w } else { f32::INFINITY };
+            f(body.instance, collision_type(mass, held == Some(body.id), walkable));
+        }
+    }
+}
+
+#[cfg(test)]
+mod collision_type_tests {
+    use super::*;
+
+    #[test]
+    fn props_get_retails_collision_types_by_mass() {
+        // b223: the flat bench is 50 kg, the cone 1.75 kg; 5.5 kg itself is heavy (`>=`).
+        assert_eq!(collision_type(50.0, false, 5.5), HEAVY_COLLISION_TYPE);
+        assert_eq!(collision_type(1.75, false, 5.5), LIGHT_COLLISION_TYPE);
+        assert_eq!(collision_type(5.5, false, 5.5), HEAVY_COLLISION_TYPE);
+        assert_eq!(collision_type(50.0, true, 5.5), HELD_COLLISION_TYPE);
+        // The walker's mask (0x6000) skips 13 and 14, so only the heavy type is ground for it.
+        let mask = skate_core::player::offboard::air_selector::MESH_REJECT_MASK;
+        assert_eq!(mask & (1 << HEAVY_COLLISION_TYPE), 0);
+        assert_ne!(mask & (1 << LIGHT_COLLISION_TYPE), 0);
+        assert_ne!(mask & (1 << HELD_COLLISION_TYPE), 0);
+    }
+}

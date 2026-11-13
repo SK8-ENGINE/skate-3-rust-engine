@@ -12,4 +12,4 @@ mod types;
 pub use prediction::{Prediction, QueryRequest, QueryResult, Trajectory};
 pub use query::{SurfaceHit, query_trajectory};
 pub use selector::{Selection, TrajectorySelector, WorldWithoutGrindEdges};
-pub use types::{LaunchInfo, SelectorInput, SelectorSettings};
+pub use types::{LaunchInfo, RecordedArc, SelectorInput, SelectorSettings};

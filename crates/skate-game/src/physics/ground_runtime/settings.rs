@@ -65,6 +65,8 @@ pub(crate) struct GroundSettings {
     pub surface_braking_factor: f32,
     pub wobble_activation: f32,
     pub wobble_amplitude: f32,
+    /// The riding skitch query (`physics_state_skitching/default`; the box vectors keep the retail values).
+    pub skitch: skate_core::riding::skitching::SkitchQuerySettings,
 }
 impl GroundSettings {
     pub fn load(data: &Collections, mode: &str, surface: &str) -> Result<Self, String> {
@@ -209,6 +211,15 @@ impl GroundSettings {
             },
             wobble_activation: m("Hash_77AFCE78FE1206CA")?,
             wobble_amplitude: m("Hash_5B57F2CCCCEEF430")?,
+            skitch: {
+                let d = skate_core::riding::skitching::SkitchQuerySettings::default();
+                let k = |field: &str, default: f32| data.float("physics_state_skitching", "default", field).unwrap_or(default);
+                skate_core::riding::skitching::SkitchQuerySettings {
+                    reach: k("Hash_BF433C58D0F12390", d.reach),
+                    latch_time: k("Hash_424A1C69E0076DBB", d.latch_time),
+                    ..d
+                }
+            },
         })
     }
     pub fn board(&self) -> GroundBoardSettings<'_> {

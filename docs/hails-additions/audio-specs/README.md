@@ -31,11 +31,11 @@ stable for that reason.
 | [`aems-evaluator-spec.md`](aems-evaluator-spec.md) | AEMS patch-program evaluator: bank and MOIR layouts, runtime, all 40 opcodes, timing, RNG, test plan |
 | [`aems-voice-graph-spec.md`](aems-voice-graph-spec.md) | Voice graph and output mix: SndPlayer1, resample, filters, gain, pan, sends, buses, output stage |
 | [`aems-env-bus-spec.md`](aems-env-bus-spec.md) | Environment (reverb) bus: send routing, reverb / delay sub-mixes, presets, zones |
-| [`aems-eqchain-buses-spec.md`](aems-eqchain-buses-spec.md) | eEQChain material buses, EQ jitter, LFO task, owner send buses |
+| [`aems-eqchain-buses-spec.md`](aems-eqchain-buses-spec.md) | eEQChain material buses, EQ jitter, LFO (low-frequency oscillator) task, owner send buses |
 | [`aems-bus-leftovers-spec.md`](aems-bus-leftovers-spec.md) | FlangeSub returns, sense_of_speed FXWET0, Splice Send A, Collision SubMix, reverb zones |
 | [`mixmap-spec.md`](mixmap-spec.md) | MixMap (`MixMapSK8.mxb`): format, evaluation, ambience / emitter outputs, ducking, validation |
 | [`grain-player-spec.md`](grain-player-spec.md) | Granular rolling bed: `grains.big`, surface → grain map, GrainPlayer pick / scheduler / fades, chains |
-| [`aems-grain-chain-spec.md`](aems-grain-chain-spec.md) | Board grain bus chain (`sub_824C8878`): FSS, shelf, clip, sends; listening-report evidence |
+| [`aems-grain-chain-spec.md`](aems-grain-chain-spec.md) | Board grain bus chain (`sub_824C8878`): FSS (frequency shift), shelf, clip, sends; listening-report evidence |
 | [`aems-board-layers-spec.md`](aems-board-layers-spec.md) | SFXObj_SkateBoard rolling layers: Class_rolling, rattles, board slide |
 | [`aems-tricks-treatment-spec.md`](aems-tricks-treatment-spec.md) | Tricks component (Class_Flips, cloth_trick) and Class_Treatment |
 | [`aems-offboard-clothing-spec.md`](aems-offboard-clothing-spec.md) | Off-board footsteps, clothing, hands-on-deck |

@@ -16,8 +16,9 @@
 struct WorldParams {
     mode: vec4<f32>, foliage_debug: vec4<f32>, surface: vec4<f32>, family: vec4<f32>,
     fog_ramp: vec4<f32>, fog_color: vec4<f32>, shadow_color: vec4<f32>, sun_direction: vec4<f32>, decal: vec4<f32>, water: array<vec4<f32>, 4>,
+    fountain: array<vec4<f32>, 4>,
 }
-struct FrameState { shadow: vec4<f32>, clock: vec4<f32>, pca: array<vec4<f32>, 7> }
+struct FrameState { shadow: vec4<f32>, clock: vec4<f32>, pca: array<vec4<f32>, 7>, pca_slow: array<vec4<f32>, 7>, water_look: vec4<f32>, water_tint: vec4<f32>, ocean_swell: vec4<f32>, fountain: vec4<f32>, fountain_body: vec4<f32>, fountain_ripple: vec4<f32>, view_dot_light: vec4<f32>, traffic_lights: array<vec4<f32>, 2>, video_feed: vec4<f32> }
 
 /// Where each texture channel of one material lives.
 ///
@@ -57,6 +58,23 @@ const PAGE_CLASSES: u32 = 8u;
 @group(#{MATERIAL_BIND_GROUP}) @binding(10) var page_7: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(11) var repeat_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(12) var cubes: texture_cube_array<f32>;
+// The environmentpark per-draw inputs (retail_render.rs ParkDraw: tint, the world's two shadow colours).
+struct ParkDraw {
+    tint: vec4<f32>,
+    dynamic_shadow: vec4<f32>,
+    exponential_shadow: vec4<f32>,
+    lightmap_bounds: vec4<f32>,
+}
+@group(#{MATERIAL_BIND_GROUP}) @binding(13) var<uniform> material_park: ParkDraw;
+// The park videoscreens' live feed (video_screens.rs), sampled by mode.y bit 1024 materials while frame_state.video_feed.x is 1.
+@group(#{MATERIAL_BIND_GROUP}) @binding(14) var video_feed: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(15) var video_feed_sampler: sampler;
+
+/// The feed in the diffuse's encoding (the shader squares it): an unflipped render, so V returns to it.
+fn sample_video_feed(uv: vec2<f32>, g: Gradients) -> vec4<f32> {
+    let c = textureSampleGrad(video_feed, video_feed_sampler, vec2<f32>(uv.x, 1.0 - uv.y), vec2<f32>(g.ddx.x, -g.ddx.y), vec2<f32>(g.ddy.x, -g.ddy.y));
+    return vec4<f32>(sqrt(max(c.rgb, vec3<f32>(0.0))), 1.0);
+}
 fn page_class(packed: u32) -> u32 { return (packed >> 16u) & 0xffu; }
 fn page_layer(packed: u32) -> u32 { return packed & 0xffffu; }
 
@@ -186,6 +204,32 @@ fn sample_specular_map(slot: u32, uv: vec2<f32>, g: Gradients) -> vec4<f32> {
 
 fn sample_lightmap(slot: u32, uv: vec2<f32>, level: f32) -> vec4<f32> {
     return sample_page_level(slots[slot].lightmap, uv, level);
+}
+
+/// Cloth sway of retail `animated.flag` (family 21, vertexanimate_defaultVS slots 7..17): docs/hails-additions/35-world-shading-parity.md#flag-sway
+fn flag_sway(slot: u32, color: vec4<f32>) -> vec3<f32> {
+    let p = params[slot];
+    if u32(p.mode.x) != 21u { return vec3<f32>(0.0); }
+    let t = frame_state().clock.x;
+    let w = vec3<f32>(color.x - 0.5, 0.5 - color.y, color.y - color.x);
+    let c8 = p.water[0];
+    let c9 = p.water[1];
+    let c10 = p.water[2];
+    return vec3<f32>(
+        w.x * c8.w * sin((t - w.x) * c9.x + c10.x),
+        w.y * c9.w * sin((t - w.y) * c9.y + c10.y),
+        w.z * c10.w * sin((t - w.z) * c9.z + c10.z));
+}
+
+/// The lightmapped retail world programs (environment, decal, reflective,
+/// transparent, water) fetch tf3 at the four half-texel corners and average
+/// before squaring. Squaring each tap would change baked lighting.
+fn sample_lightmap_box(slot: u32, uv: vec2<f32>) -> vec3<f32> {
+    let texel = 0.5 / vec2<f32>(lightmap_dimensions(slot));
+    return (sample_lightmap(slot, uv + texel, 0.0).rgb
+        + sample_lightmap(slot, uv - texel, 0.0).rgb
+        + sample_lightmap(slot, uv + texel * vec2<f32>(-1.0, 1.0), 0.0).rgb
+        + sample_lightmap(slot, uv + texel * vec2<f32>(1.0, -1.0), 0.0).rgb) * 0.25;
 }
 
 fn load_detail(slot: u32, uv: vec2<i32>, level: i32) -> vec4<f32> {

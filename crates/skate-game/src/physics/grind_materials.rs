@@ -4,6 +4,7 @@
 use super::{player_input::grind::MaterialMode, settings::PhysicsSettings};
 use skate_core::physics::{board_runtime::BoardRuntime, contact::RetailContactMaterial};
 
+#[derive(Clone)]
 pub(crate) struct GrindMaterials {
     standard: [RetailContactMaterial; 3],
 }

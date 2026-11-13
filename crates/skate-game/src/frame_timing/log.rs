@@ -37,9 +37,10 @@ pub(crate) struct Row {
     /// CPU time of the main world's schedules this frame (First..Last), in ms.
     /// Much less than `frame_ms` = the frame waited for rendering / the GPU / present.
     pub main_ms: f32,
-    /// Longer than 2x the median of the previous frames (see `stats`).
+    /// Longer than 2x the frame's expected time (see `stats::expected_ms`).
     pub hitch: bool,
-    /// That median; empty until enough history exists.
+    /// That expected time (column kept as `median_ms`: before 2026-10-19 it was the median of all previous frames);
+    /// empty until enough history exists.
     pub median_ms: Option<f32>,
 }
 

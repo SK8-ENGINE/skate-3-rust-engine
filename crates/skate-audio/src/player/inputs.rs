@@ -197,8 +197,8 @@ pub fn write_rail_at(m: &mut MixMap, g: u32, grinding: bool, was_grinding: bool)
     m.set_input(key, 1, on(was_grinding && !grinding));
 }
 
-/// `OffBoard` id 0 = on foot (`+716`, state 500), for the local player. `HandGrabs` id 0 (the
-/// object's grab byte) is 0 in retail's free-skate capture and left at 0.
+/// `OffBoard` id 0 = on foot (`+716`, state 500), for the local player. `HandGrabs` id 0 is written by the
+/// owner from `hand_grabs::HandGrabs::input` (the skitch latch).
 pub fn write_off_board(m: &mut MixMap, s: &AudioState) {
     write_off_board_at(m, 0, s);
 }

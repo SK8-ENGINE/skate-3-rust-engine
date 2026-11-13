@@ -1,0 +1,7 @@
+# Hardware fused multiply-add (FMA3, every x86-64 CPU since 2013: Intel Haswell, AMD Piledriver). The physics ports use
+# `f32::mul_add` throughout to match the console's `fmadds` bit for bit; without this flag each call went to the C
+# runtime's software `fmaf`, the top function in a 2026-10-15 CPU profile. Hardware FMA and `fmaf` are both exactly
+# rounded, so results are identical; Rust never fuses `a * b + c` by itself, so no other arithmetic changes.
+# Scripts that set CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS add `+fma` there too (that variable overrides this).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+fma"]

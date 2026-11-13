@@ -39,6 +39,12 @@ gltf = { version = "=1.4.1", default-features = true }
 # SDL3 gamepad input for every platform, built from source and statically linked.
 sdl3 = { version = "=0.20.0", features = ["build-from-source-static"] }
 
+# Replay export (Save to PC): Windows' own encoder (Media Foundation) and the save dialog. The Media Foundation
+# functions are loaded at run time (`replay/export.rs`), so the exe still starts on N editions without it; 0.58 is the
+# version already in the lockfile.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.58.0", features = ["Win32_Foundation", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+
 [dev-dependencies]
 naga = { version = "=27.0.3", features = ["wgsl-in"] }
 naga_oil = { version = "=0.20.0", default-features = false }

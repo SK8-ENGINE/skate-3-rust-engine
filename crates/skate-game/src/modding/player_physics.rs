@@ -71,6 +71,11 @@ pub(crate) fn joints(s: &SkaterRuntime) -> SkeletonJoints {
 }
 pub(crate) fn filter_drives(s: &SkaterRuntime, batch: &mut SkeletonDriveBatch) {
     let disabled = disabled_drives(s, false);
+    // Nothing disabled (no mod override): the rebuild below would keep every row in order; skip its three
+    // reallocations per tick and skater (b327 candidate 4).
+    if disabled.is_empty() {
+        return;
+    }
     let rows = std::mem::take(&mut batch.rows);
     let ids = std::mem::take(&mut batch.identities);
     let spies = std::mem::take(&mut batch.spy);

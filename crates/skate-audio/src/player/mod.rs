@@ -20,6 +20,7 @@ pub mod components;
 pub mod contacts;
 pub mod globals;
 pub mod footsteps;
+pub mod hand_grabs;
 pub mod inputs;
 pub mod jitter;
 pub mod objpos;

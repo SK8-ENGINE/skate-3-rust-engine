@@ -85,7 +85,15 @@ class Actions:
                 offset += header_size
                 row['body'] = self.stream(offset, offset + length, nesting + 1)
                 offset += length
-            elif op in {0x83, 0x8F}:
+            elif op == 0x83:
+                # getURL (retail handler 82E72590): aligned pointers to the url and target strings.
+                # "FSCommand:<cmd>" goes to the host; a ".swf" url loads that movie into the target.
+                offset = align(offset, 4)
+                r.require(offset, 8)
+                row['operand'] = r.cstring(r.u32be(offset))
+                row['target_name'] = r.cstring(r.u32be(offset + 4))
+                offset += 8
+            elif op == 0x8F:
                 # Keep unsupported compound instructions explicit, never scan
                 # their payload as though it were a stream of no-operand ops.
                 raise FormatError(f'APT compound opcode {op:#x} at {at:#x} needs decoding')

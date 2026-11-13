@@ -59,6 +59,11 @@ class HudInstallationTests(unittest.TestCase):
             self.run_install()
         self.assertFalse(self.assets.exists())
 
+    def test_untextured_minimap_fill_installs(self):
+        minimap = dict(self.score_json, shapes={"1": [{"texture": None}]})
+        (self.score / "runtime/hudminimap.json").write_text(json.dumps(minimap))
+        self.assertIn(str(Path("private/hud/runtime/hudminimap.json")), self.run_install())
+
     def test_differing_existing_file_requires_replace(self):
         self.run_install()
         target = self.assets / "private/hud/atlas.rgba"

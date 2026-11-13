@@ -158,8 +158,8 @@ pub(in crate::physics) fn update(
         info.use_position_override = true;
         info.player_jumped = true;
         let input = air_phase::selector_input(physics, skater)?;
-        skater.trajectory.launch(info, input, &physics.world)?;
-        skater.trajectory.update(input, &physics.world, crate::physics::air_trajectory::GrindContext::from_processed(&skater.player_input.processed, crate::physics::solve::deck_frame(&physics.board)[3]))?;
+        skater.trajectory.launch(info, input, &physics.world, physics.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world))?;
+        skater.trajectory.update(input, &physics.world, physics.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world), crate::physics::air_trajectory::GrindContext::from_processed(&skater.player_input.processed, crate::physics::solve::deck_frame(&physics.board)[3]))?;
     }
     Ok(())
 }

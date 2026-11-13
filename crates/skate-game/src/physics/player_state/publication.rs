@@ -17,25 +17,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         biped.frame_output.velocity.map(f32::to_bits);
     skater.player_input.physical.off_board.cadence_phase_80 = biped.cadence.phase.phase;
     skater.player_input.physical.off_board.locomotion_state_84 = biped.cadence.locomotion_index;
-    if !state.is_grind()
-        && state != PhysicalStateId::Nonspecific
-        && !matches!(
-            state,
-            PhysicalStateId::PhysicsGround
-                | PhysicalStateId::PhysicsAir
-                    | PhysicalStateId::PhysicsAirSecondary
-                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
-                | PhysicalStateId::KnownAir
-                | PhysicalStateId::BipedAir
-                | PhysicalStateId::BipedGround
-                | PhysicalStateId::OffBoardPushing
-                | PhysicalStateId::GroundAnimation
-                | PhysicalStateId::SlideGround
-                | PhysicalStateId::WipeoutGround
-                | PhysicalStateId::Teleporting
-                | PhysicalStateId::LandingOnDeck
-        )
-    {
+    if !has_output_owner(state) {
         return Err(format!(
             "FillPhysOut requires the actual {state:?} output owner"
         ));
@@ -64,6 +46,10 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     } else {
         None
     };
+    // Prop carry presents as the retail grab-object byte (OffBoard304 -> 2476 bit 21 -> 502, MovingObjectNew).
+    if physics.prop_carry.held().is_some() {
+        skater.player_input.physical.off_board.flag_304 = 1;
+    }
     let p = &skater.player_input.processed;
     let toolkit = skater
         .player_input
@@ -176,6 +162,20 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         physical.ground.flag_318 = u8::from(output.ground_32.is_pinning);
         physical.off_board.flag_304 = u8::from(output.is_grabbing_object_72_304);
         physical.animation.manual_opposition_168 = u8::from(output.manual_opposition_56_168);
+    } else if state == PhysicalStateId::Skitching {
+        //82D4C078: flag_304 only while the record is ready and not released; the rest every frame.
+        let out = skater.skitch_state.output();
+        physical.off_board.flag_304 = u8::from(out.flag_304);
+        physical.state.counter_36 = out.counter_36;
+        physical.state.skitch_value_40 = out.skitch_value_40;
+        physical.ground.scalar_292 = out.scalar_292;
+        physical.ground.skitch_grab_height_280 = out.grab_height_280;
+        physical.ground.skitch_absorb_284 = out.absorb_284;
+        physical.ground.skitch_along_288 = out.along_288;
+        physical.ground.skitch_push_308 = out.push_308;
+        physical.animation.skitch_shimmy_136 = out.shimmy_136;
+        physical.animation.skitch_grip_132 = out.grip_132;
+        physical.animation.skitch_hands_140 = out.hands_140;
     } else if state == PhysicalStateId::PhysicsAir {
         let air = skate_core::air::state::fill_physics_output(&skater.air_state);
         physical.air.landing_normal_144 = air.landing_normal.map(f32::to_bits);
@@ -251,12 +251,61 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             .publish_output(&mut skater.player_input.physical);
     }
     // ProcessOutput calls 82DB8120 after component and selected-state Fill.
-    skate_core::player::input_phase::publish_special_surface(
+    let boundary = skate_core::player::input_phase::publish_special_surface(
         &mut skater.player_input.physical,
         &skater.player_input.processed,
         &mut skater.player_state.state_flags,
         physics.riding.ground.collision_flags,
         physics.riding.ground.surface_twelve_height,
     );
+    if let Some(contact) = boundary {
+        // Type-6 `physics_unrideable` raised +69: the checkpoint reset is a boundary reset.
+        let position = skater.animated_skeleton.roots.animation_to_world[3];
+        skater
+            .respawn
+            .note_boundary(contact, [position[0], position[1], position[2]]);
+    }
     Ok(())
+}
+
+/// The states FillPhysOut has an output owner for: every grind, Nonspecific and these.
+pub(super) fn has_output_owner(state: PhysicalStateId) -> bool {
+    state.is_grind()
+        || state == PhysicalStateId::Nonspecific
+        || matches!(
+            state,
+            PhysicalStateId::PhysicsGround
+                | PhysicalStateId::PhysicsAir
+                    | PhysicalStateId::PhysicsAirSecondary
+                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                | PhysicalStateId::KnownAir
+                | PhysicalStateId::BipedAir
+                | PhysicalStateId::BipedGround
+                | PhysicalStateId::OffBoardPushing
+                | PhysicalStateId::GroundAnimation
+                | PhysicalStateId::SlideGround
+                | PhysicalStateId::WipeoutGround
+                | PhysicalStateId::Teleporting
+                | PhysicalStateId::LandingOnDeck
+                //Skitching104 publishes below (82D4C078).
+                | PhysicalStateId::Skitching
+        )
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+    // Every state the registry runs (but Sleeping) must pass PreState and FillPhysOut: Skitching was
+    // missing from both and the first live skitch failed (2026-10-16 session 3).
+    #[test]
+    fn every_supported_state_has_a_deck_prediction_and_an_output_owner() {
+        let registry = super::super::registry::StateRegistry::new();
+        for state in PhysicalStateId::ALL {
+            if state == PhysicalStateId::Sleeping || !registry.capability(state).supported {
+                continue;
+            }
+            assert!(super::super::pre_state::predicts_deck(state), "{state:?} has no PredictFutureOfDeck");
+            assert!(has_output_owner(state), "{state:?} has no FillPhysOut owner");
+        }
+    }
 }

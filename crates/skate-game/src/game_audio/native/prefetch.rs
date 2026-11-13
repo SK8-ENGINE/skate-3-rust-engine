@@ -13,7 +13,11 @@
 //! - [`Prefetch::take`] at the start: done → the data; being decoded → wait for it (at most one
 //!   bank's decode, never longer than loading it here); queued, failed or unknown → None, and the
 //!   caller loads it on the game thread as before. A start is never delayed or deferred.
+//! - During a map load the next map's banks are queued as its own slots ([`Prefetch::request_next`])
+//!   and become the requested banks at that map's change ([`Prefetch::change_map`]), so its first
+//!   frame finds them decoded (doc 25, "Map switch: sound banks read during the load").
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -52,6 +56,9 @@ pub(crate) struct Prefetch {
     /// [`Prefetch::clear`] calls so far: a requester that remembers what it asked for (the world
     /// sources) knows its requests are gone when this changes.
     clears: u64,
+    /// The map being loaded and its banks queued ahead (not takeable until its map change).
+    next_map: Option<PathBuf>,
+    next: HashMap<String, Arc<Slot>>,
 }
 
 impl Prefetch {
@@ -61,14 +68,54 @@ impl Prefetch {
         if self.slots.contains_key(source.stem()) {
             return;
         }
+        if let Some(slot) = self.queue(source) {
+            self.slots.insert(slot.0, slot.1);
+        }
+    }
+
+    /// Queue a bank of the map being loaded (`map`, its path); true when newly queued. Requests
+    /// for another map forget the earlier map's.
+    pub(crate) fn request_next(&mut self, map: &Path, source: BankSource) -> bool {
+        if self.next_map.as_deref() != Some(map) {
+            self.drop_next();
+            self.next_map = Some(map.to_owned());
+        }
+        if self.next.contains_key(source.stem()) {
+            return false;
+        }
+        let Some((stem, slot)) = self.queue(source) else { return false };
+        self.next.insert(stem, slot);
+        true
+    }
+
+    /// Forget the banks queued for a map being loaded (the load ended without its map change).
+    pub(crate) fn drop_next(&mut self) {
+        self.next_map = None;
+        let slots: Vec<_> = self.next.drain().map(|(_, slot)| slot).collect();
+        for slot in slots {
+            self.free(skip(&slot));
+        }
+    }
+
+    /// A map change to `map`: forget every requested bank, then take the banks queued for `map`
+    /// as requested (any other map's are forgotten).
+    pub(crate) fn change_map(&mut self, map: Option<&Path>) {
+        let ahead = map.is_some() && self.next_map.as_deref() == map;
+        let next = if ahead { std::mem::take(&mut self.next) } else { HashMap::new() };
+        self.clear();
+        self.slots = next;
+    }
+
+    fn queue(&mut self, source: BankSource) -> Option<(String, Arc<Slot>)> {
         let slot = Arc::new(Slot { stage: Mutex::new(Stage::Queued), ready: Condvar::new() });
         let jobs = self.jobs.get_or_insert_with(spawn);
         let stem = source.stem().to_owned();
         if jobs.send(Job::Load(slot.clone(), source)).is_ok() {
-            self.slots.insert(stem, slot);
+            Some((stem, slot))
         } else {
             // The worker is gone: loads stay on the game thread.
             self.jobs = None;
+            None
         }
     }
 
@@ -91,19 +138,25 @@ impl Prefetch {
         }
     }
 
-    /// Forget every requested bank (map change).
+    /// Forget every requested bank and the ones queued for a map being loaded (a content change
+    /// or a restart: decoded data may be of the old content).
     pub(crate) fn clear(&mut self) {
         self.clears += 1;
         let slots: Vec<_> = self.slots.drain().map(|(_, slot)| slot).collect();
         for slot in slots {
             self.free(skip(&slot));
         }
+        self.drop_next();
     }
 
-    /// Whether the bank was requested and not taken or dropped since (tests).
-    #[cfg(test)]
+    /// Whether the bank was requested and not taken or dropped since.
     pub(crate) fn contains(&self, stem: &str) -> bool {
         self.slots.contains_key(stem)
+    }
+
+    /// Whether the worker still has the bank queued or is decoding it (the startup hold waits for these).
+    pub(crate) fn busy(&self, stem: &str) -> bool {
+        self.slots.get(stem).is_some_and(|slot| slot.stage.lock().is_ok_and(|s| matches!(*s, Stage::Queued | Stage::Running)))
     }
 
     /// How many times [`Prefetch::clear`] ran (see the field).
@@ -236,6 +289,33 @@ mod tests {
         p.clear();
         assert_eq!(p.stems().count(), 0);
         assert_eq!(p.clears(), clears + 1, "a clear is counted (the world sources re-request after one)");
+    }
+
+    #[test]
+    fn banks_read_ahead_for_a_map_are_taken_over_only_at_its_change() {
+        let source = |stem: &str| BankSource::for_test(std::env::temp_dir().join("skate-prefetch-next"), stem, "aems/gone.abk", vec![]);
+        let (a, b) = (Path::new("maps/A.skate"), Path::new("maps/B.skate"));
+        let mut p = Prefetch::default();
+        p.request(source("current"));
+        assert!(p.request_next(a, source("next")));
+        assert!(!p.request_next(a, source("next")), "queued once");
+        assert!(!p.contains("next") && p.take("next").is_none(), "not the current map's until its change");
+        p.change_map(Some(a));
+        assert!(p.contains("next") && !p.contains("current"), "the change takes the map's banks over and forgets the old ones");
+        assert!(p.request_next(a, source("x")) && p.request_next(b, source("y")));
+        p.change_map(Some(a));
+        assert!(!p.contains("x") && !p.contains("y"), "requests for another map replaced the earlier map's; a change to A takes nothing of B");
+        p.request_next(a, source("z"));
+        p.change_map(None);
+        assert!(!p.contains("z"), "a change to a map without a path takes nothing");
+        p.request_next(a, source("w"));
+        p.clear();
+        p.change_map(Some(a));
+        assert!(!p.contains("w"), "a content change forgets the read-ahead banks too");
+        p.request_next(a, source("v"));
+        p.drop_next();
+        p.change_map(Some(a));
+        assert!(!p.contains("v"), "a load that ended without its change leaves nothing");
     }
 
     /// The world emitter banks of a district (data-gated): the prefetched bank and PCM equal the

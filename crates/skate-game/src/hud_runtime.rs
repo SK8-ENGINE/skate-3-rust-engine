@@ -59,6 +59,10 @@ impl Host for Bindings {
         if key == "text" || key == "autoSize" {
             self.movie.text_changed(vm, object)?;
         }
+        // AS2 scale / rotation writes, as on the front-end stage (one APT player in retail).
+        if ["_xscale", "_yscale", "_rotation", "_width", "_height"].iter().any(|k| key.eq_ignore_ascii_case(k)) {
+            self.movie.transform_changed(vm, object, key)?;
+        }
         Ok(())
     }
     fn call(

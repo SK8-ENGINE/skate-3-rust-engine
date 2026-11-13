@@ -25,6 +25,15 @@ pub enum EntryKind {
     Category,
     Item,
     Setting,
+    /// Challenge Map nodes (FE 17) by vault class; ids are vault keys, greyed until a handler exists (b244, b253).
+    MapListing,
+    MapFilter,
+    MapCategory,
+    FeLocation,
+    World,
+    Challenge,
+    MapCommand,
+    CodeUnlock,
 }
 
 impl EntryKind {
@@ -33,15 +42,39 @@ impl EntryKind {
             Self::Category => "category",
             Self::Item => "item",
             Self::Setting => "setting",
+            Self::MapListing => "map_listing",
+            Self::MapFilter => "map_filter",
+            Self::MapCategory => "map_category",
+            Self::FeLocation => "fe_locations",
+            Self::World => "world",
+            Self::Challenge => "challenges",
+            Self::MapCommand => "map_commands",
+            Self::CodeUnlock => "code_unlocks",
         }
     }
     pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "category" => Some(Self::Category),
-            "item" => Some(Self::Item),
-            "setting" => Some(Self::Setting),
-            _ => None,
-        }
+        Some(match name {
+            "category" => Self::Category,
+            "item" => Self::Item,
+            "setting" => Self::Setting,
+            "map_listing" => Self::MapListing,
+            "map_filter" => Self::MapFilter,
+            "map_category" => Self::MapCategory,
+            "fe_locations" => Self::FeLocation,
+            "world" => Self::World,
+            "challenges" => Self::Challenge,
+            "map_commands" => Self::MapCommand,
+            "code_unlocks" => Self::CodeUnlock,
+            _ => return None,
+        })
+    }
+    /// A Challenge Map node kind.
+    pub fn is_map(self) -> bool {
+        !matches!(self, Self::Category | Self::Item | Self::Setting)
+    }
+    /// A Challenge Map folder (tab or folder): enabled when one of its children is.
+    pub fn is_map_folder(self) -> bool {
+        matches!(self, Self::MapListing | Self::MapFilter)
     }
 }
 
@@ -60,6 +93,14 @@ impl EntryRef {
     }
     pub fn setting(id: &str) -> Self {
         Self { kind: EntryKind::Setting, id: id.into() }
+    }
+    /// A Challenge Map node, `kind` one of the map kinds, `key` its vault key.
+    pub fn map(kind: EntryKind, key: &str) -> Self {
+        Self { kind, id: key.into() }
+    }
+    /// The hook id form `<vault class>:<key>` (`fe_locations:dist_downtown_aletown`).
+    pub fn hook_id(&self) -> String {
+        format!("{}:{}", self.kind.name(), self.id)
     }
 }
 
@@ -84,10 +125,21 @@ pub mod facts {
     pub const PROJECT10_UNLOCKED: &str = "project10_unlocked";
     /// Retail GameMode global (1 single player, 4 / 5 online, 0 / 3 / 4 free skate).
     pub const GAME_MODE: &str = "game_mode";
+    /// 1 when the player turned on Debug Menus (PC overlay Extras, not retail): retail's debug-only menus show.
+    pub const DEBUG_MENUS: &str = "debug_menus";
+    /// Completed challenges (retail `ChallengeStatus.GetNumCompletedChallenges`; ours has none yet).
+    pub const COMPLETED_CHALLENGES: &str = "completed_challenges";
     /// 1 when the skate park being edited has unsaved changes.
     pub const PARK_DIRTY: &str = "park_dirty";
-    /// 1 when the park can be saved (retail: a park-state flag and a mode check).
+    /// 1 when the park can be saved (retail: a park-state flag only, `[0x83084690]+0x23`, b673).
     pub const PARK_SAVEABLE: &str = "park_saveable";
+    /// 1 when the current world row has `IsSkatePark` set (retail `82511168`, b673).
+    pub const WORLD_IS_SKATE_PARK: &str = "world_is_skate_park";
+    /// 1 when the San Van party pack (DLC product CCF000C, `82518AD0`) is owned (b673 / b458).
+    pub const PARTY_PACK_OWNED: &str = "party_pack_owned";
+    /// 1 when career progression still holds skate.Park locked (ProgressionManager +0x3A with neither DLC CCF0003 nor
+    /// the `film_skpk_univ_01` challenge known, b673); 0 = unlocked (ours: no career progression yet).
+    pub const SKATE_PARK_LOCKED: &str = "skate_park_locked";
     /// 1 in a downloaded community park (retail mode state 11 plus checks).
     pub const PARK_COMMUNITY: &str = "park_community";
     /// 1 when Skate Feed settings are available (retail sub_8245A2D0).
@@ -282,6 +334,47 @@ pub struct MenuData {
     /// Setting ids per screen (retail screen index = position).
     pub screens: Vec<Vec<String>>,
     pub modes: Vec<Mode>,
+    /// The Challenge Map tree (vault `map_listing` parent chain and its leaves), in display order per parent.
+    pub map_nodes: Vec<MapNode>,
+    /// The Challenge Map picture per location key (the `world` record's tMapInfo name, `map_skateschool`); a location
+    /// not listed shows the default map. Data: mods may change it.
+    pub map_pictures: std::collections::BTreeMap<String, String>,
+    /// The Challenge Map marker per location key (icon, world point, its world's map bounds); data, mods may change
+    /// it. A location without one draws no marker.
+    pub map_markers: std::collections::BTreeMap<String, MapMarker>,
+    /// Challenge Map listings flagged `IsDebug` in the vault (research b479): hidden unless Debug Menus is on.
+    pub map_debug: std::collections::BTreeSet<String>,
+}
+
+/// One Challenge Map location marker (research b263 / b264 / b265): the icon texture name (`mini_teleport`), the
+/// world point (the locator's x / z plus its world record's offset) and that world's tMapInfo bounds b1..b6.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapMarker {
+    pub icon: String,
+    pub point: [f32; 2],
+    pub bounds: [i32; 6],
+}
+
+impl MapMarker {
+    /// Map pixels relative to the map centre (`sub_8268DB68`): size b5 x b6 over the bounds b2..b1 (x) and b4..b3
+    /// (z), shrunk to 99% / 95%.
+    pub fn projected(&self) -> [f32; 2] {
+        let b = self.bounds.map(|v| v as f32);
+        let mid_x = (b[0] - b[1]) * 0.5 + b[1];
+        let mid_y = (b[2] - b[3]) * 0.5 + b[3];
+        let x = if mid_x != b[1] { (b[4] * 0.5 / (mid_x - b[1])) * (self.point[0] - mid_x) * 0.99 } else { 0.0 };
+        let y = if mid_y != b[3] { (b[5] * 0.5 / (mid_y - b[3])) * (self.point[1] - mid_y) * 0.95 } else { 0.0 };
+        [x, y]
+    }
+}
+
+/// One Challenge Map node: its entry (kind + vault key), its parent folder, its label string id and sort order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapNode {
+    pub entry: EntryRef,
+    pub parent: Option<EntryRef>,
+    pub label: String,
+    pub order: i32,
 }
 
 impl MenuData {
@@ -302,7 +395,17 @@ impl MenuData {
             EntryKind::Category => self.category(&entry.id).is_some(),
             EntryKind::Item => self.item(&entry.id).is_some(),
             EntryKind::Setting => self.setting(&entry.id).is_some(),
+            _ => self.map_node(entry).is_some(),
         }
+    }
+    pub fn map_node(&self, entry: &EntryRef) -> Option<&MapNode> {
+        self.map_nodes.iter().find(|n| n.entry == *entry)
+    }
+    /// A Challenge Map folder's children in display order (sort order, then data order).
+    pub fn map_children(&self, parent: &EntryRef) -> Vec<&MapNode> {
+        let mut children: Vec<&MapNode> = self.map_nodes.iter().filter(|n| n.parent.as_ref() == Some(parent)).collect();
+        children.sort_by_key(|n| n.order);
+        children
     }
 }
 
@@ -482,6 +585,17 @@ impl MenuData {
                             rows.retain(|x| *x != entry.id);
                         }
                     }
+                    // A Challenge Map node goes with everything under it (the tree roots are the modes).
+                    _ => {
+                        let mut gone = vec![entry.clone()];
+                        let mut i = 0;
+                        while i < gone.len() {
+                            let parent = gone[i].clone();
+                            gone.extend(self.map_nodes.iter().filter(|n| n.parent.as_ref() == Some(&parent)).map(|n| n.entry.clone()));
+                            i += 1;
+                        }
+                        self.map_nodes.retain(|n| !gone.contains(&n.entry));
+                    }
                 }
             }
         }
@@ -603,6 +717,8 @@ pub struct Row {
 
 /// Settings links followed when deciding whether a link row is enabled.
 const MAX_LINK_DEPTH: usize = 4;
+/// Deepest Challenge Map folder nesting the folder rule follows (the retail tree is 3-4 deep).
+const MAX_MAP_DEPTH: usize = 8;
 
 pub struct MenuRegistry {
     base: MenuData,
@@ -640,6 +756,9 @@ impl MenuRegistry {
         let parks = vec!["CareerPark".to_owned(), "FreePlayPark".to_owned()];
         let in_park = Rule::Mode(parks.clone());
         let not_in_park = Rule::Not(Box::new(in_park.clone()));
+        // Career / Free Play IsItemEnabled (8261F850 / 82620320, b673): also off in a world flagged as a skate park.
+        let not_park_world = Rule::All(vec![not_in_park.clone(), Rule::fact(WORLD_IS_SKATE_PARK, Cmp::Eq, 0.0)]);
+        let career = Rule::Mode(vec!["Career".to_owned()]);
         let rules: Vec<(EntryRef, Option<Rule>, Option<Rule>)> = vec![
             // Settings: GameSettings_GetNumOptions stops at the SFX pack row with <= 1 pack;
             // IsItemEnabled (sub_8260D648) greys it, Difficulty when online, Skate Feed when unavailable.
@@ -650,12 +769,26 @@ impl MenuRegistry {
             (EntryRef::item("Project10"), Some(Rule::fact(PROJECT10_UNLOCKED, Cmp::Ne, 0.0)), None),
             // Park IsItemEnabled (sub_8261FB18): SkateReel / SkateWith off in a park; SavePark,
             // RatePark and FlagSkatePark by park state.
-            (EntryRef::item("SkateReel"), None, Some(not_in_park.clone())),
-            (EntryRef::item("SkateWith"), None, Some(not_in_park)),
+            (EntryRef::item("SkateReel"), None, Some(not_park_world.clone())),
+            (EntryRef::item("SkateWith"), None, Some(not_park_world)),
+            // Career only: EnterSkatePark waits for career progression; PartyPlay needs the San Van pack (b673).
+            (EntryRef::item("EnterSkatePark"), None,
+                Some(Rule::Any(vec![Rule::Not(Box::new(career)), Rule::fact(SKATE_PARK_LOCKED, Cmp::Eq, 0.0)]))),
+            (EntryRef::item("PartyPlay"), None, Some(Rule::fact(PARTY_PACK_OWNED, Cmp::Ne, 0.0))),
             (EntryRef::item("SavePark"), None, Some(Rule::fact(PARK_SAVEABLE, Cmp::Ne, 0.0))),
             (EntryRef::item("RatePark"), None, Some(Rule::fact(PARK_COMMUNITY, Cmp::Ne, 0.0))),
             (EntryRef::item("FlagSkatePark"), None, Some(Rule::fact(PARK_COMMUNITY, Cmp::Ne, 0.0))),
+            // Challenge Map tabs: each map_listing's tab Lua (Hash_3E294F92C056A144, skatercollections): Challenges
+            // and All are hidden in free skate, Completed also while nothing is completed; Locations always shows.
+            (EntryRef::map(EntryKind::MapListing, "progression_active"), Some(not_free_skate()), None),
+            (EntryRef::map(EntryKind::MapListing, "progression_completed"),
+                Some(Rule::All(vec![not_free_skate(), Rule::fact(COMPLETED_CHALLENGES, Cmp::Gt, 0.0)])), None),
         ];
+        // Listings flagged IsDebug (82D0C0E0 skips them; b479) show only with Debug Menus (ours, PC overlay Extras).
+        let debug: Vec<EntryRef> = self.data.map_debug.iter().map(|id| EntryRef::map(EntryKind::MapListing, id)).collect();
+        for entry in debug {
+            self.hooks_mut(entry).visible.push((retail.clone(), Condition::Rule(Rule::fact(DEBUG_MENUS, Cmp::Ne, 0.0))));
+        }
         for (entry, visible, enabled) in rules {
             let hooks = self.hooks_mut(entry);
             if let Some(rule) = visible {
@@ -802,6 +935,10 @@ impl MenuRegistry {
                 return self.screen_rows_at(screen, ctx, depth + 1).iter().any(|r| r.enabled);
             }
         }
+        // A Challenge Map tab / folder opens when something inside it can be used (ours, like the settings link).
+        if entry.kind.is_map_folder() && depth < MAX_MAP_DEPTH {
+            return self.data.map_children(entry).iter().any(|c| self.enabled_at(&c.entry, ctx, depth + 1));
+        }
         false
     }
 
@@ -849,10 +986,14 @@ impl MenuRegistry {
             .collect()
     }
 
+    /// The value in force: the top value layer, else retail's default for the row (shown, not a binding:
+    /// it neither enables the row nor takes Left / Right).
     pub fn value(&self, entry: &EntryRef) -> Option<SettingValue> {
-        match Self::top(&self.hooks.get(entry)?.values)? {
-            ValueHook::Native { get, .. } => Some(get()),
-            ValueHook::Stored(v) => Some(v.clone()),
+        match self.hooks.get(entry).and_then(|h| Self::top(&h.values)) {
+            Some(ValueHook::Native { get, .. }) => Some(get()),
+            Some(ValueHook::Stored(v)) => Some(v.clone()),
+            None if entry.kind == EntryKind::Setting => crate::menu_values::retail_default(&entry.id),
+            None => None,
         }
     }
 
@@ -970,13 +1111,23 @@ impl MenuRegistry {
 /// Retail settings links and Video screen choice (sub_8260D290): Difficulty ->
 /// screen 2, Audio -> 3, Video -> 8 / 7 / 6 / 5 / 4 by front-end state, mode and
 /// session, Controls -> 9, Online -> 10, Skate Feed -> 11.
-pub fn retail_link(setting: &str) -> Option<Link> {
-    use facts::*;
-    let free_skate = Rule::Any(vec![
+/// Retail's free-skate game modes (0 / 3 / 4).
+fn free_skate_rule() -> Rule {
+    use facts::GAME_MODE;
+    Rule::Any(vec![
         Rule::fact(GAME_MODE, Cmp::Eq, 0.0),
         Rule::fact(GAME_MODE, Cmp::Eq, 3.0),
         Rule::fact(GAME_MODE, Cmp::Eq, 4.0),
-    ]);
+    ])
+}
+
+fn not_free_skate() -> Rule {
+    Rule::Not(Box::new(free_skate_rule()))
+}
+
+pub fn retail_link(setting: &str) -> Option<Link> {
+    use facts::*;
+    let free_skate = free_skate_rule();
     let session = Rule::fact(ONLINE_SESSION, Cmp::Ne, 0.0);
     Some(match setting {
         "ID_GAMESETTINGS_DIFFICULTY_SETTINGS" => Link::Screen(2),

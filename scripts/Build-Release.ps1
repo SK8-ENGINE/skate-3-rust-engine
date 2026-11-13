@@ -22,7 +22,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not install packaging dependencies' }
     & $packagePython -m unittest tools.test_setup_assets tools.asset_pipeline.test_marquee_assets tools.asset_pipeline.test_customiser_setup tools.asset_pipeline.test_setup_recovery tools.asset_pipeline.test_versions tools.asset_pipeline.test_optional_content
     if ($LASTEXITCODE -ne 0) { throw 'Setup extraction regression checks failed' }
-    $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static'
+    $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static,+fma'
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-ffff'
     $stage = Join-Path $ProjectRoot "target/release-packages/$stamp/skate3rust-windows-x64"
     $symbols = Join-Path $ProjectRoot "target/release-packages/$stamp/symbols"

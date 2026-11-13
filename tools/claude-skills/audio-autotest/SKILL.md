@@ -5,7 +5,7 @@ description: Run the automated in-game check of the audio modding features (dev 
 
 # Audio modding autotest
 
-Needs an audio branch that has the dev mod `mods/audio-content-test` with its `autotest` setting, a built
+Needs the dev mod `mods/audio-content-test` (in upstream main since PR #32) with its `autotest` setting, a built
 `bin\skate3rust.exe`, and converted assets (skill `asset-setup`) including the DownTown map.
 
 ## Pieces

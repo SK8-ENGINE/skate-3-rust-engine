@@ -73,8 +73,44 @@ def restart():
     else:command=[sys.executable,str(Path(__file__).resolve()),*sys.argv[1:]]
     return subprocess.call(command,env=env)
 
+def ensure_dependencies():
+    """Source checkout: setup brings its own packages. When numpy / Pillow are missing from this Python (the game
+    starts `py -3.13 tools/setup.py`, a system Python), create or update <checkout>/.local/venv-setup from
+    tools/requirements-setup.txt (the environment tools/setup-dev-assets.ps1 uses too) and run setup again with it.
+    Returns an exit code when setup ran (or failed) in the other Python, None to go on here. The packaged setup exe
+    carries its packages."""
+    if getattr(sys,'frozen',False):return None
+    try:
+        import numpy,PIL  # noqa: F401
+        return None
+    except ImportError:pass
+    import subprocess
+    venv=ROOT/'.local'/'venv-setup'
+    python=venv/'Scripts'/'python.exe'
+    inside=Path(sys.prefix).resolve()==venv.resolve()
+    requirements=[line.strip() for line in (ROOT/'tools'/'requirements-setup.txt').read_text(encoding='utf-8').splitlines()
+                  if line.strip() and not line.strip().startswith(('#','pyinstaller'))]
+    print('Setup: installing its Python packages into '+str(venv)+' (first run only, about a minute)',flush=True)
+    try:
+        if not python.is_file():subprocess.run([sys.executable,'-m','venv',str(venv)],check=True)
+        subprocess.run([str(python),'-m','pip','install','--disable-pip-version-check','-q',*requirements],check=True)
+    except (OSError,subprocess.CalledProcessError) as error:
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root=tk.Tk();root.withdraw()
+            messagebox.showerror('Setup could not finish',f'Setup could not install its Python packages ({error}).\n\n'
+                                 f'Check the internet connection, then try again. Environment: {venv}')
+        except Exception:pass
+        print(f'Setup could not install its Python packages: {error}',flush=True)
+        return 1
+    if inside:return None  # already the setup environment: the packages are there now
+    return subprocess.call([str(python),str(Path(__file__).resolve()),*sys.argv[1:]])
+
 def main():
     tolerate_dead_console()
+    code=ensure_dependencies()
+    if code is not None:return code
     if len(sys.argv)>1 and sys.argv[1]=='--character-import':
         # Keep the importer inside the already versioned setup payload: even
         # protocol-1 updaters deliver it atomically with the game executable.
@@ -101,39 +137,58 @@ def main():
     from tkinter import filedialog,messagebox,ttk
     from tools.asset_pipeline.customiser_setup import install
     from tools.asset_pipeline.versions import installed, fingerprints, changed_groups
-    from tools.asset_pipeline.group_receipts import damaged
     previous=installed(args.base) if args.refresh else None
+    # Only the cheap version check before the window opens: install() checks
+    # the installed files (damaged(): size and time of every output, hashing only changed ones) on the worker thread
+    # with progress. Doing it here too kept the window closed for minutes.
     changed=changed_groups(previous[1].get('pipelines',{}),fingerprints()) if previous else set()
-    if previous:changed.update(damaged(*previous,exclude=changed))
     updating=previous is not None
     reuse=saved_source(previous[1]) if previous else None
     window=tk.Tk()
     window.title('Skate 3 Rust Engine setup')
-    window.geometry('700x420');window.resizable(False,False)
+    window.geometry('700x320');window.resizable(False,False)
     icon=ROOT/'docs/images/skating-crab.ico'
     if icon.is_file():window.iconbitmap(str(icon))
     frame=ttk.Frame(window,padding=24);frame.pack(fill='both',expand=True)
-    ttk.Label(frame,text='Update game assets' if updating else 'Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,16))
-    ttk.Label(frame,text=('Asset version changes: '+(', '.join(sorted(changed)) or 'none')+'.\nOnly changed or incomplete groups will be prepared again.\nYour previous character data remains until preparation succeeds.\n'
-              +('Reusing the Xbox source from the previous setup when possible.\nKeep the game data beside default.xex.' if reuse else 'Select your Skate 3 default.xex (or ISO) to continue.\nKeep the game data beside default.xex.')) if updating else 'Select your Skate 3 Xbox 360 ISO, or default.xex inside an\nextracted game folder. Keep the game data beside default.xex.\nSetup prepares the skater, customiser, animations and disc maps.\nNo other apps need installing.\n\nISO extraction needs internet access. Allow free disk space\nand time for the first conversion.',
-              font=('Segoe UI',11),justify='left').pack(anchor='w')
-    status=tk.StringVar(value=('Reusing your previous Xbox source…' if reuse else 'Choose your game to begin.') if updating else 'Choose your game to begin.')
-    ttk.Label(frame,textvariable=status,wraplength=600).pack(anchor='w',pady=(18,8))
-    progress=ttk.Progressbar(frame,mode='indeterminate');progress.pack(fill='x')
+    style=ttk.Style(window)
+    style.configure('Note.TLabel',foreground='#666666',font=('Segoe UI',10))
+    style.configure('Status.TLabel',font=('Segoe UI',10))
+    style.configure('Setup.Horizontal.TProgressbar',thickness=8)
+    ttk.Label(frame,text='Updating game files' if updating else 'Set up Skate 3 Rust Engine',font=('Segoe UI',20)).pack(anchor='w',pady=(0,12))
+    if updating:
+        names={'hud':'HUD'}
+        parts=[names.get(g,g) for g in sorted(changed)]
+        lead=('Converting what changed: '+', '.join(parts)+'.') if parts else 'Checking your game files.'
+        note='Your current files stay in place until this finishes.'
+    else:
+        lead='Pick your Skate 3 Xbox 360 ISO, or default.xex in an extracted game folder.'
+        note='The first conversion takes a while. ISO extraction needs an internet connection.'
+    ttk.Label(frame,text=lead,font=('Segoe UI',11),wraplength=640,justify='left').pack(anchor='w')
+    ttk.Label(frame,text=note,style='Note.TLabel',wraplength=640,justify='left').pack(anchor='w',pady=(4,0))
+    status=tk.StringVar(value='Starting…' if updating and reuse else 'Choose your game to begin.')
+    ttk.Label(frame,textvariable=status,style='Status.TLabel',wraplength=640).pack(anchor='w',side='top',pady=(36,6))
+    progress=ttk.Progressbar(frame,mode='indeterminate',style='Setup.Horizontal.TProgressbar');progress.pack(fill='x')
     messages=queue.Queue();running=False;success=False
     def begin(iso):
         nonlocal running
         button.config(state='disabled');running=True;progress.start()
         def work():
             try:
-                installed_root=install(Path(iso),args.base,args.game_exe,lambda text:messages.put(('progress',text)),refresh=updating)
+                say=lambda text:messages.put(('progress',text))
+                if updating and Path(iso).suffix.lower()=='.iso':
+                    # Nothing to rebuild: no whole-disc extraction (doc 08 "ISO refresh without extracting the disc").
+                    from tools.asset_pipeline.iso_refresh import install as iso_refresh
+                    installed_root=iso_refresh(Path(iso),args.base,args.game_exe,say)
+                else:installed_root=install(Path(iso),args.base,args.game_exe,say,refresh=updating)
                 from tools.asset_pipeline.validation_report import summary
                 warnings=summary(installed_root)
                 messages.put(('done',f'Ready with {len(warnings)} warnings or unavailable components. Details: {installed_root / "setup-report.json"}' if warnings else 'Ready'))
             except Exception as error:
                 args.base.mkdir(parents=True,exist_ok=True)
                 (args.base/'setup-error.log').write_text(traceback.format_exc(),encoding='utf-8')
-                messages.put(('error',str(error)))
+                # "Could not reuse the source" only when the source itself is the problem, not for every failure.
+                source_failed=not (Path(iso).is_file() or Path(iso).is_dir()) or isinstance(error,(FileNotFoundError,PermissionError))
+                messages.put(('error-source' if source_failed else 'error',str(error)))
         threading.Thread(target=work,daemon=True).start()
     def start():
         nonlocal running
@@ -146,8 +201,12 @@ def main():
         if running:
             messagebox.showinfo('Setup running','Wait for the current conversion to finish. Your source game files are not modified.',parent=window)
         else:window.destroy()
-    buttons=ttk.Frame(frame);buttons.pack(anchor='e',pady=18)
-    button=ttk.Button(buttons,text='Select ISO or default.xex',command=start);button.pack(side='left')
+    buttons=ttk.Frame(frame);buttons.pack(anchor='e',side='bottom')
+    button=ttk.Button(buttons,text='Select ISO or default.xex',command=start)
+    # Only when a file has to be picked: an update that reuses the recorded source starts on its own.
+    def show_button():
+        if not button.winfo_ismapped():button.pack(side='left')
+    if not (updating and reuse):show_button()
     def poll():
         nonlocal running,success
         while not messages.empty():
@@ -155,9 +214,9 @@ def main():
             if kind=='done':
                 if text!='Ready':messagebox.showwarning('Setup completed with warnings',text,parent=window)
                 running=False;success=True;progress.stop();window.destroy();return
-            if kind=='error':
-                running=False;progress.stop();button.config(state='normal')
-                if reuse and text:
+            if kind in ('error','error-source'):
+                running=False;progress.stop();button.config(state='normal');show_button()
+                if reuse and text and kind=='error-source':
                     status.set('Could not reuse the previous Xbox source. Select default.xex or an ISO.')
                 messagebox.showerror('Setup could not finish',text+'\n\nDetails: '+str(args.base/'setup-error.log'),parent=window)
         window.after(100,poll)

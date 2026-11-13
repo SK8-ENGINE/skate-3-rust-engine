@@ -1,6 +1,6 @@
 # eEQChain (material) buses, EQ jitter, LFO task and owner send buses: behavioural spec
 
-Written 2026-10-02 from the TU3 recomp's generated code (reference only, read for behaviour), the image dump and the
+Written 2026-10-02 from the TU3 (title update 3) recomp's generated code (reference only, read for behaviour), the image dump and the
 user's vault. Companion to `aems-voice-graph-spec.md` (§3.3 routing records, §4.10 bus modules, §6.2 buses), which
 this supersedes for the material buses. Tags as there: [R] our reading of the lifted code, [IMG] image constant,
 [VLT] vault value, [TR] matched against a retail trace, UNCERTAIN = not proven. Throwaway local scripts
@@ -49,9 +49,9 @@ gain a `54868EDE952EF581` b `25853859640A3796`; Q a `594D91B30B95483A` b `CDF599
 Records 1–4 inherit from `55578C11340FFDF1` (enable 1), 5–7 from `5D76D8135CFA617B` (enable 0); `default` record
 values fill the gaps (clip 100, freq 10000/5000, …). Bus 3 has gain fixed at 1.0 → its two PI20 stay bypassed; it is
 a hard clipper at ±0.1. The per-record RefSpec fields (`23E3…`, `3875…`, `53AC…`, `7570…`, `B713…`, `FBE8…`) are not
-referenced by any code we found (the jitter keys are hard-coded, §2) — UNCERTAIN whether used at all.
+referenced by any code we found (the jitter keys are hard-coded, §2); UNCERTAIN whether used at all.
 
-### 1.4 Re-roll on creation — `sub_824916E8(mgr, i)` [R, TR]
+### 1.4 Re-roll on creation: `sub_824916E8(mgr, i)` [R, TR]
 Skip if i = 8 or created[i] ≠ 0. Set created[i] = 1. Look up record (class `AA801D9FC0ADBBBF`, key table[i]);
 if its enable byte is 0 → done (no posts). Otherwise, under the mixer lock, post in this order:
 1. PI20#1 param 0 = pick(freq), param 1 = pick(gain), param 2 = pick(Q);
@@ -64,7 +64,7 @@ add-with-carry generator `sub_82A8AF10`, state 0x82FD7D74; same generator as the
 (0x820641A8 = 0x3DCCCCCD). So every value sits on an 11-point grid between the two fields. Up to 6 draws per
 creation, in the order above.
 
-### 1.5 Clearing and the jitter post — `sub_82491180(mgr)` [R]
+### 1.5 Clearing and the jitter post: `sub_82491180(mgr)` [R]
 Called from the audio manager update `sub_82485190` (vtable 0x822FBEA0 +36) on every second game frame (frame
 counter at +500 alternates two halves; when frame dt > 0.02 s (double 0x822F8DE8) both halves run every frame).
 For each bus i = 0..7:
@@ -99,7 +99,7 @@ value = clamp(x, lo, hi)
 ```
 A bounded random walk with random acceleration, reflecting at the range ends. The update (slot +36) steps every
 entry, then for entries with post flag set posts trunc(clamp(value, 0, 32767)) with the entry's id to the object at
-table+12 (vfunc 8) — the six flag-1 records (`FB7567C0…`, `5FBCB3B8…`, `02D9546B…`, `C20C6630…`, `6AEEEEB9…`,
+table+12 (vfunc 8): the six flag-1 records (`FB7567C0…`, `5FBCB3B8…`, `02D9546B…`, `C20C6630…`, `6AEEEEB9…`,
 `B5E641CC…`, ids 0–5) feed some other consumer, UNCERTAIN which. Caller/cadence of slot +36 not found (virtual):
 UNCERTAIN; the retail trace fits "one step per game frame" (§4.3).
 
@@ -123,8 +123,8 @@ Holder class `42AFE160E647167C` (default record), with the component that reads 
 | 0 | E34B48082B5BF185 (pops, `sub_824B9CC8`), 9326AEAC6E053997 (touchdowns `sub_824B8D48`, manual landing `sub_824BB330`, via `sub_824B7AF0`), 4B6E2D79A8452D9B (cloth), 22D0D4A5A14FFF7D, 985A1A2890A77F85 (`sub_824EFA60`), AEA5BA7E64515945 (`sub_824DBBB8` ×2), B2C4F86A53963BA2, D1A87641CCB98787 (`sub_824C3FC8`, `sub_824C4138`) | retail bus 0 re-rolls 228× in all_163809 |
 | 1 | 8B0E030799CBDD00 (landing `sub_824BA630`), 0D73DB849EC8E2B2 (shoe scuffs `sub_824B97A8`, `sub_824C0DA8`), F61F2797B24868D9 (foot taps `sub_824B9268`, `sub_824C07D8`), 2F880F059AB9B151 (`sub_824F0718`), 428FDFC2E99FFA65 (`sub_824F05D0`), 55DA01533B378EFA (`sub_824C01E8`), 660885AD6F8F9AF4 (`sub_824EF8C8`), 748CBC9727A5347F (`sub_824BB8D8`, `sub_824BBA00`) | 207 re-rolls |
 | 2 | C014A21D0FF6EDBA (footsteps, routing word +10 → created), ED52262DABB5DE4C (`sub_824B8310`, `sub_824B8448`), A9023782094771B5, CCDFABBAEEA33EAE | 2013 re-rolls |
-| 3 | — (no field has 3) | never posted in either session |
-| 4 | — | never posted |
+| 3 | none (no field has 3) | never posted in either session |
+| 4 | none | never posted |
 | 5 | D489344CEDEE5036 (grind), F52450E504250254 (skid), E633C8F009CAEFFC | jitter |
 | 6 | 55E6488906A2E330 (wheels; `sub_824CE108` create = 0), D9BE1F2F1A72FEE8 (flips) | jitter |
 | 7 | 4D30A6CA8C9E1ABC (rattle), C1DC8556BA66CDCD (wind), 2DBD9ED0AD824844, 4A022FEF9905D8F4, C58CE169C13320CA, F2B44F93BD91662E | jitter |
@@ -148,13 +148,13 @@ timestamp (one creation = one re-roll of all six).
 ### 4.2 Jitter buses 5–7
 - Inside the §2.3 bounds: dsp 904/904, 553/553, 980/980 lines; all 4050/4050, 8637/8637, 12666/12666.
   Observed extremes reach the bounds (e.g. 100.0009..699.9996 Hz, 0.5..2.0, Q 0.25..5.75).
-- Buses 6 and 7 carry **identical** values at the same timestamps (checked 20.5 s window) — one shared source.
+- Buses 6 and 7 carry **identical** values at the same timestamps (checked 20.5 s window): one shared source.
 - Before the first jitter step bus 6 showed exactly the centres 400 / 1.25 / 3.0 and 2000 / 1.75 / 3.0 (6159 ms, dsp).
 ### 4.3 Update cadence
 - Bus 5–7 changes: median 9.5 ms apart in the recomp (its game frame rate, not 60 Hz; UNCERTAIN host pacing).
 - |Δvalue|/a2 per logged change, all_163809 bus 7 PI20#1 freq: quantiles (10/25/50/75/90 %) 0.107 / 0.292 / 0.670 /
   1.011 / 1.330. Simulated walk: 1 step per post 0.06 / 0.17 / 0.48 / 0.92 / 1.00; 2 steps 0.15 / 0.37 / 0.72 / 1.11 /
-  1.39; mixture 20–30 % one-step ≈ 0.12 / 0.31 / 0.68 / 1.02 / 1.30 — matches. Consistent with "jitter steps every
+  1.39; mixture 20–30 % one-step ≈ 0.12 / 0.31 / 0.68 / 1.02 / 1.30: matches. Consistent with "jitter steps every
   frame, bus post every second frame, both every frame on long (> 20 ms) frames". UNCERTAIN until the slot +36
   caller is found.
 
@@ -186,7 +186,7 @@ The trace's 18420/18820 have exactly GAIN, PEAK, 3 SENDs in that module order �
 mgr+60 = 0x40C18820 (the LFO centres below confirm). The effect returns (mgr+108/+112, `Sub0 → Del0 → PI20 → Sen0 →
 Gai0 → Pn21 → Sen0`) are the trace's 0x40C40770 / 0x40C40020 (PEAK, 1-ch SEND, GAIN, 6-ch SEND).
 
-### 6.2 LFO task — `sub_824907D8` builds, `sub_82490B60` runs [R, IMG]
+### 6.2 LFO task: `sub_824907D8` builds, `sub_82490B60` runs [R, IMG]
 14 entries of 32 bytes at mgr+396+32n: +0 period (s), +4 phase, +8 sine scale, +12 offset, +16 depth, +20 output,
 +24 module, +28 param index. Registered with `sub_82481BE0` as task "LFO Task" (string 0x8224DC68), callback
 `sub_82490B60`, context mgr+388. Each run (dt in f1): phase = (phase + dt) mod period;
@@ -213,7 +213,7 @@ Modules of the mgr+88..+100 graphs at module index 1 and 5 are not resolved (UNC
 of the reverb network).
 
 ## 7. Port notes
-- Material buses: implement §1.4/§1.5 exactly — per-bus created flag, cleared every second frame; re-roll on first
+- Material buses: implement §1.4/§1.5 exactly: per-bus created flag, cleared every second frame; re-roll on first
   create-flagged resolve; draws from the title generator in the fixed order; skip the draw when a == b.
 - Jitter: one shared 30-entry table; buses 5–7 share it. Retail is unreproducible sample-for-sample (shared RNG), so
   tests should check grids/bounds/step statistics as in §4, not sequences.

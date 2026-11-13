@@ -49,6 +49,10 @@ def world_environment(collections, world_key):
     world, world_chain = collections.resolve('world', world_key)
     location_key = struct.unpack('>Q', bytes.fromhex(
         field(world, 'Hash_7E23D10785C43717'))[:8])[0]
+    # TU3 0x82B6DE10 returns 0 for a key not in the class; 0x827950A8 then selects `default` (b419: the DLC night
+    # worlds name render locations that exist in no vault).
+    if (key_hash('render_locations'), location_key) not in collections.rows:
+        location_key = 'default'
     location, location_chain = collections.resolve('render_locations', location_key)
     sun = floats(field(location, 'sun_position'), 3)
     length = math.sqrt(sum(v*v for v in sun))

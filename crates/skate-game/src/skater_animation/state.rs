@@ -48,15 +48,26 @@ impl AnimationState {
 
     ///82B98980 calls82D19010's first-match query. No scalar/status test:
     ///presence in the collected tree attribute list toggles the state once.
+    ///Shared with the NPC skaters' replay puppet (`skate_core::living_world::stance`).
     pub fn apply_stance_events(&mut self, attributes: &[AnimationAttribute]) {
-        let present = |name: &[u8]| attributes.iter().any(|a| a.name == encode(name));
-        if present(b"animboardbackward") {
+        use skate_core::living_world::stance::{StanceEvents, StanceFlags};
+        static RETAIL: std::sync::OnceLock<StanceEvents> = std::sync::OnceLock::new();
+        let before = StanceFlags {
+            board_backward: self.flags & 0x8000_0000 != 0,
+            mirrored: self.flags & 0x4000_0000 != 0,
+            switch: self.publication.relative_stance == 1,
+        };
+        let mut after = before;
+        after.apply(RETAIL.get_or_init(StanceEvents::retail), |name| {
+            attributes.iter().any(|a| a.name == encode(name.as_bytes()))
+        });
+        if after.board_backward != before.board_backward {
             self.flags ^= 0x8000_0000;
         }
-        if present(b"mirrored") {
+        if after.mirrored != before.mirrored {
             self.flags ^= 0x4000_0000;
         }
-        if present(b"switch") {
+        if after.switch != before.switch {
             self.publication.relative_stance = i32::from(self.publication.relative_stance == 0);
         }
     }
@@ -83,5 +94,54 @@ impl AnimationState {
         } else {
             0x3dcc_cccd
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use skate_core::animation::output::attributes::MotionGraphAttribute;
+
+    /// The pre-sharing `apply_stance_events` (player only), kept as the reference.
+    fn reference(state: &mut AnimationState, attributes: &[AnimationAttribute]) {
+        let present = |name: &[u8]| attributes.iter().any(|a| a.name == encode(name));
+        if present(b"animboardbackward") {
+            state.flags ^= 0x8000_0000;
+        }
+        if present(b"mirrored") {
+            state.flags ^= 0x4000_0000;
+        }
+        if present(b"switch") {
+            state.publication.relative_stance = i32::from(state.publication.relative_stance == 0);
+        }
+    }
+
+    /// The shared implementation (`skate_core::living_world::stance::StanceFlags::apply`) is
+    /// bit-identical to the player's own: every flag word bit pattern of interest, relative stance
+    /// (incl. out-of-range values) and attribute subset.
+    #[test]
+    fn shared_stance_events_match_the_player_reference() {
+        let names: [&[u8]; 4] = [b"animboardbackward", b"mirrored", b"switch", b"other"];
+        for flags in [0u32, 0x8000_0000, 0x4000_0000, 0xC000_0000, 0xE802_0000, 0x2000_0000] {
+            for relative in [0, 1, 2, -1] {
+                for subset in 0..16u32 {
+                    let attributes: Vec<AnimationAttribute> = names
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| subset & (1 << i) != 0)
+                        .map(|(_, n)| MotionGraphAttribute { name: encode(n), value: 1.0 }.to_animation())
+                        .collect();
+                    let mut a = AnimationState::new(true);
+                    a.flags = flags;
+                    a.publication.relative_stance = relative;
+                    let mut b = AnimationState::new(true);
+                    b.flags = flags;
+                    b.publication.relative_stance = relative;
+                    a.apply_stance_events(&attributes);
+                    reference(&mut b, &attributes);
+                    assert_eq!((a.flags, a.publication.relative_stance), (b.flags, b.publication.relative_stance), "flags {flags:#x} relative {relative} subset {subset}");
+                }
+            }
+        }
     }
 }

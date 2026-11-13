@@ -355,6 +355,11 @@ impl SplicePlayer {
         }
     }
 
+    /// Sounds held (started and not yet released by their owner; diagnostics and the leak tests).
+    pub fn sound_count(&self) -> usize {
+        self.sounds.iter().flatten().count()
+    }
+
     /// Diagnostics: (bank name, record, member sample, gain, pitch) of every playing voice.
     pub fn voices(&self) -> Vec<(String, usize, u16, f32, f32)> {
         let mut out = Vec::new();

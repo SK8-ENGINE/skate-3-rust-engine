@@ -91,6 +91,21 @@ pub fn library_key(file: &str) -> String {
     path.strip_suffix(".apt").unwrap_or(path).to_string()
 }
 
+/// The exported menu movie set for data-gated tests (`SKATE3_MENU_MOVIES`, else the main checkout's installed
+/// set), or None (skip) when it is absent or older than this engine reads (re-run the hud setup group).
+#[cfg(test)]
+pub(crate) fn test_menu_set() -> Option<std::path::PathBuf> {
+    let root = std::env::var("SKATE3_MENU_MOVIES")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| main_checkout().join("assets/private/menu-movies"));
+    let manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).ok()?).ok()?;
+    if manifest["version"] != crate::retail_menu_movies::VERSION {
+        eprintln!("skipped: menu movie set in {} is version {}, not {}", root.display(), manifest["version"], crate::retail_menu_movies::VERSION);
+        return None;
+    }
+    Some(root)
+}
+
 /// The main checkout's root, also from a git worktree (`.git` is then a file pointing at
 /// `<main>/.git/worktrees/<name>`), so data-gated tests find the local research data and the
 /// installed assets. `SKATE3_MAIN_CHECKOUT` overrides it.

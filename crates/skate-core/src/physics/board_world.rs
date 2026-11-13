@@ -143,8 +143,45 @@ pub struct BoardWorld {
     maximum_triangle_margin: f32,
     /// Indices of water triangles, for `water_surface_at`.
     water: Vec<usize>,
+    /// The query's own scratch (taken out for the query, so `query_primitives` keeps its `&mut self` API).
+    scratch: Option<Box<QueryScratch>>,
+}
+
+/// The per-query output and retention buffer. A caller that shares one world between threads keeps one of these each
+/// and calls [`BoardWorld::query_primitives_in`] (the world itself is only read by a query).
+#[derive(Clone, Debug)]
+pub struct QueryScratch {
     contacts: Vec<BoardCollision>,
     buffer: ContactBuffer,
+}
+
+impl Default for QueryScratch {
+    fn default() -> Self {
+        Self {
+            contacts: Vec::new(),
+            buffer: ContactBuffer {
+                count: 0,
+                flushed: 0,
+                capacity: 0,
+                dropped: 0,
+                distance_squared_threshold: 0.0,
+                allow_flush: 1,
+                deferred_reduction: 0,
+                full: 0,
+                records: [[0; 64]; 50],
+            },
+        }
+    }
+}
+
+impl QueryScratch {
+    pub fn scratch_contacts(&self) -> &[BoardCollision] {
+        &self.contacts
+    }
+
+    pub fn scratch_dropped_contacts(&self) -> u32 {
+        self.buffer.dropped
+    }
 }
 
 impl BoardWorld {
@@ -191,18 +228,7 @@ impl BoardWorld {
             query_index: query_index::QueryIndex::default(),
             maximum_fatness,
             maximum_triangle_margin,
-            contacts: Vec::new(),
-            buffer: ContactBuffer {
-                count: 0,
-                flushed: 0,
-                capacity: 0,
-                dropped: 0,
-                distance_squared_threshold: 0.0,
-                allow_flush: 1,
-                deferred_reduction: 0,
-                full: 0,
-                records: [[0; 64]; 50],
-            },
+            scratch: Some(Box::default()),
         }
     }
 
@@ -225,10 +251,37 @@ impl BoardWorld {
         Ok(world)
     }
 
+    /// Replace the level's query edges (the off-board searches' rail records), validated like authored ones.
+    pub fn set_static_edges(&mut self, edges: Vec<query_metadata::EdgeSegment>) -> Result<(), &'static str> {
+        let metadata = self.query_metadata.as_mut().ok_or("Canonical world has no authored query metadata")?;
+        let old = std::mem::replace(&mut metadata.static_edges, edges);
+        if let Err(e) = metadata.validate(&self.triangles) {
+            metadata.static_edges = old;
+            return Err(e);
+        }
+        Ok(())
+    }
+
     pub fn query_metadata(&self) -> Result<&QueryMetadata, &'static str> {
         self.query_metadata
             .as_ref()
             .ok_or("Canonical world has no authored query metadata")
+    }
+
+    /// Sets the rejection flags of every query mesh that lies inside `range` (one prop instance's own meshes; a
+    /// mesh reaching outside it is left alone). Returns whether any mesh changed. Flags only filter queries, so the
+    /// query index stays as it is.
+    pub fn set_rejection_flags(&mut self, range: std::ops::Range<usize>, flags: u32) -> bool {
+        let Some(metadata) = &mut self.query_metadata else { return false };
+        let mut changed = false;
+        for mesh in &mut metadata.meshes {
+            let r = &mesh.triangle_range;
+            if range.start <= r.start && r.end <= range.end && !r.is_empty() && mesh.rejection_flags != flags {
+                mesh.rejection_flags = flags;
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub fn set_external_queries(&mut self, queries: Option<std::sync::Arc<dyn ExternalQueries>>) {
@@ -304,8 +357,14 @@ impl BoardWorld {
         board: &BoardRuntime,
         settings: WheelWorldSettings,
     ) -> &[BoardCollision] {
+        let volumes = Self::wheel_volumes(board, settings);
+        self.query_primitives(&volumes, settings.query, settings.retention)
+    }
+
+    /// The wheel spheres [`Self::query`] asks about (shared with callers that keep their own scratch).
+    pub fn wheel_volumes(board: &BoardRuntime, settings: WheelWorldSettings) -> Vec<BoardWorldVolume> {
         let poses = board.part_transforms();
-        let volumes: Vec<_> = BodyId::ORDER[..4]
+        let volumes: Vec<BoardWorldVolume> = BodyId::ORDER[..4]
             .iter()
             .filter_map(|&id| {
                 let body = &board.bodies()[id.index()];
@@ -321,7 +380,7 @@ impl BoardWorld {
                 })
             })
             .collect();
-        self.query_primitives(&volumes, settings.query, settings.retention)
+        volumes
     }
 
     /// World-space shapes come from the live part poses and authored children.
@@ -333,14 +392,34 @@ impl BoardWorld {
         query: WorldContactSettings,
         retention: ContactRetentionSettings,
     ) -> &[BoardCollision] {
-        self.contacts.clear();
-        self.buffer.count = 0;
-        self.buffer.flushed = 0;
-        self.buffer.dropped = 0;
-        self.buffer.full = 0;
-        self.buffer.capacity = retention.capacity;
-        self.buffer.distance_squared_threshold = retention.duplicate_distance_squared;
-        self.buffer.deferred_reduction = u8::from(retention.deferred_reduction);
+        let mut scratch = self.scratch.take().expect("BoardWorld query scratch is always present between queries");
+        self.query_primitives_in(&mut scratch, volumes, query, retention);
+        self.scratch = Some(scratch);
+        &self.scratch.as_ref().expect("restored above").contacts
+    }
+
+    /// [`Self::query_primitives`] with the caller's scratch: the world is only read, so several threads can query one
+    /// shared world, each with its own [`QueryScratch`].
+    pub fn query_primitives_in<'s>(
+        &self,
+        scratch: &'s mut QueryScratch,
+        volumes: &[BoardWorldVolume],
+        query: WorldContactSettings,
+        retention: ContactRetentionSettings,
+    ) -> &'s [BoardCollision] {
+        let QueryScratch { contacts: self_contacts, buffer: self_buffer } = scratch;
+        self_contacts.clear();
+        self_buffer.count = 0;
+        self_buffer.flushed = 0;
+        self_buffer.dropped = 0;
+        self_buffer.full = 0;
+        self_buffer.capacity = retention.capacity;
+        self_buffer.distance_squared_threshold = retention.duplicate_distance_squared;
+        self_buffer.deferred_reduction = u8::from(retention.deferred_reduction);
+        // No volumes: return early, as candidate_ranges(None) would walk every triangle (fix15); same result.
+        if volumes.is_empty() {
+            return &*self_contacts;
+        }
         let padding =
             if query.volume_padding.is_finite() && query.maximum_separating_distance.is_finite() {
                 query.volume_padding.max(0.) + query.maximum_separating_distance.max(0.)
@@ -378,7 +457,7 @@ impl BoardWorld {
             .and_then(|b| Bounds::from_points(b.iter().flat_map(|b| [b.min, b.max])))
             .map(|b| b.expanded(padding));
         let ranges = self.candidate_ranges(bounds);
-        let mut output = std::mem::take(&mut self.contacts);
+        let mut output = std::mem::take(&mut *self_contacts);
         let mut publish = |records: &[ContactRecord]| {
             output.extend(records.iter().map(collision_from_record));
         };
@@ -415,27 +494,27 @@ impl BoardWorld {
                         dynamic_friction: material.dynamic_friction,
                         tag: entry.tag,
                     };
-                    let Some(slot) = self.buffer.allocate(&mut publish) else {
-                        self.buffer.flush(&mut publish);
+                    let Some(slot) = self_buffer.allocate(&mut publish) else {
+                        self_buffer.flush(&mut publish);
                         break 'triangles;
                     };
-                    self.buffer.records[slot] = retention_record(volume.body, contact);
+                    self_buffer.records[slot] = retention_record(volume.body, contact);
                     //8277C23C removes the most recent record on rejection.
-                    if self.buffer.last_is_duplicate() {
-                        self.buffer.count -= 1;
+                    if self_buffer.last_is_duplicate() {
+                        self_buffer.count -= 1;
                     }
                 }
             }
         }
-        if self.buffer.full == 0 {
-            self.buffer.flush(&mut publish);
+        if self_buffer.full == 0 {
+            self_buffer.flush(&mut publish);
         }
-        self.contacts = output;
-        &self.contacts
+        *self_contacts = output;
+        &*self_contacts
     }
 
     pub fn contacts(&self) -> &[BoardCollision] {
-        &self.contacts
+        &self.scratch.as_ref().expect("BoardWorld query scratch").contacts
     }
 
     /// `water_surface_at`, but only where the water is at least `min_depth`
@@ -480,8 +559,109 @@ impl BoardWorld {
         best
     }
 
+    /// Replace a contiguous run of triangles in place (rigid rebake); bounds and index refreshed.
+    pub fn replace_triangles(
+        &mut self,
+        range: std::ops::Range<usize>,
+        triangles: &[WorldTriangle],
+    ) -> Result<(), &'static str> {
+        self.replace_triangles_batch(&[(range, triangles)])
+    }
+
+    /// Several [`Self::replace_triangles`] edits, index rebuilt once; identical to one call per edit; checked first.
+    pub fn replace_triangles_batch(
+        &mut self,
+        edits: &[(std::ops::Range<usize>, &[WorldTriangle])],
+    ) -> Result<(), &'static str> {
+        let mut bounds = Vec::with_capacity(edits.iter().map(|e| e.1.len()).sum());
+        for (range, triangles) in edits {
+            if range.len() != triangles.len() || range.end > self.triangles.len() {
+                return Err("replacement triangles must match the existing range");
+            }
+            for entry in triangles.iter() {
+                bounds.push(Bounds::from_points(entry.triangle.vertices).ok_or("invalid triangle bounds")?);
+            }
+        }
+        let mut bounds = bounds.into_iter();
+        for (range, triangles) in edits {
+            self.triangles[range.clone()].copy_from_slice(triangles);
+            for i in range.clone() {
+                self.triangle_bounds[i] = bounds.next().expect("one bounds per triangle");
+            }
+        }
+        if let Some(metadata) = &mut self.query_metadata {
+            for mesh in &mut metadata.meshes {
+                let r = &mesh.triangle_range;
+                if edits.iter().any(|(range, _)| r.start < range.end && range.start < r.end) {
+                    mesh.local_bounds = Bounds::from_points(
+                        self.triangles[r.clone()].iter().flat_map(|t| t.triangle.vertices),
+                    )
+                    .ok_or("invalid query mesh bounds")?;
+                }
+            }
+            if !edits.is_empty() {
+                self.query_index = query_index::QueryIndex::new(&metadata.meshes);
+            }
+        }
+        Ok(())
+    }
+
+    /// Append triangles (a runtime prop) in their own 64-triangle query meshes; returns the new range.
+    pub fn append_triangles(
+        &mut self,
+        triangles: &[WorldTriangle],
+        packed_surfaces: &[u16],
+    ) -> Result<std::ops::Range<usize>, &'static str> {
+        let start = self.triangles.len();
+        let mut bounds = Vec::with_capacity(triangles.len());
+        for entry in triangles {
+            bounds.push(Bounds::from_points(entry.triangle.vertices).ok_or("invalid triangle bounds")?);
+        }
+        if self.query_metadata.is_some() && packed_surfaces.len() != triangles.len() {
+            return Err("appended triangles need one packed surface each");
+        }
+        self.triangles.extend_from_slice(triangles);
+        for (i, entry) in triangles.iter().enumerate() {
+            let fatness = if entry.triangle.fatness.is_finite() && entry.triangle.fatness >= 0. {
+                entry.triangle.fatness
+            } else {
+                f32::INFINITY
+            };
+            self.maximum_fatness = self.maximum_fatness.max(fatness);
+            let b = bounds[i];
+            let span = (b.max.x - b.min.x).max(b.max.y - b.min.y).max(b.max.z - b.min.z);
+            self.maximum_triangle_margin = self.maximum_triangle_margin.max(span * (2. * broadphase::THIN_MARGIN));
+            if is_water_tag(entry.tag) {
+                self.water.push(start + i);
+            }
+        }
+        self.triangle_bounds.extend(bounds);
+        let end = self.triangles.len();
+        if let Some(metadata) = &mut self.query_metadata {
+            metadata.packed_surfaces.extend_from_slice(packed_surfaces);
+            for chunk in (start..end).step_by(64) {
+                let chunk_end = (chunk + 64).min(end);
+                metadata.meshes.push(query_metadata::QueryMesh {
+                    triangle_range: chunk..chunk_end,
+                    local_to_world: crate::physics::drive_frames::RetailAffineTransform::IDENTITY,
+                    world_to_local: crate::physics::drive_frames::RetailAffineTransform::IDENTITY,
+                    local_bounds: Bounds::from_points(
+                        self.triangles[chunk..chunk_end].iter().flat_map(|t| t.triangle.vertices),
+                    )
+                    .ok_or("invalid query mesh bounds")?,
+                    matching_group: -1,
+                    rejection_flags: 0,
+                    geometry: 0,
+                    pool: query_metadata::QueryPool::Ground,
+                });
+            }
+            self.query_index = query_index::QueryIndex::new(&metadata.meshes);
+        }
+        Ok(start..end)
+    }
+
     pub fn dropped_contacts(&self) -> u32 {
-        self.buffer.dropped
+        self.scratch.as_ref().expect("BoardWorld query scratch").buffer.dropped
     }
 }
 

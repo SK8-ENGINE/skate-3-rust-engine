@@ -43,6 +43,8 @@ pub(crate) struct PlayerAudio {
     /// The components run (banks loaded, classes bound).
     pub(crate) components: bool,
     grind: Grind,
+    /// HandGrabs' skitch part (`sub_824EC488`): the hand grab pair at a skitch, `HandGrabs.in0` while towed.
+    hand_grabs: skate_audio::player::hand_grabs::HandGrabs,
     speed: SenseOfSpeed,
     foot_drag: FootDrag,
     skid: Skid,
@@ -159,6 +161,7 @@ impl PlayerAudio {
             last_camera: None,
             components,
             grind,
+            hand_grabs: Default::default(),
             speed: SenseOfSpeed::default(),
             foot_drag: FootDrag::default(),
             skid: Skid::default(),
@@ -240,6 +243,11 @@ impl PlayerAudio {
         }
     }
 
+    /// The listener of the last pass (the world owners' position blocks read it).
+    pub(crate) fn last_listener(&self) -> Option<Listener> {
+        self.last_listener
+    }
+
     /// The materials' footstep layers (`Library::footstep_materials`).
     pub(crate) fn set_footstep_materials(&mut self, materials: Vec<skate_audio::player::footsteps::FootstepMaterial>) {
         self.footstep_tuning.materials = materials;
@@ -284,6 +292,8 @@ impl PlayerAudio {
         inputs::write_rail(m, s.grinding, self.was_grinding);
         self.was_grinding = s.grinding;
         inputs::write_off_board(m, s);
+        // HandGrabs.in0 from the skitch latch (set by `update`, so it follows one MixMap write later).
+        m.set_input(keys::hand_grabs(0), 0, self.hand_grabs.input());
         landed
     }
 
@@ -301,7 +311,7 @@ impl PlayerAudio {
                     // A mod rule may drop the post (its redeliveries and release then find no node).
                     let muted = self.rules.as_deref().is_some_and(|r| {
                         let (name, index) = super::mod_audio::player_slot(&slot);
-                        r.mutes(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::Player, class, slot: name, id: index, owner: 0 })
+                        r.mutes(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::Player, class, slot: name, id: index, owner: 0, hit: None })
                     });
                     if !muted {
                         self.nodes.insert(slot, rt.post(id, &words));
@@ -309,7 +319,7 @@ impl PlayerAudio {
                     self.posts += 1;
                     if self.events.is_some() {
                         let (name, index) = super::mod_audio::player_slot(&slot);
-                        super::mod_audio::record(&mut self.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::Player, class, slot: name, id: index, owner: 0 });
+                        super::mod_audio::record(&mut self.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::Player, class, slot: name, id: index, owner: 0, hit: None });
                     }
                     if trace() {
                         bevy::log::info!("AUDIO_NATIVE post {class} {slot:?} words={words:?}");
@@ -325,7 +335,7 @@ impl PlayerAudio {
                         rt.release(node);
                         if self.events.is_some() {
                             let (name, index) = super::mod_audio::player_slot(&slot);
-                            super::mod_audio::record(&mut self.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Release, source: super::mod_audio::Source::Player, class: "", slot: name, id: index, owner: 0 });
+                            super::mod_audio::record(&mut self.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Release, source: super::mod_audio::Source::Player, class: "", slot: name, id: index, owner: 0, hit: None });
                         }
                         if trace() {
                             bevy::log::info!("AUDIO_NATIVE release {slot:?}");
@@ -447,6 +457,12 @@ impl PlayerAudio {
             self.board.deck_calls = self.jitter_steps;
             self.board.process(s, self.contacts.buckets(), &self.tuning, &self.contact_tuning, &mut super::mod_audio::Observed::new(&mut rt.splice_host(), &mut self.events, super::mod_audio::Source::Player, 0).rules(self.rules.as_deref()));
             self.posts += self.board.starts - before;
+            if let Some(note) = self.board.landing_note {
+                // One line per landing, manual landing or manual-skipped touchdown (logs must
+                // diagnose silent landings: which Contacts posts fired and why the others did not).
+                bevy::log::info!("AUDIO_LANDING {}", note.fields());
+            }
+            body_hits(&self.board.body_hits, super::mod_audio::Source::Player, 0, self.last_listener.map(|l| l.camera), &mut self.events);
             // The collision manager runs after the player's components (its own state manager).
             let mut access = rt.splice_host();
             let mut host = super::mod_audio::Observed::new(&mut access, &mut self.events, super::mod_audio::Source::Player, 0).rules(self.rules.as_deref());
@@ -579,6 +595,7 @@ impl PlayerAudio {
             let before = self.collision.starts;
             self.collision.update(m, &self.tuning.collision, s.dt, &mut super::mod_audio::Observed::new(&mut rt.splice_host(), &mut self.events, super::mod_audio::Source::Player, 0).rules(self.rules.as_deref()));
             self.posts += self.collision.starts - before;
+            self.hand_grabs.update(s, &self.tuning.hand_grab, &mut super::mod_audio::Observed::new(&mut rt.splice_host(), &mut self.events, super::mod_audio::Source::Player, 0).rules(self.rules.as_deref()));
         }
         if self.footsteps_on {
             let off = Owner { mixmap: m, key: keys::off_board(0) };
@@ -593,6 +610,20 @@ impl PlayerAudio {
             self.wheels.update(s, &owner, &self.wheels_tuning, &mut rt.stream_host());
             self.posts += self.wheels.starts - before;
         }
+    }
+}
+
+/// The body poster's hits of one process: an `AUDIO_EVENT body impact` line each and the mods' `body_impact` row.
+pub(crate) fn body_hits(hits: &[skate_audio::player::contacts::BodyHit], source: super::mod_audio::Source, owner: u64, camera: Option<[f32; 3]>, events: &mut super::mod_audio::EventBuf) {
+    for h in hits {
+        let m = &h.message;
+        let p = m.position;
+        let distance = camera.map_or(-1.0, |c| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2) + (p[2] - c[2]).powi(2)).sqrt());
+        bevy::log::info!(
+            "AUDIO_EVENT body impact owner={owner} region={} impact={:.3} tier={}/{} material={}/{} pos=({:.1},{:.1},{:.1}) dist={distance:.1}",
+            h.region, h.impact, m.tier[0], m.tier[1], m.material[0], m.material[1], p[0], p[1], p[2]
+        );
+        super::mod_audio::record(events, super::mod_audio::body_impact_row(source, owner, *h));
     }
 }
 

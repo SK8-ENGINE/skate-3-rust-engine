@@ -23,7 +23,17 @@ def contained(root, relative):
 
 
 def runtime_files(root, marker=False):
-    manifest = "hud.json" if marker else "runtime/trickdisplay.json"
+    files = movie_files(root, "hud.json" if marker else "runtime/trickdisplay.json", marker)
+    # The central message HUD (prepare_hud.MOVIES): optional, so a cache from before it still installs.
+    if not marker and (root / "runtime/hudcentral.json").is_file():
+        files.update(movie_files(root, "runtime/hudcentral.json", False))
+    # The minimap's frame (prepare_hud.MOVIES), optional in the same way.
+    if not marker and (root / "runtime/hudminimap.json").is_file():
+        files.update(movie_files(root, "runtime/hudminimap.json", False))
+    return files
+
+
+def movie_files(root, manifest, marker):
     data = json.loads((root / manifest).read_text(encoding="utf-8"))
     if data.get("version") != 1:
         raise ValueError(f"Unsupported HUD version: {root}")
@@ -38,8 +48,9 @@ def runtime_files(root, marker=False):
             raise ValueError("Invalid scoring HUD or unresolved original fonts")
         for shape in data["shapes"].values():
             for primitive in shape:
-                t = primitive["texture"]
-                textures.append((t["rgba"], t["width"], t["height"], None))
+                # Untextured fills (the minimap frame) carry texture null, as scoring_hud.rs reads them.
+                if t := primitive.get("texture"):
+                    textures.append((t["rgba"], t["width"], t["height"], None))
         for font in data["fonts"].values():
             size = font["definition"]["textures"][0]
             textures.append((font["texture"], size["width"], size["height"], None))

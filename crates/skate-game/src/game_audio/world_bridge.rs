@@ -217,9 +217,9 @@ pub(super) fn publish(
     (living, alarm_rule): (Res<LivingWorldAudio>, Option<Res<CarAlarmRule>>),
     library: Option<Res<super::Library>>,
     physics: Option<Res<crate::physics::GamePhysics>>,
-    time: Res<Time>,
-    listener: Query<&GlobalTransform, With<super::GameAudioListener>>,
-    vehicles: Query<(Entity, &GlobalTransform, &TrafficAudio, Option<&AudioVelocity>, Has<crate::world_audio::OwnAudioInstance>)>,
+    (time, replay): (Res<Time>, Option<Res<crate::replay::Replay>>),
+    (listener, ghosts): (Query<&GlobalTransform, With<super::GameAudioListener>>, Query<(Entity, &crate::replay::GhostOf)>),
+    mut vehicles: Query<(Entity, &GlobalTransform, &TrafficAudio, Option<&AudioVelocity>, Has<crate::world_audio::OwnAudioInstance>, &mut crate::world_audio::VehicleHornState)>,
     mut peds: Query<(Entity, &GlobalTransform, &mut PedAudio, Option<&AudioVelocity>, Has<crate::world_audio::OwnAudioInstance>)>,
     mut npcs: Query<(Entity, &GlobalTransform, &mut NpcSkaterAudio, Option<&AudioVelocity>)>,
     mut speech: MessageReader<PedSpeechEvent>,
@@ -258,21 +258,26 @@ pub(super) fn publish(
             }
         }
     }
-    for h in horns.read() {
+    // During a replay the horns come from the recording (VehicleHornState at the playhead, b409): the live holds stay
+    // as they are and resume on exit.
+    let replaying = replay.as_deref().is_some_and(|r| r.active);
+    for h in horns.read().filter(|_| !replaying) {
         bridge.horns.insert(h.vehicle, (HornState::Honk(h.kind.clamp(1, 5)), h.seconds.max(0.0)));
     }
     // The alarm's time: the rule's (retail 8 s), whole console frames past it (`AlarmTuning::hold_seconds`).
     let alarm_hold = alarm_rule.as_deref().map_or_else(|| AlarmTuning::default().hold_seconds(), |r| r.tuning().hold_seconds());
-    for a in alarms.read() {
+    for a in alarms.read().filter(|_| !replaying) {
         bridge.horns.insert(a.vehicle, (HornState::Alarm, alarm_hold));
     }
+    // A replayed one-shot names the live ped; once that ped left, its ghost plays it (b670).
+    let ped_of = |e: Entity| if replaying && !peds.contains(e) { ghosts.iter().find(|(_, g)| g.0 == e).map_or(e, |(ghost, _)| ghost) } else { e };
     let tazer_seconds = *bridge.tazer_seconds.get_or_insert_with(|| library.as_deref().map_or_else(|| skate_audio::world::peds::PedObjectTuning::default().tazer_seconds, |l| l.world_tuning().ped_objects().tazer_seconds));
     for z in zaps.read() {
-        bridge.tazers.insert(z.ped, z.seconds.unwrap_or(tazer_seconds).max(0.0));
+        bridge.tazers.insert(ped_of(z.ped), z.seconds.unwrap_or(tazer_seconds).max(0.0));
     }
     for f in falls.read() {
         if f.kind != 0.0 && f.kind.is_finite() {
-            bridge.falls.entry(f.ped).or_default().0.push_back(f.kind);
+            bridge.falls.entry(ped_of(f.ped)).or_default().0.push_back(f.kind);
         }
     }
     // Each key is on for one console frame, then 0 for one frame (so a repeated key is a change).
@@ -304,10 +309,12 @@ pub(super) fn publish(
         *left -= dt;
     }
     bridge.tazers.retain(|e, left| *left > 0.0 && peds.contains(*e));
-    for (_, left) in bridge.horns.values_mut() {
-        *left -= dt;
+    if !replaying {
+        for (_, left) in bridge.horns.values_mut() {
+            *left -= dt;
+        }
+        bridge.horns.retain(|e, (_, left)| *left > 0.0 && vehicles.contains(*e));
     }
-    bridge.horns.retain(|e, (_, left)| *left > 0.0 && vehicles.contains(*e));
     let camera = listener.single().map(|t| t.translation()).unwrap_or(Vec3::ZERO);
 
     // Vehicles (own-instance objects to `mod_world`'s host, doc 16 L3).
@@ -316,14 +323,22 @@ pub(super) fn publish(
         own.0.vehicles.clear();
     }
     let mut seen = Vec::with_capacity(vehicles.iter().len());
-    for (e, t, car, given, own_instance) in &vehicles {
+    for (e, t, car, given, own_instance, mut effective) in &mut vehicles {
         let at = t.translation().to_array();
         let v = velocity(bridge, e, at, given, dt);
         let speed = car.speed.unwrap_or_else(|| length(v)).max(0.0);
         let last_speed = bridge.last.get(&e).map_or(speed, |l| l.1);
         let load = car.load.unwrap_or(if dt > 0.0 { (speed - last_speed) / dt } else { 0.0 });
         let record = engine_record(bridge, library.as_deref(), &car.engine);
-        let horn = bridge.horns.get(&e).map_or(car.horn, |h| h.0);
+        let horn = if replaying {
+            effective.0
+        } else {
+            let horn = bridge.horns.get(&e).map_or(car.horn, |h| h.0);
+            if effective.0 != horn {
+                effective.0 = horn;
+            }
+            horn
+        };
         let target = if own_instance { &mut own.0.vehicles } else { &mut owners.vehicles };
         target.insert(
             e.to_bits(),
@@ -455,6 +470,7 @@ fn read_back(
     mut stats: ResMut<WorldAudioStats>,
     instances: Query<&WorldAudioInstance>,
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::BRIDGE);
     if !bridge.active && bridge.tagged.is_empty() {
         return;
     }
@@ -581,6 +597,28 @@ mod tests {
 
     /// Components become owners (ids = entity bits), events hold their states for the right
     /// time, despawning releases, and the read-back tags the holders.
+    /// b409: the effective horn is one recorded state; during a replay the host plays the recording's value and the
+    /// live hold neither counts down nor takes new events.
+    #[test]
+    fn the_horn_state_is_recorded_and_a_replay_plays_the_recorded_value() {
+        let mut app = app();
+        let car = app.world_mut().spawn((TrafficAudio::new("c04_taxi01"), at(0.0, 10.0))).id();
+        app.world_mut().write_message(VehicleAlarm { vehicle: car });
+        app.update();
+        assert_eq!(*app.world().get::<crate::world_audio::VehicleHornState>(car).unwrap(), crate::world_audio::VehicleHornState(HornState::Alarm));
+        // Replay: the recording says a honk at the playhead; a live horn event is ignored.
+        app.world_mut().insert_resource(crate::replay::Replay::default());
+        app.world_mut().resource_mut::<crate::replay::Replay>().active = true;
+        app.world_mut().get_mut::<crate::world_audio::VehicleHornState>(car).unwrap().0 = HornState::Honk(2);
+        app.world_mut().write_message(VehicleHorn { vehicle: car, kind: 4, seconds: 5.0 });
+        app.update();
+        assert_eq!(app.world().resource::<WorldOwners>().vehicles[&car.to_bits()].horn, 2);
+        // Back live: the alarm's hold resumes (it did not count down during the replay).
+        app.world_mut().resource_mut::<crate::replay::Replay>().active = false;
+        app.update();
+        assert_eq!(app.world().resource::<WorldOwners>().vehicles[&car.to_bits()].horn, 6);
+    }
+
     #[test]
     fn components_become_owners_and_events_hold_states() {
         let mut app = app();
@@ -608,7 +646,7 @@ mod tests {
         }
         // Events.
         app.world_mut().write_message(VehicleAlarm { vehicle: car });
-        app.world_mut().write_message(PedSpeechEvent { ped: peds[0], value: SpeechValue::WARN });
+        app.world_mut().write_message(PedSpeechEvent { ped: peds[0], value: SpeechValue::WARN, topic: None });
         app.update();
         assert_eq!(app.world().resource::<WorldOwners>().vehicles[&car.to_bits()].horn, 6);
         assert_eq!(app.world().get::<PedAudio>(peds[0]).unwrap().speech_value, 53);

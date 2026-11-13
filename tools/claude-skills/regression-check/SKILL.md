@@ -13,8 +13,8 @@ underground, making the map look invisible. It passed unit tests and `--check-as
 spawn against a baseline would have caught it.
 
 The check scripts named below (`check_spawns.py`, `check_maps.py`, `check_customiser.py`, `smoke_maps.sh`) are in
-`tools/regression-checks/` of upstream PR #37 ("Tools: published research and regression helpers"); fetch that
-branch if it is not merged yet. Their baselines are made from YOUR install on the first run (`--update`), so they
+`tools/regression-checks/` (in the repo since upstream PR #37, "Tools: published research and regression helpers",
+merged). Their baselines are made from YOUR install on the first run (`--update`), so they
 never ship game data.
 
 ## 1. Converter / asset-pipeline changes (anything under `tools/`)
@@ -47,6 +47,20 @@ never ship game data.
    - Input: expect `Controller input: SDL <version>`, `Controller 0: SDL gamepad "<name>" ...`, then
      `Controller 0: ready`.
    - Rendering: `SKATE_RENDER_READY draws=... triangles=...` should match the map's `render_triangles`.
+4. Close the game with a normal window close (for example PowerShell `CloseMainWindow()`), not a hard kill: after a
+   kill, controller rumble can stay on.
+
+### 2a. Frame time before merging game code
+Run the staged release exe on a fixed spot and compare with the previous build: `--assets <install>\assets --map
+<install>\maps\DownTown.skate --mute` for about 60 s with `SKATE_TRACE_ALL=1` (living world branch and later); the
+frame log path is in the stderr `TRACE_ACTIVE` line (`frames.tsv` in the run's trace-all folder; elsewhere use
+`SKATE_FRAME_LOG=<file>`). Compare median / p90 / p99 `frame_ms` of frames 100 and later with
+`optimisation/tools/frame_log_summary.py`. `SYSTEM_TIMING` (on under trace-all) gives a per-system breakdown.
+A Chrome trace: `--trace <file.json> --trace-seconds 30` (capture starts at launch: `--trace-delay` is accepted but
+ignored; a 30 s trace is several GB, so write it to a large drive). Tracing slows every frame and hides steady-state
+stalls of 30-70 ms: use it for costs, not for finding those stalls.
+Before calling a slow play session a regression, check whether a build or other heavy job ran on the machine at the
+same time (build output timestamps): one overlapping link turned a 3.6 ms median into 14 ms.
 
 ### 2b. Water (physics/water.rs, camera/water.rs, water_splash.rs, board_world water code)
 - Headless traces (ignored test, prints per-tick body/board/camera):
@@ -62,7 +76,7 @@ never ship game data.
   behind with a vignette; splash only in deep water.
 - Judge penetration by skeleton parts 1..23: part 0 ("root") does not collide.
 
-### 2c. Audio (game_audio/, skate-audio, audio_*.py; audio branches)
+### 2c. Audio (game_audio/, skate-audio, audio_*.py)
 - `cargo test -p skate-audio --release --locked` and `cargo test -p skate-game --release --bin skate3rust --
   game_audio` (plus `graphics_menu`, `modding::audio` if settings/listener changed).
 - `py -3.13 -m unittest tools.asset_pipeline.test_audio_formats tools.asset_pipeline.test_versions
@@ -101,7 +115,7 @@ Ready-made behavioural comparisons:
 - Map conversion: convert all districts with `main`'s tools (`git archive main tools` into a temp folder) and with
   the new tree into the same scratch stage, hash every output (map, irradiance, props) and require IDENTICAL per
   district.
-- Stream decoding: `tools/setup-equivalence/compare_streams.py <reference skate3_streams.py>` (PR #37): every asset
+- Stream decoding: `tools/setup-equivalence/compare_streams.py <reference skate3_streams.py>`: every asset
   of every district/stream vs a reference copy of the loader (`git show HEAD:...skate3_streams.py > .local/ref.py`).
 
 ## 3d. Fingerprint impact (do this for EVERY tools/ change)
@@ -135,3 +149,16 @@ Latest log: `logs\game-*.stderr.log` (strip ANSI: `sed 's/\x1b\[[0-9;]*m//g'`).
 - Physics blow-ups: `physics_failed:true`, `NONFINITE`, `Non-finite`.
 
 Record new facts and baseline updates in your notes file.
+
+
+## 5. Getting to a spot: teleport there
+Use coordinate teleports in tests and research runs to reach an issue spot, instead of menu teleports, scripted
+skating or asking a player to drive there.
+- Retail (recomp): `SKATE3_TP_OVERRIDE="x y z yaw[; ...]"` (skill `recomp-scripted-runs`, "Teleport to any
+  coordinate"). Add about 4 m to an estimated ground y and read the settled height from the trace; points outside the
+  playable area put retail into its out-of-bounds re-place loop (skater near invisible, frozen).
+- Engine: `sdk.player.teleport(...)` / `sdk.camera.set(pos, look_at)` from a tiny test mod with `--verify` captures
+  (skill `build-and-run`), or `--teleport <id>`.
+- Use the same pose in both for matched retail vs engine shots, and save the poses next to the evidence.
+- Upstream's original spawns, for reference: DownTown `[0.6737, 45.8373, 0.9177]`, University
+  `[330.0, 133.005, -710.0]` (all maps: `docs/hails-additions/04-map-spawns.md`).

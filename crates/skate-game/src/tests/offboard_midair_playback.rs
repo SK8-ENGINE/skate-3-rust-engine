@@ -33,7 +33,7 @@ fn falling_dismount(release_board: bool, drop: f32, complete_landing: bool) {
     // These are fixture dimensions, not gameplay constants or fake contacts.
     let floor_y = ground::HEIGHT - drop;
     physics.world =
-        super::offboard_air_tests::edge_world(physics.settings.floor_material, 2.0, floor_y);
+        (super::offboard_air_tests::edge_world(physics.settings.floor_material, 2.0, floor_y)).into();
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
     let mut input = crate::input::ControllerInput::default();

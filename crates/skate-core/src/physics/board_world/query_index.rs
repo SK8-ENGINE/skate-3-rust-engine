@@ -4,10 +4,12 @@ use super::query_metadata::{Bounds, QueryMesh};
 use std::ops::Range;
 
 #[derive(Default)]
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct QueryIndex {
     nodes: Vec<Node>,
     order: Vec<usize>,
 }
+#[cfg_attr(test, derive(Debug))]
 struct Node {
     bounds: Bounds,
     children: Option<(usize, usize)>,

@@ -1,7 +1,7 @@
 # World audio hook-in: design spec (2026-10-03)
 
-Goal (user, 2026-10-03): "We will want to build out everything that can then easily be hooked to by the game
-engine once they are added", and then "no make it this PRs goal". The world audio (traffic, peds, ped speech, NPC
+Goal (user, 2026-10-03): build out everything the game engine can easily hook into once those systems
+are added, and make that this PR's goal. The world audio (traffic, peds, ped speech, NPC
 skaters' boards) becomes complete and trivially hookable by future engine systems (peds, vehicles, AI skaters) that
 the engine does not have yet. It stays in **PR #32** (branch `gameplay/audio`). Implementation comes after the
 current code-fix pass (PR #32 readiness plan, step 1), because the same files are touched.
@@ -258,8 +258,8 @@ the post-tick part of `mixmap_frame`. That is retail's split; today the inputs a
 Do that move only with a headless before / after render showing the expected one-frame shift and nothing else.
 
 ### 3.9 Lua SDK (mods publishing objects): superseded by §8
-The user's requirement (2026-10-03): "we want to make the audio engine moddable with the rest of the engine so
-build with that in mind for all features". §8 is the full mod-facing surface. The sketch below is only its object
+The user's requirement (2026-10-03): the audio engine is moddable together with the rest of the engine, so
+every feature is built with that in mind. §8 is the full mod-facing surface. The sketch below is only its object
 part. Mods are first-class publishers (P1, not P4). The sketch is modelled on the fork's vehicle SDK conventions
 (keys owned per mod, limits, removal on disable).
 New `Command` kinds in `skate-mods` (JSON-validated like `audio_*`):
@@ -367,8 +367,8 @@ documented as such, until it is traced.
 
 ## 7. Data plan: the existing recordings first (user, 2026-10-03)
 
-User: "you SHOULD have most of the data you need to at least get most of it done with the number of play sessions
-I've provided". So the build-out and its checks use the recordings we already have. A short **scripted background**
+The user: the play sessions provided so far should hold most of the data needed to get most of it
+done. So the build-out and its checks use the recordings we already have. A short **scripted background**
 recomp run is proposed only for the gaps in §7.3. A user session is never needed.
 Before any use, run `py -3.13 tools/recomp-trace/trace.py <trace>`: **0 malformed lines**, or the
 session is deleted (project rule "bad data is unusable"). Every number is "the recomp", not "retail" (the recomp runs uncapped
@@ -386,9 +386,9 @@ Times are the trace's ms. "Listener" = the camera position: `WPPOS` (2 Hz, world
 | `all_20261002_223306` / `223613` | 124 s / 488 s | PEDXYZ 3,963 / 1,813, SKATEB 1,510 / 1,872 | GAIN 10 k / 48 k | WPPOS | GREC 57 k / 352 k; 223613 also TREAT 352 k, SEAMPAT 139 k, SEAMHIT 4 k, with NPC rows |
 | `all_20261002_214002`, `214346`, `222155` | 56–104 s | PEDXYZ 1–3 k, VEHSTATE 655 (214002), MOODOUT 9–115 | GAIN 4–8 k | WPPOS | GREC 14–35 k, with NPC rows |
 | `all_20261002_204336`, `232153` | 58 s / 234 s | small | small | WPPOS | **clean** (no NPC owner) |
-| `audiox_grind_20261003_120315`, `audiox_ride_20261003_141046` | 493 s / 275 s | — | GAIN 53 k / 23 k, CONTACT, **COLLPOST 2,398 / 554** | **GRECX** | after the local72 fix: GREC / GRECX are local only. COLLPOST `local72 = 0` rows are the **NPC skater's contact / collision posts**, with positions. |
-| `bailx*`, `bandq`, `localtest*`, `riderun`, `bailrun_ok3` (2026-10-03, scripted, Mega-Park spawn) | 76–140 s | — | COLLPOST 186–1,216 | GRECX | `localtest2`: the NPC appears at 21.6 s (LOCALTEST proves the gate) |
-| `audiox_20261003_095054`, `audiox_bail_094336`, `bailrun_*` before 10:30 | 52–193 s | — | GREC / GRECX | GRECX (both owners) | pre-fix: NPC rows mixed in |
+| `audiox_grind_20261003_120315`, `audiox_ride_20261003_141046` | 493 s / 275 s | n/a | GAIN 53 k / 23 k, CONTACT, **COLLPOST 2,398 / 554** | **GRECX** | after the local72 fix: GREC / GRECX are local only. COLLPOST `local72 = 0` rows are the **NPC skater's contact / collision posts**, with positions. |
+| `bailx*`, `bandq`, `localtest*`, `riderun`, `bailrun_ok3` (2026-10-03, scripted, Mega-Park spawn) | 76–140 s | n/a | COLLPOST 186–1,216 | GRECX | `localtest2`: the NPC appears at 21.6 s (LOCALTEST proves the gate) |
+| `audiox_20261003_095054`, `audiox_bail_094336`, `bailrun_*` before 10:30 | 52–193 s | n/a | GREC / GRECX | GRECX (both owners) | pre-fix: NPC rows mixed in |
 
 The 2026-10-02 sessions that older notes cite (`all_…153038`, `…160126`, `…161849`, `npc_*`) are no longer on disk.
 Their extracts remain locally (`ped_chase_*.txt`, `speech_*.txt`, `veh_*.txt`). Our own state logs
@@ -570,7 +570,7 @@ deactivation); handovers between skaters are frequent at the park (one 0.1 s and
 |---|---|---|---|
 | SkateBoard posts | 74 (0.49/s): wheel skid (slot 1) 44, rattle (10) 20, Class_rolling held layers (42) 10 | 67 (0.90/s): wheel skid 42, squeaks / powerslide (7) 14, rattle 11; **no slot 42** | as ported (one rolling pass, no held layers 0 / 3); skid / squeaks / rattle run per instance |
 | Contacts Splice | 243 (1.6/s): sk8_foley 94 / 95 / 92 / 93, Skate_Collisions 1112 / 1115 / 1095 / 1060 … | 264 (3.6/s): the same families (sk8_foley 95 / 94 / 92 / 93, Skate_Collisions 1112 / 1115 / 1111 / 1079 / 1091 / 1124 / 1126 …) | as ported (non-local branches in `player::contacts`) |
-| Contacts foot drag (slot 0) | 1 | 0 | — |
+| Contacts foot drag (slot 0) | 1 | 0 | n/a |
 | **Bail grunt** (`sub_824BF5F8`) | called once, does not post (local72 = 1) | **called once and posts** the speech message (8206 / 115) at an NPC bail (140.3 s, with the NPC's Clothing body slide and cloth falls posts) | reachable: port in the speech stage (PlayerSpeech record of that skater) |
 | **Wheels** spin streams (`SFXObj_Wheels`) | 14 starts, all layer 0 (state `+332` = in the air), level 4.2–13.7 | **18 starts: layer 0 × 17, layer 1 (`+340`) × 1**, level 0–12.9 (p50 6.3); each stopped (layer off), plus a stop-all at each release | **runs for the NPC**: port Wheels for instance 1 (key `0x40010820`); layer 2 (on foot / `+308` / `+760`) and the extra parameter writes after a start are gated by `[[obj+16]+72]` = local only |
 | **Tricks** (Class_Flips slot 4, cloth_trick slot 22) | 12 posts | **0** | **local only**: the Tricks process `sub_824CBEB0` returns at once when local72 = 0 (static) → no NPC trick sounds |
@@ -733,8 +733,8 @@ scripted bail runs; 50 / 11 / 18 events): steady gains activate 58 0.6288 / 59 0
 0.3048 / 59 0.6288; go-to 58 0.6288 / 36 0.4446 / 40 peak 0.2223 / 59 0.6288 = member gain × record gain × level ×
 14568 / 32767. Delays after the post 10 / 46; 13 / 77 / 144; 8 / 162 / 189 / 278 ms (members' `+20` delays).
 Port: `skate_audio::frontend`, `game_audio::frontend`, `crate::ui_audio`.
-**Go To Marker's "static" (2026-10-04, user: "I tried the marker sounds and they sound good. but there is no static
-noise that plays with the transition when you go back to a marker like it does in retail.").** No separate sound in
+**Go To Marker's "static" (2026-10-04, user: the marker sounds sound good, but no static noise plays with the
+transition back to a marker as it does in retail).** No separate sound in
 retail: the hold sends `cMsgTeleportEffectAmount` (`0xFAF37902`, progress at `+16`, every tick plus 3 ticks of 1 after
 the jump) whose only game listener is the VisualDirector (`sub_827A96F8` registers, `sub_827A9C60` stores `+48`,
 `sub_827AAF10` draws) = the screen static, visual only; the relocation tick queues `Flow::Teleport` (`sub_825582D0`)
@@ -745,9 +745,8 @@ only 58's and 59's noise bursts (0 … 40 ms and 270 … 300 ms after 58's onset
 (white-noise bursts) of the record, which the port already plays in the same shape. Nothing ported; open with the
 user (doc 15 "Follow-up: the static noise on Go To Marker"). Tools: local, not published.
 
-**Far return (2026-10-04, investigating).** User: "1. on console it last for about a second and it only happened when
-you had traveled farther away from where the marker was set. 2. the go to sound? as in the sound when you return to the
-marker? Yes it does. 3. maybe". The hold is 0.2 s up to 100 m, `d / 1125 + 1/9` s to 1000 m, 1 s beyond (the static
+**Far return (2026-10-04, investigating).** The user: (1) on console it lasts about a second, and only after travelling farther away from where
+the marker was set; (2) yes, the go-to sound (the sound when you return to the marker) has it; (3) maybe. The hold is 0.2 s up to 100 m, `d / 1125 + 1/9` s to 1000 m, 1 s beyond (the static
 ramps over it). The request goes to `sub_82709740` → `sub_82706F50`, which asks `sub_82864C40` whether the destination is
 streamed in (radius 30 / 50 m): if not, the loading state (`0x82707508`, event 7) runs a loading screen. The user's
 recording `audiox_marker_20261004_123843` (0 malformed): the far return showed the loading screen; the record played,

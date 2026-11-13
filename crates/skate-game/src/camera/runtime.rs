@@ -31,6 +31,12 @@ pub(crate) struct CameraRuntime {
     pub simulation_rate_requests: Vec<SimulationRateRequest>,
     pub manual_cam: ManualCam,
     pub manual_cam_settings: ManualCamSettings,
+    /// Game Settings > Control > offboard X / Y axis (settings +193 / +192): retail's camera config +24 / +25,
+    /// which the offboard camera (82DF69C0) applies by negating the look stick's x / y. Synced by
+    /// `sync_look_invert`.
+    pub invert_look: [bool; 2],
+    /// Keeps the camera above water while the skater is in it.
+    water: super::water::WaterView,
     /// Stock camera graph `IsCameraTypeActive` value: 0 Low, 1 High (camera/angle.rs).
     camera_type: u32,
     /// `CameraAngleSettings` generation whose shot tunings are applied (0 = none yet).
@@ -69,6 +75,8 @@ impl CameraRuntime {
             simulation_rate_requests: Vec::new(),
             manual_cam: ManualCam::default(),
             manual_cam_settings: settings::manual_cam_settings(&data)?,
+            invert_look: [false; 2],
+            water: Default::default(),
             camera_type: super::angle::CameraAngle::default().graph_type(),
             tuning_generation: 0, reselect_shot: false })
     }
@@ -80,6 +88,11 @@ impl CameraRuntime {
     /// view, which fails the non-finite frame check on every subsequent frame
     /// even after the window is restored. Keeping the last good ratio is
     /// correct: nothing is visible while minimized.
+    /// Water-shot vignette amount for the tone pass (0 when not in water).
+    pub fn water_vignette(&self) -> f32 {
+        self.water.vignette()
+    }
+
     pub fn set_aspect_ratio(&mut self, value: f32) {
         if value.is_finite() && value > 0.0 {
             self.manager.state.aspect_ratio = value;
@@ -112,7 +125,9 @@ impl CameraRuntime {
 
     pub fn advance(&mut self, dt: f32, snapshot: CameraSubjectSnapshot,
         world: &BoardWorld, query_gravity: [f32; 4], environment: &CameraGraphEnvironment,
-        moving: &mut impl MovingObstacleProvider) -> Result<CameraFrame, String> {
+        moving: &mut impl MovingObstacleProvider,
+        // Water surface while the skater is in a water bail (camera/water.rs).
+        water: Option<f32>) -> Result<CameraFrame, String> {
         if let Some(previous) = self.latest_subject.as_ref()
             && snapshot.tick <= previous.tick
         {
@@ -158,7 +173,9 @@ impl CameraRuntime {
                 subject.landing_position,
             ));
         }
-        // Present the recovered CameraMan82DFEE80 result directly.
+        // The recovered CameraMan82DFEE80 result, then the water shot (camera/water.rs).
+        let root = subject.rig.skeleton_root[3];
+        let frame = self.water.adjust(frame, world, [root[0], root[1], root[2]], water, dt);
         self.frame = Some(frame);
         Ok(frame)
     }

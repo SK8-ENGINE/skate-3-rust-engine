@@ -48,6 +48,8 @@ pub(super) struct State {
     /// The map's crossfade bank, the content generation its layouts were built for, and the
     /// layouts (built when either changes, i.e. at map load or an audio content restart).
     layouts: Option<(Option<String>, u64, super::crossfade_layouts::Layouts)>,
+    /// Bed files of every reachable zone read ahead at map load and kept (b198); same bytes and start frame.
+    resident: (Option<(String, u64, u64)>, std::collections::BTreeSet<String>),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -66,6 +68,7 @@ pub(super) fn update(
     audio: Res<super::map_audio::MapAudio>,
     mut api: ResMut<super::mod_audio::AudioApi>,
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::AMBIENCE);
     let Some(mut library) = library else { return };
     let state = &mut *state;
     let now = time.elapsed_secs_f64();
@@ -73,7 +76,11 @@ pub(super) fn update(
     // Free clips whose voices have finished fading.
     let fading = std::mem::take(&mut state.fading);
     for clip in fading {
-        if voices.uses(&clip) { state.fading.push(clip); } else { library.release(&mut assets, &clip); }
+        if voices.uses(&clip) {
+            state.fading.push(clip);
+        } else if !state.resident.1.contains(&*clip.key) {
+            library.release(&mut assets, &clip);
+        }
     }
     let identity = (map.name.clone(), map.generation, content.world_generation);
     let new_map = state.map.as_ref() != Some(&identity);
@@ -103,12 +110,22 @@ pub(super) fn update(
         }
         state.layouts = Some((bank, content.generation, layouts));
     }
+    let resident_for = (map.name.clone(), map.generation, content.generation);
+    if state.resident.0.as_ref() != Some(&resident_for) {
+        let files = library.zone_bed_files(audio.region_tile_keys(&library, "audio_ambience"));
+        for old in state.resident.1.difference(&files) {
+            library.release_file(&mut assets, old);
+        }
+        library.warm_files(files.iter());
+        info!("AUDIO_AMBIENCE beds read ahead for {}: {}", map.name, files.len());
+        state.resident = (Some(resident_for), files);
+    }
     let at = cues.riding.board;
     let desired = audio.region_key(&library, "audio_ambience", at.x, at.z)
         .filter(|key| library.zone(*key).and_then(|z| z.bed.as_ref()).is_some()).unwrap_or(0);
     if desired != state.zone_seen {
         state.zone_seen = desired;
-        api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Zone, source: super::mod_audio::Source::Ambience, class: "", slot: "", id: 0, owner: desired });
+        api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Zone, source: super::mod_audio::Source::Ambience, class: "", slot: "", id: 0, owner: desired, hit: None });
     }
 
     let zone = library.zone(state.control.current).cloned();
@@ -285,7 +302,7 @@ mod tests {
         world.insert_resource(library);
         world.insert_resource(assets);
         world.insert_resource(Voices::default());
-        world.insert_resource(crate::map_transition::CurrentMap { path: None, name: "MyMap".into(), spawn: [0.0; 3], heading: 0.0, generation: 1, audio_tag: None });
+        world.insert_resource(crate::map_transition::CurrentMap { path: None, name: "MyMap".into(), spawn: [0.0; 3], heading: 0.0, generation: 1, audio_tag: None, layout: None });
         world.insert_resource(super::super::skate_events::Cues::default());
         world.insert_resource(Time::<Real>::default());
         world.insert_resource(Time::<Virtual>::default());

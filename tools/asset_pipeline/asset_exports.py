@@ -27,12 +27,16 @@ def core(game_root, stage, work, report, log, converted=None):
     return converted
 
 
-def hud(game_root, stage, work, report, log, converted=None):
+def hud(game_root, stage, work, report, log, converted=None, dlc=None):
     private=stage/"assets/private"
     stock=private/"stock"
     report('Preparing original scoring and session-marker HUD assets')
+    # The player's DLC packages (optional) add the Create pack's replay editor movie and text.
     engine.run(engine.task(engine.TOOLS/'prepare_runtime_huds.py', '--game', game_root,
-             '--assets', stage/'assets', '--work', work/'hud'), log, report)
+             '--assets', stage/'assets', '--work', work/'hud', *(('--dlc', dlc) if dlc else ())), log, report)
+    report('Extracting the Trick Guide demo clips')
+    engine.run(engine.task(engine.TOOLS/'prepare_trick_guide_scene.py', '--game', game_root,
+             '--assets', stage/'assets', '--work', work/'scene'), log, report)
 
 
 def character(game_root, stage, work, report, log, converted=None):
@@ -59,7 +63,7 @@ def character(game_root, stage, work, report, log, converted=None):
     (private/'game.json').write_text(json.dumps(game_manifest),encoding='utf-8')
 
 
-def environment(game_root, stage, work, report, log, converted=None, game_exe=None):
+def environment(game_root, stage, work, report, log, converted=None, game_exe=None, dlc_vaults=()):
     private=stage/"assets/private"
     stock=private/"stock"
     report('Preparing retail sky domes')
@@ -75,7 +79,8 @@ def environment(game_root, stage, work, report, log, converted=None, game_exe=No
             return
         shutil.copytree(target,stage/'assets',dirs_exist_ok=True)
         availability.unlink(missing_ok=True)
-    attempt('skies',lambda assets:write_skies(game_root,assets,converted))
+    # DLC worlds' skies come from their own packs (b417), the disc's from miscload.big.
+    attempt('skies',lambda assets:write_skies(game_root,assets,converted,dlc_vaults))
     from .render_parameters import convert as write_render_parameters
     attempt('parameters',lambda assets:write_render_parameters(assets,converted))
     # Particle sprites (water splash; dust/leaf/... for later effects).
@@ -93,13 +98,33 @@ def environment(game_root, stage, work, report, log, converted=None, game_exe=No
         attempt('menus',lambda assets:write_menu_tables(game_exe,game_root/'default.xex',assets,log))
     report('Extracting original travel destinations and location names')
     from .teleports import convert as write_teleports
-    attempt('teleports',lambda assets:write_teleports(game_root,assets,converted))
+    attempt('teleports',lambda assets:write_teleports(game_root,assets,converted,dlc_vaults))
     report('Preparing global foliage backdrops')
     from .backdrop import convert as write_backdrops
     attempt('backdrops',lambda assets:write_backdrops(game_root,assets,converted))
 
 
-def audio(game_root, stage, work, report, log, tools):
+def livingworld(game_root, stage, work, report, log, converted=None):
+    """Optional living world (pedestrians + NPC skaters): on failure the world runs empty and
+    setup reports it (living_world-availability.json)."""
+    private=stage/"assets/private"
+    from .living_world import export_group
+    from .optional_content import CONTENT_ERRORS, note
+    availability=private/'living_world-availability.json'
+    report('Preparing the living world (pedestrians and NPC skaters)')
+    try:
+        if (private/'living_world').exists():shutil.rmtree(private/'living_world')
+        # Own vault conversion (with the summary-report record names), not core's `converted`.
+        result=export_group({'game_root':game_root,'private':private,'work':work/'living_world','report':report})
+        for warning in result['peds']['warnings']+result['skaters'].get('warnings',[]):log.write(f'living world: {warning}\n')
+    except CONTENT_ERRORS as error:
+        if (private/'living_world').exists():shutil.rmtree(private/'living_world')
+        note(availability,'Living world',error,report=report)
+        return
+    availability.unlink(missing_ok=True)
+
+
+def audio(game_root, stage, work, report, log, tools, dlc_jobs=(), dlc_vaults=()):
     private=stage/"assets/private"
     from .audio_export import VGMSTREAM_SHA, VGMSTREAM_URL, convert
     from .optional_content import CONTENT_ERRORS, note
@@ -108,7 +133,7 @@ def audio(game_root, stage, work, report, log, tools):
     try:
         try:vgmstream=engine.dependency(tools,'vgmstream-cli',VGMSTREAM_URL,VGMSTREAM_SHA,report)
         except OSError as error:raise RuntimeError(f'Could not download the audio decoder: {error}') from error
-        convert(game_root,private,work/'audio',vgmstream,report,log)
+        convert(game_root,private,work/'audio',vgmstream,report,log,dlc_jobs,dlc_vaults)
     except CONTENT_ERRORS as error:
         if (private/'audio').exists():shutil.rmtree(private/'audio')
         note(availability,'Game audio',error,report=report)

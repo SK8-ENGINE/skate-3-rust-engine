@@ -13,6 +13,26 @@ function Resolve-DevAssets {
         # The game canonicalizes junctions before locating map/settings siblings.
         return (Get-Item -LiteralPath $local).FullName
     }
+    # A stale junction (a refresh published a new data\installations\<id> and deleted the old one, so every other
+    # checkout's link points at nothing): re-point it at the installation its data folder names now.
+    $link = Get-Item -LiteralPath $local -Force -ErrorAction SilentlyContinue
+    if ($link -and $link.LinkType -eq 'Junction') {
+        $oldTarget = @($link.Target)[0]
+        $dataBase = Split-Path (Split-Path (Split-Path $oldTarget -Parent) -Parent) -Parent
+        $marker = Join-Path $dataBase 'installation.json'
+        if (Test-Path -LiteralPath $marker -PathType Leaf) {
+            $installation = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+            if ($installation.directory -match '^installations/[0-9a-f]{32}$') {
+                $current = Join-Path $dataBase ($installation.directory + '/assets')
+                if (Test-Path -LiteralPath (Join-Path $current 'private/game.json') -PathType Leaf) {
+                    cmd /c rmdir "$local" | Out-Null
+                    New-Item -ItemType Junction -Path $local -Target $current | Out-Null
+                    Write-Host "Re-pointed the stale assets junction to $current"
+                    return (Get-Item -LiteralPath $local).FullName
+                }
+            }
+        }
+    }
     $parent = Split-Path $ProjectRoot -Parent
     $bases = @((Join-Path $ProjectRoot 'data'), (Join-Path $parent 'data'),
         (Join-Path $parent 'skate3rust-windows-x64/data'))

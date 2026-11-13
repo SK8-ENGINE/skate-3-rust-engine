@@ -172,6 +172,9 @@ fn a_moving_group_8_body_reaches_native_impact_feedback_for_a_stationary_actor()
         input.offboard = offboard;
         input.reference_velocity = [0.0; 4];
         let mut contact = report([-1.0, 0.0, 0.0, 0.0]);
+        // The car meets the body at hip height: on foot, contacts within 0.3 m of the ground plane are the feet's
+        // ground contacts and are filtered out (`ignore_ground`), so a contact on the plane never reaches the force.
+        contact.point = [0.0, 1.0, 0.0, 0.0];
         contact.other_group = 8;
         contact.body_a.linear_velocity = [0.0; 4];
         contact.body_b.state_flags = 4;

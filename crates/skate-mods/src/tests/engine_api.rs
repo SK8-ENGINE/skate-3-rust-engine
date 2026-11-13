@@ -33,17 +33,23 @@ fn public_engine_wrappers_emit_valid_commands_and_read_scoped_observations() {
         sdk.player.reset_joint(3)
         sdk.player.reset_joints()
         sdk.ui.remove_menu('challenges')
+        sdk.minimap.icon('gate',{position={10,0,-5}})
+        sdk.minimap.remove('gate')
+        sdk.minimap.show(false)
       end}
     "#).unwrap();
     let manifest:Manifest=serde_json::from_value(json!({"id":"tests.engine", "api":2,"name":"Engine API","version":"1.0.0","author":"test","description":"Generic wrappers","entry":"main.lua"})).unwrap();
     let snapshot=json!({"player":{"landing_seq":8,"landed_trick":"Kickflip"},"skaters":{"42":{"name":"Rider"}},"session":{"authority":"42"},"volumes":{"tests.engine":{"zone":{"inside":["42"]}},"another.mod":{"private":{"inside":["42"]}}}});
     let mut vm=Vm::new(&root,&manifest,&BTreeMap::new(),&snapshot).unwrap();
     let commands=vm.call("on_load",json!({}),&snapshot).unwrap();
-    assert_eq!(commands.len(),17);
+    assert_eq!(commands.len(),20);
     assert!(commands.iter().all(Command::validate));
     assert!(matches!(&commands[0],Command::CameraWatch{peer:Some(p)} if p == "42"));
     assert!(matches!(&commands[9],Command::GraphicsMeshBuffer{options,..} if options.capture.as_deref()==Some("view")));
     assert!(matches!(&commands[11],Command::GraphicsMesh{opacity,..} if *opacity==0.25));
+    assert!(matches!(&commands[17],Command::MinimapIcon{key,options} if key=="gate" && options.icon=="race_gate" && options.position==[10.,0.,-5.]));
+    assert!(matches!(&commands[18],Command::MinimapRemove{key} if key=="gate"));
+    assert!(matches!(&commands[19],Command::MinimapShow{shown:false}));
     drop(vm);
     std::fs::remove_dir_all(&root).unwrap();
 }
@@ -56,6 +62,7 @@ fn invalid_engine_commands_are_rejected() {
         json!({"kind":"camera_capture","key":"view","options":{"position":[0,0,0],"look_at":[0,0,1],"width":65}}),
         json!({"kind":"graphics_mesh_buffer","key":"screen","options":{"capture":"view","texture":"image.png"}}),
         json!({"kind":"session_transfer","peer":"not-a-peer"}),
+        json!({"kind":"minimap_icon","key":"gate","options":{"position":[0,0,0],"scale":0}}),
     ] {
         let command:Command=serde_json::from_value(value).unwrap();
         assert!(!command.validate());

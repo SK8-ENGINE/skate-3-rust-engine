@@ -67,6 +67,13 @@ impl Owner {
             .let_go(fields, observation, &self.settings, effects);
     }
 
+    /// 82D755E0 (hide): collision off, alignment cleared, hand drive off,
+    /// retrieval restarted from the board frame, angular-only animation.
+    /// Does not assign state448 (the caller writes 3 after it).
+    pub(crate) fn hide(&mut self, observation: &Observation, effects: &mut Effects<'_>) {
+        self.state.hide(observation, effects);
+    }
+
     pub(crate) fn stop(
         &mut self,
         fields: &mut SkateboardControllerFields,
@@ -165,6 +172,8 @@ impl<'a, 'board> Transition<'a, 'board> {
 
 impl SkateboardControllerActions for Transition<'_, '_> {
     fn hold_skateboard(&mut self) {
+        // BOARD_POSSESSION: hand edges (board picked up / let go, e.g. dropped to grab a prop).
+        bevy::log::info!("BOARD_POSSESSION hold");
         self.previous.word_444 = 0;
         self.owner
             .hold(&mut self.previous, self.observation, self.effects);
@@ -172,6 +181,7 @@ impl SkateboardControllerActions for Transition<'_, '_> {
     }
 
     fn let_go_of_skateboard(&mut self) {
+        bevy::log::info!("BOARD_POSSESSION let_go");
         self.previous.word_444 = 0;
         self.owner
             .let_go(&mut self.previous, self.observation, self.effects);

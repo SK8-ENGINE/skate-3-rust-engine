@@ -35,6 +35,13 @@ Read every hit's title; for anything related, read the PR description, the file 
   without a licence it is read/run only, never copy code; see skill `recomp-audio-trace`).
   `gh search repos "skate 3" --limit 30`, `gh search code "<format magic or identifier>"` (for example `SPLC`,
   `ABKC`, `MOIR` for EA audio).
+- Related EA projects for any subsystem (render, physics, AI / navigation, streaming, audio): the Need for Speed:
+  Most Wanted decompilation (CC0, byte-matching) and the Burnout decompilation work (b5-decomp, BP-Decomp workflow
+  with DWARF outlines), plus the debug symbols that shipped with Need for Speed ProStreet (Xbox 360): same-era EA
+  engine code with names, useful to recognise shared library functions in Skate 3. Reference only.
+- Design reference for multiplayer, mod tooling and a park editor: `Dingo-Shenanigans/ReSkate` (skate. 2025,
+  GPL-3.0; ideas only, not code).
+- To read retail code, see skills `recomp-research` (the recomp's generated code) and `ghidra` (pseudocode).
 - Format tools: vgmstream (EA SNR/SNS/ABK support), Xenia/Xbox modding wikis for EA formats.
 
 ## 4. Report before starting

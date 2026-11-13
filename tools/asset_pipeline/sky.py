@@ -7,24 +7,6 @@ from tools.owned_game.big import BigArchive
 from .environment import Collections, NAMES, field, key_hash, sky_parameters, world_environment, fog_parameters
 
 
-def _material(raw, table):
-    channels = {}
-    for section in table.entries:
-        if section.type_id != 0x00eb0005:
-            continue
-        o = section.f0
-        h = struct.unpack_from('>8I', raw, o)
-        if not h[1] or (h[4]-h[3])//h[1] != 32:
-            raise ValueError('Unexpected sky material layout')
-        for i in range(h[1]):
-            v = struct.unpack_from('>8I', raw, o+h[3]+i*32)
-            at = o+v[0]
-            kind = raw[at:raw.index(b'\0', at)].decode('ascii')
-            if kind in ('diffuse', 'specular'):
-                channels[kind] = (v[4]<<32)|v[5]
-    return channels
-
-
 def _texture(textures, guid):
     handle = None
     for section in textures.entries:
@@ -42,17 +24,87 @@ def _texture(textures, guid):
     return texture
 
 
-def convert(game_root, assets, converted):
+# Material changes retail makes to a sky model by its name (sky_overrides.json; mods may add rows).
+OVERRIDES = Path(__file__).resolve().parent / 'sky_overrides.json'
+
+
+def _bind(raw, model, prep, model_name):
+    """Per mesh: its material group (the GUID binding backdrop.py uses) and metadata, with the override rows applied
+    the way retail's copy differs (b427: the material's shader replaced, listed parameters removed)."""
+    groups, bindings = prep._bind_material_groups_by_guid(
+        raw, prep._group_material_parameters(model.materials), len(model.meshes), allow_import_order_fallback=False)
+    rows = json.loads(OVERRIDES.read_text(encoding='utf-8')).get('models', {})
+    changes = next((v['materials'] for k, v in rows.items() if k.casefold() == model_name.casefold()), {})
+    for i, binding in enumerate(bindings):
+        change = changes.get(str(binding['group_index']))
+        if change:
+            group = {k: v for k, v in groups[i].items() if k not in change.get('remove', [])}
+            group['AttribulatorMaterialName'] = [change['shader']]
+            groups[i] = group
+    return groups, bindings, [prep._material_metadata(groups, i) for i in range(len(model.meshes))]
+
+
+def _sky(collections, row, read, mdl_parser, rx2_parser, prep):
+    """A world's sky: its environment, dome texture, sun gradient and dome mesh, plus the model's other meshes
+    (Hawaiian Dream's trees and rocks, b427 / b428) for the backdrop (raises when it does not resolve)."""
+    env = world_environment(collections, row['key'])
+    raw = read(row, 'data/content/'+env['sky_model']+'.rx2')
+    model = mdl_parser.parse_rx2(raw)
+    table = rx2_parser.RX2File(raw)
+    table.parse()
+    groups, bindings, materials = _bind(raw, model, prep, env['sky_model'])
+    # The dome: the one mesh with a `sky.` material (every disc sky has only that mesh).
+    domes = [i for i, m in enumerate(materials) if (m['shader_name'] or '').startswith('sky.')]
+    if len(domes) != 1 or model.meshes[domes[0]].uvs is None:
+        raise ValueError('Unexpected sky mesh layout')
+    dome = domes[0]
+    from .backdrop import texture_groups
+    channels = texture_groups(raw, table, ('diffuse', 'specular'))[bindings[dome]['group_index']]
+    textures_raw = read(row, 'data/content/'+env['sky_textures']+'.rx2')
+    textures = rx2_parser.parse_rx2(textures_raw)
+    diffuse = _texture(textures, channels['diffuse'])
+    sun = _texture(textures, channels['specular'])
+    env.update(sky_parameters(collections, materials[dome]['shader_name']))
+    env['fog_frame'] = fog_parameters(env['fog'])
+    mesh = model.meshes[dome]
+    if len(sun.rgba) != sun.width*sun.height*4 or sun.height != 16:
+        raise ValueError('Unexpected sky sun-gradient dimensions')
+    scenery = dict(raw=raw, model=model, groups=groups, bindings=bindings, textures=textures, table=table,
+                   selected=[(i, m) for i, m in enumerate(materials) if i != dome], model_name=env['sky_model'],
+                   texture_name=env['sky_textures'])
+    return env, diffuse, sun, mesh, scenery
+
+
+def convert(game_root, assets, converted, dlc_vaults=()):
+    """Every disc world with a worldDIST_<D>.big, plus the worlds of the player's DLC map packs (`dlc_vaults`,
+    asset_pipeline.dlc.load): a DLC sky is read from its own pack first, then from miscload.big (b417)."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'vendor/utt'))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'vendor/university/tools/vanilla_map_extraction/tools'))
     import mdl_parser
     import rx2_parser
-    collections = Collections(converted)
+    import prepare_hawaiian_dream as prep
+    from .backdrop import texture_groups, write_model
+    from .dlc import merged, stream_districts
+    collections = Collections(merged(converted, list(dlc_vaults)))
     archive = BigArchive(game_root/'data/big/miscload.big')
     entries = {e.path: e for e in archive.entries}
+    packs = {}
+    for v in dlc_vaults:
+        if v['vault'] not in packs:
+            pack = BigArchive(v['big'])
+            packs[v['vault']] = (pack, {e.path.replace('\\', '/'): e for e in pack.entries})
+    def read(row, path):
+        pack = packs.get(row.get('vault'))
+        if pack and path in pack[1]:
+            return pack[0].read(pack[1][path])
+        return archive.read(entries[path])
     output = assets/'private/native-skies'
     output.mkdir(parents=True, exist_ok=True)
     available = {p.stem.removeprefix('world') for p in (game_root/'data/content').glob('worldDIST_*.big')}
+    for pack, paths in packs.values():
+        available |= set(stream_districts(paths))
     count = 0
+    skipped = []
     for (cls, _), row in collections.rows.items():
         if cls != key_hash('world'):
             continue
@@ -60,24 +112,26 @@ def convert(game_root, assets, converted):
                            if key_hash(k) == key_hash('WorldStream')), None)
         if own_stream not in available:
             continue
-        name = own_stream.removeprefix('DIST_')
-        env = world_environment(collections, row['key'])
-        raw = archive.read(entries['data/content/'+env['sky_model']+'.rx2'])
-        model = mdl_parser.parse_rx2(raw)
-        table = rx2_parser.RX2File(raw)
-        table.parse()
-        channels = _material(raw, table)
-        textures = rx2_parser.parse_rx2(archive.read(entries['data/content/'+env['sky_textures']+'.rx2']))
-        diffuse = _texture(textures, channels['diffuse'])
-        sun = _texture(textures, channels['specular'])
-        shader = next(p.value for p in model.materials if p.kind == 'AttribulatorMaterialName')
-        env.update(sky_parameters(collections, shader))
-        env['fog_frame'] = fog_parameters(env['fog'])
-        if len(model.meshes) != 1 or model.meshes[0].uvs is None:
-            raise ValueError('Unexpected sky mesh layout')
-        mesh = model.meshes[0]
-        if len(sun.rgba) != sun.width*sun.height*4 or sun.height != 16:
-            raise ValueError('Unexpected sky sun-gradient dimensions')
+        # The map's label (asset_pipeline.dlc.map_jobs: the stream folder without DIST_ / Dist_).
+        name = own_stream[5:] if own_stream.lower().startswith('dist_') else own_stream
+        try:
+            sky = _sky(collections, row, read, mdl_parser, rx2_parser, prep)
+        except (KeyError, ValueError) as error:
+            if not row.get('vault'):
+                raise
+            skipped.append(f"{row['key']} ({error!r})")
+            continue
+        env, diffuse, sun, mesh, scenery = sky
+        # A multi-mesh sky's other meshes (retail draws them with the world's environment effects, b428) become the
+        # map's render-only backdrop, unless the world has its own presentation model (backdrop.py).
+        fields, _ = collections.resolve('world', row['key'])
+        if scenery['selected'] and key_hash('Hash_951898F6C0FA6856') not in fields:
+            backdrops = assets/'private/native-backdrops'
+            backdrops.mkdir(parents=True, exist_ok=True)
+            channel_groups = texture_groups(scenery['raw'], scenery['table'], prep.RETAIL_TEXTURE_CHANNELS)
+            write_model(scenery['raw'], scenery['model'], scenery['groups'], scenery['bindings'], scenery['selected'],
+                        scenery['textures'], channel_groups, backdrops/(name+'.skate'), own_stream,
+                        scenery['model_name'], scenery['texture_name'])
         (output/(name+'.rgba')).write_bytes(diffuse.rgba)
         (output/(name+'.sun.rgba')).write_bytes(sun.rgba)
         (output/(name+'.json')).write_text(json.dumps({
@@ -90,6 +144,8 @@ def convert(game_root, assets, converted):
         count += 1
     if not count:
         raise ValueError('No authored world skies resolved')
+    if skipped:
+        print('DLC worlds without a resolvable sky: ' + ', '.join(skipped), flush=True)
     return count
 
 

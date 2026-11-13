@@ -200,6 +200,60 @@ def decode_lightmap_uvs(
     )
 
 
+def decode_secondary_texcoord_zw(
+    data: bytes,
+    *,
+    vertex_buffer_offset: int,
+    vertex_count: int,
+    vertex_stride: int,
+    attributes: Iterable[VertexAttribute],
+) -> "numpy.ndarray | None":
+    """Decode zw of a four-component second TEXCOORD, or None.
+
+    The animated.flag vertex program (vertexanimate_defaultVS) reads the second
+    TEXCOORD as xy = lightmap UV and zw = cloth motion weights; the lightmap
+    decoder above keeps only xy.
+    """
+
+    selected = _secondary_texcoord(attributes)
+    if selected is None:
+        return None
+    attribute, _usage_index = selected
+    format_code = int.from_bytes(bytes(attribute.descriptor)[4:8], "big")
+    xenos_format = format_code & 0x3F
+    if xenos_format == 26:
+        component_bytes, dtype = 2, numpy.dtype(">i2")
+    elif xenos_format == 32:
+        component_bytes, dtype = 2, numpy.dtype(">f2")
+    elif xenos_format == 38:
+        component_bytes, dtype = 4, numpy.dtype(">f4")
+    else:
+        return None
+    offset = int(attribute.offset) + 2 * component_bytes
+    if vertex_count <= 0 or vertex_stride <= 0:
+        return None
+    required_end = (
+        vertex_buffer_offset
+        + (vertex_count - 1) * vertex_stride
+        + offset
+        + component_bytes * 2
+    )
+    if required_end > len(data):
+        raise ValueError("retail TEXCOORD1 zw extends past the RX2 vertex buffer")
+    values = numpy.ndarray(
+        shape=(vertex_count, 2),
+        dtype=dtype,
+        buffer=data,
+        offset=vertex_buffer_offset + offset,
+        strides=(vertex_stride, component_bytes),
+    ).astype(numpy.float32, copy=True)
+    if xenos_format == 26:
+        values /= numpy.float32(32767.0)
+    if not numpy.isfinite(values).all():
+        raise ValueError("retail TEXCOORD1 zw contains non-finite values")
+    return numpy.ascontiguousarray(values, dtype=numpy.float32)
+
+
 def decode_retail_world_frame(
     data: bytes,
     *,

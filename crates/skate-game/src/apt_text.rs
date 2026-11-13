@@ -21,13 +21,30 @@ pub struct Font {
     pub scale: [f32; 2],
     pub offset: [f32; 2],
     pub ascent: f32,
+    /// Line advance of wrapped text in font units (bmpFont metric LineHeight; vfunc +72 0x82806470 returns
+    /// font+360 x scale. NOT RETAIL YET: font+360 is LineHeight or VAdvanceYMax, equal in every retail font).
+    pub line_height: f32,
+    /// The FontManager row's line spacing (font+364; futuraheavy 0.9). 1.0 in exports made before it was added.
+    pub line_spacing: f32,
     pub glyphs: BTreeMap<u32, Glyph>,
 }
 #[derive(Clone, Default)]
 pub struct TextAssets {
     pub fonts: BTreeMap<i32, Font>,
     pub language: BTreeMap<String, String>,
+    /// Every font of the set by APT name (lower case), for fonts a script names (TextFormat.font on a
+    /// createTextField field), and the name FontManager falls back to for a name without a row (`fallback_font`
+    /// from the export: sub_82809208 takes the first row whose FileName is not "debug").
+    pub named: BTreeMap<String, Font>,
+    pub fallback: Option<String>,
 }
+
+/// Text for our own string ids (ours, not on the disc), added under the disc's language table and replaced by any
+/// language table that carries the id.
+pub const ENGINE_STRINGS: &[(&str, &str)] = &[("ID_HAILS_REPLAY_SAVE_TO_PC", "Save to PC")];
+
+/// Font ids handed to script-named fonts in `TextAssets::fonts` (below every character id).
+pub const NAMED_FONT_BASE: i32 = -1_000_000;
 /// Retail's one secondary-font rule, 825D6B68: an APT font named "Futura Shadow" (8220BD44, stricmp
 /// 82AE89B0) gets the native font "futuraheavy" (8220BD54) from the global font table (82809208), whether
 /// or not the movie itself uses that font. Data can replace it (`font_pairs`: APT name -> native file name).
@@ -80,6 +97,8 @@ fn native_font(json: &serde_json::Value, name: &str) -> Result<Font, String> {
         ascent: d["metrics"]["Ascent"]
             .as_f64()
             .ok_or("Font ascent missing")? as f32,
+        line_height: d["metrics"]["LineHeight"].as_f64().unwrap_or(0.0) as f32,
+        line_spacing: layout["LineSpacing"].as_f64().unwrap_or(1.0) as f32,
         glyphs: BTreeMap::new(),
     };
     for mapping in d["characters"]
@@ -105,7 +124,9 @@ fn native_font(json: &serde_json::Value, name: &str) -> Result<Font, String> {
 
 /// The secondary font for `apt_name`, looked up in the whole native font table by file name.
 /// NOT RETAIL: when the paired font is absent (a mod's data, an old export) retail's lookup falls back to
-/// the "debug" row (82809208 loop 2); we have no debug bank, so the text draws its primary pass only.
+/// the first row whose FileName is not "debug" (82809208 loop 2; its compare 82AE8A10 returns 0 on a match);
+/// here the text draws its primary pass only. (The menu export applies that fallback to APT names without a
+/// row, e.g. the trick guide's HelveticaPresto: prepare_menu_movies.py.)
 fn foreground(json: &serde_json::Value, apt_name: &str) -> Result<Option<Box<Font>>, String> {
     let Some(file) = paired_file(json, apt_name) else {
         return Ok(None);
@@ -132,6 +153,9 @@ impl TextAssets {
         let mut out = Self::default();
         out.language =
             serde_json::from_value(json["language"].clone()).map_err(|e| e.to_string())?;
+        for (id, text) in ENGINE_STRINGS {
+            out.language.entry((*id).to_owned()).or_insert_with(|| (*text).to_owned());
+        }
         for c in json["characters"]
             .as_array()
             .ok_or("HUD characters missing")?
@@ -147,7 +171,32 @@ impl TextAssets {
                 font,
             );
         }
+        if let Some(fonts) = json["fonts"].as_object() {
+            for name in fonts.keys() {
+                if json["font_mappings"][name].is_null() {
+                    continue;
+                }
+                let mut font = native_font(json, name)?;
+                font.foreground = foreground(json, name)?;
+                out.named.insert(name.to_lowercase(), font);
+            }
+        }
+        // NOT RETAIL YET (old exports without `fallback_font`): the first name in sorted order stands in.
+        out.fallback = json["fallback_font"].as_str().map(str::to_lowercase).or_else(|| out.named.keys().next().cloned());
         Ok(out)
+    }
+
+    /// The font id for a script-named font (case-insensitive, else the FontManager fallback), added to `fonts`
+    /// on first use. None when the set has no fonts at all.
+    pub fn font_named(&mut self, name: &str) -> Option<i32> {
+        let key = name.to_lowercase();
+        let key = if self.named.contains_key(&key) { key } else { self.fallback.clone()? };
+        let index = self.named.keys().position(|k| *k == key)? as i32;
+        let id = NAMED_FONT_BASE - index;
+        if !self.fonts.contains_key(&id) {
+            self.fonts.insert(id, self.named[&key].clone());
+        }
+        Some(id)
     }
     pub fn localize(&self, text: &str) -> String {
         if let Some(literal) = text.strip_prefix('#') {
@@ -169,6 +218,35 @@ impl Font {
         text.chars()
             .filter_map(|c| self.glyph(c))
             .fold(0.0, |x, g| g.x_advance.mul_add(self.scale[0] * height, x))
+    }
+    /// The distance between wrapped lines (82CA2118: vfunc +72 x font+364 x height).
+    pub fn line_advance(&self, height: f32) -> f32 {
+        self.line_height * self.scale[1] * self.line_spacing * height
+    }
+    /// Retail's word wrap (SkateAptString 82CA14D0, loop 82CA1BB0): greedy, measuring from the line start through
+    /// each character; a space is the only break point (one at index 0 is not), `^` forces a break, and the break
+    /// character is dropped. A word wider than the field is never split; `\n` is an ordinary character.
+    pub fn wrap(&self, text: &str, height: f32, width: f32) -> Vec<String> {
+        let chars: Vec<char> = text.chars().collect();
+        let mut lines = Vec::new();
+        let (mut start, mut i, mut candidate) = (0, 0, 0);
+        while i < chars.len() {
+            let forced = chars[i] == '^';
+            if forced || chars[i] == ' ' {
+                candidate = i;
+            }
+            let measured: String = chars[start..=i].iter().collect();
+            if forced || (self.width(&measured, height) > width && candidate != 0 && candidate >= start) {
+                lines.push(chars[start..candidate].iter().collect());
+                start = candidate + 1;
+                i = start;
+                candidate = 0;
+                continue;
+            }
+            i += 1;
+        }
+        lines.push(chars[start.min(chars.len())..].iter().collect());
+        lines
     }
 }
 
@@ -226,6 +304,37 @@ mod font_pair_tests {
         let mut m = movie();
         m["characters"][0]["font"]["name"] = json!("Futura Std Medium");
         assert!(TextAssets::load(&m).unwrap().fonts[&3].foreground.is_none());
+    }
+
+    #[test]
+    fn our_string_ids_have_text_a_language_table_can_replace() {
+        let set = |language: serde_json::Value| TextAssets::load(&serde_json::json!({"language": language, "characters": []})).unwrap();
+        assert_eq!(set(serde_json::json!({})).localize(crate::replay::export_run::SAVE_TO_PC), "Save to PC");
+        let ours = set(serde_json::json!({"ID_HAILS_REPLAY_SAVE_TO_PC": "Auf PC speichern"}));
+        assert_eq!(ours.localize(crate::replay::export_run::SAVE_TO_PC), "Auf PC speichern");
+    }
+
+    /// 82CA1BB0: break at the last space once the line is too wide, `^` forces a break, a long word overhangs.
+    #[test]
+    fn wrap_follows_the_retail_break_rule() {
+        let glyph = Glyph { glyph_index: 0, width: 1., height: 1., x_offset: 0., y_offset: 0., x_advance: 1., atlas_bounds: [0.; 4] };
+        let font = Font {
+            foreground: None,
+            texture: String::new(),
+            size: [1, 1],
+            scale: [1., 1.],
+            offset: [0., 0.],
+            ascent: 0.,
+            line_height: 50.,
+            line_spacing: 0.9,
+            glyphs: [(65535, glyph)].into_iter().collect(),
+        };
+        // One unit per character at height 1.
+        assert_eq!(font.wrap("aaa bbb ccc", 1., 7.), ["aaa bbb", "ccc"]);
+        assert_eq!(font.wrap("aaa^bbb", 1., 50.), ["aaa", "bbb"]);
+        assert_eq!(font.wrap("aaaaaaaaaa bb", 1., 4.), ["aaaaaaaaaa", "bb"]);
+        assert_eq!(font.wrap("short", 1., 50.), ["short"]);
+        assert!((font.line_advance(2.) - 90.).abs() < 1e-4);
     }
 }
 

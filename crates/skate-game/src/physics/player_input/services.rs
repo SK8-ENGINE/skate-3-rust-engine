@@ -38,7 +38,7 @@ pub(crate) trait PlayerInputCallbacks {
         grind: &mut GrindInputState,
         processed: &ProcessedPhysicsInput,
         world: &skate_core::physics::board_world::BoardWorld,
-        provider: &crate::grind_world::StaticProvider,
+        provider: crate::grind_world::RailView<'_>,
         air_counter: i32,
     ) -> Result<Pending, String>;
     fn process_skeleton(
@@ -71,12 +71,50 @@ pub(super) struct Services<'a, C> {
     pub callbacks: &'a mut C,
     pub pre_input: &'a mut PreInputManager,
     pub grind: &'a mut GrindInputState,
-    pub world_edges: &'a crate::grind_world::StaticProvider,
+    pub world_edges: crate::grind_world::RailView<'a>,
     pub world: &'a skate_core::physics::board_world::BoardWorld,
     pub pending_grind: &'a mut Option<Pending>,
     pub toolkit: &'a mut Option<BoardToolkit>,
     pub pending_teleport: &'a mut Option<AnimationPartTransform>,
     pub pending_velocity: &'a mut Option<[f32; 3]>,
+    pub pending_ground_fit: &'a mut Option<skate_core::physics::teleport_ground_fit::GroundFit>,
+    pub arrival: ArrivalSolids<'a>,
+}
+
+/// What a travel's arrival fit-up ray hits besides the static world: docs/hails-additions/38-dlc-support.md#what-the-fit-up-ray-hits
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ArrivalSolids<'a> {
+    pub props: Option<&'a skate_core::physics::board_world::BoardWorld>,
+    /// This tick's solve proxies; only the traffic cars (`VEHICLE_GROUP`) count.
+    pub proxies: &'a [(usize, skate_dynamics::SolidBody)],
+}
+
+/// The nearest hit of the fit-up ray over the world, the props and the cars.
+pub(super) fn arrival_hit(
+    world: &skate_core::physics::board_world::BoardWorld,
+    arrival: ArrivalSolids<'_>,
+    fit: skate_core::physics::teleport_ground_fit::GroundFit,
+    s: [f32; 3],
+    e: [f32; 3],
+) -> Option<[f32; 3]> {
+    use skate_core::physics::board_world::ExternalQueries;
+    let v = |p: [f32; 3]| skate_core::math::Vector3::new(p[0], p[1], p[2]);
+    let mut hits = vec![world.query_thin_line(v(s), v(e)).ok().flatten()];
+    if fit.props {
+        hits.push(arrival.props.and_then(|p| p.query_thin_line(v(s), v(e)).ok().flatten()));
+    }
+    if fit.vehicles {
+        let cars: Vec<_> = arrival.proxies.iter()
+            .filter(|(_, b)| b.contact_group == crate::physics::VEHICLE_GROUP)
+            .map(|(_, b)| b.clone())
+            .collect();
+        if !cars.is_empty() {
+            hits.push(crate::modding::bridge::MovingQueries(cars).line(v(s), v(e), 0.0).map(|h| h.hit));
+        }
+    }
+    hits.into_iter().flatten()
+        .min_by(|a, b| a.geometry.fraction.total_cmp(&b.geometry.fraction))
+        .map(|hit| [hit.geometry.position.x, hit.geometry.position.y, hit.geometry.position.z])
 }
 impl<C: PlayerInputCallbacks> InputPhaseServices for Services<'_, C> {
     type Error = String;
@@ -118,9 +156,28 @@ impl<C: PlayerInputCallbacks> InputPhaseServices for Services<'_, C> {
         // Native handles its state request before its explicit reset bit.
         // Host requests remain owned until the entire reset succeeds.
         if physical.state.flag_61 != 0 {
-            let target = self.host.published_board_transform;
+            let mut target = self.host.published_board_transform;
+            // A travel's arrival fit-up (retail 82598428 in the teleport message, b475): height onto the static world.
+            if let Some(fit) = self.pending_ground_fit.take() {
+                let (world, arrival) = (self.world, self.arrival);
+                let asked = target[3];
+                target = skate_core::physics::teleport_ground_fit::fit_arrival_to_ground(target, fit, |s, e| {
+                    arrival_hit(world, arrival, fit, s, e)
+                });
+                // Logs must diagnose arrival reports: where the teleport asked to land and where the fit put it.
+                bevy::log::info!(
+                    "TELEPORT_ARRIVAL asked=[{:.2}, {:.2}, {:.2}] fitted_y={:.2} ground_fit={}",
+                    asked[0], asked[1], asked[2], target[3][1], fit.enabled
+                );
+            }
             self.callbacks
                 .teleport(self.board, self.ground, target, player, physical, output)?;
+            // A mod's arrival velocity (`travel`, ours) after the one reset of the reply path (b471).
+            if self.pending_teleport.is_none() {
+                if let Some(v) = self.pending_velocity.take() {
+                    apply_board_linvel(self.board, v);
+                }
+            }
         }
         if player.flags_1296 & (1 << 19) != 0 {
             let deck = self.board.part_transforms()[6];
@@ -209,5 +266,74 @@ fn apply_board_linvel(board: &mut BoardRuntime, v: [f32; 3]) {
     let vel = Vector3::new(v[0], v[1], v[2]);
     for body in board.bodies_mut() {
         body.rates.linear_velocity = vel;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{arrival_hit, ArrivalSolids};
+    use skate_core::physics::teleport_ground_fit::GroundFit;
+    use skate_dynamics::rapier3d::prelude::{Pose, Rotation, SharedShape, Vector};
+
+    const H: f32 = crate::physics::ground::HEIGHT;
+
+    fn material() -> skate_core::physics::contact::RetailContactMaterial {
+        skate_core::physics::contact::RetailContactMaterial { static_friction: 0.5, dynamic_friction: 0.5, restitution: 0.0 }
+    }
+
+    /// A 4 m plate at `H + 1` around x = 10, as a props world.
+    fn props_plate() -> skate_core::physics::board_world::BoardWorld {
+        let y = H + 1.0;
+        let plate = [[[8., y, -2.], [8., y, 2.], [12., y, 2.]], [[8., y, -2.], [12., y, 2.], [12., y, -2.]]];
+        let pieces = crate::park_layout::Pieces {
+            collision: plate.iter().map(|&points| skate_data::skate_map::Collision {
+                points, surface: 0, material: 1, native_edges: Some([0x60; 3]),
+            }).collect(),
+            ranges: vec![0..2], materials: vec![], rails: vec![],
+            fuse: crate::park_layout::FuseRules::default(), unfused: vec![true], tags: vec![],
+        };
+        crate::skate_world::props_only_world(&pieces, material()).unwrap().unwrap()
+    }
+
+    /// A 1.5 m tall box solid at x = 0 (top at `H + 1.5`) in `group`.
+    fn car(group: u32) -> (usize, skate_dynamics::SolidBody) {
+        let centre = Vector::new(0., H + 0.75, 0.);
+        (0, skate_dynamics::SolidBody {
+            id: 5,
+            pose: Pose::from_parts(centre, Rotation::IDENTITY),
+            center_of_mass: centre,
+            inertia_rotation: Rotation::IDENTITY,
+            inverse_mass: 0.0,
+            inverse_inertia: Vector::new(0.0, 0.0, 0.0),
+            linvel: Vector::new(0.0, 0.0, 0.0),
+            angvel: Vector::new(0.0, 0.0, 0.0),
+            contact_group: group,
+            colliders: vec![skate_dynamics::SolidCollider {
+                shape: SharedShape::cuboid(1.0, 0.75, 2.0), pose: Pose::from_parts(centre, Rotation::IDENTITY), friction: 0.5,
+            }],
+        })
+    }
+
+    fn height(arrival: ArrivalSolids<'_>, fit: GroundFit, x: f32) -> f32 {
+        let world = crate::physics::ground::Terrain::Flat.world(material());
+        arrival_hit(&world, arrival, fit, [x, H + 5.0, 0.], [x, H - 50.0, 0.]).unwrap()[1]
+    }
+
+    /// Retail's fit-up mask 7 (b493): the ray lands on props and traffic cars, nearest first; each is a data switch.
+    #[test]
+    fn the_fit_up_ray_hits_props_and_cars() {
+        let props = props_plate();
+        let cars = [car(crate::physics::VEHICLE_GROUP)];
+        let arrival = ArrivalSolids { props: Some(&props), proxies: &cars };
+        let fit = GroundFit::default();
+        assert!((height(arrival, fit, 10.0) - (H + 1.0)).abs() < 1e-3, "prop");
+        assert!((height(arrival, fit, 0.0) - (H + 1.5)).abs() < 1e-3, "car");
+        assert!((height(arrival, fit, -5.0) - H).abs() < 1e-3, "floor");
+        let off = GroundFit { props: false, vehicles: false, ..fit };
+        assert!((height(arrival, off, 10.0) - H).abs() < 1e-3);
+        assert!((height(arrival, off, 0.0) - H).abs() < 1e-3);
+        // Other solve proxies (peds, NPC skaters, mod bodies) are not in the mask.
+        let ped = [car(crate::living_world::ped_body::PED_GROUP)];
+        assert!((height(ArrivalSolids { props: None, proxies: &ped }, fit, 0.0) - H).abs() < 1e-3);
     }
 }

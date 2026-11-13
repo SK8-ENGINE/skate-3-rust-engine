@@ -7,7 +7,24 @@ pub(crate) struct Destination {
     pub id: String,
     pub name: String,
     pub map: String,
+    /// The location's world row (megapark_full -> dist_megapark_full): a skate.Park world places its layout.
+    #[serde(default)]
+    pub world: Option<String>,
+    /// The label id `name` is the English text of (the Challenge Map sorts its leaves by it, b451).
+    #[serde(default)]
+    pub label_key: Option<String>,
     pub matrix: Option<[[f32; 4]; 4]>,
+    /// Where the matrix came from (`teleports.py`); the retail missing-locator fallback has no ground under it.
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+impl Destination {
+    /// Placed by retail's missing-locator fallback (`82910DC0`: (0, 0.5, -5)), not a real locator: retail lists no
+    /// such row in its Challenge Map (Monster Park, research b681), so our travel menu leaves it out too.
+    pub(crate) fn fallback(&self) -> bool {
+        self.source.as_deref().is_some_and(|s| s.starts_with("retail missing-locator fallback"))
+    }
 }
 #[derive(Deserialize)]
 struct Catalog { version: u32, destinations: Vec<Destination> }
@@ -92,7 +109,7 @@ fn interact(
         travel.generation = Some(map.generation); travel.open = false; travel.shown = false;
         for e in &roots { commands.entity(e).despawn(); }
         travel.rows = load(&config.asset_root).unwrap_or_else(|e| { warn!("Travel destinations: {e}"); vec![] });
-        travel.rows.retain(|d| d.matrix.is_some() && map.path.as_ref().is_some_and(|p| same_map(p, &d.map)));
+        travel.rows.retain(|d| d.matrix.is_some() && !d.fallback() && map.path.as_ref().is_some_and(|p| same_map(p, &d.map)));
         if let Some(id) = &config.teleport {
             if map.generation == 0 {
                 if let Some(m) = travel.rows.iter().find(|d| &d.id == id).and_then(|d| d.matrix) { let _ = skater.travel_to(m); }

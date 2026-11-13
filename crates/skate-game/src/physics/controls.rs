@@ -23,6 +23,9 @@ pub(crate) struct PlayerControls {
     pub bumper_state_502: bool,
     pub bumper_state_104: bool,
     pub preferences: PushPreferences,
+    /// An AI skater's controls: its controllers fill the control map (retail runs no pad fill for them), so the
+    /// pad-derived off-board intents never overwrite a value the AI wrote this tick.
+    pub ai_driven: bool,
     //One tick's native PlayerUI82898D20 result, shared by animation and PhysIn.
     //None means the native offboard remap gate did not run, not missing camera.
     offboard_axes: Option<[f32; 2]>,
@@ -43,6 +46,7 @@ impl Default for PlayerControls {
             bumper_state_502: false,
             bumper_state_104: false,
             preferences: PushPreferences::default(),
+            ai_driven: false,
             offboard_axes: None,
             gestures: None,
         }
@@ -94,6 +98,10 @@ impl PlayerControls {
         } else {
             None
         };
+        // 825999F0 passes 825992D8 the current state (`*(state+16)`) == 502 (off-board pushing) and == 104
+        // (skitching): with both bumpers held, those states keep the bumper pressed first (82598FE0).
+        self.bumper_state_502 = physical.state.state_16 == 502;
+        self.bumper_state_104 = physical.state.state_16 == 104;
         self.update(
             &mut SimulationActions {
                 source: map,
@@ -194,6 +202,7 @@ impl PlayerControls {
                     value: intent.value,
                 }),
         );
+        step_off_for_test(&mut self.intents);
         //GenerateActionGraphIntents82594310 clears the AG map through82BC1B68
         //before Listener::Fill. MG lifecycle intents use a different persistent map.
         self.action_intents.clear();
@@ -288,3 +297,20 @@ mod offboard_tests;
 #[cfg(test)]
 #[path = "controls/bail_tests.rs"]
 mod bail_tests;
+
+/// `SKATE_TEST_STEP_OFF=<tick>`: the player presses the off-board toggle once at that tick, so an idle test run stays at
+/// its teleport spot. Unset in play.
+fn step_off_for_test(intents: &mut Vec<RidingIntent>) {
+    use std::sync::{atomic::{AtomicU32, Ordering}, OnceLock};
+    static AT: OnceLock<Option<u32>> = OnceLock::new();
+    static TICK: AtomicU32 = AtomicU32::new(0);
+    let Some(at) = *AT.get_or_init(|| std::env::var("SKATE_TEST_STEP_OFF").ok().and_then(|v| v.parse().ok())) else { return };
+    if crate::physics::log_actor() != "player" {
+        return;
+    }
+    if TICK.fetch_add(1, Ordering::Relaxed) == at {
+        bevy::log::info!("SKATE_TEST_STEP_OFF tick {at}");
+        intents.push(RidingIntent { name: "NewToggleOffBoardState", value: 1.0 });
+        intents.push(RidingIntent { name: "ToggleOffBoardState", value: 1.0 });
+    }
+}

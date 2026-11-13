@@ -3,13 +3,13 @@
 Branch `fix/grind-random-bails` (from `main` b3c9679). Status: **the handrail bend bail is fixed by porting
 retail's per-volume world-query box (third pass, below).** The first two passes found the cause chain and
 ruled out candidates 2 and 3; the third pass found the rule that differs from retail: the box every world
-triangle is tested against before the pair query. The 90 degree corners (`0x656`, `0x694`) still bail; they are
-real wheel hits and stay open.
+triangle is tested against before the pair query. The 90 degree corners (`0x656`, `0x694`) bail by design: two rails
+meet there, and the skater has to trick over the corner (user decision, not a bug).
 
 ## Problem
 
-The user: "some grinding locations will cause you to bail randomly. its an issue in main that needs fixed as
-well" and "I know for sure that the rails at the PCU Library spawn do. all three or four sets of them"
+The user reported that some grind spots make you bail at random, also on main, and that this happens for
+sure on all three or four sets of rails at the PCU Library spawn
 (University, PCU Library spawn). It happens on upstream `main` too.
 
 ## Evidence from the user's sessions
@@ -70,7 +70,7 @@ All three bails are wipeout request **2** from grind Post: the board's closing v
      face normal is 0.178 (`world_separation_limit`: approach `-n . v / 60` = 0.128, plus padding 0.05), so the
      pair is kept.
    - The raw contact normal is mostly vertical (-0.35, -0.92, 0.15). The triangle fixup `82AD3130` [code]
-     classifies it as a disabled vertex and takes the TU3 recovery in `82AD2E00` [code] (one convex and one
+     classifies it as a disabled vertex and takes the TU3 (title update 3) recovery in `82AD2E00` [code] (one convex and one
      non-convex edge with cosine 0.961 <= 0.97): the normal is bent perpendicular to the convex edge, which is
      nearly vertical, so the bent normal is horizontal, (0.956, -0.258, -0.142) toward the deck. `82AD2BF0`
      [code] reprojects the contact points along it: 2 cm apart.
@@ -432,8 +432,6 @@ pad, which reached the strip. Not measured in the recomp.
 - Which rule retail applies at the spline end (second pass: candidates 2 and 3 are not supported by the static
   code; candidate 1 remains). Needs the instruction-level read of `82D8A828` / `82D875A8` at a spline end or
   the recomp trace planned above (the recomp is reference, not a console measurement).
-- Does retail boardslide through the PCU Library flat rail's 90 degree corner, or does the board also stop
-  there? (To ask the user before more research on the corner.)
 - Handrail bottom: fixed by the box port; a recomp BRDREP trace would still confirm retail has no deck/post
   contact there.
 - Stair-edge spline 23 (`0x677`) no longer bails after the box port (82 grind ticks, no wipeout); its old bail

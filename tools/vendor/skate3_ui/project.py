@@ -85,6 +85,7 @@ def cache_is_current(
     include_dynamic: bool,
     prefixes: tuple[str, ...],
     decode_png: bool,
+    extra_archives: tuple[Path, ...] = (),
 ) -> bool:
     manifest_path = Path(output).resolve() / "manifest.json"
     try:
@@ -101,11 +102,12 @@ def cache_is_current(
         expected = list(CORE_ARCHIVES)
         if include_dynamic:
             expected.append(DYNAMIC_ARCHIVE)
+        sources = {name: big_directory / name for name in expected}
+        sources.update({_extra_name(path): Path(path) for path in extra_archives})
         records = {record["name"]: record for record in manifest.get("archives", [])}
-        if set(records) != set(expected):
+        if set(records) != set(sources):
             return False
-        for name in expected:
-            source = big_directory / name
+        for name, source in sources.items():
             record = records[name]
             if (
                 not source.is_file()
@@ -116,6 +118,10 @@ def cache_is_current(
         return True
     except (FileNotFoundError, KeyError, OSError, ValueError, json.JSONDecodeError):
         return False
+
+
+def _extra_name(path: Path) -> str:
+    return "extra:" + Path(path).name
 
 
 def _safe_output_path(root: Path, archive_path: str) -> Path:
@@ -135,6 +141,7 @@ def extract_project(
     decode_png: bool = True,
     force: bool = False,
     update: bool = False,
+    extra_archives: tuple[Path, ...] = (),
 ) -> dict:
     """Build a local, exact-asset UI cache from an installed Skate 3 copy."""
     game_root = Path(game_root).resolve()
@@ -147,6 +154,7 @@ def extract_project(
         include_dynamic=include_dynamic,
         prefixes=prefixes,
         decode_png=decode_png,
+        extra_archives=extra_archives,
     ):
         manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
         manifest["cache_reused"] = True
@@ -162,10 +170,12 @@ def extract_project(
     if include_dynamic:
         archive_names.append(DYNAMIC_ARCHIVE)
 
+    # Extra archives (DLC BIGs taken from the player's own packages) come last, so their entries win.
+    archive_sources = [(name, big_directory / name) for name in archive_names]
+    archive_sources += [(_extra_name(path), Path(path)) for path in extra_archives]
     archives: list[tuple[str, BigArchive]] = []
     archive_records = []
-    for name in archive_names:
-        source = big_directory / name
+    for name, source in archive_sources:
         if not source.is_file():
             raise FileNotFoundError(f"required UI archive is missing: {source}")
         archive = BigArchive(source)

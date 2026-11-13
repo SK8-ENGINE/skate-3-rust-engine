@@ -13,8 +13,13 @@ pub fn valid_menu_id(s: &str) -> bool {
     !s.is_empty() && s.len() <= 96 && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
+/// The pause menu kinds, and the Challenge Map node kinds (vault classes: `fe_locations` = a teleport location, ...).
 pub fn valid_entry_kind(s: &str) -> bool {
-    matches!(s, "category" | "item" | "setting")
+    matches!(
+        s,
+        "category" | "item" | "setting" | "map_listing" | "map_filter" | "map_category" | "fe_locations" | "world" | "challenges"
+            | "map_commands" | "code_unlocks"
+    )
 }
 
 fn valid_label(s: &str) -> bool {
@@ -298,5 +303,264 @@ mod tests {
         assert_eq!(serde_json::from_value::<MenuValue>(json!(3)).unwrap(), MenuValue::Int(3));
         assert_eq!(serde_json::from_value::<MenuValue>(json!(true)).unwrap(), MenuValue::Bool(true));
         assert!(valid_menu_id("ID_GAMESETTINGS_SFXVOLUME") && valid_menu_id("my-mod.Races") && !valid_menu_id("a b"));
+    }
+}
+
+/// An FE screen id: the 16 lowercase hex digits of retail's per-screen key, plus `:n` when screens share the key
+/// (`sdk.menus.info().screens` lists them).
+pub fn valid_screen_key(s: &str) -> bool {
+    let (key, n) = s.split_once(':').unwrap_or((s, "0"));
+    key.len() == 16
+        && key.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && !n.is_empty()
+        && n.len() <= 2
+        && n.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// `sdk.menus.trick_guide(entry, key, options)` entry kinds.
+pub const TRICK_GUIDE_ENTRIES: [&str; 3] = ["category", "subcategory", "trick"];
+
+/// One input slot of a Trick Guide entry: ids into the gesture / button name tables, connector 0 none, 1 Plus,
+/// 2 Arrow, 3 Or (doc 31 "Trick Guide").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrickGuideSlot {
+    #[serde(default)]
+    pub gesture: u32,
+    #[serde(default)]
+    pub button: u32,
+    #[serde(default)]
+    pub connector: u32,
+}
+
+/// `sdk.menus.trick_guide(entry, key, options)`: add or change a Trick Guide entry by key (a retail record's 16 hex
+/// digits, or the mod's own id). Unset fields keep the entry's value.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrickGuideOptions {
+    /// Name and description: string ids (FELanguage) or `#literal text`.
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Up to 4 input slots.
+    #[serde(default, deserialize_with = "crate::lua_list::opt_list")]
+    pub slots: Option<Vec<TrickGuideSlot>>,
+    /// Demo animation name (tricks need one to be listed).
+    #[serde(default)]
+    pub animation: Option<String>,
+    /// Demo camera track: an index into the ICE ViewScene tracks (retail 0..20; `trickbook_camera_tracks`).
+    #[serde(default)]
+    pub camera_track: Option<i16>,
+    /// The category a subcategory lists under, or the subcategory a trick lists under (key).
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// A trick's place in its list (ascending).
+    #[serde(default)]
+    pub order: Option<i32>,
+    /// A subcategory opens a trick list (true) or shows its own slots (false).
+    #[serde(default)]
+    pub has_tricks: Option<bool>,
+    /// A category's place in the top-level list (0-based).
+    #[serde(default)]
+    pub position: Option<u32>,
+    /// Take the entry out of its list.
+    #[serde(default)]
+    pub hidden: bool,
+}
+
+/// A retail popup a mod raises (`sdk.menus.popup`, Sk8Popup / Sk8SmallPopup); choice as a `menu_popup` event.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PopupOptions {
+    /// Shown by the small popup only (retail's Sk8Popup shows no title).
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Up to 8 choices (index 0 first); one choice shows A Continue, more a list.
+    #[serde(default, deserialize_with = "crate::lua_list::opt_list")]
+    pub options: Option<Vec<String>>,
+    /// "standard" (Sk8Popup, the default) or "small" (Sk8SmallPopup).
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// The highest priority shows; equal priorities show the newest (retail's list).
+    #[serde(default)]
+    pub priority: Option<i32>,
+    /// B answers choice 255.
+    #[serde(default)]
+    pub cancelable: bool,
+}
+
+pub const MAX_POPUP_OPTIONS: usize = 8;
+
+impl PopupOptions {
+    pub fn validate(&self) -> bool {
+        let text = |t: &Option<String>| t.as_ref().is_none_or(|t| t.len() <= 512);
+        text(&self.title)
+            && text(&self.description)
+            && self.options.as_ref().is_none_or(|o| o.len() <= MAX_POPUP_OPTIONS && o.iter().all(|t| t.len() <= 512))
+            && self.kind.as_deref().is_none_or(|k| matches!(k, "standard" | "small"))
+            && self.priority.is_none_or(|p| (-1000..=1000).contains(&p))
+    }
+}
+
+/// The Skate Profile pages a mod fills (`sdk.menus.profile(page, key, options)`): the two overall bars and the two
+/// tables.
+pub const PROFILE_PAGES: [&str; 4] = ["career", "challenges", "stats", "personal_bests"];
+
+/// A table cell: a number (the movie formats it) or text (a string id or `#literal text`).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum ProfileValue {
+    Number(f64),
+    Text(String),
+}
+
+/// `sdk.menus.profile(page, key, options)`: change an overall bar (`career` / `challenges`: title, icon, current,
+/// total; key ignored) or add / change a table row by key (`stats` / `personal_bests`: label, value, order, hidden).
+/// Unset fields keep the current value.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileOptions {
+    /// Bar title: a string id (FELanguage) or `#literal text`.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Bar icon: an asset name the movie loads (`LoadAssetByName`).
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub current: Option<f64>,
+    #[serde(default)]
+    pub total: Option<f64>,
+    /// Row label: a string id or `#literal text`.
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub value: Option<ProfileValue>,
+    /// A row's place in its table (ascending; rows without one keep their order after those with one).
+    #[serde(default)]
+    pub order: Option<i32>,
+    /// Take the row out of its table.
+    #[serde(default)]
+    pub hidden: bool,
+}
+
+impl ProfileOptions {
+    pub fn validate(&self, page: &str) -> bool {
+        let text = |t: &Option<String>| t.as_ref().is_none_or(|t| t.len() <= 512);
+        let number = |n: &Option<f64>| n.is_none_or(|n| n.is_finite());
+        let bar = page == "career" || page == "challenges";
+        let bar_fields = self.title.is_some() || self.icon.is_some() || self.current.is_some() || self.total.is_some();
+        let row_fields = self.label.is_some() || self.value.is_some() || self.order.is_some() || self.hidden;
+        let value = match &self.value {
+            Some(ProfileValue::Number(n)) => n.is_finite(),
+            Some(ProfileValue::Text(t)) => t.len() <= 512,
+            None => true,
+        };
+        PROFILE_PAGES.contains(&page)
+            && if bar { !row_fields } else { !bar_fields }
+            && text(&self.title)
+            && text(&self.icon)
+            && text(&self.label)
+            && number(&self.current)
+            && number(&self.total)
+            && value
+    }
+}
+
+/// One line of `sdk.menus.credits(key, lines)`: a string id (`ID_...`, localised) or `#literal text`, its font size
+/// and its line advance as a multiple of the line's height (retail lines: size 18 to 30, spacing 2).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreditLine {
+    pub text: String,
+    #[serde(default = "credit_size")]
+    pub size: i32,
+    #[serde(default = "credit_spacing")]
+    pub spacing: f64,
+}
+
+fn credit_size() -> i32 {
+    18
+}
+
+fn credit_spacing() -> f64 {
+    2.0
+}
+
+/// Lines one credits section may hold.
+pub const MAX_CREDIT_LINES: usize = 512;
+
+/// A loading screen line of a mod (`sdk.loading`): a hint panel's title and text, a Coach Frank line, or a Stats panel
+/// row (label and value). A string id is localised, any other text shows as written.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(tag = "panel", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LoadingLine {
+    Hint { title: String, text: String },
+    CoachFrank { text: String },
+    Stat { label: String, value: String },
+}
+
+impl LoadingLine {
+    pub fn validate(&self) -> bool {
+        let ok = |t: &str| !t.is_empty() && t.len() <= 512;
+        match self {
+            Self::Hint { title, text } => ok(title) && ok(text),
+            Self::CoachFrank { text } => ok(text),
+            Self::Stat { label, value } => ok(label) && ok(value),
+        }
+    }
+}
+
+impl CreditLine {
+    pub fn validate(&self) -> bool {
+        !self.text.is_empty() && self.text.len() <= 512 && (8..=96).contains(&self.size) && (0.0..=10.0).contains(&self.spacing)
+    }
+}
+
+pub fn valid_trick_guide_key(s: &str) -> bool {
+    (s.len() == 16 && s.bytes().all(|b| b.is_ascii_hexdigit())) || valid_menu_id(s)
+}
+
+impl TrickGuideOptions {
+    pub fn validate(&self) -> bool {
+        let text = |t: &Option<String>| t.as_ref().is_none_or(|t| t.len() <= 512);
+        text(&self.label)
+            && text(&self.description)
+            && text(&self.animation)
+            && self.parent.as_ref().is_none_or(|p| valid_trick_guide_key(p))
+            && self.slots.as_ref().is_none_or(|s| s.len() <= 4 && s.iter().all(|s| s.gesture < 256 && s.button < 256 && s.connector <= 3))
+            && self.position.is_none_or(|p| p < 256)
+    }
+}
+
+/// `sdk.menus.backdrop(screen, options)`: the world behind an FE screen (blur on / off and the ramp). Unset fields
+/// keep the retail value (screen stack info table + FE manager ramp, doc 31 "Pause blur").
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackdropOptions {
+    #[serde(default)]
+    pub blur: Option<bool>,
+    /// Full blur strength (retail 8.0).
+    #[serde(default)]
+    pub strength: Option<f32>,
+    /// Strength change per FE tick (retail 0.8).
+    #[serde(default)]
+    pub step: Option<f32>,
+    /// Tint floor {r, g, b} 0..255 (retail {90, 85, 81}).
+    #[serde(default, deserialize_with = "crate::lua_list::opt_list")]
+    pub tint: Option<Vec<i32>>,
+    /// Tint change per FE tick (retail 15).
+    #[serde(default)]
+    pub tint_step: Option<i32>,
+}
+
+impl BackdropOptions {
+    pub fn validate(&self) -> bool {
+        self.strength.is_none_or(|v| v.is_finite() && (0.0..=64.0).contains(&v))
+            && self.step.is_none_or(|v| v.is_finite() && v > 0.0 && v <= 64.0)
+            && self.tint.as_ref().is_none_or(|t| t.len() == 3 && t.iter().all(|c| (0..=255).contains(c)))
+            && self.tint_step.is_none_or(|v| (1..=255).contains(&v))
     }
 }

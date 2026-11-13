@@ -31,13 +31,37 @@ fn airborne_grabs_release_through_stock_graphs() {
 }
 
 fn roll_off_input(air_stick: Option<i16>, grab_hand: Option<usize>, grab_stick: [i16; 2]) {
-    roll_off_sequence(air_stick, grab_hand, grab_stick, false);
+    roll_off_sequence(air_stick, grab_hand, grab_stick, false, None);
+}
+
+/// b692 section 3: the AI's nosegrab `scoring_trick` schedule (TweakY -1 from tick 0, Right Air/GroundGrab from 2)
+/// posted into the action intents by `slot_signals` from takeoff, as for a sim-tier NPC: a BS grab tweaked down.
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn ai_nosegrab_schedule_through_stock_graphs() {
+    let seen = roll_off_sequence(None, None, [0; 2], false, Some(74)).unwrap();
+    assert!(seen.starts_with("BLEND_BS_TWEAK "), "{seen}");
+}
+
+/// Every category 4 (grab) schedule through the stock graphs: the clip each reaches 40 air ticks after takeoff and
+/// its grab score, which the puppet's table (`retail_grab_score`) must match.
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn ai_grab_schedules_through_stock_graphs() {
+    for (id, (name, _, category)) in skate_core::scoring::catalog::IDENTIFIERS.iter().enumerate() {
+        if *category == 4 {
+            let seen = roll_off_sequence(None, None, [0; 2], false, Some(id as i16)).unwrap_or_default();
+            eprintln!("AI_GRAB {id} {name} -> {seen}");
+            let score = crate::living_world::npc_skaters::retail_grab_score(name, false);
+            assert!(seen.ends_with(&format!("score=Some({score:?})")), "{name}: table {score}, graphs {seen}");
+        }
+    }
 }
 
 #[test]
 #[ignore = "requires private stock animation banks and collections"]
 fn airborne_tailwalk_from_raw_controller_reaches_stock_cycle() {
-    roll_off_sequence(None, Some(0), [0, 32767], true);
+    roll_off_sequence(None, Some(0), [0, 32767], true, None);
 }
 
 fn roll_off_sequence(
@@ -45,15 +69,17 @@ fn roll_off_sequence(
     grab_hand: Option<usize>,
     grab_stick: [i16; 2],
     tailwalk: bool,
-) {
+    ai_trick: Option<i16>,
+) -> Option<String> {
     let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
     let root = std::path::Path::new(&root);
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
     let mut physics = GamePhysics::load_with_terrain(root, ground::Terrain::Course).unwrap();
+    let edges = physics.world.query_metadata().unwrap().static_edges.clone();
     // Keep this air fixture's open edge now that the production level has a
     // downhill ramp. The dedicated ramp regression uses the unmodified world.
-    physics.world = BoardWorld::new(
+    physics.world = (ground::with_authored_metadata(
         physics
             .world
             .triangles()
@@ -63,11 +89,12 @@ fn roll_off_sequence(
                 !(face.tag == 1 && face.triangle.vertices.iter().any(|vertex| vertex.z > 4.0))
             })
             .collect(),
-    );
-    if grab_hand.is_some() {
+        edges.clone(),
+    )).into();
+    if grab_hand.is_some() || ai_trick.is_some() {
         // A deeper test landing gives the held cycle and OUT animation time
         // to run before contact can hide a failed airborne release.
-        physics.world = BoardWorld::new(
+        physics.world = (ground::with_authored_metadata(
             physics
                 .world
                 .triangles()
@@ -90,7 +117,8 @@ fn roll_off_sequence(
                     .unwrap()
                 })
                 .collect(),
-        );
+            edges.clone(),
+        )).into();
     }
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
@@ -101,12 +129,16 @@ fn roll_off_sequence(
     let mut landed_frames = 0;
     let mut airborne_frames = 0;
     let mut grab_frames = 0;
+    let mut airborne_stick_frames = 0;
     let mut saw_grab = false;
     let mut saw_release = false;
+    let mut ai_slot = skate_core::living_world::ai_signals::TrickSlot { category: 4, ..Default::default() };
     for tick in 0..1000 {
+        // The stock ActionGraph only reaches BoardAdjusting.Up.TailGrab with the stick already held.
+        if tailwalk && saw_air { airborne_stick_frames += 1; }
         let mut triggers = [0; 2];
         if let Some(hand) = grab_hand {
-            if saw_air && grab_frames < if tailwalk { 100 } else { 35 } {
+            if saw_air && grab_frames < if tailwalk { 100 } else { 35 } && !(tailwalk && airborne_stick_frames < 6) {
                 triggers[hand] = 255;
             }
         }
@@ -120,7 +152,7 @@ fn roll_off_sequence(
             },
             triggers,
             left: [if saw_air { air_stick.unwrap_or(0) } else { 0 }, 0],
-            right: if triggers != [0; 2] {
+            right: if triggers != [0; 2] || (tailwalk && saw_air) {
                 grab_stick
             } else {
                 [0; 2]
@@ -133,6 +165,13 @@ fn roll_off_sequence(
             physics.settings.input_magnitude_threshold,
             skater.player_input.physical.scoring.capabilities_204,
         );
+        if let (true, Some(trick)) = (saw_air, ai_trick) {
+            let schedule = usize::try_from(trick).ok().and_then(|t| skater.scoring.data.by_id(t)).map(|d| d.intents.clone()).unwrap_or_default();
+            ai_slot.trick = trick;
+            for (name, value) in skate_core::living_world::ai_signals::slot_signals(&mut ai_slot, &schedule, 1.0, Default::default()) {
+                controls.action_intents.insert(&name, value);
+            }
+        }
         let result = frame::advance(
             &mut physics,
             &mut skater,
@@ -191,7 +230,22 @@ fn roll_off_sequence(
                     ))
                 );
                 assert_eq!(skater.pose_generation, physics.ticks);
-                return;
+                return None;
+            }
+        }
+        if ai_trick.is_some() && state.category() == 200 {
+            grab_frames += 1;
+            // 40 air ticks: past every grab's INTO; the held grab bails on landing, so the outcome is read here.
+            if grab_frames == 40 {
+                let mg = skater.animation.motion_controller.frame.current.and_then(|id| graphs.motion.binding.states.get(id)).map_or("?", |s| s.name.as_str());
+                return Some(format!(
+                    "{} mg={mg} score={:?}",
+                    skater.animation.motion.animation.current_name.as_deref().unwrap_or("?"),
+                    skater.animation.motion.score_packet.grab.map(|(name, _)| skate_core::scoring::catalog::IDENTIFIERS
+                        .iter()
+                        .find(|e| skate_core::animation::skeleton_input::name::encode(e.0.as_bytes()) == name)
+                        .map_or("?", |e| e.0))
+                ));
             }
         }
         if grab_hand.is_some() && state.category() == 200 {
@@ -243,7 +297,7 @@ fn roll_off_sequence(
                     skater.air_reckoning.state.spin_angle.abs() > 0.001,
                     "Raw airborne stick did not reach physical angular integration"
                 );
-                return;
+                return None;
             }
         }
         if saw_air
@@ -275,6 +329,7 @@ fn roll_off_sequence(
         "Completed roll-off/landing: ticks={}; grounded_after_air={landed_frames}",
         physics.ticks
     );
+    None
 }
 
 #[test]

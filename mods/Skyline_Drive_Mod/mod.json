@@ -6,6 +6,7 @@
   "author": "Skate3clone",
   "description": "General engine deformation: obstacle-shaped chassis dents update GLB meshes and solid collision, with owner-authoritative replication. Animated wheels remain rigid.",
   "entry": "main.lua",
+  "enabled_by_default": false,
   "settings": {
     "tire_friction": {
       "type": "number",

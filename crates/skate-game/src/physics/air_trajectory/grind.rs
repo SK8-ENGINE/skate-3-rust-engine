@@ -1,5 +1,5 @@
 //! Real static University provider -> native trajectory admission -> landing orientation.
-use crate::grind_world::StaticProvider;
+use crate::grind_world::{RailHit, RailView};
 use skate_core::{
     air::trajectory::{
         Prediction,
@@ -77,8 +77,9 @@ impl Settings {
         prediction: &mut Prediction,
         acquire: bool,
         world: &BoardWorld,
-        provider: &StaticProvider,
-        nearby: &mut Vec<usize>,
+        props: Option<&BoardWorld>,
+        provider: RailView<'_>,
+        nearby: &mut Vec<RailHit>,
         lock_distance: f32,
         context: GrindContext,
     ) -> Result<GrindEvaluation, String> {
@@ -89,9 +90,10 @@ impl Settings {
                 core::array::from_fn(|i| collision_position[i] - if i == 1 { 0.5 } else { 2. });
             let max =
                 core::array::from_fn(|i| collision_position[i] + if i == 1 { 4. } else { 2. });
-            let indices = provider.query(min, max)?;
-            *nearby =
-                trajectory_box_filter(&indices, provider.primitives(), context.board_position);
+            let hits = provider.query(min, max)?;
+            let primitives: Vec<_> = hits.iter().map(|h| h.primitive).collect();
+            let kept = trajectory_box_filter(&(0..hits.len()).collect::<Vec<_>>(), &primitives, context.board_position);
+            *nearby = kept.into_iter().map(|i| hits[i]).collect();
         }
         let mut result = GrindEvaluation {
             target: None,
@@ -102,8 +104,8 @@ impl Settings {
         };
         //82D69D68: retain the last real query for non-acquisition candidates.
         let mut square = 1_000_000.;
-        for &index in nearby.iter() {
-            let edge = provider.primitives()[index];
+        for hit in nearby.iter() {
+            let edge = hit.primitive;
             let axis = unit(sub(edge.end, edge.start));
             let from = sub(collision_position, edge.start);
             let end = sub(collision_position, edge.end);
@@ -119,16 +121,19 @@ impl Settings {
         if !acquire || nearby.is_empty() {
             return Ok(result);
         }
-        let mut candidates = nearby
+        let mut candidates: Vec<_> = nearby
             .iter()
-            .filter_map(|&i| {
-                consider_grind_primitive(*prediction, provider.primitives()[i], i, self.padding)
-            })
+            .enumerate()
+            .filter_map(|(i, hit)| consider_grind_primitive(*prediction, hit.primitive, i, self.padding))
             .collect();
+        // Diagnostics (doc 26i "Grinding on props"): with a prop or car rail in reach, which rails the aim weighed
+        // and what it locked onto (GRIND_AIM ... locked=...).
+        let moving = nearby.iter().filter(|h| h.primitive.owner >= crate::grind_world::props::PROP_OWNER_TAG).count();
+        let aim = (moving > 0).then(|| (nearby.len(), moving, candidates.len()));
         let mut limits = self.limits.clone();
         limits.lock_distance = lock_distance;
         while let Some(c) = take_best_grind(&mut candidates, lock_distance, &self.height) {
-            let edge = provider.primitives()[c.primitive];
+            let edge = nearby[c.primitive].primitive;
             let query = InvestigationInput {
                 start: edge.start,
                 end: edge.end,
@@ -141,8 +146,9 @@ impl Settings {
                 continue;
             }
             let surface = grind_surface::investigate(query, |index, probe| {
-                crate::physics::player_input::grind::world::surface_probe(
+                crate::physics::player_input::grind::world::surface_probe_with_props(
                     world,
+                    props,
                     context.actor,
                     index,
                     probe,
@@ -202,10 +208,7 @@ impl Settings {
             } else {
                 [0., 1., 0., 0.]
             };
-            let primitive_flags = provider
-                .metadata(c.primitive)
-                .ok_or("Accepted grind primitive lacks native metadata")?
-                .flags;
+            let primitive_flags = nearby[c.primitive].metadata.flags;
             result.target = Some(GrindTarget {
                 edge,
                 provider_index: c.primitive,
@@ -215,7 +218,13 @@ impl Settings {
                 vertical_normal: vertical,
             });
             result.score = self.score;
+            if let Some((all, moving, considered)) = aim {
+                bevy::log::info!("GRIND_AIM rails={all} moving={moving} candidates={considered} locked={}", crate::grind_world::props::describe_owner(edge.owner));
+            }
             return Ok(result);
+        }
+        if let Some((all, moving, considered)) = aim {
+            bevy::log::info!("GRIND_AIM rails={all} moving={moving} candidates={considered} locked=none");
         }
         Ok(result)
     }

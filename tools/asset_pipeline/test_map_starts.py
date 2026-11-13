@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from .map_starts import DEFAULT_LOCATIONS, heading
+from .map_starts import DEFAULT_LOCATIONS, IDENTITY, heading, pick
 
 
 class MapStartTests(unittest.TestCase):
@@ -17,6 +17,15 @@ class MapStartTests(unittest.TestCase):
     def test_chosen_defaults_cover_districts_without_a_retail_start(self):
         self.assertEqual(set(DEFAULT_LOCATIONS),
                          {'DIST_University', 'DIST_Industrial', 'DIST_DownTown', 'DIST_MaloofMoneyCup'})
+
+    def test_an_unplaced_world_start_falls_through_to_the_fe_location(self):
+        placed = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [-24.4, 51.2, -46.0, 1.]]
+        records = {('dist_agpark', 'z_ArtGallery'): [IDENTITY],
+                   ('dist_agpark', 'freeskate_artgallery_locator'): [placed]}
+        start = pick('DIST_AGPark', [('z_ArtGallery', 'world'), ('freeskate_artgallery_locator', 'fe_locations')],
+                     records)
+        self.assertEqual((start['locator'], start['position']), ('freeskate_artgallery_locator', [-24.4, 51.2, -46.0]))
+        self.assertIsNone(pick('DIST_AGPark', [('z_ArtGallery', 'world'), ('missing', 'fe')], records))
 
 
 if __name__ == '__main__':

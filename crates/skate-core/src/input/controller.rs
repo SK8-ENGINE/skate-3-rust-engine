@@ -150,6 +150,44 @@ impl DerivedControllerInput {
 #[path = "controller_startup.rs"]
 mod startup_tests;
 
+#[cfg(test)]
+mod bumper_tests {
+    use super::*;
+
+    /// Actions 72 / 73 are the bumpers (packed bits 29 / 28).
+    struct Bumpers(u8, u8);
+    impl ActionMap for Bumpers {
+        fn value(&mut self, _: u32) -> f32 {
+            0.0
+        }
+        fn state(&mut self, action: u32) -> u8 {
+            match action {
+                72 => self.0,
+                73 => self.1,
+                _ => 0,
+            }
+        }
+    }
+
+    fn both_after(prior_bit: u32, state_502: bool, state_104: bool) -> u32 {
+        let mut previous = RawControllerInput::from_words([0; 7]);
+        previous.words[6] = 1 << prior_bit;
+        let mut current = previous;
+        current.update(&previous, &mut Bumpers(1, 1), state_502, state_104);
+        current.words()[6] & ((1 << 29) | (1 << 28))
+    }
+
+    /// 82598FE0: both bumpers held keep the one pressed first only in states 502 / 104 (825999F0 passes them);
+    /// otherwise bit 28 is dropped.
+    #[test]
+    fn both_bumpers_keep_the_first_only_in_states_502_and_104() {
+        assert_eq!(both_after(28, false, true), 1 << 28, "skitching keeps the earlier bumper");
+        assert_eq!(both_after(28, true, false), 1 << 28, "off-board pushing too");
+        assert_eq!(both_after(28, false, false), 1 << 29, "elsewhere bit 28 goes");
+        assert_eq!(both_after(29, false, true), 1 << 29);
+    }
+}
+
 /// Independent reciprocal-square-root estimate followed by the original two
 /// refinement steps. Host arithmetic is not claimed to be bit-exact Xenon math.
 pub(super) fn magnitude(squared: f32) -> f32 {

@@ -13,6 +13,17 @@ mod apt_text;
 mod apt_vm;
 #[path = "../../skate-game/src/hud_runtime.rs"]
 mod hud_runtime;
+// apt_scene asks which retail button names have a prompt glyph; the HUD data has no button prompts.
+mod prompt_glyphs {
+    pub(crate) fn known(_retail: &str) -> bool {
+        false
+    }
+}
+// apt_scene maps ImageRenderer slots to runtime textures; the HUD data has no image slots.
+mod image_renderer_host {
+    pub(crate) const SLOTS: usize = 0;
+    pub(crate) const SLOT_TEXTURE_PREFIX: &str = "slot/";
+}
 use apt_vm::Value;
 fn main() -> Result<(), String> {
     let path = std::env::args_os()

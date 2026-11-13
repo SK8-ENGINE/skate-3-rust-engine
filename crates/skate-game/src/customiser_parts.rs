@@ -863,7 +863,7 @@ mod stock_hair_audit {
     #[test]
     #[ignore = "requires prepared owned SKATE_CAC_TEST_LIBRARY"]
     fn stock_hair_keeps_authored_shading_and_textures_after_colour_restore() {
-        let path=std::env::var("SKATE_CAC_TEST_LIBRARY").unwrap();
+        let Some(path) = std::env::var_os("SKATE_CAC_TEST_LIBRARY") else { test_skip!("set SKATE_CAC_TEST_LIBRARY") };
         let library:Library=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         let pairs:Vec<_>=library.models.iter().filter(|(_,p)|p.slot=="Hair")
             .flat_map(|(id,p)|p.materials.iter().map(move |mid|(id.clone(),mid.clone()))).collect();

@@ -75,6 +75,29 @@ FIELD_COUNTS = {
     'VEHJUNC': 16,    # vehicle caller J seg segdata g84 w88 w92 w96 lights r4 r7 result out("w0 w1 w2") light("phase kind"|-) pos("x y z")   (sub_82E11E90)
     'VEHCONN': 15,    # vehicle why("1 jstate 2 seg 4 lane 8 segid 16 first") jstate("old new") seg("old new") lane("old new") segid4144 id4136 target_lane manoeuvre dist3640 speed3412 accel3408 flags("4402 4403") pos fwd
     'PEDAUD': 21,  # obj S id index count flags("68 69 71 80") feet("73 74") model key(hex) s96 ("88 92 120 124") class132 speech136 mats("140 144") f148 f152 f156 o128 o144 opos("x y z") listener("x y z")   (npc; PedestrianSFX process sub_824D8078)
+    # Category aiskater (2026-10-15, hooks_physics.cpp): NPC skater path controller hips-test byte.
+    'AIPC922': 5,   # brain pc pc+922 pc+940 brain+168
+    # Category menus (2026-10-12, src/research/hooks_menus.cpp): Trick Guide 3D demo camera.
+    'TGCAM': 17,    # seq P cam f1 P+108 P+112 P+116 P+121 fov M(16) elem(10) c38(16) b58b(16) b58a(16) icebuf hex
+                    # hex(player+368: element words 92..103); runs before 2026-10-12 23:30 have 16 fields
+    'TGFIT': 8,     # obj index key holder track len_before len_after icebuf
+    'TGPROP': 5,    # track result lr track+8 [track+12]+12
+    'TGTAN': 8,     # r3 r4 r5 r6 r7 u16+60 u16+64 lr
+    'TGE87': 5,     # r3 r4 ret_r3 ret_f1 lr
+    'TGLOC': 2,     # list key
+    # Category render (2026-10-09, src/research/hooks_render.cpp): draw order of one frame, g_ViewDotLight writer.
+    'DOFRAME': 3,   # start|end|capped seq ms_since_previous_boundary
+    'DOLIST': 8,    # seq view list_offset first count first_key last_key callers
+    'DOSEEN': 2,    # vtable fence|-
+    'DOAPPLY': 11,  # seq tid instance vtable bind depth_i blend_i raster_i technique vs callers
+    'VDLWRITE': 8,  # function G before("x y z w") after("x y z w") lr callers tid lines_left
+    'VDLVAL': 3,    # G value("x y z w") frames_changed
+    # Category cas (2026-10-08, hooks_cas.cpp): skater actor character records / natural stance.
+    'CASACTOR': 8,  # actor r4 index(slot) r6 r7 r8 character1804 callers   (actor ctor sub_82590DC0)
+    'CASID': 5,     # actor index record_id(u64 hex) name_word name   (sub_824581C0 from the ctor, lr 82591158)
+    'CASCHAR': 5,   # actor r5 r6 name_ptr name   (sub_82B973C8 from the ctor, lr 825911E8)
+    'CASSET': 10,   # index lr b120 b121 w124 w144 goofy_out style_out style callers   (sub_82590B50; per (index, lr) on change)
+    'CASREC': 3,    # index record_addr hex168   (once per index)
 }
 
 

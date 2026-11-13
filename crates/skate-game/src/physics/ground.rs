@@ -194,6 +194,9 @@ fn build_world(
             }
         }
     }
+    with_authored_metadata(triangles, edges)
+}
+pub(crate) fn with_authored_metadata(triangles: Vec<WorldTriangle>, edges: Vec<EdgeSegment>) -> BoardWorld {
     //This test level explicitly authors material0/category0/upper flags0.
     //This is host metadata, not a claim that the stock material is concrete,
     //and not derived from the neutral contact coefficients or rendering tag.
@@ -248,7 +251,7 @@ fn query_edges() -> Vec<EdgeSegment> {
         .collect()
 }
 
-pub(super) fn query_settings() -> (WorldContactSettings, ContactRetentionSettings) {
+pub(crate) fn query_settings() -> (WorldContactSettings, ContactRetentionSettings) {
     (
         WorldContactSettings {
             // Serialized primitive82DC3AE4/82DC3B84, source literal82165A00.

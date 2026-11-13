@@ -96,6 +96,50 @@ When upgrading Bevy, reassess this patch and rerun the GPU test, stationary and
 moving-camera benchmarks, and visual comparison. Do not assume an unchanged
 private renderer implementation across engine versions.
 
+## Fade alpha in MeshTag
+
+`bevy_pbr/src/render/pbr_fragment.wgsl` (`pbr_input_from_standard_material`) and
+`bevy_pbr/src/render/pbr_prepass_functions.wgsl` (`prepass_alpha_discard`) replace
+the material's `base_color.a` with `bitcast<f32>(tag ^ 0x80000000)` when the
+mesh's `MeshTag` is not 0. The game's NPC / ped fade (`living_world::npc_skaters::present_fade`,
+`fade_tag`) writes the fade alpha there instead of into a per-NPC material copy
+every frame, which made Bevy rebuild that material's bind group each frame; the
+value is the same f32 the copy held, so drawing and the blended shadow's discard
+are unchanged. Meshes without a `MeshTag` (tag 0) are untouched; nothing else in
+the game sets one, so a mod or feature that wants `MeshTag` must use another
+encoding or stop the fade from owning it. A negative value marks an opaque source
+material (2026-11-08): the shaders use its absolute value as the alpha and, after the
+base colour texture, set the alpha to it again instead of fade x texture alpha (opaque
+retail textures keep other data in alpha; clothes and boards vanished during fades
+while skin showed). The ped shader only ever gets positive values. Doc:
+`docs/hails-additions/34-physics-performance.md#fades-meshtag`.
+
+## Serial specialization check
+
+`bevy_pbr/src/material.rs` `check_entities_needing_specialization` collects the entities whose mesh or material
+changed with a plain `iter()` instead of `par_iter()` (`SKATE_SERIAL_SPECIALIZATION_CHECK=0` restores the parallel
+pass; a `SPECIALIZATION_CHECK` log line names the mode). It runs once per material type every frame (about ten types
+in the game); the per-entity test is a few change-tick compares, so the parallel version's compute-pool scope cost
+more than the work (about 0.1 ms per type per frame even for a type with one or two entities). The same entities
+are collected; the order of the list differed run to run already and does not reach the result (each entity is
+specialized on its own). Doc: `docs/hails-additions/34-physics-performance.md#serial-specialization-check`.
+
+## Transform propagation workers yield
+
+`bevy_transform` is the unmodified crates.io 0.18.1 source except `src/systems.rs` `parallel::propagation_worker`:
+an idle worker (queue lock busy, or queue empty while another worker still works) calls `std::thread::yield_now`
+after `SKATE_TRANSFORM_YIELD_SPINS` failed polls (default 64; 0 = never yield, upstream's behaviour, for A/B checks)
+instead of spinning on, and drops the queue lock before it yields.
+Why: `propagate_parent_transforms` starts one worker per compute thread and the idle ones spun without ever yielding.
+A Windows Performance Recorder trace with context switches (2026-11-02, `.local/research/b230-process-stall-candidates.md`
+"WPR capture") showed the worker that still held work preempted for a moment and then kept off its CPU for 32 ms by
+spinning workers at a boosted priority; the frame (main thread, and the render thread's command buffer tasks in the
+same pool) waited with it: the 20 to 90 ms in-play stalls. On Windows `yield_now` is `SwitchToThread`, which runs
+another ready thread of that processor. The work and its order inside a worker are unchanged, and each GlobalTransform
+is computed from its parent as before, so the results are the same. Doc:
+`docs/hails-additions/34-physics-performance.md#transform-propagation-stalls`. On a Bevy upgrade: check whether
+upstream's worker still spins without yielding; re-apply or drop the patch.
+
 ## SDL3 static C runtime
 
 `sdl3-sys` is vendored from crates.io 0.7.1+SDL-3.4.16 with its original license.

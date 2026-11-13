@@ -26,8 +26,8 @@ engine-facing one, and cleanup when the mod is disabled.
 Note: `.glb` files are gitignored except explicitly whitelisted ones; add a `!` exception to `.gitignore` if a mod
 asset should be committed (never retail-derived assets).
 
-## Audio and world-audio APIs (audio branches; upstream PRs #32, #36, #43, #44)
-Check `sdk/skate.lua` and the audio-modding guide on the branch you build against for the exact capability levels;
+## Audio and world-audio APIs (upstream PR #32, merged; #36, #43 and #44 were folded into it)
+Check `sdk/skate.lua` and the audio-modding guide (`docs/hails-additions/16-audio-modding.md`) for the exact capability levels;
 the summary below is the shape of the API.
 
 - **World audio** (extension `world_audio`): `sdk.world_audio.spawn(key, 'traffic'|'ped'|'skater', opts)` /
@@ -57,6 +57,10 @@ the summary below is the shape of the API.
   `sdk.audio.rule(key, {match, action = mute|replace|layer, play})` and `audio.json` `rules`.
 - Content changes hot-swap where possible (`sdk.audio.info().swaps / last_change`); `audio.json` edits reload while
   the script runs.
+  MixMap and grain changes still need a restart. `audio.json` `add.projects` adds a mod's own `.csi` projects
+  (names must not clash with the install's). Commands that can fail (a native play without the native audio, an
+  unknown tuning field, an unknown emitter bank or reverb preset, a missing rule WAV) go through
+  `sdk.commands.request`.
 - **Check:** `cargo run -p skate-mods --example check_mod -- <pkg> --install <assets> [--with <pkg>]`.
 - Examples: `sdk/examples/audio-example` (ships), `mods/audio-content-test` (dev, off by default;
   `SKATE3_MODS_ENABLE=dev-audio-content-test`), `mods/world-audio-test/` (dev). Synthesize test sounds (for example

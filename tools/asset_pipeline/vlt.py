@@ -157,6 +157,10 @@ def convert(schema_stem, collections_stem, names):
                     if t=='EA::Reflection::Text':
                         array=out[name(fkey)]['array']
                         array['text_items']=array_text_items(cb,array['items'])
+                    elif t=='Sk8::FE::TipsLoaderHint':
+                        # (title, text) string pointers (the loading screen's hints; research b581).
+                        array=out[name(fkey)]['array']
+                        array['text_pairs']=[array_text_items(cb,[raw[:8],raw[8:]]) for raw in array['items']]
         for fk,f in fields.items():
             if f[4]&2 and layout: value(fk,cb,layout+f[1])
         entries=at+48+typeslen*8

@@ -1,6 +1,6 @@
 # Setup survives a dead console (#20)
 
-Branch: `fix/setup-dead-console` (from `main` 4488651). Status: **done, uncommitted**. Setup (Python) only; no asset
+Branch: `fix/setup-dead-console` (from `main` 4488651). Status: **done, in upstream main** (`d4e00bad`, integrated through `c283cc57`). Setup (Python) only; no asset
 rebuild, no game behaviour change.
 
 ## Problem

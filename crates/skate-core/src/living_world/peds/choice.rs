@@ -1,0 +1,150 @@
+//! Which ped a census spawn becomes: entity, model and tints (826B8B88, 826BB058, 827B4170), seeded per ped.
+//! Retail order and our draws: docs/hails-additions/26f-living-world-peds.md#ped-choice
+
+use crate::living_world::rng::{Rng, derive};
+use std::collections::BTreeMap;
+
+/// `livingworld_models` record (the fields M2 uses).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PedModel {
+    pub parent: Option<String>,
+    /// `Hash_62F7C585686F3371` recipe name = GLB name (`models/<recipe>.glb`); empty = group record.
+    pub recipe: String,
+    /// `Hash_3EB8E0CD15F0891C` = the speech voice id (`world-ped-audio.md`).
+    pub voice: Option<u32>,
+    /// `secondary_colours`: the red mask tints (`i_colorize_red`).
+    pub tints_a: Vec<[f32; 4]>,
+    /// `chassis_colours`: the blue mask tints (`i_colorize_blue`).
+    pub tints_b: Vec<[f32; 4]>,
+    /// `Hash_73B6874C7B46C7C6` (45 / 55) and `Hash_9FCFDBEA56BA4733` (65 / 75) [data]: read by
+    /// `sub_827C1188` [code]: the first is the camera distance fade (opaque to 45 m, gone at
+    /// 55 m, `peds::fade`); the second replaces it only when its third float is larger.
+    pub lod_near: Option<[f32; 2]>,
+    pub lod_far: Option<[f32; 2]>,
+}
+
+/// `livingworld_entities` record (the fields M2 uses).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PedEntity {
+    /// `Model` ref (a `livingworld_models` key).
+    pub model: Option<String>,
+    /// `livingworld_entity_animation` set (`default`, `female`, `bum`, `jock`, ...).
+    pub anim_set: Option<String>,
+}
+
+/// The tables the choice reads, keyed by retail record names.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PedCatalog {
+    /// `livingworld_entitycategories`: category -> `entities` in data order.
+    pub categories: BTreeMap<String, Vec<String>>,
+    pub entities: BTreeMap<String, PedEntity>,
+    pub models: BTreeMap<String, PedModel>,
+}
+
+/// Mod / engine overrides by key (empty = retail).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PedOverrides {
+    /// category -> replacement entity list.
+    pub category_entities: BTreeMap<String, Vec<String>>,
+    /// entity -> model record.
+    pub entity_model: BTreeMap<String, String>,
+    /// entity -> animation set.
+    pub entity_anim_set: BTreeMap<String, String>,
+    /// model record -> replacement tint palettes `(tints_a, tints_b)` (red mask, blue mask);
+    /// picked with the same one-rand rule as the retail lists.
+    pub model_tints: BTreeMap<String, (Vec<[f32; 4]>, Vec<[f32; 4]>)>,
+}
+
+/// The resolved look of one ped.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PedLook {
+    pub entity: String,
+    /// The model record that carries the recipe (a group record's chosen child).
+    pub model: String,
+    pub recipe: String,
+    pub anim_set: String,
+    pub voice: Option<u32>,
+    pub tint_a: [f32; 4],
+    pub tint_b: [f32; 4],
+}
+
+/// Seed label of the look sub-RNG.
+pub const LOOK_LABEL: u64 = 0x5045_444C_4F4F_4B00;
+/// The default tint when a model has no tint array (retail reads a constant vector at
+/// `0x830D0850`; its value is runtime data, not read: white = no tint).
+pub const DEFAULT_TINT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+
+/// `sub_826BB058`: u32 x 2^-32 rounded to f32 (`fcfid`, `frsp`, `fmuls`). Can reach 1.0.
+pub fn unit_f32(draw: u32) -> f32 {
+    (draw as f32) * f32::from_bits(0x2F80_0000)
+}
+
+/// `sub_826B8B88`: the entity index for one draw, `None` for an empty list.
+pub fn entity_index(draw: u32, count: usize) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    let scaled = unit_f32(draw) * 100.0;
+    let n = scaled as i32 as u32;
+    Some((n % count as u32) as usize)
+}
+
+/// `sub_827B4170`: both tints from one rand.
+pub fn tints(model: &PedModel, r: u32) -> ([f32; 4], [f32; 4]) {
+    let pick = |v: &[[f32; 4]]| if v.is_empty() { DEFAULT_TINT } else { v[(r % v.len() as u32) as usize] };
+    (pick(&model.tints_a), pick(&model.tints_b))
+}
+
+impl PedCatalog {
+    /// The records inheriting from a group model record, with a recipe, in key order.
+    pub fn model_children(&self, model: &str) -> Vec<&str> {
+        self.models.iter().filter(|(_, m)| m.parent.as_deref() == Some(model) && !m.recipe.is_empty()).map(|(k, _)| k.as_str()).collect()
+    }
+
+    /// The models an entity's look can use: its model record when that has a recipe, else the group record's
+    /// children with one (`look_for` draws among them). Empty: no usable model (retail: no spawn).
+    pub fn model_candidates(&self, entity: &str, overrides: &PedOverrides) -> Vec<&str> {
+        let record = self.entities.get(entity);
+        let Some(model_key) = overrides.entity_model.get(entity).or_else(|| record.and_then(|e| e.model.as_ref())) else { return Vec::new() };
+        let Some((key, model)) = self.models.get_key_value(model_key) else { return Vec::new() };
+        if model.recipe.is_empty() { self.model_children(model_key) } else { vec![key.as_str()] }
+    }
+
+    /// Every recipe a census spawn of any category can get (the entity lists as `choose` reads them, each entity's
+    /// `model_candidates`): the models to have loaded before peds spawn.
+    pub fn reachable_recipes(&self, overrides: &PedOverrides) -> std::collections::BTreeSet<String> {
+        let lists = self.categories.iter().filter(|(c, _)| !overrides.category_entities.contains_key(*c)).chain(overrides.category_entities.iter());
+        lists
+            .flat_map(|(_, entities)| entities.iter())
+            .flat_map(|entity| self.model_candidates(entity, overrides))
+            .filter_map(|key| self.models.get(key).map(|m| m.recipe.clone()))
+            .collect()
+    }
+
+    /// The look of a census spawn: category + the spawn record's seed. `None` when the category
+    /// has no entities or the entity has no usable model (retail: no spawn).
+    pub fn choose(&self, category: &str, seed: u64, overrides: &PedOverrides) -> Option<PedLook> {
+        let mut rng = Rng::new(derive(seed, &[LOOK_LABEL]));
+        let draws = [rng.next_u32(), rng.next_u32(), rng.next_u32()];
+        let list = overrides.category_entities.get(category).or_else(|| self.categories.get(category))?;
+        let entity = list.get(entity_index(draws[0], list.len())?)?.clone();
+        self.look_for(&entity, draws[1], draws[2], overrides)
+    }
+
+    /// The look of a given entity (placed spawns, mods): draws for the group child and tints.
+    pub fn look_for(&self, entity: &str, child_draw: u32, tint_draw: u32, overrides: &PedOverrides) -> Option<PedLook> {
+        let record = self.entities.get(entity);
+        let candidates = self.model_candidates(entity, overrides);
+        if candidates.is_empty() {
+            return None;
+        }
+        let model_key = candidates[(child_draw % candidates.len() as u32) as usize].to_string();
+        let model = &self.models[&model_key];
+        let (tint_a, tint_b) = match overrides.model_tints.get(&model_key) {
+            Some((a, b)) => tints(&PedModel { tints_a: a.clone(), tints_b: b.clone(), ..PedModel::default() }, tint_draw),
+            None => tints(model, tint_draw),
+        };
+        let anim_set = overrides.entity_anim_set.get(entity).cloned().or_else(|| record.and_then(|e| e.anim_set.clone())).unwrap_or_else(|| "default".into());
+        Some(PedLook { entity: entity.to_string(), model: model_key, recipe: model.recipe.clone(), anim_set, voice: model.voice, tint_a, tint_b })
+    }
+}

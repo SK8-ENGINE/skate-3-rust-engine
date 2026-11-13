@@ -116,11 +116,6 @@ impl Tuning {
         let o=&OPTIONS[index];let v=((fraction.clamp(0.,1.)*o.max/o.step).round()*o.step).clamp(0.,o.max);
         self.values.insert(o.key.into(),v);
     }
-    pub fn label(&self,index:usize)->String {
-        let o=&OPTIONS[index];let v=self.value(index);
-        if o.boolean {format!("{}     {}",o.label,if v!=0. {"On"}else{"Off"})}
-        else {format!("{}     {:.2}",o.label,v)}
-    }
 }
 pub(crate) fn load_collections(root:&Path)->Result<Collections,String> {
     let mut data=Collections::load(root)?;

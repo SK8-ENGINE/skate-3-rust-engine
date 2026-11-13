@@ -156,11 +156,49 @@ mod windows {
     }
     const _: () = assert!(size_of::<CapabilitiesEx>() == 32);
     type GetCapabilitiesEx = unsafe extern "system" fn(u32, u32, u32, *mut CapabilitiesEx) -> u32;
+    type GetStateEx = unsafe extern "system" fn(u32, *mut State) -> u32;
 
     #[link(name = "xinput")]
     unsafe extern "system" {
         fn XInputGetState(index: u32, state: *mut State) -> u32;
         fn XInputGetCapabilities(index: u32, flags: u32, capabilities: *mut Capabilities) -> u32;
+        fn XInputSetState(index: u32, vibration: *mut Vibration) -> u32;
+    }
+
+    /// Motor speeds for one slot (XInputSetState); sent only when they change, like retail's device flush.
+    pub(super) fn set_rumble(index: u32, speeds: [u16; 2]) {
+        static SENT: std::sync::Mutex<[Option<[u16; 2]>; 4]> = std::sync::Mutex::new([None; 4]);
+        let mut sent = SENT.lock().unwrap_or_else(|e| e.into_inner());
+        if sent[index as usize] == Some(speeds) {
+            return;
+        }
+        let mut vibration = Vibration { left: speeds[0], right: speeds[1] };
+        // SAFETY: a valid XINPUT_VIBRATION for the call's duration.
+        if unsafe { XInputSetState(index, &mut vibration) } == 0 {
+            sent[index as usize] = Some(speeds);
+        }
+    }
+
+    /// XINPUT_CAPS_WIRELESS of an XInput slot (None when the slot is empty): SDL's XInput driver reports no
+    /// connection state, but retail's curve choice reads exactly this flag.
+    pub(super) fn wireless(index: u32) -> Option<bool> {
+        let mut capabilities = MaybeUninit::<Capabilities>::uninit();
+        // SAFETY: writable storage with the SDK ABI; read only on success.
+        if unsafe { XInputGetCapabilities(index, 1, capabilities.as_mut_ptr()) } != 0 {
+            return None;
+        }
+        // SAFETY: the successful call filled it.
+        let capabilities = unsafe { capabilities.assume_init() };
+        Some(capabilities.flags & 0x0002 != 0)
+    }
+
+    /// Zero all four slots whatever was sent before (exit paths, and the crash supervisor once the game ended).
+    pub(crate) fn stop_all_rumble() {
+        for index in 0..4 {
+            let mut vibration = Vibration { left: 0, right: 0 };
+            // SAFETY: a valid XINPUT_VIBRATION for the call's duration; an empty slot just fails.
+            unsafe { XInputSetState(index, &mut vibration) };
+        }
     }
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -168,22 +206,40 @@ mod windows {
         fn GetProcAddress(module: *mut std::ffi::c_void, name: *const u8) -> *mut std::ffi::c_void;
     }
 
+    /// An export of xinput1_4 by ordinal (null when the module or export is absent; the module is never freed).
+    fn xinput_ordinal(ordinal: usize) -> *mut std::ffi::c_void {
+        let name: Vec<u16> = "xinput1_4.dll\0".encode_utf16().collect();
+        // SAFETY: NUL-terminated wide string; an already loaded module is returned with its count raised.
+        let module = unsafe { LoadLibraryW(name.as_ptr()) };
+        if module.is_null() {
+            return std::ptr::null_mut();
+        }
+        // SAFETY: ordinal lookup (MAKEINTRESOURCE(ordinal)) in a loaded module.
+        unsafe { GetProcAddress(module, ordinal as *const u8) }
+    }
+
     /// Undocumented XInputGetCapabilitiesEx (Windows 8+ xinput1_4, ordinal
     /// 108), which SDL also uses for vendor/product. None when absent.
     fn capabilities_ex() -> Option<GetCapabilitiesEx> {
         static FUNCTION: OnceLock<Option<GetCapabilitiesEx>> = OnceLock::new();
         *FUNCTION.get_or_init(|| {
-            let name: Vec<u16> = "xinput1_4.dll\0".encode_utf16().collect();
-            // SAFETY: NUL-terminated wide string; the module is never freed.
-            let module = unsafe { LoadLibraryW(name.as_ptr()) };
-            if module.is_null() {
-                return None;
-            }
-            // SAFETY: ordinal lookup (MAKEINTRESOURCE(108)) in a loaded module.
-            let function = unsafe { GetProcAddress(module, 108usize as *const u8) };
+            let function = xinput_ordinal(108);
             // SAFETY: the export at ordinal 108 has SDL's declared signature.
             (!function.is_null()).then(|| unsafe {
                 std::mem::transmute::<*mut std::ffi::c_void, GetCapabilitiesEx>(function)
+            })
+        })
+    }
+
+    /// Undocumented XInputGetStateEx (xinput1_4, ordinal 100): XInputGetState's layout plus the Guide button as bit
+    /// 0x0400, which opens the PC overlay (SDL reads Guide the same way). None when absent.
+    fn state_ex() -> Option<GetStateEx> {
+        static FUNCTION: OnceLock<Option<GetStateEx>> = OnceLock::new();
+        *FUNCTION.get_or_init(|| {
+            let function = xinput_ordinal(100);
+            // SAFETY: the export at ordinal 100 takes (index, XINPUT_STATE*) like XInputGetState.
+            (!function.is_null()).then(|| unsafe {
+                std::mem::transmute::<*mut std::ffi::c_void, GetStateEx>(function)
             })
         })
     }
@@ -217,8 +273,11 @@ mod windows {
         cache: &mut CapabilityCache,
     ) -> Result<DevicePacket, DeviceError> {
         let mut state = MaybeUninit::<State>::uninit();
-        // SAFETY: properly aligned writable storage with the SDK's exact C ABI.
-        let result = unsafe { XInputGetState(index, state.as_mut_ptr()) };
+        // SAFETY: properly aligned writable storage with the SDK's exact C ABI (both calls share it).
+        let result = match state_ex() {
+            Some(get) => unsafe { get(index, state.as_mut_ptr()) },
+            None => unsafe { XInputGetState(index, state.as_mut_ptr()) },
+        };
         if result != 0 {
             cache.invalidate();
         }
@@ -304,7 +363,10 @@ mod sdl {
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(1);
     /// XINPUT_DEVSUBTYPE_GAMEPAD; SDL only opens devices it maps as gamepads.
     const SUBTYPE_GAMEPAD: u8 = 1;
-    const BUTTONS: [(Button, u16); 14] = [
+    /// Guide reads as bit 0x0400 (XInputGetStateEx's place for it): it opens the PC overlay; retail's pad conversion
+    /// never reads it, and it is not a bindable name (a paddle must not become the overlay button).
+    pub(super) const BUTTONS: [(Button, u16); 15] = [
+        (Button::Guide, 0x0400),
         (Button::DPadUp, 0x0001), (Button::DPadDown, 0x0002),
         (Button::DPadLeft, 0x0004), (Button::DPadRight, 0x0008),
         (Button::Start, 0x0010), (Button::Back, 0x0020),
@@ -321,10 +383,73 @@ mod sdl {
     /// Latest (packet number, state, identity) per slot, like XInputGetState's snapshot.
     pub(super) struct Shared {
         slots: Mutex<[Published; 4]>,
+        /// Requested motor speeds per slot (`set_rumble`); the SDL thread applies them.
+        rumble: Mutex<[[u16; 2]; 4]>,
+        /// Exit: the SDL thread zeroes every open pad and sets `stopped`.
+        stop: std::sync::atomic::AtomicBool,
+        stopped: std::sync::atomic::AtomicBool,
+    }
+
+    /// SDL rumble runs for a duration: re-send a running request well before it ends.
+    const RUMBLE_REFRESH: std::time::Duration = std::time::Duration::from_millis(500);
+    const RUMBLE_DURATION_MS: u32 = 1000;
+
+    pub(super) fn set_rumble(shared: &Shared, index: usize, speeds: [u16; 2]) {
+        shared.rumble.lock().unwrap_or_else(|e| e.into_inner())[index] = speeds;
+    }
+
+    /// Exit: ask the SDL thread to zero every pad and wait for it (bounded: the thread may be the one panicking).
+    pub(super) fn stop_all_rumble(shared: &Shared) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        *shared.rumble.lock().unwrap_or_else(|e| e.into_inner()) = [[0; 2]; 4];
+        shared.stop.store(true, SeqCst);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
+        while !shared.stopped.load(SeqCst) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        shared.stopped.load(SeqCst)
+    }
+
+    /// Whether the SDL thread sends `speeds` now, given what it last sent and how long ago: on any change, and a
+    /// running rumble again before its duration ends. Zero is never re-sent, so an idle pad gets no traffic.
+    pub(super) fn rumble_due(last: Option<([u16; 2], std::time::Duration)>, speeds: [u16; 2]) -> bool {
+        match last {
+            None => speeds != [0, 0],
+            Some((sent, age)) => sent != speeds || (speeds != [0, 0] && age >= RUMBLE_REFRESH),
+        }
+    }
+
+    /// The XInput slot of an SDL pad opened by SDL's XInput driver (device path "XInput#<slot>").
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(super) fn xinput_slot(path: &str) -> Option<u32> {
+        path.strip_prefix("XInput#")?.parse().ok().filter(|&slot| slot < 4)
+    }
+
+    #[test]
+    fn xinput_paths_name_their_slot() {
+        assert_eq!(xinput_slot("XInput#0"), Some(0));
+        assert_eq!(xinput_slot("XInput#3"), Some(3));
+        assert_eq!(xinput_slot("XInput#4"), None);
+        assert_eq!(xinput_slot(r"\\?\HID#VID_045E&PID_0B22"), None);
+        assert_eq!(xinput_slot(""), None);
+    }
+
+    #[test]
+    fn idle_is_never_refreshed_and_a_running_rumble_is() {
+        use std::time::Duration;
+        let long = Duration::from_secs(5);
+        assert!(!rumble_due(None, [0, 0]), "nothing to send before any rumble");
+        assert!(!rumble_due(Some(([0, 0], long)), [0, 0]), "an idle pad gets no traffic");
+        assert!(rumble_due(Some(([0, 0], Duration::ZERO)), [0, 3276]), "a change goes out at once");
+        assert!(rumble_due(Some(([0, 3276], Duration::ZERO)), [0, 0]), "so does the stop");
+        assert!(!rumble_due(Some(([9, 9], Duration::from_millis(100))), [9, 9]));
+        assert!(rumble_due(Some(([9, 9], RUMBLE_REFRESH)), [9, 9]), "re-sent before its duration ends");
     }
 
     struct Slot {
         pad: Gamepad,
+        /// Motor speeds last sent and when (None = nothing sent yet).
+        rumble: Option<([u16; 2], std::time::Instant)>,
         id: u32,
         number: u32,
         state: XboxState,
@@ -334,7 +459,13 @@ mod sdl {
     /// SDL must be pumped on the thread that initialised it, while Bevy runs
     /// systems on a pool; a dedicated thread owns SDL and publishes snapshots.
     pub(super) fn start() -> Result<&'static Shared, String> {
-        let shared: &'static Shared = Box::leak(Box::new(Shared { slots: Mutex::new(Default::default()) }));
+        let shared: &'static Shared =
+            Box::leak(Box::new(Shared {
+            slots: Mutex::new(Default::default()),
+            rumble: Mutex::new([[0; 2]; 4]),
+            stop: Default::default(),
+            stopped: Default::default(),
+        }));
         let (ready, started) = mpsc::channel();
         std::thread::Builder::new()
             .name("sdl-gamepad".into())
@@ -409,6 +540,21 @@ mod sdl {
                 *output = Some((slot.number, state, slot.kind.clone()));
             }
             *shared.slots.lock().unwrap_or_else(|e| e.into_inner()) = published;
+            let requested = *shared.rumble.lock().unwrap_or_else(|e| e.into_inner());
+            if shared.stop.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                for slot in slots.iter_mut().flatten() {
+                    let _ = slot.pad.set_rumble(0, 0, 0);
+                    slot.rumble = Some(([0, 0], std::time::Instant::now()));
+                }
+                shared.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            for (slot, speeds) in slots.iter_mut().zip(requested) {
+                let Some(slot) = slot else { continue };
+                if rumble_due(slot.rumble.map(|(sent, at)| (sent, at.elapsed())), speeds) {
+                    let _ = slot.pad.set_rumble(speeds[0], speeds[1], RUMBLE_DURATION_MS);
+                    slot.rumble = Some((speeds, std::time::Instant::now()));
+                }
+            }
             std::thread::sleep(POLL_INTERVAL);
         }
     }
@@ -446,10 +592,30 @@ mod sdl {
                 paddles: PADDLE_BUTTONS.iter().filter(|&&b| pad.has_button(b)).count() as u8,
                 touchpad: pad.touchpads_count() > 0,
                 misc_button: pad.has_button(Button::Misc1),
+                wireless: match pad.connection_state() {
+                    Ok(sdl3::joystick::ConnectionState::Wireless) => Some(true),
+                    Ok(sdl3::joystick::ConnectionState::Wired) => Some(false),
+                    // SDL's XInput driver ("XInput#<slot>") leaves it unknown: ask XInput, as retail does.
+                    #[cfg(windows)]
+                    _ => xinput_slot(&pad.path().unwrap_or_default()).and_then(super::windows::wireless),
+                    #[cfg(not(windows))]
+                    _ => None,
+                },
+                face_labels: {
+                    let labels = [Button::South, Button::East, Button::West, Button::North]
+                        .map(|b| controller_kind::PromptLabel::from_sdl(gamepads.button_label_for_gamepad_type(pad.r#type(), b)));
+                    labels.iter().all(Option::is_some).then(|| labels.map(Option::unwrap))
+                },
             },
             controller_kind::user_models(),
         ));
-        slots[index] = Some(Slot { pad, id: id.raw(), number: 0, state: XboxState::default(), kind });
+        // Stop the motors on open: a pad can still be vibrating from a game that ended mid-rumble (killed, crashed),
+        // and the poll loop only sends a stop after a rumble it started itself (2026-10-13: endless rumble).
+        let mut pad = pad;
+        let stopped = pad.set_rumble(0, 0, 0).is_ok();
+        info!("Controller {index}: rumble stopped on open ({})", if stopped { "sent" } else { "not supported" });
+        let rumble = Some(([0, 0], std::time::Instant::now()));
+        slots[index] = Some(Slot { pad, rumble, id: id.raw(), number: 0, state: XboxState::default(), kind });
     }
 
     fn read(pad: &Gamepad, paddles: [u16; 4]) -> XboxState {
@@ -481,8 +647,9 @@ enum Backend {
     Unavailable,
 }
 
+static BACKEND: OnceLock<Backend> = OnceLock::new();
+
 fn backend() -> &'static Backend {
-    static BACKEND: OnceLock<Backend> = OnceLock::new();
     BACKEND.get_or_init(|| {
         #[cfg(windows)]
         if std::env::var("SKATE3_INPUT").is_ok_and(|v| v.eq_ignore_ascii_case("xinput")) {
@@ -503,6 +670,40 @@ fn backend() -> &'static Backend {
             }
         }
     })
+}
+
+/// Motor speeds (low-frequency left, high-frequency right) for controller slot `index`.
+pub(crate) fn set_rumble(index: usize, speeds: [u16; 2]) {
+    assert!(index < 4);
+    match backend() {
+        Backend::Sdl(shared) => sdl::set_rumble(shared, index, speeds),
+        #[cfg(windows)]
+        Backend::XInput => windows::set_rumble(index as u32, speeds),
+        #[cfg(not(windows))]
+        Backend::Unavailable => {}
+    }
+}
+
+/// Exit (normal close, Ctrl+C, panic): zero every pad's motors. Never starts a backend that is not running.
+/// On Windows every XInput slot is zeroed too, which also reaches a pad SDL opened.
+pub(crate) fn stop_rumble_on_exit() {
+    let sdl = match BACKEND.get() {
+        Some(Backend::Sdl(shared)) => Some(sdl::stop_all_rumble(shared)),
+        _ => None,
+    };
+    #[cfg(windows)]
+    windows::stop_all_rumble();
+    bevy::log::info!(
+        "RUMBLE stopped on exit ({})",
+        match sdl { Some(true) => "SDL pads zeroed", Some(false) => "SDL thread did not answer", None => "XInput" }
+    );
+}
+
+/// The crash supervisor, once the game process ended (killed, crashed or closed): zero every XInput slot, which a
+/// killed game could not do itself.
+#[cfg(windows)]
+pub(crate) fn stop_rumble_after_game() {
+    windows::stop_all_rumble();
 }
 
 pub(crate) fn poll_cached(
@@ -557,6 +758,13 @@ mod conversion_tests {
         assert_eq!(button_mask("A"), Some(0x1000));
         assert_eq!(button_mask("left_shoulder"), Some(0x0100));
         assert_eq!(button_mask("guide"), None);
+    }
+
+    #[test]
+    fn guide_reads_as_bit_0x0400_which_retail_conversion_ignores() {
+        assert!(super::sdl::BUTTONS.contains(&(sdl3::gamepad::Button::Guide, 0x0400)));
+        let pressed = skate_core::input::xbox::XboxState { buttons: 0x0400, ..Default::default() };
+        assert!(skate_core::input::xbox::convert(&pressed, 0).iter().all(|v| *v == 0.0), "no retail slot moves");
     }
 }
 

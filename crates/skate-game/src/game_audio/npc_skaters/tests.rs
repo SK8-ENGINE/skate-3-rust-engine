@@ -423,7 +423,7 @@ fn a_ghost_claims_instance_1_releases_and_survives_a_map_change() {
     let Some((library, _)) = install() else { panic!("missing private data: no audio install") };
     let Ok(mut native) = super::super::native::Native::start(&library) else { panic!("missing private data: no AEMS install") };
     let Some(dir) = std::env::var_os("SKATE_AUDIO_STATE_LOGS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from) else {
-        panic!("missing private data: SKATE_AUDIO_STATE_LOGS (the audio state logs) is not set")
+        test_skip!("set SKATE_AUDIO_STATE_LOGS (the audio state logs)")
     };
     let Some(log) = std::fs::read_dir(&dir).ok().and_then(|d| d.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "tsv")).max())
     else { panic!("missing private data: no state log in {}", dir.display()) };
@@ -485,7 +485,7 @@ fn the_npc_instance_runs_wheels_clothing_and_the_bail_grunt() {
     let (wheels_on, clothing_on) = native.player.as_ref().map_or((false, false), |p| (p.wheels_on, p.footsteps_on));
     assert!(wheels_on && clothing_on, "the install has the wheel streams and the foley banks");
     let Some(dir) = std::env::var_os("SKATE_AUDIO_STATE_LOGS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from) else {
-        panic!("missing private data: SKATE_AUDIO_STATE_LOGS (the audio state logs) is not set")
+        test_skip!("set SKATE_AUDIO_STATE_LOGS (the audio state logs)")
     };
     let mut logs: Vec<std::path::PathBuf> = std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "tsv")).collect()).unwrap_or_default();
     logs.sort();
@@ -609,7 +609,7 @@ struct GrecTruck {
 #[ignore = "needs the private install data and the NPC GREC export"]
 fn npc_bed_follows_the_recomp_rows() {
     let Some(dir) = std::env::var_os("SKATE_NPC_GREC").filter(|v| !v.is_empty()) else {
-        panic!("missing private data: SKATE_NPC_GREC (npc_grec_rows.py --json)");
+        test_skip!("set SKATE_NPC_GREC (npc_grec_rows.py --json)");
     };
     let Ok(text) = std::fs::read_to_string(std::path::Path::new(&dir).join("npc_rows_180430.json")) else { panic!("missing private data: npc_rows_180430.json") };
     let rows: Vec<GrecRow> = serde_json::from_str(&text).unwrap();

@@ -282,6 +282,20 @@ function sdk.graphics.remove(key) end
 ---@param key string
 ---@param visible boolean
 function sdk.graphics.set_visible(key, visible) end
+---@class WaterLookPatch
+---@field enabled? boolean false = plain retail water_defaultPS look
+---@field ripple_scale? number ripple texture scale multiplier (retail 1)
+---@field reflection_blur? number extra reflection cube mip levels (retail 0)
+---@field reflection_tint? number[] reflection colour multiplier rgb (retail {1,1,1})
+---@field third_wave? boolean rotated third wave against visible tiling
+---@field body_calming? boolean calmer motion on small water bodies
+---@field wave_rate? number wave animation speed relative to retail (retail 1)
+---@field scroll_rate? number water texture scroll speed relative to retail (retail 1)
+---@field seamless_clock? boolean scroll clock without a visible restart (default true; false restarts every 10 s)
+---Replace values of the water look layer (capability water_look 1); nil restores the player's look.
+---One mod at a time; released when the mod is disabled.
+---@param patch WaterLookPatch|nil
+function sdk.graphics.water_look(patch) end
 ---@class MeshBufferOpts
 ---@field body? string
 ---@field position? Vec3 body-local when bound, world when unbound
@@ -436,6 +450,37 @@ function sdk.volumes.remove(key) end
 ---@return {position:Vec3,size:Vec3,rotation:Quat,inside:string[]}|nil point overlaps, not physical collisions
 function sdk.volumes.read(key) end
 
+sdk.minimap = {}
+---@param key string
+---@param options {position:Vec3, icon?:string, angle?:number, scale?:number, fade?:boolean, max_distance?:number, colour?:{[1]:number,[2]:number,[3]:number,[4]:number}}
+function sdk.minimap.icon(key, options) end
+---@param key string
+function sdk.minimap.remove(key) end
+---@param shown boolean false hides the HUD minimap while this mod is enabled
+function sdk.minimap.show(shown) end
+
+sdk.loading = {}
+---@param key string
+---@param line {title:string, text:string}|nil a hint panel line (string ids are localised); nil removes it
+function sdk.loading.hint(key, line) end
+---@param key string
+---@param text string|nil a Coach Frank line; nil removes it
+function sdk.loading.coach_frank(key, text) end
+---@param key string
+---@param row {label:string, value:string}|nil a Stats panel row next to the career stats; nil removes it
+function sdk.loading.stat(key, row) end
+---@param key string
+function sdk.loading.remove(key) end
+---@param shown boolean false: only mods' lines on the panels mods give lines for, while this mod is enabled
+function sdk.loading.retail(shown) end
+---@param key string keeps a running load's loading screen up until released (at most 30 s past the load)
+function sdk.loading.hold(key) end
+---@param key string
+function sdk.loading.release(key) end
+---@param t {show:number|nil, outro:number|nil}|nil seconds a panel shows (1..120, retail 9.0) and its outro takes
+---(0..10, retail 0.5); nil drops this mod's change. The newest mod's timing wins.
+function sdk.loading.timing(t) end
+
 ---@class TriggerVolume
 ---@field id string retail instance id (16 hex digits), custom-map id or "mod:<mod>:<key>"
 ---@field name string short name, e.g. "tut_sksc_reset_vol01"
@@ -586,6 +631,28 @@ function sdk.menus.movie(name, path) end
 ---@param bitmap integer
 ---@param path string
 function sdk.menus.bitmap(movie, bitmap, path) end
+
+---The world behind a front-end screen while it is on top: blur on / off and the ramp, by the
+---screen's retail id (sdk.menus.info().screens lists every id with its retail blur flag; the
+---pause menu is 'b4b7976b40b3e837'). Unset fields keep retail's values (strength 8.0, step 0.8 per
+---tick, tint {90, 85, 81}, tint_step 15); nil options drop this mod's override. The newest mod
+---wins; removed when the mod stops.
+---@param screen string
+---@param options {blur?:boolean,strength?:number,step?:number,tint?:integer[],tint_step?:integer}|nil
+function sdk.menus.backdrop(screen, options) end
+
+---Add or change a Trick Guide entry (pause menu > Learn > Trick Guide). entry is 'category',
+---'subcategory' or 'trick'; key is a retail record's 16 hex digits (its Attrib key) or the mod's own
+---id. Unset fields keep the entry's value: label / description (string ids or '#literal'), up to 4
+---slots {gesture, button, connector} (ids into the retail gesture and button name tables; connector
+---1 Plus, 2 Arrow, 3 Or), animation (tricks are listed only with one), parent (the category of a
+---subcategory, the subcategory of a trick), order (a trick's place), has_tricks (a subcategory
+---opens a list or shows its own slots), position (a category's place), hidden. nil options drop
+---this mod's change; mods apply in load order; removed when the mod stops.
+---@param entry 'category'|'subcategory'|'trick'
+---@param key string
+---@param options {label?:string,description?:string,slots?:{gesture?:integer,button?:integer,connector?:integer}[],animation?:string,parent?:string,order?:integer,has_tricks?:boolean,position?:integer,hidden?:boolean}|nil
+function sdk.menus.trick_guide(entry, key, options) end
 
 ---@class NativeContact
 ---@field a {kind:string,index?:integer} board, skater, external, or world
@@ -893,13 +960,18 @@ function sdk.audio.stop_all() end
 ---@field globals? string[] up to 16 retail globals
 ---@field mixmap? AudioWatchKey[] up to 16 MixMap outputs
 ---@class AudioEvent
----@field kind "post"|"release"|"splice"|"emitter_start"|"emitter_stop"|"zone"|"speech"
+---@field kind "post"|"release"|"splice"|"emitter_start"|"emitter_stop"|"zone"|"speech"|"body_impact"
 ---@field source "player"|"world"|"npc"|"emitter"|"ambience"|"speech"
 ---@field class string retail class (posts), bank (Splice starts, emitters), "speech" / "maincast" (speech lines) or ""
 ---@field slot string the poster's slot (`grind`, `footstep`, `horn`, `ped_tazer`, `body_fall`, `ring`, …) or ""
 ---@field id integer Splice sound id, emitter patch, slot index, speech event
 ---@field owner string world / NPC object, zone key, speaker ("0" for the local player)
----@field tag? "pop"|"land"|"grind_start"|"grind_end"|"footstep"|"horn"|"alarm"|"tazer"|"body_fall"|"emitter"|"zone_change"|"speech"
+---@field tag? "pop"|"land"|"grind_start"|"grind_end"|"footstep"|"horn"|"alarm"|"tazer"|"body_fall"|"emitter"|"zone_change"|"speech"|"body_impact"
+---@field region? integer body_impact: the body region (0 head, 1 torso, 2 / 3 arms, 4 / 5 legs)
+---@field impact? number body_impact: the impact the body poster read (after the speed graph)
+---@field tier? integer[] body_impact: the pair's tiers {body material, surface} (0..2, 3 = none)
+---@field material? integer[] body_impact: {body material, surface material} (143 = none)
+---@field position? number[] body_impact: {x, y, z} where the hit plays (the skater's body point)
 ---@class AudioInfo
 ---@field native boolean the native audio runtime runs
 ---@field map_epoch? integer
@@ -1033,6 +1105,19 @@ function sdk.audio.seed(n) end
 -- not be the install's or another mod's). Two mods on one identity: the first by mod id wins
 -- and the mod menu shows the conflict. Check it with `check_mod <package> --install <assets>`.
 -- Reference: docs/hails-additions/16-audio-modding.md.
+
+-- World tuning (capability `world_tuning`): typed patches while this mod runs; first writer wins per field,
+-- restored when the mod stops. Domains, fields, retail values and living_world events:
+-- docs/hails-additions/26a-living-world-overview.md#lua-world-tuning-reference
+sdk.world = {}
+---Set (a table) or restore (`nil`) this mod's patch of a world tuning domain.
+---@param domain 'living_world'|'props'|'carry'|'shadows'|'backdrop'|'respawn'|'exposure'|'ghost'|'decals'
+---@param patch table|nil
+function sdk.world.set_tuning(domain, patch) end
+---Request a domain as the game uses it now; read it as `sdk.commands.result(key).value`.
+---@param key string command result key
+---@param domain 'living_world'|'props'|'carry'|'shadows'|'backdrop'|'respawn'|'exposure'|'ghost'|'decals'
+function sdk.world.tuning(key, domain) end
 
 -- Audio tuning (capability `audio_tuning`): patch the game's typed tuning while this mod runs.
 -- Domains: 'player' (player_tuning: surfaces, grinds, seams, landing / collision materials, tricks,

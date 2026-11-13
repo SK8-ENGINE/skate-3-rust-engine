@@ -1,4 +1,4 @@
-# Pedestrian audio — retail spec, port state, hook points (2026-10-03)
+# Pedestrian audio: retail spec, port state, hook points (2026-10-03)
 
 Port: `crates/skate-audio/src/world/peds.rs`. Host: `game_audio/world_sources.rs`. Harness: `tests/world_sources.rs`
 (`a_ped_walks_past_and_steps_on_each_plant`). Speech is in `world-speech.md`.

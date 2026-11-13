@@ -286,3 +286,198 @@ fn checkpoint_reply(on_foot: bool) {
     }
     assert!(saw_ready && restored_ticks > 60);
 }
+
+/// b471 T1 / T5: a teleport is ONE placement (retail's actor reply), and a second request while it is in flight is
+/// refused. Before the fix the host teleport added a second reset a tick earlier (placements rose by 2).
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn travel_is_one_placement_and_refuses_a_second_request() {
+    travel_once(None);
+}
+
+/// b471 T4: a mod's arrival velocity survives the single reset.
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn travel_keeps_the_mods_arrival_velocity() {
+    travel_once(Some([2.0, 0.0, 0.0]));
+}
+
+/// Laptop session 2026-10-21 21:38: an on-foot arrival (Challenge Map, a marker set on foot) went Teleporting ->
+/// BipedGround -> PhysicsAir in one tick and flung the skater tens of metres. It must stay at the target.
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn travel_on_foot_stays_at_the_target() {
+    let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
+    let root = std::path::Path::new(&root);
+    let assets = skate_data::GameAssets::load(root).unwrap();
+    let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
+    let mut physics = GamePhysics::load(root).unwrap();
+    let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
+    let mut controls = PlayerControls::default();
+    let mut input = crate::input::ControllerInput::default();
+    let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
+    let mut target = [[0.0f32; 4]; 4];
+    for tick in 0..180 {
+        if tick == 60 {
+            target = skater.animated_skeleton.roots.animation_to_world;
+            target[3][2] += 5.0;
+            skater.travel_ex(target, None, false).unwrap();
+        }
+        input.sample_raw_for_test(XboxState { buttons: 0, triggers: [0; 2], left: [0; 2], right: [0; 2] });
+        let mut actions = input.player_actions();
+        controls.update(
+            &mut actions,
+            physics.settings.step.simulation.time_step,
+            physics.settings.input_magnitude_threshold,
+            skater.player_input.physical.scoring.capabilities_204,
+        );
+        frame::advance(&mut physics, &mut skater, &mut controls, &graphs, &mut actions, true, &mut camera)
+            .unwrap_or_else(|error| panic!("On-foot travel tick{tick}: {error}"));
+        if tick > 61 {
+            let at = skater.animated_skeleton.roots.animation_to_world[3];
+            let off = ((at[0] - target[3][0]).powi(2) + (at[2] - target[3][2]).powi(2)).sqrt();
+            assert!(off < 2.0, "tick {tick}: {:?} is {off:.1} m from the target, state {:?}", at,
+                skater.player_state.current());
+        }
+    }
+    assert_eq!(skater.player_state.current(), PhysicalStateId::BipedGround, "an on-foot arrival ends on foot");
+}
+
+fn travel_once(velocity: Option<[f32; 3]>) {
+    let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
+    let root = std::path::Path::new(&root);
+    let assets = skate_data::GameAssets::load(root).unwrap();
+    let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
+    let mut physics = GamePhysics::load(root).unwrap();
+    let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
+    let mut controls = PlayerControls::default();
+    let mut input = crate::input::ControllerInput::default();
+    let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
+    let mut target = [[0.0f32; 4]; 4];
+    let mut before = 0;
+    for tick in 0..130 {
+        if tick == 60 {
+            target = skater.animated_skeleton.roots.animation_to_world;
+            target[3][2] += 5.0;
+            before = skater.placements();
+            skater.travel(target, velocity).unwrap();
+            assert!(skater.teleport_pending());
+            assert!(skater.travel(target, None).is_err(), "a second request while one is in flight");
+        }
+        input.sample_raw_for_test(XboxState { buttons: 0, triggers: [0; 2], left: [0; 2], right: [0; 2] });
+        let mut actions = input.player_actions();
+        controls.update(
+            &mut actions,
+            physics.settings.step.simulation.time_step,
+            physics.settings.input_magnitude_threshold,
+            skater.player_input.physical.scoring.capabilities_204,
+        );
+        frame::advance(&mut physics, &mut skater, &mut controls, &graphs, &mut actions, true, &mut camera)
+            .unwrap_or_else(|error| panic!("Travel tick{tick}: {error}"));
+        if tick > 60 && !skater.teleport_pending() && skater.placements() == before + 1 {
+            if let Some(v) = velocity {
+                let got = physics.board.bodies()[6].rates.linear_velocity;
+                assert!((got.x - v[0]).abs() < 0.3, "arrival velocity {got:?}");
+                return;
+            }
+        }
+        assert_finite(&physics, &skater, tick);
+    }
+    assert_eq!(skater.placements(), before + 1, "one placement per teleport");
+    let position = physics.board.bodies()[6].rates.position;
+    assert!((position.z - target[3][2]).abs() < 0.5, "landed at the target: {position:?}");
+}
+
+/// b475 G1: a teleport target 3 m above the ground lands on it (ground + 0.15, plus the reset's 0.1) instead of
+/// falling; retail `82598428` fits the arrival height with one ray down.
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn travel_fits_the_arrival_onto_the_ground() {
+    let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
+    let root = std::path::Path::new(&root);
+    let assets = skate_data::GameAssets::load(root).unwrap();
+    let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
+    let mut physics = GamePhysics::load(root).unwrap();
+    let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
+    let mut controls = PlayerControls::default();
+    let mut input = crate::input::ControllerInput::default();
+    let mut camera = crate::camera::CameraRuntime::load(root).unwrap();
+    let mut ground = None;
+    for tick in 0..62 {
+        if tick == 60 {
+            let mut target = skater.animated_skeleton.roots.animation_to_world;
+            let start = skate_core::math::Vector3::new(target[3][0], target[3][1] + 0.75, target[3][2]);
+            let end = skate_core::math::Vector3::new(start.x, start.y - 500.0, start.z);
+            ground = physics.world.query_thin_line(start, end).unwrap().map(|h| h.geometry.position.y);
+            target[3][1] += 3.0;
+            skater.travel(target, None).unwrap();
+        }
+        input.sample_raw_for_test(XboxState { buttons: 0, triggers: [0; 2], left: [0; 2], right: [0; 2] });
+        let mut actions = input.player_actions();
+        controls.update(
+            &mut actions,
+            physics.settings.step.simulation.time_step,
+            physics.settings.input_magnitude_threshold,
+            skater.player_input.physical.scoring.capabilities_204,
+        );
+        frame::advance(&mut physics, &mut skater, &mut controls, &graphs, &mut actions, true, &mut camera)
+            .unwrap_or_else(|error| panic!("Fit tick{tick}: {error}"));
+    }
+    let ground = ground.expect("the test spawn stands on ground");
+    let deck = physics.board.bodies()[6].rates.position.y;
+    assert!(deck - ground < 1.0, "landed near the ground ({ground}), not 3 m up: deck {deck}");
+    assert!(physics.board.bodies()[6].rates.linear_velocity.y.abs() < 0.5, "no fall after the arrival");
+}
+
+/// b457 / b469 row 14: a Challenge Map teleport to another map waits for the map transition and places once on the
+/// new map; when the transition left the old map current, it is dropped (never another map's coordinates).
+#[test]
+#[ignore = "requires private stock animation banks and collections"]
+fn a_far_challenge_map_teleport_places_after_its_map_loads() {
+    use crate::challenge_map::{finish_travel, ChallengeMapTravel, TeleportRequest};
+    use crate::map_transition::{CurrentMap, MapTransition};
+    use bevy::ecs::system::RunSystemOnce;
+    use std::path::PathBuf;
+    let root = std::env::var_os("SKATE3_ASSET_ROOT").expect("set SKATE3_ASSET_ROOT");
+    let root = std::path::Path::new(&root);
+    let assets = skate_data::GameAssets::load(root).unwrap();
+    let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
+    let physics = GamePhysics::load(root).unwrap();
+    let skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
+    let (downtown, university) = (PathBuf::from("maps/DownTown.skate"), PathBuf::from("maps/University.skate"));
+    let current = |path: &PathBuf| CurrentMap {
+        path: Some(path.clone()), name: String::new(), spawn: [0.0; 3], heading: 0.0, generation: 0, audio_tag: None, layout: None,
+    };
+    let mut target = skater.animated_skeleton.roots.animation_to_world;
+    target[3][2] += 5.0;
+    let request = TeleportRequest { destination: "dist_university_x".into(), map: "University".into(), transform: target, on_board: false, session_marker: false };
+    let entry = crate::map_library::Entry { label: "University".into(), path: Some(university.clone()), world: None };
+    let start = |world: &mut World| {
+        let mut transition = MapTransition::default();
+        let mut travel = ChallengeMapTravel::default();
+        travel.start((request.clone(), Some(entry.clone())), Some(downtown.clone()), &mut transition);
+        assert!(transition.busy(), "another map: the transition is requested");
+        world.insert_resource(transition);
+        world.insert_resource(travel);
+        world.insert_resource(current(&downtown));
+    };
+    let mut world = World::new();
+    world.insert_resource(skater);
+    start(&mut world);
+    world.run_system_once(finish_travel).unwrap();
+    assert!(!world.resource::<SkaterRuntime>().teleport_pending(), "nothing while the map loads");
+    assert!(world.resource::<ChallengeMapTravel>().pending.is_some());
+    world.insert_resource(MapTransition::default());
+    world.insert_resource(current(&university));
+    world.run_system_once(finish_travel).unwrap();
+    assert!(world.resource::<SkaterRuntime>().teleport_pending(), "placed once the new map is current");
+    assert!(world.resource::<ChallengeMapTravel>().pending.is_none());
+    // A transition that ended with the old map still current drops the teleport.
+    let mut world = World::new();
+    world.insert_resource(SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap());
+    start(&mut world);
+    world.insert_resource(MapTransition::default());
+    world.run_system_once(finish_travel).unwrap();
+    assert!(!world.resource::<SkaterRuntime>().teleport_pending(), "dropped on the old map");
+    assert!(world.resource::<ChallengeMapTravel>().pending.is_none());
+}

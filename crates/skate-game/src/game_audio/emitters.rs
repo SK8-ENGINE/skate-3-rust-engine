@@ -334,6 +334,27 @@ fn prefetch_near(state: &mut State, native: &mut Native, library: &Library, ear:
     }
 }
 
+/// The emitter banks of the map being loaded (its emitter `records`, its path `map`) within
+/// [`AHEAD`] of its spawn point, nearest first, queued on the prefetch worker; the same banks and
+/// order the listener's first frame there asks for (`prefetch_near`). Returns how many were queued.
+///
+/// [`AHEAD`]: super::native::prefetch::AHEAD
+pub(super) fn read_ahead_banks<'a>(records: impl Iterator<Item = &'a super::library::EmitterRecord>, library: &Library, native: &mut Native, map: &std::path::Path, spawn: Vec3) -> usize {
+    use super::native::prefetch::AHEAD;
+    let mut near: Vec<(f32, &str)> = Vec::new();
+    for r in records {
+        let Some(bank) = r.bank.as_deref().filter(|b| r.kind == 1 && r.flags == 0 && native.has_bank(library, b) && !native.kept_across_maps(b)) else { continue };
+        let d = Vec3::from(r.position).distance(spawn) - Vec3::from(r.extent).max_element();
+        match near.iter_mut().find(|(_, b)| *b == bank) {
+            Some(n) => n.0 = n.0.min(d),
+            None => near.push((d, bank)),
+        }
+    }
+    near.retain(|(d, _)| *d <= AHEAD);
+    near.sort_by(|a, b| a.0.total_cmp(&b.0));
+    near.into_iter().filter(|(_, stem)| library.bank_source(stem).is_ok_and(|source| native.prefetch.request_next(map, source))).count()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn update(
     mut state: Local<State>,
@@ -353,6 +374,7 @@ pub(super) fn update(
     mut stats: ResMut<crate::world_audio::WorldEmitterStats>,
     rules: Res<super::mod_rules::AudioRules>,
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::EMITTERS);
     let _timing = super::timing::scope(&super::timing::EMITTERS);
     // No native runtime: the emitters are silent (its start logged why).
     let (Some(library), Some(mut native)) = (library, native) else { return };
@@ -385,7 +407,11 @@ pub(super) fn update(
             }
         }
         if map_changed {
-            native.unload_map_banks();
+            if runtime_changed {
+                native.unload_map_banks();
+            } else {
+                native.change_map(map.path.as_deref());
+            }
         }
         let stem = audio.stem.as_str();
         // Retail's emitter system loads every file of the map's database entry and dispatches by
@@ -415,7 +441,8 @@ pub(super) fn update(
             };
             state.emitter_bank.push(b);
         }
-        state.bank_status = vec![BankStatus::Idle; state.banks.len()];
+        // Banks read ahead during the map's load are requested already (and dropped when left behind).
+        state.bank_status = state.banks.iter().map(|b| if native.prefetch.contains(b) { BankStatus::Requested } else { BankStatus::Idle }).collect();
         state.map_len = state.emitters.len();
         state.dynamic.clear();
         state.map = Some(identity);
@@ -444,7 +471,7 @@ pub(super) fn update(
                 info!("AUDIO_EMITTER stop {} #{}", state.emitters[node.record].bank, node.record);
                 if api.events.on() {
                     let e = &state.emitters[node.record];
-                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner() });
+                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner(), hit: None });
                 }
             }
             if let Some(post) = node.post {
@@ -508,11 +535,11 @@ pub(super) fn update(
                 // sound placed at the owner plays at the record, with the record's reach.
                 let muted = rules.set.as_deref().is_some_and(|r| {
                     let site = (e.shape.position, super::mod_voices::Reach { extent: e.shape.extent, forward: e.shape.forward, core: e.shape.core, curve: e.falloff });
-                    r.mutes_at_published(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner() }, Some(site), node.entity.map(Entity::to_bits))
+                    r.mutes_at_published(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner(), hit: None }, Some(site), node.entity.map(Entity::to_bits))
                 });
                 node.post = if muted { None } else { native.post_emitter(&payload) };
                 if api.events.on() && (node.post.is_some() || muted) {
-                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner() });
+                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner(), hit: None });
                 }
             }
             Err(error) => warn!("AUDIO_EMITTER {}: {error}", e.bank),
@@ -582,7 +609,7 @@ fn sync_dynamic(
             return true;
         }
         if node.started && api.events.on() {
-            api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: "", slot: "", id: 0, owner: entity.to_bits() });
+            api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: "", slot: "", id: 0, owner: entity.to_bits(), hit: None });
         }
         if let Some(post) = node.post {
             native.release(post);
@@ -607,6 +634,52 @@ mod tests {
     /// emitter in turn. Each frame's `prefetch_near` only queues / drops decodes: the runtime's
     /// banks, evaluator random state and blocks stay untouched; requested = the banks within
     /// `AHEAD` m that are not loaded; far away everything is dropped. Prints its cost per call.
+    /// A district's emitter banks read ahead for a spawn point (data-gated) are the banks the
+    /// listener's first frame there asks for, and at the map change they are its requested banks.
+    #[test]
+    #[ignore = "needs the private install data"]
+    fn banks_read_ahead_for_the_spawn_are_the_first_frames_banks() {
+        let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets"));
+        let Ok(library) = Library::load(root) else { panic!("missing private data: no audio install") };
+        let Ok(mut native) = Native::start(&library) else { panic!("missing private data: no AEMS install") };
+        let records: Vec<_> = super::super::map_audio::tests::old_ems_files("DownTown").iter().flat_map(|f| library.emitters(f)).collect();
+        let map = std::path::Path::new("maps/DownTown.skate");
+        let mut checked = 0;
+        for r in records.iter().filter(|r| r.kind == 1 && r.bank.is_some()).step_by(25) {
+            let spawn = Vec3::from(r.position);
+            // The first frame's requests without a read-ahead.
+            let mut state = State::default();
+            for r in &records {
+                let Some(bank) = r.bank.clone().filter(|b| r.kind == 1 && r.flags == 0 && native.has_bank(&library, b)) else { continue };
+                let s = r.scalars;
+                state.emitters.push(Emitter {
+                    shape: Shape { position: Vec3::from(r.position), extent: Vec3::from(r.extent), forward: Vec3::new(s[1], s[2], s[3]), core: s[0] },
+                    volume: r.volume, falloff: r.falloff, bank: bank.clone(), patch: r.patch,
+                });
+                let b = state.banks.iter().position(|x| *x == bank).unwrap_or_else(|| {
+                    state.banks.push(bank);
+                    state.banks.len() - 1
+                });
+                state.emitter_bank.push(b);
+            }
+            state.bank_status = vec![BankStatus::Idle; state.banks.len()];
+            native.change_map(None);
+            prefetch_near(&mut state, &mut native, &library, spawn);
+            let mut first: Vec<String> = native.prefetch.stems().map(str::to_owned).filter(|s| !native.kept_across_maps(s)).collect();
+            first.sort();
+            native.change_map(None);
+            let queued = read_ahead_banks(records.iter().copied(), &library, &mut native, map, spawn);
+            native.change_map(Some(map));
+            let mut ahead: Vec<String> = native.prefetch.stems().map(str::to_owned).collect();
+            ahead.sort();
+            assert_eq!(ahead, first, "spawn {spawn}");
+            assert_eq!(queued, ahead.len());
+            checked += 1;
+        }
+        native.change_map(None);
+        assert!(checked > 3, "{checked} spawn points");
+    }
+
     #[test]
     #[ignore = "needs the private install data"]
     fn the_prefetch_follows_the_listener_and_touches_no_runtime_state() {
@@ -823,7 +896,7 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(native);
         world.insert_resource(library);
-        world.insert_resource(crate::map_transition::CurrentMap { path: None, name: "Test world".into(), spawn: [0.0; 3], heading: 0.0, generation: 0, audio_tag: None });
+        world.insert_resource(crate::map_transition::CurrentMap { path: None, name: "Test world".into(), spawn: [0.0; 3], heading: 0.0, generation: 0, audio_tag: None, layout: None });
         world.init_resource::<super::super::map_audio::MapAudio>();
         world.init_resource::<super::super::AudioContent>();
         world.init_resource::<super::super::mod_audio::AudioApi>();
@@ -835,7 +908,7 @@ mod tests {
         world.init_resource::<super::super::mod_rules::AudioRules>();
         // `extra` = the default settings (own instances since 2026-10-04); else the "shared" option.
         let saved = if extra { super::super::SavedSettings::default() } else { super::super::SavedSettings { mod_emitter_slots: super::super::ModEmitterSlots::Shared, ..Default::default() } };
-        world.insert_resource(super::super::AudioSettings { saved, path: std::env::temp_dir().join("skate-emitter-test-audio.json"), muted: true, volume_overrides: Default::default() });
+        world.insert_resource(super::super::AudioSettings { saved, path: std::env::temp_dir().join("skate-emitter-test-audio.json"), muted: true, volume_overrides: Default::default(), speech_decoded: false });
         let listener = world.spawn((super::super::GameAudioListener, Transform::default(), GlobalTransform::default())).id();
         (world, listener)
     }

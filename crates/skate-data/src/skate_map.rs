@@ -61,7 +61,7 @@ pub struct Vertex {
     pub decal_uv: Option<[f32; 2]>,
     pub tangent_frame: Option<[u8; 4]>,
 }
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Collision {
     pub points: [[f32; 3]; 3],
     pub surface: u32,
@@ -127,42 +127,129 @@ struct Reader<'a> {
     at: usize,
 }
 
+/// MOBJ authored rigid-body parameters (schema 3+): six-float physics block plus two sleep flags.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjectPhysics {
+    pub density: f32,
+    pub friction: f32,
+    pub restitution: f32,
+    pub linear_damping: f32,
+    pub angular_damping: f32,
+    pub gravity_scale: f32,
+    pub enable_sleep: bool,
+    pub initially_awake: bool,
+}
+
+impl Default for ObjectPhysics {
+    fn default() -> Self {
+        Self {
+            density: 100.0,
+            friction: 0.55,
+            restitution: 0.05,
+            linear_damping: 0.05,
+            angular_damping: 0.15,
+            gravity_scale: 1.0,
+            enable_sleep: true,
+            initially_awake: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticObject {
+    pub id: u32,
+    pub name: String,
+    /// Row-vector affine placement (v @ basis + translation): the three basis
+    /// rows, then the translation. Schema 3 records carry an origin only, so
+    /// their basis is the identity.
+    pub transform: [f32; 12],
+    pub first_index: u32,
+    pub index_count: u32,
+    pub first_collision: u32,
+    pub collision_count: u32,
+    pub rails: Vec<u32>,
+    pub physics: ObjectPhysics,
+}
+
 /// MOBJ schema 3 stores editor ownership of ranges in the base geometry.
 /// Physics-disabled objects can use those unchanged static arrays. Explicit
 /// body types still require a runtime adapter and must not be flattened.
-pub fn validate_static_objects(map: &SkateMap, extension: &Extension) -> Result<(), String> {
-    if extension.schema != 3 { return Err("Unsupported MOBJ schema".into()); }
+/// Schema 4 appends a 12-float row-vector affine transform per record so
+/// instances can share one template geometry range with distinct placements.
+pub fn parse_static_objects(map: &SkateMap, extension: &Extension) -> Result<Vec<StaticObject>, String> {
+    if extension.schema != 3 && extension.schema != 4 { return Err("Unsupported MOBJ schema".into()); }
     let mut r = Reader { bytes: &extension.payload, at: 0 };
     let count = r.u()?;
     r.check_count(count, 80)?;
     let mut ids = std::collections::HashSet::new();
+    let mut objects = Vec::with_capacity(count as usize);
     for _ in 0..count {
-        if !ids.insert(r.u()?) { return Err("Duplicate MOBJ identity".into()); }
+        let id = r.u()?;
+        if !ids.insert(id) { return Err("Duplicate MOBJ identity".into()); }
         let name = r.string()?;
-        r.floats::<3>()?;
-        for limit in [map.geometry.indices.len(), map.geometry.collision.len()] {
+        let origin = r.floats::<3>()?;
+        let mut ranges = [0; 4];
+        for (limit, slot) in [(map.geometry.indices.len(), 0), (map.geometry.collision.len(), 2)] {
             let first = r.u()? as usize;
             let length = r.u()? as usize;
             if first.checked_add(length).is_none_or(|end| end > limit) {
                 return Err(format!("MOBJ {name} geometry range is invalid"));
             }
+            ranges[slot] = first as u32;
+            ranges[slot + 1] = length as u32;
         }
         let rails = r.u()?;
         r.check_count(rails, 4)?;
+        let mut rail_ids = Vec::with_capacity(rails as usize);
         for _ in 0..rails {
-            if r.u()? as usize >= map.rails.len() { return Err(format!("MOBJ {name} rail index is invalid")); }
+            let rail = r.u()?;
+            if rail as usize >= map.rails.len() { return Err(format!("MOBJ {name} rail index is invalid")); }
+            rail_ids.push(rail);
         }
         if r.u()? != 0 {
             return Err(format!("MOBJ {name} requests object physics, which requires a body adapter"));
         }
         if r.u()? > 2 { return Err(format!("MOBJ {name} collision shape is invalid")); }
-        r.floats::<6>()?;
-        for _ in 0..2 {
-            if r.u()? > 1 { return Err(format!("MOBJ {name} has an invalid boolean")); }
+        let values = r.floats::<6>()?;
+        let mut flags = [false; 2];
+        for slot in &mut flags {
+            let value = r.u()?;
+            if value > 1 { return Err(format!("MOBJ {name} has an invalid boolean")); }
+            *slot = value != 0;
         }
+        let physics = ObjectPhysics {
+            density: values[0],
+            friction: values[1],
+            restitution: values[2],
+            linear_damping: values[3],
+            angular_damping: values[4],
+            gravity_scale: values[5],
+            enable_sleep: flags[0],
+            initially_awake: flags[1],
+        };
+        let transform = if extension.schema >= 4 {
+            r.floats::<12>()?
+        } else {
+            [1., 0., 0., 0., 1., 0., 0., 0., 1., origin[0], origin[1], origin[2]]
+        };
+        objects.push(StaticObject {
+            id,
+            name,
+            transform,
+            first_index: ranges[0],
+            index_count: ranges[1],
+            first_collision: ranges[2],
+            collision_count: ranges[3],
+            rails: rail_ids,
+            physics,
+        });
     }
     if r.at != r.bytes.len() { return Err("MOBJ has trailing data".into()); }
-    Ok(())
+    Ok(objects)
+}
+
+pub fn validate_static_objects(map: &SkateMap, extension: &Extension) -> Result<(), String> {
+    parse_static_objects(map, extension).map(|_| ())
 }
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
@@ -318,40 +405,105 @@ impl<'a> Reader<'a> {
 #[derive(Clone, Copy)]
 struct StoredBlock<'a> { expected: usize, method: u32, bytes: &'a [u8] }
 impl StoredBlock<'_> {
-    fn decode(&self) -> Result<Vec<u8>, String> {
-        let Self { expected, method, bytes } = *self;
-        let decoded = match method {
-            0 => bytes.to_vec(),
-            1 => {
-                let mut result = Vec::with_capacity(expected.min(8 * 1024 * 1024));
-                let mut decoder = flate2::read::ZlibDecoder::new(bytes);
-                decoder
-                    .by_ref()
-                    .take(expected as u64 + 1)
-                    .read_to_end(&mut result)
-                    .map_err(|e| format!("SKATE DEFLATE: {e}"))?;
-                if decoder.total_in() as usize != bytes.len() {
-                    return Err("SKATE compressed block has unused input".into());
-                }
-                result
-            }
-            2 => {
-                let mut result = Vec::with_capacity(expected.min(8 * 1024 * 1024));
-                zstd::stream::read::Decoder::new(bytes)
-                    .map_err(|e| e.to_string())?
-                    .take(expected as u64 + 1)
-                    .read_to_end(&mut result)
-                    .map_err(|e| format!("SKATE Zstandard: {e}"))?;
-                result
-            }
-            3..=10 => return storage_v15::decode(method, bytes, expected),
-            _ => return Err(format!("Unsupported SKATE storage method {method}")),
+    /// Reject a declared size the stored bytes could never decode to (deflate x1032, zstd x32768, SKATE15 x4).
+    fn check_size(&self) -> Result<(), String> {
+        let most = |method: u32, stored: usize| match method {
+            0 => stored,
+            1 => stored.saturating_mul(1032),
+            _ => stored.saturating_mul(32768),
         };
-        if decoded.len() != expected {
-            return Err("SKATE decoded block size mismatch".into());
+        let limit = match self.method {
+            0..=2 => most(self.method, self.bytes.len()),
+            3..=10 => most(if self.method <= 6 { 2 } else { 1 }, self.bytes.len().saturating_sub(4)).saturating_mul(4),
+            _ => return Ok(()),
+        };
+        if self.expected > limit {
+            return Err(format!(
+                "SKATE block declares {} bytes, more than its {} stored bytes can decode to",
+                self.expected,
+                self.bytes.len()
+            ));
         }
+        Ok(())
+    }
+    fn decode(&self) -> Result<Vec<u8>, String> {
+        self.check_size()?;
+        if (3..=10).contains(&self.method) {
+            return storage_v15::decode(self.method, self.bytes, self.expected);
+        }
+        let mut decoded = exact_buffer(self.expected)?;
+        self.decode_into(&mut decoded)?;
         Ok(decoded)
     }
+    /// Appends the block's `expected` decoded bytes to `out`, which should
+    /// already have room for them.
+    fn decode_into(&self, out: &mut Vec<u8>) -> Result<(), String> {
+        self.check_size()?;
+        let Self { expected, method, bytes } = *self;
+        let start = out.len();
+        let ended = match method {
+            0 => {
+                let ended = bytes.len() == expected;
+                if ended {
+                    out.extend_from_slice(bytes);
+                }
+                ended
+            }
+            1 => {
+                let mut decoder = flate2::read::ZlibDecoder::new(bytes);
+                let ended = read_declared(&mut decoder, expected, out)
+                    .map_err(|e| format!("SKATE DEFLATE: {e}"))?;
+                if ended && decoder.total_in() as usize != bytes.len() {
+                    return Err("SKATE compressed block has unused input".into());
+                }
+                ended
+            }
+            2 => {
+                let mut decoder = zstd::stream::read::Decoder::new(bytes).map_err(|e| e.to_string())?;
+                read_declared(&mut decoder, expected, out).map_err(|e| format!("SKATE Zstandard: {e}"))?
+            }
+            3..=10 => {
+                out.extend_from_slice(&storage_v15::decode(method, bytes, expected)?);
+                true
+            }
+            _ => return Err(format!("Unsupported SKATE storage method {method}")),
+        };
+        if !ended || out.len() - start != expected {
+            return Err("SKATE decoded block size mismatch".into());
+        }
+        Ok(())
+    }
+}
+/// An empty buffer with room for exactly `len` bytes. Growing one from a
+/// smaller start doubles past the final size while the old buffer is still
+/// alive: a 140.3 MiB vertex block asked for 256 MiB and failed on a 3 GiB heap.
+fn exact_buffer(len: usize) -> Result<Vec<u8>, String> {
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(len)
+        .map_err(|_| format!("SKATE decoded block of {len} bytes cannot be reserved"))?;
+    Ok(buffer)
+}
+/// Reads at most `expected` bytes into `out`, then reports whether the stream
+/// ends there, so a block that decodes longer never grows `out`.
+fn read_declared(reader: &mut impl Read, expected: usize, out: &mut Vec<u8>) -> std::io::Result<bool> {
+    reader.by_ref().take(expected as u64).read_to_end(out)?;
+    Ok(reader.read(&mut [0; 1])? == 0)
+}
+/// Decodes `blocks` back to back into one buffer reserved at their joined
+/// size. Extending one block's exact buffer with the next would regrow it to
+/// about twice its size while the old one is still alive.
+fn decode_joined(blocks: &[StoredBlock<'_>]) -> Result<Vec<u8>, String> {
+    let mut total = 0usize;
+    for block in blocks {
+        block.check_size()?;
+        total = total.checked_add(block.expected).ok_or("SKATE geometry blocks are too large")?;
+    }
+    let mut joined = exact_buffer(total)?;
+    for block in blocks {
+        block.decode_into(&mut joined)?;
+    }
+    Ok(joined)
 }
 impl SkateMap {
     pub fn load(path: &Path) -> Result<Self, String> {
@@ -375,14 +527,19 @@ impl SkateMap {
     }
 
     /// Decode a supplemental presentation package without requiring collision.
-    /// Playable map loading continues to use `parse`/`load`.
+    /// Playable map loading continues to use `parse`/`load`. Static MOBJ
+    /// instance records are presentation data here: they carry no collision
+    /// until a physics adapter exists.
     pub fn parse_render_only(data: &[u8]) -> Result<Self, String> {
         let map = Self::parse_inner(data, 4, false)?;
         if !map.geometry.collision.is_empty() || !map.rails.is_empty()
             || !map.doors.is_empty() || !map.lights.is_empty() || !map.routes.is_empty()
-            || map.extensions.iter().any(|e| e.tag != *b"WMET")
+            || map.extensions.iter().any(|e| e.tag != *b"WMET" && e.tag != *b"MOBJ")
         {
             return Err("SKATE render-only package contains non-presentation data".into());
+        }
+        for extension in map.extensions.iter().filter(|e| e.tag == *b"MOBJ") {
+            validate_static_objects(&map, extension)?;
         }
         Ok(map)
     }
@@ -571,9 +728,12 @@ impl SkateMap {
         let geometry_started = Instant::now();
         let geometry_counts = [counts[2], counts[3], counts[4]];
         let geometry = if version >= 9 {
-            let mut bytes = r.stored(counts[2] as usize * if version >= 12 { 56 } else { 44 })?;
-            bytes.extend(r.stored(counts[3] as usize * 4)?);
-            bytes.extend(r.stored(counts[4] as usize * if version >= 11 { 48 } else { 44 })?);
+            let blocks = [
+                r.stored_block(counts[2] as usize * if version >= 12 { 56 } else { 44 })?,
+                r.stored_block(counts[3] as usize * 4)?,
+                r.stored_block(counts[4] as usize * if version >= 11 { 48 } else { 44 })?,
+            ];
+            let bytes = decode_joined(&blocks)?;
             Reader {
                 bytes: &bytes,
                 at: 0,
@@ -737,5 +897,202 @@ impl SkateMap {
             routes,
             extensions,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn map(indices: u32) -> SkateMap {
+        SkateMap {
+            version: 14,
+            name: "props".into(),
+            spawn: [0.; 3],
+            heading: 0.,
+            environment: vec![0.; 45],
+            materials: vec![],
+            textures: vec![],
+            geometry: Geometry {
+                vertices: vec![],
+                indices: vec![0; indices as usize],
+                collision: vec![],
+            },
+            rails: vec![],
+            doors: vec![],
+            lights: vec![],
+            routes: vec![],
+            extensions: vec![],
+        }
+    }
+
+    fn u32s(payload: &mut Vec<u8>, values: &[u32]) {
+        for v in values {
+            payload.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+
+    fn floats(payload: &mut Vec<u8>, values: &[f32]) {
+        for v in values {
+            payload.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+
+    fn record(payload: &mut Vec<u8>, id: u32, name: &str, range: [u32; 2], affine: Option<[f32; 12]>) {
+        u32s(payload, &[id, name.len() as u32]);
+        payload.extend_from_slice(name.as_bytes());
+        floats(payload, &[10., 20., 30.]); // origin
+        u32s(payload, &[range[0], range[1], 0, 0, 0]); // render range, collision range, no rails
+        u32s(payload, &[0, 0]); // no physics, collision shape
+        floats(payload, &[100., 0.55, 0.05, 0.05, 0.15, 1.]);
+        u32s(payload, &[1, 0]);
+        if let Some(affine) = affine {
+            floats(payload, &affine);
+        }
+    }
+
+    fn stored(method: u32, data: &[u8]) -> Vec<u8> {
+        match method {
+            0 => data.to_vec(),
+            1 => {
+                let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+                encoder.write_all(data).unwrap();
+                encoder.finish().unwrap()
+            }
+            _ => zstd::stream::encode_all(data, 1).unwrap(),
+        }
+    }
+
+    #[test]
+    fn mobj_schema4_instances_share_geometry_ranges() {
+        let mut payload = Vec::new();
+        u32s(&mut payload, &[2]);
+        let affine = [0., 0., -1., 0., 1., 0., 1., 0., 0., 10., 20., 30.];
+        record(&mut payload, 7, "0000000000000042/ramp_a", [12, 36], Some(affine));
+        record(&mut payload, 8, "0000000000000042/ramp_b", [12, 36], Some(affine));
+        let extension = Extension { tag: *b"MOBJ", schema: 4, payload };
+        let objects = parse_static_objects(&map(48), &extension).unwrap();
+        assert_eq!(objects.len(), 2);
+        assert_eq!(objects[0].id, 7);
+        assert_eq!(objects[0].name, "0000000000000042/ramp_a");
+        assert_eq!(objects[0].transform, affine);
+        assert_eq!((objects[0].first_index, objects[0].index_count), (12, 36));
+        assert_eq!(objects[1].first_index, objects[0].first_index);
+    }
+
+    #[test]
+    fn mobj_schema3_transform_is_origin_only() {
+        let mut payload = Vec::new();
+        u32s(&mut payload, &[1]);
+        record(&mut payload, 3, "bench", [0, 12], None);
+        let extension = Extension { tag: *b"MOBJ", schema: 3, payload };
+        let objects = parse_static_objects(&map(12), &extension).unwrap();
+        assert_eq!(objects[0].transform, [1., 0., 0., 0., 1., 0., 0., 0., 1., 10., 20., 30.]);
+    }
+
+    #[test]
+    fn mobj_rejects_out_of_range_and_physics() {
+        let mut payload = Vec::new();
+        u32s(&mut payload, &[1]);
+        record(&mut payload, 1, "bad", [40, 12], None);
+        let extension = Extension { tag: *b"MOBJ", schema: 3, payload };
+        assert!(parse_static_objects(&map(48), &extension)
+            .unwrap_err()
+            .contains("geometry range"));
+
+        let mut payload = Vec::new();
+        u32s(&mut payload, &[1]);
+        u32s(&mut payload, &[1, 4]);
+        payload.extend_from_slice(b"door");
+        floats(&mut payload, &[0.; 3]);
+        u32s(&mut payload, &[0, 12, 0, 0, 0]);
+        u32s(&mut payload, &[1, 0]); // physics body requested
+        floats(&mut payload, &[100., 0.55, 0.05, 0.05, 0.15, 1.]);
+        u32s(&mut payload, &[1, 0]);
+        let extension = Extension { tag: *b"MOBJ", schema: 3, payload };
+        assert!(parse_static_objects(&map(48), &extension)
+            .unwrap_err()
+            .contains("body adapter"));
+    }
+
+    #[test]
+    fn blocks_decode_into_exactly_their_declared_size() {
+        // Past the 8 MiB the decoder used to start from before doubling.
+        let data: Vec<u8> = (0..9u32 << 20).map(|i| (i % 251) as u8).collect();
+        for method in 0..=2 {
+            let bytes = stored(method, &data);
+            let decoded = StoredBlock { expected: data.len(), method, bytes: &bytes }.decode().unwrap();
+            assert_eq!(decoded, data);
+            assert_eq!(decoded.capacity(), data.len(), "method {method} regrew its buffer");
+        }
+    }
+
+    #[test]
+    fn a_block_that_decodes_longer_fails_without_growing_its_buffer() {
+        for method in 0..=2 {
+            let bytes = stored(method, &[7; 4096]);
+            let mut out = exact_buffer(1024).unwrap();
+            assert!(StoredBlock { expected: 1024, method, bytes: &bytes }.decode_into(&mut out).is_err());
+            assert_eq!(out.capacity(), 1024, "method {method}");
+        }
+    }
+
+    #[test]
+    fn geometry_blocks_decode_into_one_buffer_reserved_once() {
+        let parts: [Vec<u8>; 3] = [(0..60_000u32).map(|i| (i % 253) as u8).collect(), vec![3; 6_000], vec![9; 4_800]];
+        let methods = [1, 2, 0];
+        let stored: Vec<Vec<u8>> = parts.iter().zip(methods).map(|(part, method)| stored(method, part)).collect();
+        let blocks: Vec<StoredBlock<'_>> = parts.iter().zip(&stored).zip(methods)
+            .map(|((part, bytes), method)| StoredBlock { expected: part.len(), method, bytes })
+            .collect();
+        let joined = decode_joined(&blocks).unwrap();
+        assert_eq!(joined, parts.concat());
+        // Extending the first block's buffer would have left it about twice its size.
+        assert_eq!(joined.capacity(), joined.len());
+    }
+
+    #[test]
+    fn a_tiny_block_declaring_1_gib_fails_without_reserving_it() {
+        for method in 0..=10 {
+            let bytes = stored(method.min(2), &[0; 16]);
+            let block = StoredBlock { expected: 1 << 30, method, bytes: &bytes };
+            let mut out = Vec::new();
+            let error = block.decode_into(&mut out).unwrap_err();
+            assert!(error.contains("declares"), "method {method}: {error}");
+            assert_eq!(out.capacity(), 0, "method {method}");
+            assert!(block.decode().unwrap_err().contains("declares"), "method {method}");
+            assert!(decode_joined(&[block]).unwrap_err().contains("declares"), "method {method}");
+        }
+    }
+
+    /// Regression check for the decode changes (regression-check 3b): every installed map's geometry fingerprint.
+    /// `SKATE3_MAPS_DIR=<install>/maps cargo test -p skate-data --lib installed_map_geometry_fingerprints -- --ignored
+    /// --nocapture`, once per decoder version; the printed lines must be identical.
+    #[test]
+    #[ignore = "Requires installed maps"]
+    fn installed_map_geometry_fingerprints() {
+        use std::hash::{Hash, Hasher};
+        let dir = std::path::PathBuf::from(std::env::var("SKATE3_MAPS_DIR").expect("SKATE3_MAPS_DIR"));
+        let mut paths: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "skate")).collect();
+        paths.sort();
+        for path in paths {
+            let map = SkateMap::load(&path).unwrap();
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            for v in &map.geometry.vertices {
+                v.position.map(f32::to_bits).hash(&mut h);
+                v.normal.map(f32::to_bits).hash(&mut h);
+                v.uv.map(f32::to_bits).hash(&mut h);
+                v.lightmap_uv.map(f32::to_bits).hash(&mut h);
+                (v.material, v.decal_uv.map(|d| d.map(f32::to_bits)), v.tangent_frame).hash(&mut h);
+            }
+            map.geometry.indices.hash(&mut h);
+            for c in &map.geometry.collision {
+                (c.points.map(|p| p.map(f32::to_bits)), c.surface, c.material, c.native_edges).hash(&mut h);
+            }
+            println!("GEOMETRY {} v={} i={} c={} {:016x}", path.file_name().unwrap().to_string_lossy(),
+                map.geometry.vertices.len(), map.geometry.indices.len(), map.geometry.collision.len(), h.finish());
+        }
     }
 }

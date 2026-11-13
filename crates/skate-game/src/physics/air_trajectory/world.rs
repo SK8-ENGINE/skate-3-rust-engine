@@ -152,3 +152,37 @@ fn vec3(v: Vector) -> Vector3 {
 fn lanes(v: Vector3) -> Vector {
     [v.x, v.y, v.z, 0.0]
 }
+
+/// [`line`] against the map and the dynamic props' world: the nearer hit along the segment. A prop hit's geometry id
+/// carries the top bit, so it never names a map triangle.
+pub(super) fn line_with_props(
+    world: &BoardWorld,
+    props: Option<&BoardWorld>,
+    start: Vector,
+    end: Vector,
+    radius: f32,
+) -> Result<Option<SurfaceHit>, String> {
+    let map = line(world, start, end, radius)?;
+    let Some(props) = props else { return Ok(map) };
+    let prop = line(props, start, end, radius)?.map(|h| SurfaceHit { geometry: h.geometry | 0x8000_0000, ..h });
+    let along = |h: &SurfaceHit| (0..3).map(|i| (h.position[i] - start[i]).powi(2)).sum::<f32>();
+    Ok(match (map, prop) {
+        (Some(m), Some(p)) => Some(if along(&p) < along(&m) { p } else { m }),
+        (m, p) => m.or(p),
+    })
+}
+
+/// [`nearby`] from the map and the dynamic props' world (at most 64, map first).
+pub(super) fn nearby_with_props(
+    world: &BoardWorld,
+    props: Option<&BoardWorld>,
+    center: Vector,
+    radius: f32,
+) -> Result<Vec<[Vector; 3]>, String> {
+    let mut triangles = nearby(world, center, radius)?;
+    if let Some(props) = props {
+        let more = nearby(props, center, radius)?;
+        triangles.extend(more.into_iter().take(64usize.saturating_sub(triangles.len())));
+    }
+    Ok(triangles)
+}

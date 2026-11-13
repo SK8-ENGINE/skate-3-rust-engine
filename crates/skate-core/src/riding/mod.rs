@@ -21,3 +21,4 @@ pub mod ground_contact_response;
 pub mod collision_response;
 pub mod ground_correction_math;
 pub mod reckoning_frames;
+pub mod skitching;

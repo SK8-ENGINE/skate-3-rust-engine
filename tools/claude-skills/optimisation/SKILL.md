@@ -5,7 +5,7 @@ description: Make engine code faster WITHOUT changing behaviour - measure first,
 
 # Optimisation
 
-Built from the native-audio optimisation passes on the audio branch (upstream PR #32): the tools, baselines,
+Built from the native-audio optimisation passes of upstream PR #32 (merged): the tools, baselines,
 proofs, pitfalls and the review checklist that worked there. Helper scripts are in `tools/` next to this file
 (installed under `<repo>/.claude/skills/optimisation/tools/`; the shell scripts find the repo root from there).
 
@@ -77,6 +77,7 @@ proofs, pitfalls and the review checklist that worked there. Helper scripts are 
   NaN != NaN).
 - **Signed zero and NaN:** `+0.0` vs `-0.0` inputs; NaN / inf coefficients and histories; a NaN parameter. `0*x` is
   +-0 and `+-0 + c` is c only for finite x. Check at run time where possible.
+  Example: `kernel_silent_tail` evaluates the three feed-forward forms once and requires the bias bit pattern.
 - **Position dependence:** retail kernels associate by position (the biquad's `n % 8` groups). Any block-level
   shortcut must keep group alignment: repeat whole groups, and continue at a multiple of 8.
 - **Block sizes:** 0, 1, 7, 8, 9, 15, 16, 24, 255, 256, 264.
@@ -98,6 +99,21 @@ proofs, pitfalls and the review checklist that worked there. Helper scripts are 
   `#[target_feature(enable = "fma")] fma::*`, selected after `is_x86_feature_detected!`, cached in an `AtomicU8`,
   `SKATE_AUDIO_FMA=0` forces plain, one `unsafe` call with a `// SAFETY:` comment. Render p50 roughly halved; all
   e2e outputs byte-identical on both paths.
+  Numbers: about 1.4 us per 256-sample biquad channel through `fmaf` vs 0.43 us with hardware FMA, about 19 ns vs
+  1 ns per FSS `sin`; bit-identity checked on 100 M random cases and the whole e2e set. A safe software fma (f64
+  product + sum, with a midpoint check and a library fallback) is exact but no faster (latency-bound). Only the
+  per-sample loops moved to the dispatch (biquad kernel and silent-tail feedback, FSS sin / cos / oscillator,
+  resampler); modules that call `mul_add` once per block or per parameter change gain nothing. Render p50 went from
+  129 to 54-58 us, p99 from 286-316 to 158-209 us (real sessions). Proof tools: `skate-audio-fma/src/tests.rs`
+  (both copies directly) and `skate-audio/tests/fma_paths.rs` (the whole runtime on both paths via `force_fma`, in its
+  own test binary because the path choice is process-wide).
+- First pass totals: render per 256-frame block p50 210 to 130 us, p99 about 360 to 233 us, steady-state render
+  allocations about 104 per block to 0; all e2e outputs and voice logs byte-identical (13 scenarios + 4 whole
+  sessions, row and fps300). Second pass (allocation-free render, direct source read in `Voice::render`, mixer
+  voice scratch planes, fewer game-thread allocations): full world render p50 -11 to -14 %, player sessions p50 -1 to
+  -4 %.
+- Not attempted, and why: merging game-thread lock sections (it changes which intermediate states a render can
+  see); skipping silent grain chains (their bias-level output reaches the master bit for bit).
 - **NaN payload is the one FMA difference:** with several NaN operands, which NaN propagates depends on operand
   order. Compare with NaNs mapped to one marker and count payload differences. LLVM constant-folds edge-value calls
   with its own NaN: feed test inputs through `std::hint::black_box`.
@@ -111,14 +127,23 @@ proofs, pitfalls and the review checklist that worked there. Helper scripts are 
   - The e2e real-session replays are the best identity net (they hit jitter, re-roll, settling and silent-bus paths
     that synthetic scenarios don't).
   - Count paths (how many blocks take each shortcut) before estimating gains, then still measure.
+    Example: the fused HPF -> LPF cascade idea died at the count (both filters are active in only 1-1.4 % of voice
+    renders); the silent-bus memo would have hit 38 % of bus blocks and still lost.
   - Exact code motion in an interpreter loop buys nothing; only a different program representation would.
+    (The evaluator walk is about 13 ns per op over about 2,700 ops; removing the second dispatch and extra lookups
+    did not move it.)
   - Make an allocation test fail on the old code first.
+    (`render_alloc` counted 1,179 / 5,061 allocations on the pre-pass evaluator and 0 / 0 after.)
   - Pool shape matters: zero-capacity lists re-allocate on every post; use best fit and give new lists a little room.
   - A data-gated test run needs `--no-fail-fast`, otherwise later test binaries never run and there is nothing to
     diff.
   - Proof per change on a cumulative tree: if each state is identical to the reference, so is every step.
+    Diff the data-gated tests' printed tables too, minus the timing lines.
   - Time with interleaved saved binaries when other work shares the machine (A B A B rounds); name disturbed rounds
     and leave them out. Benchmarks taken while a build runs are worthless.
+    Save the e2e test exe after each build (`<target>/release/deps/skate3rust-*.exe`) and run the saved exes in
+    A B A B rounds; the exe needs the toolchain's `bin` (std DLL) and the target's `deps` on `PATH` (POSIX form in
+    Git Bash). One disturbed side typically jumps 15-40 %; an identical tree once timed +30 % slower under load.
 
 ## Known hot spots / lessons
 - **Audio thread vs game thread:** the game thread waits for the runtime lock while a block renders. Keep real-time
@@ -136,7 +161,25 @@ proofs, pitfalls and the review checklist that worked there. Helper scripts are 
     failed (load here as before).
   - Size the memory first, and count where the cost moved (freeing big buffers belongs on the worker too).
   - Prove "no work on this thread" with a `cfg(test)` thread-local counter in the decode helper.
-- **Setup speed:** threads only pay where the work releases the GIL (zlib, file I/O); prefetching npz arrays on
-  threads was slower.
+  - Identity tests for the move: a Debug-equal bank and `to_bits`-equal PCM for all 66 emitter banks, plus the
+    evaluator RNG and block count before / after the new per-frame code.
+  - The first prefetch version freed evicted banks on the game thread (0.5 ms calls): hand big drops to the worker.
+  - Memory: decoded emitter banks per district map are 160-250 MiB (too much to hold), a distance ring over a real
+    session adds 20-30 MiB at 60 / 90 m look-ahead.
+  - The e2e bench does not cover host-side systems (no world emitters in the harness): pair e2e identity with
+    data-gated unit tests on a real install, and build both e2e runs from one snapshot of the tree when other work
+    edits the working tree.
+- **Setup speed:** measure and prove with skill `setup-bench` (timed full setup into a scratch install + a sha256
+  manifest, compared against a second run of the unchanged pipeline: about 40 files vary run to run). Knobs:
+  `setup_budget.py` (`SKATE_SETUP_MAP_WORKERS`, `SKATE_SETUP_THREADS`, `SKATE_SETUP_PRIORITY`, one 75 % core budget
+  `setup_budget.cores`). The export pass went from 228.3 s to 135.3 s with identical output: parallel vgmstream
+  decodes (manifest filled in order), native RefPack in the vendored UI tools, a block-at-once NumPy DXT decoder (the
+  old one kept as `_decode_dxt_reference` with a 480-case test), the HUD export and the living world in their own
+  processes, map jobs started right after core, threaded archive extraction and receipt hashing.
+  Lessons: threads only pay where the work releases the GIL (zlib, file I/O); in-process Python stages gain nothing
+  from threads, prefetching npz arrays on threads was slower, and two threads in NumPy crashed Python (BLAS). Overlap
+  stages as separate processes (`stage_job.py`). Profile a stage with `python -m cProfile -s cumtime <script>` on the
+  snapshot. Check what a moved stage reads and writes before overlapping it (grep the other stages for its output
+  folders). A change to a fingerprinted setup script makes every user's refresh redo that group.
 - **Recomp research hooks** on an audio render thread can delay the game's command-queue drain until it overflows:
   keep hooks light (skill `recomp-research`).

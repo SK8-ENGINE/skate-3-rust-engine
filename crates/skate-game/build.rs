@@ -11,10 +11,30 @@ fn program_files_x86() -> PathBuf {
 }
 
 fn main() {
+    let git = |args: &[&str]| Command::new("git").args(args).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
+    // SKATE_BUILD_STAMP=inputs (local builds): a commit that leaves the build inputs clean keeps the stamp instead of
+    // rebuilding the game (docs/hails-additions/25-perf-diagnostics.md#build-stamp-for-local-builds).
+    println!("cargo:rerun-if-env-changed=SKATE_BUILD_STAMP");
+    let inputs_only = env::var("SKATE_BUILD_STAMP").as_deref() == Ok("inputs");
+    let inputs = [":/crates", ":/vendor", ":/Cargo.toml", ":/Cargo.lock", ":/.cargo", ":/docs/images/skating-crab.ico"];
+    let dirty = if inputs_only {
+        let mut args = vec!["status", "--porcelain", "--untracked-files=normal", "--"];
+        args.extend(inputs);
+        git(&args).map(|s| !s.is_empty())
+    } else {
+        git(&["status", "--porcelain", "--untracked-files=normal"]).map(|s| !s.is_empty())
+    };
+    if inputs_only {
+        for path in ["../../crates", "../../vendor", "../../.cargo"] {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
     // Cargo must refresh provenance after a commit as well as after source edits.
-    for name in ["HEAD", "index", "refs"] {
-        if let Ok(output) = Command::new("git").args(["rev-parse", "--git-path", name]).output() {
-            if output.status.success() { println!("cargo:rerun-if-changed={}", String::from_utf8_lossy(&output.stdout).trim()); }
+    if !inputs_only || dirty != Some(false) {
+        for name in ["HEAD", "index", "refs"] {
+            if let Ok(output) = Command::new("git").args(["rev-parse", "--git-path", name]).output() {
+                if output.status.success() { println!("cargo:rerun-if-changed={}", String::from_utf8_lossy(&output.stdout).trim()); }
+            }
         }
     }
     println!("cargo:rerun-if-changed=src");
@@ -25,12 +45,10 @@ fn main() {
     for path in ["../../Cargo.toml", "Cargo.toml", "../skate-core/Cargo.toml", "../skate-data/Cargo.toml", "../skate-net/Cargo.toml", "../../vendor/bevy_pbr", "../../vendor/bevy_core_pipeline"] {
         println!("cargo:rerun-if-changed={path}");
     }
-    let git = |args: &[&str]| Command::new("git").args(args).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned());
     let revision = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "revision-unavailable".into());
     println!("cargo:rerun-if-env-changed=GITHUB_RUN_NUMBER");
     println!("cargo:rustc-env=SKATE_RELEASE_REVISION={revision}");
     println!("cargo:rustc-env=SKATE_RELEASE_BUILD={}", env::var("GITHUB_RUN_NUMBER").unwrap_or_else(|_| "0".into()));
-    let dirty = git(&["status", "--porcelain", "--untracked-files=normal"]).map(|s| !s.is_empty());
     let compiler = Command::new(env::var_os("RUSTC").unwrap_or_else(|| "rustc".into())).arg("--version").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default();
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     println!("cargo:rustc-env=SKATE_BUILD_ID={} revision={} dirty={dirty:?} build_unix_ns={stamp} target={} profile={} dynamic={} compiler={compiler}", env::var("CARGO_PKG_VERSION").unwrap(), revision, env::var("TARGET").unwrap(), env::var("PROFILE").unwrap(), env::var_os("CARGO_FEATURE_DEV_DYNAMIC").is_some());

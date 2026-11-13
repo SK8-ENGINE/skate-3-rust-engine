@@ -191,7 +191,7 @@ fn update(
     let ready = p.state.flag_69 == 0
         && state != 702
         && !(physics.board_wiping_out && p.skeleton.teleport_pending_604 != 0)
-        && skater.player_input.pending_teleport().is_none();
+        && !skater.teleport_pending();
     let distance = session.marker.map_or(0., |m| {
         // 82DB6EC0 -> 82BE1AE8 publishes animation-to-world at output+368;
         // UpdateSessionMarker reads its translation at output+416.
@@ -205,19 +205,15 @@ fn update(
         session.progress = step.progress;
         if step.relocate {
             if let Some(target) = session.marker {
-                match skater.player_input.request_teleport(target.transform) {
-                    Ok(()) => {
-                        // sub_82898FC8: the go-to sound in the relocation tick.
-                        events.write(SessionMarkerEvent { action: SessionMarkerAction::Returned });
-                        skater.animation.restore_foot_forward(target.foot_forward);
-                        skater
-                            .teleport_state
-                            .request_manual(target.transform, target.on_board);
-                    }
-                    Err(e) => {
-                        warn!("Session marker return rejected: {e}");
-                        session.hold.cancel();
-                    }
+                // One move through the actor reply, as retail's marker return (b473); refused while one is in flight.
+                if skater.teleport_pending() {
+                    warn!("Session marker return rejected: a teleport is in flight");
+                    session.hold.cancel();
+                } else {
+                    // sub_82898FC8: the go-to sound in the relocation tick.
+                    events.write(SessionMarkerEvent { action: SessionMarkerAction::Returned });
+                    skater.animation.restore_foot_forward(target.foot_forward);
+                    skater.teleport_state.request_manual(target.transform, target.on_board);
                 }
             }
         }

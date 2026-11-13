@@ -88,6 +88,11 @@ pub(crate) fn selector_input(
                     p.state_variant_index_2528
                 )
             })?,
+        //sub_82D682E8: an AI record (F+2472 0x20000000) carrying a recorded trajectory (bit 26).
+        recorded_arc: (p.flags_2472 & 0x2000_0000 != 0 && p.external_physics_1616.flags & (1 << 26) != 0).then(|| {
+            let v = |i: usize| p.external_physics_1616.vectors[i].map(f32::from_bits);
+            skate_core::air::trajectory::RecordedArc { position: v(5), velocity: v(6), acceleration: v(7) }
+        }),
     })
 }
 pub(crate) fn launch_info(

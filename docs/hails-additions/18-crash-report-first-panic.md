@@ -1,6 +1,6 @@
 # Crash report keeps the first panic
 
-Branch: `fix/crash-report-first-panic` (from `main` 4488651). Status: **done, uncommitted**. Diagnostics only
+Branch: `fix/crash-report-first-panic` (from `main` 4488651). Status: **done, in upstream main** (`6ed48ca3`, integrated through `c283cc57`). Diagnostics only
 (`crates/skate-game/src/crash_report.rs`); no gameplay or rendering change.
 
 ## Problem
