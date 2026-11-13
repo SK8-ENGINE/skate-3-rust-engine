@@ -218,7 +218,7 @@ pub(crate) struct IndicatorMarker {
 pub(crate) struct IndicatorPass;
 
 pub(crate) fn install(app: &mut App) {
-    app.init_resource::<VisualIndicators>().init_resource::<RaceIndicators>().add_systems(Update, (sync, face_camera, companion_trails).chain());
+    app.init_resource::<VisualIndicators>().init_resource::<RaceIndicators>().init_resource::<FollowIndicators>().add_systems(Update, (sync, face_camera, companion_trails).chain());
 }
 
 fn load(assets: &Path) -> Result<File, String> {
@@ -421,6 +421,8 @@ fn pass_materials(state: &VisualIndicators, colour: &str, server: &AssetServer, 
 #[derive(Component)]
 pub(crate) struct CompanionTrail {
     serial: u32,
+    /// the style row it draws with (`trail_follow` for a companion, `trail_skatewith` for a followed actor)
+    style_key: String,
     trail: skate_core::indicator_trail::Trail,
     /// The skater's anchor bone entity, once found (else its root).
     bone: Option<Entity>,
@@ -428,6 +430,15 @@ pub(crate) struct CompanionTrail {
     mesh: Handle<Mesh>,
     passes: Vec<(Handle<StandardMaterial>, Pass)>,
 }
+
+/// The actors with a follow indicator (living-world serials): a challenge's Leader.AddFollowIndicator. Retail draws
+/// them with the companions' ribbon in the `trail_skatewith` style (kind 0, `827AEC80`); a mod or host can push any
+/// skater's serial here.
+#[derive(Resource, Default)]
+pub struct FollowIndicators(pub Vec<u32>);
+
+/// The trail style of a follow indicator (kind 0, key 0x112D826AA8AD3C57, b566).
+const FOLLOW_STYLE: &str = "trail_skatewith";
 
 /// Retail keeps 4 trail objects (`827ADA30`).
 const MAX_TRAILS: usize = 4;
@@ -449,13 +460,14 @@ fn find_bone(root: Entity, bone: &str, children: &Query<&Children>, names: &Quer
     None
 }
 
-/// One trail per called skater (up to 4), fed every period with its board bone (b567: `skateboard_root` + 0.25 m),
+/// One trail per called skater or followed actor (up to 4 together, as retail's collector `82D5D710`), fed every period with its board bone (b567: `skateboard_root` + 0.25 m),
 /// drawn as retail's B-spline; hidden on greenscreen, below 4 points and past the style's fade.
 #[allow(clippy::too_many_arguments)]
 fn companion_trails(
     mut commands: Commands,
     time: Res<Time>,
     state: Res<VisualIndicators>,
+    follow: Res<FollowIndicators>,
     population: Option<Res<crate::living_world::PopulationState>>,
     npcs: Query<(Entity, &crate::living_world::npc_skaters::NpcSkater)>,
     transforms: Query<&GlobalTransform>,
@@ -468,22 +480,30 @@ fn companion_trails(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let rules = skate_core::indicator_trail::TrailRules::default();
-    let wanted: Vec<u32> = population.as_ref().map(|p| p.world.companions().iter().filter_map(|c| c.serial).take(MAX_TRAILS).collect()).unwrap_or_default();
+    // companions (kind 1, trail_follow), then followed actors (kind 0, trail_skatewith)
+    let mut wanted: Vec<(u32, String)> = population.as_ref().map(|p| p.world.companions().iter().filter_map(|c| c.serial).map(|s| (s, rules.style.clone())).collect()).unwrap_or_default();
+    for &s in &follow.0 {
+        if !wanted.iter().any(|w| w.0 == s) {
+            wanted.push((s, FOLLOW_STYLE.to_owned()));
+        }
+    }
+    wanted.truncate(MAX_TRAILS);
     let mut have = Vec::new();
     for (e, t, _) in &trails {
-        if wanted.contains(&t.serial) {
+        if wanted.iter().any(|w| w.0 == t.serial && w.1 == t.style_key) {
             have.push(t.serial);
         } else {
             commands.entity(e).despawn();
         }
     }
-    if let Some(style) = style_row(&state.styles, &rules.style) {
-        for &serial in wanted.iter().filter(|s| !have.contains(s)) {
-            info!("SKATE_VISUAL_INDICATORS trail for called skater #{serial} ({})", rules.style);
+    for (serial, key) in wanted.iter().filter(|w| !have.contains(&w.0)) {
+        let serial = *serial;
+        if let Some(style) = style_row(&state.styles, key) {
+            info!("SKATE_VISUAL_INDICATORS trail for skater #{serial} ({key})");
             let mesh = meshes.add(strips(&[], style));
             let passes = pass_materials(&state, DEFAULT_COLOUR, &server, &mut materials);
             let root = commands
-                .spawn((CompanionTrail { serial, trail: Default::default(), bone: None, style: style.clone(), mesh: mesh.clone(), passes: passes.clone() }, Transform::default(), Visibility::Hidden))
+                .spawn((CompanionTrail { serial, style_key: key.clone(), trail: Default::default(), bone: None, style: style.clone(), mesh: mesh.clone(), passes: passes.clone() }, Transform::default(), Visibility::Hidden))
                 .id();
             for (material, ..) in passes {
                 commands.spawn((IndicatorPass, Mesh3d(mesh.clone()), MeshMaterial3d(material), Transform::default(), ChildOf(root)));
@@ -611,7 +631,9 @@ mod tests {
         let mut styles = HashMap::new();
         styles.insert("Hash_8330C6CBB7402726".to_string(), Style::default());
         assert!(style_row(&styles, "trail_follow").is_some());
-        assert!(style_row(&styles, "trail_skatewith").is_none());
+        assert!(style_row(&styles, FOLLOW_STYLE).is_none());
+        styles.insert("Hash_112D826AA8AD3C57".to_string(), Style::default());
+        assert!(style_row(&styles, FOLLOW_STYLE).is_some());
     }
 
     /// The replay greenscreen hides the icons; they come back when it is off (b559).

@@ -39,6 +39,34 @@ fn yes() -> bool {
     true
 }
 
+/// The autopilot's gap behind the leader (m): inside it the brain holds the leader's speed or less. OURS, a test aid.
+const FOLLOW_GAP: f32 = 8.0;
+
+/// The line the autopilot may take next: the one after `current` on the leader's `path`; the leader's latest when
+/// the brain is on it or off the path; the first one before the brain has a line.
+fn follow_line(path: &[[u8; 16]], current: Option<[u8; 16]>) -> Option<[u8; 16]> {
+    match current.and_then(|c| path.iter().rposition(|l| *l == c)) {
+        Some(i) => path.get(i + 1).or(path.last()).copied(),
+        None => current.map_or(path.first(), |_| path.last()).copied(),
+    }
+}
+
+/// The autopilot never brakes below this for the gap (m/s): a leader standing at its start does not stop it.
+const FOLLOW_MIN_SPEED: f32 = 4.0;
+
+/// The autopilot's speed cap for a gap of `behind` meters behind the leader (negative: ahead of it) at the leader's
+/// `speed`: none past the gap, the leader's speed easing down to 75 % at no gap, 60 % once ahead.
+fn follow_cap(behind: f32, speed: f32) -> Option<f32> {
+    let cap = if behind >= FOLLOW_GAP {
+        return None;
+    } else if behind <= 0.0 {
+        0.6 * speed
+    } else {
+        speed * (0.75 + 0.25 * behind / FOLLOW_GAP)
+    };
+    Some(cap.max(FOLLOW_MIN_SPEED))
+}
+
 /// One `follow_the_leaders` row as `challenges.py` exports it.
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct FtlData {
@@ -109,13 +137,19 @@ pub(crate) struct FtlState {
     /// The leader band (None = switched off).
     band: Option<FollowerBand>,
     carry: f32,
+    /// The first leader's position last frame and its smoothed speed (m/s), for the autopilot's follow gap.
+    leader_last: Option<[f32; 3]>,
+    leader_speed: f32,
+    /// The lines the first leader has taken this run, in order: the autopilot takes them in the same order.
+    leader_path: Vec<[u8; 16]>,
     last_state: u32,
     failure_text: Option<String>,
     dialog_open: bool,
     dialog_seconds: f32,
     /// Leaders already counted inside the end volume.
     leaders_in_end: Vec<u32>,
-    follow_indicator: bool,
+    /// The competitors with a follow indicator (Leader.AddFollowIndicator), drawn as a trail behind their body.
+    follow_indicators: Vec<u32>,
     meter: Option<skate_core::challenges::distance_meter::DistanceMeter>,
     /// Commands for the next update (the start's, made in arm).
     queued: Vec<Command>,
@@ -186,7 +220,7 @@ fn arm(mut ftl: ResMut<FollowTheLeader>, config: Res<crate::config::Config>, map
     info!("SKATE_FTL start {} at {} end={:?} max={:?} leaders={rows:?}", data.id, data.start.locator, data.end_volume.as_ref().map(|v| &v.name), data.max_follow_distance);
     let commands = run.start();
     let mut state = FtlState { data, run, objectives, evaluating: false, leader, awaiting_teleport: false, band: Some(FollowerBand::default()),
-        carry: 0.0, last_state: 0, failure_text: None, dialog_open: false, dialog_seconds: 0.0, leaders_in_end: Vec::new(), follow_indicator: false, meter: None, queued: Vec::new() };
+        carry: 0.0, leader_last: None, leader_speed: 0.0, leader_path: Vec::new(), last_state: 0, failure_text: None, dialog_open: false, dialog_seconds: 0.0, leaders_in_end: Vec::new(), follow_indicators: Vec::new(), meter: None, queued: Vec::new() };
     // The first commands run on the next update with the frame's resources.
     state.pending(commands);
     ftl.run = Some(state);
@@ -222,20 +256,33 @@ fn update(
     mut hud: ResMut<ChallengeHudState>,
     mut end_dialog: Option<ResMut<crate::end_dialog_host::EndDialogScreen>>,
     mut autopilot: Option<ResMut<crate::autopilot::Autopilot>>,
-    (time, menus): (Res<Time>, Option<Res<crate::retail_menus::RetailMenus>>),
-    (mut population, index, npc_transforms, mut clocks, mut commands_ecs): (
+    (time, menus, mut follow): (Res<Time>, Option<Res<crate::retail_menus::RetailMenus>>, ResMut<crate::visual_indicators::FollowIndicators>),
+    (mut population, index, npc_transforms, mut clocks, mut commands_ecs, replays, mut brains): (
         Option<ResMut<crate::living_world::PopulationState>>,
         Option<Res<crate::living_world::npc_skaters::NpcSkaterIndex>>,
         Query<&Transform, With<crate::living_world::npc_skaters::NpcSkater>>,
         Query<&mut crate::living_world::npc_skaters::NpcRaceClock>,
         Commands,
+        Query<&crate::living_world::npc_skaters::NpcReplay>,
+        Query<&mut crate::living_world::npc_sim::NpcSim, With<crate::autopilot::Possessed>>,
     ),
 ) {
     let entered: Vec<u64> = entered.read().filter(|e| e.body == crate::trigger_volumes::PLAYER)
         .filter_map(|e| u64::from_str_radix(&e.volume, 16).ok()).collect();
     let exited: Vec<u64> = exited.read().filter(|e| e.body == crate::trigger_volumes::PLAYER)
         .filter_map(|e| u64::from_str_radix(&e.volume, 16).ok()).collect();
-    let Some(state) = ftl.run.as_mut() else { return };
+    let Some(state) = ftl.run.as_mut() else {
+        if !follow.0.is_empty() {
+            follow.0.clear();
+        }
+        if let Some(a) = autopilot.as_mut().filter(|a| a.follow.is_some()) {
+            a.follow = None;
+        }
+        for mut b in &mut brains {
+            b.speed_cap = None;
+        }
+        return;
+    };
     let id = state.data.id.clone();
     let mut commands = std::mem::take(&mut state.queued);
     // The end options dialog: its pick feeds Continue / Retry; the autopilot continues after a short look.
@@ -277,6 +324,39 @@ fn update(
         }).collect(),
         _ => Vec::new(),
     };
+    // The autopilot (a test aid) takes the first leader's lines in the leader's order: the line the leader took after
+    // the one the brain is on (after a bail it keeps to the path instead of walking to where the leader is now).
+    if let Some(a) = autopilot.as_mut() {
+        let line_of = |id: Option<skate_core::living_world::LivingWorldId>| id.and_then(|n| index.as_deref().and_then(|i| i.0.get(&n).copied()))
+            .and_then(|e| replays.get(e).ok()).map(|r| r.cursor.line);
+        if let Some(l) = line_of(state.leader.as_ref().and_then(|ai| ai.riders.first()).and_then(|r| r.npc)) {
+            if state.leader_path.last() != Some(&l) {
+                state.leader_path.push(l);
+            }
+        }
+        let line = follow_line(&state.leader_path, line_of(a.npc_id()));
+        if a.follow != line {
+            a.follow = line;
+        }
+    }
+    // ...and keeps a gap: it may not pass the leader (OURS, a test aid; FOLLOW_GAP).
+    if let Some((_, Some(at), Some(fwd))) = leaders.first() {
+        let dt = time.delta_secs().max(1e-3);
+        if let Some(last) = state.leader_last {
+            let v = ((at[0] - last[0]).powi(2) + (at[2] - last[2]).powi(2)).sqrt() / dt;
+            if v < 30.0 {
+                state.leader_speed += (v - state.leader_speed) * (dt * 2.0).min(1.0);
+            }
+        }
+        state.leader_last = Some(*at);
+        let behind = (at[0] - player[0]) * fwd[0] + (at[2] - player[2]) * fwd[2];
+        let cap = follow_cap(behind, state.leader_speed);
+        for mut b in &mut brains {
+            if b.speed_cap != cap {
+                b.speed_cap = cap;
+            }
+        }
+    }
     let mut distances = [None; 4];
     for (n, at, _) in &leaders {
         if let (Some(at), Some(slot)) = (at, distances.get_mut(*n as usize - 1)) {
@@ -334,12 +414,20 @@ fn update(
                 events.extend(o.handle(GroupMessage::TriggerEnter { volume: v }));
             }
             events.extend(o.handle(GroupMessage::Tick { gated: false }));
-            if let Some(on) = o.follow_indicator.take() {
-                if on != state.follow_indicator {
-                    state.follow_indicator = on;
-                    info!("SKATE_FTL {id} follow indicator {on} NOT RETAIL YET (no trail drawn)");
+            for (competitor, on) in o.follow_indicator.drain(..) {
+                // retail removes any entry for the id first, so adding twice keeps one (82D4F470)
+                state.follow_indicators.retain(|&c| c != competitor);
+                if on {
+                    state.follow_indicators.push(competitor);
                 }
+                info!("SKATE_FTL {id} follow indicator {competitor} {on}");
             }
+        }
+        // the followed competitors' bodies get the trail (by their living-world serial)
+        let serials: Vec<u32> = state.leader.as_ref().map(|ai| ai.riders.iter()
+            .filter(|r| state.follow_indicators.contains(&r.id)).filter_map(|r| r.npc.map(|n| n.serial)).collect()).unwrap_or_default();
+        if follow.0 != serials {
+            follow.0 = serials;
         }
         for e in events {
             match e {
@@ -404,6 +492,7 @@ fn update(
                 }
                 Command::ResetObjectives => {
                     state.leaders_in_end.clear();
+                    state.leader_path.clear();
                     state.failure_text = None;
                     if let Some(o) = state.objectives.as_mut() {
                         o.reset_only();
@@ -525,6 +614,27 @@ pub(crate) fn register(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_autopilot_keeps_a_gap_and_never_passes_the_leader() {
+        assert_eq!(follow_cap(12.0, 8.0), None);
+        assert_eq!(follow_cap(FOLLOW_GAP, 8.0), None);
+        assert_eq!(follow_cap(4.0, 8.0), Some(7.0));
+        assert_eq!(follow_cap(0.0, 8.0), Some(4.8));
+        assert_eq!(follow_cap(-3.0, 8.0), Some(4.8));
+        assert_eq!(follow_cap(2.0, 0.0), Some(FOLLOW_MIN_SPEED), "a leader still at its start does not stop it");
+    }
+
+    #[test]
+    fn the_autopilot_takes_the_leaders_lines_in_order() {
+        let (a, b, c) = ([1u8; 16], [2u8; 16], [3u8; 16]);
+        let path = [a, b, c];
+        assert_eq!(follow_line(&path, Some(a)), Some(b), "after a bail on a: b, not where the leader is now");
+        assert_eq!(follow_line(&path, Some(c)), Some(c));
+        assert_eq!(follow_line(&path, None), Some(a));
+        assert_eq!(follow_line(&path, Some([9u8; 16])), Some(c));
+        assert_eq!(follow_line(&[], Some(a)), None);
+    }
 
     #[test]
     fn rows_become_follow_params_with_the_end_volume_and_their_competitors() {

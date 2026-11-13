@@ -143,8 +143,8 @@ pub(crate) struct DataObjectives {
     pub skater: SkaterFacts,
     /// The last "n of m" counter a condition set (SetFractionValue), for the objective HUD.
     pub fraction: Option<(f32, f32)>,
-    /// Leader.AddFollowIndicator / RemoveFollowIndicator, for the follow the leader host (the trail over the leader).
-    pub follow_indicator: Option<bool>,
+    /// Leader.AddFollowIndicator / RemoveFollowIndicator (competitor, on) in call order, for the follow the leader host.
+    pub follow_indicator: Vec<(u32, bool)>,
     /// Trick group key -> member trick keys (b863), and the tricks announced this frame.
     trick_groups: TrickGroups,
     pub tricks_this_frame: Vec<u64>,
@@ -299,7 +299,7 @@ impl DataObjectives {
         let globals = vec![Value::Nil; names.globals.len()];
         info!("SKATE_CHALLENGE {id} objectives from data: {} rows, {} failure rows, {} hint rows, api {:?}", rows.len(),
             count(&failures), count(&hints), names.api);
-        Some(Self { group, programs, failures, hints, names, vars, globals, volumes, inside: Vec::new(), skater: SkaterFacts::default(), fraction: None, follow_indicator: None,
+        Some(Self { group, programs, failures, hints, names, vars, globals, volumes, inside: Vec::new(), skater: SkaterFacts::default(), fraction: None, follow_indicator: Vec::new(),
             trick_groups, tricks_this_frame: Vec::new(), tricks_began: Vec::new() })
     }
 
@@ -320,7 +320,7 @@ impl DataObjectives {
                 FlowCommand::Deactivate(i) => self.group.deactivate(i),
                 FlowCommand::Reset(i) => self.group.reset(i, true),
                 FlowCommand::Fraction(n, d) => self.fraction = Some((n, d)),
-                FlowCommand::FollowIndicator(on) => self.follow_indicator = Some(on),
+                FlowCommand::FollowIndicator { competitor, on } => self.follow_indicator.push((competitor, on)),
             }
         }
         events

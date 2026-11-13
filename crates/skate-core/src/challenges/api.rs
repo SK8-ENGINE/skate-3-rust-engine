@@ -97,7 +97,9 @@ pub enum FlowCommand {
     /// ObjectiveGameInfo.SetFractionValue: the "n of m" HUD counter of this objective (numerator, denominator).
     Fraction(f32, f32),
     /// Leader.AddFollowIndicator / RemoveFollowIndicator: the trail over the leader (b1006 / b566 style trail_follow).
-    FollowIndicator(bool),
+    /// Retail adds {competitor, kind 0, active} to the indicator manager's actor list (82D4F470 via 82C6CC00), which the
+    /// render side draws as a `trail_skatewith` ribbon (82D4FAD0, 827AEC80).
+    FollowIndicator { competitor: u32, on: bool },
 }
 
 /// The functions this API answers (last name segment). A group whose programs call anything else does not run:
@@ -259,7 +261,8 @@ impl Api for ObjectiveApi<'_> {
                 num_f(self.skater.competitor_distances.get(n - 1).copied().flatten().unwrap_or(0.0))
             }
             "AddFollowIndicator" | "RemoveFollowIndicator" => {
-                self.flow.push(FlowCommand::FollowIndicator(short == "AddFollowIndicator"));
+                let competitor = match args.first() { Some(Value::Num(n)) if *n >= 0.0 => *n as u32, _ => 0 };
+                self.flow.push(FlowCommand::FollowIndicator { competitor, on: short == "AddFollowIndicator" });
                 Value::Nil
             }
             "SetFractionValue" => {
@@ -346,13 +349,13 @@ mod tests {
         assert!(far(1, vec![Expr::Lit(Value::Num(1.0))], 50.0, d, &mut flow) && !far(1, vec![Expr::Lit(Value::Num(2.0))], 50.0, d, &mut flow));
         assert!(!far(0, vec![], 40.0, [None; 4], &mut flow), "no competitor never fails");
         let call = |func: u16, flow: &mut Vec<FlowCommand>| {
-            let p = Program { locals: 0, body: vec![Stmt::Call(Expr::Api { func, args: vec![] }), Stmt::Return(Expr::Lit(Value::Bool(true)))] };
+            let p = Program { locals: 0, body: vec![Stmt::Call(Expr::Api { func, args: vec![Expr::Lit(Value::Num(1.0))] }), Stmt::Return(Expr::Lit(Value::Bool(true)))] };
             condition(&p, &mut ObjectiveApi { names: &names, objective: &o, ctx: Context::default(), volume: &|_: &str| None,
                 inside: &[], statuses: &[], flow, skater: SkaterFacts::default(), tricks_this_frame: &[], tricks_began: &[],
                 trick_groups: &Default::default(), key: &|_: &str| 0u64 }, &mut [], &mut [], false)
         };
         call(2, &mut flow);
         call(3, &mut flow);
-        assert_eq!(flow, vec![FlowCommand::FollowIndicator(true), FlowCommand::FollowIndicator(false)]);
+        assert_eq!(flow, vec![FlowCommand::FollowIndicator { competitor: 1, on: true }, FlowCommand::FollowIndicator { competitor: 1, on: false }]);
     }
 }

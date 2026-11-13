@@ -1348,7 +1348,7 @@ Challenge ids are the retail key strings. Mods read, start, abort, hide and re-t
 - `crates/skate-game/src/challenge_objectives.rs`: inline failures load after the with-events rows of their objective (row index past them, `ObjectiveData::inline_failure`).
 - `crates/skate-game/src/ftl_host.rs`: the host. It handles start via `SKATE_FTL=<id>`, the leader on the contest rider code (`contest_ai_host.rs`, now with a per-rider speed scale), distances, the leader's end-volume entry by its body, the player pin, the 10 s window on the timer HUD, the failure central message, the end dialog and the career result.
 
-**Not yet (NOT RETAIL YET, logged).** The follow indicator trail, speech rows, the killed objectives, sign-up from the challenge map (start is `SKATE_FTL` only), the band's sign (b969 open, ours: the player behind the leader slows it).
+**Not yet (NOT RETAIL YET, logged).** Speech rows, the killed objectives, sign-up from the challenge map (start is `SKATE_FTL` only), the band's sign (b969 open, ours: the player behind the leader slows it).
 
 **Verification.** Tests `leader_calls_read_competitor_distances_and_push_the_indicator`, `inline_failures_fire_after_the_with_events_rows`, `the_follower_band_ramps_from_five_to_fifteen_meters_and_slows_a_leader_the_player_trails`, `rows_become_follow_params_with_the_end_volume_and_their_competitors`, plus the film_run tests above.
 
@@ -1372,3 +1372,30 @@ Challenge ids are the retail key strings. Mods read, start, abort, hide and re-t
 **OURS.** A row without a max gets -1 (never red); the HUD tick rate is taken as the FE cadence (60 Hz, doc 31). Mods cannot change `MeterTuning` yet (no API entry).
 
 **Verification.** `red_above_sixty_percent_of_the_max`, `refreshes_every_fifth_tick_at_any_frame_rate` (skate-core), `the_distance_meter_shows_the_distance_and_turns_red` (the retail movie, ignored without the converted HUD). Not play-tested.
+
+## The follow trail behind the leader
+
+**Problem.** `Leader.AddFollowIndicator(1)` (the objective's first evaluation) was only logged: no trail showed the player which skater to follow.
+
+**Root cause / evidence (Ghidra, TU3; research b1006, b966, b566).**
+- `AddFollowIndicator(i)` (82C6CC00) calls `VisualIndicatorMgr_Add(mgr, i, 0)` (82D4F470): it removes any entry for `i`, then pushes `{id i, kind 0, active 1}` to the manager's actor list at +0x1548. `RemoveFollowIndicator(i)` (82D4F500) takes it out again. [code]
+- That is the list the companion trail reads: `82D4FAD0` copies the active entries of +0x1548, `82D5D710` collects up to 4 over the groups, and the render side (`827AEC80`) draws each one as the ribbon trail behind that skater's board. Kind 1 (a called companion) uses style `trail_follow`; kind 0, the follow indicator, uses `trail_skatewith` (key 0x112D826AA8AD3C57). [code + data, b566 §2]
+
+**Change.**
+- `crates/skate-core/src/challenges/api.rs`: `FlowCommand::FollowIndicator { competitor, on }` carries the competitor number.
+- `crates/skate-game/src/challenge_objectives.rs`: the calls are kept in order (`follow_indicator: Vec<(u32, bool)>`).
+- `crates/skate-game/src/ftl_host.rs`: the followed competitors (an add removes the old entry first, as retail), published each frame as their living-world serials; cleared when the run ends.
+- `crates/skate-game/src/visual_indicators.rs`: `FollowIndicators` (a resource a mod or another host can fill), drawn with the companion trail in the `trail_skatewith` style, companions first, 4 trails at most.
+
+**Verification.** `leader_calls_read_competitor_distances_and_push_the_indicator` (the competitor number), `trail_style_found_by_its_hash` (both styles), plus the existing trail tests. Desktop run ftl_univ_02 (2026-11-12 22:41): `trail for skater #1 (trail_skatewith)` logged at the objective's first evaluation, the blue ribbon behind the leader in the screenshots.
+
+## The autopilot follows the leader (ours, a test aid)
+
+**Problem.** In a follow the leader run the player autopilot rode its own chain of the challenge's lines: at a line end it took a far line start and walked there on foot, away from the leader (desktop run 22:41, ask 640). Once it took the leader's lines it rode up beside the leader and passed it, then fell back (ask 641).
+
+**Change.** Not retail: retail has no autopilot.
+- `crates/skate-game/src/ftl_host.rs`: the first leader's lines are recorded in the order it takes them (`leader_path`); `Autopilot::follow` is the line the leader took after the one the brain is on (`follow_line`), so after a bail the brain keeps to the path instead of walking to where the leader is now (run 23:06 walked 45 m to the leader's current line). A speed cap goes to the possessed brain (`follow_cap`): none 8 m or more behind the leader (`FOLLOW_GAP`), the leader's smoothed speed easing down to 75 % of it with no gap, 60 % once ahead, never under 4 m/s (`FOLLOW_MIN_SPEED`: a leader still at its start does not stop it).
+- `crates/skate-game/src/autopilot.rs`: with `follow` set the brain starts on that line and gets it as its line filter (`NpcLineFilter`), so a line end takes only that line.
+- `crates/skate-game/src/living_world/npc_sim.rs`: `NpcSim::speed_cap` caps the autopilot's push target and its brake target, never below the next jump's takeoff speed.
+
+**Verification.** `the_autopilot_keeps_a_gap_and_never_passes_the_leader`, `the_autopilot_takes_the_leaders_lines_in_order`. Desktop runs: 22:51 (follow, no cap) rode the leader's lines on its board and owned the challenge after 88 s; 23:17 (path order, cap) took 0b, 02, 03, 07, 08, 09, 0a in order on its board, one 4 m step back onto line 03, one bail at 75 s; the 2 min limit ended it before the finish.

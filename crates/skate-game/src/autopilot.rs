@@ -60,6 +60,12 @@ pub(crate) struct Autopilot {
     ticks: u64,
     /// Where it was when it last made progress (position, tick): no `CRAWL_DISTANCE` in `CRAWL_TICKS` is a wedge.
     crawl_anchor: Option<([f32; 3], u64)>,
+    /// The line of the skater the brain follows (a follow the leader host sets it every frame to the leader's line): it
+    /// starts on that line, and at a line end takes only it, so it rides behind the leader instead of walking to
+    /// another line of the challenge's set. Ours, a test aid.
+    pub(crate) follow: Option<[u8; 16]>,
+    /// The follow line last put on the possessed NPC as its line filter.
+    applied_follow: Option<[u8; 16]>,
     /// A host teleported the player (a contest round start): pick a line again where it arrives. The deck jump test
     /// misses these while the brain drives (its step resets `last_deck`).
     pub(crate) host_teleported: bool,
@@ -72,6 +78,11 @@ impl Autopilot {
         let lines: Vec<[u8; 16]> = std::env::var("SKATE_AUTOPILOT_LINES").ok().map(|v| v.split(',').filter_map(parse_line).collect()).unwrap_or_default();
         let line = lines.first().copied().or_else(|| std::env::var("SKATE_AUTOPILOT_LINE").ok().and_then(|h| parse_line(&h)));
         Self { requested: on, character, line, lines, ..default() }
+    }
+
+    /// The possessed NPC that drives the player, while engaged.
+    pub(crate) fn npc_id(&self) -> Option<LivingWorldId> {
+        self.npc
     }
 
     /// The brain steps the player: the player's own controls and physics step skip this tick.
@@ -206,7 +217,10 @@ pub(crate) fn engage(
                     tricks: Default::default(), body: None, valid_lines: None };
                 skate_core::living_world::replay::choose_line_from(&race_lines, position, &ctx)
             });
-            let pick = match (given, race_pick) {
+            // Following a skater: its line, from the node nearest the player.
+            let follow_pick = autopilot.follow.filter(|l| lines.contains_key(l))
+                .and_then(|l| nearest_node(lines.get(&l).into_iter(), position, forward, f32::INFINITY));
+            let pick = match (given, follow_pick.or(race_pick)) {
                 (Some(l), _) => nearest_node(lines.get(&l).into_iter(), position, forward, f32::INFINITY),
                 (None, Some(p)) => Some(p),
                 (None, None) => nearest_node(lines.values().filter(|l| allowed(&l.id)), position, forward, PICK_RADIUS),
@@ -222,6 +236,7 @@ pub(crate) fn engage(
             autopilot.start_node = node;
             let character = autopilot.character.clone();
             autopilot.npc = population.spawn_scripted(line, &character, 0, position, heading);
+            autopilot.applied_follow = None;
             autopilot.start = Some((position, heading));
             autopilot.quiet = false;
             info!("AUTOPILOT engaged: brain {character} on line {} node {node} at {position:?} ({speed:.1} m/s)", hex(&line));
@@ -257,6 +272,18 @@ pub(crate) fn engage(
                     // Pinned at the player's spot like a racer at its slot: it takes a body at once (any distance, any
                     // node) and its line waits; `possess_in` releases it once it holds the player.
                     commands.entity(e).insert((Possessed, NpcRaceClock { moving: false, scale: 1.0, start: autopilot.start, ..default() }));
+                }
+                if autopilot.follow != autopilot.applied_follow {
+                    match autopilot.follow {
+                        Some(line) => {
+                            info!("AUTOPILOT follows line {}", hex(&line));
+                            commands.entity(e).insert(crate::living_world::npc_skaters::NpcLineFilter(std::sync::Arc::new(vec![line])));
+                        }
+                        None => {
+                            commands.entity(e).remove::<crate::living_world::npc_skaters::NpcLineFilter>();
+                        }
+                    }
+                    autopilot.applied_follow = autopilot.follow;
                 }
             }
         }

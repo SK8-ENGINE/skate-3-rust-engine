@@ -162,6 +162,9 @@ pub(crate) struct NpcSim {
     pushing: bool,
     /// The player autopilot's skater: its record steers without pulling the speed (`ai_record::without_speed_pull`, ours).
     pub(crate) own_speed: bool,
+    /// OURS (a test aid): the autopilot may not push past this speed or keeps braking to it (m/s), never below the
+    /// next jump's takeoff speed; a follow the leader host sets it to keep a gap behind the leader.
+    pub(crate) speed_cap: Option<f32>,
     /// A racer was pinned at its start slot last tick; ticks left of its standing start after GO (no launch, no speed
     /// pull: it pushes off; the user's account of retail, 2026-11-09).
     was_pinned: bool,
@@ -574,7 +577,7 @@ fn spawn_sim(
     // Logs must diagnose: where a promotion's game-thread time goes (a hitch report).
     info!("NPC_SIM_SPAWN_COST pooled={pooled} left={} wait_load_ms={:.1} body_ms={:.1}", pool.bodies.len(), waited.as_secs_f64() * 1000.0,
         (started.elapsed() - waited).as_secs_f64() * 1000.0);
-    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, was_pinned: false, start_ticks: 0, braking: false, pump_cycle: 0, pump_ticks: 0, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), air_half_turns: 0, sequence_active: false, board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
+    let mut sim = NpcSim { context, body, respawn_in: None, bail_ticks: 0, bail_alpha: 1.0, last_node: None, pushing: false, own_speed: false, speed_cap: None, was_pinned: false, start_ticks: 0, braking: false, pump_cycle: 0, pump_ticks: 0, approach: Default::default(), push_ticks: 0, walker: None, follow: None, last_state: None, last_deck: None, placed: false, teleport_pending: false, placements_at_place: 0, pending_ticks: 0, respawn_node: None, toggle: Default::default(), trace_ticks: 0, chain_trace: 0, takeoff_trace: 0, takeoff_logged: false, takeoff_launch: f32::NAN, lane_flags: (false, false), handover_push: None, previous_pose: Vec::new(), previous_root: skate_core::physics::skeleton_animation_record::IDENTITY, previous_placements: 0, hold_ticks: 0, placed_at: None, placements_at_bail: 0, skater_contact: None, no_plan: None, air: Default::default(), slot: Default::default(), air_half_turns: 0, sequence_active: false, board_yaw: Default::default(), ground_error: None, since_landing: 7200, last_body: None, audio: None, audio_memory: Default::default(), speed_watch: (0.0, 0, 0) };
     let v = place(&mut sim, target, true, hold_ticks)?;
     if fit_to_ground {
         sim.body.runtime.fit_next_arrival();
@@ -1889,6 +1892,9 @@ pub(crate) fn simulate(
                             let jump = autopilot_brain::jump_ahead(line, node, into, &rules);
                             let ahead = autopilot_brain::approach_speed(line, node, into, &autopilot_brain::BrakeRules::default());
                             input.target = autopilot_brain::push_speed(input.target, ahead, jump);
+                            if let Some(cap) = sim.speed_cap {
+                                input.target = input.target.min(cap.max(jump.map_or(0.0, |j| j.speed)));
+                            }
                             if !autopilot_brain::trick_cuts_push(input.speed, jump, &rules) {
                                 input.trick_frames = None;
                             }
@@ -1918,7 +1924,8 @@ pub(crate) fn simulate(
                             let b = autopilot_brain::BrakeRules::default();
                             let need = autopilot_brain::jump_ahead(line, node, into, &autopilot_brain::JumpRules::default()).map_or(0.0, |j| j.speed);
                             let ahead = autopilot_brain::approach_speed(line, node, into, &b).unwrap_or(input.target);
-                            (ai_push::PushInput { target: ahead.max(need), ..input }, ai_push::BrakeSettings { factor: b.factor(sim.braking), ..rules.brake })
+                            let target = sim.speed_cap.map_or(ahead.max(need), |cap| ahead.min(cap).max(need));
+                            (ai_push::PushInput { target, ..input }, ai_push::BrakeSettings { factor: b.factor(sim.braking), ..rules.brake })
                         } else {
                             (input, rules.brake)
                         };
