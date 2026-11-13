@@ -1348,7 +1348,7 @@ Challenge ids are the retail key strings. Mods read, start, abort, hide and re-t
 - `crates/skate-game/src/challenge_objectives.rs`: inline failures load after the with-events rows of their objective (row index past them, `ObjectiveData::inline_failure`).
 - `crates/skate-game/src/ftl_host.rs`: the host. It handles start via `SKATE_FTL=<id>`, the leader on the contest rider code (`contest_ai_host.rs`, now with a per-rider speed scale), distances, the leader's end-volume entry by its body, the player pin, the 10 s window on the timer HUD, the failure central message, the end dialog and the career result.
 
-**Not yet (NOT RETAIL YET, logged).** Speech rows, the killed objectives, sign-up from the challenge map (start is `SKATE_FTL` only), the band's sign (b969 open, ours: the player behind the leader slows it).
+**Not yet (NOT RETAIL YET, logged).** The killed objectives, sign-up from the challenge map (start is `SKATE_FTL` only), the band's sign (b969 open, ours: the player behind the leader slows it).
 
 **Verification.** Tests `leader_calls_read_competitor_distances_and_push_the_indicator`, `inline_failures_fire_after_the_with_events_rows`, `the_follower_band_ramps_from_five_to_fifteen_meters_and_slows_a_leader_the_player_trails`, `rows_become_follow_params_with_the_end_volume_and_their_competitors`, plus the film_run tests above.
 
@@ -1388,6 +1388,24 @@ Challenge ids are the retail key strings. Mods read, start, abort, hide and re-t
 - `crates/skate-game/src/visual_indicators.rs`: `FollowIndicators` (a resource a mod or another host can fill), drawn with the companion trail in the `trail_skatewith` style, companions first, 4 trails at most.
 
 **Verification.** `leader_calls_read_competitor_distances_and_push_the_indicator` (the competitor number), `trail_style_found_by_its_hash` (both styles), plus the existing trail tests. Desktop run ftl_univ_02 (2026-11-12 22:41): `trail for skater #1 (trail_skatewith)` logged at the objective's first evaluation, the blue ribbon behind the leader in the screenshots.
+
+## The leader's speech
+
+**Problem.** The four hint rows of a follow the leader objective (`ftl_univ_02_0_0` .. `_0_3`) were evaluated but their presentation was dropped: no "keep up" / "you're right on me" lines from the leader and no start tip (b1006 §3).
+
+**Retail / evidence (Ghidra, TU3).**
+- The rows: `_0_0` every `Delay` = 60 evaluations asks `SpeechNoWait("Reda", 309)` when the leader is 15 m or more ahead (`FallBehindDistance`), `_0_1` id 308 between 3 and 15 m, `_0_2` id 310 within 3 m (`PassingDistance`), `_0_3` once at the start the tutorial callout `ID_CHALLENGE_TUT_SCHOOL_HINT_01` for 10 s. They share the objective's vars (`_0_0` counts all three timers) [data].
+- `Speech_Play` (824A4EE8): ids of 5000 and up are NIS lines (nis.big); lower ids are cast / announcer / camera-man lines. For a cast character it goes to `guess_Speech_RequestCategoryLine` (824AC050): the id's main-cast event from the 73-row table at `8224F1B8` ([event, id]: 308 -> 7, 309 -> 8, 310 -> 9), asked of the active skater with that character (its bank and its near / far), else with the character's attrib words and flag 2 [code].
+- `maincastspeech.big` holds the lines as events 7 / 8 / 9 (`308_follow_chat`, `309_follow_behind`, `310_follow_pass`) in each leader's voice (voice 30 = Reda, the same index as the speaker table) [data].
+
+**Change.**
+- `crates/skate-game/src/ftl_host.rs`: a hint row starts its presentation group on the shared presenter (as the tutorials, 82C755B8), and the objectives evaluate once per 60 Hz challenge tick instead of once per frame (at 260 fps the 60-evaluation `Delay` passed every 0.25 s). The tick rate is [inferred]: retail's evaluation rate is still open (b1006 §7).
+- `crates/skate-game/src/presentation_run.rs`: `Speech` / `SpeechNoWait` with an id under 5000 map it through `CAST_SPEECH_EVENTS` (the `8224F1B8` table, retail values as the default) and queue a `CastSpeech` instead of looking for a NIS file; the event does not wait on it.
+- `crates/skate-game/src/game_audio/world_speech.rs`: a presentation's cast line is said by the skater in the world with that voice (the leader), through the main cast like its other lines (its distance sets near / far).
+
+**NOT RETAIL YET.** With no skater of that voice in the world retail asks with the character's attrib words and flag 2; ours logs and drops the line. Tutorials still evaluate once per frame (the same rate question).
+
+**Verification.** `cast_speech_ids_map_to_main_cast_events`, `a_cast_speech_event_goes_to_the_main_cast`. Desktop run 2026-11-13 06:31 (ftl_univ_02, test autopilot, muted): the start tip shown, the hint rows firing about once a second, `309_30_follow_behind` playing on the main cast from the leader. Not listened to yet.
 
 ## The autopilot follows the leader (ours, a test aid)
 

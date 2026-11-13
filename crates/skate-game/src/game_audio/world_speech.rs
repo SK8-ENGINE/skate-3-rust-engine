@@ -185,6 +185,8 @@ pub(crate) struct WorldSpeech {
     announcer: Option<MainCast>,
     /// This frame's announcer requests (engine systems and mods).
     pub(crate) announces: Vec<AnnouncerRequest>,
+    /// Presentation Speech events' cast lines this frame (voice, main-cast event).
+    pub(crate) presented: Vec<(u32, u16)>,
     /// The running challenge's announcer character (None: free skate) and the MixMap tick it was
     /// named at (the gate's challenge timer, retail system `+908`).
     pub(crate) announcer_character: Option<u32>,
@@ -283,6 +285,7 @@ impl Default for WorldSpeech {
             cast: None,
             announcer: None,
             announces: Vec::new(),
+            presented: Vec::new(),
             announcer_character: None,
             focus_speech: false,
             announcer_since: 0,
@@ -684,7 +687,7 @@ pub(super) fn frame(
     library: Option<Res<super::Library>>,
     cues: Res<super::skate_events::Cues>,
     listener: Query<&GlobalTransform, With<super::GameAudioListener>>,
-    (living, mut announce): (Option<Res<crate::world_audio::LivingWorldAudio>>, MessageReader<crate::world_audio::AnnouncerSpeechEvent>),
+    (living, mut announce, presenter): (Option<Res<crate::world_audio::LivingWorldAudio>>, MessageReader<crate::world_audio::AnnouncerSpeechEvent>, Option<Res<crate::presentation_run::Presenter>>),
 ) {
     let _span = super::hitch_parts::span(super::hitch_parts::SPEECH);
     let speech = &mut *speech;
@@ -697,6 +700,9 @@ pub(super) fn frame(
     }
     for e in announce.read() {
         speech.announces.push(AnnouncerRequest { event: e.event.clone(), pro: e.pro, words: e.words.clone() });
+    }
+    if let Some(mut out) = presenter.as_deref().and_then(|p| p.cast_out.lock().ok()) {
+        speech.presented.extend(out.drain(..).map(|c| (c.character, c.event)));
     }
     let announcer_idle = speech.announces.is_empty() && !speech.announcer_input && speech.announcer.as_ref().is_none_or(|c| c.player.busy() == 0 && c.player.queued() == 0);
     let cast_idle = speech.cast.as_ref().is_none_or(|c| c.player.busy() == 0 && c.player.queued() == 0) && announcer_idle;
@@ -855,6 +861,15 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
         // (retail `+28` record `+80 > 0`, slots map to the living-world models; ours: no main-cast words).
         if call.team && cast_of(library, sk.voice).is_none() {
             says.push((sk, Some(tuning.coll_team.0), None, None, None));
+        }
+    }
+    // A presentation's cast line (824AC050): the active skater with the speaker's character says it (its distance
+    // sets near / far, as any of its lines). NOT RETAIL YET: with no such skater retail asks with the character's
+    // attrib words and flag 2; ours logs and drops it.
+    for (voice, event) in std::mem::take(&mut speech.presented) {
+        match speech.skaters.iter().find(|s| s.voice == voice).copied() {
+            Some(sk) => says.push((sk, None, Some(event), None, None)),
+            None => info!("AUDIO_WORLD presentation cast line {event}: no skater with voice {voice} in the world"),
         }
     }
     // `SFXObj_PlayerSpeech`'s non-local process, once per console frame (free skate: game mode 0).

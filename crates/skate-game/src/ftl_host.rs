@@ -39,6 +39,9 @@ fn yes() -> bool {
     true
 }
 
+/// At most this many objective evaluations catch up in one frame (a long frame does not replay seconds of them).
+const MAX_EVALUATIONS_PER_FRAME: u32 = 4;
+
 /// The autopilot's gap behind the leader (m): inside it the brain holds the leader's speed or less. OURS, a test aid.
 const FOLLOW_GAP: f32 = 8.0;
 
@@ -137,6 +140,8 @@ pub(crate) struct FtlState {
     /// The leader band (None = switched off).
     band: Option<FollowerBand>,
     carry: f32,
+    /// Fractional 60 Hz ticks toward the next objective evaluation.
+    eval_carry: f32,
     /// The first leader's position last frame and its smoothed speed (m/s), for the autopilot's follow gap.
     leader_last: Option<[f32; 3]>,
     leader_speed: f32,
@@ -220,7 +225,7 @@ fn arm(mut ftl: ResMut<FollowTheLeader>, config: Res<crate::config::Config>, map
     info!("SKATE_FTL start {} at {} end={:?} max={:?} leaders={rows:?}", data.id, data.start.locator, data.end_volume.as_ref().map(|v| &v.name), data.max_follow_distance);
     let commands = run.start();
     let mut state = FtlState { data, run, objectives, evaluating: false, leader, awaiting_teleport: false, band: Some(FollowerBand::default()),
-        carry: 0.0, leader_last: None, leader_speed: 0.0, leader_path: Vec::new(), last_state: 0, failure_text: None, dialog_open: false, dialog_seconds: 0.0, leaders_in_end: Vec::new(), follow_indicators: Vec::new(), meter: None, queued: Vec::new() };
+        carry: 0.0, eval_carry: 0.0, leader_last: None, leader_speed: 0.0, leader_path: Vec::new(), last_state: 0, failure_text: None, dialog_open: false, dialog_seconds: 0.0, leaders_in_end: Vec::new(), follow_indicators: Vec::new(), meter: None, queued: Vec::new() };
     // The first commands run on the next update with the frame's resources.
     state.pending(commands);
     ftl.run = Some(state);
@@ -256,7 +261,7 @@ fn update(
     mut hud: ResMut<ChallengeHudState>,
     mut end_dialog: Option<ResMut<crate::end_dialog_host::EndDialogScreen>>,
     mut autopilot: Option<ResMut<crate::autopilot::Autopilot>>,
-    (time, menus, mut follow): (Res<Time>, Option<Res<crate::retail_menus::RetailMenus>>, ResMut<crate::visual_indicators::FollowIndicators>),
+    (time, menus, mut follow, mut presenter): (Res<Time>, Option<Res<crate::retail_menus::RetailMenus>>, ResMut<crate::visual_indicators::FollowIndicators>, Option<ResMut<crate::presentation_run::Presenter>>),
     (mut population, index, npc_transforms, mut clocks, mut commands_ecs, replays, mut brains): (
         Option<ResMut<crate::living_world::PopulationState>>,
         Option<Res<crate::living_world::npc_skaters::NpcSkaterIndex>>,
@@ -406,6 +411,11 @@ fn update(
     state.last_state = state_id;
     if state.evaluating {
         let mut events = Vec::new();
+        // The objectives evaluate once per 60 Hz challenge tick, whatever the frame rate: a row's own counters (the
+        // speech rows' `Delay` of 60 evaluations) keep their time. [inferred: retail's evaluation rate is open, b1006]
+        state.eval_carry += time.delta_secs() * TICKS_PER_SECOND;
+        let evaluations = (state.eval_carry as u32).min(MAX_EVALUATIONS_PER_FRAME);
+        state.eval_carry -= state.eval_carry.floor();
         if let Some(o) = state.objectives.as_mut() {
             for &v in &exited {
                 events.extend(o.handle(GroupMessage::TriggerExit { volume: v }));
@@ -413,7 +423,9 @@ fn update(
             for &v in &entered {
                 events.extend(o.handle(GroupMessage::TriggerEnter { volume: v }));
             }
-            events.extend(o.handle(GroupMessage::Tick { gated: false }));
+            for _ in 0..evaluations {
+                events.extend(o.handle(GroupMessage::Tick { gated: false }));
+            }
             for (competitor, on) in o.follow_indicator.drain(..) {
                 // retail removes any entry for the id first, so adding twice keeps one (82D4F470)
                 state.follow_indicators.retain(|&c| c != competitor);
@@ -437,6 +449,15 @@ fn update(
                     info!("SKATE_FTL {id} objective {objective} failure row {row} ({text:?}) distances {distances:?}");
                     state.failure_text = Some(text.unwrap_or_else(|| FAILURE_TEXT.into()));
                     commands.extend(state.run.handle(Event::ObjectiveFailed));
+                }
+                // A hint row plays its presentation only (82C755B8, b942): the leader's speech lines and the start tip.
+                GroupEvent::Hint { objective, row } => {
+                    let events = state.data.objectives.owned.get(objective).and_then(|o| o.hints.get(row)).map(|h| h.presentation.events()).unwrap_or_default();
+                    if let (Some(p), false) = (presenter.as_deref_mut(), events.is_empty()) {
+                        let group = format!("{id}/obj{objective}/hint{row}");
+                        let started = p.manager.start(skate_core::presentation::Group { id: group.clone(), owner: id.clone(), events });
+                        info!("SKATE_FTL {id} hint row {row} of objective {objective}: presentation {group} {started:?}");
+                    }
                 }
                 _ => {}
             }

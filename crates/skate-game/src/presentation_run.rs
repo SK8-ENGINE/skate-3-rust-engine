@@ -25,6 +25,8 @@ pub struct Presenter {
     pub speech: Arc<Mutex<SpeechLines>>,
     /// Lines the Speech events started, for the audio side to play.
     pub speech_out: Arc<Mutex<Vec<SpeechPlay>>>,
+    /// Cast lines the Speech events asked for (ids under 5000), for the world speech's main cast to play.
+    pub cast_out: Arc<Mutex<Vec<CastSpeech>>>,
     /// Groups that finished or were removed (`presentationeventgroupfinished`), for owners that wait on a group
     /// (the career's Execute); the newest 64 kept.
     finished: Vec<String>,
@@ -48,10 +50,11 @@ impl Default for Presenter {
         handlers.set_engine("GrantAchievement", Box::new(GrantHandler { grants: grants.clone() }));
         let speech = Arc::new(Mutex::new(SpeechLines::default()));
         let speech_out = Arc::new(Mutex::new(Vec::new()));
+        let cast_out = Arc::new(Mutex::new(Vec::new()));
         for (kind, wait) in [("Speech", true), ("SpeechNoWait", false)] {
-            handlers.set_engine(kind, Box::new(SpeechHandler { lines: speech.clone(), out: speech_out.clone(), wait, left: 0.0 }));
+            handlers.set_engine(kind, Box::new(SpeechHandler { lines: speech.clone(), out: speech_out.clone(), cast: cast_out.clone(), wait, left: 0.0 }));
         }
-        Self { manager: Manager::default(), handlers, fade, callout, sim, grants, speech, speech_out, finished: Vec::new(), driven: false }
+        Self { manager: Manager::default(), handlers, fade, callout, sim, grants, speech, speech_out, cast_out, finished: Vec::new(), driven: false }
     }
 }
 
@@ -290,8 +293,30 @@ fn wav_seconds(path: &std::path::Path) -> Option<f32> {
 pub struct SpeechHandler {
     lines: Arc<Mutex<SpeechLines>>,
     out: Arc<Mutex<Vec<SpeechPlay>>>,
+    cast: Arc<Mutex<Vec<CastSpeech>>>,
     wait: bool,
     left: f32,
+}
+
+/// A cast line a Speech event asked for: the speaker's character (the eSk8Characters index, also its main-cast
+/// voice) and the main-cast event of the speech id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CastSpeech {
+    pub character: u32,
+    pub event: u16,
+    pub id: u32,
+}
+
+/// The first NIS speech id: lower ids are cast / announcer / camera-man lines (824A4EE8: `4999 < id`).
+pub const NIS_FIRST_ID: u32 = 5000;
+
+/// Retail's speech id -> main-cast event table (TU3 `8224F1B8`, 73 rows of [event, id], read by 824AC050). Retail
+/// values as the default; data a mod or a later setup export can replace.
+pub const CAST_SPEECH_EVENTS: [(u16, u32); 73] = [(0, 101), (1, 104), (3, 130), (6, 202), (7, 308), (8, 309), (9, 310), (11, 601), (14, 901), (15, 902), (16, 903), (17, 904), (18, 908), (19, 909), (20, 910), (77, 501), (115, 201), (125, 906), (129, 1706), (131, 1705), (133, 1704), (135, 1703), (136, 1002), (137, 1003), (138, 1006), (141, 1014), (193, 1011), (195, 1010), (213, 1005), (241, 400), (247, 338), (248, 312), (250, 912), (251, 307), (253, 344), (254, 311), (255, 1307), (257, 1232), (258, 1233), (259, 1234), (260, 1235), (261, 1236), (262, 1237), (263, 1238), (264, 1239), (265, 1201), (266, 1203), (267, 1204), (268, 1205), (269, 1206), (270, 1208), (271, 1207), (272, 1209), (273, 1210), (274, 1215), (275, 1216), (276, 1217), (277, 1218), (278, 1221), (279, 1222), (280, 1223), (281, 1225), (282, 1226), (283, 1227), (284, 1230), (285, 1231), (286, 1224), (287, 150), (288, 151), (289, 1707), (290, 911), (292, 1015), (293, 1016)];
+
+/// The main-cast event of a cast speech id (the first row with that id, as 824AC050 scans).
+pub fn cast_event(id: u32) -> Option<u16> {
+    CAST_SPEECH_EVENTS.iter().find(|r| r.1 == id).map(|r| r.0)
 }
 
 /// Speech's own limit (821963E4).
@@ -307,6 +332,20 @@ impl Handler for SpeechHandler {
             info!("PRESENTATION {} {speaker} {id}: unknown speaker (no speaker table?)", event.kind);
             return;
         };
+        // Ids under 5000 are cast lines, not NIS (Speech_Play 824A4EE8): the id's main-cast event from retail's table
+        // (824AC050), asked of the speaker on the world speech's main cast. The event does not wait on them.
+        if id < NIS_FIRST_ID {
+            match cast_event(id) {
+                Some(cast_event) => {
+                    info!("PRESENTATION {} {speaker} ({character}) {id}: main-cast event {cast_event}", event.kind);
+                    if let Ok(mut out) = self.cast.lock() {
+                        out.push(CastSpeech { character, event: cast_event, id });
+                    }
+                }
+                None => info!("PRESENTATION {} {speaker} ({character}) {id}: no main-cast event for this id", event.kind),
+            }
+            return;
+        }
         // A line already playing: the request ends at once (Started + Ended on the next update, b1014).
         if lines.playing > 0.0 {
             info!("PRESENTATION {} {speaker} ({character}) {id}: a line is playing, not played", event.kind);
@@ -600,6 +639,27 @@ mod tests {
         let mut m = Manager::default();
         m.start(group("a", vec![ev("NIS", Some("intro")), ev("NoSuchType", None), ev("CentralMessage", Some("ID_X"))]));
         assert_eq!(m.update(0.016, &mut r), [Out::GroupFinished("a".into())]);
+    }
+
+    /// Retail's id table (8224F1B8): the follow the leader lines 308 / 309 / 310 are main-cast events 7 / 8 / 9.
+    #[test]
+    fn cast_speech_ids_map_to_main_cast_events() {
+        assert_eq!((cast_event(308), cast_event(309), cast_event(310)), (Some(7), Some(8), Some(9)));
+        assert_eq!(cast_event(101), Some(0));
+        assert_eq!(cast_event(5044), None);
+    }
+
+    /// A SpeechNoWait with a cast id asks the main cast for the event in the speaker's voice and does not wait.
+    #[test]
+    fn a_cast_speech_event_goes_to_the_main_cast() {
+        let mut p = Presenter::default();
+        if let Ok(mut s) = p.speech.lock() {
+            s.speakers = (0..31).map(|i| if i == 30 { "Reda".to_string() } else { format!("s{i}") }).collect();
+        }
+        p.manager.start(group("ftl", vec![Event { kind: "SpeechNoWait".into(), args: [Some("Reda".into()), Some("309".into())], mask: 0 }]));
+        assert_eq!(p.update(1.0 / 60.0), [Out::GroupFinished("ftl".into())]);
+        let out = p.cast_out.lock().map(|o| o.clone()).unwrap_or_default();
+        assert_eq!(out, [CastSpeech { character: 30, event: 8, id: 309 }]);
     }
 
     #[test]
